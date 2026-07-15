@@ -207,7 +207,11 @@ impl DesktopTray {
         let separator = PredefinedMenuItem::separator();
         let quit = MenuItem::new("Quit AirWiki", true, None);
         let menu = Menu::with_items(&[&status, &open, &separator, &quit])?;
-        let icon = Icon::from_rgba(tray_pixels(24), 24, 24)?;
+        let icon = Icon::from_rgba(
+            crate::branding::tray_icon_rgba(),
+            crate::branding::TRAY_ICON_SIDE,
+            crate::branding::TRAY_ICON_SIDE,
+        )?;
         let tray = TrayIconBuilder::new()
             .with_id("airwiki")
             .with_menu(Box::new(menu))
@@ -268,34 +272,6 @@ impl DesktopTray {
     fn set_labels(&self, _open: &str, _quit: &str) {}
 }
 
-#[cfg(any(target_os = "macos", target_os = "windows"))]
-fn tray_pixels(size: usize) -> Vec<u8> {
-    let center = (size as f32 - 1.0) / 2.0;
-    let outer = center - 1.0;
-    let inner = outer * 0.58;
-    let mut pixels = vec![0_u8; size * size * 4];
-    for y in 0..size {
-        for x in 0..size {
-            let dx = x as f32 - center;
-            let dy = y as f32 - center;
-            let distance = (dx * dx + dy * dy).sqrt();
-            let ring = distance <= outer && distance >= inner;
-            let bridge = x > size / 2 && x < size - 2 && y.abs_diff(size / 2) <= 2;
-            if ring || bridge {
-                let index = (y * size + x) * 4;
-                #[cfg(target_os = "windows")]
-                {
-                    pixels[index] = 22;
-                    pixels[index + 1] = 132;
-                    pixels[index + 2] = 190;
-                }
-                pixels[index + 3] = 255;
-            }
-        }
-    }
-    pixels
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -344,11 +320,5 @@ mod tests {
         let effect = reduce_tray_action(WindowLifecycle::HiddenToTray, TrayAction::Quit);
 
         assert_eq!(effect, LifecycleEffect::Close);
-    }
-
-    #[cfg(any(target_os = "macos", target_os = "windows"))]
-    #[test]
-    fn tray_asset_has_the_expected_dimensions() {
-        assert_eq!(tray_pixels(24).len(), 24 * 24 * 4);
     }
 }

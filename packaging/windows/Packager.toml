@@ -33,6 +33,7 @@ allowDowngrades = false
 
 [nsis]
 compression = "lzma"
+installerIcon = "../../resources/branding/airwiki.ico"
 installMode = "currentUser"
 languages = ["English", "Spanish"]
 displayLanguageSelector = true

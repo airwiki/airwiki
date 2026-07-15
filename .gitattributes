@@ -2,3 +2,9 @@
 resources/licenses/*.txt -whitespace
 resources/licenses/non-cargo/*.txt -whitespace
 resources/licenses/THIRD_PARTY_LICENSES.md -whitespace
+
+# Branding assets are opaque binary payloads and must never receive line-ending conversion.
+resources/branding/*.png binary
+resources/branding/*.rgba binary
+resources/branding/*.icns binary
+resources/branding/*.ico binary

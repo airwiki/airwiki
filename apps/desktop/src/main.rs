@@ -3,6 +3,7 @@
 mod activation;
 mod app;
 mod autostart;
+mod branding;
 mod connectivity_platform;
 mod desktop_shell;
 mod i18n;
@@ -37,6 +38,7 @@ fn main() -> Result<()> {
     let options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
             .with_title("AirWiki")
+            .with_icon(branding::window_icon())
             .with_inner_size([1180.0, 760.0])
             .with_min_inner_size([880.0, 600.0])
             .with_visible(launch_mode == LaunchMode::Foreground),

@@ -8,6 +8,7 @@ All notable user-visible changes to AirWiki will be documented here. The project
 
 - Initial development baseline for local ingestion, human-reviewed OKF publication, LAN federation, and read-only local chat integration.
 - Contributor guidance, architecture decisions, synthetic fixtures, and proportional validation commands.
+- Shared AirWiki branding for GitHub, application windows, tray icons, and desktop packages.
 
 ### Changed
 

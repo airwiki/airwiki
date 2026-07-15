@@ -12,6 +12,8 @@ RELEASE_BRIDGE="$ROOT/target/aarch64-apple-darwin/release/airwiki-mcp-bridge"
 PACKAGED_BRIDGE="$APP/Contents/Resources/integrations/bridge/airwiki-mcp-bridge"
 SOURCE_MCPB="$ROOT/target/mcpb/aarch64-apple-darwin/airwiki-claude.mcpb"
 PACKAGED_MCPB="$APP/Contents/Resources/integrations/airwiki-claude.mcpb"
+SOURCE_ICON="$ROOT/resources/branding/airwiki.icns"
+PACKAGED_ICON="$APP/Contents/Resources/airwiki.icns"
 READY_STAMP="$ROOT/target/packaging-macos-ready.stamp"
 SOURCE_RUNTIME_DIR="$ROOT/resources/llama/macos-aarch64"
 PACKAGED_RUNTIME_DIR="$APP/Contents/Resources/llama"
@@ -42,6 +44,19 @@ if [ ! -x "$RELEASE_BINARY" ] || [ ! -x "$PACKAGED_BINARY" ] ||
 fi
 if [ ! -f "$SOURCE_MCPB" ] || [ ! -f "$PACKAGED_MCPB" ]; then
   echo "fresh or packaged Claude MCPB is missing" >&2
+  exit 1
+fi
+if [ ! -f "$SOURCE_ICON" ] || [ ! -f "$PACKAGED_ICON" ]; then
+  echo "source or packaged application icon is missing" >&2
+  exit 1
+fi
+if [ "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIconFile' "$APP/Contents/Info.plist")" != \
+  "airwiki.icns" ]; then
+  echo "application bundle does not reference the AirWiki icon" >&2
+  exit 1
+fi
+if ! cmp -s "$SOURCE_ICON" "$PACKAGED_ICON"; then
+  echo "packaged application icon differs from its source" >&2
   exit 1
 fi
 

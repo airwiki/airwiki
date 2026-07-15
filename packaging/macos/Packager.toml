@@ -13,6 +13,7 @@ publisher = "AirWiki"
 copyright = "Copyright 2026 AirWiki contributors"
 category = "Productivity"
 licenseFile = "../../LICENSE"
+icons = ["../../resources/branding/airwiki.icns"]
 beforePackagingCommand = { script = "cargo run --locked -p xtask -- licenses check && cargo build --locked --release --target aarch64-apple-darwin -p airwiki-desktop -p airwiki-mcp-bridge && ./packaging/fetch-llama-macos.sh && ./packaging/sign-macos-bridge.sh && cargo run --locked -p xtask -- mcpb build --target aarch64-apple-darwin --bridge target/aarch64-apple-darwin/release/airwiki-mcp-bridge --output target/mcpb/aarch64-apple-darwin/airwiki-claude.mcpb && touch target/packaging-macos-ready.stamp", dir = "../.." }
 
 binaries = [

@@ -1,0 +1,373 @@
+name: promote signed candidate to stable
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Exact signed draft tag to promote
+        required: true
+        type: string
+        default: v0.2.0
+
+permissions:
+  contents: read
+
+concurrency:
+  group: promote-airwiki-stable
+  cancel-in-progress: false
+
+jobs:
+  verify-windows-authenticode:
+    if: ${{ vars.PUBLIC_RELEASE_ENABLED == 'true' && github.ref == 'refs/heads/main' && github.repository == 'airwiki/airwiki' }}
+    runs-on: windows-2025
+    permissions:
+      contents: read
+    outputs:
+      installer_sha256: ${{ steps.verify.outputs.installer_sha256 }}
+    steps:
+      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Verify exact draft target and final NSIS Authenticode identity
+        id: verify
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ inputs.tag }}
+          AIRWIKI_WINDOWS_SIGNER_IDENTITY: ${{ vars.WINDOWS_SIGNER_IDENTITY }}
+        run: |
+          if ($env:TAG -ne "v0.2.0") { throw "unexpected release tag" }
+          $Release = gh release view $env:TAG --json isDraft,isPrerelease,tagName,targetCommitish | ConvertFrom-Json
+          if (-not $Release.isDraft -or -not $Release.isPrerelease -or $Release.tagName -ne $env:TAG) {
+            throw "stable promotion requires the signed draft prerelease"
+          }
+          $Target = $Release.targetCommitish
+          if ($Target -cnotmatch '^[0-9a-f]{40}$') { throw "draft target must be an exact lowercase commit SHA" }
+          if ($Target -cne $env:GITHUB_SHA) {
+            throw "draft target does not match the commit audited by this workflow"
+          }
+          New-Item -ItemType Directory -Path release | Out-Null
+          gh release download $env:TAG --dir release --pattern "airwiki_0.2.0_x64-setup.exe"
+          $Installer = Get-Item -LiteralPath "release\airwiki_0.2.0_x64-setup.exe"
+          . ./packaging/windows-signing.ps1
+          $null = Assert-ExpectedWindowsSigner $Installer.FullName
+          $Digest = (Get-FileHash -LiteralPath $Installer.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
+          "installer_sha256=$Digest" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+
+  verify-macos-native:
+    if: ${{ vars.PUBLIC_RELEASE_ENABLED == 'true' && github.ref == 'refs/heads/main' && github.repository == 'airwiki/airwiki' }}
+    runs-on: macos-15
+    permissions:
+      contents: read
+    outputs:
+      dmg_sha256: ${{ steps.verify.outputs.dmg_sha256 }}
+    steps:
+      - name: Verify exact draft and native macOS trust
+        id: verify
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ inputs.tag }}
+          EXPECTED_IDENTITY: ${{ vars.MACOS_SIGNING_IDENTITY }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$TAG" = "v0.2.0"
+          test -n "$EXPECTED_IDENTITY"
+          RELEASE=$(gh release view "$TAG" --json isDraft,isPrerelease,tagName,targetCommitish)
+          python3 - "$RELEASE" "$GITHUB_SHA" <<'PY'
+          import json
+          import re
+          import sys
+
+          value = json.loads(sys.argv[1])
+          assert value["isDraft"] is True and value["isPrerelease"] is True
+          assert value["tagName"] == "v0.2.0"
+          assert re.fullmatch(r"[0-9a-f]{40}", value["targetCommitish"])
+          assert value["targetCommitish"] == sys.argv[2], (
+              "draft target does not match the commit audited by this workflow"
+          )
+          PY
+          mkdir release
+          gh release download "$TAG" --dir release --pattern 'AirWiki_0.2.0_aarch64.dmg'
+          DMG='release/AirWiki_0.2.0_aarch64.dmg'
+          test -f "$DMG" && test ! -L "$DMG"
+          xcrun stapler validate "$DMG"
+          spctl --assess --type open --context context:primary-signature --verbose=2 "$DMG"
+
+          MOUNT_POINT=$(mktemp -d)
+          cleanup() {
+            hdiutil detach "$MOUNT_POINT" -quiet 2>/dev/null || true
+            rmdir "$MOUNT_POINT" 2>/dev/null || true
+          }
+          trap cleanup EXIT
+          hdiutil attach -readonly -nobrowse -mountpoint "$MOUNT_POINT" "$DMG" >/dev/null
+          APP="$MOUNT_POINT/AirWiki.app"
+          test -d "$APP" && test ! -L "$APP"
+          codesign --verify --deep --strict --verbose=2 "$APP"
+          spctl --assess --type execute --verbose=2 "$APP"
+          CODESIGN_DETAIL=$(codesign --display --verbose=4 "$APP" 2>&1)
+          grep -F "Authority=$EXPECTED_IDENTITY" <<<"$CODESIGN_DETAIL"
+          DIGEST=$(shasum -a 256 "$DMG" | awk '{print $1}')
+          echo "dmg_sha256=$DIGEST" >> "$GITHUB_OUTPUT"
+
+  verify-candidate:
+    if: ${{ vars.PUBLIC_RELEASE_ENABLED == 'true' && github.ref == 'refs/heads/main' && github.repository == 'airwiki/airwiki' }}
+    runs-on: ubuntu-24.04
+    needs: [verify-windows-authenticode, verify-macos-native]
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Download and structurally validate the exact draft
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ inputs.tag }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$TAG" = "v0.2.0"
+          gh release view "$TAG" --json isDraft,isPrerelease,tagName,targetCommitish \
+            > "$RUNNER_TEMP/release.json"
+          TARGET=$(python3 - <<'PY'
+          import json
+          import os
+          import re
+          from pathlib import Path
+
+          release = json.loads((Path(os.environ["RUNNER_TEMP"]) / "release.json").read_text())
+          assert release == {
+              "isDraft": True,
+              "isPrerelease": True,
+              "tagName": "v0.2.0",
+              "targetCommitish": release["targetCommitish"],
+          }
+          target = release["targetCommitish"]
+          assert re.fullmatch(r"[0-9a-f]{40}", target), "draft target must be an exact commit SHA"
+          print(target)
+          PY
+          )
+          test "$TARGET" = "$GITHUB_SHA"
+          EXPECTED="repository = \"https://github.com/$GITHUB_REPOSITORY\""
+          git show "$TARGET:Cargo.toml" | grep -F "$EXPECTED"
+          for FILE in SECURITY.md CODE_OF_CONDUCT.md; do
+            ! git show "$TARGET:$FILE" | grep -n 'transitional contact\|release blocker'
+          done
+          mkdir release
+          gh release download "$TAG" --dir release
+      - name: Verify exact allowlist, checksums and updater manifest
+        env:
+          EXPECTED_WINDOWS_SHA256: ${{ needs['verify-windows-authenticode'].outputs.installer_sha256 }}
+          EXPECTED_MACOS_SHA256: ${{ needs['verify-macos-native'].outputs.dmg_sha256 }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import hashlib
+          import json
+          import os
+          import re
+          from pathlib import Path
+          from urllib.parse import quote
+
+          root = Path("release")
+          installer_name = "airwiki_0.2.0_x64-setup.exe"
+          expected = {
+              "AirWiki_0.2.0_aarch64.dmg",
+              "AirWiki.app.tar.gz",
+              "AirWiki.app.tar.gz.sig",
+              installer_name,
+              installer_name + ".sig",
+              "prerelease-0.2.0.json",
+              "airwiki-0.2.0.spdx.json",
+              "SHA256SUMS-0.2.0.txt",
+          }
+          entries = list(root.iterdir())
+          assert all(path.is_file() and not path.is_symlink() for path in entries)
+          assert {path.name for path in entries} == expected, "candidate asset allowlist mismatch"
+          assert re.fullmatch(r"[0-9a-f]{64}", os.environ["EXPECTED_WINDOWS_SHA256"])
+          assert re.fullmatch(r"[0-9a-f]{64}", os.environ["EXPECTED_MACOS_SHA256"])
+          assert hashlib.sha256((root / installer_name).read_bytes()).hexdigest() == os.environ[
+              "EXPECTED_WINDOWS_SHA256"
+          ]
+          assert hashlib.sha256((root / "AirWiki_0.2.0_aarch64.dmg").read_bytes()).hexdigest() == os.environ[
+              "EXPECTED_MACOS_SHA256"
+          ]
+
+          checksum_path = root / "SHA256SUMS-0.2.0.txt"
+          declared = {}
+          for line in checksum_path.read_text(encoding="utf-8").splitlines():
+              match = re.fullmatch(r"([0-9a-f]{64})  ([^/\\]+)", line)
+              assert match, "invalid checksum receipt line"
+              digest, name = match.groups()
+              assert name not in declared, "duplicate checksum entry"
+              declared[name] = digest
+          assert set(declared) == expected - {checksum_path.name}
+          for name, digest in declared.items():
+              assert hashlib.sha256((root / name).read_bytes()).hexdigest() == digest
+
+          manifest_path = root / "prerelease-0.2.0.json"
+          manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+          assert set(manifest) == {"version", "notes", "pub_date", "platforms"}
+          assert manifest["version"] == "0.2.0"
+          assert isinstance(manifest["notes"], str) and 0 < len(manifest["notes"]) <= 4096
+          assert re.fullmatch(
+              r"[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z",
+              manifest["pub_date"],
+          )
+          assert set(manifest["platforms"]) == {"macos-aarch64", "windows-x86_64"}
+          expected_packages = {
+              "macos-aarch64": ("AirWiki.app.tar.gz", "app"),
+              "windows-x86_64": (installer_name, "nsis"),
+          }
+          base = "https://github.com/airwiki/airwiki/releases/download/v0.2.0/"
+          for target, (name, package_format) in expected_packages.items():
+              platform = manifest["platforms"][target]
+              assert set(platform) == {"url", "format", "signature"}
+              assert platform["url"] == base + quote(name)
+              assert platform["format"] == package_format
+              assert platform["signature"].strip() == (root / (name + ".sig")).read_text(
+                  encoding="utf-8"
+              ).strip()
+
+          release = json.loads((Path(os.environ["RUNNER_TEMP"]) / "release.json").read_text())
+          receipt = {
+              "tag": "v0.2.0",
+              "target": release["targetCommitish"],
+              "assets": {
+                  path.name: hashlib.sha256(path.read_bytes()).hexdigest()
+                  for path in sorted(entries, key=lambda item: item.name)
+              },
+          }
+          verification = Path("verification")
+          verification.mkdir()
+          (verification / "verified-release.json").write_text(
+              json.dumps(receipt, indent=2, sort_keys=True) + "\n", encoding="utf-8"
+          )
+          (verification / "latest.json").write_bytes(manifest_path.read_bytes())
+          PY
+      - name: Cryptographically verify both updater signatures
+        env:
+          AIRWIKI_UPDATER_PUBLIC_KEY: ${{ vars.UPDATER_PUBLIC_KEY }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo run --locked -p xtask -- packaging verify-updater-signature \
+            --artifact 'release/AirWiki.app.tar.gz' \
+            --signature 'release/AirWiki.app.tar.gz.sig'
+          cargo run --locked -p xtask -- packaging verify-updater-signature \
+            --artifact 'release/airwiki_0.2.0_x64-setup.exe' \
+            --signature 'release/airwiki_0.2.0_x64-setup.exe.sig'
+      - name: Upload immutable promotion receipt
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: airwiki-stable-verification-0.2.0-${{ github.run_id }}
+          if-no-files-found: error
+          retention-days: 1
+          path: verification
+
+  promote:
+    if: ${{ vars.PUBLIC_RELEASE_ENABLED == 'true' && github.ref == 'refs/heads/main' && github.repository == 'airwiki/airwiki' }}
+    needs: verify-candidate
+    runs-on: ubuntu-24.04
+    environment: public-release
+    permissions:
+      contents: write
+    steps:
+      - name: Download immutable promotion receipt
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: airwiki-stable-verification-0.2.0-${{ github.run_id }}
+          path: verification
+      - name: Recheck unchanged draft bytes and promote with a final guard
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ inputs.tag }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$TAG" = "v0.2.0"
+          gh release view "$TAG" --json isDraft,isPrerelease,tagName,targetCommitish \
+            > "$RUNNER_TEMP/current-release.json"
+          mkdir current-assets
+          gh release download "$TAG" --dir current-assets
+          python3 - <<'PY'
+          import hashlib
+          import json
+          import os
+          import re
+          from pathlib import Path
+
+          receipt = json.loads(Path("verification/verified-release.json").read_text(encoding="utf-8"))
+          release = json.loads((Path(os.environ["RUNNER_TEMP"]) / "current-release.json").read_text())
+          assert receipt["tag"] == "v0.2.0"
+          assert re.fullmatch(r"[0-9a-f]{40}", receipt["target"])
+          assert receipt["target"] == os.environ["GITHUB_SHA"], (
+              "verified draft target differs from the audited workflow commit"
+          )
+          assert release == {
+              "isDraft": True,
+              "isPrerelease": True,
+              "tagName": receipt["tag"],
+              "targetCommitish": receipt["target"],
+          }
+          root = Path("current-assets")
+          entries = list(root.iterdir())
+          assert all(path.is_file() and not path.is_symlink() for path in entries)
+          current = {
+              path.name: hashlib.sha256(path.read_bytes()).hexdigest()
+              for path in entries
+          }
+          latest = Path("verification/latest.json")
+          assert latest.is_file() and not latest.is_symlink()
+          expected = dict(receipt["assets"])
+          if "latest.json" in current:
+              expected["latest.json"] = hashlib.sha256(latest.read_bytes()).hexdigest()
+              Path("verification/latest-already-present").touch()
+          assert current == expected, "draft assets changed after cryptographic verification"
+          PY
+          if [[ ! -f verification/latest-already-present ]]; then
+            gh release upload "$TAG" verification/latest.json
+          fi
+          rm -rf final-assets
+          mkdir final-assets
+          gh release download "$TAG" --dir final-assets
+          gh release view "$TAG" --json isDraft,isPrerelease,tagName,targetCommitish \
+            > "$RUNNER_TEMP/final-release.json"
+          python3 - <<'PY'
+          import hashlib
+          import json
+          import os
+          import re
+          from pathlib import Path
+
+          receipt = json.loads(Path("verification/verified-release.json").read_text(encoding="utf-8"))
+          release = json.loads((Path(os.environ["RUNNER_TEMP"]) / "final-release.json").read_text())
+          assert re.fullmatch(r"[0-9a-f]{40}", receipt["target"])
+          assert receipt["target"] == os.environ["GITHUB_SHA"]
+          assert release == {
+              "isDraft": True,
+              "isPrerelease": True,
+              "tagName": receipt["tag"],
+              "targetCommitish": receipt["target"],
+          }
+
+          latest = Path("verification/latest.json")
+          expected = dict(receipt["assets"])
+          expected["latest.json"] = hashlib.sha256(latest.read_bytes()).hexdigest()
+          root = Path("final-assets")
+          entries = list(root.iterdir())
+          assert all(path.is_file() and not path.is_symlink() for path in entries)
+          actual = {
+              path.name: hashlib.sha256(path.read_bytes()).hexdigest()
+              for path in entries
+          }
+          assert actual == expected, "draft changed while preparing stable publication"
+          PY
+          # GitHub exposes asset upload and release publication as separate APIs,
+          # so protected-environment approval and this last byte-for-byte guard
+          # bound the race; they cannot make the two remote mutations atomic.
+          gh release edit "$TAG" --draft=false --prerelease=false --latest

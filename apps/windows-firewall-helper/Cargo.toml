@@ -1,0 +1,42 @@
+[package]
+name = "airwiki-windows-firewall-helper"
+description = "Narrow elevated helper for AirWiki Windows Firewall rules"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+publish.workspace = true
+build = "build.rs"
+
+[lib]
+name = "airwiki_windows_firewall"
+path = "src/lib.rs"
+
+[[bin]]
+name = "airwiki-windows-firewall-helper"
+path = "src/main.rs"
+
+[dependencies]
+thiserror.workspace = true
+
+[target.'cfg(windows)'.dependencies]
+windows = { version = "0.62.2", features = [
+    "Win32_Foundation",
+    "Win32_NetworkManagement_WindowsFirewall",
+    "Win32_Security_Cryptography",
+    "Win32_Security_Cryptography_Catalog",
+    "Win32_Security_Cryptography_Sip",
+    "Win32_Security_WinTrust",
+    "Win32_System_Com",
+    "Win32_System_Ole",
+    "Win32_System_Threading",
+    "Win32_System_Variant",
+] }
+
+[target.'cfg(windows)'.build-dependencies]
+winresource = "0.1.22"
+
+[dev-dependencies]
+tempfile = "3.23.0"

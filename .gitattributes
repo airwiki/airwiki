@@ -1,0 +1,4 @@
+# Verified legal texts preserve the exact upstream whitespace covered by their hashes.
+resources/licenses/*.txt -whitespace
+resources/licenses/non-cargo/*.txt -whitespace
+resources/licenses/THIRD_PARTY_LICENSES.md -whitespace

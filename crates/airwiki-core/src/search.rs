@@ -1,0 +1,1401 @@
+use std::cmp::Ordering;
+use std::collections::{HashMap, HashSet};
+use std::sync::Arc;
+
+use airwiki_types::{
+    FederatedSearch, MAX_HEADING_OR_PAGE_CHARS, MAX_SNIPPET_CHARS, SearchContractError, SearchHit,
+    SearchPurpose, SearchRequest, SearchResponse,
+};
+use anyhow::{Context, Result, bail};
+use async_trait::async_trait;
+use thiserror::Error;
+use uuid::Uuid;
+
+use crate::chunk_identity::public_chunk_id;
+use crate::inference::EmbeddingProvider;
+use crate::storage::{Database, RankedChunk};
+
+const RRF_K: f64 = 60.0;
+const VECTOR_SQL_BATCH_SIZE: usize = 512;
+/// Fixed hybrid-retrieval pool classified before `top_k` truncates evidence.
+pub const RELEVANCE_CANDIDATE_LIMIT: usize = 10;
+/// Fixed per-channel over-retrieval bound before RRF and content deduplication.
+const PRE_DEDUPLICATION_CANDIDATE_LIMIT: usize = RELEVANCE_CANDIDATE_LIMIT * 4;
+
+/// Candidate evidence presented to the local relevance classifier.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RelevanceInput {
+    pub title: String,
+    pub heading: String,
+    pub text: String,
+}
+
+/// Fail-closed decision for one candidate, in the same order as the input batch.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum EvidenceDecision {
+    Relevant,
+    Irrelevant,
+}
+
+/// Sanitized failures from a local evidence relevance provider.
+#[derive(Debug, Clone, PartialEq, Eq, Error)]
+pub enum EvidenceRelevanceError {
+    #[error("evidence relevance provider is unavailable")]
+    Unavailable,
+    #[error("evidence relevance inference failed")]
+    InferenceFailed,
+    #[error("evidence relevance inference timed out")]
+    TimedOut,
+    #[error("evidence relevance provider returned invalid output")]
+    InvalidOutput,
+    #[error("evidence relevance provider returned {actual} decisions for {expected} candidates")]
+    DecisionCountMismatch { expected: usize, actual: usize },
+}
+
+/// Classifies whether retrieved passages contain evidence for the question.
+#[async_trait]
+pub trait EvidenceRelevanceProvider: Send + Sync {
+    fn profile_id(&self) -> &str;
+
+    async fn classify(
+        &self,
+        question: &str,
+        candidates: &[RelevanceInput],
+    ) -> std::result::Result<Vec<EvidenceDecision>, EvidenceRelevanceError>;
+}
+
+/// Repeatable lexical test double for offline tests. It is not a production
+/// answerability model.
+#[derive(Debug, Default, Clone)]
+pub struct DeterministicEvidenceRelevanceProvider;
+
+#[async_trait]
+impl EvidenceRelevanceProvider for DeterministicEvidenceRelevanceProvider {
+    fn profile_id(&self) -> &str {
+        "deterministic-token-overlap-test-double"
+    }
+
+    async fn classify(
+        &self,
+        question: &str,
+        candidates: &[RelevanceInput],
+    ) -> std::result::Result<Vec<EvidenceDecision>, EvidenceRelevanceError> {
+        let question_terms = normalized_terms(question);
+        Ok(candidates
+            .iter()
+            .map(|candidate| {
+                let mut candidate_terms = normalized_terms(&candidate.title);
+                candidate_terms.extend(normalized_terms(&candidate.heading));
+                candidate_terms.extend(normalized_terms(&candidate.text));
+                if question_terms
+                    .iter()
+                    .any(|term| candidate_terms.contains(term))
+                {
+                    EvidenceDecision::Relevant
+                } else {
+                    EvidenceDecision::Irrelevant
+                }
+            })
+            .collect())
+    }
+}
+
+#[derive(Clone)]
+pub struct HybridSearchEngine {
+    database: Database,
+    embeddings: Arc<dyn EmbeddingProvider>,
+    relevance: Arc<dyn EvidenceRelevanceProvider>,
+    node_id: String,
+}
+
+impl std::fmt::Debug for HybridSearchEngine {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("HybridSearchEngine")
+            .field("database", &self.database)
+            .field("embedding_model", &self.embeddings.model_id())
+            .field("relevance_profile", &self.relevance.profile_id())
+            .field("node_id", &self.node_id)
+            .finish()
+    }
+}
+
+impl HybridSearchEngine {
+    pub fn new(
+        database: Database,
+        embeddings: Arc<dyn EmbeddingProvider>,
+        relevance: Arc<dyn EvidenceRelevanceProvider>,
+        node_id: impl Into<String>,
+    ) -> Self {
+        Self {
+            database,
+            embeddings,
+            relevance,
+            node_id: node_id.into(),
+        }
+    }
+
+    /// Local desktop search includes local-only collections. `ExternalAi` is still
+    /// filtered to collections explicitly opted into cloud disclosure.
+    pub async fn search_local(&self, request: SearchRequest) -> Result<SearchResponse> {
+        request.validate()?;
+        let database = self.database.clone();
+        let collections = run_search_blocking("local search scope worker task failed", move || {
+            Ok(database
+                .list_collections()?
+                .into_iter()
+                .map(|collection| collection.id)
+                .collect::<Vec<_>>())
+        })
+        .await?;
+        self.search_collections(request, &collections).await
+    }
+
+    /// Remote callers never provide their own collection list; it comes from the
+    /// local trust store and collection policy intersection.
+    pub async fn search_for_peer(
+        &self,
+        request: SearchRequest,
+        peer_id: &str,
+    ) -> Result<SearchResponse> {
+        request.validate()?;
+        let purpose = request.purpose;
+        let database = self.database.clone();
+        let peer_id = peer_id.to_owned();
+        let scope_peer_id = peer_id.clone();
+        let collections = run_search_blocking("peer search scope worker task failed", move || {
+            let peer = database
+                .peer(&scope_peer_id)?
+                .ok_or_else(|| anyhow::anyhow!("unknown peer"))?;
+            if !peer.trusted || peer.blocked {
+                bail!("peer is not authorized");
+            }
+            database.granted_collections_for_search(&scope_peer_id, purpose)
+        })
+        .await?;
+        let mut response = self.search_collections(request, &collections).await?;
+        let database = self.database.clone();
+        let hits = std::mem::take(&mut response.hits);
+        response.hits =
+            run_search_blocking("peer search revalidation worker task failed", move || {
+                revalidate_peer_hits(database, hits, peer_id, purpose)
+            })
+            .await?;
+        Ok(response)
+    }
+
+    pub async fn search_collections(
+        &self,
+        request: SearchRequest,
+        collections: &[Uuid],
+    ) -> Result<SearchResponse> {
+        request.validate()?;
+        let query_embedding = self
+            .embeddings
+            .embed(&[format!("query: {}", request.query.trim())])
+            .await
+            .context("could not embed search query")?
+            .into_iter()
+            .next()
+            .context("embedding provider returned no query vector")?;
+        if query_embedding.len() != crate::EMBEDDING_DIMENSIONS {
+            bail!(
+                "embedding provider returned {} dimensions; expected {}",
+                query_embedding.len(),
+                crate::EMBEDDING_DIMENSIONS
+            );
+        }
+
+        let database = self.database.clone();
+        let query = request.query.clone();
+        let collections = collections.to_vec();
+        let purpose = request.purpose;
+        let prepared = run_search_blocking("hybrid retrieval worker task failed", move || {
+            prepare_candidates(database, query, collections, purpose, query_embedding)
+        })
+        .await?;
+        let PreparedCandidates {
+            candidates: deduplicated_candidates,
+            visible_snippets,
+            relevance_inputs,
+        } = prepared;
+        let decisions = if relevance_inputs.is_empty() {
+            Vec::new()
+        } else {
+            self.relevance
+                .classify(request.query.trim(), &relevance_inputs)
+                .await?
+        };
+        if decisions.len() != deduplicated_candidates.len() {
+            return Err(EvidenceRelevanceError::DecisionCountMismatch {
+                expected: deduplicated_candidates.len(),
+                actual: decisions.len(),
+            }
+            .into());
+        }
+
+        let mut hits = Vec::new();
+        for ((candidate, snippet), decision) in deduplicated_candidates
+            .into_iter()
+            .zip(visible_snippets)
+            .zip(decisions)
+        {
+            if decision == EvidenceDecision::Irrelevant {
+                continue;
+            }
+            let chunk_id = public_chunk_id(
+                &candidate.source_sha256,
+                candidate.chunk.ordinal,
+                &candidate.chunk.text_sha256,
+            );
+            let mut hit = SearchHit {
+                concept_id: candidate.chunk.concept_id,
+                collection_id: candidate.chunk.collection_id,
+                chunk_id,
+                title: candidate.title,
+                snippet,
+                heading_or_page: candidate.chunk.heading_or_page,
+                logical_resource_uri: candidate.logical_resource_uri,
+                source_revision: candidate.chunk.source_revision,
+                source_sha256: candidate.source_sha256,
+                updated_at: candidate.updated_at,
+                rank: u32::try_from(hits.len() + 1).unwrap_or(u32::MAX),
+                node_id: self.node_id.clone(),
+            };
+            hit.sanitize_for_wire();
+            hits.push(hit);
+            if hits.len() == usize::from(request.top_k) {
+                break;
+            }
+        }
+        let before_revalidation = hits.len();
+        let database = self.database.clone();
+        let purpose = request.purpose;
+        let hits = run_search_blocking("local search revalidation worker task failed", move || {
+            revalidate_local_hits(database, hits, purpose)
+        })
+        .await?;
+        let removed_during_revalidation = before_revalidation > hits.len();
+        Ok(SearchResponse {
+            request_id: request.request_id,
+            hits,
+            offline_nodes: Vec::new(),
+            warnings: removed_during_revalidation
+                .then(|| "results changed during final publication revalidation".to_owned())
+                .into_iter()
+                .collect(),
+            partial: removed_during_revalidation,
+        })
+    }
+}
+
+#[async_trait]
+impl FederatedSearch for HybridSearchEngine {
+    async fn search(
+        &self,
+        request: SearchRequest,
+    ) -> std::result::Result<SearchResponse, SearchContractError> {
+        self.search_local(request)
+            .await
+            .map_err(|error| SearchContractError::Backend(error.to_string()))
+    }
+}
+
+#[derive(Debug)]
+struct PreparedCandidates {
+    candidates: Vec<RankedChunk>,
+    visible_snippets: Vec<String>,
+    relevance_inputs: Vec<RelevanceInput>,
+}
+
+async fn run_search_blocking<T>(
+    failure_context: &'static str,
+    operation: impl FnOnce() -> Result<T> + Send + 'static,
+) -> Result<T>
+where
+    T: Send + 'static,
+{
+    tokio::task::spawn_blocking(operation)
+        .await
+        .context(failure_context)?
+}
+
+fn prepare_candidates(
+    database: Database,
+    query: String,
+    collections: Vec<Uuid>,
+    purpose: SearchPurpose,
+    query_embedding: Vec<f32>,
+) -> Result<PreparedCandidates> {
+    let lexical = database.lexical_candidates(
+        &query,
+        &collections,
+        purpose,
+        PRE_DEDUPLICATION_CANDIDATE_LIMIT,
+    )?;
+    let mut vector = Vec::with_capacity(PRE_DEDUPLICATION_CANDIDATE_LIMIT * 2);
+    let mut offset = 0;
+    loop {
+        let batch = database.vector_candidates_batch(
+            &collections,
+            purpose,
+            VECTOR_SQL_BATCH_SIZE,
+            offset,
+        )?;
+        let batch_len = batch.len();
+        vector.extend(batch.into_iter().map(|candidate| {
+            let similarity = cosine_similarity(&query_embedding, &candidate.chunk.embedding);
+            (candidate, similarity)
+        }));
+        if vector.len() >= PRE_DEDUPLICATION_CANDIDATE_LIMIT * 2 {
+            sort_and_truncate_vector_candidates(&mut vector, PRE_DEDUPLICATION_CANDIDATE_LIMIT);
+        }
+        if batch_len < VECTOR_SQL_BATCH_SIZE {
+            break;
+        }
+        offset += batch_len;
+    }
+    sort_and_truncate_vector_candidates(&mut vector, PRE_DEDUPLICATION_CANDIDATE_LIMIT);
+
+    let mut candidates = HashMap::<Uuid, RankedChunk>::new();
+    let mut scores = HashMap::<Uuid, f64>::new();
+    for (index, candidate) in lexical.into_iter().enumerate() {
+        // bm25 is used to establish rank; magnitudes never leave this node.
+        let _ = candidate.lexical_score;
+        *scores.entry(candidate.chunk.id).or_default() += rrf(index);
+        candidates.insert(candidate.chunk.id, candidate);
+    }
+    for (index, (candidate, _similarity)) in vector.into_iter().enumerate() {
+        *scores.entry(candidate.chunk.id).or_default() += rrf(index);
+        candidates.entry(candidate.chunk.id).or_insert(candidate);
+    }
+    let mut ranked = scores.into_iter().collect::<Vec<_>>();
+    ranked.sort_by(|(id_a, score_a), (id_b, score_b)| {
+        score_b
+            .partial_cmp(score_a)
+            .unwrap_or(Ordering::Equal)
+            .then_with(|| id_a.cmp(id_b))
+    });
+
+    let mut dedup = HashSet::<(String, String)>::new();
+    let mut deduplicated_candidates = Vec::new();
+    for (chunk_id, _score) in ranked {
+        let Some(candidate) = candidates.remove(&chunk_id) else {
+            continue;
+        };
+        if !dedup.insert((
+            candidate.source_sha256.clone(),
+            candidate.chunk.text_sha256.clone(),
+        )) {
+            continue;
+        }
+        deduplicated_candidates.push(candidate);
+        if deduplicated_candidates.len() == RELEVANCE_CANDIDATE_LIMIT {
+            break;
+        }
+    }
+
+    let visible_snippets = deduplicated_candidates
+        .iter()
+        .map(|candidate| relevant_snippet(&candidate.chunk.text, &query))
+        .collect::<Vec<_>>();
+    let relevance_inputs = deduplicated_candidates
+        .iter()
+        .zip(&visible_snippets)
+        .map(|(candidate, snippet)| RelevanceInput {
+            title: candidate.title.clone(),
+            // Bound legacy rows too: older databases may predate the
+            // extractor-side heading invariant.
+            heading: candidate
+                .chunk
+                .heading_or_page
+                .chars()
+                .take(MAX_HEADING_OR_PAGE_CHARS)
+                .collect(),
+            text: snippet.clone(),
+        })
+        .collect::<Vec<_>>();
+
+    Ok(PreparedCandidates {
+        candidates: deduplicated_candidates,
+        visible_snippets,
+        relevance_inputs,
+    })
+}
+
+fn revalidate_local_hits(
+    database: Database,
+    hits: Vec<SearchHit>,
+    purpose: SearchPurpose,
+) -> Result<Vec<SearchHit>> {
+    let mut current_hits = Vec::with_capacity(hits.len());
+    for hit in hits {
+        if database.hit_is_current(&hit, purpose)? {
+            current_hits.push(hit);
+        }
+    }
+    renumber_hits(&mut current_hits);
+    Ok(current_hits)
+}
+
+fn revalidate_peer_hits(
+    database: Database,
+    hits: Vec<SearchHit>,
+    peer_id: String,
+    purpose: SearchPurpose,
+) -> Result<Vec<SearchHit>> {
+    let mut current_hits = Vec::with_capacity(hits.len());
+    for hit in hits {
+        if database.peer_hit_is_current(&hit, &peer_id, purpose)? {
+            current_hits.push(hit);
+        }
+    }
+    renumber_hits(&mut current_hits);
+    Ok(current_hits)
+}
+
+fn renumber_hits(hits: &mut [SearchHit]) {
+    for (index, hit) in hits.iter_mut().enumerate() {
+        hit.rank = u32::try_from(index + 1).unwrap_or(u32::MAX);
+    }
+}
+
+fn rrf(zero_based_rank: usize) -> f64 {
+    1.0 / (RRF_K + zero_based_rank as f64 + 1.0)
+}
+
+fn cosine_similarity(left: &[f32], right: &[f32]) -> f32 {
+    if left.len() != right.len() || left.is_empty() {
+        return -1.0;
+    }
+    let mut dot = 0.0_f32;
+    let mut left_norm = 0.0_f32;
+    let mut right_norm = 0.0_f32;
+    for (left, right) in left.iter().zip(right) {
+        dot += left * right;
+        left_norm += left * left;
+        right_norm += right * right;
+    }
+    if left_norm <= f32::EPSILON || right_norm <= f32::EPSILON {
+        0.0
+    } else {
+        dot / (left_norm.sqrt() * right_norm.sqrt())
+    }
+}
+
+fn sort_and_truncate_vector_candidates(candidates: &mut Vec<(RankedChunk, f32)>, limit: usize) {
+    candidates.sort_by(|(_, left), (_, right)| right.partial_cmp(left).unwrap_or(Ordering::Equal));
+    candidates.truncate(limit);
+}
+
+fn normalized_terms(text: &str) -> HashSet<String> {
+    text.to_lowercase()
+        .split(|character: char| !character.is_alphanumeric())
+        .filter(|word| word.chars().count() >= 3)
+        .map(str::to_owned)
+        .collect()
+}
+
+fn relevant_snippet(text: &str, query: &str) -> String {
+    let query_words = query
+        .split(|character: char| !character.is_alphanumeric())
+        .filter(|word| word.len() >= 3)
+        .map(str::to_lowercase)
+        .collect::<Vec<_>>();
+    let lowercase = text.to_lowercase();
+    let byte_start = query_words
+        .iter()
+        .filter_map(|word| lowercase.find(word))
+        .min()
+        .unwrap_or(0);
+    let center_char = lowercase[..byte_start].chars().count();
+    let total_chars = text.chars().count();
+    let start_char = center_char.saturating_sub(MAX_SNIPPET_CHARS / 4);
+    let end_char = (start_char + MAX_SNIPPET_CHARS).min(total_chars);
+    let mut snippet = text
+        .chars()
+        .skip(start_char)
+        .take(end_char - start_char)
+        .collect::<String>();
+    if start_char > 0 {
+        snippet.insert(0, '…');
+    }
+    if end_char < total_chars {
+        snippet.push('…');
+    }
+    snippet.chars().take(MAX_SNIPPET_CHARS).collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use std::path::PathBuf;
+    use std::sync::atomic::{AtomicUsize, Ordering as AtomicOrdering};
+    use std::sync::{Condvar, Mutex};
+    use std::time::Duration;
+
+    use airwiki_types::{
+        CollectionPolicy, ConceptType, DEFAULT_TOP_K, EnrichmentDraft, SearchPurpose,
+    };
+    use chrono::Utc;
+
+    use super::*;
+    use crate::inference::{DeterministicEmbeddingProvider, EmbeddingProvider};
+    use crate::storage::{PeerRecord, StoredChunk};
+
+    #[derive(Debug, Clone)]
+    struct FixedEvidenceRelevanceProvider {
+        result: std::result::Result<Vec<EvidenceDecision>, EvidenceRelevanceError>,
+    }
+
+    #[async_trait]
+    impl EvidenceRelevanceProvider for FixedEvidenceRelevanceProvider {
+        fn profile_id(&self) -> &str {
+            "fixed-evidence-relevance-test-double"
+        }
+
+        async fn classify(
+            &self,
+            _question: &str,
+            _candidates: &[RelevanceInput],
+        ) -> std::result::Result<Vec<EvidenceDecision>, EvidenceRelevanceError> {
+            self.result.clone()
+        }
+    }
+
+    #[derive(Debug, Clone)]
+    struct WithdrawsDuringRelevance {
+        database: Database,
+        source_document_id: Uuid,
+    }
+
+    #[derive(Debug, Clone, Default)]
+    struct MarkerSensitiveEvidenceRelevanceProvider;
+
+    #[async_trait]
+    impl EvidenceRelevanceProvider for MarkerSensitiveEvidenceRelevanceProvider {
+        fn profile_id(&self) -> &str {
+            "marker-sensitive-evidence-relevance-test-double"
+        }
+
+        async fn classify(
+            &self,
+            _question: &str,
+            candidates: &[RelevanceInput],
+        ) -> std::result::Result<Vec<EvidenceDecision>, EvidenceRelevanceError> {
+            Ok(candidates
+                .iter()
+                .map(|candidate| {
+                    if candidate.text.contains("OUTSIDE_VISIBLE_SNIPPET") {
+                        EvidenceDecision::Relevant
+                    } else {
+                        EvidenceDecision::Irrelevant
+                    }
+                })
+                .collect())
+        }
+    }
+
+    #[derive(Debug, Clone, Default)]
+    struct CountingIrrelevantEvidenceRelevanceProvider {
+        candidates_seen: Arc<AtomicUsize>,
+    }
+
+    #[async_trait]
+    impl EvidenceRelevanceProvider for CountingIrrelevantEvidenceRelevanceProvider {
+        fn profile_id(&self) -> &str {
+            "counting-irrelevant-evidence-relevance-test-double"
+        }
+
+        async fn classify(
+            &self,
+            _question: &str,
+            candidates: &[RelevanceInput],
+        ) -> std::result::Result<Vec<EvidenceDecision>, EvidenceRelevanceError> {
+            self.candidates_seen
+                .store(candidates.len(), AtomicOrdering::SeqCst);
+            Ok(vec![EvidenceDecision::Irrelevant; candidates.len()])
+        }
+    }
+
+    #[derive(Debug, Clone, Default)]
+    struct AllRelevantEvidenceRelevanceProvider;
+
+    #[async_trait]
+    impl EvidenceRelevanceProvider for AllRelevantEvidenceRelevanceProvider {
+        fn profile_id(&self) -> &str {
+            "all-relevant-evidence-relevance-test-double"
+        }
+
+        async fn classify(
+            &self,
+            _question: &str,
+            candidates: &[RelevanceInput],
+        ) -> std::result::Result<Vec<EvidenceDecision>, EvidenceRelevanceError> {
+            Ok(vec![EvidenceDecision::Relevant; candidates.len()])
+        }
+    }
+
+    #[async_trait]
+    impl EvidenceRelevanceProvider for WithdrawsDuringRelevance {
+        fn profile_id(&self) -> &str {
+            "withdraws-during-relevance-test-double"
+        }
+
+        async fn classify(
+            &self,
+            _question: &str,
+            candidates: &[RelevanceInput],
+        ) -> std::result::Result<Vec<EvidenceDecision>, EvidenceRelevanceError> {
+            self.database
+                .mark_deleted(self.source_document_id)
+                .map_err(|_| EvidenceRelevanceError::InferenceFailed)?;
+            Ok(vec![EvidenceDecision::Relevant; candidates.len()])
+        }
+    }
+
+    async fn indexed_database() -> (Database, Uuid, Uuid) {
+        let db = Database::in_memory().unwrap();
+        let collection = db
+            .create_collection(
+                "Runbooks",
+                PathBuf::from("/tmp/source-search-test"),
+                PathBuf::from("/tmp/wiki-search-test"),
+                CollectionPolicy {
+                    local_only: false,
+                    peer_shareable: true,
+                    allow_external_ai: false,
+                },
+            )
+            .unwrap();
+        let source = db
+            .register_source(
+                collection.id,
+                "/tmp/source-search-test/payments.md",
+                &"a".repeat(64),
+                "markdown",
+                100,
+            )
+            .unwrap();
+        db.mark_extracted(source.id(), 0, 100).unwrap();
+        let draft = EnrichmentDraft {
+            concept_type: ConceptType::Runbook,
+            title: "Recuperación de pagos".into(),
+            description: "Restaurar el procesador".into(),
+            language: "es".into(),
+            tags: vec!["pagos".into()],
+            entities: vec![],
+            links: vec![],
+            summary: "Reiniciar la cola".into(),
+            classification_confidence: 1.0,
+            classification_explanation: "fixture".into(),
+        };
+        let concept = db
+            .save_enrichment(source.id(), draft.clone(), "mac", "fake")
+            .unwrap();
+        let embedding_provider = DeterministicEmbeddingProvider;
+        let embedding = embedding_provider
+            .embed(&["passage: reiniciar cola de pagos y validar API".into()])
+            .await
+            .unwrap()
+            .remove(0);
+        db.replace_chunks(
+            concept.id,
+            &[StoredChunk {
+                id: Uuid::new_v4(),
+                concept_id: concept.id,
+                source_document_id: source.id(),
+                collection_id: collection.id,
+                ordinal: 0,
+                heading_or_page: "Pasos".into(),
+                text: "Reiniciar cola de pagos y validar API".into(),
+                text_sha256: "text-hash".into(),
+                embedding,
+                source_revision: 1,
+            }],
+        )
+        .unwrap();
+        db.approve_concept(concept.id, draft).unwrap();
+        (db, collection.id, concept.id)
+    }
+
+    async fn replace_with_ranked_fixture_chunks(database: &Database, concept_id: Uuid) {
+        let template = database.chunks_for_concept(concept_id).unwrap().remove(0);
+        let passages = [
+            ("Primero", "Pagos: primera evidencia operativa"),
+            ("Segundo", "Pagos: segunda evidencia operativa"),
+            ("Tercero", "Pagos: tercera evidencia operativa"),
+        ];
+        let embedding_inputs = passages
+            .iter()
+            .map(|(_, text)| format!("passage: {text}"))
+            .collect::<Vec<_>>();
+        let embeddings = DeterministicEmbeddingProvider
+            .embed(&embedding_inputs)
+            .await
+            .unwrap();
+        let chunks = passages
+            .into_iter()
+            .zip(embeddings)
+            .enumerate()
+            .map(|(index, ((heading, text), embedding))| StoredChunk {
+                id: Uuid::new_v4(),
+                concept_id: template.concept_id,
+                source_document_id: template.source_document_id,
+                collection_id: template.collection_id,
+                ordinal: u32::try_from(index).unwrap(),
+                heading_or_page: heading.to_owned(),
+                text: text.to_owned(),
+                text_sha256: format!("text-hash-{index}"),
+                embedding,
+                source_revision: template.source_revision,
+            })
+            .collect::<Vec<_>>();
+        database.replace_chunks(concept_id, &chunks).unwrap();
+    }
+
+    async fn replace_with_disjoint_lexical_and_vector_candidates(
+        database: &Database,
+        concept_id: Uuid,
+    ) {
+        let template = database.chunks_for_concept(concept_id).unwrap().remove(0);
+        let query_embedding = DeterministicEmbeddingProvider
+            .embed(&["query: lexicalneedle".to_owned()])
+            .await
+            .unwrap()
+            .remove(0);
+        let opposite_embedding = query_embedding
+            .iter()
+            .map(|value| -*value)
+            .collect::<Vec<_>>();
+        let mut chunks = Vec::new();
+        for index in 0..8_u32 {
+            chunks.push(StoredChunk {
+                id: Uuid::new_v4(),
+                concept_id: template.concept_id,
+                source_document_id: template.source_document_id,
+                collection_id: template.collection_id,
+                ordinal: index,
+                heading_or_page: format!("Lexical {index}"),
+                text: format!("lexicalneedle evidencia {index}"),
+                text_sha256: format!("lexical-{index}"),
+                embedding: opposite_embedding.clone(),
+                source_revision: template.source_revision,
+            });
+        }
+        for index in 0..8_u32 {
+            chunks.push(StoredChunk {
+                id: Uuid::new_v4(),
+                concept_id: template.concept_id,
+                source_document_id: template.source_document_id,
+                collection_id: template.collection_id,
+                ordinal: index + 8,
+                heading_or_page: format!("Vector {index}"),
+                text: format!("tema neutral {index}"),
+                text_sha256: format!("vector-{index}"),
+                embedding: query_embedding.clone(),
+                source_revision: template.source_revision,
+            });
+        }
+        database.replace_chunks(concept_id, &chunks).unwrap();
+    }
+
+    async fn replace_with_duplicate_heavy_candidates(database: &Database, concept_id: Uuid) {
+        let template = database.chunks_for_concept(concept_id).unwrap().remove(0);
+        let query_embedding = DeterministicEmbeddingProvider
+            .embed(&["query: lexicalneedle".to_owned()])
+            .await
+            .unwrap()
+            .remove(0);
+        let opposite_embedding = query_embedding
+            .iter()
+            .map(|value| -*value)
+            .collect::<Vec<_>>();
+        let duplicate_count = RELEVANCE_CANDIDATE_LIMIT + 2;
+        let mut chunks = Vec::new();
+        for index in 0..duplicate_count {
+            chunks.push(StoredChunk {
+                id: Uuid::new_v4(),
+                concept_id: template.concept_id,
+                source_document_id: template.source_document_id,
+                collection_id: template.collection_id,
+                ordinal: u32::try_from(index).unwrap(),
+                heading_or_page: "Duplicate".to_owned(),
+                text: "lexicalneedle".to_owned(),
+                text_sha256: "duplicate-content".to_owned(),
+                embedding: query_embedding.clone(),
+                source_revision: template.source_revision,
+            });
+        }
+        for index in 0..RELEVANCE_CANDIDATE_LIMIT {
+            chunks.push(StoredChunk {
+                id: Uuid::new_v4(),
+                concept_id: template.concept_id,
+                source_document_id: template.source_document_id,
+                collection_id: template.collection_id,
+                ordinal: u32::try_from(duplicate_count + index).unwrap(),
+                heading_or_page: format!("Unique {index}"),
+                text: format!(
+                    "lexicalneedle unique evidence {index} {}",
+                    "filler ".repeat(64)
+                ),
+                text_sha256: format!("unique-content-{index}"),
+                embedding: opposite_embedding.clone(),
+                source_revision: template.source_revision,
+            });
+        }
+        database.replace_chunks(concept_id, &chunks).unwrap();
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn blocking_search_phase_yields_the_tokio_runtime() {
+        let progress = Arc::new((Mutex::new(false), Condvar::new()));
+        let blocking_progress = Arc::clone(&progress);
+        let blocking_phase = run_search_blocking("blocking search test task failed", move || {
+            let (lock, condition) = &*blocking_progress;
+            let progressed = lock.lock().unwrap();
+            let (progressed, _) = condition
+                .wait_timeout_while(progressed, Duration::from_millis(250), |value| !*value)
+                .unwrap();
+            if !*progressed {
+                bail!("Tokio runtime did not progress while search work was blocking");
+            }
+            Ok(())
+        });
+        let runtime_progress = async {
+            tokio::task::yield_now().await;
+            let (lock, condition) = &*progress;
+            *lock.lock().unwrap() = true;
+            condition.notify_one();
+        };
+
+        let (blocking_result, ()) = tokio::join!(blocking_phase, runtime_progress);
+
+        blocking_result.unwrap();
+    }
+
+    #[tokio::test]
+    async fn hybrid_search_returns_citable_evidence() {
+        let (db, _collection_id, _concept_id) = indexed_database().await;
+        let engine = HybridSearchEngine::new(
+            db,
+            Arc::new(DeterministicEmbeddingProvider),
+            Arc::new(DeterministicEvidenceRelevanceProvider),
+            "mac-node",
+        );
+        let request = SearchRequest::new(
+            "¿cómo recuperar pagos?",
+            SearchPurpose::LocalAssistant,
+            DEFAULT_TOP_K,
+        );
+        let response = engine.search_local(request).await.unwrap();
+        assert_eq!(response.hits.len(), 1);
+        assert_eq!(response.hits[0].node_id, "mac-node");
+        assert_eq!(response.hits[0].heading_or_page, "Pasos");
+        assert_eq!(response.hits[0].source_revision, 1);
+    }
+
+    #[tokio::test]
+    async fn search_exposes_content_stable_chunk_identity() {
+        let (db, _collection_id, _concept_id) = indexed_database().await;
+        let engine = HybridSearchEngine::new(
+            db,
+            Arc::new(DeterministicEmbeddingProvider),
+            Arc::new(DeterministicEvidenceRelevanceProvider),
+            "mac-node",
+        );
+        let response = engine
+            .search_local(SearchRequest::new(
+                "¿cómo recuperar pagos?",
+                SearchPurpose::LocalAssistant,
+                1,
+            ))
+            .await
+            .unwrap();
+
+        assert_eq!(
+            response.hits[0].chunk_id,
+            public_chunk_id(&"a".repeat(64), 0, "text-hash")
+        );
+    }
+
+    #[tokio::test]
+    async fn peer_grant_and_external_ai_policy_are_both_enforced() {
+        let (db, collection_id, _concept_id) = indexed_database().await;
+        db.upsert_peer(&PeerRecord {
+            peer_id: "windows".into(),
+            display_name: None,
+            trusted: true,
+            blocked: false,
+            paired_at: Some(Utc::now()),
+            last_seen_at: None,
+        })
+        .unwrap();
+        let engine = HybridSearchEngine::new(
+            db.clone(),
+            Arc::new(DeterministicEmbeddingProvider),
+            Arc::new(DeterministicEvidenceRelevanceProvider),
+            "mac",
+        );
+        let request = SearchRequest::new("pagos", SearchPurpose::LocalAssistant, 5);
+        assert!(
+            engine
+                .search_for_peer(request.clone(), "windows")
+                .await
+                .unwrap()
+                .hits
+                .is_empty()
+        );
+        db.set_grant("windows", collection_id, true).unwrap();
+        assert_eq!(
+            engine
+                .search_for_peer(request, "windows")
+                .await
+                .unwrap()
+                .hits
+                .len(),
+            1
+        );
+        let external = SearchRequest::new("pagos", SearchPurpose::ExternalAi, 5);
+        assert!(
+            engine
+                .search_for_peer(external, "windows")
+                .await
+                .unwrap()
+                .hits
+                .is_empty()
+        );
+        db.update_collection_policy(
+            collection_id,
+            CollectionPolicy {
+                local_only: false,
+                peer_shareable: true,
+                allow_external_ai: true,
+            },
+        )
+        .unwrap();
+        let external = SearchRequest::new("pagos", SearchPurpose::ExternalAi, 5);
+        assert_eq!(
+            engine
+                .search_for_peer(external, "windows")
+                .await
+                .unwrap()
+                .hits
+                .len(),
+            1
+        );
+    }
+
+    #[tokio::test]
+    async fn local_external_ai_access_does_not_require_peer_sharing() {
+        let (db, collection_id, _concept_id) = indexed_database().await;
+        db.update_collection_policy(
+            collection_id,
+            CollectionPolicy {
+                local_only: true,
+                peer_shareable: false,
+                allow_external_ai: true,
+            },
+        )
+        .unwrap();
+        db.upsert_peer(&PeerRecord {
+            peer_id: "windows".into(),
+            display_name: None,
+            trusted: true,
+            blocked: false,
+            paired_at: Some(Utc::now()),
+            last_seen_at: None,
+        })
+        .unwrap();
+        db.set_grant("windows", collection_id, true).unwrap();
+        let engine = HybridSearchEngine::new(
+            db,
+            Arc::new(DeterministicEmbeddingProvider),
+            Arc::new(DeterministicEvidenceRelevanceProvider),
+            "mac",
+        );
+
+        let local = engine
+            .search_local(SearchRequest::new("pagos", SearchPurpose::ExternalAi, 5))
+            .await
+            .unwrap();
+        assert_eq!(local.hits.len(), 1);
+
+        let remote = engine
+            .search_for_peer(
+                SearchRequest::new("pagos", SearchPurpose::ExternalAi, 5),
+                "windows",
+            )
+            .await
+            .unwrap();
+        assert!(remote.hits.is_empty());
+    }
+
+    #[tokio::test]
+    async fn ranked_hit_is_rejected_after_policy_or_publication_changes() {
+        let (db, _collection_id, _concept_id) = indexed_database().await;
+        let engine = HybridSearchEngine::new(
+            db.clone(),
+            Arc::new(DeterministicEmbeddingProvider),
+            Arc::new(DeterministicEvidenceRelevanceProvider),
+            "mac",
+        );
+        let response = engine
+            .search_local(SearchRequest::new(
+                "pagos",
+                SearchPurpose::LocalAssistant,
+                5,
+            ))
+            .await
+            .unwrap();
+        let hit = response.hits.first().unwrap();
+        assert!(
+            db.hit_is_current(hit, SearchPurpose::LocalAssistant)
+                .unwrap()
+        );
+        assert!(!db.hit_is_current(hit, SearchPurpose::ExternalAi).unwrap());
+
+        let concept = db.concept(hit.concept_id).unwrap().unwrap();
+        db.mark_deleted(concept.source_document_id).unwrap();
+        assert!(
+            !db.hit_is_current(hit, SearchPurpose::LocalAssistant)
+                .unwrap()
+        );
+    }
+
+    #[tokio::test]
+    async fn irrelevant_candidates_produce_complete_empty_response() {
+        let (database, _collection_id, _concept_id) = indexed_database().await;
+        let engine = HybridSearchEngine::new(
+            database,
+            Arc::new(DeterministicEmbeddingProvider),
+            Arc::new(DeterministicEvidenceRelevanceProvider),
+            "mac",
+        );
+
+        let response = engine
+            .search_local(SearchRequest::new(
+                "presupuesto anual",
+                SearchPurpose::LocalAssistant,
+                5,
+            ))
+            .await
+            .unwrap();
+
+        assert!(response.hits.is_empty());
+        assert!(!response.partial);
+        assert!(response.warnings.is_empty());
+    }
+
+    #[tokio::test]
+    async fn relevance_gate_classifies_only_the_exact_visible_snippet() {
+        let (database, _collection_id, concept_id) = indexed_database().await;
+        let template = database.chunks_for_concept(concept_id).unwrap().remove(0);
+        let text = format!(
+            "Pagos al inicio. {} OUTSIDE_VISIBLE_SNIPPET",
+            "contenido de relleno ".repeat(100)
+        );
+        assert!(text.chars().count() > MAX_SNIPPET_CHARS);
+        assert!(text.contains("OUTSIDE_VISIBLE_SNIPPET"));
+        let embedding = DeterministicEmbeddingProvider
+            .embed(&[format!("passage: {text}")])
+            .await
+            .unwrap()
+            .remove(0);
+        database
+            .replace_chunks(
+                concept_id,
+                &[StoredChunk {
+                    id: Uuid::new_v4(),
+                    concept_id: template.concept_id,
+                    source_document_id: template.source_document_id,
+                    collection_id: template.collection_id,
+                    ordinal: 0,
+                    heading_or_page: "Pasos".into(),
+                    text,
+                    text_sha256: "long-visible-snippet-fixture".into(),
+                    embedding,
+                    source_revision: template.source_revision,
+                }],
+            )
+            .unwrap();
+        let engine = HybridSearchEngine::new(
+            database,
+            Arc::new(DeterministicEmbeddingProvider),
+            Arc::new(MarkerSensitiveEvidenceRelevanceProvider),
+            "mac",
+        );
+
+        let response = engine
+            .search_local(SearchRequest::new(
+                "pagos",
+                SearchPurpose::LocalAssistant,
+                1,
+            ))
+            .await
+            .unwrap();
+
+        assert!(response.hits.is_empty());
+    }
+
+    #[tokio::test]
+    async fn relevance_candidate_batch_is_limited_after_rrf_deduplication() {
+        let (database, _collection_id, concept_id) = indexed_database().await;
+        replace_with_disjoint_lexical_and_vector_candidates(&database, concept_id).await;
+        let relevance = Arc::new(CountingIrrelevantEvidenceRelevanceProvider::default());
+        let engine = HybridSearchEngine::new(
+            database,
+            Arc::new(DeterministicEmbeddingProvider),
+            relevance.clone(),
+            "mac",
+        );
+
+        for top_k in airwiki_types::MIN_TOP_K..=airwiki_types::MAX_TOP_K {
+            let response = engine
+                .search_local(SearchRequest::new(
+                    "lexicalneedle",
+                    SearchPurpose::LocalAssistant,
+                    top_k,
+                ))
+                .await
+                .unwrap();
+
+            assert!(response.hits.is_empty());
+            assert_eq!(
+                relevance.candidates_seen.load(AtomicOrdering::SeqCst),
+                RELEVANCE_CANDIDATE_LIMIT
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn pre_deduplication_over_retrieval_fills_the_fixed_relevance_batch() {
+        let (database, _collection_id, concept_id) = indexed_database().await;
+        replace_with_duplicate_heavy_candidates(&database, concept_id).await;
+        let engine = HybridSearchEngine::new(
+            database,
+            Arc::new(DeterministicEmbeddingProvider),
+            Arc::new(AllRelevantEvidenceRelevanceProvider),
+            "mac",
+        );
+
+        let response = engine
+            .search_local(SearchRequest::new(
+                "lexicalneedle",
+                SearchPurpose::LocalAssistant,
+                airwiki_types::MAX_TOP_K,
+            ))
+            .await
+            .unwrap();
+
+        assert_eq!(response.hits.len(), RELEVANCE_CANDIDATE_LIMIT);
+        assert_eq!(
+            response
+                .hits
+                .iter()
+                .filter(|hit| hit.snippet.contains("unique evidence"))
+                .count(),
+            RELEVANCE_CANDIDATE_LIMIT - 1
+        );
+    }
+
+    #[test]
+    fn relevance_candidate_limit_can_still_fill_the_largest_response() {
+        assert_eq!(
+            RELEVANCE_CANDIDATE_LIMIT,
+            usize::from(airwiki_types::MAX_TOP_K)
+        );
+    }
+
+    #[tokio::test]
+    async fn top_k_only_truncates_a_fixed_answerability_ranking() {
+        let (database, _collection_id, concept_id) = indexed_database().await;
+        replace_with_disjoint_lexical_and_vector_candidates(&database, concept_id).await;
+        let engine = HybridSearchEngine::new(
+            database,
+            Arc::new(DeterministicEmbeddingProvider),
+            Arc::new(AllRelevantEvidenceRelevanceProvider),
+            "mac",
+        );
+
+        let top_one = engine
+            .search_local(SearchRequest::new(
+                "lexicalneedle",
+                SearchPurpose::LocalAssistant,
+                1,
+            ))
+            .await
+            .unwrap();
+        let top_ten = engine
+            .search_local(SearchRequest::new(
+                "lexicalneedle",
+                SearchPurpose::LocalAssistant,
+                10,
+            ))
+            .await
+            .unwrap();
+
+        assert_eq!(top_one.hits.len(), 1);
+        assert_eq!(top_ten.hits.len(), RELEVANCE_CANDIDATE_LIMIT);
+        assert_eq!(top_one.hits[0].chunk_id, top_ten.hits[0].chunk_id);
+    }
+
+    #[tokio::test]
+    async fn relevance_provider_failure_is_not_reported_as_absence() {
+        let (database, _collection_id, _concept_id) = indexed_database().await;
+        let engine = HybridSearchEngine::new(
+            database,
+            Arc::new(DeterministicEmbeddingProvider),
+            Arc::new(FixedEvidenceRelevanceProvider {
+                result: Err(EvidenceRelevanceError::Unavailable),
+            }),
+            "mac",
+        );
+
+        let error = engine
+            .search_local(SearchRequest::new(
+                "pagos",
+                SearchPurpose::LocalAssistant,
+                5,
+            ))
+            .await
+            .unwrap_err();
+
+        assert_eq!(
+            error.downcast_ref::<EvidenceRelevanceError>(),
+            Some(&EvidenceRelevanceError::Unavailable)
+        );
+    }
+
+    #[tokio::test]
+    async fn wrong_relevance_decision_count_is_an_error() {
+        let (database, _collection_id, _concept_id) = indexed_database().await;
+        let engine = HybridSearchEngine::new(
+            database,
+            Arc::new(DeterministicEmbeddingProvider),
+            Arc::new(FixedEvidenceRelevanceProvider {
+                result: Ok(Vec::new()),
+            }),
+            "mac",
+        );
+
+        let error = engine
+            .search_local(SearchRequest::new(
+                "pagos",
+                SearchPurpose::LocalAssistant,
+                5,
+            ))
+            .await
+            .unwrap_err();
+
+        assert_eq!(
+            error.downcast_ref::<EvidenceRelevanceError>(),
+            Some(&EvidenceRelevanceError::DecisionCountMismatch {
+                expected: 1,
+                actual: 0,
+            })
+        );
+    }
+
+    #[tokio::test]
+    async fn relevance_filter_preserves_rrf_order_and_renumbers_hits() {
+        let (database, _collection_id, concept_id) = indexed_database().await;
+        replace_with_ranked_fixture_chunks(&database, concept_id).await;
+        let baseline = HybridSearchEngine::new(
+            database.clone(),
+            Arc::new(DeterministicEmbeddingProvider),
+            Arc::new(DeterministicEvidenceRelevanceProvider),
+            "mac",
+        )
+        .search_local(SearchRequest::new(
+            "pagos",
+            SearchPurpose::LocalAssistant,
+            3,
+        ))
+        .await
+        .unwrap();
+        let filtered = HybridSearchEngine::new(
+            database,
+            Arc::new(DeterministicEmbeddingProvider),
+            Arc::new(FixedEvidenceRelevanceProvider {
+                result: Ok(vec![
+                    EvidenceDecision::Irrelevant,
+                    EvidenceDecision::Relevant,
+                    EvidenceDecision::Relevant,
+                ]),
+            }),
+            "mac",
+        )
+        .search_local(SearchRequest::new(
+            "pagos",
+            SearchPurpose::LocalAssistant,
+            3,
+        ))
+        .await
+        .unwrap();
+
+        assert_eq!(baseline.hits.len(), 3);
+        assert_eq!(
+            filtered
+                .hits
+                .iter()
+                .map(|hit| hit.heading_or_page.as_str())
+                .collect::<Vec<_>>(),
+            baseline
+                .hits
+                .iter()
+                .skip(1)
+                .map(|hit| hit.heading_or_page.as_str())
+                .collect::<Vec<_>>()
+        );
+        assert_eq!(
+            filtered.hits.iter().map(|hit| hit.rank).collect::<Vec<_>>(),
+            vec![1, 2]
+        );
+    }
+
+    #[tokio::test]
+    async fn publication_is_revalidated_after_relevance_classification() {
+        let (database, _collection_id, concept_id) = indexed_database().await;
+        let source_document_id = database
+            .concept(concept_id)
+            .unwrap()
+            .unwrap()
+            .source_document_id;
+        let engine = HybridSearchEngine::new(
+            database.clone(),
+            Arc::new(DeterministicEmbeddingProvider),
+            Arc::new(WithdrawsDuringRelevance {
+                database,
+                source_document_id,
+            }),
+            "mac",
+        );
+
+        let response = engine
+            .search_local(SearchRequest::new(
+                "pagos",
+                SearchPurpose::LocalAssistant,
+                5,
+            ))
+            .await
+            .unwrap();
+
+        assert!(response.hits.is_empty());
+        assert!(response.partial);
+        assert_eq!(response.warnings.len(), 1);
+    }
+
+    #[test]
+    fn snippets_respect_unicode_character_limit() {
+        let text = "á".repeat(MAX_SNIPPET_CHARS + 100);
+        let snippet = relevant_snippet(&text, "nada");
+        assert!(snippet.chars().count() <= MAX_SNIPPET_CHARS);
+    }
+
+    #[test]
+    fn snippets_handle_unicode_lowercase_that_changes_utf8_byte_length() {
+        let snippet = relevant_snippet("İ área de pagos", "área");
+
+        assert!(snippet.contains("área"));
+    }
+}

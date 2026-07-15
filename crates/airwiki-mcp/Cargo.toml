@@ -1,0 +1,36 @@
+[package]
+name = "airwiki-mcp"
+description = "Loopback-only MCP gateway for AirWiki"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[dependencies]
+axum = "0.8.8"
+airwiki-types = { version = "0.2.0", path = "../airwiki-types" }
+rmcp = { version = "2.2.0", default-features = false, features = [
+    "macros",
+    "schemars",
+    "server",
+    "transport-io",
+    "transport-streamable-http-server",
+] }
+reqwest = { version = "0.12.24", default-features = false, features = ["json"] }
+schemars = "1.0.5"
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+tokio = { workspace = true, features = ["io-util", "net"] }
+tokio-util = "0.7.17"
+tower-http = { version = "0.7.0", features = ["limit"] }
+tracing.workspace = true
+uuid.workspace = true
+
+[dev-dependencies]
+async-trait.workspace = true
+chrono.workspace = true
+uuid.workspace = true

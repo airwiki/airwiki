@@ -1,0 +1,43 @@
+name = "airwiki-windows-x64"
+productName = "AirWiki"
+version = "0.2.0"
+identifier = "io.github.airwiki.AirWiki"
+formats = ["nsis"]
+targetTriple = "x86_64-pc-windows-msvc"
+binariesDir = "../../target/x86_64-pc-windows-msvc/release"
+outDir = "../../target/packages/windows"
+description = "Local-first, human-reviewed knowledge desktop"
+longDescription = "Curate local documents into reviewed knowledge and optionally search authorized evidence across nearby devices."
+authors = ["AirWiki contributors"]
+publisher = "AirWiki"
+copyright = "Copyright 2026 AirWiki contributors"
+category = "Productivity"
+licenseFile = "../../LICENSE"
+
+binaries = [
+  { path = "airwiki", main = true },
+]
+
+resources = [
+  { src = "../../resources/llama/windows-x64", target = "llama" },
+  { src = "../../target/x86_64-pc-windows-msvc/release/airwiki-mcp-bridge.exe", target = "integrations/bridge/airwiki-mcp-bridge.exe" },
+  { src = "../../target/x86_64-pc-windows-msvc/release/airwiki-windows-firewall-helper.exe", target = "airwiki-windows-firewall-helper.exe" },
+  { src = "../../target/mcpb/x86_64-pc-windows-msvc/airwiki-claude.mcpb", target = "integrations/airwiki-claude.mcpb" },
+  { src = "../../THIRD_PARTY_NOTICES.md", target = "THIRD_PARTY_NOTICES.md" },
+  { src = "../../LICENSE", target = "LICENSE" },
+  { src = "../../resources/licenses", target = "licenses" },
+]
+
+[windows]
+allowDowngrades = false
+
+[nsis]
+compression = "lzma"
+installMode = "currentUser"
+languages = ["English", "Spanish"]
+displayLanguageSelector = true
+template = "installer.nsi"
+appdataPaths = [
+  "$LOCALAPPDATA/airwiki/AirWiki",
+  "$APPDATA/airwiki/AirWiki",
+]

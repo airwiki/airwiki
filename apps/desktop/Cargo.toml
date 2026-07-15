@@ -1,0 +1,78 @@
+[package]
+name = "airwiki-desktop"
+description = "Local-first desktop application for human-reviewed knowledge"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[[bin]]
+name = "airwiki"
+path = "src/main.rs"
+
+[dependencies]
+anyhow.workspace = true
+async-trait.workspace = true
+airwiki-core = { version = "0.2.0", path = "../../crates/airwiki-core", features = ["fastembed-runtime"] }
+airwiki-inference = { version = "0.2.0", path = "../../crates/airwiki-inference" }
+airwiki-mcp = { version = "0.2.0", path = "../../crates/airwiki-mcp" }
+airwiki-network = { version = "0.2.0", path = "../../crates/airwiki-network" }
+airwiki-types = { version = "0.2.0", path = "../../crates/airwiki-types" }
+chrono.workspace = true
+cargo-packager-updater = { version = "0.2.3", default-features = false, features = ["rustls-tls"] }
+directories = "6.0.0"
+eframe = { version = "0.35.0", default-features = false, features = ["accesskit", "default_fonts", "glow", "persistence"] }
+egui_commonmark = { version = "0.24.0", default-features = false, features = ["pulldown_cmark"] }
+egui_extras = "0.35.0"
+egui_graphs = "0.31.0"
+fluent-bundle = "0.16.0"
+futures = "0.3.31"
+interprocess = "2.4.2"
+rfd = { version = "0.15.4", default-features = false }
+serde.workspace = true
+serde_json.workspace = true
+single-instance = "0.3.3"
+sys-locale = "0.3.2"
+thiserror.workspace = true
+tokio = { workspace = true, features = ["fs", "io-util", "process"] }
+tokio-util = "0.7.16"
+tracing.workspace = true
+tracing-appender = "0.2.3"
+tracing-subscriber.workspace = true
+unic-langid = "0.9.6"
+uuid.workspace = true
+
+[target.'cfg(any(target_os = "macos", target_os = "windows"))'.dependencies]
+tray-icon = { version = "0.24.1", default-features = false }
+
+[target.'cfg(target_os = "macos")'.dependencies]
+objc2-foundation = { version = "0.3.2", default-features = false, features = ["NSString", "std"] }
+objc2-service-management = { version = "0.3.2", default-features = false, features = ["SMAppService", "SMErrors", "objc2", "objc2-foundation", "std"] }
+
+[target.'cfg(target_os = "windows")'.dependencies]
+airwiki-windows-firewall-helper = { version = "0.2.0", path = "../windows-firewall-helper" }
+tempfile = "3.23.0"
+winreg = "0.56.0"
+windows = { version = "0.62.2", features = [
+    "Win32_Foundation",
+    "Win32_NetworkManagement_IpHelper",
+    "Win32_NetworkManagement_Ndis",
+    "Win32_Networking_NetworkListManager",
+    "Win32_Networking_WinSock",
+    "Win32_Security",
+    "Win32_Storage_FileSystem",
+    "Win32_System_Com",
+    "Win32_System_Registry",
+    "Win32_System_Threading",
+    "Win32_UI_Shell",
+    "Win32_UI_WindowsAndMessaging",
+] }
+
+[target.'cfg(windows)'.build-dependencies]
+winresource = "0.1.22"
+
+[dev-dependencies]
+tempfile = "3.23.0"

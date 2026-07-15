@@ -1,0 +1,3666 @@
+use std::{
+    collections::{HashMap, HashSet, VecDeque},
+    path::PathBuf,
+    time::{Duration, SystemTime},
+};
+
+use airwiki_inference::{
+    E5_FILES, HardwareReport, InstallEvent, MMARCO_COMMON_FILES, ModelProfile,
+};
+use airwiki_network::ManualLanAddress;
+use airwiki_types::{
+    ConceptType, DEFAULT_TOP_K, EnrichmentDraft, SearchHit, SearchPurpose, SuggestedEntity,
+    SuggestedLink,
+};
+use eframe::egui::{self, Color32, RichText};
+use fluent_bundle::FluentArgs;
+use uuid::Uuid;
+
+mod integrations;
+mod knowledge;
+
+use self::integrations::{ChatIntegrationsUi, IntegrationsUiAction};
+use self::knowledge::{KnowledgeAction, KnowledgeUi};
+
+use crate::{
+    activation::{ActivationAction, LaunchMode, PrimaryInstance},
+    autostart::AutostartStatus,
+    connectivity_platform::{
+        ConnectivityPlatformSnapshot, FirewallDiagnosticState, NetworkProfileState,
+        SystemPermissionState,
+    },
+    desktop_shell::{ClosePolicy, DesktopShell},
+    i18n::{Localization, LocalizationError, UiLocale},
+    model_config::{CloseBehavior, LanPreference, LocalePreference, ONBOARDING_VERSION},
+    paths::AppPaths,
+    readiness::{
+        ConnectivityInput, ConnectivityPreference, DiscoveryState, FirewallState, ListenerState,
+        NetworkProfile, OptionalFeatureState, ReadinessComponent, ReadinessInput, ReadinessStatus,
+        RecommendedAction, SystemPermission, derive_readiness,
+    },
+    updater::{UpdateIssueCode, UpdaterDisabledReason, UpdaterStatus},
+    worker::{
+        CollectionScanState, CollectionView, ConnectivityIssueCode, DesktopPreferencesUpdate,
+        DesktopPreferencesView, FirewallOperationView, LanDiscoveryView, LanListenerView,
+        ModelStateView, PERIODIC_RECONCILE_INTERVAL, PeerActivityState, PeerTrustState, PeerView,
+        ReviewItemView, SearchCoverageView, UpdaterWorkerView, WikiHealthSummaryView,
+        WorkerCommand, WorkerEvent, WorkerHandle,
+    },
+};
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Screen {
+    Setup,
+    Models,
+    Collections,
+    Review,
+    Knowledge,
+    Search,
+    Integrations,
+    Nodes,
+    Settings,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum OnboardingPage {
+    Welcome,
+    Model,
+    Collection,
+    Lan,
+    Background,
+    Chat,
+    Complete,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum UpdateConfirmationKind {
+    Download,
+    Install,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ExternalAiPolicyChange {
+    None,
+    ApplyDisable,
+    ConfirmEnable,
+}
+
+pub struct AirWikiApp {
+    instance: PrimaryInstance,
+    shell: DesktopShell,
+    localization: Localization,
+    preferences: Option<DesktopPreferencesView>,
+    preference_request_id: Option<Uuid>,
+    autostart_status: Option<AutostartStatus>,
+    autostart_request_id: Option<Uuid>,
+    updater: Option<UpdaterWorkerView>,
+    updater_request_id: Option<Uuid>,
+    update_confirmation: Option<UpdateConfirmationKind>,
+    exit_after_update_launch: bool,
+    connectivity_platform: Option<ConnectivityPlatformSnapshot>,
+    connectivity_request_id: Option<Uuid>,
+    firewall_operation: Option<FirewallOperationView>,
+    lan_listener: LanListenerView,
+    lan_discovery: LanDiscoveryView,
+    lan_local_addresses: Vec<String>,
+    firewall_confirmation: bool,
+    wiki_health: WikiHealthSummaryView,
+    wiki_health_request_id: Option<Uuid>,
+    external_ai_confirmation: Option<Uuid>,
+    onboarding_page: Option<OnboardingPage>,
+    onboarding_finishing: bool,
+    onboarding_background: bool,
+    onboarding_autostart: bool,
+    onboarding_updates: bool,
+    onboarding_lan: LanPreference,
+    pending_onboarding_autostart: Option<bool>,
+    paths: AppPaths,
+    worker: WorkerHandle,
+    screen: Screen,
+    hardware: Option<HardwareReport>,
+    model_state: Option<ModelStateView>,
+    model_state_sequence: u64,
+    accepted_licenses: bool,
+    restart_required: Option<String>,
+    models_ready: bool,
+    install_label: Option<String>,
+    install_progress: f32,
+    node_id: String,
+    mcp_url: String,
+    collections: Vec<CollectionView>,
+    collection_scans: HashMap<Uuid, CollectionScanState>,
+    reviews: Vec<ReviewItemView>,
+    peers: Vec<PeerView>,
+    search_question: String,
+    search_top_k: u8,
+    search_hits: Vec<SearchHit>,
+    search_coverage: SearchCoverageView,
+    search_running: bool,
+    new_collection_name: String,
+    new_collection_folder: Option<PathBuf>,
+    manual_multiaddress: String,
+    notices: VecDeque<(bool, String)>,
+    selected_review: Option<Uuid>,
+    reanalyzing_reviews: HashSet<Uuid>,
+    integrations: ChatIntegrationsUi,
+    knowledge: KnowledgeUi,
+}
+
+impl AirWikiApp {
+    pub fn new(
+        context: &eframe::CreationContext<'_>,
+        paths: AppPaths,
+        launch_mode: LaunchMode,
+        instance: PrimaryInstance,
+    ) -> Result<Self, LocalizationError> {
+        configure_style(&context.egui_ctx);
+        Ok(Self {
+            instance,
+            shell: DesktopShell::new(launch_mode == LaunchMode::Background),
+            localization: Localization::new(UiLocale::from_system())?,
+            preferences: None,
+            preference_request_id: None,
+            autostart_status: None,
+            autostart_request_id: None,
+            updater: None,
+            updater_request_id: None,
+            update_confirmation: None,
+            exit_after_update_launch: false,
+            connectivity_platform: None,
+            connectivity_request_id: None,
+            firewall_operation: None,
+            lan_listener: LanListenerView::Stopped,
+            lan_discovery: LanDiscoveryView::Disabled,
+            lan_local_addresses: Vec::new(),
+            firewall_confirmation: false,
+            wiki_health: WikiHealthSummaryView::default(),
+            wiki_health_request_id: None,
+            external_ai_confirmation: None,
+            onboarding_page: None,
+            onboarding_finishing: false,
+            onboarding_background: true,
+            onboarding_autostart: true,
+            onboarding_updates: true,
+            onboarding_lan: LanPreference::Undecided,
+            pending_onboarding_autostart: None,
+            worker: WorkerHandle::spawn(paths.clone()),
+            paths,
+            screen: Screen::Setup,
+            hardware: None,
+            model_state: None,
+            model_state_sequence: 0,
+            accepted_licenses: false,
+            restart_required: None,
+            models_ready: false,
+            install_label: None,
+            install_progress: 0.0,
+            node_id: "inicializando…".into(),
+            mcp_url: "http://127.0.0.1:43123/mcp".into(),
+            collections: Vec::new(),
+            collection_scans: HashMap::new(),
+            reviews: Vec::new(),
+            peers: Vec::new(),
+            search_question: String::new(),
+            search_top_k: DEFAULT_TOP_K,
+            search_hits: Vec::new(),
+            search_coverage: SearchCoverageView::Complete,
+            search_running: false,
+            new_collection_name: String::new(),
+            new_collection_folder: None,
+            manual_multiaddress: String::new(),
+            notices: VecDeque::new(),
+            selected_review: None,
+            reanalyzing_reviews: HashSet::new(),
+            integrations: ChatIntegrationsUi::default(),
+            knowledge: KnowledgeUi::default(),
+        })
+    }
+
+    fn drain_events(&mut self) {
+        let events: Vec<_> = self.worker.try_events().collect();
+        for event in events {
+            match event {
+                WorkerEvent::Ready {
+                    node_id,
+                    mcp_url,
+                    collections,
+                    reviews,
+                } => {
+                    self.node_id = node_id;
+                    self.mcp_url = mcp_url;
+                    self.collections = collections;
+                    self.reviews = reviews;
+                    self.refresh_integrations_if_needed();
+                }
+                WorkerEvent::Hardware(report) => self.hardware = Some(report),
+                WorkerEvent::ModelState(state) => {
+                    if state.state_sequence < self.model_state_sequence {
+                        continue;
+                    }
+                    self.model_state_sequence = state.state_sequence;
+                    if state.pending_model_id.is_none() {
+                        self.restart_required = None;
+                    }
+                    let changed = self
+                        .model_state
+                        .as_ref()
+                        .and_then(|current| current.recommended_model_id.as_deref())
+                        != state.recommended_model_id.as_deref();
+                    if changed {
+                        self.accepted_licenses = state.license_accepted;
+                    } else if state.license_accepted {
+                        self.accepted_licenses = true;
+                    }
+                    self.model_state = Some(state);
+                }
+                WorkerEvent::DesktopPreferencesUpdated { request_id, result } => {
+                    if request_id != Uuid::nil() && self.preference_request_id != Some(request_id) {
+                        continue;
+                    }
+                    if request_id != Uuid::nil() {
+                        self.preference_request_id = None;
+                    }
+                    match result {
+                        Ok(preferences) => {
+                            self.localization
+                                .set_locale(effective_locale(preferences.locale));
+                            self.preferences = Some(preferences);
+                            if self.onboarding_lan == LanPreference::Undecided {
+                                self.onboarding_lan = preferences.lan_preference;
+                            }
+                            if preferences
+                                .completed_onboarding_version
+                                .is_some_and(|version| version >= ONBOARDING_VERSION)
+                            {
+                                self.onboarding_page = None;
+                                self.onboarding_finishing = false;
+                                if let Some(enabled) = self.pending_onboarding_autostart.take() {
+                                    self.request_autostart(enabled);
+                                }
+                            } else if self.onboarding_page.is_none() && !self.onboarding_finishing {
+                                self.onboarding_page = Some(OnboardingPage::Welcome);
+                            }
+                        }
+                        Err(error) => self.notices.push_back((true, error)),
+                    }
+                }
+                WorkerEvent::AutostartUpdated { request_id, result } => {
+                    if request_id != Uuid::nil() && self.autostart_request_id != Some(request_id) {
+                        continue;
+                    }
+                    if request_id != Uuid::nil() {
+                        self.autostart_request_id = None;
+                    }
+                    match result {
+                        Ok(status) => self.autostart_status = Some(status),
+                        Err(error) => self.notices.push_back((true, error)),
+                    }
+                }
+                WorkerEvent::UpdaterUpdated { request_id, result } => {
+                    if self.updater_request_id.is_some()
+                        && self.updater_request_id != Some(request_id)
+                    {
+                        continue;
+                    }
+                    if self.updater_request_id == Some(request_id) {
+                        self.updater_request_id = None;
+                    }
+                    match result {
+                        Ok(view) => {
+                            self.exit_after_update_launch = updater_launched_installer(&view);
+                            self.updater = Some(view);
+                        }
+                        Err(error) => self.notices.push_back((true, error)),
+                    }
+                }
+                WorkerEvent::ConnectivityPlatformUpdated { request_id, result } => {
+                    if self.connectivity_request_id.is_some()
+                        && self.connectivity_request_id != Some(request_id)
+                    {
+                        continue;
+                    }
+                    if self.connectivity_request_id == Some(request_id) {
+                        self.connectivity_request_id = None;
+                    }
+                    match result {
+                        Ok(snapshot) => self.connectivity_platform = Some(snapshot),
+                        Err(error) => self.notices.push_back((
+                            true,
+                            connectivity_issue_message(&self.localization, error),
+                        )),
+                    }
+                }
+                WorkerEvent::FirewallOperationUpdated { request_id, state } => {
+                    if firewall_operation_update_applies(
+                        self.connectivity_request_id,
+                        request_id,
+                        state,
+                    ) {
+                        self.firewall_operation = state;
+                    }
+                }
+                WorkerEvent::LanRuntimeUpdated {
+                    request_id,
+                    listener,
+                    discovery,
+                    local_addresses,
+                } => {
+                    if request_id != Uuid::nil() {
+                        continue;
+                    }
+                    self.lan_listener = listener;
+                    self.lan_discovery = discovery;
+                    self.lan_local_addresses = local_addresses;
+                }
+                WorkerEvent::WikiHealthUpdated { request_id, result } => {
+                    if self.wiki_health_request_id.is_some()
+                        && self.wiki_health_request_id != Some(request_id)
+                    {
+                        continue;
+                    }
+                    if self.wiki_health_request_id == Some(request_id) {
+                        self.wiki_health_request_id = None;
+                    }
+                    match result {
+                        Ok(summary) => self.wiki_health = summary,
+                        Err(error) => self.notices.push_back((true, error)),
+                    }
+                }
+                WorkerEvent::GuidedWikiRepairPrepared {
+                    request_id,
+                    collection_id,
+                    result,
+                } => {
+                    self.knowledge
+                        .guided_repair_prepared(request_id, collection_id, result);
+                }
+                WorkerEvent::GuidedWikiRepairFinished {
+                    request_id,
+                    collection_id,
+                    result,
+                } => {
+                    let reload_now = self.screen == Screen::Knowledge;
+                    if let Some(action) = self.knowledge.guided_repair_finished(
+                        request_id,
+                        collection_id,
+                        result,
+                        reload_now,
+                    ) {
+                        self.send_knowledge_action(action);
+                    }
+                }
+                WorkerEvent::ModelsMissing => self.models_ready = false,
+                WorkerEvent::InstallStopped => {
+                    self.install_label = None;
+                    self.install_progress = 0.0;
+                }
+                WorkerEvent::InstallQueued(message) => {
+                    self.install_label = Some(message);
+                    self.install_progress = 0.0;
+                }
+                WorkerEvent::ModelsReady => {
+                    self.models_ready = true;
+                    self.install_label = None;
+                    self.install_progress = 1.0;
+                    self.notices
+                        .push_back((false, "Modelos verificados e instalados".into()));
+                }
+                WorkerEvent::RestartRequired(message) => {
+                    self.restart_required = Some(message.clone());
+                    self.notices.push_back((false, message));
+                }
+                WorkerEvent::InstallProgress(event) => self.apply_install_event(event),
+                WorkerEvent::Collections(collections) => {
+                    self.collections = collections;
+                    self.integrations.collections_changed();
+                    self.refresh_integrations_if_needed();
+                    let active_scans = self
+                        .collection_scans
+                        .keys()
+                        .copied()
+                        .collect::<HashSet<_>>();
+                    let reload_now = self.screen == Screen::Knowledge;
+                    if let Some(action) = self
+                        .knowledge
+                        .collections_changed(&active_scans, reload_now)
+                    {
+                        self.send_knowledge_action(action);
+                    }
+                }
+                WorkerEvent::CollectionScan {
+                    collection_id,
+                    state,
+                } => {
+                    if let Some(state) = state {
+                        let newly_active =
+                            self.collection_scans.insert(collection_id, state).is_none();
+                        if newly_active {
+                            self.knowledge.collection_scan_started(collection_id);
+                        }
+                    } else {
+                        let was_active = self.collection_scans.remove(&collection_id).is_some();
+                        if was_active {
+                            let reload_now = self.screen == Screen::Knowledge;
+                            if let Some(action) = self
+                                .knowledge
+                                .collection_scan_finished(collection_id, reload_now)
+                            {
+                                self.send_knowledge_action(action);
+                            }
+                        }
+                    }
+                }
+                WorkerEvent::Reviews(reviews) => self.reviews = reviews,
+                WorkerEvent::ReviewReanalysis {
+                    concept_id,
+                    running,
+                } => {
+                    if running {
+                        self.reanalyzing_reviews.insert(concept_id);
+                    } else {
+                        self.reanalyzing_reviews.remove(&concept_id);
+                    }
+                }
+                WorkerEvent::KnowledgeBundleLoaded {
+                    request_id,
+                    collection_id,
+                    result,
+                } => {
+                    if let Some(action) =
+                        self.knowledge
+                            .bundle_loaded(request_id, collection_id, result)
+                    {
+                        self.send_knowledge_action(action);
+                    }
+                }
+                WorkerEvent::KnowledgePageLoaded {
+                    request_id,
+                    collection_id,
+                    page_id,
+                    result,
+                } => {
+                    if let Some(action) =
+                        self.knowledge
+                            .page_loaded(request_id, collection_id, page_id, result)
+                    {
+                        self.send_knowledge_action(action);
+                    }
+                }
+                WorkerEvent::SearchFinished { hits, coverage } => {
+                    self.search_running = false;
+                    self.search_hits = hits;
+                    self.search_coverage = coverage;
+                }
+                WorkerEvent::ChatIntegrationsUpdated { request_id, result } => {
+                    self.integrations.apply_result(request_id, result);
+                }
+                WorkerEvent::Peers(peers) => self.peers = peers,
+                WorkerEvent::Notice(message) => self.notices.push_back((false, message)),
+                WorkerEvent::Error(message) => {
+                    self.search_running = false;
+                    self.notices.push_back((true, message));
+                }
+            }
+        }
+        deduplicate_notices(&mut self.notices);
+        while self.notices.len() > 4 {
+            self.notices.pop_front();
+        }
+    }
+
+    fn apply_install_event(&mut self, event: InstallEvent) {
+        match event {
+            InstallEvent::Started { artifact, .. } => {
+                self.install_label = Some(localized_model_progress(
+                    &self.localization,
+                    "models-downloading",
+                    &artifact,
+                ));
+                self.install_progress = 0.0;
+            }
+            InstallEvent::Progress {
+                artifact,
+                downloaded,
+                total_bytes,
+            } => {
+                self.install_label = Some(localized_model_progress(
+                    &self.localization,
+                    "models-downloading",
+                    &artifact,
+                ));
+                self.install_progress = if total_bytes == 0 {
+                    0.0
+                } else {
+                    downloaded as f32 / total_bytes as f32
+                };
+            }
+            InstallEvent::Verifying { artifact } => {
+                self.install_label = Some(localized_model_progress(
+                    &self.localization,
+                    "models-verifying",
+                    &artifact,
+                ))
+            }
+            InstallEvent::Extracting { artifact } => {
+                self.install_label = Some(localized_model_progress(
+                    &self.localization,
+                    "models-installing",
+                    &artifact,
+                ))
+            }
+            InstallEvent::Complete { artifact } => {
+                self.install_label = Some(localized_model_progress(
+                    &self.localization,
+                    "models-complete",
+                    &artifact,
+                ))
+            }
+        }
+    }
+
+    fn sidebar(&mut self, root: &mut egui::Ui) {
+        let home = self.localization.text("nav-home");
+        let collections = self.localization.text("nav-collections");
+        let review = format!(
+            "{}  ({})",
+            self.localization.text("nav-review"),
+            self.reviews.len()
+        );
+        let wiki = self.localization.text("nav-wiki");
+        let search = self.localization.text("nav-search");
+        let integrations = self.localization.text("nav-integrations");
+        let devices = self.localization.text("nav-devices");
+        let settings = self.localization.text("nav-settings");
+        let model_status = if self.models_ready {
+            format!("● {}", self.localization.text("models-ready"))
+        } else {
+            format!("○ {}", self.localization.text("models-pending"))
+        };
+        egui::Panel::left("navigation")
+            .exact_size(205.0)
+            .show(root, |ui| {
+                ui.add_space(18.0);
+                ui.heading(RichText::new("AirWiki").size(22.0));
+                ui.add_space(22.0);
+                nav(ui, &mut self.screen, Screen::Setup, &home);
+                nav(ui, &mut self.screen, Screen::Collections, &collections);
+                nav(ui, &mut self.screen, Screen::Review, &review);
+                nav(ui, &mut self.screen, Screen::Knowledge, &wiki);
+                nav(ui, &mut self.screen, Screen::Search, &search);
+                nav(ui, &mut self.screen, Screen::Integrations, &integrations);
+                nav(ui, &mut self.screen, Screen::Nodes, &devices);
+                nav(ui, &mut self.screen, Screen::Settings, &settings);
+                ui.with_layout(egui::Layout::bottom_up(egui::Align::LEFT), |ui| {
+                    ui.label(
+                        RichText::new(format!("v{}", env!("CARGO_PKG_VERSION")))
+                            .small()
+                            .color(Color32::GRAY),
+                    );
+                    ui.label(model_status);
+                });
+            });
+    }
+
+    fn setup(&mut self, ui: &mut egui::Ui) {
+        if ui
+            .button(self.localization.text("models-back-home"))
+            .clicked()
+        {
+            self.screen = Screen::Setup;
+        }
+        page_title(
+            ui,
+            &self.localization.text("models-title"),
+            &self.localization.text("models-subtitle"),
+        );
+        if let Some(report) = &self.hardware {
+            egui::Frame::group(ui.style()).show(ui, |ui| {
+                ui.heading(self.localization.text("models-diagnostics"));
+                egui::Grid::new("diagnostic_grid")
+                    .num_columns(2)
+                    .spacing([24.0, 8.0])
+                    .show(ui, |ui| {
+                        ui.label(self.localization.text("models-platform"));
+                        ui.label(format!("{} {}", report.os, report.architecture));
+                        ui.end_row();
+                        ui.label(self.localization.text("models-memory"));
+                        let mut arguments = FluentArgs::new();
+                        arguments.set(
+                            "total",
+                            format!("{:.1}", report.total_memory_bytes as f64 / 1024_f64.powi(3)),
+                        );
+                        arguments.set(
+                            "available",
+                            format!(
+                                "{:.1}",
+                                report.available_memory_bytes as f64 / 1024_f64.powi(3)
+                            ),
+                        );
+                        ui.label(
+                            self.localization
+                                .text_with("models-memory-value", Some(&arguments)),
+                        );
+                        ui.end_row();
+                        ui.label(self.localization.text("models-free-space"));
+                        ui.label(format!(
+                            "{:.1} GiB",
+                            report.available_disk_bytes as f64 / 1024_f64.powi(3)
+                        ));
+                        ui.end_row();
+                        ui.label("AVX2");
+                        ui.label(if report.avx2 {
+                            "Disponible"
+                        } else if report.os == "windows" {
+                            "No disponible"
+                        } else {
+                            "No requerido"
+                        });
+                        ui.end_row();
+                        ui.label(self.localization.text("models-acceleration"));
+                        ui.label(if report.metal_available {
+                            "Metal"
+                        } else if report.os == "windows" {
+                            "CPU"
+                        } else {
+                            "No disponible"
+                        });
+                        ui.end_row();
+                    });
+                for issue in &report.issues {
+                    ui.colored_label(Color32::from_rgb(210, 75, 70), issue);
+                }
+            });
+        } else {
+            ui.spinner();
+            ui.label(self.localization.text("models-diagnosing"));
+        }
+        ui.add_space(14.0);
+        egui::Frame::group(ui.style()).show(ui, |ui| {
+            ui.heading(self.localization.text("models-local-title"));
+            ui.label(self.localization.text("models-local-body"));
+            if let Some(state) = self.model_state.clone() {
+                ui.horizontal(|ui| {
+                    for profile in [
+                        ModelProfile::Automatic,
+                        ModelProfile::Efficient,
+                        ModelProfile::Quality,
+                    ] {
+                        let label = profile_label(&self.localization, profile);
+                        if ui
+                            .selectable_label(state.profile == profile, label)
+                            .clicked()
+                            && state.profile != profile
+                        {
+                            self.accepted_licenses = false;
+                            self.worker.send(WorkerCommand::SetModelProfile(profile));
+                        }
+                    }
+                });
+                ui.add_space(6.0);
+                if let Some(display_name) = &state.recommended_display_name {
+                    ui.heading(RichText::new(display_name).size(18.0));
+                }
+                if let Some(reason) = &state.recommendation_reason {
+                    ui.label(reason);
+                }
+                if state.degraded {
+                    ui.colored_label(
+                        Color32::from_rgb(210, 145, 50),
+                        self.localization.text("models-profile-reduced"),
+                    );
+                }
+                if let Some(active) = &state.active_model_id {
+                    let mut arguments = FluentArgs::new();
+                    arguments.set("model", active.as_str());
+                    ui.label(
+                        self.localization
+                            .text_with("models-active", Some(&arguments)),
+                    );
+                }
+                if let Some(pending) = &state.pending_model_id {
+                    let mut arguments = FluentArgs::new();
+                    arguments.set("model", pending.as_str());
+                    ui.label(
+                        self.localization
+                            .text_with("models-pending-restart", Some(&arguments)),
+                    );
+                }
+                let mut arguments = FluentArgs::new();
+                arguments.set(
+                    "download",
+                    format!("{:.2}", state.download_bytes as f64 / 1024_f64.powi(3)),
+                );
+                arguments.set(
+                    "required",
+                    format!("{:.2}", state.required_free_bytes as f64 / 1024_f64.powi(3)),
+                );
+                ui.label(
+                    self.localization
+                        .text_with("models-download-size", Some(&arguments)),
+                );
+                for issue in &state.issues {
+                    ui.colored_label(Color32::from_rgb(210, 75, 70), issue);
+                }
+                if let (Some(license), Some(url), Some(revision)) =
+                    (&state.license, &state.license_url, &state.revision)
+                {
+                    ui.horizontal_wrapped(|ui| {
+                        ui.hyperlink_to(format!("Licencia {license}"), url);
+                        ui.separator();
+                        ui.label(format!("Revisión {}", &revision[..revision.len().min(12)]));
+                        ui.separator();
+                        ui.hyperlink_to(
+                            format!("Licencia multilingual-e5-small ({})", E5_FILES[0].license),
+                            E5_FILES[0].license_url,
+                        );
+                        ui.separator();
+                        ui.hyperlink_to(
+                            format!("Licencia mMARCO ({})", MMARCO_COMMON_FILES[0].license),
+                            MMARCO_COMMON_FILES[0].license_url,
+                        );
+                        ui.separator();
+                        ui.hyperlink_to(
+                            "Licencia llama.cpp",
+                            "https://github.com/ggml-org/llama.cpp/blob/b9946/LICENSE",
+                        );
+                    });
+                }
+                ui.checkbox(
+                    &mut self.accepted_licenses,
+                    self.localization.text("models-accept-licenses"),
+                );
+                let recommended = state.recommended_model_id.as_deref();
+                let already_active =
+                    self.models_ready && state.active_model_id.as_deref() == recommended;
+                let already_pending = state.pending_model_id.as_deref() == recommended;
+                let can_install = recommended.is_some()
+                    && !already_active
+                    && !already_pending
+                    && self.accepted_licenses
+                    && state.fits_available_disk
+                    && state.issues.is_empty()
+                    && self.install_label.is_none();
+                ui.horizontal(|ui| {
+                    let label = model_action_label(
+                        &self.localization,
+                        state.recommended_assets_installed,
+                        self.models_ready,
+                    );
+                    if ui
+                        .add_enabled(can_install, egui::Button::new(label))
+                        .clicked()
+                    {
+                        self.worker.send(WorkerCommand::InstallModels);
+                    }
+                    if self.install_label.is_some()
+                        && ui.button(self.localization.text("action-cancel")).clicked()
+                    {
+                        self.worker.send(WorkerCommand::CancelInstall);
+                    }
+                    if already_active {
+                        ui.colored_label(
+                            Color32::from_rgb(70, 160, 110),
+                            self.localization.text("models-recommended-active"),
+                        );
+                    } else if already_pending {
+                        ui.label(self.localization.text("models-restart-to-activate"));
+                    } else if state.recommended_assets_installed {
+                        ui.label(self.localization.text("models-already-downloaded"));
+                    }
+                });
+            } else {
+                ui.spinner();
+                ui.label(self.localization.text("models-calculating"));
+            }
+            if let Some(label) = &self.install_label {
+                ui.label(label);
+                ui.add(
+                    egui::ProgressBar::new(self.install_progress.clamp(0.0, 1.0)).show_percentage(),
+                );
+            }
+            if let Some(message) = &self.restart_required {
+                ui.colored_label(Color32::from_rgb(70, 160, 110), message);
+            }
+            ui.separator();
+            ui.label(
+                RichText::new(self.localization.text("models-multimodal-future"))
+                    .small()
+                    .color(Color32::GRAY),
+            );
+        });
+    }
+
+    fn home(&mut self, ui: &mut egui::Ui) {
+        page_title(
+            ui,
+            &self.localization.text("dashboard-title"),
+            &self.localization.text("dashboard-subtitle"),
+        );
+        let readiness = self.readiness_view();
+        let columns = if ui.available_width() >= 900.0 { 4 } else { 2 };
+        egui::Grid::new("readiness_components")
+            .num_columns(columns)
+            .spacing([12.0, 12.0])
+            .show(ui, |ui| {
+                for (index, component) in readiness.components.iter().enumerate() {
+                    egui::Frame::group(ui.style()).show(ui, |ui| {
+                        ui.set_min_width(175.0);
+                        ui.label(
+                            RichText::new(readiness_component_label(
+                                &self.localization,
+                                component.component,
+                            ))
+                            .strong(),
+                        );
+                        let (label, color) =
+                            readiness_status_presentation(&self.localization, component.status);
+                        ui.colored_label(color, label);
+                    });
+                    if (index + 1) % columns == 0 {
+                        ui.end_row();
+                    }
+                }
+            });
+        ui.add_space(18.0);
+        if readiness.status(ReadinessComponent::LocalAi) == ReadinessStatus::Working {
+            ui.label(self.localization.text("home-local-ai-working"));
+        }
+        if let Some(action) = readiness.primary_action {
+            egui::Frame::group(ui.style()).show(ui, |ui| {
+                ui.heading(primary_action_title(&self.localization, action));
+                ui.label(primary_action_explanation(&self.localization, action));
+                if ui
+                    .button(primary_action_button(&self.localization, action))
+                    .clicked()
+                {
+                    self.open_readiness_action(action);
+                }
+            });
+        } else {
+            ui.colored_label(
+                Color32::from_rgb(70, 160, 110),
+                self.localization.text("dashboard-all-ready"),
+            );
+        }
+        let checked = readiness.last_checked_at.elapsed().map_or_else(
+            |_| self.localization.text("home-checked-now"),
+            |elapsed| {
+                if elapsed.as_secs() < 60 {
+                    self.localization.text("home-checked-now")
+                } else {
+                    let mut arguments = FluentArgs::new();
+                    arguments.set("minutes", elapsed.as_secs() / 60);
+                    self.localization
+                        .text_with("home-checked-minutes", Some(&arguments))
+                }
+            },
+        );
+        let mut checked_arguments = FluentArgs::new();
+        checked_arguments.set("when", checked);
+        ui.horizontal(|ui| {
+            ui.label(
+                RichText::new(
+                    self.localization
+                        .text_with("home-last-checked", Some(&checked_arguments)),
+                )
+                .small()
+                .color(Color32::GRAY),
+            );
+            if ui
+                .add_enabled(
+                    self.wiki_health_request_id.is_none(),
+                    egui::Button::new(self.localization.text("action-refresh")),
+                )
+                .clicked()
+            {
+                let request_id = Uuid::new_v4();
+                self.wiki_health_request_id = Some(request_id);
+                self.worker
+                    .send(WorkerCommand::RefreshWikiHealth { request_id });
+            }
+        });
+    }
+
+    fn readiness_view(&self) -> crate::readiness::NodeReadinessView {
+        let preference = match self
+            .preferences
+            .map(|preferences| preferences.lan_preference)
+        {
+            Some(LanPreference::Enabled) => ConnectivityPreference::Enabled,
+            Some(LanPreference::Disabled) => ConnectivityPreference::Disabled,
+            Some(LanPreference::Undecided) | None => ConnectivityPreference::Undecided,
+        };
+        let network_enabled = preference == ConnectivityPreference::Enabled;
+        let platform = self.connectivity_platform;
+        let system_permission = if !network_enabled {
+            SystemPermission::NotRequired
+        } else {
+            match platform.map(|snapshot| snapshot.system_permission) {
+                Some(SystemPermissionState::NotApplicable) => SystemPermission::NotRequired,
+                Some(SystemPermissionState::Granted) => SystemPermission::Granted,
+                Some(SystemPermissionState::Denied) => SystemPermission::Denied,
+                Some(SystemPermissionState::Unknown)
+                    if self
+                        .peers
+                        .iter()
+                        .any(|peer| peer.activity != PeerActivityState::NotObserved) =>
+                {
+                    SystemPermission::Granted
+                }
+                Some(SystemPermissionState::Unknown) => SystemPermission::Pending,
+                None => SystemPermission::Unknown,
+            }
+        };
+        let network_profile = match platform.map(|snapshot| snapshot.network_profile) {
+            Some(NetworkProfileState::NotApplicable) => NetworkProfile::NotApplicable,
+            Some(NetworkProfileState::Private) => NetworkProfile::Private,
+            Some(NetworkProfileState::Domain) => NetworkProfile::Domain,
+            Some(NetworkProfileState::Public) => NetworkProfile::Public,
+            Some(NetworkProfileState::Unknown) | None => NetworkProfile::Unknown,
+        };
+        let firewall = match platform.map(|snapshot| snapshot.firewall) {
+            Some(FirewallDiagnosticState::NotApplicable) => FirewallState::NotRequired,
+            Some(FirewallDiagnosticState::Ready) => FirewallState::Ready,
+            Some(FirewallDiagnosticState::FirewallDisabled) => FirewallState::Disabled,
+            Some(FirewallDiagnosticState::BlockAllInbound) => FirewallState::BlockAllInbound,
+            Some(FirewallDiagnosticState::RulesMissing)
+                if platform
+                    .is_some_and(|snapshot| !snapshot.firewall_helper.can_request_elevation()) =>
+            {
+                FirewallState::HelperUnavailable
+            }
+            Some(FirewallDiagnosticState::RulesMissing) => FirewallState::RulesMissing,
+            Some(FirewallDiagnosticState::LegacyExposure) => FirewallState::LegacyExposure,
+            Some(FirewallDiagnosticState::Conflict) => FirewallState::Conflict,
+            Some(FirewallDiagnosticState::ManagedPolicy) => FirewallState::Managed,
+            Some(FirewallDiagnosticState::Unsupported) => FirewallState::Unsupported,
+            Some(FirewallDiagnosticState::Error) => FirewallState::Error,
+            Some(FirewallDiagnosticState::Unknown) | None => FirewallState::Unknown,
+        };
+        let background = match self.autostart_status {
+            Some(AutostartStatus::Enabled) => OptionalFeatureState::Ready,
+            Some(AutostartStatus::RequiresApproval) => OptionalFeatureState::NeedsPermission,
+            Some(AutostartStatus::Conflict) => OptionalFeatureState::NeedsAttention,
+            Some(AutostartStatus::Disabled | AutostartStatus::Unsupported) => {
+                OptionalFeatureState::Disabled
+            }
+            None => OptionalFeatureState::Working,
+        };
+        let updates = match &self.updater {
+            Some(UpdaterWorkerView::Disabled(_)) => OptionalFeatureState::Disabled,
+            Some(UpdaterWorkerView::Ready(view)) if view.last_issue.is_some() => {
+                OptionalFeatureState::NeedsAttention
+            }
+            Some(UpdaterWorkerView::Ready(view))
+                if matches!(
+                    view.status,
+                    UpdaterStatus::Checking
+                        | UpdaterStatus::Downloading(_)
+                        | UpdaterStatus::Installing(_)
+                ) =>
+            {
+                OptionalFeatureState::Working
+            }
+            Some(UpdaterWorkerView::Ready(_)) => OptionalFeatureState::Ready,
+            None => OptionalFeatureState::Working,
+        };
+        derive_readiness(ReadinessInput {
+            models_ready: self.models_ready,
+            models_working: self.install_label.is_some(),
+            model_issue_count: self
+                .model_state
+                .as_ref()
+                .map_or(0, |state| state.issues.len()),
+            models_need_permission: false,
+            collection_count: self.collections.len(),
+            collections_working: !self.collection_scans.is_empty(),
+            collection_issue_count: self
+                .collections
+                .iter()
+                .filter(|collection| {
+                    collection.maintenance.as_ref().is_some_and(|maintenance| {
+                        matches!(
+                            maintenance.status,
+                            airwiki_core::CollectionMaintenanceStatus::Partial
+                                | airwiki_core::CollectionMaintenanceStatus::Failed
+                                | airwiki_core::CollectionMaintenanceStatus::Quarantined
+                        )
+                    })
+                })
+                .count(),
+            pending_review_count: self.reviews.len(),
+            wiki_working: self.wiki_health.updating_count > 0,
+            wiki_issue_count: self
+                .wiki_health
+                .error_count
+                .saturating_add(self.wiki_health.warning_count),
+            connectivity: ConnectivityInput {
+                preference,
+                system_permission,
+                network_profile,
+                firewall,
+                listener: match self.lan_listener {
+                    LanListenerView::Stopped => ListenerState::Stopped,
+                    LanListenerView::Starting => ListenerState::Starting,
+                    LanListenerView::Listening => ListenerState::Listening,
+                    LanListenerView::Failed => ListenerState::Failed,
+                },
+                discovery: match self.lan_discovery {
+                    LanDiscoveryView::Disabled => DiscoveryState::Disabled,
+                    LanDiscoveryView::Starting => DiscoveryState::Starting,
+                    LanDiscoveryView::Active => DiscoveryState::Active,
+                    LanDiscoveryView::Failed => DiscoveryState::Failed,
+                },
+                peer_count: self
+                    .peers
+                    .iter()
+                    .filter(|peer| peer.trust == PeerTrustState::Trusted)
+                    .count(),
+            },
+            chat: self.integrations.readiness_state(),
+            background,
+            updates,
+            last_checked_at: SystemTime::now(),
+        })
+    }
+
+    fn open_readiness_action(&mut self, action: RecommendedAction) {
+        self.screen =
+            match action {
+                RecommendedAction::PrepareLocalAi | RecommendedAction::ResolveLocalAiIssue => {
+                    Screen::Models
+                }
+                RecommendedAction::AddKnowledgeFolder
+                | RecommendedAction::ResolveCollectionIssue => Screen::Collections,
+                RecommendedAction::ReviewPendingKnowledge => Screen::Review,
+                RecommendedAction::InspectWikiHealth => Screen::Knowledge,
+                RecommendedAction::ExplainLan
+                | RecommendedAction::RequestSystemPermission
+                | RecommendedAction::ChangeNetworkProfile
+                | RecommendedAction::ConfigureFirewall
+                | RecommendedAction::OpenFirewallSettings
+                | RecommendedAction::ReviewLegacyFirewallRules
+                | RecommendedAction::RepairConnectivityInstallation
+                | RecommendedAction::ContactAdministrator
+                | RecommendedAction::RetryConnectivity => Screen::Nodes,
+                RecommendedAction::ResolveChatIssue => Screen::Integrations,
+                RecommendedAction::ResolveBackgroundIssue
+                | RecommendedAction::ResolveUpdateIssue => Screen::Settings,
+            };
+    }
+
+    fn collections(&mut self, ui: &mut egui::Ui) {
+        page_title(
+            ui,
+            &self.localization.text("collections-title"),
+            &self.localization.text("collections-subtitle"),
+        );
+        let mut monitoring_arguments = FluentArgs::new();
+        monitoring_arguments.set("minutes", PERIODIC_RECONCILE_INTERVAL.as_secs() / 60);
+        ui.label(
+            RichText::new(
+                self.localization
+                    .text_with("collections-monitoring", Some(&monitoring_arguments)),
+            )
+            .small()
+            .color(Color32::GRAY),
+        );
+        ui.add_space(8.0);
+        egui::Frame::group(ui.style()).show(ui, |ui| {
+            ui.heading(self.localization.text("collections-new"));
+            ui.horizontal(|ui| {
+                let name_label = ui.label(self.localization.text("collections-name"));
+                ui.text_edit_singleline(&mut self.new_collection_name)
+                    .labelled_by(name_label.id);
+                if ui
+                    .button(self.localization.text("collections-choose-folder"))
+                    .clicked()
+                {
+                    self.new_collection_folder = rfd::FileDialog::new().pick_folder();
+                }
+            });
+            if let Some(path) = &self.new_collection_folder {
+                ui.monospace(path.display().to_string());
+            }
+            let enabled =
+                !self.new_collection_name.trim().is_empty() && self.new_collection_folder.is_some();
+            if ui
+                .add_enabled(
+                    enabled,
+                    egui::Button::new(self.localization.text("collections-create-scan")),
+                )
+                .clicked()
+                && let Some(folder) = self.new_collection_folder.take()
+            {
+                self.worker.send(WorkerCommand::AddCollection {
+                    name: self.new_collection_name.trim().to_owned(),
+                    folder,
+                });
+                self.new_collection_name.clear();
+            }
+        });
+        ui.add_space(12.0);
+        if self.collections.is_empty() {
+            empty_state(
+                ui,
+                &self.localization.text("collections-empty-title"),
+                &self.localization.text("collections-empty-body"),
+            );
+        }
+        let technical_details = self.localization.text("action-details");
+        let linked = self.localization.text("collections-linked");
+        let queued = self.localization.text("collections-scan-queued");
+        let scanning = self.localization.text("collections-scan-running");
+        let relink = self.localization.text("collections-relink");
+        let retry = self.localization.text("collections-retry");
+        let share_peers = self.localization.text("collections-policy-peers");
+        let allow_chat = self.localization.text("collections-policy-chat");
+        let local_only = self.localization.text("collections-local-only");
+        let cloud_warning = self.localization.text("collections-cloud-warning");
+        let mut requested_external_ai_confirmation = None;
+        for collection in &mut self.collections {
+            let scan_state = self.collection_scans.get(&collection.id).copied();
+            let mut counts_arguments = FluentArgs::new();
+            counts_arguments.set("documents", collection.document_count);
+            counts_arguments.set("published", collection.published_count);
+            let counts = self
+                .localization
+                .text_with("collections-counts", Some(&counts_arguments));
+            egui::Frame::group(ui.style()).show(ui, |ui| {
+                ui.horizontal(|ui| {
+                    ui.vertical(|ui| {
+                        ui.heading(&collection.name);
+                        ui.label(&linked);
+                        ui.collapsing(&technical_details, |ui| {
+                            ui.monospace(collection.folder.display().to_string());
+                        });
+                        ui.label(&counts);
+                        if let Some(maintenance) = &collection.maintenance {
+                            let (label, color) = maintenance_status_presentation(
+                                &self.localization,
+                                maintenance.status,
+                            );
+                            ui.colored_label(color, label);
+                            if let Some(finished) = maintenance.last_finished_at {
+                                let mut arguments = FluentArgs::new();
+                                arguments
+                                    .set("time", finished.format("%Y-%m-%d %H:%M").to_string());
+                                ui.label(
+                                    RichText::new(
+                                        self.localization
+                                            .text_with("collections-last-scan", Some(&arguments)),
+                                    )
+                                    .small()
+                                    .color(Color32::GRAY),
+                                );
+                            }
+                            if let Some(summary) = &maintenance.issue_summary {
+                                ui.label(summary);
+                            }
+                        }
+                        if let Some(state) = scan_state {
+                            ui.horizontal(|ui| {
+                                if state == CollectionScanState::Scanning {
+                                    ui.spinner();
+                                }
+                                ui.label(match state {
+                                    CollectionScanState::Queued => &queued,
+                                    CollectionScanState::Scanning => &scanning,
+                                });
+                            });
+                        }
+                    });
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        if ui.button(&relink).clicked()
+                            && let Some(folder) = rfd::FileDialog::new().pick_folder()
+                        {
+                            self.worker.send(WorkerCommand::RelinkCollection {
+                                collection_id: collection.id,
+                                folder,
+                            });
+                        }
+                        if ui
+                            .add_enabled(scan_state.is_none(), egui::Button::new(&retry))
+                            .clicked()
+                        {
+                            self.collection_scans
+                                .insert(collection.id, CollectionScanState::Queued);
+                            self.knowledge.collection_scan_started(collection.id);
+                            self.worker
+                                .send(WorkerCommand::RescanCollection(collection.id));
+                        }
+                    });
+                });
+                ui.separator();
+                let external_ai_before = collection.allow_external_ai;
+                let peer_changed = ui
+                    .checkbox(&mut collection.peer_shareable, &share_peers)
+                    .changed();
+                let external_ai_changed = ui
+                    .checkbox(&mut collection.allow_external_ai, &allow_chat)
+                    .changed();
+                let external_ai_change = classify_external_ai_policy_change(
+                    external_ai_before,
+                    collection.allow_external_ai,
+                );
+                if external_ai_change == ExternalAiPolicyChange::ConfirmEnable {
+                    collection.allow_external_ai = false;
+                    requested_external_ai_confirmation = Some(collection.id);
+                }
+                collection.local_only = !collection.peer_shareable && !collection.allow_external_ai;
+                if collection.local_only {
+                    ui.label(
+                        RichText::new(&local_only)
+                            .small()
+                            .color(Color32::from_rgb(70, 160, 110)),
+                    );
+                }
+                if collection.allow_external_ai {
+                    ui.colored_label(Color32::from_rgb(205, 120, 35), &cloud_warning);
+                }
+                let external_ai_applies = external_ai_changed
+                    && external_ai_change == ExternalAiPolicyChange::ApplyDisable;
+                if peer_changed || external_ai_applies {
+                    self.worker.send(WorkerCommand::UpdateCollectionPolicy {
+                        collection_id: collection.id,
+                        local_only: collection.local_only,
+                        peer_shareable: collection.peer_shareable,
+                        allow_external_ai: collection.allow_external_ai,
+                    });
+                }
+            });
+            ui.add_space(8.0);
+        }
+        if let Some(collection_id) = requested_external_ai_confirmation {
+            self.external_ai_confirmation = Some(collection_id);
+        }
+        self.external_ai_confirmation_window(ui.ctx());
+    }
+
+    fn external_ai_confirmation_window(&mut self, context: &egui::Context) {
+        let Some(collection_id) = self.external_ai_confirmation else {
+            return;
+        };
+        let Some(collection_name) = self
+            .collections
+            .iter()
+            .find(|collection| collection.id == collection_id)
+            .map(|collection| collection.name.clone())
+        else {
+            self.external_ai_confirmation = None;
+            return;
+        };
+        let title = self.localization.text("collections-chat-confirm-title");
+        let body = self.localization.text("collections-chat-confirm-body");
+        let warning = self.localization.text("collections-cloud-warning");
+        let cancel = self.localization.text("action-cancel");
+        let confirm = self.localization.text("action-confirm");
+        let mut decision = None;
+        egui::Window::new(title)
+            .id(egui::Id::new("external_ai_collection_confirmation"))
+            .collapsible(false)
+            .resizable(false)
+            .anchor(egui::Align2::CENTER_CENTER, egui::Vec2::ZERO)
+            .show(context, |ui| {
+                ui.heading(collection_name);
+                ui.label(body);
+                ui.colored_label(Color32::from_rgb(205, 120, 35), warning);
+                ui.horizontal(|ui| {
+                    if ui.button(cancel).clicked() {
+                        decision = Some(false);
+                    }
+                    if ui.button(confirm).clicked() {
+                        decision = Some(true);
+                    }
+                });
+            });
+        let Some(confirmed) = decision else {
+            return;
+        };
+        self.external_ai_confirmation = None;
+        if !confirmed {
+            return;
+        }
+        let Some(collection) = self
+            .collections
+            .iter_mut()
+            .find(|collection| collection.id == collection_id)
+        else {
+            return;
+        };
+        collection.allow_external_ai = true;
+        collection.local_only = !collection.peer_shareable;
+        self.worker.send(WorkerCommand::UpdateCollectionPolicy {
+            collection_id: collection.id,
+            local_only: collection.local_only,
+            peer_shareable: collection.peer_shareable,
+            allow_external_ai: true,
+        });
+    }
+
+    fn review(&mut self, ui: &mut egui::Ui) {
+        page_title(
+            ui,
+            &self.localization.text("review-title"),
+            &self.localization.text("review-subtitle"),
+        );
+        if self.reviews.is_empty() {
+            empty_state(
+                ui,
+                &self.localization.text("review-empty-title"),
+                &self.localization.text("review-empty-body"),
+            );
+            return;
+        }
+        ui.columns(2, |columns| {
+            columns[0].set_min_width(280.0);
+            for item in &self.reviews {
+                let selected = self.selected_review == Some(item.concept_id);
+                if columns[0]
+                    .selectable_label(
+                        selected,
+                        format!("{}\n{}", item.source_name, item.collection_name),
+                    )
+                    .clicked()
+                {
+                    self.selected_review = Some(item.concept_id);
+                }
+            }
+            let selected_id = self.selected_review;
+            let is_reanalyzing =
+                selected_id.is_some_and(|id| self.reanalyzing_reviews.contains(&id));
+            let selected = selected_id
+                .and_then(|id| self.reviews.iter_mut().find(|item| item.concept_id == id));
+            if let Some(item) = selected {
+                edit_draft(&mut columns[1], &self.localization, &mut item.draft);
+                columns[1].horizontal(|ui| {
+                    if ui
+                        .add_enabled(
+                            !is_reanalyzing,
+                            egui::Button::new(self.localization.text("review-approve")),
+                        )
+                        .clicked()
+                    {
+                        self.worker.send(WorkerCommand::Approve {
+                            concept_id: item.concept_id,
+                            draft: item.draft.clone(),
+                        });
+                    }
+                    if ui
+                        .add_enabled(
+                            !is_reanalyzing,
+                            egui::Button::new(self.localization.text("review-reject")),
+                        )
+                        .clicked()
+                    {
+                        self.worker.send(WorkerCommand::Reject {
+                            concept_id: item.concept_id,
+                        });
+                    }
+                    let retry = ui.add_enabled(
+                        self.models_ready && !is_reanalyzing,
+                        egui::Button::new(self.localization.text("review-reanalyze")),
+                    );
+                    if retry
+                        .on_hover_text(self.localization.text("review-reanalyze-help"))
+                        .clicked()
+                    {
+                        self.worker.send(WorkerCommand::ReanalyzeReview {
+                            concept_id: item.concept_id,
+                        });
+                    }
+                });
+                if is_reanalyzing {
+                    columns[1].horizontal(|ui| {
+                        ui.spinner();
+                        ui.label(self.localization.text("review-analyzing"));
+                    });
+                } else if !self.models_ready {
+                    columns[1].label(
+                        RichText::new(self.localization.text("review-model-required"))
+                            .small()
+                            .color(Color32::GRAY),
+                    );
+                }
+            } else {
+                columns[1].label(self.localization.text("review-select-document"));
+            }
+        });
+    }
+
+    fn search(&mut self, ui: &mut egui::Ui) {
+        page_title(
+            ui,
+            &self.localization.text("search-title"),
+            &self.localization.text("search-subtitle"),
+        );
+        ui.horizontal(|ui| {
+            let question_label = ui.label(self.localization.text("search-question"));
+            ui.add_sized(
+                [520.0, 36.0],
+                egui::TextEdit::singleline(&mut self.search_question)
+                    .hint_text(self.localization.text("search-placeholder")),
+            )
+            .labelled_by(question_label.id);
+            ui.add(
+                egui::DragValue::new(&mut self.search_top_k)
+                    .range(1..=10)
+                    .prefix("Top "),
+            );
+            let enabled = !self.search_question.trim().is_empty() && !self.search_running;
+            if ui
+                .add_enabled(
+                    enabled,
+                    egui::Button::new(self.localization.text("search-action")),
+                )
+                .clicked()
+            {
+                self.search_running = true;
+                self.search_hits.clear();
+                self.search_coverage = SearchCoverageView::Complete;
+                self.worker.send(WorkerCommand::Search {
+                    question: self.search_question.trim().to_owned(),
+                    top_k: self.search_top_k,
+                    purpose: SearchPurpose::LocalAssistant,
+                });
+            }
+        });
+        if self.search_running {
+            ui.spinner();
+            ui.label(self.localization.text("search-running"));
+        }
+        if let Some(message) = search_coverage_message(&self.localization, self.search_coverage) {
+            ui.colored_label(Color32::from_rgb(205, 145, 30), message);
+        }
+        for hit in &self.search_hits {
+            ui.add_space(8.0);
+            egui::Frame::group(ui.style()).show(ui, |ui| {
+                ui.horizontal(|ui| {
+                    ui.heading(format!("{}. {}", hit.rank, hit.title));
+                });
+                ui.label(RichText::new(&hit.heading_or_page).strong());
+                ui.label(&hit.snippet);
+                ui.collapsing(self.localization.text("search-citation-details"), |ui| {
+                    let mut arguments = FluentArgs::new();
+                    arguments.set("revision", hit.source_revision);
+                    ui.label(
+                        self.localization
+                            .text_with("search-revision", Some(&arguments)),
+                    );
+                    ui.monospace(format!(
+                        "{}… · {}",
+                        &hit.source_sha256[..hit.source_sha256.len().min(12)],
+                        hit.node_id
+                    ));
+                    ui.monospace(&hit.logical_resource_uri);
+                });
+            });
+        }
+    }
+
+    fn integrations(&mut self, ui: &mut egui::Ui) {
+        let actions = self.integrations.show(ui, &self.localization);
+        for action in actions {
+            match action {
+                IntegrationsUiAction::Run { request_id, action } => {
+                    self.worker
+                        .send(WorkerCommand::ManageChatIntegration { request_id, action });
+                }
+                IntegrationsUiAction::OpenCollections => self.screen = Screen::Collections,
+            }
+        }
+    }
+
+    fn refresh_integrations_if_needed(&mut self) {
+        let Some(IntegrationsUiAction::Run { request_id, action }) =
+            self.integrations.refresh_if_idle()
+        else {
+            return;
+        };
+        self.worker
+            .send(WorkerCommand::ManageChatIntegration { request_id, action });
+    }
+
+    fn nodes(&mut self, ui: &mut egui::Ui) {
+        page_title(
+            ui,
+            &self.localization.text("devices-title"),
+            &self.localization.text("devices-subtitle"),
+        );
+        self.connectivity_panel(ui);
+        ui.add_space(10.0);
+        ui.collapsing(self.localization.text("devices-manual-advanced"), |ui| {
+            egui::Frame::group(ui.style()).show(ui, |ui| {
+                if !self.lan_local_addresses.is_empty() {
+                    ui.label(self.localization.text("devices-this-address"));
+                    for address in &self.lan_local_addresses {
+                        ui.horizontal(|ui| {
+                            ui.monospace(address);
+                            if ui
+                                .small_button(self.localization.text("action-copy"))
+                                .clicked()
+                            {
+                                ui.ctx().copy_text(address.clone());
+                            }
+                        });
+                    }
+                    ui.add_space(8.0);
+                }
+                let manual_address = parse_manual_ipv4_address(&self.manual_multiaddress);
+                let manual_connection_available = self.preferences.is_some_and(|preferences| {
+                    preferences.lan_preference == LanPreference::Enabled
+                }) && self.lan_listener
+                    == LanListenerView::Listening;
+                ui.horizontal(|ui| {
+                    ui.add_sized(
+                        [560.0, 28.0],
+                        egui::TextEdit::singleline(&mut self.manual_multiaddress)
+                            .hint_text("/ip4/192.168.1.20/tcp/12345/p2p/12D3Koo…"),
+                    );
+                    if ui
+                        .add_enabled(
+                            manual_connection_available && manual_address.is_some(),
+                            egui::Button::new(self.localization.text("action-connect")),
+                        )
+                        .clicked()
+                        && let Some(address) = &manual_address
+                    {
+                        self.worker.send(WorkerCommand::Dial {
+                            address: address.to_string(),
+                        });
+                    }
+                });
+                if !self.manual_multiaddress.trim().is_empty() && manual_address.is_none() {
+                    ui.colored_label(
+                        Color32::from_rgb(220, 90, 70),
+                        self.localization.text("devices-manual-invalid"),
+                    );
+                }
+                if !manual_connection_available {
+                    ui.label(self.localization.text("devices-manual-requires-lan"));
+                }
+            });
+        });
+        ui.add_space(10.0);
+        if self.peers.is_empty() {
+            empty_state(
+                ui,
+                &self.localization.text("devices-empty-title"),
+                &self.localization.text("devices-empty-body"),
+            );
+        }
+        let nearby_device = self.localization.text("devices-nearby");
+        let technical_details = self.localization.text("action-details");
+        let pair = self.localization.text("devices-pair");
+        let matches = self.localization.text("devices-code-matches");
+        let does_not_match = self.localization.text("devices-code-does-not-match");
+        let revoke = self.localization.text("devices-revoke");
+        let blocked_message = self.localization.text("devices-blocked-message");
+        let pair_again = self.localization.text("devices-pair-again");
+        for peer in &mut self.peers {
+            egui::Frame::group(ui.style()).show(ui, |ui| {
+                ui.horizontal(|ui| {
+                    ui.vertical(|ui| {
+                        ui.heading(peer.device_name.as_deref().unwrap_or(&nearby_device));
+                        ui.collapsing(&technical_details, |ui| {
+                            ui.monospace(&peer.peer_id);
+                            ui.monospace(&peer.address);
+                        });
+                    });
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        ui.vertical(|ui| {
+                            ui.label(peer_trust_label(&self.localization, peer.trust));
+                            ui.small(peer_activity_label(
+                                &self.localization,
+                                peer.trust,
+                                peer.activity,
+                            ));
+                        });
+                    });
+                });
+                if should_present_pairing_controls(peer.activity) {
+                    if let Some(words) = &peer.sas_words {
+                        ui.heading(words.join("  "));
+                        ui.horizontal(|ui| {
+                            if ui.button(&matches).clicked() {
+                                self.worker.send(WorkerCommand::ConfirmPairing {
+                                    peer_id: peer.peer_id.clone(),
+                                    accepted: true,
+                                });
+                            }
+                            if ui.button(&does_not_match).clicked() {
+                                self.worker.send(WorkerCommand::ConfirmPairing {
+                                    peer_id: peer.peer_id.clone(),
+                                    accepted: false,
+                                });
+                            }
+                        });
+                    }
+                } else {
+                    match peer.trust {
+                        PeerTrustState::Unpaired => {
+                            if ui.button(&pair).clicked() {
+                                self.worker.send(WorkerCommand::Pair {
+                                    peer_id: peer.peer_id.clone(),
+                                });
+                            }
+                        }
+                        PeerTrustState::Trusted => {
+                            for collection in &self.collections {
+                                if collection.local_only || !collection.peer_shareable {
+                                    continue;
+                                }
+                                let mut granted = peer.granted_collections.contains(&collection.id);
+                                let mut arguments = FluentArgs::new();
+                                arguments.set("name", collection.name.as_str());
+                                if ui
+                                    .checkbox(
+                                        &mut granted,
+                                        self.localization
+                                            .text_with("devices-grant", Some(&arguments)),
+                                    )
+                                    .changed()
+                                {
+                                    if granted {
+                                        peer.granted_collections.insert(collection.id);
+                                    } else {
+                                        peer.granted_collections.remove(&collection.id);
+                                    }
+                                    self.worker.send(WorkerCommand::GrantCollection {
+                                        peer_id: peer.peer_id.clone(),
+                                        collection_id: collection.id,
+                                        granted,
+                                    });
+                                }
+                            }
+                            if ui.button(&revoke).clicked() {
+                                self.worker.send(WorkerCommand::RevokePeer {
+                                    peer_id: peer.peer_id.clone(),
+                                });
+                            }
+                        }
+                        PeerTrustState::Blocked => {
+                            ui.colored_label(Color32::RED, &blocked_message);
+                            if ui.button(&pair_again).clicked() {
+                                self.worker.send(WorkerCommand::Pair {
+                                    peer_id: peer.peer_id.clone(),
+                                });
+                            }
+                        }
+                    }
+                }
+            });
+        }
+        self.firewall_confirmation(ui.ctx());
+    }
+
+    fn connectivity_panel(&mut self, ui: &mut egui::Ui) {
+        let preference = self
+            .preferences
+            .map_or(LanPreference::Undecided, |preferences| {
+                preferences.lan_preference
+            });
+        egui::Frame::group(ui.style()).show(ui, |ui| {
+            ui.heading(self.localization.text("connectivity-title"));
+            match preference {
+                LanPreference::Undecided => {
+                    ui.label(self.localization.text("connectivity-undecided"));
+                    ui.horizontal(|ui| {
+                        if ui
+                            .button(self.localization.text("connectivity-enable"))
+                            .clicked()
+                        {
+                            self.update_preferences(
+                                |preferences| preferences.lan_preference = LanPreference::Enabled,
+                                false,
+                            );
+                        }
+                        if ui
+                            .button(self.localization.text("connectivity-local-only"))
+                            .clicked()
+                        {
+                            self.update_preferences(
+                                |preferences| preferences.lan_preference = LanPreference::Disabled,
+                                false,
+                            );
+                        }
+                    });
+                }
+                LanPreference::Disabled => {
+                    ui.label(self.localization.text("connectivity-disabled"));
+                    if ui
+                        .button(self.localization.text("connectivity-activate"))
+                        .clicked()
+                    {
+                        self.update_preferences(
+                            |preferences| preferences.lan_preference = LanPreference::Enabled,
+                            false,
+                        );
+                    }
+                }
+                LanPreference::Enabled => {
+                    let readiness = self.readiness_view();
+                    let (status, color) = readiness_status_presentation(
+                        &self.localization,
+                        readiness.status(ReadinessComponent::Lan),
+                    );
+                    ui.colored_label(color, status);
+                    if let Some(operation) = self.firewall_operation {
+                        ui.horizontal(|ui| {
+                            ui.spinner();
+                            ui.label(self.localization.text(match operation {
+                                FirewallOperationView::AwaitingWindows => {
+                                    "connectivity-firewall-awaiting-windows"
+                                }
+                                FirewallOperationView::TakingLonger => {
+                                    "connectivity-firewall-taking-longer"
+                                }
+                            }));
+                        });
+                    }
+                    match self.connectivity_platform {
+                        Some(snapshot)
+                            if snapshot.network_profile == NetworkProfileState::Public =>
+                        {
+                            ui.colored_label(
+                                Color32::from_rgb(220, 90, 70),
+                                self.localization.text("connectivity-public-network"),
+                            );
+                            if ui
+                                .button(
+                                    self.localization.text("connectivity-open-network-settings"),
+                                )
+                                .clicked()
+                            {
+                                ui.ctx()
+                                    .open_url(egui::OpenUrl::same_tab("ms-settings:network-status"));
+                            }
+                        }
+                        Some(snapshot)
+                            if matches!(
+                                snapshot.firewall,
+                                FirewallDiagnosticState::FirewallDisabled
+                                    | FirewallDiagnosticState::BlockAllInbound
+                            ) =>
+                        {
+                            let message = if snapshot.firewall
+                                == FirewallDiagnosticState::FirewallDisabled
+                            {
+                                "connectivity-firewall-disabled"
+                            } else {
+                                "connectivity-firewall-block-all-inbound"
+                            };
+                            ui.colored_label(
+                                Color32::from_rgb(220, 90, 70),
+                                self.localization.text(message),
+                            );
+                            if ui
+                                .button(
+                                    self.localization
+                                        .text("connectivity-open-firewall-settings"),
+                                )
+                                .clicked()
+                            {
+                                ui.ctx().open_url(egui::OpenUrl::same_tab(
+                                    "ms-settings:windowsdefender",
+                                ));
+                            }
+                        }
+                        Some(snapshot)
+                            if snapshot.firewall == FirewallDiagnosticState::RulesMissing
+                                && snapshot.firewall_helper.can_request_elevation() =>
+                        {
+                            ui.label(self.localization.text("connectivity-firewall-needed"));
+                            if ui
+                                .add_enabled(
+                                    self.connectivity_request_id.is_none(),
+                                    egui::Button::new(
+                                        self.localization.text("connectivity-configure-firewall"),
+                                    ),
+                                )
+                                .clicked()
+                            {
+                                self.firewall_confirmation = true;
+                            }
+                        }
+                        Some(snapshot)
+                            if snapshot.firewall == FirewallDiagnosticState::RulesMissing =>
+                        {
+                            ui.colored_label(
+                                Color32::from_rgb(205, 145, 30),
+                                self.localization
+                                    .text("connectivity-firewall-helper-repair"),
+                            );
+                        }
+                        Some(snapshot)
+                            if firewall_state_offers_advanced_recovery(snapshot.firewall) =>
+                        {
+                            let warning = if snapshot.firewall
+                                == FirewallDiagnosticState::LegacyExposure
+                            {
+                                "connectivity-firewall-legacy-exposure"
+                            } else {
+                                "connectivity-issue-firewall-conflict"
+                            };
+                            ui.colored_label(
+                                Color32::from_rgb(220, 90, 70),
+                                self.localization.text(warning),
+                            );
+                            ui.label(
+                                self.localization
+                                    .text("connectivity-firewall-advanced-guidance"),
+                            );
+                            if ui
+                                .add_enabled(
+                                    self.connectivity_request_id.is_none(),
+                                    egui::Button::new(
+                                        self.localization
+                                            .text("connectivity-open-advanced-firewall"),
+                                    ),
+                                )
+                                .clicked()
+                            {
+                                let request_id = Uuid::new_v4();
+                                self.connectivity_request_id = Some(request_id);
+                                self.worker
+                                    .send(WorkerCommand::OpenAdvancedFirewall { request_id });
+                            }
+                        }
+                        Some(snapshot)
+                            if snapshot.firewall == FirewallDiagnosticState::ManagedPolicy =>
+                        {
+                            ui.colored_label(
+                                Color32::from_rgb(205, 145, 30),
+                                self.localization.text("connectivity-admin-needed"),
+                            );
+                        }
+                        _ if self.lan_listener == LanListenerView::Starting => {
+                            ui.spinner();
+                            ui.label(self.localization.text("connectivity-starting"));
+                        }
+                        _ if self.lan_listener == LanListenerView::Failed
+                            || self.lan_discovery == LanDiscoveryView::Failed =>
+                        {
+                            ui.colored_label(
+                                Color32::from_rgb(220, 90, 70),
+                                self.localization.text("connectivity-failed"),
+                            );
+                            #[cfg(target_os = "macos")]
+                            if ui
+                                .button(
+                                    self.localization
+                                        .text("connectivity-open-local-network-settings"),
+                                )
+                                .clicked()
+                            {
+                                ui.ctx().open_url(egui::OpenUrl::same_tab(
+                                    "x-help-action://openPrefPane?bundleId=com.apple.settings.PrivacySecurity.extension",
+                                ));
+                            }
+                        }
+                        _ if connectivity_runtime_is_active(
+                            self.connectivity_platform,
+                            self.lan_listener,
+                            self.lan_discovery,
+                        ) => {
+                            ui.label(self.localization.text("connectivity-active"));
+                        }
+                        _ => {
+                            ui.colored_label(
+                                Color32::from_rgb(205, 145, 30),
+                                self.localization.text("connectivity-not-ready"),
+                            );
+                        }
+                    }
+                    ui.horizontal(|ui| {
+                        if ui
+                            .add_enabled(
+                                self.connectivity_request_id.is_none(),
+                                egui::Button::new(
+                                    self.localization.text("connectivity-check-again"),
+                                ),
+                            )
+                            .clicked()
+                        {
+                            self.request_connectivity_refresh();
+                        }
+                        if ui
+                            .button(self.localization.text("connectivity-disable"))
+                            .clicked()
+                        {
+                            self.update_preferences(
+                                |preferences| preferences.lan_preference = LanPreference::Disabled,
+                                false,
+                            );
+                        }
+                    });
+                }
+            }
+        });
+    }
+
+    fn request_connectivity_refresh(&mut self) {
+        let request_id = Uuid::new_v4();
+        self.connectivity_request_id = Some(request_id);
+        self.worker
+            .send(WorkerCommand::RefreshConnectivity { request_id });
+    }
+
+    fn firewall_confirmation(&mut self, context: &egui::Context) {
+        if !self.firewall_confirmation {
+            return;
+        }
+        let mut confirm = false;
+        let mut cancel = false;
+        egui::Window::new(self.localization.text("firewall-dialog-title"))
+            .collapsible(false)
+            .resizable(false)
+            .anchor(egui::Align2::CENTER_CENTER, egui::Vec2::ZERO)
+            .show(context, |ui| {
+                ui.label(self.localization.text("firewall-dialog-intro"));
+                ui.label(self.localization.text("firewall-dialog-tcp"));
+                ui.label(self.localization.text("firewall-dialog-udp"));
+                ui.label(self.localization.text("firewall-dialog-exclusions"));
+                ui.horizontal(|ui| {
+                    if ui
+                        .button(self.localization.text("action-continue"))
+                        .clicked()
+                    {
+                        confirm = true;
+                    }
+                    if ui.button(self.localization.text("action-cancel")).clicked() {
+                        cancel = true;
+                    }
+                });
+            });
+        if confirm {
+            self.firewall_confirmation = false;
+            let preference = self
+                .preferences
+                .map_or(LanPreference::Undecided, |preferences| {
+                    preferences.lan_preference
+                });
+            if firewall_configuration_is_current(
+                preference,
+                self.connectivity_platform,
+                self.preference_request_id.is_some() || self.connectivity_request_id.is_some(),
+            ) {
+                let request_id = Uuid::new_v4();
+                self.connectivity_request_id = Some(request_id);
+                self.worker.send(WorkerCommand::ConfigureFirewall {
+                    request_id,
+                    install: true,
+                });
+            } else {
+                self.notices.push_back((
+                    true,
+                    self.localization
+                        .text("connectivity-issue-firewall-state-changed"),
+                ));
+                if self.connectivity_request_id.is_none() {
+                    self.request_connectivity_refresh();
+                }
+            }
+        } else if cancel {
+            self.firewall_confirmation = false;
+        }
+    }
+
+    fn settings(&mut self, ui: &mut egui::Ui) {
+        page_title(
+            ui,
+            &self.localization.text("settings-title"),
+            &self.localization.text("settings-subtitle"),
+        );
+        let mut locale = self
+            .preferences
+            .map_or(LocalePreference::System, |preferences| preferences.locale);
+        ui.horizontal(|ui| {
+            let language_label = ui.label(self.localization.text("settings-language"));
+            egui::ComboBox::from_id_salt("ui_locale")
+                .selected_text(match locale {
+                    LocalePreference::System => self.localization.text("language-system"),
+                    LocalePreference::Es => self.localization.text("language-spanish"),
+                    LocalePreference::En => self.localization.text("language-english"),
+                })
+                .show_ui(ui, |ui| {
+                    ui.selectable_value(
+                        &mut locale,
+                        LocalePreference::System,
+                        self.localization.text("language-system"),
+                    );
+                    ui.selectable_value(
+                        &mut locale,
+                        LocalePreference::Es,
+                        self.localization.text("language-spanish"),
+                    );
+                    ui.selectable_value(
+                        &mut locale,
+                        LocalePreference::En,
+                        self.localization.text("language-english"),
+                    );
+                })
+                .response
+                .labelled_by(language_label.id);
+        });
+        if self
+            .preferences
+            .is_some_and(|current| current.locale != locale)
+        {
+            self.update_preferences(|preferences| preferences.locale = locale, false);
+        }
+        ui.add_space(12.0);
+        ui.horizontal(|ui| {
+            let mut arguments = FluentArgs::new();
+            arguments.set(
+                "status",
+                autostart_status_label(&self.localization, self.autostart_status),
+            );
+            ui.label(
+                self.localization
+                    .text_with("settings-login-status", Some(&arguments)),
+            );
+            let operation_idle = self.autostart_request_id.is_none();
+            if ui
+                .add_enabled(
+                    operation_idle,
+                    egui::Button::new(self.localization.text("action-enable")),
+                )
+                .clicked()
+            {
+                self.request_autostart(true);
+            }
+            if ui
+                .add_enabled(
+                    operation_idle,
+                    egui::Button::new(self.localization.text("action-disable")),
+                )
+                .clicked()
+            {
+                self.request_autostart(false);
+            }
+            if ui
+                .add_enabled(
+                    operation_idle,
+                    egui::Button::new(self.localization.text("settings-refresh-status")),
+                )
+                .clicked()
+            {
+                let request_id = Uuid::new_v4();
+                self.autostart_request_id = Some(request_id);
+                self.worker
+                    .send(WorkerCommand::RefreshAutostart { request_id });
+            }
+            if self.autostart_request_id.is_some() {
+                ui.spinner();
+            }
+        });
+        ui.add_space(12.0);
+        self.update_settings(ui);
+        ui.add_space(12.0);
+        ui.collapsing(
+            self.localization.text("settings-advanced-diagnostics"),
+            |ui| {
+                egui::Grid::new("settings")
+                    .num_columns(2)
+                    .spacing([24.0, 12.0])
+                    .show(ui, |ui| {
+                        ui.label("Identidad local");
+                        ui.monospace(&self.node_id);
+                        ui.end_row();
+                        ui.label("MCP local");
+                        ui.monospace(&self.mcp_url);
+                        ui.end_row();
+                        ui.label("Base de datos");
+                        ui.monospace(self.paths.database.display().to_string());
+                        ui.end_row();
+                        ui.label("Bundles OKF");
+                        ui.monospace(self.paths.vaults.display().to_string());
+                        ui.end_row();
+                        ui.label("Logs sanitizados");
+                        ui.monospace(self.paths.logs.display().to_string());
+                        ui.end_row();
+                        ui.label("Configuración");
+                        ui.monospace(self.paths.config.display().to_string());
+                        ui.end_row();
+                    });
+            },
+        );
+        ui.add_space(12.0);
+        if let Some(state) = self.model_state.clone() {
+            egui::Frame::group(ui.style()).show(ui, |ui| {
+                ui.heading(self.localization.text("settings-local-ai"));
+                let mut profile_arguments = FluentArgs::new();
+                profile_arguments.set("profile", profile_label(&self.localization, state.profile));
+                ui.label(
+                    self.localization
+                        .text_with("settings-model-profile", Some(&profile_arguments)),
+                );
+                let mut active_arguments = FluentArgs::new();
+                active_arguments.set(
+                    "model",
+                    state
+                        .active_model_id
+                        .clone()
+                        .unwrap_or_else(|| self.localization.text("settings-model-none")),
+                );
+                ui.label(
+                    self.localization
+                        .text_with("settings-model-active", Some(&active_arguments)),
+                );
+                if let Some(pending) = &state.pending_model_id {
+                    let mut arguments = FluentArgs::new();
+                    arguments.set("model", pending.as_str());
+                    ui.label(
+                        self.localization
+                            .text_with("models-pending-restart", Some(&arguments)),
+                    );
+                }
+                if ui
+                    .button(self.localization.text("settings-manage-models"))
+                    .clicked()
+                {
+                    self.screen = Screen::Models;
+                }
+            });
+            ui.add_space(12.0);
+        }
+        ui.label("MCP escucha únicamente en 127.0.0.1. La herramienta es de solo lectura y revalida allow_external_ai en el nodo fuente.");
+    }
+
+    fn knowledge(&mut self, ui: &mut egui::Ui) {
+        let collections = self
+            .collections
+            .iter()
+            .map(|collection| (collection.id, collection.name.clone()))
+            .collect::<Vec<_>>();
+        let active_scans = self
+            .collection_scans
+            .keys()
+            .copied()
+            .collect::<HashSet<_>>();
+        let actions = self
+            .knowledge
+            .show(ui, &self.localization, &collections, &active_scans);
+        for action in actions {
+            self.send_knowledge_action(action);
+        }
+    }
+
+    fn send_knowledge_action(&self, action: KnowledgeAction) {
+        let command = match action {
+            KnowledgeAction::LoadBundle {
+                request_id,
+                collection_id,
+            } => WorkerCommand::LoadKnowledgeBundle {
+                request_id,
+                collection_id,
+            },
+            KnowledgeAction::LoadPage {
+                request_id,
+                collection_id,
+                page_id,
+                expected_fingerprint,
+            } => WorkerCommand::LoadKnowledgePage {
+                request_id,
+                collection_id,
+                page_id,
+                expected_fingerprint,
+            },
+            KnowledgeAction::PrepareGuidedRepair {
+                request_id,
+                collection_id,
+            } => WorkerCommand::PrepareGuidedWikiRepair {
+                request_id,
+                collection_id,
+            },
+            KnowledgeAction::ExecuteGuidedRepair {
+                request_id,
+                preview,
+            } => WorkerCommand::ExecuteGuidedWikiRepair {
+                request_id,
+                preview,
+            },
+        };
+        self.worker.send(command);
+    }
+
+    fn notices(&mut self, root: &mut egui::Ui) {
+        if !self.notices.is_empty() {
+            egui::Panel::bottom("notices").show(root, |ui| {
+                for (error, message) in &self.notices {
+                    let color = if *error {
+                        Color32::from_rgb(220, 70, 70)
+                    } else {
+                        Color32::from_rgb(70, 160, 110)
+                    };
+                    let summary = if *error {
+                        human_error_summary(&self.localization, message)
+                    } else {
+                        message.clone()
+                    };
+                    ui.colored_label(color, summary);
+                    if *error {
+                        ui.collapsing("Detalles técnicos", |ui| {
+                            ui.label(message);
+                        });
+                    }
+                }
+            });
+        }
+    }
+
+    fn update_preferences(
+        &mut self,
+        mutate: impl FnOnce(&mut DesktopPreferencesUpdate),
+        complete_onboarding: bool,
+    ) {
+        let Some(current) = self.preferences else {
+            return;
+        };
+        let mut update = DesktopPreferencesUpdate {
+            locale: current.locale,
+            lan_preference: current.lan_preference,
+            close_behavior: current.close_behavior,
+            automatic_update_checks: current.automatic_update_checks,
+            complete_onboarding,
+        };
+        mutate(&mut update);
+        let request_id = Uuid::new_v4();
+        self.preference_request_id = Some(request_id);
+        self.worker
+            .send(WorkerCommand::UpdateDesktopPreferences { request_id, update });
+    }
+
+    fn update_settings(&mut self, ui: &mut egui::Ui) {
+        egui::Frame::group(ui.style()).show(ui, |ui| {
+            ui.heading(self.localization.text("updates-title"));
+            if let Some(preferences) = self.preferences {
+                let mut automatic = preferences.automatic_update_checks;
+                if ui
+                    .checkbox(&mut automatic, self.localization.text("updates-automatic"))
+                    .changed()
+                {
+                    self.update_preferences(
+                        |preferences| preferences.automatic_update_checks = automatic,
+                        false,
+                    );
+                }
+            }
+            let operation_idle = self.updater_request_id.is_none();
+            match self.updater.clone() {
+                Some(UpdaterWorkerView::Disabled(reason)) => {
+                    ui.label(updater_disabled_label(&self.localization, reason));
+                }
+                Some(UpdaterWorkerView::Ready(view)) => {
+                    if let Some(issue) = view.last_issue {
+                        let message = update_issue_label(&self.localization, issue.code);
+                        ui.colored_label(Color32::from_rgb(205, 145, 30), message);
+                    }
+                    match view.status {
+                        UpdaterStatus::Idle => {
+                            ui.label(self.localization.text("updates-idle"));
+                        }
+                        UpdaterStatus::Checking => {
+                            ui.spinner();
+                            ui.label(self.localization.text("updates-checking"));
+                        }
+                        UpdaterStatus::UpToDate => {
+                            ui.label(self.localization.text("updates-current"));
+                        }
+                        UpdaterStatus::Available(update) => {
+                            ui.label(localized_update_version(
+                                &self.localization,
+                                "updates-available",
+                                &update.version,
+                            ));
+                            if let Some(notes) = update.release_notes {
+                                ui.label(notes);
+                            }
+                            if ui
+                                .add_enabled(
+                                    operation_idle,
+                                    egui::Button::new(self.localization.text("updates-download")),
+                                )
+                                .clicked()
+                            {
+                                self.update_confirmation = Some(UpdateConfirmationKind::Download);
+                            }
+                        }
+                        UpdaterStatus::Downloading(update) => {
+                            ui.spinner();
+                            ui.label(localized_update_version(
+                                &self.localization,
+                                "updates-downloading",
+                                &update.version,
+                            ));
+                        }
+                        UpdaterStatus::ReadyToInstall(update) => {
+                            ui.label(localized_update_version(
+                                &self.localization,
+                                "updates-ready-install",
+                                &update.version,
+                            ));
+                            if ui
+                                .add_enabled(
+                                    operation_idle,
+                                    egui::Button::new(self.localization.text("updates-install")),
+                                )
+                                .clicked()
+                            {
+                                self.update_confirmation = Some(UpdateConfirmationKind::Install);
+                            }
+                        }
+                        UpdaterStatus::Installing(update) => {
+                            ui.spinner();
+                            ui.label(localized_update_version(
+                                &self.localization,
+                                "updates-installing",
+                                &update.version,
+                            ));
+                        }
+                        UpdaterStatus::Installed(update) => {
+                            ui.label(localized_update_version(
+                                &self.localization,
+                                "updates-installed",
+                                &update.version,
+                            ));
+                        }
+                    }
+                }
+                None => {
+                    ui.spinner();
+                    ui.label(self.localization.text("updates-loading"));
+                }
+            }
+            if ui
+                .add_enabled(
+                    operation_idle,
+                    egui::Button::new(self.localization.text("updates-check-now")),
+                )
+                .clicked()
+            {
+                self.request_update(|request_id| WorkerCommand::CheckUpdates { request_id });
+            }
+        });
+
+        let Some(kind) = self.update_confirmation else {
+            return;
+        };
+        let mut confirmed = false;
+        let mut cancelled = false;
+        egui::Window::new(match kind {
+            UpdateConfirmationKind::Download => self.localization.text("updates-confirm-download"),
+            UpdateConfirmationKind::Install => self.localization.text("updates-confirm-install"),
+        })
+        .collapsible(false)
+        .resizable(false)
+        .anchor(egui::Align2::CENTER_CENTER, egui::Vec2::ZERO)
+        .show(ui.ctx(), |ui| {
+            ui.label(self.localization.text(match kind {
+                UpdateConfirmationKind::Download => "updates-confirm-download-body",
+                UpdateConfirmationKind::Install => "updates-confirm-install-body",
+            }));
+            ui.horizontal(|ui| {
+                if ui
+                    .button(self.localization.text("action-confirm"))
+                    .clicked()
+                {
+                    confirmed = true;
+                }
+                if ui.button(self.localization.text("action-cancel")).clicked() {
+                    cancelled = true;
+                }
+            });
+        });
+        if confirmed {
+            self.update_confirmation = None;
+            match kind {
+                UpdateConfirmationKind::Download => {
+                    self.request_update(|request_id| WorkerCommand::DownloadUpdate { request_id })
+                }
+                UpdateConfirmationKind::Install => {
+                    self.request_update(|request_id| WorkerCommand::InstallUpdate { request_id })
+                }
+            }
+        } else if cancelled {
+            self.update_confirmation = None;
+        }
+    }
+
+    fn request_update(&mut self, command: impl FnOnce(Uuid) -> WorkerCommand) {
+        let request_id = Uuid::new_v4();
+        self.updater_request_id = Some(request_id);
+        self.worker.send(command(request_id));
+    }
+
+    fn request_autostart(&mut self, enabled: bool) {
+        let request_id = Uuid::new_v4();
+        self.autostart_request_id = Some(request_id);
+        self.worker.send(WorkerCommand::SetAutostart {
+            request_id,
+            enabled,
+        });
+    }
+
+    fn close_policy(&self) -> ClosePolicy {
+        match self
+            .preferences
+            .map(|preferences| preferences.close_behavior)
+        {
+            Some(CloseBehavior::HideToTray) => ClosePolicy::HideToTray,
+            Some(CloseBehavior::Quit) => ClosePolicy::Quit,
+            Some(CloseBehavior::Ask) | None => ClosePolicy::Ask,
+        }
+    }
+
+    fn close_confirmation(&mut self, context: &egui::Context) {
+        if !self.shell.close_confirmation_requested() {
+            return;
+        }
+        let mut decision = None;
+        egui::Window::new(self.localization.text("close-dialog-title"))
+            .collapsible(false)
+            .resizable(false)
+            .anchor(egui::Align2::CENTER_CENTER, egui::Vec2::ZERO)
+            .show(context, |ui| {
+                ui.label(self.localization.text("close-dialog-body"));
+                ui.horizontal(|ui| {
+                    if ui
+                        .add_enabled(
+                            self.shell.tray_ready(),
+                            egui::Button::new(self.localization.text("close-dialog-background")),
+                        )
+                        .clicked()
+                    {
+                        decision = Some(CloseBehavior::HideToTray);
+                    }
+                    if ui.button(self.localization.text("tray-quit")).clicked() {
+                        decision = Some(CloseBehavior::Quit);
+                    }
+                    if ui.button(self.localization.text("action-cancel")).clicked() {
+                        self.shell.cancel_close_confirmation();
+                    }
+                });
+            });
+        if let Some(close_behavior) = decision {
+            self.update_preferences(
+                |preferences| preferences.close_behavior = close_behavior,
+                false,
+            );
+            self.shell.resolve_close(
+                context,
+                match close_behavior {
+                    CloseBehavior::HideToTray => ClosePolicy::HideToTray,
+                    CloseBehavior::Quit | CloseBehavior::Ask => ClosePolicy::Quit,
+                },
+            );
+        }
+    }
+
+    fn onboarding(&mut self, ui: &mut egui::Ui) {
+        let Some(page) = self.onboarding_page else {
+            return;
+        };
+        ui.set_max_width(880.0);
+        ui.add_space(24.0);
+        match page {
+            OnboardingPage::Welcome => {
+                page_title(
+                    ui,
+                    &self.localization.text("onboarding-welcome-title"),
+                    &self.localization.text("onboarding-welcome-body"),
+                );
+                ui.add_space(16.0);
+                egui::Frame::group(ui.style()).show(ui, |ui| {
+                    ui.heading(self.localization.text("onboarding-privacy-title"));
+                    ui.label(self.localization.text("onboarding-privacy-local"));
+                    ui.label(self.localization.text("onboarding-privacy-review"));
+                });
+                ui.add_space(18.0);
+                if ui
+                    .button(self.localization.text("onboarding-next"))
+                    .clicked()
+                {
+                    self.onboarding_page = Some(if self.models_ready {
+                        if self.collections.is_empty() {
+                            OnboardingPage::Collection
+                        } else if self.preferences.is_some_and(|preferences| {
+                            preferences.lan_preference == LanPreference::Undecided
+                        }) {
+                            OnboardingPage::Lan
+                        } else {
+                            OnboardingPage::Background
+                        }
+                    } else {
+                        OnboardingPage::Model
+                    });
+                }
+            }
+            OnboardingPage::Model => {
+                self.setup(ui);
+                ui.add_space(18.0);
+                if ui
+                    .add_enabled(
+                        self.models_ready,
+                        egui::Button::new(self.localization.text("onboarding-next")),
+                    )
+                    .clicked()
+                {
+                    self.onboarding_page = Some(if self.collections.is_empty() {
+                        OnboardingPage::Collection
+                    } else {
+                        OnboardingPage::Lan
+                    });
+                }
+            }
+            OnboardingPage::Collection => {
+                page_title(
+                    ui,
+                    &self.localization.text("onboarding-collection-title"),
+                    &self.localization.text("onboarding-collection-body"),
+                );
+                if !self.collections.is_empty() {
+                    ui.colored_label(
+                        Color32::from_rgb(70, 160, 110),
+                        self.localization.text("onboarding-collection-linked"),
+                    );
+                }
+                ui.horizontal(|ui| {
+                    if ui
+                        .button(self.localization.text("collections-choose-folder"))
+                        .clicked()
+                        && let Some(folder) = rfd::FileDialog::new().pick_folder()
+                    {
+                        let name = folder
+                            .file_name()
+                            .and_then(|name| name.to_str())
+                            .filter(|name| !name.trim().is_empty())
+                            .map(ToOwned::to_owned)
+                            .unwrap_or_else(|| {
+                                self.localization.text("onboarding-default-folder-name")
+                            });
+                        self.worker
+                            .send(WorkerCommand::AddCollection { name, folder });
+                    }
+                    if ui
+                        .button(self.localization.text("onboarding-skip"))
+                        .clicked()
+                    {
+                        self.onboarding_page = Some(OnboardingPage::Lan);
+                    }
+                    if !self.collections.is_empty()
+                        && ui
+                            .button(self.localization.text("onboarding-next"))
+                            .clicked()
+                    {
+                        self.onboarding_page = Some(OnboardingPage::Lan);
+                    }
+                });
+            }
+            OnboardingPage::Lan => {
+                page_title(
+                    ui,
+                    &self.localization.text("onboarding-lan-title"),
+                    &self.localization.text("onboarding-lan-body"),
+                );
+                ui.horizontal(|ui| {
+                    if ui
+                        .button(self.localization.text("onboarding-lan-enable"))
+                        .clicked()
+                    {
+                        self.onboarding_lan = LanPreference::Enabled;
+                        self.onboarding_page = Some(OnboardingPage::Background);
+                    }
+                    if ui
+                        .button(self.localization.text("onboarding-lan-disable"))
+                        .clicked()
+                    {
+                        self.onboarding_lan = LanPreference::Disabled;
+                        self.onboarding_page = Some(OnboardingPage::Background);
+                    }
+                });
+            }
+            OnboardingPage::Background => {
+                page_title(
+                    ui,
+                    &self.localization.text("onboarding-background-title"),
+                    &self.localization.text("onboarding-background-body"),
+                );
+                ui.checkbox(
+                    &mut self.onboarding_background,
+                    self.localization.text("onboarding-background-close"),
+                );
+                ui.checkbox(
+                    &mut self.onboarding_autostart,
+                    self.localization.text("onboarding-background-login"),
+                );
+                ui.checkbox(
+                    &mut self.onboarding_updates,
+                    self.localization.text("onboarding-background-updates"),
+                );
+                ui.label(
+                    RichText::new(self.localization.text("onboarding-pending-confirmation"))
+                        .small()
+                        .color(Color32::GRAY),
+                );
+                if ui
+                    .button(self.localization.text("onboarding-next"))
+                    .clicked()
+                {
+                    self.onboarding_page = Some(OnboardingPage::Chat);
+                }
+            }
+            OnboardingPage::Chat => {
+                page_title(
+                    ui,
+                    &self.localization.text("onboarding-chat-title"),
+                    &self.localization.text("onboarding-chat-body"),
+                );
+                ui.label(self.localization.text("onboarding-chat-later"));
+                ui.collapsing(self.localization.text("onboarding-chat-now"), |ui| {
+                    self.integrations(ui)
+                });
+                ui.horizontal(|ui| {
+                    if ui
+                        .button(self.localization.text("onboarding-next"))
+                        .clicked()
+                    {
+                        self.onboarding_page = Some(OnboardingPage::Complete);
+                    }
+                });
+            }
+            OnboardingPage::Complete => {
+                page_title(
+                    ui,
+                    &self.localization.text("onboarding-complete-title"),
+                    &self.localization.text("onboarding-complete-body"),
+                );
+                if ui
+                    .add_enabled(
+                        !self.onboarding_finishing,
+                        egui::Button::new(self.localization.text("onboarding-finish")),
+                    )
+                    .clicked()
+                {
+                    self.onboarding_finishing = true;
+                    self.pending_onboarding_autostart = Some(self.onboarding_autostart);
+                    let lan_preference = self.onboarding_lan;
+                    let close_behavior = if self.onboarding_background {
+                        CloseBehavior::HideToTray
+                    } else {
+                        CloseBehavior::Quit
+                    };
+                    let automatic_update_checks = self.onboarding_updates;
+                    self.update_preferences(
+                        |preferences| {
+                            preferences.lan_preference = lan_preference;
+                            preferences.close_behavior = close_behavior;
+                            preferences.automatic_update_checks = automatic_update_checks;
+                        },
+                        true,
+                    );
+                }
+                if self.onboarding_finishing {
+                    ui.spinner();
+                }
+            }
+        }
+    }
+}
+
+fn effective_locale(preference: LocalePreference) -> UiLocale {
+    match preference {
+        LocalePreference::System => UiLocale::from_system(),
+        LocalePreference::Es => UiLocale::Es,
+        LocalePreference::En => UiLocale::EnUs,
+    }
+}
+
+fn classify_external_ai_policy_change(current: bool, proposed: bool) -> ExternalAiPolicyChange {
+    match (current, proposed) {
+        (false, true) => ExternalAiPolicyChange::ConfirmEnable,
+        (true, false) => ExternalAiPolicyChange::ApplyDisable,
+        (false, false) | (true, true) => ExternalAiPolicyChange::None,
+    }
+}
+
+fn autostart_status_label(localization: &Localization, status: Option<AutostartStatus>) -> String {
+    localization.text(match status {
+        Some(AutostartStatus::Enabled) => "autostart-enabled",
+        Some(AutostartStatus::Disabled) => "autostart-disabled",
+        Some(AutostartStatus::RequiresApproval) => "autostart-needs-approval",
+        Some(AutostartStatus::Conflict) => "autostart-conflict",
+        Some(AutostartStatus::Unsupported) => "autostart-unsupported",
+        None => "autostart-checking",
+    })
+}
+
+fn updater_disabled_label(localization: &Localization, reason: UpdaterDisabledReason) -> String {
+    localization.text(match reason {
+        UpdaterDisabledReason::NotConfigured => "updates-disabled-not-configured",
+        UpdaterDisabledReason::InvalidEndpoint => "updates-disabled-endpoint",
+        UpdaterDisabledReason::InvalidPublicKey => "updates-disabled-key",
+        UpdaterDisabledReason::InvalidCurrentVersion => "updates-disabled-version",
+        UpdaterDisabledReason::UnsupportedPlatform => "updates-disabled-platform",
+    })
+}
+
+fn updater_launched_installer(view: &UpdaterWorkerView) -> bool {
+    matches!(
+        view,
+        UpdaterWorkerView::Ready(view) if matches!(&view.status, UpdaterStatus::Installed(_))
+    )
+}
+
+fn update_issue_label(localization: &Localization, issue: UpdateIssueCode) -> String {
+    localization.text(match issue {
+        UpdateIssueCode::Offline => "updates-issue-offline",
+        UpdateIssueCode::InvalidManifest => "updates-issue-manifest",
+        UpdateIssueCode::InvalidSignature => "updates-issue-signature",
+        UpdateIssueCode::Unsupported => "updates-issue-unsupported",
+        UpdateIssueCode::Internal => "updates-issue-internal",
+    })
+}
+
+fn localized_update_version(
+    localization: &Localization,
+    message_id: &str,
+    version: &str,
+) -> String {
+    let mut arguments = FluentArgs::new();
+    arguments.set("version", version);
+    localization.text_with(message_id, Some(&arguments))
+}
+
+fn readiness_component_label(localization: &Localization, component: ReadinessComponent) -> String {
+    localization.text(match component {
+        ReadinessComponent::LocalAi => "component-local-ai",
+        ReadinessComponent::Collections => "component-collections",
+        ReadinessComponent::Review => "component-review",
+        ReadinessComponent::Wiki => "component-wiki",
+        ReadinessComponent::Lan => "component-lan",
+        ReadinessComponent::Chat => "component-chat",
+        ReadinessComponent::Background => "component-background",
+        ReadinessComponent::Updates => "component-updates",
+    })
+}
+
+fn readiness_status_presentation(
+    localization: &Localization,
+    status: ReadinessStatus,
+) -> (String, Color32) {
+    let (message, color) = match status {
+        ReadinessStatus::Ready => ("status-ready", Color32::from_rgb(70, 160, 110)),
+        ReadinessStatus::Working => ("status-working", Color32::from_rgb(60, 145, 205)),
+        ReadinessStatus::NeedsPermission => {
+            ("status-needs-permission", Color32::from_rgb(205, 145, 30))
+        }
+        ReadinessStatus::NeedsAttention => {
+            ("status-needs-attention", Color32::from_rgb(220, 90, 70))
+        }
+        ReadinessStatus::OptionalDisabled => ("status-optional-disabled", Color32::GRAY),
+    };
+    (localization.text(message), color)
+}
+
+fn maintenance_status_presentation(
+    localization: &Localization,
+    status: airwiki_core::CollectionMaintenanceStatus,
+) -> (String, Color32) {
+    let (message, color) = match status {
+        airwiki_core::CollectionMaintenanceStatus::Never => ("maintenance-never", Color32::GRAY),
+        airwiki_core::CollectionMaintenanceStatus::Success => {
+            ("maintenance-success", Color32::from_rgb(70, 160, 110))
+        }
+        airwiki_core::CollectionMaintenanceStatus::Partial => {
+            ("maintenance-partial", Color32::from_rgb(205, 145, 30))
+        }
+        airwiki_core::CollectionMaintenanceStatus::Failed => {
+            ("maintenance-failed", Color32::from_rgb(220, 90, 70))
+        }
+        airwiki_core::CollectionMaintenanceStatus::Quarantined => {
+            ("maintenance-quarantined", Color32::from_rgb(220, 90, 70))
+        }
+    };
+    (localization.text(message), color)
+}
+
+fn peer_trust_label(localization: &Localization, trust: PeerTrustState) -> String {
+    localization.text(match trust {
+        PeerTrustState::Unpaired => "peer-trust-unpaired",
+        PeerTrustState::Trusted => "peer-trust-trusted",
+        PeerTrustState::Blocked => "peer-trust-blocked",
+    })
+}
+
+fn peer_activity_label(
+    localization: &Localization,
+    trust: PeerTrustState,
+    activity: PeerActivityState,
+) -> String {
+    localization.text(peer_activity_message_id(trust, activity))
+}
+
+const fn should_present_pairing_controls(activity: PeerActivityState) -> bool {
+    matches!(activity, PeerActivityState::Pairing)
+}
+
+const fn peer_activity_message_id(
+    trust: PeerTrustState,
+    activity: PeerActivityState,
+) -> &'static str {
+    match (trust, activity) {
+        (PeerTrustState::Trusted, PeerActivityState::NotObserved) => "peer-activity-not-observed",
+        (_, PeerActivityState::NotObserved) => "peer-activity-unavailable",
+        (_, PeerActivityState::Discovered) => "peer-activity-discovered",
+        (_, PeerActivityState::Pairing) => "peer-activity-pairing",
+        (_, PeerActivityState::Connected) => "peer-activity-connected",
+    }
+}
+
+fn search_coverage_message(
+    localization: &Localization,
+    coverage: SearchCoverageView,
+) -> Option<String> {
+    match coverage {
+        SearchCoverageView::Complete => None,
+        SearchCoverageView::FederationDisabled => {
+            Some(localization.text("search-coverage-federation-disabled"))
+        }
+        SearchCoverageView::OfflineDevices { count } => {
+            let mut arguments = FluentArgs::new();
+            arguments.set("count", count);
+            Some(localization.text_with("search-coverage-offline-devices", Some(&arguments)))
+        }
+        SearchCoverageView::Partial => Some(localization.text("search-coverage-partial")),
+    }
+}
+
+fn connectivity_issue_message(localization: &Localization, issue: ConnectivityIssueCode) -> String {
+    localization.text(match issue {
+        ConnectivityIssueCode::Busy => "connectivity-issue-busy",
+        ConnectivityIssueCode::FirewallCancelled => "connectivity-issue-firewall-cancelled",
+        ConnectivityIssueCode::FirewallManagedPolicy => "connectivity-issue-firewall-managed",
+        ConnectivityIssueCode::FirewallInboundBlocked => {
+            "connectivity-issue-firewall-inbound-blocked"
+        }
+        ConnectivityIssueCode::FirewallConflict => "connectivity-issue-firewall-conflict",
+        ConnectivityIssueCode::FirewallInstallationInvalid => {
+            "connectivity-issue-firewall-installation"
+        }
+        ConnectivityIssueCode::FirewallUnsupported => "connectivity-issue-firewall-unsupported",
+        ConnectivityIssueCode::FirewallStateChanged => "connectivity-issue-firewall-state-changed",
+        ConnectivityIssueCode::FirewallInternal => "connectivity-issue-firewall-internal",
+    })
+}
+
+fn firewall_operation_update_applies(
+    presentation_request_id: Option<Uuid>,
+    event_request_id: Uuid,
+    state: Option<FirewallOperationView>,
+) -> bool {
+    state.is_none() || presentation_request_id == Some(event_request_id)
+}
+
+fn human_error_summary(localization: &Localization, message: &str) -> String {
+    let normalized = message.to_lowercase();
+    let message_id = if normalized.contains("modelo") || normalized.contains("inferencia") {
+        "error-local-ai"
+    } else if normalized.contains("colección")
+        || normalized.contains("carpeta")
+        || normalized.contains("scan")
+        || normalized.contains("watcher")
+    {
+        "error-collection"
+    } else if normalized.contains("lan")
+        || normalized.contains("red local")
+        || normalized.contains("firewall")
+        || normalized.contains("empareja")
+    {
+        "error-connectivity"
+    } else if normalized.contains("integración")
+        || normalized.contains("mcp")
+        || normalized.contains("chat")
+    {
+        "error-chat"
+    } else if normalized.contains("actualiza") {
+        "error-update"
+    } else {
+        "error-generic"
+    };
+    localization.text(message_id)
+}
+
+fn primary_action_title(localization: &Localization, action: RecommendedAction) -> String {
+    localization.text(match action {
+        RecommendedAction::PrepareLocalAi => "primary-prepare-ai-title",
+        RecommendedAction::ResolveLocalAiIssue => "primary-resolve-ai-title",
+        RecommendedAction::AddKnowledgeFolder => "primary-add-folder-title",
+        RecommendedAction::ResolveCollectionIssue => "primary-resolve-folder-title",
+        RecommendedAction::ReviewPendingKnowledge => "primary-review-title",
+        RecommendedAction::InspectWikiHealth => "primary-wiki-title",
+        RecommendedAction::ExplainLan => "primary-explain-lan-title",
+        RecommendedAction::RequestSystemPermission => "primary-permission-title",
+        RecommendedAction::ChangeNetworkProfile => "primary-profile-title",
+        RecommendedAction::ConfigureFirewall => "primary-firewall-title",
+        RecommendedAction::OpenFirewallSettings => "primary-firewall-system-title",
+        RecommendedAction::ReviewLegacyFirewallRules => "primary-firewall-legacy-title",
+        RecommendedAction::RepairConnectivityInstallation => {
+            "primary-connectivity-installation-title"
+        }
+        RecommendedAction::ContactAdministrator => "primary-connectivity-admin-title",
+        RecommendedAction::RetryConnectivity => "primary-connectivity-title",
+        RecommendedAction::ResolveChatIssue => "primary-chat-title",
+        RecommendedAction::ResolveBackgroundIssue => "primary-background-title",
+        RecommendedAction::ResolveUpdateIssue => "primary-updates-title",
+    })
+}
+
+fn primary_action_explanation(localization: &Localization, action: RecommendedAction) -> String {
+    localization.text(match action {
+        RecommendedAction::PrepareLocalAi | RecommendedAction::ResolveLocalAiIssue => {
+            "primary-ai-explanation"
+        }
+        RecommendedAction::AddKnowledgeFolder | RecommendedAction::ResolveCollectionIssue => {
+            "primary-folder-explanation"
+        }
+        RecommendedAction::ReviewPendingKnowledge => "primary-review-explanation",
+        RecommendedAction::InspectWikiHealth => "primary-wiki-explanation",
+        RecommendedAction::ExplainLan
+        | RecommendedAction::RequestSystemPermission
+        | RecommendedAction::ChangeNetworkProfile
+        | RecommendedAction::ConfigureFirewall
+        | RecommendedAction::OpenFirewallSettings
+        | RecommendedAction::RepairConnectivityInstallation
+        | RecommendedAction::RetryConnectivity => "primary-lan-explanation",
+        RecommendedAction::ReviewLegacyFirewallRules => "primary-firewall-legacy-explanation",
+        RecommendedAction::ContactAdministrator => "primary-connectivity-admin-explanation",
+        RecommendedAction::ResolveChatIssue => "primary-chat-explanation",
+        RecommendedAction::ResolveBackgroundIssue => "primary-background-explanation",
+        RecommendedAction::ResolveUpdateIssue => "primary-updates-explanation",
+    })
+}
+
+fn primary_action_button(localization: &Localization, action: RecommendedAction) -> String {
+    localization.text(match action {
+        RecommendedAction::PrepareLocalAi => "primary-button-prepare",
+        RecommendedAction::ResolveLocalAiIssue
+        | RecommendedAction::ResolveCollectionIssue
+        | RecommendedAction::RequestSystemPermission
+        | RecommendedAction::ChangeNetworkProfile
+        | RecommendedAction::ConfigureFirewall
+        | RecommendedAction::OpenFirewallSettings
+        | RecommendedAction::ReviewLegacyFirewallRules
+        | RecommendedAction::RepairConnectivityInstallation
+        | RecommendedAction::RetryConnectivity
+        | RecommendedAction::ResolveChatIssue
+        | RecommendedAction::ResolveBackgroundIssue
+        | RecommendedAction::ResolveUpdateIssue => "primary-button-resolve",
+        RecommendedAction::AddKnowledgeFolder => "primary-button-add-folder",
+        RecommendedAction::ReviewPendingKnowledge => "action-review",
+        RecommendedAction::InspectWikiHealth => "primary-button-open-health",
+        RecommendedAction::ExplainLan => "primary-button-view-options",
+        RecommendedAction::ContactAdministrator => "primary-button-view-diagnostics",
+    })
+}
+
+fn profile_label(localization: &Localization, profile: ModelProfile) -> String {
+    localization.text(match profile {
+        ModelProfile::Automatic => "models-profile-automatic",
+        ModelProfile::Efficient => "models-profile-efficient",
+        ModelProfile::Quality => "models-profile-quality",
+    })
+}
+
+fn model_action_label(
+    localization: &Localization,
+    assets_installed: bool,
+    models_ready: bool,
+) -> String {
+    localization.text(if assets_installed {
+        "models-action-activate-restart"
+    } else if models_ready {
+        "models-action-install-update"
+    } else {
+        "models-action-download"
+    })
+}
+
+fn localized_model_progress(
+    localization: &Localization,
+    message_id: &str,
+    artifact: &str,
+) -> String {
+    let mut arguments = FluentArgs::new();
+    arguments.set("artifact", artifact);
+    localization.text_with(message_id, Some(&arguments))
+}
+
+impl eframe::App for AirWikiApp {
+    fn logic(&mut self, context: &egui::Context, _frame: &mut eframe::Frame) {
+        if let Some(error) = self.shell.ensure_tray() {
+            self.notices.push_back((
+                true,
+                format!("No se pudo iniciar la bandeja del sistema: {error}"),
+            ));
+            self.shell.show(context);
+        }
+        for action in self.instance.try_actions() {
+            if action == ActivationAction::Show {
+                self.shell.show(context);
+            }
+        }
+        self.shell.handle_frame(context, self.close_policy());
+        self.drain_events();
+        if self.exit_after_update_launch {
+            self.exit_after_update_launch = false;
+            self.shell.request_exit(context);
+        }
+        let readiness = self.readiness_view();
+        let tray_status = if readiness.primary_action.is_some() {
+            format!(
+                "AirWiki · {}",
+                self.localization.text("status-needs-attention")
+            )
+        } else {
+            format!("AirWiki · {}", self.localization.text("status-ready"))
+        };
+        self.shell.set_status(&tray_status);
+        self.shell.set_labels(
+            &self.localization.text("tray-open"),
+            &self.localization.text("tray-quit"),
+        );
+        context.request_repaint_after(if self.shell.hidden() {
+            Duration::from_secs(1)
+        } else {
+            Duration::from_millis(150)
+        });
+    }
+
+    fn ui(&mut self, root: &mut egui::Ui, _frame: &mut eframe::Frame) {
+        if self.onboarding_page.is_some() {
+            egui::CentralPanel::default().show(root, |ui| {
+                egui::ScrollArea::vertical()
+                    .auto_shrink([false; 2])
+                    .show(ui, |ui| self.onboarding(ui));
+            });
+            self.notices(root);
+            self.close_confirmation(root.ctx());
+            return;
+        }
+        self.sidebar(root);
+        if self.screen != Screen::Setup {
+            self.notices(root);
+        }
+        egui::CentralPanel::default().show(root, |ui| {
+            if self.screen == Screen::Knowledge {
+                self.knowledge(ui);
+            } else {
+                egui::ScrollArea::vertical()
+                    .auto_shrink([false; 2])
+                    .show(ui, |ui| match self.screen {
+                        Screen::Setup => self.home(ui),
+                        Screen::Models => self.setup(ui),
+                        Screen::Collections => self.collections(ui),
+                        Screen::Review => self.review(ui),
+                        Screen::Knowledge => unreachable!("knowledge has a dedicated viewport"),
+                        Screen::Search => self.search(ui),
+                        Screen::Integrations => self.integrations(ui),
+                        Screen::Nodes => self.nodes(ui),
+                        Screen::Settings => self.settings(ui),
+                    });
+            }
+        });
+        self.close_confirmation(root.ctx());
+    }
+}
+
+fn configure_style(context: &egui::Context) {
+    let mut style = (*context.global_style()).clone();
+    style.spacing.item_spacing = egui::vec2(10.0, 8.0);
+    style.visuals.widgets.active.corner_radius = egui::CornerRadius::same(6);
+    style.visuals.widgets.hovered.corner_radius = egui::CornerRadius::same(6);
+    style.visuals.widgets.inactive.corner_radius = egui::CornerRadius::same(6);
+    context.set_global_style(style);
+}
+
+fn nav(ui: &mut egui::Ui, current: &mut Screen, target: Screen, label: &str) {
+    if ui
+        .add_sized(
+            [178.0, 34.0],
+            egui::Button::selectable(*current == target, label),
+        )
+        .clicked()
+    {
+        *current = target;
+    }
+}
+
+fn page_title(ui: &mut egui::Ui, title: &str, subtitle: &str) {
+    ui.heading(RichText::new(title).size(28.0));
+    ui.label(RichText::new(subtitle).color(Color32::GRAY));
+    ui.add_space(18.0);
+}
+
+fn empty_state(ui: &mut egui::Ui, title: &str, body: &str) {
+    egui::Frame::group(ui.style()).show(ui, |ui| {
+        ui.add_space(20.0);
+        ui.vertical_centered(|ui| {
+            ui.heading(title);
+            ui.label(body);
+        });
+        ui.add_space(20.0);
+    });
+}
+
+fn deduplicate_notices(notices: &mut VecDeque<(bool, String)>) {
+    let mut seen = HashSet::new();
+    notices.retain(|notice| seen.insert(notice.clone()));
+}
+
+fn connectivity_runtime_is_active(
+    snapshot: Option<ConnectivityPlatformSnapshot>,
+    listener: LanListenerView,
+    discovery: LanDiscoveryView,
+) -> bool {
+    let Some(snapshot) = snapshot else {
+        return false;
+    };
+    listener == LanListenerView::Listening
+        && discovery == LanDiscoveryView::Active
+        && matches!(
+            snapshot.network_profile,
+            NetworkProfileState::NotApplicable
+                | NetworkProfileState::Private
+                | NetworkProfileState::Domain
+        )
+        && matches!(
+            snapshot.firewall,
+            FirewallDiagnosticState::Ready | FirewallDiagnosticState::NotApplicable
+        )
+        && snapshot.system_permission != crate::connectivity_platform::SystemPermissionState::Denied
+}
+
+fn firewall_configuration_is_current(
+    preference: LanPreference,
+    snapshot: Option<ConnectivityPlatformSnapshot>,
+    operation_in_progress: bool,
+) -> bool {
+    if preference != LanPreference::Enabled || operation_in_progress {
+        return false;
+    }
+    snapshot.is_some_and(|snapshot| {
+        matches!(
+            snapshot.network_profile,
+            NetworkProfileState::Private | NetworkProfileState::Domain
+        ) && snapshot.firewall == FirewallDiagnosticState::RulesMissing
+            && snapshot.firewall_helper.can_request_elevation()
+    })
+}
+
+const fn firewall_state_offers_advanced_recovery(state: FirewallDiagnosticState) -> bool {
+    matches!(
+        state,
+        FirewallDiagnosticState::Conflict | FirewallDiagnosticState::LegacyExposure
+    )
+}
+
+fn parse_manual_ipv4_address(input: &str) -> Option<ManualLanAddress> {
+    input
+        .trim()
+        .parse::<ManualLanAddress>()
+        .ok()
+        .filter(|address| address.ip_addr().is_ipv4())
+}
+
+fn edit_draft(ui: &mut egui::Ui, localization: &Localization, draft: &mut EnrichmentDraft) {
+    ui.heading(localization.text("review-metadata-title"));
+    egui::ComboBox::from_label(localization.text("review-field-type"))
+        .selected_text(draft.concept_type.to_string())
+        .show_ui(ui, |ui| {
+            for value in [
+                ConceptType::Document,
+                ConceptType::Policy,
+                ConceptType::Procedure,
+                ConceptType::Runbook,
+                ConceptType::Reference,
+                ConceptType::Report,
+            ] {
+                ui.selectable_value(&mut draft.concept_type, value, value.to_string());
+            }
+        });
+    let title_label = ui.label(localization.text("review-field-title"));
+    ui.text_edit_singleline(&mut draft.title)
+        .labelled_by(title_label.id);
+    let description_label = ui.label(localization.text("review-field-description"));
+    ui.text_edit_multiline(&mut draft.description)
+        .labelled_by(description_label.id);
+    let language_label = ui.label(localization.text("review-field-language"));
+    ui.text_edit_singleline(&mut draft.language)
+        .labelled_by(language_label.id);
+    let mut tags = draft.tags.join(", ");
+    let tags_label = ui.label(localization.text("review-field-tags"));
+    if ui
+        .text_edit_singleline(&mut tags)
+        .labelled_by(tags_label.id)
+        .changed()
+    {
+        draft.tags = tags
+            .split(',')
+            .map(str::trim)
+            .filter(|v| !v.is_empty())
+            .take(10)
+            .map(str::to_owned)
+            .collect();
+    }
+    let summary_label = ui.label(localization.text("review-field-summary"));
+    ui.text_edit_multiline(&mut draft.summary)
+        .labelled_by(summary_label.id);
+    ui.separator();
+    ui.label(localization.text("review-field-entities"));
+    let mut remove_entity = None;
+    for (index, entity) in draft.entities.iter_mut().enumerate() {
+        ui.horizontal(|ui| {
+            ui.add(
+                egui::TextEdit::singleline(&mut entity.name)
+                    .hint_text(localization.text("review-entity-name")),
+            );
+            ui.add(
+                egui::TextEdit::singleline(&mut entity.kind)
+                    .hint_text(localization.text("review-entity-type")),
+            );
+            if ui
+                .small_button(localization.text("action-remove"))
+                .clicked()
+            {
+                remove_entity = Some(index);
+            }
+        });
+    }
+    if let Some(index) = remove_entity {
+        draft.entities.remove(index);
+    }
+    if ui
+        .small_button(localization.text("review-add-entity"))
+        .clicked()
+    {
+        draft.entities.push(SuggestedEntity {
+            name: String::new(),
+            kind: String::new(),
+        });
+    }
+    ui.label(localization.text("review-field-links"));
+    let mut remove_link = None;
+    for (index, link) in draft.links.iter_mut().enumerate() {
+        ui.horizontal(|ui| {
+            ui.add(
+                egui::TextEdit::singleline(&mut link.label)
+                    .hint_text(localization.text("review-link-label")),
+            );
+            ui.add(
+                egui::TextEdit::singleline(&mut link.target)
+                    .hint_text(localization.text("review-link-target")),
+            );
+            if ui
+                .small_button(localization.text("action-remove"))
+                .clicked()
+            {
+                remove_link = Some(index);
+            }
+        });
+    }
+    if let Some(index) = remove_link {
+        draft.links.remove(index);
+    }
+    if ui
+        .small_button(localization.text("review-add-link"))
+        .clicked()
+    {
+        draft.links.push(SuggestedLink {
+            label: String::new(),
+            target: String::new(),
+        });
+    }
+    ui.add(
+        egui::Slider::new(&mut draft.classification_confidence, 0.0..=1.0)
+            .text(localization.text("review-confidence")),
+    );
+    let classification_label = ui.label(localization.text("review-classification-explanation"));
+    ui.text_edit_multiline(&mut draft.classification_explanation)
+        .labelled_by(classification_label.id);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{
+        ExternalAiPolicyChange, classify_external_ai_policy_change, connectivity_runtime_is_active,
+        deduplicate_notices, firewall_configuration_is_current, firewall_operation_update_applies,
+        firewall_state_offers_advanced_recovery, human_error_summary, model_action_label,
+        parse_manual_ipv4_address, peer_activity_message_id, primary_action_explanation,
+        primary_action_title, search_coverage_message, should_present_pairing_controls,
+        updater_launched_installer,
+    };
+    use crate::connectivity_platform::{
+        ConnectivityPlatformSnapshot, FirewallDiagnosticState, FirewallHelperState,
+        NetworkProfileState, SystemPermissionState,
+    };
+    use crate::i18n::{Localization, UiLocale};
+    use crate::model_config::LanPreference;
+    use crate::readiness::RecommendedAction;
+    use crate::updater::{UpdateSummary, UpdaterStatus, UpdaterView};
+    use crate::worker::{
+        FirewallOperationView, LanDiscoveryView, LanListenerView, PeerActivityState,
+        PeerTrustState, SearchCoverageView, UpdaterWorkerView,
+    };
+    use std::collections::VecDeque;
+    use uuid::Uuid;
+
+    #[test]
+    fn conflict_and_legacy_exposure_offer_advanced_inbound_recovery() {
+        for state in [
+            FirewallDiagnosticState::Conflict,
+            FirewallDiagnosticState::LegacyExposure,
+        ] {
+            assert!(firewall_state_offers_advanced_recovery(state));
+        }
+        assert!(!firewall_state_offers_advanced_recovery(
+            FirewallDiagnosticState::ManagedPolicy
+        ));
+    }
+
+    #[test]
+    fn terminal_firewall_update_clears_presentation_after_a_later_request() {
+        let completed = Uuid::new_v4();
+        let later = Uuid::new_v4();
+
+        assert!(firewall_operation_update_applies(
+            Some(later),
+            completed,
+            None,
+        ));
+        assert!(!firewall_operation_update_applies(
+            Some(later),
+            completed,
+            Some(FirewallOperationView::TakingLonger),
+        ));
+    }
+
+    #[test]
+    fn only_a_successfully_launched_installer_requests_desktop_exit() {
+        let summary = UpdateSummary {
+            version: "0.2.1".to_owned(),
+            release_notes: None,
+        };
+        let installed = UpdaterWorkerView::Ready(UpdaterView {
+            status: UpdaterStatus::Installed(summary.clone()),
+            last_issue: None,
+        });
+        let ready = UpdaterWorkerView::Ready(UpdaterView {
+            status: UpdaterStatus::ReadyToInstall(summary),
+            last_issue: None,
+        });
+
+        assert!(updater_launched_installer(&installed));
+        assert!(!updater_launched_installer(&ready));
+        assert!(!updater_launched_installer(&UpdaterWorkerView::Disabled(
+            crate::updater::UpdaterDisabledReason::NotConfigured,
+        )));
+    }
+
+    #[test]
+    fn an_already_downloaded_recommendation_is_not_presented_as_an_install() {
+        let localization = Localization::new(UiLocale::Es).unwrap();
+        assert_eq!(
+            model_action_label(&localization, true, true),
+            "Activar al reiniciar"
+        );
+        assert_eq!(
+            model_action_label(&localization, true, false),
+            "Activar al reiniciar"
+        );
+        assert_eq!(
+            model_action_label(&localization, false, true),
+            "Instalar actualización"
+        );
+        assert_eq!(
+            model_action_label(&localization, false, false),
+            "Descargar y verificar"
+        );
+    }
+
+    #[test]
+    fn technical_errors_are_reduced_to_human_categories() {
+        let localization = Localization::new(UiLocale::Es).unwrap();
+        assert_eq!(
+            human_error_summary(
+                &localization,
+                "La colección 123e4567-e89b-12d3-a456-426614174000 falló en /private/path"
+            ),
+            "Una carpeta de conocimiento necesita atención."
+        );
+        assert!(!human_error_summary(&localization, "falló").contains("/"));
+    }
+
+    #[test]
+    fn legacy_firewall_action_uses_specific_human_copy() {
+        let cases = [
+            (
+                UiLocale::Es,
+                "Una o más reglas del firewall permiten demasiado acceso",
+                "AirWiki mantendrá apagada la conexión con otros equipos hasta que revises en Windows las reglas que permiten más tráfico del necesario.",
+            ),
+            (
+                UiLocale::EnUs,
+                "One or more firewall rules allow too much access",
+                "AirWiki will keep connections to other devices off until you review the Windows rules that allow more traffic than necessary.",
+            ),
+        ];
+
+        for (locale, expected_title, expected_explanation) in cases {
+            let localization = Localization::new(locale).unwrap();
+
+            assert_eq!(
+                (
+                    primary_action_title(
+                        &localization,
+                        RecommendedAction::ReviewLegacyFirewallRules,
+                    ),
+                    primary_action_explanation(
+                        &localization,
+                        RecommendedAction::ReviewLegacyFirewallRules,
+                    ),
+                ),
+                (expected_title.to_owned(), expected_explanation.to_owned())
+            );
+        }
+    }
+
+    #[test]
+    fn search_coverage_uses_localized_human_messages() {
+        for (locale, expected_offline) in [
+            (UiLocale::Es, "equipos no respondieron"),
+            (UiLocale::EnUs, "other devices did not respond"),
+        ] {
+            let localization = Localization::new(locale).unwrap();
+            let offline = search_coverage_message(
+                &localization,
+                SearchCoverageView::OfflineDevices { count: 2 },
+            )
+            .unwrap();
+            let disabled =
+                search_coverage_message(&localization, SearchCoverageView::FederationDisabled)
+                    .unwrap();
+
+            assert!(
+                offline.contains('2') && offline.contains(expected_offline),
+                "unexpected localized coverage message: {offline:?}"
+            );
+            assert!(!offline.contains("12D3Koo"));
+            assert!(!disabled.contains("federation_disabled"));
+        }
+        let localization = Localization::new(UiLocale::Es).unwrap();
+        assert_eq!(
+            search_coverage_message(&localization, SearchCoverageView::Complete),
+            None
+        );
+    }
+
+    #[test]
+    fn firewall_confirmation_fails_closed_when_its_context_changes() {
+        let eligible = ConnectivityPlatformSnapshot {
+            system_permission: SystemPermissionState::NotApplicable,
+            network_profile: NetworkProfileState::Private,
+            firewall: FirewallDiagnosticState::RulesMissing,
+            firewall_helper: FirewallHelperState::Verified,
+        };
+        assert!(firewall_configuration_is_current(
+            LanPreference::Enabled,
+            Some(eligible),
+            false,
+        ));
+
+        for (preference, snapshot, busy) in [
+            (LanPreference::Disabled, Some(eligible), false),
+            (LanPreference::Enabled, Some(eligible), true),
+            (
+                LanPreference::Enabled,
+                Some(ConnectivityPlatformSnapshot {
+                    network_profile: NetworkProfileState::Public,
+                    ..eligible
+                }),
+                false,
+            ),
+            (
+                LanPreference::Enabled,
+                Some(ConnectivityPlatformSnapshot {
+                    firewall: FirewallDiagnosticState::Ready,
+                    ..eligible
+                }),
+                false,
+            ),
+            (
+                LanPreference::Enabled,
+                Some(ConnectivityPlatformSnapshot {
+                    firewall_helper: FirewallHelperState::Untrusted,
+                    ..eligible
+                }),
+                false,
+            ),
+            (LanPreference::Enabled, None, false),
+        ] {
+            assert!(!firewall_configuration_is_current(
+                preference, snapshot, busy
+            ));
+        }
+    }
+
+    #[test]
+    fn enabling_external_ai_requires_confirmation_but_disabling_is_immediate() {
+        assert_eq!(
+            classify_external_ai_policy_change(false, true),
+            ExternalAiPolicyChange::ConfirmEnable
+        );
+        assert_eq!(
+            classify_external_ai_policy_change(true, false),
+            ExternalAiPolicyChange::ApplyDisable
+        );
+        assert_eq!(
+            classify_external_ai_policy_change(false, false),
+            ExternalAiPolicyChange::None
+        );
+    }
+
+    #[test]
+    fn repeated_notices_are_collapsed_without_merging_different_severities() {
+        let mut notices = VecDeque::from([
+            (true, "same".to_owned()),
+            (true, "same".to_owned()),
+            (false, "same".to_owned()),
+            (true, "different".to_owned()),
+        ]);
+
+        deduplicate_notices(&mut notices);
+
+        assert_eq!(
+            notices,
+            VecDeque::from([
+                (true, "same".to_owned()),
+                (false, "same".to_owned()),
+                (true, "different".to_owned()),
+            ])
+        );
+    }
+
+    #[test]
+    fn connectivity_is_active_only_when_platform_and_runtime_are_ready() {
+        let ready = ConnectivityPlatformSnapshot {
+            system_permission: SystemPermissionState::NotApplicable,
+            network_profile: NetworkProfileState::Private,
+            firewall: FirewallDiagnosticState::Ready,
+            firewall_helper: FirewallHelperState::Verified,
+        };
+        assert!(connectivity_runtime_is_active(
+            Some(ready),
+            LanListenerView::Listening,
+            LanDiscoveryView::Active,
+        ));
+
+        for firewall in [
+            FirewallDiagnosticState::Unknown,
+            FirewallDiagnosticState::FirewallDisabled,
+            FirewallDiagnosticState::BlockAllInbound,
+            FirewallDiagnosticState::RulesMissing,
+            FirewallDiagnosticState::Conflict,
+            FirewallDiagnosticState::LegacyExposure,
+            FirewallDiagnosticState::ManagedPolicy,
+            FirewallDiagnosticState::Unsupported,
+            FirewallDiagnosticState::Error,
+        ] {
+            assert!(!connectivity_runtime_is_active(
+                Some(ConnectivityPlatformSnapshot { firewall, ..ready }),
+                LanListenerView::Listening,
+                LanDiscoveryView::Active,
+            ));
+        }
+        assert!(!connectivity_runtime_is_active(
+            Some(ConnectivityPlatformSnapshot {
+                network_profile: NetworkProfileState::Public,
+                ..ready
+            }),
+            LanListenerView::Listening,
+            LanDiscoveryView::Active,
+        ));
+        assert!(!connectivity_runtime_is_active(
+            Some(ready),
+            LanListenerView::Stopped,
+            LanDiscoveryView::Active,
+        ));
+    }
+
+    #[test]
+    fn manual_fallback_accepts_ipv4_and_rejects_ipv6() {
+        assert!(parse_manual_ipv4_address("/ip4/192.168.1.25/tcp/61743").is_some());
+        assert!(parse_manual_ipv4_address("/ip6/fd42::25/tcp/61743").is_none());
+    }
+
+    #[test]
+    fn idle_connection_copy_never_promises_reconnect_for_a_blocked_peer() {
+        assert_eq!(
+            peer_activity_message_id(PeerTrustState::Blocked, PeerActivityState::NotObserved),
+            "peer-activity-unavailable"
+        );
+        assert_eq!(
+            peer_activity_message_id(PeerTrustState::Trusted, PeerActivityState::NotObserved),
+            "peer-activity-not-observed"
+        );
+    }
+
+    #[test]
+    fn pairing_activity_presents_sas_controls() {
+        assert!(should_present_pairing_controls(PeerActivityState::Pairing));
+        assert!(!should_present_pairing_controls(
+            PeerActivityState::Connected,
+        ));
+    }
+}

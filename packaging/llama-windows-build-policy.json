@@ -1,0 +1,159 @@
+{
+  "schema_version": 1,
+  "component": "llama.cpp",
+  "tag": "b9946",
+  "commit": "fb30ba9a6c5b4674174d06aed14794832ab33278",
+  "source_date_epoch": 1783617347,
+  "source": {
+    "url": "https://github.com/ggml-org/llama.cpp/archive/fb30ba9a6c5b4674174d06aed14794832ab33278.zip",
+    "filename": "llama.cpp-fb30ba9a6c5b4674174d06aed14794832ab33278.zip",
+    "size": 36865897,
+    "sha256": "7a36a3e384ad29ce4ffbac0051f31b7265105d7d8c3240e5ab9a859e952ec3a2",
+    "root_directory": "llama.cpp-fb30ba9a6c5b4674174d06aed14794832ab33278"
+  },
+  "target": {
+    "triple": "x86_64-pc-windows-msvc",
+    "minimum_cpu": "avx2",
+    "imports": [
+      "ADVAPI32.dll",
+      "KERNEL32.dll",
+      "SHELL32.dll",
+      "WS2_32.dll"
+    ]
+  },
+  "toolchain": {
+    "visual_studio_installation_version_prefix": "17.14.",
+    "vc_tools_version_prefix": "14.44.",
+    "msvc_compiler_version_prefix": "19.44.",
+    "windows_sdk_version": "10.0.26100.0",
+    "cmake_version": "3.31.6-msvc6",
+    "ninja_versions": [
+      "1.12.1",
+      "1.13.2"
+    ]
+  },
+  "build": {
+    "msvc_runtime": "MultiThreaded",
+    "shared_libraries": false,
+    "openmp": false,
+    "compiler_flags": [
+      "/O2",
+      "/Ob2",
+      "/DNDEBUG",
+      "/experimental:deterministic",
+      "/Brepro"
+    ],
+    "linker_flags": [
+      "/INCREMENTAL:NO",
+      "/OPT:REF",
+      "/OPT:ICF",
+      "/Brepro"
+    ],
+    "cmake_definitions": [
+      "-DBUILD_SHARED_LIBS=OFF",
+      "-DGGML_BACKEND_DL=OFF",
+      "-DGGML_OPENMP=OFF",
+      "-DGGML_NATIVE=OFF",
+      "-DGGML_SSE42=ON",
+      "-DGGML_AVX=ON",
+      "-DGGML_AVX2=ON",
+      "-DGGML_BMI2=ON",
+      "-DGGML_AVX512=OFF",
+      "-DGGML_AVX512_VBMI=OFF",
+      "-DGGML_AVX512_VNNI=OFF",
+      "-DGGML_AVX512_BF16=OFF",
+      "-DGGML_LTO=OFF",
+      "-DGGML_CCACHE=OFF",
+      "-DGGML_RPC=OFF",
+      "-DGGML_BLAS=OFF",
+      "-DGGML_LLAMAFILE=OFF",
+      "-DLLAMA_OPENSSL=OFF",
+      "-DLLAMA_LLGUIDANCE=OFF",
+      "-DLLAMA_BUILD_TESTS=OFF",
+      "-DLLAMA_BUILD_EXAMPLES=OFF",
+      "-DLLAMA_BUILD_APP=OFF",
+      "-DLLAMA_BUILD_TOOLS=ON",
+      "-DLLAMA_BUILD_SERVER=ON",
+      "-DLLAMA_BUILD_UI=OFF",
+      "-DLLAMA_USE_PREBUILT_UI=OFF",
+      "-DMTMD_VIDEO=OFF",
+      "-DCMAKE_C_COMPILER_LAUNCHER=",
+      "-DCMAKE_CXX_COMPILER_LAUNCHER=",
+      "-DCMAKE_ASM_COMPILER_LAUNCHER=",
+      "-DCMAKE_C_LINKER_LAUNCHER=",
+      "-DCMAKE_CXX_LINKER_LAUNCHER=",
+      "-DCMAKE_ASM_LINKER_LAUNCHER=",
+      "-DCMAKE_DISABLE_FIND_PACKAGE_Git=TRUE",
+      "-DGIT_EXECUTABLE=OFF",
+      "-DGIT_EXE=OFF",
+      "-DLLAMA_BUILD_NUMBER=9946",
+      "-DLLAMA_BUILD_COMMIT=fb30ba9a6c5b4674174d06aed14794832ab33278"
+    ]
+  },
+  "source_patches": [
+    {
+      "id": "replace-unlicensed-bicubic-with-pillow-path",
+      "path": "tools/mtmd/mtmd-image.cpp",
+      "input_sha256": "84d130afea62061871e8daef3fe8188415d4bcea0bcf9278955083700f951a65",
+      "output_sha256": "7c0cfa47bd61a9202824a9610cdc1168c2edd868e7c2e115f80e9eba70037f0f"
+    }
+  ],
+  "legal_sources": [
+    {
+      "path": "LICENSE",
+      "sha256": "94f29bbed6a22c35b992c5c6ebf0e7c92f13b836b90f36f461c9cf2f0f1d010d"
+    },
+    {
+      "path": "licenses/LICENSE-jsonhpp",
+      "sha256": "c0d068392ea65358b798b8c165103560f06e9e3b38c4ab4e2d8810a7b931af86"
+    },
+    {
+      "path": "vendor/nlohmann/json.hpp",
+      "sha256": "aaf127c04cb31c406e5b04a63f1ae89369fccde6d8fa7cdda1ed4f32dfc5de63"
+    },
+    {
+      "path": "vendor/cpp-httplib/LICENSE",
+      "sha256": "4b45cbe16d7b71b89ae6127e26e0d90a029198ca5e958ad8e3d0b8bbed364d8b"
+    },
+    {
+      "path": "vendor/miniaudio/miniaudio.h",
+      "sha256": "ac7af4de748b7e26b777f37e01cee313a308a7296a3eb080e2906b320cc55c89"
+    },
+    {
+      "path": "vendor/stb/stb_image.h",
+      "sha256": "594c2fe35d49488b4382dbfaec8f98366defca819d916ac95becf3e75f4200b3"
+    },
+    {
+      "path": "vendor/sheredom/subprocess.h",
+      "sha256": "0bf208a408ba2c7e63739d62a0a492a13f90b0113214776835c855629ef90043"
+    },
+    {
+      "path": "common/base64.hpp",
+      "sha256": "57f595aa0a206c4dec9a84b90a3416028a242da4dd8f219afc0859a6ccb7efe7"
+    },
+    {
+      "path": "ggml/src/ggml-cpu/ops.cpp",
+      "sha256": "701c57328cc54ec1979a1dcd120b46c36928e9c4d6d017c86d042f9725cf98f6"
+    },
+    {
+      "path": "tools/mtmd/mtmd-image.cpp",
+      "sha256": "84d130afea62061871e8daef3fe8188415d4bcea0bcf9278955083700f951a65"
+    },
+    {
+      "path": "ggml/src/ggml-cpu/vec.h",
+      "sha256": "926330bae1c5d003bd654035426e31381fafcdca23ffcc23201d219dbb97cbeb"
+    },
+    {
+      "path": "ggml/src/ggml-impl.h",
+      "sha256": "2ed56e264202906d107e26d08eabb242d3107b026ebfb78096fa1e5f94bdbbb8"
+    },
+    {
+      "path": "src/llama-vocab.cpp",
+      "sha256": "3c649e905f838ee8f2ffd877bc1701e278f35948e17b0233c2bd350091c58670"
+    },
+    {
+      "path": "tools/mtmd/mtmd-audio.cpp",
+      "sha256": "22ae060fedb63689d3924a625b3b9a6a4488b89d692761a18bb67e380b0c0548"
+    }
+  ]
+}

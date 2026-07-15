@@ -14,6 +14,7 @@ All notable user-visible changes to AirWiki will be documented here. The project
 
 - Clarified privacy boundaries and separated internal development packages from future public distribution.
 - Consolidated durable project guidance and documentation ownership.
+- Improved the public project summary and contributor entry points.
 
 ### Fixed
 

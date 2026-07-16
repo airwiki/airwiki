@@ -1,7 +1,10 @@
-# Verified legal texts preserve the exact upstream whitespace covered by their hashes.
-resources/licenses/*.txt -whitespace
-resources/licenses/non-cargo/*.txt -whitespace
-resources/licenses/THIRD_PARTY_LICENSES.md -whitespace
+# Repository text has one canonical checkout representation on every CI host.
+* text=auto eol=lf
+
+# Verified legal texts preserve the exact upstream bytes covered by their hashes.
+resources/licenses/*.txt -text -whitespace
+resources/licenses/non-cargo/*.txt -text -whitespace
+resources/licenses/THIRD_PARTY_LICENSES.md -text -whitespace
 
 # Branding assets are opaque binary payloads and must never receive line-ending conversion.
 resources/branding/*.png binary

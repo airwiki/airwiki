@@ -936,24 +936,14 @@ mod tests {
         let temp = tempfile::tempdir().unwrap();
         let watcher = FolderWatcher::new(temp.path(), Duration::from_millis(10)).unwrap();
 
-        assert!(
-            watcher
-                .recv_debounced_timeout(Duration::from_millis(25))
-                .unwrap()
-                .is_none()
-        );
+        wait_for_watcher_quiet(&watcher);
     }
 
     #[test]
     fn watcher_can_receive_after_a_timeout() {
         let temp = tempfile::tempdir().unwrap();
         let watcher = FolderWatcher::new(temp.path(), Duration::from_millis(20)).unwrap();
-        assert!(
-            watcher
-                .recv_debounced_timeout(Duration::from_millis(10))
-                .unwrap()
-                .is_none()
-        );
+        wait_for_watcher_quiet(&watcher);
 
         let changed = temp.path().join("changed.md");
         std::fs::write(&changed, "content").unwrap();
@@ -965,5 +955,22 @@ mod tests {
         // Some notify backends report the changed file while others report its
         // watched parent directory. Either proves the receiver remained usable.
         assert!(!paths.is_empty());
+    }
+
+    fn wait_for_watcher_quiet(watcher: &FolderWatcher) {
+        let deadline = std::time::Instant::now() + Duration::from_secs(2);
+        loop {
+            if watcher
+                .recv_debounced_timeout(Duration::from_millis(25))
+                .unwrap()
+                .is_none()
+            {
+                return;
+            }
+            assert!(
+                std::time::Instant::now() < deadline,
+                "filesystem watcher did not become quiet after its initial events"
+            );
+        }
     }
 }

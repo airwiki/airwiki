@@ -335,6 +335,27 @@ pub struct InstallOutcome {
     pub llama_server_path: PathBuf,
 }
 
+impl InstallOutcome {
+    /// Reuses the result of a completed integrity verification for presentation.
+    ///
+    /// The returned plan never authorizes loading an artifact: model activation
+    /// still consumes the verified paths in this outcome, and every future
+    /// installation recomputes its plan immediately before writing. Keeping this
+    /// conversion filesystem-free prevents the desktop from hashing the same
+    /// multi-gigabyte assets again merely to render their installed state.
+    pub fn verified_install_plan(&self) -> InstallPlan {
+        InstallPlan {
+            selection: self.selection.clone(),
+            artifact_ids: Vec::new(),
+            download_bytes: 0,
+            required_free_bytes: INSTALL_HEADROOM_BYTES,
+            // No transfer is required for an already verified outcome. A later
+            // installation always recomputes available capacity before writing.
+            fits_available_disk: true,
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct InstallPlan {
     pub selection: ModelSelection,
@@ -1497,6 +1518,27 @@ mod tests {
         assert_eq!(std::fs::read(&model).unwrap(), before);
         assert!(!dir.path().join("cache").exists());
         assert!(!dir.path().join("runtimes").exists());
+    }
+
+    #[test]
+    fn verified_outcome_builds_a_plan_without_reading_artifact_paths() {
+        let selection = ModelSelection::legacy_qwen();
+        let outcome = InstallOutcome {
+            generation_settings: selection.generation_settings(),
+            selection,
+            model_path: PathBuf::from("missing/model.gguf"),
+            embedding_snapshot_path: PathBuf::from("missing/embeddings"),
+            relevance_snapshot_path: PathBuf::from("missing/relevance"),
+            llama_server_path: PathBuf::from("missing/llama-server"),
+        };
+
+        let plan = outcome.verified_install_plan();
+
+        assert!(plan.artifact_ids.is_empty());
+        assert_eq!(plan.download_bytes, 0);
+        assert_eq!(plan.required_free_bytes, INSTALL_HEADROOM_BYTES);
+        assert!(plan.fits_available_disk);
+        assert_eq!(plan.selection.model_id, outcome.selection.model_id);
     }
 
     #[tokio::test]

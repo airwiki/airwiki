@@ -155,6 +155,62 @@ impl NodeReadinessView {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum FirstKnowledgeStage {
+    PrepareLocalAi,
+    ChooseKnowledgeFolder,
+    ProcessKnowledge,
+    ReviewKnowledge,
+    PublishReady,
+    SearchKnowledge,
+}
+
+impl FirstKnowledgeStage {
+    const fn position(self) -> u8 {
+        match self {
+            Self::PrepareLocalAi => 0,
+            Self::ChooseKnowledgeFolder => 1,
+            Self::ProcessKnowledge => 2,
+            Self::ReviewKnowledge => 3,
+            Self::PublishReady => 4,
+            Self::SearchKnowledge => 5,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum FirstKnowledgeStepState {
+    Complete,
+    Current,
+    Working,
+    NeedsPermission,
+    NeedsAttention,
+    Pending,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum FirstKnowledgeCta {
+    Recommended(RecommendedAction),
+    SearchKnowledge,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct FirstKnowledgeJourneyView {
+    pub current_stage: FirstKnowledgeStage,
+    pub current_state: FirstKnowledgeStepState,
+    pub cta: Option<FirstKnowledgeCta>,
+}
+
+impl FirstKnowledgeJourneyView {
+    pub(crate) fn stage_state(self, stage: FirstKnowledgeStage) -> FirstKnowledgeStepState {
+        match stage.position().cmp(&self.current_stage.position()) {
+            std::cmp::Ordering::Less => FirstKnowledgeStepState::Complete,
+            std::cmp::Ordering::Equal => self.current_state,
+            std::cmp::Ordering::Greater => FirstKnowledgeStepState::Pending,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct ConnectivityInput {
     pub preference: ConnectivityPreference,
     pub system_permission: SystemPermission,
@@ -269,6 +325,143 @@ pub(crate) fn derive_readiness(input: ReadinessInput) -> NodeReadinessView {
         primary_action: primary_action(input, &connectivity),
         components,
         last_checked_at: input.last_checked_at,
+    }
+}
+
+pub(crate) fn derive_first_knowledge_journey(
+    readiness: &NodeReadinessView,
+    published_count: usize,
+) -> FirstKnowledgeJourneyView {
+    let current_stage = first_knowledge_current_stage(readiness, published_count);
+
+    FirstKnowledgeJourneyView {
+        current_stage,
+        current_state: first_knowledge_current_state(readiness, current_stage),
+        cta: first_knowledge_cta(readiness, current_stage),
+    }
+}
+
+fn first_knowledge_current_stage(
+    readiness: &NodeReadinessView,
+    published_count: usize,
+) -> FirstKnowledgeStage {
+    if readiness.status(ReadinessComponent::LocalAi) != ReadinessStatus::Ready {
+        return FirstKnowledgeStage::PrepareLocalAi;
+    }
+    if let Some(stage) = readiness
+        .primary_action
+        .and_then(first_knowledge_action_stage)
+    {
+        return stage;
+    }
+
+    for (component, stage) in [
+        (
+            ReadinessComponent::Collections,
+            FirstKnowledgeStage::ProcessKnowledge,
+        ),
+        (ReadinessComponent::Wiki, FirstKnowledgeStage::PublishReady),
+    ] {
+        if readiness.status(component) == ReadinessStatus::Working {
+            return stage;
+        }
+    }
+
+    if published_count > 0 && readiness.status(ReadinessComponent::Wiki) == ReadinessStatus::Ready {
+        return FirstKnowledgeStage::SearchKnowledge;
+    }
+    if readiness.status(ReadinessComponent::Collections) == ReadinessStatus::NeedsAttention {
+        return FirstKnowledgeStage::ChooseKnowledgeFolder;
+    }
+    if readiness.status(ReadinessComponent::Review) == ReadinessStatus::NeedsAttention {
+        return FirstKnowledgeStage::ReviewKnowledge;
+    }
+    if readiness.status(ReadinessComponent::Wiki) != ReadinessStatus::Ready {
+        return FirstKnowledgeStage::PublishReady;
+    }
+
+    FirstKnowledgeStage::ProcessKnowledge
+}
+
+fn first_knowledge_action_stage(action: RecommendedAction) -> Option<FirstKnowledgeStage> {
+    match action {
+        RecommendedAction::PrepareLocalAi | RecommendedAction::ResolveLocalAiIssue => {
+            Some(FirstKnowledgeStage::PrepareLocalAi)
+        }
+        RecommendedAction::AddKnowledgeFolder => Some(FirstKnowledgeStage::ChooseKnowledgeFolder),
+        RecommendedAction::ResolveCollectionIssue => Some(FirstKnowledgeStage::ProcessKnowledge),
+        RecommendedAction::ReviewPendingKnowledge => Some(FirstKnowledgeStage::ReviewKnowledge),
+        RecommendedAction::InspectWikiHealth => Some(FirstKnowledgeStage::PublishReady),
+        RecommendedAction::ExplainLan
+        | RecommendedAction::RequestSystemPermission
+        | RecommendedAction::ChangeNetworkProfile
+        | RecommendedAction::ConfigureFirewall
+        | RecommendedAction::OpenFirewallSettings
+        | RecommendedAction::ReviewLegacyFirewallRules
+        | RecommendedAction::RepairConnectivityInstallation
+        | RecommendedAction::ContactAdministrator
+        | RecommendedAction::RetryConnectivity
+        | RecommendedAction::ResolveChatIssue
+        | RecommendedAction::ResolveBackgroundIssue
+        | RecommendedAction::ResolveUpdateIssue => None,
+    }
+}
+
+fn first_knowledge_cta(
+    readiness: &NodeReadinessView,
+    stage: FirstKnowledgeStage,
+) -> Option<FirstKnowledgeCta> {
+    if stage == FirstKnowledgeStage::SearchKnowledge {
+        return Some(FirstKnowledgeCta::SearchKnowledge);
+    }
+
+    readiness
+        .primary_action
+        .filter(|action| first_knowledge_action_stage(*action) == Some(stage))
+        .map(FirstKnowledgeCta::Recommended)
+}
+
+fn first_knowledge_current_state(
+    readiness: &NodeReadinessView,
+    stage: FirstKnowledgeStage,
+) -> FirstKnowledgeStepState {
+    if let Some(action) = readiness.primary_action
+        && first_knowledge_action_stage(action) == Some(stage)
+    {
+        return match action {
+            RecommendedAction::PrepareLocalAi
+            | RecommendedAction::AddKnowledgeFolder
+            | RecommendedAction::ReviewPendingKnowledge => FirstKnowledgeStepState::Current,
+            RecommendedAction::ResolveLocalAiIssue
+                if readiness.status(ReadinessComponent::LocalAi)
+                    == ReadinessStatus::NeedsPermission =>
+            {
+                FirstKnowledgeStepState::NeedsPermission
+            }
+            RecommendedAction::ResolveLocalAiIssue
+            | RecommendedAction::ResolveCollectionIssue
+            | RecommendedAction::InspectWikiHealth => FirstKnowledgeStepState::NeedsAttention,
+            _ => FirstKnowledgeStepState::Current,
+        };
+    }
+
+    let component = match stage {
+        FirstKnowledgeStage::PrepareLocalAi => ReadinessComponent::LocalAi,
+        FirstKnowledgeStage::ChooseKnowledgeFolder | FirstKnowledgeStage::ProcessKnowledge => {
+            ReadinessComponent::Collections
+        }
+        FirstKnowledgeStage::ReviewKnowledge => ReadinessComponent::Review,
+        FirstKnowledgeStage::PublishReady | FirstKnowledgeStage::SearchKnowledge => {
+            ReadinessComponent::Wiki
+        }
+    };
+    match readiness.status(component) {
+        ReadinessStatus::Working => FirstKnowledgeStepState::Working,
+        ReadinessStatus::NeedsPermission => FirstKnowledgeStepState::NeedsPermission,
+        ReadinessStatus::NeedsAttention => FirstKnowledgeStepState::NeedsAttention,
+        ReadinessStatus::Ready | ReadinessStatus::OptionalDisabled => {
+            FirstKnowledgeStepState::Current
+        }
     }
 }
 
@@ -490,6 +683,199 @@ mod tests {
             updates: OptionalFeatureState::Ready,
             last_checked_at: SystemTime::UNIX_EPOCH,
         }
+    }
+
+    fn first_knowledge(input: ReadinessInput, published_count: usize) -> FirstKnowledgeJourneyView {
+        derive_first_knowledge_journey(&derive_readiness(input), published_count)
+    }
+
+    fn current_snapshot(
+        view: &FirstKnowledgeJourneyView,
+    ) -> (
+        FirstKnowledgeStage,
+        FirstKnowledgeStepState,
+        Option<FirstKnowledgeCta>,
+    ) {
+        (view.current_stage, view.current_state, view.cta)
+    }
+
+    #[test]
+    fn first_knowledge_follows_the_complete_local_journey() {
+        let mut missing_ai = ready_input();
+        missing_ai.models_ready = false;
+        let mut working_ai = missing_ai;
+        working_ai.models_working = true;
+        working_ai.collection_count = 0;
+        let mut missing_folder = ready_input();
+        missing_folder.collection_count = 0;
+        let mut processing = ready_input();
+        processing.collections_working = true;
+        let mut review = ready_input();
+        review.pending_review_count = 1;
+        let mut publishing = ready_input();
+        publishing.wiki_working = true;
+
+        let cases = [
+            (
+                "prepare",
+                missing_ai,
+                0,
+                FirstKnowledgeStage::PrepareLocalAi,
+                FirstKnowledgeStepState::Current,
+                Some(FirstKnowledgeCta::Recommended(
+                    RecommendedAction::PrepareLocalAi,
+                )),
+            ),
+            (
+                "prepare-running",
+                working_ai,
+                0,
+                FirstKnowledgeStage::PrepareLocalAi,
+                FirstKnowledgeStepState::Working,
+                None,
+            ),
+            (
+                "choose-folder",
+                missing_folder,
+                0,
+                FirstKnowledgeStage::ChooseKnowledgeFolder,
+                FirstKnowledgeStepState::Current,
+                Some(FirstKnowledgeCta::Recommended(
+                    RecommendedAction::AddKnowledgeFolder,
+                )),
+            ),
+            (
+                "process",
+                processing,
+                0,
+                FirstKnowledgeStage::ProcessKnowledge,
+                FirstKnowledgeStepState::Working,
+                None,
+            ),
+            (
+                "review",
+                review,
+                0,
+                FirstKnowledgeStage::ReviewKnowledge,
+                FirstKnowledgeStepState::Current,
+                Some(FirstKnowledgeCta::Recommended(
+                    RecommendedAction::ReviewPendingKnowledge,
+                )),
+            ),
+            (
+                "publish",
+                publishing,
+                0,
+                FirstKnowledgeStage::PublishReady,
+                FirstKnowledgeStepState::Working,
+                None,
+            ),
+            (
+                "search",
+                ready_input(),
+                1,
+                FirstKnowledgeStage::SearchKnowledge,
+                FirstKnowledgeStepState::Current,
+                Some(FirstKnowledgeCta::SearchKnowledge),
+            ),
+        ];
+
+        for (label, input, published, stage, state, cta) in cases {
+            let view = first_knowledge(input, published);
+            assert_eq!(current_snapshot(&view), (stage, state, cta), "{label}");
+        }
+    }
+
+    #[test]
+    fn first_knowledge_recovers_to_the_earliest_failed_core_stage() {
+        let mut ai = ready_input();
+        ai.models_ready = false;
+        ai.model_issue_count = 1;
+        let mut collection = ready_input();
+        collection.collection_issue_count = 1;
+        let mut withdrawn = ready_input();
+        withdrawn.pending_review_count = 1;
+        let mut wiki = ready_input();
+        wiki.wiki_issue_count = 1;
+
+        let cases = [
+            (
+                "ai",
+                ai,
+                1,
+                FirstKnowledgeStage::PrepareLocalAi,
+                RecommendedAction::ResolveLocalAiIssue,
+            ),
+            (
+                "collection",
+                collection,
+                0,
+                FirstKnowledgeStage::ProcessKnowledge,
+                RecommendedAction::ResolveCollectionIssue,
+            ),
+            (
+                "withdrawn",
+                withdrawn,
+                0,
+                FirstKnowledgeStage::ReviewKnowledge,
+                RecommendedAction::ReviewPendingKnowledge,
+            ),
+            (
+                "wiki",
+                wiki,
+                1,
+                FirstKnowledgeStage::PublishReady,
+                RecommendedAction::InspectWikiHealth,
+            ),
+        ];
+
+        for (label, input, published, stage, action) in cases {
+            let view = first_knowledge(input, published);
+            let snapshot = current_snapshot(&view);
+            assert_eq!(
+                (snapshot.0, snapshot.2),
+                (stage, Some(FirstKnowledgeCta::Recommended(action))),
+                "{label}"
+            );
+        }
+    }
+
+    #[test]
+    fn first_knowledge_keeps_optional_setup_out_of_the_completed_local_journey() {
+        let mut input = ready_input();
+        input.connectivity.preference = ConnectivityPreference::Undecided;
+        input.connectivity.listener = ListenerState::Stopped;
+        input.connectivity.discovery = DiscoveryState::Disabled;
+
+        let view = first_knowledge(input, 1);
+
+        assert_eq!(
+            current_snapshot(&view),
+            (
+                FirstKnowledgeStage::SearchKnowledge,
+                FirstKnowledgeStepState::Current,
+                Some(FirstKnowledgeCta::SearchKnowledge),
+            )
+        );
+        assert_eq!(
+            [
+                FirstKnowledgeStage::PrepareLocalAi,
+                FirstKnowledgeStage::ChooseKnowledgeFolder,
+                FirstKnowledgeStage::ProcessKnowledge,
+                FirstKnowledgeStage::ReviewKnowledge,
+                FirstKnowledgeStage::PublishReady,
+                FirstKnowledgeStage::SearchKnowledge,
+            ]
+            .map(|stage| view.stage_state(stage)),
+            [
+                FirstKnowledgeStepState::Complete,
+                FirstKnowledgeStepState::Complete,
+                FirstKnowledgeStepState::Complete,
+                FirstKnowledgeStepState::Complete,
+                FirstKnowledgeStepState::Complete,
+                FirstKnowledgeStepState::Current,
+            ]
+        );
     }
 
     #[test]

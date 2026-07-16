@@ -16,7 +16,7 @@ use airwiki_core::{
     KnowledgeBundleView, KnowledgePageId, KnowledgePageView, WikiRepairError,
 };
 use airwiki_inference::{
-    AssetManager, E5_FILES, E5_REVISION, HardwareReport, InstallEvent, InstallOutcome,
+    AssetManager, E5_FILES, E5_REVISION, HardwareReport, InstallEvent, InstallOutcome, InstallPlan,
     LLAMA_CPP_BUILD, MMARCO_COMMON_FILES, MMARCO_REVISION, ModelDecision, ModelProfile,
     ModelSelection, diagnose_hardware, install_failure_is_transient, select_model,
     selection_for_model,
@@ -78,6 +78,14 @@ pub struct ReviewItemView {
     pub source_name: String,
     pub collection_name: String,
     pub draft: EnrichmentDraft,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SourceIssueView {
+    pub collection_id: Uuid,
+    pub source_name: String,
+    pub collection_name: String,
+    pub code: airwiki_core::SourceIssueCode,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -359,6 +367,7 @@ pub enum WorkerEvent {
         mcp_url: String,
         collections: Vec<CollectionView>,
         reviews: Vec<ReviewItemView>,
+        source_issues: Vec<SourceIssueView>,
     },
     Hardware(HardwareReport),
     ModelState(ModelStateView),
@@ -414,6 +423,7 @@ pub enum WorkerEvent {
         state: Option<CollectionScanState>,
     },
     Reviews(Vec<ReviewItemView>),
+    SourceIssues(Vec<SourceIssueView>),
     ReviewReanalysis {
         concept_id: Uuid,
         running: bool,
@@ -723,6 +733,10 @@ fn model_state_request_is_current(state_sequence: u64, next_sequence: u64) -> bo
     next_sequence == state_sequence.wrapping_add(1)
 }
 
+fn should_schedule_initial_model_state(config: &DesktopConfig) -> bool {
+    config.active_selection.is_none() && config.pending_selection.is_none()
+}
+
 #[derive(Debug, Default)]
 struct WatcherSetup {
     started: Vec<Uuid>,
@@ -853,6 +867,7 @@ async fn run_worker(
             mcp_url: "http://127.0.0.1:43123/mcp".to_owned(),
             collections: Vec::new(),
             reviews: Vec::new(),
+            source_issues: Vec::new(),
         },
     );
 
@@ -937,7 +952,14 @@ async fn run_worker(
             return;
         }
     };
-    send_model_state(&events, &asset_manager, &desktop_config, &recommendation);
+    // A fresh installation has no trusted assets to activate, so its install plan can be
+    // prepared immediately while storage, identity and MCP finish starting. Existing installs
+    // still wait for verification and reuse that exact result instead of hashing immutable
+    // assets twice.
+    let initial_model_state_scheduled = should_schedule_initial_model_state(&desktop_config);
+    if initial_model_state_scheduled {
+        send_model_state(&events, &asset_manager, &desktop_config, &recommendation);
+    }
     // Storage, MCP and local search must be available even when Windows cannot
     // safely expose a LAN listener. The optional runtime is started only after
     // the platform diagnostic has proved its prerequisites.
@@ -1057,6 +1079,10 @@ async fn run_worker(
     let mut model_lifecycle = ModelLifecycle::Verifying;
     let mut queued_install = false;
     let mut enabling_model_id: Option<String> = None;
+    // A successful verification or installation is also sufficient evidence
+    // for the model-state view. Keep that one-shot result until activation
+    // settles instead of hashing the same immutable assets a second time.
+    let mut verified_model_plan: Option<InstallPlan> = None;
     let mut attempted_startup_fallback = false;
     let pending_selection = desktop_config
         .pending_selection
@@ -1125,6 +1151,9 @@ async fn run_worker(
             ),
         );
         send(&events, WorkerEvent::ModelsMissing);
+        if !initial_model_state_scheduled {
+            send_model_state(&events, &asset_manager, &desktop_config, &recommendation);
+        }
     }
 
     'running: loop {
@@ -1798,6 +1827,7 @@ async fn run_worker(
                     {
                         match result {
                             Ok(outcome) => {
+                                verified_model_plan = Some(outcome.verified_install_plan());
                                 enabling_model_id = Some(outcome.selection.model_id.to_owned());
                                 model_lifecycle = ModelLifecycle::Enabling;
                                 spawn_model_enable(
@@ -1892,12 +1922,14 @@ async fn run_worker(
                                     ),
                                 );
                                 send(&events, WorkerEvent::ModelsMissing);
-                                send_model_state(
-                                    &events,
-                                    &asset_manager,
-                                    &desktop_config,
-                                    &recommendation,
-                                );
+                                if !initial_model_state_scheduled {
+                                    send_model_state(
+                                        &events,
+                                        &asset_manager,
+                                        &desktop_config,
+                                        &recommendation,
+                                    );
+                                }
                             }
                         }
                     }
@@ -1911,6 +1943,7 @@ async fn run_worker(
                         send(&events, WorkerEvent::InstallStopped);
                         match result {
                             Ok(outcome) => {
+                                let verified_plan = outcome.verified_install_plan();
                                 let has_different_active = should_stage_for_restart(
                                     services.models_ready(),
                                     desktop_config.active_selection.as_deref(),
@@ -1940,13 +1973,15 @@ async fn run_worker(
                                             )),
                                         );
                                     }
-                                    send_model_state(
+                                    send_model_state_with_known_plan(
                                         &events,
                                         &asset_manager,
                                         &desktop_config,
                                         &recommendation,
+                                        Some(verified_plan),
                                     );
                                 } else {
+                                    verified_model_plan = Some(verified_plan);
                                     enabling_model_id =
                                         Some(outcome.selection.model_id.to_owned());
                                     model_lifecycle = ModelLifecycle::Enabling;
@@ -2028,11 +2063,12 @@ async fn run_worker(
                                             outcome.selection.manifest.display_name
                                         )),
                                     );
-                                    send_model_state(
+                                    send_model_state_with_known_plan(
                                         &events,
                                         &asset_manager,
                                         &desktop_config,
                                         &recommendation,
+                                        Some(outcome.verified_install_plan()),
                                     );
                                 } else {
                                     desktop_config.pending_selection = previous_pending;
@@ -2320,7 +2356,7 @@ async fn run_worker(
                                     );
                                 }
                                 watcher_quarantined.remove(&collection_id);
-                                report_ingest_outcomes(collection_id, &outcomes, &events);
+                                report_ingest_outcomes(&outcomes, &events);
                                 successful_manual_summary =
                                     Some(manual_rescan_summary(&outcomes));
                                 spawn_wiki_maintenance(
@@ -2858,11 +2894,12 @@ async fn run_worker(
                                         )),
                                     );
                                 }
-                                send_model_state(
+                                send_model_state_with_known_plan(
                                     &events,
                                     &asset_manager,
                                     &desktop_config,
                                     &recommendation,
+                                    verified_model_plan.take(),
                                 );
                                 if should_probe_profile_activation(
                                     &desktop_config,
@@ -2941,11 +2978,12 @@ async fn run_worker(
                                     model_lifecycle = ModelLifecycle::Missing;
                                     send(&events, WorkerEvent::ModelsMissing);
                                 }
-                                send_model_state(
+                                send_model_state_with_known_plan(
                                     &events,
                                     &asset_manager,
                                     &desktop_config,
                                     &recommendation,
+                                    verified_model_plan.take(),
                                 );
                             }
                         }
@@ -3083,17 +3121,22 @@ async fn run_worker(
 }
 
 fn send_ready(services: &DesktopServices, events: &Sender<WorkerEvent>) {
-    match (services.collection_views(), services.review_views()) {
-        (Ok(collections), Ok(reviews)) => send(
+    match (
+        services.collection_views(),
+        services.review_views(),
+        services.source_issue_views(),
+    ) {
+        (Ok(collections), Ok(reviews), Ok(source_issues)) => send(
             events,
             WorkerEvent::Ready {
                 node_id: services.node_id().to_owned(),
                 mcp_url: services.mcp_endpoint().to_owned(),
                 collections,
                 reviews,
+                source_issues,
             },
         ),
-        (Err(error), _) | (_, Err(error)) => send(
+        (Err(error), _, _) | (_, Err(error), _) | (_, _, Err(error)) => send(
             events,
             WorkerEvent::Error(format!("No se pudo cargar el estado local: {error:#}")),
         ),
@@ -3523,11 +3566,22 @@ fn send_model_state(
     config: &DesktopConfig,
     decision: &ModelDecision,
 ) {
+    send_model_state_with_known_plan(events, manager, config, decision, None);
+}
+
+fn send_model_state_with_known_plan(
+    events: &Sender<WorkerEvent>,
+    manager: &AssetManager,
+    config: &DesktopConfig,
+    decision: &ModelDecision,
+    known_plan: Option<InstallPlan>,
+) {
     let state_sequence = MODEL_STATE_SEQUENCE.fetch_add(1, Ordering::SeqCst);
     let events = events.clone();
     let manager = manager.clone();
     let config = config.clone();
     let decision = decision.clone();
+    let known_plan = matching_known_install_plan(known_plan, &decision);
     tokio::spawn(async move {
         // Snapshot verification can hash several GiB. Serialize it so rapid profile changes
         // discard queued stale requests instead of starting redundant filesystem work.
@@ -3545,7 +3599,11 @@ fn send_model_state(
         let mut fits_available_disk = false;
         let mut recommended_assets_installed = false;
         if let Some(selection) = decision.selection.as_ref() {
-            match manager.build_install_plan_async(selection).await {
+            let plan = match known_plan {
+                Some(plan) => Ok(plan),
+                None => manager.build_install_plan_async(selection).await,
+            };
+            match plan {
                 Ok(plan) => {
                     recommended_assets_installed = plan.artifact_ids.is_empty();
                     download_bytes = plan.download_bytes;
@@ -3597,6 +3655,17 @@ fn send_model_state(
     });
 }
 
+fn matching_known_install_plan(
+    known_plan: Option<InstallPlan>,
+    decision: &ModelDecision,
+) -> Option<InstallPlan> {
+    let recommended = decision
+        .selection
+        .as_ref()
+        .map(|selection| selection.model_id)?;
+    known_plan.filter(|plan| plan.selection.model_id == recommended)
+}
+
 fn refresh_content_views(services: &DesktopServices, events: &Sender<WorkerEvent>) {
     match services.collection_views() {
         Ok(collections) => send(events, WorkerEvent::Collections(collections)),
@@ -3612,6 +3681,15 @@ fn refresh_content_views(services: &DesktopServices, events: &Sender<WorkerEvent
         Err(error) => send(
             events,
             WorkerEvent::Error(format!("No se pudo refrescar la revisión: {error:#}")),
+        ),
+    }
+    match services.source_issue_views() {
+        Ok(issues) => send(events, WorkerEvent::SourceIssues(issues)),
+        Err(error) => send(
+            events,
+            WorkerEvent::Error(format!(
+                "No se pudieron refrescar los archivos pendientes: {error:#}"
+            )),
         ),
     }
 }
@@ -4226,44 +4304,16 @@ fn clear_manual_rescan(manual_rescans: &mut HashSet<Uuid>, collection_id: Uuid) 
     manual_rescans.remove(&collection_id);
 }
 
-fn report_ingest_outcomes(
-    collection_id: Uuid,
-    outcomes: &[IngestOutcome],
-    events: &Sender<WorkerEvent>,
-) {
-    let mut failed = 0_usize;
+fn report_ingest_outcomes(outcomes: &[IngestOutcome], events: &Sender<WorkerEvent>) {
     let mut awaiting_review = 0_usize;
     for outcome in outcomes {
         match outcome {
-            IngestOutcome::Failed { path, error, .. } => {
-                failed += 1;
-                if failed <= 5 {
-                    let name = path
-                        .file_name()
-                        .and_then(|value| value.to_str())
-                        .unwrap_or("documento");
-                    send(
-                        events,
-                        WorkerEvent::Error(format!(
-                            "La colección {collection_id} no pudo procesar {name}: {error}"
-                        )),
-                    );
-                }
-            }
+            IngestOutcome::Failed { .. } => {}
             IngestOutcome::NeedsReview { .. } => awaiting_review += 1,
             IngestOutcome::Unchanged { .. }
             | IngestOutcome::Renamed { .. }
             | IngestOutcome::Deleted { .. } => {}
         }
-    }
-    if failed > 5 {
-        send(
-            events,
-            WorkerEvent::Error(format!(
-                "La colección {collection_id} tuvo {} errores adicionales",
-                failed - 5
-            )),
-        );
     }
     if awaiting_review > 0 {
         send(
@@ -4658,6 +4708,25 @@ mod tests {
     }
 
     #[test]
+    fn only_fresh_model_config_schedules_state_before_service_startup() {
+        assert!(should_schedule_initial_model_state(
+            &DesktopConfig::default()
+        ));
+
+        let active = DesktopConfig {
+            active_selection: Some("qwen3-1.7b-q8".into()),
+            ..DesktopConfig::default()
+        };
+        assert!(!should_schedule_initial_model_state(&active));
+
+        let pending = DesktopConfig {
+            pending_selection: Some("gemma-4-e4b-q4".into()),
+            ..DesktopConfig::default()
+        };
+        assert!(!should_schedule_initial_model_state(&pending));
+    }
+
+    #[test]
     fn mcp_activity_is_recent_only_inside_the_diagnostic_window() {
         let now = SystemTime::UNIX_EPOCH + Duration::from_secs(1_000);
 
@@ -4868,6 +4937,7 @@ mod tests {
             IngestOutcome::Failed {
                 source_document_id: Some(source),
                 path: PathBuf::from("private-name.pdf"),
+                code: airwiki_core::SourceIssueCode::ProcessingFailed,
                 error: "private failure".into(),
             },
         ];
@@ -4879,6 +4949,21 @@ mod tests {
         );
         assert!(!summary.contains("private-name"));
         assert!(!summary.contains("private failure"));
+    }
+
+    #[test]
+    fn ingest_failure_is_presented_by_the_typed_issue_list_not_a_raw_notice() {
+        let outcomes = vec![IngestOutcome::Failed {
+            source_document_id: None,
+            path: PathBuf::from("/private/customer/secret-report.pdf"),
+            code: airwiki_core::SourceIssueCode::InvalidPdf,
+            error: "parser failed on customer secret".into(),
+        }];
+        let (sender, receiver) = std::sync::mpsc::channel();
+
+        report_ingest_outcomes(&outcomes, &sender);
+
+        assert!(receiver.try_recv().is_err());
     }
 
     #[test]
@@ -5147,6 +5232,73 @@ mod tests {
         config.pending_selection = None;
         config.active_selection = Some(selection.model_id.into());
         assert!(!should_probe_profile_activation(&config, &decision));
+    }
+
+    #[test]
+    fn model_state_reuses_only_a_verified_plan_for_the_recommendation() {
+        let recommendation = ModelDecision {
+            selection: selection_for_model(ModelProfile::Automatic, "gemma-4-e4b-q4", "test"),
+            issues: Vec::new(),
+        };
+        let matching = recommendation.selection.as_ref().unwrap().clone();
+        let matching_plan = InstallPlan {
+            selection: matching,
+            artifact_ids: Vec::new(),
+            download_bytes: 0,
+            required_free_bytes: airwiki_inference::INSTALL_HEADROOM_BYTES,
+            fits_available_disk: true,
+        };
+
+        assert!(matching_known_install_plan(Some(matching_plan), &recommendation).is_some());
+
+        let different_plan = InstallPlan {
+            selection: ModelSelection::legacy_qwen(),
+            artifact_ids: Vec::new(),
+            download_bytes: 0,
+            required_free_bytes: airwiki_inference::INSTALL_HEADROOM_BYTES,
+            fits_available_disk: true,
+        };
+        assert!(matching_known_install_plan(Some(different_plan), &recommendation).is_none());
+    }
+
+    #[tokio::test]
+    async fn verified_model_state_does_not_reinspect_artifact_paths() {
+        let temp = tempfile::tempdir().unwrap();
+        let manager = AssetManager::new(temp.path())
+            .unwrap()
+            .with_bundled_runtime(Some(temp.path().join("missing-llama-server")));
+        let recommendation = ModelDecision {
+            selection: selection_for_model(ModelProfile::Automatic, "gemma-4-e4b-q4", "test"),
+            issues: Vec::new(),
+        };
+        let plan = InstallPlan {
+            selection: recommendation.selection.as_ref().unwrap().clone(),
+            artifact_ids: Vec::new(),
+            download_bytes: 0,
+            required_free_bytes: airwiki_inference::INSTALL_HEADROOM_BYTES,
+            fits_available_disk: true,
+        };
+        let (events, receiver) = mpsc::channel();
+
+        send_model_state_with_known_plan(
+            &events,
+            &manager,
+            &DesktopConfig::default(),
+            &recommendation,
+            Some(plan),
+        );
+
+        let event = tokio::task::spawn_blocking(move || {
+            receiver.recv_timeout(Duration::from_secs(2)).unwrap()
+        })
+        .await
+        .unwrap();
+        let WorkerEvent::ModelState(state) = event else {
+            panic!("expected a model-state event");
+        };
+        assert!(state.recommended_assets_installed);
+        assert!(state.issues.is_empty());
+        assert_eq!(state.download_bytes, 0);
     }
 
     #[test]

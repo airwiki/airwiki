@@ -24,8 +24,8 @@ use airwiki_core::{
     GuidedRepairPreview, GuidedRepairResult, HybridSearchEngine, IngestOutcome, IngestPipeline,
     KnowledgeBundleState, KnowledgeBundleView, KnowledgePageId, KnowledgePageView,
     LlamaServerProvider, OkfBundleInspector, OkfPublicationMaterializer, PinnedE5Snapshot,
-    PinnedMmarcoRerankerSnapshot, RelevanceInput, ReviewEdits, Tokenizer, WikiRepairExecutor,
-    WikiRepairPlanner,
+    PinnedMmarcoRerankerSnapshot, RelevanceInput, ReviewEdits, SourceIssueCode, Tokenizer,
+    WikiRepairExecutor, WikiRepairPlanner,
 };
 use airwiki_inference::{
     GenerationSettings, InstallOutcome, LlamaSupervisor, ModelSelection, SupervisorConfig,
@@ -55,7 +55,10 @@ use uuid::Uuid;
 use crate::{
     manual_lan_route,
     paths::AppPaths,
-    worker::{CollectionView, PeerActivityState, PeerTrustState, PeerView, ReviewItemView},
+    worker::{
+        CollectionView, PeerActivityState, PeerTrustState, PeerView, ReviewItemView,
+        SourceIssueView,
+    },
 };
 
 const KEYRING_SERVICE: &str = "io.github.airwiki.AirWiki";
@@ -517,6 +520,12 @@ struct LivePeer {
     sas_words: Option<[String; 6]>,
 }
 
+#[derive(Debug, Clone)]
+struct TransientSourceIssue {
+    path: PathBuf,
+    code: SourceIssueCode,
+}
+
 /// Side effects useful to the worker after applying a network event.
 #[derive(Debug, Default, Clone)]
 pub struct NetworkEventEffect {
@@ -542,6 +551,7 @@ pub struct DesktopServices {
     models: RwLock<Option<ModelServices>>,
     live_peers: RwLock<HashMap<PeerId, LivePeer>>,
     startup_preflight_blocked: RwLock<HashSet<Uuid>>,
+    transient_source_issues: RwLock<HashMap<Uuid, Vec<TransientSourceIssue>>>,
 }
 
 impl DesktopServices {
@@ -633,6 +643,7 @@ impl DesktopServices {
             models: RwLock::new(None),
             live_peers: RwLock::new(HashMap::new()),
             startup_preflight_blocked: RwLock::new(HashSet::new()),
+            transient_source_issues: RwLock::new(HashMap::new()),
         })
     }
 
@@ -959,6 +970,9 @@ impl DesktopServices {
             .context("la colección ya no existe")?;
         self.database
             .update_collection_source_folder(collection_id, &source_folder)?;
+        if let Ok(mut issues) = write_lock(&self.transient_source_issues, "source issue snapshot") {
+            issues.remove(&collection_id);
+        }
         self.audit(
             "collection_source_relinked",
             "collection",
@@ -1006,7 +1020,9 @@ impl DesktopServices {
     }
 
     pub async fn scan_collection(&self, collection_id: Uuid) -> Result<Vec<IngestOutcome>> {
-        self.pipeline()?.scan_collection(collection_id).await
+        let outcomes = self.pipeline()?.scan_collection(collection_id).await?;
+        self.replace_transient_source_issues(collection_id, &outcomes);
+        Ok(outcomes)
     }
 
     /// Reconciles filesystem hashes and immediately withdraws stale published
@@ -1445,12 +1461,7 @@ impl DesktopServices {
                     .database
                     .collection(concept.collection_id)?
                     .context("un concepto en revisión perdió su colección")?;
-                let source_name = source
-                    .source_path
-                    .file_name()
-                    .and_then(|name| name.to_str())
-                    .unwrap_or("Documento")
-                    .to_owned();
+                let source_name = source_display_name(&source.source_path);
                 Ok(ReviewItemView {
                     concept_id: concept.id,
                     source_name,
@@ -1459,6 +1470,70 @@ impl DesktopServices {
                 })
             })
             .collect()
+    }
+
+    pub fn source_issue_views(&self) -> Result<Vec<SourceIssueView>> {
+        let collections = self
+            .database
+            .list_collections()?
+            .into_iter()
+            .map(|collection| (collection.id, collection.name))
+            .collect::<HashMap<_, _>>();
+        let mut issues = HashMap::<(Uuid, PathBuf), SourceIssueCode>::new();
+        for collection_id in collections.keys().copied() {
+            for source in self.database.list_sources(collection_id)? {
+                if source.status != DocumentStatus::Failed {
+                    continue;
+                }
+                let code = source.last_error.as_deref().map_or(
+                    SourceIssueCode::ProcessingFailed,
+                    SourceIssueCode::from_error,
+                );
+                if code.is_user_visible() {
+                    issues.insert((collection_id, source.source_path), code);
+                }
+            }
+        }
+        for (collection_id, transient) in
+            read_lock(&self.transient_source_issues, "source issue snapshot")?.iter()
+        {
+            for issue in transient {
+                issues.insert((*collection_id, issue.path.clone()), issue.code);
+            }
+        }
+
+        let mut views = issues
+            .into_iter()
+            .filter_map(|((collection_id, path), code)| {
+                let collection_name = collections.get(&collection_id)?;
+                Some(source_issue_view(
+                    collection_id,
+                    collection_name,
+                    &path,
+                    code,
+                ))
+            })
+            .collect::<Vec<_>>();
+        views.sort_by(|left, right| {
+            left.collection_name
+                .cmp(&right.collection_name)
+                .then_with(|| left.source_name.cmp(&right.source_name))
+        });
+        Ok(views)
+    }
+
+    fn replace_transient_source_issues(&self, collection_id: Uuid, outcomes: &[IngestOutcome]) {
+        let issues = transient_source_issues_from_outcomes(outcomes);
+        match write_lock(&self.transient_source_issues, "source issue snapshot") {
+            Ok(mut snapshots) => {
+                snapshots.insert(collection_id, issues);
+            }
+            Err(error) => tracing::warn!(
+                error_kind = "source_issue_snapshot",
+                %error,
+                "source issue snapshot could not be refreshed"
+            ),
+        }
     }
 
     pub fn peer_views(&self) -> Result<Vec<PeerView>> {
@@ -1881,6 +1956,46 @@ fn touch_known_peer(database: &Database, peer: PeerId) -> Result<()> {
     Ok(())
 }
 
+fn source_display_name(path: &Path) -> String {
+    path.file_name()
+        .and_then(|name| name.to_str())
+        .filter(|name| !name.trim().is_empty())
+        .unwrap_or("Document")
+        .to_owned()
+}
+
+fn source_issue_view(
+    collection_id: Uuid,
+    collection_name: &str,
+    path: &Path,
+    code: SourceIssueCode,
+) -> SourceIssueView {
+    SourceIssueView {
+        collection_id,
+        source_name: source_display_name(path),
+        collection_name: collection_name.to_owned(),
+        code,
+    }
+}
+
+fn transient_source_issues_from_outcomes(outcomes: &[IngestOutcome]) -> Vec<TransientSourceIssue> {
+    outcomes
+        .iter()
+        .filter_map(|outcome| match outcome {
+            IngestOutcome::Failed {
+                source_document_id: None,
+                path,
+                code,
+                ..
+            } if code.is_user_visible() => Some(TransientSourceIssue {
+                path: path.clone(),
+                code: *code,
+            }),
+            _ => None,
+        })
+        .collect()
+}
+
 fn clear_pairing(peers: &RwLock<HashMap<PeerId, LivePeer>>, peer: PeerId) -> Result<()> {
     if let Some(state) = write_lock(peers, "live peer view")?.get_mut(&peer) {
         state.pairing = false;
@@ -2121,6 +2236,40 @@ mod tests {
     use super::*;
 
     struct EmptyFederatedSearch;
+
+    #[test]
+    fn source_issue_view_exposes_only_the_file_name() {
+        let view = source_issue_view(
+            Uuid::nil(),
+            "Synthetic collection",
+            Path::new("/private/customer/secret-report.pdf"),
+            SourceIssueCode::InvalidPdf,
+        );
+
+        assert_eq!(view.source_name, "secret-report.pdf");
+    }
+
+    #[test]
+    fn transient_source_issues_ignore_superseded_internal_work() {
+        let outcomes = vec![
+            IngestOutcome::Failed {
+                source_document_id: None,
+                path: PathBuf::from("too-large.pdf"),
+                code: SourceIssueCode::FileTooLarge,
+                error: "private detail".into(),
+            },
+            IngestOutcome::Failed {
+                source_document_id: None,
+                path: PathBuf::from("racing.md"),
+                code: SourceIssueCode::Superseded,
+                error: "internal race".into(),
+            },
+        ];
+
+        let issues = transient_source_issues_from_outcomes(&outcomes);
+
+        assert_eq!(issues.len(), 1);
+    }
 
     #[test]
     fn stale_network_generation_is_rejected_after_runtime_restart() {

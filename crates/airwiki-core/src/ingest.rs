@@ -64,9 +64,72 @@ pub struct FileCandidate {
     pub byte_size: u64,
 }
 
+/// Stable, content-free reason why a supported source could not enter review.
+///
+/// The detailed processing error remains local to the core for diagnostics. UI
+/// callers should render this code instead, because parser errors can include a
+/// source path or implementation detail.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum SourceIssueCode {
+    FileTooLarge,
+    Unreadable,
+    InvalidUtf8,
+    InvalidPdf,
+    EncryptedPdf,
+    TooManyPages,
+    NoTextLayer,
+    TooManyCharacters,
+    Superseded,
+    ProcessingFailed,
+}
+
+impl SourceIssueCode {
+    /// Classifies an existing local error without carrying its potentially
+    /// sensitive text across the core/UI boundary.
+    pub fn from_error(error: &str) -> Self {
+        let error = error.to_ascii_lowercase();
+        if error.contains("superseded") {
+            Self::Superseded
+        } else if error.contains("exceeds the") && error.contains("byte limit")
+            || error.contains("exceeds the configured size limit")
+        {
+            Self::FileTooLarge
+        } else if error.contains("encrypted pdf") {
+            Self::EncryptedPdf
+        } else if error.contains("no extractable text layer") {
+            Self::NoTextLayer
+        } else if error.contains("pdf has") && error.contains("pages; maximum") {
+            Self::TooManyPages
+        } else if error.contains("character limit") {
+            Self::TooManyCharacters
+        } else if error.contains("not valid utf-8") {
+            Self::InvalidUtf8
+        } else if error.contains("could not parse pdf")
+            || error.contains("could not inspect pdf metadata")
+        {
+            Self::InvalidPdf
+        } else if error.contains("could not open")
+            || error.contains("could not read")
+            || error.contains("metadata is unavailable")
+            || error.contains("traversal is incomplete")
+            || error.contains("permission denied")
+        {
+            Self::Unreadable
+        } else {
+            Self::ProcessingFailed
+        }
+    }
+
+    /// Whether the issue represents a file that needs a person's attention.
+    pub const fn is_user_visible(self) -> bool {
+        !matches!(self, Self::Superseded)
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct FileDiscoveryIssue {
     pub path: PathBuf,
+    pub code: SourceIssueCode,
     pub error: String,
 }
 
@@ -314,6 +377,7 @@ pub fn discover_files_with_issues(
                 discovery.status = FileDiscoveryStatus::Incomplete;
                 discovery.issues.push(FileDiscoveryIssue {
                     path,
+                    code: SourceIssueCode::Unreadable,
                     error: format!("source traversal is incomplete: {message}"),
                 });
                 continue;
@@ -340,6 +404,7 @@ pub fn discover_files_with_issues(
                 discovery.status = FileDiscoveryStatus::Incomplete;
                 discovery.issues.push(FileDiscoveryIssue {
                     path: entry.path().to_path_buf(),
+                    code: SourceIssueCode::Unreadable,
                     error: format!("source metadata is unavailable: {error}"),
                 });
                 continue;
@@ -349,6 +414,7 @@ pub fn discover_files_with_issues(
             tracing::warn!(byte_size, "source exceeds size limit");
             discovery.issues.push(FileDiscoveryIssue {
                 path: entry.path().to_path_buf(),
+                code: SourceIssueCode::FileTooLarge,
                 error: format!(
                     "source exceeds the {} byte limit (actual size: {byte_size} bytes)",
                     limits.max_bytes
@@ -727,8 +793,19 @@ mod tests {
         assert!(report.candidates.is_empty());
         assert_eq!(report.issues.len(), 1);
         assert_eq!(report.issues[0].path, path);
+        assert_eq!(report.issues[0].code, SourceIssueCode::FileTooLarge);
         assert!(report.issues[0].error.contains("10 byte limit"));
         assert!(report.issues[0].error.contains("11 bytes"));
+    }
+
+    #[test]
+    fn source_issue_classification_discards_sensitive_error_detail() {
+        let error = "could not parse PDF /private/secret/report.pdf";
+
+        assert_eq!(
+            SourceIssueCode::from_error(error),
+            SourceIssueCode::InvalidPdf
+        );
     }
 
     #[test]

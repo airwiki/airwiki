@@ -12,8 +12,8 @@ use uuid::Uuid;
 use crate::chunk_identity::stored_chunk_id;
 use crate::inference::{EmbeddingProvider, GenerationProvider, MAX_GENERATION_INPUT_TOKENS};
 use crate::ingest::{
-    ChunkDraft, Chunker, FileCandidate, FileDiscovery, IngestLimits, SourceFormat, Tokenizer,
-    WhitespaceTokenizer, discover_files_with_issues, extract_file, sha256_file,
+    ChunkDraft, Chunker, FileCandidate, FileDiscovery, IngestLimits, SourceFormat, SourceIssueCode,
+    Tokenizer, WhitespaceTokenizer, discover_files_with_issues, extract_file, sha256_file,
 };
 use crate::publication::OkfPublicationMaterializer;
 use crate::storage::{
@@ -88,6 +88,7 @@ pub enum IngestOutcome {
     Failed {
         source_document_id: Option<Uuid>,
         path: PathBuf,
+        code: SourceIssueCode,
         error: String,
     },
 }
@@ -291,6 +292,7 @@ impl IngestPipeline {
             .map(|issue| IngestOutcome::Failed {
                 source_document_id: None,
                 path: issue.path,
+                code: issue.code,
                 error: issue.error,
             })
             .collect::<Vec<_>>();
@@ -327,11 +329,15 @@ impl IngestPipeline {
                         pending.push(registered);
                     }
                 },
-                Err(error) => outcomes.push(IngestOutcome::Failed {
-                    source_document_id: None,
-                    path: candidate.path,
-                    error: error.to_string(),
-                }),
+                Err(error) => {
+                    let error = error.to_string();
+                    outcomes.push(IngestOutcome::Failed {
+                        source_document_id: None,
+                        path: candidate.path,
+                        code: SourceIssueCode::from_error(&error),
+                        error,
+                    });
+                }
             }
         }
 
@@ -551,6 +557,11 @@ impl IngestPipeline {
             }
             Err(error) => {
                 let message = error.to_string();
+                let code = if error.downcast_ref::<SupersededProcessing>().is_some() {
+                    SourceIssueCode::Superseded
+                } else {
+                    SourceIssueCode::from_error(&message)
+                };
                 if error.downcast_ref::<SupersededProcessing>().is_none() {
                     self.database.mark_source_failed_if_current(
                         source_document_id,
@@ -564,6 +575,7 @@ impl IngestPipeline {
                 Ok(IngestOutcome::Failed {
                     source_document_id: Some(source_document_id),
                     path: registered.candidate.path,
+                    code,
                     error: message,
                 })
             }
@@ -1156,6 +1168,7 @@ mod tests {
             [IngestOutcome::Failed {
                 source_document_id: None,
                 path: failed_path,
+                code: SourceIssueCode::FileTooLarge,
                 error,
             }] if failed_path == &path && error.contains("10 byte limit")
         ));
@@ -1413,6 +1426,7 @@ mod tests {
             candidates: Vec::new(),
             issues: vec![crate::ingest::FileDiscoveryIssue {
                 path: collection.source_folder.join("unreadable"),
+                code: SourceIssueCode::Unreadable,
                 error: "source traversal is incomplete: permission denied".into(),
             }],
             status: crate::ingest::FileDiscoveryStatus::Incomplete,

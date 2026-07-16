@@ -13,12 +13,15 @@ use airwiki_types::{
     SuggestedLink,
 };
 use eframe::egui::{self, Color32, RichText};
+use egui_extras::{Size, StripBuilder};
 use fluent_bundle::FluentArgs;
 use uuid::Uuid;
 
+mod first_knowledge;
 mod integrations;
 mod knowledge;
 
+use self::first_knowledge::JourneyStepState;
 use self::integrations::{ChatIntegrationsUi, IntegrationsUiAction};
 use self::knowledge::{KnowledgeAction, KnowledgeUi};
 
@@ -31,20 +34,23 @@ use crate::{
     },
     desktop_shell::{ClosePolicy, DesktopShell},
     i18n::{Localization, LocalizationError, UiLocale},
+    layout::ResponsiveLayout,
     model_config::{CloseBehavior, LanPreference, LocalePreference, ONBOARDING_VERSION},
     paths::AppPaths,
     readiness::{
-        ConnectivityInput, ConnectivityPreference, DiscoveryState, FirewallState, ListenerState,
-        NetworkProfile, OptionalFeatureState, ReadinessComponent, ReadinessInput, ReadinessStatus,
-        RecommendedAction, SystemPermission, derive_readiness,
+        ConnectivityInput, ConnectivityPreference, DiscoveryState, FirewallState,
+        FirstKnowledgeCta, FirstKnowledgeJourneyView, FirstKnowledgeStage, FirstKnowledgeStepState,
+        ListenerState, NetworkProfile, OptionalFeatureState, ReadinessComponent, ReadinessInput,
+        ReadinessStatus, RecommendedAction, SystemPermission, derive_first_knowledge_journey,
+        derive_readiness,
     },
     updater::{UpdateIssueCode, UpdaterDisabledReason, UpdaterStatus},
     worker::{
         CollectionScanState, CollectionView, ConnectivityIssueCode, DesktopPreferencesUpdate,
         DesktopPreferencesView, FirewallOperationView, LanDiscoveryView, LanListenerView,
         ModelStateView, PERIODIC_RECONCILE_INTERVAL, PeerActivityState, PeerTrustState, PeerView,
-        ReviewItemView, SearchCoverageView, UpdaterWorkerView, WikiHealthSummaryView,
-        WorkerCommand, WorkerEvent, WorkerHandle,
+        ReviewItemView, SearchCoverageView, SourceIssueView, UpdaterWorkerView,
+        WikiHealthSummaryView, WorkerCommand, WorkerEvent, WorkerHandle,
     },
 };
 
@@ -66,10 +72,9 @@ enum OnboardingPage {
     Welcome,
     Model,
     Collection,
-    Lan,
-    Background,
-    Chat,
-    Complete,
+    Processing,
+    Review,
+    Search,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -109,11 +114,6 @@ pub struct AirWikiApp {
     external_ai_confirmation: Option<Uuid>,
     onboarding_page: Option<OnboardingPage>,
     onboarding_finishing: bool,
-    onboarding_background: bool,
-    onboarding_autostart: bool,
-    onboarding_updates: bool,
-    onboarding_lan: LanPreference,
-    pending_onboarding_autostart: Option<bool>,
     paths: AppPaths,
     worker: WorkerHandle,
     screen: Screen,
@@ -130,6 +130,7 @@ pub struct AirWikiApp {
     collections: Vec<CollectionView>,
     collection_scans: HashMap<Uuid, CollectionScanState>,
     reviews: Vec<ReviewItemView>,
+    source_issues: Vec<SourceIssueView>,
     peers: Vec<PeerView>,
     search_question: String,
     search_top_k: u8,
@@ -178,11 +179,6 @@ impl AirWikiApp {
             external_ai_confirmation: None,
             onboarding_page: None,
             onboarding_finishing: false,
-            onboarding_background: true,
-            onboarding_autostart: true,
-            onboarding_updates: true,
-            onboarding_lan: LanPreference::Undecided,
-            pending_onboarding_autostart: None,
             worker: WorkerHandle::spawn(paths.clone()),
             paths,
             screen: Screen::Setup,
@@ -199,6 +195,7 @@ impl AirWikiApp {
             collections: Vec::new(),
             collection_scans: HashMap::new(),
             reviews: Vec::new(),
+            source_issues: Vec::new(),
             peers: Vec::new(),
             search_question: String::new(),
             search_top_k: DEFAULT_TOP_K,
@@ -225,11 +222,15 @@ impl AirWikiApp {
                     mcp_url,
                     collections,
                     reviews,
+                    source_issues,
                 } => {
                     self.node_id = node_id;
                     self.mcp_url = mcp_url;
                     self.collections = collections;
+                    self.selected_review =
+                        selected_review_after_refresh(self.selected_review, &reviews);
                     self.reviews = reviews;
+                    self.source_issues = source_issues;
                     self.refresh_integrations_if_needed();
                 }
                 WorkerEvent::Hardware(report) => self.hardware = Some(report),
@@ -265,18 +266,12 @@ impl AirWikiApp {
                             self.localization
                                 .set_locale(effective_locale(preferences.locale));
                             self.preferences = Some(preferences);
-                            if self.onboarding_lan == LanPreference::Undecided {
-                                self.onboarding_lan = preferences.lan_preference;
-                            }
                             if preferences
                                 .completed_onboarding_version
                                 .is_some_and(|version| version >= ONBOARDING_VERSION)
                             {
                                 self.onboarding_page = None;
                                 self.onboarding_finishing = false;
-                                if let Some(enabled) = self.pending_onboarding_autostart.take() {
-                                    self.request_autostart(enabled);
-                                }
                             } else if self.onboarding_page.is_none() && !self.onboarding_finishing {
                                 self.onboarding_page = Some(OnboardingPage::Welcome);
                             }
@@ -403,7 +398,7 @@ impl AirWikiApp {
                     self.install_label = None;
                     self.install_progress = 1.0;
                     self.notices
-                        .push_back((false, "Modelos verificados e instalados".into()));
+                        .push_back((false, self.localization.text("models-installed-notice")));
                 }
                 WorkerEvent::RestartRequired(message) => {
                     self.restart_required = Some(message.clone());
@@ -450,7 +445,14 @@ impl AirWikiApp {
                         }
                     }
                 }
-                WorkerEvent::Reviews(reviews) => self.reviews = reviews,
+                WorkerEvent::Reviews(reviews) => {
+                    self.selected_review =
+                        selected_review_after_refresh(self.selected_review, &reviews);
+                    self.reviews = reviews;
+                }
+                WorkerEvent::SourceIssues(source_issues) => {
+                    self.source_issues = source_issues;
+                }
                 WorkerEvent::ReviewReanalysis {
                     concept_id,
                     running,
@@ -564,7 +566,7 @@ impl AirWikiApp {
         let review = format!(
             "{}  ({})",
             self.localization.text("nav-review"),
-            self.reviews.len()
+            self.reviews.len().saturating_add(self.source_issues.len())
         );
         let wiki = self.localization.text("nav-wiki");
         let search = self.localization.text("nav-search");
@@ -613,275 +615,365 @@ impl AirWikiApp {
             &self.localization.text("models-title"),
             &self.localization.text("models-subtitle"),
         );
-        if let Some(report) = &self.hardware {
-            egui::Frame::group(ui.style()).show(ui, |ui| {
-                ui.heading(self.localization.text("models-diagnostics"));
-                egui::Grid::new("diagnostic_grid")
-                    .num_columns(2)
-                    .spacing([24.0, 8.0])
-                    .show(ui, |ui| {
-                        ui.label(self.localization.text("models-platform"));
-                        ui.label(format!("{} {}", report.os, report.architecture));
-                        ui.end_row();
-                        ui.label(self.localization.text("models-memory"));
+        let details_height = ui.available_height().max(0.0);
+        egui::ScrollArea::vertical()
+            .id_salt("models_configuration")
+            .max_height(details_height)
+            .auto_shrink([false; 2])
+            .show(ui, |ui| {
+                if let Some(report) = &self.hardware {
+                    egui::Frame::group(ui.style()).show(ui, |ui| {
+                        ui.heading(self.localization.text("models-diagnostics"));
+                        egui::Grid::new("diagnostic_grid")
+                            .num_columns(2)
+                            .spacing([24.0, 8.0])
+                            .show(ui, |ui| {
+                                ui.label(self.localization.text("models-platform"));
+                                ui.label(format!("{} {}", report.os, report.architecture));
+                                ui.end_row();
+                                ui.label(self.localization.text("models-memory"));
+                                let mut arguments = FluentArgs::new();
+                                arguments.set(
+                                    "total",
+                                    format!(
+                                        "{:.1}",
+                                        report.total_memory_bytes as f64 / 1024_f64.powi(3)
+                                    ),
+                                );
+                                arguments.set(
+                                    "available",
+                                    format!(
+                                        "{:.1}",
+                                        report.available_memory_bytes as f64 / 1024_f64.powi(3)
+                                    ),
+                                );
+                                ui.label(
+                                    self.localization
+                                        .text_with("models-memory-value", Some(&arguments)),
+                                );
+                                ui.end_row();
+                                ui.label(self.localization.text("models-free-space"));
+                                ui.label(format!(
+                                    "{:.1} GiB",
+                                    report.available_disk_bytes as f64 / 1024_f64.powi(3)
+                                ));
+                                ui.end_row();
+                                ui.label(self.localization.text("models-avx2"));
+                                ui.label(if report.avx2 {
+                                    self.localization.text("models-available")
+                                } else if report.os == "windows" {
+                                    self.localization.text("models-unavailable")
+                                } else {
+                                    self.localization.text("models-not-required")
+                                });
+                                ui.end_row();
+                                ui.label(self.localization.text("models-acceleration"));
+                                ui.label(if report.metal_available {
+                                    "Metal".to_owned()
+                                } else if report.os == "windows" {
+                                    self.localization.text("models-cpu")
+                                } else {
+                                    self.localization.text("models-unavailable")
+                                });
+                                ui.end_row();
+                            });
+                        for issue in &report.issues {
+                            ui.colored_label(Color32::from_rgb(210, 75, 70), issue);
+                        }
+                    });
+                } else {
+                    ui.spinner();
+                    ui.label(self.localization.text("models-diagnosing"));
+                }
+                ui.add_space(14.0);
+                egui::Frame::group(ui.style()).show(ui, |ui| {
+                    ui.heading(self.localization.text("models-local-title"));
+                    ui.label(self.localization.text("models-local-body"));
+                    if let Some(state) = self.model_state.clone() {
+                        ui.horizontal(|ui| {
+                            for profile in [
+                                ModelProfile::Automatic,
+                                ModelProfile::Efficient,
+                                ModelProfile::Quality,
+                            ] {
+                                let label = profile_label(&self.localization, profile);
+                                if ui
+                                    .selectable_label(state.profile == profile, label)
+                                    .clicked()
+                                    && state.profile != profile
+                                {
+                                    self.accepted_licenses = false;
+                                    self.worker.send(WorkerCommand::SetModelProfile(profile));
+                                }
+                            }
+                        });
+                        ui.add_space(6.0);
+                        if let Some(display_name) = &state.recommended_display_name {
+                            ui.heading(RichText::new(display_name).size(18.0));
+                        }
+                        if let Some(reason) = &state.recommendation_reason {
+                            ui.label(reason);
+                        }
+                        if state.degraded {
+                            ui.colored_label(
+                                Color32::from_rgb(210, 145, 50),
+                                self.localization.text("models-profile-reduced"),
+                            );
+                        }
+                        if let Some(active) = &state.active_model_id {
+                            let mut arguments = FluentArgs::new();
+                            arguments.set("model", active.as_str());
+                            ui.label(
+                                self.localization
+                                    .text_with("models-active", Some(&arguments)),
+                            );
+                        }
+                        if let Some(pending) = &state.pending_model_id {
+                            let mut arguments = FluentArgs::new();
+                            arguments.set("model", pending.as_str());
+                            ui.label(
+                                self.localization
+                                    .text_with("models-pending-restart", Some(&arguments)),
+                            );
+                        }
                         let mut arguments = FluentArgs::new();
                         arguments.set(
-                            "total",
-                            format!("{:.1}", report.total_memory_bytes as f64 / 1024_f64.powi(3)),
+                            "download",
+                            format!("{:.2}", state.download_bytes as f64 / 1024_f64.powi(3)),
                         );
                         arguments.set(
-                            "available",
-                            format!(
-                                "{:.1}",
-                                report.available_memory_bytes as f64 / 1024_f64.powi(3)
-                            ),
+                            "required",
+                            format!("{:.2}", state.required_free_bytes as f64 / 1024_f64.powi(3)),
                         );
                         ui.label(
                             self.localization
-                                .text_with("models-memory-value", Some(&arguments)),
+                                .text_with("models-download-size", Some(&arguments)),
                         );
-                        ui.end_row();
-                        ui.label(self.localization.text("models-free-space"));
-                        ui.label(format!(
-                            "{:.1} GiB",
-                            report.available_disk_bytes as f64 / 1024_f64.powi(3)
-                        ));
-                        ui.end_row();
-                        ui.label("AVX2");
-                        ui.label(if report.avx2 {
-                            "Disponible"
-                        } else if report.os == "windows" {
-                            "No disponible"
-                        } else {
-                            "No requerido"
-                        });
-                        ui.end_row();
-                        ui.label(self.localization.text("models-acceleration"));
-                        ui.label(if report.metal_available {
-                            "Metal"
-                        } else if report.os == "windows" {
-                            "CPU"
-                        } else {
-                            "No disponible"
-                        });
-                        ui.end_row();
-                    });
-                for issue in &report.issues {
-                    ui.colored_label(Color32::from_rgb(210, 75, 70), issue);
-                }
-            });
-        } else {
-            ui.spinner();
-            ui.label(self.localization.text("models-diagnosing"));
-        }
-        ui.add_space(14.0);
-        egui::Frame::group(ui.style()).show(ui, |ui| {
-            ui.heading(self.localization.text("models-local-title"));
-            ui.label(self.localization.text("models-local-body"));
-            if let Some(state) = self.model_state.clone() {
-                ui.horizontal(|ui| {
-                    for profile in [
-                        ModelProfile::Automatic,
-                        ModelProfile::Efficient,
-                        ModelProfile::Quality,
-                    ] {
-                        let label = profile_label(&self.localization, profile);
-                        if ui
-                            .selectable_label(state.profile == profile, label)
-                            .clicked()
-                            && state.profile != profile
-                        {
-                            self.accepted_licenses = false;
-                            self.worker.send(WorkerCommand::SetModelProfile(profile));
+                        for issue in &state.issues {
+                            ui.colored_label(Color32::from_rgb(210, 75, 70), issue);
                         }
+                        if let (Some(license), Some(url), Some(revision)) =
+                            (&state.license, &state.license_url, &state.revision)
+                        {
+                            ui.horizontal_wrapped(|ui| {
+                                ui.hyperlink_to(
+                                    localized_license(&self.localization, license),
+                                    url,
+                                );
+                                ui.separator();
+                                let mut revision_arguments = FluentArgs::new();
+                                revision_arguments
+                                    .set("revision", &revision[..revision.len().min(12)]);
+                                ui.label(
+                                    self.localization
+                                        .text_with("models-revision", Some(&revision_arguments)),
+                                );
+                                ui.separator();
+                                ui.hyperlink_to(
+                                    localized_license(&self.localization, E5_FILES[0].license),
+                                    E5_FILES[0].license_url,
+                                );
+                                ui.separator();
+                                ui.hyperlink_to(
+                                    localized_license(
+                                        &self.localization,
+                                        MMARCO_COMMON_FILES[0].license,
+                                    ),
+                                    MMARCO_COMMON_FILES[0].license_url,
+                                );
+                                ui.separator();
+                                ui.hyperlink_to(
+                                    localized_license(&self.localization, "llama.cpp"),
+                                    "https://github.com/ggml-org/llama.cpp/blob/b9946/LICENSE",
+                                );
+                            });
+                        }
+                        ui.checkbox(
+                            &mut self.accepted_licenses,
+                            self.localization.text("models-accept-licenses"),
+                        );
+                        let recommended = state.recommended_model_id.as_deref();
+                        let already_active =
+                            self.models_ready && state.active_model_id.as_deref() == recommended;
+                        let already_pending = state.pending_model_id.as_deref() == recommended;
+                        let can_install = recommended.is_some()
+                            && !already_active
+                            && !already_pending
+                            && self.accepted_licenses
+                            && state.fits_available_disk
+                            && state.issues.is_empty()
+                            && self.install_label.is_none();
+                        ui.horizontal(|ui| {
+                            let label = model_action_label(
+                                &self.localization,
+                                state.recommended_assets_installed,
+                                self.models_ready,
+                            );
+                            if ui
+                                .add_enabled(can_install, egui::Button::new(label))
+                                .clicked()
+                            {
+                                self.worker.send(WorkerCommand::InstallModels);
+                            }
+                            if self.install_label.is_some()
+                                && ui.button(self.localization.text("action-cancel")).clicked()
+                            {
+                                self.worker.send(WorkerCommand::CancelInstall);
+                            }
+                            if already_active {
+                                ui.colored_label(
+                                    Color32::from_rgb(70, 160, 110),
+                                    self.localization.text("models-recommended-active"),
+                                );
+                            } else if already_pending {
+                                ui.label(self.localization.text("models-restart-to-activate"));
+                            } else if state.recommended_assets_installed {
+                                ui.label(self.localization.text("models-already-downloaded"));
+                            }
+                        });
+                    } else {
+                        ui.spinner();
+                        ui.label(self.localization.text("models-calculating"));
                     }
-                });
-                ui.add_space(6.0);
-                if let Some(display_name) = &state.recommended_display_name {
-                    ui.heading(RichText::new(display_name).size(18.0));
-                }
-                if let Some(reason) = &state.recommendation_reason {
-                    ui.label(reason);
-                }
-                if state.degraded {
-                    ui.colored_label(
-                        Color32::from_rgb(210, 145, 50),
-                        self.localization.text("models-profile-reduced"),
-                    );
-                }
-                if let Some(active) = &state.active_model_id {
-                    let mut arguments = FluentArgs::new();
-                    arguments.set("model", active.as_str());
+                    if let Some(label) = &self.install_label {
+                        ui.label(label);
+                        ui.add(
+                            egui::ProgressBar::new(self.install_progress.clamp(0.0, 1.0))
+                                .show_percentage(),
+                        );
+                    }
+                    if let Some(message) = &self.restart_required {
+                        ui.colored_label(Color32::from_rgb(70, 160, 110), message);
+                    }
+                    ui.separator();
                     ui.label(
-                        self.localization
-                            .text_with("models-active", Some(&arguments)),
+                        RichText::new(self.localization.text("models-multimodal-future"))
+                            .small()
+                            .color(Color32::GRAY),
                     );
-                }
-                if let Some(pending) = &state.pending_model_id {
-                    let mut arguments = FluentArgs::new();
-                    arguments.set("model", pending.as_str());
-                    ui.label(
-                        self.localization
-                            .text_with("models-pending-restart", Some(&arguments)),
-                    );
-                }
-                let mut arguments = FluentArgs::new();
-                arguments.set(
-                    "download",
-                    format!("{:.2}", state.download_bytes as f64 / 1024_f64.powi(3)),
-                );
-                arguments.set(
-                    "required",
-                    format!("{:.2}", state.required_free_bytes as f64 / 1024_f64.powi(3)),
-                );
-                ui.label(
-                    self.localization
-                        .text_with("models-download-size", Some(&arguments)),
-                );
-                for issue in &state.issues {
-                    ui.colored_label(Color32::from_rgb(210, 75, 70), issue);
-                }
-                if let (Some(license), Some(url), Some(revision)) =
-                    (&state.license, &state.license_url, &state.revision)
-                {
-                    ui.horizontal_wrapped(|ui| {
-                        ui.hyperlink_to(format!("Licencia {license}"), url);
-                        ui.separator();
-                        ui.label(format!("Revisión {}", &revision[..revision.len().min(12)]));
-                        ui.separator();
-                        ui.hyperlink_to(
-                            format!("Licencia multilingual-e5-small ({})", E5_FILES[0].license),
-                            E5_FILES[0].license_url,
-                        );
-                        ui.separator();
-                        ui.hyperlink_to(
-                            format!("Licencia mMARCO ({})", MMARCO_COMMON_FILES[0].license),
-                            MMARCO_COMMON_FILES[0].license_url,
-                        );
-                        ui.separator();
-                        ui.hyperlink_to(
-                            "Licencia llama.cpp",
-                            "https://github.com/ggml-org/llama.cpp/blob/b9946/LICENSE",
-                        );
-                    });
-                }
-                ui.checkbox(
-                    &mut self.accepted_licenses,
-                    self.localization.text("models-accept-licenses"),
-                );
-                let recommended = state.recommended_model_id.as_deref();
-                let already_active =
-                    self.models_ready && state.active_model_id.as_deref() == recommended;
-                let already_pending = state.pending_model_id.as_deref() == recommended;
-                let can_install = recommended.is_some()
-                    && !already_active
-                    && !already_pending
-                    && self.accepted_licenses
-                    && state.fits_available_disk
-                    && state.issues.is_empty()
-                    && self.install_label.is_none();
-                ui.horizontal(|ui| {
-                    let label = model_action_label(
-                        &self.localization,
-                        state.recommended_assets_installed,
-                        self.models_ready,
-                    );
-                    if ui
-                        .add_enabled(can_install, egui::Button::new(label))
-                        .clicked()
-                    {
-                        self.worker.send(WorkerCommand::InstallModels);
-                    }
-                    if self.install_label.is_some()
-                        && ui.button(self.localization.text("action-cancel")).clicked()
-                    {
-                        self.worker.send(WorkerCommand::CancelInstall);
-                    }
-                    if already_active {
-                        ui.colored_label(
-                            Color32::from_rgb(70, 160, 110),
-                            self.localization.text("models-recommended-active"),
-                        );
-                    } else if already_pending {
-                        ui.label(self.localization.text("models-restart-to-activate"));
-                    } else if state.recommended_assets_installed {
-                        ui.label(self.localization.text("models-already-downloaded"));
-                    }
                 });
-            } else {
-                ui.spinner();
-                ui.label(self.localization.text("models-calculating"));
-            }
-            if let Some(label) = &self.install_label {
-                ui.label(label);
-                ui.add(
-                    egui::ProgressBar::new(self.install_progress.clamp(0.0, 1.0)).show_percentage(),
-                );
-            }
-            if let Some(message) = &self.restart_required {
-                ui.colored_label(Color32::from_rgb(70, 160, 110), message);
-            }
-            ui.separator();
-            ui.label(
-                RichText::new(self.localization.text("models-multimodal-future"))
-                    .small()
-                    .color(Color32::GRAY),
-            );
-        });
+            });
     }
 
     fn home(&mut self, ui: &mut egui::Ui) {
-        page_title(
-            ui,
-            &self.localization.text("dashboard-title"),
-            &self.localization.text("dashboard-subtitle"),
-        );
+        let layout = ResponsiveLayout::from_available(ui.available_size());
         let readiness = self.readiness_view();
-        let columns = if ui.available_width() >= 900.0 { 4 } else { 2 };
-        egui::Grid::new("readiness_components")
-            .num_columns(columns)
-            .spacing([12.0, 12.0])
-            .show(ui, |ui| {
-                for (index, component) in readiness.components.iter().enumerate() {
-                    egui::Frame::group(ui.style()).show(ui, |ui| {
-                        ui.set_min_width(175.0);
-                        ui.label(
-                            RichText::new(readiness_component_label(
-                                &self.localization,
-                                component.component,
-                            ))
-                            .strong(),
-                        );
+        let published_count = self
+            .collections
+            .iter()
+            .map(|collection| collection.published_count)
+            .sum();
+        let document_count = self
+            .collections
+            .iter()
+            .map(|collection| collection.document_count)
+            .sum::<usize>();
+        let journey = derive_first_knowledge_journey(&readiness, published_count);
+
+        first_knowledge::show_journey_header(
+            ui,
+            &self.localization,
+            visible_journey_states(journey),
+            layout.density,
+        );
+        ui.add_space(if layout.is_compact() { 10.0 } else { 18.0 });
+        first_knowledge::work_surface(ui, layout.density, |ui| {
+            ui.label(
+                RichText::new(self.localization.text("home-next-step"))
+                    .small()
+                    .strong()
+                    .color(ui.visuals().weak_text_color()),
+            );
+            match journey.cta {
+                Some(FirstKnowledgeCta::Recommended(action)) => {
+                    ui.heading(primary_action_title(&self.localization, action));
+                    ui.label(primary_action_explanation(&self.localization, action));
+                    ui.add_space(10.0);
+                    if ui
+                        .add(first_knowledge::primary_button(primary_action_button(
+                            &self.localization,
+                            action,
+                        )))
+                        .clicked()
+                    {
+                        self.open_readiness_action(action);
+                    }
+                }
+                Some(FirstKnowledgeCta::SearchKnowledge) => {
+                    ui.heading(self.localization.text("onboarding-search-title"));
+                    ui.label(self.localization.text("onboarding-search-body"));
+                    ui.add_space(10.0);
+                    if ui
+                        .add(first_knowledge::primary_button(
+                            self.localization.text("search-action"),
+                        ))
+                        .clicked()
+                    {
+                        self.screen = Screen::Search;
+                    }
+                }
+                None => {
+                    let (title, body) =
+                        journey_stage_copy(&self.localization, journey.current_stage);
+                    ui.heading(title);
+                    ui.label(body);
+                    ui.add_space(10.0);
+                    if journey.current_stage == FirstKnowledgeStage::ProcessKnowledge
+                        && document_count == 0
+                    {
+                        if ui
+                            .button(self.localization.text("onboarding-processing-open-folder"))
+                            .clicked()
+                        {
+                            self.screen = Screen::Collections;
+                        }
+                    } else {
+                        ui.horizontal(|ui| {
+                            ui.spinner();
+                            ui.label(
+                                readiness_status_presentation(
+                                    &self.localization,
+                                    first_knowledge_readiness_status(journey.current_state),
+                                )
+                                .0,
+                            );
+                        });
+                    }
+                }
+            }
+        });
+
+        ui.add_space(if layout.is_compact() { 8.0 } else { 16.0 });
+        first_knowledge::privacy_note(ui, &self.localization);
+        ui.add_space(if layout.is_compact() { 8.0 } else { 16.0 });
+        ui.collapsing(self.localization.text("home-optional-title"), |ui| {
+            ui.label(self.localization.text("home-optional-body"));
+            ui.add_space(8.0);
+            egui::Grid::new("optional_readiness_components")
+                .num_columns(2)
+                .spacing([24.0, 8.0])
+                .show(ui, |ui| {
+                    for component in readiness.components.iter().filter(|component| {
+                        matches!(
+                            component.component,
+                            ReadinessComponent::Lan
+                                | ReadinessComponent::Chat
+                                | ReadinessComponent::Background
+                                | ReadinessComponent::Updates
+                        )
+                    }) {
+                        ui.label(readiness_component_label(
+                            &self.localization,
+                            component.component,
+                        ));
                         let (label, color) =
                             readiness_status_presentation(&self.localization, component.status);
                         ui.colored_label(color, label);
-                    });
-                    if (index + 1) % columns == 0 {
                         ui.end_row();
                     }
-                }
-            });
-        ui.add_space(18.0);
-        if readiness.status(ReadinessComponent::LocalAi) == ReadinessStatus::Working {
-            ui.label(self.localization.text("home-local-ai-working"));
-        }
-        if let Some(action) = readiness.primary_action {
-            egui::Frame::group(ui.style()).show(ui, |ui| {
-                ui.heading(primary_action_title(&self.localization, action));
-                ui.label(primary_action_explanation(&self.localization, action));
-                if ui
-                    .button(primary_action_button(&self.localization, action))
-                    .clicked()
-                {
-                    self.open_readiness_action(action);
-                }
-            });
-        } else {
-            ui.colored_label(
-                Color32::from_rgb(70, 160, 110),
-                self.localization.text("dashboard-all-ready"),
-            );
-        }
+                });
+        });
+
         let checked = readiness.last_checked_at.elapsed().map_or_else(
             |_| self.localization.text("home-checked-now"),
             |elapsed| {
@@ -1021,14 +1113,13 @@ impl AirWikiApp {
                     collection.maintenance.as_ref().is_some_and(|maintenance| {
                         matches!(
                             maintenance.status,
-                            airwiki_core::CollectionMaintenanceStatus::Partial
-                                | airwiki_core::CollectionMaintenanceStatus::Failed
+                            airwiki_core::CollectionMaintenanceStatus::Failed
                                 | airwiki_core::CollectionMaintenanceStatus::Quarantined
                         )
                     })
                 })
                 .count(),
-            pending_review_count: self.reviews.len(),
+            pending_review_count: self.reviews.len().saturating_add(self.source_issues.len()),
             wiki_working: self.wiki_health.updating_count > 0,
             wiki_issue_count: self
                 .wiki_health
@@ -1158,119 +1249,135 @@ impl AirWikiApp {
         let local_only = self.localization.text("collections-local-only");
         let cloud_warning = self.localization.text("collections-cloud-warning");
         let mut requested_external_ai_confirmation = None;
-        for collection in &mut self.collections {
-            let scan_state = self.collection_scans.get(&collection.id).copied();
-            let mut counts_arguments = FluentArgs::new();
-            counts_arguments.set("documents", collection.document_count);
-            counts_arguments.set("published", collection.published_count);
-            let counts = self
-                .localization
-                .text_with("collections-counts", Some(&counts_arguments));
-            egui::Frame::group(ui.style()).show(ui, |ui| {
-                ui.horizontal(|ui| {
-                    ui.vertical(|ui| {
-                        ui.heading(&collection.name);
-                        ui.label(&linked);
-                        ui.collapsing(&technical_details, |ui| {
-                            ui.monospace(collection.folder.display().to_string());
-                        });
-                        ui.label(&counts);
-                        if let Some(maintenance) = &collection.maintenance {
-                            let (label, color) = maintenance_status_presentation(
-                                &self.localization,
-                                maintenance.status,
-                            );
-                            ui.colored_label(color, label);
-                            if let Some(finished) = maintenance.last_finished_at {
-                                let mut arguments = FluentArgs::new();
-                                arguments
-                                    .set("time", finished.format("%Y-%m-%d %H:%M").to_string());
-                                ui.label(
-                                    RichText::new(
-                                        self.localization
-                                            .text_with("collections-last-scan", Some(&arguments)),
-                                    )
-                                    .small()
-                                    .color(Color32::GRAY),
-                                );
-                            }
-                            if let Some(summary) = &maintenance.issue_summary {
-                                ui.label(summary);
-                            }
-                        }
-                        if let Some(state) = scan_state {
-                            ui.horizontal(|ui| {
-                                if state == CollectionScanState::Scanning {
-                                    ui.spinner();
-                                }
-                                ui.label(match state {
-                                    CollectionScanState::Queued => &queued,
-                                    CollectionScanState::Scanning => &scanning,
+        let list_height = ui.available_height().max(0.0);
+        egui::ScrollArea::vertical()
+            .id_salt("collections_list")
+            .max_height(list_height)
+            .auto_shrink([false; 2])
+            .show(ui, |ui| {
+                for collection in &mut self.collections {
+                    let scan_state = self.collection_scans.get(&collection.id).copied();
+                    let mut counts_arguments = FluentArgs::new();
+                    counts_arguments.set("documents", collection.document_count);
+                    counts_arguments.set("published", collection.published_count);
+                    let counts = self
+                        .localization
+                        .text_with("collections-counts", Some(&counts_arguments));
+                    egui::Frame::group(ui.style()).show(ui, |ui| {
+                        ui.horizontal(|ui| {
+                            ui.vertical(|ui| {
+                                ui.heading(&collection.name);
+                                ui.label(&linked);
+                                ui.collapsing(&technical_details, |ui| {
+                                    ui.monospace(collection.folder.display().to_string());
                                 });
+                                ui.label(&counts);
+                                if let Some(maintenance) = &collection.maintenance {
+                                    let (label, color) = maintenance_status_presentation(
+                                        &self.localization,
+                                        maintenance.status,
+                                    );
+                                    ui.colored_label(color, label);
+                                    if let Some(finished) = maintenance.last_finished_at {
+                                        let mut arguments = FluentArgs::new();
+                                        arguments.set(
+                                            "time",
+                                            finished.format("%Y-%m-%d %H:%M").to_string(),
+                                        );
+                                        ui.label(
+                                            RichText::new(self.localization.text_with(
+                                                "collections-last-scan",
+                                                Some(&arguments),
+                                            ))
+                                            .small()
+                                            .color(Color32::GRAY),
+                                        );
+                                    }
+                                    if let Some(summary) = &maintenance.issue_summary {
+                                        ui.label(summary);
+                                    }
+                                }
+                                if let Some(state) = scan_state {
+                                    ui.horizontal(|ui| {
+                                        if state == CollectionScanState::Scanning {
+                                            ui.spinner();
+                                        }
+                                        ui.label(match state {
+                                            CollectionScanState::Queued => &queued,
+                                            CollectionScanState::Scanning => &scanning,
+                                        });
+                                    });
+                                }
                             });
+                            ui.with_layout(
+                                egui::Layout::right_to_left(egui::Align::Center),
+                                |ui| {
+                                    if ui.button(&relink).clicked()
+                                        && let Some(folder) = rfd::FileDialog::new().pick_folder()
+                                    {
+                                        self.worker.send(WorkerCommand::RelinkCollection {
+                                            collection_id: collection.id,
+                                            folder,
+                                        });
+                                    }
+                                    if ui
+                                        .add_enabled(
+                                            scan_state.is_none(),
+                                            egui::Button::new(&retry),
+                                        )
+                                        .clicked()
+                                    {
+                                        self.collection_scans
+                                            .insert(collection.id, CollectionScanState::Queued);
+                                        self.knowledge.collection_scan_started(collection.id);
+                                        self.worker
+                                            .send(WorkerCommand::RescanCollection(collection.id));
+                                    }
+                                },
+                            );
+                        });
+                        ui.separator();
+                        let external_ai_before = collection.allow_external_ai;
+                        let peer_changed = ui
+                            .checkbox(&mut collection.peer_shareable, &share_peers)
+                            .changed();
+                        let external_ai_changed = ui
+                            .checkbox(&mut collection.allow_external_ai, &allow_chat)
+                            .changed();
+                        let external_ai_change = classify_external_ai_policy_change(
+                            external_ai_before,
+                            collection.allow_external_ai,
+                        );
+                        if external_ai_change == ExternalAiPolicyChange::ConfirmEnable {
+                            collection.allow_external_ai = false;
+                            requested_external_ai_confirmation = Some(collection.id);
                         }
-                    });
-                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                        if ui.button(&relink).clicked()
-                            && let Some(folder) = rfd::FileDialog::new().pick_folder()
-                        {
-                            self.worker.send(WorkerCommand::RelinkCollection {
+                        collection.local_only =
+                            !collection.peer_shareable && !collection.allow_external_ai;
+                        if collection.local_only {
+                            ui.label(
+                                RichText::new(&local_only)
+                                    .small()
+                                    .color(Color32::from_rgb(70, 160, 110)),
+                            );
+                        }
+                        if collection.allow_external_ai {
+                            ui.colored_label(Color32::from_rgb(205, 120, 35), &cloud_warning);
+                        }
+                        let external_ai_applies = external_ai_changed
+                            && external_ai_change == ExternalAiPolicyChange::ApplyDisable;
+                        if peer_changed || external_ai_applies {
+                            self.worker.send(WorkerCommand::UpdateCollectionPolicy {
                                 collection_id: collection.id,
-                                folder,
+                                local_only: collection.local_only,
+                                peer_shareable: collection.peer_shareable,
+                                allow_external_ai: collection.allow_external_ai,
                             });
                         }
-                        if ui
-                            .add_enabled(scan_state.is_none(), egui::Button::new(&retry))
-                            .clicked()
-                        {
-                            self.collection_scans
-                                .insert(collection.id, CollectionScanState::Queued);
-                            self.knowledge.collection_scan_started(collection.id);
-                            self.worker
-                                .send(WorkerCommand::RescanCollection(collection.id));
-                        }
                     });
-                });
-                ui.separator();
-                let external_ai_before = collection.allow_external_ai;
-                let peer_changed = ui
-                    .checkbox(&mut collection.peer_shareable, &share_peers)
-                    .changed();
-                let external_ai_changed = ui
-                    .checkbox(&mut collection.allow_external_ai, &allow_chat)
-                    .changed();
-                let external_ai_change = classify_external_ai_policy_change(
-                    external_ai_before,
-                    collection.allow_external_ai,
-                );
-                if external_ai_change == ExternalAiPolicyChange::ConfirmEnable {
-                    collection.allow_external_ai = false;
-                    requested_external_ai_confirmation = Some(collection.id);
-                }
-                collection.local_only = !collection.peer_shareable && !collection.allow_external_ai;
-                if collection.local_only {
-                    ui.label(
-                        RichText::new(&local_only)
-                            .small()
-                            .color(Color32::from_rgb(70, 160, 110)),
-                    );
-                }
-                if collection.allow_external_ai {
-                    ui.colored_label(Color32::from_rgb(205, 120, 35), &cloud_warning);
-                }
-                let external_ai_applies = external_ai_changed
-                    && external_ai_change == ExternalAiPolicyChange::ApplyDisable;
-                if peer_changed || external_ai_applies {
-                    self.worker.send(WorkerCommand::UpdateCollectionPolicy {
-                        collection_id: collection.id,
-                        local_only: collection.local_only,
-                        peer_shareable: collection.peer_shareable,
-                        allow_external_ai: collection.allow_external_ai,
-                    });
+                    ui.add_space(8.0);
                 }
             });
-            ui.add_space(8.0);
-        }
         if let Some(collection_id) = requested_external_ai_confirmation {
             self.external_ai_confirmation = Some(collection_id);
         }
@@ -1344,7 +1451,11 @@ impl AirWikiApp {
             &self.localization.text("review-title"),
             &self.localization.text("review-subtitle"),
         );
-        if self.reviews.is_empty() {
+        self.review_content(ui);
+    }
+
+    fn review_content(&mut self, ui: &mut egui::Ui) {
+        if self.reviews.is_empty() && self.source_issues.is_empty() {
             empty_state(
                 ui,
                 &self.localization.text("review-empty-title"),
@@ -1352,32 +1463,135 @@ impl AirWikiApp {
             );
             return;
         }
+        let issues = self.source_issues.clone();
+        let mut requested_rescan = None;
         ui.columns(2, |columns| {
             columns[0].set_min_width(280.0);
-            for item in &self.reviews {
-                let selected = self.selected_review == Some(item.concept_id);
-                if columns[0]
-                    .selectable_label(
-                        selected,
-                        format!("{}\n{}", item.source_name, item.collection_name),
-                    )
-                    .clicked()
-                {
-                    self.selected_review = Some(item.concept_id);
-                }
-            }
+            let queue_height = columns[0].available_height().max(0.0);
+            egui::ScrollArea::vertical()
+                .id_salt("review_queue")
+                .max_height(queue_height)
+                .auto_shrink([false; 2])
+                .show(&mut columns[0], |ui| {
+                    if !self.reviews.is_empty() {
+                        let mut arguments = FluentArgs::new();
+                        arguments.set("count", self.reviews.len() as i64);
+                        ui.label(
+                            RichText::new(
+                                self.localization
+                                    .text_with("review-ready-group", Some(&arguments)),
+                            )
+                            .strong(),
+                        );
+                        ui.add_space(4.0);
+                        for item in &self.reviews {
+                            let selected = self.selected_review == Some(item.concept_id);
+                            if ui
+                                .selectable_label(
+                                    selected,
+                                    format!("{}\n{}", item.source_name, item.collection_name),
+                                )
+                                .clicked()
+                            {
+                                self.selected_review = Some(item.concept_id);
+                            }
+                        }
+                    }
+                    if !issues.is_empty() {
+                        if !self.reviews.is_empty() {
+                            ui.add_space(14.0);
+                        }
+                        let mut arguments = FluentArgs::new();
+                        arguments.set("count", issues.len() as i64);
+                        ui.label(
+                            RichText::new(
+                                self.localization
+                                    .text_with("review-issues-group", Some(&arguments)),
+                            )
+                            .strong()
+                            .color(Color32::from_rgb(230, 160, 35)),
+                        );
+                        ui.add_space(4.0);
+                        for issue in &issues {
+                            let scanning = self.collection_scans.contains_key(&issue.collection_id);
+                            egui::Frame::new()
+                                .fill(Color32::from_rgba_unmultiplied(230, 160, 35, 18))
+                                .stroke(egui::Stroke::new(1.0, Color32::from_rgb(155, 105, 25)))
+                                .corner_radius(egui::CornerRadius::same(8))
+                                .inner_margin(egui::Margin::same(10))
+                                .show(ui, |ui| {
+                                    ui.set_min_width(ui.available_width());
+                                    ui.horizontal(|ui| {
+                                        ui.label(
+                                            RichText::new("!")
+                                                .strong()
+                                                .color(Color32::from_rgb(230, 160, 35)),
+                                        );
+                                        ui.vertical(|ui| {
+                                            ui.label(RichText::new(&issue.source_name).strong());
+                                            ui.label(
+                                                RichText::new(&issue.collection_name)
+                                                    .small()
+                                                    .color(Color32::GRAY),
+                                            );
+                                            ui.label(
+                                                RichText::new(
+                                                    self.localization.text("review-issue-status"),
+                                                )
+                                                .small()
+                                                .strong()
+                                                .color(Color32::from_rgb(230, 160, 35)),
+                                            );
+                                            ui.add(
+                                                egui::Label::new(
+                                                    RichText::new(source_issue_message(
+                                                        &self.localization,
+                                                        issue.code,
+                                                    ))
+                                                    .small(),
+                                                )
+                                                .wrap(),
+                                            );
+                                            if ui
+                                                .add_enabled(
+                                                    !scanning,
+                                                    egui::Button::new(
+                                                        self.localization.text("review-scan-again"),
+                                                    )
+                                                    .small(),
+                                                )
+                                                .clicked()
+                                            {
+                                                requested_rescan = Some(issue.collection_id);
+                                            }
+                                        });
+                                    });
+                                });
+                            ui.add_space(6.0);
+                        }
+                    }
+                });
             let selected_id = self.selected_review;
             let is_reanalyzing =
                 selected_id.is_some_and(|id| self.reanalyzing_reviews.contains(&id));
             let selected = selected_id
                 .and_then(|id| self.reviews.iter_mut().find(|item| item.concept_id == id));
             if let Some(item) = selected {
-                edit_draft(&mut columns[1], &self.localization, &mut item.draft);
-                columns[1].horizontal(|ui| {
+                let editor_height = (columns[1].available_height() - 62.0).max(120.0);
+                egui::ScrollArea::vertical()
+                    .id_salt("review_editor")
+                    .max_height(editor_height)
+                    .auto_shrink([false; 2])
+                    .show(&mut columns[1], |ui| {
+                        edit_draft(ui, &self.localization, &mut item.draft);
+                    });
+                columns[1].horizontal_wrapped(|ui| {
                     if ui
                         .add_enabled(
                             !is_reanalyzing,
-                            egui::Button::new(self.localization.text("review-approve")),
+                            first_knowledge::primary_button(
+                                self.localization.text("review-approve"),
+                            ),
                         )
                         .clicked()
                     {
@@ -1423,9 +1637,21 @@ impl AirWikiApp {
                     );
                 }
             } else {
-                columns[1].label(self.localization.text("review-select-document"));
+                let message = if issues.is_empty() {
+                    self.localization.text("review-select-document")
+                } else {
+                    self.localization.text("review-only-issues")
+                };
+                columns[1].label(message);
             }
         });
+        if let Some(collection_id) = requested_rescan {
+            self.collection_scans
+                .insert(collection_id, CollectionScanState::Queued);
+            self.knowledge.collection_scan_started(collection_id);
+            self.worker
+                .send(WorkerCommand::RescanCollection(collection_id));
+        }
     }
 
     fn search(&mut self, ui: &mut egui::Ui) {
@@ -1434,37 +1660,85 @@ impl AirWikiApp {
             &self.localization.text("search-title"),
             &self.localization.text("search-subtitle"),
         );
-        ui.horizontal(|ui| {
+        self.search_form(ui, true);
+        self.search_feedback(ui);
+    }
+
+    fn search_form(&mut self, ui: &mut egui::Ui, show_top_k: bool) {
+        let layout = ResponsiveLayout::from_available(ui.available_size());
+        let enabled = !self.search_question.trim().is_empty() && !self.search_running;
+        let mut submit_clicked = false;
+        let response = if layout.is_narrow() {
             let question_label = ui.label(self.localization.text("search-question"));
-            ui.add_sized(
-                [520.0, 36.0],
-                egui::TextEdit::singleline(&mut self.search_question)
-                    .hint_text(self.localization.text("search-placeholder")),
-            )
-            .labelled_by(question_label.id);
-            ui.add(
-                egui::DragValue::new(&mut self.search_top_k)
-                    .range(1..=10)
-                    .prefix("Top "),
-            );
-            let enabled = !self.search_question.trim().is_empty() && !self.search_running;
-            if ui
-                .add_enabled(
-                    enabled,
-                    egui::Button::new(self.localization.text("search-action")),
+            let response = ui
+                .add_sized(
+                    [ui.available_width(), 36.0],
+                    egui::TextEdit::singleline(&mut self.search_question)
+                        .hint_text(self.localization.text("search-placeholder")),
                 )
-                .clicked()
-            {
-                self.search_running = true;
-                self.search_hits.clear();
-                self.search_coverage = SearchCoverageView::Complete;
-                self.worker.send(WorkerCommand::Search {
-                    question: self.search_question.trim().to_owned(),
-                    top_k: self.search_top_k,
-                    purpose: SearchPurpose::LocalAssistant,
-                });
-            }
-        });
+                .labelled_by(question_label.id);
+            ui.horizontal(|ui| {
+                if show_top_k {
+                    ui.add(
+                        egui::DragValue::new(&mut self.search_top_k)
+                            .range(1..=10)
+                            .prefix("Top "),
+                    );
+                }
+                submit_clicked = ui
+                    .add_enabled(
+                        enabled,
+                        first_knowledge::primary_button(self.localization.text("search-action")),
+                    )
+                    .clicked();
+            });
+            response
+        } else {
+            ui.horizontal(|ui| {
+                let question_label = ui.label(self.localization.text("search-question"));
+                let reserved_width = if show_top_k { 190.0 } else { 100.0 };
+                let field_width = (ui.available_width() - reserved_width).clamp(220.0, 520.0);
+                let response = ui
+                    .add_sized(
+                        [field_width, 36.0],
+                        egui::TextEdit::singleline(&mut self.search_question)
+                            .hint_text(self.localization.text("search-placeholder")),
+                    )
+                    .labelled_by(question_label.id);
+                if show_top_k {
+                    ui.add(
+                        egui::DragValue::new(&mut self.search_top_k)
+                            .range(1..=10)
+                            .prefix("Top "),
+                    );
+                }
+                submit_clicked = ui
+                    .add_enabled(
+                        enabled,
+                        first_knowledge::primary_button(self.localization.text("search-action")),
+                    )
+                    .clicked();
+                response
+            })
+            .inner
+        };
+        let submit = submit_clicked
+            || (enabled
+                && response.lost_focus()
+                && ui.input(|input| input.key_pressed(egui::Key::Enter)));
+        if submit {
+            self.search_running = true;
+            self.search_hits.clear();
+            self.search_coverage = SearchCoverageView::Complete;
+            self.worker.send(WorkerCommand::Search {
+                question: self.search_question.trim().to_owned(),
+                top_k: self.search_top_k,
+                purpose: SearchPurpose::LocalAssistant,
+            });
+        }
+    }
+
+    fn search_feedback(&mut self, ui: &mut egui::Ui) {
         if self.search_running {
             ui.spinner();
             ui.label(self.localization.text("search-running"));
@@ -1472,30 +1746,41 @@ impl AirWikiApp {
         if let Some(message) = search_coverage_message(&self.localization, self.search_coverage) {
             ui.colored_label(Color32::from_rgb(205, 145, 30), message);
         }
-        for hit in &self.search_hits {
-            ui.add_space(8.0);
-            egui::Frame::group(ui.style()).show(ui, |ui| {
-                ui.horizontal(|ui| {
-                    ui.heading(format!("{}. {}", hit.rank, hit.title));
-                });
-                ui.label(RichText::new(&hit.heading_or_page).strong());
-                ui.label(&hit.snippet);
-                ui.collapsing(self.localization.text("search-citation-details"), |ui| {
-                    let mut arguments = FluentArgs::new();
-                    arguments.set("revision", hit.source_revision);
-                    ui.label(
-                        self.localization
-                            .text_with("search-revision", Some(&arguments)),
-                    );
-                    ui.monospace(format!(
-                        "{}… · {}",
-                        &hit.source_sha256[..hit.source_sha256.len().min(12)],
-                        hit.node_id
-                    ));
-                    ui.monospace(&hit.logical_resource_uri);
-                });
+        let results_height = ui.available_height().max(0.0);
+        egui::ScrollArea::vertical()
+            .id_salt("search_results")
+            .max_height(results_height)
+            .auto_shrink([false; 2])
+            .show(ui, |ui| {
+                for hit in &self.search_hits {
+                    ui.add_space(8.0);
+                    egui::Frame::group(ui.style()).show(ui, |ui| {
+                        ui.heading(format!("{}. {}", hit.rank, hit.title));
+                        ui.label(RichText::new(&hit.heading_or_page).strong());
+                        ui.label(&hit.snippet);
+                        ui.collapsing(self.localization.text("search-citation-details"), |ui| {
+                            let mut arguments = FluentArgs::new();
+                            arguments.set("revision", hit.source_revision);
+                            ui.label(
+                                self.localization
+                                    .text_with("search-revision", Some(&arguments)),
+                            );
+                            ui.monospace(format!(
+                                "{}… · {}",
+                                &hit.source_sha256[..hit.source_sha256.len().min(12)],
+                                hit.node_id
+                            ));
+                            ui.add(
+                                egui::Label::new(
+                                    RichText::new(&hit.logical_resource_uri).monospace(),
+                                )
+                                .selectable(true)
+                                .wrap(),
+                            );
+                        });
+                    });
+                }
             });
-        }
     }
 
     fn integrations(&mut self, ui: &mut egui::Ui) {
@@ -1551,9 +1836,10 @@ impl AirWikiApp {
                     preferences.lan_preference == LanPreference::Enabled
                 }) && self.lan_listener
                     == LanListenerView::Listening;
-                ui.horizontal(|ui| {
+                ui.horizontal_wrapped(|ui| {
+                    let field_width = (ui.available_width() - 110.0).clamp(180.0, 560.0);
                     ui.add_sized(
-                        [560.0, 28.0],
+                        [field_width, 28.0],
                         egui::TextEdit::singleline(&mut self.manual_multiaddress)
                             .hint_text("/ip4/192.168.1.20/tcp/12345/p2p/12D3Koo…"),
                     );
@@ -1597,100 +1883,111 @@ impl AirWikiApp {
         let revoke = self.localization.text("devices-revoke");
         let blocked_message = self.localization.text("devices-blocked-message");
         let pair_again = self.localization.text("devices-pair-again");
-        for peer in &mut self.peers {
-            egui::Frame::group(ui.style()).show(ui, |ui| {
-                ui.horizontal(|ui| {
-                    ui.vertical(|ui| {
-                        ui.heading(peer.device_name.as_deref().unwrap_or(&nearby_device));
-                        ui.collapsing(&technical_details, |ui| {
-                            ui.monospace(&peer.peer_id);
-                            ui.monospace(&peer.address);
-                        });
-                    });
-                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                        ui.vertical(|ui| {
-                            ui.label(peer_trust_label(&self.localization, peer.trust));
-                            ui.small(peer_activity_label(
-                                &self.localization,
-                                peer.trust,
-                                peer.activity,
-                            ));
-                        });
-                    });
-                });
-                if should_present_pairing_controls(peer.activity) {
-                    if let Some(words) = &peer.sas_words {
-                        ui.heading(words.join("  "));
+        let list_height = ui.available_height().max(0.0);
+        egui::ScrollArea::vertical()
+            .id_salt("peer_list")
+            .max_height(list_height)
+            .auto_shrink([false; 2])
+            .show(ui, |ui| {
+                for peer in &mut self.peers {
+                    egui::Frame::group(ui.style()).show(ui, |ui| {
                         ui.horizontal(|ui| {
-                            if ui.button(&matches).clicked() {
-                                self.worker.send(WorkerCommand::ConfirmPairing {
-                                    peer_id: peer.peer_id.clone(),
-                                    accepted: true,
+                            ui.vertical(|ui| {
+                                ui.heading(peer.device_name.as_deref().unwrap_or(&nearby_device));
+                                ui.collapsing(&technical_details, |ui| {
+                                    ui.monospace(&peer.peer_id);
+                                    ui.monospace(&peer.address);
                                 });
-                            }
-                            if ui.button(&does_not_match).clicked() {
-                                self.worker.send(WorkerCommand::ConfirmPairing {
-                                    peer_id: peer.peer_id.clone(),
-                                    accepted: false,
-                                });
-                            }
-                        });
-                    }
-                } else {
-                    match peer.trust {
-                        PeerTrustState::Unpaired => {
-                            if ui.button(&pair).clicked() {
-                                self.worker.send(WorkerCommand::Pair {
-                                    peer_id: peer.peer_id.clone(),
-                                });
-                            }
-                        }
-                        PeerTrustState::Trusted => {
-                            for collection in &self.collections {
-                                if collection.local_only || !collection.peer_shareable {
-                                    continue;
-                                }
-                                let mut granted = peer.granted_collections.contains(&collection.id);
-                                let mut arguments = FluentArgs::new();
-                                arguments.set("name", collection.name.as_str());
-                                if ui
-                                    .checkbox(
-                                        &mut granted,
-                                        self.localization
-                                            .text_with("devices-grant", Some(&arguments)),
-                                    )
-                                    .changed()
-                                {
-                                    if granted {
-                                        peer.granted_collections.insert(collection.id);
-                                    } else {
-                                        peer.granted_collections.remove(&collection.id);
-                                    }
-                                    self.worker.send(WorkerCommand::GrantCollection {
-                                        peer_id: peer.peer_id.clone(),
-                                        collection_id: collection.id,
-                                        granted,
+                            });
+                            ui.with_layout(
+                                egui::Layout::right_to_left(egui::Align::Center),
+                                |ui| {
+                                    ui.vertical(|ui| {
+                                        ui.label(peer_trust_label(&self.localization, peer.trust));
+                                        ui.small(peer_activity_label(
+                                            &self.localization,
+                                            peer.trust,
+                                            peer.activity,
+                                        ));
                                     });
+                                },
+                            );
+                        });
+                        if should_present_pairing_controls(peer.activity) {
+                            if let Some(words) = &peer.sas_words {
+                                ui.heading(words.join("  "));
+                                ui.horizontal(|ui| {
+                                    if ui.button(&matches).clicked() {
+                                        self.worker.send(WorkerCommand::ConfirmPairing {
+                                            peer_id: peer.peer_id.clone(),
+                                            accepted: true,
+                                        });
+                                    }
+                                    if ui.button(&does_not_match).clicked() {
+                                        self.worker.send(WorkerCommand::ConfirmPairing {
+                                            peer_id: peer.peer_id.clone(),
+                                            accepted: false,
+                                        });
+                                    }
+                                });
+                            }
+                        } else {
+                            match peer.trust {
+                                PeerTrustState::Unpaired => {
+                                    if ui.button(&pair).clicked() {
+                                        self.worker.send(WorkerCommand::Pair {
+                                            peer_id: peer.peer_id.clone(),
+                                        });
+                                    }
+                                }
+                                PeerTrustState::Trusted => {
+                                    for collection in &self.collections {
+                                        if collection.local_only || !collection.peer_shareable {
+                                            continue;
+                                        }
+                                        let mut granted =
+                                            peer.granted_collections.contains(&collection.id);
+                                        let mut arguments = FluentArgs::new();
+                                        arguments.set("name", collection.name.as_str());
+                                        if ui
+                                            .checkbox(
+                                                &mut granted,
+                                                self.localization
+                                                    .text_with("devices-grant", Some(&arguments)),
+                                            )
+                                            .changed()
+                                        {
+                                            if granted {
+                                                peer.granted_collections.insert(collection.id);
+                                            } else {
+                                                peer.granted_collections.remove(&collection.id);
+                                            }
+                                            self.worker.send(WorkerCommand::GrantCollection {
+                                                peer_id: peer.peer_id.clone(),
+                                                collection_id: collection.id,
+                                                granted,
+                                            });
+                                        }
+                                    }
+                                    if ui.button(&revoke).clicked() {
+                                        self.worker.send(WorkerCommand::RevokePeer {
+                                            peer_id: peer.peer_id.clone(),
+                                        });
+                                    }
+                                }
+                                PeerTrustState::Blocked => {
+                                    ui.colored_label(Color32::RED, &blocked_message);
+                                    if ui.button(&pair_again).clicked() {
+                                        self.worker.send(WorkerCommand::Pair {
+                                            peer_id: peer.peer_id.clone(),
+                                        });
+                                    }
                                 }
                             }
-                            if ui.button(&revoke).clicked() {
-                                self.worker.send(WorkerCommand::RevokePeer {
-                                    peer_id: peer.peer_id.clone(),
-                                });
-                            }
                         }
-                        PeerTrustState::Blocked => {
-                            ui.colored_label(Color32::RED, &blocked_message);
-                            if ui.button(&pair_again).clicked() {
-                                self.worker.send(WorkerCommand::Pair {
-                                    peer_id: peer.peer_id.clone(),
-                                });
-                            }
-                        }
-                    }
+                    });
                 }
             });
-        }
         self.firewall_confirmation(ui.ctx());
     }
 
@@ -2012,6 +2309,12 @@ impl AirWikiApp {
             &self.localization.text("settings-title"),
             &self.localization.text("settings-subtitle"),
         );
+        let settings_height = ui.available_height().max(0.0);
+        egui::ScrollArea::vertical()
+            .id_salt("settings_sections")
+            .max_height(settings_height)
+            .auto_shrink([false; 2])
+            .show(ui, |ui| {
         let mut locale = self
             .preferences
             .map_or(LocalePreference::System, |preferences| preferences.locale);
@@ -2166,6 +2469,7 @@ impl AirWikiApp {
             ui.add_space(12.0);
         }
         ui.label("MCP escucha únicamente en 127.0.0.1. La herramienta es de solo lectura y revalida allow_external_ai en el nodo fuente.");
+            });
     }
 
     fn knowledge(&mut self, ui: &mut egui::Ui) {
@@ -2241,13 +2545,38 @@ impl AirWikiApp {
                     };
                     ui.colored_label(color, summary);
                     if *error {
-                        ui.collapsing("Detalles técnicos", |ui| {
+                        ui.collapsing(self.localization.text("technical-details"), |ui| {
                             ui.label(message);
                         });
                     }
                 }
             });
         }
+    }
+
+    fn onboarding_notices(&self, root: &mut egui::Ui) {
+        let Some(page) = self.onboarding_page else {
+            return;
+        };
+        let relevant = self
+            .notices
+            .iter()
+            .filter(|(error, message)| *error && onboarding_error_is_relevant(page, message))
+            .collect::<Vec<_>>();
+        if relevant.is_empty() {
+            return;
+        }
+        egui::Panel::bottom("onboarding_notices").show(root, |ui| {
+            for (_, message) in relevant {
+                ui.colored_label(
+                    Color32::from_rgb(220, 70, 70),
+                    human_error_summary(&self.localization, message),
+                );
+                ui.collapsing(self.localization.text("technical-details"), |ui| {
+                    ui.label(message);
+                });
+            }
+        });
     }
 
     fn update_preferences(
@@ -2498,214 +2827,461 @@ impl AirWikiApp {
         }
     }
 
+    fn onboarding_model(&mut self, ui: &mut egui::Ui) {
+        let Some(state) = self.model_state.clone() else {
+            ui.horizontal(|ui| {
+                ui.spinner();
+                ui.label(self.localization.text("models-calculating"));
+            });
+            return;
+        };
+
+        ui.label(
+            RichText::new(self.localization.text("onboarding-model-recommended"))
+                .small()
+                .strong()
+                .color(ui.visuals().weak_text_color()),
+        );
+        if let Some(display_name) = &state.recommended_display_name {
+            ui.heading(RichText::new(display_name).size(21.0));
+        }
+        ui.add(egui::Label::new(self.localization.text("onboarding-model-private")).wrap());
+
+        let mut size_arguments = FluentArgs::new();
+        size_arguments.set(
+            "download",
+            format!("{:.2}", state.download_bytes as f64 / 1024_f64.powi(3)),
+        );
+        size_arguments.set(
+            "required",
+            format!("{:.2}", state.required_free_bytes as f64 / 1024_f64.powi(3)),
+        );
+        ui.add(
+            egui::Label::new(
+                self.localization
+                    .text_with("models-download-size", Some(&size_arguments)),
+            )
+            .wrap(),
+        );
+
+        if !state.issues.is_empty() {
+            ui.colored_label(
+                Color32::from_rgb(220, 90, 70),
+                self.localization.text("error-local-ai"),
+            );
+            ui.collapsing(self.localization.text("technical-details"), |ui| {
+                egui::ScrollArea::vertical()
+                    .id_salt("onboarding_model_issues")
+                    .max_height(96.0)
+                    .auto_shrink([false; 2])
+                    .show(ui, |ui| {
+                        for issue in &state.issues {
+                            ui.label(issue);
+                        }
+                    });
+            });
+        }
+
+        ui.collapsing(self.localization.text("onboarding-model-details"), |ui| {
+            egui::ScrollArea::vertical()
+                .id_salt("onboarding_model_licenses")
+                .max_height(110.0)
+                .auto_shrink([false; 2])
+                .show(ui, |ui| {
+                    if let (Some(license), Some(url), Some(revision)) =
+                        (&state.license, &state.license_url, &state.revision)
+                    {
+                        ui.hyperlink_to(localized_license(&self.localization, license), url);
+                        let mut revision_arguments = FluentArgs::new();
+                        revision_arguments.set("revision", &revision[..revision.len().min(12)]);
+                        ui.label(
+                            self.localization
+                                .text_with("models-revision", Some(&revision_arguments)),
+                        );
+                    }
+                    ui.hyperlink_to(
+                        localized_license(&self.localization, E5_FILES[0].license),
+                        E5_FILES[0].license_url,
+                    );
+                    ui.hyperlink_to(
+                        localized_license(&self.localization, MMARCO_COMMON_FILES[0].license),
+                        MMARCO_COMMON_FILES[0].license_url,
+                    );
+                    ui.hyperlink_to(
+                        localized_license(&self.localization, "llama.cpp"),
+                        "https://github.com/ggml-org/llama.cpp/blob/b9946/LICENSE",
+                    );
+                });
+        });
+
+        let recommended = state.recommended_model_id.as_deref();
+        let already_active = self.models_ready && state.active_model_id.as_deref() == recommended;
+        let already_pending = state.pending_model_id.as_deref() == recommended;
+        if already_active {
+            ui.colored_label(
+                Color32::from_rgb(70, 160, 110),
+                self.localization.text("models-recommended-active"),
+            );
+        } else {
+            ui.checkbox(
+                &mut self.accepted_licenses,
+                self.localization.text("models-accept-licenses"),
+            );
+            let can_install = recommended.is_some()
+                && !already_pending
+                && self.accepted_licenses
+                && state.fits_available_disk
+                && state.issues.is_empty()
+                && self.install_label.is_none();
+            ui.horizontal(|ui| {
+                if ui
+                    .add_enabled(
+                        can_install,
+                        first_knowledge::primary_button(model_action_label(
+                            &self.localization,
+                            state.recommended_assets_installed,
+                            self.models_ready,
+                        )),
+                    )
+                    .clicked()
+                {
+                    self.worker.send(WorkerCommand::InstallModels);
+                }
+                if self.install_label.is_some()
+                    && ui.button(self.localization.text("action-cancel")).clicked()
+                {
+                    self.worker.send(WorkerCommand::CancelInstall);
+                }
+                if already_pending {
+                    ui.label(self.localization.text("models-restart-to-activate"));
+                }
+            });
+        }
+
+        if let Some(label) = &self.install_label {
+            ui.label(label);
+            ui.add(egui::ProgressBar::new(self.install_progress.clamp(0.0, 1.0)).show_percentage());
+        }
+        ui.label(
+            RichText::new(self.localization.text("onboarding-model-change-later"))
+                .small()
+                .color(ui.visuals().weak_text_color()),
+        );
+    }
+
     fn onboarding(&mut self, ui: &mut egui::Ui) {
         let Some(page) = self.onboarding_page else {
             return;
         };
-        ui.set_max_width(880.0);
-        ui.add_space(24.0);
-        match page {
-            OnboardingPage::Welcome => {
-                page_title(
-                    ui,
-                    &self.localization.text("onboarding-welcome-title"),
-                    &self.localization.text("onboarding-welcome-body"),
-                );
-                ui.add_space(16.0);
-                egui::Frame::group(ui.style()).show(ui, |ui| {
-                    ui.heading(self.localization.text("onboarding-privacy-title"));
-                    ui.label(self.localization.text("onboarding-privacy-local"));
-                    ui.label(self.localization.text("onboarding-privacy-review"));
+        let readiness = self.readiness_view();
+        let published_count = self
+            .collections
+            .iter()
+            .map(|collection| collection.published_count)
+            .sum();
+        let journey = derive_first_knowledge_journey(&readiness, published_count);
+        let layout = ResponsiveLayout::from_available(ui.available_size());
+
+        ui.set_width(ui.available_width().min(940.0));
+        StripBuilder::new(ui)
+            .size(Size::exact(first_knowledge::journey_header_height(
+                layout.density,
+            )))
+            .size(Size::remainder())
+            .size(Size::exact(first_knowledge::footer_height(layout.density)))
+            .clip(true)
+            .vertical(|mut strip| {
+                strip.cell(|ui| {
+                    first_knowledge::show_journey_header(
+                        ui,
+                        &self.localization,
+                        visible_journey_states(journey),
+                        layout.density,
+                    );
                 });
-                ui.add_space(18.0);
-                if ui
-                    .button(self.localization.text("onboarding-next"))
-                    .clicked()
-                {
-                    self.onboarding_page = Some(if self.models_ready {
-                        if self.collections.is_empty() {
-                            OnboardingPage::Collection
-                        } else if self.preferences.is_some_and(|preferences| {
-                            preferences.lan_preference == LanPreference::Undecided
-                        }) {
-                            OnboardingPage::Lan
-                        } else {
-                            OnboardingPage::Background
+                strip.cell(|ui| {
+                    let content_height = (ui.available_height()
+                        - f32::from(first_knowledge::surface_margin(layout.density)) * 2.0)
+                        .max(0.0);
+                    first_knowledge::work_surface(ui, layout.density, |ui| {
+                        ui.set_min_height(content_height);
+                        match page {
+                            OnboardingPage::Welcome => {
+                                onboarding_title(
+                                    ui,
+                                    &self.localization.text("onboarding-welcome-title"),
+                                    &self.localization.text("onboarding-welcome-body"),
+                                    layout.density,
+                                );
+                                ui.heading(
+                                    RichText::new(
+                                        self.localization.text("onboarding-privacy-title"),
+                                    )
+                                    .size(18.0),
+                                );
+                                ui.label(self.localization.text("onboarding-privacy-local"));
+                                ui.label(self.localization.text("onboarding-privacy-review"));
+                                ui.add_space(16.0);
+                                if ui
+                                    .add(first_knowledge::primary_button(
+                                        self.localization.text("onboarding-next"),
+                                    ))
+                                    .clicked()
+                                {
+                                    self.onboarding_page = Some(self.next_onboarding_page());
+                                }
+                            }
+                            OnboardingPage::Model => {
+                                onboarding_title(
+                                    ui,
+                                    &self.localization.text("onboarding-model-title"),
+                                    &self.localization.text("onboarding-model-body"),
+                                    layout.density,
+                                );
+                                self.onboarding_model(ui);
+                                ui.add_space(16.0);
+                                ui.horizontal(|ui| {
+                                    if ui
+                                        .button(self.localization.text("onboarding-back"))
+                                        .clicked()
+                                    {
+                                        self.onboarding_page = Some(OnboardingPage::Welcome);
+                                    }
+                                    if ui
+                                        .add_enabled(
+                                            self.models_ready,
+                                            first_knowledge::primary_button(
+                                                self.localization.text("onboarding-next"),
+                                            ),
+                                        )
+                                        .clicked()
+                                    {
+                                        self.onboarding_page = Some(self.next_onboarding_page());
+                                    }
+                                });
+                            }
+                            OnboardingPage::Collection => {
+                                onboarding_title(
+                                    ui,
+                                    &self.localization.text("onboarding-collection-title"),
+                                    &self.localization.text("onboarding-collection-body"),
+                                    layout.density,
+                                );
+                                if !self.collections.is_empty() {
+                                    ui.colored_label(
+                                        Color32::from_rgb(70, 160, 110),
+                                        self.localization.text("onboarding-collection-linked"),
+                                    );
+                                }
+                                ui.add_space(12.0);
+                                ui.horizontal(|ui| {
+                                    if ui
+                                        .add(first_knowledge::primary_button(
+                                            self.localization.text("collections-choose-folder"),
+                                        ))
+                                        .clicked()
+                                    {
+                                        self.choose_and_add_collection();
+                                    }
+                                    if !self.collections.is_empty()
+                                        && ui
+                                            .add(first_knowledge::primary_button(
+                                                self.localization.text("onboarding-next"),
+                                            ))
+                                            .clicked()
+                                    {
+                                        self.onboarding_page = Some(OnboardingPage::Processing);
+                                    }
+                                });
+                                ui.add_space(14.0);
+                                if ui
+                                    .link(self.localization.text("onboarding-skip-folder"))
+                                    .clicked()
+                                {
+                                    self.finish_onboarding();
+                                }
+                                ui.label(
+                                    RichText::new(
+                                        self.localization.text("onboarding-skip-folder-help"),
+                                    )
+                                    .small()
+                                    .color(ui.visuals().weak_text_color()),
+                                );
+                            }
+                            OnboardingPage::Processing => {
+                                onboarding_title(
+                                    ui,
+                                    &self.localization.text("onboarding-processing-title"),
+                                    &self.localization.text("onboarding-processing-body"),
+                                    layout.density,
+                                );
+                                let document_count = self
+                                    .collections
+                                    .iter()
+                                    .map(|collection| collection.document_count)
+                                    .sum::<usize>();
+                                let scan_finished = self.collection_scans.is_empty()
+                                    && self.collections.iter().any(|collection| {
+                                        collection.maintenance.as_ref().is_some_and(|maintenance| {
+                            maintenance.status != airwiki_core::CollectionMaintenanceStatus::Never
+                        })
+                                    });
+                                if scan_finished && document_count == 0 {
+                                    empty_state(
+                                        ui,
+                                        &self
+                                            .localization
+                                            .text("onboarding-processing-empty-title"),
+                                        &self.localization.text("onboarding-processing-empty-body"),
+                                    );
+                                    if ui
+                                        .button(
+                                            self.localization
+                                                .text("onboarding-processing-open-folder"),
+                                        )
+                                        .clicked()
+                                    {
+                                        self.screen = Screen::Collections;
+                                        self.finish_onboarding();
+                                    }
+                                } else {
+                                    ui.horizontal(|ui| {
+                                        ui.spinner();
+                                        ui.label(if self.collection_scans.is_empty() {
+                                            self.localization
+                                                .text("onboarding-processing-enriching")
+                                        } else {
+                                            self.localization.text("onboarding-processing-scanning")
+                                        });
+                                    });
+                                }
+                            }
+                            OnboardingPage::Review => {
+                                onboarding_title(
+                                    ui,
+                                    &self.localization.text("onboarding-review-title"),
+                                    &self.localization.text("onboarding-review-body"),
+                                    layout.density,
+                                );
+                                if onboarding_review_requires_recovery(
+                                    self.reviews.len(),
+                                    self.source_issues.len(),
+                                ) {
+                                    ui.horizontal_wrapped(|ui| {
+                                        if ui
+                                            .add(first_knowledge::primary_button(
+                                                self.localization
+                                                    .text("onboarding-review-choose-folder"),
+                                            ))
+                                            .clicked()
+                                        {
+                                            self.choose_and_add_collection();
+                                        }
+                                        if ui
+                                            .button(
+                                                self.localization
+                                                    .text("onboarding-review-continue"),
+                                            )
+                                            .clicked()
+                                        {
+                                            self.finish_onboarding();
+                                        }
+                                    });
+                                    ui.add_space(8.0);
+                                }
+                                self.review_content(ui);
+                            }
+                            OnboardingPage::Search => {
+                                onboarding_title(
+                                    ui,
+                                    &self.localization.text("onboarding-search-title"),
+                                    &self.localization.text("onboarding-search-body"),
+                                    layout.density,
+                                );
+                                self.search_form(ui, false);
+                                if !self.search_hits.is_empty() {
+                                    ui.add_space(if layout.is_compact() { 8.0 } else { 16.0 });
+                                    ui.heading(
+                                        self.localization.text("onboarding-search-ready-title"),
+                                    );
+                                    ui.label(
+                                        self.localization.text("onboarding-search-ready-body"),
+                                    );
+                                    if ui
+                                        .add_enabled(
+                                            !self.onboarding_finishing,
+                                            first_knowledge::primary_button(
+                                                self.localization.text("onboarding-search-finish"),
+                                            ),
+                                        )
+                                        .clicked()
+                                    {
+                                        self.finish_onboarding();
+                                    }
+                                }
+                                self.search_feedback(ui);
+                            }
                         }
-                    } else {
-                        OnboardingPage::Model
                     });
-                }
-            }
-            OnboardingPage::Model => {
-                self.setup(ui);
-                ui.add_space(18.0);
-                if ui
-                    .add_enabled(
-                        self.models_ready,
-                        egui::Button::new(self.localization.text("onboarding-next")),
-                    )
-                    .clicked()
-                {
-                    self.onboarding_page = Some(if self.collections.is_empty() {
-                        OnboardingPage::Collection
-                    } else {
-                        OnboardingPage::Lan
-                    });
-                }
-            }
-            OnboardingPage::Collection => {
-                page_title(
-                    ui,
-                    &self.localization.text("onboarding-collection-title"),
-                    &self.localization.text("onboarding-collection-body"),
-                );
-                if !self.collections.is_empty() {
-                    ui.colored_label(
-                        Color32::from_rgb(70, 160, 110),
-                        self.localization.text("onboarding-collection-linked"),
-                    );
-                }
-                ui.horizontal(|ui| {
-                    if ui
-                        .button(self.localization.text("collections-choose-folder"))
-                        .clicked()
-                        && let Some(folder) = rfd::FileDialog::new().pick_folder()
-                    {
-                        let name = folder
-                            .file_name()
-                            .and_then(|name| name.to_str())
-                            .filter(|name| !name.trim().is_empty())
-                            .map(ToOwned::to_owned)
-                            .unwrap_or_else(|| {
-                                self.localization.text("onboarding-default-folder-name")
-                            });
-                        self.worker
-                            .send(WorkerCommand::AddCollection { name, folder });
-                    }
-                    if ui
-                        .button(self.localization.text("onboarding-skip"))
-                        .clicked()
-                    {
-                        self.onboarding_page = Some(OnboardingPage::Lan);
-                    }
-                    if !self.collections.is_empty()
-                        && ui
-                            .button(self.localization.text("onboarding-next"))
-                            .clicked()
-                    {
-                        self.onboarding_page = Some(OnboardingPage::Lan);
+                });
+                strip.cell(|ui| {
+                    first_knowledge::privacy_note(ui, &self.localization);
+                    if self.onboarding_finishing {
+                        ui.spinner();
                     }
                 });
-            }
-            OnboardingPage::Lan => {
-                page_title(
-                    ui,
-                    &self.localization.text("onboarding-lan-title"),
-                    &self.localization.text("onboarding-lan-body"),
-                );
-                ui.horizontal(|ui| {
-                    if ui
-                        .button(self.localization.text("onboarding-lan-enable"))
-                        .clicked()
-                    {
-                        self.onboarding_lan = LanPreference::Enabled;
-                        self.onboarding_page = Some(OnboardingPage::Background);
-                    }
-                    if ui
-                        .button(self.localization.text("onboarding-lan-disable"))
-                        .clicked()
-                    {
-                        self.onboarding_lan = LanPreference::Disabled;
-                        self.onboarding_page = Some(OnboardingPage::Background);
-                    }
-                });
-            }
-            OnboardingPage::Background => {
-                page_title(
-                    ui,
-                    &self.localization.text("onboarding-background-title"),
-                    &self.localization.text("onboarding-background-body"),
-                );
-                ui.checkbox(
-                    &mut self.onboarding_background,
-                    self.localization.text("onboarding-background-close"),
-                );
-                ui.checkbox(
-                    &mut self.onboarding_autostart,
-                    self.localization.text("onboarding-background-login"),
-                );
-                ui.checkbox(
-                    &mut self.onboarding_updates,
-                    self.localization.text("onboarding-background-updates"),
-                );
-                ui.label(
-                    RichText::new(self.localization.text("onboarding-pending-confirmation"))
-                        .small()
-                        .color(Color32::GRAY),
-                );
-                if ui
-                    .button(self.localization.text("onboarding-next"))
-                    .clicked()
-                {
-                    self.onboarding_page = Some(OnboardingPage::Chat);
-                }
-            }
-            OnboardingPage::Chat => {
-                page_title(
-                    ui,
-                    &self.localization.text("onboarding-chat-title"),
-                    &self.localization.text("onboarding-chat-body"),
-                );
-                ui.label(self.localization.text("onboarding-chat-later"));
-                ui.collapsing(self.localization.text("onboarding-chat-now"), |ui| {
-                    self.integrations(ui)
-                });
-                ui.horizontal(|ui| {
-                    if ui
-                        .button(self.localization.text("onboarding-next"))
-                        .clicked()
-                    {
-                        self.onboarding_page = Some(OnboardingPage::Complete);
-                    }
-                });
-            }
-            OnboardingPage::Complete => {
-                page_title(
-                    ui,
-                    &self.localization.text("onboarding-complete-title"),
-                    &self.localization.text("onboarding-complete-body"),
-                );
-                if ui
-                    .add_enabled(
-                        !self.onboarding_finishing,
-                        egui::Button::new(self.localization.text("onboarding-finish")),
-                    )
-                    .clicked()
-                {
-                    self.onboarding_finishing = true;
-                    self.pending_onboarding_autostart = Some(self.onboarding_autostart);
-                    let lan_preference = self.onboarding_lan;
-                    let close_behavior = if self.onboarding_background {
-                        CloseBehavior::HideToTray
-                    } else {
-                        CloseBehavior::Quit
-                    };
-                    let automatic_update_checks = self.onboarding_updates;
-                    self.update_preferences(
-                        |preferences| {
-                            preferences.lan_preference = lan_preference;
-                            preferences.close_behavior = close_behavior;
-                            preferences.automatic_update_checks = automatic_update_checks;
-                        },
-                        true,
-                    );
-                }
-                if self.onboarding_finishing {
-                    ui.spinner();
-                }
-            }
+            });
+    }
+
+    fn next_onboarding_page(&self) -> OnboardingPage {
+        onboarding_page_for_state(
+            self.models_ready,
+            self.collections.len(),
+            self.reviews.len(),
+            self.source_issues.len(),
+            self.collections
+                .iter()
+                .map(|collection| collection.published_count)
+                .sum(),
+        )
+    }
+
+    fn choose_and_add_collection(&self) {
+        let Some(folder) = rfd::FileDialog::new().pick_folder() else {
+            return;
+        };
+        let name = folder
+            .file_name()
+            .and_then(|name| name.to_str())
+            .filter(|name| !name.trim().is_empty())
+            .map(ToOwned::to_owned)
+            .unwrap_or_else(|| self.localization.text("onboarding-default-folder-name"));
+        self.worker
+            .send(WorkerCommand::AddCollection { name, folder });
+    }
+
+    fn reconcile_onboarding_page(&mut self) {
+        if self.onboarding_finishing {
+            return;
         }
+        self.onboarding_page = advance_onboarding_page(
+            self.onboarding_page,
+            self.collections.len(),
+            self.reviews.len(),
+            self.source_issues.len(),
+            self.collections
+                .iter()
+                .map(|collection| collection.published_count)
+                .sum(),
+        );
+    }
+
+    fn finish_onboarding(&mut self) {
+        if self.onboarding_finishing || self.preferences.is_none() {
+            return;
+        }
+        self.onboarding_finishing = true;
+        self.update_preferences(|_| {}, true);
     }
 }
 
@@ -2826,6 +3402,25 @@ fn maintenance_status_presentation(
     (localization.text(message), color)
 }
 
+fn source_issue_message(
+    localization: &Localization,
+    code: airwiki_core::SourceIssueCode,
+) -> String {
+    let message_id = match code {
+        airwiki_core::SourceIssueCode::FileTooLarge => "review-issue-file-too-large",
+        airwiki_core::SourceIssueCode::Unreadable => "review-issue-unreadable",
+        airwiki_core::SourceIssueCode::InvalidUtf8 => "review-issue-invalid-utf8",
+        airwiki_core::SourceIssueCode::InvalidPdf => "review-issue-invalid-pdf",
+        airwiki_core::SourceIssueCode::EncryptedPdf => "review-issue-encrypted-pdf",
+        airwiki_core::SourceIssueCode::TooManyPages => "review-issue-too-many-pages",
+        airwiki_core::SourceIssueCode::NoTextLayer => "review-issue-no-text-layer",
+        airwiki_core::SourceIssueCode::TooManyCharacters => "review-issue-too-many-characters",
+        airwiki_core::SourceIssueCode::Superseded
+        | airwiki_core::SourceIssueCode::ProcessingFailed => "review-issue-processing-failed",
+    };
+    localization.text(message_id)
+}
+
 fn peer_trust_label(localization: &Localization, trust: PeerTrustState) -> String {
     localization.text(match trust {
         PeerTrustState::Unpaired => "peer-trust-unpaired",
@@ -2930,6 +3525,42 @@ fn human_error_summary(localization: &Localization, message: &str) -> String {
         "error-generic"
     };
     localization.text(message_id)
+}
+
+fn onboarding_error_is_relevant(page: OnboardingPage, message: &str) -> bool {
+    let normalized = message.to_lowercase();
+    let contains_any = |terms: &[&str]| terms.iter().any(|term| normalized.contains(term));
+    if contains_any(&[
+        "private services",
+        "servicios privados",
+        "device identity",
+        "identidad ed25519",
+        "keychain",
+        "llavero",
+    ]) {
+        return true;
+    }
+    match page {
+        OnboardingPage::Welcome => false,
+        OnboardingPage::Model => contains_any(&[
+            "model", "modelo", "infer", "asset", "artifact", "hash", "memory", "memoria", "disk",
+            "space", "espacio",
+        ]),
+        OnboardingPage::Collection | OnboardingPage::Processing | OnboardingPage::Review => {
+            contains_any(&[
+                "collection",
+                "colección",
+                "document",
+                "wiki",
+                "markdown",
+                "pdf",
+                "chunk",
+            ])
+        }
+        OnboardingPage::Search => {
+            contains_any(&["search", "búsqueda", "index", "índice", "fts", "embedding"])
+        }
+    }
 }
 
 fn primary_action_title(localization: &Localization, action: RecommendedAction) -> String {
@@ -3037,12 +3668,169 @@ fn localized_model_progress(
     localization.text_with(message_id, Some(&arguments))
 }
 
+fn localized_license(localization: &Localization, name: &str) -> String {
+    let mut arguments = FluentArgs::new();
+    arguments.set("name", name);
+    localization.text_with("models-license", Some(&arguments))
+}
+
+fn onboarding_title(
+    ui: &mut egui::Ui,
+    title: &str,
+    body: &str,
+    density: crate::layout::LayoutDensity,
+) {
+    let (title_size, body_size, gap) = match density {
+        crate::layout::LayoutDensity::Compact => (20.0, 14.0, 8.0),
+        crate::layout::LayoutDensity::Comfortable => (24.0, 15.0, 16.0),
+    };
+    ui.heading(RichText::new(title).size(title_size).strong());
+    ui.add(egui::Label::new(RichText::new(body).size(body_size)).wrap());
+    ui.add_space(gap);
+}
+
+fn onboarding_page_for_state(
+    models_ready: bool,
+    collection_count: usize,
+    review_count: usize,
+    issue_count: usize,
+    published_count: usize,
+) -> OnboardingPage {
+    if !models_ready {
+        OnboardingPage::Model
+    } else if collection_count == 0 {
+        OnboardingPage::Collection
+    } else if published_count > 0 {
+        OnboardingPage::Search
+    } else if review_count > 0 || issue_count > 0 {
+        OnboardingPage::Review
+    } else {
+        OnboardingPage::Processing
+    }
+}
+
+fn advance_onboarding_page(
+    current: Option<OnboardingPage>,
+    collection_count: usize,
+    review_count: usize,
+    issue_count: usize,
+    published_count: usize,
+) -> Option<OnboardingPage> {
+    match current {
+        Some(OnboardingPage::Collection) if collection_count > 0 => {
+            Some(OnboardingPage::Processing)
+        }
+        Some(OnboardingPage::Processing | OnboardingPage::Review) if published_count > 0 => {
+            Some(OnboardingPage::Search)
+        }
+        Some(OnboardingPage::Processing) if review_count > 0 || issue_count > 0 => {
+            Some(OnboardingPage::Review)
+        }
+        other => other,
+    }
+}
+
+fn onboarding_review_requires_recovery(review_count: usize, issue_count: usize) -> bool {
+    review_count == 0 && issue_count > 0
+}
+
+fn selected_review_after_refresh(
+    selected: Option<Uuid>,
+    reviews: &[ReviewItemView],
+) -> Option<Uuid> {
+    selected
+        .filter(|selected| reviews.iter().any(|review| review.concept_id == *selected))
+        .or_else(|| reviews.first().map(|review| review.concept_id))
+}
+
+fn visible_journey_states(journey: FirstKnowledgeJourneyView) -> [JourneyStepState; 5] {
+    let choose_folder =
+        visible_journey_state(journey.stage_state(FirstKnowledgeStage::ChooseKnowledgeFolder));
+    let process = visible_journey_state(journey.stage_state(FirstKnowledgeStage::ProcessKnowledge));
+    [
+        visible_journey_state(journey.stage_state(FirstKnowledgeStage::PrepareLocalAi)),
+        merge_read_state(choose_folder, process),
+        visible_journey_state(journey.stage_state(FirstKnowledgeStage::ReviewKnowledge)),
+        visible_journey_state(journey.stage_state(FirstKnowledgeStage::PublishReady)),
+        visible_journey_state(journey.stage_state(FirstKnowledgeStage::SearchKnowledge)),
+    ]
+}
+
+fn visible_journey_state(state: FirstKnowledgeStepState) -> JourneyStepState {
+    match state {
+        FirstKnowledgeStepState::Complete => JourneyStepState::Complete,
+        FirstKnowledgeStepState::Current | FirstKnowledgeStepState::Working => {
+            JourneyStepState::Current
+        }
+        FirstKnowledgeStepState::NeedsPermission | FirstKnowledgeStepState::NeedsAttention => {
+            JourneyStepState::Attention
+        }
+        FirstKnowledgeStepState::Pending => JourneyStepState::Upcoming,
+    }
+}
+
+fn merge_read_state(
+    choose_folder: JourneyStepState,
+    process: JourneyStepState,
+) -> JourneyStepState {
+    if matches!(
+        (choose_folder, process),
+        (JourneyStepState::Attention, _) | (_, JourneyStepState::Attention)
+    ) {
+        JourneyStepState::Attention
+    } else if matches!(
+        (choose_folder, process),
+        (JourneyStepState::Current, _) | (_, JourneyStepState::Current)
+    ) {
+        JourneyStepState::Current
+    } else if choose_folder == JourneyStepState::Complete && process == JourneyStepState::Complete {
+        JourneyStepState::Complete
+    } else {
+        JourneyStepState::Upcoming
+    }
+}
+
+fn journey_stage_copy(localization: &Localization, stage: FirstKnowledgeStage) -> (String, String) {
+    let (title, body) = match stage {
+        FirstKnowledgeStage::PrepareLocalAi => ("onboarding-model-title", "onboarding-model-body"),
+        FirstKnowledgeStage::ChooseKnowledgeFolder => {
+            ("onboarding-collection-title", "onboarding-collection-body")
+        }
+        FirstKnowledgeStage::ProcessKnowledge => {
+            ("onboarding-processing-title", "onboarding-processing-body")
+        }
+        FirstKnowledgeStage::ReviewKnowledge => {
+            ("onboarding-review-title", "onboarding-review-body")
+        }
+        FirstKnowledgeStage::PublishReady => {
+            ("knowledge-updating-title", "knowledge-updating-body")
+        }
+        FirstKnowledgeStage::SearchKnowledge => {
+            ("onboarding-search-title", "onboarding-search-body")
+        }
+    };
+    (localization.text(title), localization.text(body))
+}
+
+fn first_knowledge_readiness_status(state: FirstKnowledgeStepState) -> ReadinessStatus {
+    match state {
+        FirstKnowledgeStepState::NeedsPermission => ReadinessStatus::NeedsPermission,
+        FirstKnowledgeStepState::NeedsAttention => ReadinessStatus::NeedsAttention,
+        FirstKnowledgeStepState::Current | FirstKnowledgeStepState::Working => {
+            ReadinessStatus::Working
+        }
+        FirstKnowledgeStepState::Complete | FirstKnowledgeStepState::Pending => {
+            ReadinessStatus::Ready
+        }
+    }
+}
+
 impl eframe::App for AirWikiApp {
     fn logic(&mut self, context: &egui::Context, _frame: &mut eframe::Frame) {
         if let Some(error) = self.shell.ensure_tray() {
             self.notices.push_back((
                 true,
-                format!("No se pudo iniciar la bandeja del sistema: {error}"),
+                format!("{} {error}", self.localization.text("tray-start-failed")),
             ));
             self.shell.show(context);
         }
@@ -3053,6 +3841,7 @@ impl eframe::App for AirWikiApp {
         }
         self.shell.handle_frame(context, self.close_policy());
         self.drain_events();
+        self.reconcile_onboarding_page();
         if self.exit_after_update_launch {
             self.exit_after_update_launch = false;
             self.shell.request_exit(context);
@@ -3081,11 +3870,9 @@ impl eframe::App for AirWikiApp {
     fn ui(&mut self, root: &mut egui::Ui, _frame: &mut eframe::Frame) {
         if self.onboarding_page.is_some() {
             egui::CentralPanel::default().show(root, |ui| {
-                egui::ScrollArea::vertical()
-                    .auto_shrink([false; 2])
-                    .show(ui, |ui| self.onboarding(ui));
+                self.onboarding(ui);
             });
-            self.notices(root);
+            self.onboarding_notices(root);
             self.close_confirmation(root.ctx());
             return;
         }
@@ -3093,24 +3880,16 @@ impl eframe::App for AirWikiApp {
         if self.screen != Screen::Setup {
             self.notices(root);
         }
-        egui::CentralPanel::default().show(root, |ui| {
-            if self.screen == Screen::Knowledge {
-                self.knowledge(ui);
-            } else {
-                egui::ScrollArea::vertical()
-                    .auto_shrink([false; 2])
-                    .show(ui, |ui| match self.screen {
-                        Screen::Setup => self.home(ui),
-                        Screen::Models => self.setup(ui),
-                        Screen::Collections => self.collections(ui),
-                        Screen::Review => self.review(ui),
-                        Screen::Knowledge => unreachable!("knowledge has a dedicated viewport"),
-                        Screen::Search => self.search(ui),
-                        Screen::Integrations => self.integrations(ui),
-                        Screen::Nodes => self.nodes(ui),
-                        Screen::Settings => self.settings(ui),
-                    });
-            }
+        egui::CentralPanel::default().show(root, |ui| match self.screen {
+            Screen::Setup => self.home(ui),
+            Screen::Models => self.setup(ui),
+            Screen::Collections => self.collections(ui),
+            Screen::Review => self.review(ui),
+            Screen::Knowledge => self.knowledge(ui),
+            Screen::Search => self.search(ui),
+            Screen::Integrations => self.integrations(ui),
+            Screen::Nodes => self.nodes(ui),
+            Screen::Settings => self.settings(ui),
         });
         self.close_confirmation(root.ctx());
     }
@@ -3119,9 +3898,13 @@ impl eframe::App for AirWikiApp {
 fn configure_style(context: &egui::Context) {
     let mut style = (*context.global_style()).clone();
     style.spacing.item_spacing = egui::vec2(10.0, 8.0);
-    style.visuals.widgets.active.corner_radius = egui::CornerRadius::same(6);
-    style.visuals.widgets.hovered.corner_radius = egui::CornerRadius::same(6);
-    style.visuals.widgets.inactive.corner_radius = egui::CornerRadius::same(6);
+    style.spacing.button_padding = egui::vec2(14.0, 8.0);
+    style.spacing.interact_size.y = 36.0;
+    style.visuals.selection.bg_fill = first_knowledge::AIR_BLUE;
+    style.visuals.selection.stroke = egui::Stroke::new(1.0, Color32::WHITE);
+    style.visuals.widgets.active.corner_radius = egui::CornerRadius::same(8);
+    style.visuals.widgets.hovered.corner_radius = egui::CornerRadius::same(8);
+    style.visuals.widgets.inactive.corner_radius = egui::CornerRadius::same(8);
     context.set_global_style(style);
 }
 
@@ -3261,7 +4044,7 @@ fn edit_draft(ui: &mut egui::Ui, localization: &Localization, draft: &mut Enrich
     ui.label(localization.text("review-field-entities"));
     let mut remove_entity = None;
     for (index, entity) in draft.entities.iter_mut().enumerate() {
-        ui.horizontal(|ui| {
+        let render_fields = |ui: &mut egui::Ui| {
             ui.add(
                 egui::TextEdit::singleline(&mut entity.name)
                     .hint_text(localization.text("review-entity-name")),
@@ -3276,7 +4059,12 @@ fn edit_draft(ui: &mut egui::Ui, localization: &Localization, draft: &mut Enrich
             {
                 remove_entity = Some(index);
             }
-        });
+        };
+        if review_fields_stack(ui.available_width()) {
+            ui.vertical(render_fields);
+        } else {
+            ui.horizontal(render_fields);
+        }
     }
     if let Some(index) = remove_entity {
         draft.entities.remove(index);
@@ -3293,7 +4081,7 @@ fn edit_draft(ui: &mut egui::Ui, localization: &Localization, draft: &mut Enrich
     ui.label(localization.text("review-field-links"));
     let mut remove_link = None;
     for (index, link) in draft.links.iter_mut().enumerate() {
-        ui.horizontal(|ui| {
+        let render_fields = |ui: &mut egui::Ui| {
             ui.add(
                 egui::TextEdit::singleline(&mut link.label)
                     .hint_text(localization.text("review-link-label")),
@@ -3308,7 +4096,12 @@ fn edit_draft(ui: &mut egui::Ui, localization: &Localization, draft: &mut Enrich
             {
                 remove_link = Some(index);
             }
-        });
+        };
+        if review_fields_stack(ui.available_width()) {
+            ui.vertical(render_fields);
+        } else {
+            ui.horizontal(render_fields);
+        }
     }
     if let Some(index) = remove_link {
         draft.links.remove(index);
@@ -3331,15 +4124,22 @@ fn edit_draft(ui: &mut egui::Ui, localization: &Localization, draft: &mut Enrich
         .labelled_by(classification_label.id);
 }
 
+fn review_fields_stack(available_width: f32) -> bool {
+    available_width < 520.0
+}
+
 #[cfg(test)]
 mod tests {
     use super::{
-        ExternalAiPolicyChange, classify_external_ai_policy_change, connectivity_runtime_is_active,
-        deduplicate_notices, firewall_configuration_is_current, firewall_operation_update_applies,
+        ExternalAiPolicyChange, OnboardingPage, advance_onboarding_page,
+        classify_external_ai_policy_change, connectivity_runtime_is_active, deduplicate_notices,
+        firewall_configuration_is_current, firewall_operation_update_applies,
         firewall_state_offers_advanced_recovery, human_error_summary, model_action_label,
-        parse_manual_ipv4_address, peer_activity_message_id, primary_action_explanation,
-        primary_action_title, search_coverage_message, should_present_pairing_controls,
-        updater_launched_installer,
+        onboarding_error_is_relevant, onboarding_page_for_state,
+        onboarding_review_requires_recovery, parse_manual_ipv4_address, peer_activity_message_id,
+        primary_action_explanation, primary_action_title, review_fields_stack,
+        search_coverage_message, should_present_pairing_controls, updater_launched_installer,
+        visible_journey_states,
     };
     use crate::connectivity_platform::{
         ConnectivityPlatformSnapshot, FirewallDiagnosticState, FirewallHelperState,
@@ -3347,7 +4147,10 @@ mod tests {
     };
     use crate::i18n::{Localization, UiLocale};
     use crate::model_config::LanPreference;
-    use crate::readiness::RecommendedAction;
+    use crate::readiness::{
+        FirstKnowledgeCta, FirstKnowledgeJourneyView, FirstKnowledgeStage, FirstKnowledgeStepState,
+        RecommendedAction,
+    };
     use crate::updater::{UpdateSummary, UpdaterStatus, UpdaterView};
     use crate::worker::{
         FirewallOperationView, LanDiscoveryView, LanListenerView, PeerActivityState,
@@ -3355,6 +4158,102 @@ mod tests {
     };
     use std::collections::VecDeque;
     use uuid::Uuid;
+
+    #[test]
+    fn first_run_targets_the_earliest_unfinished_knowledge_step() {
+        for (models, collections, reviews, issues, published, expected) in [
+            (false, 0, 0, 0, 0, OnboardingPage::Model),
+            (true, 0, 0, 0, 0, OnboardingPage::Collection),
+            (true, 1, 0, 0, 0, OnboardingPage::Processing),
+            (true, 1, 1, 0, 0, OnboardingPage::Review),
+            (true, 1, 0, 1, 0, OnboardingPage::Review),
+            (true, 1, 0, 0, 1, OnboardingPage::Search),
+        ] {
+            assert_eq!(
+                onboarding_page_for_state(models, collections, reviews, issues, published),
+                expected
+            );
+        }
+    }
+
+    #[test]
+    fn first_run_advances_from_real_worker_state_without_optional_setup() {
+        assert_eq!(
+            advance_onboarding_page(Some(OnboardingPage::Collection), 1, 0, 0, 0),
+            Some(OnboardingPage::Processing)
+        );
+        assert_eq!(
+            advance_onboarding_page(Some(OnboardingPage::Processing), 1, 1, 0, 0),
+            Some(OnboardingPage::Review)
+        );
+        assert_eq!(
+            advance_onboarding_page(Some(OnboardingPage::Review), 1, 0, 0, 1),
+            Some(OnboardingPage::Search)
+        );
+        assert_eq!(
+            advance_onboarding_page(Some(OnboardingPage::Welcome), 1, 1, 0, 1),
+            Some(OnboardingPage::Welcome)
+        );
+        assert_eq!(
+            advance_onboarding_page(Some(OnboardingPage::Processing), 1, 0, 1, 0),
+            Some(OnboardingPage::Review)
+        );
+    }
+
+    #[test]
+    fn issue_only_onboarding_offers_a_safe_exit() {
+        assert!(onboarding_review_requires_recovery(0, 1));
+        assert!(!onboarding_review_requires_recovery(1, 1));
+        assert!(!onboarding_review_requires_recovery(0, 0));
+    }
+
+    #[test]
+    fn review_fields_stack_in_the_minimum_window_editor() {
+        assert!(review_fields_stack(337.0));
+        assert!(!review_fields_stack(520.0));
+    }
+
+    #[test]
+    fn first_run_hides_optional_system_failures_from_the_core_step() {
+        assert!(!onboarding_error_is_relevant(
+            OnboardingPage::Model,
+            "the bundled macOS launch agent is unavailable"
+        ));
+        assert!(onboarding_error_is_relevant(
+            OnboardingPage::Model,
+            "the local model failed integrity verification"
+        ));
+        assert!(onboarding_error_is_relevant(
+            OnboardingPage::Processing,
+            "the collection could not process a PDF"
+        ));
+        assert!(onboarding_error_is_relevant(
+            OnboardingPage::Welcome,
+            "No se pudieron iniciar los servicios privados"
+        ));
+    }
+
+    #[test]
+    fn six_internal_conditions_render_as_five_human_steps() {
+        let journey = FirstKnowledgeJourneyView {
+            current_stage: FirstKnowledgeStage::ReviewKnowledge,
+            current_state: FirstKnowledgeStepState::Current,
+            cta: Some(FirstKnowledgeCta::Recommended(
+                RecommendedAction::ReviewPendingKnowledge,
+            )),
+        };
+
+        assert_eq!(
+            visible_journey_states(journey),
+            [
+                super::JourneyStepState::Complete,
+                super::JourneyStepState::Complete,
+                super::JourneyStepState::Current,
+                super::JourneyStepState::Upcoming,
+                super::JourneyStepState::Upcoming,
+            ]
+        );
+    }
 
     #[test]
     fn conflict_and_legacy_exposure_offer_advanced_inbound_recovery() {

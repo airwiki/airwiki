@@ -27,7 +27,9 @@ const GRAPH_LAYOUT_WORK_BUDGET: Duration = Duration::from_millis(3);
 const MAX_LAYOUT_NODES_PER_FRAME: usize = 64;
 const UPDATING_RETRY_DELAY: Duration = Duration::from_millis(750);
 const TREE_WIDTH: f32 = 270.0;
+const NARROW_TREE_WIDTH: f32 = 220.0;
 const DETAILS_WIDTH: f32 = 310.0;
+const NARROW_WIKI_THRESHOLD: f32 = 760.0;
 
 #[derive(Debug, Clone)]
 pub(super) enum KnowledgeAction {
@@ -56,6 +58,12 @@ enum KnowledgeTab {
     Wiki,
     Graph,
     Health,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum NarrowWikiPane {
+    Page,
+    Details,
 }
 
 #[derive(Debug, Clone)]
@@ -141,6 +149,7 @@ impl IncrementalGraphLayout {
 
 pub(super) struct KnowledgeUi {
     tab: KnowledgeTab,
+    narrow_wiki_pane: NarrowWikiPane,
     collection_id: Option<Uuid>,
     bundle: Option<Arc<KnowledgeBundleView>>,
     bundle_pending: Option<PendingBundle>,
@@ -170,6 +179,7 @@ impl Default for KnowledgeUi {
     fn default() -> Self {
         Self {
             tab: KnowledgeTab::Wiki,
+            narrow_wiki_pane: NarrowWikiPane::Page,
             collection_id: None,
             bundle: None,
             bundle_pending: None,
@@ -528,6 +538,7 @@ impl KnowledgeUi {
         if let Some(page_id) = requested_page
             && let Some(action) = self.request_page(page_id)
         {
+            self.narrow_wiki_pane = NarrowWikiPane::Page;
             actions.push(action);
         }
 
@@ -671,22 +682,57 @@ impl KnowledgeUi {
         bundle: &KnowledgeBundleView,
     ) -> Option<KnowledgePageId> {
         let mut requested_page = None;
-        StripBuilder::new(ui)
-            .size(Size::exact(TREE_WIDTH))
-            .size(Size::remainder().at_least(260.0))
-            .size(Size::exact(DETAILS_WIDTH))
-            .clip(true)
-            .horizontal(|mut strip| {
-                strip.cell(|ui| {
-                    requested_page = requested_page.or(self.wiki_tree(ui, localization, bundle));
+        if ui.available_width() < NARROW_WIKI_THRESHOLD {
+            StripBuilder::new(ui)
+                .size(Size::exact(NARROW_TREE_WIDTH))
+                .size(Size::remainder().at_least(260.0))
+                .clip(true)
+                .horizontal(|mut strip| {
+                    strip.cell(|ui| {
+                        requested_page =
+                            requested_page.or(self.wiki_tree(ui, localization, bundle));
+                    });
+                    strip.cell(|ui| {
+                        ui.horizontal(|ui| {
+                            ui.selectable_value(
+                                &mut self.narrow_wiki_pane,
+                                NarrowWikiPane::Page,
+                                localization.text("knowledge-tab-wiki"),
+                            );
+                            ui.selectable_value(
+                                &mut self.narrow_wiki_pane,
+                                NarrowWikiPane::Details,
+                                localization.text("action-details"),
+                            );
+                        });
+                        ui.separator();
+                        requested_page = requested_page.or(match self.narrow_wiki_pane {
+                            NarrowWikiPane::Page => self.wiki_page(ui, localization, bundle),
+                            NarrowWikiPane::Details => self.wiki_details(ui, localization, bundle),
+                        });
+                    });
                 });
-                strip.cell(|ui| {
-                    requested_page = requested_page.or(self.wiki_page(ui, localization, bundle));
+        } else {
+            StripBuilder::new(ui)
+                .size(Size::exact(TREE_WIDTH))
+                .size(Size::remainder().at_least(260.0))
+                .size(Size::exact(DETAILS_WIDTH))
+                .clip(true)
+                .horizontal(|mut strip| {
+                    strip.cell(|ui| {
+                        requested_page =
+                            requested_page.or(self.wiki_tree(ui, localization, bundle));
+                    });
+                    strip.cell(|ui| {
+                        requested_page =
+                            requested_page.or(self.wiki_page(ui, localization, bundle));
+                    });
+                    strip.cell(|ui| {
+                        requested_page =
+                            requested_page.or(self.wiki_details(ui, localization, bundle));
+                    });
                 });
-                strip.cell(|ui| {
-                    requested_page = requested_page.or(self.wiki_details(ui, localization, bundle));
-                });
-            });
+        }
         requested_page
     }
 

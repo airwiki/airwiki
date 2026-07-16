@@ -396,6 +396,24 @@ impl AirWikiApp {
                         }
                     }
                 }
+                WorkerEvent::WikiMaintenanceFinished {
+                    collection_id,
+                    repaired,
+                } => {
+                    if repaired {
+                        self.notices.push_back((
+                            false,
+                            self.localization.text("knowledge-maintenance-complete"),
+                        ));
+                    }
+                    let reload_now = self.screen == Screen::Knowledge;
+                    if let Some(action) = self
+                        .knowledge
+                        .mark_snapshot_stale(Some(collection_id), reload_now)
+                    {
+                        self.send_knowledge_action(action);
+                    }
+                }
                 WorkerEvent::GuidedWikiRepairPrepared {
                     request_id,
                     collection_id,
@@ -1229,6 +1247,19 @@ impl AirWikiApp {
     }
 
     fn open_readiness_action(&mut self, action: RecommendedAction) {
+        let knowledge_action = (action == RecommendedAction::InspectWikiHealth).then(|| {
+            let collection_id = self
+                .wiki_health
+                .attention_collection_id
+                .filter(|candidate| {
+                    self.collections
+                        .iter()
+                        .any(|collection| collection.id == *candidate)
+                });
+            let scan_active = collection_id
+                .is_some_and(|collection_id| self.collection_scans.contains_key(&collection_id));
+            self.knowledge.select_health(collection_id, scan_active)
+        });
         self.screen =
             match action {
                 RecommendedAction::PrepareLocalAi | RecommendedAction::ResolveLocalAiIssue => {
@@ -1251,6 +1282,9 @@ impl AirWikiApp {
                 RecommendedAction::ResolveBackgroundIssue
                 | RecommendedAction::ResolveUpdateIssue => Screen::Settings,
             };
+        if let Some(Some(action)) = knowledge_action {
+            self.send_knowledge_action(action);
+        }
     }
 
     fn collections(&mut self, ui: &mut egui::Ui) {

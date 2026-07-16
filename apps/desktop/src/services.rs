@@ -77,6 +77,14 @@ const REVIEW_EVIDENCE_EXCERPT_MAX_BYTES: usize = 4 * 1024;
 const LAN_LISTENER_START_GRACE: Duration = Duration::from_secs(10);
 const STARTUP_COLLECTION_DISCOVERY_TIMEOUT: Duration = Duration::from_secs(5);
 
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub(crate) struct WikiHealthRollup {
+    pub(crate) error_count: usize,
+    pub(crate) warning_count: usize,
+    pub(crate) updating_count: usize,
+    pub(crate) attention_collection_id: Option<Uuid>,
+}
+
 /// Exact runtime assets already verified by [`airwiki_inference::AssetManager`].
 #[derive(Debug, Clone)]
 pub struct ModelRuntimePaths {
@@ -1442,19 +1450,34 @@ impl DesktopServices {
             .map_err(Into::into)
     }
 
-    pub fn wiki_health_rollup(&self) -> Result<(usize, usize, usize)> {
+    pub fn wiki_health_rollup(&self) -> Result<WikiHealthRollup> {
         let inspector = OkfBundleInspector::new(self.database.clone());
-        let mut errors = 0_usize;
-        let mut warnings = 0_usize;
-        let mut updating = 0_usize;
+        let mut rollup = WikiHealthRollup::default();
+        let mut attention_priority = 0_u8;
         for collection in self.database.list_collections()? {
             let bundle = inspector.inspect_bundle(collection.id)?;
-            errors = errors.saturating_add(bundle.health.error_count);
-            warnings = warnings.saturating_add(bundle.health.warning_count);
-            updating = updating
+            rollup.error_count = rollup.error_count.saturating_add(bundle.health.error_count);
+            rollup.warning_count = rollup
+                .warning_count
+                .saturating_add(bundle.health.warning_count);
+            rollup.updating_count = rollup
+                .updating_count
                 .saturating_add(usize::from(bundle.state == KnowledgeBundleState::Updating));
+            let priority = if bundle.health.error_count > 0 {
+                3
+            } else if bundle.health.warning_count > 0 {
+                2
+            } else if bundle.state == KnowledgeBundleState::Updating {
+                1
+            } else {
+                0
+            };
+            if priority > attention_priority {
+                attention_priority = priority;
+                rollup.attention_collection_id = Some(collection.id);
+            }
         }
-        Ok((errors, warnings, updating))
+        Ok(rollup)
     }
 
     pub fn review_views(&self) -> Result<Vec<ReviewItemView>> {

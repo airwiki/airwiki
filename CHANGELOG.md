@@ -30,6 +30,7 @@ All notable user-visible changes to AirWiki will be documented here. The project
 - Showed files that could not be prepared alongside review drafts with a safe, localized cause and a folder rescan action.
 - Removed flaky filesystem-watcher and reranker timing assumptions from macOS CI and made Windows hashing tests load their required PowerShell module explicitly.
 - Replaced the GitHub advisory action that required unavailable check-write permission with a read-only `cargo audit` gate.
+- Kept Wiki Health recovery actions honest: filesystem and ambiguous findings now require manual recovery instead of offering a guided repair that cannot complete, while missing pages are no longer rendered as dead links.
 
 ### Security
 

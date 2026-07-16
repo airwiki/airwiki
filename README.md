@@ -83,6 +83,7 @@ The workspace separates dependency-light contracts, local domain logic, inferenc
 - [Development packaging](docs/packaging.md)
 - [Changelog](CHANGELOG.md)
 - [Contributing](CONTRIBUTING.md)
+- [Code review](CODE_REVIEW.md)
 - [Security policy](SECURITY.md)
 - [Third-party notices](THIRD_PARTY_NOTICES.md)
 

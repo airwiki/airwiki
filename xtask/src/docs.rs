@@ -1,5 +1,5 @@
 use std::{
-    collections::BTreeSet,
+    collections::{BTreeMap, BTreeSet},
     ffi::OsString,
     fs,
     path::{Component, Path, PathBuf},
@@ -7,9 +7,10 @@ use std::{
 
 use anyhow::{Context, Result, bail, ensure};
 
-const REQUIRED_ROOT_FILES: [&str; 9] = [
+const REQUIRED_ROOT_FILES: [&str; 10] = [
     "AGENTS.md",
     "CHANGELOG.md",
+    "CODE_REVIEW.md",
     "CODE_OF_CONDUCT.md",
     "CONTRIBUTING.md",
     "LICENSE",
@@ -19,7 +20,13 @@ const REQUIRED_ROOT_FILES: [&str; 9] = [
     "THIRD_PARTY_NOTICES.md",
 ];
 const ADR_STATUSES: [&str; 4] = ["Proposed", "Accepted", "Superseded", "Rejected"];
-const ACTIVE_WORKFLOWS: [&str; 2] = ["ci.yml", "package-pilot.yml"];
+const ADR_REQUIRED_SECTIONS: [&str; 4] = [
+    "## Context",
+    "## Decision",
+    "## Consequences",
+    "## Rejected alternatives",
+];
+const ACTIVE_WORKFLOWS: [&str; 3] = ["ci.yml", "dco.yml", "package-pilot.yml"];
 const ARCHIVED_WORKFLOWS: [&str; 3] = [
     "README.md",
     "promote-stable.yml.disabled",
@@ -300,21 +307,13 @@ fn resolve_local_link(
 fn check_adrs(repository_root: &Path, issues: &mut Vec<String>) -> Result<()> {
     let adr_directory = repository_root.join("docs/adr");
     let index_path = adr_directory.join("README.md");
-    let indexed_files = if index_path.is_file() {
+    let indexed_adrs = if index_path.is_file() {
         let index_content = fs::read_to_string(&index_path)
             .with_context(|| format!("failed to read `{}`", index_path.display()))?;
-        markdown_link_targets(&index_content)
-            .into_iter()
-            .filter_map(|target| {
-                local_link_target(&target)
-                    .and_then(|target| Path::new(target).file_name())
-                    .and_then(|value| value.to_str())
-                    .map(str::to_owned)
-            })
-            .collect()
+        adr_index_entries(&index_content, issues)
     } else {
         issues.push("missing ADR index `docs/adr/README.md`".to_owned());
-        BTreeSet::new()
+        BTreeMap::new()
     };
 
     let mut records = Vec::new();
@@ -361,13 +360,61 @@ fn check_adrs(repository_root: &Path, issues: &mut Vec<String>) -> Result<()> {
                 "ADR numbering is not contiguous: expected {expected_number:04}, found {number:04}"
             ));
         }
-        check_adr_file(repository_root, *number, path, issues)?;
-        if !indexed_files.contains(file_name) {
+        let metadata = check_adr_file(repository_root, *number, path, issues)?;
+        if let Some(indexed) = indexed_adrs.get(file_name) {
+            check_adr_index_metadata(file_name, &metadata, indexed, issues);
+        } else {
             issues.push(format!("ADR index does not link `{file_name}`"));
         }
     }
 
+    let record_files: BTreeSet<&str> = records
+        .iter()
+        .map(|(_, file_name, _)| file_name.as_str())
+        .collect();
+    for file_name in indexed_adrs.keys() {
+        if !record_files.contains(file_name.as_str()) {
+            issues.push(format!("ADR index links unknown decision `{file_name}`"));
+        }
+    }
+
     Ok(())
+}
+
+#[derive(Debug)]
+struct AdrIndexEntry {
+    status: String,
+    date: String,
+}
+
+fn adr_index_entries(content: &str, issues: &mut Vec<String>) -> BTreeMap<String, AdrIndexEntry> {
+    let mut entries = BTreeMap::new();
+    for line in content.lines() {
+        let columns: Vec<&str> = line.split('|').map(str::trim).collect();
+        if columns.len() < 6 {
+            continue;
+        }
+        let Some(target) = markdown_link_targets(columns[1]).into_iter().next() else {
+            continue;
+        };
+        let Some(file_name) = local_link_target(&target)
+            .and_then(|target| Path::new(target).file_name())
+            .and_then(|value| value.to_str())
+            .filter(|file_name| adr_number(file_name).is_some())
+        else {
+            continue;
+        };
+        let entry = AdrIndexEntry {
+            status: columns[3].to_owned(),
+            date: columns[4].to_owned(),
+        };
+        if entries.insert(file_name.to_owned(), entry).is_some() {
+            issues.push(format!(
+                "ADR index contains duplicate decision `{file_name}`"
+            ));
+        }
+    }
+    entries
 }
 
 fn adr_number(file_name: &str) -> Option<u32> {
@@ -383,7 +430,7 @@ fn check_adr_file(
     number: u32,
     path: &Path,
     issues: &mut Vec<String>,
-) -> Result<()> {
+) -> Result<AdrMetadata> {
     let content =
         fs::read_to_string(path).with_context(|| format!("failed to read `{}`", path.display()))?;
     let relative_path = display_relative(repository_root, path);
@@ -398,14 +445,16 @@ fn check_adr_file(
         ));
     }
 
-    match metadata_value(&content, "Status") {
+    let status = metadata_value(&content, "Status").map(str::to_owned);
+    match status.as_deref() {
         Some(status) if ADR_STATUSES.contains(&status) => {}
         Some(status) => issues.push(format!(
             "{relative_path}: unsupported ADR status `{status}`"
         )),
         None => issues.push(format!("{relative_path}: missing `- Status:` metadata")),
     }
-    match metadata_value(&content, "Date") {
+    let date = metadata_value(&content, "Date").map(str::to_owned);
+    match date.as_deref() {
         Some(date) if valid_iso_date(date) => {}
         Some(date) => issues.push(format!(
             "{relative_path}: ADR date `{date}` must use YYYY-MM-DD"
@@ -413,7 +462,43 @@ fn check_adr_file(
         None => issues.push(format!("{relative_path}: missing `- Date:` metadata")),
     }
 
-    Ok(())
+    for section in ADR_REQUIRED_SECTIONS {
+        if !content.lines().any(|line| line.trim() == section) {
+            issues.push(format!(
+                "{relative_path}: missing required section `{section}`"
+            ));
+        }
+    }
+
+    Ok(AdrMetadata { status, date })
+}
+
+#[derive(Debug)]
+struct AdrMetadata {
+    status: Option<String>,
+    date: Option<String>,
+}
+
+fn check_adr_index_metadata(
+    file_name: &str,
+    metadata: &AdrMetadata,
+    indexed: &AdrIndexEntry,
+    issues: &mut Vec<String>,
+) {
+    if metadata.status.as_deref() != Some(indexed.status.as_str()) {
+        issues.push(format!(
+            "ADR index status for `{file_name}` is `{}`, expected `{}`",
+            indexed.status,
+            metadata.status.as_deref().unwrap_or("missing")
+        ));
+    }
+    if metadata.date.as_deref() != Some(indexed.date.as_str()) {
+        issues.push(format!(
+            "ADR index date for `{file_name}` is `{}`, expected `{}`",
+            indexed.date,
+            metadata.date.as_deref().unwrap_or("missing")
+        ));
+    }
 }
 
 fn metadata_value<'a>(content: &'a str, field: &str) -> Option<&'a str> {
@@ -523,14 +608,15 @@ mod tests {
             }
             fixture.write(
                 "docs/adr/README.md",
-                "# Architecture decisions\n\n- [ADR 0001](0001-first-decision.md)\n",
+                "# Architecture decisions\n\n| Number | Decision | Status | Date | Relationship |\n| --- | --- | --- | --- | --- |\n| [0001](0001-first-decision.md) | First decision | Accepted | 2026-07-15 | — |\n",
             );
             fixture.write(
                 "docs/adr/0001-first-decision.md",
-                "# ADR 0001: First decision\n\n- Status: Accepted\n- Date: 2026-07-15\n",
+                "# ADR 0001: First decision\n\n- Status: Accepted\n- Date: 2026-07-15\n\n## Context\n\nContext.\n\n## Decision\n\nDecision.\n\n## Consequences\n\nConsequences.\n\n## Rejected alternatives\n\nAlternatives.\n",
             );
-            fixture.write(".github/workflows/ci.yml", "name: CI\n");
-            fixture.write(".github/workflows/package-pilot.yml", "name: Pilot\n");
+            for file_name in ACTIVE_WORKFLOWS {
+                fixture.write(&format!(".github/workflows/{file_name}"), "name: Test\n");
+            }
             for file_name in ARCHIVED_WORKFLOWS {
                 fixture.write(
                     &format!("docs/archive/release-workflows/{file_name}"),
@@ -626,6 +712,71 @@ mod tests {
         let error = check(fixture.root()).unwrap_err().to_string();
 
         assert!(error.contains("unsupported ADR status `Draft`"));
+    }
+
+    #[test]
+    fn check_rejects_adr_without_required_section() {
+        let fixture = Fixture::valid();
+        fixture.write(
+            "docs/adr/0001-first-decision.md",
+            "# ADR 0001: First decision\n\n- Status: Accepted\n- Date: 2026-07-15\n\n## Context\n\nContext.\n\n## Decision\n\nDecision.\n\n## Consequences\n\nConsequences.\n",
+        );
+
+        let error = check(fixture.root()).unwrap_err().to_string();
+
+        assert!(error.contains("missing required section `## Rejected alternatives`"));
+    }
+
+    #[test]
+    fn check_rejects_adr_index_status_mismatch() {
+        let fixture = Fixture::valid();
+        fixture.write(
+            "docs/adr/README.md",
+            "# Architecture decisions\n\n| Number | Decision | Status | Date | Relationship |\n| --- | --- | --- | --- | --- |\n| [0001](0001-first-decision.md) | First decision | Proposed | 2026-07-15 | — |\n",
+        );
+
+        let error = check(fixture.root()).unwrap_err().to_string();
+
+        assert!(error.contains("index status for `0001-first-decision.md` is `Proposed`"));
+    }
+
+    #[test]
+    fn check_rejects_adr_index_date_mismatch() {
+        let fixture = Fixture::valid();
+        fixture.write(
+            "docs/adr/README.md",
+            "# Architecture decisions\n\n| Number | Decision | Status | Date | Relationship |\n| --- | --- | --- | --- | --- |\n| [0001](0001-first-decision.md) | First decision | Accepted | 2026-07-16 | — |\n",
+        );
+
+        let error = check(fixture.root()).unwrap_err().to_string();
+
+        assert!(error.contains("index date for `0001-first-decision.md` is `2026-07-16`"));
+    }
+
+    #[test]
+    fn check_rejects_duplicate_adr_index_entry() {
+        let fixture = Fixture::valid();
+        fixture.write(
+            "docs/adr/README.md",
+            "# Architecture decisions\n\n| Number | Decision | Status | Date | Relationship |\n| --- | --- | --- | --- | --- |\n| [0001](0001-first-decision.md) | First decision | Accepted | 2026-07-15 | — |\n| [0001](0001-first-decision.md) | First decision | Accepted | 2026-07-15 | — |\n",
+        );
+
+        let error = check(fixture.root()).unwrap_err().to_string();
+
+        assert!(error.contains("index contains duplicate decision `0001-first-decision.md`"));
+    }
+
+    #[test]
+    fn check_rejects_unknown_adr_index_entry() {
+        let fixture = Fixture::valid();
+        fixture.write(
+            "docs/adr/README.md",
+            "# Architecture decisions\n\n| Number | Decision | Status | Date | Relationship |\n| --- | --- | --- | --- | --- |\n| [0001](0001-first-decision.md) | First decision | Accepted | 2026-07-15 | — |\n| [0002](0002-missing-decision.md) | Missing decision | Proposed | 2026-07-16 | — |\n",
+        );
+
+        let error = check(fixture.root()).unwrap_err().to_string();
+
+        assert!(error.contains("index links unknown decision `0002-missing-decision.md`"));
     }
 
     #[test]

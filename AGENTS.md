@@ -19,7 +19,7 @@ The source is Apache-2.0 and the official repository is [airwiki/airwiki](https:
 
 ## Before changing anything
 
-- Read `README.md`, `CONTRIBUTING.md`, and the documentation relevant to the change.
+- Read `README.md`, `CONTRIBUTING.md`, and the documentation relevant to the change. When touching `apps/**` or `packaging/**`, you must also read the closest nested `AGENTS.md` before editing; it supplements this file and prevails on conflicts within its subtree.
 - Inspect the current branch, `git status`, and existing diffs. Preserve unrelated and user-owned changes.
 - State the user-visible outcome, the shortest acceptance path, and what is deliberately deferred before a multi-step change. Use `PLANS.md` only when durable coordination is genuinely useful.
 - Prefer a focused change. Do not combine behavior changes, broad refactors, dependency upgrades, and formatting churn.
@@ -49,7 +49,7 @@ SQLite is the source of operational state and local paths. Published OKF files a
 - A local model proposes metadata only. It never decides publication, collection membership, permissions, or whether content may leave the device.
 - Keep sharing opt-in. Do not add telemetry, cloud transfer, remote fetching, or new trust boundaries without an explicit product decision and threat-model update.
 - Use the pinned stable toolchain and safe, idiomatic Rust. Keep public APIs small; prefer enums and newtypes for domain states and typed errors at reusable boundaries.
-- Avoid `unwrap`, `expect`, `panic!`, unchecked indexing, unnecessary cloning, locks, trait objects, and `unsafe` in production paths. Any unavoidable invariant must be documented and tested locally.
+- Avoid `unwrap`, `expect`, `panic!`, unchecked indexing, unnecessary cloning, unnecessary locks or trait objects, and `unsafe` in production paths. Any unavoidable invariant must be documented and tested locally.
 - Never block egui or a Tokio runtime worker with filesystem traversal, parsing, hashing, heavy SQLite work, inference, or network I/O. Use the existing worker boundary and `spawn_blocking` where appropriate.
 - Logs are structured and sanitized. Never log document content, queries, snippets, tokens, secrets, embeddings, source paths, PeerIds, IPs, ports, or multiaddresses by default.
 - Released migrations are append-only. Persisted schema, OKF profile, wire protocol, and public API changes require compatibility tests and documentation.
@@ -86,3 +86,5 @@ cargo run --locked -p xtask -- licenses check
 Run `cargo deny --locked check` when dependencies or `Cargo.lock` change. Tests may use loopback and in-process fake peers, but must not download models, contact real peers or external services, open external URLs, or require private credentials.
 
 UI, operating-system, LAN, installer, and packaging changes also require the shortest relevant manual test on the affected installed candidate. A change is complete only when its success and applicable failure/recovery paths are covered, documentation is current, privacy invariants hold, and unrelated files remain untouched.
+
+Changes intended for `main` follow the proportional review process in `CODE_REVIEW.md`: focused branch, pull request, applicable review, green required checks, then merge. Never use a direct push to bypass a failed or missing check.

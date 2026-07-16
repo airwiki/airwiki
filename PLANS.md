@@ -10,6 +10,7 @@ A plan records intent and acceptance, not a transcript, command log, or speculat
 # <Outcome-oriented title>
 
 Status: Draft | Active | Blocked | Completed | Superseded
+Last updated: <YYYY-MM-DD>
 
 ## User-visible outcome
 
@@ -33,7 +34,16 @@ Status: Draft | Active | Blocked | Completed | Superseded
 
 - [ ] <Small verifiable checkpoint.>
 
+## Evidence and recovery
+
+- Evidence: <Smallest sanitized proof that the outcome and recovery path passed.>
+- Recovery: <How to return to a safe state if the implementation or rollout fails.>
+
 ## Decisions
 
 - <Date or checkpoint>: <Decision and reason; omit implementation diaries.>
+
+## Outcome and retrospective
+
+<Complete when closing the plan: actual outcome, decisive evidence, and any remaining follow-up.>
 ```

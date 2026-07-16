@@ -13,6 +13,7 @@ tests, operational runbooks or evaluation reports.
 | [0003](0003-desktop-lifecycle-and-signed-updates.md) | Keep desktop services available and require signed updates | Accepted | 2026-07-12 | Supersedes ADR 0002 only for lifecycle and per-user autostart |
 | [0004](0004-sqlite-okf-authority-and-reconciliation.md) | Separate SQLite operational authority from visible OKF authority | Accepted | 2026-07-15 | — |
 | [0005](0005-lan-identity-pairing-and-authorization.md) | Bind LAN authorization to persistent identity and human-confirmed SAS | Accepted | 2026-07-15 | — |
+| [0006](0006-windows-firewall-privilege-boundary.md) | Isolate Windows firewall changes in a narrow elevated helper | Accepted | 2026-07-16 | — |
 
 ## Policy
 

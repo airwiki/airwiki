@@ -5,7 +5,7 @@ use std::{
 };
 
 use airwiki_core::{
-    GuidedRepairChange, GuidedRepairPreview, GuidedRepairResult, HealthSeverity,
+    GuidedRepairChange, GuidedRepairPreview, GuidedRepairResult, HealthRecovery, HealthSeverity,
     KnowledgeBundleState, KnowledgeBundleView, KnowledgeConceptView, KnowledgeLinkDisposition,
     KnowledgePageId, KnowledgePageView, RepairAuthority,
 };
@@ -18,10 +18,9 @@ use egui_graphs::{
 };
 use uuid::Uuid;
 
-use crate::i18n::Localization;
+use crate::{i18n::Localization, layout::ResponsiveLayout};
 
 const MAX_GRAPH_CONCEPTS: usize = 500;
-const GRAPH_LAYOUT_FRAME_BUDGET: Duration = Duration::from_millis(4);
 // Keep a margin for the persisted egui_graphs layout state around our own step.
 const GRAPH_LAYOUT_WORK_BUDGET: Duration = Duration::from_millis(3);
 const MAX_LAYOUT_NODES_PER_FRAME: usize = 64;
@@ -208,6 +207,23 @@ impl Default for KnowledgeUi {
 }
 
 impl KnowledgeUi {
+    pub(super) fn select_health(
+        &mut self,
+        collection_id: Option<Uuid>,
+        scan_active: bool,
+    ) -> Option<KnowledgeAction> {
+        self.tab = KnowledgeTab::Health;
+        let collection_id = collection_id?;
+        if self.collection_id == Some(collection_id) {
+            if scan_active {
+                return None;
+            }
+            self.clear_snapshot();
+            return Some(self.request_bundle(collection_id));
+        }
+        self.select_collection(collection_id, scan_active)
+    }
+
     pub(super) fn bundle_loaded(
         &mut self,
         request_id: Uuid,
@@ -586,57 +602,85 @@ impl KnowledgeUi {
         active_scans: &HashSet<Uuid>,
         actions: &mut Vec<KnowledgeAction>,
     ) {
-        ui.horizontal(|ui| {
-            ui.vertical(|ui| {
-                ui.heading(RichText::new(localization.text("knowledge-title")).size(28.0));
-                ui.label(
-                    RichText::new(localization.text("knowledge-subtitle")).color(Color32::GRAY),
-                );
-            });
-            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                let refresh_enabled = self.collection_id.is_some_and(|collection_id| {
-                    !active_scans.contains(&collection_id) && self.bundle_pending.is_none()
-                });
-                if ui
-                    .add_enabled(
-                        refresh_enabled,
-                        egui::Button::new(localization.text("action-refresh")),
-                    )
-                    .clicked()
-                    && let Some(collection_id) = self.collection_id
-                {
-                    self.clear_snapshot();
-                    actions.push(self.request_bundle(collection_id));
-                }
-
-                let before = self.collection_id;
-                let mut selected_collection = before;
-                let selected_collection_name = self
-                    .collection_id
-                    .and_then(|selected| {
-                        collections
-                            .iter()
-                            .find(|(id, _)| *id == selected)
-                            .map(|(_, name)| name.clone())
-                    })
-                    .unwrap_or_else(|| localization.text("knowledge-select-collection"));
-                egui::ComboBox::from_id_salt("knowledge_collection")
-                    .width(230.0)
-                    .selected_text(selected_collection_name)
-                    .show_ui(ui, |ui| {
-                        for (id, name) in collections {
-                            ui.selectable_value(&mut selected_collection, Some(*id), name);
-                        }
-                    });
-                if selected_collection != before
-                    && let Some(collection_id) = selected_collection
-                    && let Some(action) =
-                        self.select_collection(collection_id, active_scans.contains(&collection_id))
-                {
-                    actions.push(action);
-                }
-            });
+        let narrow = ResponsiveLayout::from_available(ui.available_size()).is_narrow();
+        let refresh_enabled = self.collection_id.is_some_and(|collection_id| {
+            !active_scans.contains(&collection_id) && self.bundle_pending.is_none()
         });
+        let before = self.collection_id;
+        let mut selected_collection = before;
+        let selected_collection_name = self
+            .collection_id
+            .and_then(|selected| {
+                collections
+                    .iter()
+                    .find(|(id, _)| *id == selected)
+                    .map(|(_, name)| name.clone())
+            })
+            .unwrap_or_else(|| localization.text("knowledge-select-collection"));
+        let mut refresh_requested = false;
+
+        let title = |ui: &mut egui::Ui| {
+            ui.heading(RichText::new(localization.text("knowledge-title")).size(28.0));
+            ui.add(
+                egui::Label::new(
+                    RichText::new(localization.text("knowledge-subtitle")).color(Color32::GRAY),
+                )
+                .wrap(),
+            );
+        };
+        if narrow {
+            ui.vertical(|ui| {
+                title(ui);
+                ui.add_space(4.0);
+                ui.horizontal_wrapped(|ui| {
+                    egui::ComboBox::from_id_salt("knowledge_collection")
+                        .width(230.0)
+                        .selected_text(&selected_collection_name)
+                        .show_ui(ui, |ui| {
+                            for (id, name) in collections {
+                                ui.selectable_value(&mut selected_collection, Some(*id), name);
+                            }
+                        });
+                    refresh_requested = ui
+                        .add_enabled(
+                            refresh_enabled,
+                            egui::Button::new(localization.text("action-refresh")),
+                        )
+                        .clicked();
+                });
+            });
+        } else {
+            ui.horizontal(|ui| {
+                ui.vertical(title);
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    refresh_requested = ui
+                        .add_enabled(
+                            refresh_enabled,
+                            egui::Button::new(localization.text("action-refresh")),
+                        )
+                        .clicked();
+                    egui::ComboBox::from_id_salt("knowledge_collection")
+                        .width(230.0)
+                        .selected_text(&selected_collection_name)
+                        .show_ui(ui, |ui| {
+                            for (id, name) in collections {
+                                ui.selectable_value(&mut selected_collection, Some(*id), name);
+                            }
+                        });
+                });
+            });
+        }
+        if refresh_requested && let Some(collection_id) = self.collection_id {
+            self.clear_snapshot();
+            actions.push(self.request_bundle(collection_id));
+        }
+        if selected_collection != before
+            && let Some(collection_id) = selected_collection
+            && let Some(action) =
+                self.select_collection(collection_id, active_scans.contains(&collection_id))
+        {
+            actions.push(action);
+        }
         ui.add_space(10.0);
         ui.horizontal(|ui| {
             tab_button(
@@ -659,7 +703,7 @@ impl KnowledgeUi {
             );
             if let Some(bundle) = &self.bundle {
                 ui.separator();
-                bundle_state_badge(ui, localization, bundle.state);
+                bundle_state_badge(ui, localization, bundle);
                 let mut arguments = fluent_bundle::FluentArgs::new();
                 arguments.set("count", bundle.concepts.len());
                 ui.label(
@@ -983,29 +1027,15 @@ impl KnowledgeUi {
         let (types, tags) = filter_values(bundle);
         normalize_filter(&mut self.type_filter, &types);
         normalize_filter(&mut self.tag_filter, &tags);
-        ui.horizontal(|ui| {
-            ui.label(localization.text("knowledge-graph-description"));
-            ui.separator();
-            ui.add(
-                egui::TextEdit::singleline(&mut self.query_filter)
-                    .desired_width(260.0)
-                    .hint_text(localization.text("knowledge-filter-concepts")),
-            );
-            filter_combo(
-                ui,
-                localization,
-                "knowledge-filter-type",
-                &mut self.type_filter,
-                &types,
-            );
-            filter_combo(
-                ui,
-                localization,
-                "knowledge-filter-tag",
-                &mut self.tag_filter,
-                &tags,
-            );
-        });
+        graph_filter_controls(
+            ui,
+            localization,
+            &mut self.query_filter,
+            &mut self.type_filter,
+            &mut self.tag_filter,
+            &types,
+            &tags,
+        );
 
         let filtered_count = filtered_concepts(
             bundle,
@@ -1031,16 +1061,14 @@ impl KnowledgeUi {
         let cache = self.graph.as_mut()?;
         let mut layout_advanced = cache.layout.advance(&mut cache.graph) > 0;
 
-        ui.horizontal(|ui| {
+        ui.horizontal_wrapped(|ui| {
             let mut graph_arguments = fluent_bundle::FluentArgs::new();
             graph_arguments.set("nodes", cache.graph.node_count());
             graph_arguments.set("links", cache.graph.edge_count());
             ui.label(localization.text_with("knowledge-graph-counts", Some(&graph_arguments)));
             if !cache.layout.stable {
                 ui.spinner();
-                let mut arguments = fluent_bundle::FluentArgs::new();
-                arguments.set("milliseconds", GRAPH_LAYOUT_FRAME_BUDGET.as_millis() as u64);
-                ui.label(localization.text_with("knowledge-graph-organizing", Some(&arguments)));
+                ui.label(localization.text("knowledge-graph-organizing"));
             }
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 if ui
@@ -1195,6 +1223,8 @@ impl KnowledgeUi {
         ui.add_space(10.0);
         let history_recovery = health_requires_history_recovery(bundle);
         let content_repair = health_has_guided_content_repair(bundle);
+        let manual_recovery = health_has_manual_intervention(bundle);
+        let guided_repair_available = content_repair && !history_recovery && !manual_recovery;
         if history_recovery {
             ui.colored_label(
                 Color32::from_rgb(205, 145, 30),
@@ -1202,6 +1232,17 @@ impl KnowledgeUi {
             );
             ui.label(
                 RichText::new(localization.text("knowledge-repair-history-body"))
+                    .small()
+                    .color(Color32::GRAY),
+            );
+        }
+        if manual_recovery {
+            ui.colored_label(
+                Color32::from_rgb(205, 145, 30),
+                localization.text("knowledge-repair-manual-title"),
+            );
+            ui.label(
+                RichText::new(localization.text("knowledge-repair-manual-body"))
                     .small()
                     .color(Color32::GRAY),
             );
@@ -1233,7 +1274,7 @@ impl KnowledgeUi {
             );
         }
         let mut repair_action = None;
-        if content_repair && !history_recovery {
+        if guided_repair_available {
             if self.guided_repair_prepare_pending.is_some()
                 || self.guided_repair_execute_pending.is_some()
             {
@@ -1280,17 +1321,34 @@ impl KnowledgeUi {
                                 ui.with_layout(
                                     egui::Layout::right_to_left(egui::Align::Center),
                                     |ui| {
-                                        if ui
-                                            .link(page_label(localization, bundle, page_id))
-                                            .clicked()
-                                        {
-                                            requested = Some(page_id);
+                                        let label = page_label(localization, bundle, page_id);
+                                        if health_issue_page_available(bundle, page_id) {
+                                            if ui.link(label).clicked() {
+                                                requested = Some(page_id);
+                                            }
+                                        } else {
+                                            ui.label(
+                                                RichText::new(label)
+                                                    .small()
+                                                    .color(ui.visuals().weak_text_color()),
+                                            )
+                                            .on_hover_text(
+                                                localization.text("knowledge-page-missing"),
+                                            );
                                         }
                                     },
                                 );
                             }
                         });
                         ui.label(health_issue_summary(localization, &issue.code));
+                        ui.label(
+                            RichText::new(localization.text(health_recovery_message_id(
+                                issue.recovery(),
+                                guided_repair_available,
+                            )))
+                            .small()
+                            .color(ui.visuals().weak_text_color()),
+                        );
                         ui.collapsing(localization.text("action-details"), |ui| {
                             ui.monospace(&issue.code);
                             ui.label(&issue.message);
@@ -1873,28 +1931,39 @@ fn health_issue_summary(localization: &Localization, code: &str) -> String {
 
 fn health_requires_history_recovery(bundle: &KnowledgeBundleView) -> bool {
     bundle.health.issues.iter().any(|issue| {
-        issue.severity != HealthSeverity::Info
-            && (issue.page == Some(KnowledgePageId::Log)
-                || issue.code.contains("history")
-                || issue.code.contains("log"))
+        issue.severity != HealthSeverity::Info && issue.recovery() == HealthRecovery::ManualHistory
     })
 }
 
 fn health_has_guided_content_repair(bundle: &KnowledgeBundleView) -> bool {
-    const DERIVED_INDEX_CODES: &[&str] = &[
-        "broken_index_link",
-        "index_missing_concept",
-        "invalid_index_structure",
-        "missing_index",
-        "stale_index_metadata",
-    ];
+    bundle.health.issues.iter().any(|issue| {
+        issue.severity != HealthSeverity::Info && issue.recovery() == HealthRecovery::GuidedContent
+    })
+}
+
+fn health_has_manual_intervention(bundle: &KnowledgeBundleView) -> bool {
     bundle.health.issues.iter().any(|issue| {
         issue.severity != HealthSeverity::Info
-            && !DERIVED_INDEX_CODES.contains(&issue.code.as_str())
-            && issue.page != Some(KnowledgePageId::Log)
-            && !issue.code.contains("history")
-            && !issue.code.contains("log")
+            && issue.recovery() == HealthRecovery::ManualIntervention
     })
+}
+
+fn health_recovery_message_id(
+    recovery: HealthRecovery,
+    guided_repair_available: bool,
+) -> &'static str {
+    match recovery {
+        HealthRecovery::AutomaticDerived => "knowledge-recovery-automatic",
+        HealthRecovery::GuidedContent if guided_repair_available => "knowledge-recovery-guided",
+        HealthRecovery::GuidedContent => "knowledge-recovery-guided-blocked",
+        HealthRecovery::ManualHistory => "knowledge-recovery-history",
+        HealthRecovery::ManualIntervention => "knowledge-recovery-manual",
+        HealthRecovery::Informational => "knowledge-recovery-informational",
+    }
+}
+
+fn health_issue_page_available(bundle: &KnowledgeBundleView, page_id: KnowledgePageId) -> bool {
+    page_fingerprint(bundle, page_id).is_some()
 }
 
 fn localized_guided_repair_error(localization: &Localization, code: &str) -> String {
@@ -1977,6 +2046,53 @@ fn page_button(
     .clicked()
 }
 
+fn graph_filter_controls(
+    ui: &mut egui::Ui,
+    localization: &Localization,
+    query: &mut String,
+    selected_type: &mut Option<String>,
+    selected_tag: &mut Option<String>,
+    types: &BTreeSet<String>,
+    tags: &BTreeSet<String>,
+) {
+    if ResponsiveLayout::from_available(ui.available_size()).is_narrow() {
+        ui.add(egui::Label::new(localization.text("knowledge-graph-description")).wrap());
+        ui.add(
+            egui::TextEdit::singleline(query)
+                .desired_width(ui.available_width())
+                .hint_text(localization.text("knowledge-filter-concepts")),
+        );
+        ui.horizontal_wrapped(|ui| {
+            filter_combo(
+                ui,
+                localization,
+                "knowledge-filter-type",
+                selected_type,
+                types,
+            );
+            filter_combo(ui, localization, "knowledge-filter-tag", selected_tag, tags);
+        });
+    } else {
+        ui.horizontal(|ui| {
+            ui.label(localization.text("knowledge-graph-description"));
+            ui.separator();
+            ui.add(
+                egui::TextEdit::singleline(query)
+                    .desired_width(260.0)
+                    .hint_text(localization.text("knowledge-filter-concepts")),
+            );
+            filter_combo(
+                ui,
+                localization,
+                "knowledge-filter-type",
+                selected_type,
+                types,
+            );
+            filter_combo(ui, localization, "knowledge-filter-tag", selected_tag, tags);
+        });
+    }
+}
+
 fn filter_combo(
     ui: &mut egui::Ui,
     localization: &Localization,
@@ -2002,16 +2118,30 @@ fn filter_combo(
         });
 }
 
-fn bundle_state_badge(ui: &mut egui::Ui, localization: &Localization, state: KnowledgeBundleState) {
-    let (message, color) = match state {
+fn bundle_state_badge(
+    ui: &mut egui::Ui,
+    localization: &Localization,
+    bundle: &KnowledgeBundleView,
+) {
+    let (message, color) = bundle_state_visual(bundle);
+    let label = localization.text(message);
+    ui.colored_label(color, RichText::new(format!("● {label}")).strong());
+}
+
+fn bundle_state_visual(bundle: &KnowledgeBundleView) -> (&'static str, Color32) {
+    match bundle.state {
         KnowledgeBundleState::Empty => ("knowledge-state-empty", Color32::GRAY),
+        KnowledgeBundleState::Ready if bundle.health.error_count > 0 => {
+            ("knowledge-state-attention", Color32::from_rgb(220, 75, 75))
+        }
+        KnowledgeBundleState::Ready if bundle.health.warning_count > 0 => {
+            ("knowledge-state-review", Color32::from_rgb(205, 145, 30))
+        }
         KnowledgeBundleState::Ready => ("knowledge-state-ready", Color32::from_rgb(70, 170, 110)),
         KnowledgeBundleState::Updating => {
             ("knowledge-state-updating", Color32::from_rgb(205, 145, 30))
         }
-    };
-    let label = localization.text(message);
-    ui.colored_label(color, RichText::new(format!("● {label}")).strong());
+    }
 }
 
 fn empty_bundle_has_health_findings(bundle: &KnowledgeBundleView) -> bool {
@@ -2108,9 +2238,9 @@ mod tests {
 
     use airwiki_core::{
         BundleHealthReport, GuidedRepairChange, GuidedRepairFilePreview, GuidedRepairPreview,
-        GuidedRepairResult, HealthIssue, HealthSeverity, KnowledgeBundleState, KnowledgeBundleView,
-        KnowledgeConceptView, KnowledgeLinkDisposition, KnowledgeLinkView, KnowledgePageId,
-        KnowledgePageView, RepairAuthority, RepairPlanId,
+        GuidedRepairResult, HealthIssue, HealthRecovery, HealthSeverity, KnowledgeBundleState,
+        KnowledgeBundleView, KnowledgeConceptView, KnowledgeLinkDisposition, KnowledgeLinkView,
+        KnowledgePageId, KnowledgePageView, RepairAuthority, RepairPlanId,
     };
     use airwiki_types::CollectionPolicy;
     use uuid::Uuid;
@@ -2118,9 +2248,11 @@ mod tests {
     use crate::i18n::{Localization, UiLocale};
 
     use super::{
-        GRAPH_LAYOUT_FRAME_BUDGET, GRAPH_LAYOUT_WORK_BUDGET, KnowledgeAction, KnowledgeUi,
-        build_graph, deterministic_graph_position, empty_bundle_has_health_findings,
-        graph_requires_filter, normalized_http_url, short_fingerprint, truncate_chars,
+        GRAPH_LAYOUT_WORK_BUDGET, KnowledgeAction, KnowledgeTab, KnowledgeUi, build_graph,
+        bundle_state_visual, deterministic_graph_position, empty_bundle_has_health_findings,
+        graph_requires_filter, health_has_guided_content_repair, health_has_manual_intervention,
+        health_issue_page_available, health_recovery_message_id, normalized_http_url,
+        short_fingerprint, truncate_chars,
     };
 
     fn localization() -> Localization {
@@ -2340,7 +2472,7 @@ mod tests {
                 .map(|(_, node)| node.location())
                 .collect::<Vec<_>>()
         );
-        assert!(GRAPH_LAYOUT_WORK_BUDGET < GRAPH_LAYOUT_FRAME_BUDGET);
+        assert!(GRAPH_LAYOUT_WORK_BUDGET < Duration::from_millis(4));
     }
 
     #[test]
@@ -2459,6 +2591,126 @@ mod tests {
         empty.health.error_count = 1;
 
         assert!(empty_bundle_has_health_findings(&empty));
+    }
+
+    #[test]
+    fn manual_health_findings_never_offer_a_guided_repair() {
+        let mut view = bundle(Uuid::new_v4());
+        view.health.issues.push(HealthIssue {
+            severity: HealthSeverity::Error,
+            code: "missing_bundle".to_owned(),
+            page: None,
+            message: "The managed bundle is missing".to_owned(),
+        });
+
+        assert_eq!(
+            (
+                health_has_manual_intervention(&view),
+                health_has_guided_content_repair(&view),
+            ),
+            (true, false)
+        );
+    }
+
+    #[test]
+    fn verified_concept_drift_keeps_the_guided_repair_action() {
+        let mut view = bundle(Uuid::new_v4());
+        view.health.issues.push(HealthIssue {
+            severity: HealthSeverity::Error,
+            code: "metadata_mismatch".to_owned(),
+            page: Some(KnowledgePageId::Concept(Uuid::new_v4())),
+            message: "Published metadata changed".to_owned(),
+        });
+
+        assert_eq!(
+            (
+                health_has_manual_intervention(&view),
+                health_has_guided_content_repair(&view),
+            ),
+            (false, true)
+        );
+    }
+
+    #[test]
+    fn manual_finding_blocks_the_guided_repair_promise() {
+        let mut view = bundle(Uuid::new_v4());
+        view.health.issues.extend([
+            HealthIssue {
+                severity: HealthSeverity::Error,
+                code: "metadata_mismatch".to_owned(),
+                page: Some(KnowledgePageId::Concept(Uuid::new_v4())),
+                message: "Published metadata changed".to_owned(),
+            },
+            HealthIssue {
+                severity: HealthSeverity::Error,
+                code: "missing_bundle".to_owned(),
+                page: None,
+                message: "The managed bundle is missing".to_owned(),
+            },
+        ]);
+
+        let guided_available =
+            health_has_guided_content_repair(&view) && !health_has_manual_intervention(&view);
+
+        assert!(!guided_available);
+        assert_eq!(
+            health_recovery_message_id(HealthRecovery::GuidedContent, guided_available),
+            "knowledge-recovery-guided-blocked"
+        );
+    }
+
+    #[test]
+    fn stable_bundle_with_errors_is_not_badged_as_ready() {
+        let mut view = bundle(Uuid::new_v4());
+        view.health.error_count = 1;
+
+        assert_eq!(bundle_state_visual(&view).0, "knowledge-state-attention");
+    }
+
+    #[test]
+    fn stable_bundle_with_warnings_asks_for_review() {
+        let mut view = bundle(Uuid::new_v4());
+        view.health.warning_count = 1;
+
+        assert_eq!(bundle_state_visual(&view).0, "knowledge-state-review");
+    }
+
+    #[test]
+    fn health_navigation_selects_the_health_tab() {
+        let mut ui = KnowledgeUi::default();
+
+        let action = ui.select_health(None, false);
+
+        assert_eq!(ui.tab, KnowledgeTab::Health);
+        assert!(action.is_none());
+    }
+
+    #[test]
+    fn health_navigation_loads_the_collection_selected_by_the_rollup() {
+        let current = Uuid::new_v4();
+        let affected = Uuid::new_v4();
+        let mut ui = KnowledgeUi {
+            collection_id: Some(current),
+            ..KnowledgeUi::default()
+        };
+
+        let action = ui.select_health(Some(affected), false);
+
+        assert_eq!(ui.collection_id, Some(affected));
+        assert!(matches!(
+            action,
+            Some(KnowledgeAction::LoadBundle { collection_id, .. }) if collection_id == affected
+        ));
+    }
+
+    #[test]
+    fn missing_health_page_is_not_actionable() {
+        let view = bundle(Uuid::new_v4());
+
+        assert!(!health_issue_page_available(
+            &view,
+            KnowledgePageId::Concept(Uuid::new_v4())
+        ));
     }
 
     #[test]

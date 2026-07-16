@@ -40,6 +40,25 @@ const TRANSIENT_RECONCILIATION_CODES: &[&str] = &[
     "stale_log_revision",
     "log_missing_publication",
 ];
+const AUTOMATIC_DERIVED_RECOVERY_CODES: &[&str] = &[
+    "broken_index_link",
+    "index_missing_concept",
+    "invalid_index_structure",
+    "missing_index",
+    "stale_index_metadata",
+];
+const GUIDED_CONTENT_RECOVERY_CODES: &[&str] = &[
+    "broken_link",
+    "invalid_frontmatter",
+    "invalid_utf8",
+    "metadata_mismatch",
+    "missing_airwiki_profile",
+    "missing_concept",
+    "missing_frontmatter",
+    "missing_type",
+    "unexpected_concept",
+    "unsafe_link",
+];
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub enum KnowledgePageId {
@@ -84,6 +103,25 @@ pub enum HealthSeverity {
     Info,
     Warning,
     Error,
+}
+
+/// Recovery boundary for one health finding.
+///
+/// Unknown or structurally unsafe findings default to [`Self::ManualIntervention`].
+/// This keeps UI and repair planning fail-closed when a newer inspector code is
+/// introduced without an explicitly verified recovery path.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum HealthRecovery {
+    /// AirWiki may rebuild a deterministic artifact from a coherent snapshot.
+    AutomaticDerived,
+    /// AirWiki may prepare a preview that still requires explicit confirmation.
+    GuidedContent,
+    /// Append-only publication history requires a separate human decision.
+    ManualHistory,
+    /// Filesystem, storage, or otherwise ambiguous state needs manual recovery.
+    ManualIntervention,
+    /// The finding is diagnostic and does not require a recovery action.
+    Informational,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -251,6 +289,27 @@ impl HealthIssue {
             page,
             message: message.into(),
         }
+    }
+
+    /// Returns the only recovery path currently verified for this finding.
+    pub fn recovery(&self) -> HealthRecovery {
+        if self.severity == HealthSeverity::Info {
+            return HealthRecovery::Informational;
+        }
+        if self.page == Some(KnowledgePageId::Index)
+            && AUTOMATIC_DERIVED_RECOVERY_CODES.contains(&self.code.as_str())
+        {
+            return HealthRecovery::AutomaticDerived;
+        }
+        if self.page == Some(KnowledgePageId::Log) {
+            return HealthRecovery::ManualHistory;
+        }
+        if matches!(self.page, Some(KnowledgePageId::Concept(_)))
+            && GUIDED_CONTENT_RECOVERY_CODES.contains(&self.code.as_str())
+        {
+            return HealthRecovery::GuidedContent;
+        }
+        HealthRecovery::ManualIntervention
     }
 }
 
@@ -1304,6 +1363,10 @@ fn inspect_unexpected_markdown(
         if let Ok(snapshot) = read_page_snapshot(entry.path(), 1) {
             fingerprints.insert(relative.clone(), snapshot.fingerprint);
         }
+        let unexpected_concept_id = relative
+            .strip_prefix("concepts/")
+            .and_then(|name| name.strip_suffix(".md"))
+            .and_then(|id| Uuid::parse_str(id).ok());
         let is_concept = relative.starts_with("concepts/");
         health.push(HealthIssue::new(
             if is_concept {
@@ -1316,7 +1379,7 @@ fn inspect_unexpected_markdown(
             } else {
                 "unmanaged_markdown"
             },
-            None,
+            unexpected_concept_id.map(KnowledgePageId::Concept),
             format!("El bundle contiene la página Markdown no administrada `{relative}`."),
         ));
     }
@@ -2300,6 +2363,82 @@ mod tests {
         bundle.health.issues.iter().any(|issue| issue.code == code)
     }
 
+    fn recovery_for(
+        severity: HealthSeverity,
+        code: &str,
+        page: Option<KnowledgePageId>,
+    ) -> HealthRecovery {
+        HealthIssue::new(severity, code, page, "synthetic finding").recovery()
+    }
+
+    #[test]
+    fn missing_index_has_automatic_derived_recovery() {
+        assert_eq!(
+            recovery_for(
+                HealthSeverity::Error,
+                "missing_index",
+                Some(KnowledgePageId::Index),
+            ),
+            HealthRecovery::AutomaticDerived
+        );
+    }
+
+    #[test]
+    fn concept_metadata_drift_has_guided_recovery() {
+        assert_eq!(
+            recovery_for(
+                HealthSeverity::Error,
+                "metadata_mismatch",
+                Some(KnowledgePageId::Concept(Uuid::nil())),
+            ),
+            HealthRecovery::GuidedContent
+        );
+    }
+
+    #[test]
+    fn missing_bundle_requires_manual_intervention() {
+        assert_eq!(
+            recovery_for(HealthSeverity::Error, "missing_bundle", None),
+            HealthRecovery::ManualIntervention
+        );
+    }
+
+    #[test]
+    fn unknown_recovery_code_fails_closed_to_manual_intervention() {
+        assert_eq!(
+            recovery_for(
+                HealthSeverity::Error,
+                "future_recovery_code",
+                Some(KnowledgePageId::Concept(Uuid::nil())),
+            ),
+            HealthRecovery::ManualIntervention
+        );
+    }
+
+    #[test]
+    fn log_findings_require_manual_history_recovery() {
+        assert_eq!(
+            recovery_for(
+                HealthSeverity::Error,
+                "missing_log",
+                Some(KnowledgePageId::Log),
+            ),
+            HealthRecovery::ManualHistory
+        );
+    }
+
+    #[test]
+    fn informational_findings_never_offer_recovery() {
+        assert_eq!(
+            recovery_for(
+                HealthSeverity::Info,
+                "historical_broken_link",
+                Some(KnowledgePageId::Log),
+            ),
+            HealthRecovery::Informational
+        );
+    }
+
     #[test]
     fn empty_collection_without_directory_is_a_healthy_empty_bundle() {
         let fixture = Fixture::new();
@@ -2335,6 +2474,37 @@ mod tests {
         assert!(bundle.concepts.is_empty());
         assert!(has_issue(&bundle, "unexpected_concept"));
         assert_eq!(bundle.health.error_count, 1);
+    }
+
+    #[test]
+    fn uuid_named_orphan_has_a_guided_recovery_target() {
+        let fixture = Fixture::new();
+        let orphan_id = Uuid::new_v4();
+        fs::create_dir_all(fixture.collection.wiki_folder.join("concepts")).unwrap();
+        fs::write(
+            fixture.concept_path(orphan_id),
+            "---\ntype: Document\nresource: urn:airwiki:orphan\n---\n\n# Huérfano\n",
+        )
+        .unwrap();
+
+        let bundle = fixture
+            .inspector()
+            .inspect_bundle(fixture.collection.id)
+            .unwrap();
+        let issue = bundle
+            .health
+            .issues
+            .iter()
+            .find(|issue| issue.code == "unexpected_concept")
+            .unwrap();
+
+        assert_eq!(
+            (issue.page, issue.recovery()),
+            (
+                Some(KnowledgePageId::Concept(orphan_id)),
+                HealthRecovery::GuidedContent,
+            )
+        );
     }
 
     #[test]

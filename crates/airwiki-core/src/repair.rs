@@ -18,7 +18,7 @@ use thiserror::Error;
 use uuid::Uuid;
 
 use crate::knowledge::{
-    HealthIssue, HealthSeverity, KnowledgeBundleState, KnowledgeBundleView, KnowledgePageId,
+    HealthRecovery, HealthSeverity, KnowledgeBundleState, KnowledgeBundleView, KnowledgePageId,
     OkfBundleInspector,
 };
 use crate::okf::{OkfPublisher, atomic_write};
@@ -28,14 +28,6 @@ const SNAPSHOT_SCHEMA_VERSION: u32 = 1;
 const SNAPSHOT_RETENTION: usize = 5;
 const MAX_SNAPSHOT_INDEX_BYTES: u64 = 16 * 1024 * 1024;
 const MAX_GUIDED_SNAPSHOT_BYTES: u64 = 64 * 1024 * 1024;
-const DERIVED_INDEX_CODES: &[&str] = &[
-    "broken_index_link",
-    "index_missing_concept",
-    "invalid_index_structure",
-    "missing_index",
-    "stale_index_metadata",
-];
-
 /// Stable identity of one repair plan and its on-disk recovery snapshot.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct RepairPlanId(Uuid);
@@ -270,22 +262,23 @@ impl WikiRepairPlanner {
             if issue.severity == HealthSeverity::Info {
                 continue;
             }
-            match issue_risk(issue) {
-                RepairRisk::Derived => {
+            match issue.recovery() {
+                HealthRecovery::AutomaticDerived => {
                     derived_codes.insert(issue.code.clone());
                 }
-                RepairRisk::Content => {
+                HealthRecovery::GuidedContent => {
                     content_codes.insert(issue.code.clone());
                     if let Some(page) = issue.page {
                         content_pages.insert(page);
                     }
                 }
-                RepairRisk::History => {
+                HealthRecovery::ManualHistory => {
                     history_codes.insert(issue.code.clone());
                     if let Some(page) = issue.page {
                         history_pages.insert(page);
                     }
                 }
+                HealthRecovery::ManualIntervention | HealthRecovery::Informational => {}
             }
         }
 
@@ -371,6 +364,18 @@ impl WikiRepairExecutor {
         if bundle.fingerprint != plan.expected_bundle_fingerprint {
             return Err(WikiRepairError::StalePlan);
         }
+        if bundle.health.issues.iter().any(|issue| {
+            issue.severity != HealthSeverity::Info
+                && issue.recovery() == HealthRecovery::ManualHistory
+        }) {
+            return Err(WikiRepairError::HistoryRepairRequiresHumanRecovery);
+        }
+        if bundle.health.issues.iter().any(|issue| {
+            issue.severity != HealthSeverity::Info
+                && issue.recovery() == HealthRecovery::ManualIntervention
+        }) {
+            return Err(WikiRepairError::UnresolvedGuidedScope);
+        }
         let collection = self
             .database
             .collection(plan.collection_id)
@@ -415,9 +420,10 @@ impl WikiRepairExecutor {
                 .database
                 .concept(concept_id)
                 .map_err(WikiRepairError::Storage)?;
-            if concept
-                .is_some_and(|concept| concept.status == airwiki_types::DocumentStatus::Published)
-            {
+            if concept.is_some_and(|concept| {
+                concept.collection_id == collection.id
+                    && concept.status == airwiki_types::DocumentStatus::Published
+            }) {
                 returned_to_review.push(concept_id);
                 files.push(GuidedRepairFilePreview {
                     page,
@@ -517,11 +523,17 @@ impl WikiRepairExecutor {
                     .concept(*concept_id)
                     .map_err(WikiRepairError::Storage)?
                     .ok_or(WikiRepairError::StalePlan)?;
+                if concept.collection_id != preview.collection_id {
+                    return Err(WikiRepairError::StalePlan);
+                }
                 let source = self
                     .database
                     .source_document(concept.source_document_id)
                     .map_err(WikiRepairError::Storage)?
                     .ok_or(WikiRepairError::StalePlan)?;
+                if source.collection_id != preview.collection_id {
+                    return Err(WikiRepairError::StalePlan);
+                }
                 let changed = self
                     .database
                     .return_to_review_if_current(
@@ -668,7 +680,7 @@ impl WikiRepairExecutor {
             .issues
             .iter()
             .filter(|issue| issue.severity != HealthSeverity::Info)
-            .filter(|issue| issue_risk(issue) == RepairRisk::Derived)
+            .filter(|issue| issue.recovery() == HealthRecovery::AutomaticDerived)
             .map(|issue| issue.code.clone())
             .collect::<BTreeSet<_>>();
         if current_codes.is_empty() || current_codes != planned_codes {
@@ -707,7 +719,12 @@ impl WikiRepairExecutor {
         retain_snapshots(&collection, SNAPSHOT_RETENTION)?;
 
         if let Err(error) = publisher.regenerate_index(&published) {
-            return Err(WikiRepairError::Regeneration(error));
+            return Err(recover_after_regeneration_error(
+                &index_path,
+                original.as_deref(),
+                &rendered_sha256,
+                error,
+            ));
         }
         if let Err(error) = observer(RepairExecutionStep::IndexWritten) {
             return Err(rollback_or_combine(
@@ -1228,30 +1245,13 @@ enum RepairExecutionStep {
     IndexWritten,
 }
 
-fn issue_risk(issue: &HealthIssue) -> RepairRisk {
-    if issue.page == Some(KnowledgePageId::Index)
-        && DERIVED_INDEX_CODES.contains(&issue.code.as_str())
-    {
-        RepairRisk::Derived
-    } else if issue.page == Some(KnowledgePageId::Log)
-        || issue.code.starts_with("log_")
-        || issue.code.starts_with("historical_")
-        || issue.code.starts_with("stale_log_")
-        || issue.code == "missing_log"
-    {
-        RepairRisk::History
-    } else {
-        RepairRisk::Content
-    }
-}
-
 fn blocking_health_codes(bundle: &KnowledgeBundleView) -> Vec<String> {
     bundle
         .health
         .issues
         .iter()
         .filter(|issue| issue.severity == HealthSeverity::Error)
-        .filter(|issue| issue_risk(issue) != RepairRisk::Derived)
+        .filter(|issue| issue.recovery() != HealthRecovery::AutomaticDerived)
         .map(|issue| issue.code.clone())
         .collect::<BTreeSet<_>>()
         .into_iter()
@@ -1586,6 +1586,25 @@ fn rollback_or_combine(
     }
 }
 
+fn recover_after_regeneration_error(
+    index_path: &Path,
+    original: Option<&[u8]>,
+    rendered_sha256: &str,
+    error: anyhow::Error,
+) -> WikiRepairError {
+    let cause = WikiRepairError::Regeneration(error);
+    let unchanged = match fs::read(index_path) {
+        Ok(current) => original.is_some_and(|bytes| current == bytes),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => original.is_none(),
+        Err(_) => false,
+    };
+    if unchanged {
+        cause
+    } else {
+        rollback_or_combine(index_path, original, rendered_sha256, cause)
+    }
+}
+
 fn rollback_index(
     index_path: &Path,
     original: Option<&[u8]>,
@@ -1751,6 +1770,16 @@ mod tests {
     }
 
     #[test]
+    fn planner_never_turns_a_missing_bundle_into_a_guided_repair() {
+        let fixture = Fixture::published();
+        fs::remove_dir_all(&fixture.collection.wiki_folder).unwrap();
+
+        let plan = fixture.planner();
+
+        assert!(plan.is_empty());
+    }
+
+    #[test]
     fn guided_preview_is_read_only_and_explains_withdrawal() {
         let fixture = Fixture::published();
         let concept_path = fixture
@@ -1837,8 +1866,96 @@ mod tests {
     }
 
     #[test]
+    fn guided_repair_keeps_a_foreign_collection_published_when_its_uuid_is_an_orphan() {
+        let fixture = Fixture::published();
+        let target_source = fixture._temp.path().join("target-source");
+        fs::create_dir_all(&target_source).unwrap();
+        let target = fixture
+            .database
+            .create_collection(
+                "Target",
+                &target_source,
+                fixture._temp.path().join("target-wiki"),
+                CollectionPolicy::local_only(),
+            )
+            .unwrap();
+        fs::create_dir_all(target.wiki_folder.join("concepts")).unwrap();
+        let foreign_page = fixture
+            .collection
+            .wiki_folder
+            .join("concepts")
+            .join(format!("{}.md", fixture.concept_id));
+        let orphan_page = target
+            .wiki_folder
+            .join("concepts")
+            .join(format!("{}.md", fixture.concept_id));
+        fs::copy(&foreign_page, &orphan_page).unwrap();
+        let bundle = OkfBundleInspector::new(fixture.database.clone())
+            .inspect_bundle(target.id)
+            .unwrap();
+        let plan = WikiRepairPlanner::plan(&bundle).unwrap();
+        let executor = WikiRepairExecutor::new(fixture.database.clone());
+        let preview = executor.prepare_guided(&plan).unwrap();
+
+        let result = executor.execute_guided(&preview).unwrap();
+
+        assert_eq!(result.orphan_concepts_removed, vec![fixture.concept_id]);
+        assert!(result.concepts_returned_to_review.is_empty());
+        assert!(!orphan_page.exists());
+        assert!(foreign_page.exists());
+        assert_eq!(
+            fixture
+                .database
+                .concept(fixture.concept_id)
+                .unwrap()
+                .unwrap()
+                .status,
+            airwiki_types::DocumentStatus::Published
+        );
+    }
+
+    #[test]
+    fn guided_repair_is_blocked_when_concept_drift_coexists_with_manual_intervention() {
+        let fixture = Fixture::published();
+        let concept_path = fixture
+            .collection
+            .wiki_folder
+            .join("concepts")
+            .join(format!("{}.md", fixture.concept_id));
+        let content = fs::read_to_string(&concept_path).unwrap();
+        fs::write(
+            concept_path,
+            content.replace("Synthetic guide", "Changed outside AirWiki"),
+        )
+        .unwrap();
+        fs::write(
+            fixture.collection.wiki_folder.join("unmanaged.md"),
+            "# Unmanaged\n",
+        )
+        .unwrap();
+        let plan = fixture.planner();
+
+        let error = WikiRepairExecutor::new(fixture.database.clone())
+            .prepare_guided(&plan)
+            .unwrap_err();
+
+        assert!(matches!(error, WikiRepairError::UnresolvedGuidedScope));
+    }
+
+    #[test]
     fn guided_history_repair_remains_blocked_without_a_separate_authority() {
         let fixture = Fixture::published();
+        let concept_path = fixture
+            .collection
+            .wiki_folder
+            .join("concepts")
+            .join(format!("{}.md", fixture.concept_id));
+        let content = fs::read_to_string(&concept_path).unwrap();
+        fs::write(
+            concept_path,
+            content.replace("Synthetic guide", "Changed outside AirWiki"),
+        )
+        .unwrap();
         fs::write(
             fixture.collection.wiki_folder.join("log.md"),
             "invalid history\n",
@@ -2109,6 +2226,25 @@ mod tests {
             matches!(error, WikiRepairError::Regeneration(_))
                 && fs::read(index_path).unwrap() == original
         );
+    }
+
+    #[test]
+    fn automatic_execution_rolls_back_if_persistence_fails_after_index_replacement() {
+        let temp = tempfile::tempdir().unwrap();
+        let index_path = temp.path().join("index.md");
+        let original = b"# Original\n";
+        let rendered = b"# Rebuilt\n";
+        fs::write(&index_path, rendered).unwrap();
+
+        let error = recover_after_regeneration_error(
+            &index_path,
+            Some(original),
+            &sha256(rendered),
+            anyhow::anyhow!("synthetic directory sync failure"),
+        );
+
+        assert!(matches!(error, WikiRepairError::Regeneration(_)));
+        assert_eq!(fs::read(index_path).unwrap(), original);
     }
 
     #[test]

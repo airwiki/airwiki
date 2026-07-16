@@ -34,9 +34,9 @@ pub use ingest::{
     extract_file, sha256_file,
 };
 pub use knowledge::{
-    BundleHealthReport, HealthIssue, HealthSeverity, KnowledgeBundleState, KnowledgeBundleView,
-    KnowledgeConceptView, KnowledgeLinkDisposition, KnowledgeLinkView, KnowledgePageId,
-    KnowledgePageView, MAX_KNOWLEDGE_PAGE_BYTES, OkfBundleInspector,
+    BundleHealthReport, HealthIssue, HealthRecovery, HealthSeverity, KnowledgeBundleState,
+    KnowledgeBundleView, KnowledgeConceptView, KnowledgeLinkDisposition, KnowledgeLinkView,
+    KnowledgePageId, KnowledgePageView, MAX_KNOWLEDGE_PAGE_BYTES, OkfBundleInspector,
 };
 pub use okf::{OkfConcept, OkfPublisher, OkfValidationError};
 pub use pipeline::{CollectionPreflight, IngestOutcome, IngestPipeline, ReviewEdits};

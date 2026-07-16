@@ -46,7 +46,10 @@ use crate::{
         CloseBehavior, DesktopConfig, LanPreference, LocalePreference, ONBOARDING_VERSION,
     },
     paths::AppPaths,
-    services::{CollectionWatchEvent, CollectionWatcherHandle, DesktopServices, ModelRuntimePaths},
+    services::{
+        CollectionWatchEvent, CollectionWatcherHandle, DesktopServices, ModelRuntimePaths,
+        WikiHealthRollup,
+    },
     updater::{
         PackagerUpdateBackend, UpdateSchedule, UpdaterBuildConfig, UpdaterDisabledReason,
         UpdaterService, UpdaterView, schedule_jitter,
@@ -266,6 +269,7 @@ pub struct WikiHealthSummaryView {
     pub error_count: usize,
     pub warning_count: usize,
     pub updating_count: usize,
+    pub attention_collection_id: Option<Uuid>,
     pub checked_at: Option<SystemTime>,
 }
 
@@ -463,6 +467,10 @@ pub enum WorkerEvent {
         request_id: Uuid,
         generation: u64,
         result: Result<WikiHealthSummaryView, String>,
+    },
+    WikiMaintenanceFinished {
+        collection_id: Uuid,
+        repaired: bool,
     },
     GuidedWikiRepairPrepared {
         request_id: Uuid,
@@ -2689,26 +2697,30 @@ async fn run_worker(
                     })) => {
                         match result {
                             Ok(true) => {
-                            send(
-                                &events,
-                                WorkerEvent::Notice(
-                                    "Se regeneró un índice derivado de la Wiki".to_owned(),
-                                ),
-                            );
-                            spawn_knowledge_bundle(
-                                &services,
-                                &mut background,
-                                Uuid::new_v4(),
-                                collection_id,
-                            );
+                                send(
+                                    &events,
+                                    WorkerEvent::WikiMaintenanceFinished {
+                                        collection_id,
+                                        repaired: true,
+                                    },
+                                );
                             }
                             Ok(false) => {}
-                            Err(error) => tracing::warn!(
-                                %collection_id,
-                                error_kind = "wiki_derived_maintenance",
-                                %error,
-                                "automatic derived Wiki maintenance was not applied"
-                            ),
+                            Err(error) => {
+                                tracing::warn!(
+                                    %collection_id,
+                                    error_kind = "wiki_derived_maintenance",
+                                    %error,
+                                    "automatic derived Wiki maintenance was not applied"
+                                );
+                                send(
+                                    &events,
+                                    WorkerEvent::WikiMaintenanceFinished {
+                                        collection_id,
+                                        repaired: false,
+                                    },
+                                );
+                            }
                         }
                         spawn_next_wiki_health(
                             &services,
@@ -3581,14 +3593,12 @@ fn spawn_wiki_health(
     });
 }
 
-fn wiki_health_summary(
-    (error_count, warning_count, updating_count): (usize, usize, usize),
-    checked_at: SystemTime,
-) -> WikiHealthSummaryView {
+fn wiki_health_summary(rollup: WikiHealthRollup, checked_at: SystemTime) -> WikiHealthSummaryView {
     WikiHealthSummaryView {
-        error_count,
-        warning_count,
-        updating_count,
+        error_count: rollup.error_count,
+        warning_count: rollup.warning_count,
+        updating_count: rollup.updating_count,
+        attention_collection_id: rollup.attention_collection_id,
         checked_at: Some(checked_at),
     }
 }
@@ -4636,11 +4646,20 @@ mod tests {
         let checked_at = SystemTime::UNIX_EPOCH + Duration::from_secs(42);
 
         assert_eq!(
-            wiki_health_summary((3, 2, 1), checked_at),
+            wiki_health_summary(
+                WikiHealthRollup {
+                    error_count: 3,
+                    warning_count: 2,
+                    updating_count: 1,
+                    attention_collection_id: Some(Uuid::nil()),
+                },
+                checked_at,
+            ),
             WikiHealthSummaryView {
                 error_count: 3,
                 warning_count: 2,
                 updating_count: 1,
+                attention_collection_id: Some(Uuid::nil()),
                 checked_at: Some(checked_at),
             }
         );

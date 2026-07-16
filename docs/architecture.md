@@ -74,6 +74,10 @@ detected -> extracted -> enriched -> needs review -> published
 ```
 
 A modified source withdraws its published revision before preparing a new one.
+The review screen loads bounded pages of extracted chunks through the desktop
+worker. An opaque version binds the visible draft, source revision and complete
+chunk set; storage revalidates it in the publication transaction. Stale responses
+are discarded and publication remains unavailable until current evidence loads.
 Automation may retry, inspect and rebuild unambiguous derived artifacts, but it
 may not publish, grant access or enable external chat. Guided repair withdraws
 affected concepts before changing ambiguous state, preserves a verified

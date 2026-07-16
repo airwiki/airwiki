@@ -18,7 +18,7 @@ Tested development targets are macOS arm64 and Windows x64. Linux, web, and mobi
 
 - Watch folders containing Markdown and text-based PDF files.
 - Extract and enrich documents with a locally managed model.
-- Require human review before publishing an OKF wiki concept.
+- Compare each proposed draft with revision-bound local evidence and require human review before publishing an OKF wiki concept.
 - Search locally with lexical and vector evidence.
 - Discover, pair, authorize, and search other AirWiki nodes on a LAN.
 - Expose explicitly approved evidence through a read-only local MCP integration.

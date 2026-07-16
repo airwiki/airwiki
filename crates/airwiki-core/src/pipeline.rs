@@ -18,8 +18,8 @@ use crate::ingest::{
 use crate::publication::OkfPublicationMaterializer;
 use crate::storage::{
     AuditEvent, CollectionMaintenanceCounts, CollectionMaintenanceResult,
-    CollectionMaintenanceStatus, CollectionRecord, ConceptRecord, Database, SourceDocumentRecord,
-    SourceRegistration, StoredChunk,
+    CollectionMaintenanceStatus, CollectionRecord, ConceptRecord, Database, ReviewVersionToken,
+    SourceDocumentRecord, SourceRegistration, StoredChunk,
 };
 
 const EMBEDDING_BATCH_SIZE: usize = 32;
@@ -795,8 +795,17 @@ impl IngestPipeline {
     }
 
     /// Human approval is the only API that changes a concept to `Published`.
-    pub fn approve(&self, concept_id: Uuid, edits: ReviewEdits) -> Result<ConceptRecord> {
-        OkfPublicationMaterializer::new(self.database.clone()).approve(concept_id, edits.draft)
+    pub fn approve(
+        &self,
+        concept_id: Uuid,
+        edits: ReviewEdits,
+        review_version: &ReviewVersionToken,
+    ) -> Result<ConceptRecord> {
+        OkfPublicationMaterializer::new(self.database.clone()).approve(
+            concept_id,
+            edits.draft,
+            review_version,
+        )
     }
 
     fn audit(
@@ -1026,6 +1035,29 @@ mod tests {
             "mac",
         );
         (temp, db, collection.id, pipeline)
+    }
+
+    fn review_version(database: &Database, concept_id: Uuid) -> Result<ReviewVersionToken> {
+        let concept = database
+            .concept(concept_id)?
+            .context("test concept is missing")?;
+        let source = database
+            .source_document(concept.source_document_id)?
+            .context("test source is missing")?;
+        database
+            .review_evidence_page(concept_id, source.revision, None, None, 1)?
+            .context("test review is no longer current")
+            .map(|page| page.review_version)
+    }
+
+    fn approve_current(
+        pipeline: &IngestPipeline,
+        database: &Database,
+        concept_id: Uuid,
+        draft: EnrichmentDraft,
+    ) -> Result<ConceptRecord> {
+        let review_version = review_version(database, concept_id)?;
+        pipeline.approve(concept_id, ReviewEdits { draft }, &review_version)
     }
 
     struct BlockNextGeneration {
@@ -1337,7 +1369,7 @@ mod tests {
         assert!(!temp.path().join("wiki/concepts").exists());
 
         let draft = db.concept(concept_id).unwrap().unwrap().draft;
-        pipeline.approve(concept_id, ReviewEdits { draft }).unwrap();
+        approve_current(&pipeline, &db, concept_id, draft).unwrap();
         assert_eq!(
             db.concept(concept_id).unwrap().unwrap().status,
             DocumentStatus::Published
@@ -1369,7 +1401,7 @@ mod tests {
             other => panic!("unexpected {other:?}"),
         };
         let draft = db.concept(concept_id).unwrap().unwrap().draft;
-        pipeline.approve(concept_id, ReviewEdits { draft }).unwrap();
+        approve_current(&pipeline, &db, concept_id, draft).unwrap();
         let engine = HybridSearchEngine::new(
             db.clone(),
             Arc::new(DeterministicEmbeddingProvider),
@@ -1419,7 +1451,7 @@ mod tests {
             other => panic!("unexpected {other:?}"),
         };
         let draft = db.concept(concept_id).unwrap().unwrap().draft;
-        pipeline.approve(concept_id, ReviewEdits { draft }).unwrap();
+        approve_current(&pipeline, &db, concept_id, draft).unwrap();
 
         let collection = db.collection(collection_id).unwrap().unwrap();
         let discovery = FileDiscovery {
@@ -1474,7 +1506,7 @@ mod tests {
             other => panic!("unexpected {other:?}"),
         };
         let draft = db.concept(concept_id).unwrap().unwrap().draft;
-        pipeline.approve(concept_id, ReviewEdits { draft }).unwrap();
+        approve_current(&pipeline, &db, concept_id, draft).unwrap();
 
         let limited_pipeline = pipeline.clone().with_limits(IngestLimits {
             max_bytes: 8,
@@ -1519,7 +1551,7 @@ mod tests {
             other => panic!("unexpected {other:?}"),
         };
         let draft = db.concept(concept_id).unwrap().unwrap().draft;
-        pipeline.approve(concept_id, ReviewEdits { draft }).unwrap();
+        approve_current(&pipeline, &db, concept_id, draft).unwrap();
         let engine = HybridSearchEngine::new(
             db.clone(),
             Arc::new(DeterministicEmbeddingProvider),
@@ -1588,9 +1620,7 @@ mod tests {
             other => panic!("unexpected {other:?}"),
         };
         let draft = db.concept(published_concept_id).unwrap().unwrap().draft;
-        pipeline
-            .approve(published_concept_id, ReviewEdits { draft })
-            .unwrap();
+        approve_current(&pipeline, &db, published_concept_id, draft).unwrap();
 
         let new_path = temp.path().join("source/00-slow-new.md");
         std::fs::write(&new_path, "# Documento lento\nContenido nuevo").unwrap();
@@ -1751,16 +1781,7 @@ mod tests {
         let wiki = temp.path().join("wiki");
         std::fs::write(&wiki, "blocks the wiki directory").unwrap();
 
-        assert!(
-            pipeline
-                .approve(
-                    concept_id,
-                    ReviewEdits {
-                        draft: draft.clone(),
-                    },
-                )
-                .is_err()
-        );
+        assert!(approve_current(&pipeline, &db, concept_id, draft.clone()).is_err());
         assert_eq!(
             db.concept(concept_id).unwrap().unwrap().status,
             DocumentStatus::NeedsReview
@@ -1768,7 +1789,7 @@ mod tests {
         assert!(!db.chunks_for_concept(concept_id).unwrap().is_empty());
 
         std::fs::remove_file(wiki).unwrap();
-        pipeline.approve(concept_id, ReviewEdits { draft }).unwrap();
+        approve_current(&pipeline, &db, concept_id, draft).unwrap();
         assert_eq!(
             db.concept(concept_id).unwrap().unwrap().status,
             DocumentStatus::Published
@@ -1788,9 +1809,7 @@ mod tests {
         let draft = db.concept(concept_id).unwrap().unwrap().draft;
         std::fs::write(&path, "# Pagos\nProcedimiento versión dos").unwrap();
 
-        let error = pipeline
-            .approve(concept_id, ReviewEdits { draft })
-            .unwrap_err();
+        let error = approve_current(&pipeline, &db, concept_id, draft).unwrap_err();
         assert!(error.to_string().contains("source changed"));
         assert_eq!(
             db.concept(concept_id).unwrap().unwrap().status,
@@ -1944,13 +1963,18 @@ mod tests {
             other => panic!("unexpected outcome: {other:?}"),
         };
         let draft = db.concept(concept_id).unwrap().unwrap().draft;
+        let review_version = review_version(&db, concept_id).unwrap();
         let claim = db.begin_review_reanalysis(concept_id).unwrap();
 
         assert_eq!(
             db.concept(concept_id).unwrap().unwrap().status,
             DocumentStatus::Enriched
         );
-        assert!(pipeline.approve(concept_id, ReviewEdits { draft }).is_err());
+        assert!(
+            pipeline
+                .approve(concept_id, ReviewEdits { draft }, &review_version)
+                .is_err()
+        );
         assert!(db.fail_review_reanalysis(&claim, "cancelled").unwrap());
         assert_eq!(
             db.concept(concept_id).unwrap().unwrap().status,
@@ -1980,7 +2004,7 @@ mod tests {
             other => panic!("unexpected {other:?}"),
         };
         let draft = db.concept(concept_id).unwrap().unwrap().draft;
-        pipeline.approve(concept_id, ReviewEdits { draft }).unwrap();
+        approve_current(&pipeline, &db, concept_id, draft).unwrap();
         std::fs::remove_file(path).unwrap();
         let outcomes = pipeline.scan_collection(collection_id).await.unwrap();
         assert!(matches!(
@@ -2018,7 +2042,7 @@ mod tests {
             other => panic!("unexpected {other:?}"),
         };
         let draft = db.concept(concept_id).unwrap().unwrap().draft;
-        pipeline.approve(concept_id, ReviewEdits { draft }).unwrap();
+        approve_current(&pipeline, &db, concept_id, draft).unwrap();
         std::fs::rename(old_path, &new_path).unwrap();
         let outcomes = pipeline.scan_collection(collection_id).await.unwrap();
         assert!(matches!(

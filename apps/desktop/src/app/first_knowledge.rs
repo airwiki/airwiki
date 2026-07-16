@@ -1,4 +1,5 @@
 use eframe::egui::{self, Color32, RichText, Stroke};
+use fluent_bundle::FluentArgs;
 
 use crate::i18n::Localization;
 use crate::layout::LayoutDensity;
@@ -15,6 +16,58 @@ pub(super) enum JourneyStepState {
     Current,
     Upcoming,
     Attention,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) struct ProcessingProgress {
+    pub documents: usize,
+    pub preparing: usize,
+    pub ready_for_review: usize,
+    pub issues: usize,
+}
+
+pub(super) fn processing_progress(
+    document_count: usize,
+    published_count: usize,
+    needs_review_count: usize,
+    failed_count: usize,
+    visible_issue_count: usize,
+) -> ProcessingProgress {
+    let preparing = document_count
+        .saturating_sub(published_count)
+        .saturating_sub(needs_review_count)
+        .saturating_sub(failed_count);
+    ProcessingProgress {
+        documents: document_count,
+        preparing,
+        ready_for_review: needs_review_count,
+        issues: failed_count.max(visible_issue_count),
+    }
+}
+
+pub(super) fn show_processing_progress(
+    ui: &mut egui::Ui,
+    localization: &Localization,
+    progress: ProcessingProgress,
+) {
+    let mut arguments = FluentArgs::new();
+    arguments.set("documents", progress.documents);
+    arguments.set("preparing", progress.preparing);
+    arguments.set("ready", progress.ready_for_review);
+    arguments.set("issues", progress.issues);
+    let color = if ui.visuals().dark_mode {
+        AIR_BLUE
+    } else {
+        AIR_INK
+    };
+    ui.add(
+        egui::Label::new(
+            RichText::new(localization.text_with("onboarding-processing-counts", Some(&arguments)))
+                .strong()
+                .color(color),
+        )
+        .wrap(),
+    );
 }
 
 pub(super) const fn journey_header_height(density: LayoutDensity) -> f32 {
@@ -302,5 +355,28 @@ mod tests {
             journey_header_height(LayoutDensity::Compact)
                 < journey_header_height(LayoutDensity::Comfortable)
         );
+    }
+
+    #[test]
+    fn processing_progress_uses_persisted_document_states() {
+        assert_eq!(
+            processing_progress(7, 1, 2, 1, 1),
+            ProcessingProgress {
+                documents: 7,
+                preparing: 3,
+                ready_for_review: 2,
+                issues: 1,
+            }
+        );
+    }
+
+    #[test]
+    fn processing_progress_includes_transient_visible_issues() {
+        assert_eq!(processing_progress(0, 0, 0, 0, 1).issues, 1);
+    }
+
+    #[test]
+    fn processing_progress_saturates_inconsistent_snapshots() {
+        assert_eq!(processing_progress(1, 1, 1, 1, 0).preparing, 0);
     }
 }

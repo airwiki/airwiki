@@ -139,7 +139,7 @@ pub(crate) struct ConnectivityView {
 pub(crate) struct NodeReadinessView {
     pub components: [ComponentReadinessView; 8],
     pub primary_action: Option<RecommendedAction>,
-    pub last_checked_at: SystemTime,
+    pub last_checked_at: Option<SystemTime>,
 }
 
 impl NodeReadinessView {
@@ -246,7 +246,7 @@ pub(crate) struct ReadinessInput {
     pub chat: OptionalFeatureState,
     pub background: OptionalFeatureState,
     pub updates: OptionalFeatureState,
-    pub last_checked_at: SystemTime,
+    pub last_checked_at: Option<SystemTime>,
 }
 
 pub(crate) fn derive_connectivity(input: ConnectivityInput) -> ConnectivityView {
@@ -681,8 +681,16 @@ mod tests {
             chat: OptionalFeatureState::Ready,
             background: OptionalFeatureState::Ready,
             updates: OptionalFeatureState::Ready,
-            last_checked_at: SystemTime::UNIX_EPOCH,
+            last_checked_at: Some(SystemTime::UNIX_EPOCH),
         }
+    }
+
+    #[test]
+    fn readiness_preserves_an_unknown_health_check_time() {
+        let mut input = ready_input();
+        input.last_checked_at = None;
+
+        assert_eq!(derive_readiness(input).last_checked_at, None);
     }
 
     fn first_knowledge(input: ReadinessInput, published_count: usize) -> FirstKnowledgeJourneyView {

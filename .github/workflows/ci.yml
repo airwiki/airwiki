@@ -57,13 +57,18 @@ jobs:
         run: cargo run --locked -p xtask -- docs check
       - name: Reproducible third-party license inventory
         run: cargo run --locked -p xtask -- licenses check
-      - uses: rustsec/audit-check@69366f33c96575abad1ee0dba8212993eecbe998 # v2.0.0
-        with:
-          token: ${{ secrets.GITHUB_TOKEN }}
-          # 0118/0119 are constrained to libp2p's mDNS-only hickory build; the
-          # quick-xml advisories are target-Linux dependencies absent from both
-          # supported binaries. All four exceptions are documented in the threat model.
-          ignore: RUSTSEC-2026-0118,RUSTSEC-2026-0119,RUSTSEC-2026-0194,RUSTSEC-2026-0195
+      - name: Install cargo-audit
+        run: cargo install cargo-audit --version 0.22.2 --locked
+      - name: Dependency advisories
+        # 0118/0119 are constrained to libp2p's mDNS-only hickory build; the
+        # quick-xml advisories are target-Linux dependencies absent from both
+        # supported binaries. All four exceptions are documented in the threat model.
+        run: >-
+          cargo audit
+          --ignore RUSTSEC-2026-0118
+          --ignore RUSTSEC-2026-0119
+          --ignore RUSTSEC-2026-0194
+          --ignore RUSTSEC-2026-0195
       - name: Install cargo-deny
         run: cargo install cargo-deny --version 0.20.2 --locked
       - name: Dependency policy

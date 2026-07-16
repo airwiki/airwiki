@@ -746,7 +746,14 @@ mod tests {
 
         assert_eq!(error, EvidenceRelevanceError::TimedOut);
         assert_eq!(semaphore.available_permits(), 0);
-        tokio::time::sleep(Duration::from_millis(100)).await;
+        let released = tokio::time::timeout(
+            Duration::from_secs(2),
+            Arc::clone(&semaphore).acquire_owned(),
+        )
+        .await
+        .expect("blocking reranker did not release its permit")
+        .unwrap();
+        drop(released);
         assert_eq!(semaphore.available_permits(), 1);
     }
 

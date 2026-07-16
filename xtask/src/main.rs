@@ -6371,7 +6371,11 @@ mod tests {
     #[cfg(windows)]
     fn run_windows_runtime_script(body: &str) -> std::process::Output {
         let runtime = powershell_literal(&workspace_root().join("packaging/windows-runtime.ps1"));
-        let command = format!("$ErrorActionPreference='Stop'; . {runtime}; {body}");
+        let command = format!(
+            "$ErrorActionPreference='Stop'; \
+             Import-Module Microsoft.PowerShell.Utility -ErrorAction Stop; \
+             . {runtime}; {body}"
+        );
         std::process::Command::new("powershell.exe")
             .args([
                 "-NoProfile",

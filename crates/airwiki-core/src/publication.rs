@@ -7,7 +7,10 @@ use uuid::Uuid;
 
 use crate::ingest::sha256_file;
 use crate::okf::OkfPublisher;
-use crate::storage::{ConceptRecord, Database, PublicationClaim, SourceDocumentRecord};
+use crate::storage::{
+    ConceptRecord, Database, ExpectedReview, PublicationClaim, ReviewVersionToken,
+    SourceDocumentRecord,
+};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum PublicationStep {
@@ -37,12 +40,22 @@ impl OkfPublicationMaterializer {
         Self { database }
     }
 
-    pub fn approve(&self, concept_id: Uuid, draft: EnrichmentDraft) -> Result<ConceptRecord> {
+    pub fn approve(
+        &self,
+        concept_id: Uuid,
+        draft: EnrichmentDraft,
+        review_version: &ReviewVersionToken,
+    ) -> Result<ConceptRecord> {
         let _guard = self.database.publication_guard()?;
-        self.approve_locked(concept_id, draft)
+        self.approve_locked(concept_id, draft, review_version)
     }
 
-    fn approve_locked(&self, concept_id: Uuid, draft: EnrichmentDraft) -> Result<ConceptRecord> {
+    fn approve_locked(
+        &self,
+        concept_id: Uuid,
+        draft: EnrichmentDraft,
+        review_version: &ReviewVersionToken,
+    ) -> Result<ConceptRecord> {
         let recovery = self.recover_claims()?;
         if recovery.pending > 0 {
             bail!("pending OKF publication cleanup must finish before another approval");
@@ -79,8 +92,11 @@ impl OkfPublicationMaterializer {
         let claim = self.database.begin_publication_if_current(
             concept_id,
             draft,
-            &source.source_sha256,
-            source.revision,
+            ExpectedReview {
+                source_sha256: &source.source_sha256,
+                source_revision: source.revision,
+                review_version,
+            },
             action,
             reviewed_at,
         )?;
@@ -364,13 +380,22 @@ mod tests {
     }
 
     fn begin_claim(fixture: &Fixture) -> PublicationClaim {
+        let review_version = fixture
+            .database
+            .review_evidence_page(fixture.concept_id, 1, None, None, 1)
+            .unwrap()
+            .unwrap()
+            .review_version;
         fixture
             .database
             .begin_publication_if_current(
                 fixture.concept_id,
                 fixture.draft.clone(),
-                &fixture.source_sha256,
-                1,
+                ExpectedReview {
+                    source_sha256: &fixture.source_sha256,
+                    source_revision: 1,
+                    review_version: &review_version,
+                },
                 "published",
                 Utc::now(),
             )

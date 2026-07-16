@@ -13,7 +13,7 @@ use std::{
 
 use airwiki_core::{
     CollectionMaintenanceRecord, GuidedRepairPreview, GuidedRepairResult, IngestOutcome,
-    KnowledgeBundleView, KnowledgePageId, KnowledgePageView, WikiRepairError,
+    KnowledgeBundleView, KnowledgePageId, KnowledgePageView, ReviewVersionToken, WikiRepairError,
 };
 use airwiki_inference::{
     AssetManager, E5_FILES, E5_REVISION, HardwareReport, InstallEvent, InstallOutcome, InstallPlan,
@@ -75,9 +75,59 @@ pub enum CollectionScanState {
 #[derive(Debug, Clone)]
 pub struct ReviewItemView {
     pub concept_id: Uuid,
+    pub source_revision: u32,
     pub source_name: String,
     pub collection_name: String,
     pub draft: EnrichmentDraft,
+}
+
+#[derive(Clone, PartialEq, Eq)]
+pub struct ReviewEvidenceExcerptView {
+    pub ordinal: u32,
+    pub heading_or_page: String,
+    pub text: String,
+    pub truncated: bool,
+}
+
+impl std::fmt::Debug for ReviewEvidenceExcerptView {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("ReviewEvidenceExcerptView")
+            .field("ordinal", &self.ordinal)
+            .field("heading_present", &!self.heading_or_page.is_empty())
+            .field("text_bytes", &self.text.len())
+            .field("truncated", &self.truncated)
+            .finish()
+    }
+}
+
+#[derive(Clone, PartialEq, Eq)]
+pub struct ReviewEvidencePageView {
+    pub concept_id: Uuid,
+    pub source_revision: u32,
+    pub review_version: ReviewVersionToken,
+    pub excerpts: Vec<ReviewEvidenceExcerptView>,
+    pub total_chunks: usize,
+    pub next_ordinal: Option<u32>,
+}
+
+impl std::fmt::Debug for ReviewEvidencePageView {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("ReviewEvidencePageView")
+            .field("source_revision", &self.source_revision)
+            .field("excerpt_count", &self.excerpts.len())
+            .field("total_chunks", &self.total_chunks)
+            .field("next_ordinal", &self.next_ordinal)
+            .finish()
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ReviewEvidenceErrorView {
+    NoLongerPending,
+    MissingEvidence,
+    Unavailable,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -312,6 +362,7 @@ pub enum WorkerCommand {
     },
     Approve {
         concept_id: Uuid,
+        expected_review_version: ReviewVersionToken,
         draft: EnrichmentDraft,
     },
     Reject {
@@ -319,6 +370,13 @@ pub enum WorkerCommand {
     },
     ReanalyzeReview {
         concept_id: Uuid,
+    },
+    LoadReviewEvidence {
+        request_id: Uuid,
+        concept_id: Uuid,
+        expected_source_revision: u32,
+        expected_review_version: Option<ReviewVersionToken>,
+        after_ordinal: Option<u32>,
     },
     LoadKnowledgeBundle {
         request_id: Uuid,
@@ -427,6 +485,12 @@ pub enum WorkerEvent {
     ReviewReanalysis {
         concept_id: Uuid,
         running: bool,
+    },
+    ReviewEvidenceLoaded {
+        request_id: Uuid,
+        concept_id: Uuid,
+        expected_source_revision: u32,
+        result: Result<ReviewEvidencePageView, ReviewEvidenceErrorView>,
     },
     KnowledgeBundleLoaded {
         request_id: Uuid,
@@ -577,6 +641,12 @@ enum BackgroundCompletion {
     ReanalyzeReview {
         concept_id: Uuid,
         result: Result<(), String>,
+    },
+    ReviewEvidence {
+        request_id: Uuid,
+        concept_id: Uuid,
+        expected_source_revision: u32,
+        result: Result<ReviewEvidencePageView, ReviewEvidenceErrorView>,
     },
     KnowledgeBundle {
         request_id: Uuid,
@@ -1668,7 +1738,11 @@ async fn run_worker(
                         }
                         refresh_content_views(&services, &events);
                     }
-                    WorkerCommand::Approve { concept_id, draft } => {
+                    WorkerCommand::Approve {
+                        concept_id,
+                        expected_review_version,
+                        draft,
+                    } => {
                         if !approving_reviews.insert(concept_id) {
                             send(
                                 &events,
@@ -1681,6 +1755,7 @@ async fn run_worker(
                                 &services,
                                 &mut background,
                                 concept_id,
+                                expected_review_version,
                                 draft,
                             );
                         }
@@ -1719,6 +1794,23 @@ async fn run_worker(
                             );
                             spawn_review_reanalysis(&services, &mut background, concept_id);
                         }
+                    }
+                    WorkerCommand::LoadReviewEvidence {
+                        request_id,
+                        concept_id,
+                        expected_source_revision,
+                        expected_review_version,
+                        after_ordinal,
+                    } => {
+                        spawn_review_evidence(
+                            &services,
+                            &mut background,
+                            request_id,
+                            concept_id,
+                            expected_source_revision,
+                            expected_review_version,
+                            after_ordinal,
+                        );
                     }
                     WorkerCommand::LoadKnowledgeBundle { request_id, collection_id } => {
                         spawn_knowledge_bundle(
@@ -2447,6 +2539,20 @@ async fn run_worker(
                         }
                         refresh_content_views(&services, &events);
                     }
+                    Some(Ok(BackgroundCompletion::ReviewEvidence {
+                        request_id,
+                        concept_id,
+                        expected_source_revision,
+                        result,
+                    })) => send(
+                        &events,
+                        WorkerEvent::ReviewEvidenceLoaded {
+                            request_id,
+                            concept_id,
+                            expected_source_revision,
+                            result,
+                        },
+                    ),
                     Some(Ok(BackgroundCompletion::KnowledgeBundle {
                         request_id,
                         collection_id,
@@ -4153,16 +4259,48 @@ fn spawn_review_approval(
     services: &Arc<DesktopServices>,
     background: &mut JoinSet<BackgroundCompletion>,
     concept_id: Uuid,
+    expected_review_version: ReviewVersionToken,
     draft: EnrichmentDraft,
 ) {
     let services = Arc::clone(services);
     background.spawn(async move {
-        let result =
-            tokio::task::spawn_blocking(move || services.approve_review(concept_id, draft))
-                .await
-                .map_err(|error| format!("falló el worker de publicación: {error}"))
-                .and_then(|result| result.map_err(|error| format!("{error:#}")));
+        let result = tokio::task::spawn_blocking(move || {
+            services.approve_review(concept_id, &expected_review_version, draft)
+        })
+        .await
+        .map_err(|error| format!("falló el worker de publicación: {error}"))
+        .and_then(|result| result.map_err(|error| format!("{error:#}")));
         BackgroundCompletion::Approve { concept_id, result }
+    });
+}
+
+fn spawn_review_evidence(
+    services: &Arc<DesktopServices>,
+    background: &mut JoinSet<BackgroundCompletion>,
+    request_id: Uuid,
+    concept_id: Uuid,
+    expected_source_revision: u32,
+    expected_review_version: Option<ReviewVersionToken>,
+    after_ordinal: Option<u32>,
+) {
+    let services = Arc::clone(services);
+    background.spawn(async move {
+        let result = tokio::task::spawn_blocking(move || {
+            services.load_review_evidence(
+                concept_id,
+                expected_source_revision,
+                expected_review_version.as_ref(),
+                after_ordinal,
+            )
+        })
+        .await
+        .unwrap_or(Err(ReviewEvidenceErrorView::Unavailable));
+        BackgroundCompletion::ReviewEvidence {
+            request_id,
+            concept_id,
+            expected_source_revision,
+            result,
+        }
     });
 }
 
@@ -4425,6 +4563,31 @@ fn apply_claude_approval_state(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn review_evidence_debug_redacts_content_and_identity() {
+        let concept_id = Uuid::new_v4();
+        let secret = "DO-NOT-LOG-REVIEW-EVIDENCE";
+        let page = ReviewEvidencePageView {
+            concept_id,
+            source_revision: 2,
+            review_version: ReviewVersionToken::from_digest([11; 32]),
+            excerpts: vec![ReviewEvidenceExcerptView {
+                ordinal: 0,
+                heading_or_page: secret.to_owned(),
+                text: secret.to_owned(),
+                truncated: false,
+            }],
+            total_chunks: 1,
+            next_ordinal: None,
+        };
+
+        let debug = format!("{page:?}");
+
+        assert!(!debug.contains(secret));
+        assert!(!debug.contains(&concept_id.to_string()));
+        assert!(debug.contains("excerpt_count"));
+    }
 
     fn tracked_firewall_operation() -> FirewallOperationTracker {
         FirewallOperationTracker {

@@ -120,8 +120,13 @@ async fn published_fixture(node_id: &str) -> Database {
             }],
         )
         .unwrap();
+    let review_version = database
+        .review_evidence_page(concept.id, 1, None, None, 1)
+        .unwrap()
+        .unwrap()
+        .review_version;
     OkfPublicationMaterializer::new(database.clone())
-        .approve(concept.id, draft)
+        .approve(concept.id, draft, &review_version)
         .unwrap();
     database
 }

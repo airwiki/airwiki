@@ -67,6 +67,7 @@ Controls are not considered effective end to end until the
 | Crash splits approved DB and bundle state | Durable publication intent resumes idempotently before exposure | Altered sources or bundle return to human intervention |
 | Peer forges citation node | Receiver replaces `node_id` with the Noise-authenticated PeerId | A compromised source controls content under its own identity |
 | Prompt injection in evidence | Local LLM only proposes metadata; remote diagnostics are discarded; MCP instructions label evidence as untrusted data | A chat model may still follow hostile snippets; validate the golden prompt set |
+| Stale or mismatched evidence is shown during review | Worker requests bind request, concept, revision and an opaque review version; storage revalidates pending state, draft and all chunk evidence in the publication transaction; approval stays disabled without current evidence | A compromised local database remains outside the threat model |
 | Published Markdown loads hostile resources | Viewer disables images, files, network, SVG, and embeds; external HTTP links require confirmation | User can still choose to open a URL |
 | Bundle is modified outside the app | Bounded tolerant inspector, normalized in-root paths, no symlinks, DB/filesystem health report, confirmed snapshot repair | A local writer already controls data; ambiguous history remains blocked |
 | Model grants permission | Enrichment schema excludes collection, grants, publication, and cloud policy | Review schemas and preserve human approval |

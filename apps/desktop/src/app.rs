@@ -20,10 +20,16 @@ use uuid::Uuid;
 mod first_knowledge;
 mod integrations;
 mod knowledge;
+mod review;
 
 use self::first_knowledge::JourneyStepState;
 use self::integrations::{ChatIntegrationsUi, IntegrationsUiAction};
 use self::knowledge::{KnowledgeAction, KnowledgeUi};
+use self::review::{
+    REVIEW_ACTION_BAR_HEIGHT, REVIEW_PANEL_GAP, REVIEW_QUEUE_WIDTH, ReviewEvidenceAction,
+    ReviewEvidencePanelIntent, ReviewEvidenceUi, ReviewLayoutMode, review_comparison_widths,
+    review_layout_mode, show_review_evidence_panel,
+};
 
 use crate::{
     activation::{ActivationAction, LaunchMode, PrimaryInstance},
@@ -143,6 +149,7 @@ pub struct AirWikiApp {
     notices: VecDeque<(bool, String)>,
     selected_review: Option<Uuid>,
     reanalyzing_reviews: HashSet<Uuid>,
+    review_evidence: ReviewEvidenceUi,
     integrations: ChatIntegrationsUi,
     knowledge: KnowledgeUi,
 }
@@ -208,6 +215,7 @@ impl AirWikiApp {
             notices: VecDeque::new(),
             selected_review: None,
             reanalyzing_reviews: HashSet::new(),
+            review_evidence: ReviewEvidenceUi::default(),
             integrations: ChatIntegrationsUi::default(),
             knowledge: KnowledgeUi::default(),
         })
@@ -462,6 +470,24 @@ impl AirWikiApp {
                     } else {
                         self.reanalyzing_reviews.remove(&concept_id);
                     }
+                    if let Some(action) =
+                        self.review_evidence.reanalysis_changed(concept_id, running)
+                    {
+                        self.send_review_evidence_action(action);
+                    }
+                }
+                WorkerEvent::ReviewEvidenceLoaded {
+                    request_id,
+                    concept_id,
+                    expected_source_revision,
+                    result,
+                } => {
+                    self.review_evidence.apply_loaded(
+                        request_id,
+                        concept_id,
+                        expected_source_revision,
+                        result,
+                    );
                 }
                 WorkerEvent::KnowledgeBundleLoaded {
                     request_id,
@@ -1456,6 +1482,7 @@ impl AirWikiApp {
 
     fn review_content(&mut self, ui: &mut egui::Ui) {
         if self.reviews.is_empty() && self.source_issues.is_empty() {
+            self.review_evidence.sync_selection(None, false);
             empty_state(
                 ui,
                 &self.localization.text("review-empty-title"),
@@ -1465,186 +1492,27 @@ impl AirWikiApp {
         }
         let issues = self.source_issues.clone();
         let mut requested_rescan = None;
-        ui.columns(2, |columns| {
-            columns[0].set_min_width(280.0);
-            let queue_height = columns[0].available_height().max(0.0);
-            egui::ScrollArea::vertical()
-                .id_salt("review_queue")
-                .max_height(queue_height)
-                .auto_shrink([false; 2])
-                .show(&mut columns[0], |ui| {
-                    if !self.reviews.is_empty() {
-                        let mut arguments = FluentArgs::new();
-                        arguments.set("count", self.reviews.len() as i64);
-                        ui.label(
-                            RichText::new(
-                                self.localization
-                                    .text_with("review-ready-group", Some(&arguments)),
-                            )
-                            .strong(),
-                        );
-                        ui.add_space(4.0);
-                        for item in &self.reviews {
-                            let selected = self.selected_review == Some(item.concept_id);
-                            if ui
-                                .selectable_label(
-                                    selected,
-                                    format!("{}\n{}", item.source_name, item.collection_name),
-                                )
-                                .clicked()
-                            {
-                                self.selected_review = Some(item.concept_id);
-                            }
-                        }
-                    }
-                    if !issues.is_empty() {
-                        if !self.reviews.is_empty() {
-                            ui.add_space(14.0);
-                        }
-                        let mut arguments = FluentArgs::new();
-                        arguments.set("count", issues.len() as i64);
-                        ui.label(
-                            RichText::new(
-                                self.localization
-                                    .text_with("review-issues-group", Some(&arguments)),
-                            )
-                            .strong()
-                            .color(Color32::from_rgb(230, 160, 35)),
-                        );
-                        ui.add_space(4.0);
-                        for issue in &issues {
-                            let scanning = self.collection_scans.contains_key(&issue.collection_id);
-                            egui::Frame::new()
-                                .fill(Color32::from_rgba_unmultiplied(230, 160, 35, 18))
-                                .stroke(egui::Stroke::new(1.0, Color32::from_rgb(155, 105, 25)))
-                                .corner_radius(egui::CornerRadius::same(8))
-                                .inner_margin(egui::Margin::same(10))
-                                .show(ui, |ui| {
-                                    ui.set_min_width(ui.available_width());
-                                    ui.horizontal(|ui| {
-                                        ui.label(
-                                            RichText::new("!")
-                                                .strong()
-                                                .color(Color32::from_rgb(230, 160, 35)),
-                                        );
-                                        ui.vertical(|ui| {
-                                            ui.label(RichText::new(&issue.source_name).strong());
-                                            ui.label(
-                                                RichText::new(&issue.collection_name)
-                                                    .small()
-                                                    .color(Color32::GRAY),
-                                            );
-                                            ui.label(
-                                                RichText::new(
-                                                    self.localization.text("review-issue-status"),
-                                                )
-                                                .small()
-                                                .strong()
-                                                .color(Color32::from_rgb(230, 160, 35)),
-                                            );
-                                            ui.add(
-                                                egui::Label::new(
-                                                    RichText::new(source_issue_message(
-                                                        &self.localization,
-                                                        issue.code,
-                                                    ))
-                                                    .small(),
-                                                )
-                                                .wrap(),
-                                            );
-                                            if ui
-                                                .add_enabled(
-                                                    !scanning,
-                                                    egui::Button::new(
-                                                        self.localization.text("review-scan-again"),
-                                                    )
-                                                    .small(),
-                                                )
-                                                .clicked()
-                                            {
-                                                requested_rescan = Some(issue.collection_id);
-                                            }
-                                        });
-                                    });
-                                });
-                            ui.add_space(6.0);
-                        }
-                    }
-                });
-            let selected_id = self.selected_review;
-            let is_reanalyzing =
-                selected_id.is_some_and(|id| self.reanalyzing_reviews.contains(&id));
-            let selected = selected_id
-                .and_then(|id| self.reviews.iter_mut().find(|item| item.concept_id == id));
-            if let Some(item) = selected {
-                let editor_height = (columns[1].available_height() - 62.0).max(120.0);
-                egui::ScrollArea::vertical()
-                    .id_salt("review_editor")
-                    .max_height(editor_height)
-                    .auto_shrink([false; 2])
-                    .show(&mut columns[1], |ui| {
-                        edit_draft(ui, &self.localization, &mut item.draft);
-                    });
-                columns[1].horizontal_wrapped(|ui| {
-                    if ui
-                        .add_enabled(
-                            !is_reanalyzing,
-                            first_knowledge::primary_button(
-                                self.localization.text("review-approve"),
-                            ),
-                        )
-                        .clicked()
-                    {
-                        self.worker.send(WorkerCommand::Approve {
-                            concept_id: item.concept_id,
-                            draft: item.draft.clone(),
-                        });
-                    }
-                    if ui
-                        .add_enabled(
-                            !is_reanalyzing,
-                            egui::Button::new(self.localization.text("review-reject")),
-                        )
-                        .clicked()
-                    {
-                        self.worker.send(WorkerCommand::Reject {
-                            concept_id: item.concept_id,
-                        });
-                    }
-                    let retry = ui.add_enabled(
-                        self.models_ready && !is_reanalyzing,
-                        egui::Button::new(self.localization.text("review-reanalyze")),
-                    );
-                    if retry
-                        .on_hover_text(self.localization.text("review-reanalyze-help"))
-                        .clicked()
-                    {
-                        self.worker.send(WorkerCommand::ReanalyzeReview {
-                            concept_id: item.concept_id,
-                        });
-                    }
-                });
-                if is_reanalyzing {
-                    columns[1].horizontal(|ui| {
-                        ui.spinner();
-                        ui.label(self.localization.text("review-analyzing"));
-                    });
-                } else if !self.models_ready {
-                    columns[1].label(
-                        RichText::new(self.localization.text("review-model-required"))
-                            .small()
-                            .color(Color32::GRAY),
-                    );
-                }
-            } else {
-                let message = if issues.is_empty() {
-                    self.localization.text("review-select-document")
-                } else {
-                    self.localization.text("review-only-issues")
-                };
-                columns[1].label(message);
+        match review_layout_mode(ui.available_width()) {
+            ReviewLayoutMode::CompactCompare => {
+                self.compact_review_selector(ui, &issues, &mut requested_rescan);
+                ui.separator();
+                self.review_comparison(ui, &issues);
             }
-        });
+            ReviewLayoutMode::QueueCompare => {
+                StripBuilder::new(ui)
+                    .size(Size::exact(REVIEW_QUEUE_WIDTH))
+                    .size(Size::exact(REVIEW_PANEL_GAP))
+                    .size(Size::remainder())
+                    .clip(true)
+                    .horizontal(|mut strip| {
+                        strip.cell(|ui| {
+                            self.review_queue(ui, &issues, &mut requested_rescan);
+                        });
+                        strip.cell(|_| {});
+                        strip.cell(|ui| self.review_comparison(ui, &issues));
+                    });
+            }
+        }
         if let Some(collection_id) = requested_rescan {
             self.collection_scans
                 .insert(collection_id, CollectionScanState::Queued);
@@ -1652,6 +1520,280 @@ impl AirWikiApp {
             self.worker
                 .send(WorkerCommand::RescanCollection(collection_id));
         }
+    }
+
+    fn compact_review_selector(
+        &mut self,
+        ui: &mut egui::Ui,
+        issues: &[SourceIssueView],
+        requested_rescan: &mut Option<Uuid>,
+    ) {
+        ui.horizontal_wrapped(|ui| {
+            ui.label(RichText::new(self.localization.text("review-document-selector")).strong());
+            let selected_text = self
+                .selected_review
+                .and_then(|id| self.reviews.iter().find(|item| item.concept_id == id))
+                .map(|item| item.source_name.clone())
+                .unwrap_or_else(|| self.localization.text("review-select-document"));
+            egui::ComboBox::from_id_salt("compact_review_selector")
+                .selected_text(selected_text)
+                .width(230.0)
+                .show_ui(ui, |ui| {
+                    for item in &self.reviews {
+                        ui.selectable_value(
+                            &mut self.selected_review,
+                            Some(item.concept_id),
+                            format!("{} · {}", item.source_name, item.collection_name),
+                        );
+                    }
+                });
+            if !issues.is_empty() {
+                let mut arguments = FluentArgs::new();
+                arguments.set("count", issues.len() as i64);
+                let title = self
+                    .localization
+                    .text_with("review-issues-group", Some(&arguments));
+                ui.menu_button(title, |ui| {
+                    ui.set_min_width(320.0);
+                    egui::ScrollArea::vertical()
+                        .id_salt("compact_review_issues")
+                        .max_height(280.0)
+                        .show(ui, |ui| {
+                            for issue in issues {
+                                let scanning =
+                                    self.collection_scans.contains_key(&issue.collection_id);
+                                if show_review_issue(ui, &self.localization, issue, scanning) {
+                                    *requested_rescan = Some(issue.collection_id);
+                                }
+                                ui.add_space(6.0);
+                            }
+                        });
+                });
+            }
+        });
+    }
+
+    fn review_queue(
+        &mut self,
+        ui: &mut egui::Ui,
+        issues: &[SourceIssueView],
+        requested_rescan: &mut Option<Uuid>,
+    ) {
+        let queue_height = ui.available_height().max(0.0);
+        egui::ScrollArea::vertical()
+            .id_salt("review_queue")
+            .max_height(queue_height)
+            .auto_shrink([false; 2])
+            .show(ui, |ui| {
+                if !self.reviews.is_empty() {
+                    let mut arguments = FluentArgs::new();
+                    arguments.set("count", self.reviews.len() as i64);
+                    ui.label(
+                        RichText::new(
+                            self.localization
+                                .text_with("review-ready-group", Some(&arguments)),
+                        )
+                        .strong(),
+                    );
+                    ui.add_space(4.0);
+                    for item in &self.reviews {
+                        let selected = self.selected_review == Some(item.concept_id);
+                        if ui
+                            .selectable_label(
+                                selected,
+                                format!("{}\n{}", item.source_name, item.collection_name),
+                            )
+                            .clicked()
+                        {
+                            self.selected_review = Some(item.concept_id);
+                        }
+                    }
+                }
+                if !issues.is_empty() {
+                    if !self.reviews.is_empty() {
+                        ui.add_space(14.0);
+                    }
+                    let mut arguments = FluentArgs::new();
+                    arguments.set("count", issues.len() as i64);
+                    ui.label(
+                        RichText::new(
+                            self.localization
+                                .text_with("review-issues-group", Some(&arguments)),
+                        )
+                        .strong()
+                        .color(Color32::from_rgb(230, 160, 35)),
+                    );
+                    ui.add_space(4.0);
+                    for issue in issues {
+                        let scanning = self.collection_scans.contains_key(&issue.collection_id);
+                        if show_review_issue(ui, &self.localization, issue, scanning) {
+                            *requested_rescan = Some(issue.collection_id);
+                        }
+                        ui.add_space(6.0);
+                    }
+                }
+            });
+    }
+
+    fn review_comparison(&mut self, ui: &mut egui::Ui, issues: &[SourceIssueView]) {
+        let Some(selected_index) = self.selected_review.and_then(|selected| {
+            self.reviews
+                .iter()
+                .position(|item| item.concept_id == selected)
+        }) else {
+            self.review_evidence.sync_selection(None, false);
+            let message = if issues.is_empty() {
+                self.localization.text("review-select-document")
+            } else {
+                self.localization.text("review-only-issues")
+            };
+            ui.label(message);
+            return;
+        };
+        let concept_id = self.reviews[selected_index].concept_id;
+        let source_revision = self.reviews[selected_index].source_revision;
+        let is_reanalyzing = self.reanalyzing_reviews.contains(&concept_id);
+        if let Some(action) = self
+            .review_evidence
+            .sync_selection(Some((concept_id, source_revision)), is_reanalyzing)
+        {
+            self.send_review_evidence_action(action);
+        }
+
+        let approval_ready = self
+            .review_evidence
+            .approval_ready(concept_id, source_revision);
+        let loading = self.review_evidence.is_loading(concept_id, source_revision);
+        let error = self.review_evidence.error_for(concept_id, source_revision);
+        let page = self.review_evidence.page_for(concept_id, source_revision);
+        let mut evidence_intent = None;
+        let mut approve = false;
+        let mut reject = false;
+        let mut reanalyze = false;
+        let (evidence_width, _) = review_comparison_widths(ui.available_width());
+        StripBuilder::new(ui)
+            .size(Size::remainder())
+            .size(Size::exact(REVIEW_ACTION_BAR_HEIGHT))
+            .clip(true)
+            .vertical(|mut strip| {
+                strip.cell(|ui| {
+                    StripBuilder::new(ui)
+                        .size(Size::exact(evidence_width))
+                        .size(Size::exact(REVIEW_PANEL_GAP))
+                        .size(Size::remainder())
+                        .clip(true)
+                        .horizontal(|mut strip| {
+                            strip.cell(|ui| {
+                                evidence_intent = show_review_evidence_panel(
+                                    ui,
+                                    &self.localization,
+                                    concept_id,
+                                    source_revision,
+                                    page,
+                                    error,
+                                    loading,
+                                );
+                            });
+                            strip.cell(|_| {});
+                            strip.cell(|ui| {
+                                let editor_height = ui.available_height().max(0.0);
+                                egui::ScrollArea::vertical()
+                                    .id_salt(("review_editor", concept_id, source_revision))
+                                    .max_height(editor_height)
+                                    .auto_shrink([false; 2])
+                                    .show(ui, |ui| {
+                                        edit_draft(
+                                            ui,
+                                            &self.localization,
+                                            &mut self.reviews[selected_index].draft,
+                                        );
+                                    });
+                            });
+                        });
+                });
+                strip.cell(|ui| {
+                    ui.separator();
+                    ui.horizontal_wrapped(|ui| {
+                        approve = ui
+                            .add_enabled(
+                                approval_ready,
+                                first_knowledge::primary_button(
+                                    self.localization.text("review-approve"),
+                                ),
+                            )
+                            .clicked();
+                        reject = ui
+                            .add_enabled(
+                                !is_reanalyzing,
+                                egui::Button::new(self.localization.text("review-reject")),
+                            )
+                            .clicked();
+                        reanalyze = ui
+                            .add_enabled(
+                                self.models_ready && !is_reanalyzing,
+                                egui::Button::new(self.localization.text("review-reanalyze")),
+                            )
+                            .on_hover_text(self.localization.text("review-reanalyze-help"))
+                            .clicked();
+                    });
+                    if is_reanalyzing {
+                        ui.horizontal(|ui| {
+                            ui.spinner();
+                            ui.label(self.localization.text("review-analyzing"));
+                        });
+                    } else if !approval_ready {
+                        ui.label(
+                            RichText::new(
+                                self.localization.text("review-evidence-approval-blocked"),
+                            )
+                            .small()
+                            .color(ui.visuals().weak_text_color()),
+                        );
+                    } else if !self.models_ready {
+                        ui.label(
+                            RichText::new(self.localization.text("review-model-required"))
+                                .small()
+                                .color(ui.visuals().weak_text_color()),
+                        );
+                    }
+                });
+            });
+
+        if let Some(action) = match evidence_intent {
+            Some(ReviewEvidencePanelIntent::LoadMore) => self.review_evidence.request_more(),
+            Some(ReviewEvidencePanelIntent::Retry) => self.review_evidence.retry(),
+            None => None,
+        } {
+            self.send_review_evidence_action(action);
+        }
+        if approve
+            && let Some(expected_review_version) = self
+                .review_evidence
+                .approval_version(concept_id, source_revision)
+        {
+            self.worker.send(WorkerCommand::Approve {
+                concept_id,
+                expected_review_version,
+                draft: self.reviews[selected_index].draft.clone(),
+            });
+        }
+        if reject {
+            self.worker.send(WorkerCommand::Reject { concept_id });
+        }
+        if reanalyze {
+            self.worker
+                .send(WorkerCommand::ReanalyzeReview { concept_id });
+        }
+    }
+
+    fn send_review_evidence_action(&self, action: ReviewEvidenceAction) {
+        self.worker.send(WorkerCommand::LoadReviewEvidence {
+            request_id: action.request_id,
+            concept_id: action.concept_id,
+            expected_source_revision: action.expected_source_revision,
+            expected_review_version: action.expected_review_version,
+            after_ordinal: action.after_ordinal,
+        });
     }
 
     fn search(&mut self, ui: &mut egui::Ui) {
@@ -3419,6 +3561,48 @@ fn source_issue_message(
         | airwiki_core::SourceIssueCode::ProcessingFailed => "review-issue-processing-failed",
     };
     localization.text(message_id)
+}
+
+fn show_review_issue(
+    ui: &mut egui::Ui,
+    localization: &Localization,
+    issue: &SourceIssueView,
+    scanning: bool,
+) -> bool {
+    let mut requested_rescan = false;
+    egui::Frame::new()
+        .fill(Color32::from_rgba_unmultiplied(230, 160, 35, 18))
+        .stroke(egui::Stroke::new(1.0, Color32::from_rgb(155, 105, 25)))
+        .corner_radius(egui::CornerRadius::same(8))
+        .inner_margin(egui::Margin::same(10))
+        .show(ui, |ui| {
+            ui.set_min_width(ui.available_width());
+            ui.label(RichText::new(&issue.source_name).strong());
+            ui.label(
+                RichText::new(&issue.collection_name)
+                    .small()
+                    .color(ui.visuals().weak_text_color()),
+            );
+            ui.label(
+                RichText::new(localization.text("review-issue-status"))
+                    .small()
+                    .strong()
+                    .color(Color32::from_rgb(230, 160, 35)),
+            );
+            ui.add(
+                egui::Label::new(
+                    RichText::new(source_issue_message(localization, issue.code)).small(),
+                )
+                .wrap(),
+            );
+            requested_rescan = ui
+                .add_enabled(
+                    !scanning,
+                    egui::Button::new(localization.text("review-scan-again")).small(),
+                )
+                .clicked();
+        });
+    requested_rescan
 }
 
 fn peer_trust_label(localization: &Localization, trust: PeerTrustState) -> String {

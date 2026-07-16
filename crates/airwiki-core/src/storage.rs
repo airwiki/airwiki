@@ -11,6 +11,7 @@ use anyhow::{Context, Result, anyhow, bail};
 use chrono::{DateTime, Utc};
 use rusqlite::{Connection, OptionalExtension, Transaction, params, params_from_iter};
 use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
 use uuid::Uuid;
 
 use crate::EMBEDDING_DIMENSIONS;
@@ -105,6 +106,75 @@ pub struct StoredChunk {
     pub source_revision: u32,
 }
 
+/// Opaque identity of the exact pending review state shown to a human.
+///
+/// The value is not an authorization secret, but its representation stays
+/// private so it cannot accidentally become a logging or persistence contract.
+#[derive(Clone, PartialEq, Eq)]
+pub struct ReviewVersionToken([u8; 32]);
+
+impl ReviewVersionToken {
+    /// Constructs a token for boundary tests and non-persistent view fixtures.
+    #[doc(hidden)]
+    pub const fn from_digest(digest: [u8; 32]) -> Self {
+        Self(digest)
+    }
+}
+
+impl std::fmt::Debug for ReviewVersionToken {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str("ReviewVersionToken([REDACTED])")
+    }
+}
+
+/// Source evidence displayed while a concept is awaiting human review.
+///
+/// Its custom `Debug` implementation intentionally excludes source-derived
+/// strings so diagnostic logs cannot accidentally disclose document content.
+#[derive(Clone, PartialEq, Eq)]
+pub struct ReviewEvidenceChunkRecord {
+    pub ordinal: u32,
+    pub heading_or_page: String,
+    pub text: String,
+}
+
+impl std::fmt::Debug for ReviewEvidenceChunkRecord {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("ReviewEvidenceChunkRecord")
+            .field("ordinal", &self.ordinal)
+            .field("heading_or_page_len", &self.heading_or_page.len())
+            .field("text_len", &self.text.len())
+            .finish()
+    }
+}
+
+/// One stable page of source evidence for the exact revision under review.
+///
+/// `next_ordinal`, when present, is an exclusive cursor to pass back as
+/// `after_ordinal` when requesting the following page.
+#[derive(Clone, PartialEq, Eq)]
+pub struct ReviewEvidencePageRecord {
+    pub concept_id: Uuid,
+    pub source_revision: u32,
+    pub review_version: ReviewVersionToken,
+    pub total_chunks: usize,
+    pub chunks: Vec<ReviewEvidenceChunkRecord>,
+    pub next_ordinal: Option<u32>,
+}
+
+impl std::fmt::Debug for ReviewEvidencePageRecord {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("ReviewEvidencePageRecord")
+            .field("source_revision", &self.source_revision)
+            .field("total_chunks", &self.total_chunks)
+            .field("page_chunk_count", &self.chunks.len())
+            .field("next_ordinal", &self.next_ordinal)
+            .finish()
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct JobRecord {
     pub id: Uuid,
@@ -147,6 +217,12 @@ pub(crate) struct PublicationClaim {
     pub action: String,
     pub reviewed_at: DateTime<Utc>,
     pub job_state: String,
+}
+
+pub(crate) struct ExpectedReview<'a> {
+    pub source_sha256: &'a str,
+    pub source_revision: u32,
+    pub review_version: &'a ReviewVersionToken,
 }
 
 #[derive(Debug, Clone)]
@@ -362,6 +438,200 @@ pub(crate) struct RankedChunk {
     pub source_sha256: String,
     pub updated_at: DateTime<Utc>,
     pub lexical_score: Option<f64>,
+}
+
+struct PendingReviewMetadata {
+    source_document_id: String,
+    collection_id: String,
+    source_sha256: String,
+    source_revision: u32,
+    concept_type: String,
+    title: String,
+    description: String,
+    language: String,
+    tags_json: String,
+    entities_json: String,
+    links_json: String,
+    summary: String,
+    classification_confidence: f64,
+    classification_explanation: String,
+    logical_resource_uri: String,
+    generator_model: String,
+}
+
+struct PendingReviewSnapshot {
+    source_document_id: String,
+    collection_id: String,
+    source_sha256: String,
+    source_revision: u32,
+    review_version: ReviewVersionToken,
+    total_chunks: usize,
+}
+
+fn pending_review_snapshot(
+    tx: &Transaction<'_>,
+    concept_id: Uuid,
+    expected_revision: u32,
+) -> Result<Option<PendingReviewSnapshot>> {
+    let metadata = tx
+        .query_row(
+            "SELECT co.source_document_id,co.collection_id,sd.source_sha256,sd.revision,
+                    co.concept_type,co.title,co.description,co.language,co.tags_json,
+                    co.entities_json,co.links_json,co.summary,co.classification_confidence,
+                    co.classification_explanation,co.logical_resource_uri,co.generator_model
+             FROM concepts co
+             JOIN source_documents sd ON sd.id=co.source_document_id
+             WHERE co.id=?1 AND co.status='needs_review' AND sd.status='needs_review'
+               AND sd.concept_id=co.id AND sd.collection_id=co.collection_id
+               AND sd.revision=?2",
+            params![concept_id.to_string(), expected_revision],
+            |row| {
+                Ok(PendingReviewMetadata {
+                    source_document_id: row.get(0)?,
+                    collection_id: row.get(1)?,
+                    source_sha256: row.get(2)?,
+                    source_revision: row.get(3)?,
+                    concept_type: row.get(4)?,
+                    title: row.get(5)?,
+                    description: row.get(6)?,
+                    language: row.get(7)?,
+                    tags_json: row.get(8)?,
+                    entities_json: row.get(9)?,
+                    links_json: row.get(10)?,
+                    summary: row.get(11)?,
+                    classification_confidence: row.get(12)?,
+                    classification_explanation: row.get(13)?,
+                    logical_resource_uri: row.get(14)?,
+                    generator_model: row.get(15)?,
+                })
+            },
+        )
+        .optional()?;
+    let Some(metadata) = metadata else {
+        return Ok(None);
+    };
+
+    let ownership_is_corrupt = tx.query_row(
+        "SELECT EXISTS(
+           SELECT 1 FROM chunks ch
+           WHERE (ch.concept_id=?1 OR ch.source_document_id=?2)
+             AND NOT (
+               ch.concept_id=?1 AND ch.source_document_id=?2
+               AND ch.collection_id=?3 AND ch.source_revision=?4
+             )
+         )",
+        params![
+            concept_id.to_string(),
+            metadata.source_document_id,
+            metadata.collection_id,
+            metadata.source_revision,
+        ],
+        |row| row.get::<_, bool>(0),
+    )?;
+    if ownership_is_corrupt {
+        bail!("review evidence chunks do not match current concept ownership and revision");
+    }
+
+    let mut hasher = Sha256::new();
+    hasher.update(b"airwiki-review-version-v1");
+    hash_review_component(&mut hasher, b"concept_id", concept_id.as_bytes())?;
+    hash_review_component(
+        &mut hasher,
+        b"source_document_id",
+        metadata.source_document_id.as_bytes(),
+    )?;
+    hash_review_component(
+        &mut hasher,
+        b"collection_id",
+        metadata.collection_id.as_bytes(),
+    )?;
+    hash_review_component(
+        &mut hasher,
+        b"source_revision",
+        &metadata.source_revision.to_be_bytes(),
+    )?;
+    hash_review_component(
+        &mut hasher,
+        b"source_sha256",
+        metadata.source_sha256.as_bytes(),
+    )?;
+    for (label, value) in [
+        (b"concept_type".as_slice(), metadata.concept_type.as_bytes()),
+        (b"title".as_slice(), metadata.title.as_bytes()),
+        (b"description".as_slice(), metadata.description.as_bytes()),
+        (b"language".as_slice(), metadata.language.as_bytes()),
+        (b"tags_json".as_slice(), metadata.tags_json.as_bytes()),
+        (
+            b"entities_json".as_slice(),
+            metadata.entities_json.as_bytes(),
+        ),
+        (b"links_json".as_slice(), metadata.links_json.as_bytes()),
+        (b"summary".as_slice(), metadata.summary.as_bytes()),
+        (
+            b"classification_explanation".as_slice(),
+            metadata.classification_explanation.as_bytes(),
+        ),
+        (
+            b"logical_resource_uri".as_slice(),
+            metadata.logical_resource_uri.as_bytes(),
+        ),
+        (
+            b"generator_model".as_slice(),
+            metadata.generator_model.as_bytes(),
+        ),
+    ] {
+        hash_review_component(&mut hasher, label, value)?;
+    }
+    hash_review_component(
+        &mut hasher,
+        b"classification_confidence",
+        &metadata.classification_confidence.to_bits().to_be_bytes(),
+    )?;
+
+    let mut statement = tx.prepare(
+        "SELECT ordinal,heading_or_page,text,text_sha256
+         FROM chunks WHERE concept_id=?1 ORDER BY ordinal",
+    )?;
+    let mut rows = statement.query([concept_id.to_string()])?;
+    let mut total_chunks = 0_usize;
+    while let Some(row) = rows.next()? {
+        let ordinal = row.get::<_, u32>(0)?;
+        let heading_or_page = row.get::<_, String>(1)?;
+        let text = row.get::<_, String>(2)?;
+        let text_sha256 = row.get::<_, String>(3)?;
+        hash_review_component(&mut hasher, b"chunk.ordinal", &ordinal.to_be_bytes())?;
+        hash_review_component(
+            &mut hasher,
+            b"chunk.heading_or_page",
+            heading_or_page.as_bytes(),
+        )?;
+        hash_review_component(&mut hasher, b"chunk.text", text.as_bytes())?;
+        hash_review_component(&mut hasher, b"chunk.text_sha256", text_sha256.as_bytes())?;
+        total_chunks = total_chunks
+            .checked_add(1)
+            .context("review evidence chunk count exceeds this platform's capacity")?;
+    }
+    drop(rows);
+    drop(statement);
+
+    Ok(Some(PendingReviewSnapshot {
+        source_document_id: metadata.source_document_id,
+        collection_id: metadata.collection_id,
+        source_sha256: metadata.source_sha256,
+        source_revision: metadata.source_revision,
+        review_version: ReviewVersionToken::from_digest(hasher.finalize().into()),
+        total_chunks,
+    }))
+}
+
+fn hash_review_component(hasher: &mut Sha256, label: &[u8], value: &[u8]) -> Result<()> {
+    let label_len = u64::try_from(label.len()).context("review hash label is too large")?;
+    let value_len = u64::try_from(value.len()).context("review hash value is too large")?;
+    hasher.update(label_len.to_be_bytes());
+    hasher.update(label);
+    hasher.update(value_len.to_be_bytes());
+    hasher.update(value);
+    Ok(())
 }
 
 impl Database {
@@ -1614,12 +1884,87 @@ impl Database {
         rows.collect::<rusqlite::Result<_>>().map_err(Into::into)
     }
 
+    /// Loads source evidence for the exact concept revision awaiting review.
+    ///
+    /// Returns `None` only when the requested review is stale. A current review
+    /// with no chunks returns an empty page so callers can distinguish missing
+    /// evidence from a concurrent state transition. Embeddings are deliberately
+    /// excluded from the query.
+    pub fn review_evidence_page(
+        &self,
+        concept_id: Uuid,
+        expected_revision: u32,
+        expected_review_version: Option<&ReviewVersionToken>,
+        after_ordinal: Option<u32>,
+        limit: usize,
+    ) -> Result<Option<ReviewEvidencePageRecord>> {
+        if !(1..=100).contains(&limit) {
+            bail!("review evidence page limit must be between 1 and 100");
+        }
+
+        let mut connection = self.connection()?;
+        let tx = connection.transaction()?;
+        let Some(snapshot) = pending_review_snapshot(&tx, concept_id, expected_revision)? else {
+            tx.commit()?;
+            return Ok(None);
+        };
+        if expected_review_version.is_some_and(|expected| expected != &snapshot.review_version) {
+            tx.commit()?;
+            return Ok(None);
+        }
+        let query_limit = i64::try_from(limit + 1)
+            .context("review evidence page limit exceeds SQLite capacity")?;
+        let mut statement = tx.prepare(
+            "SELECT ordinal,heading_or_page,text
+             FROM chunks
+             WHERE concept_id=?1 AND source_document_id=?2 AND collection_id=?3
+               AND source_revision=?4 AND ordinal>coalesce(?5,-1)
+             ORDER BY ordinal
+             LIMIT ?6",
+        )?;
+        let mut rows = statement.query(params![
+            concept_id.to_string(),
+            snapshot.source_document_id,
+            snapshot.collection_id,
+            snapshot.source_revision,
+            after_ordinal,
+            query_limit,
+        ])?;
+        let mut chunks = Vec::with_capacity(limit + 1);
+        while let Some(row) = rows.next()? {
+            chunks.push(ReviewEvidenceChunkRecord {
+                ordinal: row.get(0)?,
+                heading_or_page: row.get(1)?,
+                text: row.get(2)?,
+            });
+        }
+        drop(rows);
+        drop(statement);
+
+        let has_more = chunks.len() > limit;
+        chunks.truncate(limit);
+        let next_ordinal = if has_more {
+            chunks.last().map(|chunk| chunk.ordinal)
+        } else {
+            None
+        };
+        tx.commit()?;
+
+        Ok(Some(ReviewEvidencePageRecord {
+            concept_id,
+            source_revision: snapshot.source_revision,
+            review_version: snapshot.review_version,
+            total_chunks: snapshot.total_chunks,
+            chunks,
+            next_ordinal,
+        }))
+    }
+
     pub(crate) fn begin_publication_if_current(
         &self,
         concept_id: Uuid,
         mut draft: EnrichmentDraft,
-        expected_source_sha256: &str,
-        expected_revision: u32,
+        expected: ExpectedReview<'_>,
         action: &str,
         reviewed_at: DateTime<Utc>,
     ) -> Result<PublicationClaim> {
@@ -1631,30 +1976,17 @@ impl Database {
         let now = Utc::now();
         let mut connection = self.connection()?;
         let tx = connection.transaction()?;
-        let (source_id, collection_id) = tx
-            .query_row(
-                "SELECT co.source_document_id,co.collection_id FROM concepts co
-                 JOIN source_documents sd ON sd.id=co.source_document_id
-                 WHERE co.id=?1 AND co.status='needs_review' AND sd.status='needs_review'
-                   AND sd.source_sha256=?2 AND sd.revision=?3
-                   AND EXISTS (
-                     SELECT 1 FROM chunks ch
-                     WHERE ch.concept_id=co.id AND ch.source_document_id=sd.id
-                       AND ch.source_revision=sd.revision
-                   )",
-                params![
-                    concept_id.to_string(),
-                    expected_source_sha256,
-                    expected_revision
-                ],
-                |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)),
-            )
-            .optional()?
+        let snapshot = pending_review_snapshot(&tx, concept_id, expected.source_revision)?
+            .filter(|snapshot| {
+                snapshot.source_sha256 == expected.source_sha256
+                    && snapshot.review_version == *expected.review_version
+                    && snapshot.total_chunks > 0
+            })
             .with_context(|| {
-                format!("concept {concept_id} is no longer an approvable current revision")
+                format!("concept {concept_id} is no longer an approvable current review")
             })?;
-        let source_id = parse_uuid(&source_id)?;
-        let collection_id = parse_uuid(&collection_id)?;
+        let source_id = parse_uuid(&snapshot.source_document_id)?;
+        let collection_id = parse_uuid(&snapshot.collection_id)?;
         let job_id = Uuid::new_v4();
         tx.execute(
             "INSERT INTO jobs(id,source_document_id,kind,state,attempts,created_at,updated_at)
@@ -1669,8 +2001,8 @@ impl Database {
                 job_id.to_string(),
                 concept_id.to_string(),
                 collection_id.to_string(),
-                expected_source_sha256,
-                expected_revision,
+                expected.source_sha256,
+                expected.source_revision,
                 action,
                 reviewed_at.to_rfc3339(),
             ],
@@ -1702,8 +2034,8 @@ impl Database {
             params![
                 source_id.to_string(),
                 now.to_rfc3339(),
-                expected_source_sha256,
-                expected_revision,
+                expected.source_sha256,
+                expected.source_revision,
             ],
         )?;
         if concept_changed != 1 || source_changed != 1 {
@@ -3129,6 +3461,293 @@ mod tests {
             )
             .unwrap();
         (temp, db, collection)
+    }
+
+    fn setup_review_evidence(
+        chunk_count: u32,
+    ) -> (tempfile::TempDir, Database, CollectionRecord, Uuid, Uuid) {
+        let (temp, db, collection) = setup();
+        let path = temp.path().join("source/review.md");
+        std::fs::write(&path, "review evidence").unwrap();
+        let source_id = db
+            .register_source(collection.id, &path, "source-hash", "markdown", 15)
+            .unwrap()
+            .id();
+        db.mark_extracted(source_id, 0, 15).unwrap();
+        let concept_id = db
+            .save_enrichment(source_id, draft(), "peer-a", "fake")
+            .unwrap()
+            .id;
+        let chunks = (0..chunk_count)
+            .map(|ordinal| StoredChunk {
+                id: Uuid::new_v4(),
+                concept_id,
+                source_document_id: source_id,
+                collection_id: collection.id,
+                ordinal,
+                heading_or_page: format!("Section {ordinal}"),
+                text: format!("Evidence {ordinal}"),
+                text_sha256: format!("hash-{ordinal}"),
+                embedding: vec![0.0; EMBEDDING_DIMENSIONS],
+                source_revision: 1,
+            })
+            .collect::<Vec<_>>();
+        db.replace_chunks(concept_id, &chunks).unwrap();
+        (temp, db, collection, source_id, concept_id)
+    }
+
+    #[test]
+    fn review_evidence_pages_twenty_chunks_and_continues_without_embeddings() {
+        let (_temp, db, _collection, _source_id, concept_id) = setup_review_evidence(25);
+        db.connection()
+            .unwrap()
+            .execute(
+                "UPDATE chunks SET embedding=x'00' WHERE concept_id=?1",
+                [concept_id.to_string()],
+            )
+            .unwrap();
+
+        let first = db
+            .review_evidence_page(concept_id, 1, None, None, 20)
+            .unwrap()
+            .unwrap();
+        assert_eq!(first.total_chunks, 25);
+        assert_eq!(first.chunks.len(), 20);
+        assert_eq!(first.chunks.first().map(|chunk| chunk.ordinal), Some(0));
+        assert_eq!(first.chunks.last().map(|chunk| chunk.ordinal), Some(19));
+        assert_eq!(first.next_ordinal, Some(19));
+        let review_version = first.review_version.clone();
+
+        let second = db
+            .review_evidence_page(concept_id, 1, Some(&review_version), first.next_ordinal, 20)
+            .unwrap()
+            .unwrap();
+        assert_eq!(second.review_version, review_version);
+        assert_eq!(second.total_chunks, 25);
+        assert_eq!(second.chunks.len(), 5);
+        assert_eq!(second.chunks.first().map(|chunk| chunk.ordinal), Some(20));
+        assert_eq!(second.chunks.last().map(|chunk| chunk.ordinal), Some(24));
+        assert_eq!(second.next_ordinal, None);
+    }
+
+    #[test]
+    fn review_version_changes_when_chunks_are_replaced_for_the_same_source_revision() {
+        let (_temp, db, _collection, _source_id, concept_id) = setup_review_evidence(1);
+        let first = db
+            .review_evidence_page(concept_id, 1, None, None, 20)
+            .unwrap()
+            .unwrap();
+        let old_review_version = first.review_version;
+        let mut chunks = db.chunks_for_concept(concept_id).unwrap();
+        chunks[0].text = "Regenerated evidence".into();
+        chunks[0].text_sha256 = "regenerated-hash".into();
+        db.replace_chunks(concept_id, &chunks).unwrap();
+
+        let refreshed = db
+            .review_evidence_page(concept_id, 1, None, None, 20)
+            .unwrap()
+            .unwrap();
+        assert_ne!(refreshed.review_version, old_review_version);
+        assert!(
+            db.review_evidence_page(concept_id, 1, Some(&old_review_version), None, 20,)
+                .unwrap()
+                .is_none()
+        );
+    }
+
+    #[test]
+    fn review_version_changes_when_draft_or_model_is_reenriched() {
+        let (_temp, db, _collection, source_id, concept_id) = setup_review_evidence(1);
+        let old_review_version = db
+            .review_evidence_page(concept_id, 1, None, None, 20)
+            .unwrap()
+            .unwrap()
+            .review_version;
+        let mut changed_draft = draft();
+        changed_draft.summary = "A different generated summary".into();
+        db.save_enrichment(
+            source_id,
+            changed_draft,
+            "peer-a",
+            "different-generator-model",
+        )
+        .unwrap();
+
+        let current = db
+            .review_evidence_page(concept_id, 1, None, None, 20)
+            .unwrap()
+            .unwrap();
+        assert_ne!(current.review_version, old_review_version);
+    }
+
+    #[test]
+    fn stale_review_version_cannot_create_a_publication_claim() {
+        let (_temp, db, _collection, source_id, concept_id) = setup_review_evidence(1);
+        let old_review_version = db
+            .review_evidence_page(concept_id, 1, None, None, 20)
+            .unwrap()
+            .unwrap()
+            .review_version;
+        let mut chunks = db.chunks_for_concept(concept_id).unwrap();
+        chunks[0].text = "Evidence changed after review".into();
+        chunks[0].text_sha256 = "changed-after-review".into();
+        db.replace_chunks(concept_id, &chunks).unwrap();
+
+        let error = db
+            .begin_publication_if_current(
+                concept_id,
+                draft(),
+                ExpectedReview {
+                    source_sha256: "source-hash",
+                    source_revision: 1,
+                    review_version: &old_review_version,
+                },
+                "published",
+                Utc::now(),
+            )
+            .unwrap_err();
+
+        assert!(error.to_string().contains("current review"));
+        assert_eq!(
+            db.concept(concept_id).unwrap().unwrap().status,
+            DocumentStatus::NeedsReview
+        );
+        assert_eq!(
+            db.source_document(source_id).unwrap().unwrap().status,
+            DocumentStatus::NeedsReview
+        );
+        assert_eq!(db.count("publication_claims").unwrap(), 0);
+        assert_eq!(db.count("jobs").unwrap(), 0);
+    }
+
+    #[test]
+    fn review_evidence_returns_an_empty_page_for_a_current_review_without_chunks() {
+        let (_temp, db, _collection, _source_id, concept_id) = setup_review_evidence(0);
+
+        let page = db
+            .review_evidence_page(concept_id, 1, None, None, 20)
+            .unwrap()
+            .unwrap();
+
+        assert_eq!(page.total_chunks, 0);
+        assert!(page.chunks.is_empty());
+        assert_eq!(page.next_ordinal, None);
+    }
+
+    #[test]
+    fn review_evidence_is_stale_after_publication() {
+        let (_temp, db, _collection, _source_id, concept_id) = setup_review_evidence(1);
+        db.approve_concept(concept_id, draft()).unwrap();
+
+        assert!(
+            db.review_evidence_page(concept_id, 1, None, None, 20)
+                .unwrap()
+                .is_none()
+        );
+    }
+
+    #[test]
+    fn review_evidence_is_stale_after_source_status_changes() {
+        let (_temp, db, _collection, source_id, concept_id) = setup_review_evidence(1);
+        db.mark_source_status(source_id, DocumentStatus::Failed)
+            .unwrap();
+
+        assert!(
+            db.review_evidence_page(concept_id, 1, None, None, 20)
+                .unwrap()
+                .is_none()
+        );
+    }
+
+    #[test]
+    fn review_evidence_is_stale_after_source_revision_changes() {
+        let (_temp, db, _collection, source_id, concept_id) = setup_review_evidence(1);
+        db.connection()
+            .unwrap()
+            .execute(
+                "UPDATE source_documents SET revision=2 WHERE id=?1",
+                [source_id.to_string()],
+            )
+            .unwrap();
+
+        assert!(
+            db.review_evidence_page(concept_id, 1, None, None, 20)
+                .unwrap()
+                .is_none()
+        );
+    }
+
+    #[test]
+    fn review_evidence_rejects_corrupt_ownership_outside_the_requested_page() {
+        let (temp, db, _collection, _source_id, concept_id) = setup_review_evidence(25);
+        let other_source = temp.path().join("other-source");
+        let other_wiki = temp.path().join("other-wiki");
+        std::fs::create_dir_all(&other_source).unwrap();
+        std::fs::create_dir_all(&other_wiki).unwrap();
+        let other_collection = db
+            .create_collection(
+                "Other",
+                &other_source,
+                &other_wiki,
+                CollectionPolicy::local_only(),
+            )
+            .unwrap();
+        db.connection()
+            .unwrap()
+            .execute(
+                "UPDATE chunks SET collection_id=?1 WHERE concept_id=?2 AND ordinal=24",
+                params![other_collection.id.to_string(), concept_id.to_string()],
+            )
+            .unwrap();
+
+        let error = db
+            .review_evidence_page(concept_id, 1, None, None, 20)
+            .unwrap_err();
+        assert!(error.to_string().contains("ownership and revision"));
+    }
+
+    #[test]
+    fn review_evidence_debug_output_redacts_source_text() {
+        let secret = "DO-NOT-LOG-THIS-EVIDENCE";
+        let concept_id = Uuid::new_v4();
+        let chunk = ReviewEvidenceChunkRecord {
+            ordinal: 7,
+            heading_or_page: secret.into(),
+            text: secret.into(),
+        };
+        let page = ReviewEvidencePageRecord {
+            concept_id,
+            source_revision: 1,
+            review_version: ReviewVersionToken::from_digest([0xab; 32]),
+            total_chunks: 1,
+            chunks: vec![chunk.clone()],
+            next_ordinal: None,
+        };
+
+        let chunk_debug = format!("{chunk:?}");
+        let page_debug = format!("{page:?}");
+        let token_debug = format!("{:?}", page.review_version);
+        assert!(!chunk_debug.contains(secret));
+        assert!(!page_debug.contains(secret));
+        assert!(!page_debug.contains(&concept_id.to_string()));
+        assert!(!page_debug.contains("ReviewVersionToken"));
+        assert_eq!(token_debug, "ReviewVersionToken([REDACTED])");
+        assert!(chunk_debug.contains("text_len"));
+        assert!(page_debug.contains("page_chunk_count"));
+    }
+
+    #[test]
+    fn review_evidence_rejects_limits_outside_the_public_contract() {
+        let (_temp, db, _collection, _source_id, concept_id) = setup_review_evidence(1);
+
+        assert!(
+            db.review_evidence_page(concept_id, 1, None, None, 0)
+                .is_err()
+        );
+        assert!(
+            db.review_evidence_page(concept_id, 1, None, None, 101)
+                .is_err()
+        );
     }
 
     #[test]

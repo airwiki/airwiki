@@ -24,8 +24,8 @@ use airwiki_core::{
     GuidedRepairPreview, GuidedRepairResult, HybridSearchEngine, IngestOutcome, IngestPipeline,
     KnowledgeBundleState, KnowledgeBundleView, KnowledgePageId, KnowledgePageView,
     LlamaServerProvider, OkfBundleInspector, OkfPublicationMaterializer, PinnedE5Snapshot,
-    PinnedMmarcoRerankerSnapshot, RelevanceInput, ReviewEdits, SourceIssueCode, Tokenizer,
-    WikiRepairExecutor, WikiRepairPlanner,
+    PinnedMmarcoRerankerSnapshot, RelevanceInput, ReviewEdits, ReviewVersionToken, SourceIssueCode,
+    Tokenizer, WikiRepairExecutor, WikiRepairPlanner,
 };
 use airwiki_inference::{
     GenerationSettings, InstallOutcome, LlamaSupervisor, ModelSelection, SupervisorConfig,
@@ -56,8 +56,8 @@ use crate::{
     manual_lan_route,
     paths::AppPaths,
     worker::{
-        CollectionView, PeerActivityState, PeerTrustState, PeerView, ReviewItemView,
-        SourceIssueView,
+        CollectionView, PeerActivityState, PeerTrustState, PeerView, ReviewEvidenceErrorView,
+        ReviewEvidenceExcerptView, ReviewEvidencePageView, ReviewItemView, SourceIssueView,
     },
 };
 
@@ -72,6 +72,8 @@ const RELEVANCE_SMOKE_TEST_PASSAGES: [&str; 2] = [
 const KNOWLEDGE_READ_ATTEMPTS: usize = 3;
 const KNOWLEDGE_READ_RETRY_DELAY: Duration = Duration::from_millis(100);
 const KNOWLEDGE_PAGE_MAX_BYTES: usize = 1024 * 1024;
+const REVIEW_EVIDENCE_PAGE_SIZE: usize = 20;
+const REVIEW_EVIDENCE_EXCERPT_MAX_BYTES: usize = 4 * 1024;
 const LAN_LISTENER_START_GRACE: Duration = Duration::from_secs(10);
 const STARTUP_COLLECTION_DISCOVERY_TIMEOUT: Duration = Duration::from_secs(5);
 
@@ -1049,9 +1051,14 @@ impl DesktopServices {
         )
     }
 
-    pub fn approve_review(&self, concept_id: Uuid, draft: EnrichmentDraft) -> Result<()> {
+    pub fn approve_review(
+        &self,
+        concept_id: Uuid,
+        expected_review_version: &ReviewVersionToken,
+        draft: EnrichmentDraft,
+    ) -> Result<()> {
         self.pipeline()?
-            .approve(concept_id, ReviewEdits { draft })?;
+            .approve(concept_id, ReviewEdits { draft }, expected_review_version)?;
         Ok(())
     }
 
@@ -1464,12 +1471,63 @@ impl DesktopServices {
                 let source_name = source_display_name(&source.source_path);
                 Ok(ReviewItemView {
                     concept_id: concept.id,
+                    source_revision: source.revision,
                     source_name,
                     collection_name: collection.name,
                     draft: concept.draft,
                 })
             })
             .collect()
+    }
+
+    pub fn load_review_evidence(
+        &self,
+        concept_id: Uuid,
+        expected_source_revision: u32,
+        expected_review_version: Option<&ReviewVersionToken>,
+        after_ordinal: Option<u32>,
+    ) -> std::result::Result<ReviewEvidencePageView, ReviewEvidenceErrorView> {
+        let Some(page) = self
+            .database
+            .review_evidence_page(
+                concept_id,
+                expected_source_revision,
+                expected_review_version,
+                after_ordinal,
+                REVIEW_EVIDENCE_PAGE_SIZE,
+            )
+            .map_err(|_| ReviewEvidenceErrorView::Unavailable)?
+        else {
+            return Err(ReviewEvidenceErrorView::NoLongerPending);
+        };
+
+        if page.total_chunks == 0 {
+            return Err(ReviewEvidenceErrorView::MissingEvidence);
+        }
+
+        let excerpts = page
+            .chunks
+            .into_iter()
+            .map(|chunk| {
+                let (text, truncated) =
+                    truncate_utf8_bytes(&chunk.text, REVIEW_EVIDENCE_EXCERPT_MAX_BYTES);
+                ReviewEvidenceExcerptView {
+                    ordinal: chunk.ordinal,
+                    heading_or_page: chunk.heading_or_page,
+                    text,
+                    truncated,
+                }
+            })
+            .collect();
+
+        Ok(ReviewEvidencePageView {
+            concept_id,
+            source_revision: page.source_revision,
+            review_version: page.review_version,
+            excerpts,
+            total_chunks: page.total_chunks,
+            next_ordinal: page.next_ordinal,
+        })
     }
 
     pub fn source_issue_views(&self) -> Result<Vec<SourceIssueView>> {
@@ -1964,6 +2022,18 @@ fn source_display_name(path: &Path) -> String {
         .to_owned()
 }
 
+fn truncate_utf8_bytes(value: &str, max_bytes: usize) -> (String, bool) {
+    if value.len() <= max_bytes {
+        return (value.to_owned(), false);
+    }
+
+    let mut end = max_bytes;
+    while end > 0 && !value.is_char_boundary(end) {
+        end -= 1;
+    }
+    (value[..end].to_owned(), true)
+}
+
 fn source_issue_view(
     collection_id: Uuid,
     collection_name: &str,
@@ -2247,6 +2317,14 @@ mod tests {
         );
 
         assert_eq!(view.source_name, "secret-report.pdf");
+    }
+
+    #[test]
+    fn review_evidence_excerpt_limit_preserves_valid_utf8() {
+        let (value, truncated) = truncate_utf8_bytes("áéíóú", 5);
+
+        assert_eq!(value, "áé");
+        assert!(truncated);
     }
 
     #[test]
@@ -2734,8 +2812,13 @@ mod tests {
                 }],
             )
             .unwrap();
+        let review_version = database
+            .review_evidence_page(concept.id, source_record.revision, None, None, 1)
+            .unwrap()
+            .unwrap()
+            .review_version;
         let published = OkfPublicationMaterializer::new(database.clone())
-            .approve(concept.id, draft)
+            .approve(concept.id, draft, &review_version)
             .unwrap();
         let authorization = proxy
             .access

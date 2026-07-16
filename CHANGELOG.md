@@ -11,6 +11,7 @@ All notable user-visible changes to AirWiki will be documented here. The project
 - A proportional code-review contract, pull-request template, and read-only DCO validation for contributions.
 - Shared AirWiki branding for GitHub, application windows, tray icons, and desktop packages.
 - A guided first-knowledge journey from local AI setup through folder processing, human review, publication, and a cited local search.
+- A revision-bound evidence panel that lets reviewers compare locally extracted text with each proposed draft before publication.
 
 ### Changed
 

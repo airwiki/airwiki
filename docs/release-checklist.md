@@ -10,11 +10,13 @@ constitute a supported public release.
   repository with `main` as its default branch.
 - [x] Add the final repository URL to workspace package metadata and every
   distributed package.
-- [ ] Configure protected branches and protected release environments.
+- [x] Protect `main` with pull requests, strict required checks, linear history,
+  conversation resolution, and no force pushes or deletion.
+- [ ] Configure protected release environments.
 - [ ] Publish monitored security and Code of Conduct contacts.
 - [x] Document proportional review and add read-only DCO validation for pull
   requests.
-- [ ] Require DCO and CI checks through branch protection or repository rulesets.
+- [x] Require DCO and CI checks through branch protection or repository rulesets.
 - [ ] Review Apache-2.0, model terms, third-party notices, package metadata, and
   distribution terms with the project owner.
 

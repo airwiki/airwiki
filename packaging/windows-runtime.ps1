@@ -59,6 +59,26 @@ function Get-VerifiedWindowsRegularFile([string] $Path, [string] $Label) {
     return $Item.FullName
 }
 
+function Get-WindowsFileSha256([string] $Path, [string] $Label) {
+    $ResolvedPath = Get-VerifiedWindowsRegularFile $Path $Label
+    $Stream = [IO.File]::Open(
+        $ResolvedPath,
+        [IO.FileMode]::Open,
+        [IO.FileAccess]::Read,
+        [IO.FileShare]::Read
+    )
+    try {
+        $Hasher = [Security.Cryptography.SHA256]::Create()
+        try {
+            return [BitConverter]::ToString($Hasher.ComputeHash($Stream)).Replace("-", "")
+        } finally {
+            $Hasher.Dispose()
+        }
+    } finally {
+        $Stream.Dispose()
+    }
+}
+
 function Invoke-WindowsToolVersionLine(
     [string] $Path,
     [string[]] $Arguments,
@@ -101,12 +121,12 @@ function Set-WindowsAtomicFileReplacement(
 
     $StagedItem = Get-Item -LiteralPath $ResolvedStaged -Force -ErrorAction Stop
     [long] $ExpectedLength = $StagedItem.Length
-    $ExpectedHash = (Get-FileHash -LiteralPath $ResolvedStaged -Algorithm SHA256).Hash
+    $ExpectedHash = Get-WindowsFileSha256 $ResolvedStaged "$Label staging file"
 
     if (Test-Path -LiteralPath $BackupPath) {
         $null = Get-VerifiedWindowsRegularFile $BackupPath "$Label interrupted backup"
         $CurrentItem = Get-Item -LiteralPath $ResolvedDestination -Force -ErrorAction Stop
-        $CurrentHash = (Get-FileHash -LiteralPath $ResolvedDestination -Algorithm SHA256).Hash
+        $CurrentHash = Get-WindowsFileSha256 $ResolvedDestination "$Label destination"
         if ($CurrentItem.Length -ne $ExpectedLength -or $CurrentHash -cne $ExpectedHash) {
             throw "$Label has an ambiguous interrupted replacement"
         }
@@ -125,7 +145,7 @@ function Set-WindowsAtomicFileReplacement(
     [IO.File]::Replace($ResolvedStaged, $ResolvedDestination, $BackupPath)
     $null = Get-VerifiedWindowsRegularFile $BackupPath "$Label replacement backup"
     $CommittedItem = Get-Item -LiteralPath $ResolvedDestination -Force -ErrorAction Stop
-    $CommittedHash = (Get-FileHash -LiteralPath $ResolvedDestination -Algorithm SHA256).Hash
+    $CommittedHash = Get-WindowsFileSha256 $ResolvedDestination "$Label destination"
     if ($CommittedItem.Length -ne $ExpectedLength -or $CommittedHash -cne $ExpectedHash) {
         throw "$Label replacement did not commit the staged bytes"
     }
@@ -487,7 +507,7 @@ function Get-VerifiedRuntimeTree([string] $Root, [string] $Label) {
             if ($TotalBytes -gt $script:WindowsRuntimeMaxBytes) {
                 throw "$Label runtime tree exceeds the size limit"
             }
-            $Hash = (Get-FileHash -LiteralPath $Entry.FullName -Algorithm SHA256).Hash
+            $Hash = Get-WindowsFileSha256 $Entry.FullName "$Label runtime file"
             $AfterHash = Get-Item -LiteralPath $Entry.FullName -Force -ErrorAction Stop
             if (($AfterHash.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0 -or
                 $AfterHash.Length -ne $Length -or
@@ -584,7 +604,9 @@ function Get-WindowsLlamaRuntimeManifest(
         throw "llama.cpp Windows build policy or manifest is invalid JSON"
     }
 
-    $PolicyHash = (Get-FileHash -LiteralPath $ResolvedPolicy -Algorithm SHA256).Hash.ToLowerInvariant()
+    $PolicyHash = (Get-WindowsFileSha256 `
+        $ResolvedPolicy `
+        "llama.cpp Windows build policy").ToLowerInvariant()
     if ($Manifest.schema_version -ne 1 -or $Manifest.component -ne "llama.cpp" -or
         $Manifest.tag -ne $Policy.tag -or $Manifest.commit -ne $Policy.commit -or
         $Manifest.policy_sha256 -ne $PolicyHash -or

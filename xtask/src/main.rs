@@ -6306,6 +6306,10 @@ mod tests {
                 && runtime.contains("Test-WindowsOrdinalSequenceEqual")
                 && runtime.contains("Set-WindowsAtomicFileReplacement")
                 && runtime.contains("Invoke-WindowsToolVersionLine")
+                && runtime.contains("function Get-WindowsFileSha256")
+                && runtime.contains("[Security.Cryptography.SHA256]::Create()")
+                && runtime.contains("[IO.FileShare]::Read")
+                && !runtime.contains("Get-FileHash")
                 && runtime.contains("$Expected.Directories.Count")
                 && runtime.contains("Get-WindowsPackagedRuntimeRoot")
                 && !runtime.contains("Get-ChildItem -LiteralPath $RootPath -Recurse")
@@ -6371,11 +6375,7 @@ mod tests {
     #[cfg(windows)]
     fn run_windows_runtime_script(body: &str) -> std::process::Output {
         let runtime = powershell_literal(&workspace_root().join("packaging/windows-runtime.ps1"));
-        let command = format!(
-            "$ErrorActionPreference='Stop'; \
-             Import-Module Microsoft.PowerShell.Utility -ErrorAction Stop; \
-             . {runtime}; {body}"
-        );
+        let command = format!("$ErrorActionPreference='Stop'; . {runtime}; {body}");
         std::process::Command::new("powershell.exe")
             .args([
                 "-NoProfile",

@@ -49,6 +49,7 @@ SQLite is the source of operational state and local paths. Published OKF files a
 - A local model proposes metadata only. It never decides publication, collection membership, permissions, or whether content may leave the device.
 - Keep sharing opt-in. Do not add telemetry, cloud transfer, remote fetching, or new trust boundaries without an explicit product decision and threat-model update.
 - Use the pinned stable toolchain and safe, idiomatic Rust. Keep public APIs small; prefer enums and newtypes for domain states and typed errors at reusable boundaries.
+- When Codex skills are available, use `rust-best-practices` for Rust implementation and review, and `rust-async-patterns` for Tokio or concurrency work. Skills guide the work; versioned code, tests, ADRs, and documentation remain authoritative, and contributor workflows must not depend on a local skill installation.
 - Avoid `unwrap`, `expect`, `panic!`, unchecked indexing, unnecessary cloning, unnecessary locks or trait objects, and `unsafe` in production paths. Any unavoidable invariant must be documented and tested locally.
 - Never block egui or a Tokio runtime worker with filesystem traversal, parsing, hashing, heavy SQLite work, inference, or network I/O. Use the existing worker boundary and `spawn_blocking` where appropriate.
 - Logs are structured and sanitized. Never log document content, queries, snippets, tokens, secrets, embeddings, source paths, PeerIds, IPs, ports, or multiaddresses by default.

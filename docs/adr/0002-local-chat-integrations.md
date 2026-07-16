@@ -17,7 +17,7 @@ Relevant contracts are the official [Codex MCP documentation],
 
 [Codex MCP documentation]: https://developers.openai.com/codex/mcp/
 [Gemini CLI MCP server documentation]: https://geminicli.com/docs/tools/mcp-server/
-[MCPB manifest v0.3]: https://github.com/modelcontextprotocol/mcpb/blob/main/MANIFEST.md
+[MCPB manifest v0.3]: https://github.com/modelcontextprotocol/mcpb/blob/70fe3b34cd6dff1b3bba046638edc72a6467a4fb/MANIFEST.md
 
 ## Decision
 

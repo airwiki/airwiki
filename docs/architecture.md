@@ -35,7 +35,9 @@ xtask ──────────────┬──> airwiki-core
   stdio to a local chat client and forwards only to the desktop's fixed loopback
   MCP endpoint.
 - `apps/windows-firewall-helper` is a narrow elevated process. The desktop may
-  invoke only its fixed install/remove operations on Windows.
+  invoke only its fixed install/remove operations on Windows. See
+  [ADR 0006](adr/0006-windows-firewall-privilege-boundary.md) for the privilege
+  boundary and managed rule scope.
 - `xtask` contains reproducible repository, legal and packaging checks.
 
 The important runtime boundaries are separate from Rust dependency direction:

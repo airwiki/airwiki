@@ -1,0 +1,70 @@
+name: DCO
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, edited]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: dco-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  sign-off:
+    name: Sign-off
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Verify commit sign-offs
+        shell: bash
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -euo pipefail
+
+          git cat-file -e "${BASE_SHA}^{commit}"
+          git cat-file -e "${HEAD_SHA}^{commit}"
+
+          failed=0
+          commit_count=0
+          while IFS= read -r commit; do
+            commit_count=$((commit_count + 1))
+            author_email="$(git show -s --format=%ae "${commit}")"
+            committer_email="$(git show -s --format=%ce "${commit}")"
+            author_email="$(printf '%s' "${author_email}" | tr '[:upper:]' '[:lower:]')"
+            committer_email="$(printf '%s' "${committer_email}" | tr '[:upper:]' '[:lower:]')"
+            matched=0
+
+            while IFS= read -r line; do
+              signoff_email="$(printf '%s\n' "${line}" | sed -nE 's/^Signed-off-by:[[:space:]]+.+[[:space:]]+<([^<>[:space:]]+@[^<>[:space:]]+)>[[:space:]]*$/\1/p')"
+              [[ -n "${signoff_email}" ]] || continue
+              signoff_email="$(printf '%s' "${signoff_email}" | tr '[:upper:]' '[:lower:]')"
+              if [[ "${signoff_email}" == "${author_email}" || "${signoff_email}" == "${committer_email}" ]]; then
+                matched=1
+                break
+              fi
+            done < <(git show -s --format=%B "${commit}")
+
+            if (( matched == 0 )); then
+              echo "::error::Commit ${commit:0:12} lacks a valid DCO sign-off matching its author or committer. Amend it with git commit --amend -s and update the branch."
+              failed=1
+            fi
+          done < <(git rev-list --reverse --no-merges "${BASE_SHA}..${HEAD_SHA}")
+
+          if (( commit_count == 0 )); then
+            echo "No non-merge commits require DCO validation."
+            exit 0
+          fi
+
+          if (( failed != 0 )); then
+            exit 1
+          fi
+
+          echo "DCO sign-offs verified for ${commit_count} commit(s)."

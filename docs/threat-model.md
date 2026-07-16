@@ -39,7 +39,8 @@ Controls are not considered effective end to end until the
 7. **Desktop → operating system.** Tray, per-user autostart, and single-instance
    activation remain inside the user session; OS state is authoritative.
 8. **Desktop → elevated Windows helper.** The helper accepts only `install` or
-   `remove` and owns two narrow application rules.
+   `remove` and owns two narrow application rules, as defined by
+   [ADR 0006](adr/0006-windows-firewall-privilege-boundary.md).
 9. **Desktop → update transport.** Remote metadata and bytes remain untrusted
    until updater and native signatures pass. Public update distribution is not
    active in the current baseline.

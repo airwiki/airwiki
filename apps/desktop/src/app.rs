@@ -96,6 +96,13 @@ enum ExternalAiPolicyChange {
     ConfirmEnable,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum WikiHealthCheckState {
+    Loading,
+    Ready,
+    Failed(String),
+}
+
 pub struct AirWikiApp {
     instance: PrimaryInstance,
     shell: DesktopShell,
@@ -117,6 +124,9 @@ pub struct AirWikiApp {
     firewall_confirmation: bool,
     wiki_health: WikiHealthSummaryView,
     wiki_health_request_id: Option<Uuid>,
+    wiki_health_generation: u64,
+    wiki_health_check: WikiHealthCheckState,
+    wiki_health_error_dismissed: bool,
     external_ai_confirmation: Option<Uuid>,
     onboarding_page: Option<OnboardingPage>,
     onboarding_finishing: bool,
@@ -142,7 +152,9 @@ pub struct AirWikiApp {
     search_top_k: u8,
     search_hits: Vec<SearchHit>,
     search_coverage: SearchCoverageView,
-    search_running: bool,
+    search_request_id: Option<Uuid>,
+    search_completed: bool,
+    search_error: Option<String>,
     new_collection_name: String,
     new_collection_folder: Option<PathBuf>,
     manual_multiaddress: String,
@@ -183,6 +195,9 @@ impl AirWikiApp {
             firewall_confirmation: false,
             wiki_health: WikiHealthSummaryView::default(),
             wiki_health_request_id: None,
+            wiki_health_generation: 0,
+            wiki_health_check: WikiHealthCheckState::Loading,
+            wiki_health_error_dismissed: false,
             external_ai_confirmation: None,
             onboarding_page: None,
             onboarding_finishing: false,
@@ -208,7 +223,9 @@ impl AirWikiApp {
             search_top_k: DEFAULT_TOP_K,
             search_hits: Vec::new(),
             search_coverage: SearchCoverageView::Complete,
-            search_running: false,
+            search_request_id: None,
+            search_completed: false,
+            search_error: None,
             new_collection_name: String::new(),
             new_collection_folder: None,
             manual_multiaddress: String::new(),
@@ -355,18 +372,28 @@ impl AirWikiApp {
                     self.lan_discovery = discovery;
                     self.lan_local_addresses = local_addresses;
                 }
-                WorkerEvent::WikiHealthUpdated { request_id, result } => {
-                    if self.wiki_health_request_id.is_some()
-                        && self.wiki_health_request_id != Some(request_id)
-                    {
-                        continue;
-                    }
+                WorkerEvent::WikiHealthUpdated {
+                    request_id,
+                    generation,
+                    result,
+                } => {
                     if self.wiki_health_request_id == Some(request_id) {
                         self.wiki_health_request_id = None;
                     }
+                    if !wiki_health_result_applies(self.wiki_health_generation, generation) {
+                        continue;
+                    }
+                    self.wiki_health_generation = generation;
                     match result {
-                        Ok(summary) => self.wiki_health = summary,
-                        Err(error) => self.notices.push_back((true, error)),
+                        Ok(summary) => {
+                            self.wiki_health = summary;
+                            self.wiki_health_check = WikiHealthCheckState::Ready;
+                            self.wiki_health_error_dismissed = false;
+                        }
+                        Err(error) => {
+                            self.wiki_health_check = WikiHealthCheckState::Failed(error);
+                            self.wiki_health_error_dismissed = false;
+                        }
                     }
                 }
                 WorkerEvent::GuidedWikiRepairPrepared {
@@ -514,20 +541,30 @@ impl AirWikiApp {
                         self.send_knowledge_action(action);
                     }
                 }
-                WorkerEvent::SearchFinished { hits, coverage } => {
-                    self.search_running = false;
-                    self.search_hits = hits;
-                    self.search_coverage = coverage;
+                WorkerEvent::SearchFinished { request_id, result } => {
+                    if !search_result_applies(self.search_request_id, request_id) {
+                        continue;
+                    }
+                    self.search_request_id = None;
+                    match result {
+                        Ok((hits, coverage)) => {
+                            self.search_completed = true;
+                            self.search_hits = hits;
+                            self.search_coverage = coverage;
+                            self.search_error = None;
+                        }
+                        Err(error) => {
+                            self.search_completed = false;
+                            self.search_error = Some(error);
+                        }
+                    }
                 }
                 WorkerEvent::ChatIntegrationsUpdated { request_id, result } => {
                     self.integrations.apply_result(request_id, result);
                 }
                 WorkerEvent::Peers(peers) => self.peers = peers,
                 WorkerEvent::Notice(message) => self.notices.push_back((false, message)),
-                WorkerEvent::Error(message) => {
-                    self.search_running = false;
-                    self.notices.push_back((true, message));
-                }
+                WorkerEvent::Error(message) => self.notices.push_back((true, message)),
             }
         }
         deduplicate_notices(&mut self.notices);
@@ -904,6 +941,9 @@ impl AirWikiApp {
         );
         ui.add_space(if layout.is_compact() { 10.0 } else { 18.0 });
         first_knowledge::work_surface(ui, layout.density, |ui| {
+            if self.home_wiki_incident(ui) {
+                ui.add_space(10.0);
+            }
             ui.label(
                 RichText::new(self.localization.text("home-next-step"))
                     .small()
@@ -1000,39 +1040,47 @@ impl AirWikiApp {
                 });
         });
 
-        let checked = readiness.last_checked_at.elapsed().map_or_else(
-            |_| self.localization.text("home-checked-now"),
-            |elapsed| {
-                if elapsed.as_secs() < 60 {
-                    self.localization.text("home-checked-now")
-                } else {
-                    let mut arguments = FluentArgs::new();
-                    arguments.set("minutes", elapsed.as_secs() / 60);
-                    self.localization
-                        .text_with("home-checked-minutes", Some(&arguments))
-                }
-            },
-        );
-        let mut checked_arguments = FluentArgs::new();
-        checked_arguments.set("when", checked);
         ui.horizontal(|ui| {
-            ui.label(
-                RichText::new(
+            let checked = match (&self.wiki_health_check, readiness.last_checked_at) {
+                (WikiHealthCheckState::Loading, _) => self.localization.text("home-wiki-checking"),
+                (WikiHealthCheckState::Failed(_), _) => self.localization.text("home-wiki-failed"),
+                (WikiHealthCheckState::Ready, Some(checked_at)) => {
+                    let minutes = elapsed_minutes(checked_at, SystemTime::now());
+                    let when = if minutes == 0 {
+                        self.localization.text("home-checked-now")
+                    } else {
+                        let mut arguments = FluentArgs::new();
+                        arguments.set("minutes", minutes);
+                        self.localization
+                            .text_with("home-checked-minutes", Some(&arguments))
+                    };
+                    let mut arguments = FluentArgs::new();
+                    arguments.set("when", when);
                     self.localization
-                        .text_with("home-last-checked", Some(&checked_arguments)),
-                )
-                .small()
-                .color(Color32::GRAY),
-            );
+                        .text_with("home-last-checked", Some(&arguments))
+                }
+                (WikiHealthCheckState::Ready, None) => {
+                    self.localization.text("home-wiki-not-checked")
+                }
+            };
+            ui.label(RichText::new(checked).small().color(Color32::GRAY));
+            let action = if matches!(self.wiki_health_check, WikiHealthCheckState::Failed(_)) {
+                "action-retry"
+            } else {
+                "action-refresh"
+            };
             if ui
                 .add_enabled(
-                    self.wiki_health_request_id.is_none(),
-                    egui::Button::new(self.localization.text("action-refresh")),
+                    self.wiki_health_request_id.is_none()
+                        && !matches!(self.wiki_health_check, WikiHealthCheckState::Loading),
+                    egui::Button::new(self.localization.text(action)),
                 )
                 .clicked()
             {
                 let request_id = Uuid::new_v4();
                 self.wiki_health_request_id = Some(request_id);
+                self.wiki_health_check = WikiHealthCheckState::Loading;
+                self.wiki_health_error_dismissed = false;
                 self.worker
                     .send(WorkerCommand::RefreshWikiHealth { request_id });
             }
@@ -1122,6 +1170,8 @@ impl AirWikiApp {
             Some(UpdaterWorkerView::Ready(_)) => OptionalFeatureState::Ready,
             None => OptionalFeatureState::Working,
         };
+        let (wiki_working, wiki_issue_count) =
+            wiki_health_readiness_inputs(&self.wiki_health_check, &self.wiki_health);
         derive_readiness(ReadinessInput {
             models_ready: self.models_ready,
             models_working: self.install_label.is_some(),
@@ -1146,11 +1196,8 @@ impl AirWikiApp {
                 })
                 .count(),
             pending_review_count: self.reviews.len().saturating_add(self.source_issues.len()),
-            wiki_working: self.wiki_health.updating_count > 0,
-            wiki_issue_count: self
-                .wiki_health
-                .error_count
-                .saturating_add(self.wiki_health.warning_count),
+            wiki_working,
+            wiki_issue_count,
             connectivity: ConnectivityInput {
                 preference,
                 system_permission,
@@ -1177,7 +1224,7 @@ impl AirWikiApp {
             chat: self.integrations.readiness_state(),
             background,
             updates,
-            last_checked_at: SystemTime::now(),
+            last_checked_at: self.wiki_health.checked_at,
         })
     }
 
@@ -1803,25 +1850,30 @@ impl AirWikiApp {
             &self.localization.text("search-subtitle"),
         );
         self.search_form(ui, true);
-        self.search_feedback(ui);
+        self.search_feedback(ui, true);
     }
 
     fn search_form(&mut self, ui: &mut egui::Ui, show_top_k: bool) {
         let layout = ResponsiveLayout::from_available(ui.available_size());
-        let enabled = !self.search_question.trim().is_empty() && !self.search_running;
+        let search_running = self.search_request_id.is_some();
+        let enabled = !self.search_question.trim().is_empty() && !search_running;
         let mut submit_clicked = false;
         let response = if layout.is_narrow() {
             let question_label = ui.label(self.localization.text("search-question"));
             let response = ui
-                .add_sized(
-                    [ui.available_width(), 36.0],
-                    egui::TextEdit::singleline(&mut self.search_question)
-                        .hint_text(self.localization.text("search-placeholder")),
-                )
+                .add_enabled_ui(!search_running, |ui| {
+                    ui.add_sized(
+                        [ui.available_width(), 36.0],
+                        egui::TextEdit::singleline(&mut self.search_question)
+                            .hint_text(self.localization.text("search-placeholder")),
+                    )
+                })
+                .inner
                 .labelled_by(question_label.id);
             ui.horizontal(|ui| {
                 if show_top_k {
-                    ui.add(
+                    ui.add_enabled(
+                        !search_running,
                         egui::DragValue::new(&mut self.search_top_k)
                             .range(1..=10)
                             .prefix("Top "),
@@ -1841,14 +1893,18 @@ impl AirWikiApp {
                 let reserved_width = if show_top_k { 190.0 } else { 100.0 };
                 let field_width = (ui.available_width() - reserved_width).clamp(220.0, 520.0);
                 let response = ui
-                    .add_sized(
-                        [field_width, 36.0],
-                        egui::TextEdit::singleline(&mut self.search_question)
-                            .hint_text(self.localization.text("search-placeholder")),
-                    )
+                    .add_enabled_ui(!search_running, |ui| {
+                        ui.add_sized(
+                            [field_width, 36.0],
+                            egui::TextEdit::singleline(&mut self.search_question)
+                                .hint_text(self.localization.text("search-placeholder")),
+                        )
+                    })
+                    .inner
                     .labelled_by(question_label.id);
                 if show_top_k {
-                    ui.add(
+                    ui.add_enabled(
+                        !search_running,
                         egui::DragValue::new(&mut self.search_top_k)
                             .range(1..=10)
                             .prefix("Top "),
@@ -1868,11 +1924,20 @@ impl AirWikiApp {
             || (enabled
                 && response.lost_focus()
                 && ui.input(|input| input.key_pressed(egui::Key::Enter)));
+        if response.changed() {
+            self.search_completed = false;
+            self.search_hits.clear();
+            self.search_error = None;
+        }
         if submit {
-            self.search_running = true;
+            let request_id = Uuid::new_v4();
+            self.search_request_id = Some(request_id);
+            self.search_completed = false;
+            self.search_error = None;
             self.search_hits.clear();
             self.search_coverage = SearchCoverageView::Complete;
             self.worker.send(WorkerCommand::Search {
+                request_id,
                 question: self.search_question.trim().to_owned(),
                 top_k: self.search_top_k,
                 purpose: SearchPurpose::LocalAssistant,
@@ -1880,13 +1945,21 @@ impl AirWikiApp {
         }
     }
 
-    fn search_feedback(&mut self, ui: &mut egui::Ui) {
-        if self.search_running {
+    fn search_feedback(&mut self, ui: &mut egui::Ui, show_empty_state: bool) {
+        if self.search_request_id.is_some() {
             ui.spinner();
             ui.label(self.localization.text("search-running"));
         }
+        self.search_error_feedback(ui);
         if let Some(message) = search_coverage_message(&self.localization, self.search_coverage) {
             ui.colored_label(Color32::from_rgb(205, 145, 30), message);
+        }
+        if show_empty_state && self.search_completed && self.search_hits.is_empty() {
+            empty_state(
+                ui,
+                &self.localization.text("search-empty-title"),
+                &self.localization.text("search-empty-body"),
+            );
         }
         let results_height = ui.available_height().max(0.0);
         egui::ScrollArea::vertical()
@@ -1923,6 +1996,25 @@ impl AirWikiApp {
                     });
                 }
             });
+    }
+
+    fn search_error_feedback(&self, ui: &mut egui::Ui) {
+        let Some(error) = &self.search_error else {
+            return;
+        };
+        ui.colored_label(
+            Color32::from_rgb(220, 70, 70),
+            self.localization.text("search-error-title"),
+        );
+        ui.collapsing(self.localization.text("technical-details"), |ui| {
+            egui::ScrollArea::vertical()
+                .id_salt("search_error_details")
+                .max_height(88.0)
+                .auto_shrink([false, true])
+                .show(ui, |ui| {
+                    ui.add(egui::Label::new(error).wrap());
+                });
+        });
     }
 
     fn integrations(&mut self, ui: &mut egui::Ui) {
@@ -2696,6 +2788,44 @@ impl AirWikiApp {
         }
     }
 
+    fn home_wiki_incident(&mut self, ui: &mut egui::Ui) -> bool {
+        if self.wiki_health_error_dismissed {
+            return false;
+        }
+        let WikiHealthCheckState::Failed(message) = &self.wiki_health_check else {
+            return false;
+        };
+        let message = message.clone();
+        let mut dismiss = false;
+        egui::Frame::group(ui.style()).show(ui, |ui| {
+            ui.horizontal_wrapped(|ui| {
+                ui.colored_label(
+                    Color32::from_rgb(220, 70, 70),
+                    human_error_summary(&self.localization, &message),
+                );
+                if ui
+                    .small_button(self.localization.text("action-dismiss"))
+                    .clicked()
+                {
+                    dismiss = true;
+                }
+            });
+            ui.collapsing(self.localization.text("technical-details"), |ui| {
+                egui::ScrollArea::vertical()
+                    .id_salt("home_wiki_health_error")
+                    .max_height(88.0)
+                    .auto_shrink([false, true])
+                    .show(ui, |ui| {
+                        ui.add(egui::Label::new(&message).wrap());
+                    });
+            });
+        });
+        if dismiss {
+            self.wiki_health_error_dismissed = true;
+        }
+        true
+    }
+
     fn onboarding_notices(&self, root: &mut egui::Ui) {
         let Some(page) = self.onboarding_page else {
             return;
@@ -3262,13 +3392,88 @@ impl AirWikiApp {
                                     .iter()
                                     .map(|collection| collection.document_count)
                                     .sum::<usize>();
+                                let published_count = self
+                                    .collections
+                                    .iter()
+                                    .map(|collection| collection.published_count)
+                                    .sum::<usize>();
+                                let needs_review_count = self
+                                    .collections
+                                    .iter()
+                                    .map(|collection| collection.needs_review_count)
+                                    .sum::<usize>();
+                                let failed_count = self
+                                    .collections
+                                    .iter()
+                                    .map(|collection| collection.failed_count)
+                                    .sum::<usize>();
+                                first_knowledge::show_processing_progress(
+                                    ui,
+                                    &self.localization,
+                                    first_knowledge::processing_progress(
+                                        document_count,
+                                        published_count,
+                                        needs_review_count,
+                                        failed_count,
+                                        self.source_issues.len(),
+                                    ),
+                                );
+                                ui.add_space(8.0);
+                                let failed_collections = self
+                                    .collections
+                                    .iter()
+                                    .filter(|collection| {
+                                        collection.maintenance.as_ref().is_some_and(|maintenance| {
+                                            collection_maintenance_needs_recovery(
+                                                maintenance.status,
+                                            )
+                                        })
+                                    })
+                                    .map(|collection| collection.id)
+                                    .collect::<Vec<_>>();
                                 let scan_finished = self.collection_scans.is_empty()
                                     && self.collections.iter().any(|collection| {
                                         collection.maintenance.as_ref().is_some_and(|maintenance| {
                             maintenance.status != airwiki_core::CollectionMaintenanceStatus::Never
                         })
                                     });
-                                if scan_finished && document_count == 0 {
+                                if scan_finished && !failed_collections.is_empty() {
+                                    empty_state(
+                                        ui,
+                                        &self.localization.text("primary-resolve-folder-title"),
+                                        &self.localization.text("primary-folder-explanation"),
+                                    );
+                                    ui.horizontal_wrapped(|ui| {
+                                        if ui
+                                            .add(first_knowledge::primary_button(
+                                                self.localization.text("action-retry"),
+                                            ))
+                                            .clicked()
+                                        {
+                                            for collection_id in &failed_collections {
+                                                self.collection_scans.insert(
+                                                    *collection_id,
+                                                    CollectionScanState::Queued,
+                                                );
+                                                self.knowledge
+                                                    .collection_scan_started(*collection_id);
+                                                self.worker.send(WorkerCommand::RescanCollection(
+                                                    *collection_id,
+                                                ));
+                                            }
+                                        }
+                                        if ui
+                                            .button(
+                                                self.localization
+                                                    .text("onboarding-processing-open-folder"),
+                                            )
+                                            .clicked()
+                                        {
+                                            self.screen = Screen::Collections;
+                                            self.finish_onboarding();
+                                        }
+                                    });
+                                } else if scan_finished && document_count == 0 {
                                     empty_state(
                                         ui,
                                         &self
@@ -3341,27 +3546,45 @@ impl AirWikiApp {
                                     layout.density,
                                 );
                                 self.search_form(ui, false);
-                                if !self.search_hits.is_empty() {
-                                    ui.add_space(if layout.is_compact() { 8.0 } else { 16.0 });
-                                    ui.heading(
-                                        self.localization.text("onboarding-search-ready-title"),
-                                    );
-                                    ui.label(
-                                        self.localization.text("onboarding-search-ready-body"),
-                                    );
+                                ui.add_space(if layout.is_compact() { 8.0 } else { 16.0 });
+                                if self.search_request_id.is_some() {
+                                    self.search_feedback(ui, false);
+                                } else if self.search_error.is_some() {
+                                    self.search_error_feedback(ui);
+                                    ui.add_space(8.0);
                                     if ui
                                         .add_enabled(
                                             !self.onboarding_finishing,
-                                            first_knowledge::primary_button(
-                                                self.localization.text("onboarding-search-finish"),
+                                            egui::Button::new(
+                                                self.localization
+                                                    .text("onboarding-search-finish-later"),
                                             ),
                                         )
                                         .clicked()
                                     {
                                         self.finish_onboarding();
                                     }
+                                } else {
+                                    let (title_id, body_id, button_id) =
+                                        onboarding_search_completion(
+                                            self.search_completed,
+                                            !self.search_hits.is_empty(),
+                                        );
+                                    ui.heading(self.localization.text(title_id));
+                                    ui.label(self.localization.text(body_id));
+                                    if ui
+                                        .add_enabled(
+                                            !self.onboarding_finishing,
+                                            first_knowledge::primary_button(
+                                                self.localization.text(button_id),
+                                            ),
+                                        )
+                                        .clicked()
+                                    {
+                                        self.finish_onboarding();
+                                    }
+                                    self.search_feedback(ui, false);
                                 }
-                                self.search_feedback(ui);
                             }
                         }
                     });
@@ -3918,6 +4141,41 @@ fn onboarding_review_requires_recovery(review_count: usize, issue_count: usize) 
     review_count == 0 && issue_count > 0
 }
 
+fn collection_maintenance_needs_recovery(
+    status: airwiki_core::CollectionMaintenanceStatus,
+) -> bool {
+    matches!(
+        status,
+        airwiki_core::CollectionMaintenanceStatus::Failed
+            | airwiki_core::CollectionMaintenanceStatus::Quarantined
+    )
+}
+
+fn onboarding_search_completion(
+    search_completed: bool,
+    has_hits: bool,
+) -> (&'static str, &'static str, &'static str) {
+    if has_hits {
+        (
+            "onboarding-search-ready-title",
+            "onboarding-search-ready-body",
+            "onboarding-search-finish",
+        )
+    } else if search_completed {
+        (
+            "onboarding-search-empty-title",
+            "onboarding-search-empty-body",
+            "onboarding-search-finish-later",
+        )
+    } else {
+        (
+            "onboarding-search-optional-title",
+            "onboarding-search-optional-body",
+            "onboarding-search-finish-later",
+        )
+    }
+}
+
 fn selected_review_after_refresh(
     selected: Option<Uuid>,
     reviews: &[ReviewItemView],
@@ -4126,6 +4384,32 @@ fn deduplicate_notices(notices: &mut VecDeque<(bool, String)>) {
     notices.retain(|notice| seen.insert(notice.clone()));
 }
 
+fn search_result_applies(active_request_id: Option<Uuid>, event_request_id: Uuid) -> bool {
+    active_request_id == Some(event_request_id)
+}
+
+fn wiki_health_result_applies(last_generation: u64, event_generation: u64) -> bool {
+    event_generation > last_generation
+}
+
+fn elapsed_minutes(checked_at: SystemTime, now: SystemTime) -> u64 {
+    now.duration_since(checked_at)
+        .map_or(0, |elapsed| elapsed.as_secs() / 60)
+}
+
+fn wiki_health_readiness_inputs(
+    check: &WikiHealthCheckState,
+    summary: &WikiHealthSummaryView,
+) -> (bool, usize) {
+    let working = matches!(check, WikiHealthCheckState::Loading) || summary.updating_count > 0;
+    let failed_check = usize::from(matches!(check, WikiHealthCheckState::Failed(_)));
+    let issues = summary
+        .error_count
+        .saturating_add(summary.warning_count)
+        .saturating_add(failed_check);
+    (working, issues)
+}
+
 fn connectivity_runtime_is_active(
     snapshot: Option<ConnectivityPlatformSnapshot>,
     listener: LanListenerView,
@@ -4315,15 +4599,17 @@ fn review_fields_stack(available_width: f32) -> bool {
 #[cfg(test)]
 mod tests {
     use super::{
-        ExternalAiPolicyChange, OnboardingPage, advance_onboarding_page,
-        classify_external_ai_policy_change, connectivity_runtime_is_active, deduplicate_notices,
+        ExternalAiPolicyChange, OnboardingPage, WikiHealthCheckState, advance_onboarding_page,
+        classify_external_ai_policy_change, collection_maintenance_needs_recovery,
+        connectivity_runtime_is_active, deduplicate_notices, elapsed_minutes,
         firewall_configuration_is_current, firewall_operation_update_applies,
         firewall_state_offers_advanced_recovery, human_error_summary, model_action_label,
         onboarding_error_is_relevant, onboarding_page_for_state,
-        onboarding_review_requires_recovery, parse_manual_ipv4_address, peer_activity_message_id,
-        primary_action_explanation, primary_action_title, review_fields_stack,
-        search_coverage_message, should_present_pairing_controls, updater_launched_installer,
-        visible_journey_states,
+        onboarding_review_requires_recovery, onboarding_search_completion,
+        parse_manual_ipv4_address, peer_activity_message_id, primary_action_explanation,
+        primary_action_title, review_fields_stack, search_coverage_message, search_result_applies,
+        should_present_pairing_controls, updater_launched_installer, visible_journey_states,
+        wiki_health_readiness_inputs, wiki_health_result_applies,
     };
     use crate::connectivity_platform::{
         ConnectivityPlatformSnapshot, FirewallDiagnosticState, FirewallHelperState,
@@ -4338,9 +4624,12 @@ mod tests {
     use crate::updater::{UpdateSummary, UpdaterStatus, UpdaterView};
     use crate::worker::{
         FirewallOperationView, LanDiscoveryView, LanListenerView, PeerActivityState,
-        PeerTrustState, SearchCoverageView, UpdaterWorkerView,
+        PeerTrustState, SearchCoverageView, UpdaterWorkerView, WikiHealthSummaryView,
     };
-    use std::collections::VecDeque;
+    use std::{
+        collections::VecDeque,
+        time::{Duration, SystemTime},
+    };
     use uuid::Uuid;
 
     #[test]
@@ -4389,6 +4678,46 @@ mod tests {
         assert!(onboarding_review_requires_recovery(0, 1));
         assert!(!onboarding_review_requires_recovery(1, 1));
         assert!(!onboarding_review_requires_recovery(0, 0));
+    }
+
+    #[test]
+    fn zero_result_onboarding_can_finish_and_search_later() {
+        assert_eq!(
+            onboarding_search_completion(true, false),
+            (
+                "onboarding-search-empty-title",
+                "onboarding-search-empty-body",
+                "onboarding-search-finish-later",
+            )
+        );
+    }
+
+    #[test]
+    fn unsearched_onboarding_does_not_claim_that_evidence_is_missing() {
+        assert_eq!(
+            onboarding_search_completion(false, false).0,
+            "onboarding-search-optional-title"
+        );
+    }
+
+    #[test]
+    fn successful_onboarding_search_keeps_the_ready_completion() {
+        assert_eq!(
+            onboarding_search_completion(true, true).2,
+            "onboarding-search-finish"
+        );
+    }
+
+    #[test]
+    fn terminal_collection_states_offer_onboarding_recovery() {
+        let states = [
+            airwiki_core::CollectionMaintenanceStatus::Failed,
+            airwiki_core::CollectionMaintenanceStatus::Quarantined,
+            airwiki_core::CollectionMaintenanceStatus::Success,
+        ]
+        .map(collection_maintenance_needs_recovery);
+
+        assert_eq!(states, [true, true, false]);
     }
 
     #[test]
@@ -4672,6 +5001,61 @@ mod tests {
                 (false, "same".to_owned()),
                 (true, "different".to_owned()),
             ])
+        );
+    }
+
+    #[test]
+    fn search_results_apply_only_to_the_active_request() {
+        let active = Uuid::new_v4();
+
+        assert!(search_result_applies(Some(active), active));
+        assert!(!search_result_applies(Some(active), Uuid::new_v4()));
+        assert!(!search_result_applies(None, active));
+    }
+
+    #[test]
+    fn wiki_health_rejects_older_and_duplicate_generations() {
+        assert!(wiki_health_result_applies(4, 5));
+        assert!(!wiki_health_result_applies(4, 4));
+        assert!(!wiki_health_result_applies(4, 3));
+    }
+
+    #[test]
+    fn wiki_health_loading_and_failure_feed_readiness() {
+        let summary = WikiHealthSummaryView::default();
+
+        assert_eq!(
+            wiki_health_readiness_inputs(&WikiHealthCheckState::Loading, &summary),
+            (true, 0)
+        );
+        assert_eq!(
+            wiki_health_readiness_inputs(
+                &WikiHealthCheckState::Failed("unavailable".to_owned()),
+                &summary,
+            ),
+            (false, 1)
+        );
+    }
+
+    #[test]
+    fn wiki_health_age_uses_completed_snapshot_time() {
+        assert_eq!(
+            elapsed_minutes(
+                SystemTime::UNIX_EPOCH,
+                SystemTime::UNIX_EPOCH + Duration::from_secs(125),
+            ),
+            2
+        );
+    }
+
+    #[test]
+    fn wiki_health_age_tolerates_a_future_system_clock() {
+        assert_eq!(
+            elapsed_minutes(
+                SystemTime::UNIX_EPOCH + Duration::from_secs(1),
+                SystemTime::UNIX_EPOCH,
+            ),
+            0
         );
     }
 

@@ -59,7 +59,9 @@ pub struct CollectionView {
     pub name: String,
     pub folder: PathBuf,
     pub document_count: usize,
+    pub needs_review_count: usize,
     pub published_count: usize,
+    pub failed_count: usize,
     pub local_only: bool,
     pub peer_shareable: bool,
     pub allow_external_ai: bool,
@@ -264,6 +266,7 @@ pub struct WikiHealthSummaryView {
     pub error_count: usize,
     pub warning_count: usize,
     pub updating_count: usize,
+    pub checked_at: Option<SystemTime>,
 }
 
 /// Stable, localized-by-the-UI connectivity failures.
@@ -389,6 +392,7 @@ pub enum WorkerCommand {
         expected_fingerprint: String,
     },
     Search {
+        request_id: Uuid,
         question: String,
         top_k: u8,
         purpose: SearchPurpose,
@@ -457,6 +461,7 @@ pub enum WorkerEvent {
     },
     WikiHealthUpdated {
         request_id: Uuid,
+        generation: u64,
         result: Result<WikiHealthSummaryView, String>,
     },
     GuidedWikiRepairPrepared {
@@ -504,8 +509,8 @@ pub enum WorkerEvent {
         result: Result<KnowledgePageView, String>,
     },
     SearchFinished {
-        hits: Vec<SearchHit>,
-        coverage: SearchCoverageView,
+        request_id: Uuid,
+        result: Result<(Vec<SearchHit>, SearchCoverageView), String>,
     },
     ChatIntegrationsUpdated {
         request_id: Uuid,
@@ -659,7 +664,10 @@ enum BackgroundCompletion {
         page_id: KnowledgePageId,
         result: Result<KnowledgePageView, String>,
     },
-    Search(Result<SearchResponse, String>),
+    Search {
+        request_id: Uuid,
+        result: Result<SearchResponse, String>,
+    },
     ChatIntegrations {
         request_id: Uuid,
         action: IntegrationAction,
@@ -701,6 +709,7 @@ enum BackgroundCompletion {
     },
     WikiHealth {
         request_id: Uuid,
+        generation: u64,
         result: Result<WikiHealthSummaryView, String>,
     },
     GuidedWikiRepairPrepared {
@@ -1077,9 +1086,15 @@ async fn run_worker(
     let (watch_tx, mut watch_rx) = tokio::sync::mpsc::unbounded_channel();
     let mut watchers = HashMap::new();
     let mut background = JoinSet::<BackgroundCompletion>::new();
+    let mut wiki_health_generation = 0_u64;
     spawn_autostart(&mut background, Uuid::nil(), None);
     spawn_connectivity_diagnostic(&mut background, Uuid::nil());
-    spawn_wiki_health(&services, &mut background, Uuid::nil());
+    spawn_next_wiki_health(
+        &services,
+        &mut background,
+        &mut wiki_health_generation,
+        Uuid::nil(),
+    );
     if let Ok(collections) = services.collection_views() {
         for collection in collections {
             spawn_wiki_maintenance(&services, &mut background, collection.id);
@@ -1591,7 +1606,12 @@ async fn run_worker(
                         }
                     }
                     WorkerCommand::RefreshWikiHealth { request_id } => {
-                        spawn_wiki_health(&services, &mut background, request_id);
+                        spawn_next_wiki_health(
+                            &services,
+                            &mut background,
+                            &mut wiki_health_generation,
+                            request_id,
+                        );
                     }
                     WorkerCommand::PrepareGuidedWikiRepair {
                         request_id,
@@ -1835,10 +1855,16 @@ async fn run_worker(
                             expected_fingerprint,
                         );
                     }
-                    WorkerCommand::Search { question, top_k, purpose } => {
+                    WorkerCommand::Search {
+                        request_id,
+                        question,
+                        top_k,
+                        purpose,
+                    } => {
                         spawn_search(
                             &services,
                             &mut background,
+                            request_id,
                             question,
                             top_k,
                             purpose,
@@ -2384,7 +2410,12 @@ async fn run_worker(
                             ),
                         }
                         refresh_content_views(&services, &events);
-                        spawn_wiki_health(&services, &mut background, Uuid::new_v4());
+                        spawn_next_wiki_health(
+                            &services,
+                            &mut background,
+                            &mut wiki_health_generation,
+                            Uuid::new_v4(),
+                        );
                     }
                     Some(Ok(BackgroundCompletion::Preflight { collection_id, result })) => {
                         if let Err(error) = result {
@@ -2575,22 +2606,18 @@ async fn run_worker(
                             result,
                         ),
                     ),
-                    Some(Ok(BackgroundCompletion::Search(result))) => match result {
-                        Ok(response) => {
-                            let coverage = search_coverage_view(&response);
-                            send(
-                                &events,
-                                WorkerEvent::SearchFinished {
-                                    hits: response.hits,
-                                    coverage,
-                                },
-                            );
-                        }
-                        Err(error) => send(
+                    Some(Ok(BackgroundCompletion::Search { request_id, result })) => {
+                        let result = result
+                            .map(|response| {
+                                let coverage = search_coverage_view(&response);
+                                (response.hits, coverage)
+                            })
+                            .map_err(|error| format!("Falló la búsqueda: {error}"));
+                        send(
                             &events,
-                            WorkerEvent::Error(format!("Falló la búsqueda: {error}")),
-                        ),
-                    },
+                            WorkerEvent::SearchFinished { request_id, result },
+                        );
+                    }
                     Some(Ok(BackgroundCompletion::ChatIntegrations {
                         request_id,
                         action,
@@ -2683,7 +2710,12 @@ async fn run_worker(
                                 "automatic derived Wiki maintenance was not applied"
                             ),
                         }
-                        spawn_wiki_health(&services, &mut background, Uuid::new_v4());
+                        spawn_next_wiki_health(
+                            &services,
+                            &mut background,
+                            &mut wiki_health_generation,
+                            Uuid::new_v4(),
+                        );
                     }
                     Some(Ok(BackgroundCompletion::RelinkCollection {
                         collection_id,
@@ -2906,10 +2938,18 @@ async fn run_worker(
                             }
                         }
                     }
-                    Some(Ok(BackgroundCompletion::WikiHealth { request_id, result })) => {
+                    Some(Ok(BackgroundCompletion::WikiHealth {
+                        request_id,
+                        generation,
+                        result,
+                    })) => {
                         send(
                             &events,
-                            WorkerEvent::WikiHealthUpdated { request_id, result },
+                            WorkerEvent::WikiHealthUpdated {
+                                request_id,
+                                generation,
+                                result,
+                            },
                         );
                     }
                     Some(Ok(BackgroundCompletion::GuidedWikiRepairPrepared {
@@ -2946,7 +2986,12 @@ async fn run_worker(
                             },
                         );
                         refresh_content_views(&services, &events);
-                        spawn_wiki_health(&services, &mut background, Uuid::new_v4());
+                        spawn_next_wiki_health(
+                            &services,
+                            &mut background,
+                            &mut wiki_health_generation,
+                            Uuid::new_v4(),
+                        );
                     }
                     Some(Ok(BackgroundCompletion::ModelsEnabled { model_id, result })) => {
                         if model_lifecycle != ModelLifecycle::Enabling {
@@ -3506,25 +3551,46 @@ fn spawn_wiki_maintenance(
     });
 }
 
+fn spawn_next_wiki_health(
+    services: &Arc<DesktopServices>,
+    background: &mut JoinSet<BackgroundCompletion>,
+    generation: &mut u64,
+    request_id: Uuid,
+) {
+    *generation = generation.saturating_add(1);
+    spawn_wiki_health(services, background, request_id, *generation);
+}
+
 fn spawn_wiki_health(
     services: &Arc<DesktopServices>,
     background: &mut JoinSet<BackgroundCompletion>,
     request_id: Uuid,
+    generation: u64,
 ) {
     let services = Arc::clone(services);
     background.spawn_blocking(move || {
         let result = services
             .wiki_health_rollup()
-            .map(
-                |(error_count, warning_count, updating_count)| WikiHealthSummaryView {
-                    error_count,
-                    warning_count,
-                    updating_count,
-                },
-            )
+            .map(|counts| wiki_health_summary(counts, SystemTime::now()))
             .map_err(|error| format!("{error:#}"));
-        BackgroundCompletion::WikiHealth { request_id, result }
+        BackgroundCompletion::WikiHealth {
+            request_id,
+            generation,
+            result,
+        }
     });
+}
+
+fn wiki_health_summary(
+    (error_count, warning_count, updating_count): (usize, usize, usize),
+    checked_at: SystemTime,
+) -> WikiHealthSummaryView {
+    WikiHealthSummaryView {
+        error_count,
+        warning_count,
+        updating_count,
+        checked_at: Some(checked_at),
+    }
 }
 
 fn spawn_guided_repair_preview(
@@ -4380,6 +4446,7 @@ fn spawn_knowledge_page(
 fn spawn_search(
     services: &Arc<DesktopServices>,
     background: &mut JoinSet<BackgroundCompletion>,
+    request_id: Uuid,
     question: String,
     top_k: u8,
     purpose: SearchPurpose,
@@ -4391,7 +4458,7 @@ fn spawn_search(
             .await
             .map_err(panic_message)
             .and_then(|result| result.map_err(|error| error.to_string()));
-        BackgroundCompletion::Search(result)
+        BackgroundCompletion::Search { request_id, result }
     });
 }
 
@@ -4563,6 +4630,21 @@ fn apply_claude_approval_state(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn wiki_health_summary_keeps_the_completed_check_time() {
+        let checked_at = SystemTime::UNIX_EPOCH + Duration::from_secs(42);
+
+        assert_eq!(
+            wiki_health_summary((3, 2, 1), checked_at),
+            WikiHealthSummaryView {
+                error_count: 3,
+                warning_count: 2,
+                updating_count: 1,
+                checked_at: Some(checked_at),
+            }
+        );
+    }
 
     #[test]
     fn review_evidence_debug_redacts_content_and_identity() {

@@ -121,10 +121,17 @@ impl ChatIntegrationsUi {
         ui.add_space(12.0);
 
         if let Some(snapshot) = self.snapshot.clone() {
-            for integration in &snapshot.integrations {
-                self.integration_card(ui, localization, integration, &mut actions);
-                ui.add_space(8.0);
-            }
+            let list_height = ui.available_height().max(0.0);
+            egui::ScrollArea::vertical()
+                .id_salt("integration_cards")
+                .max_height(list_height)
+                .auto_shrink([false; 2])
+                .show(ui, |ui| {
+                    for integration in &snapshot.integrations {
+                        self.integration_card(ui, localization, integration, &mut actions);
+                        ui.add_space(8.0);
+                    }
+                });
         } else if self.pending_request_id.is_some() {
             ui.spinner();
         }

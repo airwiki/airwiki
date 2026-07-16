@@ -30,8 +30,8 @@ pub use inference::{
 };
 pub use ingest::{
     ChunkDraft, Chunker, ExtractedDocument, ExtractedSection, FileCandidate, FolderWatcher,
-    IngestLimits, SourceFormat, Tokenizer, WhitespaceTokenizer, discover_files, extract_file,
-    sha256_file,
+    IngestLimits, SourceFormat, SourceIssueCode, Tokenizer, WhitespaceTokenizer, discover_files,
+    extract_file, sha256_file,
 };
 pub use knowledge::{
     BundleHealthReport, HealthIssue, HealthSeverity, KnowledgeBundleState, KnowledgeBundleView,

@@ -8,6 +8,7 @@ mod connectivity_platform;
 mod desktop_shell;
 mod i18n;
 mod integrations;
+mod layout;
 mod manual_lan_route;
 mod model_config;
 mod paths;
@@ -22,6 +23,7 @@ use eframe::egui;
 use crate::{
     activation::{InstanceDisposition, LaunchMode, prepare_instance},
     app::AirWikiApp,
+    layout::{INITIAL_WINDOW_SIZE, MINIMUM_WINDOW_SIZE},
     paths::AppPaths,
 };
 
@@ -39,8 +41,8 @@ fn main() -> Result<()> {
         viewport: egui::ViewportBuilder::default()
             .with_title("AirWiki")
             .with_icon(branding::window_icon())
-            .with_inner_size([1180.0, 760.0])
-            .with_min_inner_size([880.0, 600.0])
+            .with_inner_size(INITIAL_WINDOW_SIZE)
+            .with_min_inner_size(MINIMUM_WINDOW_SIZE)
             .with_visible(launch_mode == LaunchMode::Foreground),
         ..Default::default()
     };

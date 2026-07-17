@@ -37,16 +37,24 @@ cargo deny --locked check
 ```
 
 Real-model evaluation is optional for ordinary CI and must use an already
-verified local snapshot:
+verified local snapshot. Structural validation uses deterministic providers and
+does not download models:
 
 ```bash
 cargo run --locked -p xtask -- relevance validate
 cargo run --locked -p xtask -- relevance evaluate --snapshot <verified-snapshot>
+cargo run --locked -p xtask -- retrieval validate
+cargo run --locked -p xtask -- retrieval evaluate \
+  --embedding-snapshot <verified-e5-snapshot> \
+  --relevance-snapshot <verified-mmarco-snapshot>
 ```
 
-The generated report stays under `target/evals/`. Persist only its fixture hash,
-artifact revision, platform, aggregate result, and SHA-256 when a candidate
-requires that evidence.
+The generated reports stay under `target/evals/`. Persist only their fixture
+hash, artifact revisions, platform, aggregate result, and SHA-256 when a
+candidate requires that evidence. A real-model failure is a measured product
+quality result; do not alter fixtures or thresholds solely to make a candidate
+appear green. See the [retrieval-quality profile](retrieval-quality-evaluation.md)
+for the pipeline scope and current platform observation.
 
 Manual platform gates must use installed applications in interactive desktop
 sessions. A macOS build cannot certify Windows behavior, and an SSH-launched

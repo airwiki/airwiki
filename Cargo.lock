@@ -8373,9 +8373,11 @@ name = "xtask"
 version = "0.2.0"
 dependencies = [
  "anyhow",
+ "async-trait",
  "base64 0.22.1",
  "airwiki-core",
  "airwiki-inference",
+ "airwiki-types",
  "hex",
  "minisign-verify",
  "serde",
@@ -8385,6 +8387,7 @@ dependencies = [
  "tempfile",
  "tokio",
  "tokio-util",
+ "uuid",
  "zip",
 ]
 

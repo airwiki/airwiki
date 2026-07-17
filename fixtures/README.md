@@ -14,6 +14,9 @@ or personal information.
 - `relevance/answerability.json`: schema-v2 relevance corpus with calibration,
   holdout, missing facts, contradictions, prompt injection, and cross-language
   cases.
+- `retrieval/search-quality-v1.json`: schema-v1 source-side retrieval corpus for
+  local and federated scopes, policy, provenance, deduplication, stability and
+  honest abstention.
 
 The expected federated question asks how Atlas is recovered, who is responsible,
 and the target date. A correct answer combines the Mac procedure with the
@@ -36,6 +39,25 @@ snapshot and writes aggregate synthetic evidence under `target/evals/`:
 ```bash
 cargo run --locked -p xtask -- relevance evaluate --snapshot <snapshot-directory>
 ```
+
+Structural retrieval validation uses deterministic providers but exercises the
+real publication, SQLite, hybrid-search, policy and provenance path:
+
+```bash
+cargo run --locked -p xtask -- retrieval validate
+```
+
+The platform-specific retrieval profile requires both already verified model
+snapshots:
+
+```bash
+cargo run --locked -p xtask -- retrieval evaluate \
+  --embedding-snapshot <verified-e5-snapshot-directory> \
+  --relevance-snapshot <verified-mmarco-snapshot-directory>
+```
+
+See the [retrieval-quality evaluation profile](../docs/retrieval-quality-evaluation.md)
+for metrics, report hygiene and current results.
 
 For MCP evaluation:
 

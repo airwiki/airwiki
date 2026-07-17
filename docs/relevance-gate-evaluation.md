@@ -5,6 +5,11 @@ evidence for the answerability boundary defined by
 [ADR 0001](adr/0001-answerability-gated-search-v2.md). It is not an architecture
 decision. Update it when a reviewed profile or platform evaluation changes.
 
+This evaluation receives an already selected candidate set. The separate
+[retrieval-quality profile](retrieval-quality-evaluation.md) exercises the
+published-knowledge, SQLite, hybrid-search, policy, deduplication and provenance
+path that produces those candidates.
+
 ## Active profile
 
 - Model: `cross-encoder/mmarco-mMiniLMv2-L12-H384-v1`

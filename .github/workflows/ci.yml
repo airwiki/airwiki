@@ -43,6 +43,8 @@ jobs:
         run: cargo test --workspace --all-features --locked
       - name: Synthetic relevance fixture
         run: cargo run --locked -p xtask -- relevance validate
+      - name: Synthetic retrieval pipeline
+        run: cargo run --locked -p xtask -- retrieval validate
 
   supply-chain:
     name: Advisories, licenses and sources

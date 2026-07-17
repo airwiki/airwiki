@@ -11,9 +11,11 @@ publish = false
 
 [dependencies]
 anyhow.workspace = true
+async-trait.workspace = true
 base64 = "0.22.1"
 airwiki-core = { version = "0.2.0", path = "../crates/airwiki-core", features = ["fastembed-runtime"] }
 airwiki-inference = { version = "0.2.0", path = "../crates/airwiki-inference" }
+airwiki-types = { version = "0.2.0", path = "../crates/airwiki-types" }
 hex = "0.4.3"
 minisign-verify = "0.2.5"
 serde.workspace = true
@@ -22,6 +24,7 @@ serde_yaml = { package = "serde_yaml_ng", version = "0.10.0" }
 sha2 = "0.10.9"
 tokio = { workspace = true, features = ["fs"] }
 tokio-util = "0.7.18"
+uuid.workspace = true
 zip = { version = "6.0.0", default-features = false, features = ["deflate"] }
 
 [dev-dependencies]

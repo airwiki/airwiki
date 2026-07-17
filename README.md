@@ -67,7 +67,8 @@ The workspace separates dependency-light contracts, local domain logic, inferenc
 - `crates/`: domain contracts and reusable core, inference, LAN, and MCP behavior.
 - `apps/`: the desktop application and its narrowly scoped helper executables.
 - `packaging/`: development package scripts and platform manifests.
-- `xtask/`: reproducible documentation, licensing, and repository checks.
+- `xtask/`: reproducible documentation, licensing, evaluation, and repository
+  checks.
 - `docs/`: architecture, decisions, operations, security, and internal release guidance.
 - `fixtures/`: synthetic test material only.
 
@@ -76,6 +77,7 @@ The workspace separates dependency-light contracts, local domain logic, inferenc
 - [Installation and local operation](docs/install.md)
 - [Architecture](docs/architecture.md)
 - [Architecture decisions](docs/adr/README.md)
+- [Retrieval-quality evaluation](docs/retrieval-quality-evaluation.md)
 - [Local chat integrations](docs/chat-integrations.md)
 - [Two-node manual acceptance](docs/two-node-runbook.md)
 - [Recovery](docs/recovery.md)

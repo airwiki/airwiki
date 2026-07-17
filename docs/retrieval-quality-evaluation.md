@@ -95,6 +95,35 @@ also requires a fresh, larger domain-separated profile that reports selective
 risk and coverage with uncertainty, plus fail-closed behavior on malformed
 output.
 
+Question-answering entailment is closer to AirWiki's safety boundary than
+generic semantic similarity. QA-entailment research evaluates whether a passage
+supports a complete question-and-answer claim, while QNLI asks only whether a
+sentence contains an answer and generic NLI assumes a declarative hypothesis
+([Chen et al., 2021](https://aclanthology.org/2021.findings-emnlp.324/),
+[Wang et al., 2018](https://aclanthology.org/W18-5446/),
+[Conneau et al., 2018](https://aclanthology.org/D18-1269/)). These tasks are
+useful experimental controls, not interchangeable production gates. A candidate
+answer span must first be turned into a complete claim without changing its
+subject, relation, scope or negation. The passage must entail that claim; merely
+locating a plausible date, person or phrase is insufficient.
+
+Evidence-verification work also supports testing entailment as a secondary
+ranking signal, and SemQA combines question similarity with bidirectional answer
+entailment rather than treating either signal as sufficient on its own
+([Yang et al., 2021](https://aclanthology.org/2021.ranlp-1.174/),
+[Indrehus et al., 2025](https://aclanthology.org/2025.fever-1.14/)). AirWiki
+therefore evaluates a staged verifier—candidate retrieval, answer-span
+extraction, complete-claim construction and passage support—before considering
+changes to the first-stage retriever. This is a testable design hypothesis, not
+evidence that the cited systems transfer to private organizational documents.
+
+Every future promotion-oriented model experiment therefore starts with a
+falsifiable hypothesis, an immutable artifact identity, a development-only
+corpus, a primary metric and a predeclared rejection condition. Aggregate
+ranking improvements cannot override a known false-evidence regression. Model
+output never overrides authorization, publication state, literal-span
+provenance or final revision revalidation.
+
 Model selection uses only regression and calibration domains. Repeatedly using
 a test set for selection biases the reported result, so final domains are used
 once after freezing the candidate
@@ -295,3 +324,133 @@ current mMARCO gate, but neither policy meets AirWiki's zero-false-evidence rule
 or interactive latency budget. The result does not justify a Windows run,
 because the macOS process alone used approximately 4.8 GiB of resident memory
 during the second experiment. Production search remains unchanged.
+
+## Exploratory relative-reranker observation
+
+The mGTE paper reports strong multilingual reranking results and therefore
+motivated a bounded GTE experiment
+([Zhang et al., 2024](https://arxiv.org/abs/2407.19669)). The macOS arm64 run
+used the INT8 ONNX conversion revision
+`ee64367e35a2db0da46bb6497e13a18f8bd585cb`, whose model SHA-256 was
+`ccf51dba7f8aa9205753761cfaa68c55f741792501463a3bf25d7e5bcdac7c35`.
+The conversion was used for local research only; a distributable artifact would
+have to be reproduced from the licensed upstream checkpoint.
+
+The candidate generator already placed all ten expected development evidence
+groups in its bounded per-source pools and all ten within the source top five.
+Here, source-list Recall@5 is the fraction of required evidence groups that have
+at least one authorized current candidate in the first five results of their
+source list. GTE therefore could not improve this primary coverage result.
+Across nine answerable per-source lists, using binary relevance over expected
+evidence groups and macro-averaging the lists, it changed mean first-evidence
+MRR@10 from 0.833 to 0.889 and mean nDCG@10 from 0.877 to 0.925. It worsened the
+known Atlas paraphrase case from reciprocal rank 1.0 to 0.5 and the compound
+case from 1.0 to 0.75. A release-mode diagnostic observed 1.001 seconds of
+startup and per-source calls of p50 238 ms and p95 382 ms. These timings are not
+end-to-end query latency.
+
+The run falsified the rationale for promoting GTE on this small profile: it did
+not improve evidence coverage and regressed known rankings. The one-off harness,
+sanitized report and exact fixture manifest were not retained, so these numbers
+are an exploratory local observation, not reproducible promotion evidence. A
+future reranker must be evaluated by the versioned protocol below. Production
+search remains unchanged.
+
+## Exploratory reader and entailment observations
+
+Two multilingual encoders fine-tuned on English SQuAD2 were explored with the
+standard best-span-minus-CLS/null margin. Neither produced a scalar boundary
+that separated the reviewed recovery evidence from relational hard negatives.
+Their complete artifact identities and fixtures were not retained, so this
+reader run is not reproducible evidence and must not be used for promotion. The
+observation is consistent with cross-lingual unanswerable-QA results
+([Gorodissky et al., 2025](https://aclanthology.org/2025.starsem-1.8/)) and with
+the transfer gap reported by MLQA
+([Lewis et al., 2020](https://aclanthology.org/2020.acl-main.653/)).
+
+Two NLI controls used 17 reviewed positive and hard-negative
+subject/relation/scope pairs; the English-only QNLI control used 15 translated
+question/passage pairs. Human-written canonical claims isolated the NLI
+verifiers from automatic question-to-statement conversion:
+
+- [`MoritzLaurer/multilingual-MiniLMv2-L6-mnli-xnli`](https://huggingface.co/MoritzLaurer/multilingual-MiniLMv2-L6-mnli-xnli/tree/0a71e92a985b6e1ad1828cf67ce9c459639c1dca)
+  revision `0a71e92a985b6e1ad1828cf67ce9c459639c1dca` used its official FP32 ONNX file
+  with SHA-256
+  `79f8cda2b1230585a95ea0514a6f1bd21c5c986ba0529bb3261213a3e195fa6e`;
+  its lowest positive entailment margin was `-0.684`, while a negative reached
+  `0.931`;
+- [`MoritzLaurer/mDeBERTa-v3-base-mnli-xnli`](https://huggingface.co/MoritzLaurer/mDeBERTa-v3-base-mnli-xnli/tree/8adb042d524ecd5c26d3e3ba0e3fbcf7e2d0864c)
+  revision `8adb042d524ecd5c26d3e3ba0e3fbcf7e2d0864c` used its official quantized ONNX
+  file with SHA-256
+  `27c39e884c14b03cf46cfc5485971b6db70ff330220d93dfe729c63fde43af0e`;
+  its lowest positive margin was `-0.602`, below the highest negative margin of
+  `-0.197`; and
+- the English-only
+  [`cross-encoder/qnli-distilroberta-base`](https://huggingface.co/cross-encoder/qnli-distilroberta-base/tree/7dd04ee0a6040c06fb381ad7edcb8585f4d937fd)
+  revision `7dd04ee0a6040c06fb381ad7edcb8585f4d937fd` used the official arm64 INT8 file
+  with SHA-256
+  `4c3d2853f28c9a450054b40e02a683a10ab74076d726fb0ac9c8f19fbc27a3c3`;
+  its lowest positive logit was `-5.657`, while an unsupported negative reached
+  `3.021`.
+
+No threshold separated positives from negatives for any control. Generic NLI
+missed procedural paraphrase and cross-language relations; QNLI scored a
+withdrawn, explicitly unapproved budget above a valid procedure answer. The 17
+and 15 reviewed pair fixtures were not retained as a versioned corpus, so these
+figures are exploratory local observations rather than reproducible promotion
+evidence. They reject using these off-the-shelf thresholds in the current
+profile; they do not reject a future multilingual model trained specifically on
+QA entailment and relational hard negatives.
+
+## Next research gate
+
+The next candidate must be developed against a larger, licensed and traceable
+corpus before any new production code. The development profile will sample
+ranking cases from MIRACL and answerability/support cases from SQuAD2, XQuAD,
+MLQA, ContractNLI, MuSiQue and Natural Questions, while preserving each
+dataset's license and attribution requirements
+([MIRACL](https://arxiv.org/abs/2210.09984),
+[XQuAD](https://aclanthology.org/2020.acl-main.421/),
+[ContractNLI](https://aclanthology.org/2021.findings-emnlp.164/),
+[MuSiQue](https://aclanthology.org/2022.tacl-1.31/),
+[Natural Questions](https://research.google/pubs/natural-questions-a-benchmark-for-question-answering-research/)).
+Documents, translations and multi-hop chains must remain grouped before any
+split so equivalent evidence cannot cross development, calibration and final
+holdout.
+
+The primary measures have fixed meanings:
+
+- candidate Recall@10 is the fraction of required atomic needs with at least
+  one authorized current candidate in the first ten results of its source list;
+- atomic-need recall is the fraction of required needs covered by verified
+  evidence in the verifier's final accepted evidence set;
+- evidence precision is the number of final evidence items whose mapping to at
+  least one atomic need is judged supportive, divided by every item in that set;
+- query-level selective risk is the fraction of accepted queries whose final
+  evidence set contains at least one unsupported evidence-to-need mapping;
+- coverage is the fraction of eligible queries for which every required atomic
+  need is verified and the evidence set is accepted; an incomplete compound
+  query must abstain; and
+- the risk-coverage curve evaluates query-level risk as a frozen decision-score
+  threshold changes.
+
+The acceptance threshold is chosen only from the separate calibration split.
+Conformal risk control is eligible as a later calibration method only if the
+versioned protocol states and satisfies its exchangeability and monotone-loss
+assumptions; otherwise AirWiki reports empirical risk-coverage without a formal
+guarantee
+([Angelopoulos et al., 2024](https://arxiv.org/abs/2208.02814)).
+
+Documents, translations and multi-hop chains are grouped to prevent evident
+split leakage; that design choice does not by itself establish statistical
+independence. Confidence intervals and resampling units must follow the metric
+and experimental design. Standard and bootstrap intervals are established
+options for common IR measures
+([Soboroff, 2014](https://www.nist.gov/publications/computing-confidence-intervals-common-ir-measures)).
+If, and only if, the accepted grouped evaluation units can be modeled as i.i.d.
+Bernoulli trials, then zero observed false-evidence events among `n` units gives
+the illustrative one-sided 95% upper bound `1 - 0.05^(1/n)`: 17 such clean units
+would still permit about 16.2% risk, and 299 are required before the bound falls
+below 1%. The 17 exploratory NLI pairs above do not establish those assumptions.
+Until a frozen candidate passes a fresh domain-separated holdout, AirWiki must
+describe all such runs as development evidence, not a safety guarantee.

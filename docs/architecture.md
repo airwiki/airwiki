@@ -20,7 +20,8 @@ apps/desktop ───────┬──> airwiki-core ───────�
 apps/mcp-bridge ───────> airwiki-mcp ───────────> airwiki-types
 
 xtask ──────────────┬──> airwiki-core
-                    └──> airwiki-inference
+                    ├──> airwiki-inference
+                    └──> airwiki-types
 ```
 
 - `airwiki-types` contains dependency-light identifiers and contracts.
@@ -38,7 +39,8 @@ xtask ──────────────┬──> airwiki-core
   invoke only its fixed install/remove operations on Windows. See
   [ADR 0006](adr/0006-windows-firewall-privilege-boundary.md) for the privilege
   boundary and managed rule scope.
-- `xtask` contains reproducible repository, legal and packaging checks.
+- `xtask` contains reproducible repository, legal, packaging and evaluation
+  checks.
 
 The important runtime boundaries are separate from Rust dependency direction:
 

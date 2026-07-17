@@ -23,6 +23,7 @@ use tokio_util::sync::CancellationToken;
 use zip::{CompressionMethod, DateTime, ZipArchive, ZipWriter, write::SimpleFileOptions};
 
 mod docs;
+mod retrieval;
 
 const LICENSE_REPORT: &str = "resources/licenses/THIRD_PARTY_LICENSES.md";
 const NON_CARGO_LICENSE_INVENTORY: &str = "resources/licenses/NON_CARGO_COMPONENTS.md";
@@ -155,6 +156,42 @@ async fn main() -> Result<()> {
             Some(other) => bail!("unknown relevance command: {other}"),
             None => bail!("missing relevance command; expected `validate` or `evaluate`"),
         },
+        "retrieval" => match arguments.next().as_deref() {
+            Some("validate") => {
+                ensure!(
+                    arguments.next().is_none(),
+                    "retrieval validate received unexpected arguments"
+                );
+                retrieval::validate().await
+            }
+            Some("evaluate") => {
+                ensure!(
+                    arguments.next().as_deref() == Some("--embedding-snapshot"),
+                    "retrieval evaluate expects `--embedding-snapshot <path>` first"
+                );
+                let embedding_snapshot = arguments
+                    .next()
+                    .context("retrieval evaluate is missing the embedding snapshot path")?;
+                ensure!(
+                    arguments.next().as_deref() == Some("--relevance-snapshot"),
+                    "retrieval evaluate expects `--relevance-snapshot <path>` second"
+                );
+                let relevance_snapshot = arguments
+                    .next()
+                    .context("retrieval evaluate is missing the relevance snapshot path")?;
+                ensure!(
+                    arguments.next().is_none(),
+                    "retrieval evaluate received unexpected arguments"
+                );
+                retrieval::evaluate(
+                    Path::new(&embedding_snapshot),
+                    Path::new(&relevance_snapshot),
+                )
+                .await
+            }
+            Some(other) => bail!("unknown retrieval command: {other}"),
+            None => bail!("missing retrieval command; expected `validate` or `evaluate`"),
+        },
         "licenses" => match arguments.next().as_deref() {
             Some("generate") => generate_licenses(false),
             Some("check") => generate_licenses(true),
@@ -204,6 +241,10 @@ async fn main() -> Result<()> {
             println!("cargo run -p xtask -- fetch-runtime");
             println!("cargo run --locked -p xtask -- relevance validate");
             println!("cargo run --locked -p xtask -- relevance evaluate --snapshot <directory>");
+            println!("cargo run --locked -p xtask -- retrieval validate");
+            println!(
+                "cargo run --locked -p xtask -- retrieval evaluate --embedding-snapshot <directory> --relevance-snapshot <directory>"
+            );
             println!("cargo run --locked -p xtask -- licenses generate");
             println!("cargo run --locked -p xtask -- licenses check");
             println!("cargo run --locked -p xtask -- docs check");

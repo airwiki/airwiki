@@ -13,6 +13,7 @@ All notable user-visible changes to AirWiki will be documented here. The project
 - A guided first-knowledge journey from local AI setup through folder processing, human review, publication, and a cited local search.
 - A revision-bound evidence panel that lets reviewers compare locally extracted text with each proposed draft before publication.
 - Direct navigation from a local search result to its exact published Wiki concept, with the cited source location and revision kept visible.
+- A reproducible retrieval-quality corpus and evaluator covering local and peer-authorized source evidence, abstention, provenance, privacy, contradictions, deduplication, and stable ordering.
 
 ### Changed
 

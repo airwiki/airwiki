@@ -2863,7 +2863,7 @@ impl Database {
              JOIN collections col ON col.id=ch.collection_id
              WHERE chunk_fts MATCH ?1 AND co.status='published' AND sd.status='published'
              AND ch.collection_id IN ({placeholders}){external_clause}
-             ORDER BY bm25(chunk_fts) LIMIT ?2"
+             ORDER BY bm25(chunk_fts), ch.id LIMIT ?2"
         );
         let mut values: Vec<rusqlite::types::Value> = vec![
             fts_query.into(),

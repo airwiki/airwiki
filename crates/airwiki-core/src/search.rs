@@ -484,7 +484,12 @@ fn cosine_similarity(left: &[f32], right: &[f32]) -> f32 {
 }
 
 fn sort_and_truncate_vector_candidates(candidates: &mut Vec<(RankedChunk, f32)>, limit: usize) {
-    candidates.sort_by(|(_, left), (_, right)| right.partial_cmp(left).unwrap_or(Ordering::Equal));
+    candidates.sort_by(|(left_candidate, left), (right_candidate, right)| {
+        right
+            .partial_cmp(left)
+            .unwrap_or(Ordering::Equal)
+            .then_with(|| left_candidate.chunk.id.cmp(&right_candidate.chunk.id))
+    });
     candidates.truncate(limit);
 }
 

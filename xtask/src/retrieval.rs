@@ -1,8 +1,11 @@
 use std::{
     collections::{BTreeSet, HashMap, HashSet},
     path::{Path, PathBuf},
-    sync::Arc,
-    time::Instant,
+    sync::{
+        Arc, Mutex,
+        atomic::{AtomicU32, Ordering},
+    },
+    time::{Duration, Instant},
 };
 
 use airwiki_core::{
@@ -11,7 +14,11 @@ use airwiki_core::{
     HybridSearchEngine, MMARCO_RERANKER_REVISION, OkfPublicationMaterializer, PinnedE5Snapshot,
     PinnedMmarcoRerankerSnapshot, RelevanceInput, StoredChunk,
 };
-use airwiki_inference::{E5_REVISION, MMARCO_REVISION, platform_relevance_model};
+use airwiki_inference::{
+    AssetManager, E5_REVISION, GenerationConfig, LLAMA_CPP_BUILD, LlamaClient, LlamaSupervisor,
+    MMARCO_REVISION, ModelProfile, ServerReasoningMode, SupervisorConfig, platform_relevance_model,
+    selection_for_model,
+};
 use airwiki_types::{
     CollectionPolicy, ConceptType, EnrichmentDraft, MAX_SNIPPET_CHARS, MAX_TOP_K, SearchHit,
     SearchPurpose, SearchRequest,
@@ -24,17 +31,21 @@ use uuid::Uuid;
 
 use crate::{replace_file, workspace_root};
 
-const FIXTURE_PATH: &str = "fixtures/retrieval/search-quality-v1.json";
+mod selector;
+
+const FIXTURE_PATH: &str = "fixtures/retrieval/search-quality-v2.json";
+#[cfg(test)]
+const V1_FIXTURE_PATH: &str = "fixtures/retrieval/search-quality-v1.json";
 const REPORT_DIRECTORY: &str = "target/evals";
-const REPORT_SCHEMA_VERSION: u32 = 1;
-const FIXTURE_SCHEMA_VERSION: u32 = 1;
+const REPORT_SCHEMA_VERSION: u32 = 3;
+const FIXTURE_SCHEMA_VERSION: u32 = 2;
 const TOP_K: u8 = 5;
 const MIN_RECALL_AT_FIVE: f64 = 0.9;
 const ORIGIN_NODE_ID: &str = "fixture-origin";
 const PEER_NODE_ID: &str = "fixture-peer";
 const ORIGIN_REQUESTER_ID: &str = "fixture-origin-requester";
 
-const EXPECTED_CASE_IDS: [&str; 13] = [
+const V1_EXPECTED_CASE_IDS: [&str; 13] = [
     "calibration_common_name",
     "calibration_direct_recovery",
     "calibration_external_chat_private",
@@ -48,6 +59,26 @@ const EXPECTED_CASE_IDS: [&str; 13] = [
     "holdout_owner_cross_language",
     "holdout_peer_without_grant",
     "holdout_unrelated_injection",
+];
+
+const V2_EXPECTED_CASE_IDS: [&str; 17] = [
+    "calibration_aurora_owner",
+    "calibration_cedar_injection",
+    "calibration_lumen_peer_without_grant",
+    "calibration_nebula_withdrawn_budget",
+    "calibration_orion_external_private",
+    "calibration_solstice_conflict",
+    "holdout_harbor_compound_federated",
+    "holdout_harbor_owner_cross_language",
+    "holdout_harbor_paraphrase_recovery",
+    "holdout_library_external_policy",
+    "holdout_quasar_unrelated_injection",
+    "holdout_sensor_conflict",
+    "regression_atlas_compound_federated",
+    "regression_atlas_date_cross_language",
+    "regression_atlas_external_ai_policy",
+    "regression_atlas_paraphrase_recovery",
+    "regression_atlas_unrelated_injection",
 ];
 
 const REQUIRED_TAGS: [RetrievalTag; 13] = [
@@ -112,6 +143,8 @@ impl FixtureNode {
 #[serde(deny_unknown_fields)]
 struct FixtureDocument {
     id: String,
+    #[serde(default)]
+    domain: Option<String>,
     collection_id: String,
     publication_state: FixturePublicationState,
     title: String,
@@ -141,6 +174,8 @@ struct FixtureChunk {
 #[serde(deny_unknown_fields)]
 struct FixtureCase {
     id: String,
+    #[serde(default)]
+    domain: Option<String>,
     split: RetrievalSplit,
     tags: Vec<RetrievalTag>,
     scope: RetrievalScope,
@@ -154,8 +189,56 @@ struct FixtureCase {
 #[derive(Debug, Clone, Copy, Deserialize, Serialize, PartialEq, Eq, PartialOrd, Ord)]
 #[serde(rename_all = "snake_case")]
 enum RetrievalSplit {
+    Regression,
     Calibration,
     Holdout,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum EvaluationPhase {
+    Development,
+    Final,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+enum EvaluationProfile {
+    Current,
+    Selector,
+}
+
+impl EvaluationProfile {
+    const fn label(self) -> &'static str {
+        match self {
+            Self::Current => "current",
+            Self::Selector => "selector",
+        }
+    }
+}
+
+impl EvaluationPhase {
+    pub fn parse(value: &str) -> Result<Self> {
+        match value {
+            "development" => Ok(Self::Development),
+            "final" => Ok(Self::Final),
+            _ => anyhow::bail!("unknown retrieval evaluation phase: {value}"),
+        }
+    }
+
+    const fn includes(self, split: RetrievalSplit) -> bool {
+        match self {
+            Self::Development => !matches!(split, RetrievalSplit::Holdout),
+            Self::Final => true,
+        }
+    }
+
+    const fn label(self) -> &'static str {
+        match self {
+            Self::Development => "development",
+            Self::Final => "final",
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, Deserialize, Serialize, PartialEq, Eq, PartialOrd, Ord)]
@@ -292,7 +375,129 @@ impl EvidenceRelevanceProvider for FixtureRelevanceProvider {
 struct EvaluationProviders {
     embeddings: Arc<dyn EmbeddingProvider>,
     relevance: Arc<dyn EvidenceRelevanceProvider>,
+    profile: EvaluationProfile,
     identity: ProviderIdentity,
+    telemetry: Option<Arc<EvaluationTelemetry>>,
+    startup_ms: Option<u128>,
+}
+
+#[derive(Debug, Default)]
+struct EvaluationTelemetry {
+    call_count: AtomicU32,
+    failure_count: AtomicU32,
+    unavailable_count: AtomicU32,
+    inference_failure_count: AtomicU32,
+    timeout_count: AtomicU32,
+    invalid_output_count: AtomicU32,
+    elapsed_ms: Mutex<Vec<u128>>,
+}
+
+impl EvaluationTelemetry {
+    fn record(&self, elapsed_ms: u128, failure: Option<&EvidenceRelevanceError>) {
+        self.call_count.fetch_add(1, Ordering::Relaxed);
+        if let Ok(mut elapsed) = self.elapsed_ms.lock() {
+            elapsed.push(elapsed_ms);
+        } else {
+            self.failure_count.fetch_add(1, Ordering::Relaxed);
+            self.invalid_output_count.fetch_add(1, Ordering::Relaxed);
+        }
+        let Some(failure) = failure else {
+            return;
+        };
+        self.failure_count.fetch_add(1, Ordering::Relaxed);
+        match failure {
+            EvidenceRelevanceError::Unavailable => {
+                self.unavailable_count.fetch_add(1, Ordering::Relaxed);
+            }
+            EvidenceRelevanceError::InferenceFailed => {
+                self.inference_failure_count.fetch_add(1, Ordering::Relaxed);
+            }
+            EvidenceRelevanceError::TimedOut => {
+                self.timeout_count.fetch_add(1, Ordering::Relaxed);
+            }
+            EvidenceRelevanceError::InvalidOutput
+            | EvidenceRelevanceError::DecisionCountMismatch { .. } => {
+                self.invalid_output_count.fetch_add(1, Ordering::Relaxed);
+            }
+        }
+    }
+
+    fn failure_count(&self) -> u32 {
+        self.failure_count.load(Ordering::Relaxed)
+    }
+
+    fn report(&self) -> ProviderTelemetryReport {
+        let mut elapsed = self
+            .elapsed_ms
+            .lock()
+            .map(|values| values.clone())
+            .unwrap_or_default();
+        elapsed.sort_unstable();
+        ProviderTelemetryReport {
+            call_count: self.call_count.load(Ordering::Relaxed),
+            failure_count: self.failure_count(),
+            unavailable_count: self.unavailable_count.load(Ordering::Relaxed),
+            inference_failure_count: self.inference_failure_count.load(Ordering::Relaxed),
+            timeout_count: self.timeout_count.load(Ordering::Relaxed),
+            invalid_output_count: self.invalid_output_count.load(Ordering::Relaxed),
+            p50_ms: percentile(&elapsed, 50),
+            p95_ms: percentile(&elapsed, 95),
+            max_ms: elapsed.last().copied(),
+        }
+    }
+}
+
+fn percentile(sorted: &[u128], percentile: usize) -> Option<u128> {
+    if sorted.is_empty() {
+        return None;
+    }
+    let rank = percentile
+        .saturating_mul(sorted.len())
+        .div_ceil(100)
+        .saturating_sub(1)
+        .min(sorted.len().saturating_sub(1));
+    sorted.get(rank).copied()
+}
+
+#[derive(Clone)]
+struct ObservedRelevanceProvider {
+    inner: Arc<dyn EvidenceRelevanceProvider>,
+    telemetry: Arc<EvaluationTelemetry>,
+}
+
+#[async_trait]
+impl EvidenceRelevanceProvider for ObservedRelevanceProvider {
+    fn profile_id(&self) -> &str {
+        self.inner.profile_id()
+    }
+
+    async fn classify(
+        &self,
+        question: &str,
+        candidates: &[RelevanceInput],
+    ) -> std::result::Result<Vec<EvidenceDecision>, EvidenceRelevanceError> {
+        let started = Instant::now();
+        match self.inner.classify(question, candidates).await {
+            Ok(decisions) if decisions.len() == candidates.len() => {
+                self.telemetry.record(started.elapsed().as_millis(), None);
+                Ok(decisions)
+            }
+            Ok(decisions) => {
+                let failure = EvidenceRelevanceError::DecisionCountMismatch {
+                    expected: candidates.len(),
+                    actual: decisions.len(),
+                };
+                self.telemetry
+                    .record(started.elapsed().as_millis(), Some(&failure));
+                Ok(vec![EvidenceDecision::Irrelevant; candidates.len()])
+            }
+            Err(failure) => {
+                self.telemetry
+                    .record(started.elapsed().as_millis(), Some(&failure));
+                Ok(vec![EvidenceDecision::Irrelevant; candidates.len()])
+            }
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -377,6 +582,7 @@ struct RetrievalCaseReport {
     top_k_prefix_stable: bool,
     insertion_order_stable: bool,
     elapsed_ms: u128,
+    provider_failure_count: u32,
     passed: bool,
 }
 
@@ -392,17 +598,37 @@ struct AggregateMetrics {
     provenance_error_count: u32,
     duplicate_violation_count: u32,
     unstable_case_count: u32,
+    provider_failure_count: u32,
+}
+
+#[derive(Debug, Clone, Default, Serialize)]
+struct ProviderTelemetryReport {
+    call_count: u32,
+    failure_count: u32,
+    unavailable_count: u32,
+    inference_failure_count: u32,
+    timeout_count: u32,
+    invalid_output_count: u32,
+    p50_ms: Option<u128>,
+    p95_ms: Option<u128>,
+    max_ms: Option<u128>,
 }
 
 #[derive(Debug, Serialize)]
 struct RetrievalEvaluationReport {
     schema_version: u32,
     fixture_sha256: String,
+    phase: EvaluationPhase,
+    candidate_fingerprint: String,
+    profile: EvaluationProfile,
     target_os: String,
     target_arch: String,
     provider: ProviderIdentity,
     top_k: u8,
     elapsed_ms: u128,
+    startup_ms: Option<u128>,
+    provider_telemetry: Option<ProviderTelemetryReport>,
+    regression: AggregateMetrics,
     calibration: AggregateMetrics,
     holdout: AggregateMetrics,
     total: AggregateMetrics,
@@ -413,7 +639,7 @@ struct RetrievalEvaluationReport {
 pub async fn validate() -> Result<()> {
     let loaded = load_fixture()?;
     let providers = fixture_providers(&loaded.fixture)?;
-    let report = run_evaluation(&loaded, providers).await?;
+    let report = run_evaluation(&loaded, providers, EvaluationPhase::Final).await?;
     ensure!(
         report.passed,
         "deterministic retrieval pipeline did not meet the fixture contract"
@@ -426,9 +652,17 @@ pub async fn validate() -> Result<()> {
     Ok(())
 }
 
-pub async fn evaluate(embedding_snapshot: &Path, relevance_snapshot: &Path) -> Result<()> {
+pub async fn evaluate(
+    phase: EvaluationPhase,
+    embedding_snapshot: &Path,
+    relevance_snapshot: &Path,
+) -> Result<()> {
     validate_model_revisions()?;
     let loaded = load_fixture()?;
+    ensure!(
+        phase == EvaluationPhase::Development,
+        "the active v2 holdout has already been observed; reserve a fresh profile before final evaluation"
+    );
     let threads = std::thread::available_parallelism()
         .map(usize::from)
         .unwrap_or(2)
@@ -445,6 +679,7 @@ pub async fn evaluate(embedding_snapshot: &Path, relevance_snapshot: &Path) -> R
     let relevance_artifact =
         platform_relevance_model().context("unsupported retrieval evaluation target")?;
     let providers = EvaluationProviders {
+        profile: EvaluationProfile::Current,
         identity: ProviderIdentity {
             embedding_profile: embeddings.model_id().to_owned(),
             embedding_revision: E5_MODEL_REVISION.to_owned(),
@@ -456,8 +691,10 @@ pub async fn evaluate(embedding_snapshot: &Path, relevance_snapshot: &Path) -> R
         },
         embeddings,
         relevance,
+        telemetry: None,
+        startup_ms: None,
     };
-    let report = run_evaluation(&loaded, providers).await?;
+    let report = run_evaluation(&loaded, providers, phase).await?;
     let destination = write_report(&report)?;
     ensure!(
         report.passed,
@@ -471,8 +708,122 @@ pub async fn evaluate(embedding_snapshot: &Path, relevance_snapshot: &Path) -> R
     Ok(())
 }
 
+pub async fn evaluate_selector(
+    phase: EvaluationPhase,
+    data_root: &Path,
+    llama_server: &Path,
+    model_id: &str,
+) -> Result<()> {
+    ensure!(
+        phase == EvaluationPhase::Development,
+        "the active v2 holdout has already been observed; reserve a fresh profile before final evaluation"
+    );
+    let selection = selection_for_model(
+        ModelProfile::Automatic,
+        model_id,
+        "retrieval selector evaluation",
+    )
+    .context("retrieval selector model is not in the pinned AirWiki catalog")?;
+    let outcome = AssetManager::new(data_root)?
+        .with_bundled_runtime(Some(llama_server.to_path_buf()))
+        .verify_selection(&selection)
+        .await
+        .context("retrieval selector assets failed verification")?;
+    let threads = std::thread::available_parallelism()
+        .map(usize::from)
+        .unwrap_or(2)
+        .clamp(1, 4);
+    let embeddings: Arc<dyn EmbeddingProvider> = Arc::new(FastEmbedE5Small::from_snapshot(
+        &PinnedE5Snapshot::open(&outcome.embedding_snapshot_path)?,
+        threads,
+    )?);
+
+    let mut supervisor_config =
+        SupervisorConfig::bundled(outcome.llama_server_path, outcome.model_path);
+    supervisor_config.model_id = outcome.generation_settings.model_api_id.to_owned();
+    supervisor_config.context_tokens = outcome.generation_settings.context_tokens;
+    supervisor_config.threads = threads;
+    supervisor_config.reasoning_mode = ServerReasoningMode::Off;
+    // The evaluator can make up to 60 sequential calls. Keep the runtime alive
+    // for the bounded experiment; explicit shutdown remains authoritative.
+    supervisor_config.idle_timeout = Duration::from_secs(45 * 60);
+    let supervisor = LlamaSupervisor::new(supervisor_config);
+    let startup_started = Instant::now();
+    let endpoint = supervisor
+        .ensure_running()
+        .await
+        .context("retrieval selector runtime did not become ready")?;
+    let startup_ms = startup_started.elapsed().as_millis();
+    let mut generation_config = GenerationConfig::from_settings(outcome.generation_settings);
+    generation_config.temperature = 0.0;
+    // The outer selector timeout owns the stable TimedOut classification. Give
+    // reqwest a small grace period so it cannot race that boundary.
+    generation_config.timeout = selector::SELECTOR_CALL_TIMEOUT + Duration::from_secs(5);
+    let selector: Arc<dyn EvidenceRelevanceProvider> = Arc::new(
+        selector::GenerativeEvidenceSelector::new(LlamaClient::new(endpoint, generation_config)?),
+    );
+    let telemetry = Arc::new(EvaluationTelemetry::default());
+    let relevance: Arc<dyn EvidenceRelevanceProvider> = Arc::new(ObservedRelevanceProvider {
+        inner: selector,
+        telemetry: Arc::clone(&telemetry),
+    });
+    let providers = EvaluationProviders {
+        embeddings,
+        relevance,
+        profile: EvaluationProfile::Selector,
+        identity: ProviderIdentity {
+            embedding_profile: format!("multilingual-e5-small@{E5_REVISION}"),
+            embedding_revision: E5_REVISION.to_owned(),
+            relevance_profile: format!(
+                "{}/{}/{}/llama.cpp-{}/policy-{}/temp-0/timeout-{}ms/context-{}/input-{}/output-{}/reasoning-off",
+                selector::SELECTOR_PROFILE_ID,
+                selector::SELECTOR_PROMPT_VERSION,
+                outcome.selection.model_id,
+                LLAMA_CPP_BUILD,
+                selector::policy_fingerprint(),
+                selector::SELECTOR_CALL_TIMEOUT.as_millis(),
+                outcome.generation_settings.context_tokens,
+                outcome.generation_settings.max_input_tokens,
+                outcome.generation_settings.max_output_tokens,
+            ),
+            relevance_revision: outcome.selection.manifest.artifact.revision.to_owned(),
+            relevance_artifact_filename: Some(
+                outcome.selection.manifest.artifact.filename.to_owned(),
+            ),
+            relevance_artifact_sha256: Some(outcome.selection.manifest.artifact.sha256.to_owned()),
+            thread_count: threads,
+        },
+        telemetry: Some(telemetry),
+        startup_ms: Some(startup_ms),
+    };
+    let loaded = load_fixture()?;
+    let report_result = run_evaluation(&loaded, providers, phase).await;
+    let stop_result = supervisor.stop().await;
+    let report = report_result?;
+    let destination = write_report(&report)?;
+    ensure!(
+        stop_result.is_ok(),
+        "retrieval selector runtime did not stop cleanly; report written to {}",
+        destination.display()
+    );
+    ensure!(
+        report.passed,
+        "retrieval selector did not meet the development thresholds; report written to {}",
+        destination.display()
+    );
+    println!(
+        "retrieval selector passed development evaluation; report written to {}",
+        destination.display()
+    );
+    Ok(())
+}
+
 fn load_fixture() -> Result<LoadedFixture> {
-    let path = workspace_root().join(FIXTURE_PATH);
+    load_fixture_at(FIXTURE_PATH)
+}
+
+fn load_fixture_at(relative_path: &str) -> Result<LoadedFixture> {
+    let path = workspace_root().join(relative_path);
     let bytes = std::fs::read(&path).with_context(|| format!("reading {}", path.display()))?;
     let fixture: RetrievalFixture =
         serde_json::from_slice(&bytes).with_context(|| format!("parsing {}", path.display()))?;
@@ -485,11 +836,12 @@ fn load_fixture() -> Result<LoadedFixture> {
 
 fn validate_fixture_data(fixture: &RetrievalFixture) -> Result<()> {
     ensure!(
-        fixture.schema_version == FIXTURE_SCHEMA_VERSION,
+        matches!(fixture.schema_version, 1 | FIXTURE_SCHEMA_VERSION),
         "unsupported retrieval fixture schema"
     );
     let mut collection_ids = BTreeSet::new();
     let mut collection_nodes = HashMap::new();
+    let mut collection_grants = HashMap::new();
     for collection in &fixture.collections {
         validate_identifier(&collection.id, "collection")?;
         ensure!(
@@ -505,6 +857,7 @@ fn validate_fixture_data(fixture: &RetrievalFixture) -> Result<()> {
             "a granted retrieval collection must be peer-shareable"
         );
         collection_nodes.insert(collection.id.as_str(), collection.node);
+        collection_grants.insert(collection.id.as_str(), collection.granted_to_origin);
     }
     ensure!(
         collection_nodes
@@ -519,10 +872,17 @@ fn validate_fixture_data(fixture: &RetrievalFixture) -> Result<()> {
     let mut document_ids = BTreeSet::new();
     let mut fact_ids = BTreeSet::new();
     let mut facts = HashMap::<&str, &FixtureChunk>::new();
+    let mut fact_domains = HashMap::<&str, Option<&str>>::new();
+    let mut fact_collections = HashMap::<&str, &str>::new();
     let mut evidence_keys = HashSet::new();
     let mut has_withdrawn_document = false;
     for document in &fixture.documents {
         validate_identifier(&document.id, "document")?;
+        validate_optional_domain(
+            document.domain.as_deref(),
+            fixture.schema_version,
+            "document",
+        )?;
         ensure!(
             document_ids.insert(document.id.as_str()),
             "duplicate retrieval document id"
@@ -571,6 +931,8 @@ fn validate_fixture_data(fixture: &RetrievalFixture) -> Result<()> {
                 "retrieval facts must have unique title, heading and text tuples"
             );
             facts.insert(chunk.id.as_str(), chunk);
+            fact_domains.insert(chunk.id.as_str(), document.domain.as_deref());
+            fact_collections.insert(chunk.id.as_str(), document.collection_id.as_str());
         }
     }
     ensure!(
@@ -578,13 +940,22 @@ fn validate_fixture_data(fixture: &RetrievalFixture) -> Result<()> {
         "retrieval fixture requires a withdrawn publication"
     );
 
-    let expected_ids = EXPECTED_CASE_IDS.into_iter().collect::<BTreeSet<_>>();
+    let expected_ids = if fixture.schema_version == 1 {
+        V1_EXPECTED_CASE_IDS.into_iter().collect::<BTreeSet<_>>()
+    } else {
+        V2_EXPECTED_CASE_IDS.into_iter().collect::<BTreeSet<_>>()
+    };
     let mut case_ids = BTreeSet::new();
     let mut questions = BTreeSet::new();
     let mut splits = BTreeSet::new();
     let mut tags = BTreeSet::new();
+    let mut regression_domains = BTreeSet::new();
+    let mut calibration_domains = BTreeSet::new();
+    let mut holdout_domains = BTreeSet::new();
+    let mut has_peer_without_grant_case = false;
     for case in &fixture.cases {
         validate_identifier(&case.id, "case")?;
+        validate_optional_domain(case.domain.as_deref(), fixture.schema_version, "case")?;
         ensure!(
             case_ids.insert(case.id.as_str()),
             "duplicate retrieval case id"
@@ -606,6 +977,19 @@ fn validate_fixture_data(fixture: &RetrievalFixture) -> Result<()> {
         );
         tags.extend(case_tags);
         splits.insert(case.split);
+        if let Some(domain) = case.domain.as_deref() {
+            match case.split {
+                RetrievalSplit::Regression => {
+                    regression_domains.insert(domain);
+                }
+                RetrievalSplit::Calibration => {
+                    calibration_domains.insert(domain);
+                }
+                RetrievalSplit::Holdout => {
+                    holdout_domains.insert(domain);
+                }
+            }
+        }
 
         let relevant = validate_fact_references(&case.relevant_fact_ids, &fact_ids, "relevant")?;
         let forbidden = validate_fact_references(&case.forbidden_fact_ids, &fact_ids, "forbidden")?;
@@ -613,9 +997,11 @@ fn validate_fixture_data(fixture: &RetrievalFixture) -> Result<()> {
             case.expected_groups.is_empty() || !relevant.is_empty(),
             "an answerable retrieval case needs relevant facts"
         );
+        let mut expected = BTreeSet::new();
         for group in &case.expected_groups {
             ensure!(!group.is_empty(), "retrieval expected group is empty");
             let group_ids = validate_fact_references(group, &fact_ids, "expected group")?;
+            expected.extend(group_ids.iter().copied());
             ensure!(
                 group_ids.iter().all(|id| relevant.contains(id)),
                 "expected retrieval facts must be relevant"
@@ -640,17 +1026,88 @@ fn validate_fixture_data(fixture: &RetrievalFixture) -> Result<()> {
                 );
             }
         }
+        if fixture.schema_version == FIXTURE_SCHEMA_VERSION {
+            if expected.is_empty() {
+                ensure!(
+                    relevant.is_subset(&forbidden),
+                    "non-answerable relevant facts must be forbidden"
+                );
+            } else {
+                ensure!(
+                    relevant == expected,
+                    "answerable relevant facts must exactly match expected evidence"
+                );
+            }
+            has_peer_without_grant_case |= case.scope == RetrievalScope::TrustedPeer
+                && expected.is_empty()
+                && !relevant.is_empty()
+                && relevant.iter().all(|fact_id| {
+                    fact_collections
+                        .get(fact_id)
+                        .and_then(|collection_id| collection_nodes.get(collection_id))
+                        == Some(&FixtureNode::Peer)
+                        && fact_collections
+                            .get(fact_id)
+                            .and_then(|collection_id| collection_grants.get(collection_id))
+                            == Some(&false)
+                });
+        }
+        if let Some(case_domain) = case.domain.as_deref() {
+            ensure!(
+                relevant.iter().chain(&forbidden).all(|fact_id| {
+                    fact_domains
+                        .get(fact_id)
+                        .is_some_and(|domain| *domain == Some(case_domain))
+                }),
+                "retrieval case references evidence from another domain"
+            );
+        }
     }
     ensure!(case_ids == expected_ids, "retrieval case id set changed");
-    ensure!(
-        splits == BTreeSet::from([RetrievalSplit::Calibration, RetrievalSplit::Holdout]),
-        "retrieval fixture requires calibration and holdout splits"
-    );
+    if fixture.schema_version == 1 {
+        ensure!(
+            splits == BTreeSet::from([RetrievalSplit::Calibration, RetrievalSplit::Holdout]),
+            "retrieval v1 fixture requires calibration and holdout splits"
+        );
+    } else {
+        ensure!(
+            splits
+                == BTreeSet::from([
+                    RetrievalSplit::Regression,
+                    RetrievalSplit::Calibration,
+                    RetrievalSplit::Holdout,
+                ]),
+            "retrieval v2 fixture requires regression, calibration and holdout splits"
+        );
+        ensure!(
+            regression_domains.is_disjoint(&calibration_domains)
+                && regression_domains.is_disjoint(&holdout_domains)
+                && calibration_domains.is_disjoint(&holdout_domains),
+            "retrieval v2 split domains must be pairwise disjoint"
+        );
+        ensure!(
+            has_peer_without_grant_case,
+            "retrieval v2 fixture requires a peer-without-grant case"
+        );
+    }
     for required in REQUIRED_TAGS {
         ensure!(
             tags.contains(&required),
             "retrieval fixture is missing a required tag"
         );
+    }
+    Ok(())
+}
+
+fn validate_optional_domain(domain: Option<&str>, schema_version: u32, kind: &str) -> Result<()> {
+    if schema_version == 1 {
+        ensure!(
+            domain.is_none(),
+            "retrieval v1 {kind} cannot declare a domain"
+        );
+    } else {
+        let domain = domain.context("retrieval v2 item is missing a domain")?;
+        validate_identifier(domain, "domain")?;
     }
     Ok(())
 }
@@ -764,17 +1221,20 @@ fn fixture_providers(fixture: &RetrievalFixture) -> Result<EvaluationProviders> 
         relevant_by_question: Arc::new(relevant_by_question),
     });
     Ok(EvaluationProviders {
+        profile: EvaluationProfile::Current,
         identity: ProviderIdentity {
             embedding_profile: embeddings.model_id().to_owned(),
-            embedding_revision: "synthetic-v1".to_owned(),
+            embedding_revision: format!("synthetic-v{}", fixture.schema_version),
             relevance_profile: relevance.profile_id().to_owned(),
-            relevance_revision: "synthetic-v1".to_owned(),
+            relevance_revision: format!("synthetic-v{}", fixture.schema_version),
             relevance_artifact_filename: None,
             relevance_artifact_sha256: None,
             thread_count: 1,
         },
         embeddings,
         relevance,
+        telemetry: None,
+        startup_ms: None,
     })
 }
 
@@ -814,17 +1274,53 @@ fn normalize_vector(vector: &mut [f32]) {
 async fn run_evaluation(
     loaded: &LoadedFixture,
     providers: EvaluationProviders,
+    phase: EvaluationPhase,
 ) -> Result<RetrievalEvaluationReport> {
     let started = Instant::now();
-    let forward = build_corpus(&loaded.fixture, &providers, false).await?;
-    let reverse = build_corpus(&loaded.fixture, &providers, true).await?;
+    let development_domains = (phase == EvaluationPhase::Development).then(|| {
+        loaded
+            .fixture
+            .cases
+            .iter()
+            .filter(|case| phase.includes(case.split))
+            .filter_map(|case| case.domain.as_deref())
+            .collect::<BTreeSet<_>>()
+    });
+    let forward = build_corpus(
+        &loaded.fixture,
+        &providers,
+        false,
+        development_domains.as_ref(),
+    )
+    .await?;
+    let reverse = build_corpus(
+        &loaded.fixture,
+        &providers,
+        true,
+        development_domains.as_ref(),
+    )
+    .await?;
     let mut case_reports = Vec::with_capacity(loaded.fixture.cases.len());
-    for case in &loaded.fixture.cases {
+    for case in loaded
+        .fixture
+        .cases
+        .iter()
+        .filter(|case| phase.includes(case.split))
+    {
         let case_started = Instant::now();
+        let failures_before = providers
+            .telemetry
+            .as_ref()
+            .map_or(0, |telemetry| telemetry.failure_count());
         let baseline = run_case(&forward, case, TOP_K).await?;
         let repeated = run_case(&forward, case, TOP_K).await?;
         let expanded = run_case(&forward, case, MAX_TOP_K).await?;
         let reversed = run_case(&reverse, case, TOP_K).await?;
+        let provider_failure_count = providers
+            .telemetry
+            .as_ref()
+            .map_or(0, |telemetry| telemetry.failure_count())
+            .saturating_sub(failures_before);
         case_reports.push(score_case(
             case,
             baseline,
@@ -832,8 +1328,14 @@ async fn run_evaluation(
             expanded,
             reversed,
             case_started.elapsed().as_millis(),
+            provider_failure_count,
         ));
     }
+    let regression = aggregate_metrics(
+        case_reports
+            .iter()
+            .filter(|report| report.split == RetrievalSplit::Regression),
+    );
     let calibration = aggregate_metrics(
         case_reports
             .iter()
@@ -845,15 +1347,33 @@ async fn run_evaluation(
             .filter(|report| report.split == RetrievalSplit::Holdout),
     );
     let total = aggregate_metrics(case_reports.iter());
-    let passed = split_passes(&calibration) && split_passes(&holdout);
+    let passed = if loaded.fixture.schema_version == 1 {
+        split_passes(&calibration) && split_passes(&holdout)
+    } else {
+        let development_passed = regression_cases_pass(&case_reports)
+            && split_passes(&regression)
+            && split_passes(&calibration);
+        development_passed && (phase == EvaluationPhase::Development || split_passes(&holdout))
+    };
+    let candidate_fingerprint = candidate_fingerprint(&providers.identity);
+    let provider_telemetry = providers
+        .telemetry
+        .as_ref()
+        .map(|telemetry| telemetry.report());
     Ok(RetrievalEvaluationReport {
         schema_version: REPORT_SCHEMA_VERSION,
         fixture_sha256: loaded.sha256.clone(),
+        phase,
+        candidate_fingerprint,
+        profile: providers.profile,
         target_os: std::env::consts::OS.to_owned(),
         target_arch: std::env::consts::ARCH.to_owned(),
         provider: providers.identity,
         top_k: TOP_K,
         elapsed_ms: started.elapsed().as_millis(),
+        startup_ms: providers.startup_ms,
+        provider_telemetry,
+        regression,
         calibration,
         holdout,
         total,
@@ -866,6 +1386,7 @@ async fn build_corpus(
     fixture: &RetrievalFixture,
     providers: &EvaluationProviders,
     reverse_documents: bool,
+    included_domains: Option<&BTreeSet<&str>>,
 ) -> Result<FixtureCorpus> {
     let origin_database = Database::in_memory()?;
     let peer_database = Database::in_memory()?;
@@ -931,7 +1452,14 @@ async fn build_corpus(
     } else {
         Box::new(fixture.documents.iter())
     };
-    for document in documents {
+    for document in documents.filter(|document| {
+        included_domains.is_none_or(|domains| {
+            document
+                .domain
+                .as_deref()
+                .is_some_and(|domain| domains.contains(domain))
+        })
+    }) {
         let collection = fixture
             .collections
             .iter()
@@ -1199,6 +1727,7 @@ fn score_case(
     expanded: NormalizedRun,
     reversed: NormalizedRun,
     elapsed_ms: u128,
+    provider_failure_count: u32,
 ) -> RetrievalCaseReport {
     let repeat_stable = baseline == repeated;
     let top_k_prefix_stable = run_is_prefix(&baseline, &expanded);
@@ -1283,6 +1812,7 @@ fn score_case(
         && repeat_stable
         && top_k_prefix_stable
         && insertion_order_stable;
+    let passed = passed && provider_failure_count == 0;
     RetrievalCaseReport {
         id: case.id.clone(),
         split: case.split,
@@ -1300,6 +1830,7 @@ fn score_case(
         top_k_prefix_stable,
         insertion_order_stable,
         elapsed_ms,
+        provider_failure_count,
         passed,
     }
 }
@@ -1346,6 +1877,9 @@ fn aggregate_metrics<'a>(
         if !report.repeat_stable || !report.top_k_prefix_stable || !report.insertion_order_stable {
             metrics.unstable_case_count = metrics.unstable_case_count.saturating_add(1);
         }
+        metrics.provider_failure_count = metrics
+            .provider_failure_count
+            .saturating_add(report.provider_failure_count);
         if report.expected_group_count > 0 {
             reciprocal_rank_sum += report.reciprocal_rank_at_five.unwrap_or(0.0);
             reciprocal_rank_count = reciprocal_rank_count.saturating_add(1);
@@ -1367,6 +1901,34 @@ fn split_passes(metrics: &AggregateMetrics) -> bool {
         && metrics.provenance_error_count == 0
         && metrics.duplicate_violation_count == 0
         && metrics.unstable_case_count == 0
+        && metrics.provider_failure_count == 0
+}
+
+fn regression_cases_pass(reports: &[RetrievalCaseReport]) -> bool {
+    reports
+        .iter()
+        .filter(|report| report.split == RetrievalSplit::Regression)
+        .all(|report| report.passed)
+}
+
+fn candidate_fingerprint(identity: &ProviderIdentity) -> String {
+    let mut hasher = Sha256::new();
+    for value in [
+        identity.embedding_profile.as_str(),
+        identity.embedding_revision.as_str(),
+        identity.relevance_profile.as_str(),
+        identity.relevance_revision.as_str(),
+        identity
+            .relevance_artifact_filename
+            .as_deref()
+            .unwrap_or(""),
+        identity.relevance_artifact_sha256.as_deref().unwrap_or(""),
+    ] {
+        hasher.update(value.as_bytes());
+        hasher.update([0]);
+    }
+    hasher.update(identity.thread_count.to_le_bytes());
+    hex::encode(hasher.finalize())
 }
 
 fn validate_model_revisions() -> Result<()> {
@@ -1381,16 +1943,18 @@ fn validate_model_revisions() -> Result<()> {
     Ok(())
 }
 
-fn report_path() -> PathBuf {
+fn report_path(profile: EvaluationProfile, phase: EvaluationPhase) -> PathBuf {
     workspace_root().join(REPORT_DIRECTORY).join(format!(
-        "retrieval-pipeline-{}-{}.json",
+        "retrieval-pipeline-v2-{}-{}-{}-{}.json",
+        profile.label(),
+        phase.label(),
         std::env::consts::OS,
         std::env::consts::ARCH
     ))
 }
 
 fn write_report(report: &RetrievalEvaluationReport) -> Result<PathBuf> {
-    let destination = report_path();
+    let destination = report_path(report.profile, report.phase);
     let parent = destination
         .parent()
         .context("retrieval report has no parent")?;
@@ -1408,14 +1972,189 @@ fn write_report(report: &RetrievalEvaluationReport) -> Result<PathBuf> {
 mod tests {
     use super::*;
 
+    #[derive(Debug)]
+    struct InvalidRelevanceProvider;
+
+    #[async_trait]
+    impl EvidenceRelevanceProvider for InvalidRelevanceProvider {
+        fn profile_id(&self) -> &str {
+            "invalid-test-provider"
+        }
+
+        async fn classify(
+            &self,
+            _question: &str,
+            _candidates: &[RelevanceInput],
+        ) -> std::result::Result<Vec<EvidenceDecision>, EvidenceRelevanceError> {
+            Err(EvidenceRelevanceError::InvalidOutput)
+        }
+    }
+
     #[tokio::test]
     async fn deterministic_fixture_exercises_the_complete_retrieval_pipeline() {
         let loaded = load_fixture().unwrap();
         let providers = fixture_providers(&loaded.fixture).unwrap();
 
-        let report = run_evaluation(&loaded, providers).await.unwrap();
+        let report = run_evaluation(&loaded, providers, EvaluationPhase::Final)
+            .await
+            .unwrap();
 
         assert!(report.passed, "deterministic retrieval report: {report:#?}");
+        assert!(report.holdout.case_count > 0);
+    }
+
+    #[tokio::test]
+    async fn observed_provider_fails_closed_and_records_sanitized_failure() {
+        let telemetry = Arc::new(EvaluationTelemetry::default());
+        let provider = ObservedRelevanceProvider {
+            inner: Arc::new(InvalidRelevanceProvider),
+            telemetry: Arc::clone(&telemetry),
+        };
+        let candidates = [RelevanceInput {
+            title: "title".to_owned(),
+            heading: "heading".to_owned(),
+            text: "synthetic evidence".to_owned(),
+        }];
+
+        let decisions = provider.classify("question", &candidates).await.unwrap();
+        let report = telemetry.report();
+
+        assert_eq!(decisions, vec![EvidenceDecision::Irrelevant]);
+        assert_eq!(report.call_count, 1);
+        assert_eq!(report.failure_count, 1);
+        assert_eq!(report.invalid_output_count, 1);
+    }
+
+    #[tokio::test]
+    async fn development_evaluation_does_not_read_or_report_holdout() {
+        let loaded = load_fixture().unwrap();
+        let providers = fixture_providers(&loaded.fixture).unwrap();
+
+        let report = run_evaluation(&loaded, providers, EvaluationPhase::Development)
+            .await
+            .unwrap();
+
+        assert_eq!(report.phase, EvaluationPhase::Development);
+        assert_eq!(report.holdout.case_count, 0);
+        assert!(
+            report
+                .cases
+                .iter()
+                .all(|case| case.split != RetrievalSplit::Holdout)
+        );
+
+        let development_domains = loaded
+            .fixture
+            .cases
+            .iter()
+            .filter(|case| case.split != RetrievalSplit::Holdout)
+            .filter_map(|case| case.domain.as_deref())
+            .collect::<BTreeSet<_>>();
+        let holdout_fact_ids = loaded
+            .fixture
+            .documents
+            .iter()
+            .filter(|document| {
+                document
+                    .domain
+                    .as_deref()
+                    .is_some_and(|domain| !development_domains.contains(domain))
+            })
+            .flat_map(|document| document.chunks.iter().map(|chunk| chunk.id.as_str()))
+            .collect::<BTreeSet<_>>();
+        let corpus = build_corpus(
+            &loaded.fixture,
+            &fixture_providers(&loaded.fixture).unwrap(),
+            false,
+            Some(&development_domains),
+        )
+        .await
+        .unwrap();
+        assert!(
+            corpus
+                .facts_by_provenance
+                .values()
+                .all(|fact| !holdout_fact_ids.contains(fact.id.as_str()))
+        );
+    }
+
+    #[test]
+    fn v1_fixture_remains_valid() {
+        let loaded = load_fixture_at(V1_FIXTURE_PATH).unwrap();
+
+        assert_eq!(loaded.fixture.schema_version, 1);
+    }
+
+    #[test]
+    fn v2_fixture_rejects_overlapping_split_domains() {
+        let mut loaded = load_fixture().unwrap();
+        let case = loaded
+            .fixture
+            .cases
+            .iter_mut()
+            .find(|case| case.id == "calibration_aurora_owner")
+            .unwrap();
+        case.domain = Some("atlas_acceptance".to_owned());
+        let document = loaded
+            .fixture
+            .documents
+            .iter_mut()
+            .find(|document| document.id == "aurora_coordination")
+            .unwrap();
+        document.domain = Some("atlas_acceptance".to_owned());
+
+        let error = validate_fixture_data(&loaded.fixture).unwrap_err();
+
+        assert!(error.to_string().contains("pairwise disjoint"));
+    }
+
+    #[test]
+    fn v2_fixture_rejects_cross_domain_evidence() {
+        let mut loaded = load_fixture().unwrap();
+        let case = loaded
+            .fixture
+            .cases
+            .iter_mut()
+            .find(|case| case.id == "holdout_harbor_owner_cross_language")
+            .unwrap();
+        case.domain = Some("quasar_security".to_owned());
+
+        let error = validate_fixture_data(&loaded.fixture).unwrap_err();
+
+        assert!(error.to_string().contains("another domain"));
+    }
+
+    #[test]
+    fn v2_fixture_rejects_related_but_non_answering_evidence() {
+        let mut loaded = load_fixture().unwrap();
+        let case = loaded
+            .fixture
+            .cases
+            .iter_mut()
+            .find(|case| case.id == "regression_atlas_unrelated_injection")
+            .unwrap();
+        case.relevant_fact_ids
+            .push("atlas_recovery_rollback".to_owned());
+
+        let error = validate_fixture_data(&loaded.fixture).unwrap_err();
+
+        assert!(error.to_string().contains("exactly match"));
+    }
+
+    #[test]
+    fn v2_fixture_requires_a_peer_without_grant_case() {
+        let mut loaded = load_fixture().unwrap();
+        let collection = loaded
+            .fixture
+            .collections
+            .iter_mut()
+            .find(|collection| collection.id == "peer_ungranted")
+            .unwrap();
+        collection.granted_to_origin = true;
+
+        let error = validate_fixture_data(&loaded.fixture).unwrap_err();
+
+        assert!(error.to_string().contains("peer-without-grant"));
     }
 
     #[test]
@@ -1434,6 +2173,9 @@ mod tests {
         let report = RetrievalEvaluationReport {
             schema_version: REPORT_SCHEMA_VERSION,
             fixture_sha256: loaded.sha256,
+            phase: EvaluationPhase::Development,
+            candidate_fingerprint: "candidate".to_owned(),
+            profile: EvaluationProfile::Current,
             target_os: "test".to_owned(),
             target_arch: "test".to_owned(),
             provider: ProviderIdentity {
@@ -1447,6 +2189,9 @@ mod tests {
             },
             top_k: TOP_K,
             elapsed_ms: 0,
+            startup_ms: None,
+            provider_telemetry: None,
+            regression: AggregateMetrics::default(),
             calibration: AggregateMetrics::default(),
             holdout: AggregateMetrics::default(),
             total: AggregateMetrics::default(),
@@ -1459,15 +2204,70 @@ mod tests {
         for forbidden in [
             "question",
             "snippet",
+            "quote",
             "source_sha256",
             "logical_resource_uri",
             "node_id",
             "peer_id",
             "multiaddress",
             "source_path",
+            "endpoint",
+            "bearer_token",
+            "data_root",
+            "llama_server",
         ] {
             assert!(!serialized.contains(forbidden));
         }
+    }
+
+    #[test]
+    fn provider_failure_cannot_make_an_absence_case_pass() {
+        let case = FixtureCase {
+            id: "absence_case".to_owned(),
+            domain: Some("absence_domain".to_owned()),
+            split: RetrievalSplit::Calibration,
+            tags: vec![RetrievalTag::Absence],
+            scope: RetrievalScope::Local,
+            question: "synthetic absence".to_owned(),
+            semantic_keys: vec!["absence".to_owned()],
+            relevant_fact_ids: Vec::new(),
+            expected_groups: Vec::new(),
+            forbidden_fact_ids: Vec::new(),
+        };
+        let empty = NormalizedRun {
+            sources: Vec::new(),
+            provenance_errors: 0,
+        };
+
+        let report = score_case(
+            &case,
+            empty.clone(),
+            empty.clone(),
+            empty.clone(),
+            empty,
+            0,
+            1,
+        );
+
+        assert!(!report.passed);
+        assert_eq!(report.provider_failure_count, 1);
+    }
+
+    #[test]
+    fn candidate_fingerprint_changes_with_the_selector_policy() {
+        let mut first = ProviderIdentity {
+            embedding_profile: "embedding".to_owned(),
+            embedding_revision: "revision".to_owned(),
+            relevance_profile: "selector-v1".to_owned(),
+            relevance_revision: "model-revision".to_owned(),
+            relevance_artifact_filename: Some("model.gguf".to_owned()),
+            relevance_artifact_sha256: Some("artifact".to_owned()),
+            thread_count: 4,
+        };
+        let first_fingerprint = candidate_fingerprint(&first);
+        first.relevance_profile = "selector-v2".to_owned();
+
+        assert_ne!(first_fingerprint, candidate_fingerprint(&first));
     }
 
     #[test]
@@ -1490,6 +2290,7 @@ mod tests {
                 top_k_prefix_stable: true,
                 insertion_order_stable: true,
                 elapsed_ms: 0,
+                provider_failure_count: 0,
                 passed: reciprocal_rank.is_some(),
             }
         }
@@ -1498,6 +2299,40 @@ mod tests {
         let metrics = aggregate_metrics(reports.iter());
 
         assert_eq!(metrics.mean_reciprocal_rank_at_five, Some(0.5));
+    }
+
+    #[test]
+    fn every_regression_case_must_pass_individually() {
+        fn report(id: &str, split: RetrievalSplit, passed: bool) -> RetrievalCaseReport {
+            RetrievalCaseReport {
+                id: id.to_owned(),
+                split,
+                tags: vec![RetrievalTag::Direct],
+                expected_group_count: 1,
+                found_group_count: u32::from(passed),
+                reciprocal_rank_at_five: passed.then_some(1.0),
+                returned_fact_ids: Vec::new(),
+                missing_group_count: u32::from(!passed),
+                unexpected_fact_ids: Vec::new(),
+                forbidden_fact_ids: Vec::new(),
+                provenance_error_count: 0,
+                duplicate_violation_count: 0,
+                repeat_stable: true,
+                top_k_prefix_stable: true,
+                insertion_order_stable: true,
+                elapsed_ms: 0,
+                provider_failure_count: 0,
+                passed,
+            }
+        }
+
+        let reports = [
+            report("regression_pass", RetrievalSplit::Regression, true),
+            report("regression_fail", RetrievalSplit::Regression, false),
+            report("calibration_fail", RetrievalSplit::Calibration, false),
+        ];
+
+        assert!(!regression_cases_pass(&reports));
     }
 
     #[test]

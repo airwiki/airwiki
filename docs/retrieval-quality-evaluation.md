@@ -16,13 +16,36 @@ contract.
 
 ## Scope
 
-The schema-v1 fixture at `fixtures/retrieval/search-quality-v1.json` has
-SHA-256
+The active schema-v2 fixture at
+`fixtures/retrieval/search-quality-v2.json` has SHA-256
+`2b83ffb0939b4e91a9fdb799d92a4b6ed4e4f775298694c5b9abe3761a2f52f6`.
+Its 17 cases cover direct and paraphrased retrieval, cross-language and compound
+questions, absent and withdrawn facts, contradictions, common-name ambiguity,
+prompt injection, near duplicates, peer grants, external-chat policy and stable
+ordering.
+
+V2 separates cases by their permitted use:
+
+- `regression` contains the five observed failures from the initial v1 run;
+- `calibration` is a development/tuning split containing reviewed examples that
+  may guide model selection or a decision policy; its name does not imply that
+  the profile measures probabilistic calibration; and
+- `holdout` contains Harbor, library, sensor and Quasar transfer domains.
+
+Every document and case declares a domain. The validator requires regression,
+calibration and holdout domains to be pairwise disjoint and rejects a case that
+references evidence outside its own domain. If a holdout result guides an
+implementation change, that holdout is no longer unobserved and a future
+profile must reserve new domains rather than relabel the same examples. The v2
+holdout was observed during the initial baseline audit on 2026-07-17, so it is
+now diagnostic transfer evidence and **cannot** approve a production profile.
+A future final evaluation must introduce fresh structural domains after the
+candidate model, prompt and decision policy are frozen.
+
+The original schema-v1 fixture remains unchanged at
+`fixtures/retrieval/search-quality-v1.json` with SHA-256
 `accd40d8473ad499469c0fd105eec9f34d70f660c9bdada1254d2325f609e727`.
-Its 13 calibration and holdout cases cover direct and paraphrased retrieval,
-cross-language and compound questions, absent and withdrawn facts,
-contradictions, common-name ambiguity, prompt injection, near duplicates,
-authorization, external-chat policy and stable ordering.
+It preserves the initial measurement and is not the active acceptance corpus.
 
 The evaluator builds temporary origin and peer databases and uses the production
 publication and search interfaces. It covers:
@@ -45,6 +68,45 @@ The evaluator does not cover file parsing, generative enrichment, network
 transport, pairing UX, chat-client synthesis or installed-platform behavior.
 Those boundaries retain their focused tests and manual acceptance paths.
 
+## Evidence basis
+
+The current candidate stage intentionally remains BM25 plus multilingual E5,
+followed by RRF with `k=60`. Multilingual E5 was evaluated on multilingual and
+cross-lingual retrieval benchmarks, while the original RRF study shows why
+combining ranks avoids comparing arbitrary scores from heterogeneous retrievers
+([Wang et al., 2024](https://arxiv.org/abs/2402.05672),
+[Cormack et al., 2009](https://cormack.uwaterloo.ca/cormacksigir09-rrf.pdf)).
+RRF `k=60` is a literature-motivated baseline, not a claim that the value is
+optimal for AirWiki. Before changing this stage, a promotion profile must report
+pre-selector candidate Recall@10 separately from selector errors.
+
+Answerability is a separate selective-prediction problem. SQuAD 2.0 established
+that a system must abstain when a similar-looking passage does not state an
+answer, and selective-QA research shows that raw model confidence is unreliable
+under domain shift
+([Rajpurkar et al., 2018](https://aclanthology.org/P18-2124/),
+[Kamath et al., 2020](https://aclanthology.org/2020.acl-main.503/)). Neural
+scores are also not probabilities without calibration
+([Guo et al., 2017](https://proceedings.mlr.press/v70/guo17a.html)). For that
+reason, AirWiki does not promote another reranking threshold merely because it
+improves a known example. This small synthetic corpus is a regression and
+privacy gate, not statistical evidence of calibration. Production promotion
+also requires a fresh, larger domain-separated profile that reports selective
+risk and coverage with uncertainty, plus fail-closed behavior on malformed
+output.
+
+Model selection uses only regression and calibration domains. Repeatedly using
+a test set for selection biases the reported result, so final domains are used
+once after freezing the candidate
+([Cawley and Talbot, 2010](https://www.jmlr.org/papers/v11/cawley10a.html)).
+Prompt-injection passages remain adversarial data rather than instructions;
+deterministic validation and authorization remain the security boundary because
+prompt-only defenses are insufficient
+([Liu et al., 2024](https://www.usenix.org/conference/usenixsecurity24/presentation/liu-yupei)).
+Passing the included attacks is a regression result, not a robustness guarantee;
+a final security profile must report false-selection or attack-success rates
+across multiple indirect-injection variants.
+
 ## Deterministic CI validation
 
 Ordinary CI uses fixture embedding and relevance providers. It downloads no
@@ -60,22 +122,59 @@ claim about the quality of the shipped embedding and relevance artifacts.
 ## Real-model evaluation
 
 A maintainer can evaluate the current profile with already verified local
-snapshots of multilingual E5 and mMARCO:
+snapshots of multilingual E5 and mMARCO. Development mode excludes both holdout
+cases and holdout documents:
 
 ```bash
 cargo run --locked -p xtask -- retrieval evaluate \
+  --phase development \
   --embedding-snapshot <verified-e5-snapshot-directory> \
   --relevance-snapshot <verified-mmarco-snapshot-directory>
 ```
 
 No evaluation command downloads models. A run is platform-specific and writes
-`target/evals/retrieval-pipeline-<os>-<arch>.json` whether it passes or fails.
-The command exits unsuccessfully when the measured profile misses an acceptance
-threshold.
+`target/evals/retrieval-pipeline-v2-current-development-<os>-<arch>.json`
+whether it passes or fails. The command exits unsuccessfully when the measured
+profile misses an acceptance threshold. Final mode is deliberately rejected for
+the active fixture because its former holdout has already been observed.
+
+### Generative-selector experiment
+
+Maintainers can compare the current relevance model with a strict local
+generative selector without changing the desktop or production search path. The
+experiment accepts only assets already pinned and verified by AirWiki:
+
+```bash
+cargo run --locked -p xtask -- retrieval evaluate-selector \
+  --phase development \
+  --data-root <verified-AirWiki-data-root> \
+  --llama-server <verified-bundled-llama-server> \
+  --model-id gemma-4-e4b-q4
+```
+
+The model must identify one to four atomic information needs and return an exact
+quote from every selected candidate. Rust rejects unknown fields, unknown or
+duplicate candidate identifiers, invented quotes and oversized quotes. Candidate
+content is untrusted data, not an authorization boundary. Invalid output fails
+the affected case and returns no evidence. Exact substring validation proves
+provenance integrity only; it does not by itself prove that the quote entails the
+answer. A production gate must add reviewed support spans or an equivalent
+grounded-support check.
+
+The selector exists only in `xtask`. A development-quality pass cannot promote
+it into `airwiki-core` or the desktop. Promotion first requires a fresh final
+profile plus installed macOS and Windows measurements that satisfy production
+latency, memory and shutdown budgets. It must also pass a maximum-size candidate
+payload profile: the development fixture intentionally does not prove behavior
+for ten maximum-length snippets within the generation context budget. Its report
+is written to
+`target/evals/retrieval-pipeline-v2-selector-development-<os>-<arch>.json`.
 
 ## Metrics and acceptance
 
-Each calibration and holdout split must independently satisfy:
+Every regression case must pass individually so aggregate recall cannot hide a
+known failure. In addition, each regression, calibration and holdout split must
+independently satisfy:
 
 - Recall@5 of at least 0.90 across expected evidence groups;
 - zero unexpected evidence facts;
@@ -85,21 +184,31 @@ Each calibration and holdout split must independently satisfy:
 - stable repeated results, stable top-5 prefixes and stable results after
   reversing insertion order.
 
-MRR@5 uses the first returned member of an expected evidence group. Every
-answerable case is included in the denominator, and a miss contributes zero.
-MRR@5 and elapsed time are diagnostics rather than acceptance thresholds.
+The report's MRR@5 field is first-evidence reciprocal rank: it uses the first
+returned member of any expected evidence group. Every answerable case is
+included in the denominator, and a miss contributes zero. It does not measure
+completion of every need in a compound question; the all-groups pass condition
+does. MRR@5 and elapsed time are diagnostics rather than acceptance thresholds.
+Promotion also requires separate platform-specific latency and memory gates;
+quality success on macOS cannot waive the Windows CPU budget or the LAN/MCP
+deadlines.
 
 ## Report privacy
 
-The JSON report contains fixture and artifact identity, target platform, thread
-count, aggregate metrics, synthetic case and fact identifiers, stability flags,
-elapsed times and PASS/FAIL. It contains no question or passage text, snippets,
-source-document paths, source-document hashes, local usernames, peer identities,
-IP addresses, ports or multiaddresses. Reports remain ignored under `target/`;
-maintainer evidence should retain only the aggregate fields allowed by
+The JSON report is written as
+`target/evals/retrieval-pipeline-v2-<profile>-<phase>-<os>-<arch>.json`. It
+contains the evaluation phase, a candidate fingerprint, fixture and artifact
+identity, target platform, thread count, per-split aggregate metrics, synthetic
+case and fact identifiers, stability flags, elapsed times and PASS/FAIL. A
+selector report additionally contains only aggregate call counts, sanitized
+failure categories and p50, p95 and maximum call latency. It contains no
+question or passage text, generated needs or quotes, snippets, source-document
+paths, source-document hashes, local usernames, peer identities, IP addresses,
+ports, endpoints, tokens or multiaddresses. Reports remain ignored under
+`target/`; maintainer evidence should retain only the aggregate fields allowed by
 [the validation-record policy](maintainer-validation.md).
 
-## Initial platform observation
+## Initial v1 platform observation
 
 The first macOS arm64 observation on 2026-07-16 used the pinned E5 revision
 `614241f622f53c4eeff9890bdc4f31cfecc418b3` and mMARCO revision
@@ -118,11 +227,71 @@ The failing case identifiers were `calibration_paraphrase_recovery`,
 are synthetic diagnostics and contain no question or document content.
 
 The current real-model profile therefore **fails** this retrieval-quality gate.
-The result establishes an honest baseline: the authorization, provenance,
+The result established an honest baseline: the authorization, provenance,
 deduplication and stability boundaries held, while retrieval completeness and
-false-evidence control need focused improvement. This goal does not tune the
-fixture, add query decomposition, introduce another model or change product
-protocols merely to turn that observation green.
+false-evidence control needed focused improvement. It did not by itself justify
+tuning the fixture or changing product protocols merely to turn the observation
+green.
+
+These measurements apply only to schema v1.
+
+## Corrected v2 development observation
+
+The macOS arm64 development run on 2026-07-17 used the same pinned E5 and
+mMARCO revisions against the corrected schema-v2 corpus. Its immutable candidate
+fingerprint was
+`2b83cc6fb163da61ccce78bc10448dfed82230e5484db8027d26e117c0dfc9be`. It
+produced:
+
+- regression Recall@5: 0.50 and MRR@5: 0.75;
+- calibration Recall@5 and MRR@5: 1.00;
+- overall Recall@5: 0.70 and MRR@5: 0.8571;
+- three false-evidence facts, all in observed regression cases;
+- zero forbidden-evidence, provenance, duplicate, stability or provider
+  failures; and
+- 3.657 seconds of aggregate evaluator time, excluding process compilation and
+  model initialization.
+
+The failing regression identifiers were
+`regression_atlas_paraphrase_recovery`,
+`regression_atlas_compound_federated`,
+`regression_atlas_external_ai_policy` and
+`regression_atlas_unrelated_injection`. Calibration success therefore does not
+hide the known failures, and the current profile remains rejected.
 
 Windows real-model evaluation is pending. A macOS result must never be used to
 infer the behavior of the Windows artifacts.
+
+## Generative-selector development observations
+
+Two Gemma 4 E4B Q4 policies were evaluated on macOS arm64 on 2026-07-17. Both
+used temperature zero, a 4,096-token context, a 30-second call timeout and the
+same schema-v2 development corpus. Neither was evaluated on the disqualified
+holdout or promoted into product code.
+
+The strict exact-quote policy with candidate fingerprint
+`967118cd5c6896878dd8d454a1317c2e0b150125720bcdb407116482cf55f5d0`
+produced:
+
+- regression, calibration and overall Recall@5: 1.00;
+- two false-evidence facts across two regression cases;
+- zero provider, forbidden-evidence, provenance, duplicate or stability
+  failures;
+- 60 model calls with p50 4.575 seconds, p95 14.170 seconds and maximum 17.756
+  seconds; and
+- 263.271 seconds of aggregate evaluator time plus 8.597 seconds of model
+  startup.
+
+A second policy required an explicit evidence-to-need mapping and preserved
+more query qualifiers. Its candidate fingerprint was
+`2eaa686a61bfca1d1fa0e42de35123bd4f91060bc15e77fe55c6910c7bf254b4`.
+It retained Recall@5 of 1.00 but increased false evidence from two facts to three
+and slowed calls to p50 6.177 seconds, p95 19.068 seconds and maximum 23.239
+seconds. It was rejected and the first policy remains only the better
+experimental baseline.
+
+These runs show that generative selection can recover evidence missed by the
+current mMARCO gate, but neither policy meets AirWiki's zero-false-evidence rule
+or interactive latency budget. The result does not justify a Windows run,
+because the macOS process alone used approximately 4.8 GiB of resident memory
+during the second experiment. Production search remains unchanged.

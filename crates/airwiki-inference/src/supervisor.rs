@@ -247,8 +247,23 @@ impl LlamaSupervisor {
     pub async fn stop(&self) -> Result<()> {
         let mut state = self.inner.state.lock().await;
         if let Some(mut server) = state.take() {
-            server.child.kill().await.ok();
-            server.child.wait().await.ok();
+            if server
+                .child
+                .try_wait()
+                .context("failed to inspect llama-server before shutdown")?
+                .is_none()
+            {
+                server
+                    .child
+                    .kill()
+                    .await
+                    .context("failed to terminate llama-server")?;
+            }
+            server
+                .child
+                .wait()
+                .await
+                .context("failed to reap llama-server")?;
             info!("llama-server stopped");
         }
         Ok(())

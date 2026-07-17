@@ -25,6 +25,7 @@ All notable user-visible changes to AirWiki will be documented here. The project
 - Showed the local-model recommendation while private services finish starting on fresh installs, without weakening asset verification.
 - Made the desktop layout responsive down to its explicit minimum size, keeping primary actions visible and limiting scrolling to bounded lists and detail panels.
 - Made the first-run journey recoverable with visible processing counts, actionable terminal states, a truthful Wiki-health timestamp, and an explicit way to finish after a search returns no evidence.
+- Separated retrieval development cases from disqualified holdout domains and added a fail-closed local selector experiment; production search remains unchanged because the measured candidate missed false-evidence and latency gates.
 
 ### Fixed
 

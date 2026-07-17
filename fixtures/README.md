@@ -14,9 +14,13 @@ or personal information.
 - `relevance/answerability.json`: schema-v2 relevance corpus with calibration,
   holdout, missing facts, contradictions, prompt injection, and cross-language
   cases.
-- `retrieval/search-quality-v1.json`: schema-v1 source-side retrieval corpus for
-  local and federated scopes, policy, provenance, deduplication, stability and
-  honest abstention.
+- `retrieval/search-quality-v1.json`: immutable initial source-side retrieval
+  baseline retained for reproducibility.
+- `retrieval/search-quality-v2.json`: active source-side retrieval corpus with
+  separate regression, calibration and domain-disjoint transfer cases for local
+  and federated scopes, policy, grants, provenance, deduplication, stability and
+  honest abstention. Its former holdout has been observed and cannot approve a
+  production profile; final promotion requires fresh domains.
 
 The expected federated question asks how Atlas is recovered, who is responsible,
 and the target date. A correct answer combines the Mac procedure with the
@@ -52,6 +56,7 @@ snapshots:
 
 ```bash
 cargo run --locked -p xtask -- retrieval evaluate \
+  --phase development \
   --embedding-snapshot <verified-e5-snapshot-directory> \
   --relevance-snapshot <verified-mmarco-snapshot-directory>
 ```

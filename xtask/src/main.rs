@@ -166,8 +166,16 @@ async fn main() -> Result<()> {
             }
             Some("evaluate") => {
                 ensure!(
+                    arguments.next().as_deref() == Some("--phase"),
+                    "retrieval evaluate expects `--phase development|final` first"
+                );
+                let phase = arguments
+                    .next()
+                    .context("retrieval evaluate is missing the evaluation phase")?;
+                let phase = retrieval::EvaluationPhase::parse(&phase)?;
+                ensure!(
                     arguments.next().as_deref() == Some("--embedding-snapshot"),
-                    "retrieval evaluate expects `--embedding-snapshot <path>` first"
+                    "retrieval evaluate expects `--embedding-snapshot <path>` after the phase"
                 );
                 let embedding_snapshot = arguments
                     .next()
@@ -184,13 +192,58 @@ async fn main() -> Result<()> {
                     "retrieval evaluate received unexpected arguments"
                 );
                 retrieval::evaluate(
+                    phase,
                     Path::new(&embedding_snapshot),
                     Path::new(&relevance_snapshot),
                 )
                 .await
             }
+            Some("evaluate-selector") => {
+                ensure!(
+                    arguments.next().as_deref() == Some("--phase"),
+                    "retrieval evaluate-selector expects `--phase development` first"
+                );
+                let phase = arguments
+                    .next()
+                    .context("retrieval evaluate-selector is missing the evaluation phase")?;
+                let phase = retrieval::EvaluationPhase::parse(&phase)?;
+                ensure!(
+                    arguments.next().as_deref() == Some("--data-root"),
+                    "retrieval evaluate-selector expects `--data-root <path>` after the phase"
+                );
+                let data_root = arguments
+                    .next()
+                    .context("retrieval evaluate-selector is missing the data root")?;
+                ensure!(
+                    arguments.next().as_deref() == Some("--llama-server"),
+                    "retrieval evaluate-selector expects `--llama-server <path>` after the data root"
+                );
+                let llama_server = arguments
+                    .next()
+                    .context("retrieval evaluate-selector is missing llama-server")?;
+                ensure!(
+                    arguments.next().as_deref() == Some("--model-id"),
+                    "retrieval evaluate-selector expects `--model-id <catalog-id>` last"
+                );
+                let model_id = arguments
+                    .next()
+                    .context("retrieval evaluate-selector is missing the model ID")?;
+                ensure!(
+                    arguments.next().is_none(),
+                    "retrieval evaluate-selector received unexpected arguments"
+                );
+                retrieval::evaluate_selector(
+                    phase,
+                    Path::new(&data_root),
+                    Path::new(&llama_server),
+                    &model_id,
+                )
+                .await
+            }
             Some(other) => bail!("unknown retrieval command: {other}"),
-            None => bail!("missing retrieval command; expected `validate` or `evaluate`"),
+            None => bail!(
+                "missing retrieval command; expected `validate`, `evaluate` or `evaluate-selector`"
+            ),
         },
         "licenses" => match arguments.next().as_deref() {
             Some("generate") => generate_licenses(false),
@@ -243,7 +296,10 @@ async fn main() -> Result<()> {
             println!("cargo run --locked -p xtask -- relevance evaluate --snapshot <directory>");
             println!("cargo run --locked -p xtask -- retrieval validate");
             println!(
-                "cargo run --locked -p xtask -- retrieval evaluate --embedding-snapshot <directory> --relevance-snapshot <directory>"
+                "cargo run --locked -p xtask -- retrieval evaluate --phase development|final --embedding-snapshot <directory> --relevance-snapshot <directory>"
+            );
+            println!(
+                "cargo run --locked -p xtask -- retrieval evaluate-selector --phase development --data-root <directory> --llama-server <path> --model-id <catalog-id>"
             );
             println!("cargo run --locked -p xtask -- licenses generate");
             println!("cargo run --locked -p xtask -- licenses check");

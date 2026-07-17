@@ -437,6 +437,11 @@ knowledge-concept-fallback = Concepto { $id }
 knowledge-error-wrong-collection = El proceso en segundo plano devolvió un bundle para otra carpeta.
 knowledge-error-generic = No se pudo cargar esta vista publicada. Abre los detalles técnicos para diagnosticarla.
 knowledge-snapshot-changed = La Wiki cambió durante la lectura; se está cargando el snapshot nuevo.
+knowledge-search-evidence-title = Abierto desde Búsqueda
+knowledge-search-evidence-locator = Ubicación en la fuente: { $location } · Revisión { $revision }
+knowledge-search-evidence-location-unknown = Fuente publicada
+knowledge-search-evidence-help = Esta ubicación pertenece a la fuente revisada que respalda esta página publicada.
+knowledge-search-evidence-stale = Esta evidencia cambió o ya no está publicada. Vuelve a buscar antes de abrirla.
 
 models-back-home = ← Inicio
 models-title = Preparar este equipo
@@ -545,6 +550,11 @@ search-running = Consultando los equipos disponibles…
 search-citation-details = Detalles de la cita
 search-revision = Revisión { $revision }
 search-question = Pregunta
+search-open-wiki = Abrir en Wiki
+search-origin-local = Publicado en este equipo
+search-origin-remote = Desde { $device }
+search-origin-remote-fallback = Desde otro equipo
+search-local-unavailable = Este resultado cambió. Vuelve a buscar antes de abrir su página publicada.
 search-coverage-federation-disabled = No se consultaron otros equipos emparejados porque la conexión local está desactivada.
 search-coverage-offline-devices = { $count ->
     [one] Otro equipo no respondió. Estos resultados pueden estar incompletos.

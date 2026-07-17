@@ -24,7 +24,7 @@ mod review;
 
 use self::first_knowledge::JourneyStepState;
 use self::integrations::{ChatIntegrationsUi, IntegrationsUiAction};
-use self::knowledge::{KnowledgeAction, KnowledgeUi};
+use self::knowledge::{KnowledgeAction, KnowledgeUi, SearchEvidenceTarget};
 use self::review::{
     REVIEW_ACTION_BAR_HEIGHT, REVIEW_PANEL_GAP, REVIEW_QUEUE_WIDTH, ReviewEvidenceAction,
     ReviewEvidencePanelIntent, ReviewEvidenceUi, ReviewLayoutMode, review_comparison_widths,
@@ -101,6 +101,13 @@ enum WikiHealthCheckState {
     Loading,
     Ready,
     Failed(String),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum SearchResultAvailability {
+    LocalAvailable,
+    LocalUnavailable,
+    Remote { device_name: Option<String> },
 }
 
 pub struct AirWikiApp {
@@ -1884,7 +1891,9 @@ impl AirWikiApp {
             &self.localization.text("search-subtitle"),
         );
         self.search_form(ui, true);
-        self.search_feedback(ui, true);
+        if let Some(target) = self.search_feedback(ui, true) {
+            self.open_search_evidence(target);
+        }
     }
 
     fn search_form(&mut self, ui: &mut egui::Ui, show_top_k: bool) {
@@ -1979,7 +1988,12 @@ impl AirWikiApp {
         }
     }
 
-    fn search_feedback(&mut self, ui: &mut egui::Ui, show_empty_state: bool) {
+    fn search_feedback(
+        &mut self,
+        ui: &mut egui::Ui,
+        show_empty_state: bool,
+    ) -> Option<SearchEvidenceTarget> {
+        let mut selected_evidence = None;
         if self.search_request_id.is_some() {
             ui.spinner();
             ui.label(self.localization.text("search-running"));
@@ -2002,11 +2016,55 @@ impl AirWikiApp {
             .auto_shrink([false; 2])
             .show(ui, |ui| {
                 for hit in &self.search_hits {
+                    let collection_exists = self
+                        .collections
+                        .iter()
+                        .any(|collection| collection.id == hit.collection_id);
+                    let remote_device_name = self
+                        .peers
+                        .iter()
+                        .find(|peer| peer.peer_id == hit.node_id)
+                        .and_then(|peer| peer.device_name.as_deref());
+                    let availability = classify_search_result(
+                        &self.node_id,
+                        &hit.node_id,
+                        collection_exists,
+                        remote_device_name,
+                    );
+                    let origin = search_result_origin_label(&self.localization, &availability);
                     ui.add_space(8.0);
                     egui::Frame::group(ui.style()).show(ui, |ui| {
                         ui.heading(format!("{}. {}", hit.rank, hit.title));
                         ui.label(RichText::new(&hit.heading_or_page).strong());
                         ui.label(&hit.snippet);
+                        ui.horizontal_wrapped(|ui| match &availability {
+                            SearchResultAvailability::LocalAvailable => {
+                                ui.label(
+                                    RichText::new(&origin)
+                                        .small()
+                                        .color(ui.visuals().weak_text_color()),
+                                );
+                                if ui
+                                    .button(self.localization.text("search-open-wiki"))
+                                    .clicked()
+                                {
+                                    selected_evidence = Some(SearchEvidenceTarget::from(hit));
+                                }
+                            }
+                            SearchResultAvailability::LocalUnavailable => {
+                                ui.colored_label(
+                                    Color32::from_rgb(205, 145, 30),
+                                    self.localization.text("search-local-unavailable"),
+                                );
+                            }
+                            SearchResultAvailability::Remote { .. } => {
+                                ui.label(
+                                    RichText::new(&origin)
+                                        .small()
+                                        .color(ui.visuals().weak_text_color()),
+                                );
+                            }
+                        });
                         ui.collapsing(self.localization.text("search-citation-details"), |ui| {
                             let mut arguments = FluentArgs::new();
                             arguments.set("revision", hit.source_revision);
@@ -2017,7 +2075,7 @@ impl AirWikiApp {
                             ui.monospace(format!(
                                 "{}… · {}",
                                 &hit.source_sha256[..hit.source_sha256.len().min(12)],
-                                hit.node_id
+                                origin
                             ));
                             ui.add(
                                 egui::Label::new(
@@ -2030,6 +2088,16 @@ impl AirWikiApp {
                     });
                 }
             });
+        selected_evidence
+    }
+
+    fn open_search_evidence(&mut self, target: SearchEvidenceTarget) {
+        let scan_active = self.collection_scans.contains_key(&target.collection_id());
+        let action = self.knowledge.open_search_evidence(target, scan_active);
+        self.screen = Screen::Knowledge;
+        if let Some(action) = action {
+            self.send_knowledge_action(action);
+        }
     }
 
     fn search_error_feedback(&self, ui: &mut egui::Ui) {
@@ -3581,8 +3649,8 @@ impl AirWikiApp {
                                 );
                                 self.search_form(ui, false);
                                 ui.add_space(if layout.is_compact() { 8.0 } else { 16.0 });
-                                if self.search_request_id.is_some() {
-                                    self.search_feedback(ui, false);
+                                let selected_evidence = if self.search_request_id.is_some() {
+                                    self.search_feedback(ui, false)
                                 } else if self.search_error.is_some() {
                                     self.search_error_feedback(ui);
                                     ui.add_space(8.0);
@@ -3598,6 +3666,7 @@ impl AirWikiApp {
                                     {
                                         self.finish_onboarding();
                                     }
+                                    None
                                 } else {
                                     let (title_id, body_id, button_id) =
                                         onboarding_search_completion(
@@ -3617,7 +3686,11 @@ impl AirWikiApp {
                                     {
                                         self.finish_onboarding();
                                     }
-                                    self.search_feedback(ui, false);
+                                    self.search_feedback(ui, false)
+                                };
+                                if let Some(target) = selected_evidence {
+                                    self.open_search_evidence(target);
+                                    self.finish_onboarding();
                                 }
                             }
                         }
@@ -3910,6 +3983,47 @@ fn search_coverage_message(
             Some(localization.text_with("search-coverage-offline-devices", Some(&arguments)))
         }
         SearchCoverageView::Partial => Some(localization.text("search-coverage-partial")),
+    }
+}
+
+fn classify_search_result(
+    local_node_id: &str,
+    hit_node_id: &str,
+    local_collection_exists: bool,
+    remote_device_name: Option<&str>,
+) -> SearchResultAvailability {
+    if hit_node_id == local_node_id {
+        if local_collection_exists {
+            SearchResultAvailability::LocalAvailable
+        } else {
+            SearchResultAvailability::LocalUnavailable
+        }
+    } else {
+        SearchResultAvailability::Remote {
+            device_name: remote_device_name
+                .map(str::trim)
+                .filter(|name| !name.is_empty())
+                .map(str::to_owned),
+        }
+    }
+}
+
+fn search_result_origin_label(
+    localization: &Localization,
+    availability: &SearchResultAvailability,
+) -> String {
+    match availability {
+        SearchResultAvailability::LocalAvailable | SearchResultAvailability::LocalUnavailable => {
+            localization.text("search-origin-local")
+        }
+        SearchResultAvailability::Remote { device_name } => {
+            let Some(device) = device_name.as_deref() else {
+                return localization.text("search-origin-remote-fallback");
+            };
+            let mut arguments = FluentArgs::new();
+            arguments.set("device", device);
+            localization.text_with("search-origin-remote", Some(&arguments))
+        }
     }
 }
 
@@ -4633,17 +4747,17 @@ fn review_fields_stack(available_width: f32) -> bool {
 #[cfg(test)]
 mod tests {
     use super::{
-        ExternalAiPolicyChange, OnboardingPage, WikiHealthCheckState, advance_onboarding_page,
-        classify_external_ai_policy_change, collection_maintenance_needs_recovery,
-        connectivity_runtime_is_active, deduplicate_notices, elapsed_minutes,
-        firewall_configuration_is_current, firewall_operation_update_applies,
+        ExternalAiPolicyChange, OnboardingPage, SearchResultAvailability, WikiHealthCheckState,
+        advance_onboarding_page, classify_external_ai_policy_change, classify_search_result,
+        collection_maintenance_needs_recovery, connectivity_runtime_is_active, deduplicate_notices,
+        elapsed_minutes, firewall_configuration_is_current, firewall_operation_update_applies,
         firewall_state_offers_advanced_recovery, human_error_summary, model_action_label,
         onboarding_error_is_relevant, onboarding_page_for_state,
         onboarding_review_requires_recovery, onboarding_search_completion,
         parse_manual_ipv4_address, peer_activity_message_id, primary_action_explanation,
         primary_action_title, review_fields_stack, search_coverage_message, search_result_applies,
-        should_present_pairing_controls, updater_launched_installer, visible_journey_states,
-        wiki_health_readiness_inputs, wiki_health_result_applies,
+        search_result_origin_label, should_present_pairing_controls, updater_launched_installer,
+        visible_journey_states, wiki_health_readiness_inputs, wiki_health_result_applies,
     };
     use crate::connectivity_platform::{
         ConnectivityPlatformSnapshot, FirewallDiagnosticState, FirewallHelperState,
@@ -5045,6 +5159,47 @@ mod tests {
         assert!(search_result_applies(Some(active), active));
         assert!(!search_result_applies(Some(active), Uuid::new_v4()));
         assert!(!search_result_applies(None, active));
+    }
+
+    #[test]
+    fn only_an_exact_local_result_with_a_current_collection_can_open_the_wiki() {
+        assert_eq!(
+            classify_search_result("local", "local", true, Some("ignored")),
+            SearchResultAvailability::LocalAvailable
+        );
+        assert_eq!(
+            classify_search_result("local", "local", false, None),
+            SearchResultAvailability::LocalUnavailable
+        );
+        assert_eq!(
+            classify_search_result("local", "remote", true, Some("Office PC")),
+            SearchResultAvailability::Remote {
+                device_name: Some("Office PC".to_owned())
+            }
+        );
+        assert_eq!(
+            classify_search_result("local", "remote", true, Some("   ")),
+            SearchResultAvailability::Remote { device_name: None }
+        );
+    }
+
+    #[test]
+    fn remote_search_origin_uses_a_human_name_without_exposing_peer_identity() {
+        let localization = Localization::new(UiLocale::EnUs).unwrap();
+        let known = SearchResultAvailability::Remote {
+            device_name: Some("Office PC".to_owned()),
+        };
+        let unknown = SearchResultAvailability::Remote { device_name: None };
+
+        let known_label = search_result_origin_label(&localization, &known);
+        assert!(known_label.starts_with("From "));
+        assert!(known_label.contains("Office PC"));
+        assert!(!known_label.contains("12D3Koo"));
+        assert_eq!(
+            search_result_origin_label(&localization, &unknown),
+            "From another device"
+        );
+        assert!(!search_result_origin_label(&localization, &unknown).contains("12D3Koo"));
     }
 
     #[test]

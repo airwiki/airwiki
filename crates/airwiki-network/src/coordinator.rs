@@ -243,9 +243,21 @@ mod tests {
         let request = SearchRequest::new("pagos", airwiki_types::SearchPurpose::LocalAssistant, 5);
         let duplicate = uuid::Uuid::new_v4();
         let mut local = SearchResponse::empty(request.request_id);
-        local.hits.push(hit("local copy", 1, "same", duplicate));
+        let local_hit = hit("local copy", 1, "same", duplicate);
+        let local_identity = (
+            local_hit.collection_id,
+            local_hit.concept_id,
+            local_hit.logical_resource_uri.clone(),
+            local_hit.source_revision,
+        );
+        local.hits.push(local_hit);
         let mut remote = SearchResponse::empty(request.request_id);
-        remote.hits.push(hit("remote copy", 2, "same", duplicate));
+        let mut remote_duplicate = hit("remote copy", 2, "same", duplicate);
+        remote_duplicate.collection_id = uuid::Uuid::new_v4();
+        remote_duplicate.concept_id = uuid::Uuid::new_v4();
+        remote_duplicate.logical_resource_uri = "urn:remote-copy".to_owned();
+        remote_duplicate.source_revision = 9;
+        remote.hits.push(remote_duplicate);
         remote
             .hits
             .push(hit("remote only", 1, "other", uuid::Uuid::new_v4()));
@@ -257,6 +269,11 @@ mod tests {
         let response = coordinator.search(request).await.unwrap();
         assert_eq!(response.hits.len(), 2);
         assert_eq!(response.hits[0].source_sha256, "same");
+        assert_eq!(response.hits[0].node_id, "local copy");
+        assert_eq!(response.hits[0].collection_id, local_identity.0);
+        assert_eq!(response.hits[0].concept_id, local_identity.1);
+        assert_eq!(response.hits[0].logical_resource_uri, local_identity.2);
+        assert_eq!(response.hits[0].source_revision, local_identity.3);
         assert_eq!(response.hits[0].rank, 1);
     }
 

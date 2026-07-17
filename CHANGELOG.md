@@ -12,6 +12,7 @@ All notable user-visible changes to AirWiki will be documented here. The project
 - Shared AirWiki branding for GitHub, application windows, tray icons, and desktop packages.
 - A guided first-knowledge journey from local AI setup through folder processing, human review, publication, and a cited local search.
 - A revision-bound evidence panel that lets reviewers compare locally extracted text with each proposed draft before publication.
+- Direct navigation from a local search result to its exact published Wiki concept, with the cited source location and revision kept visible.
 
 ### Changed
 
@@ -35,3 +36,4 @@ All notable user-visible changes to AirWiki will be documented here. The project
 ### Security
 
 - External-chat access, peer sharing, grants, publication, and ambiguous repairs remain explicit human decisions and fail closed when authorization is uncertain.
+- Remote search results remain read-only evidence cards and never expose a local Wiki navigation action.

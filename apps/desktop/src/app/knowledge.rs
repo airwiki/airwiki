@@ -9,6 +9,7 @@ use airwiki_core::{
     KnowledgeBundleState, KnowledgeBundleView, KnowledgeConceptView, KnowledgeLinkDisposition,
     KnowledgePageId, KnowledgePageView, RepairAuthority,
 };
+use airwiki_types::SearchHit;
 use eframe::egui::{self, Color32, RichText};
 use egui_commonmark::{CommonMarkCache, CommonMarkViewer};
 use egui_extras::{Size, StripBuilder};
@@ -18,6 +19,7 @@ use egui_graphs::{
 };
 use uuid::Uuid;
 
+use super::first_knowledge::AIR_BLUE;
 use crate::{i18n::Localization, layout::ResponsiveLayout};
 
 const MAX_GRAPH_CONCEPTS: usize = 500;
@@ -50,6 +52,35 @@ pub(super) enum KnowledgeAction {
         request_id: Uuid,
         preview: GuidedRepairPreview,
     },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(super) struct SearchEvidenceTarget {
+    collection_id: Uuid,
+    concept_id: Uuid,
+    heading_or_page: String,
+    logical_resource_uri: String,
+    source_revision: u32,
+    source_sha256: String,
+}
+
+impl From<&SearchHit> for SearchEvidenceTarget {
+    fn from(hit: &SearchHit) -> Self {
+        Self {
+            collection_id: hit.collection_id,
+            concept_id: hit.concept_id,
+            heading_or_page: hit.heading_or_page.clone(),
+            logical_resource_uri: hit.logical_resource_uri.clone(),
+            source_revision: hit.source_revision,
+            source_sha256: hit.source_sha256.clone(),
+        }
+    }
+}
+
+impl SearchEvidenceTarget {
+    pub(super) fn collection_id(&self) -> Uuid {
+        self.collection_id
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -167,6 +198,8 @@ pub(super) struct KnowledgeUi {
     snapshot_stale: bool,
     retry_bundle_at: Option<Instant>,
     page_recovery_attempted: bool,
+    search_evidence: Option<SearchEvidenceTarget>,
+    search_evidence_focus_pending: bool,
     guided_repair_prepare_pending: Option<PendingBundle>,
     guided_repair_execute_pending: Option<PendingBundle>,
     guided_repair_preview: Option<GuidedRepairPreview>,
@@ -197,6 +230,8 @@ impl Default for KnowledgeUi {
             snapshot_stale: false,
             retry_bundle_at: None,
             page_recovery_attempted: false,
+            search_evidence: None,
+            search_evidence_focus_pending: false,
             guided_repair_prepare_pending: None,
             guided_repair_execute_pending: None,
             guided_repair_preview: None,
@@ -207,6 +242,40 @@ impl Default for KnowledgeUi {
 }
 
 impl KnowledgeUi {
+    pub(super) fn open_search_evidence(
+        &mut self,
+        target: SearchEvidenceTarget,
+        scan_active: bool,
+    ) -> Option<KnowledgeAction> {
+        self.tab = KnowledgeTab::Wiki;
+        self.narrow_wiki_pane = NarrowWikiPane::Page;
+        self.query_filter.clear();
+        self.type_filter = None;
+        self.tag_filter = None;
+        self.link_notice = None;
+        self.page_recovery_attempted = false;
+
+        let collection_changed = self.collection_id != Some(target.collection_id);
+        if collection_changed {
+            self.collection_id = Some(target.collection_id);
+            self.clear_snapshot();
+        } else if scan_active {
+            self.invalidate_snapshot_preserving_selection();
+            self.snapshot_stale = true;
+        }
+
+        self.selected_page = Some(KnowledgePageId::Concept(target.concept_id));
+        self.search_evidence = Some(target);
+        self.search_evidence_focus_pending = true;
+        if scan_active || self.bundle_pending.is_some() {
+            return None;
+        }
+        if self.bundle.is_some() {
+            return self.queue_verified_search_evidence();
+        }
+        self.collection_id.map(|id| self.request_bundle(id))
+    }
+
     pub(super) fn select_health(
         &mut self,
         collection_id: Option<Uuid>,
@@ -262,6 +331,16 @@ impl KnowledgeUi {
                 self.graph = None;
                 self.snapshot_stale = false;
                 self.retry_bundle_at = None;
+                let search_target_pending = self
+                    .search_evidence
+                    .as_ref()
+                    .is_some_and(|target| target.collection_id == collection_id);
+                if search_target_pending {
+                    self.bundle = Some(Arc::new(bundle));
+                    self.page = None;
+                    self.page_error = None;
+                    return self.queue_verified_search_evidence();
+                }
                 let selected = self
                     .selected_page
                     .filter(|page_id| page_fingerprint(&bundle, *page_id).is_some())
@@ -912,6 +991,16 @@ impl KnowledgeUi {
                 });
                 return;
             };
+
+            if let Some(target) = self.search_evidence.as_ref().filter(|target| {
+                page.page_id == KnowledgePageId::Concept(target.concept_id)
+                    && page.collection_id == target.collection_id
+            }) {
+                let request_focus = self.search_evidence_focus_pending;
+                search_evidence_trace(ui, localization, target, request_focus);
+                self.search_evidence_focus_pending = false;
+                ui.add_space(8.0);
+            }
 
             ui.horizontal(|ui| {
                 ui.heading(&page.title);
@@ -1618,8 +1707,36 @@ impl KnowledgeUi {
     }
 
     fn request_page(&mut self, page_id: KnowledgePageId) -> Option<KnowledgeAction> {
+        self.search_evidence = None;
+        self.search_evidence_focus_pending = false;
+        self.link_notice = None;
         self.page_recovery_attempted = false;
         self.queue_page(page_id)
+    }
+
+    fn queue_verified_search_evidence(&mut self) -> Option<KnowledgeAction> {
+        let target = self.search_evidence.clone()?;
+        let matches = self.bundle.as_ref().is_some_and(|bundle| {
+            bundle.collection_id == target.collection_id
+                && bundle.concepts.iter().any(|concept| {
+                    concept.id == target.concept_id
+                        && concept.revision == Some(target.source_revision)
+                        && concept.source_sha256.as_deref() == Some(target.source_sha256.as_str())
+                        && concept.resource.as_deref() == Some(target.logical_resource_uri.as_str())
+                })
+        });
+        if !matches {
+            self.selected_page = None;
+            self.page = None;
+            self.page_pending = None;
+            self.page_error = None;
+            self.search_evidence = None;
+            self.search_evidence_focus_pending = false;
+            self.link_notice = Some((true, "knowledge-search-evidence-stale".to_owned()));
+            return None;
+        }
+
+        self.queue_page(KnowledgePageId::Concept(target.concept_id))
     }
 
     fn queue_page(&mut self, page_id: KnowledgePageId) -> Option<KnowledgeAction> {
@@ -1678,6 +1795,8 @@ impl KnowledgeUi {
     fn clear_snapshot(&mut self) {
         self.invalidate_snapshot_preserving_selection();
         self.selected_page = None;
+        self.search_evidence = None;
+        self.search_evidence_focus_pending = false;
         self.link_notice = None;
         self.snapshot_stale = false;
         self.page_recovery_attempted = false;
@@ -1900,8 +2019,50 @@ fn localized_knowledge_error(localization: &Localization, error: &str) -> String
 fn localized_knowledge_notice(localization: &Localization, notice: &str) -> String {
     match notice {
         "knowledge-snapshot-changed" => localization.text("knowledge-snapshot-changed"),
+        "knowledge-search-evidence-stale" => localization.text("knowledge-search-evidence-stale"),
         _ => notice.to_owned(),
     }
+}
+
+fn search_evidence_trace(
+    ui: &mut egui::Ui,
+    localization: &Localization,
+    target: &SearchEvidenceTarget,
+    request_focus: bool,
+) {
+    egui::Frame::new()
+        .fill(AIR_BLUE.gamma_multiply(0.08))
+        .stroke(egui::Stroke::new(1.0, AIR_BLUE.gamma_multiply(0.75)))
+        .corner_radius(egui::CornerRadius::same(8))
+        .inner_margin(egui::Margin::symmetric(12, 10))
+        .show(ui, |ui| {
+            let title = ui.add(
+                egui::Label::new(
+                    RichText::new(localization.text("knowledge-search-evidence-title"))
+                        .strong()
+                        .color(AIR_BLUE),
+                )
+                .sense(egui::Sense::focusable_noninteractive()),
+            );
+            if request_focus {
+                title.request_focus();
+            }
+            let fallback = localization.text("knowledge-search-evidence-location-unknown");
+            let location = if target.heading_or_page.trim().is_empty() {
+                fallback.as_str()
+            } else {
+                target.heading_or_page.as_str()
+            };
+            let mut arguments = fluent_bundle::FluentArgs::new();
+            arguments.set("location", location);
+            arguments.set("revision", target.source_revision);
+            ui.label(localization.text_with("knowledge-search-evidence-locator", Some(&arguments)));
+            ui.label(
+                RichText::new(localization.text("knowledge-search-evidence-help"))
+                    .small()
+                    .color(ui.visuals().weak_text_color()),
+            );
+        });
 }
 
 fn localized_url_notice(localization: &Localization, message_id: &str, url: &str) -> String {
@@ -2248,11 +2409,11 @@ mod tests {
     use crate::i18n::{Localization, UiLocale};
 
     use super::{
-        GRAPH_LAYOUT_WORK_BUDGET, KnowledgeAction, KnowledgeTab, KnowledgeUi, build_graph,
-        bundle_state_visual, deterministic_graph_position, empty_bundle_has_health_findings,
-        graph_requires_filter, health_has_guided_content_repair, health_has_manual_intervention,
-        health_issue_page_available, health_recovery_message_id, normalized_http_url,
-        short_fingerprint, truncate_chars,
+        GRAPH_LAYOUT_WORK_BUDGET, KnowledgeAction, KnowledgeTab, KnowledgeUi, NarrowWikiPane,
+        SearchEvidenceTarget, build_graph, bundle_state_visual, deterministic_graph_position,
+        empty_bundle_has_health_findings, graph_requires_filter, health_has_guided_content_repair,
+        health_has_manual_intervention, health_issue_page_available, health_recovery_message_id,
+        normalized_http_url, short_fingerprint, truncate_chars,
     };
 
     fn localization() -> Localization {
@@ -2287,6 +2448,343 @@ mod tests {
     #[test]
     fn fingerprint_preview_is_unicode_safe() {
         assert_eq!(short_fingerprint("áβ猫0123456789abc"), "áβ猫012345678");
+    }
+
+    #[test]
+    fn matching_search_evidence_opens_the_exact_published_concept() {
+        let target = search_target(Uuid::new_v4(), Uuid::new_v4());
+        let mut ui = ui_with_bundle(bundle_with_target(&target));
+        ui.tab = KnowledgeTab::Health;
+        ui.narrow_wiki_pane = NarrowWikiPane::Details;
+        ui.query_filter = "hidden".to_owned();
+
+        let action = ui
+            .open_search_evidence(target.clone(), false)
+            .expect("matching evidence loads its concept page");
+        let request_id = page_request_id(&action);
+
+        assert!(matches!(
+            action,
+            KnowledgeAction::LoadPage {
+                collection_id,
+                page_id: KnowledgePageId::Concept(concept_id),
+                ..
+            } if collection_id == target.collection_id && concept_id == target.concept_id
+        ));
+        assert_eq!(ui.tab, KnowledgeTab::Wiki);
+        assert_eq!(ui.narrow_wiki_pane, NarrowWikiPane::Page);
+        assert!(ui.query_filter.is_empty());
+        assert_eq!(ui.search_evidence, Some(target.clone()));
+
+        assert!(
+            ui.page_loaded(
+                request_id,
+                target.collection_id,
+                KnowledgePageId::Concept(target.concept_id),
+                Ok(concept_page(&target)),
+            )
+            .is_none()
+        );
+        assert!(ui.search_evidence_focus_pending);
+    }
+
+    #[test]
+    fn search_evidence_in_another_collection_loads_bundle_then_exact_page() {
+        let target = search_target(Uuid::new_v4(), Uuid::new_v4());
+        let mut ui = ui_with_bundle(bundle(Uuid::new_v4()));
+
+        let bundle_action = ui
+            .open_search_evidence(target.clone(), false)
+            .expect("another collection needs a bundle snapshot");
+        assert!(matches!(
+            bundle_action,
+            KnowledgeAction::LoadBundle { collection_id, .. }
+                if collection_id == target.collection_id
+        ));
+
+        let page_action = ui
+            .bundle_loaded(
+                bundle_request_id(&bundle_action),
+                target.collection_id,
+                Ok(bundle_with_target(&target)),
+            )
+            .expect("the matching snapshot loads the cited concept");
+        assert!(matches!(
+            page_action,
+            KnowledgeAction::LoadPage {
+                page_id: KnowledgePageId::Concept(concept_id),
+                ..
+            } if concept_id == target.concept_id
+        ));
+    }
+
+    #[test]
+    fn stale_search_identity_never_falls_back_to_another_wiki_page() {
+        for drift in ["missing", "revision", "hash", "resource"] {
+            let target = search_target(Uuid::new_v4(), Uuid::new_v4());
+            let mut snapshot = bundle_with_target(&target);
+            match drift {
+                "missing" => snapshot.concepts.clear(),
+                "revision" => snapshot.concepts[0].revision = Some(target.source_revision + 1),
+                "hash" => snapshot.concepts[0].source_sha256 = Some("b".repeat(64)),
+                "resource" => snapshot.concepts[0].resource = Some("urn:airwiki:other".to_owned()),
+                _ => unreachable!(),
+            }
+            let mut ui = KnowledgeUi::default();
+            let request = ui
+                .open_search_evidence(target.clone(), false)
+                .expect("the target collection must be inspected");
+
+            let action = ui.bundle_loaded(
+                bundle_request_id(&request),
+                target.collection_id,
+                Ok(snapshot),
+            );
+
+            assert!(action.is_none(), "{drift} drift must fail closed");
+            assert!(ui.selected_page.is_none());
+            assert!(ui.page_pending.is_none());
+            assert!(ui.search_evidence.is_none());
+            assert_eq!(
+                ui.link_notice.as_ref().map(|notice| notice.1.as_str()),
+                Some("knowledge-search-evidence-stale")
+            );
+        }
+    }
+
+    #[test]
+    fn stale_page_recovery_revalidates_the_search_revision() {
+        let target = search_target(Uuid::new_v4(), Uuid::new_v4());
+        let mut ui = ui_with_bundle(bundle_with_target(&target));
+        let page_action = ui.open_search_evidence(target.clone(), false).unwrap();
+
+        let reload = ui
+            .page_loaded(
+                page_request_id(&page_action),
+                target.collection_id,
+                KnowledgePageId::Concept(target.concept_id),
+                Err("page changed".to_owned()),
+            )
+            .expect("a stale page reloads the bundle once");
+        let mut newer = bundle_with_target(&target);
+        newer.concepts[0].revision = Some(target.source_revision + 1);
+
+        let action = ui.bundle_loaded(bundle_request_id(&reload), target.collection_id, Ok(newer));
+
+        assert!(action.is_none());
+        assert!(ui.page_pending.is_none());
+        assert!(ui.search_evidence.is_none());
+        assert_eq!(
+            ui.link_notice.as_ref().map(|notice| notice.1.as_str()),
+            Some("knowledge-search-evidence-stale")
+        );
+    }
+
+    #[test]
+    fn manual_wiki_navigation_clears_the_search_evidence_trace() {
+        let target = search_target(Uuid::new_v4(), Uuid::new_v4());
+        let mut ui = ui_with_bundle(bundle_with_target(&target));
+        assert!(ui.open_search_evidence(target, false).is_some());
+        ui.search_evidence_focus_pending = true;
+
+        let action = ui.request_page(KnowledgePageId::Index);
+
+        assert!(action.is_some());
+        assert!(ui.search_evidence.is_none());
+        assert!(!ui.search_evidence_focus_pending);
+    }
+
+    #[test]
+    fn reloading_the_same_search_evidence_does_not_steal_focus_again() {
+        let target = search_target(Uuid::new_v4(), Uuid::new_v4());
+        let mut ui = ui_with_bundle(bundle_with_target(&target));
+        let first_page = ui.open_search_evidence(target.clone(), false).unwrap();
+        assert!(
+            ui.page_loaded(
+                page_request_id(&first_page),
+                target.collection_id,
+                KnowledgePageId::Concept(target.concept_id),
+                Ok(concept_page(&target)),
+            )
+            .is_none()
+        );
+        assert!(ui.search_evidence_focus_pending);
+
+        // Rendering the evidence trace consumes the one-shot focus request.
+        ui.search_evidence_focus_pending = false;
+        let reload = ui
+            .mark_snapshot_stale(Some(target.collection_id), true)
+            .expect("the changed bundle is reloaded");
+        let reloaded_page = ui
+            .bundle_loaded(
+                bundle_request_id(&reload),
+                target.collection_id,
+                Ok(bundle_with_target(&target)),
+            )
+            .expect("the same evidence is still current");
+        assert!(
+            ui.page_loaded(
+                page_request_id(&reloaded_page),
+                target.collection_id,
+                KnowledgePageId::Concept(target.concept_id),
+                Ok(concept_page(&target)),
+            )
+            .is_none()
+        );
+        assert!(!ui.search_evidence_focus_pending);
+    }
+
+    #[test]
+    fn active_scan_defers_search_navigation_until_the_bundle_is_stable() {
+        let target = search_target(Uuid::new_v4(), Uuid::new_v4());
+        let mut ui = ui_with_bundle(bundle_with_target(&target));
+
+        assert!(ui.open_search_evidence(target.clone(), true).is_none());
+        assert!(ui.bundle.is_none());
+        assert_eq!(ui.search_evidence, Some(target.clone()));
+
+        let bundle_action = ui
+            .collection_scan_finished(target.collection_id, true)
+            .expect("scan completion reloads the target bundle");
+        let page_action = ui.bundle_loaded(
+            bundle_request_id(&bundle_action),
+            target.collection_id,
+            Ok(bundle_with_target(&target)),
+        );
+        assert!(matches!(
+            page_action,
+            Some(KnowledgeAction::LoadPage { .. })
+        ));
+    }
+
+    #[test]
+    fn scan_start_cancels_an_in_flight_search_page_and_revalidates_afterwards() {
+        let target = search_target(Uuid::new_v4(), Uuid::new_v4());
+        let mut ui = ui_with_bundle(bundle_with_target(&target));
+        let stale_page = ui.open_search_evidence(target.clone(), false).unwrap();
+
+        ui.collection_scan_started(target.collection_id);
+        assert!(ui.bundle.is_none());
+        assert!(ui.page_pending.is_none());
+        assert_eq!(ui.search_evidence, Some(target.clone()));
+        assert!(
+            ui.page_loaded(
+                page_request_id(&stale_page),
+                target.collection_id,
+                KnowledgePageId::Concept(target.concept_id),
+                Ok(concept_page(&target)),
+            )
+            .is_none()
+        );
+        assert!(ui.page.is_none());
+
+        let reload = ui
+            .collection_scan_finished(target.collection_id, true)
+            .expect("the stable collection is re-inspected");
+        let current_page = ui
+            .bundle_loaded(
+                bundle_request_id(&reload),
+                target.collection_id,
+                Ok(bundle_with_target(&target)),
+            )
+            .expect("the exact target remains published");
+        assert!(
+            ui.page_loaded(
+                page_request_id(&current_page),
+                target.collection_id,
+                KnowledgePageId::Concept(target.concept_id),
+                Ok(concept_page(&target)),
+            )
+            .is_none()
+        );
+        assert_eq!(
+            ui.page.as_ref().map(|page| page.page_id),
+            Some(KnowledgePageId::Concept(target.concept_id))
+        );
+    }
+
+    #[test]
+    fn a_second_search_target_replaces_an_in_flight_page_in_the_same_collection() {
+        let collection_id = Uuid::new_v4();
+        let first = search_target(collection_id, Uuid::new_v4());
+        let second = search_target(collection_id, Uuid::new_v4());
+        let mut snapshot = bundle_with_target(&first);
+        snapshot
+            .concepts
+            .extend(bundle_with_target(&second).concepts);
+        snapshot.health.total_concepts = 2;
+        let mut ui = ui_with_bundle(snapshot);
+
+        let stale_page = ui.open_search_evidence(first.clone(), false).unwrap();
+        let current_page = ui.open_search_evidence(second.clone(), false).unwrap();
+
+        assert!(
+            ui.page_loaded(
+                page_request_id(&stale_page),
+                collection_id,
+                KnowledgePageId::Concept(first.concept_id),
+                Ok(concept_page(&first)),
+            )
+            .is_none()
+        );
+        assert!(ui.page.is_none());
+        assert_eq!(ui.search_evidence, Some(second.clone()));
+        assert!(
+            ui.page_loaded(
+                page_request_id(&current_page),
+                collection_id,
+                KnowledgePageId::Concept(second.concept_id),
+                Ok(concept_page(&second)),
+            )
+            .is_none()
+        );
+        assert_eq!(
+            ui.page.as_ref().map(|page| page.page_id),
+            Some(KnowledgePageId::Concept(second.concept_id))
+        );
+    }
+
+    #[test]
+    fn a_second_search_target_replaces_an_in_flight_page_in_another_collection() {
+        let first = search_target(Uuid::new_v4(), Uuid::new_v4());
+        let second = search_target(Uuid::new_v4(), Uuid::new_v4());
+        let mut ui = ui_with_bundle(bundle_with_target(&first));
+
+        let stale_page = ui.open_search_evidence(first.clone(), false).unwrap();
+        let current_bundle = ui.open_search_evidence(second.clone(), false).unwrap();
+
+        assert!(
+            ui.page_loaded(
+                page_request_id(&stale_page),
+                first.collection_id,
+                KnowledgePageId::Concept(first.concept_id),
+                Ok(concept_page(&first)),
+            )
+            .is_none()
+        );
+        assert!(ui.page.is_none());
+        assert_eq!(ui.search_evidence, Some(second.clone()));
+
+        let current_page = ui
+            .bundle_loaded(
+                bundle_request_id(&current_bundle),
+                second.collection_id,
+                Ok(bundle_with_target(&second)),
+            )
+            .expect("the replacement target loads its exact page");
+        assert!(
+            ui.page_loaded(
+                page_request_id(&current_page),
+                second.collection_id,
+                KnowledgePageId::Concept(second.concept_id),
+                Ok(concept_page(&second)),
+            )
+            .is_none()
+        );
+        assert_eq!(
+            ui.page.as_ref().map(|page| page.page_id),
+            Some(KnowledgePageId::Concept(second.concept_id))
+        );
     }
 
     #[test]
@@ -2854,6 +3352,40 @@ mod tests {
         }
     }
 
+    fn search_target(collection_id: Uuid, concept_id: Uuid) -> SearchEvidenceTarget {
+        SearchEvidenceTarget {
+            collection_id,
+            concept_id,
+            heading_or_page: "Recovery steps".to_owned(),
+            logical_resource_uri: format!("urn:airwiki:test:{concept_id}"),
+            source_revision: 1,
+            source_sha256: "a".repeat(64),
+        }
+    }
+
+    fn bundle_with_target(target: &SearchEvidenceTarget) -> KnowledgeBundleView {
+        let mut view = bundle(target.collection_id);
+        view.concepts.push(KnowledgeConceptView {
+            id: target.concept_id,
+            relative_path: format!("concepts/{}.md", target.concept_id),
+            concept_type: "Runbook".to_owned(),
+            title: "Recovery".to_owned(),
+            description: "Reviewed recovery steps".to_owned(),
+            tags: vec!["recovery".to_owned()],
+            resource: Some(target.logical_resource_uri.clone()),
+            timestamp: None,
+            revision: Some(target.source_revision),
+            source_sha256: Some(target.source_sha256.clone()),
+            language: Some("en".to_owned()),
+            generator_model: None,
+            reviewed_at: None,
+            extensions: BTreeMap::new(),
+            fingerprint: "concept-v1".to_owned(),
+        });
+        view.health.total_concepts = 1;
+        view
+    }
+
     fn page(collection_id: Uuid, fingerprint: &str) -> KnowledgePageView {
         KnowledgePageView {
             collection_id,
@@ -2861,6 +3393,20 @@ mod tests {
             title: "Índice".to_owned(),
             fingerprint: fingerprint.to_owned(),
             body_markdown: "# Índice".to_owned(),
+            metadata: Vec::new(),
+            outgoing_links: Vec::new(),
+            backlinks: Vec::new(),
+            truncated: false,
+        }
+    }
+
+    fn concept_page(target: &SearchEvidenceTarget) -> KnowledgePageView {
+        KnowledgePageView {
+            collection_id: target.collection_id,
+            page_id: KnowledgePageId::Concept(target.concept_id),
+            title: "Recovery".to_owned(),
+            fingerprint: "concept-v1".to_owned(),
+            body_markdown: "# Recovery".to_owned(),
             metadata: Vec::new(),
             outgoing_links: Vec::new(),
             backlinks: Vec::new(),

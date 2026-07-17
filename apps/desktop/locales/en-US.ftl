@@ -437,6 +437,11 @@ knowledge-concept-fallback = Concept { $id }
 knowledge-error-wrong-collection = The background worker returned a bundle for a different folder.
 knowledge-error-generic = This published view could not be loaded. Open technical details for diagnostics.
 knowledge-snapshot-changed = The Wiki changed during reading; the new snapshot is loading.
+knowledge-search-evidence-title = Opened from Search
+knowledge-search-evidence-locator = Source location: { $location } · Revision { $revision }
+knowledge-search-evidence-location-unknown = Published source
+knowledge-search-evidence-help = This location belongs to the reviewed source behind this published page.
+knowledge-search-evidence-stale = This evidence changed or is no longer published. Search again before opening it.
 
 models-back-home = ← Home
 models-title = Prepare this device
@@ -545,6 +550,11 @@ search-running = Searching available devices…
 search-citation-details = Citation details
 search-revision = Revision { $revision }
 search-question = Question
+search-open-wiki = Open in Wiki
+search-origin-local = Published on this device
+search-origin-remote = From { $device }
+search-origin-remote-fallback = From another device
+search-local-unavailable = This result changed. Search again before opening its published page.
 search-coverage-federation-disabled = Other paired devices were not searched because local networking is off.
 search-coverage-offline-devices = { $count ->
     [one] One other device did not respond. These results may be incomplete.

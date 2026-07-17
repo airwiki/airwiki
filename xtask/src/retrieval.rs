@@ -31,8 +31,11 @@ use uuid::Uuid;
 
 use crate::{replace_file, workspace_root};
 
+mod corpus;
 mod selector;
 
+const ANSWERABILITY_CORPUS_MANIFEST_PATH: &str =
+    "resources/evaluation/retrieval-answerability-development-v1/manifest.json";
 const FIXTURE_PATH: &str = "fixtures/retrieval/search-quality-v2.json";
 #[cfg(test)]
 const V1_FIXTURE_PATH: &str = "fixtures/retrieval/search-quality-v1.json";
@@ -96,6 +99,21 @@ const REQUIRED_TAGS: [RetrievalTag; 13] = [
     RetrievalTag::Federated,
     RetrievalTag::Stability,
 ];
+
+pub fn validate_answerability_corpus() -> Result<()> {
+    let manifest_path = workspace_root().join(ANSWERABILITY_CORPUS_MANIFEST_PATH);
+    let summary = corpus::validate_manifest(&manifest_path)?;
+    println!(
+        "answerability corpus valid: {} sources, {} artifacts, {} selections ({} answerable, {} unanswerable), {} groups",
+        summary.source_count,
+        summary.artifact_count,
+        summary.selection_count,
+        summary.answerable_count,
+        summary.unanswerable_count,
+        summary.group_count,
+    );
+    Ok(())
+}
 
 #[derive(Debug, Clone, Deserialize)]
 #[serde(deny_unknown_fields)]

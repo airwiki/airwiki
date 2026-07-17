@@ -157,6 +157,17 @@ async fn main() -> Result<()> {
             None => bail!("missing relevance command; expected `validate` or `evaluate`"),
         },
         "retrieval" => match arguments.next().as_deref() {
+            Some("corpus") => match arguments.next().as_deref() {
+                Some("validate") => {
+                    ensure!(
+                        arguments.next().is_none(),
+                        "retrieval corpus validate received unexpected arguments"
+                    );
+                    retrieval::validate_answerability_corpus()
+                }
+                Some(other) => bail!("unknown retrieval corpus command: {other}"),
+                None => bail!("missing retrieval corpus command; expected `validate`"),
+            },
             Some("validate") => {
                 ensure!(
                     arguments.next().is_none(),
@@ -242,7 +253,7 @@ async fn main() -> Result<()> {
             }
             Some(other) => bail!("unknown retrieval command: {other}"),
             None => bail!(
-                "missing retrieval command; expected `validate`, `evaluate` or `evaluate-selector`"
+                "missing retrieval command; expected `corpus`, `validate`, `evaluate` or `evaluate-selector`"
             ),
         },
         "licenses" => match arguments.next().as_deref() {
@@ -295,6 +306,7 @@ async fn main() -> Result<()> {
             println!("cargo run --locked -p xtask -- relevance validate");
             println!("cargo run --locked -p xtask -- relevance evaluate --snapshot <directory>");
             println!("cargo run --locked -p xtask -- retrieval validate");
+            println!("cargo run --locked -p xtask -- retrieval corpus validate");
             println!(
                 "cargo run --locked -p xtask -- retrieval evaluate --phase development|final --embedding-snapshot <directory> --relevance-snapshot <directory>"
             );

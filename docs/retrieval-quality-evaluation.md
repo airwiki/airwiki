@@ -136,6 +136,37 @@ Passing the included attacks is a regression result, not a robustness guarantee;
 a final security profile must report false-selection or attack-success rates
 across multiple indirect-injection variants.
 
+## Answerability corpus provenance
+
+The next experiment begins from the closed, content-free manifest documented in
+[retrieval answerability development corpus v1](../resources/evaluation/retrieval-answerability-development-v1/README.md).
+It pins SQuAD 2.0, parallel English/Spanish XQuAD and ContractNLI artifacts by
+repository revision, byte size, SHA-256 and dataset license. The sources cover
+plausible no-answer passages, cross-language transfer and document-level
+relation, scope and negation. They are complementary controls, not evidence that
+one dataset or model represents private AirWiki knowledge.
+
+Only traceability metadata—source-native record identifiers, local non-content
+locators, grouping decisions and expected support roles—is versioned. Dataset
+text remains outside the repository and packages.
+The initial manifest contains training and calibration groups only; a fresh
+grouped holdout will be selected after the candidate structure, model inputs and
+decision policy are frozen. This prevents a repeatedly observed test set from
+becoming an implicit tuning set.
+
+CI validates the manifest without downloading any dataset:
+
+```bash
+cargo run --locked -p xtask -- retrieval corpus validate
+```
+
+The validator rejects unknown fields, unsupported licenses, malformed hashes,
+unsafe artifact paths, duplicate identifiers, dangling source references,
+invalid answerability labels and document or translation groups split across
+training and calibration. It reports counts only. It does not read questions,
+passages or answers and does not claim that a pinned artifact has been locally
+downloaded or verified; that boundary belongs to the future importer.
+
 ## Deterministic CI validation
 
 Ordinary CI uses fixture embedding and relevance providers. It downloads no

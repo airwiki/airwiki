@@ -1,0 +1,212 @@
+{
+  "schema_version": 1,
+  "corpus_id": "retrieval_answerability_development_v1",
+  "sources": [
+    {
+      "id": "squad_v2",
+      "repository": "https://github.com/rajpurkar/SQuAD-explorer",
+      "revision": "eee5fdbf62f8613a7812b03419e6b29617b74fd1",
+      "license": "CC-BY-SA-4.0",
+      "artifacts": [
+        {
+          "path": "squad_v2/dataset/train-v2.0.json",
+          "sha256": "68dcfbb971bd3e96d5b46c7177b16c1a4e7d4bdef19fb204502738552dede002",
+          "size": 42123633
+        },
+        {
+          "path": "squad_v2/dataset/dev-v2.0.json",
+          "sha256": "80a5225e94905956a6446d296ca1093975c4d3b3260f1d6c8f68bc2ab77182d8",
+          "size": 4370528
+        }
+      ]
+    },
+    {
+      "id": "xquad_en_es",
+      "repository": "https://github.com/google-deepmind/xquad",
+      "revision": "7d30520c717524000f0d9d2f9c10a069acd9d285",
+      "license": "CC-BY-SA-4.0",
+      "artifacts": [
+        {
+          "path": "xquad_en_es/xquad.en.json",
+          "sha256": "e4c57d1c9143aaa1c5d265ba5987a65f4e69528d2a98f29d6e75019b10344f29",
+          "size": 609383
+        },
+        {
+          "path": "xquad_en_es/xquad.es.json",
+          "sha256": "dcbae93ec3a9f4b9e78fd834a171d6f96c1a875e10e15b7530b7e4ef4971e37e",
+          "size": 684322
+        }
+      ]
+    },
+    {
+      "id": "contract_nli",
+      "repository": "https://github.com/stanfordnlp/contract-nli",
+      "revision": "eced6528dd3c1d14d73f9a87df8f7bdbc03126f9",
+      "license": "CC-BY-4.0",
+      "artifacts": [
+        {
+          "path": "contract_nli/resources/contract-nli.zip",
+          "sha256": "e03fc77bbf8b53e2976a250e81d8a294bc3d5e5fb014521e477dee9340d6287b",
+          "size": 65362913
+        }
+      ]
+    }
+  ],
+  "selections": [
+    {
+      "id": "squad_beyonce_popularity",
+      "source_id": "squad_v2",
+      "artifact_path": "squad_v2/dataset/train-v2.0.json",
+      "split": "training",
+      "group_id": "squad_beyonce_article",
+      "document_id": "data_0",
+      "upstream_record_id": "56be85543aeaaa14008c9063",
+      "need_id": "need_squad_beyonce_popularity",
+      "expectation": "answerable",
+      "supports": [
+        {
+          "artifact_path": "squad_v2/dataset/train-v2.0.json",
+          "document_id": "data_0",
+          "segment_id": "paragraph_0"
+        }
+      ],
+      "hard_negatives": [
+        {
+          "artifact_path": "squad_v2/dataset/train-v2.0.json",
+          "document_id": "data_0",
+          "segment_id": "paragraph_1",
+          "kind": "related_but_unanswered"
+        }
+      ]
+    },
+    {
+      "id": "squad_zelda_australia_category",
+      "source_id": "squad_v2",
+      "artifact_path": "squad_v2/dataset/train-v2.0.json",
+      "split": "calibration",
+      "group_id": "squad_zelda_twilight_princess_article",
+      "document_id": "data_4",
+      "upstream_record_id": "5a8d7bf7df8bba001a0f9ab1",
+      "need_id": "need_squad_zelda_australia_category",
+      "expectation": "unanswerable",
+      "supports": [],
+      "hard_negatives": [
+        {
+          "artifact_path": "squad_v2/dataset/train-v2.0.json",
+          "document_id": "data_4",
+          "segment_id": "paragraph_0",
+          "kind": "related_but_unanswered"
+        }
+      ]
+    },
+    {
+      "id": "xquad_en_panthers_points",
+      "source_id": "xquad_en_es",
+      "artifact_path": "xquad_en_es/xquad.en.json",
+      "split": "training",
+      "group_id": "xquad_super_bowl_50_parallel",
+      "document_id": "data_0",
+      "upstream_record_id": "56beb4343aeaaa14008c925b",
+      "need_id": "need_xquad_en_panthers_points",
+      "expectation": "answerable",
+      "supports": [
+        {
+          "artifact_path": "xquad_en_es/xquad.en.json",
+          "document_id": "data_0",
+          "segment_id": "paragraph_0"
+        }
+      ],
+      "hard_negatives": [
+        {
+          "artifact_path": "xquad_en_es/xquad.en.json",
+          "document_id": "data_0",
+          "segment_id": "paragraph_1",
+          "kind": "related_but_unanswered"
+        }
+      ]
+    },
+    {
+      "id": "xquad_es_panthers_points",
+      "source_id": "xquad_en_es",
+      "artifact_path": "xquad_en_es/xquad.es.json",
+      "split": "training",
+      "group_id": "xquad_super_bowl_50_parallel",
+      "document_id": "data_0",
+      "upstream_record_id": "56beb4343aeaaa14008c925b",
+      "need_id": "need_xquad_es_panthers_points",
+      "expectation": "answerable",
+      "supports": [
+        {
+          "artifact_path": "xquad_en_es/xquad.es.json",
+          "document_id": "data_0",
+          "segment_id": "paragraph_0"
+        }
+      ],
+      "hard_negatives": [
+        {
+          "artifact_path": "xquad_en_es/xquad.es.json",
+          "document_id": "data_0",
+          "segment_id": "paragraph_1",
+          "kind": "related_but_unanswered"
+        }
+      ]
+    },
+    {
+      "id": "contract_34_nda_16",
+      "source_id": "contract_nli",
+      "artifact_path": "contract_nli/resources/contract-nli.zip",
+      "member_path": "contract-nli/train.json",
+      "split": "calibration",
+      "group_id": "contract_document_34",
+      "document_id": "34",
+      "upstream_record_id": "nda-16",
+      "need_id": "need_contract_34_nda_16",
+      "expectation": "answerable",
+      "supports": [
+        {
+          "artifact_path": "contract_nli/resources/contract-nli.zip",
+          "member_path": "contract-nli/train.json",
+          "document_id": "34",
+          "segment_id": "span_39"
+        },
+        {
+          "artifact_path": "contract_nli/resources/contract-nli.zip",
+          "member_path": "contract-nli/train.json",
+          "document_id": "34",
+          "segment_id": "span_40"
+        }
+      ],
+      "hard_negatives": [
+        {
+          "artifact_path": "contract_nli/resources/contract-nli.zip",
+          "member_path": "contract-nli/train.json",
+          "document_id": "34",
+          "segment_id": "span_38",
+          "kind": "wrong_relation"
+        }
+      ]
+    },
+    {
+      "id": "contract_34_nda_11",
+      "source_id": "contract_nli",
+      "artifact_path": "contract_nli/resources/contract-nli.zip",
+      "member_path": "contract-nli/train.json",
+      "split": "calibration",
+      "group_id": "contract_document_34",
+      "document_id": "34",
+      "upstream_record_id": "nda-11",
+      "need_id": "need_contract_34_nda_11",
+      "expectation": "unanswerable",
+      "supports": [],
+      "hard_negatives": [
+        {
+          "artifact_path": "contract_nli/resources/contract-nli.zip",
+          "member_path": "contract-nli/train.json",
+          "document_id": "34",
+          "segment_id": "span_14",
+          "kind": "related_but_unanswered"
+        }
+      ]
+    }
+  ]
+}

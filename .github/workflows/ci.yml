@@ -45,6 +45,8 @@ jobs:
         run: cargo run --locked -p xtask -- relevance validate
       - name: Synthetic retrieval pipeline
         run: cargo run --locked -p xtask -- retrieval validate
+      - name: Answerability corpus contract
+        run: cargo run --locked -p xtask -- retrieval corpus validate
 
   supply-chain:
     name: Advisories, licenses and sources

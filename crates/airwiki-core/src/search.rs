@@ -19,8 +19,25 @@ const RRF_K: f64 = 60.0;
 const VECTOR_SQL_BATCH_SIZE: usize = 512;
 /// Fixed hybrid-retrieval pool classified before `top_k` truncates evidence.
 pub const RELEVANCE_CANDIDATE_LIMIT: usize = 10;
+/// Largest pre-classification ranking exposed to offline retrieval evaluators.
+#[cfg(feature = "retrieval-evaluation")]
+pub const MAX_RETRIEVAL_EVALUATION_CANDIDATES: usize = 32;
 /// Fixed per-channel over-retrieval bound before RRF and content deduplication.
 const PRE_DEDUPLICATION_CANDIDATE_LIMIT: usize = RELEVANCE_CANDIDATE_LIMIT * 4;
+
+/// Content-free identity for one candidate in the production hybrid ranking.
+///
+/// The vector position is the rank. Text, snippets and internal scores are
+/// intentionally absent so evaluation code cannot become a second disclosure
+/// path.
+#[cfg(feature = "retrieval-evaluation")]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct RetrievalEvaluationCandidate {
+    pub collection_id: Uuid,
+    pub concept_id: Uuid,
+    pub chunk_id: Uuid,
+    pub source_revision: u32,
+}
 
 /// Candidate evidence presented to the local relevance classifier.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -139,15 +156,7 @@ impl HybridSearchEngine {
     /// filtered to collections explicitly opted into cloud disclosure.
     pub async fn search_local(&self, request: SearchRequest) -> Result<SearchResponse> {
         request.validate()?;
-        let database = self.database.clone();
-        let collections = run_search_blocking("local search scope worker task failed", move || {
-            Ok(database
-                .list_collections()?
-                .into_iter()
-                .map(|collection| collection.id)
-                .collect::<Vec<_>>())
-        })
-        .await?;
+        let collections = self.resolve_local_scope().await?;
         self.search_collections(request, &collections).await
     }
 
@@ -160,21 +169,10 @@ impl HybridSearchEngine {
     ) -> Result<SearchResponse> {
         request.validate()?;
         let purpose = request.purpose;
-        let database = self.database.clone();
-        let peer_id = peer_id.to_owned();
-        let scope_peer_id = peer_id.clone();
-        let collections = run_search_blocking("peer search scope worker task failed", move || {
-            let peer = database
-                .peer(&scope_peer_id)?
-                .ok_or_else(|| anyhow::anyhow!("unknown peer"))?;
-            if !peer.trusted || peer.blocked {
-                bail!("peer is not authorized");
-            }
-            database.granted_collections_for_search(&scope_peer_id, purpose)
-        })
-        .await?;
+        let collections = self.resolve_peer_scope(peer_id, purpose).await?;
         let mut response = self.search_collections(request, &collections).await?;
         let database = self.database.clone();
+        let peer_id = peer_id.to_owned();
         let hits = std::mem::take(&mut response.hits);
         response.hits =
             run_search_blocking("peer search revalidation worker task failed", move || {
@@ -190,30 +188,14 @@ impl HybridSearchEngine {
         collections: &[Uuid],
     ) -> Result<SearchResponse> {
         request.validate()?;
-        let query_embedding = self
-            .embeddings
-            .embed(&[format!("query: {}", request.query.trim())])
-            .await
-            .context("could not embed search query")?
-            .into_iter()
-            .next()
-            .context("embedding provider returned no query vector")?;
-        if query_embedding.len() != crate::EMBEDDING_DIMENSIONS {
-            bail!(
-                "embedding provider returned {} dimensions; expected {}",
-                query_embedding.len(),
-                crate::EMBEDDING_DIMENSIONS
-            );
-        }
-
-        let database = self.database.clone();
-        let query = request.query.clone();
-        let collections = collections.to_vec();
-        let purpose = request.purpose;
-        let prepared = run_search_blocking("hybrid retrieval worker task failed", move || {
-            prepare_candidates(database, query, collections, purpose, query_embedding)
-        })
-        .await?;
+        let prepared = self
+            .prepare_ranked_candidates(
+                &request.query,
+                collections,
+                request.purpose,
+                RELEVANCE_CANDIDATE_LIMIT,
+            )
+            .await?;
         let PreparedCandidates {
             candidates: deduplicated_candidates,
             visible_snippets,
@@ -287,6 +269,114 @@ impl HybridSearchEngine {
             partial: removed_during_revalidation,
         })
     }
+
+    /// Returns a content-free prefix of the production hybrid ranking for an
+    /// offline evaluator, using the authoritative local collection scope.
+    #[cfg(feature = "retrieval-evaluation")]
+    pub async fn rank_local_for_evaluation(
+        &self,
+        query: &str,
+        purpose: SearchPurpose,
+        output_limit: usize,
+    ) -> Result<Vec<RetrievalEvaluationCandidate>> {
+        validate_retrieval_evaluation_request(query, purpose, output_limit)?;
+        let collections = self.resolve_local_scope().await?;
+        self.rank_collections_for_evaluation(query, purpose, &collections, output_limit)
+            .await
+    }
+
+    #[cfg(feature = "retrieval-evaluation")]
+    async fn rank_collections_for_evaluation(
+        &self,
+        query: &str,
+        purpose: SearchPurpose,
+        collections: &[Uuid],
+        output_limit: usize,
+    ) -> Result<Vec<RetrievalEvaluationCandidate>> {
+        let prepared = self
+            .prepare_ranked_candidates(query, collections, purpose, output_limit)
+            .await?;
+        Ok(prepared
+            .candidates
+            .into_iter()
+            .map(|candidate| RetrievalEvaluationCandidate {
+                collection_id: candidate.chunk.collection_id,
+                concept_id: candidate.chunk.concept_id,
+                chunk_id: public_chunk_id(
+                    &candidate.source_sha256,
+                    candidate.chunk.ordinal,
+                    &candidate.chunk.text_sha256,
+                ),
+                source_revision: candidate.chunk.source_revision,
+            })
+            .collect())
+    }
+
+    async fn resolve_local_scope(&self) -> Result<Vec<Uuid>> {
+        let database = self.database.clone();
+        run_search_blocking("local search scope worker task failed", move || {
+            Ok(database
+                .list_collections()?
+                .into_iter()
+                .map(|collection| collection.id)
+                .collect::<Vec<_>>())
+        })
+        .await
+    }
+
+    async fn resolve_peer_scope(&self, peer_id: &str, purpose: SearchPurpose) -> Result<Vec<Uuid>> {
+        let database = self.database.clone();
+        let peer_id = peer_id.to_owned();
+        run_search_blocking("peer search scope worker task failed", move || {
+            let peer = database
+                .peer(&peer_id)?
+                .ok_or_else(|| anyhow::anyhow!("unknown peer"))?;
+            if !peer.trusted || peer.blocked {
+                bail!("peer is not authorized");
+            }
+            database.granted_collections_for_search(&peer_id, purpose)
+        })
+        .await
+    }
+
+    async fn prepare_ranked_candidates(
+        &self,
+        query: &str,
+        collections: &[Uuid],
+        purpose: SearchPurpose,
+        output_limit: usize,
+    ) -> Result<PreparedCandidates> {
+        let query_embedding = self
+            .embeddings
+            .embed(&[format!("query: {}", query.trim())])
+            .await
+            .context("could not embed search query")?
+            .into_iter()
+            .next()
+            .context("embedding provider returned no query vector")?;
+        if query_embedding.len() != crate::EMBEDDING_DIMENSIONS {
+            bail!(
+                "embedding provider returned {} dimensions; expected {}",
+                query_embedding.len(),
+                crate::EMBEDDING_DIMENSIONS
+            );
+        }
+
+        let database = self.database.clone();
+        let query = query.to_owned();
+        let collections = collections.to_vec();
+        run_search_blocking("hybrid retrieval worker task failed", move || {
+            prepare_candidates(
+                database,
+                query,
+                collections,
+                purpose,
+                query_embedding,
+                output_limit,
+            )
+        })
+        .await
+    }
 }
 
 #[async_trait]
@@ -326,7 +416,15 @@ fn prepare_candidates(
     collections: Vec<Uuid>,
     purpose: SearchPurpose,
     query_embedding: Vec<f32>,
+    output_limit: usize,
 ) -> Result<PreparedCandidates> {
+    if output_limit == 0 {
+        return Ok(PreparedCandidates {
+            candidates: Vec::new(),
+            visible_snippets: Vec::new(),
+            relevance_inputs: Vec::new(),
+        });
+    }
     let lexical = database.lexical_candidates(
         &query,
         &collections,
@@ -390,7 +488,7 @@ fn prepare_candidates(
             continue;
         }
         deduplicated_candidates.push(candidate);
-        if deduplicated_candidates.len() == RELEVANCE_CANDIDATE_LIMIT {
+        if deduplicated_candidates.len() == output_limit {
             break;
         }
     }
@@ -421,6 +519,22 @@ fn prepare_candidates(
         visible_snippets,
         relevance_inputs,
     })
+}
+
+#[cfg(feature = "retrieval-evaluation")]
+fn validate_retrieval_evaluation_request(
+    query: &str,
+    purpose: SearchPurpose,
+    output_limit: usize,
+) -> Result<()> {
+    SearchRequest::new(query, purpose, airwiki_types::MIN_TOP_K).validate()?;
+    if !(1..=MAX_RETRIEVAL_EVALUATION_CANDIDATES).contains(&output_limit) {
+        bail!(
+            "retrieval evaluation output limit must be between 1 and {}",
+            MAX_RETRIEVAL_EVALUATION_CANDIDATES
+        );
+    }
+    Ok(())
 }
 
 fn revalidate_local_hits(
@@ -1242,6 +1356,95 @@ mod tests {
         assert_eq!(top_one.hits.len(), 1);
         assert_eq!(top_ten.hits.len(), RELEVANCE_CANDIDATE_LIMIT);
         assert_eq!(top_one.hits[0].chunk_id, top_ten.hits[0].chunk_id);
+    }
+
+    #[cfg(feature = "retrieval-evaluation")]
+    #[tokio::test]
+    async fn evaluation_ranking_preserves_the_production_prefix_and_order() {
+        let (database, _collection_id, concept_id) = indexed_database().await;
+        replace_with_disjoint_lexical_and_vector_candidates(&database, concept_id).await;
+        let engine = HybridSearchEngine::new(
+            database,
+            Arc::new(DeterministicEmbeddingProvider),
+            Arc::new(AllRelevantEvidenceRelevanceProvider),
+            "mac",
+        );
+
+        let production = engine
+            .search_local(SearchRequest::new(
+                "lexicalneedle",
+                SearchPurpose::LocalAssistant,
+                airwiki_types::MAX_TOP_K,
+            ))
+            .await
+            .unwrap();
+        let evaluation = engine
+            .rank_local_for_evaluation(
+                "lexicalneedle",
+                SearchPurpose::LocalAssistant,
+                MAX_RETRIEVAL_EVALUATION_CANDIDATES,
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(production.hits.len(), RELEVANCE_CANDIDATE_LIMIT);
+        assert!(evaluation.len() > production.hits.len());
+        assert_eq!(
+            production
+                .hits
+                .iter()
+                .map(|hit| hit.chunk_id)
+                .collect::<Vec<_>>(),
+            evaluation
+                .iter()
+                .take(production.hits.len())
+                .map(|candidate| candidate.chunk_id)
+                .collect::<Vec<_>>()
+        );
+        assert!(
+            evaluation
+                .iter()
+                .all(|candidate| candidate.source_revision == 1)
+        );
+    }
+
+    #[cfg(feature = "retrieval-evaluation")]
+    #[tokio::test]
+    async fn evaluation_scope_enforces_local_cloud_policy() {
+        let (database, collection_id, _concept_id) = indexed_database().await;
+        let engine = HybridSearchEngine::new(
+            database.clone(),
+            Arc::new(DeterministicEmbeddingProvider),
+            Arc::new(AllRelevantEvidenceRelevanceProvider),
+            "mac",
+        );
+
+        assert!(
+            engine
+                .rank_local_for_evaluation("pagos", SearchPurpose::ExternalAi, 1)
+                .await
+                .unwrap()
+                .is_empty()
+        );
+
+        database
+            .update_collection_policy(
+                collection_id,
+                CollectionPolicy {
+                    local_only: true,
+                    peer_shareable: false,
+                    allow_external_ai: true,
+                },
+            )
+            .unwrap();
+        assert_eq!(
+            engine
+                .rank_local_for_evaluation("pagos", SearchPurpose::ExternalAi, 1)
+                .await
+                .unwrap()
+                .len(),
+            1
+        );
     }
 
     #[tokio::test]

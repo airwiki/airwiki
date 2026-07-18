@@ -12,6 +12,7 @@ publish.workspace = true
 [features]
 default = []
 fastembed-runtime = ["dep:fastembed", "dep:tokenizers"]
+retrieval-evaluation = []
 
 [dependencies]
 anyhow.workspace = true

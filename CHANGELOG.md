@@ -17,6 +17,7 @@ All notable user-visible changes to AirWiki will be documented here. The project
 - A content-free, pinned answerability corpus workflow and a development-only two-stage QA-entailment rejection gate with sanitized aggregate reports; production search remains unchanged.
 - A development-only reviewed-evidence-anchor ablation comparing passage QA, reviewed-claim selection, and deterministic conflict detection without changing production search or OKF.
 - A dependency-free, development-only Rust mini-graph ablation comparing wider hybrid retrieval with bounded expansion over reviewed internal OKF links.
+- A real-ranking mini-graph replay that materializes healthy OKF bundles, reuses production BM25/E5/RRF, and compares bounded expansion with both a wider candidate pool and a degree-preserving sham graph.
 
 ### Changed
 
@@ -33,6 +34,7 @@ All notable user-visible changes to AirWiki will be documented here. The project
 - Made retrieval research hypothesis-driven: literature supplies baselines and controls, while AirWiki-specific mechanisms require versioned ablations, counterfactual tests, fresh holdouts, and explicit rejection conditions.
 - Kept production retrieval unchanged after the combined reviewed-claim representation and selector showed higher development coverage but failed false-evidence, no-answer, and correctness gates; observed latency remained descriptive.
 - Recorded that the synthetic mini-graph mechanistic gate passed while keeping it at candidate stage until it is reproduced from healthy OKF bundles and real BM25/E5 rankings on fresh domains.
+- Kept production retrieval unchanged after the real-ranking mini-graph development replay improved candidate-group coverage; a separately authored holdout and end-to-end chunk/reranker evidence remain required.
 
 ### Fixed
 

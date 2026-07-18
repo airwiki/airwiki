@@ -30,6 +30,10 @@ or personal information.
   frozen synthetic candidate orders and reviewed internal concept links. It
   compares C10, C32 and bounded one-hop graph expansion without a model or a
   production search change; it is not a promotion holdout.
+- `retrieval/mini-graph-real-development-v1.json`: visible development corpus
+  with four domain-separated OKF bundles, 12 questions and no authored ranking
+  fields. It compares the production BM25/E5/RRF order with one-hop expansion
+  and a degree-preserving sham graph; it is not a promotion holdout.
 
 The expected federated question asks how Atlas is recovered, who is responsible,
 and the target date. A correct answer combines the Mac procedure with the
@@ -85,6 +89,14 @@ be measured in the release profile:
 
 ```bash
 cargo run --release --locked -p xtask -- retrieval evaluate-mini-graph
+```
+
+The real-ranking replay requires only an already verified multilingual E5
+snapshot. It publishes temporary OKF bundles and downloads nothing:
+
+```bash
+cargo run --release --locked -p xtask -- retrieval evaluate-real-mini-graph \
+  --embedding-snapshot <verified-e5-snapshot-directory>
 ```
 
 See the [retrieval-quality evaluation profile](../docs/retrieval-quality-evaluation.md)

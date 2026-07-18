@@ -55,6 +55,8 @@ pub use search::{
     DeterministicEvidenceRelevanceProvider, EvidenceDecision, EvidenceRelevanceError,
     EvidenceRelevanceProvider, HybridSearchEngine, RELEVANCE_CANDIDATE_LIMIT, RelevanceInput,
 };
+#[cfg(feature = "retrieval-evaluation")]
+pub use search::{MAX_RETRIEVAL_EVALUATION_CANDIDATES, RetrievalEvaluationCandidate};
 pub use storage::{
     AuditEvent, CollectionMaintenanceCounts, CollectionMaintenanceRecord,
     CollectionMaintenanceResult, CollectionMaintenanceStatus, CollectionRecord, CollectionStats,

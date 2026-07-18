@@ -346,9 +346,23 @@ async fn main() -> Result<()> {
                 );
                 retrieval::evaluate_mini_graph()
             }
+            Some("evaluate-real-mini-graph") => {
+                ensure!(
+                    arguments.next().as_deref() == Some("--embedding-snapshot"),
+                    "retrieval evaluate-real-mini-graph expects `--embedding-snapshot <directory>`"
+                );
+                let embedding_snapshot = arguments.next().context(
+                    "retrieval evaluate-real-mini-graph is missing the embedding snapshot path",
+                )?;
+                ensure!(
+                    arguments.next().is_none(),
+                    "retrieval evaluate-real-mini-graph received unexpected arguments"
+                );
+                retrieval::evaluate_real_mini_graph(Path::new(&embedding_snapshot)).await
+            }
             Some(other) => bail!("unknown retrieval command: {other}"),
             None => bail!(
-                "missing retrieval command; expected `corpus`, `validate`, `evaluate`, `evaluate-selector`, `evaluate-answerability`, `evaluate-reviewed-anchors` or `evaluate-mini-graph`"
+                "missing retrieval command; expected `corpus`, `validate`, `evaluate`, `evaluate-selector`, `evaluate-answerability`, `evaluate-reviewed-anchors`, `evaluate-mini-graph` or `evaluate-real-mini-graph`"
             ),
         },
         "licenses" => match arguments.next().as_deref() {
@@ -418,6 +432,9 @@ async fn main() -> Result<()> {
                 "cargo run --locked -p xtask -- retrieval evaluate-reviewed-anchors --data-root <directory> --llama-server <path> --model-id <catalog-id>"
             );
             println!("cargo run --release --locked -p xtask -- retrieval evaluate-mini-graph");
+            println!(
+                "cargo run --release --locked -p xtask -- retrieval evaluate-real-mini-graph --embedding-snapshot <directory>"
+            );
             println!("cargo run --locked -p xtask -- licenses generate");
             println!("cargo run --locked -p xtask -- licenses check");
             println!("cargo run --locked -p xtask -- docs check");

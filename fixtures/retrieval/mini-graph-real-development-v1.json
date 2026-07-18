@@ -1,0 +1,282 @@
+{
+  "schema_version": 1,
+  "experiment_id": "okf-mini-graph-real-development-v1",
+  "domains": [
+    {
+      "id": "observatory_maintenance",
+      "collection_name": "Observatory maintenance",
+      "language": "en",
+      "distractor_count": 36,
+      "distractor_title": "Primary mirror maintenance review",
+      "distractor_description": "A related but non-authoritative maintenance note.",
+      "distractor_heading": "Pending thermal and custody review",
+      "distractor_text": "This note discusses the approved thermal stabilization limit for the primary mirror and the cryogenic inspection custodian, but it explicitly records neither the numeric boundary nor the assigned person.",
+      "documents": [
+        {
+          "id": "observatory_thermal_hub",
+          "title": "Primary mirror thermal hub",
+          "description": "Routing note for the reviewed mirror stabilization boundary.",
+          "heading": "Authoritative appendix",
+          "text": "For the approved thermal stabilization limit of the primary mirror, use the linked Annex Z-17. This hub intentionally does not repeat the numeric value.",
+          "links": [{ "label": "Annex Z-17", "target_document_id": "observatory_thermal_value" }]
+        },
+        {
+          "id": "observatory_thermal_value",
+          "title": "Annex Z-17",
+          "description": "Reviewed numeric boundary referenced by its maintenance hub.",
+          "heading": "Approved boundary",
+          "text": "The approved boundary is 4.7 millikelvin.",
+          "links": []
+        },
+        {
+          "id": "observatory_custodian_hub",
+          "title": "Cryogenic inspection hub",
+          "description": "Routing note for the current inspection custodian.",
+          "heading": "Implementation record",
+          "text": "The cryogenic inspection custodian is recorded in implementation record Q-22. This hub intentionally does not name the assigned person.",
+          "links": []
+        },
+        {
+          "id": "observatory_custodian_record",
+          "title": "Implementation record Q-22",
+          "description": "Reviewed implementation record for the inspection hub.",
+          "heading": "Assigned person",
+          "text": "Record Q-22 assigns Leona Vega.",
+          "links": [{ "label": "Cryogenic inspection hub", "target_document_id": "observatory_custodian_hub" }]
+        },
+        {
+          "id": "observatory_direct_control",
+          "title": "Observatory calibration control",
+          "description": "Directly retrievable control evidence.",
+          "heading": "Control token",
+          "text": "The observatory calibration control token is OBS-DIRECT-917.",
+          "links": []
+        }
+      ],
+      "cases": [
+        {
+          "id": "observatory_outgoing",
+          "question": "What is the approved thermal stabilization limit for the primary mirror?",
+          "required_document_groups": [["observatory_thermal_hub"], ["observatory_thermal_value"]]
+        },
+        {
+          "id": "observatory_incoming",
+          "question": "Who is the cryogenic inspection custodian?",
+          "required_document_groups": [["observatory_custodian_hub"], ["observatory_custodian_record"]]
+        },
+        {
+          "id": "observatory_direct",
+          "question": "What is the observatory calibration control token OBS-DIRECT-917?",
+          "required_document_groups": [["observatory_direct_control"]]
+        }
+      ]
+    },
+    {
+      "id": "museum_conservation",
+      "collection_name": "Museum conservation",
+      "language": "en",
+      "distractor_count": 36,
+      "distractor_title": "Conservation quarantine review",
+      "distractor_description": "A related but non-authoritative conservation note.",
+      "distractor_heading": "Pending humidity and custody review",
+      "distractor_text": "This note discusses the approved humidity quarantine window for textile intake and the pigment transport custodian, but it explicitly records neither the duration nor the assigned person.",
+      "documents": [
+        {
+          "id": "museum_humidity_hub",
+          "title": "Textile intake humidity hub",
+          "description": "Routing note for the reviewed quarantine window.",
+          "heading": "Authoritative appendix",
+          "text": "For the approved humidity quarantine window at textile intake, use the linked Annex M-31. This hub intentionally does not repeat the duration.",
+          "links": [{ "label": "Annex M-31", "target_document_id": "museum_humidity_value" }]
+        },
+        {
+          "id": "museum_humidity_value",
+          "title": "Annex M-31",
+          "description": "Reviewed duration referenced by its conservation hub.",
+          "heading": "Approved window",
+          "text": "The approved window is seventy-two hours.",
+          "links": []
+        },
+        {
+          "id": "museum_custodian_hub",
+          "title": "Pigment transport hub",
+          "description": "Routing note for the current transport custodian.",
+          "heading": "Implementation record",
+          "text": "The pigment transport custodian is recorded in implementation record C-08. This hub intentionally does not name the assigned person.",
+          "links": []
+        },
+        {
+          "id": "museum_custodian_record",
+          "title": "Implementation record C-08",
+          "description": "Reviewed implementation record for the transport hub.",
+          "heading": "Assigned person",
+          "text": "Record C-08 assigns Amara Sol.",
+          "links": [{ "label": "Pigment transport hub", "target_document_id": "museum_custodian_hub" }]
+        },
+        {
+          "id": "museum_direct_control",
+          "title": "Museum conservation control",
+          "description": "Directly retrievable control evidence.",
+          "heading": "Control token",
+          "text": "The museum conservation control token is MUS-DIRECT-284.",
+          "links": []
+        }
+      ],
+      "cases": [
+        {
+          "id": "museum_outgoing",
+          "question": "What is the approved humidity quarantine window for textile intake?",
+          "required_document_groups": [["museum_humidity_hub"], ["museum_humidity_value"]]
+        },
+        {
+          "id": "museum_incoming",
+          "question": "Who is the pigment transport custodian?",
+          "required_document_groups": [["museum_custodian_hub"], ["museum_custodian_record"]]
+        },
+        {
+          "id": "museum_direct",
+          "question": "What is the museum conservation control token MUS-DIRECT-284?",
+          "required_document_groups": [["museum_direct_control"]]
+        }
+      ]
+    },
+    {
+      "id": "community_irrigation",
+      "collection_name": "Community irrigation",
+      "language": "es",
+      "distractor_count": 36,
+      "distractor_title": "Revisión de mantenimiento de compuertas",
+      "distractor_description": "Nota relacionada pero no autoritativa de irrigación.",
+      "distractor_heading": "Revisión pendiente de intervalo y custodia",
+      "distractor_text": "Esta nota analiza el intervalo aprobado de purga de la compuerta norte y la persona responsable de la excepción por sequía, pero no registra ni la cantidad de días ni el nombre asignado.",
+      "documents": [
+        {
+          "id": "irrigation_interval_hub",
+          "title": "Guía de purga de la compuerta norte",
+          "description": "Nota de encaminamiento hacia el intervalo revisado.",
+          "heading": "Anexo autoritativo",
+          "text": "Para conocer el intervalo aprobado de purga de la compuerta norte, se debe usar el Anexo I-44 enlazado. Esta guía no repite la cantidad de días.",
+          "links": [{ "label": "Anexo I-44", "target_document_id": "irrigation_interval_value" }]
+        },
+        {
+          "id": "irrigation_interval_value",
+          "title": "Anexo I-44",
+          "description": "Intervalo revisado al que apunta la guía de irrigación.",
+          "heading": "Intervalo aprobado",
+          "text": "El intervalo aprobado es de once días.",
+          "links": []
+        },
+        {
+          "id": "irrigation_custodian_hub",
+          "title": "Guía de excepción por sequía",
+          "description": "Nota de encaminamiento hacia la persona responsable vigente.",
+          "heading": "Registro de implementación",
+          "text": "La persona responsable de la excepción por sequía figura en el registro D-09. Esta guía no repite su nombre.",
+          "links": []
+        },
+        {
+          "id": "irrigation_custodian_record",
+          "title": "Registro de implementación D-09",
+          "description": "Registro revisado que implementa la guía de excepción.",
+          "heading": "Persona asignada",
+          "text": "El registro D-09 asigna a Nico Ferrer.",
+          "links": [{ "label": "Guía de excepción por sequía", "target_document_id": "irrigation_custodian_hub" }]
+        },
+        {
+          "id": "irrigation_direct_control",
+          "title": "Control de irrigación comunitaria",
+          "description": "Evidencia de control recuperable de forma directa.",
+          "heading": "Token de control",
+          "text": "El token de control de irrigación es IRR-DIRECT-563.",
+          "links": []
+        }
+      ],
+      "cases": [
+        {
+          "id": "irrigation_outgoing",
+          "question": "¿Cuál es el intervalo aprobado de purga de la compuerta norte?",
+          "required_document_groups": [["irrigation_interval_hub"], ["irrigation_interval_value"]]
+        },
+        {
+          "id": "irrigation_incoming",
+          "question": "¿Quién es responsable de la excepción por sequía?",
+          "required_document_groups": [["irrigation_custodian_hub"], ["irrigation_custodian_record"]]
+        },
+        {
+          "id": "irrigation_direct",
+          "question": "¿Cuál es el token de control IRR-DIRECT-563?",
+          "required_document_groups": [["irrigation_direct_control"]]
+        }
+      ]
+    },
+    {
+      "id": "transit_accessibility",
+      "collection_name": "Transit accessibility",
+      "language": "es",
+      "distractor_count": 36,
+      "distractor_title": "Revisión de accesibilidad de estaciones",
+      "distractor_description": "Nota relacionada pero no autoritativa de transporte.",
+      "distractor_heading": "Revisión pendiente de intervalo y enlace",
+      "distractor_text": "Esta nota analiza el intervalo aprobado de inspección de las bandas táctiles y la persona de enlace durante una interrupción de ascensores, pero no registra ni la frecuencia ni el nombre asignado.",
+      "documents": [
+        {
+          "id": "transit_interval_hub",
+          "title": "Guía de inspección de bandas táctiles",
+          "description": "Nota de encaminamiento hacia el intervalo revisado.",
+          "heading": "Anexo autoritativo",
+          "text": "Para conocer el intervalo aprobado de inspección de las bandas táctiles, se debe usar el Anexo T-27 enlazado. Esta guía no repite la frecuencia.",
+          "links": [{ "label": "Anexo T-27", "target_document_id": "transit_interval_value" }]
+        },
+        {
+          "id": "transit_interval_value",
+          "title": "Anexo T-27",
+          "description": "Frecuencia revisada a la que apunta la guía de accesibilidad.",
+          "heading": "Intervalo aprobado",
+          "text": "El intervalo aprobado es de seis semanas.",
+          "links": []
+        },
+        {
+          "id": "transit_custodian_hub",
+          "title": "Guía de interrupción de ascensores",
+          "description": "Nota de encaminamiento hacia la persona de enlace vigente.",
+          "heading": "Registro de implementación",
+          "text": "La persona de enlace durante una interrupción de ascensores figura en el registro E-12. Esta guía no repite su nombre.",
+          "links": []
+        },
+        {
+          "id": "transit_custodian_record",
+          "title": "Registro de implementación E-12",
+          "description": "Registro revisado que implementa la guía de interrupción.",
+          "heading": "Persona asignada",
+          "text": "El registro E-12 asigna a Mara Ibarra.",
+          "links": [{ "label": "Guía de interrupción de ascensores", "target_document_id": "transit_custodian_hub" }]
+        },
+        {
+          "id": "transit_direct_control",
+          "title": "Control de accesibilidad de transporte",
+          "description": "Evidencia de control recuperable de forma directa.",
+          "heading": "Token de control",
+          "text": "El token de control de accesibilidad es TRN-DIRECT-846.",
+          "links": []
+        }
+      ],
+      "cases": [
+        {
+          "id": "transit_outgoing",
+          "question": "¿Cuál es el intervalo aprobado de inspección de las bandas táctiles?",
+          "required_document_groups": [["transit_interval_hub"], ["transit_interval_value"]]
+        },
+        {
+          "id": "transit_incoming",
+          "question": "¿Quién es la persona de enlace durante una interrupción de ascensores?",
+          "required_document_groups": [["transit_custodian_hub"], ["transit_custodian_record"]]
+        },
+        {
+          "id": "transit_direct",
+          "question": "¿Cuál es el token de control TRN-DIRECT-846?",
+          "required_document_groups": [["transit_direct_control"]]
+        }
+      ]
+    }
+  ]
+}

@@ -23,8 +23,8 @@ const REPORT_DIRECTORY: &str = "target/evals";
 const FIXTURE_SCHEMA_VERSION: u32 = 1;
 const REPORT_SCHEMA_VERSION: u32 = 1;
 const GRAPH_CONTRACT_VERSION: &str = "okf-reviewed-concept-links-v1";
-const BASELINE_LIMIT: usize = 10;
-const CONTROL_LIMIT: usize = 32;
+pub(in crate::retrieval) const BASELINE_LIMIT: usize = 10;
+pub(in crate::retrieval) const CONTROL_LIMIT: usize = 32;
 const MAX_EXPANDED_CANDIDATES: usize = CONTROL_LIMIT;
 const MAX_GRAPH_NODES: usize = 500;
 const MAX_GRAPH_EDGES: usize = 2_000;
@@ -62,7 +62,7 @@ struct GraphCase {
 
 #[derive(Debug, Clone, Copy, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
-enum GraphPurpose {
+pub(in crate::retrieval) enum GraphPurpose {
     LocalAssistant,
     ExternalAi,
 }
@@ -79,7 +79,7 @@ struct NodeOverride {
 
 #[derive(Debug, Clone, Copy, Default, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
-enum NodeState {
+pub(in crate::retrieval) enum NodeState {
     #[default]
     Current,
     Withdrawn,
@@ -96,7 +96,7 @@ struct LinkFixture {
 
 #[derive(Debug, Clone, Copy, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
-enum LinkDisposition {
+pub(in crate::retrieval) enum LinkDisposition {
     ReviewedInternal,
     Broken,
     Unsafe,
@@ -114,25 +114,25 @@ struct ExpectedFoundGroups {
 
 #[repr(transparent)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
-struct NodeId(u32);
+pub(in crate::retrieval) struct NodeId(pub(in crate::retrieval) u32);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
-struct GraphNode {
-    concept_id: Uuid,
-    collection_id: Uuid,
+pub(in crate::retrieval) struct GraphNode {
+    pub(in crate::retrieval) concept_id: Uuid,
+    pub(in crate::retrieval) collection_id: Uuid,
 }
 
 #[derive(Debug, Clone, Copy)]
-struct GraphNodeInput {
-    node: GraphNode,
-    state: NodeState,
+pub(in crate::retrieval) struct GraphNodeInput {
+    pub(in crate::retrieval) node: GraphNode,
+    pub(in crate::retrieval) state: NodeState,
 }
 
 #[derive(Debug, Clone, Copy)]
-struct GraphLinkInput {
-    source: Uuid,
-    target: Uuid,
-    disposition: LinkDisposition,
+pub(in crate::retrieval) struct GraphLinkInput {
+    pub(in crate::retrieval) source: Uuid,
+    pub(in crate::retrieval) target: Uuid,
+    pub(in crate::retrieval) disposition: LinkDisposition,
 }
 
 #[derive(Debug, Clone, Copy, Default, Serialize, PartialEq, Eq)]
@@ -147,7 +147,7 @@ struct GraphBuildStats {
 }
 
 #[derive(Debug, Clone)]
-struct MiniGraph {
+pub(in crate::retrieval) struct MiniGraph {
     nodes: Box<[GraphNode]>,
     outgoing: Box<[Box<[NodeId]>]>,
     incoming: Box<[Box<[NodeId]>]>,
@@ -156,7 +156,10 @@ struct MiniGraph {
 }
 
 impl MiniGraph {
-    fn build(nodes: &[GraphNodeInput], links: &[GraphLinkInput]) -> Result<Self> {
+    pub(in crate::retrieval) fn build(
+        nodes: &[GraphNodeInput],
+        links: &[GraphLinkInput],
+    ) -> Result<Self> {
         ensure!(
             links.len() <= MAX_GRAPH_LINK_INPUTS,
             "mini graph exceeds the {MAX_GRAPH_LINK_INPUTS} link-input budget"
@@ -246,15 +249,27 @@ impl MiniGraph {
         })
     }
 
-    fn node_id(&self, concept_id: Uuid) -> Option<NodeId> {
+    pub(in crate::retrieval) fn node_id(&self, concept_id: Uuid) -> Option<NodeId> {
         node_id(&self.nodes, concept_id)
     }
 
-    fn node(&self, id: NodeId) -> Option<&GraphNode> {
+    pub(in crate::retrieval) fn fingerprint(&self) -> &str {
+        &self.fingerprint
+    }
+
+    pub(in crate::retrieval) fn node_count(&self) -> u32 {
+        self.stats.node_count
+    }
+
+    pub(in crate::retrieval) fn edge_count(&self) -> u32 {
+        self.stats.edge_count
+    }
+
+    pub(in crate::retrieval) fn node(&self, id: NodeId) -> Option<&GraphNode> {
         node_index(id).ok().and_then(|index| self.nodes.get(index))
     }
 
-    fn retained_payload_bytes(&self) -> usize {
+    pub(in crate::retrieval) fn retained_payload_bytes(&self) -> usize {
         size_of_val(self)
             .saturating_add(self.fingerprint.capacity())
             .saturating_add(self.nodes.len().saturating_mul(size_of::<GraphNode>()))
@@ -277,7 +292,12 @@ impl MiniGraph {
             )
     }
 
-    fn visible_candidates(&self, ranked: &[Uuid], scope: &QueryScope, limit: usize) -> Vec<NodeId> {
+    pub(in crate::retrieval) fn visible_candidates(
+        &self,
+        ranked: &[Uuid],
+        scope: &QueryScope,
+        limit: usize,
+    ) -> Vec<NodeId> {
         let mut candidates = Vec::with_capacity(limit);
         let mut seen = BTreeSet::new();
         for concept_id in ranked {
@@ -345,7 +365,7 @@ impl MiniGraph {
         }
     }
 
-    fn expand_one_hop_with_backfill(
+    pub(in crate::retrieval) fn expand_one_hop_with_backfill(
         &self,
         seeds: &[NodeId],
         ranked: &[Uuid],
@@ -429,11 +449,11 @@ fn append_neighbors(
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-struct ExpansionResult {
-    candidates: Vec<NodeId>,
-    edges_scanned: u32,
-    edge_budget_exhausted: bool,
-    candidate_budget_exhausted: bool,
+pub(in crate::retrieval) struct ExpansionResult {
+    pub(in crate::retrieval) candidates: Vec<NodeId>,
+    pub(in crate::retrieval) edges_scanned: u32,
+    pub(in crate::retrieval) edge_budget_exhausted: bool,
+    pub(in crate::retrieval) candidate_budget_exhausted: bool,
 }
 
 fn boxed_adjacency(values: Vec<Vec<NodeId>>) -> Box<[Box<[NodeId]>]> {
@@ -473,16 +493,16 @@ fn graph_fingerprint(nodes: &[GraphNode], outgoing: &[Box<[NodeId]>]) -> String 
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum ExpansionDirection {
+pub(in crate::retrieval) enum ExpansionDirection {
     Outgoing,
     Bidirectional,
 }
 
 #[derive(Debug)]
-struct QueryScope {
-    purpose: GraphPurpose,
-    authorized_collections: BTreeSet<Uuid>,
-    external_ai_collections: BTreeSet<Uuid>,
+pub(in crate::retrieval) struct QueryScope {
+    pub(in crate::retrieval) purpose: GraphPurpose,
+    pub(in crate::retrieval) authorized_collections: BTreeSet<Uuid>,
+    pub(in crate::retrieval) external_ai_collections: BTreeSet<Uuid>,
 }
 
 #[derive(Debug)]

@@ -13,7 +13,7 @@ publish = false
 anyhow.workspace = true
 async-trait.workspace = true
 base64 = "0.22.1"
-airwiki-core = { version = "0.2.0", path = "../crates/airwiki-core", features = ["fastembed-runtime"] }
+airwiki-core = { version = "0.2.0", path = "../crates/airwiki-core", features = ["fastembed-runtime", "retrieval-evaluation"] }
 airwiki-inference = { version = "0.2.0", path = "../crates/airwiki-inference" }
 airwiki-types = { version = "0.2.0", path = "../crates/airwiki-types" }
 hex = "0.4.3"

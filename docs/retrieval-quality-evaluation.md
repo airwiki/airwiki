@@ -786,6 +786,70 @@ rankings and compare C32/G1 on new domains. Any future integration must discard
 a stale or unhealthy projection and retain SQLite publication, purpose, grant
 and final hit revalidation as the disclosure authority.
 
+#### Real-ranking development replay
+
+The next development replay removes the hand-authored ranking from the
+experiment. `fixtures/retrieval/mini-graph-real-development-v1.json` contains
+documents, reviewed links, questions and evidence groups, but no rank, score or
+candidate-position field. Its SHA-256 is
+`e4d084dc9e7e84b9b9f82a157a298b052283251bbbb84f2736778e2038e056e8`.
+The four visible development domains are observatory maintenance, museum
+conservation, community irrigation and transit accessibility. Each contributes
+an outgoing-link case, a backlink case and an unlinked direct-retrieval
+control. Deterministic related distractors bring the corpus to 164 concepts so
+the 32-candidate control is meaningful.
+
+The evaluator publishes every source through SQLite and
+`OkfPublicationMaterializer`, then obtains nodes and edges only from
+`OkfBundleInspector`. A collection contributes to the projection only while it
+is `Ready`, has zero health errors and retains the same bundle fingerprint
+before and after ranking. Only resolved concept-to-concept internal links are
+accepted. Every concept in this first replay has exactly one current chunk, so
+concept nomination maps to a citable chunk without introducing a second
+selection algorithm.
+
+An evaluation-only `airwiki-core` feature exposes a content-free prefix of the
+production BM25/E5/RRF ranking. It returns collection, concept, stable chunk and
+revision identities, but no text, snippet or score. The normal desktop build
+still uses the fixed 10-candidate relevance pool. In addition to C10, C32,
+G1-out and G1-bidir, this replay evaluates **G1-sham**: the same source and
+target degrees with targets rotated deterministically inside each collection.
+This control tests whether any bounded expansion would appear to help.
+
+For this visible v1 fixture, the development regression gate requires G1-bidir
+to gain at least two evidence groups over both C32 and G1-sham, improve over
+both controls in at least three of four domains, produce outgoing-link and
+backlink rescues in at least two domains each, and regress no individual case
+by losing an evidence group already covered by C32. These thresholds prevent a
+one-case or one-domain result from
+passing; they are not production-promotion criteria.
+
+```bash
+cargo run --release --locked -p xtask -- retrieval evaluate-real-mini-graph \
+  --embedding-snapshot <verified-multilingual-e5-small-snapshot>
+```
+
+The first macOS arm64 release-profile observation used multilingual E5 revision
+`614241f622f53c4eeff9890bdc4f31cfecc418b3`. Across 12 cases and 20 required
+evidence groups, C10 covered 12 groups, C32 covered 13, G1-out covered 16,
+G1-bidir covered all 20 and G1-sham covered 13. Outgoing links produced three
+groups absent from C32; backlinks added four more beyond outgoing expansion;
+the sham graph added none over C32. Support density was 3.39% for C32, 4.17%
+for G1-out and 5.21% for G1-bidir at the same aggregate 384-candidate budget.
+Both real and sham projections together retained 21,456 bytes. Healthy-bundle
+inspection plus projection took 60,296 microseconds, and all 12 real rankings
+plus expansions took 96,720 microseconds in aggregate. These are descriptive
+single-workstation measurements, not percentile claims.
+
+The real-ranking development gate passed, but
+`production_promotion_ready` remains false. The corpus and questions were
+visible while the mechanism was developed, every concept has only one chunk,
+and no relevance reranker or top-five answer path was evaluated. Before a
+production shadow integration, the direction and chunk-selection rule must be
+frozen, a separately authored set of at least four new domains must be scored
+once, and G1 must outperform both C32 and the degree-preserving sham without a
+privacy, current-revision, latency or evidence-quality regression.
+
 ### H-AWK-1 development observation
 
 The first macOS arm64 release-profile run on 2026-07-18 used Gemma 4 E4B Q4 at

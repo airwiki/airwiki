@@ -1,7 +1,7 @@
 use std::{
     collections::{BTreeSet, HashMap, HashSet},
     path::{Path, PathBuf},
-    sync::Arc,
+    sync::{Arc, Mutex},
     time::Instant,
 };
 
@@ -13,8 +13,8 @@ use airwiki_core::{
 };
 use airwiki_inference::{E5_REVISION, MMARCO_REVISION, platform_relevance_model};
 use airwiki_types::{
-    CollectionPolicy, ConceptType, EnrichmentDraft, MAX_SNIPPET_CHARS, MAX_TOP_K, SearchHit,
-    SearchPurpose, SearchRequest,
+    CollectionPolicy, ConceptType, EnrichmentDraft, MAX_HEADING_OR_PAGE_CHARS, MAX_SNIPPET_CHARS,
+    MAX_TOP_K, SearchHit, SearchPurpose, SearchRequest,
 };
 use anyhow::{Context, Result, anyhow, ensure};
 use async_trait::async_trait;
@@ -26,7 +26,7 @@ use crate::{replace_file, workspace_root};
 
 const FIXTURE_PATH: &str = "fixtures/retrieval/search-quality-v2.json";
 const REPORT_DIRECTORY: &str = "target/evals";
-const REPORT_SCHEMA_VERSION: u32 = 2;
+const REPORT_SCHEMA_VERSION: u32 = 3;
 const FIXTURE_SCHEMA_VERSION: u32 = 2;
 const TOP_K: u8 = 5;
 const MIN_RECALL_AT_FIVE: f64 = 0.9;
@@ -209,10 +209,100 @@ struct LoadedFixture {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-struct EvidenceKey {
+struct EvidenceLocator {
     title: String,
     heading: String,
-    text: String,
+}
+
+fn evidence_locator(title: &str, heading: &str) -> EvidenceLocator {
+    EvidenceLocator {
+        title: title.to_owned(),
+        heading: heading.chars().take(MAX_HEADING_OR_PAGE_CHARS).collect(),
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct AuditedCandidate {
+    fact_id: Option<String>,
+    decision: EvidenceDecision,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct MaskAuditCall {
+    node: FixtureNode,
+    candidates: Vec<AuditedCandidate>,
+}
+
+#[derive(Debug, Default)]
+struct MaskAudit {
+    calls: Mutex<HashMap<[u8; 32], Vec<MaskAuditCall>>>,
+}
+
+impl MaskAudit {
+    fn take(&self, question: &str) -> Result<Vec<MaskAuditCall>> {
+        let mut calls = self
+            .calls
+            .lock()
+            .map_err(|_| anyhow!("retrieval mask audit state is unavailable"))?;
+        let mut result = calls.remove(&audit_key(question)).unwrap_or_default();
+        result.sort_by_key(|call| call.node);
+        Ok(result)
+    }
+}
+
+#[derive(Clone)]
+struct AuditedRelevanceProvider {
+    inner: Arc<dyn EvidenceRelevanceProvider>,
+    facts: Arc<HashMap<EvidenceLocator, String>>,
+    audit: Arc<MaskAudit>,
+    node: FixtureNode,
+}
+
+#[async_trait]
+impl EvidenceRelevanceProvider for AuditedRelevanceProvider {
+    fn profile_id(&self) -> &str {
+        self.inner.profile_id()
+    }
+
+    async fn classify(
+        &self,
+        question: &str,
+        candidates: &[RelevanceInput],
+    ) -> std::result::Result<Vec<EvidenceDecision>, EvidenceRelevanceError> {
+        let decisions = self.inner.classify(question, candidates).await?;
+        if decisions.len() != candidates.len() {
+            return Err(EvidenceRelevanceError::DecisionCountMismatch {
+                expected: candidates.len(),
+                actual: decisions.len(),
+            });
+        }
+        let audited = candidates
+            .iter()
+            .zip(&decisions)
+            .map(|(candidate, decision)| AuditedCandidate {
+                fact_id: self
+                    .facts
+                    .get(&evidence_locator(&candidate.title, &candidate.heading))
+                    .cloned(),
+                decision: *decision,
+            })
+            .collect();
+        self.audit
+            .calls
+            .lock()
+            .map_err(|_| EvidenceRelevanceError::Unavailable)?
+            .entry(audit_key(question))
+            .or_default()
+            .push(MaskAuditCall {
+                node: self.node,
+                candidates: audited,
+            });
+        Ok(decisions)
+    }
+}
+
+fn audit_key(question: &str) -> [u8; 32] {
+    Sha256::digest(question.trim().as_bytes()).into()
 }
 
 #[derive(Debug, Clone)]
@@ -254,7 +344,7 @@ impl EmbeddingProvider for FixtureEmbeddingProvider {
 
 #[derive(Debug, Clone)]
 struct FixtureRelevanceProvider {
-    facts: Arc<HashMap<EvidenceKey, String>>,
+    facts: Arc<HashMap<EvidenceLocator, String>>,
     relevant_by_question: Arc<HashMap<String, HashSet<String>>>,
 }
 
@@ -276,11 +366,7 @@ impl EvidenceRelevanceProvider for FixtureRelevanceProvider {
         candidates
             .iter()
             .map(|candidate| {
-                let key = EvidenceKey {
-                    title: candidate.title.clone(),
-                    heading: candidate.heading.clone(),
-                    text: candidate.text.clone(),
-                };
+                let key = evidence_locator(&candidate.title, &candidate.heading);
                 let fact_id = self
                     .facts
                     .get(&key)
@@ -366,6 +452,17 @@ struct NormalizedRun {
     provenance_errors: u32,
 }
 
+#[derive(Debug)]
+struct CaseEvaluationRuns {
+    baseline: NormalizedRun,
+    repeated: NormalizedRun,
+    expanded: NormalizedRun,
+    reversed: NormalizedRun,
+    baseline_audit: Vec<MaskAuditCall>,
+    expected_audit_nodes: BTreeSet<FixtureNode>,
+    audit_stable: bool,
+}
+
 #[derive(Debug, Serialize)]
 struct RetrievalCaseReport {
     id: String,
@@ -380,11 +477,44 @@ struct RetrievalCaseReport {
     forbidden_fact_ids: Vec<String>,
     provenance_error_count: u32,
     duplicate_violation_count: u32,
+    stage_attribution: StageAttribution,
     repeat_stable: bool,
     top_k_prefix_stable: bool,
     insertion_order_stable: bool,
     elapsed_ms: u128,
     passed: bool,
+}
+
+#[derive(Debug, Clone, Default, Serialize)]
+struct StageAttribution {
+    source_candidate_group_count: u32,
+    mask_surviving_group_count: u32,
+    not_retrieved_group_count: u32,
+    rejected_by_mask_group_count: u32,
+    outside_top_k_group_count: u32,
+    revalidation_loss_group_count: u32,
+    unexpected_survivor_count: u32,
+    hard_negative_source_candidate_count: u32,
+    mapping_error_count: u32,
+    audit_complete: bool,
+    audit_stable: bool,
+}
+
+#[derive(Debug, Clone, Default, Serialize)]
+struct StageAttributionSummary {
+    expected_group_count: u32,
+    source_candidate_group_count: u32,
+    mask_surviving_group_count: u32,
+    source_candidate_recall_at_ten: Option<f64>,
+    mask_surviving_recall_at_ten: Option<f64>,
+    not_retrieved_group_count: u32,
+    rejected_by_mask_group_count: u32,
+    outside_top_k_group_count: u32,
+    revalidation_loss_group_count: u32,
+    unexpected_survivor_count: u32,
+    hard_negative_source_candidate_count: u32,
+    mapping_error_count: u32,
+    audit_error_case_count: u32,
 }
 
 #[derive(Debug, Clone, Default, Serialize)]
@@ -399,6 +529,7 @@ struct AggregateMetrics {
     provenance_error_count: u32,
     duplicate_violation_count: u32,
     unstable_case_count: u32,
+    stage_audit_error_count: u32,
 }
 
 #[derive(Debug, Serialize)]
@@ -414,6 +545,7 @@ struct RetrievalEvaluationReport {
     calibration: AggregateMetrics,
     holdout: AggregateMetrics,
     total: AggregateMetrics,
+    stage_attribution: StageAttributionSummary,
     passed: bool,
     cases: Vec<RetrievalCaseReport>,
 }
@@ -533,7 +665,7 @@ fn validate_fixture_data(fixture: &RetrievalFixture) -> Result<()> {
     let mut facts = HashMap::<&str, &FixtureChunk>::new();
     let mut fact_domains = HashMap::<&str, &str>::new();
     let mut fact_collections = HashMap::<&str, &str>::new();
-    let mut evidence_keys = HashSet::new();
+    let mut evidence_locators = HashSet::new();
     let mut has_withdrawn_document = false;
     for document in &fixture.documents {
         validate_identifier(&document.id, "document")?;
@@ -576,14 +708,9 @@ fn validate_fixture_data(fixture: &RetrievalFixture) -> Result<()> {
                 "retrieval fact must fit in one visible snippet"
             );
             validate_semantic_keys(&chunk.semantic_keys, "fact")?;
-            let key = EvidenceKey {
-                title: document.title.clone(),
-                heading: chunk.heading.clone(),
-                text: chunk.text.clone(),
-            };
             ensure!(
-                evidence_keys.insert(key),
-                "retrieval facts must have unique title, heading and text tuples"
+                evidence_locators.insert(evidence_locator(&document.title, &chunk.heading)),
+                "retrieval facts must have unique title and normalized heading pairs"
             );
             facts.insert(chunk.id.as_str(), chunk);
             fact_domains.insert(chunk.id.as_str(), document.domain.as_str());
@@ -822,11 +949,7 @@ fn fixture_providers(fixture: &RetrievalFixture) -> Result<EvaluationProviders> 
                 &key_dimensions,
             )?;
             facts.insert(
-                EvidenceKey {
-                    title: document.title.clone(),
-                    heading: chunk.heading.clone(),
-                    text: chunk.text.clone(),
-                },
+                evidence_locator(&document.title, &chunk.heading),
                 chunk.id.clone(),
             );
         }
@@ -864,6 +987,70 @@ fn fixture_providers(fixture: &RetrievalFixture) -> Result<EvaluationProviders> 
         },
         embeddings,
         relevance,
+    })
+}
+
+fn fact_ids_by_locator(fixture: &RetrievalFixture) -> Result<HashMap<EvidenceLocator, String>> {
+    let mut facts = HashMap::new();
+    for document in &fixture.documents {
+        for chunk in &document.chunks {
+            let previous = facts.insert(
+                evidence_locator(&document.title, &chunk.heading),
+                chunk.id.clone(),
+            );
+            ensure!(
+                previous.is_none(),
+                "retrieval fixture title and normalized heading pairs must be unique"
+            );
+        }
+    }
+    Ok(facts)
+}
+
+fn expected_audit_nodes(fixture: &RetrievalFixture, case: &FixtureCase) -> BTreeSet<FixtureNode> {
+    let purpose = case.scope.purpose();
+    let scopes = match case.scope {
+        RetrievalScope::Local | RetrievalScope::LocalExternalAi => {
+            [Some(FixtureNode::Origin), None]
+        }
+        RetrievalScope::TrustedPeer | RetrievalScope::TrustedPeerExternalAi => {
+            [Some(FixtureNode::Peer), None]
+        }
+        RetrievalScope::Federated => [Some(FixtureNode::Origin), Some(FixtureNode::Peer)],
+    };
+    scopes
+        .into_iter()
+        .flatten()
+        .filter(|node| node_has_searchable_document(fixture, *node, purpose))
+        .collect()
+}
+
+fn node_has_searchable_document(
+    fixture: &RetrievalFixture,
+    node: FixtureNode,
+    purpose: SearchPurpose,
+) -> bool {
+    fixture.documents.iter().any(|document| {
+        if document.publication_state != FixturePublicationState::Published {
+            return false;
+        }
+        let Some(collection) = fixture
+            .collections
+            .iter()
+            .find(|collection| collection.id == document.collection_id)
+        else {
+            return false;
+        };
+        if collection.node != node {
+            return false;
+        }
+        let purpose_allowed = purpose != SearchPurpose::ExternalAi || collection.allow_external_ai;
+        match node {
+            FixtureNode::Origin => purpose_allowed,
+            FixtureNode::Peer => {
+                purpose_allowed && collection.peer_shareable && collection.granted_to_origin
+            }
+        }
     })
 }
 
@@ -905,21 +1092,43 @@ async fn run_evaluation(
     providers: EvaluationProviders,
 ) -> Result<RetrievalEvaluationReport> {
     let started = Instant::now();
-    let forward = build_corpus(&loaded.fixture, &providers, false).await?;
-    let reverse = build_corpus(&loaded.fixture, &providers, true).await?;
+    let audit = Arc::new(MaskAudit::default());
+    let facts = Arc::new(fact_ids_by_locator(&loaded.fixture)?);
+    let forward = build_corpus(
+        &loaded.fixture,
+        &providers,
+        false,
+        Arc::clone(&audit),
+        Arc::clone(&facts),
+    )
+    .await?;
+    let reverse =
+        build_corpus(&loaded.fixture, &providers, true, Arc::clone(&audit), facts).await?;
     let mut case_reports = Vec::with_capacity(loaded.fixture.cases.len());
     for case in &loaded.fixture.cases {
         let case_started = Instant::now();
         let baseline = run_case(&forward, case, TOP_K).await?;
+        let baseline_audit = audit.take(&case.question)?;
         let repeated = run_case(&forward, case, TOP_K).await?;
+        let repeated_audit = audit.take(&case.question)?;
         let expanded = run_case(&forward, case, MAX_TOP_K).await?;
+        let expanded_audit = audit.take(&case.question)?;
         let reversed = run_case(&reverse, case, TOP_K).await?;
+        let reversed_audit = audit.take(&case.question)?;
+        let audit_stable = baseline_audit == repeated_audit
+            && baseline_audit == expanded_audit
+            && baseline_audit == reversed_audit;
         case_reports.push(score_case(
             case,
-            baseline,
-            repeated,
-            expanded,
-            reversed,
+            CaseEvaluationRuns {
+                baseline,
+                repeated,
+                expanded,
+                reversed,
+                baseline_audit,
+                expected_audit_nodes: expected_audit_nodes(&loaded.fixture, case),
+                audit_stable,
+            },
             case_started.elapsed().as_millis(),
         ));
     }
@@ -939,6 +1148,7 @@ async fn run_evaluation(
             .filter(|report| report.split == RetrievalSplit::Holdout),
     );
     let total = aggregate_metrics(case_reports.iter());
+    let stage_attribution = aggregate_stage_attribution(&case_reports);
     let passed = regression_cases_pass(&case_reports)
         && split_passes(&regression)
         && split_passes(&calibration)
@@ -955,6 +1165,7 @@ async fn run_evaluation(
         calibration,
         holdout,
         total,
+        stage_attribution,
         passed,
         cases: case_reports,
     })
@@ -964,6 +1175,8 @@ async fn build_corpus(
     fixture: &RetrievalFixture,
     providers: &EvaluationProviders,
     reverse_documents: bool,
+    audit: Arc<MaskAudit>,
+    facts: Arc<HashMap<EvidenceLocator, String>>,
 ) -> Result<FixtureCorpus> {
     let origin_database = Database::in_memory()?;
     let peer_database = Database::in_memory()?;
@@ -1059,13 +1272,23 @@ async fn build_corpus(
         origin: HybridSearchEngine::new(
             origin_database,
             Arc::clone(&providers.embeddings),
-            Arc::clone(&providers.relevance),
+            Arc::new(AuditedRelevanceProvider {
+                inner: Arc::clone(&providers.relevance),
+                facts: Arc::clone(&facts),
+                audit: Arc::clone(&audit),
+                node: FixtureNode::Origin,
+            }),
             ORIGIN_NODE_ID,
         ),
         peer: HybridSearchEngine::new(
             peer_database,
             Arc::clone(&providers.embeddings),
-            Arc::clone(&providers.relevance),
+            Arc::new(AuditedRelevanceProvider {
+                inner: Arc::clone(&providers.relevance),
+                facts,
+                audit,
+                node: FixtureNode::Peer,
+            }),
             PEER_NODE_ID,
         ),
         facts_by_provenance,
@@ -1292,12 +1515,18 @@ fn hit_has_valid_provenance(
 
 fn score_case(
     case: &FixtureCase,
-    baseline: NormalizedRun,
-    repeated: NormalizedRun,
-    expanded: NormalizedRun,
-    reversed: NormalizedRun,
+    runs: CaseEvaluationRuns,
     elapsed_ms: u128,
 ) -> RetrievalCaseReport {
+    let CaseEvaluationRuns {
+        baseline,
+        repeated,
+        expanded,
+        reversed,
+        baseline_audit,
+        expected_audit_nodes,
+        audit_stable,
+    } = runs;
     let repeat_stable = baseline == repeated;
     let top_k_prefix_stable = run_is_prefix(&baseline, &expanded);
     let insertion_order_stable = baseline == reversed;
@@ -1373,11 +1602,19 @@ fn score_case(
     let expected_group_count = case.expected_groups.len();
     let missing_group_count = expected_group_count.saturating_sub(found_group_count);
     let provenance_error_count = baseline.provenance_errors;
+    let stage_attribution = attribute_retrieval_stages(
+        case,
+        &returned_ids,
+        &baseline_audit,
+        &expected_audit_nodes,
+        audit_stable,
+    );
     let passed = missing_group_count == 0
         && unexpected_fact_ids.is_empty()
         && returned_forbidden_fact_ids.is_empty()
         && provenance_error_count == 0
         && duplicate_violation_count == 0
+        && stage_attribution_is_valid(&stage_attribution)
         && repeat_stable
         && top_k_prefix_stable
         && insertion_order_stable;
@@ -1394,11 +1631,119 @@ fn score_case(
         forbidden_fact_ids: returned_forbidden_fact_ids,
         provenance_error_count,
         duplicate_violation_count: u32::try_from(duplicate_violation_count).unwrap_or(u32::MAX),
+        stage_attribution,
         repeat_stable,
         top_k_prefix_stable,
         insertion_order_stable,
         elapsed_ms,
         passed,
+    }
+}
+
+fn stage_attribution_is_valid(stage: &StageAttribution) -> bool {
+    stage.mapping_error_count == 0 && stage.audit_complete && stage.audit_stable
+}
+
+fn attribute_retrieval_stages(
+    case: &FixtureCase,
+    returned_ids: &[&str],
+    calls: &[MaskAuditCall],
+    expected_audit_nodes: &BTreeSet<FixtureNode>,
+    audit_stable: bool,
+) -> StageAttribution {
+    let mut candidate_ids = HashSet::new();
+    let mut surviving_ids = HashSet::new();
+    let mut emitted_before_revalidation = HashSet::new();
+    let mut mapping_error_count = 0_u32;
+    let observed_nodes = calls.iter().map(|call| call.node).collect::<BTreeSet<_>>();
+    let audit_complete =
+        &observed_nodes == expected_audit_nodes && observed_nodes.len() == calls.len();
+    for call in calls {
+        let mut accepted_in_call = 0_usize;
+        for candidate in &call.candidates {
+            let emitted = candidate.decision == EvidenceDecision::Relevant
+                && accepted_in_call < usize::from(TOP_K);
+            if candidate.decision == EvidenceDecision::Relevant {
+                accepted_in_call = accepted_in_call.saturating_add(1);
+            }
+            let Some(fact_id) = candidate.fact_id.as_deref() else {
+                mapping_error_count = mapping_error_count.saturating_add(1);
+                continue;
+            };
+            candidate_ids.insert(fact_id);
+            if candidate.decision == EvidenceDecision::Relevant {
+                surviving_ids.insert(fact_id);
+                if emitted {
+                    emitted_before_revalidation.insert(fact_id);
+                }
+            }
+        }
+    }
+
+    let returned_ids = returned_ids.iter().copied().collect::<HashSet<_>>();
+    let relevant_ids = case
+        .relevant_fact_ids
+        .iter()
+        .map(String::as_str)
+        .collect::<HashSet<_>>();
+    let forbidden_ids = case
+        .forbidden_fact_ids
+        .iter()
+        .map(String::as_str)
+        .collect::<HashSet<_>>();
+    let group_has = |group: &[String], facts: &HashSet<&str>| {
+        group.iter().any(|fact_id| facts.contains(fact_id.as_str()))
+    };
+
+    let source_candidate_group_count = case
+        .expected_groups
+        .iter()
+        .filter(|group| group_has(group, &candidate_ids))
+        .count();
+    let mask_surviving_group_count = case
+        .expected_groups
+        .iter()
+        .filter(|group| group_has(group, &surviving_ids))
+        .count();
+    let mut not_retrieved_group_count = 0_usize;
+    let mut rejected_by_mask_group_count = 0_usize;
+    let mut outside_top_k_group_count = 0_usize;
+    let mut revalidation_loss_group_count = 0_usize;
+    for group in case
+        .expected_groups
+        .iter()
+        .filter(|group| !group_has(group, &returned_ids))
+    {
+        if !group_has(group, &candidate_ids) {
+            not_retrieved_group_count = not_retrieved_group_count.saturating_add(1);
+        } else if !group_has(group, &surviving_ids) {
+            rejected_by_mask_group_count = rejected_by_mask_group_count.saturating_add(1);
+        } else if !group_has(group, &emitted_before_revalidation) {
+            outside_top_k_group_count = outside_top_k_group_count.saturating_add(1);
+        } else {
+            revalidation_loss_group_count = revalidation_loss_group_count.saturating_add(1);
+        }
+    }
+
+    StageAttribution {
+        source_candidate_group_count: u32::try_from(source_candidate_group_count)
+            .unwrap_or(u32::MAX),
+        mask_surviving_group_count: u32::try_from(mask_surviving_group_count).unwrap_or(u32::MAX),
+        not_retrieved_group_count: u32::try_from(not_retrieved_group_count).unwrap_or(u32::MAX),
+        rejected_by_mask_group_count: u32::try_from(rejected_by_mask_group_count)
+            .unwrap_or(u32::MAX),
+        outside_top_k_group_count: u32::try_from(outside_top_k_group_count).unwrap_or(u32::MAX),
+        revalidation_loss_group_count: u32::try_from(revalidation_loss_group_count)
+            .unwrap_or(u32::MAX),
+        unexpected_survivor_count: u32::try_from(surviving_ids.difference(&relevant_ids).count())
+            .unwrap_or(u32::MAX),
+        hard_negative_source_candidate_count: u32::try_from(
+            candidate_ids.intersection(&forbidden_ids).count(),
+        )
+        .unwrap_or(u32::MAX),
+        mapping_error_count,
+        audit_complete,
+        audit_stable,
     }
 }
 
@@ -1444,6 +1789,9 @@ fn aggregate_metrics<'a>(
         if !report.repeat_stable || !report.top_k_prefix_stable || !report.insertion_order_stable {
             metrics.unstable_case_count = metrics.unstable_case_count.saturating_add(1);
         }
+        if !stage_attribution_is_valid(&report.stage_attribution) {
+            metrics.stage_audit_error_count = metrics.stage_audit_error_count.saturating_add(1);
+        }
         if report.expected_group_count > 0 {
             reciprocal_rank_sum += report.reciprocal_rank_at_five.unwrap_or(0.0);
             reciprocal_rank_count = reciprocal_rank_count.saturating_add(1);
@@ -1456,6 +1804,53 @@ fn aggregate_metrics<'a>(
     metrics
 }
 
+fn aggregate_stage_attribution(reports: &[RetrievalCaseReport]) -> StageAttributionSummary {
+    let mut summary = StageAttributionSummary::default();
+    for report in reports {
+        let stage = &report.stage_attribution;
+        summary.expected_group_count = summary
+            .expected_group_count
+            .saturating_add(report.expected_group_count);
+        summary.source_candidate_group_count = summary
+            .source_candidate_group_count
+            .saturating_add(stage.source_candidate_group_count);
+        summary.mask_surviving_group_count = summary
+            .mask_surviving_group_count
+            .saturating_add(stage.mask_surviving_group_count);
+        summary.not_retrieved_group_count = summary
+            .not_retrieved_group_count
+            .saturating_add(stage.not_retrieved_group_count);
+        summary.rejected_by_mask_group_count = summary
+            .rejected_by_mask_group_count
+            .saturating_add(stage.rejected_by_mask_group_count);
+        summary.outside_top_k_group_count = summary
+            .outside_top_k_group_count
+            .saturating_add(stage.outside_top_k_group_count);
+        summary.revalidation_loss_group_count = summary
+            .revalidation_loss_group_count
+            .saturating_add(stage.revalidation_loss_group_count);
+        summary.unexpected_survivor_count = summary
+            .unexpected_survivor_count
+            .saturating_add(stage.unexpected_survivor_count);
+        summary.hard_negative_source_candidate_count = summary
+            .hard_negative_source_candidate_count
+            .saturating_add(stage.hard_negative_source_candidate_count);
+        summary.mapping_error_count = summary
+            .mapping_error_count
+            .saturating_add(stage.mapping_error_count);
+        if !stage_attribution_is_valid(stage) {
+            summary.audit_error_case_count = summary.audit_error_case_count.saturating_add(1);
+        }
+    }
+    summary.source_candidate_recall_at_ten = (summary.expected_group_count > 0).then(|| {
+        f64::from(summary.source_candidate_group_count) / f64::from(summary.expected_group_count)
+    });
+    summary.mask_surviving_recall_at_ten = (summary.expected_group_count > 0).then(|| {
+        f64::from(summary.mask_surviving_group_count) / f64::from(summary.expected_group_count)
+    });
+    summary
+}
+
 fn split_passes(metrics: &AggregateMetrics) -> bool {
     metrics
         .recall_at_five
@@ -1465,6 +1860,7 @@ fn split_passes(metrics: &AggregateMetrics) -> bool {
         && metrics.provenance_error_count == 0
         && metrics.duplicate_violation_count == 0
         && metrics.unstable_case_count == 0
+        && metrics.stage_audit_error_count == 0
 }
 
 fn regression_cases_pass(reports: &[RetrievalCaseReport]) -> bool {
@@ -1513,6 +1909,26 @@ fn write_report(report: &RetrievalEvaluationReport) -> Result<PathBuf> {
 mod tests {
     use super::*;
 
+    #[derive(Clone)]
+    struct FixedTestRelevanceProvider {
+        decisions: Vec<EvidenceDecision>,
+    }
+
+    #[async_trait]
+    impl EvidenceRelevanceProvider for FixedTestRelevanceProvider {
+        fn profile_id(&self) -> &str {
+            "fixed-test-relevance"
+        }
+
+        async fn classify(
+            &self,
+            _question: &str,
+            _candidates: &[RelevanceInput],
+        ) -> std::result::Result<Vec<EvidenceDecision>, EvidenceRelevanceError> {
+            Ok(self.decisions.clone())
+        }
+    }
+
     #[tokio::test]
     async fn deterministic_fixture_exercises_the_complete_retrieval_pipeline() {
         let loaded = load_fixture().unwrap();
@@ -1522,6 +1938,65 @@ mod tests {
 
         assert!(report.passed, "deterministic retrieval report: {report:#?}");
         assert!(report.regression.case_count > 0);
+        assert_eq!(
+            report.stage_attribution.source_candidate_recall_at_ten,
+            Some(1.0)
+        );
+        assert_eq!(
+            report.stage_attribution.mask_surviving_recall_at_ten,
+            Some(1.0)
+        );
+        assert_eq!(report.stage_attribution.mapping_error_count, 0);
+    }
+
+    #[tokio::test]
+    async fn relevance_audit_preserves_decisions_and_records_no_document_text() {
+        let audit = Arc::new(MaskAudit::default());
+        let provider = AuditedRelevanceProvider {
+            inner: Arc::new(FixedTestRelevanceProvider {
+                decisions: vec![EvidenceDecision::Relevant, EvidenceDecision::Irrelevant],
+            }),
+            facts: Arc::new(HashMap::from([(
+                EvidenceLocator {
+                    title: "Synthetic title".to_owned(),
+                    heading: "Synthetic heading".to_owned(),
+                },
+                "synthetic_fact".to_owned(),
+            )])),
+            audit: Arc::clone(&audit),
+            node: FixtureNode::Origin,
+        };
+        let candidates = vec![
+            RelevanceInput {
+                title: "Synthetic title".to_owned(),
+                heading: "Synthetic heading".to_owned(),
+                text: "content must not enter audit state".to_owned(),
+            },
+            RelevanceInput {
+                title: "Unmapped title".to_owned(),
+                heading: "Unmapped heading".to_owned(),
+                text: "other content must not enter audit state".to_owned(),
+            },
+        ];
+
+        let decisions = provider
+            .classify(" private synthetic question ", &candidates)
+            .await
+            .unwrap();
+        let calls = audit.take("private synthetic question").unwrap();
+
+        assert_eq!(
+            decisions,
+            vec![EvidenceDecision::Relevant, EvidenceDecision::Irrelevant]
+        );
+        assert_eq!(calls.len(), 1);
+        assert_eq!(calls[0].candidates.len(), 2);
+        assert_eq!(
+            calls[0].candidates[0].fact_id.as_deref(),
+            Some("synthetic_fact")
+        );
+        assert!(calls[0].candidates[1].fact_id.is_none());
+        assert!(audit.take("private synthetic question").unwrap().is_empty());
     }
 
     #[test]
@@ -1545,6 +2020,44 @@ mod tests {
         let error = validate_fixture_data(&loaded.fixture).unwrap_err();
 
         assert!(error.to_string().contains("pairwise disjoint"));
+    }
+
+    #[test]
+    fn fixture_rejects_headings_that_collide_after_production_truncation() {
+        let mut loaded = load_fixture().unwrap();
+        let title = loaded
+            .fixture
+            .documents
+            .iter()
+            .find(|document| document.id == "atlas_recovery")
+            .unwrap()
+            .title
+            .clone();
+        let shared_prefix = "h".repeat(MAX_HEADING_OR_PAGE_CHARS);
+        loaded
+            .fixture
+            .documents
+            .iter_mut()
+            .find(|document| document.id == "atlas_recovery")
+            .unwrap()
+            .chunks[0]
+            .heading = format!("{shared_prefix}a");
+        let target = loaded
+            .fixture
+            .documents
+            .iter_mut()
+            .find(|document| document.id == "aurora_coordination")
+            .unwrap();
+        target.title = title;
+        target.chunks[0].heading = format!("{shared_prefix}b");
+
+        let error = validate_fixture_data(&loaded.fixture).unwrap_err();
+
+        assert!(
+            error
+                .to_string()
+                .contains("title and normalized heading pairs")
+        );
     }
 
     #[test]
@@ -1677,6 +2190,7 @@ mod tests {
             calibration: AggregateMetrics::default(),
             holdout: AggregateMetrics::default(),
             total: AggregateMetrics::default(),
+            stage_attribution: StageAttributionSummary::default(),
             passed: true,
             cases: Vec::new(),
         };
@@ -1713,6 +2227,7 @@ mod tests {
                 forbidden_fact_ids: Vec::new(),
                 provenance_error_count: 0,
                 duplicate_violation_count: 0,
+                stage_attribution: StageAttribution::default(),
                 repeat_stable: true,
                 top_k_prefix_stable: true,
                 insertion_order_stable: true,
@@ -1725,6 +2240,17 @@ mod tests {
         let metrics = aggregate_metrics(reports.iter());
 
         assert_eq!(metrics.mean_reciprocal_rank_at_five, Some(0.5));
+    }
+
+    #[test]
+    fn split_rejects_an_invalid_stage_audit() {
+        let metrics = AggregateMetrics {
+            recall_at_five: Some(1.0),
+            stage_audit_error_count: 1,
+            ..AggregateMetrics::default()
+        };
+
+        assert!(!split_passes(&metrics));
     }
 
     #[test]
@@ -1743,6 +2269,7 @@ mod tests {
                 forbidden_fact_ids: Vec::new(),
                 provenance_error_count: 0,
                 duplicate_violation_count: 0,
+                stage_attribution: StageAttribution::default(),
                 repeat_stable: true,
                 top_k_prefix_stable: true,
                 insertion_order_stable: true,
@@ -1758,6 +2285,81 @@ mod tests {
         ];
 
         assert!(!regression_cases_pass(&reports));
+    }
+
+    #[test]
+    fn stage_attribution_partitions_each_missing_group_once() {
+        let case = FixtureCase {
+            id: "stage_partition".to_owned(),
+            domain: "stage_partition".to_owned(),
+            split: RetrievalSplit::Calibration,
+            tags: vec![RetrievalTag::Compound],
+            scope: RetrievalScope::Local,
+            question: "synthetic stage question".to_owned(),
+            semantic_keys: vec!["stage".to_owned()],
+            relevant_fact_ids: [
+                "not_retrieved",
+                "masked",
+                "outside",
+                "revalidated",
+                "returned",
+            ]
+            .into_iter()
+            .map(str::to_owned)
+            .collect(),
+            expected_groups: [
+                "not_retrieved",
+                "masked",
+                "outside",
+                "revalidated",
+                "returned",
+            ]
+            .into_iter()
+            .map(|fact| vec![fact.to_owned()])
+            .collect(),
+            forbidden_fact_ids: Vec::new(),
+        };
+        let candidate = |fact_id: &str, decision| AuditedCandidate {
+            fact_id: Some(fact_id.to_owned()),
+            decision,
+        };
+        let calls = vec![MaskAuditCall {
+            node: FixtureNode::Origin,
+            candidates: vec![
+                candidate("masked", EvidenceDecision::Irrelevant),
+                candidate("revalidated", EvidenceDecision::Relevant),
+                candidate("returned", EvidenceDecision::Relevant),
+                candidate("filler_1", EvidenceDecision::Relevant),
+                candidate("filler_2", EvidenceDecision::Relevant),
+                candidate("filler_3", EvidenceDecision::Relevant),
+                candidate("outside", EvidenceDecision::Relevant),
+            ],
+        }];
+
+        let attribution = attribute_retrieval_stages(
+            &case,
+            &["returned"],
+            &calls,
+            &BTreeSet::from([FixtureNode::Origin]),
+            true,
+        );
+
+        assert_eq!(attribution.source_candidate_group_count, 4);
+        assert_eq!(attribution.mask_surviving_group_count, 3);
+        assert_eq!(attribution.not_retrieved_group_count, 1);
+        assert_eq!(attribution.rejected_by_mask_group_count, 1);
+        assert_eq!(attribution.outside_top_k_group_count, 1);
+        assert_eq!(attribution.revalidation_loss_group_count, 1);
+        assert_eq!(
+            attribution.not_retrieved_group_count
+                + attribution.rejected_by_mask_group_count
+                + attribution.outside_top_k_group_count
+                + attribution.revalidation_loss_group_count,
+            4
+        );
+        assert_eq!(attribution.mapping_error_count, 0);
+        assert!(attribution.audit_complete);
+        assert!(attribution.audit_stable);
     }
 
     #[test]

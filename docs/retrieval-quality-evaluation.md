@@ -48,6 +48,14 @@ publication and search interfaces. It covers:
 - local, peer-authorized, external-AI and federated search scopes;
 - collection policy, grants and result-provenance revalidation.
 
+Report schema 3 also attributes each missing expected group to its source
+candidate pool, binary relevance mask, source top-k truncation or final
+revalidation. The audit wraps the existing relevance provider and never changes
+its decisions. It is an evaluation boundary only; no logits, questions,
+passages or audit state enter the product search API or persistent storage. The
+evaluator also fails if the audited source set is incomplete or repeated
+decisions are unstable.
+
 For a multi-node case, Recall@5 means that required evidence must appear within
 the top five returned by its source node. The evaluator combines that source
 coverage for scoring; it does not claim that up to ten source hits are the
@@ -109,11 +117,12 @@ MRR@5 and elapsed time are diagnostics rather than acceptance thresholds.
 ## Report privacy
 
 The JSON report contains fixture and artifact identity, target platform, thread
-count, aggregate metrics, synthetic case and fact identifiers, stability flags,
-elapsed times and PASS/FAIL. It contains no question or passage text, snippets,
-source-document paths, source-document hashes, local usernames, peer identities,
-IP addresses, ports or multiaddresses. Reports remain ignored under `target/`;
-maintainer evidence should retain only the aggregate fields allowed by
+count, aggregate and stage-attribution metrics, synthetic case and fact
+identifiers, stability flags, elapsed times and PASS/FAIL. It contains no
+question or passage text, snippets, source-document paths, source-document
+hashes, local usernames, peer identities, IP addresses, ports or multiaddresses.
+Reports remain ignored under `target/`; maintainer evidence should retain only
+the aggregate fields allowed by
 [the validation-record policy](maintainer-validation.md).
 
 ## Initial platform observation
@@ -144,6 +153,33 @@ protocols merely to turn that observation green.
 Schema v2 deterministically validates the corrected corpus and pipeline
 contract. It has not established a passing semantic-quality result for the real
 model artifacts.
+
+## V2 stage-attribution observation
+
+The macOS arm64 run on 2026-07-18 used the same pinned model revisions and the
+active schema-v2 corpus. Its final quality result still failed:
+
+- regression Recall@5: 0.50 with three unexpected facts;
+- calibration Recall@5: 1.00;
+- diagnostic holdout Recall@5: 0.625; and
+- overall Recall@5: 0.6667 with no provenance, duplicate or stability errors.
+
+The stage attribution isolated the failure:
+
+- source-candidate Recall@10: 1.00 (18 of 18 expected groups; each node keeps
+  its own pool of up to ten candidates);
+- mask-surviving recall: 0.6667 (12 of 18 groups);
+- six groups rejected by the binary mMARCO mask;
+- zero expected groups absent from retrieval, outside the source top five or
+  removed by final revalidation; and
+- three non-answering fragments accepted by the selector.
+
+Three hard-negative facts were present in candidate pools. This is expected:
+candidate retrieval is an internal ranking stage, not evidence disclosure. The
+quality failure is that the selector accepted three non-answering candidates
+while rejecting six answer-bearing candidates. This result supports work on one
+better selector contract; it does not justify changing BM25, E5, RRF, the pool
+size, top-k, policies or the wire protocol.
 
 Windows real-model evaluation is pending. A macOS result must never be used to
 infer the behavior of the Windows artifacts.

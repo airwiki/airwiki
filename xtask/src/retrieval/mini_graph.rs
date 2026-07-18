@@ -315,7 +315,7 @@ impl MiniGraph {
         candidates
     }
 
-    fn expand_one_hop(
+    pub(in crate::retrieval) fn expand_one_hop(
         &self,
         seeds: &[NodeId],
         scope: &QueryScope,

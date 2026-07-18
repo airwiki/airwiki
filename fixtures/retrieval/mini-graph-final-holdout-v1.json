@@ -1,0 +1,2694 @@
+{
+  "schema_version": 1,
+  "experiment_id": "mini-graph-final-holdout-v1",
+  "domains": [
+    {
+      "id": "encuadernacion_lumbre",
+      "collection_name": "Taller de encuadernación Lumbre",
+      "language": "es",
+      "distractor_count": 28,
+      "distractor_title": "Nota de mantenimiento del patio de secado",
+      "distractor_description": "Registro ficticio de tareas ambientales que no describe encargos de encuadernación.",
+      "distractor_sections": [
+        {
+          "id": "lum_dist_sombra",
+          "heading": "Sombra del patio",
+          "text": "Las lonas del patio se revisan al comienzo de cada estación y se guardan cuando hay viento fuerte."
+        },
+        {
+          "id": "lum_dist_macetas",
+          "heading": "Macetas",
+          "text": "Las macetas decorativas llevan una etiqueta gris para separarlas de los materiales del taller."
+        },
+        {
+          "id": "lum_dist_llaves",
+          "heading": "Llaves comunes",
+          "text": "El juego de llaves del patio queda en una caja numerada junto a la puerta interior."
+        }
+      ],
+      "documents": [
+        {
+          "id": "lum_mapa_encargos",
+          "title": "Mapa de encargos y estaciones",
+          "description": "Recorrido de ingreso para los cuadernos artesanales del taller Lumbre.",
+          "sections": [
+            {
+              "id": "lum_ruta_encargo",
+              "heading": "Ruta de la tarjeta ámbar",
+              "text": "La tarjeta ámbar acompaña los encargos con costura visible desde la mesa de recepción hasta la estación de pliegos. El color del hilo determina qué especificación de armado debe consultar la persona de turno."
+            },
+            {
+              "id": "lum_estaciones",
+              "heading": "Orden de estaciones",
+              "text": "El bloque pasa por pliegos, costura y cubierta en ese orden. La prensa se usa sólo después de registrar la revisión del lomo."
+            },
+            {
+              "id": "lum_cierre_turno",
+              "heading": "Cierre del turno",
+              "text": "Al terminar, las plegaderas vuelven al cajón azul y las tarjetas activas quedan en la bandeja de continuidad. Ningún encargo se deja sobre la mesa de corte."
+            }
+          ],
+          "links": [
+            {
+              "label": "Consultar la especificación de pliegos indicada por la tarjeta",
+              "target_document_id": "lum_guia_pliegos"
+            },
+            {
+              "label": "Elegir la cubierta después de completar el bloque",
+              "target_document_id": "lum_catalogo_cubiertas"
+            }
+          ]
+        },
+        {
+          "id": "lum_guia_pliegos",
+          "title": "Guía de pliegos y marcas de orientación",
+          "description": "Especificaciones para formar bloques antes de la costura.",
+          "sections": [
+            {
+              "id": "lum_marca_norte",
+              "heading": "Serie verde",
+              "text": "Para un encargo ámbar con hilo verde, cada cuadernillo se forma con cuatro hojas dobladas. La marca triangular de orientación queda en el borde superior, mirando hacia la cabecera del bloque."
+            },
+            {
+              "id": "lum_prensa_temporal",
+              "heading": "Prensado provisional",
+              "text": "Los cuadernillos alineados descansan cinco minutos bajo la tabla liviana, sin apretar el tornillo principal. Este paso sólo estabiliza los pliegues antes de perforar."
+            },
+            {
+              "id": "lum_conteo_cuadernillos",
+              "heading": "Conteo de respaldo",
+              "text": "La persona que perfora anota el número de cuadernillos en el reverso de la tarjeta. Si el conteo no coincide con la orden, el bloque vuelve a recepción."
+            }
+          ],
+          "links": [
+            {
+              "label": "Ver cómo se evalúa el lomo una vez cosido",
+              "target_document_id": "lum_control_calidad"
+            }
+          ]
+        },
+        {
+          "id": "lum_catalogo_cubiertas",
+          "title": "Catálogo técnico de cubiertas textiles",
+          "description": "Preparación de telas ficticias para cubiertas de series pequeñas.",
+          "sections": [
+            {
+              "id": "lum_reposo_coral",
+              "heading": "Tela Coral-7",
+              "text": "La tela Coral-7 reposa dieciocho minutos antes del corte, extendida sobre la rejilla de haya. No se apila ni se cubre durante ese intervalo."
+            },
+            {
+              "id": "lum_corte_ceniza",
+              "heading": "Tela Ceniza-2",
+              "text": "Ceniza-2 se corta con una reserva de seis milímetros por lado y se alisa desde el centro. La guía metálica se limpia antes de cada tanda."
+            },
+            {
+              "id": "lum_guardado_rollos",
+              "heading": "Guardado de rollos",
+              "text": "Los rollos abiertos se sujetan con cintas de algodón sin adhesivo. La fecha de apertura se escribe en una etiqueta separada."
+            }
+          ],
+          "links": [
+            {
+              "label": "Aplicar las precauciones del adhesivo usado con estas telas",
+              "target_document_id": "lum_seguridad_materiales"
+            }
+          ]
+        },
+        {
+          "id": "lum_registro_turno",
+          "title": "Registro de turnos de costura",
+          "description": "Observaciones de lotes ficticios antes de la inspección final.",
+          "sections": [
+            {
+              "id": "lum_lote_mirlo",
+              "heading": "Turno del viernes: lote Mirlo",
+              "text": "El viernes, el lote Mirlo llegó a revisión con doce piezas. Una pieza quedó apartada porque el hilo cruzaba el canal central; las otras once siguieron juntas."
+            },
+            {
+              "id": "lum_lote_sauce",
+              "heading": "Turno del sábado: lote Sauce",
+              "text": "Sauce reunió ocho piezas con tensión uniforme. Una nota de recepción pidió conservar el orden original de las tarjetas."
+            },
+            {
+              "id": "lum_cambio_agujas",
+              "heading": "Cambio de agujas",
+              "text": "Las agujas de punta roma se reemplazaron al cierre del sábado. El recambio quedó contado en el inventario de herramientas."
+            }
+          ],
+          "links": [
+            {
+              "label": "Interpretar estas observaciones con los criterios del sello azul",
+              "target_document_id": "lum_control_calidad"
+            }
+          ]
+        },
+        {
+          "id": "lum_seguridad_materiales",
+          "title": "Seguridad de adhesivos y limpieza",
+          "description": "Respuesta del taller ante incidentes menores con materiales.",
+          "sections": [
+            {
+              "id": "lum_burbujas_niebla",
+              "heading": "Burbujas en adhesivo Niebla",
+              "text": "Si el adhesivo Niebla forma burbujas, se detiene la aplicación y el recipiente se lleva a la bandeja ventilada durante diez minutos. No se mezcla ni se calienta para acelerar el asentamiento."
+            },
+            {
+              "id": "lum_derrame_mesa",
+              "heading": "Derrame sobre mesa",
+              "text": "Un derrame pequeño se rodea con paños secos y se retira con la espátula roja. La superficie queda fuera de uso hasta completar la limpieza."
+            },
+            {
+              "id": "lum_trapos_usados",
+              "heading": "Paños usados",
+              "text": "Los paños con residuo se depositan en el cubo con tapa y se cuentan al final del turno. Nunca vuelven al estante de telas."
+            }
+          ],
+          "links": [
+            {
+              "label": "Confirmar los límites de aceptación antes de liberar una pieza",
+              "target_document_id": "lum_control_calidad"
+            }
+          ]
+        },
+        {
+          "id": "lum_control_calidad",
+          "title": "Control final y sello azul",
+          "description": "Criterios de aceptación para bloques cosidos y cubiertas terminadas.",
+          "sections": [
+            {
+              "id": "lum_sello_azul",
+              "heading": "Lectura del sello azul",
+              "text": "El sello azul confirma que el lote fue contado, que las anomalías se separaron y que el registro del turno está enlazado. El sello no sustituye la observación escrita del lote."
+            },
+            {
+              "id": "lum_tolerancia_lomo",
+              "heading": "Tolerancia del lomo",
+              "text": "El lomo se acepta cuando la desviación entre cabecera y pie no supera dos milímetros. Una desviación mayor devuelve la pieza a la estación de costura."
+            },
+            {
+              "id": "lum_bordes_cubierta",
+              "heading": "Bordes de cubierta",
+              "text": "Las esquinas deben quedar cerradas y sin fibras sueltas visibles a la distancia de un brazo. La revisión se hace con la pieza apoyada, no suspendida."
+            }
+          ],
+          "links": [
+            {
+              "label": "Volver al procedimiento que prepara los bloques para esta inspección",
+              "target_document_id": "lum_guia_pliegos"
+            }
+          ]
+        }
+      ],
+      "cases": [
+        {
+          "id": "lum_outgoing_rescue",
+          "question": "En la ruta de la tarjeta ámbar, ¿cómo se forma el bloque cuando el hilo es verde y dónde queda la marca triangular?",
+          "expected_answerable": true,
+          "required_evidence_groups": [
+            [
+              {
+                "document_id": "lum_guia_pliegos",
+                "section_id": "lum_marca_norte"
+              }
+            ]
+          ],
+          "forbidden_evidence": [
+            {
+              "document_id": "lum_mapa_encargos",
+              "section_id": "lum_ruta_encargo"
+            },
+            {
+              "document_id": "lum_guia_pliegos",
+              "section_id": "lum_conteo_cuadernillos"
+            }
+          ]
+        },
+        {
+          "id": "lum_backlink_rescue",
+          "question": "Al aplicar el sello azul al lote Mirlo del viernes, ¿cuántas piezas llegaron y cuál fue la anomalía apartada?",
+          "expected_answerable": true,
+          "required_evidence_groups": [
+            [
+              {
+                "document_id": "lum_registro_turno",
+                "section_id": "lum_lote_mirlo"
+              }
+            ]
+          ],
+          "forbidden_evidence": [
+            {
+              "document_id": "lum_control_calidad",
+              "section_id": "lum_sello_azul"
+            },
+            {
+              "document_id": "lum_registro_turno",
+              "section_id": "lum_lote_sauce"
+            }
+          ]
+        },
+        {
+          "id": "lum_direct_control",
+          "question": "¿Cuánto tiempo debe reposar la tela Coral-7 antes del corte y sobre qué superficie?",
+          "expected_answerable": true,
+          "required_evidence_groups": [
+            [
+              {
+                "document_id": "lum_catalogo_cubiertas",
+                "section_id": "lum_reposo_coral"
+              }
+            ]
+          ],
+          "forbidden_evidence": [
+            {
+              "document_id": "lum_catalogo_cubiertas",
+              "section_id": "lum_corte_ceniza"
+            },
+            {
+              "document_id": "lum_mapa_encargos",
+              "section_id": "lum_estaciones"
+            }
+          ]
+        },
+        {
+          "id": "lum_compound_all_of",
+          "question": "¿Qué respuesta exige el taller si el adhesivo Niebla forma burbujas y qué tolerancia debe cumplir luego el lomo para ser aceptado?",
+          "expected_answerable": true,
+          "required_evidence_groups": [
+            [
+              {
+                "document_id": "lum_seguridad_materiales",
+                "section_id": "lum_burbujas_niebla"
+              }
+            ],
+            [
+              {
+                "document_id": "lum_control_calidad",
+                "section_id": "lum_tolerancia_lomo"
+              }
+            ]
+          ],
+          "forbidden_evidence": [
+            {
+              "document_id": "lum_seguridad_materiales",
+              "section_id": "lum_derrame_mesa"
+            },
+            {
+              "document_id": "lum_control_calidad",
+              "section_id": "lum_bordes_cubierta"
+            }
+          ]
+        },
+        {
+          "id": "lum_no_answer",
+          "question": "¿Cuál es el porcentaje máximo de humedad permitido para almacenar los rollos de tela del taller?",
+          "expected_answerable": false,
+          "required_evidence_groups": [],
+          "forbidden_evidence": [
+            {
+              "document_id": "lum_catalogo_cubiertas",
+              "section_id": "lum_guardado_rollos"
+            },
+            {
+              "document_id": "lum_seguridad_materiales",
+              "section_id": "lum_trapos_usados"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "radio_horizonte_bajo",
+      "collection_name": "Radio comunitaria Horizonte Bajo",
+      "language": "es",
+      "distractor_count": 31,
+      "distractor_title": "Agenda del huerto del edificio",
+      "distractor_description": "Notas ficticias sobre plantas del patio, ajenas a la producción de radio.",
+      "distractor_sections": [
+        {
+          "id": "rad_dist_semillas",
+          "heading": "Sobres de semillas",
+          "text": "Los sobres sin abrir se guardan por color en una caja de madera del vestíbulo."
+        },
+        {
+          "id": "rad_dist_bancos",
+          "heading": "Bancos del patio",
+          "text": "Los bancos se mueven a la pared norte cuando se limpia el suelo exterior."
+        },
+        {
+          "id": "rad_dist_carteles",
+          "heading": "Carteles del huerto",
+          "text": "Cada maceta tiene un cartel laminado con el nombre ficticio de la variedad."
+        }
+      ],
+      "documents": [
+        {
+          "id": "rad_mapa_programas",
+          "title": "Mapa de programas y franjas",
+          "description": "Guía para trasladar una propuesta desde la reunión editorial hasta el estudio.",
+          "sections": [
+            {
+              "id": "rad_franja_puente",
+              "heading": "Franja Puente Claro",
+              "text": "Puente Claro reúne entrevistas breves y relatos de barrio los martes. La ficha de la franja remite al protocolo del estudio para la apertura técnica."
+            },
+            {
+              "id": "rad_franja_marea",
+              "heading": "Franja Marea Lenta",
+              "text": "Marea Lenta reserva los jueves para piezas musicales comentadas. Los comentarios se graban antes de seleccionar el orden final."
+            },
+            {
+              "id": "rad_entrega_guion",
+              "heading": "Entrega de guion",
+              "text": "El guion aprobado queda en la bandeja violeta antes del ensayo. Las modificaciones posteriores se marcan en una copia nueva."
+            }
+          ],
+          "links": [
+            {
+              "label": "Preparar en estudio la apertura de Puente Claro",
+              "target_document_id": "rad_protocolo_estudio"
+            },
+            {
+              "label": "Seleccionar el grabador adecuado para una salida",
+              "target_document_id": "rad_equipos_campo"
+            }
+          ]
+        },
+        {
+          "id": "rad_protocolo_estudio",
+          "title": "Protocolo de apertura del estudio",
+          "description": "Secuencia técnica para comenzar emisiones ficticias sin sobresaltos.",
+          "sections": [
+            {
+              "id": "rad_apertura_pc4",
+              "heading": "Apertura de Puente Claro",
+              "text": "Antes de la primera voz de Puente Claro se dejan dos segundos de silencio y se muestra la pizarra PC-4 a la operadora. La cortina entra únicamente después de que la pizarra baje."
+            },
+            {
+              "id": "rad_prueba_micros",
+              "heading": "Prueba de micrófonos",
+              "text": "Cada participante dice una frase de prueba a volumen conversacional. La ganancia se ajusta sin conservar esa prueba en el archivo."
+            },
+            {
+              "id": "rad_salida_estudio",
+              "heading": "Salida del estudio",
+              "text": "Al finalizar se silencian los canales, se guardan los pies de micrófono y se entrega la hoja de incidencias."
+            }
+          ],
+          "links": [
+            {
+              "label": "Comprobar después cómo queda asentada la emisión",
+              "target_document_id": "rad_bitacora_emisiones"
+            }
+          ]
+        },
+        {
+          "id": "rad_equipos_campo",
+          "title": "Equipos para grabaciones de campo",
+          "description": "Configuración y cuidado de grabadores portátiles ficticios.",
+          "sections": [
+            {
+              "id": "rad_senda3_baterias",
+              "heading": "Grabador Senda-3",
+              "text": "El Senda-3 sale con tres baterías cargadas: dos instaladas y una en la funda lateral. La tarjeta de memoria se formatea sólo después de copiar la sesión anterior."
+            },
+            {
+              "id": "rad_viento_suave",
+              "heading": "Protección contra viento",
+              "text": "La cubierta de espuma gris sirve para brisa leve; la cubierta peluda se reserva para ráfagas. Ambas deben secarse fuera del estuche."
+            },
+            {
+              "id": "rad_regreso_equipo",
+              "heading": "Regreso del equipo",
+              "text": "Al volver, el grabador se entrega apagado y con una etiqueta que identifica la sesión. Los cables se cuentan por separado."
+            }
+          ],
+          "links": [
+            {
+              "label": "Seguir el resguardo previsto cuando cambia el tiempo",
+              "target_document_id": "rad_seguridad_tormenta"
+            }
+          ]
+        },
+        {
+          "id": "rad_bitacora_emisiones",
+          "title": "Bitácora semanal de emisiones",
+          "description": "Registro ficticio de salidas al aire y observaciones de continuidad.",
+          "sections": [
+            {
+              "id": "rad_campana_miercoles",
+              "heading": "Miércoles: señal de campana",
+              "text": "El miércoles se registraron nueve intervenciones acompañadas por la campana suave. La tercera quedó marcada para repetir porque la voz comenzó antes de terminar la señal."
+            },
+            {
+              "id": "rad_lectura_sabado",
+              "heading": "Sábado: lectura compartida",
+              "text": "La lectura del sábado tuvo seis turnos y una pausa adicional. No hubo cambios en el orden aprobado."
+            },
+            {
+              "id": "rad_cierre_semana",
+              "heading": "Cierre de la semana",
+              "text": "Las hojas firmadas se agruparon por franja y se dejó una nota para revisar niveles en la próxima reunión."
+            }
+          ],
+          "links": [
+            {
+              "label": "Contrastar las señales anotadas con la guía de accesibilidad sonora",
+              "target_document_id": "rad_guia_accesibilidad"
+            }
+          ]
+        },
+        {
+          "id": "rad_seguridad_tormenta",
+          "title": "Resguardo ante tormentas",
+          "description": "Decisiones operativas para proteger a personas y equipos durante salidas.",
+          "sections": [
+            {
+              "id": "rad_alerta_violeta",
+              "heading": "Alerta violeta",
+              "text": "Con alerta violeta se suspende la grabación exterior, el equipo se apaga y el grupo vuelve al punto cubierto acordado. Nadie permanece para terminar una toma."
+            },
+            {
+              "id": "rad_cables_mojados",
+              "heading": "Cables húmedos",
+              "text": "Un cable mojado se etiqueta y queda fuera de servicio hasta una inspección en seco. No se prueba en el estudio al regresar."
+            },
+            {
+              "id": "rad_aviso_equipo",
+              "heading": "Aviso al equipo",
+              "text": "La productora confirma la suspensión por el canal interno y registra sólo la franja afectada, sin datos personales."
+            }
+          ],
+          "links": [
+            {
+              "label": "Preparar el aviso audible que acompaña una interrupción",
+              "target_document_id": "rad_guia_accesibilidad"
+            }
+          ]
+        },
+        {
+          "id": "rad_guia_accesibilidad",
+          "title": "Guía de accesibilidad sonora",
+          "description": "Convenciones para que señales y avisos tengan significado claro.",
+          "sections": [
+            {
+              "id": "rad_campana_suave",
+              "heading": "Campana suave",
+              "text": "La campana suave anuncia un cambio de voz y debe terminar antes de que hable la siguiente persona. No indica cierre ni emergencia."
+            },
+            {
+              "id": "rad_aviso_interrupcion",
+              "heading": "Aviso de interrupción",
+              "text": "Una interrupción meteorológica se comunica con la frase 'pausa preventiva' seguida del nombre de la franja. La explicación se repite una vez, sin música debajo."
+            },
+            {
+              "id": "rad_descripcion_silencios",
+              "heading": "Silencios deliberados",
+              "text": "Los silencios que forman parte de una obra se anuncian en el guion técnico, pero no se rellenan con efectos."
+            }
+          ],
+          "links": [
+            {
+              "label": "Revisar cómo quedaron registradas las señales en emisiones reales",
+              "target_document_id": "rad_bitacora_emisiones"
+            }
+          ]
+        }
+      ],
+      "cases": [
+        {
+          "id": "rad_outgoing_rescue",
+          "question": "Para la franja Puente Claro, ¿qué ocurre justo antes de la primera voz y qué pizarra debe ver la operadora?",
+          "expected_answerable": true,
+          "required_evidence_groups": [
+            [
+              {
+                "document_id": "rad_protocolo_estudio",
+                "section_id": "rad_apertura_pc4"
+              }
+            ]
+          ],
+          "forbidden_evidence": [
+            {
+              "document_id": "rad_mapa_programas",
+              "section_id": "rad_franja_puente"
+            },
+            {
+              "document_id": "rad_protocolo_estudio",
+              "section_id": "rad_prueba_micros"
+            }
+          ]
+        },
+        {
+          "id": "rad_backlink_rescue",
+          "question": "En la revisión de la campana suave, ¿cuántas intervenciones tuvo el miércoles y cuál debió repetirse?",
+          "expected_answerable": true,
+          "required_evidence_groups": [
+            [
+              {
+                "document_id": "rad_bitacora_emisiones",
+                "section_id": "rad_campana_miercoles"
+              }
+            ]
+          ],
+          "forbidden_evidence": [
+            {
+              "document_id": "rad_guia_accesibilidad",
+              "section_id": "rad_campana_suave"
+            },
+            {
+              "document_id": "rad_bitacora_emisiones",
+              "section_id": "rad_lectura_sabado"
+            }
+          ]
+        },
+        {
+          "id": "rad_direct_control",
+          "question": "¿Con cuántas baterías cargadas sale el grabador Senda-3 y cómo se distribuyen?",
+          "expected_answerable": true,
+          "required_evidence_groups": [
+            [
+              {
+                "document_id": "rad_equipos_campo",
+                "section_id": "rad_senda3_baterias"
+              }
+            ]
+          ],
+          "forbidden_evidence": [
+            {
+              "document_id": "rad_equipos_campo",
+              "section_id": "rad_regreso_equipo"
+            },
+            {
+              "document_id": "rad_equipos_campo",
+              "section_id": "rad_viento_suave"
+            }
+          ]
+        },
+        {
+          "id": "rad_compound_all_of",
+          "question": "¿Qué debe hacer el equipo con una alerta violeta y cómo debe formularse al aire el aviso de esa interrupción?",
+          "expected_answerable": true,
+          "required_evidence_groups": [
+            [
+              {
+                "document_id": "rad_seguridad_tormenta",
+                "section_id": "rad_alerta_violeta"
+              }
+            ],
+            [
+              {
+                "document_id": "rad_guia_accesibilidad",
+                "section_id": "rad_aviso_interrupcion"
+              }
+            ]
+          ],
+          "forbidden_evidence": [
+            {
+              "document_id": "rad_seguridad_tormenta",
+              "section_id": "rad_cables_mojados"
+            },
+            {
+              "document_id": "rad_guia_accesibilidad",
+              "section_id": "rad_descripcion_silencios"
+            }
+          ]
+        },
+        {
+          "id": "rad_no_answer",
+          "question": "¿En qué fecha vence la licencia anual de emisión de Horizonte Bajo?",
+          "expected_answerable": false,
+          "required_evidence_groups": [],
+          "forbidden_evidence": [
+            {
+              "document_id": "rad_mapa_programas",
+              "section_id": "rad_entrega_guion"
+            },
+            {
+              "document_id": "rad_bitacora_emisiones",
+              "section_id": "rad_cierre_semana"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "cocina_fermentos_bosque_claro",
+      "collection_name": "Cocina de fermentos Bosque Claro",
+      "language": "es",
+      "distractor_count": 27,
+      "distractor_title": "Cuaderno del rincón de lectura",
+      "distractor_description": "Notas ficticias sobre préstamos de libros, sin relación con los lotes de fermentación.",
+      "distractor_sections": [
+        {
+          "id": "fer_dist_marcapaginas",
+          "heading": "Marcapáginas",
+          "text": "Los marcapáginas de cartón se guardan en un frasco seco junto al sillón."
+        },
+        {
+          "id": "fer_dist_lampara",
+          "heading": "Lámpara",
+          "text": "La lámpara de lectura se apaga al cerrar el salón y no se traslada a la cocina."
+        },
+        {
+          "id": "fer_dist_catalogo",
+          "heading": "Catálogo",
+          "text": "Las fichas del catálogo recreativo se ordenan por el color de la cubierta."
+        }
+      ],
+      "documents": [
+        {
+          "id": "fer_mapa_lotes",
+          "title": "Mapa de lotes de temporada",
+          "description": "Puerta de entrada para planificar frascos y derivar cada receta a su protocolo.",
+          "sections": [
+            {
+              "id": "fer_lote_bruma",
+              "heading": "Lote Bruma",
+              "text": "Bruma es la serie de raíz blanca preparada en frascos bajos. La ficha turquesa envía al protocolo de salmuera antes de que el lote reciba fecha."
+            },
+            {
+              "id": "fer_lote_luciernaga",
+              "heading": "Lote Luciérnaga",
+              "text": "Luciérnaga combina hojas firmes y especias enteras en frascos altos. Su evaluación sensorial ocurre al final de la semana."
+            },
+            {
+              "id": "fer_asignacion_mesas",
+              "heading": "Asignación de mesas",
+              "text": "Las series nuevas ocupan la mesa uno y los lotes en revisión la mesa dos. Las etiquetas se completan antes de mover un frasco."
+            }
+          ],
+          "links": [
+            {
+              "label": "Preparar la salmuera correspondiente a la ficha turquesa",
+              "target_document_id": "fer_protocolo_salmuera"
+            },
+            {
+              "label": "Escoger el instrumento que verifica cada lote",
+              "target_document_id": "fer_instrumentos"
+            }
+          ]
+        },
+        {
+          "id": "fer_protocolo_salmuera",
+          "title": "Protocolo de salmuera y carga",
+          "description": "Proporciones y orden de llenado para recetas sintéticas.",
+          "sections": [
+            {
+              "id": "fer_bruma_turquesa",
+              "heading": "Ficha turquesa de Bruma",
+              "text": "Para Bruma con ficha turquesa se disuelven veintidós gramos de sal en un litro de agua. La raíz se coloca primero y la hoja de laurel queda encima, bajo el peso de vidrio."
+            },
+            {
+              "id": "fer_disolucion",
+              "heading": "Disolución",
+              "text": "La sal se incorpora en tres partes mientras el agua gira suavemente. La mezcla descansa hasta verse transparente."
+            },
+            {
+              "id": "fer_espacio_cabeza",
+              "heading": "Espacio superior",
+              "text": "Se deja un espacio visible bajo la tapa para que el peso no la toque. Un frasco sobrecargado vuelve a la mesa de preparación."
+            }
+          ],
+          "links": [
+            {
+              "label": "Comprobar después los criterios de etiqueta y cierre",
+              "target_document_id": "fer_etiquetado_calidad"
+            }
+          ]
+        },
+        {
+          "id": "fer_instrumentos",
+          "title": "Instrumentos de temperatura y densidad",
+          "description": "Uso de herramientas ficticias para controles repetibles.",
+          "sections": [
+            {
+              "id": "fer_termometro_nacar",
+              "heading": "Termómetro Nácar",
+              "text": "El termómetro Nácar se verifica en agua a temperatura ambiente durante cuarenta segundos antes de medir un lote. Si difiere más de un grado del patrón, se etiqueta fuera de servicio."
+            },
+            {
+              "id": "fer_varilla_densidad",
+              "heading": "Varilla de densidad",
+              "text": "La varilla se enjuaga, se seca al aire y se introduce sin tocar el fondo del frasco de muestra."
+            },
+            {
+              "id": "fer_registro_medidas",
+              "heading": "Registro de medidas",
+              "text": "Cada lectura se anota con el identificador del lote y el momento del día. No se promedian lecturas tomadas con instrumentos distintos."
+            }
+          ],
+          "links": [
+            {
+              "label": "Aislar herramientas que puedan comprometer una preparación",
+              "target_document_id": "fer_separacion_alergenos"
+            }
+          ]
+        },
+        {
+          "id": "fer_diario_catas",
+          "title": "Diario de catas internas",
+          "description": "Observaciones de lotes ficticios expresadas con el vocabulario acordado.",
+          "sections": [
+            {
+              "id": "fer_cata_luciernaga",
+              "heading": "Cata del lote Luciérnaga",
+              "text": "La cata de Luciérnaga reunió siete frascos. Dos se apartaron por un aroma descrito como corteza húmeda y cinco conservaron el perfil esperado."
+            },
+            {
+              "id": "fer_cata_bruma",
+              "heading": "Cata del lote Bruma",
+              "text": "Bruma presentó textura firme en seis muestras y una muestra necesitó una segunda lectura de acidez."
+            },
+            {
+              "id": "fer_orden_servicio",
+              "heading": "Orden de servicio",
+              "text": "Las muestras se sirven de menor a mayor intensidad y cada cuchara se usa una sola vez."
+            }
+          ],
+          "links": [
+            {
+              "label": "Interpretar las descripciones con el glosario sensorial común",
+              "target_document_id": "fer_glosario_sensorial"
+            }
+          ]
+        },
+        {
+          "id": "fer_separacion_alergenos",
+          "title": "Separación preventiva de ingredientes",
+          "description": "Acciones para evitar cruces entre mesas de preparación.",
+          "sections": [
+            {
+              "id": "fer_sello_amarillo",
+              "heading": "Rotura del sello amarillo",
+              "text": "Si se rompe un sello amarillo, se detiene la mesa, se cubren los frascos abiertos y los utensilios usados pasan a la bandeja de cuarentena. El trabajo sólo continúa con un juego limpio."
+            },
+            {
+              "id": "fer_delantales",
+              "heading": "Delantales por mesa",
+              "text": "Los delantales de una mesa no cruzan a otra durante el turno. Cada color vuelve a su gancho identificado."
+            },
+            {
+              "id": "fer_molinillo",
+              "heading": "Molinillo compartido",
+              "text": "El molinillo se desmonta y limpia antes de cambiar de familia de especias. La limpieza queda anotada sin registrar nombres de personas."
+            }
+          ],
+          "links": [
+            {
+              "label": "Verificar qué debe declarar la etiqueta antes de cerrar el lote",
+              "target_document_id": "fer_etiquetado_calidad"
+            }
+          ]
+        },
+        {
+          "id": "fer_etiquetado_calidad",
+          "title": "Etiquetado y control de cierre",
+          "description": "Reglas ficticias para liberar frascos después de la revisión.",
+          "sections": [
+            {
+              "id": "fer_banda_cobre",
+              "heading": "Banda cobre",
+              "text": "La banda cobre se acepta sólo si la etiqueta enumera la familia de especias y muestra el código de mesa. Si falta cualquiera de los dos datos, el frasco no se libera."
+            },
+            {
+              "id": "fer_tapa_inclinada",
+              "heading": "Tapa inclinada",
+              "text": "Una tapa visualmente inclinada se abre y reemplaza; no se corrige apretándola sobre el mismo sello."
+            },
+            {
+              "id": "fer_fecha_revision",
+              "heading": "Fecha de revisión",
+              "text": "La fecha corresponde al día de control, no al día de preparación. Se escribe después de comprobar la banda."
+            }
+          ],
+          "links": [
+            {
+              "label": "Volver al protocolo que produce el frasco revisado",
+              "target_document_id": "fer_protocolo_salmuera"
+            }
+          ]
+        },
+        {
+          "id": "fer_glosario_sensorial",
+          "title": "Glosario sensorial compartido",
+          "description": "Definiciones para describir aromas y texturas sin confundirlos con decisiones de seguridad.",
+          "sections": [
+            {
+              "id": "fer_corteza_humeda",
+              "heading": "Corteza húmeda",
+              "text": "Corteza húmeda describe un aroma terroso persistente que aparece después de agitar la muestra. El término por sí solo no declara que un frasco sea inseguro."
+            },
+            {
+              "id": "fer_textura_vidrio",
+              "heading": "Textura vidrio",
+              "text": "Textura vidrio significa un crujido limpio sin fibras largas. Se registra sólo después de dos bocados pequeños."
+            },
+            {
+              "id": "fer_acidez_redonda",
+              "heading": "Acidez redonda",
+              "text": "Acidez redonda identifica una sensación breve y uniforme, sin una nota dominante al final."
+            }
+          ],
+          "links": [
+            {
+              "label": "Consultar los lotes donde se aplicaron estas palabras",
+              "target_document_id": "fer_diario_catas"
+            }
+          ]
+        }
+      ],
+      "cases": [
+        {
+          "id": "fer_outgoing_rescue",
+          "question": "Para el lote Bruma con ficha turquesa, ¿qué proporción de sal se usa y en qué orden se colocan la raíz y el laurel?",
+          "expected_answerable": true,
+          "required_evidence_groups": [
+            [
+              {
+                "document_id": "fer_protocolo_salmuera",
+                "section_id": "fer_bruma_turquesa"
+              }
+            ]
+          ],
+          "forbidden_evidence": [
+            {
+              "document_id": "fer_mapa_lotes",
+              "section_id": "fer_lote_bruma"
+            },
+            {
+              "document_id": "fer_protocolo_salmuera",
+              "section_id": "fer_disolucion"
+            }
+          ]
+        },
+        {
+          "id": "fer_backlink_rescue",
+          "question": "En la cata asociada al descriptor corteza húmeda, ¿cuántos frascos de Luciérnaga se revisaron y cuántos se apartaron?",
+          "expected_answerable": true,
+          "required_evidence_groups": [
+            [
+              {
+                "document_id": "fer_diario_catas",
+                "section_id": "fer_cata_luciernaga"
+              }
+            ]
+          ],
+          "forbidden_evidence": [
+            {
+              "document_id": "fer_glosario_sensorial",
+              "section_id": "fer_corteza_humeda"
+            },
+            {
+              "document_id": "fer_diario_catas",
+              "section_id": "fer_cata_bruma"
+            }
+          ]
+        },
+        {
+          "id": "fer_direct_control",
+          "question": "¿Durante cuánto tiempo se verifica el termómetro Nácar y qué desviación lo deja fuera de servicio?",
+          "expected_answerable": true,
+          "required_evidence_groups": [
+            [
+              {
+                "document_id": "fer_instrumentos",
+                "section_id": "fer_termometro_nacar"
+              }
+            ]
+          ],
+          "forbidden_evidence": [
+            {
+              "document_id": "fer_instrumentos",
+              "section_id": "fer_varilla_densidad"
+            },
+            {
+              "document_id": "fer_instrumentos",
+              "section_id": "fer_registro_medidas"
+            }
+          ]
+        },
+        {
+          "id": "fer_compound_all_of",
+          "question": "¿Qué pasos siguen a la rotura de un sello amarillo y qué dos datos exige después una etiqueta con banda cobre?",
+          "expected_answerable": true,
+          "required_evidence_groups": [
+            [
+              {
+                "document_id": "fer_separacion_alergenos",
+                "section_id": "fer_sello_amarillo"
+              }
+            ],
+            [
+              {
+                "document_id": "fer_etiquetado_calidad",
+                "section_id": "fer_banda_cobre"
+              }
+            ]
+          ],
+          "forbidden_evidence": [
+            {
+              "document_id": "fer_separacion_alergenos",
+              "section_id": "fer_delantales"
+            },
+            {
+              "document_id": "fer_etiquetado_calidad",
+              "section_id": "fer_fecha_revision"
+            }
+          ]
+        },
+        {
+          "id": "fer_no_answer",
+          "question": "¿Cuál es la dirección postal del proveedor de sal usado por Bosque Claro?",
+          "expected_answerable": false,
+          "required_evidence_groups": [],
+          "forbidden_evidence": [
+            {
+              "document_id": "fer_protocolo_salmuera",
+              "section_id": "fer_bruma_turquesa"
+            },
+            {
+              "document_id": "fer_instrumentos",
+              "section_id": "fer_registro_medidas"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "vivero_espiral",
+      "collection_name": "Vivero de plantas nativas La Espiral",
+      "language": "es",
+      "distractor_count": 33,
+      "distractor_title": "Inventario del taller de cerámica vecino",
+      "distractor_description": "Fichas ficticias de arcillas y estantes que no contienen información del vivero.",
+      "distractor_sections": [
+        {
+          "id": "viv_dist_arcilla",
+          "heading": "Arcilla blanca",
+          "text": "Los bloques de arcilla blanca se cuentan al recibirlos y quedan bajo una tela seca."
+        },
+        {
+          "id": "viv_dist_horno",
+          "heading": "Estante del horno",
+          "text": "Las piezas frías pasan al estante bajo una vez que su etiqueta se verifica."
+        },
+        {
+          "id": "viv_dist_esponjas",
+          "heading": "Esponjas",
+          "text": "Las esponjas redondas se separan de las rectangulares en cajas distintas."
+        }
+      ],
+      "documents": [
+        {
+          "id": "viv_ruta_temporada",
+          "title": "Ruta de preparación de temporada",
+          "description": "Mapa de trabajo para semillas ficticias desde recepción hasta bandeja.",
+          "sections": [
+            {
+              "id": "viv_serie_luna",
+              "heading": "Serie Luna Parda",
+              "text": "Luna Parda identifica semillas de cubierta dura que llegan en sobre plateado. Antes de sembrarlas, la ruta dirige al tratamiento específico de apertura."
+            },
+            {
+              "id": "viv_serie_cauce",
+              "heading": "Serie Cauce Breve",
+              "text": "Cauce Breve se recibe en sobre verde y pasa directamente a mezcla fina. No comparte bandejas con la serie plateada."
+            },
+            {
+              "id": "viv_mesas",
+              "heading": "Mesas de preparación",
+              "text": "La mesa norte recibe semillas sin tratar y la mesa sur recibe bandejas listas. Las herramientas cambian de mesa sólo después de limpiarse."
+            }
+          ],
+          "links": [
+            {
+              "label": "Aplicar a Luna Parda el tratamiento previo indicado",
+              "target_document_id": "viv_apertura_semillas"
+            },
+            {
+              "label": "Preparar la mezcla adecuada para las bandejas",
+              "target_document_id": "viv_mezclas_sustrato"
+            }
+          ]
+        },
+        {
+          "id": "viv_apertura_semillas",
+          "title": "Tratamientos de apertura de semillas",
+          "description": "Procedimientos sintéticos para cubiertas de distinta dureza.",
+          "sections": [
+            {
+              "id": "viv_luna_parda",
+              "heading": "Luna Parda en sobre plateado",
+              "text": "Las semillas Luna Parda se frotan seis veces sobre la cara fina de la placa violeta y luego descansan tres horas entre dos paños húmedos. La muesca debe quedar visible hacia arriba."
+            },
+            {
+              "id": "viv_bano_tibio",
+              "heading": "Baño tibio",
+              "text": "Las semillas de cubierta media se colocan en agua tibia durante veinte minutos y se secan superficialmente antes de sembrar."
+            },
+            {
+              "id": "viv_control_superficie",
+              "heading": "Control de superficie",
+              "text": "Una cubierta quebrada por completo se descarta del ensayo. Una marca superficial uniforme permite continuar."
+            }
+          ],
+          "links": [
+            {
+              "label": "Comprobar luego los criterios de salida de una plántula",
+              "target_document_id": "viv_criterios_salida"
+            }
+          ]
+        },
+        {
+          "id": "viv_mezclas_sustrato",
+          "title": "Mezclas de sustrato por bandeja",
+          "description": "Recetas ficticias de materiales para etapas tempranas.",
+          "sections": [
+            {
+              "id": "viv_mezcla_alba",
+              "heading": "Mezcla Alba-5",
+              "text": "Alba-5 combina dos medidas de fibra clara, una de arena lavada y media de compost tamizado. Se mezcla en seco antes de llenar la bandeja."
+            },
+            {
+              "id": "viv_mezcla_honda",
+              "heading": "Mezcla Honda-2",
+              "text": "Honda-2 usa partes iguales de corteza fina y compost, con una capa inferior de grava pequeña."
+            },
+            {
+              "id": "viv_llenado_bandeja",
+              "heading": "Llenado de bandeja",
+              "text": "El sustrato se nivela sin presionarlo y queda un dedo por debajo del borde. Cada bandeja recibe una tarjeta antes de moverse."
+            }
+          ],
+          "links": [
+            {
+              "label": "Evitar que una mezcla introduzca material no controlado",
+              "target_document_id": "viv_bioseguridad"
+            }
+          ]
+        },
+        {
+          "id": "viv_registro_germinacion",
+          "title": "Registro de germinación por bandeja",
+          "description": "Conteos ficticios y observaciones de forma durante el seguimiento.",
+          "sections": [
+            {
+              "id": "viv_bandeja_zorzal",
+              "heading": "Bandeja Zorzal",
+              "text": "Zorzal produjo catorce brotes durante la primera lectura. Tres mostraron el patrón llamado ala cerrada y quedaron marcados para una segunda observación."
+            },
+            {
+              "id": "viv_bandeja_tilo",
+              "heading": "Bandeja Tilo",
+              "text": "Tilo produjo nueve brotes uniformes y ninguna cubierta permaneció adherida al tallo."
+            },
+            {
+              "id": "viv_hora_lectura",
+              "heading": "Hora de lectura",
+              "text": "Los conteos se realizan con luz natural indirecta y se anotan antes de mover las bandejas."
+            }
+          ],
+          "links": [
+            {
+              "label": "Comparar las formas observadas con la guía morfológica",
+              "target_document_id": "viv_guia_formas"
+            }
+          ]
+        },
+        {
+          "id": "viv_bioseguridad",
+          "title": "Bioseguridad de bandejas",
+          "description": "Respuesta ante señales que podrían extenderse entre lotes.",
+          "sections": [
+            {
+              "id": "viv_polvo_naranja",
+              "heading": "Polvo naranja",
+              "text": "Si aparece polvo naranja, la bandeja se cubre con la campana transparente, se inmovilizan las herramientas cercanas y se traslada el conjunto a la mesa de aislamiento."
+            },
+            {
+              "id": "viv_musgo_superficie",
+              "heading": "Musgo superficial",
+              "text": "Una película verde se fotografía para el registro sintético y la bandeja se separa hasta evaluar su superficie."
+            },
+            {
+              "id": "viv_limpieza_pinzas",
+              "heading": "Limpieza de pinzas",
+              "text": "Las pinzas pasan por dos recipientes de limpieza y se secan sobre papel nuevo antes de otra bandeja."
+            }
+          ],
+          "links": [
+            {
+              "label": "Determinar cuándo una plántula aislada puede salir",
+              "target_document_id": "viv_criterios_salida"
+            }
+          ]
+        },
+        {
+          "id": "viv_criterios_salida",
+          "title": "Criterios de salida a cantero",
+          "description": "Condiciones ficticias que deben cumplirse antes del traslado.",
+          "sections": [
+            {
+              "id": "viv_salida_raices",
+              "heading": "Sistema de raíces",
+              "text": "Una plántula puede salir cuando presenta tres raíces laterales visibles y un tallo sin pliegues oscuros. Ambas condiciones se registran en la misma revisión."
+            },
+            {
+              "id": "viv_altura_guia",
+              "heading": "Altura orientativa",
+              "text": "La altura ayuda a ordenar bandejas, pero por sí sola no autoriza un traslado. Se mide desde el sustrato hasta la hoja más alta."
+            },
+            {
+              "id": "viv_etiqueta_salida",
+              "heading": "Etiqueta de salida",
+              "text": "La etiqueta de salida conserva el código de bandeja y la fecha de revisión. No incluye nombres de personas."
+            }
+          ],
+          "links": [
+            {
+              "label": "Volver al tratamiento que inició las series de cubierta dura",
+              "target_document_id": "viv_apertura_semillas"
+            }
+          ]
+        },
+        {
+          "id": "viv_guia_formas",
+          "title": "Guía de formas tempranas",
+          "description": "Vocabulario visual ficticio para observaciones de brotes.",
+          "sections": [
+            {
+              "id": "viv_ala_cerrada",
+              "heading": "Ala cerrada",
+              "text": "Ala cerrada describe dos cotiledones que permanecen juntos durante la primera lectura. La etiqueta pide observar de nuevo, no descartar el brote."
+            },
+            {
+              "id": "viv_arco_claro",
+              "heading": "Arco claro",
+              "text": "Arco claro es una curvatura uniforme del tallo sin cambio de color en la base."
+            },
+            {
+              "id": "viv_punta_doble",
+              "heading": "Punta doble",
+              "text": "Punta doble registra dos hojas iniciales de tamaño similar que se separan al segundo día."
+            }
+          ],
+          "links": [
+            {
+              "label": "Revisar los conteos donde se aplicaron estas formas",
+              "target_document_id": "viv_registro_germinacion"
+            }
+          ]
+        }
+      ],
+      "cases": [
+        {
+          "id": "viv_outgoing_rescue",
+          "question": "Para la serie Luna Parda del sobre plateado, ¿cómo se abre la cubierta y cuánto tiempo descansa después?",
+          "expected_answerable": true,
+          "required_evidence_groups": [
+            [
+              {
+                "document_id": "viv_apertura_semillas",
+                "section_id": "viv_luna_parda"
+              }
+            ]
+          ],
+          "forbidden_evidence": [
+            {
+              "document_id": "viv_ruta_temporada",
+              "section_id": "viv_serie_luna"
+            },
+            {
+              "document_id": "viv_apertura_semillas",
+              "section_id": "viv_bano_tibio"
+            }
+          ]
+        },
+        {
+          "id": "viv_backlink_rescue",
+          "question": "En la observación asociada con la forma ala cerrada, ¿cuántos brotes produjo Zorzal y cuántos quedaron marcados?",
+          "expected_answerable": true,
+          "required_evidence_groups": [
+            [
+              {
+                "document_id": "viv_registro_germinacion",
+                "section_id": "viv_bandeja_zorzal"
+              }
+            ]
+          ],
+          "forbidden_evidence": [
+            {
+              "document_id": "viv_guia_formas",
+              "section_id": "viv_ala_cerrada"
+            },
+            {
+              "document_id": "viv_registro_germinacion",
+              "section_id": "viv_bandeja_tilo"
+            }
+          ]
+        },
+        {
+          "id": "viv_direct_control",
+          "question": "¿Qué proporciones componen la mezcla Alba-5 y cuándo se combinan sus materiales?",
+          "expected_answerable": true,
+          "required_evidence_groups": [
+            [
+              {
+                "document_id": "viv_mezclas_sustrato",
+                "section_id": "viv_mezcla_alba"
+              }
+            ]
+          ],
+          "forbidden_evidence": [
+            {
+              "document_id": "viv_mezclas_sustrato",
+              "section_id": "viv_mezcla_honda"
+            },
+            {
+              "document_id": "viv_mezclas_sustrato",
+              "section_id": "viv_llenado_bandeja"
+            }
+          ]
+        },
+        {
+          "id": "viv_compound_all_of",
+          "question": "¿Cómo se contiene una bandeja con polvo naranja y qué dos rasgos debe mostrar una plántula para salir después del aislamiento?",
+          "expected_answerable": true,
+          "required_evidence_groups": [
+            [
+              {
+                "document_id": "viv_bioseguridad",
+                "section_id": "viv_polvo_naranja"
+              }
+            ],
+            [
+              {
+                "document_id": "viv_criterios_salida",
+                "section_id": "viv_salida_raices"
+              }
+            ]
+          ],
+          "forbidden_evidence": [
+            {
+              "document_id": "viv_bioseguridad",
+              "section_id": "viv_musgo_superficie"
+            },
+            {
+              "document_id": "viv_criterios_salida",
+              "section_id": "viv_altura_guia"
+            }
+          ]
+        },
+        {
+          "id": "viv_no_answer",
+          "question": "¿Cuál es el precio de venta de una plántula Luna Parda en La Espiral?",
+          "expected_answerable": false,
+          "required_evidence_groups": [],
+          "forbidden_evidence": [
+            {
+              "document_id": "viv_ruta_temporada",
+              "section_id": "viv_serie_luna"
+            },
+            {
+              "document_id": "viv_criterios_salida",
+              "section_id": "viv_etiqueta_salida"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "harbor_kite_workshop",
+      "collection_name": "Harbor Kite Workshop",
+      "language": "en",
+      "distractor_count": 29,
+      "distractor_title": "Break-room tea rotation",
+      "distractor_description": "Fictional notes about shared tea supplies, unrelated to kite construction or flying.",
+      "distractor_sections": [
+        {
+          "id": "kite_dist_tins",
+          "heading": "Tea tins",
+          "text": "The square tins stay on the upper shelf and are counted at the end of each month."
+        },
+        {
+          "id": "kite_dist_cups",
+          "heading": "Shared cups",
+          "text": "Blue cups belong in the left rack while white cups dry on the right rack."
+        },
+        {
+          "id": "kite_dist_kettle",
+          "heading": "Kettle note",
+          "text": "The kettle is emptied after the final break and left with its lid open."
+        }
+      ],
+      "documents": [
+        {
+          "id": "kite_order_map",
+          "title": "Commission map and build benches",
+          "description": "Routes fictional kite commissions from intake to the appropriate build instructions.",
+          "sections": [
+            {
+              "id": "kite_silver_gull",
+              "heading": "Silver Gull card",
+              "text": "The Silver Gull card identifies a narrow-tailed practice kite with a teal spine mark. Intake sends that card to the spar-tension sheet before cloth is cut."
+            },
+            {
+              "id": "kite_ember_wing",
+              "heading": "Ember Wing card",
+              "text": "Ember Wing commissions use a wide tail and an orange corner patch. They remain on bench two until their frame is signed off."
+            },
+            {
+              "id": "kite_bench_sequence",
+              "heading": "Bench sequence",
+              "text": "Frames move from measuring to tying and then to cloth fitting. Completed cards rest in the green tray."
+            }
+          ],
+          "links": [
+            {
+              "label": "Set the frame tension specified for a Silver Gull commission",
+              "target_document_id": "kite_spar_guide"
+            },
+            {
+              "label": "Choose cloth after the frame passes its bench check",
+              "target_document_id": "kite_cloth_catalog"
+            }
+          ]
+        },
+        {
+          "id": "kite_spar_guide",
+          "title": "Spar tension and knot guide",
+          "description": "Detailed frame settings for the workshop's fictional kite patterns.",
+          "sections": [
+            {
+              "id": "kite_gull_tension",
+              "heading": "Silver Gull with teal mark",
+              "text": "For a Silver Gull carrying the teal spine mark, the cross spar bends until its midpoint rises four centimeters above the table. The bridle knot sits one palm below the spar crossing."
+            },
+            {
+              "id": "kite_square_lashing",
+              "heading": "Square lashing",
+              "text": "The crossing receives three wraps in each direction and one locking turn. Loose ends point toward the tail."
+            },
+            {
+              "id": "kite_frame_rest",
+              "heading": "Frame rest",
+              "text": "A tied frame rests flat for twelve minutes before the bend is checked again. Any twist returns it to the tying bench."
+            }
+          ],
+          "links": [
+            {
+              "label": "Inspect the completed frame before field release",
+              "target_document_id": "kite_release_check"
+            }
+          ]
+        },
+        {
+          "id": "kite_cloth_catalog",
+          "title": "Cloth and seam catalog",
+          "description": "Cutting behavior for synthetic workshop fabrics.",
+          "sections": [
+            {
+              "id": "kite_mist12_cut",
+              "heading": "Mist-12 cloth",
+              "text": "Mist-12 is cut with a seven-millimeter seam allowance and the matte face upward. It is clipped at the corners before any adhesive strip is applied."
+            },
+            {
+              "id": "kite_reef8_cut",
+              "heading": "Reef-8 cloth",
+              "text": "Reef-8 needs a five-millimeter allowance and is weighted along both long edges during marking."
+            },
+            {
+              "id": "kite_roll_storage",
+              "heading": "Roll storage",
+              "text": "Opened rolls hang from padded rods and carry a removable batch tag. No roll rests directly on the floor."
+            }
+          ],
+          "links": [
+            {
+              "label": "Apply field precautions appropriate to the finished sail",
+              "target_document_id": "kite_field_safety"
+            }
+          ]
+        },
+        {
+          "id": "kite_flight_log",
+          "title": "Practice field flight log",
+          "description": "Fictional observations from controlled test flights.",
+          "sections": [
+            {
+              "id": "kite_copper_bay_log",
+              "heading": "Copper Bay session",
+              "text": "The Copper Bay session launched eleven kites. Three showed the pattern called ladder sway, and the eighth launch was stopped before full line extension."
+            },
+            {
+              "id": "kite_dune_path_log",
+              "heading": "Dune Path session",
+              "text": "Dune Path launched six kites with stable tails. One frame was returned for a loose corner."
+            },
+            {
+              "id": "kite_log_close",
+              "heading": "Closing the log",
+              "text": "The field lead records launch order and frame card, then closes the sheet before equipment is packed."
+            }
+          ],
+          "links": [
+            {
+              "label": "Interpret observed motion using the shared flight vocabulary",
+              "target_document_id": "kite_motion_glossary"
+            }
+          ]
+        },
+        {
+          "id": "kite_field_safety",
+          "title": "Field safety and weather response",
+          "description": "Bounded actions for fictional practice sessions.",
+          "sections": [
+            {
+              "id": "kite_yellow_whistle",
+              "heading": "Yellow whistle",
+              "text": "At a yellow whistle, every flyer lowers the kite, reels in without running, and places the frame nose-down in the marked rest area. Launches remain paused until the field lead clears them."
+            },
+            {
+              "id": "kite_wet_line",
+              "heading": "Wet line",
+              "text": "A wet line is bagged separately and tagged for drying. It is never wound onto a dry reel."
+            },
+            {
+              "id": "kite_spectator_edge",
+              "heading": "Spectator edge",
+              "text": "Observers stay behind the white rope and enter the field only after the all-clear signal."
+            }
+          ],
+          "links": [
+            {
+              "label": "Confirm which frame checks are required after a safety pause",
+              "target_document_id": "kite_release_check"
+            }
+          ]
+        },
+        {
+          "id": "kite_release_check",
+          "title": "Frame release inspection",
+          "description": "Acceptance criteria before a kite returns to the launch line.",
+          "sections": [
+            {
+              "id": "kite_release_bridle",
+              "heading": "Bridle and spine",
+              "text": "Release requires a bridle with no visible twist and a spine gap no wider than two millimeters at the center gauge. Both observations are recorded together."
+            },
+            {
+              "id": "kite_tail_balance",
+              "heading": "Tail balance",
+              "text": "Tail arms must hang within one cloth tab of each other. Length alone does not approve the frame."
+            },
+            {
+              "id": "kite_release_tag",
+              "heading": "Release tag",
+              "text": "The green release tag shows the frame card and inspection session. It does not identify the flyer."
+            }
+          ],
+          "links": [
+            {
+              "label": "Return to the tension specification used to build the frame",
+              "target_document_id": "kite_spar_guide"
+            }
+          ]
+        },
+        {
+          "id": "kite_motion_glossary",
+          "title": "Flight motion glossary",
+          "description": "Shared language for describing movement without replacing inspection.",
+          "sections": [
+            {
+              "id": "kite_ladder_sway",
+              "heading": "Ladder sway",
+              "text": "Ladder sway is a repeated side-to-side step that grows as line is released. The term calls for a logged observation, not an automatic repair."
+            },
+            {
+              "id": "kite_soft_dive",
+              "heading": "Soft dive",
+              "text": "A soft dive is a gradual nose drop that stops when line tension eases."
+            },
+            {
+              "id": "kite_tail_flutter",
+              "heading": "Tail flutter",
+              "text": "Tail flutter describes rapid motion confined to the final third of the tail."
+            }
+          ],
+          "links": [
+            {
+              "label": "See the flight sessions where these motion terms were applied",
+              "target_document_id": "kite_flight_log"
+            }
+          ]
+        }
+      ],
+      "cases": [
+        {
+          "id": "kite_outgoing_rescue",
+          "question": "For a Silver Gull card with a teal spine mark, how far should the cross spar rise and where is the bridle knot placed?",
+          "expected_answerable": true,
+          "required_evidence_groups": [
+            [
+              {
+                "document_id": "kite_spar_guide",
+                "section_id": "kite_gull_tension"
+              }
+            ]
+          ],
+          "forbidden_evidence": [
+            {
+              "document_id": "kite_order_map",
+              "section_id": "kite_silver_gull"
+            },
+            {
+              "document_id": "kite_spar_guide",
+              "section_id": "kite_frame_rest"
+            }
+          ]
+        },
+        {
+          "id": "kite_backlink_rescue",
+          "question": "In the session associated with ladder sway, how many kites launched at Copper Bay and which launch was stopped early?",
+          "expected_answerable": true,
+          "required_evidence_groups": [
+            [
+              {
+                "document_id": "kite_flight_log",
+                "section_id": "kite_copper_bay_log"
+              }
+            ]
+          ],
+          "forbidden_evidence": [
+            {
+              "document_id": "kite_motion_glossary",
+              "section_id": "kite_ladder_sway"
+            },
+            {
+              "document_id": "kite_flight_log",
+              "section_id": "kite_dune_path_log"
+            }
+          ]
+        },
+        {
+          "id": "kite_direct_control",
+          "question": "What seam allowance and cloth orientation are required when cutting Mist-12?",
+          "expected_answerable": true,
+          "required_evidence_groups": [
+            [
+              {
+                "document_id": "kite_cloth_catalog",
+                "section_id": "kite_mist12_cut"
+              }
+            ]
+          ],
+          "forbidden_evidence": [
+            {
+              "document_id": "kite_cloth_catalog",
+              "section_id": "kite_reef8_cut"
+            },
+            {
+              "document_id": "kite_cloth_catalog",
+              "section_id": "kite_roll_storage"
+            }
+          ]
+        },
+        {
+          "id": "kite_compound_all_of",
+          "question": "What must flyers do at a yellow whistle, and which bridle and spine conditions must pass before a kite is released again?",
+          "expected_answerable": true,
+          "required_evidence_groups": [
+            [
+              {
+                "document_id": "kite_field_safety",
+                "section_id": "kite_yellow_whistle"
+              }
+            ],
+            [
+              {
+                "document_id": "kite_release_check",
+                "section_id": "kite_release_bridle"
+              }
+            ]
+          ],
+          "forbidden_evidence": [
+            {
+              "document_id": "kite_field_safety",
+              "section_id": "kite_wet_line"
+            },
+            {
+              "document_id": "kite_release_check",
+              "section_id": "kite_tail_balance"
+            }
+          ]
+        },
+        {
+          "id": "kite_no_answer",
+          "question": "What shipping fee does Harbor Kite Workshop charge for a finished Silver Gull?",
+          "expected_answerable": false,
+          "required_evidence_groups": [],
+          "forbidden_evidence": [
+            {
+              "document_id": "kite_order_map",
+              "section_id": "kite_silver_gull"
+            },
+            {
+              "document_id": "kite_release_check",
+              "section_id": "kite_release_tag"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "nightjar_community_theatre",
+      "collection_name": "Nightjar Community Theatre",
+      "language": "en",
+      "distractor_count": 30,
+      "distractor_title": "Lobby puzzle club note",
+      "distractor_description": "Fictional puzzle-club records that do not describe rehearsals, costumes, props, or performances.",
+      "distractor_sections": [
+        {
+          "id": "the_dist_tiles",
+          "heading": "Puzzle tiles",
+          "text": "Wooden tiles are counted into cloth bags after the weekly puzzle meeting."
+        },
+        {
+          "id": "the_dist_tables",
+          "heading": "Lobby tables",
+          "text": "Folding tables stay against the east wall until the puzzle host arrives."
+        },
+        {
+          "id": "the_dist_scores",
+          "heading": "Score cards",
+          "text": "Unused score cards remain blank and are recycled at the end of the season."
+        }
+      ],
+      "documents": [
+        {
+          "id": "the_production_map",
+          "title": "Production map for Small Moons",
+          "description": "Routes fictional scene elements through rehearsal and technical preparation.",
+          "sections": [
+            {
+              "id": "the_lantern_scene",
+              "heading": "Lantern scene",
+              "text": "The lantern scene in Small Moons uses the paper comet prop and a blue handoff card. The production map directs that card to the prop-transfer instructions before rehearsal."
+            },
+            {
+              "id": "the_river_scene",
+              "heading": "River scene",
+              "text": "The river scene uses two fabric stones and a narrow silver ribbon. Its floor marks are checked at the start of the evening."
+            },
+            {
+              "id": "the_callboard",
+              "heading": "Callboard flow",
+              "text": "Revised scene cards appear in the center column and retired versions move to the archive envelope."
+            }
+          ],
+          "links": [
+            {
+              "label": "Carry out the paper comet handoff for the lantern scene",
+              "target_document_id": "the_prop_handoff"
+            },
+            {
+              "label": "Prepare garments after scene assignments are stable",
+              "target_document_id": "the_costume_care"
+            }
+          ]
+        },
+        {
+          "id": "the_prop_handoff",
+          "title": "Prop handoff and preset guide",
+          "description": "Exact transfer cues for fictional handheld props.",
+          "sections": [
+            {
+              "id": "the_comet_handoff",
+              "heading": "Paper comet with blue card",
+              "text": "For the blue-card paper comet, the stagehand places the handle in the actor's left hand after the second lantern dim. The empty cradle is then turned toward the back wall."
+            },
+            {
+              "id": "the_stone_preset",
+              "heading": "Fabric stone preset",
+              "text": "The two fabric stones sit one floor square apart with their stitched faces down."
+            },
+            {
+              "id": "the_prop_return",
+              "heading": "Return after scene",
+              "text": "Handheld pieces return to numbered cradles and are checked before the next scene begins."
+            }
+          ],
+          "links": [
+            {
+              "label": "Check how the completed handoff is recorded in rehearsal",
+              "target_document_id": "the_rehearsal_log"
+            }
+          ]
+        },
+        {
+          "id": "the_costume_care",
+          "title": "Costume care cards",
+          "description": "Handling directions for synthetic fabrics and accessories.",
+          "sections": [
+            {
+              "id": "the_velvet_fern",
+              "heading": "Velvet Fern cape",
+              "text": "The Velvet Fern cape is brushed in one downward pass and hangs for twenty-four minutes before bagging. Its wooden clasp remains open while it hangs."
+            },
+            {
+              "id": "the_cloud_sash",
+              "heading": "Cloud sash",
+              "text": "The Cloud sash is rolled around a padded tube and secured with two cotton ties."
+            },
+            {
+              "id": "the_accessory_tray",
+              "heading": "Accessory tray",
+              "text": "Small accessories rest in divided trays with the scene card visible above them."
+            }
+          ],
+          "links": [
+            {
+              "label": "Keep cared-for garments clear of overhead work",
+              "target_document_id": "the_rigging_safety"
+            }
+          ]
+        },
+        {
+          "id": "the_rehearsal_log",
+          "title": "Rehearsal continuity log",
+          "description": "Fictional counts and timing notes from scene practice.",
+          "sections": [
+            {
+              "id": "the_thrush_cue_log",
+              "heading": "Thrush cue run",
+              "text": "The Thursday run contained ten thrush cues. The sixth cue was held because the narrator entered before the soft wing signal had cleared."
+            },
+            {
+              "id": "the_bell_cue_log",
+              "heading": "Bell cue run",
+              "text": "The Friday run used four bell cues with no holds. The final transition gained one extra beat."
+            },
+            {
+              "id": "the_notes_close",
+              "heading": "Closing notes",
+              "text": "Continuity notes are grouped by scene and transferred to the next rehearsal card without performer names."
+            }
+          ],
+          "links": [
+            {
+              "label": "Interpret timing phrases with the common cue glossary",
+              "target_document_id": "the_cue_glossary"
+            }
+          ]
+        },
+        {
+          "id": "the_rigging_safety",
+          "title": "Overhead rigging safety",
+          "description": "Pause and recovery steps around lightweight scenic pieces.",
+          "sections": [
+            {
+              "id": "the_amber_hold",
+              "heading": "Amber hold",
+              "text": "On an amber hold, actors leave the marked drop zone, the rope operator secures the brake, and the floor lead confirms the zone is empty. Work resumes only after a fresh visual check."
+            },
+            {
+              "id": "the_loose_ribbon",
+              "heading": "Loose ribbon",
+              "text": "A loose scenic ribbon is lowered to working height before it is retied. Nobody reaches for it from a chair."
+            },
+            {
+              "id": "the_tool_pockets",
+              "heading": "Tool pockets",
+              "text": "Rigging tools remain tethered in the gray pockets and are counted after the call."
+            }
+          ],
+          "links": [
+            {
+              "label": "Provide the audience-facing description after a technical pause",
+              "target_document_id": "the_access_description"
+            }
+          ]
+        },
+        {
+          "id": "the_access_description",
+          "title": "Access narration style sheet",
+          "description": "Concise wording for describing visible changes without interpretation.",
+          "sections": [
+            {
+              "id": "the_resume_phrase",
+              "heading": "Return after amber hold",
+              "text": "After an amber hold, the narrator says, 'the hanging piece is still; the marked area is clear,' and then names the scene that resumes. The line is spoken once without music."
+            },
+            {
+              "id": "the_costume_description",
+              "heading": "Costume descriptions",
+              "text": "Descriptions name color, shape, and movement in that order. They avoid guessing a character's feelings."
+            },
+            {
+              "id": "the_silent_action",
+              "heading": "Silent action",
+              "text": "A silent action is described after it finishes if speaking over it would mask dialogue."
+            }
+          ],
+          "links": [
+            {
+              "label": "Align narration wording with rehearsal cue language",
+              "target_document_id": "the_cue_glossary"
+            }
+          ]
+        },
+        {
+          "id": "the_cue_glossary",
+          "title": "Cue timing glossary",
+          "description": "Definitions used by stage and continuity teams.",
+          "sections": [
+            {
+              "id": "the_soft_wing",
+              "heading": "Soft wing signal",
+              "text": "The soft wing signal is a brief fabric sound that must finish before the next entrance. It marks readiness, not the start of speech."
+            },
+            {
+              "id": "the_held_cue",
+              "heading": "Held cue",
+              "text": "A held cue pauses the planned action while preserving its place in sequence."
+            },
+            {
+              "id": "the_extra_beat",
+              "heading": "Extra beat",
+              "text": "An extra beat is one added count between completed actions, recorded separately from a hold."
+            }
+          ],
+          "links": [
+            {
+              "label": "See rehearsal runs where these timing terms were used",
+              "target_document_id": "the_rehearsal_log"
+            }
+          ]
+        }
+      ],
+      "cases": [
+        {
+          "id": "the_outgoing_rescue",
+          "question": "During the lantern scene, how is the blue-card paper comet handed over after the second dim?",
+          "expected_answerable": true,
+          "required_evidence_groups": [
+            [
+              {
+                "document_id": "the_prop_handoff",
+                "section_id": "the_comet_handoff"
+              }
+            ]
+          ],
+          "forbidden_evidence": [
+            {
+              "document_id": "the_production_map",
+              "section_id": "the_lantern_scene"
+            },
+            {
+              "document_id": "the_prop_handoff",
+              "section_id": "the_prop_return"
+            }
+          ]
+        },
+        {
+          "id": "the_backlink_rescue",
+          "question": "In the rehearsal associated with the soft wing signal, how many thrush cues occurred on Thursday and which one was held?",
+          "expected_answerable": true,
+          "required_evidence_groups": [
+            [
+              {
+                "document_id": "the_rehearsal_log",
+                "section_id": "the_thrush_cue_log"
+              }
+            ]
+          ],
+          "forbidden_evidence": [
+            {
+              "document_id": "the_cue_glossary",
+              "section_id": "the_soft_wing"
+            },
+            {
+              "document_id": "the_rehearsal_log",
+              "section_id": "the_bell_cue_log"
+            }
+          ]
+        },
+        {
+          "id": "the_direct_control",
+          "question": "How is the Velvet Fern cape brushed, and how long does it hang before bagging?",
+          "expected_answerable": true,
+          "required_evidence_groups": [
+            [
+              {
+                "document_id": "the_costume_care",
+                "section_id": "the_velvet_fern"
+              }
+            ]
+          ],
+          "forbidden_evidence": [
+            {
+              "document_id": "the_costume_care",
+              "section_id": "the_cloud_sash"
+            },
+            {
+              "document_id": "the_costume_care",
+              "section_id": "the_accessory_tray"
+            }
+          ]
+        },
+        {
+          "id": "the_compound_all_of",
+          "question": "What actions are required during an amber hold, and what exact information does the narrator provide when the scene resumes?",
+          "expected_answerable": true,
+          "required_evidence_groups": [
+            [
+              {
+                "document_id": "the_rigging_safety",
+                "section_id": "the_amber_hold"
+              }
+            ],
+            [
+              {
+                "document_id": "the_access_description",
+                "section_id": "the_resume_phrase"
+              }
+            ]
+          ],
+          "forbidden_evidence": [
+            {
+              "document_id": "the_rigging_safety",
+              "section_id": "the_loose_ribbon"
+            },
+            {
+              "document_id": "the_access_description",
+              "section_id": "the_costume_description"
+            }
+          ]
+        },
+        {
+          "id": "the_no_answer",
+          "question": "What is the standard ticket price for a Small Moons performance?",
+          "expected_answerable": false,
+          "required_evidence_groups": [],
+          "forbidden_evidence": [
+            {
+              "document_id": "the_production_map",
+              "section_id": "the_lantern_scene"
+            },
+            {
+              "document_id": "the_access_description",
+              "section_id": "the_silent_action"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "juniper_mushroom_cooperative",
+      "collection_name": "Juniper Mushroom Cooperative",
+      "language": "en",
+      "distractor_count": 26,
+      "distractor_title": "Courtyard chess shelf record",
+      "distractor_description": "Fictional notes about chess sets that are unrelated to crop preparation and harvest.",
+      "distractor_sections": [
+        {
+          "id": "mush_dist_boards",
+          "heading": "Boards",
+          "text": "Travel boards are stored flat while wooden boards stand in the rear slots."
+        },
+        {
+          "id": "mush_dist_pieces",
+          "heading": "Piece bags",
+          "text": "Each cloth bag receives sixteen light and sixteen dark pieces after play."
+        },
+        {
+          "id": "mush_dist_clock",
+          "heading": "Practice clock",
+          "text": "The practice clock remains in its padded box unless a timed game is scheduled."
+        }
+      ],
+      "documents": [
+        {
+          "id": "mush_crop_map",
+          "title": "Crop map for trial rooms",
+          "description": "Routes fictional mushroom blocks from planning to their preparation protocol.",
+          "sections": [
+            {
+              "id": "mush_pine_room",
+              "heading": "Pine Room silver batch",
+              "text": "The Pine Room silver batch uses compact blocks marked with a crescent stamp. Its planning card points to the matching inoculation sequence before shelving."
+            },
+            {
+              "id": "mush_maple_room",
+              "heading": "Maple Room amber batch",
+              "text": "The Maple Room amber batch uses tall bags and a square stamp. It remains on the staging cart until the room card is signed."
+            },
+            {
+              "id": "mush_cart_flow",
+              "heading": "Staging cart flow",
+              "text": "Unprepared blocks occupy the upper shelf and sealed blocks the lower shelf. The cart is cleared between batch colors."
+            }
+          ],
+          "links": [
+            {
+              "label": "Apply the inoculation sequence for the crescent-stamped silver batch",
+              "target_document_id": "mush_inoculation_protocol"
+            },
+            {
+              "label": "Verify the instruments assigned to each room",
+              "target_document_id": "mush_room_instruments"
+            }
+          ]
+        },
+        {
+          "id": "mush_inoculation_protocol",
+          "title": "Inoculation and sealing protocol",
+          "description": "Exact synthetic preparation steps for trial blocks.",
+          "sections": [
+            {
+              "id": "mush_crescent_sequence",
+              "heading": "Silver batch with crescent stamp",
+              "text": "A crescent-stamped silver block receives four plugs spaced one thumb apart along the upper seam. The seam is folded twice toward the label before the blue clip is attached."
+            },
+            {
+              "id": "mush_square_sequence",
+              "heading": "Amber batch with square stamp",
+              "text": "A square-stamped amber bag receives three plugs in a vertical line and a single outward fold."
+            },
+            {
+              "id": "mush_tool_reset",
+              "heading": "Tool reset",
+              "text": "The punch is wiped and returned to its covered tray after each batch. Clips of different colors never share a cup."
+            }
+          ],
+          "links": [
+            {
+              "label": "Check how sealed blocks qualify for packaging",
+              "target_document_id": "mush_packaging_criteria"
+            }
+          ]
+        },
+        {
+          "id": "mush_room_instruments",
+          "title": "Room instruments and checks",
+          "description": "Verification procedures for fictional environmental tools.",
+          "sections": [
+            {
+              "id": "mush_finch_meter",
+              "heading": "Finch humidity meter",
+              "text": "The Finch meter is checked for fifty seconds inside the gray reference sleeve. A reading more than three points from the sleeve card sends the meter to the red service box."
+            },
+            {
+              "id": "mush_dawn_probe",
+              "heading": "Dawn temperature probe",
+              "text": "The Dawn probe rests on the center hook for one minute before a room reading is recorded."
+            },
+            {
+              "id": "mush_instrument_log",
+              "heading": "Instrument log",
+              "text": "Checks are recorded by instrument code and room, without worker names. Failed tools remain visible in the log until replaced."
+            }
+          ],
+          "links": [
+            {
+              "label": "Follow the clean-room response when a tool may be compromised",
+              "target_document_id": "mush_clean_response"
+            }
+          ]
+        },
+        {
+          "id": "mush_harvest_log",
+          "title": "Trial harvest log",
+          "description": "Fictional yield observations recorded before grading.",
+          "sections": [
+            {
+              "id": "mush_wren_harvest",
+              "heading": "Wren shelf harvest",
+              "text": "The Wren shelf produced thirteen clusters. Four were marked feather edge, while the ninth cluster was held back because its cap had split."
+            },
+            {
+              "id": "mush_lark_harvest",
+              "heading": "Lark shelf harvest",
+              "text": "The Lark shelf produced eight even clusters and one loose stem group."
+            },
+            {
+              "id": "mush_harvest_close",
+              "heading": "Closing the harvest",
+              "text": "Trays are counted before grading and their shelf cards travel with them. No weights are estimated."
+            }
+          ],
+          "links": [
+            {
+              "label": "Compare observed forms with the cooperative grading vocabulary",
+              "target_document_id": "mush_grading_guide"
+            }
+          ]
+        },
+        {
+          "id": "mush_clean_response",
+          "title": "Clean-room incident response",
+          "description": "Containment actions for synthetic preparation rooms.",
+          "sections": [
+            {
+              "id": "mush_green_dust",
+              "heading": "Green dust on a block",
+              "text": "If green dust appears, the block is covered in place, the cart wheels are marked, and the entire cart moves to the closed review bay. Adjacent blocks are not opened."
+            },
+            {
+              "id": "mush_torn_glove",
+              "heading": "Torn glove",
+              "text": "A torn glove stops the current handling step. The outer wrap is discarded and the bench receives a fresh liner."
+            },
+            {
+              "id": "mush_spill_floor",
+              "heading": "Spill on floor",
+              "text": "Loose substrate is collected with the dedicated pan and the aisle stays closed until the floor is dry."
+            }
+          ],
+          "links": [
+            {
+              "label": "Confirm which review marks permit later packaging",
+              "target_document_id": "mush_packaging_criteria"
+            }
+          ]
+        },
+        {
+          "id": "mush_packaging_criteria",
+          "title": "Packaging release criteria",
+          "description": "Conditions for moving reviewed clusters into fictional cartons.",
+          "sections": [
+            {
+              "id": "mush_release_marks",
+              "heading": "Tray release marks",
+              "text": "A tray may be packed only when its shelf card bears a violet review dot and every held cluster has been removed. Both conditions are checked before the carton label is printed."
+            },
+            {
+              "id": "mush_carton_liner",
+              "heading": "Carton liner",
+              "text": "The liner folds over the short sides first and remains below the ventilation slots."
+            },
+            {
+              "id": "mush_carton_code",
+              "heading": "Carton code",
+              "text": "The carton code repeats the shelf and harvest session, but contains no person identifier."
+            }
+          ],
+          "links": [
+            {
+              "label": "Return to the sealing procedure that prepared each block",
+              "target_document_id": "mush_inoculation_protocol"
+            }
+          ]
+        },
+        {
+          "id": "mush_grading_guide",
+          "title": "Cluster grading vocabulary",
+          "description": "Shared visual terms used before release decisions.",
+          "sections": [
+            {
+              "id": "mush_feather_edge",
+              "heading": "Feather edge",
+              "text": "Feather edge describes a cap margin with three or more shallow waves. It prompts a grading note but does not itself hold a cluster."
+            },
+            {
+              "id": "mush_round_crown",
+              "heading": "Round crown",
+              "text": "Round crown indicates an even curve with no visible split at the center."
+            },
+            {
+              "id": "mush_open_fan",
+              "heading": "Open fan",
+              "text": "Open fan describes caps that separate widely while sharing a firm base."
+            }
+          ],
+          "links": [
+            {
+              "label": "See harvest records where these grading terms were applied",
+              "target_document_id": "mush_harvest_log"
+            }
+          ]
+        }
+      ],
+      "cases": [
+        {
+          "id": "mush_outgoing_rescue",
+          "question": "For the Pine Room silver batch with a crescent stamp, how are plugs spaced and how is the seam folded?",
+          "expected_answerable": true,
+          "required_evidence_groups": [
+            [
+              {
+                "document_id": "mush_inoculation_protocol",
+                "section_id": "mush_crescent_sequence"
+              }
+            ]
+          ],
+          "forbidden_evidence": [
+            {
+              "document_id": "mush_crop_map",
+              "section_id": "mush_pine_room"
+            },
+            {
+              "document_id": "mush_inoculation_protocol",
+              "section_id": "mush_square_sequence"
+            }
+          ]
+        },
+        {
+          "id": "mush_backlink_rescue",
+          "question": "In the harvest associated with feather edge, how many clusters came from Wren shelf and which cluster was held back?",
+          "expected_answerable": true,
+          "required_evidence_groups": [
+            [
+              {
+                "document_id": "mush_harvest_log",
+                "section_id": "mush_wren_harvest"
+              }
+            ]
+          ],
+          "forbidden_evidence": [
+            {
+              "document_id": "mush_grading_guide",
+              "section_id": "mush_feather_edge"
+            },
+            {
+              "document_id": "mush_harvest_log",
+              "section_id": "mush_lark_harvest"
+            }
+          ]
+        },
+        {
+          "id": "mush_direct_control",
+          "question": "How long is the Finch humidity meter checked, and what deviation sends it to service?",
+          "expected_answerable": true,
+          "required_evidence_groups": [
+            [
+              {
+                "document_id": "mush_room_instruments",
+                "section_id": "mush_finch_meter"
+              }
+            ]
+          ],
+          "forbidden_evidence": [
+            {
+              "document_id": "mush_room_instruments",
+              "section_id": "mush_dawn_probe"
+            },
+            {
+              "document_id": "mush_room_instruments",
+              "section_id": "mush_instrument_log"
+            }
+          ]
+        },
+        {
+          "id": "mush_compound_all_of",
+          "question": "How is a cart contained when green dust appears, and what two conditions must its tray later meet before packing?",
+          "expected_answerable": true,
+          "required_evidence_groups": [
+            [
+              {
+                "document_id": "mush_clean_response",
+                "section_id": "mush_green_dust"
+              }
+            ],
+            [
+              {
+                "document_id": "mush_packaging_criteria",
+                "section_id": "mush_release_marks"
+              }
+            ]
+          ],
+          "forbidden_evidence": [
+            {
+              "document_id": "mush_clean_response",
+              "section_id": "mush_torn_glove"
+            },
+            {
+              "document_id": "mush_packaging_criteria",
+              "section_id": "mush_carton_liner"
+            }
+          ]
+        },
+        {
+          "id": "mush_no_answer",
+          "question": "On what date does the cooperative's building lease expire?",
+          "expected_answerable": false,
+          "required_evidence_groups": [],
+          "forbidden_evidence": [
+            {
+              "document_id": "mush_crop_map",
+              "section_id": "mush_cart_flow"
+            },
+            {
+              "document_id": "mush_harvest_log",
+              "section_id": "mush_harvest_close"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "cedar_bell_tool_library",
+      "collection_name": "Cedar Bell Tool Library",
+      "language": "en",
+      "distractor_count": 32,
+      "distractor_title": "Community choir folder note",
+      "distractor_description": "Fictional choir material records unrelated to lending, inspection, repair, or tool safety.",
+      "distractor_sections": [
+        {
+          "id": "tool_dist_folders",
+          "heading": "Music folders",
+          "text": "Green folders stay in the first cabinet and blue folders in the second."
+        },
+        {
+          "id": "tool_dist_pencils",
+          "heading": "Choir pencils",
+          "text": "Short pencils are collected in a jar before each rehearsal."
+        },
+        {
+          "id": "tool_dist_stands",
+          "heading": "Music stands",
+          "text": "Folded stands are stacked horizontally after the choir leaves."
+        }
+      ],
+      "documents": [
+        {
+          "id": "tool_loan_map",
+          "title": "Loan map and return stations",
+          "description": "Routes fictional lending items through return and inspection.",
+          "sections": [
+            {
+              "id": "tool_fox_drill",
+              "heading": "Fox-4 drill kit",
+              "text": "A Fox-4 drill kit with a copper return card goes to the powered-tool inspection bench. The loan map points staff to the detailed spindle and trigger check."
+            },
+            {
+              "id": "tool_wren_saw",
+              "heading": "Wren hand saw",
+              "text": "A Wren saw returns in a canvas sleeve and goes first to the tooth guard station."
+            },
+            {
+              "id": "tool_return_bins",
+              "heading": "Return bins",
+              "text": "Uninspected items use the orange bin and cleared items use the green rack. Chargers remain with their kits."
+            }
+          ],
+          "links": [
+            {
+              "label": "Perform the powered-tool checks required by the copper return card",
+              "target_document_id": "tool_return_inspection"
+            },
+            {
+              "label": "Store rechargeable packs after inspection",
+              "target_document_id": "tool_battery_care"
+            }
+          ]
+        },
+        {
+          "id": "tool_return_inspection",
+          "title": "Powered-tool return inspection",
+          "description": "Detailed acceptance sequence for fictional loan kits.",
+          "sections": [
+            {
+              "id": "tool_fox4_check",
+              "heading": "Fox-4 with copper card",
+              "text": "For a copper-card Fox-4, the inspector turns the spindle by hand for two full rotations and holds the unplugged trigger for five seconds. The kit advances only if both movements are smooth."
+            },
+            {
+              "id": "tool_cord_check",
+              "heading": "Cord check",
+              "text": "Detachable cords are uncoiled on the mat and checked from plug to socket without bending the strain relief."
+            },
+            {
+              "id": "tool_case_count",
+              "heading": "Case count",
+              "text": "Bits, guide, and charger are counted against the card before the case is closed."
+            }
+          ],
+          "links": [
+            {
+              "label": "Record any failed movement using the repair condition terms",
+              "target_document_id": "tool_condition_lexicon"
+            }
+          ]
+        },
+        {
+          "id": "tool_battery_care",
+          "title": "Rechargeable pack care",
+          "description": "Storage rules for synthetic battery packs used by loan kits.",
+          "sections": [
+            {
+              "id": "tool_lark_pack",
+              "heading": "Lark-9 pack",
+              "text": "A Lark-9 pack is stored at two illuminated bars, with its contact cap fitted and the label facing outward. It rests on the middle ceramic shelf."
+            },
+            {
+              "id": "tool_warm_pack",
+              "heading": "Warm pack",
+              "text": "A pack that feels warm remains on the ventilated pad until it reaches room temperature. It is not placed on a charger."
+            },
+            {
+              "id": "tool_pack_log",
+              "heading": "Pack log",
+              "text": "The storage log records pack code, bar count, and shelf, without borrower information."
+            }
+          ],
+          "links": [
+            {
+              "label": "Quarantine a pack that cannot meet storage conditions",
+              "target_document_id": "tool_safety_quarantine"
+            }
+          ]
+        },
+        {
+          "id": "tool_repair_log",
+          "title": "Repair bench log",
+          "description": "Fictional observations recorded before a tool is cleared or held.",
+          "sections": [
+            {
+              "id": "tool_otter_driver",
+              "heading": "Otter driver entry",
+              "text": "The Otter driver entry covered twelve returned units. Three showed the condition called sanded pause, and unit seven was held because its selector would not settle."
+            },
+            {
+              "id": "tool_heron_sander",
+              "heading": "Heron sander entry",
+              "text": "Five Heron sanders passed the pad check, while one case lacked its dust sleeve."
+            },
+            {
+              "id": "tool_log_close",
+              "heading": "Closing an entry",
+              "text": "The bench lead records unit count and disposition before returning any cases to the green rack."
+            }
+          ],
+          "links": [
+            {
+              "label": "Interpret observed behavior with the condition lexicon",
+              "target_document_id": "tool_condition_lexicon"
+            }
+          ]
+        },
+        {
+          "id": "tool_safety_quarantine",
+          "title": "Safety quarantine procedure",
+          "description": "Containment for returned items with potentially unsafe behavior.",
+          "sections": [
+            {
+              "id": "tool_red_pulse",
+              "heading": "Red pulse indicator",
+              "text": "When a charger shows a red pulse, power is disconnected at the wall, the pack remains in place under the clear cover, and the entire set receives a black hold tag. It is not moved to general storage."
+            },
+            {
+              "id": "tool_cracked_case",
+              "heading": "Cracked case",
+              "text": "A cracked case is placed in a rigid tray and separated from loose accessories until inspection."
+            },
+            {
+              "id": "tool_unknown_smell",
+              "heading": "Unknown smell",
+              "text": "An unusual smell closes the immediate bench and triggers ventilation before any case is opened."
+            }
+          ],
+          "links": [
+            {
+              "label": "Send the appropriate status notice after a kit is held",
+              "target_document_id": "tool_member_notices"
+            }
+          ]
+        },
+        {
+          "id": "tool_member_notices",
+          "title": "Loan-status notice guide",
+          "description": "Minimal wording for informing members about held or delayed items.",
+          "sections": [
+            {
+              "id": "tool_black_hold_notice",
+              "heading": "Black hold notice",
+              "text": "For a black hold tag, the notice says the kit is undergoing a safety review and offers either a substitute category or cancellation. It gives no diagnosis or promised completion date."
+            },
+            {
+              "id": "tool_missing_part_notice",
+              "heading": "Missing part notice",
+              "text": "A missing-part notice lists the kit code and the absent component, then asks whether a partial loan is useful."
+            },
+            {
+              "id": "tool_ready_notice",
+              "heading": "Ready notice",
+              "text": "A ready notice names the pickup shelf and reservation window without revealing another member's activity."
+            }
+          ],
+          "links": [
+            {
+              "label": "Check the containment state that determines the notice",
+              "target_document_id": "tool_safety_quarantine"
+            }
+          ]
+        },
+        {
+          "id": "tool_condition_lexicon",
+          "title": "Repair condition lexicon",
+          "description": "Shared terms for observable tool behavior.",
+          "sections": [
+            {
+              "id": "tool_sanded_pause",
+              "heading": "Sanded pause",
+              "text": "Sanded pause describes a brief gritty stop during a slow selector turn. It requires a log entry but does not by itself identify a failed part."
+            },
+            {
+              "id": "tool_soft_return",
+              "heading": "Soft return",
+              "text": "Soft return means a switch comes back gradually without sticking at the midpoint."
+            },
+            {
+              "id": "tool_double_click",
+              "heading": "Double click",
+              "text": "Double click records two distinct sounds during one completed latch movement."
+            }
+          ],
+          "links": [
+            {
+              "label": "Review bench entries where these conditions were observed",
+              "target_document_id": "tool_repair_log"
+            }
+          ]
+        }
+      ],
+      "cases": [
+        {
+          "id": "tool_outgoing_rescue",
+          "question": "For a copper-card Fox-4 return, how are the spindle and unplugged trigger checked?",
+          "expected_answerable": true,
+          "required_evidence_groups": [
+            [
+              {
+                "document_id": "tool_return_inspection",
+                "section_id": "tool_fox4_check"
+              }
+            ]
+          ],
+          "forbidden_evidence": [
+            {
+              "document_id": "tool_loan_map",
+              "section_id": "tool_fox_drill"
+            },
+            {
+              "document_id": "tool_return_inspection",
+              "section_id": "tool_case_count"
+            }
+          ]
+        },
+        {
+          "id": "tool_backlink_rescue",
+          "question": "In the repair entry associated with sanded pause, how many Otter drivers were returned and which unit was held?",
+          "expected_answerable": true,
+          "required_evidence_groups": [
+            [
+              {
+                "document_id": "tool_repair_log",
+                "section_id": "tool_otter_driver"
+              }
+            ]
+          ],
+          "forbidden_evidence": [
+            {
+              "document_id": "tool_condition_lexicon",
+              "section_id": "tool_sanded_pause"
+            },
+            {
+              "document_id": "tool_repair_log",
+              "section_id": "tool_heron_sander"
+            }
+          ]
+        },
+        {
+          "id": "tool_direct_control",
+          "question": "At what charge level and in what position is a Lark-9 battery pack stored?",
+          "expected_answerable": true,
+          "required_evidence_groups": [
+            [
+              {
+                "document_id": "tool_battery_care",
+                "section_id": "tool_lark_pack"
+              }
+            ]
+          ],
+          "forbidden_evidence": [
+            {
+              "document_id": "tool_battery_care",
+              "section_id": "tool_warm_pack"
+            },
+            {
+              "document_id": "tool_battery_care",
+              "section_id": "tool_pack_log"
+            }
+          ]
+        },
+        {
+          "id": "tool_compound_all_of",
+          "question": "What containment steps follow a charger's red pulse, and what choices must the resulting black-hold notice offer?",
+          "expected_answerable": true,
+          "required_evidence_groups": [
+            [
+              {
+                "document_id": "tool_safety_quarantine",
+                "section_id": "tool_red_pulse"
+              }
+            ],
+            [
+              {
+                "document_id": "tool_member_notices",
+                "section_id": "tool_black_hold_notice"
+              }
+            ]
+          ],
+          "forbidden_evidence": [
+            {
+              "document_id": "tool_safety_quarantine",
+              "section_id": "tool_cracked_case"
+            },
+            {
+              "document_id": "tool_member_notices",
+              "section_id": "tool_missing_part_notice"
+            }
+          ]
+        },
+        {
+          "id": "tool_no_answer",
+          "question": "What annual membership fee does Cedar Bell Tool Library charge?",
+          "expected_answerable": false,
+          "required_evidence_groups": [],
+          "forbidden_evidence": [
+            {
+              "document_id": "tool_loan_map",
+              "section_id": "tool_return_bins"
+            },
+            {
+              "document_id": "tool_member_notices",
+              "section_id": "tool_ready_notice"
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

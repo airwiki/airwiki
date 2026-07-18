@@ -360,9 +360,34 @@ async fn main() -> Result<()> {
                 );
                 retrieval::evaluate_real_mini_graph(Path::new(&embedding_snapshot)).await
             }
+            Some("evaluate-final-mini-graph") => {
+                ensure!(
+                    arguments.next().as_deref() == Some("--embedding-snapshot"),
+                    "retrieval evaluate-final-mini-graph expects `--embedding-snapshot <directory>` first"
+                );
+                let embedding_snapshot = arguments.next().context(
+                    "retrieval evaluate-final-mini-graph is missing the embedding snapshot path",
+                )?;
+                ensure!(
+                    arguments.next().as_deref() == Some("--relevance-snapshot"),
+                    "retrieval evaluate-final-mini-graph expects `--relevance-snapshot <directory>` second"
+                );
+                let relevance_snapshot = arguments.next().context(
+                    "retrieval evaluate-final-mini-graph is missing the relevance snapshot path",
+                )?;
+                ensure!(
+                    arguments.next().is_none(),
+                    "retrieval evaluate-final-mini-graph received unexpected arguments"
+                );
+                retrieval::evaluate_final_mini_graph(
+                    Path::new(&embedding_snapshot),
+                    Path::new(&relevance_snapshot),
+                )
+                .await
+            }
             Some(other) => bail!("unknown retrieval command: {other}"),
             None => bail!(
-                "missing retrieval command; expected `corpus`, `validate`, `evaluate`, `evaluate-selector`, `evaluate-answerability`, `evaluate-reviewed-anchors`, `evaluate-mini-graph` or `evaluate-real-mini-graph`"
+                "missing retrieval command; expected `corpus`, `validate`, `evaluate`, `evaluate-selector`, `evaluate-answerability`, `evaluate-reviewed-anchors`, `evaluate-mini-graph`, `evaluate-real-mini-graph` or `evaluate-final-mini-graph`"
             ),
         },
         "licenses" => match arguments.next().as_deref() {
@@ -434,6 +459,9 @@ async fn main() -> Result<()> {
             println!("cargo run --release --locked -p xtask -- retrieval evaluate-mini-graph");
             println!(
                 "cargo run --release --locked -p xtask -- retrieval evaluate-real-mini-graph --embedding-snapshot <directory>"
+            );
+            println!(
+                "cargo run --release --locked -p xtask -- retrieval evaluate-final-mini-graph --embedding-snapshot <directory> --relevance-snapshot <directory>"
             );
             println!("cargo run --locked -p xtask -- licenses generate");
             println!("cargo run --locked -p xtask -- licenses check");

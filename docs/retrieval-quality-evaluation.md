@@ -850,6 +850,77 @@ frozen, a separately authored set of at least four new domains must be scored
 once, and G1 must outperform both C32 and the degree-preserving sham without a
 privacy, current-revision, latency or evidence-quality regression.
 
+#### Sealed multichunk top-five holdout
+
+The final H-AWK-2 candidate gate is frozen before its first execution.
+`fixtures/retrieval/mini-graph-final-holdout-v1.json` was authored independently
+from the development corpus and evaluator. Its SHA-256 is
+`96c0efbe5acdfbe77f4c3c7bece68b7991d0066a721b54bb90b055ba02e9383d`.
+It contains eight new fictional domains—four Spanish and four English—40 cases,
+54 curated concepts with 162 sections, 62 reviewed links and 236 related
+distractors. Each domain contributes an outgoing-link rescue, backlink rescue,
+direct control, two-group compound question and plausible no-answer case. The
+fixture contains no authored rank, score, arm or expansion-direction hint.
+
+The frozen arms are:
+
+- **B32:** the first 32 current chunks from production BM25/E5/RRF;
+- **G1:** the first ten exact B32 chunks, one bidirectional hop over reviewed
+  internal OKF links, then the unused B32 prefix as backfill; and
+- **G1-sham:** the same procedure over a deterministic graph that preserves
+  each concept's incoming and outgoing degree while rotating link targets in
+  stable synthetic logical-ID order.
+
+The graph nominates concepts, never evidence text. For every graph-only concept,
+SQLite selects at most two current chunks by query-E5 cosine, with stable public
+chunk identity as the tie-breaker. The ordered arm is capped at 32 chunks,
+deduplicated by source and chunk content, classified by the existing pinned
+mMARCO relevance provider, and truncated to the first five relevant hits. The
+mMARCO component is a relevance filter, not a score-ordering reranker; arm order
+therefore remains authoritative. Citation construction and final publication,
+revision and collection-policy revalidation are exactly the local production
+path. A provider error is a failed case, never a valid no-answer.
+The evaluator rejects an expansion that exhausts its edge or candidate budget,
+rather than accepting a subset whose membership could depend on runtime UUIDs.
+
+The in-process projection remains deliberately small: projection-local `u32`
+node IDs plus boxed outgoing and incoming adjacency slices. It stores no text,
+titles, tags, paths, queries, embeddings or authorization state and introduces
+no graph database, daemon or dependency. SQLite and the inspected OKF bundle
+remain the authorities; an unhealthy, updating or fingerprint-changed bundle
+invalidates the run.
+
+The result is eligible only for a production **shadow** experiment when every
+frozen condition passes:
+
+- group Recall@5 at least 0.90 and citation precision at least 0.80;
+- all no-answer cases return zero hits and no forbidden evidence is cited;
+- no evidence group already covered by B32 is lost;
+- macro-domain recall exceeds both B32 and G1-sham by at least 0.05, with
+  improvement over both controls in at least five of eight domains;
+- the deterministic paired-domain bootstrap 95% lower bound is above zero
+  against each control, and MRR@5 is no worse than either control;
+- provider failures and invalid or stale provenance are zero;
+- real and sham graph payload together remain below 1 MiB, projection remains
+  below one second, and G1 candidate assembly p95 remains below 25 ms. Candidate
+  assembly includes one-hop nominee expansion plus query-E5/SQLite selection of
+  graph-nominated chunks, before the shared mMARCO relevance filter;
+- full G1 query p95 remains below three seconds and no worse than the greater
+  of 110% of B32 p95 or B32 p95 plus 10 ms; and
+- every bundle stays healthy with its original fingerprint.
+
+```bash
+cargo run --release --locked -p xtask -- retrieval evaluate-final-mini-graph \
+  --embedding-snapshot <verified-multilingual-e5-small-snapshot> \
+  --relevance-snapshot <verified-mmarco-snapshot>
+```
+
+The fixture is executed only after both evaluator and fixture are sealed. A
+passing report still sets `production_promotion_ready=false`: it permits a
+content-free shadow integration proposal, not a production behavior change.
+Installed macOS and Windows memory/latency evidence and a real-user corpus gate
+remain separate decisions.
+
 ### H-AWK-1 development observation
 
 The first macOS arm64 release-profile run on 2026-07-18 used Gemma 4 E4B Q4 at

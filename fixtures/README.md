@@ -34,6 +34,10 @@ or personal information.
   with four domain-separated OKF bundles, 12 questions and no authored ranking
   fields. It compares the production BM25/E5/RRF order with one-hop expansion
   and a degree-preserving sham graph; it is not a promotion holdout.
+- `retrieval/mini-graph-final-holdout-v1.json`: independently authored and
+  sealed multichunk candidate holdout with eight unseen fictional domains and
+  40 cases. Its expectations score final top-five citations but never enter
+  ranking, graph expansion, chunk selection or relevance classification.
 
 The expected federated question asks how Atlas is recovered, who is responsible,
 and the target date. A correct answer combines the Mac procedure with the
@@ -97,6 +101,15 @@ snapshot. It publishes temporary OKF bundles and downloads nothing:
 ```bash
 cargo run --release --locked -p xtask -- retrieval evaluate-real-mini-graph \
   --embedding-snapshot <verified-e5-snapshot-directory>
+```
+
+The sealed final mini-graph holdout additionally uses the already verified
+mMARCO relevance snapshot and runs only after the evaluator is frozen:
+
+```bash
+cargo run --release --locked -p xtask -- retrieval evaluate-final-mini-graph \
+  --embedding-snapshot <verified-e5-snapshot-directory> \
+  --relevance-snapshot <verified-mmarco-snapshot-directory>
 ```
 
 See the [retrieval-quality evaluation profile](../docs/retrieval-quality-evaluation.md)

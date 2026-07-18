@@ -1,6 +1,8 @@
 use std::cmp::Ordering;
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
+#[cfg(feature = "retrieval-evaluation")]
+use std::time::Instant;
 
 use airwiki_types::{
     FederatedSearch, MAX_HEADING_OR_PAGE_CHARS, MAX_SNIPPET_CHARS, SearchContractError, SearchHit,
@@ -22,6 +24,10 @@ pub const RELEVANCE_CANDIDATE_LIMIT: usize = 10;
 /// Largest pre-classification ranking exposed to offline retrieval evaluators.
 #[cfg(feature = "retrieval-evaluation")]
 pub const MAX_RETRIEVAL_EVALUATION_CANDIDATES: usize = 32;
+/// Maximum current chunks contributed by one graph-nominated concept during
+/// an offline retrieval evaluation.
+#[cfg(feature = "retrieval-evaluation")]
+pub const MAX_RETRIEVAL_EVALUATION_CHUNKS_PER_CONCEPT: usize = 2;
 /// Fixed per-channel over-retrieval bound before RRF and content deduplication.
 const PRE_DEDUPLICATION_CANDIDATE_LIMIT: usize = RELEVANCE_CANDIDATE_LIMIT * 4;
 
@@ -37,6 +43,34 @@ pub struct RetrievalEvaluationCandidate {
     pub concept_id: Uuid,
     pub chunk_id: Uuid,
     pub source_revision: u32,
+}
+
+/// One position in an explicitly ordered offline evaluation arm.
+///
+/// Exact nominees preserve a chunk from the production hybrid ranking. Concept
+/// nominees let a graph propose a current concept while SQLite still selects
+/// and authorizes its evidence chunks.
+#[cfg(feature = "retrieval-evaluation")]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RetrievalEvaluationNominee {
+    Exact(RetrievalEvaluationCandidate),
+    Concept {
+        collection_id: Uuid,
+        concept_id: Uuid,
+        expected_revision: u32,
+    },
+}
+
+/// Content-free result of replaying one ordered evaluation arm through the
+/// production relevance and final publication checks.
+#[cfg(feature = "retrieval-evaluation")]
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RetrievalEvaluationSelection {
+    pub candidates: Vec<RetrievalEvaluationCandidate>,
+    pub partial: bool,
+    /// Time spent authorizing and materializing the ordered candidate arm,
+    /// before the shared relevance and final-publication path.
+    pub candidate_preparation_micros: u128,
 }
 
 /// Candidate evidence presented to the local relevance classifier.
@@ -196,6 +230,14 @@ impl HybridSearchEngine {
                 RELEVANCE_CANDIDATE_LIMIT,
             )
             .await?;
+        self.finalize_local_candidates(request, prepared).await
+    }
+
+    async fn finalize_local_candidates(
+        &self,
+        request: SearchRequest,
+        prepared: PreparedCandidates,
+    ) -> Result<SearchResponse> {
         let PreparedCandidates {
             candidates: deduplicated_candidates,
             visible_snippets,
@@ -312,6 +354,77 @@ impl HybridSearchEngine {
             .collect())
     }
 
+    /// Replays an explicitly ordered candidate arm through the same relevance,
+    /// citation construction and final publication checks as local search.
+    ///
+    /// This seam is compiled only for offline evaluation. Graph nominees carry
+    /// no text or score and may contribute at most two current chunks each.
+    #[cfg(feature = "retrieval-evaluation")]
+    pub async fn search_local_arm_for_evaluation(
+        &self,
+        request: SearchRequest,
+        nominees: &[RetrievalEvaluationNominee],
+    ) -> Result<RetrievalEvaluationSelection> {
+        validate_retrieval_evaluation_arm(&request, nominees)?;
+        let collections = self.resolve_local_scope().await?;
+        let candidate_preparation_started = Instant::now();
+        let needs_query_embedding = nominees
+            .iter()
+            .any(|nominee| matches!(nominee, RetrievalEvaluationNominee::Concept { .. }));
+        let query_embedding = if needs_query_embedding {
+            let embedding = self
+                .embeddings
+                .embed(&[format!("query: {}", request.query.trim())])
+                .await
+                .context("could not embed retrieval evaluation query")?
+                .into_iter()
+                .next()
+                .context("embedding provider returned no retrieval evaluation query vector")?;
+            if embedding.len() != crate::EMBEDDING_DIMENSIONS {
+                bail!(
+                    "embedding provider returned {} dimensions; expected {}",
+                    embedding.len(),
+                    crate::EMBEDDING_DIMENSIONS
+                );
+            }
+            Some(embedding)
+        } else {
+            None
+        };
+        let database = self.database.clone();
+        let query = request.query.clone();
+        let purpose = request.purpose;
+        let nominees = nominees.to_vec();
+        let prepared =
+            run_search_blocking("retrieval evaluation arm worker task failed", move || {
+                prepare_evaluation_nominees(
+                    database,
+                    query,
+                    collections,
+                    purpose,
+                    nominees,
+                    query_embedding,
+                )
+            })
+            .await?;
+        let candidate_preparation_micros = candidate_preparation_started.elapsed().as_micros();
+        let response = self.finalize_local_candidates(request, prepared).await?;
+        Ok(RetrievalEvaluationSelection {
+            candidates: response
+                .hits
+                .into_iter()
+                .map(|hit| RetrievalEvaluationCandidate {
+                    collection_id: hit.collection_id,
+                    concept_id: hit.concept_id,
+                    chunk_id: hit.chunk_id,
+                    source_revision: hit.source_revision,
+                })
+                .collect(),
+            partial: response.partial,
+            candidate_preparation_micros,
+        })
+    }
+
     async fn resolve_local_scope(&self) -> Result<Vec<Uuid>> {
         let database = self.database.clone();
         run_search_blocking("local search scope worker task failed", move || {
@@ -396,6 +509,19 @@ struct PreparedCandidates {
     candidates: Vec<RankedChunk>,
     visible_snippets: Vec<String>,
     relevance_inputs: Vec<RelevanceInput>,
+}
+
+#[cfg(feature = "retrieval-evaluation")]
+type EvaluationExactKey = (Uuid, Uuid, Uuid, u32);
+
+#[cfg(feature = "retrieval-evaluation")]
+type EvaluationConceptKey = (Uuid, Uuid, u32);
+
+#[cfg(feature = "retrieval-evaluation")]
+struct ScoredEvaluationCandidate {
+    candidate: RankedChunk,
+    similarity: f32,
+    public_id: Uuid,
 }
 
 async fn run_search_blocking<T>(
@@ -493,11 +619,18 @@ fn prepare_candidates(
         }
     }
 
-    let visible_snippets = deduplicated_candidates
+    prepare_ranked_chunk_list(deduplicated_candidates, &query)
+}
+
+fn prepare_ranked_chunk_list(
+    candidates: Vec<RankedChunk>,
+    query: &str,
+) -> Result<PreparedCandidates> {
+    let visible_snippets = candidates
         .iter()
-        .map(|candidate| relevant_snippet(&candidate.chunk.text, &query))
+        .map(|candidate| relevant_snippet(&candidate.chunk.text, query))
         .collect::<Vec<_>>();
-    let relevance_inputs = deduplicated_candidates
+    let relevance_inputs = candidates
         .iter()
         .zip(&visible_snippets)
         .map(|(candidate, snippet)| RelevanceInput {
@@ -515,10 +648,167 @@ fn prepare_candidates(
         .collect::<Vec<_>>();
 
     Ok(PreparedCandidates {
-        candidates: deduplicated_candidates,
+        candidates,
         visible_snippets,
         relevance_inputs,
     })
+}
+
+#[cfg(feature = "retrieval-evaluation")]
+fn prepare_evaluation_nominees(
+    database: Database,
+    query: String,
+    collections: Vec<Uuid>,
+    purpose: SearchPurpose,
+    nominees: Vec<RetrievalEvaluationNominee>,
+    query_embedding: Option<Vec<f32>>,
+) -> Result<PreparedCandidates> {
+    let exact_keys = nominees
+        .iter()
+        .filter_map(|nominee| match nominee {
+            RetrievalEvaluationNominee::Exact(candidate) => Some(evaluation_exact_key(*candidate)),
+            RetrievalEvaluationNominee::Concept { .. } => None,
+        })
+        .collect::<HashSet<_>>();
+    let concept_keys = nominees
+        .iter()
+        .map(|nominee| evaluation_concept_key(*nominee))
+        .collect::<HashSet<_>>();
+    let graph_concept_keys = nominees
+        .iter()
+        .filter_map(|nominee| match nominee {
+            RetrievalEvaluationNominee::Exact(_) => None,
+            RetrievalEvaluationNominee::Concept { .. } => Some(evaluation_concept_key(*nominee)),
+        })
+        .collect::<HashSet<_>>();
+    let mut exact_candidates = HashMap::<EvaluationExactKey, RankedChunk>::new();
+    let mut concept_candidates =
+        HashMap::<EvaluationConceptKey, Vec<ScoredEvaluationCandidate>>::new();
+    let mut offset = 0;
+    loop {
+        let batch = database.vector_candidates_batch(
+            &collections,
+            purpose,
+            VECTOR_SQL_BATCH_SIZE,
+            offset,
+        )?;
+        let batch_len = batch.len();
+        for candidate in batch {
+            let concept_key = (
+                candidate.chunk.collection_id,
+                candidate.chunk.concept_id,
+                candidate.chunk.source_revision,
+            );
+            if !concept_keys.contains(&concept_key) {
+                continue;
+            }
+            let public_id = public_chunk_id(
+                &candidate.source_sha256,
+                candidate.chunk.ordinal,
+                &candidate.chunk.text_sha256,
+            );
+            let exact_key = (
+                candidate.chunk.collection_id,
+                candidate.chunk.concept_id,
+                public_id,
+                candidate.chunk.source_revision,
+            );
+            let is_exact = exact_keys.contains(&exact_key);
+            let is_concept = graph_concept_keys.contains(&concept_key);
+            if is_exact && !is_concept {
+                exact_candidates.entry(exact_key).or_insert(candidate);
+                continue;
+            }
+            if is_exact {
+                exact_candidates
+                    .entry(exact_key)
+                    .or_insert_with(|| candidate.clone());
+            }
+            if is_concept {
+                let query_embedding = query_embedding
+                    .as_deref()
+                    .context("graph nominee is missing its evaluation query embedding")?;
+                let scored = ScoredEvaluationCandidate {
+                    similarity: cosine_similarity(query_embedding, &candidate.chunk.embedding),
+                    candidate,
+                    public_id,
+                };
+                let best = concept_candidates.entry(concept_key).or_default();
+                best.push(scored);
+                best.sort_by(|left, right| {
+                    right
+                        .similarity
+                        .partial_cmp(&left.similarity)
+                        .unwrap_or(Ordering::Equal)
+                        .then_with(|| left.public_id.cmp(&right.public_id))
+                });
+                best.truncate(MAX_RETRIEVAL_EVALUATION_CHUNKS_PER_CONCEPT);
+            }
+        }
+        if batch_len < VECTOR_SQL_BATCH_SIZE {
+            break;
+        }
+        offset += batch_len;
+    }
+
+    let mut selected = Vec::with_capacity(MAX_RETRIEVAL_EVALUATION_CANDIDATES);
+    let mut deduplicated_content = HashSet::<(String, String)>::new();
+    for nominee in nominees {
+        let matches = match nominee {
+            RetrievalEvaluationNominee::Exact(candidate) => vec![
+                exact_candidates
+                    .get(&evaluation_exact_key(candidate))
+                    .cloned()
+                    .context("retrieval evaluation nominee is unavailable")?,
+            ],
+            RetrievalEvaluationNominee::Concept { .. } => concept_candidates
+                .get(&evaluation_concept_key(nominee))
+                .filter(|candidates| !candidates.is_empty())
+                .context("retrieval evaluation nominee is unavailable")?
+                .iter()
+                .map(|candidate| candidate.candidate.clone())
+                .collect(),
+        };
+        for candidate in matches {
+            if !deduplicated_content.insert((
+                candidate.source_sha256.clone(),
+                candidate.chunk.text_sha256.clone(),
+            )) {
+                continue;
+            }
+            selected.push(candidate);
+            if selected.len() == MAX_RETRIEVAL_EVALUATION_CANDIDATES {
+                return prepare_ranked_chunk_list(selected, &query);
+            }
+        }
+    }
+    prepare_ranked_chunk_list(selected, &query)
+}
+
+#[cfg(feature = "retrieval-evaluation")]
+fn evaluation_exact_key(candidate: RetrievalEvaluationCandidate) -> EvaluationExactKey {
+    (
+        candidate.collection_id,
+        candidate.concept_id,
+        candidate.chunk_id,
+        candidate.source_revision,
+    )
+}
+
+#[cfg(feature = "retrieval-evaluation")]
+fn evaluation_concept_key(nominee: RetrievalEvaluationNominee) -> EvaluationConceptKey {
+    match nominee {
+        RetrievalEvaluationNominee::Exact(candidate) => (
+            candidate.collection_id,
+            candidate.concept_id,
+            candidate.source_revision,
+        ),
+        RetrievalEvaluationNominee::Concept {
+            collection_id,
+            concept_id,
+            expected_revision,
+        } => (collection_id, concept_id, expected_revision),
+    }
 }
 
 #[cfg(feature = "retrieval-evaluation")]
@@ -531,6 +821,24 @@ fn validate_retrieval_evaluation_request(
     if !(1..=MAX_RETRIEVAL_EVALUATION_CANDIDATES).contains(&output_limit) {
         bail!(
             "retrieval evaluation output limit must be between 1 and {}",
+            MAX_RETRIEVAL_EVALUATION_CANDIDATES
+        );
+    }
+    Ok(())
+}
+
+#[cfg(feature = "retrieval-evaluation")]
+fn validate_retrieval_evaluation_arm(
+    request: &SearchRequest,
+    nominees: &[RetrievalEvaluationNominee],
+) -> Result<()> {
+    request.validate()?;
+    if request.top_k != airwiki_types::DEFAULT_TOP_K {
+        bail!("retrieval evaluation arms require top_k 5");
+    }
+    if nominees.is_empty() || nominees.len() > MAX_RETRIEVAL_EVALUATION_CANDIDATES {
+        bail!(
+            "retrieval evaluation arm must contain between 1 and {} nominees",
             MAX_RETRIEVAL_EVALUATION_CANDIDATES
         );
     }
@@ -717,6 +1025,23 @@ mod tests {
     #[derive(Debug, Clone, Default)]
     struct CountingIrrelevantEvidenceRelevanceProvider {
         candidates_seen: Arc<AtomicUsize>,
+    }
+
+    #[derive(Debug, Clone, Default)]
+    struct CountingEmbeddingProvider {
+        calls: Arc<AtomicUsize>,
+    }
+
+    #[async_trait]
+    impl EmbeddingProvider for CountingEmbeddingProvider {
+        fn model_id(&self) -> &str {
+            "counting-embedding-test-double"
+        }
+
+        async fn embed(&self, texts: &[String]) -> Result<Vec<Vec<f32>>> {
+            self.calls.fetch_add(1, AtomicOrdering::SeqCst);
+            DeterministicEmbeddingProvider.embed(texts).await
+        }
     }
 
     #[async_trait]
@@ -1447,6 +1772,247 @@ mod tests {
         );
     }
 
+    #[cfg(feature = "retrieval-evaluation")]
+    #[tokio::test]
+    async fn exact_evaluation_arm_matches_the_production_top_five() {
+        let (database, _collection_id, concept_id) = indexed_database().await;
+        replace_with_disjoint_lexical_and_vector_candidates(&database, concept_id).await;
+        let embeddings = Arc::new(CountingEmbeddingProvider::default());
+        let engine = HybridSearchEngine::new(
+            database,
+            embeddings.clone(),
+            Arc::new(AllRelevantEvidenceRelevanceProvider),
+            "mac",
+        );
+        let request = SearchRequest::new(
+            "lexicalneedle",
+            SearchPurpose::LocalAssistant,
+            airwiki_types::DEFAULT_TOP_K,
+        );
+        let production = engine.search_local(request.clone()).await.unwrap();
+        let ranked = engine
+            .rank_local_for_evaluation(&request.query, request.purpose, RELEVANCE_CANDIDATE_LIMIT)
+            .await
+            .unwrap();
+        let nominees = ranked
+            .into_iter()
+            .map(RetrievalEvaluationNominee::Exact)
+            .collect::<Vec<_>>();
+        let embedding_calls_before_replay = embeddings.calls.load(AtomicOrdering::SeqCst);
+
+        let replay = engine
+            .search_local_arm_for_evaluation(request, &nominees)
+            .await
+            .unwrap();
+
+        assert_eq!(
+            replay
+                .candidates
+                .iter()
+                .map(|candidate| candidate.chunk_id)
+                .collect::<Vec<_>>(),
+            production
+                .hits
+                .iter()
+                .map(|hit| hit.chunk_id)
+                .collect::<Vec<_>>()
+        );
+        assert_eq!(
+            embeddings.calls.load(AtomicOrdering::SeqCst),
+            embedding_calls_before_replay,
+            "an exact-only arm must not perform a redundant query embedding"
+        );
+    }
+
+    #[cfg(feature = "retrieval-evaluation")]
+    #[tokio::test]
+    async fn concept_nominee_selects_at_most_two_chunks_by_query_cosine() {
+        let (database, collection_id, concept_id) = indexed_database().await;
+        replace_with_ranked_fixture_chunks(&database, concept_id).await;
+        let query = "pagos operativa";
+        let query_embedding = DeterministicEmbeddingProvider
+            .embed(&[format!("query: {query}")])
+            .await
+            .unwrap()
+            .remove(0);
+        let source_sha256 = database
+            .source_document(
+                database
+                    .concept(concept_id)
+                    .unwrap()
+                    .unwrap()
+                    .source_document_id,
+            )
+            .unwrap()
+            .unwrap()
+            .source_sha256;
+        let mut expected = database
+            .chunks_for_concept(concept_id)
+            .unwrap()
+            .into_iter()
+            .map(|chunk| {
+                let similarity = cosine_similarity(&query_embedding, &chunk.embedding);
+                let public_id = public_chunk_id(&source_sha256, chunk.ordinal, &chunk.text_sha256);
+                (similarity, public_id)
+            })
+            .collect::<Vec<_>>();
+        expected.sort_by(|(left_score, left_id), (right_score, right_id)| {
+            right_score
+                .partial_cmp(left_score)
+                .unwrap_or(Ordering::Equal)
+                .then_with(|| left_id.cmp(right_id))
+        });
+        expected.truncate(MAX_RETRIEVAL_EVALUATION_CHUNKS_PER_CONCEPT);
+        let engine = HybridSearchEngine::new(
+            database,
+            Arc::new(DeterministicEmbeddingProvider),
+            Arc::new(AllRelevantEvidenceRelevanceProvider),
+            "mac",
+        );
+
+        let response = engine
+            .search_local_arm_for_evaluation(
+                SearchRequest::new(
+                    query,
+                    SearchPurpose::LocalAssistant,
+                    airwiki_types::DEFAULT_TOP_K,
+                ),
+                &[RetrievalEvaluationNominee::Concept {
+                    collection_id,
+                    concept_id,
+                    expected_revision: 1,
+                }],
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(response.candidates.len(), 2);
+        assert_eq!(
+            response
+                .candidates
+                .iter()
+                .map(|candidate| candidate.chunk_id)
+                .collect::<Vec<_>>(),
+            expected.into_iter().map(|(_, id)| id).collect::<Vec<_>>()
+        );
+    }
+
+    #[cfg(feature = "retrieval-evaluation")]
+    #[tokio::test]
+    async fn stale_graph_nominee_never_reaches_relevance() {
+        let (database, collection_id, concept_id) = indexed_database().await;
+        let relevance = Arc::new(CountingIrrelevantEvidenceRelevanceProvider::default());
+        let engine = HybridSearchEngine::new(
+            database,
+            Arc::new(DeterministicEmbeddingProvider),
+            relevance.clone(),
+            "mac",
+        );
+
+        let error = engine
+            .search_local_arm_for_evaluation(
+                SearchRequest::new(
+                    "pagos",
+                    SearchPurpose::LocalAssistant,
+                    airwiki_types::DEFAULT_TOP_K,
+                ),
+                &[RetrievalEvaluationNominee::Concept {
+                    collection_id,
+                    concept_id,
+                    expected_revision: 2,
+                }],
+            )
+            .await
+            .unwrap_err();
+
+        assert_eq!(
+            error.to_string(),
+            "retrieval evaluation nominee is unavailable"
+        );
+        assert_eq!(relevance.candidates_seen.load(AtomicOrdering::SeqCst), 0);
+    }
+
+    #[cfg(feature = "retrieval-evaluation")]
+    #[tokio::test]
+    async fn evaluation_arm_revalidates_a_withdrawal_during_relevance() {
+        let (database, _collection_id, concept_id) = indexed_database().await;
+        let source_document_id = database
+            .concept(concept_id)
+            .unwrap()
+            .unwrap()
+            .source_document_id;
+        let ranked = HybridSearchEngine::new(
+            database.clone(),
+            Arc::new(DeterministicEmbeddingProvider),
+            Arc::new(AllRelevantEvidenceRelevanceProvider),
+            "mac",
+        )
+        .rank_local_for_evaluation("pagos", SearchPurpose::LocalAssistant, 1)
+        .await
+        .unwrap();
+        let engine = HybridSearchEngine::new(
+            database.clone(),
+            Arc::new(DeterministicEmbeddingProvider),
+            Arc::new(WithdrawsDuringRelevance {
+                database,
+                source_document_id,
+            }),
+            "mac",
+        );
+
+        let response = engine
+            .search_local_arm_for_evaluation(
+                SearchRequest::new(
+                    "pagos",
+                    SearchPurpose::LocalAssistant,
+                    airwiki_types::DEFAULT_TOP_K,
+                ),
+                &[RetrievalEvaluationNominee::Exact(ranked[0])],
+            )
+            .await
+            .unwrap();
+
+        assert!(response.candidates.is_empty());
+        assert!(response.partial);
+    }
+
+    #[cfg(feature = "retrieval-evaluation")]
+    #[tokio::test]
+    async fn evaluation_arm_deduplicates_exact_and_concept_nominees() {
+        let (database, collection_id, concept_id) = indexed_database().await;
+        let engine = HybridSearchEngine::new(
+            database,
+            Arc::new(DeterministicEmbeddingProvider),
+            Arc::new(AllRelevantEvidenceRelevanceProvider),
+            "mac",
+        );
+        let ranked = engine
+            .rank_local_for_evaluation("pagos", SearchPurpose::LocalAssistant, 1)
+            .await
+            .unwrap();
+
+        let response = engine
+            .search_local_arm_for_evaluation(
+                SearchRequest::new(
+                    "pagos",
+                    SearchPurpose::LocalAssistant,
+                    airwiki_types::DEFAULT_TOP_K,
+                ),
+                &[
+                    RetrievalEvaluationNominee::Exact(ranked[0]),
+                    RetrievalEvaluationNominee::Concept {
+                        collection_id,
+                        concept_id,
+                        expected_revision: 1,
+                    },
+                ],
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(response.candidates.len(), 1);
+    }
+
     #[tokio::test]
     async fn relevance_provider_failure_is_not_reported_as_absence() {
         let (database, _collection_id, _concept_id) = indexed_database().await;
@@ -1471,6 +2037,55 @@ mod tests {
         assert_eq!(
             error.downcast_ref::<EvidenceRelevanceError>(),
             Some(&EvidenceRelevanceError::Unavailable)
+        );
+    }
+
+    #[cfg(feature = "retrieval-evaluation")]
+    #[tokio::test]
+    async fn graph_nominee_respects_external_ai_collection_policy() {
+        let (database, collection_id, concept_id) = indexed_database().await;
+        let engine = HybridSearchEngine::new(
+            database.clone(),
+            Arc::new(DeterministicEmbeddingProvider),
+            Arc::new(AllRelevantEvidenceRelevanceProvider),
+            "mac",
+        );
+        let request = SearchRequest::new(
+            "pagos",
+            SearchPurpose::ExternalAi,
+            airwiki_types::DEFAULT_TOP_K,
+        );
+        let nominee = RetrievalEvaluationNominee::Concept {
+            collection_id,
+            concept_id,
+            expected_revision: 1,
+        };
+
+        assert!(
+            engine
+                .search_local_arm_for_evaluation(request.clone(), &[nominee])
+                .await
+                .is_err()
+        );
+
+        database
+            .update_collection_policy(
+                collection_id,
+                CollectionPolicy {
+                    local_only: false,
+                    peer_shareable: false,
+                    allow_external_ai: true,
+                },
+            )
+            .unwrap();
+        assert_eq!(
+            engine
+                .search_local_arm_for_evaluation(request, &[nominee])
+                .await
+                .unwrap()
+                .candidates
+                .len(),
+            1
         );
     }
 

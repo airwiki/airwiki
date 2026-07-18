@@ -56,7 +56,10 @@ pub use search::{
     EvidenceRelevanceProvider, HybridSearchEngine, RELEVANCE_CANDIDATE_LIMIT, RelevanceInput,
 };
 #[cfg(feature = "retrieval-evaluation")]
-pub use search::{MAX_RETRIEVAL_EVALUATION_CANDIDATES, RetrievalEvaluationCandidate};
+pub use search::{
+    MAX_RETRIEVAL_EVALUATION_CANDIDATES, MAX_RETRIEVAL_EVALUATION_CHUNKS_PER_CONCEPT,
+    RetrievalEvaluationCandidate, RetrievalEvaluationNominee, RetrievalEvaluationSelection,
+};
 pub use storage::{
     AuditEvent, CollectionMaintenanceCounts, CollectionMaintenanceRecord,
     CollectionMaintenanceResult, CollectionMaintenanceStatus, CollectionRecord, CollectionStats,

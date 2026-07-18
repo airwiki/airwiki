@@ -18,6 +18,7 @@ All notable user-visible changes to AirWiki will be documented here. The project
 - A development-only reviewed-evidence-anchor ablation comparing passage QA, reviewed-claim selection, and deterministic conflict detection without changing production search or OKF.
 - A dependency-free, development-only Rust mini-graph ablation comparing wider hybrid retrieval with bounded expansion over reviewed internal OKF links.
 - A real-ranking mini-graph replay that materializes healthy OKF bundles, reuses production BM25/E5/RRF, and compares bounded expansion with both a wider candidate pool and a degree-preserving sham graph.
+- An independently authored, sealed multichunk holdout for evaluating compact OKF graph nomination through the existing relevance and final top-five citation path.
 
 ### Changed
 

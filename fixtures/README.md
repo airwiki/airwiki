@@ -37,7 +37,9 @@ or personal information.
 - `retrieval/mini-graph-final-holdout-v1.json`: independently authored and
   sealed multichunk candidate holdout with eight unseen fictional domains and
   40 cases. Its expectations score final top-five citations but never enter
-  ranking, graph expansion, chunk selection or relevance classification.
+  ranking, graph expansion, chunk selection or relevance classification. Its
+  bytes and SHA remain unchanged by the pre-outcome v1.1 sham-construction
+  amendment documented in the retrieval evaluation profile.
 
 The expected federated question asks how Atlas is recovered, who is responsible,
 and the target date. A correct answer combines the Mac procedure with the

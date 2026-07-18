@@ -31,6 +31,7 @@ use super::mini_graph::{
     BASELINE_LIMIT, CONTROL_LIMIT, ExpansionDirection, GraphLinkInput, GraphNode, GraphNodeInput,
     GraphPurpose, LinkDisposition, MiniGraph, NodeState, QueryScope,
 };
+use super::sham_graph::{StructuralShamStats, build_structural_sham};
 use crate::{replace_file, workspace_root};
 
 const FIXTURE_PATH: &str = "fixtures/retrieval/mini-graph-real-development-v1.json";
@@ -39,7 +40,7 @@ const FINAL_FIXTURE_SHA256: &str =
     "96c0efbe5acdfbe77f4c3c7bece68b7991d0066a721b54bb90b055ba02e9383d";
 const REPORT_DIRECTORY: &str = "target/evals";
 const FIXTURE_SCHEMA_VERSION: u32 = 1;
-const REPORT_SCHEMA_VERSION: u32 = 1;
+const REPORT_SCHEMA_VERSION: u32 = 2;
 const MIN_DOMAIN_COUNT: usize = 4;
 const MIN_CASES_PER_DOMAIN: usize = 3;
 const MAX_DISTRACTORS_PER_DOMAIN: usize = 64;
@@ -71,7 +72,8 @@ const FINAL_FULL_QUERY_RELATIVE_SLACK: f64 = 1.10;
 const FINAL_BOOTSTRAP_RESAMPLES: usize = 10_000;
 const FINAL_BOOTSTRAP_SEED: u64 = 0x41_49_52_57_49_4b_49;
 const FINAL_EPSILON: f64 = 1e-12;
-const FINAL_POLICY: &str = "airwiki-final-graph-holdout-v1;warmup=one-unscored;arm-order=latin-square;ranking=bm25-e5-rrf-32;seeds=first-10-exact;expansion=one-hop-bidirectional-edge-neighbors;graph-nominee=concept-current-up-to-2-chunks;backfill=remaining-b32-exact;nominee-limit=32;assembly=expansion-plus-candidate-preparation;final=mMARCOReranker-top5;bootstrap=paired-domain-10000-seed-0x41495257494b49";
+const SHAM_CONTRACT_VERSION: &str = "deterministic-min-cost-degree-preserving-v1.1";
+const FINAL_POLICY: &str = "airwiki-final-graph-holdout-v1.1;warmup=one-unscored;arm-order=latin-square;ranking=bm25-e5-rrf-32;seeds=first-10-exact;expansion=one-hop-bidirectional-edge-neighbors;graph-nominee=concept-current-up-to-2-chunks;backfill=remaining-b32-exact;nominee-limit=32;assembly=expansion-plus-candidate-preparation;sham=deterministic-min-cost-degree-preserving-v1.1;sham-forced-original-edges=retained;final=mMARCOReranker-top5;bootstrap=paired-domain-10000-seed-0x41495257494b49";
 
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -200,6 +202,7 @@ struct ReplayCorpus {
     engine: HybridSearchEngine,
     graph: MiniGraph,
     sham_graph: MiniGraph,
+    sham_stats: StructuralShamStats,
     logical_by_concept: HashMap<Uuid, String>,
     concept_by_logical: HashMap<String, Uuid>,
     expected_by_chunk: HashMap<Uuid, ExpectedCitation>,
@@ -260,6 +263,11 @@ struct ReplayReport {
     edge_count: u32,
     graph_fingerprint: String,
     sham_graph_fingerprint: String,
+    sham_contract_version: String,
+    sham_linked_collection_count: u32,
+    sham_retained_original_edge_count: u32,
+    sham_rewired_edge_count: u32,
+    sham_unchanged_collection_count: u32,
     retained_payload_bytes: usize,
     projection_micros: u128,
     ranking_and_expansion_micros: u128,
@@ -389,6 +397,11 @@ struct FinalReplayReport {
     edge_count: u32,
     graph_fingerprint: String,
     sham_graph_fingerprint: String,
+    sham_contract_version: String,
+    sham_linked_collection_count: u32,
+    sham_retained_original_edge_count: u32,
+    sham_rewired_edge_count: u32,
+    sham_unchanged_collection_count: u32,
     bundle_set_fingerprint: String,
     retained_payload_bytes: usize,
     projection_micros: u128,
@@ -956,12 +969,12 @@ async fn build_corpus(
         }
     }
     let graph = MiniGraph::build(&node_inputs, &link_inputs)?;
-    let sham_links = sham_links(&node_inputs, &link_inputs, &logical_by_concept)?;
-    let sham_graph = MiniGraph::build(&node_inputs, &sham_links)?;
+    let structural_sham = build_structural_sham(&node_inputs, &link_inputs, &logical_by_concept)?;
+    let sham_graph = MiniGraph::build(&node_inputs, &structural_sham.links)?;
     ensure!(
         graph.node_count() == sham_graph.node_count()
             && graph.edge_count() == sham_graph.edge_count()
-            && directed_degrees(&link_inputs) == directed_degrees(&sham_links),
+            && directed_degrees(&link_inputs) == directed_degrees(&structural_sham.links),
         "sham graph must preserve graph size and per-node directed degrees"
     );
     let projection_micros = projection_started.elapsed().as_micros();
@@ -977,6 +990,7 @@ async fn build_corpus(
         engine,
         graph,
         sham_graph,
+        sham_stats: structural_sham.stats,
         logical_by_concept,
         concept_by_logical,
         expected_by_chunk,
@@ -1171,91 +1185,6 @@ fn replay_public_chunk_id(source_sha256: &str, ordinal: u32, text_sha256: &str) 
         &Uuid::NAMESPACE_URL,
         format!("urn:airwiki:chunk:{source_sha256}:{ordinal}:{text_sha256}").as_bytes(),
     )
-}
-
-fn sham_links(
-    nodes: &[GraphNodeInput],
-    links: &[GraphLinkInput],
-    stable_label_by_concept: &HashMap<Uuid, String>,
-) -> Result<Vec<GraphLinkInput>> {
-    ensure_unique_directed_links(links, "real graph")?;
-    let collections = nodes
-        .iter()
-        .map(|input| (input.node.concept_id, input.node.collection_id))
-        .collect::<HashMap<_, _>>();
-    let mut grouped = BTreeMap::<Uuid, Vec<GraphLinkInput>>::new();
-    for link in links {
-        let collection = collections
-            .get(&link.source)
-            .copied()
-            .context("sham source is missing from graph")?;
-        ensure!(
-            collections.get(&link.target) == Some(&collection),
-            "sham input crosses collection boundary"
-        );
-        grouped.entry(collection).or_default().push(*link);
-    }
-    let mut rewired = Vec::with_capacity(links.len());
-    for (_, mut collection_links) in grouped {
-        collection_links.sort_unstable_by(|left, right| {
-            let left_source = stable_label_by_concept.get(&left.source);
-            let right_source = stable_label_by_concept.get(&right.source);
-            let left_target = stable_label_by_concept.get(&left.target);
-            let right_target = stable_label_by_concept.get(&right.target);
-            (left_source, left_target).cmp(&(right_source, right_target))
-        });
-        ensure!(
-            collection_links.iter().all(|link| {
-                stable_label_by_concept.contains_key(&link.source)
-                    && stable_label_by_concept.contains_key(&link.target)
-            }),
-            "sham control is missing a stable concept label"
-        );
-        ensure!(
-            collection_links.len() >= 2,
-            "sham control requires at least two links per collection"
-        );
-        let targets = collection_links
-            .iter()
-            .map(|link| link.target)
-            .collect::<Vec<_>>();
-        let rotated = (1..targets.len()).find_map(|offset| {
-            let candidate = collection_links
-                .iter()
-                .enumerate()
-                .map(|(index, link)| GraphLinkInput {
-                    target: targets[(index + offset) % targets.len()],
-                    ..*link
-                })
-                .collect::<Vec<_>>();
-            let unique = candidate
-                .iter()
-                .map(|link| (link.source, link.target))
-                .collect::<BTreeSet<_>>();
-            (candidate.iter().all(|link| link.source != link.target)
-                && unique.len() == candidate.len())
-            .then_some(candidate)
-        });
-        rewired.extend(rotated.context("sham control has no valid deterministic rotation")?);
-    }
-    ensure_unique_directed_links(&rewired, "sham graph")?;
-    ensure!(
-        directed_degrees(links) == directed_degrees(&rewired),
-        "sham rewiring changed per-node directed degrees"
-    );
-    Ok(rewired)
-}
-
-fn ensure_unique_directed_links(links: &[GraphLinkInput], label: &str) -> Result<()> {
-    let unique = links
-        .iter()
-        .map(|link| (link.source, link.target))
-        .collect::<BTreeSet<_>>();
-    ensure!(
-        unique.len() == links.len(),
-        "{label} contains duplicate directed links"
-    );
-    Ok(())
 }
 
 fn directed_degrees(links: &[GraphLinkInput]) -> (BTreeMap<Uuid, usize>, BTreeMap<Uuid, usize>) {
@@ -1517,6 +1446,11 @@ async fn run_replay(
         edge_count: corpus.graph.edge_count(),
         graph_fingerprint: corpus.graph.fingerprint().to_owned(),
         sham_graph_fingerprint: corpus.sham_graph.fingerprint().to_owned(),
+        sham_contract_version: SHAM_CONTRACT_VERSION.to_owned(),
+        sham_linked_collection_count: corpus.sham_stats.collection_count,
+        sham_retained_original_edge_count: corpus.sham_stats.retained_original_edge_count,
+        sham_rewired_edge_count: corpus.sham_stats.rewired_edge_count,
+        sham_unchanged_collection_count: corpus.sham_stats.unchanged_collection_count,
         retained_payload_bytes,
         projection_micros: corpus.projection_micros,
         ranking_and_expansion_micros,
@@ -1755,6 +1689,11 @@ async fn run_final_replay(
         edge_count: corpus.graph.edge_count(),
         graph_fingerprint: corpus.graph.fingerprint().to_owned(),
         sham_graph_fingerprint: corpus.sham_graph.fingerprint().to_owned(),
+        sham_contract_version: SHAM_CONTRACT_VERSION.to_owned(),
+        sham_linked_collection_count: corpus.sham_stats.collection_count,
+        sham_retained_original_edge_count: corpus.sham_stats.retained_original_edge_count,
+        sham_rewired_edge_count: corpus.sham_stats.rewired_edge_count,
+        sham_unchanged_collection_count: corpus.sham_stats.unchanged_collection_count,
         bundle_set_fingerprint: bundle_set_fingerprint(&corpus.bundle_fingerprints),
         retained_payload_bytes,
         projection_micros: corpus.projection_micros,
@@ -2495,132 +2434,6 @@ mod tests {
                 .map(|domain| domain.cases.len())
                 .sum::<usize>(),
             12
-        );
-    }
-
-    #[test]
-    fn sham_rotation_changes_endpoints_without_changing_directed_degrees() {
-        let collection = Uuid::new_v4();
-        let ids = (0..4).map(|_| Uuid::new_v4()).collect::<Vec<_>>();
-        let nodes = ids
-            .iter()
-            .map(|concept_id| GraphNodeInput {
-                node: GraphNode {
-                    concept_id: *concept_id,
-                    collection_id: collection,
-                },
-                state: NodeState::Current,
-            })
-            .collect::<Vec<_>>();
-        let links = vec![
-            GraphLinkInput {
-                source: ids[0],
-                target: ids[1],
-                disposition: LinkDisposition::ReviewedInternal,
-            },
-            GraphLinkInput {
-                source: ids[2],
-                target: ids[3],
-                disposition: LinkDisposition::ReviewedInternal,
-            },
-        ];
-
-        let sham = sham_links(&nodes, &links, &stable_labels(&ids)).unwrap();
-
-        assert_eq!(sham.len(), links.len());
-        let original_by_source = links
-            .iter()
-            .map(|link| (link.source, link.target))
-            .collect::<HashMap<_, _>>();
-        assert!(sham.iter().all(|link| {
-            original_by_source
-                .get(&link.source)
-                .is_some_and(|target| *target != link.target)
-        }));
-        assert_eq!(
-            sham.iter().map(|link| link.source).collect::<BTreeSet<_>>(),
-            links
-                .iter()
-                .map(|link| link.source)
-                .collect::<BTreeSet<_>>()
-        );
-        assert_eq!(
-            sham.iter().map(|link| link.target).collect::<BTreeSet<_>>(),
-            links
-                .iter()
-                .map(|link| link.target)
-                .collect::<BTreeSet<_>>()
-        );
-        assert_eq!(directed_degrees(&sham), directed_degrees(&links));
-    }
-
-    #[test]
-    fn sham_rotation_rejects_duplicate_directed_links() {
-        let collection = Uuid::new_v4();
-        let ids = (0..3).map(|_| Uuid::new_v4()).collect::<Vec<_>>();
-        let nodes = ids
-            .iter()
-            .map(|concept_id| GraphNodeInput {
-                node: GraphNode {
-                    concept_id: *concept_id,
-                    collection_id: collection,
-                },
-                state: NodeState::Current,
-            })
-            .collect::<Vec<_>>();
-        let link = GraphLinkInput {
-            source: ids[0],
-            target: ids[1],
-            disposition: LinkDisposition::ReviewedInternal,
-        };
-
-        let error = sham_links(&nodes, &[link, link], &stable_labels(&ids)).unwrap_err();
-
-        assert!(error.to_string().contains("duplicate directed links"));
-    }
-
-    #[test]
-    fn sham_rotation_tries_the_next_deterministic_offset_after_self_links() {
-        let collection = Uuid::from_u128(10);
-        let ids = [Uuid::from_u128(1), Uuid::from_u128(2), Uuid::from_u128(3)];
-        let nodes = ids
-            .iter()
-            .map(|concept_id| GraphNodeInput {
-                node: GraphNode {
-                    concept_id: *concept_id,
-                    collection_id: collection,
-                },
-                state: NodeState::Current,
-            })
-            .collect::<Vec<_>>();
-        let links = vec![
-            GraphLinkInput {
-                source: ids[0],
-                target: ids[2],
-                disposition: LinkDisposition::ReviewedInternal,
-            },
-            GraphLinkInput {
-                source: ids[1],
-                target: ids[0],
-                disposition: LinkDisposition::ReviewedInternal,
-            },
-            GraphLinkInput {
-                source: ids[2],
-                target: ids[1],
-                disposition: LinkDisposition::ReviewedInternal,
-            },
-        ];
-
-        let sham = sham_links(&nodes, &links, &stable_labels(&ids)).unwrap();
-
-        assert_eq!(directed_degrees(&sham), directed_degrees(&links));
-        assert!(sham.iter().all(|link| link.source != link.target));
-        assert_eq!(
-            sham.iter()
-                .map(|link| (link.source, link.target))
-                .collect::<BTreeSet<_>>()
-                .len(),
-            sham.len()
         );
     }
 

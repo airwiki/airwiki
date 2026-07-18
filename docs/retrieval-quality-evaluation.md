@@ -813,8 +813,8 @@ production BM25/E5/RRF ranking. It returns collection, concept, stable chunk and
 revision identities, but no text, snippet or score. The normal desktop build
 still uses the fixed 10-candidate relevance pool. In addition to C10, C32,
 G1-out and G1-bidir, this replay evaluates **G1-sham**: the same source and
-target degrees with targets rotated deterministically inside each collection.
-This control tests whether any bounded expansion would appear to help.
+target degrees under the deterministic structural-sham contract described
+below. This control tests whether any bounded expansion would appear to help.
 
 For this visible v1 fixture, the development regression gate requires G1-bidir
 to gain at least two evidence groups over both C32 and G1-sham, improve over
@@ -829,16 +829,17 @@ cargo run --release --locked -p xtask -- retrieval evaluate-real-mini-graph \
   --embedding-snapshot <verified-multilingual-e5-small-snapshot>
 ```
 
-The first macOS arm64 release-profile observation used multilingual E5 revision
+The amended v1.1 macOS arm64 release-profile observation used multilingual E5 revision
 `614241f622f53c4eeff9890bdc4f31cfecc418b3`. Across 12 cases and 20 required
 evidence groups, C10 covered 12 groups, C32 covered 13, G1-out covered 16,
 G1-bidir covered all 20 and G1-sham covered 13. Outgoing links produced three
 groups absent from C32; backlinks added four more beyond outgoing expansion;
 the sham graph added none over C32. Support density was 3.39% for C32, 4.17%
 for G1-out and 5.21% for G1-bidir at the same aggregate 384-candidate budget.
+The v1.1 replay rewired all eight sham edges and retained no original edge.
 Both real and sham projections together retained 21,456 bytes. Healthy-bundle
-inspection plus projection took 60,296 microseconds, and all 12 real rankings
-plus expansions took 96,720 microseconds in aggregate. These are descriptive
+inspection plus projection took 49,628 microseconds, and all 12 real rankings
+plus expansions took 106,301 microseconds in aggregate. These are descriptive
 single-workstation measurements, not percentile claims.
 
 The real-ranking development gate passed, but
@@ -867,9 +868,25 @@ The frozen arms are:
 - **B32:** the first 32 current chunks from production BM25/E5/RRF;
 - **G1:** the first ten exact B32 chunks, one bidirectional hop over reviewed
   internal OKF links, then the unused B32 prefix as backfill; and
-- **G1-sham:** the same procedure over a deterministic graph that preserves
-  each concept's incoming and outgoing degree while rotating link targets in
-  stable synthetic logical-ID order.
+- **G1-sham:** the same procedure over a deterministic structural sham that
+  preserves each concept's incoming and outgoing degree while minimizing the
+  number of original links retained, with stable synthetic logical IDs as the
+  only tie-breaker.
+
+The first sealed command at commit `c80eeb7` aborted while constructing the
+sham, before evaluator warm-up, case execution, ranking, scoring or report
+creation. A cyclic target rotation is not defined for every valid directed
+degree sequence: some original links may be mathematically unavoidable. No
+question, ranking or metric was observed. Protocol amendment v1.1 therefore
+keeps the fixture SHA, models, B32, G1, metrics, thresholds and gates unchanged,
+but realizes the sham per collection with deterministic min-cost bipartite
+b-matching. Capacity-one concept pairs prohibit duplicates, self-links and
+cross-collection edges; costs prefer non-original links. Forced original links
+remain, making the control more conservative rather than favoring G1. The
+report records aggregate retained/rewired edges and unchanged collections.
+This is a deterministic structural ablation, not a uniform sample from all
+directed graphs with the same degrees; uniform directed-graph sampling requires
+a different switch-chain protocol ([Erdos et al.](https://arxiv.org/abs/0912.3834)).
 
 The graph nominates concepts, never evidence text. For every graph-only concept,
 SQLite selects at most two current chunks by query-E5 cosine, with stable public

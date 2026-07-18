@@ -39,6 +39,7 @@ All notable user-visible changes to AirWiki will be documented here. The project
 
 ### Fixed
 
+- Amended the sealed graph evaluator before observing outcomes so its deterministic degree-preserving sham retains mathematically unavoidable links instead of aborting on valid directed degree sequences.
 - Made the first pending review immediately selectable and localized model diagnostics used by the normal setup flow.
 - Showed files that could not be prepared alongside review drafts with a safe, localized cause and a folder rescan action.
 - Removed flaky filesystem-watcher and reranker timing assumptions from macOS CI and made Windows hashing tests load their required PowerShell module explicitly.

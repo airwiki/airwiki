@@ -39,6 +39,7 @@ mod real_graph;
 mod reviewed_anchor_selector;
 mod reviewed_anchors;
 mod selector;
+mod sham_graph;
 
 pub(crate) use answerability::evaluate_answerability;
 pub(crate) use mini_graph::evaluate_mini_graph;

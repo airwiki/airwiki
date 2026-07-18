@@ -339,9 +339,16 @@ async fn main() -> Result<()> {
                 )
                 .await
             }
+            Some("evaluate-mini-graph") => {
+                ensure!(
+                    arguments.next().is_none(),
+                    "retrieval evaluate-mini-graph received unexpected arguments"
+                );
+                retrieval::evaluate_mini_graph()
+            }
             Some(other) => bail!("unknown retrieval command: {other}"),
             None => bail!(
-                "missing retrieval command; expected `corpus`, `validate`, `evaluate`, `evaluate-selector`, `evaluate-answerability` or `evaluate-reviewed-anchors`"
+                "missing retrieval command; expected `corpus`, `validate`, `evaluate`, `evaluate-selector`, `evaluate-answerability`, `evaluate-reviewed-anchors` or `evaluate-mini-graph`"
             ),
         },
         "licenses" => match arguments.next().as_deref() {
@@ -410,6 +417,7 @@ async fn main() -> Result<()> {
             println!(
                 "cargo run --locked -p xtask -- retrieval evaluate-reviewed-anchors --data-root <directory> --llama-server <path> --model-id <catalog-id>"
             );
+            println!("cargo run --release --locked -p xtask -- retrieval evaluate-mini-graph");
             println!("cargo run --locked -p xtask -- licenses generate");
             println!("cargo run --locked -p xtask -- licenses check");
             println!("cargo run --locked -p xtask -- docs check");

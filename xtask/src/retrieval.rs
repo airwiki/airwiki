@@ -33,12 +33,14 @@ use crate::{replace_file, workspace_root};
 
 mod answerability;
 mod corpus;
+mod mini_graph;
 mod qa_entailment;
 mod reviewed_anchor_selector;
 mod reviewed_anchors;
 mod selector;
 
 pub(crate) use answerability::evaluate_answerability;
+pub(crate) use mini_graph::evaluate_mini_graph;
 pub(crate) use reviewed_anchors::evaluate_reviewed_anchors;
 
 const ANSWERABILITY_CORPUS_MANIFEST_PATH: &str =

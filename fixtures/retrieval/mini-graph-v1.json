@@ -1,0 +1,236 @@
+{
+  "schema_version": 1,
+  "experiment_id": "okf-mini-graph-development-v1",
+  "cases": [
+    {
+      "id": "outgoing-rescue-lyra",
+      "purpose": "local_assistant",
+      "default_collection_id": "lyra",
+      "authorized_collection_ids": ["lyra"],
+      "hybrid_ranked_concept_ids": [
+        "lyra-seed",
+        "lyra-d01", "lyra-d02", "lyra-d03", "lyra-d04", "lyra-d05",
+        "lyra-d06", "lyra-d07", "lyra-d08", "lyra-d09", "lyra-d10",
+        "lyra-d11", "lyra-d12", "lyra-d13", "lyra-d14", "lyra-d15",
+        "lyra-d16", "lyra-d17", "lyra-d18", "lyra-d19", "lyra-d20",
+        "lyra-d21", "lyra-d22", "lyra-d23", "lyra-d24", "lyra-d25",
+        "lyra-d26", "lyra-d27", "lyra-d28", "lyra-d29", "lyra-d30",
+        "lyra-d31", "lyra-d32", "lyra-target"
+      ],
+      "links": [
+        { "source": "lyra-seed", "target": "lyra-target", "disposition": "reviewed_internal" }
+      ],
+      "required_groups": [["lyra-target"]],
+      "forbidden_concept_ids": [],
+      "expected_found_groups": { "c10": 0, "c32": 0, "g1_out": 1, "g1_bidir": 1 }
+    },
+    {
+      "id": "outgoing-rescue-harbor",
+      "purpose": "local_assistant",
+      "default_collection_id": "harbor",
+      "authorized_collection_ids": ["harbor"],
+      "hybrid_ranked_concept_ids": [
+        "harbor-seed",
+        "harbor-d01", "harbor-d02", "harbor-d03", "harbor-d04", "harbor-d05",
+        "harbor-d06", "harbor-d07", "harbor-d08", "harbor-d09", "harbor-d10",
+        "harbor-d11", "harbor-d12", "harbor-d13", "harbor-d14", "harbor-d15",
+        "harbor-d16", "harbor-d17", "harbor-d18", "harbor-d19", "harbor-d20",
+        "harbor-d21", "harbor-d22", "harbor-d23", "harbor-d24", "harbor-d25",
+        "harbor-d26", "harbor-d27", "harbor-d28", "harbor-d29", "harbor-d30",
+        "harbor-d31", "harbor-d32", "harbor-target"
+      ],
+      "links": [
+        { "source": "harbor-seed", "target": "harbor-target", "disposition": "reviewed_internal" }
+      ],
+      "required_groups": [["harbor-target"]],
+      "forbidden_concept_ids": [],
+      "expected_found_groups": { "c10": 0, "c32": 0, "g1_out": 1, "g1_bidir": 1 }
+    },
+    {
+      "id": "incoming-rescue-cedar",
+      "purpose": "local_assistant",
+      "default_collection_id": "cedar",
+      "authorized_collection_ids": ["cedar"],
+      "hybrid_ranked_concept_ids": [
+        "cedar-seed",
+        "cedar-d01", "cedar-d02", "cedar-d03", "cedar-d04", "cedar-d05",
+        "cedar-d06", "cedar-d07", "cedar-d08", "cedar-d09", "cedar-d10",
+        "cedar-d11", "cedar-d12", "cedar-d13", "cedar-d14", "cedar-d15",
+        "cedar-d16", "cedar-d17", "cedar-d18", "cedar-d19", "cedar-d20",
+        "cedar-d21", "cedar-d22", "cedar-d23", "cedar-d24", "cedar-d25",
+        "cedar-d26", "cedar-d27", "cedar-d28", "cedar-d29", "cedar-d30",
+        "cedar-d31", "cedar-d32", "cedar-target"
+      ],
+      "links": [
+        { "source": "cedar-target", "target": "cedar-seed", "disposition": "reviewed_internal" }
+      ],
+      "required_groups": [["cedar-target"]],
+      "forbidden_concept_ids": [],
+      "expected_found_groups": { "c10": 0, "c32": 0, "g1_out": 0, "g1_bidir": 1 }
+    },
+    {
+      "id": "wider-pool-control-aurora",
+      "purpose": "local_assistant",
+      "default_collection_id": "aurora",
+      "authorized_collection_ids": ["aurora"],
+      "hybrid_ranked_concept_ids": [
+        "aurora-seed",
+        "aurora-d01", "aurora-d02", "aurora-d03", "aurora-d04", "aurora-d05",
+        "aurora-d06", "aurora-d07", "aurora-d08", "aurora-d09", "aurora-d10",
+        "aurora-d11", "aurora-d12", "aurora-d13", "aurora-d14", "aurora-d15",
+        "aurora-d16", "aurora-d17", "aurora-d18", "aurora-d19", "aurora-d20",
+        "aurora-d21", "aurora-d22", "aurora-d23", "aurora-d24", "aurora-d25",
+        "aurora-d26", "aurora-d27", "aurora-d28", "aurora-d29", "aurora-d30",
+        "aurora-target", "aurora-d31"
+      ],
+      "links": [
+        { "source": "aurora-seed", "target": "aurora-linked-distractor", "disposition": "reviewed_internal" }
+      ],
+      "required_groups": [["aurora-target"]],
+      "forbidden_concept_ids": [],
+      "expected_found_groups": { "c10": 0, "c32": 1, "g1_out": 0, "g1_bidir": 0 }
+    },
+    {
+      "id": "two-hop-bound-orbit",
+      "purpose": "local_assistant",
+      "default_collection_id": "orbit",
+      "authorized_collection_ids": ["orbit"],
+      "hybrid_ranked_concept_ids": [
+        "orbit-seed",
+        "orbit-d01", "orbit-d02", "orbit-d03", "orbit-d04", "orbit-d05",
+        "orbit-d06", "orbit-d07", "orbit-d08", "orbit-d09", "orbit-d10",
+        "orbit-d11", "orbit-d12", "orbit-d13", "orbit-d14", "orbit-d15",
+        "orbit-d16", "orbit-d17", "orbit-d18", "orbit-d19", "orbit-d20",
+        "orbit-d21", "orbit-d22", "orbit-d23", "orbit-d24", "orbit-d25",
+        "orbit-d26", "orbit-d27", "orbit-d28", "orbit-d29", "orbit-d30",
+        "orbit-d31", "orbit-bridge", "orbit-target"
+      ],
+      "links": [
+        { "source": "orbit-seed", "target": "orbit-bridge", "disposition": "reviewed_internal" },
+        { "source": "orbit-bridge", "target": "orbit-seed", "disposition": "reviewed_internal" },
+        { "source": "orbit-bridge", "target": "orbit-target", "disposition": "reviewed_internal" }
+      ],
+      "required_groups": [["orbit-target"]],
+      "forbidden_concept_ids": [],
+      "expected_found_groups": { "c10": 0, "c32": 0, "g1_out": 0, "g1_bidir": 0 }
+    },
+    {
+      "id": "invalid-links-nova",
+      "purpose": "local_assistant",
+      "default_collection_id": "nova",
+      "authorized_collection_ids": ["nova"],
+      "hybrid_ranked_concept_ids": [
+        "nova-seed", "nova-d01", "nova-d02", "nova-d03", "nova-d04",
+        "nova-d05", "nova-d06", "nova-d07", "nova-d08", "nova-d09"
+      ],
+      "links": [
+        { "source": "nova-seed", "target": "nova-target", "disposition": "broken" },
+        { "source": "nova-seed", "target": "nova-target", "disposition": "unsafe" },
+        { "source": "nova-seed", "target": "nova-target", "disposition": "external" }
+      ],
+      "required_groups": [],
+      "forbidden_concept_ids": ["nova-target"],
+      "expected_found_groups": { "c10": 0, "c32": 0, "g1_out": 0, "g1_bidir": 0 }
+    },
+    {
+      "id": "withdrawn-target-polaris",
+      "purpose": "local_assistant",
+      "default_collection_id": "polaris",
+      "authorized_collection_ids": ["polaris"],
+      "hybrid_ranked_concept_ids": [
+        "polaris-seed", "polaris-d01", "polaris-d02", "polaris-d03", "polaris-d04",
+        "polaris-d05", "polaris-d06", "polaris-d07", "polaris-d08", "polaris-d09",
+        "polaris-target"
+      ],
+      "node_overrides": [
+        { "id": "polaris-target", "state": "withdrawn" }
+      ],
+      "links": [
+        { "source": "polaris-seed", "target": "polaris-target", "disposition": "reviewed_internal" }
+      ],
+      "required_groups": [],
+      "forbidden_concept_ids": ["polaris-target"],
+      "expected_found_groups": { "c10": 0, "c32": 0, "g1_out": 0, "g1_bidir": 0 }
+    },
+    {
+      "id": "stale-target-sable",
+      "purpose": "local_assistant",
+      "default_collection_id": "sable",
+      "authorized_collection_ids": ["sable"],
+      "hybrid_ranked_concept_ids": [
+        "sable-seed", "sable-d01", "sable-d02", "sable-d03", "sable-d04",
+        "sable-d05", "sable-d06", "sable-d07", "sable-d08", "sable-d09",
+        "sable-target"
+      ],
+      "node_overrides": [
+        { "id": "sable-target", "state": "stale" }
+      ],
+      "links": [
+        { "source": "sable-seed", "target": "sable-target", "disposition": "reviewed_internal" }
+      ],
+      "required_groups": [],
+      "forbidden_concept_ids": ["sable-target"],
+      "expected_found_groups": { "c10": 0, "c32": 0, "g1_out": 0, "g1_bidir": 0 }
+    },
+    {
+      "id": "external-ai-policy-orion",
+      "purpose": "external_ai",
+      "default_collection_id": "orion-public",
+      "authorized_collection_ids": ["orion-public"],
+      "external_ai_collection_ids": [],
+      "hybrid_ranked_concept_ids": [
+        "orion-target", "orion-seed", "orion-d01", "orion-d02", "orion-d03",
+        "orion-d04", "orion-d05", "orion-d06", "orion-d07", "orion-d08", "orion-d09"
+      ],
+      "links": [
+        { "source": "orion-seed", "target": "orion-target", "disposition": "reviewed_internal" }
+      ],
+      "required_groups": [],
+      "forbidden_concept_ids": ["orion-target"],
+      "expected_found_groups": { "c10": 0, "c32": 0, "g1_out": 0, "g1_bidir": 0 }
+    },
+    {
+      "id": "ungranted-peer-lumen",
+      "purpose": "local_assistant",
+      "default_collection_id": "lumen-granted",
+      "authorized_collection_ids": ["lumen-granted"],
+      "hybrid_ranked_concept_ids": [
+        "lumen-target", "lumen-seed", "lumen-d01", "lumen-d02", "lumen-d03",
+        "lumen-d04", "lumen-d05", "lumen-d06", "lumen-d07", "lumen-d08", "lumen-d09"
+      ],
+      "node_overrides": [
+        { "id": "lumen-target", "collection_id": "lumen-ungranted" }
+      ],
+      "links": [
+        { "source": "lumen-seed", "target": "lumen-target", "disposition": "reviewed_internal" }
+      ],
+      "required_groups": [],
+      "forbidden_concept_ids": ["lumen-target"],
+      "expected_found_groups": { "c10": 0, "c32": 0, "g1_out": 0, "g1_bidir": 0 }
+    },
+    {
+      "id": "linked-distractor-ember",
+      "purpose": "local_assistant",
+      "default_collection_id": "ember",
+      "authorized_collection_ids": ["ember"],
+      "hybrid_ranked_concept_ids": [
+        "ember-seed",
+        "ember-d01", "ember-d02", "ember-d03", "ember-d04", "ember-d05",
+        "ember-d06", "ember-d07", "ember-d08", "ember-d09", "ember-d10",
+        "ember-d11", "ember-d12", "ember-d13", "ember-d14", "ember-d15",
+        "ember-d16", "ember-d17", "ember-d18", "ember-d19", "ember-d20",
+        "ember-d21", "ember-d22", "ember-d23", "ember-d24", "ember-d25",
+        "ember-d26", "ember-d27", "ember-d28", "ember-d29", "ember-d30",
+        "ember-d31", "ember-d32", "ember-target", "ember-distractor"
+      ],
+      "links": [
+        { "source": "ember-seed", "target": "ember-target", "disposition": "reviewed_internal" },
+        { "source": "ember-seed", "target": "ember-distractor", "disposition": "reviewed_internal" },
+        { "source": "ember-seed", "target": "ember-target", "disposition": "reviewed_internal" }
+      ],
+      "required_groups": [["ember-target"]],
+      "forbidden_concept_ids": [],
+      "expected_found_groups": { "c10": 0, "c32": 0, "g1_out": 1, "g1_bidir": 1 }
+    }
+  ]
+}

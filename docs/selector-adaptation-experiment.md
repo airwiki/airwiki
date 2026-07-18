@@ -1,8 +1,8 @@
 # Selector adaptation experiment
 
-Status: **development candidate frozen; promotion holdout unobserved**. This
-profile does not describe a shipped model and does not authorize a
-production-model change.
+Status: **rejected after the one-time promotion observation**. This profile
+records a negative experiment; it does not describe a shipped model or
+authorize a production-model change.
 
 ## Why this experiment exists
 
@@ -151,19 +151,28 @@ tokenizer_config.json        e7fbfbfa6347b4e414c1cee50d142e2c2f9a895dad68b068ae8
 revision.txt                 47e22c1da153a2c56cb2072c94b1aca9217d990c47421108ebc14f604559fea1
 ```
 
-The checkpoint, runner and aggregate reports remain disposable local
-artifacts. This manifest is sufficient to detect replacement; it does not make
-the candidate releasable. The next permitted action is blind human review of a
-fresh promotion set. Model evaluation, ONNX export and product integration
-remain blocked until their respective gates pass.
+The checkpoint, runner and aggregate reports were disposable local artifacts.
+This manifest was sufficient to detect replacement; it did not make the
+candidate releasable. The promotion observation below rejected the candidate,
+so ONNX export and product integration were not attempted.
 
 ## Promotion set and gates
 
-After the recipe, seed and cutoff are frozen, create a separate 48-pool
-promotion set with twelve pools per language direction and new worlds,
-entities, values and wording. Its labels must be independently human-reviewed
-before it can support a product decision. Once observed, it becomes regression
-data and a later attempt needs fresh promotion domains.
+After the recipe, seed and cutoff were frozen, a separate 48-pool promotion set
+was created with twelve pools per language direction and new worlds, entities,
+values and wording. Its 288 question-passage pairs were reviewed by one blind
+model reviewer. A second context-isolated model reviewer adjudicated only the
+twelve disagreements, without seeing either proposed label. The sealed key was
+opened only after the primary review hash was frozen. This is honestly recorded
+as `blind_model_assisted`, with `human_reviewed: false`; it is not a substitute
+for the independent human review that an acceptance decision would require.
+
+That limitation cannot turn a failure into an acceptance. It is sufficient to
+reject this candidate because the semantic results missed the gates by a wide
+margin. The corpus also missed its preregistered ambiguity-negative taxonomy
+coverage, so it could not have supported promotion even if the model metrics
+had passed. A later attempt needs fresh promotion domains rather than revised
+labels, a changed cutoff or another run over this holdout.
 
 The candidate must satisfy all of these gates:
 
@@ -183,13 +192,37 @@ The candidate must satisfy all of these gates:
 Improving only false positives or only false negatives is insufficient.
 Authorization and lifecycle policy remain independent structural gates.
 
+## One-time promotion observation
+
+The frozen seed 29 checkpoint and cutoff `0xbe897b56` were evaluated once on
+CPU, offline, in the reviewed file order. The scorer used batch size 8,
+maximum length 512 and the production `question` plus serialized passage
+contract. It persisted only aggregate metrics. The attempt receipt prevents an
+automatic second run. The aggregate report has SHA-256
+`f8b4096202eddc4aae11ee72cb677b76a08264c2c0e709d7bb0d04c42497b509`.
+
+The candidate retained 70 of 72 answers for 0.9722 recall, but accepted 159
+non-answer pairs. Precision was 0.3057, 134 accepted pairs were high-risk false
+positives, 16 of 36 support passages were accepted, and all twelve no-answer
+pools produced accepted evidence (52 pairs in total). Only 2 of 48 pools met
+the exact-pool criterion. Recall passed overall and in each language direction;
+every other semantic gate failed. The structural coverage gate also failed
+because the authored promotion set contained no `ambiguity` negative.
+
+The decision is **rejected**. Do not change the cutoff, retrain against this
+holdout, rerun the observation, export the checkpoint or integrate its weights.
+The durable result is that development-selected zero-false-positive behavior
+did not transfer: the adapted cross-encoder learned high answer recall without
+the abstention boundary AirWiki requires.
+
 ## Export and platform validation
 
-Only a candidate that passes the semantic gates is exported to ONNX FP32 and
-then dynamically quantized. ONNX Runtime recommends dynamic quantization for
-transformer models; start with signed 8-bit weights and retain the existing
-unsigned AVX2 variant only where platform validation requires it. See the
-[ONNX Runtime quantization guidance](https://onnxruntime.ai/docs/performance/model-optimizations/quantization.html).
+Only a future candidate that passes the semantic and coverage gates may be
+exported to ONNX FP32 and then dynamically quantized. This candidate was not
+exported. ONNX Runtime recommends dynamic quantization for transformer models;
+start with signed 8-bit weights and retain the existing unsigned AVX2 variant
+only where platform validation requires it. See the [ONNX Runtime quantization
+guidance](https://onnxruntime.ai/docs/performance/model-optimizations/quantization.html).
 
 PyTorch, ONNX FP32, macOS arm64 INT8 and Windows x64/AVX2 INT8 must produce the
 same decisions on development, promotion and regression corpora. Both platform

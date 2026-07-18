@@ -15,6 +15,7 @@ All notable user-visible changes to AirWiki will be documented here. The project
 - Direct navigation from a local search result to its exact published Wiki concept, with the cited source location and revision kept visible.
 - A reproducible retrieval-quality corpus and evaluator covering local and peer-authorized source evidence, abstention, provenance, privacy, contradictions, deduplication, and stable ordering.
 - A preregistered bilingual selector-adaptation corpus and structural validator that keep model inputs separate from evaluation labels, permissions, and provenance metadata.
+- A durable negative-result record for the rejected adapted mMARCO selector, including its one-time aggregate promotion metrics and no-rerun decision.
 
 ### Changed
 

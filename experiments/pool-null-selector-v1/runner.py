@@ -29,6 +29,7 @@ RUNNER_PATH = EXPERIMENT_ROOT / "runner.py"
 EVIDENCE_ROOT = EXPERIMENT_ROOT / "evidence"
 ARTIFACT_ROOT = REPO_ROOT / "target" / "pool-null-experiment"
 MODEL_ROOT = ARTIFACT_ROOT / "base-model"
+MODEL_MANIFEST_PATH = ARTIFACT_ROOT / "base-model-manifest.json"
 ATTEMPT_PATH = EVIDENCE_ROOT / "compatibility-attempt.json"
 REPORT_PATH = EVIDENCE_ROOT / "compatibility-report.json"
 MODEL_REPO = "cross-encoder/mmarco-mMiniLMv2-L12-H384-v1"
@@ -520,6 +521,20 @@ def self_test() -> None:
     else:
         raise AssertionError("non-string passage value accepted")
 
+    with tempfile.TemporaryDirectory() as temporary:
+        temporary_root = Path(temporary)
+        source = temporary_root / "source"
+        destination = temporary_root / "destination"
+        source.mkdir()
+        payload = source / "payload"
+        payload.write_bytes(b"synthetic model payload")
+        payload.chmod(0o400)
+        publish_read_only_directory(source, destination)
+        assert not source.exists()
+        assert destination.is_dir()
+        assert (destination / "payload").read_bytes() == b"synthetic model payload"
+        destination.chmod(0o700)
+
 
 def synthetic_pool(roles: list[Role]) -> Pool:
     candidates = []
@@ -635,15 +650,59 @@ def environment_manifest(versions: dict[str, str]) -> dict[str, Any]:
     }
 
 
+def model_manifest(hashes: dict[str, str]) -> dict[str, Any]:
+    return {
+        "files": hashes,
+        "model_repo": MODEL_REPO,
+        "revision": MODEL_REVISION,
+    }
+
+
 def write_model_manifest(hashes: dict[str, str]) -> None:
-    atomic_json(
-        ARTIFACT_ROOT / "base-model-manifest.json",
-        {
-            "files": hashes,
-            "model_repo": MODEL_REPO,
-            "revision": MODEL_REVISION,
-        },
-    )
+    atomic_json(MODEL_MANIFEST_PATH, model_manifest(hashes))
+
+
+def seal_model_directory(root: Path) -> None:
+    for path in root.iterdir():
+        if not path.is_file() or path.is_symlink():
+            raise ExperimentError("model_hash_mismatch")
+        path.chmod(0o400)
+    root.chmod(0o500)
+    fsync_directory(root.parent)
+
+
+def verify_model_ready() -> dict[str, str]:
+    hashes = verify_exact_hashes(MODEL_ROOT, MODEL_FILES, "model_hash_mismatch")
+    if MODEL_ROOT.stat().st_mode & 0o777 != 0o500:
+        raise ExperimentError("model_permissions_mismatch")
+    for path in MODEL_ROOT.iterdir():
+        if path.stat().st_mode & 0o777 != 0o400:
+            raise ExperimentError("model_permissions_mismatch")
+    if not MODEL_MANIFEST_PATH.is_file() or MODEL_MANIFEST_PATH.is_symlink():
+        raise ExperimentError("model_manifest_mismatch")
+    try:
+        with MODEL_MANIFEST_PATH.open("r", encoding="utf-8") as handle:
+            observed_manifest = json.load(handle)
+    except (OSError, json.JSONDecodeError) as error:
+        raise ExperimentError("model_manifest_mismatch") from error
+    if observed_manifest != model_manifest(hashes):
+        raise ExperimentError("model_manifest_mismatch")
+    return hashes
+
+
+def publish_read_only_directory(source: Path, destination: Path) -> None:
+    if destination.exists():
+        raise ExperimentError("model_state_conflict")
+    os.rename(source, destination)
+    try:
+        seal_model_directory(destination)
+    except (OSError, ExperimentError) as error:
+        try:
+            destination.chmod(0o700)
+            shutil.rmtree(destination)
+        except OSError:
+            pass
+        raise ExperimentError("model_publish_failed") from error
 
 
 def prepare_model(allow_network: bool) -> None:
@@ -657,8 +716,13 @@ def prepare_model(allow_network: bool) -> None:
     ARTIFACT_ROOT.mkdir(parents=True, exist_ok=True)
     if MODEL_ROOT.exists():
         hashes = verify_exact_hashes(MODEL_ROOT, MODEL_FILES, "model_hash_mismatch")
+        seal_model_directory(MODEL_ROOT)
+        hashes = verify_exact_hashes(MODEL_ROOT, MODEL_FILES, "model_hash_mismatch")
         write_model_manifest(hashes)
+        verify_model_ready()
         return
+
+    MODEL_MANIFEST_PATH.unlink(missing_ok=True)
 
     with tempfile.TemporaryDirectory(
         prefix=".model-download.", dir=ARTIFACT_ROOT
@@ -681,16 +745,11 @@ def prepare_model(allow_network: bool) -> None:
                 raise ExperimentError("model_hash_mismatch")
             shutil.copyfile(source, clean_root / relative)
         hashes = verify_exact_hashes(clean_root, MODEL_FILES, "model_hash_mismatch")
-        for path in clean_root.iterdir():
-            path.chmod(0o400)
-        clean_root.chmod(0o500)
-        if MODEL_ROOT.exists():
-            raise ExperimentError("model_state_conflict")
-        os.rename(clean_root, MODEL_ROOT)
-        fsync_directory(ARTIFACT_ROOT)
+        publish_read_only_directory(clean_root, MODEL_ROOT)
 
     hashes = verify_exact_hashes(MODEL_ROOT, MODEL_FILES, "model_hash_mismatch")
     write_model_manifest(hashes)
+    verify_model_ready()
 
 
 def configure_runtime() -> tuple[Any, Any, Any, Any, Any]:
@@ -1052,7 +1111,7 @@ def run_compatibility() -> None:
         raise ExperimentError("checkpoint_state_conflict")
 
     versions = verified_package_versions()
-    model_hashes = verify_exact_hashes(MODEL_ROOT, MODEL_FILES, "model_hash_mismatch")
+    model_hashes = verify_model_ready()
     receipt = create_attempt_receipt(versions, model_hashes)
     try:
         corpus = load_corpus()

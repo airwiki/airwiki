@@ -44,6 +44,7 @@ All notable user-visible changes to AirWiki will be documented here. The project
 - Kept production retrieval unchanged after mMARCO score ordering produced the same visible-development results as the current filter order, identifying the relevance mask rather than ordering as the immediate bottleneck.
 - Rejected a single absolute mMARCO logit cutoff after grouped bilingual calibration lost four baseline-complete queries and still returned a hard negative; no sealed holdout or production threshold was authorized.
 - Rejected raw two-hop reviewed-link connectivity as a standalone retrieval decision after it connected every positive semantic pair but also 17 of 24 hard negatives; production search remains unchanged.
+- Kept production retrieval unchanged after bounded graph diffusion matched B10 and its structural sham exactly on the frozen development corpus, which exposed no eligible cutoff opportunities and therefore did not authorize a holdout.
 
 ### Fixed
 

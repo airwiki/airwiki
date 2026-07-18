@@ -1114,6 +1114,35 @@ revalidation path. It cannot change production search;
 development guardrail for this primitive, not a production latency benchmark;
 any holdout must measure latency again.
 
+### H-AWK-4A development observation
+
+The first and only macOS arm64 release-profile replay on 2026-07-18 used the
+sealed fixture above and multilingual E5 revision
+`614241f622f53c4eeff9890bdc4f31cfecc418b3`. The evaluation-policy fingerprint
+was `d89dcf99f76dbe6bef50ad4756205baaf3060eba5c315e0c65c1bbadfc0fc158`.
+All bundle-health, fingerprint, exact-pool and control-integrity checks passed;
+the sham rewired all 24 reviewed links and retained no original edge.
+
+B10, real diffusion and sham diffusion each recovered 26 of 28 required groups:
+Recall@10 was `0.928571`, MRR@10 was `0.714286`, support density was `0.1625`
+and macro-domain recall was `0.928571` in every arm. Real diffusion improved no
+domain and neither gained nor lost a baseline group. English recall was `1.0`
+and Spanish recall was `0.857143` in all three arms. The frozen ranking exposed
+zero required groups in promotable positions 11 or 12, below the minimum four
+opportunities required to diagnose the mechanism.
+
+The compact implementation remained well inside its engineering guardrails:
+the real-plus-sham retained payload was 11,472 bytes, projection took 37.802 ms
+and real/sham reranking p95 was 25/6 microseconds. Those 16-case timings remain
+descriptive development observations only.
+
+H-AWK-4A therefore **did not pass** its frozen development gate. The result does
+not establish that reviewed-link diffusion can never help; this particular
+corpus provided no eligible cutoff opportunity, so it supplied no evidence of
+benefit over semantic ranking or the structural control. The fixture will not
+be tuned or reused as a holdout, no fresh holdout is authorized, and production
+retrieval remains unchanged.
+
 ### H-AWK-1 development observation
 
 The first macOS arm64 release-profile run on 2026-07-18 used Gemma 4 E4B Q4 at

@@ -14,6 +14,7 @@ All notable user-visible changes to AirWiki will be documented here. The project
 - A revision-bound evidence panel that lets reviewers compare locally extracted text with each proposed draft before publication.
 - Direct navigation from a local search result to its exact published Wiki concept, with the cited source location and revision kept visible.
 - A reproducible retrieval-quality corpus and evaluator covering local and peer-authorized source evidence, abstention, provenance, privacy, contradictions, deduplication, and stable ordering.
+- A content-free, pinned answerability corpus workflow and a development-only two-stage QA-entailment rejection gate with sanitized aggregate reports; production search remains unchanged.
 
 ### Changed
 
@@ -26,6 +27,8 @@ All notable user-visible changes to AirWiki will be documented here. The project
 - Made the desktop layout responsive down to its explicit minimum size, keeping primary actions visible and limiting scrolling to bounded lists and detail panels.
 - Made the first-run journey recoverable with visible processing counts, actionable terminal states, a truthful Wiki-health timestamp, and an explicit way to finish after a search returns no evidence.
 - Separated retrieval development cases from disqualified holdout domains and added a fail-closed local selector experiment; production search remains unchanged because the measured candidate missed false-evidence and latency gates.
+- Kept answerability references out of model control flow and scored accepted answers post-inference with the documented SQuAD/XQuAD normalized exact-match policy.
+- Made retrieval research hypothesis-driven: literature supplies baselines and controls, while AirWiki-specific mechanisms require versioned ablations, counterfactual tests, fresh holdouts, and explicit rejection conditions.
 
 ### Fixed
 

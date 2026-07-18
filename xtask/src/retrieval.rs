@@ -31,8 +31,12 @@ use uuid::Uuid;
 
 use crate::{replace_file, workspace_root};
 
+mod answerability;
 mod corpus;
+mod qa_entailment;
 mod selector;
+
+pub(crate) use answerability::evaluate_answerability;
 
 const ANSWERABILITY_CORPUS_MANIFEST_PATH: &str =
     "resources/evaluation/retrieval-answerability-development-v1/manifest.json";
@@ -111,6 +115,23 @@ pub fn validate_answerability_corpus() -> Result<()> {
         summary.answerable_count,
         summary.unanswerable_count,
         summary.group_count,
+    );
+    Ok(())
+}
+
+pub fn verify_answerability_corpus(source_root: &Path) -> Result<()> {
+    let manifest_path = workspace_root().join(ANSWERABILITY_CORPUS_MANIFEST_PATH);
+    let loaded = corpus::load_verified_corpus(&manifest_path, source_root)?;
+    let summary = loaded.summary();
+    println!(
+        "answerability corpus {} verified: {} referenced artifacts, {} selections ({} answerable, {} unanswerable), {} candidates; manifest SHA-256 {}",
+        loaded.corpus_id,
+        summary.artifact_count,
+        summary.selection_count,
+        summary.answerable_count,
+        summary.unanswerable_count,
+        summary.candidate_count,
+        loaded.manifest_sha256,
     );
     Ok(())
 }

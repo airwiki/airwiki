@@ -14,9 +14,33 @@ cargo run --locked -p xtask -- retrieval corpus validate
 ```
 
 The command validates the closed schema and privacy-safe invariants. It does not
-download or hash local artifacts. A later importer will place verified inputs
-under ignored `target/` state and must compare both size and SHA-256 before
-reading a record.
+download or hash local artifacts.
+
+After reviewing the upstream licenses and ContractNLI access terms, a maintainer
+can place the four selection-referenced artifacts under an ignored local root:
+
+```text
+<source-root>/
+  squad_v2/dataset/train-v2.0.json
+  xquad_en_es/xquad.en.json
+  xquad_en_es/xquad.es.json
+  contract_nli/resources/contract-nli.zip
+```
+
+The pinned but currently unreferenced SQuAD development file is not required by
+this seed. Verify the local files and every selected source-native locator with:
+
+```bash
+cargo run --locked -p xtask -- retrieval corpus verify \
+  --source-root <source-root>
+```
+
+The verifier does not download or persist corpus content. It rejects symlinks,
+unexpected sizes or hashes, unsafe ZIP members, invalid source offsets and
+locator disagreements before returning a content-free count. It parses each
+referenced artifact once; streaming or parallel parsing is
+deliberately deferred until measurement shows that the current bounded inputs
+need it.
 
 ## Source ledger
 
@@ -43,6 +67,9 @@ records the dataset's CC BY-SA 4.0 declaration.
 XQuAD is derived from SQuAD 1.1 and contains answerable questions. It is not a
 source of SQuAD 2.0-style unanswerable examples. Parallel translations remain
 in the same group and split so they cannot leak across calibration boundaries.
+The answerability harness follows XQuAD's documented use of the official SQuAD
+normalized exact-match policy. Gold answers are used only for post-inference
+scoring and are never supplied to the proposal or verification model calls.
 
 ### ContractNLI
 
@@ -61,8 +88,9 @@ upstream terms before downloading it.
 ## Split policy
 
 - `training` may be used to implement the experimental verifier.
-- `calibration` may be used to choose a selective decision threshold after the
-  verifier structure is frozen.
+- `calibration` may expose a known regression or reject a frozen experimental
+  structure. Comparisons on these three examples are exploratory only: they
+  cannot select a winner, estimate a difference or choose a selective threshold.
 - No final holdout is included. Fresh document groups will be selected only
   after the candidate, prompt, features and thresholding method are frozen.
 - A complete document, article and parallel translation family is one group.
@@ -78,16 +106,21 @@ ContractNLI, `document_id` is the source-native numeric document ID and
 `segment_id` is `span_<index>` from the selected archive member. These locators
 avoid storing or normalizing document titles.
 
-A support is a passage expected to justify the need. A hard negative is a
-different passage that does not contain the required support and must be
-rejected for the declared reason. The SQuAD and XQuAD negatives deliberately
-use another paragraph rather than another question from the support paragraph.
-These seed selections exist to validate the representation; a promotion
-evaluation needs a larger reviewed corpus and grouped uncertainty estimates.
+A support is a passage expected to justify the need. In this seed every declared
+support is complementary and therefore required; this is not a general claim
+that every relevant passage must be selected. A future corpus must distinguish
+`all_of` complementary evidence from `one_of` equivalent sources and optional
+corroboration. A hard negative is a different passage that does not contain the
+required support and must be rejected for the declared reason. The SQuAD and
+XQuAD negatives deliberately use another paragraph rather than another question
+from the support paragraph. These seed selections exist to validate the
+representation; a promotion evaluation needs a larger reviewed corpus, an
+explicit human-adjudication protocol and grouped uncertainty estimates.
 
 ## Scientific boundary
 
-The candidate design follows a staged hypothesis:
+The candidate design evaluates an AirWiki hypothesis, rather than assuming that
+the cited methods transfer:
 
 1. retrieve a fixed candidate pool with BM25, multilingual E5 and RRF;
 2. identify each atomic information need;
@@ -96,6 +129,10 @@ The candidate design follows a staged hypothesis:
 5. accept evidence only when the passage supports that claim, otherwise abstain.
 
 The design is motivated by selective QA and QA-entailment research, but cited
-results do not establish transfer to AirWiki data. Promotion requires a fresh
-grouped holdout, selective risk and coverage with uncertainty, and the existing
-authorization, provenance, latency and memory gates.
+results do not establish transfer to AirWiki data. The normalized exact-match
+comparison is a conservative extraction control for this seed, not a general
+definition of semantic answer correctness. Promotion requires a fresh grouped
+holdout, selective risk and coverage with uncertainty, independent human gold
+for ambiguous cases, and the existing authorization, provenance, latency and
+memory gates. The broader hypothesis-driven method is documented in the
+[retrieval-quality evaluation profile](../../../docs/retrieval-quality-evaluation.md#research-method-for-an-emerging-domain).

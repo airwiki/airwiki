@@ -6,6 +6,11 @@ use std::{
 
 use anyhow::{Context, Result, ensure};
 use serde::Deserialize;
+use sha2::{Digest, Sha256};
+
+mod loader;
+
+pub(super) use loader::{CANDIDATE_ORDER_POLICY_VERSION, CandidateRole, LoadedCorpus, NeedKind};
 
 const MANIFEST_SCHEMA_VERSION: u32 = 1;
 const SUPPORTED_LICENSES: [&str; 2] = ["CC-BY-SA-4.0", "CC-BY-4.0"];
@@ -75,14 +80,14 @@ struct PassageRef {
 
 #[derive(Debug, Clone, Copy, Deserialize, PartialEq, Eq, Hash)]
 #[serde(rename_all = "snake_case")]
-enum CorpusSplit {
+pub(super) enum CorpusSplit {
     Training,
     Calibration,
 }
 
 #[derive(Debug, Clone, Copy, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
-enum CorpusExpectation {
+pub(super) enum CorpusExpectation {
     Answerable,
     Unanswerable,
 }
@@ -95,12 +100,12 @@ struct HardNegative {
     document_id: String,
     segment_id: String,
     #[serde(rename = "kind")]
-    _kind: HardNegativeKind,
+    kind: HardNegativeKind,
 }
 
 #[derive(Debug, Clone, Copy, Deserialize, PartialEq, Eq, Hash)]
 #[serde(rename_all = "snake_case")]
-enum HardNegativeKind {
+pub(super) enum HardNegativeKind {
     WrongSubject,
     WrongRelation,
     WrongScope,
@@ -111,12 +116,33 @@ enum HardNegativeKind {
 }
 
 pub(super) fn validate_manifest(path: &Path) -> Result<CorpusManifestSummary> {
+    let loaded = load_manifest(path)?;
+    validate_manifest_contents(&loaded.manifest)
+}
+
+pub(super) fn load_verified_corpus(
+    path: &Path,
+    source_root: &Path,
+) -> Result<loader::LoadedCorpus> {
+    let loaded = load_manifest(path)?;
+    validate_manifest_contents(&loaded.manifest)?;
+    loader::load_verified(loaded.manifest, loaded.sha256, source_root)
+}
+
+struct LoadedManifest {
+    manifest: CorpusManifest,
+    sha256: String,
+}
+
+fn load_manifest(path: &Path) -> Result<LoadedManifest> {
     let bytes = fs::read(path)
         .with_context(|| format!("failed to read corpus manifest `{}`", path.display()))?;
     let manifest: CorpusManifest = serde_json::from_slice(&bytes)
         .with_context(|| format!("failed to parse corpus manifest `{}`", path.display()))?;
-
-    validate_manifest_contents(&manifest)
+    Ok(LoadedManifest {
+        manifest,
+        sha256: hex::encode(Sha256::digest(&bytes)),
+    })
 }
 
 fn validate_manifest_contents(manifest: &CorpusManifest) -> Result<CorpusManifestSummary> {

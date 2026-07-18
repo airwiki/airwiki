@@ -68,6 +68,53 @@ The evaluator does not cover file parsing, generative enrichment, network
 transport, pairing UX, chat-client synthesis or installed-platform behavior.
 Those boundaries retain their focused tests and manual acceptance paths.
 
+## Research method for an emerging domain
+
+LLM Wiki, reviewed local knowledge and OKF federation do not yet have one
+established end-to-end solution. AirWiki therefore uses literature as prior
+evidence and a source of baselines, datasets and known failure modes—not as an
+implementation recipe. New mechanisms may originate from observed product
+failures, contributor hypotheses, architectural constraints or adversarial
+analysis. They earn adoption only through reproducible evidence.
+
+This document distinguishes four kinds of statement:
+
+- **External evidence** is a result reported by cited work. It may motivate a
+  control, but it does not establish transfer to AirWiki.
+- **AirWiki hypothesis** is an original, falsifiable engineering thesis. It must
+  state its predicted mechanism, comparison baseline and rejection condition.
+- **Product invariant** is a deliberate privacy, authorization, integrity or
+  usability requirement. It is not an empirical average and cannot be traded
+  away by a better aggregate score.
+- **Observation** is a result for one pinned corpus, implementation, model and
+  platform. Its claim ends at that boundary.
+
+Before implementation, a non-trivial hypothesis records: the user-visible
+failure; the proposed causal mechanism; a minimal baseline and ablation; the
+primary metric and safety veto; expected invariances; counterfactuals that must
+change the result; resource budgets; allowed development data; a frozen
+holdout; and a predeclared rejection condition. A negative result is retained
+when it rules out a plausible design; it is not tuned away case by case.
+
+Evidence advances through inexpensive deterministic invariants, metamorphic and
+counterfactual tests, synthetic development cases, reviewed AirWiki-like cases,
+a fresh grouped holdout and finally installed-platform measurement. Behavioral
+tests are especially useful here: reordering candidates, adding an irrelevant
+distractor or paraphrasing a need should preserve the decision, while changing
+the subject, date, negation, approval state, revision or grant should change it.
+This follows the capability-oriented testing principle illustrated by
+[CheckList](https://aclanthology.org/2020.acl-main.442/), while AirWiki's exact
+relations and safety vetoes remain its own hypotheses and product decisions.
+
+Benchmarks enter through a capability matrix rather than by accumulation. A
+public dataset is included only when it supplies a missing control; reviewed
+AirWiki-shaped scenarios remain necessary for revisions, grants, temporal
+conflicts, compound coverage and human publication. Gold evidence must declare
+whether spans are complementary (`all_of`), interchangeable (`one_of`) or only
+corroborating, and ambiguous promotion cases require independent human
+adjudication. The same model may propose an annotation, but cannot be its final
+gold authority.
+
 ## Evidence basis
 
 The current candidate stage intentionally remains BM25 plus multilingual E5,
@@ -80,10 +127,11 @@ RRF `k=60` is a literature-motivated baseline, not a claim that the value is
 optimal for AirWiki. Before changing this stage, a promotion profile must report
 pre-selector candidate Recall@10 separately from selector errors.
 
-Answerability is a separate selective-prediction problem. SQuAD 2.0 established
-that a system must abstain when a similar-looking passage does not state an
-answer, and selective-QA research shows that raw model confidence is unreliable
-under domain shift
+Answerability is a separate selective-prediction problem. SQuAD 2.0
+operationalized answerable questions together with plausible, similar-looking
+passages that do not state an answer. AirWiki turns that failure mode into a
+fail-closed abstention policy. Selective-QA research also shows that raw model
+confidence is unreliable under domain shift
 ([Rajpurkar et al., 2018](https://aclanthology.org/P18-2124/),
 [Kamath et al., 2020](https://aclanthology.org/2020.acl-main.503/)). Neural
 scores are also not probabilities without calibration
@@ -95,8 +143,9 @@ also requires a fresh, larger domain-separated profile that reports selective
 risk and coverage with uncertainty, plus fail-closed behavior on malformed
 output.
 
-Question-answering entailment is closer to AirWiki's safety boundary than
-generic semantic similarity. QA-entailment research evaluates whether a passage
+**AirWiki hypothesis H-A1:** question-answering entailment may represent
+AirWiki's evidence boundary better than generic semantic similarity.
+QA-entailment research evaluates whether a passage
 supports a complete question-and-answer claim, while QNLI asks only whether a
 sentence contains an answer and generic NLI assumes a declarative hypothesis
 ([Chen et al., 2021](https://aclanthology.org/2021.findings-emnlp.324/),
@@ -165,7 +214,147 @@ unsafe artifact paths, duplicate identifiers, dangling source references,
 invalid answerability labels and document or translation groups split across
 training and calibration. It reports counts only. It does not read questions,
 passages or answers and does not claim that a pinned artifact has been locally
-downloaded or verified; that boundary belongs to the future importer.
+downloaded or verified. After separately accepting the upstream terms and
+placing the referenced files under an ignored local root, a maintainer can
+verify hashes and source-native locators without downloading or reporting
+content:
+
+```bash
+cargo run --locked -p xtask -- retrieval corpus verify \
+  --source-root <source-root>
+```
+
+The verifier rejects symlinks and unsafe archive members, parses each referenced
+artifact once and emits only identifiers, fingerprints and counts. The exact
+local layout is documented with the
+[corpus manifest](../resources/evaluation/retrieval-answerability-development-v1/README.md).
+
+### Experimental QA-entailment contract
+
+The next experiment keeps BM25, multilingual E5 and RRF fixed and evaluates one
+manifest-provided atomic need at a time. It deliberately separates two model
+calls:
+
+1. a proposal call selects one or more exact passage quotes and, for a question,
+   converts the proposed answer into a complete declarative claim; and
+2. a verification call receives the original atomic need, that frozen claim and
+   only the selected passages, then separately decides whether the claim answers
+   the need and whether the passages entail it. It cannot rewrite the claim.
+
+Because the manifest supplies atomic needs, this experiment does not evaluate
+question decomposition, cross-need synthesis or conflict presentation.
+
+This experiment is inspired by the staged QA-to-NLI formulation studied by
+[Chen et al. (2021)](https://aclanthology.org/2021.findings-emnlp.324/) and
+retains multi-span evidence because
+[ContractNLI](https://aclanthology.org/2021.findings-emnlp.164/) shows that a
+document-level hypothesis may require more than one evidence span. The two
+calls are not statistically independent when they use the same local model;
+their purpose is to make proposal and verification separately observable and
+falsifiable. This does not reproduce the trained NLI verifier in the paper or
+inherit its results. A single call that writes both the claim and its verdict
+would let the model weaken the claim to make its own evidence appear sufficient.
+
+Rust remains the authority for the closed JSON schema, known identifiers,
+literal quote provenance, length bounds and all-or-nothing coverage. A question
+proposal must copy its answer text from a selected passage and include that
+literal answer in the complete claim. If the supporting quote is a different
+literal span in the same selected passage, Rust derives the minimal answer quote
+deterministically rather than asking the model to duplicate the same span twice.
+Source-native SQuAD or XQuAD reference answers are never passed into either
+model call or used to change its control flow. The evaluation harness compares
+an accepted answer with those references after inference using the official
+SQuAD v2
+[normalized exact-match policy](https://github.com/rajpurkar/SQuAD-explorer/blob/eee5fdbf62f8613a7812b03419e6b29617b74fd1/evaluate-v2.0.py);
+an accepted non-match fails the gate
+but is not misclassified as malformed JSON.
+This separation prevents the gold answer from becoming a runtime oracle while
+still detecting a weakened answer. XQuAD itself uses the official SQuAD
+evaluation script and documents the limits of its English-specific
+normalization
+([XQuAD repository](https://github.com/google-deepmind/xquad#training-and-evaluation)).
+Candidate identifiers and their deterministic order are blinded to
+the support or hard-negative role so the prompt cannot reveal the gold label;
+this also avoids always placing gold evidence in one prompt position, since
+language-model use of evidence can change with its context position
+([Liu et al., 2024](https://aclanthology.org/2024.tacl-1.9/)). A declarative
+ContractNLI need is already the frozen claim and cannot be rewritten. Any
+timeout, malformed output, unknown identifier, invented quote, need mismatch or
+unsupported claim produces abstention. The verifier never receives or changes
+authorization, publication or provenance state.
+
+The report fingerprints the answer matcher and the complete scoring policy,
+including failure-as-abstention, proposed-versus-accepted evidence, complete
+support coverage and language-parity rules. Evidence is canonicalized into the
+input candidate order before verification. If the proposal succeeds but the
+verification call fails, proposed evidence remains a diagnostic observation
+while accepted evidence remains empty. These rules make two runs comparable;
+they do not make the two calls statistically independent or prevent a shared
+model from repeating its own error.
+
+The six-selection seed is only a smoke and rejection gate. It must retain every
+reviewed support in the final accepted evidence, retain no hard negative or
+unanswerable case in final evidence, produce no invalid output or timeout, and
+preserve the English/Spanish XQuAD decision. It
+does not justify a confidence threshold, a statistical safety claim or
+production integration. Selective-QA work shows that raw model confidence is
+unreliable under domain shift, while conformal risk control requires assumptions
+and sample sizes that this seed does not establish
+([Kamath et al., 2020](https://aclanthology.org/2020.acl-main.503/),
+[Angelopoulos et al., 2022](https://arxiv.org/abs/2208.02814)). A future frozen
+candidate must be evaluated once on a fresh holdout grouped by document,
+translation family and domain.
+
+After the corpus and the already-installed AirWiki assets verify, a maintainer
+can execute this development-only gate with:
+
+```bash
+cargo run --locked -p xtask -- retrieval evaluate-answerability \
+  --source-root <source-root> \
+  --data-root <airwiki-data-root> \
+  --llama-server <llama-server-path> \
+  --model-id <catalog-model-id>
+```
+
+The command does not download assets or change production search. It runs one
+local model request at a time and writes only fingerprints, aggregate
+training/calibration counts and latency summaries under `target/evals/`. A
+failed gate rejects this experimental structure; a passed gate only permits the
+work to proceed to a frozen, fresh holdout.
+
+### QA-entailment development observation
+
+The macOS arm64 run on 2026-07-17 used the pinned Gemma 4 E4B Q4 artifact and
+`llama.cpp` build `b9946`. The final development candidate fingerprint was
+`22b8163839b6d4d2a7f39192c2908f2b60045b099b5a007597e386f24b3e14f1`.
+The run used answer-match policy `squad-v2-normalized-exact-match-v2` and
+scoring policy `answerability-scoring-gate-v1`.
+It produced:
+
+- one accepted ContractNLI support set and zero accepted hard negatives;
+- one hard-negative proposal that the second stage rejected, an observation
+  consistent with reporting proposal diagnostics separately from final
+  evidence;
+- three effective false-negative decisions across the three QA training cases;
+- two invalid literal answer spans and one inconsistent generated claim;
+- zero timeouts, provider failures, accepted hard negatives or final false
+  positives;
+- descriptive proposal latency of p50 10.977 seconds and p95 15.183 seconds,
+  and descriptive verification latency of p50 2.256 seconds and p95 4.656
+  seconds;
+  the call counts are too small to estimate platform performance; and
+- 66.392 seconds of aggregate evaluator time, excluding process compilation.
+
+The candidate therefore fails the seed rejection gate. In particular, a zero
+observed final false-positive count cannot compensate for zero QA coverage.
+This is one descriptive run; temperature zero does not establish deterministic
+model behavior, and a promotion candidate would require repeated-decision and
+evidence-set stability measurements.
+AirWiki must not tune further prompts against these six observed selections or
+promote this verifier into production. A next candidate requires a larger
+licensed development corpus and either a reader designed for multilingual
+answerability or another independently justified, lower-complexity method; it
+must then be frozen before a fresh grouped holdout is revealed.
 
 ## Deterministic CI validation
 
@@ -268,6 +457,15 @@ ports, endpoints, tokens or multiaddresses. Reports remain ignored under
 `target/`; maintainer evidence should retain only the aggregate fields allowed by
 [the validation-record policy](maintainer-validation.md).
 
+The answerability experiment writes
+`target/evals/retrieval-answerability-development-<os>-<arch>.json`. It contains
+only corpus, candidate and artifact fingerprints; versioned policy identifiers;
+platform and bounded runtime parameters; aggregate split counts; sanitized
+failure categories; latency summaries; and PASS/FAIL. It follows the same
+content, path, identity, endpoint and token exclusions above. In particular, it
+does not serialize needs, answers, claims, quotes, passages, candidate IDs,
+source-native record IDs or local roots.
+
 ## Initial v1 platform observation
 
 The first macOS arm64 observation on 2026-07-16 used the pinned E5 revision
@@ -350,8 +548,8 @@ and slowed calls to p50 6.177 seconds, p95 19.068 seconds and maximum 23.239
 seconds. It was rejected and the first policy remains only the better
 experimental baseline.
 
-These runs show that generative selection can recover evidence missed by the
-current mMARCO gate, but neither policy meets AirWiki's zero-false-evidence rule
+Generative selection recovered evidence missed by the current mMARCO gate in
+these observed cases, but neither policy meets AirWiki's zero-false-evidence rule
 or interactive latency budget. The result does not justify a Windows run,
 because the macOS process alone used approximately 4.8 GiB of resident memory
 during the second experiment. Production search remains unchanged.
@@ -380,8 +578,8 @@ case from 1.0 to 0.75. A release-mode diagnostic observed 1.001 seconds of
 startup and per-source calls of p50 238 ms and p95 382 ms. These timings are not
 end-to-end query latency.
 
-The run falsified the rationale for promoting GTE on this small profile: it did
-not improve evidence coverage and regressed known rankings. The one-off harness,
+The run rejected this GTE candidate under this small profile: it did not improve
+evidence coverage and regressed known rankings. The one-off harness,
 sanitized report and exact fixture manifest were not retained, so these numbers
 are an exploratory local observation, not reproducible promotion evidence. A
 future reranker must be evaluated by the versioned protocol below. Production
@@ -435,19 +633,46 @@ QA entailment and relational hard negatives.
 
 ## Next research gate
 
-The next candidate must be developed against a larger, licensed and traceable
-corpus before any new production code. The development profile will sample
-ranking cases from MIRACL and answerability/support cases from SQuAD2, XQuAD,
-MLQA, ContractNLI, MuSiQue and Natural Questions, while preserving each
-dataset's license and attribution requirements
-([MIRACL](https://arxiv.org/abs/2210.09984),
-[XQuAD](https://aclanthology.org/2020.acl-main.421/),
-[ContractNLI](https://aclanthology.org/2021.findings-emnlp.164/),
-[MuSiQue](https://aclanthology.org/2022.tacl-1.31/),
-[Natural Questions](https://research.google/pubs/natural-questions-a-benchmark-for-question-answering-research/)).
-Documents, translations and multi-hop chains must remain grouped before any
-split so equivalent evidence cannot cross development, calibration and final
-holdout.
+The next candidate must use a larger, licensed and traceable development corpus
+before any production change, but more benchmarks are not automatically better.
+[`MIRACL`](https://aclanthology.org/2023.tacl-1.63/),
+[`SQuAD2`](https://aclanthology.org/P18-2124/),
+[`XQuAD`](https://aclanthology.org/2020.acl-main.421/),
+[`MLQA`](https://aclanthology.org/2020.acl-main.653/),
+[`ContractNLI`](https://aclanthology.org/2021.findings-emnlp.164/),
+[`MuSiQue`](https://aclanthology.org/2022.tacl-1.31/) and
+[`Natural Questions`](https://research.google/pubs/natural-questions-a-benchmark-for-question-answering-research/)
+are a menu of possible transfer controls, not a required bundle. Each source
+must fill a declared capability gap and preserve its license and attribution.
+Documents, translations and multi-hop chains remain grouped before any split so
+equivalent evidence cannot cross development, calibration and final holdout.
+
+**AirWiki hypothesis H-AWK-1:** claims with reviewed evidence anchors created at
+publication time will be safer and cheaper to query than generating and
+verifying a new claim from scratch with the same small model on every search.
+This hypothesis exploits AirWiki's human review, immutable revisions and OKF
+resources rather than copying a web-RAG architecture.
+
+The smallest experimental algorithm is:
+
+1. During review, the model proposes an atomic claim plus a literal anchor,
+   scope, negation and revision; a person accepts, edits or rejects it.
+2. Search retrieves only authorized, current reviewed claims and their anchors.
+3. For a bounded candidate pool, Rust evaluates the small subsets in stable
+   order and chooses the smallest evidence set that covers every atomic need;
+   `all_of` obligations require every complementary piece, while `one_of`
+   accepts one equivalent source. If no complete cover exists, it abstains.
+4. A separate retrieval pass looks for counterevidence, later revisions and
+   scope or negation conflicts. A material unresolved conflict is reported
+   explicitly rather than collapsed into one confidence score.
+
+The first ablation compares: (A) the current two-call development verifier; (B)
+retrieval over reviewed claims; and (C) reviewed claims plus counterevidence
+search. It measures selective risk, complete-need coverage, conflicts found,
+latency, memory and additional human review time. H-AWK-1 is rejected if it does
+not reduce unsupported accepted evidence, loses unacceptable coverage, exceeds
+local resource budgets or imposes an impractical review burden. No OKF profile
+or production schema changes until that experimental advantage exists.
 
 The primary measures have fixed meanings:
 

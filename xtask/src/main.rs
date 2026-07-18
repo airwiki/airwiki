@@ -165,8 +165,22 @@ async fn main() -> Result<()> {
                     );
                     retrieval::validate_answerability_corpus()
                 }
+                Some("verify") => {
+                    ensure!(
+                        arguments.next().as_deref() == Some("--source-root"),
+                        "retrieval corpus verify expects `--source-root <path>`"
+                    );
+                    let source_root = arguments
+                        .next()
+                        .context("retrieval corpus verify is missing the source root")?;
+                    ensure!(
+                        arguments.next().is_none(),
+                        "retrieval corpus verify received unexpected arguments"
+                    );
+                    retrieval::verify_answerability_corpus(Path::new(&source_root))
+                }
                 Some(other) => bail!("unknown retrieval corpus command: {other}"),
-                None => bail!("missing retrieval corpus command; expected `validate`"),
+                None => bail!("missing retrieval corpus command; expected `validate` or `verify`"),
             },
             Some("validate") => {
                 ensure!(
@@ -251,9 +265,50 @@ async fn main() -> Result<()> {
                 )
                 .await
             }
+            Some("evaluate-answerability") => {
+                ensure!(
+                    arguments.next().as_deref() == Some("--source-root"),
+                    "retrieval evaluate-answerability expects `--source-root <directory>` first"
+                );
+                let source_root = arguments.next().context(
+                    "retrieval evaluate-answerability is missing the corpus source root",
+                )?;
+                ensure!(
+                    arguments.next().as_deref() == Some("--data-root"),
+                    "retrieval evaluate-answerability expects `--data-root <directory>` after the source root"
+                );
+                let data_root = arguments
+                    .next()
+                    .context("retrieval evaluate-answerability is missing the data root")?;
+                ensure!(
+                    arguments.next().as_deref() == Some("--llama-server"),
+                    "retrieval evaluate-answerability expects `--llama-server <path>` after the data root"
+                );
+                let llama_server = arguments
+                    .next()
+                    .context("retrieval evaluate-answerability is missing llama-server")?;
+                ensure!(
+                    arguments.next().as_deref() == Some("--model-id"),
+                    "retrieval evaluate-answerability expects `--model-id <catalog-id>` last"
+                );
+                let model_id = arguments
+                    .next()
+                    .context("retrieval evaluate-answerability is missing the model ID")?;
+                ensure!(
+                    arguments.next().is_none(),
+                    "retrieval evaluate-answerability received unexpected arguments"
+                );
+                retrieval::evaluate_answerability(
+                    Path::new(&source_root),
+                    Path::new(&data_root),
+                    Path::new(&llama_server),
+                    &model_id,
+                )
+                .await
+            }
             Some(other) => bail!("unknown retrieval command: {other}"),
             None => bail!(
-                "missing retrieval command; expected `corpus`, `validate`, `evaluate` or `evaluate-selector`"
+                "missing retrieval command; expected `corpus`, `validate`, `evaluate`, `evaluate-selector` or `evaluate-answerability`"
             ),
         },
         "licenses" => match arguments.next().as_deref() {
@@ -308,10 +363,16 @@ async fn main() -> Result<()> {
             println!("cargo run --locked -p xtask -- retrieval validate");
             println!("cargo run --locked -p xtask -- retrieval corpus validate");
             println!(
+                "cargo run --locked -p xtask -- retrieval corpus verify --source-root <directory>"
+            );
+            println!(
                 "cargo run --locked -p xtask -- retrieval evaluate --phase development|final --embedding-snapshot <directory> --relevance-snapshot <directory>"
             );
             println!(
                 "cargo run --locked -p xtask -- retrieval evaluate-selector --phase development --data-root <directory> --llama-server <path> --model-id <catalog-id>"
+            );
+            println!(
+                "cargo run --locked -p xtask -- retrieval evaluate-answerability --source-root <directory> --data-root <directory> --llama-server <path> --model-id <catalog-id>"
             );
             println!("cargo run --locked -p xtask -- licenses generate");
             println!("cargo run --locked -p xtask -- licenses check");

@@ -15,6 +15,8 @@ use fastembed::{
 use sha2::{Digest, Sha256};
 use thiserror::Error;
 
+#[cfg(feature = "retrieval-evaluation")]
+use crate::search::RetrievalEvaluationRelevance;
 use crate::{EvidenceDecision, EvidenceRelevanceError, EvidenceRelevanceProvider, RelevanceInput};
 
 /// Hugging Face repository containing the selected multilingual cross-encoder.
@@ -253,19 +255,12 @@ impl FastEmbedMmarcoReranker {
             inference_permit: Arc::new(tokio::sync::Semaphore::new(1)),
         })
     }
-}
 
-#[async_trait]
-impl EvidenceRelevanceProvider for FastEmbedMmarcoReranker {
-    fn profile_id(&self) -> &str {
-        MMARCO_RERANKER_PROFILE_ID
-    }
-
-    async fn classify(
+    async fn score_candidates(
         &self,
         question: &str,
         candidates: &[RelevanceInput],
-    ) -> std::result::Result<Vec<EvidenceDecision>, EvidenceRelevanceError> {
+    ) -> std::result::Result<Vec<f32>, EvidenceRelevanceError> {
         if candidates.is_empty() {
             return Ok(Vec::new());
         }
@@ -276,7 +271,7 @@ impl EvidenceRelevanceProvider for FastEmbedMmarcoReranker {
         let documents = candidates.iter().map(candidate_passage).collect::<Vec<_>>();
         let expected = documents.len();
 
-        let classification = async move {
+        let reranking = async move {
             let permit = inference_permit
                 .acquire_owned()
                 .await
@@ -295,10 +290,42 @@ impl EvidenceRelevanceProvider for FastEmbedMmarcoReranker {
             })
             .await
         };
-        let results = run_with_relevance_deadline(RELEVANCE_DEADLINE, classification).await?;
+        let results = run_with_relevance_deadline(RELEVANCE_DEADLINE, reranking).await?;
 
-        let scores = reconstruct_scores(results, expected)?;
+        reconstruct_scores(results, expected)
+    }
+}
+
+#[async_trait]
+impl EvidenceRelevanceProvider for FastEmbedMmarcoReranker {
+    fn profile_id(&self) -> &str {
+        MMARCO_RERANKER_PROFILE_ID
+    }
+
+    async fn classify(
+        &self,
+        question: &str,
+        candidates: &[RelevanceInput],
+    ) -> std::result::Result<Vec<EvidenceDecision>, EvidenceRelevanceError> {
+        let scores = self.score_candidates(question, candidates).await?;
         decisions_from_scores(&scores)
+    }
+
+    #[cfg(feature = "retrieval-evaluation")]
+    async fn classify_and_order_for_evaluation(
+        &self,
+        question: &str,
+        candidates: &[RelevanceInput],
+    ) -> std::result::Result<RetrievalEvaluationRelevance, EvidenceRelevanceError> {
+        let scores = self.score_candidates(question, candidates).await?;
+        let decisions = decisions_from_scores(&scores)?;
+        let ordering_started = std::time::Instant::now();
+        let score_order = score_descending_order(&scores)?;
+        RetrievalEvaluationRelevance::from_decisions_and_order(
+            decisions,
+            score_order,
+            ordering_started.elapsed().as_micros(),
+        )
     }
 }
 
@@ -391,6 +418,22 @@ fn decisions_from_scores(
             }
         })
         .collect())
+}
+
+#[cfg(feature = "retrieval-evaluation")]
+fn score_descending_order(
+    scores: &[f32],
+) -> std::result::Result<Vec<usize>, EvidenceRelevanceError> {
+    if scores.iter().any(|score| !score.is_finite()) {
+        return Err(EvidenceRelevanceError::InvalidOutput);
+    }
+    let mut order = (0..scores.len()).collect::<Vec<_>>();
+    order.sort_by(|left, right| {
+        scores[*right]
+            .total_cmp(&scores[*left])
+            .then_with(|| left.cmp(right))
+    });
+    Ok(order)
 }
 
 fn platform_onnx_asset() -> std::result::Result<SnapshotAsset, MmarcoRerankerLoadError> {
@@ -594,6 +637,15 @@ mod tests {
                 Err(EvidenceRelevanceError::InvalidOutput)
             );
         }
+    }
+
+    #[cfg(feature = "retrieval-evaluation")]
+    #[test]
+    fn score_order_sorts_descending_with_stable_input_ties() {
+        assert_eq!(
+            score_descending_order(&[0.5, 4.0, 4.0, -2.0]).unwrap(),
+            vec![1, 2, 0, 3]
+        );
     }
 
     #[test]

@@ -339,6 +339,31 @@ async fn main() -> Result<()> {
                 )
                 .await
             }
+            Some("evaluate-rerank-order") => {
+                ensure!(
+                    arguments.next().as_deref() == Some("--embedding-snapshot"),
+                    "retrieval evaluate-rerank-order expects `--embedding-snapshot <directory>` first"
+                );
+                let embedding_snapshot = arguments.next().context(
+                    "retrieval evaluate-rerank-order is missing the embedding snapshot path",
+                )?;
+                ensure!(
+                    arguments.next().as_deref() == Some("--relevance-snapshot"),
+                    "retrieval evaluate-rerank-order expects `--relevance-snapshot <directory>` second"
+                );
+                let relevance_snapshot = arguments.next().context(
+                    "retrieval evaluate-rerank-order is missing the relevance snapshot path",
+                )?;
+                ensure!(
+                    arguments.next().is_none(),
+                    "retrieval evaluate-rerank-order received unexpected arguments"
+                );
+                retrieval::evaluate_rerank_order(
+                    Path::new(&embedding_snapshot),
+                    Path::new(&relevance_snapshot),
+                )
+                .await
+            }
             Some("evaluate-mini-graph") => {
                 ensure!(
                     arguments.next().is_none(),
@@ -387,7 +412,7 @@ async fn main() -> Result<()> {
             }
             Some(other) => bail!("unknown retrieval command: {other}"),
             None => bail!(
-                "missing retrieval command; expected `corpus`, `validate`, `evaluate`, `evaluate-selector`, `evaluate-answerability`, `evaluate-reviewed-anchors`, `evaluate-mini-graph`, `evaluate-real-mini-graph` or `evaluate-final-mini-graph`"
+                "missing retrieval command; expected `corpus`, `validate`, `evaluate`, `evaluate-selector`, `evaluate-answerability`, `evaluate-reviewed-anchors`, `evaluate-rerank-order`, `evaluate-mini-graph`, `evaluate-real-mini-graph` or `evaluate-final-mini-graph`"
             ),
         },
         "licenses" => match arguments.next().as_deref() {
@@ -455,6 +480,9 @@ async fn main() -> Result<()> {
             );
             println!(
                 "cargo run --locked -p xtask -- retrieval evaluate-reviewed-anchors --data-root <directory> --llama-server <path> --model-id <catalog-id>"
+            );
+            println!(
+                "cargo run --release --locked -p xtask -- retrieval evaluate-rerank-order --embedding-snapshot <directory> --relevance-snapshot <directory>"
             );
             println!("cargo run --release --locked -p xtask -- retrieval evaluate-mini-graph");
             println!(

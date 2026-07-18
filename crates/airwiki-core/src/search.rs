@@ -73,6 +73,26 @@ pub struct RetrievalEvaluationSelection {
     pub candidate_preparation_micros: u128,
 }
 
+/// Content-free A0/A1 result from one shared local relevance inference.
+#[cfg(feature = "retrieval-evaluation")]
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RetrievalEvaluationOrderingComparison {
+    /// Current production behavior: relevant candidates retain hybrid RRF order.
+    pub filter_order: RetrievalEvaluationSelection,
+    /// Ablation behavior: the same relevant candidates follow mMARCO score order.
+    pub score_order: RetrievalEvaluationSelection,
+    /// Time spent in the single shared relevance inference, excluding ordering.
+    pub shared_relevance_micros: u128,
+    /// Time spent deriving the content-free score permutation.
+    pub score_order_micros: u128,
+    /// Number of candidates shared by both arms before relevance filtering.
+    pub candidate_count: usize,
+    /// Number of shared relevance calls: zero for an empty pool, otherwise one.
+    pub relevance_call_count: u32,
+    /// Whether either arm lost authority during final publication revalidation.
+    pub invalidated: bool,
+}
+
 /// Candidate evidence presented to the local relevance classifier.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RelevanceInput {
@@ -103,6 +123,48 @@ pub enum EvidenceRelevanceError {
     DecisionCountMismatch { expected: usize, actual: usize },
 }
 
+/// Decisions plus a content-free permutation for offline score-order evaluation.
+///
+/// Scores never cross this boundary. The permutation is validated as a complete
+/// bijection over the input batch before search can use it.
+#[cfg(feature = "retrieval-evaluation")]
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RetrievalEvaluationRelevance {
+    decisions: Vec<EvidenceDecision>,
+    score_order: Vec<usize>,
+    score_order_micros: u128,
+}
+
+#[cfg(feature = "retrieval-evaluation")]
+impl RetrievalEvaluationRelevance {
+    /// Creates a fail-closed evaluation output from aligned decisions and a
+    /// complete input-index permutation.
+    pub fn from_decisions_and_order(
+        decisions: Vec<EvidenceDecision>,
+        score_order: Vec<usize>,
+        score_order_micros: u128,
+    ) -> std::result::Result<Self, EvidenceRelevanceError> {
+        validate_candidate_order(decisions.len(), &score_order)?;
+        Ok(Self {
+            decisions,
+            score_order,
+            score_order_micros,
+        })
+    }
+
+    fn input_order(
+        decisions: Vec<EvidenceDecision>,
+    ) -> std::result::Result<Self, EvidenceRelevanceError> {
+        let started = Instant::now();
+        let score_order = (0..decisions.len()).collect();
+        Self::from_decisions_and_order(decisions, score_order, started.elapsed().as_micros())
+    }
+
+    fn into_parts(self) -> (Vec<EvidenceDecision>, Vec<usize>, u128) {
+        (self.decisions, self.score_order, self.score_order_micros)
+    }
+}
+
 /// Classifies whether retrieved passages contain evidence for the question.
 #[async_trait]
 pub trait EvidenceRelevanceProvider: Send + Sync {
@@ -113,6 +175,20 @@ pub trait EvidenceRelevanceProvider: Send + Sync {
         question: &str,
         candidates: &[RelevanceInput],
     ) -> std::result::Result<Vec<EvidenceDecision>, EvidenceRelevanceError>;
+
+    /// Produces a content-free ordering for offline retrieval evaluation.
+    ///
+    /// Providers without a meaningful score order retain input order. This
+    /// method is absent from production builds and must perform at most one
+    /// inference for the returned decisions and permutation.
+    #[cfg(feature = "retrieval-evaluation")]
+    async fn classify_and_order_for_evaluation(
+        &self,
+        question: &str,
+        candidates: &[RelevanceInput],
+    ) -> std::result::Result<RetrievalEvaluationRelevance, EvidenceRelevanceError> {
+        RetrievalEvaluationRelevance::input_order(self.classify(question, candidates).await?)
+    }
 }
 
 /// Repeatable lexical test double for offline tests. It is not a production
@@ -312,6 +388,107 @@ impl HybridSearchEngine {
         })
     }
 
+    #[cfg(feature = "retrieval-evaluation")]
+    async fn finalize_candidate_order_for_evaluation(
+        &self,
+        request: &SearchRequest,
+        prepared: &PreparedCandidates,
+        decisions: &[EvidenceDecision],
+        candidate_order: &[usize],
+    ) -> Result<SearchResponse> {
+        let hits = build_hits_for_candidate_order(
+            &self.node_id,
+            prepared,
+            decisions,
+            candidate_order,
+            usize::from(request.top_k),
+        )?;
+        let before_revalidation = hits.len();
+        let database = self.database.clone();
+        let purpose = request.purpose;
+        let hits = run_search_blocking("local search revalidation worker task failed", move || {
+            revalidate_local_hits(database, hits, purpose)
+        })
+        .await?;
+        let removed_during_revalidation = before_revalidation > hits.len();
+        Ok(SearchResponse {
+            request_id: request.request_id,
+            hits,
+            offline_nodes: Vec::new(),
+            warnings: removed_during_revalidation
+                .then(|| "results changed during final publication revalidation".to_owned())
+                .into_iter()
+                .collect(),
+            partial: removed_during_revalidation,
+        })
+    }
+
+    /// Compares production filter order (A0) with mMARCO score order (A1).
+    ///
+    /// Both arms share the production pool of ten candidates, one relevance
+    /// inference, identical decisions, citation construction and final
+    /// publication revalidation. Scores remain inside the provider.
+    #[cfg(feature = "retrieval-evaluation")]
+    pub async fn compare_local_score_order_for_evaluation(
+        &self,
+        request: SearchRequest,
+    ) -> Result<RetrievalEvaluationOrderingComparison> {
+        request.validate()?;
+        let collections = self.resolve_local_scope().await?;
+        let candidate_preparation_started = Instant::now();
+        let prepared = self
+            .prepare_ranked_candidates(
+                &request.query,
+                &collections,
+                request.purpose,
+                RELEVANCE_CANDIDATE_LIMIT,
+            )
+            .await?;
+        let candidate_preparation_micros = candidate_preparation_started.elapsed().as_micros();
+
+        let candidate_count = prepared.candidates.len();
+        let relevance_call_count = u32::from(!prepared.relevance_inputs.is_empty());
+        let shared_relevance_started = Instant::now();
+        let relevance = if prepared.relevance_inputs.is_empty() {
+            RetrievalEvaluationRelevance::input_order(Vec::new())?
+        } else {
+            self.relevance
+                .classify_and_order_for_evaluation(request.query.trim(), &prepared.relevance_inputs)
+                .await?
+        };
+        let shared_relevance_total_micros = shared_relevance_started.elapsed().as_micros();
+        let (decisions, score_order, score_order_micros) = relevance.into_parts();
+        validate_decision_count(prepared.candidates.len(), decisions.len())?;
+        let input_order = (0..prepared.candidates.len()).collect::<Vec<_>>();
+
+        let filter_response = self
+            .finalize_candidate_order_for_evaluation(&request, &prepared, &decisions, &input_order)
+            .await?;
+        let score_response = self
+            .finalize_candidate_order_for_evaluation(&request, &prepared, &decisions, &score_order)
+            .await?;
+        let invalidated = filter_response.partial || score_response.partial;
+        let mut filter_order =
+            evaluation_selection_from_response(filter_response, candidate_preparation_micros);
+        let mut score_order =
+            evaluation_selection_from_response(score_response, candidate_preparation_micros);
+        if invalidated {
+            filter_order.partial = true;
+            score_order.partial = true;
+        }
+
+        Ok(RetrievalEvaluationOrderingComparison {
+            filter_order,
+            score_order,
+            shared_relevance_micros: shared_relevance_total_micros
+                .saturating_sub(score_order_micros),
+            score_order_micros,
+            candidate_count,
+            relevance_call_count,
+            invalidated,
+        })
+    }
+
     /// Returns a content-free prefix of the production hybrid ranking for an
     /// offline evaluator, using the authoritative local collection scope.
     #[cfg(feature = "retrieval-evaluation")]
@@ -409,20 +586,10 @@ impl HybridSearchEngine {
             .await?;
         let candidate_preparation_micros = candidate_preparation_started.elapsed().as_micros();
         let response = self.finalize_local_candidates(request, prepared).await?;
-        Ok(RetrievalEvaluationSelection {
-            candidates: response
-                .hits
-                .into_iter()
-                .map(|hit| RetrievalEvaluationCandidate {
-                    collection_id: hit.collection_id,
-                    concept_id: hit.concept_id,
-                    chunk_id: hit.chunk_id,
-                    source_revision: hit.source_revision,
-                })
-                .collect(),
-            partial: response.partial,
+        Ok(evaluation_selection_from_response(
+            response,
             candidate_preparation_micros,
-        })
+        ))
     }
 
     async fn resolve_local_scope(&self) -> Result<Vec<Uuid>> {
@@ -509,6 +676,113 @@ struct PreparedCandidates {
     candidates: Vec<RankedChunk>,
     visible_snippets: Vec<String>,
     relevance_inputs: Vec<RelevanceInput>,
+}
+
+#[cfg(feature = "retrieval-evaluation")]
+fn validate_decision_count(
+    expected: usize,
+    actual: usize,
+) -> std::result::Result<(), EvidenceRelevanceError> {
+    if actual != expected {
+        return Err(EvidenceRelevanceError::DecisionCountMismatch { expected, actual });
+    }
+    Ok(())
+}
+
+#[cfg(feature = "retrieval-evaluation")]
+fn validate_candidate_order(
+    expected: usize,
+    candidate_order: &[usize],
+) -> std::result::Result<(), EvidenceRelevanceError> {
+    if candidate_order.len() != expected {
+        return Err(EvidenceRelevanceError::InvalidOutput);
+    }
+    let mut seen = vec![false; expected];
+    for index in candidate_order {
+        let Some(seen) = seen.get_mut(*index) else {
+            return Err(EvidenceRelevanceError::InvalidOutput);
+        };
+        if std::mem::replace(seen, true) {
+            return Err(EvidenceRelevanceError::InvalidOutput);
+        }
+    }
+    Ok(())
+}
+
+#[cfg(feature = "retrieval-evaluation")]
+fn build_hits_for_candidate_order(
+    node_id: &str,
+    prepared: &PreparedCandidates,
+    decisions: &[EvidenceDecision],
+    candidate_order: &[usize],
+    top_k: usize,
+) -> std::result::Result<Vec<SearchHit>, EvidenceRelevanceError> {
+    validate_decision_count(prepared.candidates.len(), decisions.len())?;
+    validate_candidate_order(prepared.candidates.len(), candidate_order)?;
+
+    let mut hits = Vec::with_capacity(top_k.min(prepared.candidates.len()));
+    for index in candidate_order {
+        let candidate = prepared
+            .candidates
+            .get(*index)
+            .ok_or(EvidenceRelevanceError::InvalidOutput)?;
+        let snippet = prepared
+            .visible_snippets
+            .get(*index)
+            .ok_or(EvidenceRelevanceError::InvalidOutput)?;
+        let decision = decisions
+            .get(*index)
+            .ok_or(EvidenceRelevanceError::InvalidOutput)?;
+        if *decision == EvidenceDecision::Irrelevant {
+            continue;
+        }
+        let chunk_id = public_chunk_id(
+            &candidate.source_sha256,
+            candidate.chunk.ordinal,
+            &candidate.chunk.text_sha256,
+        );
+        let mut hit = SearchHit {
+            concept_id: candidate.chunk.concept_id,
+            collection_id: candidate.chunk.collection_id,
+            chunk_id,
+            title: candidate.title.clone(),
+            snippet: snippet.clone(),
+            heading_or_page: candidate.chunk.heading_or_page.clone(),
+            logical_resource_uri: candidate.logical_resource_uri.clone(),
+            source_revision: candidate.chunk.source_revision,
+            source_sha256: candidate.source_sha256.clone(),
+            updated_at: candidate.updated_at,
+            rank: u32::try_from(hits.len() + 1).unwrap_or(u32::MAX),
+            node_id: node_id.to_owned(),
+        };
+        hit.sanitize_for_wire();
+        hits.push(hit);
+        if hits.len() == top_k {
+            break;
+        }
+    }
+    Ok(hits)
+}
+
+#[cfg(feature = "retrieval-evaluation")]
+fn evaluation_selection_from_response(
+    response: SearchResponse,
+    candidate_preparation_micros: u128,
+) -> RetrievalEvaluationSelection {
+    RetrievalEvaluationSelection {
+        candidates: response
+            .hits
+            .into_iter()
+            .map(|hit| RetrievalEvaluationCandidate {
+                collection_id: hit.collection_id,
+                concept_id: hit.concept_id,
+                chunk_id: hit.chunk_id,
+                source_revision: hit.source_revision,
+            })
+            .collect(),
+        partial: response.partial,
+        candidate_preparation_micros,
+    }
 }
 
 #[cfg(feature = "retrieval-evaluation")]
@@ -974,6 +1248,14 @@ mod tests {
         result: std::result::Result<Vec<EvidenceDecision>, EvidenceRelevanceError>,
     }
 
+    #[cfg(feature = "retrieval-evaluation")]
+    #[derive(Debug, Clone)]
+    struct FixedScoreOrderEvidenceRelevanceProvider {
+        decisions: Vec<EvidenceDecision>,
+        score_order: Vec<usize>,
+        calls: Arc<AtomicUsize>,
+    }
+
     #[async_trait]
     impl EvidenceRelevanceProvider for FixedEvidenceRelevanceProvider {
         fn profile_id(&self) -> &str {
@@ -986,6 +1268,36 @@ mod tests {
             _candidates: &[RelevanceInput],
         ) -> std::result::Result<Vec<EvidenceDecision>, EvidenceRelevanceError> {
             self.result.clone()
+        }
+    }
+
+    #[cfg(feature = "retrieval-evaluation")]
+    #[async_trait]
+    impl EvidenceRelevanceProvider for FixedScoreOrderEvidenceRelevanceProvider {
+        fn profile_id(&self) -> &str {
+            "fixed-score-order-evidence-relevance-test-double"
+        }
+
+        async fn classify(
+            &self,
+            _question: &str,
+            _candidates: &[RelevanceInput],
+        ) -> std::result::Result<Vec<EvidenceDecision>, EvidenceRelevanceError> {
+            self.calls.fetch_add(1, AtomicOrdering::SeqCst);
+            Ok(self.decisions.clone())
+        }
+
+        async fn classify_and_order_for_evaluation(
+            &self,
+            _question: &str,
+            _candidates: &[RelevanceInput],
+        ) -> std::result::Result<RetrievalEvaluationRelevance, EvidenceRelevanceError> {
+            self.calls.fetch_add(1, AtomicOrdering::SeqCst);
+            RetrievalEvaluationRelevance::from_decisions_and_order(
+                self.decisions.clone(),
+                self.score_order.clone(),
+                7,
+            )
         }
     }
 
@@ -1821,6 +2133,186 @@ mod tests {
             embeddings.calls.load(AtomicOrdering::SeqCst),
             embedding_calls_before_replay,
             "an exact-only arm must not perform a redundant query embedding"
+        );
+    }
+
+    #[cfg(feature = "retrieval-evaluation")]
+    #[tokio::test]
+    async fn score_order_comparison_uses_one_shared_relevance_call() {
+        let (database, _collection_id, concept_id) = indexed_database().await;
+        replace_with_ranked_fixture_chunks(&database, concept_id).await;
+        let calls = Arc::new(AtomicUsize::new(0));
+        let engine = HybridSearchEngine::new(
+            database,
+            Arc::new(DeterministicEmbeddingProvider),
+            Arc::new(FixedScoreOrderEvidenceRelevanceProvider {
+                decisions: vec![EvidenceDecision::Relevant; 3],
+                score_order: vec![2, 0, 1],
+                calls: Arc::clone(&calls),
+            }),
+            "mac",
+        );
+
+        let comparison = engine
+            .compare_local_score_order_for_evaluation(SearchRequest::new(
+                "pagos",
+                SearchPurpose::LocalAssistant,
+                airwiki_types::DEFAULT_TOP_K,
+            ))
+            .await
+            .unwrap();
+
+        assert_eq!(calls.load(AtomicOrdering::SeqCst), 1);
+        assert_eq!(comparison.relevance_call_count, 1);
+        assert_eq!(comparison.candidate_count, 3);
+        assert_eq!(comparison.score_order_micros, 7);
+    }
+
+    #[cfg(feature = "retrieval-evaluation")]
+    #[tokio::test]
+    async fn score_order_comparison_reorders_only_the_same_relevant_candidates() {
+        let (database, _collection_id, concept_id) = indexed_database().await;
+        replace_with_ranked_fixture_chunks(&database, concept_id).await;
+        let engine = HybridSearchEngine::new(
+            database,
+            Arc::new(DeterministicEmbeddingProvider),
+            Arc::new(FixedScoreOrderEvidenceRelevanceProvider {
+                decisions: vec![
+                    EvidenceDecision::Relevant,
+                    EvidenceDecision::Irrelevant,
+                    EvidenceDecision::Relevant,
+                ],
+                score_order: vec![1, 2, 0],
+                calls: Arc::new(AtomicUsize::new(0)),
+            }),
+            "mac",
+        );
+        let ranked = engine
+            .rank_local_for_evaluation("pagos", SearchPurpose::LocalAssistant, 3)
+            .await
+            .unwrap();
+
+        let comparison = engine
+            .compare_local_score_order_for_evaluation(SearchRequest::new(
+                "pagos",
+                SearchPurpose::LocalAssistant,
+                airwiki_types::DEFAULT_TOP_K,
+            ))
+            .await
+            .unwrap();
+
+        assert_eq!(
+            comparison
+                .filter_order
+                .candidates
+                .iter()
+                .map(|candidate| candidate.chunk_id)
+                .collect::<Vec<_>>(),
+            vec![ranked[0].chunk_id, ranked[2].chunk_id]
+        );
+        assert_eq!(
+            comparison
+                .score_order
+                .candidates
+                .iter()
+                .map(|candidate| candidate.chunk_id)
+                .collect::<Vec<_>>(),
+            vec![ranked[2].chunk_id, ranked[0].chunk_id]
+        );
+    }
+
+    #[cfg(feature = "retrieval-evaluation")]
+    #[tokio::test]
+    async fn filter_order_arm_matches_the_production_path() {
+        let (database, _collection_id, concept_id) = indexed_database().await;
+        replace_with_ranked_fixture_chunks(&database, concept_id).await;
+        let relevance = Arc::new(FixedScoreOrderEvidenceRelevanceProvider {
+            decisions: vec![
+                EvidenceDecision::Relevant,
+                EvidenceDecision::Irrelevant,
+                EvidenceDecision::Relevant,
+            ],
+            score_order: vec![2, 0, 1],
+            calls: Arc::new(AtomicUsize::new(0)),
+        });
+        let engine = HybridSearchEngine::new(
+            database,
+            Arc::new(DeterministicEmbeddingProvider),
+            relevance,
+            "mac",
+        );
+        let request = SearchRequest::new(
+            "pagos",
+            SearchPurpose::LocalAssistant,
+            airwiki_types::DEFAULT_TOP_K,
+        );
+
+        let comparison = engine
+            .compare_local_score_order_for_evaluation(request.clone())
+            .await
+            .unwrap();
+        let production = engine.search_local(request).await.unwrap();
+
+        assert_eq!(
+            comparison
+                .filter_order
+                .candidates
+                .iter()
+                .map(|candidate| candidate.chunk_id)
+                .collect::<Vec<_>>(),
+            production
+                .hits
+                .iter()
+                .map(|hit| hit.chunk_id)
+                .collect::<Vec<_>>()
+        );
+    }
+
+    #[cfg(feature = "retrieval-evaluation")]
+    #[tokio::test]
+    async fn score_order_comparison_invalidates_both_arms_after_withdrawal() {
+        let (database, _collection_id, concept_id) = indexed_database().await;
+        let source_document_id = database
+            .concept(concept_id)
+            .unwrap()
+            .unwrap()
+            .source_document_id;
+        let engine = HybridSearchEngine::new(
+            database.clone(),
+            Arc::new(DeterministicEmbeddingProvider),
+            Arc::new(WithdrawsDuringRelevance {
+                database,
+                source_document_id,
+            }),
+            "mac",
+        );
+
+        let comparison = engine
+            .compare_local_score_order_for_evaluation(SearchRequest::new(
+                "pagos",
+                SearchPurpose::LocalAssistant,
+                airwiki_types::DEFAULT_TOP_K,
+            ))
+            .await
+            .unwrap();
+
+        assert!(comparison.invalidated);
+        assert!(comparison.filter_order.partial);
+        assert!(comparison.score_order.partial);
+        assert!(comparison.filter_order.candidates.is_empty());
+        assert!(comparison.score_order.candidates.is_empty());
+    }
+
+    #[cfg(feature = "retrieval-evaluation")]
+    #[test]
+    fn evaluation_relevance_rejects_a_non_bijective_order() {
+        assert_eq!(
+            RetrievalEvaluationRelevance::from_decisions_and_order(
+                vec![EvidenceDecision::Relevant; 2],
+                vec![0, 0],
+                0,
+            ),
+            Err(EvidenceRelevanceError::InvalidOutput)
         );
     }
 

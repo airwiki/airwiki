@@ -36,6 +36,7 @@ mod corpus;
 mod mini_graph;
 mod qa_entailment;
 mod real_graph;
+mod rerank_order;
 mod reviewed_anchor_selector;
 mod reviewed_anchors;
 mod selector;
@@ -44,6 +45,7 @@ mod sham_graph;
 pub(crate) use answerability::evaluate_answerability;
 pub(crate) use mini_graph::evaluate_mini_graph;
 pub(crate) use real_graph::{evaluate_final_mini_graph, evaluate_real_mini_graph};
+pub(crate) use rerank_order::evaluate_rerank_order;
 pub(crate) use reviewed_anchors::evaluate_reviewed_anchors;
 
 const ANSWERABILITY_CORPUS_MANIFEST_PATH: &str =

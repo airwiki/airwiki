@@ -1032,3 +1032,73 @@ would still permit about 16.2% risk, and 299 are required before the bound falls
 below 1%. The 17 exploratory NLI pairs above do not establish those assumptions.
 Until a frozen candidate passes a fresh domain-separated holdout, AirWiki must
 describe all such runs as development evidence, not a safety guarantee.
+
+## mMARCO score-order ablation
+
+AirWiki's pinned mMARCO cross-encoder currently classifies each of the first ten
+hybrid candidates as relevant or irrelevant, after which search preserves the
+original BM25/E5/RRF order. This is intentionally conservative, but it does not
+exercise the model as a reranker. The model card and the standard cross-encoder
+contract instead order passages by descending score
+([model card](https://huggingface.co/cross-encoder/mmarco-mMiniLMv2-L12-H384-v1),
+[Sentence Transformers](https://www.sbert.net/docs/cross_encoder/usage/usage.html));
+the original BERT passage-ranking formulation likewise sorts passage relevance
+estimates to construct the final list
+([Nogueira and Cho, 2019](https://arxiv.org/abs/1901.04085)).
+
+### H-RR1 frozen development contract
+
+H-RR1 asks whether AirWiki loses useful evidence by discarding score order. It
+compares two outputs from **one** mMARCO inference over the **same** ordered set
+of at most ten authorized, current candidates:
+
+- **A0:** apply the existing relevance mask and retain hybrid RRF order; and
+- **A1:** apply the identical mask, then stable-sort relevant candidates by
+  descending mMARCO score, breaking equal-score ties by their original RRF
+  position.
+
+The evaluator may expose a permutation of candidate indices, but never raw
+scores, questions, passage text, snippets or local identities. A0 and A1 must
+have identical candidate identities and relevance decisions. Both arms pass
+through the same citation construction and final publication/policy
+revalidation. A concurrent publication or authorization change invalidates the
+paired case rather than favoring either arm.
+
+The first run is a mechanism diagnostic on already visible development data,
+not promotion evidence. H-RR1 advances to a new licensed, domain-separated
+development corpus only if A1 improves at least one answerable case, loses no
+evidence group found by A0, does not reduce MRR@5, and does not increase false
+or forbidden evidence. No-answer accuracy must remain 100%; provider,
+provenance and stale-revision failures must remain zero; stable sorting must add
+less than one millisecond p95 outside the shared inference. Otherwise H-RR1 is
+rejected without changing production.
+
+If H-RR1 advances, candidate depths 10, 16 and 32 become a separate H-RR2
+experiment on the new development corpus. Pool depth, score fusion and
+abstention thresholds must not be changed in H-RR1. A later production proposal
+requires a frozen candidate and a newly authored holdout that has not been used
+to select any of those choices. Results must be stratified by Spanish-to-Spanish,
+English-to-English and both cross-language directions; multilingual training
+does not establish equivalent cross-language calibration.
+
+```bash
+cargo run --release --locked -p xtask -- retrieval evaluate-rerank-order \
+  --embedding-snapshot <verified-multilingual-e5-small-snapshot> \
+  --relevance-snapshot <verified-mmarco-snapshot>
+```
+
+**Observed visible-development result (2026-07-18).** The diagnostic used the
+pinned multilingual E5 and mMARCO snapshots on macOS arm64. It evaluated five
+eligible local cases and 39 candidates with exactly five shared relevance calls
+and no provider, provenance, forbidden-evidence or partial-result failures.
+A0 and A1 were identical: each found two of three evidence groups, for 0.667
+Recall@5 and MRR@5, with 1.00 citation precision and 1.00 no-answer accuracy.
+A1 improved zero answerable cases and lost zero groups. Stable score ordering
+was below the timer's microsecond resolution.
+
+H-RR1 is therefore rejected and production search remains unchanged. In the
+missed Atlas case the fixed relevance mask removed every candidate before order
+could matter; the other answerable cases retained at most one result. Pool-depth
+H-RR2 must not proceed from this result. The next experiment must separate
+ranking from abstention on a new licensed development corpus instead of tuning
+the existing threshold against these five visible cases.

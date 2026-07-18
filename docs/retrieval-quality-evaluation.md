@@ -16,13 +16,27 @@ contract.
 
 ## Scope
 
-The schema-v1 fixture at `fixtures/retrieval/search-quality-v1.json` has
-SHA-256
-`accd40d8473ad499469c0fd105eec9f34d70f660c9bdada1254d2325f609e727`.
-Its 13 calibration and holdout cases cover direct and paraphrased retrieval,
-cross-language and compound questions, absent and withdrawn facts,
+The active schema-v2 fixture at
+`fixtures/retrieval/search-quality-v2.json` has SHA-256
+`2b83ffb0939b4e91a9fdb799d92a4b6ed4e4f775298694c5b9abe3761a2f52f6`.
+Its 17 regression, calibration and holdout cases cover direct and paraphrased
+retrieval, cross-language and compound questions, absent and withdrawn facts,
 contradictions, common-name ambiguity, prompt injection, near duplicates,
 authorization, external-chat policy and stable ordering.
+
+V2 preserves the five observed failures from the initial run as regression
+cases. Every case and document belongs to a domain, and the validator rejects
+overlap between regression, calibration and holdout domains, cross-domain gold
+evidence, answerable cases with merely related evidence, no-answer facts that
+are not forbidden, and a corpus without a peer-without-grant case. The split
+remains serialized as `holdout`, but it has already been observed and now serves
+only as diagnostic transfer evidence. A future promotion decision requires
+fresh domains rather than relabeling this fixture as an unobserved holdout.
+
+The original schema-v1 fixture remains unchanged at
+`fixtures/retrieval/search-quality-v1.json` with SHA-256
+`accd40d8473ad499469c0fd105eec9f34d70f660c9bdada1254d2325f609e727`.
+It preserves the initial measurement and is not the active acceptance corpus.
 
 The evaluator builds temporary origin and peer databases and uses the production
 publication and search interfaces. It covers:
@@ -75,7 +89,7 @@ threshold.
 
 ## Metrics and acceptance
 
-Each calibration and holdout split must independently satisfy:
+Each regression, calibration and holdout split must independently satisfy:
 
 - Recall@5 of at least 0.90 across expected evidence groups;
 - zero unexpected evidence facts;
@@ -84,6 +98,9 @@ Each calibration and holdout split must independently satisfy:
 - zero duplicate violations; and
 - stable repeated results, stable top-5 prefixes and stable results after
   reversing insertion order.
+
+Every regression case must also pass individually, so a strong aggregate cannot
+hide the return of a known failure.
 
 MRR@5 uses the first returned member of an expected evidence group. Every
 answerable case is included in the denominator, and a miss contributes zero.
@@ -117,12 +134,21 @@ The failing case identifiers were `calibration_paraphrase_recovery`,
 `holdout_external_ai_policy` and `holdout_unrelated_injection`. These identifiers
 are synthetic diagnostics and contain no question or document content.
 
-The current real-model profile therefore **fails** this retrieval-quality gate.
-The result establishes an honest baseline: the authorization, provenance,
+The v1 real-model observation therefore **failed** this retrieval-quality gate.
+The result established an honest baseline: the authorization, provenance,
 deduplication and stability boundaries held, while retrieval completeness and
 false-evidence control need focused improvement. This goal does not tune the
 fixture, add query decomposition, introduce another model or change product
 protocols merely to turn that observation green.
 
+Schema v2 deterministically validates the corrected corpus and pipeline
+contract. It has not established a passing semantic-quality result for the real
+model artifacts.
+
 Windows real-model evaluation is pending. A macOS result must never be used to
 infer the behavior of the Windows artifacts.
+
+Rejected or inconclusive candidate mechanisms are summarized in the
+[retrieval research ledger](retrieval-research-ledger.md). Their implementation
+remains in the linked pull requests for reproducibility but is not maintained in
+`main` without an active product consumer.

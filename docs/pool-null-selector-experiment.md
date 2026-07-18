@@ -1,7 +1,8 @@
 # Pool-level abstention experiment
 
-Status: **preregistered; not executed**. This experiment is disposable research
-and does not authorize a model, policy, runtime or production-search change.
+Status: **completed and rejected on 2026-07-18**. This experiment was disposable
+research and does not authorize a model, policy, runtime or production-search
+change.
 
 ## Question
 
@@ -30,6 +31,27 @@ single-variable comparison with the retired BCE run.
 Calibration, score-gap heuristics and ensembles are excluded. They can abstain
 on uncertain pools, but cannot repair a confidently wrong entity or relation
 and would add another tuning surface or runtime cost.
+
+## Observed outcome
+
+The one-shot compatibility diagnostic completed under the preregistered offline
+contract. Neither arm passed, so the experiment stopped before regression
+diagnostics, fresh holdouts, export or product integration.
+
+| Arm | Answer recall | Lowest direction recall | Precision | Exact-pool success | No-answer or high-risk acceptances | Decision |
+| --- | ---: | ---: | ---: | ---: | ---: | --- |
+| Fixed-boundary control | 0.7083 | 0.5000 | 1.0000 | 0.5625 | 0 | Reject |
+| Query-conditioned no-evidence | 0.7500 | 0.5000 | 1.0000 | 0.6250 | 0 | Reject |
+
+Both arms safely avoided false evidence in this observed split, but missed the
+required 0.90 overall recall, 0.85 recall in every language direction and 0.85
+exact-pool success gates. The query-conditioned arm recovered only two more of
+48 answers than the control and did not make the mechanism eligible for another
+diagnostic. The aggregate [attempt receipt](../experiments/pool-null-selector-v1/evidence/compatibility-attempt.json)
+and [report](../experiments/pool-null-selector-v1/evidence/compatibility-report.json)
+preserve the audited outcome. Their SHA-256 values are respectively
+`39078cb91601032bc910541c1cbc237196923133587fc100ba8d846b1748842b` and
+`cbd797657b716ee27cefd12dc3a23ee1e3ce1e39e80a7477c7197b4037aa995e`.
 
 ## Shared training contract
 
@@ -77,13 +99,15 @@ six candidates plus the empty pair. Arm A ignores the empty-pair score and its
 gradient, while Arm B uses it as `z_q`; this keeps pool order, tensor shape and
 dropout consumption identical. Arm A evaluates only the six production inputs.
 
-The exact reviewed [runner](../experiments/pool-null-selector-v1/runner.py) and
-small aggregate evidence live outside Cargo's regenerable `target/` directory.
-Downloaded assets and checkpoints remain under ignored `target/` state and are
-never shipped. After explicit model preparation, the observed command
-self-reexecutes exactly once inside its own macOS kernel sandbox with all network
-access denied and verifies there that a loopback connection is rejected before
-creating its receipt.
+The exact reviewed runner remains in [PR #29](https://github.com/airwiki/airwiki/pull/29)
+at commit `e8091d79660b3be3779efde5f2a8f458dc7e0c5d`; it was removed from
+the maintained tree after rejection. Small aggregate evidence remains outside
+Cargo's regenerable `target/` directory.
+Downloaded assets and checkpoints stayed under ignored `target/` state during
+the run, were never shipped and were deleted after rejection. After explicit
+model preparation, the observed command reexecuted exactly once inside its own
+macOS kernel sandbox with all network access denied and verified there that a
+loopback connection was rejected before creating its receipt.
 It checks every loader-visible model/tokenizer file against an exact manifest,
 persists aggregate numerators, denominators and metrics only, and never writes
 questions, passages, identifiers, per-pair scores or labels to logs.
@@ -157,7 +181,7 @@ version.
 
 ## Staged decision
 
-### 1. Observed compatibility diagnostic
+### 1. Observed compatibility diagnostic — completed and rejected
 
 The selector-v1 development split was already observed and previously selected
 another candidate's seed and cutoff. It is therefore a diagnostic, not an
@@ -182,18 +206,21 @@ then the fixed-boundary control. This selection is allowed only because every
 later acceptance gate uses fresh, separately sealed data. Do not tune either
 arm after seeing this diagnostic.
 
-### 2. Observed regression diagnostics
+### 2. Observed regression diagnostics — not run
 
-Run only the selected frozen arm once through the existing relevance-v2 and
-retrieval-v3 evaluators. Those corpora are already observed; they may reject the
-candidate but cannot promote it. The candidate must retain every current
-provenance, authorization, deduplication, stability and ordering invariant,
-meet the documented per-split recall gates, and emit zero unexpected or
-forbidden evidence. Any failure retires the experiment without a fresh corpus.
+This stage was not authorized because neither arm passed stage 1. Its frozen
+contract would have run only the selected frozen arm once through the existing
+relevance-v2 and retrieval-v3 evaluators. Those corpora are already observed;
+they may reject the candidate but cannot promote it. The candidate must retain
+every current provenance, authorization, deduplication, stability and ordering
+invariant, meet the documented per-split recall gates, and emit zero unexpected
+or forbidden evidence. Any failure retires the experiment without a fresh
+corpus.
 
-### 3. Fresh rejection holdout
+### 3. Fresh rejection holdout — not created or run
 
-Only a diagnostic pass permits authoring a fresh sealed rejection holdout. It
+This stage was not authorized because neither arm passed stage 1. Only a
+diagnostic pass permits authoring a fresh sealed rejection holdout. It
 contains 32 ten-candidate pools, balanced across ES-to-ES, ES-to-EN, EN-to-ES
 and EN-to-EN, with new worlds, entity families, relation families and
 paraphrase templates. Each direction contains six answerable pools with exactly
@@ -215,9 +242,10 @@ Run the selected candidate once, offline on CPU, using the same semantic and
 coverage gates as above. Do not retain per-pair scores. A failure retires the
 experiment. A pass only permits the next stage.
 
-### 4. Human-reviewed promotion holdout
+### 4. Human-reviewed promotion holdout — not created or run
 
-A fresh promotion corpus must use new domains and remain unobserved by the
+This stage was not authorized because neither arm passed stage 1. A fresh
+promotion corpus must use new domains and remain unobserved by the
 candidate. It contains 48 ten-candidate pools, twelve per language direction
 and three no-answer pools per direction. Each direction contains nine
 answerable pools with exactly two `answer`, two `support` and six

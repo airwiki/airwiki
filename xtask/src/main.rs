@@ -306,9 +306,42 @@ async fn main() -> Result<()> {
                 )
                 .await
             }
+            Some("evaluate-reviewed-anchors") => {
+                ensure!(
+                    arguments.next().as_deref() == Some("--data-root"),
+                    "retrieval evaluate-reviewed-anchors expects `--data-root <directory>` first"
+                );
+                let data_root = arguments
+                    .next()
+                    .context("retrieval evaluate-reviewed-anchors is missing the data root")?;
+                ensure!(
+                    arguments.next().as_deref() == Some("--llama-server"),
+                    "retrieval evaluate-reviewed-anchors expects `--llama-server <path>` after the data root"
+                );
+                let llama_server = arguments
+                    .next()
+                    .context("retrieval evaluate-reviewed-anchors is missing llama-server")?;
+                ensure!(
+                    arguments.next().as_deref() == Some("--model-id"),
+                    "retrieval evaluate-reviewed-anchors expects `--model-id <catalog-id>` last"
+                );
+                let model_id = arguments
+                    .next()
+                    .context("retrieval evaluate-reviewed-anchors is missing the model ID")?;
+                ensure!(
+                    arguments.next().is_none(),
+                    "retrieval evaluate-reviewed-anchors received unexpected arguments"
+                );
+                retrieval::evaluate_reviewed_anchors(
+                    Path::new(&data_root),
+                    Path::new(&llama_server),
+                    &model_id,
+                )
+                .await
+            }
             Some(other) => bail!("unknown retrieval command: {other}"),
             None => bail!(
-                "missing retrieval command; expected `corpus`, `validate`, `evaluate`, `evaluate-selector` or `evaluate-answerability`"
+                "missing retrieval command; expected `corpus`, `validate`, `evaluate`, `evaluate-selector`, `evaluate-answerability` or `evaluate-reviewed-anchors`"
             ),
         },
         "licenses" => match arguments.next().as_deref() {
@@ -373,6 +406,9 @@ async fn main() -> Result<()> {
             );
             println!(
                 "cargo run --locked -p xtask -- retrieval evaluate-answerability --source-root <directory> --data-root <directory> --llama-server <path> --model-id <catalog-id>"
+            );
+            println!(
+                "cargo run --locked -p xtask -- retrieval evaluate-reviewed-anchors --data-root <directory> --llama-server <path> --model-id <catalog-id>"
             );
             println!("cargo run --locked -p xtask -- licenses generate");
             println!("cargo run --locked -p xtask -- licenses check");

@@ -466,6 +466,16 @@ content, path, identity, endpoint and token exclusions above. In particular, it
 does not serialize needs, answers, claims, quotes, passages, candidate IDs,
 source-native record IDs or local roots.
 
+The reviewed-anchor ablation report contains fixture, model and policy
+fingerprints; target and bounded runtime parameters; synthetic case identifiers;
+per-case expected and observed decisions, counts and elapsed times; aggregate
+coverage, precision, conflict and failure counts; call and latency summaries;
+and the two development-readiness booleans. It does not serialize questions,
+atomic needs, claims, anchors, structured keys or values, selected fact
+identifiers, snippets, source-document paths or source-document hashes, peer
+data, endpoints or model output. `production_promotion_ready` is always false
+for this observed development fixture.
+
 ## Initial v1 platform observation
 
 The first macOS arm64 observation on 2026-07-16 used the pinned E5 revision
@@ -633,8 +643,9 @@ QA entailment and relational hard negatives.
 
 ## Next research gate
 
-The next candidate must use a larger, licensed and traceable development corpus
-before any production change, but more benchmarks are not automatically better.
+The next promotion-oriented candidate must use a larger, licensed and traceable
+development corpus before any production change, but more benchmarks are not
+automatically better.
 [`MIRACL`](https://aclanthology.org/2023.tacl-1.63/),
 [`SQuAD2`](https://aclanthology.org/P18-2124/),
 [`XQuAD`](https://aclanthology.org/2020.acl-main.421/),
@@ -647,32 +658,132 @@ must fill a declared capability gap and preserve its license and attribution.
 Documents, translations and multi-hop chains remain grouped before any split so
 equivalent evidence cannot cross development, calibration and final holdout.
 
-**AirWiki hypothesis H-AWK-1:** claims with reviewed evidence anchors created at
-publication time will be safer and cheaper to query than generating and
-verifying a new claim from scratch with the same small model on every search.
-This hypothesis exploits AirWiki's human review, immutable revisions and OKF
-resources rather than copying a web-RAG architecture.
+### Reviewed-evidence-anchor ablation (H-AWK-1)
 
-The smallest experimental algorithm is:
+**AirWiki hypothesis H-AWK-1:** a short reviewed factual claim bound to an exact
+literal source anchor may be a safer and cheaper selection unit than asking the
+same small local model to extract, rewrite and verify an answer from raw
+passages at query time. The predicted mechanism is less query-time generation,
+explicit subject/relation/scope/temporal identity and deterministic
+counterevidence detection without weakening publication or authorization.
 
-1. During review, the model proposes an atomic claim plus a literal anchor,
-   scope, negation and revision; a person accepts, edits or rejects it.
-2. Search retrieves only authorized, current reviewed claims and their anchors.
-3. For a bounded candidate pool, Rust evaluates the small subsets in stable
-   order and chooses the smallest evidence set that covers every atomic need;
-   `all_of` obligations require every complementary piece, while `one_of`
-   accepts one equivalent source. If no complete cover exists, it abstains.
-4. A separate retrieval pass looks for counterevidence, later revisions and
-   scope or negation conflicts. A material unresolved conflict is reported
-   explicitly rather than collapsed into one confidence score.
+The `xtask`-only development ablation keeps the production publication and
+hybrid-search path, but uses a pass-through relevance provider to retain its
+bounded candidates. It compares:
 
-The first ablation compares: (A) the current two-call development verifier; (B)
-retrieval over reviewed claims; and (C) reviewed claims plus counterevidence
-search. It measures selective risk, complete-need coverage, conflicts found,
-latency, memory and additional human review time. H-AWK-1 is rejected if it does
-not reduce unsupported accepted evidence, loses unacceptable coverage, exceeds
-local resource budgets or imposes an impractical review burden. No OKF profile
-or production schema changes until that experimental advantage exists.
+- **A — raw passages:** the rejected two-call QA-entailment verifier;
+- **B — reviewed claims:** one model call maps fixture-supplied atomic needs to
+  opaque claim identifiers, while Rust validates the closed output and literal
+  anchor binding; and
+- **C — reviewed claims plus conflicts:** arm B followed by a deterministic
+  scan for current, authorized claims with the same subject, relation, scope
+  and temporal key, where opposite polarities apply to the same value or two
+  affirmed values differ for an explicitly single-valued relation.
+
+The selector receives only atomic needs and reviewed claim text. It never
+receives expected groups, fixture roles, structured claim keys, authorization
+state or expected outcomes. Rust applies the production publication, revision
+and authorization filters before selection. No production schema, OKF profile,
+SQLite contract, search API, LAN protocol or desktop behavior changes.
+
+`fixtures/retrieval/reviewed-anchors-v1.json` is a manually authored synthetic
+development overlay pinned to `search-quality-v2.json`. It was created after
+the base questions and transfer cases had already been observed. The command
+evaluates regression and calibration cases only; its holdout-shaped entries
+validate structural binding and are not evaluated as a holdout. The fixture
+also supplies atomic decomposition and expected groups, so the run does not
+evaluate decomposition, claim-authoring quality, independent adjudication or
+human review time. Because B and C change both indexed representation and
+selector, any improvement belongs to the combined mechanism rather than to
+anchors alone.
+
+```bash
+cargo run --locked -p xtask -- retrieval evaluate-reviewed-anchors \
+  --data-root <verified-AirWiki-data-root> \
+  --llama-server <verified-bundled-llama-server> \
+  --model-id <catalog-model-id>
+```
+
+The command downloads nothing and writes a sanitized report under
+`target/evals/`. Zero forbidden evidence, selective risk, failures and false
+conflicts are safety vetoes. It also requires every expected outcome to be
+correct, every required evidence group to remain represented in the effective
+model-input pool, every expected conflict to be detected, coverage no worse
+than arm A and at most one model call per case. Passing sets only
+`mechanism_promising`;
+`production_promotion_ready` remains false by design. Promotion requires a
+separately authored and frozen domain-grouped holdout, independent human
+adjudication, review-time measurement and installed macOS and Windows latency
+and peak-memory evidence.
+
+### In-process mini-graph hypothesis (H-AWK-2)
+
+**AirWiki hypothesis H-AWK-2:** starting from BM25/E5 seeds and expanding only
+reviewed, typed relationships for one or two hops may recover complementary and
+conflicting evidence that vector or lexical similarity misses, while remaining
+bounded enough for workstation memory and interactive latency.
+
+The first graph experiment is deferred until H-AWK-1 establishes a reliable
+reviewed unit. Its path is `BM25/E5 seeds -> bounded graph expansion ->
+reviewed-claim selection -> deterministic counterevidence`. The initial Rust
+representation should use concept nodes only, intern canonical concept
+identities into projection-local `u32` node IDs, keep compact adjacency vectors
+and enforce explicit node, edge and hop budgets. The first experiment starts
+with compact in-project adjacency vectors; CSR or a graph crate is considered
+only if profiling demonstrates a need. There is no graph database, daemon,
+query language or network service.
+
+The graph is a derived, rebuildable projection of reconciled current
+publications; it is never a new source of truth. Its first edge type is only a
+resolved internal concept link from a reviewed OKF page. Tags, entity
+suggestions, external links and similarity-inferred relations create neither
+nodes nor edges. Additional relation types remain deferred until reviewed
+metadata and a measured case require them. Authorization, current revision and
+publication state apply to every seed and expanded node, so traversal cannot
+widen the caller's collection scope.
+
+A future arm D must report unique multi-hop atomic-need recall, evidence
+precision, conflict recall, forbidden evidence, p95 end-to-end latency, peak RSS
+and bytes per node and edge against H-AWK-1 without the graph. Reject it if it
+adds no unique coverage, introduces any forbidden or false evidence, exceeds
+the interactive resource budget, or makes rebuild and reconciliation
+materially less reliable.
+
+### H-AWK-1 development observation
+
+The first macOS arm64 release-profile run on 2026-07-18 used Gemma 4 E4B Q4 at
+revision `7edc6763a77bbca236126a361613b834c5ea0f7a`, llama.cpp `b9946`, four
+threads and reviewed-anchor fixture SHA-256
+`21d6fc5623b388a8c8ed2659c48e8faaf276fddc66ad4b1e88dbc1547f69ce8c`.
+The candidate fingerprint was
+`a303b79c080095483d52de072cb36642ba5f5b7731a5d71654c8a13783a37e80`.
+
+All three arms made all 10 required evidence groups available in their
+effective selection pools; this measures candidate availability, not final
+accepted-evidence recall. The raw two-call arm covered 1 of 9 positive atomic
+needs, returned 4 of 11 correct outcomes and returned `unavailable` in 7 cases.
+Reviewed claims covered all 9 positive needs and made 13 per-case evidence
+selections, of which 10 were supportive (precision 10/13). They produced four
+selective-risk cases, including one fixture-forbidden semantic selection; this
+was not an authorization leak, because every pre-model policy exclusion held.
+Of four expected no-answer cases, the selector incorrectly accepted one and
+returned `unavailable` for the other three. Deterministic conflict detection
+found the one expected conflict with no false conflict, reduced selective-risk
+cases from four to three, retained 10/13 evidence precision and produced 5 of
+11 correct outcomes.
+
+The reviewed-claim arm used one model call per case and had per-case evaluator
+p50/p95 of 2.970/6.457 seconds, compared with 7.615/11.351 seconds for the raw
+arm. These distributions are not comparable speed evidence: only one raw-arm
+case reached verification, producing 12 calls across 11 cases, while most raw
+cases failed earlier. Human review time and peak memory were not measured.
+
+The current one-call H-AWK-1 selector therefore **fails** the development gate.
+Its coverage and conflict result do not compensate for false evidence,
+no-answer failures and low outcome correctness. Production search remains
+unchanged. This rejects the measured selector contract, not reviewed anchors as
+a future representation; another candidate must establish a safer selection
+mechanism on new development domains before graph expansion can consume it.
 
 The primary measures have fixed meanings:
 

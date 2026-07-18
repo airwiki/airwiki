@@ -21,6 +21,11 @@ or personal information.
   and federated scopes, policy, grants, provenance, deduplication, stability and
   honest abstention. Its former holdout has been observed and cannot approve a
   production profile; final promotion requires fresh domains.
+- `retrieval/reviewed-anchors-v1.json`: development-only overlay of synthetic
+  claim and literal-anchor records intended to model a reviewed representation.
+  It compares passage QA, claim selection and deterministic conflict detection,
+  was authored with the known search-quality questions and is not a promotion
+  holdout.
 
 The expected federated question asks how Atlas is recovered, who is responsible,
 and the target date. A correct answer combines the Mac procedure with the
@@ -59,6 +64,16 @@ cargo run --locked -p xtask -- retrieval evaluate \
   --phase development \
   --embedding-snapshot <verified-e5-snapshot-directory> \
   --relevance-snapshot <verified-mmarco-snapshot-directory>
+```
+
+The reviewed-anchor mechanism ablation reuses the installed, verified AirWiki
+assets and writes a sanitized development report under `target/evals/`:
+
+```bash
+cargo run --locked -p xtask -- retrieval evaluate-reviewed-anchors \
+  --data-root <AirWiki-data-root> \
+  --llama-server <verified-llama-server> \
+  --model-id <catalog-id>
 ```
 
 See the [retrieval-quality evaluation profile](../docs/retrieval-quality-evaluation.md)

@@ -423,6 +423,13 @@ async fn main() -> Result<()> {
                 );
                 retrieval::evaluate_mini_graph()
             }
+            Some("evaluate-path-signal") => {
+                ensure!(
+                    arguments.next().is_none(),
+                    "retrieval evaluate-path-signal received unexpected arguments"
+                );
+                retrieval::evaluate_path_signal()
+            }
             Some("evaluate-real-mini-graph") => {
                 ensure!(
                     arguments.next().as_deref() == Some("--embedding-snapshot"),
@@ -464,7 +471,7 @@ async fn main() -> Result<()> {
             }
             Some(other) => bail!("unknown retrieval command: {other}"),
             None => bail!(
-                "missing retrieval command; expected `corpus`, `calibration-corpus`, `validate`, `evaluate`, `evaluate-selector`, `evaluate-answerability`, `evaluate-reviewed-anchors`, `evaluate-rerank-order`, `evaluate-rerank-calibration`, `evaluate-mini-graph`, `evaluate-real-mini-graph` or `evaluate-final-mini-graph`"
+                "missing retrieval command; expected `corpus`, `calibration-corpus`, `validate`, `evaluate`, `evaluate-selector`, `evaluate-answerability`, `evaluate-reviewed-anchors`, `evaluate-rerank-order`, `evaluate-rerank-calibration`, `evaluate-mini-graph`, `evaluate-path-signal`, `evaluate-real-mini-graph` or `evaluate-final-mini-graph`"
             ),
         },
         "licenses" => match arguments.next().as_deref() {
@@ -544,6 +551,7 @@ async fn main() -> Result<()> {
                 "cargo run --release --locked -p xtask -- retrieval evaluate-rerank-calibration --source-root <directory> --relevance-snapshot <directory>"
             );
             println!("cargo run --release --locked -p xtask -- retrieval evaluate-mini-graph");
+            println!("cargo run --release --locked -p xtask -- retrieval evaluate-path-signal");
             println!(
                 "cargo run --release --locked -p xtask -- retrieval evaluate-real-mini-graph --embedding-snapshot <directory>"
             );

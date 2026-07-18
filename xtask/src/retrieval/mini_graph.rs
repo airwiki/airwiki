@@ -30,6 +30,8 @@ const MAX_GRAPH_NODES: usize = 500;
 const MAX_GRAPH_EDGES: usize = 2_000;
 const MAX_GRAPH_LINK_INPUTS: usize = 4_000;
 const MAX_SCANNED_EDGES: usize = 128;
+const MAX_PATH_SCANNED_EDGES: u32 = 256;
+const MAX_PATH_FRONTIER: usize = MAX_PATH_SCANNED_EDGES as usize;
 const MAX_RETAINED_PAYLOAD_BYTES: usize = 1024 * 1024;
 const MAX_BUILD_MICROS_P95: u128 = 50_000;
 const MAX_EXPANSION_MICROS_P95: u128 = 5_000;
@@ -392,12 +394,187 @@ impl MiniGraph {
         result
     }
 
+    /// Tests whether two visible concepts are connected by at most two
+    /// reviewed-link hops without returning the intermediate concept.
+    ///
+    /// This is intentionally a bounded diagnostic primitive. It cannot turn a
+    /// graph node into evidence, and callers must still validate every final
+    /// hit through the normal publication and authorization path.
+    pub(in crate::retrieval) fn path_within_two_hops(
+        &self,
+        source: NodeId,
+        target: NodeId,
+        scope: &QueryScope,
+        direction: ExpansionDirection,
+    ) -> PathQueryResult {
+        if !self.is_visible(source, scope) || !self.is_visible(target, scope) {
+            return PathQueryResult {
+                status: PathQueryStatus::EndpointUnavailable,
+                edges_scanned: 0,
+            };
+        }
+        if source == target {
+            return PathQueryResult {
+                status: PathQueryStatus::Found { hops: 0 },
+                edges_scanned: 0,
+            };
+        }
+
+        let mut traversal = PathTraversal::new();
+        self.scan_path_neighbors(source, target, scope, direction, true, &mut traversal);
+        if traversal.target_found {
+            return traversal.finish(PathQueryStatus::Found { hops: 1 });
+        }
+        if traversal.edge_budget_exhausted {
+            return traversal.finish(PathQueryStatus::BudgetExceeded);
+        }
+
+        let first_hop_count = traversal.frontier.len();
+        for index in 0..first_hop_count {
+            let intermediate = traversal.frontier[index];
+            self.scan_path_neighbors(
+                intermediate,
+                target,
+                scope,
+                direction,
+                false,
+                &mut traversal,
+            );
+            if traversal.target_found {
+                return traversal.finish(PathQueryStatus::Found { hops: 2 });
+            }
+            if traversal.edge_budget_exhausted {
+                break;
+            }
+        }
+        traversal.finish(if traversal.edge_budget_exhausted {
+            PathQueryStatus::BudgetExceeded
+        } else {
+            PathQueryStatus::NotConnected
+        })
+    }
+
+    pub(in crate::retrieval) const fn path_requested_scratch_bytes() -> usize {
+        size_of::<PathTraversal>() + MAX_PATH_FRONTIER * size_of::<NodeId>()
+    }
+
+    fn scan_path_neighbors(
+        &self,
+        source: NodeId,
+        target: NodeId,
+        scope: &QueryScope,
+        direction: ExpansionDirection,
+        collect_frontier: bool,
+        traversal: &mut PathTraversal,
+    ) {
+        let Ok(source_index) = node_index(source) else {
+            return;
+        };
+        let Some(outgoing) = self.outgoing.get(source_index) else {
+            return;
+        };
+        scan_path_adjacency(self, outgoing, target, scope, collect_frontier, traversal);
+        if direction == ExpansionDirection::Bidirectional
+            && !traversal.target_found
+            && !traversal.edge_budget_exhausted
+            && let Some(incoming) = self.incoming.get(source_index)
+        {
+            scan_path_adjacency(self, incoming, target, scope, collect_frontier, traversal);
+        }
+    }
+
     fn is_visible(&self, id: NodeId, scope: &QueryScope) -> bool {
         self.node(id).is_some_and(|node| {
             scope.authorized_collections.contains(&node.collection_id)
                 && (scope.purpose == GraphPurpose::LocalAssistant
                     || scope.external_ai_collections.contains(&node.collection_id))
         })
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(in crate::retrieval) struct PathQueryResult {
+    pub(in crate::retrieval) status: PathQueryStatus,
+    pub(in crate::retrieval) edges_scanned: u32,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(in crate::retrieval) enum PathQueryStatus {
+    Found { hops: u8 },
+    NotConnected,
+    BudgetExceeded,
+    EndpointUnavailable,
+}
+
+impl PathQueryStatus {
+    pub(in crate::retrieval) const fn hops(self) -> Option<u8> {
+        match self {
+            Self::Found { hops } => Some(hops),
+            Self::NotConnected | Self::BudgetExceeded | Self::EndpointUnavailable => None,
+        }
+    }
+
+    pub(in crate::retrieval) const fn connected(self) -> Option<bool> {
+        match self {
+            Self::Found { .. } => Some(true),
+            Self::NotConnected => Some(false),
+            Self::BudgetExceeded | Self::EndpointUnavailable => None,
+        }
+    }
+}
+
+struct PathTraversal {
+    frontier: Vec<NodeId>,
+    edges_scanned: u32,
+    target_found: bool,
+    edge_budget_exhausted: bool,
+}
+
+impl PathTraversal {
+    fn new() -> Self {
+        Self {
+            frontier: Vec::with_capacity(MAX_PATH_FRONTIER),
+            edges_scanned: 0,
+            target_found: false,
+            edge_budget_exhausted: false,
+        }
+    }
+
+    fn finish(&self, status: PathQueryStatus) -> PathQueryResult {
+        PathQueryResult {
+            status,
+            edges_scanned: self.edges_scanned,
+        }
+    }
+}
+
+fn scan_path_adjacency(
+    graph: &MiniGraph,
+    adjacency: &[NodeId],
+    target: NodeId,
+    scope: &QueryScope,
+    collect_frontier: bool,
+    traversal: &mut PathTraversal,
+) {
+    for neighbor in adjacency {
+        if traversal.edges_scanned == MAX_PATH_SCANNED_EDGES {
+            traversal.edge_budget_exhausted = true;
+            return;
+        }
+        traversal.edges_scanned = traversal.edges_scanned.saturating_add(1);
+        if !graph.is_visible(*neighbor, scope) {
+            continue;
+        }
+        if *neighbor == target {
+            traversal.target_found = true;
+            return;
+        }
+        if collect_frontier
+            && traversal.frontier.len() < MAX_PATH_FRONTIER
+            && !traversal.frontier.contains(neighbor)
+        {
+            traversal.frontier.push(*neighbor);
+        }
     }
 }
 
@@ -1438,6 +1615,134 @@ mod tests {
 
         assert_eq!(expanded.candidates, vec![seed, immediate_neighbor]);
         assert!(!expanded.candidates.contains(&second_hop));
+    }
+
+    #[test]
+    fn path_query_reports_the_shortest_bounded_navigation_chain() {
+        let nodes = (0..4).map(graph_node).collect::<Vec<_>>();
+        let links = vec![reviewed_link(0, 1), reviewed_link(1, 2)];
+        let graph = MiniGraph::build(&nodes, &links).unwrap();
+        let scope = QueryScope {
+            purpose: GraphPurpose::LocalAssistant,
+            authorized_collections: [Uuid::from_u128(1)].into_iter().collect(),
+            external_ai_collections: BTreeSet::new(),
+        };
+        let first = graph.node_id(Uuid::from_u128(1)).unwrap();
+        let second = graph.node_id(Uuid::from_u128(2)).unwrap();
+        let third = graph.node_id(Uuid::from_u128(3)).unwrap();
+        let disconnected = graph.node_id(Uuid::from_u128(4)).unwrap();
+
+        assert_eq!(
+            graph
+                .path_within_two_hops(first, first, &scope, ExpansionDirection::Outgoing)
+                .status,
+            PathQueryStatus::Found { hops: 0 }
+        );
+        assert_eq!(
+            graph
+                .path_within_two_hops(first, second, &scope, ExpansionDirection::Outgoing)
+                .status,
+            PathQueryStatus::Found { hops: 1 }
+        );
+        assert_eq!(
+            graph
+                .path_within_two_hops(first, third, &scope, ExpansionDirection::Outgoing)
+                .status,
+            PathQueryStatus::Found { hops: 2 }
+        );
+        assert_eq!(
+            graph
+                .path_within_two_hops(first, disconnected, &scope, ExpansionDirection::Outgoing,)
+                .status,
+            PathQueryStatus::NotConnected
+        );
+    }
+
+    #[test]
+    fn bidirectional_path_uses_backlinks_without_walking_beyond_two_hops() {
+        let nodes = (0..4).map(graph_node).collect::<Vec<_>>();
+        let graph = MiniGraph::build(
+            &nodes,
+            &[
+                reviewed_link(1, 0),
+                reviewed_link(2, 1),
+                reviewed_link(3, 2),
+            ],
+        )
+        .unwrap();
+        let scope = QueryScope {
+            purpose: GraphPurpose::LocalAssistant,
+            authorized_collections: [Uuid::from_u128(1)].into_iter().collect(),
+            external_ai_collections: BTreeSet::new(),
+        };
+        let first = graph.node_id(Uuid::from_u128(1)).unwrap();
+        let third = graph.node_id(Uuid::from_u128(3)).unwrap();
+        let fourth = graph.node_id(Uuid::from_u128(4)).unwrap();
+
+        assert_eq!(
+            graph
+                .path_within_two_hops(first, third, &scope, ExpansionDirection::Outgoing)
+                .status,
+            PathQueryStatus::NotConnected
+        );
+        assert_eq!(
+            graph
+                .path_within_two_hops(first, third, &scope, ExpansionDirection::Bidirectional)
+                .status,
+            PathQueryStatus::Found { hops: 2 }
+        );
+        assert_eq!(
+            graph
+                .path_within_two_hops(first, fourth, &scope, ExpansionDirection::Bidirectional)
+                .status,
+            PathQueryStatus::NotConnected
+        );
+    }
+
+    #[test]
+    fn path_query_fails_closed_before_traversing_an_external_ai_scope() {
+        let nodes = (0..2).map(graph_node).collect::<Vec<_>>();
+        let graph = MiniGraph::build(&nodes, &[reviewed_link(0, 1)]).unwrap();
+        let scope = QueryScope {
+            purpose: GraphPurpose::ExternalAi,
+            authorized_collections: [Uuid::from_u128(1)].into_iter().collect(),
+            external_ai_collections: BTreeSet::new(),
+        };
+        let source = graph.node_id(Uuid::from_u128(1)).unwrap();
+        let target = graph.node_id(Uuid::from_u128(2)).unwrap();
+
+        let result =
+            graph.path_within_two_hops(source, target, &scope, ExpansionDirection::Bidirectional);
+
+        assert_eq!(result.status, PathQueryStatus::EndpointUnavailable);
+        assert_eq!(result.edges_scanned, 0);
+    }
+
+    #[test]
+    fn path_query_has_fixed_edge_and_scratch_budgets() {
+        let nodes = (0..302).map(graph_node).collect::<Vec<_>>();
+        let mut links = (1..=100)
+            .map(|target| reviewed_link(0, target))
+            .collect::<Vec<_>>();
+        for source in 1..=100 {
+            links.push(reviewed_link(source, 100 + source));
+            links.push(reviewed_link(source, 200 + source));
+        }
+        let graph = MiniGraph::build(&nodes, &links).unwrap();
+        let scope = QueryScope {
+            purpose: GraphPurpose::LocalAssistant,
+            authorized_collections: [Uuid::from_u128(1)].into_iter().collect(),
+            external_ai_collections: BTreeSet::new(),
+        };
+        let source = graph.node_id(Uuid::from_u128(1)).unwrap();
+        let unreachable = graph.node_id(Uuid::from_u128(302)).unwrap();
+
+        let result =
+            graph.path_within_two_hops(source, unreachable, &scope, ExpansionDirection::Outgoing);
+
+        assert_eq!(result.status, PathQueryStatus::BudgetExceeded);
+        assert_eq!(result.edges_scanned, MAX_PATH_SCANNED_EDGES);
+        assert!(MiniGraph::path_requested_scratch_bytes() < 8 * 1024);
     }
 
     #[test]

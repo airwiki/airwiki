@@ -34,6 +34,7 @@ use crate::{replace_file, workspace_root};
 mod answerability;
 mod corpus;
 mod mini_graph;
+mod path_signal;
 mod qa_entailment;
 mod real_graph;
 mod rerank_calibration;
@@ -45,6 +46,7 @@ mod sham_graph;
 
 pub(crate) use answerability::evaluate_answerability;
 pub(crate) use mini_graph::evaluate_mini_graph;
+pub(crate) use path_signal::evaluate_path_signal;
 pub(crate) use real_graph::{evaluate_final_mini_graph, evaluate_real_mini_graph};
 pub(crate) use rerank_calibration::evaluate_rerank_calibration;
 pub(crate) use rerank_order::evaluate_rerank_order;

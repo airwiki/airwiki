@@ -1,0 +1,579 @@
+{
+  "schema_version": 1,
+  "experiment_id": "okf-path-signal-development-v1",
+  "authoring_role": "concept-inventory-without-links-or-pairs",
+  "domains": [
+    {
+      "id": "archivo_ceramica_puerto_claro",
+      "language": "es",
+      "title": "Archivo de ceramica de Puerto Claro",
+      "concepts": [
+        {
+          "id": "cer_recepcion_piezas",
+          "title": "Ingreso de piezas ceramicas",
+          "description": "Criterios para recibir piezas y documentar su estado inicial sin intervenirlas.",
+          "sections": [
+            {
+              "id": "cer_recepcion_embalaje",
+              "heading": "Revision del embalaje",
+              "text": "El embalaje se examina antes de mover la pieza. Las deformaciones, zonas humedas y particulas sueltas se anotan mientras el objeto permanece apoyado en su base de transporte."
+            },
+            {
+              "id": "cer_recepcion_alta",
+              "heading": "Alta inicial",
+              "text": "Cada ingreso recibe un codigo temporal, una fotografia general y una descripcion breve del estado visible. Una fractura activa o un residuo desconocido mantiene la pieza en observacion."
+            }
+          ]
+        },
+        {
+          "id": "cer_limpieza_superficial",
+          "title": "Limpieza superficial controlada",
+          "description": "Metodo conservador para retirar polvo suelto de superficies ceramicas estables.",
+          "sections": [
+            {
+              "id": "cer_limpieza_seca",
+              "heading": "Trabajo en seco",
+              "text": "El polvo se retira con una brocha de fibra blanda y aspiracion indirecta a baja potencia. La boquilla conserva una separacion minima de ocho centimetros respecto de la superficie."
+            },
+            {
+              "id": "cer_limpieza_exclusiones",
+              "heading": "Condiciones de exclusion",
+              "text": "No se aplica humedad sobre engobes pulverulentos, sales visibles ni pigmentos que se desprenden al contacto leve. En esos casos la actividad se detiene y se conserva el residuo recuperado."
+            }
+          ]
+        },
+        {
+          "id": "cer_estabilizacion_fragmentos",
+          "title": "Estabilizacion temporal de fragmentos",
+          "description": "Preparacion reversible de fragmentos para su estudio y almacenamiento seguro.",
+          "sections": [
+            {
+              "id": "cer_estabilizacion_ensayo",
+              "heading": "Ensayo de ajuste",
+              "text": "Los fragmentos se aproximan sobre espuma neutra sin aplicar adhesivo. La posicion se considera compatible cuando los bordes coinciden sin presion y no quedan puntos de carga concentrada."
+            },
+            {
+              "id": "cer_estabilizacion_bordes",
+              "heading": "Proteccion de bordes",
+              "text": "Los bordes fragiles se separan con tiras de tejido inerte. Las piezas menores de tres centimetros se guardan en cavidades individuales para evitar movimientos durante la manipulacion."
+            }
+          ]
+        },
+        {
+          "id": "cer_registro_pigmentos",
+          "title": "Registro de pigmentos y decoraciones",
+          "description": "Condiciones de observacion para describir colores, trazos y perdidas decorativas.",
+          "sections": [
+            {
+              "id": "cer_pigmentos_iluminacion",
+              "heading": "Iluminacion de observacion",
+              "text": "La inspeccion utiliza luz difusa de 5000 K y evita radiacion ultravioleta directa. La pieza permanece en la misma orientacion durante toda la secuencia fotografica."
+            },
+            {
+              "id": "cer_pigmentos_color",
+              "heading": "Referencia cromatica",
+              "text": "Una carta de color neutra se incluye en la primera imagen de cada cara. Los cambios de tono se describen con palabras y nunca se deducen unicamente de una fotografia."
+            }
+          ]
+        },
+        {
+          "id": "cer_clima_deposito",
+          "title": "Clima del deposito ceramico",
+          "description": "Rangos ambientales y respuesta basica ante variaciones del deposito.",
+          "sections": [
+            {
+              "id": "cer_clima_rangos",
+              "heading": "Rangos de conservacion",
+              "text": "La humedad relativa se mantiene entre 42 % y 55 %, con variaciones diarias menores de 5 puntos. La temperatura operativa permanece entre 18 C y 23 C."
+            },
+            {
+              "id": "cer_clima_desvio",
+              "heading": "Desvios persistentes",
+              "text": "Una lectura fuera de rango durante mas de dos horas activa una inspeccion de estanterias y envoltorios. Los objetos no se trasladan mientras exista condensacion visible."
+            }
+          ]
+        },
+        {
+          "id": "cer_embalaje_reserva",
+          "title": "Embalaje para reserva",
+          "description": "Materiales y separaciones usados para conservar piezas ceramicas dentro del deposito.",
+          "sections": [
+            {
+              "id": "cer_embalaje_materiales",
+              "heading": "Materiales admitidos",
+              "text": "Las cajas emplean carton neutro, espuma de polietileno cerrada y tejido sin apresto. No se permiten grapas expuestas, lana mineral ni plasticos con olor persistente."
+            },
+            {
+              "id": "cer_embalaje_espacio",
+              "heading": "Separacion interna",
+              "text": "La pieza conserva dos centimetros de amortiguacion en sus caras estables y cuatro en zonas salientes. Ningun fragmento comparte cavidad con otro objeto."
+            }
+          ]
+        },
+        {
+          "id": "cer_salida_exposicion",
+          "title": "Preparacion para salida a exposicion",
+          "description": "Controles aplicados antes de transportar una pieza hacia una sala temporal.",
+          "sections": [
+            {
+              "id": "cer_salida_condicion",
+              "heading": "Control de condicion",
+              "text": "La superficie, las uniones y las zonas decoradas se comparan con imagenes recientes. Cualquier perdida nueva suspende la salida hasta que se determine su estabilidad."
+            },
+            {
+              "id": "cer_salida_transito",
+              "heading": "Condiciones de transito",
+              "text": "La caja viaja en posicion indicada, protegida de lluvia y con registro de impactos. El periodo continuo de traslado no supera seis horas sin una parada de control."
+            }
+          ]
+        },
+        {
+          "id": "cer_retorno_prestamos",
+          "title": "Retorno de piezas prestadas",
+          "description": "Recepcion, observacion y cierre de movimientos despues de una exposicion externa.",
+          "sections": [
+            {
+              "id": "cer_retorno_observacion",
+              "heading": "Periodo de observacion",
+              "text": "La caja cerrada se estabiliza durante cuatro horas en una zona intermedia. Luego se comprueban polvo, humedad, desplazamientos y cambios visibles en la pieza."
+            },
+            {
+              "id": "cer_retorno_cierre",
+              "heading": "Cierre del movimiento",
+              "text": "El movimiento termina cuando las fotografias de retorno, las lecturas ambientales y las observaciones estan completas. Una diferencia sin explicacion mantiene abierto el seguimiento."
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "compostaje_vecinal_la_ribera",
+      "language": "es",
+      "title": "Compostaje vecinal La Ribera",
+      "concepts": [
+        {
+          "id": "com_recepcion_materiales",
+          "title": "Recepcion de materiales organicos",
+          "description": "Criterios para aceptar aportes vegetales y separar materiales impropios.",
+          "sections": [
+            {
+              "id": "com_recepcion_admitidos",
+              "heading": "Aportes admitidos",
+              "text": "Se aceptan restos de frutas, verduras, hojas secas y poda triturada sin tratamiento quimico reciente. Las bolsas se vacian y retiran antes de pesar el aporte."
+            },
+            {
+              "id": "com_recepcion_rechazos",
+              "heading": "Materiales rechazados",
+              "text": "Carne, aceite, vidrio, metales y residuos sanitarios no ingresan a las pilas. Un aporte con olor quimico o presencia abundante de plastico queda aislado."
+            }
+          ]
+        },
+        {
+          "id": "com_balance_mezcla",
+          "title": "Balance de la mezcla inicial",
+          "description": "Proporciones practicas para combinar materiales humedos y secos.",
+          "sections": [
+            {
+              "id": "com_mezcla_proporcion",
+              "heading": "Proporcion de partida",
+              "text": "La mezcla comienza con dos recipientes de material seco por cada recipiente de material humedo. La poda gruesa se tritura hasta piezas menores de cinco centimetros."
+            },
+            {
+              "id": "com_mezcla_textura",
+              "heading": "Textura esperada",
+              "text": "Una porcion comprimida debe conservar su forma sin liberar agua. Si se desarma de inmediato se agrega material humedo; si gotea se incorpora material seco."
+            }
+          ]
+        },
+        {
+          "id": "com_control_humedad",
+          "title": "Control de humedad de las pilas",
+          "description": "Comprobaciones y ajustes de humedad durante el proceso de compostaje.",
+          "sections": [
+            {
+              "id": "com_humedad_medicion",
+              "heading": "Medicion semanal",
+              "text": "La humedad se comprueba a veinte centimetros de profundidad en tres puntos. El rango operativo es de 45 % a 60 %."
+            },
+            {
+              "id": "com_humedad_ajuste",
+              "heading": "Ajustes permitidos",
+              "text": "Por debajo del rango se anade agua en capas finas durante el volteo. Por encima del rango se agregan hojas secas y se mejora la ventilacion lateral."
+            }
+          ]
+        },
+        {
+          "id": "com_temperatura_nucleo",
+          "title": "Seguimiento de temperatura",
+          "description": "Lectura del nucleo y respuesta ante temperaturas anomalas.",
+          "sections": [
+            {
+              "id": "com_temperatura_lectura",
+              "heading": "Lectura del nucleo",
+              "text": "La sonda permanece cinco minutos en el centro de la pila. Durante la fase activa se esperan valores entre 50 C y 65 C."
+            },
+            {
+              "id": "com_temperatura_alerta",
+              "heading": "Respuesta a valores extremos",
+              "text": "Una lectura superior a 68 C requiere volteo y revision de humedad. Si la temperatura permanece por debajo de 35 C durante tres dias se evalua la composicion."
+            }
+          ]
+        },
+        {
+          "id": "com_volteo_aireacion",
+          "title": "Volteo y aireacion",
+          "description": "Frecuencia y tecnica para renovar el oxigeno sin compactar la pila.",
+          "sections": [
+            {
+              "id": "com_volteo_frecuencia",
+              "heading": "Frecuencia de trabajo",
+              "text": "Durante el primer mes la pila se voltea cada siete dias. Mas adelante la frecuencia se ajusta a catorce dias si no aparecen olores ni zonas compactadas."
+            },
+            {
+              "id": "com_volteo_tecnica",
+              "heading": "Distribucion del material",
+              "text": "El material exterior pasa al centro y el nucleo se distribuye hacia los bordes. Los bloques compactos se desarman sin moler las fibras."
+            }
+          ]
+        },
+        {
+          "id": "com_manejo_contaminacion",
+          "title": "Manejo de contaminacion y plagas",
+          "description": "Acciones seguras ante impropios, insectos y presencia de roedores.",
+          "sections": [
+            {
+              "id": "com_contaminacion_impropios",
+              "heading": "Retiro de impropios",
+              "text": "Los objetos visibles se retiran con guantes y se contabilizan por tipo. Una dispersion extensa de vidrio suspende la manipulacion manual de esa pila."
+            },
+            {
+              "id": "com_contaminacion_fauna",
+              "heading": "Senales de fauna",
+              "text": "Madrigueras, huellas o alimento expuesto requieren cubrir la superficie con quince centimetros de material seco y revisar el cierre perimetral."
+            }
+          ]
+        },
+        {
+          "id": "com_maduracion_lote",
+          "title": "Maduracion y control del lote",
+          "description": "Criterios observables para determinar si un lote termino su fase activa.",
+          "sections": [
+            {
+              "id": "com_maduracion_indicadores",
+              "heading": "Indicadores de madurez",
+              "text": "El material maduro tiene color oscuro, textura suelta y olor a suelo. Su temperatura se mantiene proxima a la ambiental durante siete dias."
+            },
+            {
+              "id": "com_maduracion_prueba",
+              "heading": "Prueba de estabilidad",
+              "text": "Una muestra humedecida se conserva cerrada durante cuarenta y ocho horas. Un olor acido intenso o un aumento apreciable de temperatura prolonga la maduracion."
+            }
+          ]
+        },
+        {
+          "id": "com_entrega_comunidad",
+          "title": "Entrega de compost a la comunidad",
+          "description": "Preparacion de partidas y limites de uso comunicados a las personas receptoras.",
+          "sections": [
+            {
+              "id": "com_entrega_preparacion",
+              "heading": "Preparacion de partidas",
+              "text": "El compost se tamiza a doce milimetros y se entrega en recipientes limpios. Cada partida conserva fecha, peso y codigo de lote."
+            },
+            {
+              "id": "com_entrega_uso",
+              "heading": "Indicaciones de uso",
+              "text": "Se recomienda mezclar una parte de compost con tres partes de suelo. El producto no se aplica directamente sobre semillas recien germinadas."
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "lakeside_rowing_workshop",
+      "language": "en",
+      "title": "Lakeside Rowing Workshop",
+      "concepts": [
+        {
+          "id": "row_boat_intake",
+          "title": "Boat intake assessment",
+          "description": "Initial inspection criteria for rowing shells arriving at the workshop.",
+          "sections": [
+            {
+              "id": "row_intake_support",
+              "heading": "Safe support",
+              "text": "The shell is placed on padded stands beneath reinforced areas. Loose fittings are bagged and labeled before the hull is rotated."
+            },
+            {
+              "id": "row_intake_record",
+              "heading": "Condition record",
+              "text": "The intake record includes overall photographs, visible cracks, previous repairs, and measured hull mass. Active water leakage keeps the boat out of routine work."
+            }
+          ]
+        },
+        {
+          "id": "row_timber_moisture",
+          "title": "Timber moisture assessment",
+          "description": "Moisture checks for wooden components before shaping or bonding.",
+          "sections": [
+            {
+              "id": "row_moisture_sampling",
+              "heading": "Sampling locations",
+              "text": "Readings are taken at both ends and the center of each component. The meter pins avoid finished faces and existing fastener holes."
+            },
+            {
+              "id": "row_moisture_limit",
+              "heading": "Working range",
+              "text": "Timber may be shaped between 8% and 12% moisture content. A difference greater than three points between locations requires additional conditioning."
+            }
+          ]
+        },
+        {
+          "id": "row_rib_steaming",
+          "title": "Steaming replacement ribs",
+          "description": "Controlled heating and forming of thin wooden ribs.",
+          "sections": [
+            {
+              "id": "row_steam_duration",
+              "heading": "Steam duration",
+              "text": "A rib is steamed for one minute per millimeter of thickness. The chamber remains above 94 C without allowing the timber to contact standing water."
+            },
+            {
+              "id": "row_steam_forming",
+              "heading": "Forming window",
+              "text": "The rib reaches the mold within forty-five seconds of leaving the chamber. Clamps apply gradual pressure from the center toward both ends."
+            }
+          ]
+        },
+        {
+          "id": "row_epoxy_bonding",
+          "title": "Epoxy bonding of structural repairs",
+          "description": "Mixing, application, and curing conditions for structural adhesive joints.",
+          "sections": [
+            {
+              "id": "row_epoxy_mix",
+              "heading": "Mixing control",
+              "text": "Resin and hardener are measured by mass at the manufacturer-approved ratio. Material scraped from the sides of the mixing cup is blended before application."
+            },
+            {
+              "id": "row_epoxy_cure",
+              "heading": "Curing conditions",
+              "text": "A bonded joint remains undisturbed for sixteen hours above 18 C. Clamps are removed only after the adhesive surface is firm and no longer tacky."
+            }
+          ]
+        },
+        {
+          "id": "row_oar_balance",
+          "title": "Balancing repaired oars",
+          "description": "Checks for mass distribution and alignment after an oar repair.",
+          "sections": [
+            {
+              "id": "row_oar_balance_point",
+              "heading": "Balance point",
+              "text": "The balance point is measured from the handle end with all fittings installed. Paired oars may differ by no more than eight millimeters."
+            },
+            {
+              "id": "row_oar_alignment",
+              "heading": "Blade alignment",
+              "text": "The blade face is checked against a straight reference surface. Twist greater than one degree across the blade requires correction."
+            }
+          ]
+        },
+        {
+          "id": "row_finish_coating",
+          "title": "Protective coating application",
+          "description": "Surface preparation and coating limits for repaired wooden parts.",
+          "sections": [
+            {
+              "id": "row_coating_surface",
+              "heading": "Surface preparation",
+              "text": "The surface is sanded to 180 grit and cleared with filtered air. Dust, wax, and uncured adhesive prevent coating application."
+            },
+            {
+              "id": "row_coating_layers",
+              "heading": "Layer schedule",
+              "text": "Three thin coats are applied with at least six hours between layers. The finished part cures for forty-eight hours before water exposure."
+            }
+          ]
+        },
+        {
+          "id": "row_lake_trial",
+          "title": "Post-repair lake trial",
+          "description": "Operational checks performed during a controlled return to the water.",
+          "sections": [
+            {
+              "id": "row_trial_conditions",
+              "heading": "Trial conditions",
+              "text": "The trial takes place in sheltered water with wind below 12 knots. A support launch remains within visual range."
+            },
+            {
+              "id": "row_trial_observations",
+              "heading": "Observed behavior",
+              "text": "The crew records tracking, unusual vibration, water entry, and fitting movement. Any new crack or persistent leak ends the trial immediately."
+            }
+          ]
+        },
+        {
+          "id": "row_tool_calibration",
+          "title": "Workshop tool calibration",
+          "description": "Routine verification of measuring and clamping equipment.",
+          "sections": [
+            {
+              "id": "row_tool_schedule",
+              "heading": "Verification schedule",
+              "text": "Scales, torque tools, and moisture meters are checked every ninety days. A tool is also checked after impact or an unexplained reading."
+            },
+            {
+              "id": "row_tool_response",
+              "heading": "Out-of-tolerance response",
+              "text": "A failed tool is tagged and removed from use. Work completed since its last valid check is reviewed for possible remeasurement."
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "community_seed_library",
+      "language": "en",
+      "title": "Community Seed Library",
+      "concepts": [
+        {
+          "id": "seed_donation_intake",
+          "title": "Seed donation intake",
+          "description": "Information and physical checks required when donated seed arrives.",
+          "sections": [
+            {
+              "id": "seed_intake_details",
+              "heading": "Required details",
+              "text": "Each donation records the crop, variety name, harvest season, growing area, and donor declaration. Seed without a known crop identity remains separated."
+            },
+            {
+              "id": "seed_intake_condition",
+              "heading": "Initial condition",
+              "text": "The container is checked for moisture, insects, mold, and mixed material. Damp or visibly affected seed is isolated from the active collection."
+            }
+          ]
+        },
+        {
+          "id": "seed_cleaning",
+          "title": "Cleaning small seed lots",
+          "description": "Mechanical separation of seed from chaff and foreign material.",
+          "sections": [
+            {
+              "id": "seed_cleaning_sequence",
+              "heading": "Cleaning sequence",
+              "text": "Coarse material is removed by hand before the lot passes through nested screens. Air separation uses the lowest flow that moves chaff without carrying sound seed."
+            },
+            {
+              "id": "seed_cleaning_loss",
+              "heading": "Loss control",
+              "text": "Rejected material is inspected before disposal. A loss greater than 10% of the incoming mass triggers a second manual sort."
+            }
+          ]
+        },
+        {
+          "id": "seed_moisture_drying",
+          "title": "Drying and moisture verification",
+          "description": "Low-temperature drying and release limits for cleaned seed.",
+          "sections": [
+            {
+              "id": "seed_drying_method",
+              "heading": "Drying method",
+              "text": "Seed is spread in a single layer in moving room-temperature air. Direct sun and heated air above 30 C are avoided."
+            },
+            {
+              "id": "seed_drying_release",
+              "heading": "Release check",
+              "text": "Two samples taken twelve hours apart must both read at or below 8% moisture. A rising second result extends the drying period."
+            }
+          ]
+        },
+        {
+          "id": "seed_germination_sample",
+          "title": "Germination sampling",
+          "description": "Small-lot test for estimating viability without consuming excessive seed.",
+          "sections": [
+            {
+              "id": "seed_germination_setup",
+              "heading": "Sample setup",
+              "text": "Twenty seeds are placed on evenly moistened paper in a covered tray. The tray carries the lot code and start date."
+            },
+            {
+              "id": "seed_germination_result",
+              "heading": "Result classification",
+              "text": "Normal seedlings are counted at the crop-specific observation day. A result below 70% is marked low viability and receives a reduced storage interval."
+            }
+          ]
+        },
+        {
+          "id": "seed_packet_labeling",
+          "title": "Packet labeling",
+          "description": "Minimum information printed on packets prepared for circulation.",
+          "sections": [
+            {
+              "id": "seed_label_fields",
+              "heading": "Label fields",
+              "text": "The packet shows crop, variety, lot code, harvest season, quantity, and viability status. Handwritten corrections are initialed and dated."
+            },
+            {
+              "id": "seed_label_language",
+              "heading": "Plain-language notes",
+              "text": "Special isolation or sowing notes use complete words rather than internal abbreviations. Unverified traits are not presented as established characteristics."
+            }
+          ]
+        },
+        {
+          "id": "seed_cold_storage",
+          "title": "Cold cabinet storage",
+          "description": "Environmental limits and placement rules for sealed seed packets.",
+          "sections": [
+            {
+              "id": "seed_storage_climate",
+              "heading": "Cabinet conditions",
+              "text": "The cabinet operates between 4 C and 8 C with relative humidity below 40%. Readings are recorded twice each day."
+            },
+            {
+              "id": "seed_storage_placement",
+              "heading": "Packet placement",
+              "text": "Packets remain in sealed boxes above the cabinet floor. Lots with different status labels occupy separate trays."
+            }
+          ]
+        },
+        {
+          "id": "seed_checkout_return",
+          "title": "Seed checkout and return",
+          "description": "Circulation records and handling of seed returned by members.",
+          "sections": [
+            {
+              "id": "seed_checkout_record",
+              "heading": "Checkout record",
+              "text": "A checkout records the packet lot, quantity, member code, and date. The transaction does not include personal growing notes."
+            },
+            {
+              "id": "seed_return_review",
+              "heading": "Returned seed",
+              "text": "Returned seed is treated as a new donation unless its sealed packet is intact. Open packets never re-enter the original lot."
+            }
+          ]
+        },
+        {
+          "id": "seed_seasonal_inventory",
+          "title": "Seasonal inventory review",
+          "description": "Periodic checks for quantity, age, condition, and record consistency.",
+          "sections": [
+            {
+              "id": "seed_inventory_count",
+              "heading": "Physical count",
+              "text": "Each packet is counted against its recorded quantity band and storage location. Missing or duplicate labels are isolated for correction."
+            },
+            {
+              "id": "seed_inventory_action",
+              "heading": "Seasonal action",
+              "text": "Old, low-viability, or damaged lots are marked for retesting or removal. No lot is discarded until its status change is recorded."
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

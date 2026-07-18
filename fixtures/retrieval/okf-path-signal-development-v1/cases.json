@@ -1,0 +1,316 @@
+{
+  "schema_version": 1,
+  "experiment_id": "okf-path-signal-development-v1",
+  "authoring_role": "semantic-pairs-without-links",
+  "concepts_sha256": "64138f2473246c42279358d8282468acb424c1ecb9d9ffd84a3231fa4a18d1f7",
+  "domains": [
+    {
+      "id": "archivo_ceramica_puerto_claro",
+      "cases": [
+        {
+          "id": "cer_rel_01",
+          "source_concept_id": "cer_clima_deposito",
+          "target_concept_id": "cer_embalaje_reserva",
+          "expected_related": true
+        },
+        {
+          "id": "cer_rel_02",
+          "source_concept_id": "cer_embalaje_reserva",
+          "target_concept_id": "cer_salida_exposicion",
+          "expected_related": true
+        },
+        {
+          "id": "cer_rel_03",
+          "source_concept_id": "cer_estabilizacion_fragmentos",
+          "target_concept_id": "cer_recepcion_piezas",
+          "expected_related": true
+        },
+        {
+          "id": "cer_rel_04",
+          "source_concept_id": "cer_limpieza_superficial",
+          "target_concept_id": "cer_registro_pigmentos",
+          "expected_related": true
+        },
+        {
+          "id": "cer_rel_05",
+          "source_concept_id": "cer_registro_pigmentos",
+          "target_concept_id": "cer_salida_exposicion",
+          "expected_related": true
+        },
+        {
+          "id": "cer_rel_06",
+          "source_concept_id": "cer_retorno_prestamos",
+          "target_concept_id": "cer_salida_exposicion",
+          "expected_related": true
+        },
+        {
+          "id": "cer_neg_01",
+          "source_concept_id": "cer_clima_deposito",
+          "target_concept_id": "cer_estabilizacion_fragmentos",
+          "expected_related": false
+        },
+        {
+          "id": "cer_neg_02",
+          "source_concept_id": "cer_clima_deposito",
+          "target_concept_id": "cer_recepcion_piezas",
+          "expected_related": false
+        },
+        {
+          "id": "cer_neg_03",
+          "source_concept_id": "cer_clima_deposito",
+          "target_concept_id": "cer_registro_pigmentos",
+          "expected_related": false
+        },
+        {
+          "id": "cer_neg_04",
+          "source_concept_id": "cer_embalaje_reserva",
+          "target_concept_id": "cer_limpieza_superficial",
+          "expected_related": false
+        },
+        {
+          "id": "cer_neg_05",
+          "source_concept_id": "cer_estabilizacion_fragmentos",
+          "target_concept_id": "cer_registro_pigmentos",
+          "expected_related": false
+        },
+        {
+          "id": "cer_neg_06",
+          "source_concept_id": "cer_limpieza_superficial",
+          "target_concept_id": "cer_salida_exposicion",
+          "expected_related": false
+        }
+      ]
+    },
+    {
+      "id": "compostaje_vecinal_la_ribera",
+      "cases": [
+        {
+          "id": "com_rel_01",
+          "source_concept_id": "com_balance_mezcla",
+          "target_concept_id": "com_control_humedad",
+          "expected_related": true
+        },
+        {
+          "id": "com_rel_02",
+          "source_concept_id": "com_balance_mezcla",
+          "target_concept_id": "com_recepcion_materiales",
+          "expected_related": true
+        },
+        {
+          "id": "com_rel_03",
+          "source_concept_id": "com_control_humedad",
+          "target_concept_id": "com_volteo_aireacion",
+          "expected_related": true
+        },
+        {
+          "id": "com_rel_04",
+          "source_concept_id": "com_entrega_comunidad",
+          "target_concept_id": "com_maduracion_lote",
+          "expected_related": true
+        },
+        {
+          "id": "com_rel_05",
+          "source_concept_id": "com_manejo_contaminacion",
+          "target_concept_id": "com_recepcion_materiales",
+          "expected_related": true
+        },
+        {
+          "id": "com_rel_06",
+          "source_concept_id": "com_temperatura_nucleo",
+          "target_concept_id": "com_volteo_aireacion",
+          "expected_related": true
+        },
+        {
+          "id": "com_neg_01",
+          "source_concept_id": "com_balance_mezcla",
+          "target_concept_id": "com_entrega_comunidad",
+          "expected_related": false
+        },
+        {
+          "id": "com_neg_02",
+          "source_concept_id": "com_control_humedad",
+          "target_concept_id": "com_entrega_comunidad",
+          "expected_related": false
+        },
+        {
+          "id": "com_neg_03",
+          "source_concept_id": "com_entrega_comunidad",
+          "target_concept_id": "com_manejo_contaminacion",
+          "expected_related": false
+        },
+        {
+          "id": "com_neg_04",
+          "source_concept_id": "com_maduracion_lote",
+          "target_concept_id": "com_recepcion_materiales",
+          "expected_related": false
+        },
+        {
+          "id": "com_neg_05",
+          "source_concept_id": "com_manejo_contaminacion",
+          "target_concept_id": "com_temperatura_nucleo",
+          "expected_related": false
+        },
+        {
+          "id": "com_neg_06",
+          "source_concept_id": "com_recepcion_materiales",
+          "target_concept_id": "com_temperatura_nucleo",
+          "expected_related": false
+        }
+      ]
+    },
+    {
+      "id": "lakeside_rowing_workshop",
+      "cases": [
+        {
+          "id": "row_rel_01",
+          "source_concept_id": "row_boat_intake",
+          "target_concept_id": "row_lake_trial",
+          "expected_related": true
+        },
+        {
+          "id": "row_rel_02",
+          "source_concept_id": "row_epoxy_bonding",
+          "target_concept_id": "row_finish_coating",
+          "expected_related": true
+        },
+        {
+          "id": "row_rel_03",
+          "source_concept_id": "row_epoxy_bonding",
+          "target_concept_id": "row_timber_moisture",
+          "expected_related": true
+        },
+        {
+          "id": "row_rel_04",
+          "source_concept_id": "row_finish_coating",
+          "target_concept_id": "row_lake_trial",
+          "expected_related": true
+        },
+        {
+          "id": "row_rel_05",
+          "source_concept_id": "row_oar_balance",
+          "target_concept_id": "row_tool_calibration",
+          "expected_related": true
+        },
+        {
+          "id": "row_rel_06",
+          "source_concept_id": "row_rib_steaming",
+          "target_concept_id": "row_timber_moisture",
+          "expected_related": true
+        },
+        {
+          "id": "row_neg_01",
+          "source_concept_id": "row_boat_intake",
+          "target_concept_id": "row_oar_balance",
+          "expected_related": false
+        },
+        {
+          "id": "row_neg_02",
+          "source_concept_id": "row_epoxy_bonding",
+          "target_concept_id": "row_oar_balance",
+          "expected_related": false
+        },
+        {
+          "id": "row_neg_03",
+          "source_concept_id": "row_finish_coating",
+          "target_concept_id": "row_oar_balance",
+          "expected_related": false
+        },
+        {
+          "id": "row_neg_04",
+          "source_concept_id": "row_lake_trial",
+          "target_concept_id": "row_rib_steaming",
+          "expected_related": false
+        },
+        {
+          "id": "row_neg_05",
+          "source_concept_id": "row_lake_trial",
+          "target_concept_id": "row_tool_calibration",
+          "expected_related": false
+        },
+        {
+          "id": "row_neg_06",
+          "source_concept_id": "row_rib_steaming",
+          "target_concept_id": "row_tool_calibration",
+          "expected_related": false
+        }
+      ]
+    },
+    {
+      "id": "community_seed_library",
+      "cases": [
+        {
+          "id": "seed_rel_01",
+          "source_concept_id": "seed_checkout_return",
+          "target_concept_id": "seed_donation_intake",
+          "expected_related": true
+        },
+        {
+          "id": "seed_rel_02",
+          "source_concept_id": "seed_cleaning",
+          "target_concept_id": "seed_donation_intake",
+          "expected_related": true
+        },
+        {
+          "id": "seed_rel_03",
+          "source_concept_id": "seed_cleaning",
+          "target_concept_id": "seed_moisture_drying",
+          "expected_related": true
+        },
+        {
+          "id": "seed_rel_04",
+          "source_concept_id": "seed_cold_storage",
+          "target_concept_id": "seed_moisture_drying",
+          "expected_related": true
+        },
+        {
+          "id": "seed_rel_05",
+          "source_concept_id": "seed_germination_sample",
+          "target_concept_id": "seed_packet_labeling",
+          "expected_related": true
+        },
+        {
+          "id": "seed_rel_06",
+          "source_concept_id": "seed_packet_labeling",
+          "target_concept_id": "seed_seasonal_inventory",
+          "expected_related": true
+        },
+        {
+          "id": "seed_neg_01",
+          "source_concept_id": "seed_checkout_return",
+          "target_concept_id": "seed_germination_sample",
+          "expected_related": false
+        },
+        {
+          "id": "seed_neg_02",
+          "source_concept_id": "seed_checkout_return",
+          "target_concept_id": "seed_moisture_drying",
+          "expected_related": false
+        },
+        {
+          "id": "seed_neg_03",
+          "source_concept_id": "seed_cleaning",
+          "target_concept_id": "seed_seasonal_inventory",
+          "expected_related": false
+        },
+        {
+          "id": "seed_neg_04",
+          "source_concept_id": "seed_cold_storage",
+          "target_concept_id": "seed_donation_intake",
+          "expected_related": false
+        },
+        {
+          "id": "seed_neg_05",
+          "source_concept_id": "seed_donation_intake",
+          "target_concept_id": "seed_seasonal_inventory",
+          "expected_related": false
+        },
+        {
+          "id": "seed_neg_06",
+          "source_concept_id": "seed_germination_sample",
+          "target_concept_id": "seed_moisture_drying",
+          "expected_related": false
+        }
+      ]
+    }
+  ]
+}

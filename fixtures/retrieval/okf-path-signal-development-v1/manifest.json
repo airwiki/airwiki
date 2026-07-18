@@ -1,0 +1,8 @@
+{
+  "schema_version": 1,
+  "experiment_id": "okf-path-signal-development-v1",
+  "authoring_protocol": "procedurally-separated-concepts-links-pairs-v1",
+  "concepts_sha256": "64138f2473246c42279358d8282468acb424c1ecb9d9ffd84a3231fa4a18d1f7",
+  "links_sha256": "cd86ee94a26c55b89854bf5e76c0482b5513b906116444377409e1cacbe99e09",
+  "cases_sha256": "7df17fbbc3be8f911a0cfd0203242c76956626a25fed8be3ae873523da5bcae6"
+}

@@ -1,0 +1,216 @@
+{
+  "schema_version": 1,
+  "experiment_id": "okf-path-signal-development-v1",
+  "authoring_role": "reviewed-links-without-pairs",
+  "concepts_sha256": "64138f2473246c42279358d8282468acb424c1ecb9d9ffd84a3231fa4a18d1f7",
+  "domains": [
+    {
+      "id": "archivo_ceramica_puerto_claro",
+      "links": [
+        {
+          "source_concept_id": "cer_recepcion_piezas",
+          "target_concept_id": "cer_registro_pigmentos"
+        },
+        {
+          "source_concept_id": "cer_recepcion_piezas",
+          "target_concept_id": "cer_limpieza_superficial"
+        },
+        {
+          "source_concept_id": "cer_recepcion_piezas",
+          "target_concept_id": "cer_estabilizacion_fragmentos"
+        },
+        {
+          "source_concept_id": "cer_limpieza_superficial",
+          "target_concept_id": "cer_embalaje_reserva"
+        },
+        {
+          "source_concept_id": "cer_estabilizacion_fragmentos",
+          "target_concept_id": "cer_embalaje_reserva"
+        },
+        {
+          "source_concept_id": "cer_registro_pigmentos",
+          "target_concept_id": "cer_salida_exposicion"
+        },
+        {
+          "source_concept_id": "cer_clima_deposito",
+          "target_concept_id": "cer_embalaje_reserva"
+        },
+        {
+          "source_concept_id": "cer_embalaje_reserva",
+          "target_concept_id": "cer_salida_exposicion"
+        },
+        {
+          "source_concept_id": "cer_salida_exposicion",
+          "target_concept_id": "cer_retorno_prestamos"
+        },
+        {
+          "source_concept_id": "cer_retorno_prestamos",
+          "target_concept_id": "cer_recepcion_piezas"
+        },
+        {
+          "source_concept_id": "cer_retorno_prestamos",
+          "target_concept_id": "cer_clima_deposito"
+        }
+      ]
+    },
+    {
+      "id": "compostaje_vecinal_la_ribera",
+      "links": [
+        {
+          "source_concept_id": "com_recepcion_materiales",
+          "target_concept_id": "com_balance_mezcla"
+        },
+        {
+          "source_concept_id": "com_recepcion_materiales",
+          "target_concept_id": "com_manejo_contaminacion"
+        },
+        {
+          "source_concept_id": "com_balance_mezcla",
+          "target_concept_id": "com_control_humedad"
+        },
+        {
+          "source_concept_id": "com_balance_mezcla",
+          "target_concept_id": "com_temperatura_nucleo"
+        },
+        {
+          "source_concept_id": "com_control_humedad",
+          "target_concept_id": "com_temperatura_nucleo"
+        },
+        {
+          "source_concept_id": "com_control_humedad",
+          "target_concept_id": "com_volteo_aireacion"
+        },
+        {
+          "source_concept_id": "com_temperatura_nucleo",
+          "target_concept_id": "com_volteo_aireacion"
+        },
+        {
+          "source_concept_id": "com_volteo_aireacion",
+          "target_concept_id": "com_manejo_contaminacion"
+        },
+        {
+          "source_concept_id": "com_volteo_aireacion",
+          "target_concept_id": "com_maduracion_lote"
+        },
+        {
+          "source_concept_id": "com_temperatura_nucleo",
+          "target_concept_id": "com_maduracion_lote"
+        },
+        {
+          "source_concept_id": "com_maduracion_lote",
+          "target_concept_id": "com_entrega_comunidad"
+        },
+        {
+          "source_concept_id": "com_manejo_contaminacion",
+          "target_concept_id": "com_entrega_comunidad"
+        }
+      ]
+    },
+    {
+      "id": "lakeside_rowing_workshop",
+      "links": [
+        {
+          "source_concept_id": "row_boat_intake",
+          "target_concept_id": "row_timber_moisture"
+        },
+        {
+          "source_concept_id": "row_boat_intake",
+          "target_concept_id": "row_epoxy_bonding"
+        },
+        {
+          "source_concept_id": "row_boat_intake",
+          "target_concept_id": "row_oar_balance"
+        },
+        {
+          "source_concept_id": "row_boat_intake",
+          "target_concept_id": "row_tool_calibration"
+        },
+        {
+          "source_concept_id": "row_timber_moisture",
+          "target_concept_id": "row_rib_steaming"
+        },
+        {
+          "source_concept_id": "row_timber_moisture",
+          "target_concept_id": "row_epoxy_bonding"
+        },
+        {
+          "source_concept_id": "row_timber_moisture",
+          "target_concept_id": "row_tool_calibration"
+        },
+        {
+          "source_concept_id": "row_rib_steaming",
+          "target_concept_id": "row_epoxy_bonding"
+        },
+        {
+          "source_concept_id": "row_epoxy_bonding",
+          "target_concept_id": "row_finish_coating"
+        },
+        {
+          "source_concept_id": "row_epoxy_bonding",
+          "target_concept_id": "row_tool_calibration"
+        },
+        {
+          "source_concept_id": "row_oar_balance",
+          "target_concept_id": "row_lake_trial"
+        },
+        {
+          "source_concept_id": "row_finish_coating",
+          "target_concept_id": "row_lake_trial"
+        }
+      ]
+    },
+    {
+      "id": "community_seed_library",
+      "links": [
+        {
+          "source_concept_id": "seed_donation_intake",
+          "target_concept_id": "seed_cleaning"
+        },
+        {
+          "source_concept_id": "seed_donation_intake",
+          "target_concept_id": "seed_checkout_return"
+        },
+        {
+          "source_concept_id": "seed_cleaning",
+          "target_concept_id": "seed_moisture_drying"
+        },
+        {
+          "source_concept_id": "seed_moisture_drying",
+          "target_concept_id": "seed_germination_sample"
+        },
+        {
+          "source_concept_id": "seed_moisture_drying",
+          "target_concept_id": "seed_packet_labeling"
+        },
+        {
+          "source_concept_id": "seed_germination_sample",
+          "target_concept_id": "seed_packet_labeling"
+        },
+        {
+          "source_concept_id": "seed_germination_sample",
+          "target_concept_id": "seed_seasonal_inventory"
+        },
+        {
+          "source_concept_id": "seed_packet_labeling",
+          "target_concept_id": "seed_cold_storage"
+        },
+        {
+          "source_concept_id": "seed_packet_labeling",
+          "target_concept_id": "seed_checkout_return"
+        },
+        {
+          "source_concept_id": "seed_cold_storage",
+          "target_concept_id": "seed_checkout_return"
+        },
+        {
+          "source_concept_id": "seed_cold_storage",
+          "target_concept_id": "seed_seasonal_inventory"
+        },
+        {
+          "source_concept_id": "seed_checkout_return",
+          "target_concept_id": "seed_seasonal_inventory"
+        }
+      ]
+    }
+  ]
+}

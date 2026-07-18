@@ -24,6 +24,7 @@ use zip::{CompressionMethod, DateTime, ZipArchive, ZipWriter, write::SimpleFileO
 
 mod docs;
 mod retrieval;
+mod selector_corpus;
 
 const LICENSE_REPORT: &str = "resources/licenses/THIRD_PARTY_LICENSES.md";
 const NON_CARGO_LICENSE_INVENTORY: &str = "resources/licenses/NON_CARGO_COMPONENTS.md";
@@ -192,6 +193,17 @@ async fn main() -> Result<()> {
             Some(other) => bail!("unknown retrieval command: {other}"),
             None => bail!("missing retrieval command; expected `validate` or `evaluate`"),
         },
+        "selector-corpus" => match arguments.next().as_deref() {
+            Some("validate") => {
+                ensure!(
+                    arguments.next().is_none(),
+                    "selector-corpus validate received unexpected arguments"
+                );
+                selector_corpus::validate()
+            }
+            Some(other) => bail!("unknown selector-corpus command: {other}"),
+            None => bail!("missing selector-corpus command; expected `validate`"),
+        },
         "licenses" => match arguments.next().as_deref() {
             Some("generate") => generate_licenses(false),
             Some("check") => generate_licenses(true),
@@ -245,6 +257,7 @@ async fn main() -> Result<()> {
             println!(
                 "cargo run --locked -p xtask -- retrieval evaluate --embedding-snapshot <directory> --relevance-snapshot <directory>"
             );
+            println!("cargo run --locked -p xtask -- selector-corpus validate");
             println!("cargo run --locked -p xtask -- licenses generate");
             println!("cargo run --locked -p xtask -- licenses check");
             println!("cargo run --locked -p xtask -- docs check");

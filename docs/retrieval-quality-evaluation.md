@@ -1032,6 +1032,88 @@ development hypothesis in which graph structure is only a bounded feature
 alongside semantic evidence, then use new procedurally separated artifacts and
 fresh gates. This result must not be tuned away or reused as a holdout.
 
+### Graph-conditioned bounded diffusion (H-AWK-4A)
+
+**AirWiki hypothesis H-AWK-4A:** reviewed OKF links may improve candidate
+Recall@10 when they act only as a small, degree-normalized ordering feature
+inside the exact production B32 pool. The graph cannot add a concept, expand a
+neighborhood or make an evidence decision. This directly addresses H-AWK-3B's
+false-attribution failure: semantic retrieval establishes eligibility before
+topology is consulted.
+
+`fixtures/retrieval/okf-diffusion-development-v1.json` is a fresh development
+artifact with four fictional domains, split evenly between Spanish and
+English, 84 one-section documents and 16 cases. Its SHA-256 is
+`7855a88051a4f4117d9230a8acb350c12202e22e9aea460b081c3d81ab8a6468`.
+The fixture contains documents, reviewed links, questions and required document
+groups, but no authored rank, score, arm or cutoff position. Every domain has
+seven linked concepts, keeping the exact weak-degree-preserving sham inside its
+bounded search contract. The corpus is visible development data and cannot be
+used as a promotion holdout.
+
+For each question, production BM25, multilingual E5 and RRF produce exactly 32
+authorized, current candidates. For one-based rank `r`, the semantic prior is
+`p(r) = 1 / (60 + r)`. The real and sham graphs each apply one weak,
+bidirectional step:
+
+```text
+score(i) = p(i) + sum(
+  p(j) / sqrt((visible_degree(i) + 1) * (visible_degree(j) + 1))
+  for j in B32 when i and j share a reviewed internal link
+)
+```
+
+Degrees are computed over the full visible graph, while only B32 candidates
+contribute query-conditioned mass. The first eight positions remain exactly
+unchanged. Remaining candidates are stable-sorted only inside their original
+blocks of four, so no item moves more than three positions; the first ten form
+the candidate arm. This bounded block rule is the hard cap that keeps graph
+structure secondary even when a hub receives substantial mass. It is informed
+by degree-normalized graph diffusion and query-conditioned reranking, while the
+specific cap is an AirWiki hypothesis that must earn its use empirically
+([Zhou et al.](https://papers.nips.cc/paper_files/paper/2003/file/87682805257e619d49b8e0dfdc14affa-Paper.pdf),
+[Kurland and Lee](https://www.cs.cornell.edu/home/llee/papers/lmpagerank.home.html)).
+
+The control minimizes retained real links exactly while preserving each
+concept's weak degree and collection. Its exploration order comes from a
+pre-sealed hash of fixed domain and document ordinals, rather than semantic
+IDs, titles or text. Both graphs retain only projection-local identities and
+boxed adjacency slices: no text, titles, tags, queries, paths, embeddings or
+authorization state. An unavailable candidate, unhealthy or changed bundle,
+invalid permutation, or exhausted 1,024-adjacency-entry budget invalidates the
+run. The evaluator writes aggregate counts, fingerprints, language metrics and
+timings only; it never serializes questions, document or candidate identities,
+ranks, scores, control keys or ordinals.
+
+The frozen development gate requires all of the following:
+
+- real macro-domain Recall@10 gains at least 0.05 over both B10 and the weak
+  structural sham, with improvement over both in at least three domains;
+- no evidence group found by B10 is lost, MRR@10 and support density do not
+  regress against either control, and neither language regresses;
+- at least four required groups are absent from B10 but present in the only
+  promotable B32 positions, 11 or 12, so the corpus can diagnose the rule;
+- the real and sham outputs are complete B32 bijections, positions 1–8 remain
+  fixed, no candidate moves across a four-position block and no candidate is
+  introduced;
+- the weak sham rewires at least 80% of links with no unchanged linked
+  collection; both graph payloads remain at most 1 MiB, projection at most one
+  second and real and sham reranking p95 at most two milliseconds in a release
+  build; and
+- bundle health and fingerprints remain unchanged throughout the replay.
+
+```bash
+cargo run --release --locked -p xtask -- retrieval evaluate-diffusion-rerank \
+  --embedding-snapshot <verified-multilingual-e5-small-snapshot>
+```
+
+Passing this visible development gate can authorize only a separately authored
+multichunk holdout through the existing relevance, citation and final
+revalidation path. It cannot change production search;
+`production_promotion_ready` is always false. The 16-case p95 is only a bounded
+development guardrail for this primitive, not a production latency benchmark;
+any holdout must measure latency again.
+
 ### H-AWK-1 development observation
 
 The first macOS arm64 release-profile run on 2026-07-18 used Gemma 4 E4B Q4 at

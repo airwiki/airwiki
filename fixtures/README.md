@@ -40,6 +40,10 @@ or personal information.
   ranking, graph expansion, chunk selection or relevance classification. Its
   bytes and SHA remain unchanged by the pre-outcome v1.1 sham-construction
   amendment documented in the retrieval evaluation profile.
+- `retrieval/okf-diffusion-development-v1.json`: fresh bilingual development
+  corpus for a candidate-only graph reranking ablation. It contains no authored
+  ranks or scores; reviewed links may only permute exact B32 candidates inside
+  bounded four-position blocks and cannot nominate new evidence.
 
 The expected federated question asks how Atlas is recovered, who is responsible,
 and the target date. A correct answer combines the Mac procedure with the
@@ -102,6 +106,14 @@ snapshot. It publishes temporary OKF bundles and downloads nothing:
 
 ```bash
 cargo run --release --locked -p xtask -- retrieval evaluate-real-mini-graph \
+  --embedding-snapshot <verified-e5-snapshot-directory>
+```
+
+The graph-conditioned diffusion replay also requires only the verified E5
+snapshot. It is a candidate-stage development gate, not a promotion holdout:
+
+```bash
+cargo run --release --locked -p xtask -- retrieval evaluate-diffusion-rerank \
   --embedding-snapshot <verified-e5-snapshot-directory>
 ```
 

@@ -1,0 +1,542 @@
+{
+  "schema_version": 1,
+  "experiment_id": "okf-diffusion-development-v1",
+  "domains": [
+    {
+      "id": "desalinizacion_bahia",
+      "collection_name": "Planta sintética Bahía Clara",
+      "language": "es",
+      "distractor_count": 12,
+      "distractor_title": "Revisión de operación de Bahía Clara",
+      "distractor_description": "Nota temática no autoritativa sobre presión, lavado y alarmas de salmuera.",
+      "distractor_heading": "Valores pendientes de confirmación",
+      "distractor_text": "El equipo revisa la presión de toma, la duración del lavado de membranas y la respuesta ante una alarma de salmuera. Esta nota de planificación no registra el límite aprobado, el tiempo vigente ni la secuencia autorizada.",
+      "documents": [
+        {
+          "id": "bahia_guia_presion",
+          "title": "Guía de presión de la toma norte",
+          "description": "Ruta revisada hacia el límite operativo de la toma norte.",
+          "heading": "Referencia vigente",
+          "text": "El límite aprobado para estabilizar la toma norte está en el Anexo B-17 enlazado. La guía describe la verificación, pero no repite el valor numérico.",
+          "links": [
+            {
+              "label": "Consultar el límite aprobado en el Anexo B-17",
+              "target_document_id": "bahia_anexo_presion"
+            }
+          ]
+        },
+        {
+          "id": "bahia_anexo_presion",
+          "title": "Anexo B-17 de presión",
+          "description": "Límite revisado para estabilizar la toma norte.",
+          "heading": "Límite aprobado",
+          "text": "La toma norte se estabiliza a 2,8 bar antes de habilitar el flujo hacia las membranas.",
+          "links": []
+        },
+        {
+          "id": "bahia_guia_lavado",
+          "title": "Guía de lavado de membranas Delta",
+          "description": "Ruta revisada hacia la duración vigente del lavado Delta.",
+          "heading": "Registro operativo",
+          "text": "La duración vigente del lavado de membranas Delta figura en el registro L-04 enlazado. Esta guía no repite la cantidad de minutos.",
+          "links": [
+            {
+              "label": "Abrir el registro L-04 de duración",
+              "target_document_id": "bahia_registro_lavado"
+            }
+          ]
+        },
+        {
+          "id": "bahia_registro_lavado",
+          "title": "Registro L-04 de lavado Delta",
+          "description": "Duración revisada del ciclo de lavado de membranas.",
+          "heading": "Duración vigente",
+          "text": "El ciclo Delta debe mantenerse durante catorce minutos completos.",
+          "links": []
+        },
+        {
+          "id": "bahia_guia_alarma",
+          "title": "Guía de alarma de salmuera ámbar",
+          "description": "Ruta revisada hacia la respuesta segura de la alarma ámbar.",
+          "heading": "Procedimiento enlazado",
+          "text": "La secuencia autorizada para la alarma de salmuera ámbar se encuentra en el procedimiento S-09 enlazado. La guía no enumera las acciones.",
+          "links": [
+            {
+              "label": "Aplicar el procedimiento S-09",
+              "target_document_id": "bahia_procedimiento_alarma"
+            }
+          ]
+        },
+        {
+          "id": "bahia_procedimiento_alarma",
+          "title": "Procedimiento S-09 de salmuera",
+          "description": "Respuesta revisada para una alarma ámbar de salmuera.",
+          "heading": "Secuencia autorizada",
+          "text": "Ante la alarma ámbar se cierra la válvula V-3 y luego se conmuta a la bomba Delta.",
+          "links": []
+        },
+        {
+          "id": "bahia_indice_operativo",
+          "title": "Índice operativo de Bahía Clara",
+          "description": "Hub revisado para presión, lavado y alarmas de la planta.",
+          "heading": "Rutas de operación",
+          "text": "Este índice reúne las rutas vigentes para la toma norte, el lavado Delta y la alarma de salmuera. No contiene valores ni acciones operativas.",
+          "links": [
+            {
+              "label": "Ruta de presión de la toma norte",
+              "target_document_id": "bahia_guia_presion"
+            },
+            {
+              "label": "Ruta de lavado de membranas Delta",
+              "target_document_id": "bahia_guia_lavado"
+            },
+            {
+              "label": "Ruta de alarma de salmuera ámbar",
+              "target_document_id": "bahia_guia_alarma"
+            }
+          ]
+        },
+        {
+          "id": "bahia_control_directo",
+          "title": "Control de calibración de caudal",
+          "description": "Control independiente de calibración en Bahía Clara.",
+          "heading": "Código de control",
+          "text": "El código sintético de calibración del caudalímetro es BAHIA-CAL-482.",
+          "links": []
+        },
+        {
+          "id": "bahia_borrador_semantico",
+          "title": "Borrador de capacidad y salmuera",
+          "description": "Borrador no aprobado con vocabulario cercano a las guías vigentes.",
+          "heading": "Hipótesis descartadas",
+          "text": "El borrador compara presiones de toma, ciclos de lavado y conmutaciones de bombas, pero ninguna cifra o secuencia de esta nota está aprobada para operación.",
+          "links": []
+        }
+      ],
+      "cases": [
+        {
+          "id": "bahia_presion_toma",
+          "question": "Según la guía de la toma norte, ¿a qué presión debe estabilizarse antes de habilitar el flujo?",
+          "required_document_groups": [["bahia_guia_presion"], ["bahia_anexo_presion"]]
+        },
+        {
+          "id": "bahia_lavado_delta",
+          "question": "¿Cuánto dura el lavado vigente de las membranas Delta indicado por su guía operativa?",
+          "required_document_groups": [["bahia_guia_lavado"], ["bahia_registro_lavado"]]
+        },
+        {
+          "id": "bahia_alarma_salmuera",
+          "question": "¿Qué acciones exige la guía cuando aparece la alarma de salmuera ámbar?",
+          "required_document_groups": [["bahia_guia_alarma"], ["bahia_procedimiento_alarma"]]
+        },
+        {
+          "id": "bahia_codigo_calibracion",
+          "question": "¿Cuál es el código sintético de calibración del caudalímetro de Bahía Clara?",
+          "required_document_groups": [["bahia_control_directo"]]
+        }
+      ]
+    },
+    {
+      "id": "banco_semillas_sierra",
+      "collection_name": "Banco sintético de semillas Sierra Azul",
+      "language": "es",
+      "distractor_count": 12,
+      "distractor_title": "Revisión ambiental de Sierra Azul",
+      "distractor_description": "Nota temática no autoritativa sobre humedad, rotación y heladas.",
+      "distractor_heading": "Parámetros en discusión",
+      "distractor_text": "La revisión menciona el umbral de humedad de la cámara, la custodia de la rotación de bandejas y la respuesta ante una alerta de escarcha. No confirma el porcentaje, la persona asignada ni el aislamiento vigente.",
+      "documents": [
+        {
+          "id": "sierra_guia_humedad",
+          "title": "Guía de humedad de la cámara Cedro",
+          "description": "Ruta revisada hacia el umbral de humedad de la cámara Cedro.",
+          "heading": "Anexo vigente",
+          "text": "El umbral aprobado de humedad de la cámara Cedro está en el Anexo H-12 enlazado. Esta guía no repite el porcentaje.",
+          "links": [
+            {
+              "label": "Consultar el umbral en el Anexo H-12",
+              "target_document_id": "sierra_anexo_humedad"
+            }
+          ]
+        },
+        {
+          "id": "sierra_anexo_humedad",
+          "title": "Anexo H-12 de humedad",
+          "description": "Umbral revisado para la cámara Cedro.",
+          "heading": "Umbral aprobado",
+          "text": "La alerta de la cámara Cedro se activa al alcanzar treinta y ocho por ciento de humedad relativa.",
+          "links": []
+        },
+        {
+          "id": "sierra_guia_rotacion",
+          "title": "Guía de rotación de bandejas Álamo",
+          "description": "Ruta revisada hacia la persona responsable de la rotación.",
+          "heading": "Registro de custodia",
+          "text": "La persona responsable de la rotación de bandejas Álamo figura en el registro R-26 enlazado. La guía no incluye su nombre.",
+          "links": [
+            {
+              "label": "Abrir el registro R-26 de custodia",
+              "target_document_id": "sierra_registro_rotacion"
+            }
+          ]
+        },
+        {
+          "id": "sierra_registro_rotacion",
+          "title": "Registro R-26 de rotación",
+          "description": "Asignación revisada para las bandejas Álamo.",
+          "heading": "Persona responsable",
+          "text": "El registro R-26 asigna la rotación de bandejas a Iria Montes, persona ficticia.",
+          "links": []
+        },
+        {
+          "id": "sierra_guia_escarcha",
+          "title": "Guía de alerta de escarcha violeta",
+          "description": "Ruta revisada hacia la respuesta ante escarcha violeta.",
+          "heading": "Respuesta enlazada",
+          "text": "La respuesta autorizada para una alerta de escarcha violeta está en el protocolo F-06 enlazado. La guía no repite la acción ni el tiempo.",
+          "links": [
+            {
+              "label": "Aplicar el protocolo F-06",
+              "target_document_id": "sierra_protocolo_escarcha"
+            }
+          ]
+        },
+        {
+          "id": "sierra_protocolo_escarcha",
+          "title": "Protocolo F-06 de escarcha",
+          "description": "Respuesta revisada para una alerta violeta.",
+          "heading": "Aislamiento temporal",
+          "text": "Se aísla la bandeja F-6 durante nueve minutos y se mantiene cerrada la compuerta superior.",
+          "links": []
+        },
+        {
+          "id": "sierra_indice_conservacion",
+          "title": "Índice de conservación de Sierra Azul",
+          "description": "Hub revisado para humedad, rotación y alertas de escarcha.",
+          "heading": "Rutas de conservación",
+          "text": "Este índice conecta las guías vigentes de la cámara Cedro, las bandejas Álamo y la alerta violeta. No contiene umbrales, nombres ni instrucciones.",
+          "links": [
+            {
+              "label": "Ruta de humedad de la cámara Cedro",
+              "target_document_id": "sierra_guia_humedad"
+            },
+            {
+              "label": "Ruta de rotación de bandejas Álamo",
+              "target_document_id": "sierra_guia_rotacion"
+            },
+            {
+              "label": "Ruta de alerta de escarcha violeta",
+              "target_document_id": "sierra_guia_escarcha"
+            }
+          ]
+        },
+        {
+          "id": "sierra_control_directo",
+          "title": "Control de inventario de sobres",
+          "description": "Control independiente del inventario de Sierra Azul.",
+          "heading": "Código de inventario",
+          "text": "El código sintético del inventario de sobres es SIERRA-INV-731.",
+          "links": []
+        },
+        {
+          "id": "sierra_borrador_semantico",
+          "title": "Borrador de clima y rotaciones",
+          "description": "Borrador no aprobado con términos próximos a las guías de conservación.",
+          "heading": "Escenarios sin validar",
+          "text": "El borrador discute humedad, bandejas, responsables y escarcha, pero sus porcentajes, nombres y tiempos son hipótesis sin autoridad operativa.",
+          "links": []
+        }
+      ],
+      "cases": [
+        {
+          "id": "sierra_umbral_humedad",
+          "question": "Según la guía de la cámara Cedro, ¿qué porcentaje activa la alerta de humedad?",
+          "required_document_groups": [["sierra_guia_humedad"], ["sierra_anexo_humedad"]]
+        },
+        {
+          "id": "sierra_responsable_rotacion",
+          "question": "¿Quién tiene asignada la rotación de bandejas Álamo según su guía de custodia?",
+          "required_document_groups": [["sierra_guia_rotacion"], ["sierra_registro_rotacion"]]
+        },
+        {
+          "id": "sierra_alerta_escarcha",
+          "question": "¿Cómo se responde a la alerta de escarcha violeta y durante cuánto tiempo?",
+          "required_document_groups": [["sierra_guia_escarcha"], ["sierra_protocolo_escarcha"]]
+        },
+        {
+          "id": "sierra_codigo_inventario",
+          "question": "¿Cuál es el código sintético del inventario de sobres de Sierra Azul?",
+          "required_document_groups": [["sierra_control_directo"]]
+        }
+      ]
+    },
+    {
+      "id": "floating_clinic",
+      "collection_name": "Synthetic floating clinic Northstar",
+      "language": "en",
+      "distractor_count": 12,
+      "distractor_title": "Northstar clinic operations review",
+      "distractor_description": "A topical but non-authoritative note about cooling, handoff, and power alarms.",
+      "distractor_heading": "Values awaiting confirmation",
+      "distractor_text": "The team is reviewing the vaccine cooler boundary, the overnight handoff contact, and the response to a battery alarm. This planning note records no approved temperature, assigned person, or authorized sequence.",
+      "documents": [
+        {
+          "id": "northstar_cooler_guide",
+          "title": "Vaccine cooler Kestrel guide",
+          "description": "Reviewed route to the Kestrel cooler temperature boundary.",
+          "heading": "Current appendix",
+          "text": "The approved upper boundary for cooler Kestrel is recorded in linked Appendix C-21. This guide intentionally does not repeat the temperature.",
+          "links": [
+            {
+              "label": "Consult the boundary in Appendix C-21",
+              "target_document_id": "northstar_cooler_appendix"
+            }
+          ]
+        },
+        {
+          "id": "northstar_cooler_appendix",
+          "title": "Appendix C-21 cooler boundary",
+          "description": "Reviewed upper temperature boundary for cooler Kestrel.",
+          "heading": "Approved boundary",
+          "text": "Cooler Kestrel must remain at or below 3.4 degrees Celsius during transfer.",
+          "links": []
+        },
+        {
+          "id": "northstar_handoff_guide",
+          "title": "Overnight handoff guide",
+          "description": "Reviewed route to the current overnight handoff contact.",
+          "heading": "Assignment record",
+          "text": "The current contact for the overnight handoff is recorded in linked roster N-08. This guide intentionally does not name the person.",
+          "links": [
+            {
+              "label": "Open overnight roster N-08",
+              "target_document_id": "northstar_handoff_roster"
+            }
+          ]
+        },
+        {
+          "id": "northstar_handoff_roster",
+          "title": "Roster N-08 for overnight handoff",
+          "description": "Reviewed assignment for the Northstar overnight handoff.",
+          "heading": "Assigned contact",
+          "text": "Roster N-08 assigns the overnight handoff to Rowan Vale, a fictional person.",
+          "links": []
+        },
+        {
+          "id": "northstar_battery_guide",
+          "title": "Amber battery alarm guide",
+          "description": "Reviewed route to the safe response for an amber battery alarm.",
+          "heading": "Linked response",
+          "text": "The authorized response to an amber battery alarm is in linked procedure P-14. This guide does not list the steps.",
+          "links": [
+            {
+              "label": "Apply battery procedure P-14",
+              "target_document_id": "northstar_battery_procedure"
+            }
+          ]
+        },
+        {
+          "id": "northstar_battery_procedure",
+          "title": "Procedure P-14 for battery alarms",
+          "description": "Reviewed response to an amber battery alarm.",
+          "heading": "Authorized sequence",
+          "text": "For an amber alarm, disconnect outlet O-2 and engage reserve battery Finch.",
+          "links": []
+        },
+        {
+          "id": "northstar_operations_hub",
+          "title": "Northstar clinical operations index",
+          "description": "Reviewed hub for cooling, handoff, and battery response routes.",
+          "heading": "Clinical routes",
+          "text": "This index connects the current cooler, overnight handoff, and amber battery guides. It contains no temperatures, names, or response steps.",
+          "links": [
+            {
+              "label": "Route to the Kestrel cooler guide",
+              "target_document_id": "northstar_cooler_guide"
+            },
+            {
+              "label": "Route to the overnight handoff guide",
+              "target_document_id": "northstar_handoff_guide"
+            },
+            {
+              "label": "Route to the amber battery guide",
+              "target_document_id": "northstar_battery_guide"
+            }
+          ]
+        },
+        {
+          "id": "northstar_direct_control",
+          "title": "Cabinet seal verification",
+          "description": "Independent verification control for the floating clinic.",
+          "heading": "Verification token",
+          "text": "The synthetic cabinet seal verification token is NORTHSTAR-SEAL-205.",
+          "links": []
+        },
+        {
+          "id": "northstar_semantic_draft",
+          "title": "Cooling and handoff planning draft",
+          "description": "Unapproved draft using vocabulary close to current clinical guides.",
+          "heading": "Discarded scenarios",
+          "text": "The draft compares cooler temperatures, handoff contacts, outlets, and reserve batteries, but none of its values, names, or sequences is approved for use.",
+          "links": []
+        }
+      ],
+      "cases": [
+        {
+          "id": "northstar_cooler_boundary",
+          "question": "According to the Kestrel cooler guide, what upper temperature applies during transfer?",
+          "required_document_groups": [["northstar_cooler_guide"], ["northstar_cooler_appendix"]]
+        },
+        {
+          "id": "northstar_handoff_contact",
+          "question": "Who is assigned to the Northstar overnight handoff according to its guide?",
+          "required_document_groups": [["northstar_handoff_guide"], ["northstar_handoff_roster"]]
+        },
+        {
+          "id": "northstar_battery_alarm",
+          "question": "What does the amber battery alarm guide require the clinic to do?",
+          "required_document_groups": [["northstar_battery_guide"], ["northstar_battery_procedure"]]
+        },
+        {
+          "id": "northstar_seal_token",
+          "question": "What is the synthetic cabinet seal verification token?",
+          "required_document_groups": [["northstar_direct_control"]]
+        }
+      ]
+    },
+    {
+      "id": "mountain_observatory",
+      "collection_name": "Synthetic mountain observatory Copper Ridge",
+      "language": "en",
+      "distractor_count": 12,
+      "distractor_title": "Copper Ridge instrumentation review",
+      "distractor_description": "A topical but non-authoritative note about thermal windows, custody, and sensor alerts.",
+      "distractor_heading": "Parameters under discussion",
+      "distractor_text": "The review discusses the spectrograph thermal window, the calibration plate custodian, and the response to a violet sensor alert. It confirms no numeric range, assigned person, or authorized action.",
+      "documents": [
+        {
+          "id": "copper_thermal_guide",
+          "title": "Spectrograph thermal window guide",
+          "description": "Reviewed route to the thermal window for spectrograph Copper-4.",
+          "heading": "Current annex",
+          "text": "The approved thermal window for spectrograph Copper-4 is recorded in linked Annex T-33. This guide intentionally omits the numeric range.",
+          "links": [
+            {
+              "label": "Consult thermal Annex T-33",
+              "target_document_id": "copper_thermal_annex"
+            }
+          ]
+        },
+        {
+          "id": "copper_thermal_annex",
+          "title": "Annex T-33 thermal window",
+          "description": "Reviewed thermal window for spectrograph Copper-4.",
+          "heading": "Approved range",
+          "text": "Spectrograph Copper-4 may operate between 18.2 and 18.8 degrees Celsius.",
+          "links": []
+        },
+        {
+          "id": "copper_custody_guide",
+          "title": "Calibration plate custody guide",
+          "description": "Reviewed route to the current calibration plate custodian.",
+          "heading": "Custody record",
+          "text": "The current custodian for plate Quartz-9 is identified in linked record Q-19. This guide does not repeat the name.",
+          "links": [
+            {
+              "label": "Open custody record Q-19",
+              "target_document_id": "copper_custody_record"
+            }
+          ]
+        },
+        {
+          "id": "copper_custody_record",
+          "title": "Custody record Q-19",
+          "description": "Reviewed assignment for calibration plate Quartz-9.",
+          "heading": "Assigned custodian",
+          "text": "Record Q-19 assigns plate Quartz-9 to Ellis Wren, a fictional person.",
+          "links": []
+        },
+        {
+          "id": "copper_sensor_guide",
+          "title": "Violet sensor alert guide",
+          "description": "Reviewed route to the response for a violet sensor alert.",
+          "heading": "Response protocol",
+          "text": "The authorized response to a violet sensor alert is recorded in linked protocol V-07. The guide does not list its actions.",
+          "links": [
+            {
+              "label": "Apply sensor protocol V-07",
+              "target_document_id": "copper_sensor_protocol"
+            }
+          ]
+        },
+        {
+          "id": "copper_sensor_protocol",
+          "title": "Protocol V-07 for sensor alerts",
+          "description": "Reviewed response to a violet sensor alert.",
+          "heading": "Authorized action",
+          "text": "A violet alert requires parking mount M-5 and switching telemetry to channel Lark.",
+          "links": []
+        },
+        {
+          "id": "copper_instrument_hub",
+          "title": "Copper Ridge instrument index",
+          "description": "Reviewed hub for thermal, custody, and sensor response routes.",
+          "heading": "Instrument routes",
+          "text": "This index connects the current thermal, plate custody, and violet sensor guides. It contains no ranges, names, or response actions.",
+          "links": [
+            {
+              "label": "Route to the Copper-4 thermal guide",
+              "target_document_id": "copper_thermal_guide"
+            },
+            {
+              "label": "Route to the Quartz-9 custody guide",
+              "target_document_id": "copper_custody_guide"
+            },
+            {
+              "label": "Route to the violet sensor guide",
+              "target_document_id": "copper_sensor_guide"
+            }
+          ]
+        },
+        {
+          "id": "copper_direct_control",
+          "title": "Dome latch verification",
+          "description": "Independent verification control for Copper Ridge.",
+          "heading": "Verification token",
+          "text": "The synthetic dome latch verification token is COPPER-LATCH-664.",
+          "links": []
+        },
+        {
+          "id": "copper_semantic_draft",
+          "title": "Thermal and telemetry planning draft",
+          "description": "Unapproved draft using vocabulary close to current instrument guides.",
+          "heading": "Discarded scenarios",
+          "text": "The draft compares thermal ranges, calibration custodians, mounts, and telemetry channels, but none of its values, names, or actions is approved.",
+          "links": []
+        }
+      ],
+      "cases": [
+        {
+          "id": "copper_thermal_window",
+          "question": "According to the Copper-4 guide, what thermal operating window is approved?",
+          "required_document_groups": [["copper_thermal_guide"], ["copper_thermal_annex"]]
+        },
+        {
+          "id": "copper_plate_custodian",
+          "question": "Who is the custodian of calibration plate Quartz-9 according to its guide?",
+          "required_document_groups": [["copper_custody_guide"], ["copper_custody_record"]]
+        },
+        {
+          "id": "copper_violet_alert",
+          "question": "What actions are required by the violet sensor alert guide?",
+          "required_document_groups": [["copper_sensor_guide"], ["copper_sensor_protocol"]]
+        },
+        {
+          "id": "copper_latch_token",
+          "question": "What is the synthetic dome latch verification token?",
+          "required_document_groups": [["copper_direct_control"]]
+        }
+      ]
+    }
+  ]
+}

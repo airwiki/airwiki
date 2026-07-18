@@ -22,6 +22,7 @@ All notable user-visible changes to AirWiki will be documented here. The project
 - A development-only mMARCO score-order diagnostic that compares the current relevance-filter order with descending cross-encoder order from one shared inference.
 - A grouped, bilingual mMARCO cutoff-calibration corpus and evaluation-only score seam that keep third-party text and raw logits out of reports while comparing the current evidence policy with one frozen absolute threshold.
 - A development-only two-hop OKF navigation diagnostic with a compact Rust graph, procedurally separated bilingual artifacts, and an exact weak-degree-preserving structural control.
+- A development-only graph-conditioned diffusion ablation that can only reorder exact B32 semantic candidates within bounded blocks, with a fresh bilingual corpus and weak-degree-preserving sham control.
 
 ### Changed
 

@@ -444,6 +444,20 @@ async fn main() -> Result<()> {
                 );
                 retrieval::evaluate_real_mini_graph(Path::new(&embedding_snapshot)).await
             }
+            Some("evaluate-diffusion-rerank") => {
+                ensure!(
+                    arguments.next().as_deref() == Some("--embedding-snapshot"),
+                    "retrieval evaluate-diffusion-rerank expects `--embedding-snapshot <directory>`"
+                );
+                let embedding_snapshot = arguments.next().context(
+                    "retrieval evaluate-diffusion-rerank is missing the embedding snapshot path",
+                )?;
+                ensure!(
+                    arguments.next().is_none(),
+                    "retrieval evaluate-diffusion-rerank received unexpected arguments"
+                );
+                retrieval::evaluate_diffusion_rerank(Path::new(&embedding_snapshot)).await
+            }
             Some("evaluate-final-mini-graph") => {
                 ensure!(
                     arguments.next().as_deref() == Some("--embedding-snapshot"),

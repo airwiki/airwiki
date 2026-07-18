@@ -11,7 +11,7 @@ use std::mem::{size_of, size_of_val};
 use std::path::PathBuf;
 use std::time::Instant;
 
-use anyhow::{Context, Result, ensure};
+use anyhow::{Context, Result, bail, ensure};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use uuid::Uuid;
@@ -32,6 +32,11 @@ const MAX_GRAPH_LINK_INPUTS: usize = 4_000;
 const MAX_SCANNED_EDGES: usize = 128;
 const MAX_PATH_SCANNED_EDGES: u32 = 256;
 const MAX_PATH_FRONTIER: usize = MAX_PATH_SCANNED_EDGES as usize;
+const DIFFUSION_RRF_K: f64 = 60.0;
+const DIFFUSION_TAU: f64 = 1.0;
+const DIFFUSION_FROZEN_PREFIX: usize = 8;
+const DIFFUSION_BLOCK_SIZE: usize = 4;
+const MAX_DIFFUSION_SCANNED_ADJACENCY: u32 = 1_024;
 const MAX_RETAINED_PAYLOAD_BYTES: usize = 1024 * 1024;
 const MAX_BUILD_MICROS_P95: u128 = 50_000;
 const MAX_EXPANSION_MICROS_P95: u128 = 5_000;
@@ -454,8 +459,134 @@ impl MiniGraph {
         })
     }
 
+    /// Reorders an existing candidate pool with one weak-neighborhood diffusion
+    /// step without adding or removing a candidate.
+    ///
+    /// The first eight positions are frozen. Remaining candidates may move only
+    /// inside their original block of four, with original rank as the stable
+    /// tie-breaker. An unavailable endpoint or exhausted aggregate adjacency
+    /// budget rejects the whole operation instead of returning a partial order.
+    pub(in crate::retrieval) fn rerank_one_hop_diffusion(
+        &self,
+        pool: &[NodeId],
+        scope: &QueryScope,
+    ) -> Result<OneHopDiffusionResult> {
+        ensure!(
+            pool.len() <= CONTROL_LIMIT,
+            "one-hop diffusion pool exceeds the {CONTROL_LIMIT}-candidate budget"
+        );
+
+        let mut distinct_nodes = pool.to_vec();
+        distinct_nodes.sort_unstable();
+        distinct_nodes.dedup();
+        let mut adjacency_entries_scanned = 0_u32;
+        let mut visible_neighbors = Vec::<(NodeId, Box<[NodeId]>)>::new();
+        for node in &distinct_nodes {
+            ensure!(
+                self.is_visible(*node, scope),
+                "one-hop diffusion candidate is unavailable in the query scope"
+            );
+            visible_neighbors.push((
+                *node,
+                self.visible_weak_neighbors(*node, scope, &mut adjacency_entries_scanned)?,
+            ));
+        }
+
+        let priors = (0..pool.len())
+            .map(|index| {
+                let rank = index.saturating_add(1) as f64;
+                1.0 / (DIFFUSION_RRF_K + rank)
+            })
+            .collect::<Vec<_>>();
+        let scores = pool
+            .iter()
+            .enumerate()
+            .map(|(candidate_index, candidate)| {
+                let candidate_neighbors = diffusion_neighbors(&visible_neighbors, *candidate)
+                    .context("one-hop diffusion candidate neighborhood disappeared")?;
+                let candidate_degree = candidate_neighbors.len() as f64;
+                let diffusion = pool
+                    .iter()
+                    .enumerate()
+                    .filter(|(_, neighbor)| candidate_neighbors.binary_search(neighbor).is_ok())
+                    .map(|(neighbor_index, neighbor)| {
+                        let neighbor_degree = diffusion_neighbors(&visible_neighbors, *neighbor)
+                            .map_or(0.0, |neighbors| neighbors.len() as f64);
+                        let normalization = ((candidate_degree + DIFFUSION_TAU)
+                            * (neighbor_degree + DIFFUSION_TAU))
+                            .sqrt();
+                        priors[neighbor_index] / normalization
+                    })
+                    .sum::<f64>();
+                Ok(priors[candidate_index] + diffusion)
+            })
+            .collect::<Result<Vec<_>>>()?;
+
+        let mut permutation = (0..pool.len()).collect::<Vec<_>>();
+        for block_start in (DIFFUSION_FROZEN_PREFIX..pool.len()).step_by(DIFFUSION_BLOCK_SIZE) {
+            let block_end = block_start
+                .saturating_add(DIFFUSION_BLOCK_SIZE)
+                .min(pool.len());
+            permutation[block_start..block_end].sort_unstable_by(|left, right| {
+                scores[*right]
+                    .total_cmp(&scores[*left])
+                    .then_with(|| left.cmp(right))
+            });
+        }
+        validate_diffusion_permutation(pool.len(), &permutation)?;
+
+        let moved_candidate_count = permutation
+            .iter()
+            .enumerate()
+            .filter(|(position, original)| *position != **original)
+            .count();
+        let reranked_block_count = pool
+            .len()
+            .saturating_sub(DIFFUSION_FROZEN_PREFIX)
+            .div_ceil(DIFFUSION_BLOCK_SIZE);
+        Ok(OneHopDiffusionResult {
+            permutation,
+            stats: OneHopDiffusionStats {
+                pool_size: u32::try_from(pool.len()).unwrap_or(u32::MAX),
+                distinct_node_count: u32::try_from(distinct_nodes.len()).unwrap_or(u32::MAX),
+                frozen_prefix_size: u32::try_from(pool.len().min(DIFFUSION_FROZEN_PREFIX))
+                    .unwrap_or(u32::MAX),
+                reranked_block_count: u32::try_from(reranked_block_count).unwrap_or(u32::MAX),
+                moved_candidate_count: u32::try_from(moved_candidate_count).unwrap_or(u32::MAX),
+                adjacency_entries_scanned,
+            },
+        })
+    }
+
     pub(in crate::retrieval) const fn path_requested_scratch_bytes() -> usize {
         size_of::<PathTraversal>() + MAX_PATH_FRONTIER * size_of::<NodeId>()
+    }
+
+    fn visible_weak_neighbors(
+        &self,
+        source: NodeId,
+        scope: &QueryScope,
+        adjacency_entries_scanned: &mut u32,
+    ) -> Result<Box<[NodeId]>> {
+        let source_index = node_index(source)?;
+        let mut neighbors = Vec::new();
+        for adjacency in [&self.outgoing, &self.incoming] {
+            let entries = adjacency.get(source_index).map_or(&[][..], AsRef::as_ref);
+            for neighbor in entries {
+                if *adjacency_entries_scanned == MAX_DIFFUSION_SCANNED_ADJACENCY {
+                    bail!(
+                        "one-hop diffusion exceeded the {MAX_DIFFUSION_SCANNED_ADJACENCY}-entry aggregate adjacency budget"
+                    );
+                }
+                *adjacency_entries_scanned = adjacency_entries_scanned.saturating_add(1);
+                if self.is_visible(*neighbor, scope) {
+                    neighbors.push(*neighbor);
+                }
+            }
+        }
+        neighbors.sort_unstable();
+        neighbors.dedup();
+        Ok(neighbors.into_boxed_slice())
     }
 
     fn scan_path_neighbors(
@@ -490,6 +621,54 @@ impl MiniGraph {
                     || scope.external_ai_collections.contains(&node.collection_id))
         })
     }
+}
+
+/// Content-free result of one bounded diffusion reorder.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(in crate::retrieval) struct OneHopDiffusionResult {
+    /// Output position to original pool index.
+    pub(in crate::retrieval) permutation: Vec<usize>,
+    pub(in crate::retrieval) stats: OneHopDiffusionStats,
+}
+
+/// Aggregate diagnostics that contain no concept identity or ranking score.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(in crate::retrieval) struct OneHopDiffusionStats {
+    pub(in crate::retrieval) pool_size: u32,
+    pub(in crate::retrieval) distinct_node_count: u32,
+    pub(in crate::retrieval) frozen_prefix_size: u32,
+    pub(in crate::retrieval) reranked_block_count: u32,
+    pub(in crate::retrieval) moved_candidate_count: u32,
+    pub(in crate::retrieval) adjacency_entries_scanned: u32,
+}
+
+fn diffusion_neighbors(
+    neighborhoods: &[(NodeId, Box<[NodeId]>)],
+    node: NodeId,
+) -> Option<&[NodeId]> {
+    neighborhoods
+        .binary_search_by_key(&node, |(candidate, _)| *candidate)
+        .ok()
+        .and_then(|index| neighborhoods.get(index))
+        .map(|(_, neighbors)| neighbors.as_ref())
+}
+
+fn validate_diffusion_permutation(expected: usize, permutation: &[usize]) -> Result<()> {
+    ensure!(
+        permutation.len() == expected,
+        "one-hop diffusion returned an incomplete permutation"
+    );
+    let mut seen = vec![false; expected];
+    for index in permutation {
+        let Some(seen) = seen.get_mut(*index) else {
+            bail!("one-hop diffusion returned an out-of-range permutation index");
+        };
+        ensure!(
+            !std::mem::replace(seen, true),
+            "one-hop diffusion returned a duplicate permutation index"
+        );
+    }
+    Ok(())
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -1502,6 +1681,24 @@ mod tests {
         }
     }
 
+    fn local_scope() -> QueryScope {
+        QueryScope {
+            purpose: GraphPurpose::LocalAssistant,
+            authorized_collections: [Uuid::from_u128(1)].into_iter().collect(),
+            external_ai_collections: BTreeSet::new(),
+        }
+    }
+
+    fn pool_node_ids(graph: &MiniGraph, count: u32) -> Vec<NodeId> {
+        (0..count)
+            .map(|index| {
+                graph
+                    .node_id(Uuid::from_u128(u128::from(index) + 1))
+                    .unwrap()
+            })
+            .collect()
+    }
+
     #[test]
     fn fixture_meets_the_frozen_mechanistic_gate() {
         let loaded = load_fixture().unwrap();
@@ -1743,6 +1940,118 @@ mod tests {
         assert_eq!(result.status, PathQueryStatus::BudgetExceeded);
         assert_eq!(result.edges_scanned, MAX_PATH_SCANNED_EDGES);
         assert!(MiniGraph::path_requested_scratch_bytes() < 8 * 1024);
+    }
+
+    #[test]
+    fn one_hop_diffusion_returns_a_complete_bijection() {
+        let nodes = (0..12).map(graph_node).collect::<Vec<_>>();
+        let graph = MiniGraph::build(&nodes, &[reviewed_link(0, 11)]).unwrap();
+        let pool = pool_node_ids(&graph, 12);
+
+        let result = graph
+            .rerank_one_hop_diffusion(&pool, &local_scope())
+            .unwrap();
+        let mut sorted = result.permutation.clone();
+        sorted.sort_unstable();
+
+        assert_eq!(sorted, (0..pool.len()).collect::<Vec<_>>());
+        assert_eq!(result.stats.pool_size, 12);
+        assert_eq!(result.stats.distinct_node_count, 12);
+    }
+
+    #[test]
+    fn one_hop_diffusion_keeps_the_first_eight_positions_frozen() {
+        let nodes = (0..12).map(graph_node).collect::<Vec<_>>();
+        let links = (1..12)
+            .map(|target| reviewed_link(0, target))
+            .collect::<Vec<_>>();
+        let graph = MiniGraph::build(&nodes, &links).unwrap();
+        let pool = pool_node_ids(&graph, 12);
+
+        let result = graph
+            .rerank_one_hop_diffusion(&pool, &local_scope())
+            .unwrap();
+
+        assert_eq!(result.permutation[..8], (0..8).collect::<Vec<_>>());
+        assert_eq!(result.stats.frozen_prefix_size, 8);
+    }
+
+    #[test]
+    fn one_hop_diffusion_never_moves_a_candidate_more_than_three_positions() {
+        let nodes = (0..32).map(graph_node).collect::<Vec<_>>();
+        let links = [
+            reviewed_link(0, 11),
+            reviewed_link(0, 19),
+            reviewed_link(0, 31),
+        ];
+        let graph = MiniGraph::build(&nodes, &links).unwrap();
+        let pool = pool_node_ids(&graph, 32);
+
+        let result = graph
+            .rerank_one_hop_diffusion(&pool, &local_scope())
+            .unwrap();
+
+        assert!(
+            result
+                .permutation
+                .iter()
+                .enumerate()
+                .all(|(position, original)| {
+                    position.abs_diff(*original) < DIFFUSION_BLOCK_SIZE
+                })
+        );
+        assert_eq!(result.permutation[8], 11);
+        assert_eq!(result.stats.reranked_block_count, 6);
+    }
+
+    #[test]
+    fn symmetric_global_degree_normalization_dampens_a_hub() {
+        let nodes = (0..21).map(graph_node).collect::<Vec<_>>();
+        let mut links = vec![reviewed_link(0, 8), reviewed_link(0, 9)];
+        links.extend((12..21).map(|target| reviewed_link(8, target)));
+        let graph = MiniGraph::build(&nodes, &links).unwrap();
+        let pool = pool_node_ids(&graph, 12);
+
+        let result = graph
+            .rerank_one_hop_diffusion(&pool, &local_scope())
+            .unwrap();
+
+        assert_eq!(result.permutation[8], 9);
+        assert_eq!(result.permutation[9], 8);
+    }
+
+    #[test]
+    fn one_hop_diffusion_fails_closed_for_an_out_of_scope_candidate() {
+        let mut nodes = vec![graph_node(0), graph_node(1)];
+        nodes[1].node.collection_id = Uuid::from_u128(2);
+        let graph = MiniGraph::build(&nodes, &[]).unwrap();
+        let pool = pool_node_ids(&graph, 2);
+
+        let error = graph
+            .rerank_one_hop_diffusion(&pool, &local_scope())
+            .unwrap_err();
+
+        assert!(error.to_string().contains("unavailable in the query scope"));
+    }
+
+    #[test]
+    fn one_hop_diffusion_has_a_fixed_aggregate_adjacency_budget() {
+        let nodes = (0..32).map(graph_node).collect::<Vec<_>>();
+        let links = (0..32)
+            .flat_map(|source| {
+                (0..32)
+                    .filter(move |target| *target != source)
+                    .map(move |target| reviewed_link(source, target))
+            })
+            .collect::<Vec<_>>();
+        let graph = MiniGraph::build(&nodes, &links).unwrap();
+        let pool = pool_node_ids(&graph, 32);
+
+        let error = graph
+            .rerank_one_hop_diffusion(&pool, &local_scope())
+            .unwrap_err();
+
+        assert!(error.to_string().contains("aggregate adjacency budget"));
     }
 
     #[test]

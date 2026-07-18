@@ -34,6 +34,8 @@ use super::mini_graph::{
 use super::sham_graph::{StructuralShamStats, build_structural_sham};
 use crate::{replace_file, workspace_root};
 
+mod diffusion_rerank;
+
 const FIXTURE_PATH: &str = "fixtures/retrieval/mini-graph-real-development-v1.json";
 const FINAL_FIXTURE_PATH: &str = "fixtures/retrieval/mini-graph-final-holdout-v1.json";
 const FINAL_FIXTURE_SHA256: &str =
@@ -202,6 +204,8 @@ struct ReplayCorpus {
     engine: HybridSearchEngine,
     graph: MiniGraph,
     sham_graph: MiniGraph,
+    node_inputs: Box<[GraphNodeInput]>,
+    link_inputs: Box<[GraphLinkInput]>,
     sham_stats: StructuralShamStats,
     logical_by_concept: HashMap<Uuid, String>,
     concept_by_logical: HashMap<String, Uuid>,
@@ -452,6 +456,10 @@ pub(crate) async fn evaluate_real_mini_graph(embedding_snapshot: &Path) -> Resul
         destination.display()
     );
     Ok(())
+}
+
+pub(crate) async fn evaluate_diffusion_rerank(embedding_snapshot: &Path) -> Result<()> {
+    diffusion_rerank::evaluate(embedding_snapshot).await
 }
 
 pub(crate) async fn evaluate_final_mini_graph(
@@ -990,6 +998,8 @@ async fn build_corpus(
         engine,
         graph,
         sham_graph,
+        node_inputs: node_inputs.into_boxed_slice(),
+        link_inputs: link_inputs.into_boxed_slice(),
         sham_stats: structural_sham.stats,
         logical_by_concept,
         concept_by_logical,

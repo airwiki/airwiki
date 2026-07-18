@@ -47,7 +47,9 @@ mod sham_graph;
 pub(crate) use answerability::evaluate_answerability;
 pub(crate) use mini_graph::evaluate_mini_graph;
 pub(crate) use path_signal::evaluate_path_signal;
-pub(crate) use real_graph::{evaluate_final_mini_graph, evaluate_real_mini_graph};
+pub(crate) use real_graph::{
+    evaluate_diffusion_rerank, evaluate_final_mini_graph, evaluate_real_mini_graph,
+};
 pub(crate) use rerank_calibration::evaluate_rerank_calibration;
 pub(crate) use rerank_order::evaluate_rerank_order;
 pub(crate) use reviewed_anchors::evaluate_reviewed_anchors;

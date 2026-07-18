@@ -17,8 +17,6 @@ or personal information.
 - `retrieval/search-quality-v2.json`: active domain-separated source-side
   retrieval regression corpus for local and federated scopes, policy,
   provenance, deduplication, stability and honest abstention.
-- `retrieval/search-quality-v1.json`: preserved initial measurement corpus; it
-  is no longer the active acceptance baseline.
 
 The expected federated question asks how Atlas is recovered, who is responsible,
 and the target date. A correct answer combines the Mac procedure with the

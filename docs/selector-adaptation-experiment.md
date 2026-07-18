@@ -1,7 +1,8 @@
 # Selector adaptation experiment
 
-Status: **preregistered development experiment**. This profile does not describe
-a shipped model and does not authorize a production-model change.
+Status: **development candidate frozen; promotion holdout unobserved**. This
+profile does not describe a shipped model and does not authorize a
+production-model change.
 
 ## Why this experiment exists
 
@@ -112,6 +113,49 @@ and must be reviewed before training. See the
 [Sentence Transformers cross-encoder guidance](https://sbert.net/docs/cross_encoder/training_overview.html),
 the [mMARCO paper](https://arxiv.org/abs/2108.13897) and
 [RocketQA](https://arxiv.org/abs/2010.08191).
+
+## Frozen development candidate
+
+The first development run used corpus commit
+`29e4da366a9ef0399349895ad08cae82fa1efd19` and selected seed `29`. Its frozen
+acceptance cutoff is the `f32` value `-0.2685191035270691` (bits
+`0xbe897b56`). The cutoff and seed must not change after a promotion holdout is
+observed.
+
+The aggregate development result was 0.9375 answer recall, 1.0 precision, zero
+false-positive pairs, zero accepted support pairs, zero accepted pairs across
+eight no-answer pools and 0.90625 exact-pool success. Recall by direction was
+0.9167 for EN→EN, EN→ES and ES→ES, and 1.0 for ES→EN. These are
+development measurements, not generalization evidence: the zero-false-positive
+cutoff was selected against these development negatives.
+
+The run used PyTorch `2.7.1` and Transformers `4.56.1` on CPU. AdamW retained
+its library defaults (`betas=(0.9, 0.999)`, `eps=1e-8`), applying weight decay
+`0.01` to other trainable weights and `0.0` to biases and LayerNorm weights.
+Linear warmup covered 14 of 135 optimizer steps. A prior MPS attempt stopped on
+the host memory safety limit; the completed CPU run kept the same corpus,
+recipe, batch size and seeds.
+
+The candidate identity is sealed by these SHA-256 digests:
+
+```text
+base model.safetensors       5daeca2481a76b5976a2bdc32f0a78532b6716da4f8cd3ff59460ef8d2f359b4
+training runner              69a57848a997c719e2554f302a60188dd62ccf81129243968b7e71db92b3a654
+aggregate report             a2fb5af444b385b0304634adfd29dd012ae859a6d004c8eb9b7ab933766d9e5e
+selected model.safetensors   db86b3f0e9c13e38d5488a55a138e27faa1741d2357c2fd7218d2d8e4ffbe24f
+selected config.json         1aa7092d47e252a9ffacd69bdfc67fdf8ec22ecab7723a16334fde92cd2ee779
+tokenizer.json               62c24cdc13d4c9952d63718d6c9fa4c287974249e16b7ade6d5a85e7bbb75626
+base config.json             cc2cfe51aa3fd759d21d21acf5dfd6994aa67a3c9210636d22e143699d336c77
+special_tokens_map.json      378eb3bf733eb16e65792d7e3fda5b8a4631387ca04d2015199c4d4f22ae554d
+tokenizer_config.json        e7fbfbfa6347b4e414c1cee50d142e2c2f9a895dad68b068ae83a8b564c3837e
+revision.txt                 47e22c1da153a2c56cb2072c94b1aca9217d990c47421108ebc14f604559fea1
+```
+
+The checkpoint, runner and aggregate reports remain disposable local
+artifacts. This manifest is sufficient to detect replacement; it does not make
+the candidate releasable. The next permitted action is blind human review of a
+fresh promotion set. Model evaluation, ONNX export and product integration
+remain blocked until their respective gates pass.
 
 ## Promotion set and gates
 

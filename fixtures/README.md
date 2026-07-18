@@ -26,6 +26,10 @@ or personal information.
   It compares passage QA, claim selection and deterministic conflict detection,
   was authored with the known search-quality questions and is not a promotion
   holdout.
+- `retrieval/mini-graph-v1.json`: development-only mechanistic ablation with
+  frozen synthetic candidate orders and reviewed internal concept links. It
+  compares C10, C32 and bounded one-hop graph expansion without a model or a
+  production search change; it is not a promotion holdout.
 
 The expected federated question asks how Atlas is recovered, who is responsible,
 and the target date. A correct answer combines the Mac procedure with the
@@ -74,6 +78,13 @@ cargo run --locked -p xtask -- retrieval evaluate-reviewed-anchors \
   --data-root <AirWiki-data-root> \
   --llama-server <verified-llama-server> \
   --model-id <catalog-id>
+```
+
+The mini-graph mechanism ablation needs no model or external service and should
+be measured in the release profile:
+
+```bash
+cargo run --release --locked -p xtask -- retrieval evaluate-mini-graph
 ```
 
 See the [retrieval-quality evaluation profile](../docs/retrieval-quality-evaluation.md)

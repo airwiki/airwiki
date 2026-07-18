@@ -719,35 +719,72 @@ and peak-memory evidence.
 ### In-process mini-graph hypothesis (H-AWK-2)
 
 **AirWiki hypothesis H-AWK-2:** starting from BM25/E5 seeds and expanding only
-reviewed, typed relationships for one or two hops may recover complementary and
-conflicting evidence that vector or lexical similarity misses, while remaining
-bounded enough for workstation memory and interactive latency.
+reviewed internal OKF links for one bounded hop may nominate useful concepts
+that vector or lexical similarity misses, while remaining small enough for a
+workstation process. H-AWK-2 is evaluated at the candidate stage and does not
+consume the rejected H-AWK-1 selector.
 
-The first graph experiment is deferred until H-AWK-1 establishes a reliable
-reviewed unit. Its path is `BM25/E5 seeds -> bounded graph expansion ->
-reviewed-claim selection -> deterministic counterevidence`. The initial Rust
-representation should use concept nodes only, intern canonical concept
-identities into projection-local `u32` node IDs, keep compact adjacency vectors
-and enforce explicit node, edge and hop budgets. The first experiment starts
-with compact in-project adjacency vectors; CSR or a graph crate is considered
-only if profiling demonstrates a need. There is no graph database, daemon,
-query language or network service.
+`fixtures/retrieval/mini-graph-v1.json` freezes synthetic hybrid rankings and
+reviewed-link projections for a mechanistic ablation. Expectations score the
+result but never enter the expansion algorithm. The four arms are:
 
-The graph is a derived, rebuildable projection of reconciled current
-publications; it is never a new source of truth. Its first edge type is only a
-resolved internal concept link from a reviewed OKF page. Tags, entity
-suggestions, external links and similarity-inferred relations create neither
-nodes nor edges. Additional relation types remain deferred until reviewed
-metadata and a measured case require them. Authorization, current revision and
-publication state apply to every seed and expanded node, so traversal cannot
-widen the caller's collection scope.
+- **C10:** the first 10 current, authorized hybrid candidates;
+- **C32:** the same ranking widened to 32 candidates;
+- **G1-out:** C10, one outgoing reviewed-link hop and then hybrid-rank
+  backfill up to the same 32-candidate budget; and
+- **G1-bidir:** C10, outgoing neighbors and then incoming neighbors of those
+  same C10 seeds, followed by hybrid-rank backfill to 32.
 
-A future arm D must report unique multi-hop atomic-need recall, evidence
-precision, conflict recall, forbidden evidence, p95 end-to-end latency, peak RSS
-and bytes per node and edge against H-AWK-1 without the graph. Reject it if it
-adds no unique coverage, introduces any forbidden or false evidence, exceeds
-the interactive resource budget, or makes rebuild and reconciliation
-materially less reliable.
+```bash
+cargo run --release --locked -p xtask -- retrieval evaluate-mini-graph
+```
+
+The graph uses concept nodes only. Canonical concept UUIDs are sorted and
+addressed through projection-local `u32` IDs; outgoing and incoming neighbors
+are sorted, deduplicated boxed slices. The projection retains no titles, tags,
+text, paths, queries or embeddings and adds no graph dependency. It accepts
+only current concepts and reviewed internal links, ignores self-links and
+rejects links across collections. The graph retains no permission state;
+caller authorization and external-AI collection policy are applied before
+seeding, traversal and hybrid backfill. One query may inspect at most 128
+edges, never traverses a newly added node and returns at most 32 candidates.
+The scale profile is fixed at 500 concepts and 2,000 directed links. Neo4j, a
+daemon, a graph query language, similarity edges, entity edges, tags and
+two-hop traversal remain deliberately out of scope.
+
+The synthetic development gate requires at least two outgoing-link rescues
+that C32 misses, a separate group rescued only by C32, higher outgoing recall
+and support density no lower than C32 at the same candidate budget, one
+backlink-only rescue, zero forbidden candidates in every arm, stable frozen
+expectations, less than 1 MiB retained payload, release-profile build p95 below
+50 ms and one-hop expansion plus hybrid-backfill p95 below 5 ms.
+Candidate support density is not evidence precision: no selector or answer
+generator runs in this experiment. Passing can set only
+`synthetic_gate_passed`; `production_promotion_ready` is always false.
+
+The frozen macOS arm64 release-profile observation on 2026-07-18 used evaluator
+commit `97106026ceb594524155811783714dd499841d7e`, Rust 1.96.1 and fixture SHA-256
+`60fc5cf1d3d99648b2755c8fa7af8eb7608b896ff2a6f2258b028a4337d012ba`.
+C10 recovered 0 of 6 required groups, C32 recovered 1 of 6, G1-out recovered 3
+of 6 and G1-bidir recovered 4 of 6. Outgoing links added three groups absent
+from C32; backlinks added one more; and the wider-pool control retained one
+graph-independent rescue. C32, G1-out and G1-bidir each evaluated 232 aggregate
+candidates across the mixed-size cases, and all arms returned zero forbidden
+candidates. At the 500-concept/2,000-link scale, the projection retained 48,168
+payload bytes, built in 182 microseconds at p95 over 25 iterations and expanded
+with hybrid backfill in 1 microsecond at p95 over 1,000 post-warm-up
+iterations. These timings are one descriptive workstation observation; the
+structural limits and release thresholds are the reproducible gates.
+
+This synthetic mechanistic gate demonstrates that the bounded graph code and
+controls behave as designed; it does not establish retrieval utility or change
+production search. The rankings are manually frozen synthetic inputs rather
+than captured BM25/E5 output, and the timing excludes OKF inspection, SQLite
+loading and revalidation. The next gate must build the projection from a
+healthy, fingerprinted `KnowledgeBundleView`, replay fresh real hybrid
+rankings and compare C32/G1 on new domains. Any future integration must discard
+a stale or unhealthy projection and retain SQLite publication, purpose, grant
+and final hit revalidation as the disclosure authority.
 
 ### H-AWK-1 development observation
 

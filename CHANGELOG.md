@@ -16,6 +16,7 @@ All notable user-visible changes to AirWiki will be documented here. The project
 - A reproducible retrieval-quality corpus and evaluator covering local and peer-authorized source evidence, abstention, provenance, privacy, contradictions, deduplication, and stable ordering.
 - A content-free, pinned answerability corpus workflow and a development-only two-stage QA-entailment rejection gate with sanitized aggregate reports; production search remains unchanged.
 - A development-only reviewed-evidence-anchor ablation comparing passage QA, reviewed-claim selection, and deterministic conflict detection without changing production search or OKF.
+- A dependency-free, development-only Rust mini-graph ablation comparing wider hybrid retrieval with bounded expansion over reviewed internal OKF links.
 
 ### Changed
 
@@ -31,6 +32,7 @@ All notable user-visible changes to AirWiki will be documented here. The project
 - Kept answerability references out of model control flow and scored accepted answers post-inference with the documented SQuAD/XQuAD normalized exact-match policy.
 - Made retrieval research hypothesis-driven: literature supplies baselines and controls, while AirWiki-specific mechanisms require versioned ablations, counterfactual tests, fresh holdouts, and explicit rejection conditions.
 - Kept production retrieval unchanged after the combined reviewed-claim representation and selector showed higher development coverage but failed false-evidence, no-answer, and correctness gates; observed latency remained descriptive.
+- Recorded that the synthetic mini-graph mechanistic gate passed while keeping it at candidate stage until it is reproduced from healthy OKF bundles and real BM25/E5 rankings on fresh domains.
 
 ### Fixed
 

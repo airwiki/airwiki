@@ -24,10 +24,10 @@ use uuid::Uuid;
 
 use crate::{replace_file, workspace_root};
 
-const FIXTURE_PATH: &str = "fixtures/retrieval/search-quality-v2.json";
+const FIXTURE_PATH: &str = "fixtures/retrieval/search-quality-v3.json";
 const REPORT_DIRECTORY: &str = "target/evals";
-const REPORT_SCHEMA_VERSION: u32 = 3;
-const FIXTURE_SCHEMA_VERSION: u32 = 2;
+const REPORT_SCHEMA_VERSION: u32 = 4;
+const FIXTURE_SCHEMA_VERSION: u32 = 3;
 const TOP_K: u8 = 5;
 const MIN_RECALL_AT_FIVE: f64 = 0.9;
 const ORIGIN_NODE_ID: &str = "fixture-origin";
@@ -154,6 +154,7 @@ struct FixtureCase {
     semantic_keys: Vec<String>,
     relevant_fact_ids: Vec<String>,
     expected_groups: Vec<Vec<String>>,
+    allowed_support_fact_ids: Vec<String>,
     forbidden_fact_ids: Vec<String>,
 }
 
@@ -472,6 +473,7 @@ struct RetrievalCaseReport {
     found_group_count: u32,
     reciprocal_rank_at_five: Option<f64>,
     returned_fact_ids: Vec<String>,
+    returned_support_fact_ids: Vec<String>,
     missing_group_count: u32,
     unexpected_fact_ids: Vec<String>,
     forbidden_fact_ids: Vec<String>,
@@ -768,6 +770,8 @@ fn validate_fixture_data(fixture: &RetrievalFixture) -> Result<()> {
         }
 
         let relevant = validate_fact_references(&case.relevant_fact_ids, &fact_ids, "relevant")?;
+        let support =
+            validate_fact_references(&case.allowed_support_fact_ids, &fact_ids, "allowed support")?;
         let forbidden = validate_fact_references(&case.forbidden_fact_ids, &fact_ids, "forbidden")?;
         ensure!(
             case.expected_groups.is_empty() || !relevant.is_empty(),
@@ -807,7 +811,23 @@ fn validate_fixture_data(fixture: &RetrievalFixture) -> Result<()> {
                 );
             }
         }
+        ensure!(
+            support.is_disjoint(&expected),
+            "allowed support facts cannot be expected evidence"
+        );
+        ensure!(
+            support.is_disjoint(&relevant),
+            "allowed support facts cannot be relevant evidence"
+        );
+        ensure!(
+            support.is_disjoint(&forbidden),
+            "allowed support facts cannot be forbidden"
+        );
         if expected.is_empty() {
+            ensure!(
+                support.is_empty(),
+                "non-answerable retrieval cases cannot allow support evidence"
+            );
             ensure!(
                 relevant.is_subset(&forbidden),
                 "non-answerable relevant facts must be forbidden"
@@ -836,9 +856,13 @@ fn validate_fixture_data(fixture: &RetrievalFixture) -> Result<()> {
                         == Some(&true)
             });
         ensure!(
-            relevant.iter().chain(&forbidden).all(|fact_id| {
-                fact_domains.get(fact_id).copied() == Some(case.domain.as_str())
-            }),
+            relevant
+                .iter()
+                .chain(&support)
+                .chain(&forbidden)
+                .all(|fact_id| {
+                    fact_domains.get(fact_id).copied() == Some(case.domain.as_str())
+                }),
             "retrieval case references evidence from another domain"
         );
     }
@@ -978,9 +1002,9 @@ fn fixture_providers(fixture: &RetrievalFixture) -> Result<EvaluationProviders> 
     Ok(EvaluationProviders {
         identity: ProviderIdentity {
             embedding_profile: embeddings.model_id().to_owned(),
-            embedding_revision: "synthetic-v2".to_owned(),
+            embedding_revision: "synthetic-v3".to_owned(),
             relevance_profile: relevance.profile_id().to_owned(),
-            relevance_revision: "synthetic-v2".to_owned(),
+            relevance_revision: "synthetic-v3".to_owned(),
             relevance_artifact_filename: None,
             relevance_artifact_sha256: None,
             thread_count: 1,
@@ -1544,6 +1568,11 @@ fn score_case(
         .iter()
         .map(String::as_str)
         .collect::<HashSet<_>>();
+    let allowed_support = case
+        .allowed_support_fact_ids
+        .iter()
+        .map(String::as_str)
+        .collect::<HashSet<_>>();
     let forbidden = case
         .forbidden_fact_ids
         .iter()
@@ -1580,7 +1609,7 @@ fn score_case(
     let unexpected_fact_ids = returned_ids
         .iter()
         .copied()
-        .filter(|fact_id| !relevant.contains(fact_id))
+        .filter(|fact_id| !relevant.contains(fact_id) && !allowed_support.contains(fact_id))
         .map(str::to_owned)
         .collect::<BTreeSet<_>>()
         .into_iter()
@@ -1589,6 +1618,14 @@ fn score_case(
         .iter()
         .copied()
         .filter(|fact_id| forbidden.contains(fact_id))
+        .map(str::to_owned)
+        .collect::<BTreeSet<_>>()
+        .into_iter()
+        .collect::<Vec<_>>();
+    let returned_support_fact_ids = returned_ids
+        .iter()
+        .copied()
+        .filter(|fact_id| allowed_support.contains(fact_id))
         .map(str::to_owned)
         .collect::<BTreeSet<_>>()
         .into_iter()
@@ -1626,6 +1663,7 @@ fn score_case(
         found_group_count: u32::try_from(found_group_count).unwrap_or(u32::MAX),
         reciprocal_rank_at_five,
         returned_fact_ids: returned_ids.into_iter().map(str::to_owned).collect(),
+        returned_support_fact_ids,
         missing_group_count: u32::try_from(missing_group_count).unwrap_or(u32::MAX),
         unexpected_fact_ids,
         forbidden_fact_ids: returned_forbidden_fact_ids,
@@ -1681,9 +1719,11 @@ fn attribute_retrieval_stages(
     }
 
     let returned_ids = returned_ids.iter().copied().collect::<HashSet<_>>();
-    let relevant_ids = case
-        .relevant_fact_ids
+    let allowed_ids = case
+        .expected_groups
         .iter()
+        .flatten()
+        .chain(&case.allowed_support_fact_ids)
         .map(String::as_str)
         .collect::<HashSet<_>>();
     let forbidden_ids = case
@@ -1735,7 +1775,7 @@ fn attribute_retrieval_stages(
         outside_top_k_group_count: u32::try_from(outside_top_k_group_count).unwrap_or(u32::MAX),
         revalidation_loss_group_count: u32::try_from(revalidation_loss_group_count)
             .unwrap_or(u32::MAX),
-        unexpected_survivor_count: u32::try_from(surviving_ids.difference(&relevant_ids).count())
+        unexpected_survivor_count: u32::try_from(surviving_ids.difference(&allowed_ids).count())
             .unwrap_or(u32::MAX),
         hard_negative_source_candidate_count: u32::try_from(
             candidate_ids.intersection(&forbidden_ids).count(),
@@ -1999,6 +2039,33 @@ mod tests {
         assert!(audit.take("private synthetic question").unwrap().is_empty());
     }
 
+    #[tokio::test]
+    async fn allowed_support_is_not_fed_into_the_fixture_relevance_oracle() {
+        let loaded = load_fixture().unwrap();
+        let providers = fixture_providers(&loaded.fixture).unwrap();
+        let case = loaded
+            .fixture
+            .cases
+            .iter()
+            .find(|case| case.id == "regression_atlas_paraphrase_recovery")
+            .unwrap();
+        let decisions = providers
+            .relevance
+            .classify(
+                &case.question,
+                &[RelevanceInput {
+                    title: "Proyecto Atlas — recuperación operativa".to_owned(),
+                    heading: "Reversión".to_owned(),
+                    text: "Si la métrica no vuelve a verde, revierte la configuración y escala el incidente."
+                        .to_owned(),
+                }],
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(decisions, [EvidenceDecision::Irrelevant]);
+    }
+
     #[test]
     fn fixture_rejects_overlapping_split_domains() {
         let mut loaded = load_fixture().unwrap();
@@ -2090,7 +2157,83 @@ mod tests {
 
         let error = validate_fixture_data(&loaded.fixture).unwrap_err();
 
-        assert!(error.to_string().contains("exactly match"));
+        assert!(error.to_string().contains("cannot be relevant"));
+    }
+
+    #[test]
+    fn fixture_rejects_an_unknown_allowed_support_fact() {
+        let mut loaded = load_fixture().unwrap();
+        loaded.fixture.cases[0]
+            .allowed_support_fact_ids
+            .push("unknown_fact".to_owned());
+
+        let error = validate_fixture_data(&loaded.fixture).unwrap_err();
+
+        assert!(error.to_string().contains("allowed support"));
+        assert!(error.to_string().contains("unknown fact"));
+    }
+
+    #[test]
+    fn fixture_rejects_expected_evidence_as_allowed_support() {
+        let mut loaded = load_fixture().unwrap();
+        loaded.fixture.cases[0]
+            .allowed_support_fact_ids
+            .push("atlas_recovery_procedure".to_owned());
+
+        let error = validate_fixture_data(&loaded.fixture).unwrap_err();
+
+        assert!(error.to_string().contains("cannot be expected"));
+    }
+
+    #[test]
+    fn fixture_rejects_forbidden_evidence_as_allowed_support() {
+        let mut loaded = load_fixture().unwrap();
+        let case = loaded
+            .fixture
+            .cases
+            .iter_mut()
+            .find(|case| case.id == "regression_atlas_unrelated_injection")
+            .unwrap();
+        case.allowed_support_fact_ids
+            .push("atlas_note_injection".to_owned());
+
+        let error = validate_fixture_data(&loaded.fixture).unwrap_err();
+
+        assert!(error.to_string().contains("cannot be forbidden"));
+    }
+
+    #[test]
+    fn fixture_rejects_cross_domain_allowed_support() {
+        let mut loaded = load_fixture().unwrap();
+        let case = loaded
+            .fixture
+            .cases
+            .iter_mut()
+            .find(|case| case.id == "calibration_aurora_owner")
+            .unwrap();
+        case.allowed_support_fact_ids
+            .push("cedar_note_authority".to_owned());
+
+        let error = validate_fixture_data(&loaded.fixture).unwrap_err();
+
+        assert!(error.to_string().contains("another domain"));
+    }
+
+    #[test]
+    fn fixture_rejects_allowed_support_for_a_non_answerable_case() {
+        let mut loaded = load_fixture().unwrap();
+        let case = loaded
+            .fixture
+            .cases
+            .iter_mut()
+            .find(|case| case.id == "regression_atlas_external_ai_policy")
+            .unwrap();
+        case.allowed_support_fact_ids
+            .push("atlas_target_date".to_owned());
+
+        let error = validate_fixture_data(&loaded.fixture).unwrap_err();
+
+        assert!(error.to_string().contains("non-answerable"));
     }
 
     #[test]
@@ -2211,6 +2354,87 @@ mod tests {
         }
     }
 
+    fn score_support_case(returned_fact_ids: &[&str]) -> RetrievalCaseReport {
+        let case = FixtureCase {
+            id: "support_scoring".to_owned(),
+            domain: "support_scoring".to_owned(),
+            split: RetrievalSplit::Calibration,
+            tags: vec![RetrievalTag::Direct],
+            scope: RetrievalScope::Local,
+            question: "synthetic support question".to_owned(),
+            semantic_keys: vec!["support".to_owned()],
+            relevant_fact_ids: vec!["answer".to_owned()],
+            expected_groups: vec![vec!["answer".to_owned()]],
+            allowed_support_fact_ids: vec!["support".to_owned()],
+            forbidden_fact_ids: vec!["forbidden".to_owned()],
+        };
+        let baseline = NormalizedRun {
+            sources: vec![NormalizedSource {
+                node: FixtureNode::Origin,
+                hits: returned_fact_ids
+                    .iter()
+                    .enumerate()
+                    .map(|(index, fact_id)| NormalizedHit {
+                        fact_id: (*fact_id).to_owned(),
+                        rank: u32::try_from(index + 1).unwrap_or(u32::MAX),
+                    })
+                    .collect(),
+            }],
+            provenance_errors: 0,
+        };
+        score_case(
+            &case,
+            CaseEvaluationRuns {
+                baseline: baseline.clone(),
+                repeated: baseline.clone(),
+                expanded: baseline.clone(),
+                reversed: baseline,
+                baseline_audit: Vec::new(),
+                expected_audit_nodes: BTreeSet::new(),
+                audit_stable: true,
+            },
+            0,
+        )
+    }
+
+    #[test]
+    fn allowed_support_alone_does_not_satisfy_expected_evidence() {
+        let report = score_support_case(&["support"]);
+
+        assert_eq!(report.found_group_count, 0);
+        assert_eq!(report.missing_group_count, 1);
+        assert_eq!(report.reciprocal_rank_at_five, None);
+        assert!(report.unexpected_fact_ids.is_empty());
+        assert_eq!(report.returned_support_fact_ids, ["support"]);
+        assert!(!report.passed);
+    }
+
+    #[test]
+    fn allowed_support_before_expected_does_not_improve_expected_rank() {
+        let report = score_support_case(&["support", "answer"]);
+
+        assert_eq!(report.found_group_count, 1);
+        assert_eq!(report.reciprocal_rank_at_five, Some(0.5));
+        assert!(report.unexpected_fact_ids.is_empty());
+        assert_eq!(report.returned_support_fact_ids, ["support"]);
+    }
+
+    #[test]
+    fn unlisted_returned_fact_remains_unexpected() {
+        let report = score_support_case(&["answer", "unlisted"]);
+
+        assert_eq!(report.unexpected_fact_ids, ["unlisted"]);
+        assert!(!report.passed);
+    }
+
+    #[test]
+    fn forbidden_returned_fact_remains_forbidden() {
+        let report = score_support_case(&["answer", "forbidden"]);
+
+        assert_eq!(report.forbidden_fact_ids, ["forbidden"]);
+        assert!(!report.passed);
+    }
+
     #[test]
     fn mrr_includes_answerable_cases_without_a_hit_as_zero() {
         fn report(expected: u32, reciprocal_rank: Option<f64>) -> RetrievalCaseReport {
@@ -2222,6 +2446,7 @@ mod tests {
                 found_group_count: u32::from(reciprocal_rank.is_some()),
                 reciprocal_rank_at_five: reciprocal_rank,
                 returned_fact_ids: Vec::new(),
+                returned_support_fact_ids: Vec::new(),
                 missing_group_count: u32::from(reciprocal_rank.is_none()),
                 unexpected_fact_ids: Vec::new(),
                 forbidden_fact_ids: Vec::new(),
@@ -2264,6 +2489,7 @@ mod tests {
                 found_group_count: u32::from(passed),
                 reciprocal_rank_at_five: passed.then_some(1.0),
                 returned_fact_ids: Vec::new(),
+                returned_support_fact_ids: Vec::new(),
                 missing_group_count: u32::from(!passed),
                 unexpected_fact_ids: Vec::new(),
                 forbidden_fact_ids: Vec::new(),
@@ -2317,6 +2543,7 @@ mod tests {
             .into_iter()
             .map(|fact| vec![fact.to_owned()])
             .collect(),
+            allowed_support_fact_ids: Vec::new(),
             forbidden_fact_ids: Vec::new(),
         };
         let candidate = |fact_id: &str, decision| AuditedCandidate {
@@ -2360,6 +2587,83 @@ mod tests {
         assert_eq!(attribution.mapping_error_count, 0);
         assert!(attribution.audit_complete);
         assert!(attribution.audit_stable);
+    }
+
+    #[test]
+    fn allowed_support_does_not_count_as_an_unexpected_mask_survivor() {
+        let case = FixtureCase {
+            id: "support_stage".to_owned(),
+            domain: "support_stage".to_owned(),
+            split: RetrievalSplit::Calibration,
+            tags: vec![RetrievalTag::Direct],
+            scope: RetrievalScope::Local,
+            question: "synthetic support stage question".to_owned(),
+            semantic_keys: vec!["support".to_owned()],
+            relevant_fact_ids: vec!["answer".to_owned()],
+            expected_groups: vec![vec!["answer".to_owned()]],
+            allowed_support_fact_ids: vec!["support".to_owned()],
+            forbidden_fact_ids: Vec::new(),
+        };
+        let calls = vec![MaskAuditCall {
+            node: FixtureNode::Origin,
+            candidates: vec![
+                AuditedCandidate {
+                    fact_id: Some("support".to_owned()),
+                    decision: EvidenceDecision::Relevant,
+                },
+                AuditedCandidate {
+                    fact_id: Some("answer".to_owned()),
+                    decision: EvidenceDecision::Relevant,
+                },
+            ],
+        }];
+
+        let attribution = attribute_retrieval_stages(
+            &case,
+            &["support", "answer"],
+            &calls,
+            &BTreeSet::from([FixtureNode::Origin]),
+            true,
+        );
+
+        assert_eq!(attribution.source_candidate_group_count, 1);
+        assert_eq!(attribution.mask_surviving_group_count, 1);
+        assert_eq!(attribution.unexpected_survivor_count, 0);
+    }
+
+    #[test]
+    fn forbidden_survivor_is_unexpected_for_a_non_answerable_case() {
+        let case = FixtureCase {
+            id: "forbidden_stage".to_owned(),
+            domain: "forbidden_stage".to_owned(),
+            split: RetrievalSplit::Calibration,
+            tags: vec![RetrievalTag::Absence],
+            scope: RetrievalScope::Local,
+            question: "synthetic forbidden stage question".to_owned(),
+            semantic_keys: vec!["forbidden".to_owned()],
+            relevant_fact_ids: vec!["forbidden".to_owned()],
+            expected_groups: Vec::new(),
+            allowed_support_fact_ids: Vec::new(),
+            forbidden_fact_ids: vec!["forbidden".to_owned()],
+        };
+        let calls = vec![MaskAuditCall {
+            node: FixtureNode::Origin,
+            candidates: vec![AuditedCandidate {
+                fact_id: Some("forbidden".to_owned()),
+                decision: EvidenceDecision::Relevant,
+            }],
+        }];
+
+        let attribution = attribute_retrieval_stages(
+            &case,
+            &[],
+            &calls,
+            &BTreeSet::from([FixtureNode::Origin]),
+            true,
+        );
+
+        assert_eq!(attribution.unexpected_survivor_count, 1);
+        assert_eq!(attribution.hard_negative_source_candidate_count, 1);
     }
 
     #[test]

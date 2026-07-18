@@ -17,11 +17,13 @@ candidate belongs in the product.
 | mMARCO abstention calibration | [#14](https://github.com/airwiki/airwiki/pull/14) | **Rejected** | Cutoff support recall fell from 0.75 to 0.4167, four queries lost support and a hard negative remained. |
 | Standalone OKF path signal | [#15](https://github.com/airwiki/airwiki/pull/15) | **Rejected** | The signal connected 17 of 24 hard negatives, so a path alone is not evidence of answerability. |
 | Graph-conditioned bounded diffusion | [#16](https://github.com/airwiki/airwiki/pull/16) | **Inconclusive** | Baseline, real graph and degree-preserving sham all found 26/28 evidence groups, and the corpus exposed zero cutoff opportunities. Do not tune or promote from that fixture. |
+| Retrieval-stage attribution | [Active evaluator](retrieval-quality-evaluation.md#v2-stage-attribution-observation) | **Accepted diagnostic** | Source-candidate Recall@10 was 1.00 for all 18 expected groups. mMARCO rejected all six missing groups and accepted three non-answering fragments; no expected group was lost in candidate generation, top-k truncation or revalidation. Keep stage attribution in the evaluator, not the product path. |
 
 ## Constraint for the next experiment
 
-Start from the accepted v2 baseline and one explicit observed failure. Measure
-candidate recall before the relevance mask separately from selector errors, use
-fresh domains for promotion evidence, and reject any candidate that weakens
-privacy, provenance, stability or known regression cases. Add reusable code to
-`main` only when it has an active product or evaluation consumer.
+Start from one selector failure now isolated by the accepted stage attribution.
+The next candidate must improve both false-negative and false-positive behavior
+on fresh domains; the observed v2 corpus remains regression and diagnostic
+evidence, not promotion evidence. Reject any candidate that weakens privacy,
+provenance, stability or known regression cases. Add reusable code to `main`
+only when it has an active product or evaluation consumer.

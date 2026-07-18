@@ -212,8 +212,9 @@ because the authored promotion set contained no `ambiguity` negative.
 The decision is **rejected**. Do not change the cutoff, retrain against this
 holdout, rerun the observation, export the checkpoint or integrate its weights.
 The durable result is that development-selected zero-false-positive behavior
-did not transfer: the adapted cross-encoder learned high answer recall without
-the abstention boundary AirWiki requires.
+did not transfer for this frozen checkpoint and cutoff: this candidate learned
+high answer recall without the abstention boundary AirWiki requires. It does
+not reject mMARCO, cross-encoders or answerability adaptation as model families.
 
 ## Export and platform validation
 

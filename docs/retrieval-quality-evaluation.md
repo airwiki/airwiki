@@ -960,6 +960,78 @@ it does not establish that every future graph representation is ineffective.
 Any materially different graph thesis requires a new development corpus and a
 new independently sealed holdout rather than tuning against this result.
 
+### Reviewed-link path-signal diagnostic (H-AWK-3B)
+
+**AirWiki hypothesis H-AWK-3B:** independently authored semantic concept pairs
+should be connected within at most two bidirectional reviewed-link hops more
+often in the real OKF topology than in a structural sham with the same weak
+degree sequence, while retaining enough precision and safety to justify a new
+ranking experiment. This diagnostic isolates whether reviewed links carry a
+usable navigation signal before proposing another graph retrieval rule. It
+does not rank chunks, nominate evidence or consume a question embedding.
+
+`fixtures/retrieval/okf-path-signal-development-v1/` freezes four synthetic
+domains, split evenly between Spanish and English, with 32 concepts and 48
+balanced positive/hard-negative pairs. The concept inventory, reviewed links
+and pair labels were authored with procedural separation and bound by a fourth
+manifest. This reduces direct topology-label leakage but is not a claim of
+statistical independence. No artifact may be changed after observing the
+result.
+
+The evaluator projects concept UUIDs to local `u32` IDs and retains concept and
+collection identity, boxed outgoing and incoming adjacency slices, a
+fingerprint and aggregate graph statistics—but no titles, tags, text, paths,
+queries or embeddings. A query may inspect at most 256 edges, uses at most 8
+KiB of requested scratch space, stops after two hops and never returns an
+intermediate node. Missing authorization, an unavailable endpoint or budget
+exhaustion is indeterminate and vetoes the run. The control is built per
+collection by an exact, bounded search over at most eight incident nodes:
+it preserves every weak degree and the edge count while minimizing retained
+real links. Self-links, reciprocal links, cross-collection links and partial
+results are rejected. Stable opaque labels break ties between optimal
+realizations; the control is deterministic, not a uniform graph sample.
+
+The frozen development gate requires real F1 at least 0.75, an F1 advantage of
+at least 0.10 over the sham, zero real false-positive relations, real wins in
+at least three of four domains, no language regression, at least 80% sham
+rewiring and no unchanged collection. The graph pair must remain at most 1
+MiB, projection at most one second, requested path scratch at most 8 KiB and
+both path p95 values at most 2 ms in a release build. Passing could authorize
+only a new, separately sealed ranking experiment;
+`production_promotion_ready` is always false.
+
+```bash
+cargo run --release --locked -p xtask -- retrieval evaluate-path-signal
+```
+
+**Observed frozen result (2026-07-18).** The first recorded macOS arm64 release
+run used evaluator commit `dc621faa9b0fce3aafe35dcc2167913436c77000` and
+manifest SHA-256
+`75c96a9fd1d6cda4642210c9ebc2e8464a544ec1b557534ca57ab4d14a538f87`.
+The real topology connected all 24 positive pairs but also connected 17 of 24
+hard negatives, yielding precision 0.5854 and F1 0.7385. The exact sham
+recovered 19 positives and connected 18 hard negatives, yielding F1 0.6230.
+The real topology won in all four domains and its F1 advantage was 0.1155, but
+it failed the minimum real-F1 and zero-false-attribution gates. The sham
+rewired 37 of 47 edges (78.72%), narrowly below the frozen 80% requirement;
+no collection remained unchanged.
+
+Spanish real/sham F1 was 0.7500/0.6429 and English F1 was 0.7273/0.6061. No
+path was indeterminate or asymmetric. The graph pair retained 5,184 bytes,
+requested path scratch was 1,056 bytes, projection took 1,844 microseconds and
+real/sham path p95 was 208/250 nanoseconds. These resource observations show
+that the Rust mini-graph is cheap; they do not rescue the failed quality and
+attribution gates.
+
+The real topology does exhibit comparative navigation signal over the sham,
+but H-AWK-3B's development gate and its proposed standalone use are
+**rejected**; production retrieval remains unchanged. A raw `<=2`-hop relation
+is too permissive to act as a standalone semantic-relation or candidate-
+eligibility decision. Future graph work, if pursued, must formulate a new
+development hypothesis in which graph structure is only a bounded feature
+alongside semantic evidence, then use new procedurally separated artifacts and
+fresh gates. This result must not be tuned away or reused as a holdout.
+
 ### H-AWK-1 development observation
 
 The first macOS arm64 release-profile run on 2026-07-18 used Gemma 4 E4B Q4 at

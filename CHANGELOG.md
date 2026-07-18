@@ -21,6 +21,7 @@ All notable user-visible changes to AirWiki will be documented here. The project
 - An independently authored, sealed multichunk holdout for evaluating compact OKF graph nomination through the existing relevance and final top-five citation path.
 - A development-only mMARCO score-order diagnostic that compares the current relevance-filter order with descending cross-encoder order from one shared inference.
 - A grouped, bilingual mMARCO cutoff-calibration corpus and evaluation-only score seam that keep third-party text and raw logits out of reports while comparing the current evidence policy with one frozen absolute threshold.
+- A development-only two-hop OKF navigation diagnostic with a compact Rust graph, procedurally separated bilingual artifacts, and an exact weak-degree-preserving structural control.
 
 ### Changed
 
@@ -41,6 +42,7 @@ All notable user-visible changes to AirWiki will be documented here. The project
 - Rejected compact OKF graph nomination for shadow use after the sealed end-to-end holdout matched the wider hybrid baseline and structural sham at 0.75 Recall@5 while exceeding its frozen candidate-assembly budget.
 - Kept production retrieval unchanged after mMARCO score ordering produced the same visible-development results as the current filter order, identifying the relevance mask rather than ordering as the immediate bottleneck.
 - Rejected a single absolute mMARCO logit cutoff after grouped bilingual calibration lost four baseline-complete queries and still returned a hard negative; no sealed holdout or production threshold was authorized.
+- Rejected raw two-hop reviewed-link connectivity as a standalone retrieval decision after it connected every positive semantic pair but also 17 of 24 hard negatives; production search remains unchanged.
 
 ### Fixed
 

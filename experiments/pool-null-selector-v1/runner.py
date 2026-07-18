@@ -709,6 +709,8 @@ def prepare_model(allow_network: bool) -> None:
     if not allow_network:
         raise ExperimentError("network_not_authorized")
     os.environ["HF_HUB_DISABLE_TELEMETRY"] = "1"
+    # Keep byte verification independent from any stale local Xet chunk cache.
+    os.environ["HF_HUB_DISABLE_XET"] = "1"
     from huggingface_hub import snapshot_download
 
     if ATTEMPT_PATH.exists() or REPORT_PATH.exists():

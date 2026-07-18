@@ -36,6 +36,7 @@ mod corpus;
 mod mini_graph;
 mod qa_entailment;
 mod real_graph;
+mod rerank_calibration;
 mod rerank_order;
 mod reviewed_anchor_selector;
 mod reviewed_anchors;
@@ -45,11 +46,14 @@ mod sham_graph;
 pub(crate) use answerability::evaluate_answerability;
 pub(crate) use mini_graph::evaluate_mini_graph;
 pub(crate) use real_graph::{evaluate_final_mini_graph, evaluate_real_mini_graph};
+pub(crate) use rerank_calibration::evaluate_rerank_calibration;
 pub(crate) use rerank_order::evaluate_rerank_order;
 pub(crate) use reviewed_anchors::evaluate_reviewed_anchors;
 
 const ANSWERABILITY_CORPUS_MANIFEST_PATH: &str =
     "resources/evaluation/retrieval-answerability-development-v1/manifest.json";
+const RERANK_CALIBRATION_CORPUS_MANIFEST_PATH: &str =
+    "resources/evaluation/retrieval-rerank-abstention-development-v1/manifest.json";
 const FIXTURE_PATH: &str = "fixtures/retrieval/search-quality-v2.json";
 #[cfg(test)]
 const V1_FIXTURE_PATH: &str = "fixtures/retrieval/search-quality-v1.json";
@@ -135,6 +139,38 @@ pub fn verify_answerability_corpus(source_root: &Path) -> Result<()> {
     let summary = loaded.summary();
     println!(
         "answerability corpus {} verified: {} referenced artifacts, {} selections ({} answerable, {} unanswerable), {} candidates; manifest SHA-256 {}",
+        loaded.corpus_id,
+        summary.artifact_count,
+        summary.selection_count,
+        summary.answerable_count,
+        summary.unanswerable_count,
+        summary.candidate_count,
+        loaded.manifest_sha256,
+    );
+    Ok(())
+}
+
+pub fn validate_rerank_calibration_corpus() -> Result<()> {
+    let manifest_path = workspace_root().join(RERANK_CALIBRATION_CORPUS_MANIFEST_PATH);
+    let summary = corpus::validate_manifest(&manifest_path)?;
+    println!(
+        "rerank calibration corpus valid: {} sources, {} artifacts, {} selections ({} support-present, {} support-absent), {} groups",
+        summary.source_count,
+        summary.artifact_count,
+        summary.selection_count,
+        summary.answerable_count,
+        summary.unanswerable_count,
+        summary.group_count,
+    );
+    Ok(())
+}
+
+pub fn verify_rerank_calibration_corpus(source_root: &Path) -> Result<()> {
+    let manifest_path = workspace_root().join(RERANK_CALIBRATION_CORPUS_MANIFEST_PATH);
+    let loaded = corpus::load_verified_corpus(&manifest_path, source_root)?;
+    let summary = loaded.summary();
+    println!(
+        "rerank calibration corpus {} verified: {} referenced artifacts, {} selections ({} support-present, {} support-absent), {} candidates; manifest SHA-256 {}",
         loaded.corpus_id,
         summary.artifact_count,
         summary.selection_count,

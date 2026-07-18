@@ -11,8 +11,8 @@ use sha2::{Digest, Sha256};
 use zip::ZipArchive;
 
 use super::{
-    CorpusArtifact, CorpusExpectation, CorpusManifest, CorpusSelection, CorpusSplit,
-    HardNegativeKind, PassageRef,
+    CorpusArtifact, CorpusExpectation, CorpusLanguage, CorpusManifest, CorpusSelection,
+    CorpusSplit, HardNegativeKind, PassageRef,
 };
 
 const MAX_ARTIFACT_BYTES: u64 = 128 * 1024 * 1024;
@@ -58,9 +58,13 @@ impl LoadedCorpus {
             // added.
             let _ = (
                 &selection.id,
+                &selection.source_id,
                 selection.split,
                 &selection.group_id,
                 &selection.need_id,
+                selection.source_expectation,
+                selection.query_language,
+                selection.candidate_language,
                 selection.need_kind,
                 &selection.need,
                 &selection.reference_answers,
@@ -88,10 +92,14 @@ pub(in crate::retrieval) enum NeedKind {
 
 pub(in crate::retrieval) struct LoadedSelection {
     pub(in crate::retrieval) id: String,
+    pub(in crate::retrieval) source_id: String,
     pub(in crate::retrieval) split: CorpusSplit,
     pub(in crate::retrieval) group_id: String,
     pub(in crate::retrieval) need_id: String,
     pub(in crate::retrieval) expectation: CorpusExpectation,
+    pub(in crate::retrieval) source_expectation: CorpusExpectation,
+    pub(in crate::retrieval) query_language: Option<CorpusLanguage>,
+    pub(in crate::retrieval) candidate_language: Option<CorpusLanguage>,
     pub(in crate::retrieval) need_kind: NeedKind,
     pub(in crate::retrieval) need: String,
     pub(in crate::retrieval) reference_answers: Vec<String>,
@@ -433,6 +441,12 @@ fn load_selection(
         ParsedDataset::Squad(dataset) => resolve_squad_need(dataset, selection)?,
         ParsedDataset::ContractNli(dataset) => resolve_contract_need(dataset, selection)?,
     };
+    if selection.source_id == "xquad_en_es" {
+        let ParsedDataset::Squad(primary) = primary else {
+            anyhow::bail!("XQuAD question artifact did not resolve to a SQuAD-family dataset");
+        };
+        validate_xquad_alignment(primary, selection, datasets)?;
+    }
 
     let mut candidates =
         Vec::with_capacity(selection.supports.len() + selection.hard_negatives.len());
@@ -460,10 +474,14 @@ fn load_selection(
 
     Ok(LoadedSelection {
         id: selection.id.clone(),
+        source_id: selection.source_id.clone(),
         split: selection.split,
         group_id: selection.group_id.clone(),
         need_id: selection.need_id.clone(),
         expectation: selection.expectation,
+        source_expectation: selection.source_expectation(),
+        query_language: selection.query_language,
+        candidate_language: selection.candidate_language,
         need_kind: resolved.kind,
         need: resolved.text,
         reference_answers: resolved.reference_answers,
@@ -527,56 +545,69 @@ fn number_candidates_blindly(
 }
 
 fn resolve_squad_need(dataset: &SquadDataset, selection: &CorpusSelection) -> Result<ResolvedNeed> {
-    let document_index = parse_prefixed_index(&selection.document_id, "data_")?;
-    let document = dataset
-        .data
-        .get(document_index)
-        .context("SQuAD selection document index is out of bounds")?;
-    let mut matched = None;
-    for (paragraph_index, paragraph) in document.paragraphs.iter().enumerate() {
-        for qa in &paragraph.qas {
-            if qa.id == selection.upstream_record_id {
-                ensure!(matched.is_none(), "SQuAD question identifier is not unique");
-                matched = Some((paragraph_index, paragraph, qa));
-            }
-        }
-    }
-    let (paragraph_index, paragraph, qa) =
-        matched.context("SQuAD selection question identifier was not found")?;
+    let location = resolve_squad_question(dataset, selection)?;
+    let paragraph_index = location.paragraph_index;
+    let paragraph = location.paragraph;
+    let qa = location.qa;
     validate_bounded_text(&qa.question, MAX_NEED_CHARS, "SQuAD question")?;
 
-    match selection.expectation {
+    match selection.source_expectation() {
         CorpusExpectation::Answerable => {
             ensure!(
                 !qa.is_impossible && !qa.answers.is_empty(),
-                "answerable SQuAD selection does not have source answers"
-            );
-            let expected_segment = format!("paragraph_{paragraph_index}");
-            ensure!(
-                selection.supports.iter().any(|support| {
-                    support.artifact_path == selection.artifact_path
-                        && support.member_path == selection.member_path
-                        && support.document_id == selection.document_id
-                        && support.segment_id == expected_segment
-                }),
-                "answerable SQuAD selection does not include its question paragraph as support"
+                "answerable SQuAD source record does not have source answers"
             );
         }
         CorpusExpectation::Unanswerable => {
             ensure!(
                 qa.is_impossible && qa.answers.is_empty(),
-                "unanswerable SQuAD selection disagrees with the source label"
+                "unanswerable SQuAD source record disagrees with the source label"
+            );
+        }
+    }
+
+    match selection.expectation {
+        CorpusExpectation::Answerable => {
+            ensure!(
+                selection.source_expectation() == CorpusExpectation::Answerable,
+                "answerable SQuAD pool requires an answerable source record"
             );
             let expected_segment = format!("paragraph_{paragraph_index}");
             ensure!(
-                selection.hard_negatives.iter().any(|negative| {
-                    negative.artifact_path == selection.artifact_path
-                        && negative.member_path == selection.member_path
-                        && negative.document_id == selection.document_id
-                        && negative.segment_id == expected_segment
-                }),
-                "unanswerable SQuAD selection does not include its adversarial paragraph"
+                selection.source_id == "xquad_en_es"
+                    || selection.supports.iter().any(|support| {
+                        support.artifact_path == selection.artifact_path
+                            && support.member_path == selection.member_path
+                            && support.document_id == selection.document_id
+                            && support.segment_id == expected_segment
+                    }),
+                "answerable SQuAD pool does not include its question paragraph as support"
             );
+        }
+        CorpusExpectation::Unanswerable => {
+            if selection.source_expectation() == CorpusExpectation::Unanswerable {
+                let expected_segment = format!("paragraph_{paragraph_index}");
+                ensure!(
+                    selection.hard_negatives.iter().any(|negative| {
+                        negative.artifact_path == selection.artifact_path
+                            && negative.member_path == selection.member_path
+                            && negative.document_id == selection.document_id
+                            && negative.segment_id == expected_segment
+                    }),
+                    "unanswerable SQuAD pool does not include its adversarial paragraph"
+                );
+            } else if selection.source_id != "xquad_en_es" {
+                let expected_segment = format!("paragraph_{paragraph_index}");
+                ensure!(
+                    selection.hard_negatives.iter().all(|negative| {
+                        negative.artifact_path != selection.artifact_path
+                            || negative.member_path != selection.member_path
+                            || negative.document_id != selection.document_id
+                            || negative.segment_id != expected_segment
+                    }),
+                    "support-absent SQuAD pool cannot label the source question paragraph as a hard negative"
+                );
+            }
         }
     }
 
@@ -603,6 +634,143 @@ fn resolve_squad_need(dataset: &SquadDataset, selection: &CorpusSelection) -> Re
     })
 }
 
+struct SquadQuestionLocation<'a> {
+    document: &'a SquadDocument,
+    paragraph_index: usize,
+    paragraph: &'a SquadParagraph,
+    qa: &'a SquadQa,
+}
+
+fn resolve_squad_question<'a>(
+    dataset: &'a SquadDataset,
+    selection: &CorpusSelection,
+) -> Result<SquadQuestionLocation<'a>> {
+    resolve_squad_question_by_id(
+        dataset,
+        &selection.document_id,
+        &selection.upstream_record_id,
+    )
+}
+
+fn resolve_squad_question_by_id<'a>(
+    dataset: &'a SquadDataset,
+    document_id: &str,
+    upstream_record_id: &str,
+) -> Result<SquadQuestionLocation<'a>> {
+    let document_index = parse_prefixed_index(document_id, "data_")?;
+    let document = dataset
+        .data
+        .get(document_index)
+        .context("SQuAD selection document index is out of bounds")?;
+    let mut matched = None;
+    for (paragraph_index, paragraph) in document.paragraphs.iter().enumerate() {
+        for qa in &paragraph.qas {
+            if qa.id == upstream_record_id {
+                ensure!(matched.is_none(), "SQuAD question identifier is not unique");
+                matched = Some(SquadQuestionLocation {
+                    document,
+                    paragraph_index,
+                    paragraph,
+                    qa,
+                });
+            }
+        }
+    }
+    matched.context("SQuAD selection question identifier was not found")
+}
+
+fn validate_xquad_alignment(
+    primary: &SquadDataset,
+    selection: &CorpusSelection,
+    datasets: &BTreeMap<DatasetKey, ParsedDataset>,
+) -> Result<()> {
+    let query = resolve_squad_question(primary, selection)?;
+    for support in &selection.supports {
+        validate_xquad_candidate_alignment(datasets, selection, &query, support, true)?;
+    }
+    for negative in &selection.hard_negatives {
+        let reference = PassageRef {
+            artifact_path: negative.artifact_path.clone(),
+            member_path: negative.member_path.clone(),
+            document_id: negative.document_id.clone(),
+            segment_id: negative.segment_id.clone(),
+        };
+        validate_xquad_candidate_alignment(datasets, selection, &query, &reference, false)?;
+    }
+    Ok(())
+}
+
+fn validate_xquad_candidate_alignment(
+    datasets: &BTreeMap<DatasetKey, ParsedDataset>,
+    selection: &CorpusSelection,
+    query: &SquadQuestionLocation<'_>,
+    reference: &PassageRef,
+    is_support: bool,
+) -> Result<()> {
+    ensure!(
+        !is_support || reference.document_id == selection.document_id,
+        "XQuAD support must use the query document identifier"
+    );
+    let key = dataset_key(&reference.artifact_path, reference.member_path.as_deref());
+    let ParsedDataset::Squad(candidate_dataset) = datasets
+        .get(&key)
+        .context("verified corpus is missing an XQuAD candidate dataset")?
+    else {
+        anyhow::bail!("XQuAD candidate artifact did not resolve to a SQuAD-family dataset");
+    };
+    let segment_index = parse_prefixed_index(&reference.segment_id, "paragraph_")?;
+    if reference.document_id != selection.document_id {
+        let document_index = parse_prefixed_index(&reference.document_id, "data_")?;
+        ensure!(
+            candidate_dataset
+                .data
+                .get(document_index)
+                .and_then(|document| document.paragraphs.get(segment_index))
+                .is_some(),
+            "XQuAD cross-document candidate locator is out of bounds"
+        );
+        return Ok(());
+    }
+    let candidate_question = resolve_squad_question_by_id(
+        candidate_dataset,
+        &reference.document_id,
+        &selection.upstream_record_id,
+    )?;
+    ensure!(
+        candidate_question.paragraph_index == query.paragraph_index,
+        "XQuAD translations place the upstream question in different paragraphs"
+    );
+    ensure!(
+        candidate_question.document.paragraphs.len() == query.document.paragraphs.len(),
+        "XQuAD translations have different parallel paragraph counts"
+    );
+    if !is_support
+        && selection.expectation == CorpusExpectation::Unanswerable
+        && selection.source_expectation() == CorpusExpectation::Answerable
+    {
+        ensure!(
+            segment_index != query.paragraph_index,
+            "support-absent XQuAD pool cannot label the parallel question paragraph as a hard negative"
+        );
+    }
+    ensure!(
+        query.document.paragraphs.get(segment_index).is_some()
+            && candidate_question
+                .document
+                .paragraphs
+                .get(segment_index)
+                .is_some(),
+        "XQuAD candidate does not have a parallel query-document paragraph"
+    );
+    if is_support {
+        ensure!(
+            segment_index == query.paragraph_index,
+            "answerable XQuAD pool support is not the parallel question paragraph"
+        );
+    }
+    Ok(())
+}
+
 fn resolve_contract_need(
     dataset: &ContractNliDataset,
     selection: &CorpusSelection,
@@ -621,33 +789,11 @@ fn resolve_contract_need(
         .context("ContractNLI hypothesis identifier was not found")?;
     validate_bounded_text(&label.hypothesis, MAX_NEED_CHARS, "ContractNLI hypothesis")?;
 
-    match selection.expectation {
+    match selection.source_expectation() {
         CorpusExpectation::Answerable => {
             ensure!(
                 annotation.choice == ContractChoice::Entailment,
-                "answerable ContractNLI selection is not entailed upstream"
-            );
-            ensure!(
-                selection.supports.iter().all(|support| {
-                    support.artifact_path == selection.artifact_path
-                        && support.member_path == selection.member_path
-                        && support.document_id == selection.document_id
-                }),
-                "ContractNLI support locators must remain within the selected document"
-            );
-            let annotated = annotation.spans.iter().copied().collect::<BTreeSet<_>>();
-            ensure!(
-                annotated.len() == annotation.spans.len(),
-                "ContractNLI annotation contains duplicate evidence spans"
-            );
-            let declared = selection
-                .supports
-                .iter()
-                .map(|support| parse_prefixed_index(&support.segment_id, "span_"))
-                .collect::<Result<BTreeSet<_>>>()?;
-            ensure!(
-                annotated == declared,
-                "ContractNLI support locators disagree with the upstream evidence spans"
+                "answerable ContractNLI source record is not entailed upstream"
             );
         }
         CorpusExpectation::Unanswerable => ensure!(
@@ -655,8 +801,37 @@ fn resolve_contract_need(
                 annotation.choice,
                 ContractChoice::Contradiction | ContractChoice::NotMentioned
             ),
-            "unanswerable ContractNLI selection is entailed upstream"
+            "unanswerable ContractNLI source record is entailed upstream"
         ),
+    }
+
+    if selection.expectation == CorpusExpectation::Answerable {
+        ensure!(
+            selection.source_expectation() == CorpusExpectation::Answerable,
+            "answerable ContractNLI pool requires an answerable source record"
+        );
+        ensure!(
+            selection.supports.iter().all(|support| {
+                support.artifact_path == selection.artifact_path
+                    && support.member_path == selection.member_path
+                    && support.document_id == selection.document_id
+            }),
+            "ContractNLI support locators must remain within the selected document"
+        );
+        let annotated = annotation.spans.iter().copied().collect::<BTreeSet<_>>();
+        ensure!(
+            annotated.len() == annotation.spans.len(),
+            "ContractNLI annotation contains duplicate evidence spans"
+        );
+        let declared = selection
+            .supports
+            .iter()
+            .map(|support| parse_prefixed_index(&support.segment_id, "span_"))
+            .collect::<Result<BTreeSet<_>>>()?;
+        ensure!(
+            annotated == declared,
+            "ContractNLI support locators disagree with the upstream evidence spans"
+        );
     }
 
     Ok(ResolvedNeed {
@@ -874,6 +1049,9 @@ mod tests {
             upstream_record_id: "qa_one".to_owned(),
             need_id: "need_one".to_owned(),
             expectation,
+            source_expectation: None,
+            query_language: None,
+            candidate_language: None,
             supports: if expectation == CorpusExpectation::Answerable {
                 vec![passage("data_0", "paragraph_0")]
             } else {
@@ -915,6 +1093,85 @@ mod tests {
                 }],
             }],
         }
+    }
+
+    fn xquad_selection(expectation: CorpusExpectation) -> CorpusSelection {
+        CorpusSelection {
+            id: "xquad_cross_language".to_owned(),
+            source_id: "xquad_en_es".to_owned(),
+            artifact_path: "xquad/xquad.es.json".to_owned(),
+            member_path: None,
+            split: CorpusSplit::Calibration,
+            group_id: "xquad_data_0".to_owned(),
+            document_id: "data_0".to_owned(),
+            upstream_record_id: "qa_parallel".to_owned(),
+            need_id: "need_xquad_cross_language".to_owned(),
+            expectation,
+            source_expectation: Some(CorpusExpectation::Answerable),
+            query_language: Some(CorpusLanguage::Es),
+            candidate_language: Some(CorpusLanguage::En),
+            supports: if expectation == CorpusExpectation::Answerable {
+                vec![PassageRef {
+                    artifact_path: "xquad/xquad.en.json".to_owned(),
+                    member_path: None,
+                    document_id: "data_0".to_owned(),
+                    segment_id: "paragraph_0".to_owned(),
+                }]
+            } else {
+                Vec::new()
+            },
+            hard_negatives: vec![HardNegative {
+                artifact_path: "xquad/xquad.en.json".to_owned(),
+                member_path: None,
+                document_id: "data_0".to_owned(),
+                segment_id: "paragraph_1".to_owned(),
+                kind: HardNegativeKind::RelatedButUnanswered,
+            }],
+        }
+    }
+
+    fn xquad_bytes(
+        language: CorpusLanguage,
+        question_paragraph: usize,
+        question_id: &str,
+    ) -> Vec<u8> {
+        let (question, answer, answer_start, answer_context, negative_context) = match language {
+            CorpusLanguage::En => (
+                "What color is the answer?",
+                "blue",
+                14,
+                "The answer is blue.",
+                "This nearby paragraph does not answer the question.",
+            ),
+            CorpusLanguage::Es => (
+                "¿De qué color es la respuesta?",
+                "azul",
+                16,
+                "La respuesta es azul.",
+                "Este párrafo cercano no responde la pregunta.",
+            ),
+        };
+        let mut paragraphs = vec![
+            json!({"context": answer_context, "qas": []}),
+            json!({"context": negative_context, "qas": []}),
+        ];
+        paragraphs[question_paragraph]["qas"] = json!([{
+            "id": question_id,
+            "question": question,
+            "answers": [{"text": answer, "answer_start": answer_start}],
+            "is_impossible": false
+        }]);
+        serde_json::to_vec(&json!({
+            "version": "1.1",
+            "data": [
+                {"title": "Synthetic parallel document", "paragraphs": paragraphs},
+                {
+                    "title": "Synthetic distractor document",
+                    "paragraphs": [{"context": negative_context, "qas": []}]
+                }
+            ]
+        }))
+        .unwrap()
     }
 
     fn contract_dataset() -> ContractNliDataset {
@@ -971,6 +1228,9 @@ mod tests {
             upstream_record_id: record_id.to_owned(),
             need_id: format!("need_{record_id}"),
             expectation,
+            source_expectation: None,
+            query_language: None,
+            candidate_language: None,
             supports: if expectation == CorpusExpectation::Answerable {
                 vec![
                     PassageRef {
@@ -1062,6 +1322,28 @@ mod tests {
         .unwrap();
 
         assert_eq!(resolved.reference_answers, vec!["café"]);
+    }
+
+    #[test]
+    fn omitted_source_expectation_defaults_to_the_pool_expectation() {
+        let selection = squad_selection(CorpusExpectation::Answerable);
+
+        assert_eq!(
+            selection.source_expectation(),
+            CorpusExpectation::Answerable
+        );
+    }
+
+    #[test]
+    fn source_answerable_squad_pool_rejects_question_paragraph_as_a_hard_negative() {
+        let mut selection = squad_selection(CorpusExpectation::Unanswerable);
+        selection.source_expectation = Some(CorpusExpectation::Answerable);
+
+        let error = resolve_squad_need(&squad_dataset(false, 7), &selection)
+            .err()
+            .unwrap();
+
+        assert!(error.to_string().contains("source question paragraph"));
     }
 
     #[test]
@@ -1425,5 +1707,184 @@ mod tests {
                 candidate_count: 3,
             }
         );
+    }
+
+    #[test]
+    fn load_verified_resolves_a_cross_language_xquad_pool() {
+        let directory = tempdir().unwrap();
+        let english = xquad_bytes(CorpusLanguage::En, 0, "qa_parallel");
+        let spanish = xquad_bytes(CorpusLanguage::Es, 0, "qa_parallel");
+        write_artifact(directory.path(), "xquad/xquad.en.json", &english);
+        write_artifact(directory.path(), "xquad/xquad.es.json", &spanish);
+        let source = corpus_source(
+            "xquad_en_es",
+            vec![
+                artifact("xquad/xquad.en.json", &english),
+                artifact("xquad/xquad.es.json", &spanish),
+            ],
+        );
+        let manifest =
+            corpus_manifest(source, vec![xquad_selection(CorpusExpectation::Answerable)]);
+
+        let loaded = load_verified(manifest, "c".repeat(64), directory.path()).unwrap();
+        let selection = &loaded.selections[0];
+
+        assert_eq!(
+            (
+                selection.source_id.as_str(),
+                selection.expectation,
+                selection.source_expectation,
+                selection.query_language,
+                selection.candidate_language,
+                selection.candidates.len(),
+            ),
+            (
+                "xquad_en_es",
+                CorpusExpectation::Answerable,
+                CorpusExpectation::Answerable,
+                Some(CorpusLanguage::Es),
+                Some(CorpusLanguage::En),
+                2,
+            )
+        );
+    }
+
+    #[test]
+    fn answerable_xquad_source_can_load_an_unanswerable_candidate_pool() {
+        let directory = tempdir().unwrap();
+        let english = xquad_bytes(CorpusLanguage::En, 0, "qa_parallel");
+        let spanish = xquad_bytes(CorpusLanguage::Es, 0, "qa_parallel");
+        write_artifact(directory.path(), "xquad/xquad.en.json", &english);
+        write_artifact(directory.path(), "xquad/xquad.es.json", &spanish);
+        let source = corpus_source(
+            "xquad_en_es",
+            vec![
+                artifact("xquad/xquad.en.json", &english),
+                artifact("xquad/xquad.es.json", &spanish),
+            ],
+        );
+        let manifest = corpus_manifest(
+            source,
+            vec![xquad_selection(CorpusExpectation::Unanswerable)],
+        );
+
+        let loaded = load_verified(manifest, "d".repeat(64), directory.path()).unwrap();
+        let selection = &loaded.selections[0];
+
+        assert_eq!(
+            (
+                selection.expectation,
+                selection.source_expectation,
+                selection.reference_answers.as_slice(),
+                selection.candidates.len(),
+            ),
+            (
+                CorpusExpectation::Unanswerable,
+                CorpusExpectation::Answerable,
+                ["azul".to_owned()].as_slice(),
+                1,
+            )
+        );
+    }
+
+    #[test]
+    fn cross_language_xquad_allows_a_cross_document_hard_negative() {
+        let directory = tempdir().unwrap();
+        let english = xquad_bytes(CorpusLanguage::En, 0, "qa_parallel");
+        let spanish = xquad_bytes(CorpusLanguage::Es, 0, "qa_parallel");
+        write_artifact(directory.path(), "xquad/xquad.en.json", &english);
+        write_artifact(directory.path(), "xquad/xquad.es.json", &spanish);
+        let source = corpus_source(
+            "xquad_en_es",
+            vec![
+                artifact("xquad/xquad.en.json", &english),
+                artifact("xquad/xquad.es.json", &spanish),
+            ],
+        );
+        let mut selection = xquad_selection(CorpusExpectation::Answerable);
+        selection.hard_negatives[0].document_id = "data_1".to_owned();
+        selection.hard_negatives[0].segment_id = "paragraph_0".to_owned();
+        let manifest = corpus_manifest(source, vec![selection]);
+
+        let loaded = load_verified(manifest, "0".repeat(64), directory.path()).unwrap();
+
+        assert_eq!(loaded.selections[0].candidates.len(), 2);
+    }
+
+    #[test]
+    fn source_answerable_xquad_pool_rejects_parallel_question_paragraph_as_a_hard_negative() {
+        let directory = tempdir().unwrap();
+        let english = xquad_bytes(CorpusLanguage::En, 0, "qa_parallel");
+        let spanish = xquad_bytes(CorpusLanguage::Es, 0, "qa_parallel");
+        write_artifact(directory.path(), "xquad/xquad.en.json", &english);
+        write_artifact(directory.path(), "xquad/xquad.es.json", &spanish);
+        let source = corpus_source(
+            "xquad_en_es",
+            vec![
+                artifact("xquad/xquad.en.json", &english),
+                artifact("xquad/xquad.es.json", &spanish),
+            ],
+        );
+        let mut selection = xquad_selection(CorpusExpectation::Unanswerable);
+        selection.hard_negatives[0].segment_id = "paragraph_0".to_owned();
+        let manifest = corpus_manifest(source, vec![selection]);
+
+        let error = load_verified(manifest, "1".repeat(64), directory.path())
+            .err()
+            .unwrap();
+
+        assert!(error.to_string().contains("parallel question paragraph"));
+    }
+
+    #[test]
+    fn cross_language_xquad_rejects_a_different_upstream_question_id() {
+        let directory = tempdir().unwrap();
+        let english = xquad_bytes(CorpusLanguage::En, 0, "qa_other");
+        let spanish = xquad_bytes(CorpusLanguage::Es, 0, "qa_parallel");
+        write_artifact(directory.path(), "xquad/xquad.en.json", &english);
+        write_artifact(directory.path(), "xquad/xquad.es.json", &spanish);
+        let source = corpus_source(
+            "xquad_en_es",
+            vec![
+                artifact("xquad/xquad.en.json", &english),
+                artifact("xquad/xquad.es.json", &spanish),
+            ],
+        );
+        let manifest =
+            corpus_manifest(source, vec![xquad_selection(CorpusExpectation::Answerable)]);
+
+        let error = load_verified(manifest, "e".repeat(64), directory.path())
+            .err()
+            .unwrap();
+
+        assert!(
+            error
+                .to_string()
+                .contains("question identifier was not found")
+        );
+    }
+
+    #[test]
+    fn cross_language_xquad_rejects_a_non_parallel_question_paragraph() {
+        let directory = tempdir().unwrap();
+        let english = xquad_bytes(CorpusLanguage::En, 1, "qa_parallel");
+        let spanish = xquad_bytes(CorpusLanguage::Es, 0, "qa_parallel");
+        write_artifact(directory.path(), "xquad/xquad.en.json", &english);
+        write_artifact(directory.path(), "xquad/xquad.es.json", &spanish);
+        let source = corpus_source(
+            "xquad_en_es",
+            vec![
+                artifact("xquad/xquad.en.json", &english),
+                artifact("xquad/xquad.es.json", &spanish),
+            ],
+        );
+        let manifest =
+            corpus_manifest(source, vec![xquad_selection(CorpusExpectation::Answerable)]);
+
+        let error = load_verified(manifest, "f".repeat(64), directory.path())
+            .err()
+            .unwrap();
+
+        assert!(error.to_string().contains("different paragraphs"));
     }
 }

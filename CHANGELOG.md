@@ -20,6 +20,7 @@ All notable user-visible changes to AirWiki will be documented here. The project
 - A real-ranking mini-graph replay that materializes healthy OKF bundles, reuses production BM25/E5/RRF, and compares bounded expansion with both a wider candidate pool and a degree-preserving sham graph.
 - An independently authored, sealed multichunk holdout for evaluating compact OKF graph nomination through the existing relevance and final top-five citation path.
 - A development-only mMARCO score-order diagnostic that compares the current relevance-filter order with descending cross-encoder order from one shared inference.
+- A grouped, bilingual mMARCO cutoff-calibration corpus and evaluation-only score seam that keep third-party text and raw logits out of reports while comparing the current evidence policy with one frozen absolute threshold.
 
 ### Changed
 
@@ -39,6 +40,7 @@ All notable user-visible changes to AirWiki will be documented here. The project
 - Kept production retrieval unchanged after the real-ranking mini-graph development replay improved candidate-group coverage; a separately authored holdout and end-to-end chunk/reranker evidence remain required.
 - Rejected compact OKF graph nomination for shadow use after the sealed end-to-end holdout matched the wider hybrid baseline and structural sham at 0.75 Recall@5 while exceeding its frozen candidate-assembly budget.
 - Kept production retrieval unchanged after mMARCO score ordering produced the same visible-development results as the current filter order, identifying the relevance mask rather than ordering as the immediate bottleneck.
+- Rejected a single absolute mMARCO logit cutoff after grouped bilingual calibration lost four baseline-complete queries and still returned a hard negative; no sealed holdout or production threshold was authorized.
 
 ### Fixed
 

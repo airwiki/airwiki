@@ -10,9 +10,12 @@ use sha2::{Digest, Sha256};
 
 mod loader;
 
-pub(super) use loader::{CANDIDATE_ORDER_POLICY_VERSION, CandidateRole, LoadedCorpus, NeedKind};
+pub(super) use loader::{
+    CANDIDATE_ORDER_POLICY_VERSION, CandidateRole, LoadedCorpus, LoadedSelection, NeedKind,
+};
 
-const MANIFEST_SCHEMA_VERSION: u32 = 1;
+const MANIFEST_SCHEMA_VERSION_V1: u32 = 1;
+const MANIFEST_SCHEMA_VERSION_V2: u32 = 2;
 const SUPPORTED_LICENSES: [&str; 2] = ["CC-BY-SA-4.0", "CC-BY-4.0"];
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -65,8 +68,20 @@ struct CorpusSelection {
     upstream_record_id: String,
     need_id: String,
     expectation: CorpusExpectation,
+    #[serde(default)]
+    source_expectation: Option<CorpusExpectation>,
+    #[serde(default)]
+    query_language: Option<CorpusLanguage>,
+    #[serde(default)]
+    candidate_language: Option<CorpusLanguage>,
     supports: Vec<PassageRef>,
     hard_negatives: Vec<HardNegative>,
+}
+
+impl CorpusSelection {
+    fn source_expectation(&self) -> CorpusExpectation {
+        self.source_expectation.unwrap_or(self.expectation)
+    }
 }
 
 #[derive(Debug, Deserialize)]
@@ -90,6 +105,13 @@ pub(super) enum CorpusSplit {
 pub(super) enum CorpusExpectation {
     Answerable,
     Unanswerable,
+}
+
+#[derive(Debug, Clone, Copy, Deserialize, PartialEq, Eq, Hash)]
+#[serde(rename_all = "snake_case")]
+pub(super) enum CorpusLanguage {
+    En,
+    Es,
 }
 
 #[derive(Debug, Deserialize)]
@@ -147,8 +169,11 @@ fn load_manifest(path: &Path) -> Result<LoadedManifest> {
 
 fn validate_manifest_contents(manifest: &CorpusManifest) -> Result<CorpusManifestSummary> {
     ensure!(
-        manifest.schema_version == MANIFEST_SCHEMA_VERSION,
-        "corpus manifest schema_version must be {MANIFEST_SCHEMA_VERSION}"
+        matches!(
+            manifest.schema_version,
+            MANIFEST_SCHEMA_VERSION_V1 | MANIFEST_SCHEMA_VERSION_V2
+        ),
+        "corpus manifest schema_version must be {MANIFEST_SCHEMA_VERSION_V1} or {MANIFEST_SCHEMA_VERSION_V2}"
     );
     validate_id(&manifest.corpus_id, "corpus")?;
     ensure!(
@@ -191,6 +216,7 @@ fn validate_manifest_contents(manifest: &CorpusManifest) -> Result<CorpusManifes
             &mut selection_ids,
             &mut need_ids,
             &mut group_splits,
+            manifest.schema_version,
         )?;
         ensure!(
             upstream_record_locators.insert((
@@ -208,6 +234,9 @@ fn validate_manifest_contents(manifest: &CorpusManifest) -> Result<CorpusManifes
             CorpusExpectation::Answerable => answerable_count += 1,
             CorpusExpectation::Unanswerable => unanswerable_count += 1,
         }
+    }
+    if manifest.schema_version == MANIFEST_SCHEMA_VERSION_V2 {
+        validate_document_family_splits(&manifest.selections)?;
     }
 
     ensure!(
@@ -289,6 +318,7 @@ fn validate_selection<'a>(
     selection_ids: &mut HashSet<&'a str>,
     need_ids: &mut HashSet<&'a str>,
     group_splits: &mut HashMap<&'a str, CorpusSplit>,
+    schema_version: u32,
 ) -> Result<()> {
     validate_id(&selection.id, "selection")?;
     validate_id(&selection.source_id, "selection source")?;
@@ -316,6 +346,7 @@ fn validate_selection<'a>(
         selection.member_path.as_deref(),
         "selection",
     )?;
+    validate_selection_extensions(selection, schema_version)?;
 
     if let Some(existing_split) = group_splits.insert(selection.group_id.as_str(), selection.split)
     {
@@ -356,6 +387,112 @@ fn validate_selection<'a>(
             selection.supports.is_empty(),
             "unanswerable corpus selection cannot contain supports"
         ),
+    }
+    Ok(())
+}
+
+fn validate_selection_extensions(selection: &CorpusSelection, schema_version: u32) -> Result<()> {
+    if schema_version == MANIFEST_SCHEMA_VERSION_V1 {
+        ensure!(
+            selection.source_expectation.is_none()
+                && selection.query_language.is_none()
+                && selection.candidate_language.is_none(),
+            "corpus schema_version 1 cannot use schema_version 2 selection fields"
+        );
+        return Ok(());
+    }
+
+    if selection.source_id == "xquad_en_es" {
+        if let Some(language) = selection.query_language {
+            ensure!(
+                xquad_artifact_language(&selection.artifact_path) == Some(language),
+                "XQuAD query_language disagrees with the question artifact"
+            );
+        }
+        if let Some(language) = selection.candidate_language {
+            ensure!(
+                selection.supports.iter().all(|support| {
+                    xquad_artifact_language(&support.artifact_path) == Some(language)
+                }) && selection.hard_negatives.iter().all(|negative| {
+                    xquad_artifact_language(&negative.artifact_path) == Some(language)
+                }),
+                "XQuAD candidate_language disagrees with a candidate artifact"
+            );
+        }
+    }
+    Ok(())
+}
+
+fn xquad_artifact_language(artifact_path: &str) -> Option<CorpusLanguage> {
+    if artifact_path.ends_with("xquad.en.json") {
+        Some(CorpusLanguage::En)
+    } else if artifact_path.ends_with("xquad.es.json") {
+        Some(CorpusLanguage::Es)
+    } else {
+        None
+    }
+}
+
+fn validate_document_family_splits(selections: &[CorpusSelection]) -> Result<()> {
+    let mut document_family_splits = HashMap::new();
+    for selection in selections {
+        register_document_family(
+            &mut document_family_splits,
+            &selection.source_id,
+            &selection.artifact_path,
+            selection.member_path.as_deref(),
+            &selection.document_id,
+            selection.split,
+        )?;
+        for support in &selection.supports {
+            register_document_family(
+                &mut document_family_splits,
+                &selection.source_id,
+                &support.artifact_path,
+                support.member_path.as_deref(),
+                &support.document_id,
+                selection.split,
+            )?;
+        }
+        for negative in &selection.hard_negatives {
+            register_document_family(
+                &mut document_family_splits,
+                &selection.source_id,
+                &negative.artifact_path,
+                negative.member_path.as_deref(),
+                &negative.document_id,
+                selection.split,
+            )?;
+        }
+    }
+    Ok(())
+}
+
+fn register_document_family(
+    document_family_splits: &mut HashMap<String, CorpusSplit>,
+    source_id: &str,
+    artifact_path: &str,
+    member_path: Option<&str>,
+    document_id: &str,
+    split: CorpusSplit,
+) -> Result<()> {
+    let family = if source_id == "xquad_en_es" {
+        format!("{source_id}:{document_id}")
+    } else {
+        let member_path = member_path.unwrap_or_default();
+        format!(
+            "{}:{source_id}{}:{artifact_path}{}:{member_path}{}:{document_id}",
+            source_id.len(),
+            artifact_path.len(),
+            member_path.len(),
+            document_id.len(),
+        )
+    };
+    if let Some(existing_split) = document_family_splits.insert(family, split) {
+        ensure!(
+            existing_split == split,
+            "corpus document family cannot cross training and calibration splits"
+        );
     }
     Ok(())
 }
@@ -588,6 +725,27 @@ mod tests {
         format!("{:#}", validate_json(value).unwrap_err())
     }
 
+    fn add_cross_split_family_reference(manifest: &mut Value) {
+        manifest["selections"].as_array_mut().unwrap().push(json!({
+            "id": "selection_cross_split_reference",
+            "source_id": "squad2",
+            "artifact_path": "sources/squad2/train.json",
+            "split": "calibration",
+            "group_id": "document_three",
+            "document_id": "document_three",
+            "upstream_record_id": "record_three",
+            "need_id": "need_three",
+            "expectation": "unanswerable",
+            "supports": [],
+            "hard_negatives": [{
+                "artifact_path": "sources/squad2/train.json",
+                "document_id": "document_one",
+                "segment_id": "passage_cross_split",
+                "kind": "related_but_unanswered"
+            }]
+        }));
+    }
+
     #[test]
     fn valid_manifest_returns_content_free_counts() {
         let summary = validate_json(&valid_manifest()).unwrap();
@@ -616,9 +774,126 @@ mod tests {
     #[test]
     fn unsupported_schema_version_is_rejected() {
         let mut manifest = valid_manifest();
+        manifest["schema_version"] = json!(3);
+
+        assert!(validation_error(&manifest).contains("schema_version must be 1 or 2"));
+    }
+
+    #[test]
+    fn schema_version_two_accepts_omitted_extension_fields() {
+        let mut manifest = valid_manifest();
         manifest["schema_version"] = json!(2);
 
-        assert!(validation_error(&manifest).contains("schema_version must be 1"));
+        assert!(validate_json(&manifest).is_ok());
+    }
+
+    #[test]
+    fn schema_version_one_rejects_version_two_selection_fields() {
+        let mut manifest = valid_manifest();
+        manifest["selections"][0]["source_expectation"] = json!("answerable");
+
+        assert!(validation_error(&manifest).contains("schema_version 2 selection fields"));
+    }
+
+    #[test]
+    fn schema_version_two_rejects_an_unknown_language() {
+        let mut manifest = valid_manifest();
+        manifest["schema_version"] = json!(2);
+        manifest["selections"][0]["query_language"] = json!("fr");
+
+        assert!(validation_error(&manifest).contains("unknown variant"));
+    }
+
+    #[test]
+    fn schema_version_two_allows_answerable_source_with_unanswerable_pool() {
+        let mut manifest = valid_manifest();
+        manifest["schema_version"] = json!(2);
+        manifest["selections"][0]["expectation"] = json!("unanswerable");
+        manifest["selections"][0]["source_expectation"] = json!("answerable");
+        manifest["selections"][0]["supports"] = json!([]);
+        manifest["selections"][1]["expectation"] = json!("answerable");
+        manifest["selections"][1]["source_expectation"] = json!("answerable");
+        manifest["selections"][1]["supports"] = json!([{
+            "artifact_path": "sources/contractnli/train.jsonl",
+            "document_id": "document_two",
+            "segment_id": "passage_two"
+        }]);
+
+        assert!(validate_json(&manifest).is_ok());
+    }
+
+    #[test]
+    fn document_reference_family_cannot_cross_splits() {
+        let mut manifest = valid_manifest();
+        manifest["schema_version"] = json!(2);
+        add_cross_split_family_reference(&mut manifest);
+
+        assert!(validation_error(&manifest).contains("document family cannot cross"));
+    }
+
+    #[test]
+    fn schema_version_one_preserves_preexisting_document_family_behavior() {
+        let mut manifest = valid_manifest();
+        add_cross_split_family_reference(&mut manifest);
+
+        assert!(validate_json(&manifest).is_ok());
+    }
+
+    #[test]
+    fn xquad_translations_share_one_document_family() {
+        let mut manifest = valid_manifest();
+        manifest["schema_version"] = json!(2);
+        manifest["sources"] = json!([{
+            "id": "xquad_en_es",
+            "repository": "https://example.invalid/xquad",
+            "revision": "1".repeat(40),
+            "license": "CC-BY-SA-4.0",
+            "artifacts": [
+                {
+                    "path": "xquad/xquad.en.json",
+                    "sha256": "a".repeat(64),
+                    "size": 42
+                },
+                {
+                    "path": "xquad/xquad.es.json",
+                    "sha256": "b".repeat(64),
+                    "size": 42
+                }
+            ]
+        }]);
+        manifest["selections"][0]["source_id"] = json!("xquad_en_es");
+        manifest["selections"][0]["artifact_path"] = json!("xquad/xquad.en.json");
+        manifest["selections"][0]["document_id"] = json!("data_0");
+        manifest["selections"][0]["supports"][0]["artifact_path"] = json!("xquad/xquad.en.json");
+        manifest["selections"][0]["supports"][0]["document_id"] = json!("data_0");
+        manifest["selections"][0]["hard_negatives"][0]["artifact_path"] =
+            json!("xquad/xquad.en.json");
+        manifest["selections"][0]["hard_negatives"][0]["document_id"] = json!("data_0");
+        manifest["selections"][1]["source_id"] = json!("xquad_en_es");
+        manifest["selections"][1]["artifact_path"] = json!("xquad/xquad.es.json");
+        manifest["selections"][1]["document_id"] = json!("data_0");
+        manifest["selections"][1]["hard_negatives"][0]["artifact_path"] =
+            json!("xquad/xquad.es.json");
+        manifest["selections"][1]["hard_negatives"][0]["document_id"] = json!("data_0");
+
+        assert!(validation_error(&manifest).contains("document family cannot cross"));
+    }
+
+    #[test]
+    fn xquad_declared_candidate_language_must_match_every_candidate_artifact() {
+        let mut manifest = valid_manifest();
+        manifest["schema_version"] = json!(2);
+        manifest["sources"][0]["id"] = json!("xquad_en_es");
+        manifest["sources"][0]["artifacts"][0]["path"] = json!("sources/xquad/xquad.en.json");
+        manifest["selections"][0]["source_id"] = json!("xquad_en_es");
+        manifest["selections"][0]["artifact_path"] = json!("sources/xquad/xquad.en.json");
+        manifest["selections"][0]["supports"][0]["artifact_path"] =
+            json!("sources/xquad/xquad.en.json");
+        manifest["selections"][0]["hard_negatives"][0]["artifact_path"] =
+            json!("sources/xquad/xquad.en.json");
+        manifest["selections"][0]["candidate_language"] = json!("es");
+
+        assert!(validation_error(&manifest).contains("candidate_language disagrees"));
     }
 
     #[test]

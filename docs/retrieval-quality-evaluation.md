@@ -1102,3 +1102,91 @@ could matter; the other answerable cases retained at most one result. Pool-depth
 H-RR2 must not proceed from this result. The next experiment must separate
 ranking from abstention on a new licensed development corpus instead of tuning
 the existing threshold against these five visible cases.
+
+## Absolute abstention calibration (H-CAL1)
+
+H-CAL1 isolates the remaining decision that H-RR1 could not exercise: the
+absolute mMARCO cutoff. The cross-encoder returns logits, not calibrated
+probabilities. Applying a sigmoid or another monotone mapping would not change
+ranking or the candidate set selected by one corresponding cutoff, so this
+first experiment deliberately avoids a fitted probability model. Platt scaling,
+isotonic regression and conformal risk control remain deferred until AirWiki has
+enough independent grouped calibration queries to justify their additional
+assumptions and parameters.
+
+The new development corpus contains 48 queries in 40 document and translation
+families, with exactly ten candidates per query. XQuAD contributes parallel
+English and Spanish questions and passages in all four query-to-passage language
+directions. SQuAD 2.0 contributes paired answerable and source-native impossible
+questions over the same candidate pools. Complete documents, parallel
+translations and every document used as a distractor remain within one split.
+Twenty-four queries select the candidate rule in `training`; 24 queries held
+out from training across 20 grouped families are read once as `calibration`.
+Neither split is a promotion holdout, and all third-party text remains in
+ignored, hash-verified local source artifacts.
+
+One shared mMARCO inference produces the following content-free arms:
+
+- **B0:** the current `evidence-v1` decisions in the blinded input order;
+- **T1:** replace the fixed zero floor with one absolute logit cutoff selected
+  on `training`, retain the current 3.6-logit relative window and blinded input
+  order; and
+- **T1-score:** use the identical T1 decisions but stable-sort them by descending
+  mMARCO score, with blinded input position as the tie-breaker.
+
+The cutoff candidates are the finite training scores plus the fail-closed
+abstain-all boundary. Selection maximizes complete-query coverage subject to
+zero returned hard negatives and zero accepted support-absent queries; ties use
+the higher cutoff. A query is complete only when its returned top five contains
+every required support. Candidate rows are correlated and never counted as
+independent calibration units. Raw scores stay in memory and must not appear in
+logs or reports; only the selected cutoff, fingerprints and aggregate metrics
+may be persisted.
+
+The closed manifest and source ledger live under
+`resources/evaluation/retrieval-rerank-abstention-development-v1/`. The real
+model run is:
+
+```bash
+cargo run --release --locked -p xtask -- retrieval evaluate-rerank-calibration \
+  --source-root <verified-corpus-root> \
+  --relevance-snapshot <verified-mmarco-snapshot>
+```
+
+The calibration gate requires zero provider or provenance failures, 100%
+support-absent accuracy, zero returned hard negatives, no loss of a query
+covered by B0, at least 0.05 absolute improvement in complete-query coverage
+over B0, improvement in at least two language/source strata, non-regressing
+MRR@5 and less than one millisecond p95 decision overhead. Passing authorizes
+only a newly authored sealed end-to-end holdout and a Windows replay of the same
+frozen rule. It does not authorize `evidence-v2`, a production threshold or a
+user-facing confidence value.
+
+**Observed grouped-calibration result (2026-07-18).** The first frozen macOS
+arm64 release-profile run used corpus manifest SHA-256
+`24ce3ab44361b483176d90b1344d2507d95ddb70da788545d3d85588f094aa6b`
+and mMARCO revision `1427fd652930e4ba29e8149678df786c240d8825`. Training
+selected an absolute logit cutoff of `6.1731644`; this value is an internal
+model score, not a probability or user-facing confidence.
+
+| Calibration measure | B0 | T1-score |
+| --- | ---: | ---: |
+| Complete-query coverage | 0.75 | 0.4167 |
+| Support Recall@5 | 0.9167 | 0.4167 |
+| MRR@5 | 0.8611 | 0.4167 |
+| No-answer accuracy | 0.6667 | 0.9167 |
+| Citation precision | 0.6111 | 0.8333 |
+| Returned hard negatives | 7 | 1 |
+
+T1-score lost four queries completed by B0, improved no frozen stratum and
+still returned one hard negative on a support-absent query. Its complete-query
+coverage changed by `-0.3333`, well below the required `+0.05`. The decision
+step itself remained below one microsecond p95 outside the shared inference;
+model inference was 475 ms p95 over the 48 grouped queries on this workstation.
+
+H-CAL1 is therefore rejected. `sealed_holdout_authorized` and
+`production_promotion_ready` remain false, and production search is unchanged.
+The result shows that one global raw-logit cutoff does not separate useful from
+misleading evidence reliably enough on this bilingual grouped corpus. Further
+work requires a materially different abstention or evidence-composition thesis;
+the calibration split must not be reused to tune this cutoff.

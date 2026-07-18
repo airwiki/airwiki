@@ -321,9 +321,10 @@ impl EvidenceRelevanceProvider for FastEmbedMmarcoReranker {
         let decisions = decisions_from_scores(&scores)?;
         let ordering_started = std::time::Instant::now();
         let score_order = score_descending_order(&scores)?;
-        RetrievalEvaluationRelevance::from_decisions_and_order(
+        RetrievalEvaluationRelevance::from_decisions_order_and_scores(
             decisions,
             score_order,
+            scores,
             ordering_started.elapsed().as_micros(),
         )
     }

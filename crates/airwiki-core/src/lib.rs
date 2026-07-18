@@ -58,7 +58,8 @@ pub use search::{
 #[cfg(feature = "retrieval-evaluation")]
 pub use search::{
     MAX_RETRIEVAL_EVALUATION_CANDIDATES, MAX_RETRIEVAL_EVALUATION_CHUNKS_PER_CONCEPT,
-    RetrievalEvaluationCandidate, RetrievalEvaluationNominee, RetrievalEvaluationSelection,
+    RetrievalEvaluationCandidate, RetrievalEvaluationNominee, RetrievalEvaluationRelevance,
+    RetrievalEvaluationScoredParts, RetrievalEvaluationSelection,
 };
 pub use storage::{
     AuditEvent, CollectionMaintenanceCounts, CollectionMaintenanceRecord,

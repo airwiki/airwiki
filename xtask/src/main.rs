@@ -182,6 +182,33 @@ async fn main() -> Result<()> {
                 Some(other) => bail!("unknown retrieval corpus command: {other}"),
                 None => bail!("missing retrieval corpus command; expected `validate` or `verify`"),
             },
+            Some("calibration-corpus") => match arguments.next().as_deref() {
+                Some("validate") => {
+                    ensure!(
+                        arguments.next().is_none(),
+                        "retrieval calibration-corpus validate received unexpected arguments"
+                    );
+                    retrieval::validate_rerank_calibration_corpus()
+                }
+                Some("verify") => {
+                    ensure!(
+                        arguments.next().as_deref() == Some("--source-root"),
+                        "retrieval calibration-corpus verify expects `--source-root <path>`"
+                    );
+                    let source_root = arguments.next().context(
+                        "retrieval calibration-corpus verify is missing the source root",
+                    )?;
+                    ensure!(
+                        arguments.next().is_none(),
+                        "retrieval calibration-corpus verify received unexpected arguments"
+                    );
+                    retrieval::verify_rerank_calibration_corpus(Path::new(&source_root))
+                }
+                Some(other) => bail!("unknown retrieval calibration-corpus command: {other}"),
+                None => bail!(
+                    "missing retrieval calibration-corpus command; expected `validate` or `verify`"
+                ),
+            },
             Some("validate") => {
                 ensure!(
                     arguments.next().is_none(),
@@ -364,6 +391,31 @@ async fn main() -> Result<()> {
                 )
                 .await
             }
+            Some("evaluate-rerank-calibration") => {
+                ensure!(
+                    arguments.next().as_deref() == Some("--source-root"),
+                    "retrieval evaluate-rerank-calibration expects `--source-root <directory>` first"
+                );
+                let source_root = arguments
+                    .next()
+                    .context("retrieval evaluate-rerank-calibration is missing the source root")?;
+                ensure!(
+                    arguments.next().as_deref() == Some("--relevance-snapshot"),
+                    "retrieval evaluate-rerank-calibration expects `--relevance-snapshot <directory>` second"
+                );
+                let relevance_snapshot = arguments.next().context(
+                    "retrieval evaluate-rerank-calibration is missing the relevance snapshot path",
+                )?;
+                ensure!(
+                    arguments.next().is_none(),
+                    "retrieval evaluate-rerank-calibration received unexpected arguments"
+                );
+                retrieval::evaluate_rerank_calibration(
+                    Path::new(&source_root),
+                    Path::new(&relevance_snapshot),
+                )
+                .await
+            }
             Some("evaluate-mini-graph") => {
                 ensure!(
                     arguments.next().is_none(),
@@ -412,7 +464,7 @@ async fn main() -> Result<()> {
             }
             Some(other) => bail!("unknown retrieval command: {other}"),
             None => bail!(
-                "missing retrieval command; expected `corpus`, `validate`, `evaluate`, `evaluate-selector`, `evaluate-answerability`, `evaluate-reviewed-anchors`, `evaluate-rerank-order`, `evaluate-mini-graph`, `evaluate-real-mini-graph` or `evaluate-final-mini-graph`"
+                "missing retrieval command; expected `corpus`, `calibration-corpus`, `validate`, `evaluate`, `evaluate-selector`, `evaluate-answerability`, `evaluate-reviewed-anchors`, `evaluate-rerank-order`, `evaluate-rerank-calibration`, `evaluate-mini-graph`, `evaluate-real-mini-graph` or `evaluate-final-mini-graph`"
             ),
         },
         "licenses" => match arguments.next().as_deref() {
@@ -469,6 +521,10 @@ async fn main() -> Result<()> {
             println!(
                 "cargo run --locked -p xtask -- retrieval corpus verify --source-root <directory>"
             );
+            println!("cargo run --locked -p xtask -- retrieval calibration-corpus validate");
+            println!(
+                "cargo run --locked -p xtask -- retrieval calibration-corpus verify --source-root <directory>"
+            );
             println!(
                 "cargo run --locked -p xtask -- retrieval evaluate --phase development|final --embedding-snapshot <directory> --relevance-snapshot <directory>"
             );
@@ -483,6 +539,9 @@ async fn main() -> Result<()> {
             );
             println!(
                 "cargo run --release --locked -p xtask -- retrieval evaluate-rerank-order --embedding-snapshot <directory> --relevance-snapshot <directory>"
+            );
+            println!(
+                "cargo run --release --locked -p xtask -- retrieval evaluate-rerank-calibration --source-root <directory> --relevance-snapshot <directory>"
             );
             println!("cargo run --release --locked -p xtask -- retrieval evaluate-mini-graph");
             println!(

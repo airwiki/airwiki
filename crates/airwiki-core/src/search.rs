@@ -123,16 +123,56 @@ pub enum EvidenceRelevanceError {
     DecisionCountMismatch { expected: usize, actual: usize },
 }
 
-/// Decisions plus a content-free permutation for offline score-order evaluation.
+/// Decisions plus evaluation-only ordering data from an evidence provider.
 ///
-/// Scores never cross this boundary. The permutation is validated as a complete
-/// bijection over the input batch before search can use it.
+/// Production builds never expose scores. With `retrieval-evaluation`, raw
+/// scores may cross this boundary only through the non-serializable calibration
+/// API. Every permutation is validated as a complete bijection, and a
+/// score-bearing permutation must match descending score order with stable
+/// input-position ties.
 #[cfg(feature = "retrieval-evaluation")]
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Clone, PartialEq)]
 pub struct RetrievalEvaluationRelevance {
     decisions: Vec<EvidenceDecision>,
     score_order: Vec<usize>,
+    scores: Option<Vec<f32>>,
     score_order_micros: u128,
+}
+
+/// Score-bearing parts consumed by an offline calibration evaluator.
+///
+/// Raw scores remain feature-gated and this type deliberately has no
+/// serialization implementation.
+#[cfg(feature = "retrieval-evaluation")]
+#[derive(Clone, PartialEq)]
+pub struct RetrievalEvaluationScoredParts {
+    pub decisions: Vec<EvidenceDecision>,
+    pub score_order: Vec<usize>,
+    pub scores: Vec<f32>,
+    pub score_order_micros: u128,
+}
+
+#[cfg(feature = "retrieval-evaluation")]
+impl std::fmt::Debug for RetrievalEvaluationScoredParts {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("RetrievalEvaluationScoredParts")
+            .field("candidate_count", &self.decisions.len())
+            .field("score_order_micros", &self.score_order_micros)
+            .finish()
+    }
+}
+
+#[cfg(feature = "retrieval-evaluation")]
+impl std::fmt::Debug for RetrievalEvaluationRelevance {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("RetrievalEvaluationRelevance")
+            .field("candidate_count", &self.decisions.len())
+            .field("has_scores", &self.scores.is_some())
+            .field("score_order_micros", &self.score_order_micros)
+            .finish()
+    }
 }
 
 #[cfg(feature = "retrieval-evaluation")]
@@ -148,6 +188,41 @@ impl RetrievalEvaluationRelevance {
         Ok(Self {
             decisions,
             score_order,
+            scores: None,
+            score_order_micros,
+        })
+    }
+
+    /// Creates an evaluation result that retains aligned raw model scores.
+    ///
+    /// This constructor and its scores are absent from production builds. The
+    /// values are intended only for offline calibration and must not be logged,
+    /// serialized or presented as probabilities.
+    pub fn from_decisions_order_and_scores(
+        decisions: Vec<EvidenceDecision>,
+        score_order: Vec<usize>,
+        scores: Vec<f32>,
+        score_order_micros: u128,
+    ) -> std::result::Result<Self, EvidenceRelevanceError> {
+        validate_candidate_order(decisions.len(), &score_order)?;
+        if scores.len() != decisions.len() || scores.iter().any(|score| !score.is_finite()) {
+            return Err(EvidenceRelevanceError::InvalidOutput);
+        }
+        if !score_order.windows(2).all(|pair| {
+            let left = pair[0];
+            let right = pair[1];
+            match scores[left].total_cmp(&scores[right]) {
+                std::cmp::Ordering::Greater => true,
+                std::cmp::Ordering::Equal => left < right,
+                std::cmp::Ordering::Less => false,
+            }
+        }) {
+            return Err(EvidenceRelevanceError::InvalidOutput);
+        }
+        Ok(Self {
+            decisions,
+            score_order,
+            scores: Some(scores),
             score_order_micros,
         })
     }
@@ -162,6 +237,19 @@ impl RetrievalEvaluationRelevance {
 
     fn into_parts(self) -> (Vec<EvidenceDecision>, Vec<usize>, u128) {
         (self.decisions, self.score_order, self.score_order_micros)
+    }
+
+    /// Consumes a score-bearing offline result without serializing its logits.
+    pub fn into_scored_parts(
+        self,
+    ) -> std::result::Result<RetrievalEvaluationScoredParts, EvidenceRelevanceError> {
+        let scores = self.scores.ok_or(EvidenceRelevanceError::InvalidOutput)?;
+        Ok(RetrievalEvaluationScoredParts {
+            decisions: self.decisions,
+            score_order: self.score_order,
+            scores,
+            score_order_micros: self.score_order_micros,
+        })
     }
 }
 
@@ -2314,6 +2402,54 @@ mod tests {
             ),
             Err(EvidenceRelevanceError::InvalidOutput)
         );
+    }
+
+    #[cfg(feature = "retrieval-evaluation")]
+    #[test]
+    fn scored_evaluation_relevance_validates_and_consumes_aligned_scores() {
+        let relevance = RetrievalEvaluationRelevance::from_decisions_order_and_scores(
+            vec![EvidenceDecision::Relevant, EvidenceDecision::Irrelevant],
+            vec![1, 0],
+            vec![0.25, 8.25],
+            9,
+        )
+        .unwrap();
+        let debug = format!("{relevance:?}");
+        assert!(debug.contains("candidate_count: 2"));
+        assert!(!debug.contains("8.25"));
+
+        let parts = relevance.into_scored_parts().unwrap();
+        let parts_debug = format!("{parts:?}");
+        assert!(parts_debug.contains("candidate_count: 2"));
+        assert!(!parts_debug.contains("8.25"));
+        assert_eq!(
+            parts.decisions,
+            vec![EvidenceDecision::Relevant, EvidenceDecision::Irrelevant]
+        );
+        assert_eq!(parts.score_order, vec![1, 0]);
+        assert_eq!(parts.scores, vec![0.25, 8.25]);
+        assert_eq!(parts.score_order_micros, 9);
+    }
+
+    #[cfg(feature = "retrieval-evaluation")]
+    #[test]
+    fn scored_evaluation_relevance_rejects_misaligned_or_non_finite_scores() {
+        for (scores, score_order) in [
+            (vec![1.0], vec![0, 1]),
+            (vec![1.0, f32::NAN], vec![0, 1]),
+            (vec![0.25, 8.25], vec![0, 1]),
+            (vec![1.0, 1.0], vec![1, 0]),
+        ] {
+            assert_eq!(
+                RetrievalEvaluationRelevance::from_decisions_order_and_scores(
+                    vec![EvidenceDecision::Relevant; 2],
+                    score_order,
+                    scores,
+                    0,
+                ),
+                Err(EvidenceRelevanceError::InvalidOutput)
+            );
+        }
     }
 
     #[cfg(feature = "retrieval-evaluation")]

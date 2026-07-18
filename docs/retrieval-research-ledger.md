@@ -6,10 +6,14 @@ dependency. The linked pull requests preserve the reproducible implementation.
 Green CI means that an experiment ran as designed; it does not mean that its
 candidate belongs in the product.
 
+A rejected or inconclusive probe leaves only its conclusion in this ledger;
+its adapters, assets and one-off fixtures are removed rather than maintained.
+
 | Candidate | Evidence | Decision | Durable conclusion |
 | --- | --- | --- | --- |
 | Domain-separated retrieval baseline v2 | [#8](https://github.com/airwiki/airwiki/pull/8) | **Accepted baseline** | Keep the 17-case regression corpus and its structural validator. Do not keep the selectors or model-specific runners bundled into the research branch. |
 | Local QA-entailment selector | [#8](https://github.com/airwiki/airwiki/pull/8) | **Rejected** | The candidate missed its predeclared quality gate. Generic answerability machinery is not justified in `main`. |
+| Off-the-shelf QA/NLI thresholds | [#8](https://github.com/airwiki/airwiki/pull/8) | **Rejected** | Multilingual SQuAD2 readers, MiniLM and mDeBERTa NLI, and QNLI did not separate answer-bearing passages from negatives with a threshold. Do not repeat those model probes without a materially different contract. |
 | Reviewed evidence anchors | [#9](https://github.com/airwiki/airwiki/pull/9) | **Rejected** | Coverage reached 9/9 positive needs, but precision was 10/13 and only 5/11 decisions were correct. Reviewed links can supply candidates, but cannot serve as an answerability decision by themselves. |
 | Compact OKF graph on development rankings | [#10](https://github.com/airwiki/airwiki/pull/10), [#11](https://github.com/airwiki/airwiki/pull/11) | **Superseded** | A positive synthetic signal required a real-ranking holdout; it was not sufficient evidence for graph infrastructure. |
 | Compact OKF graph on sealed holdout | [#12](https://github.com/airwiki/airwiki/pull/12) | **Rejected** | Baseline, graph and structural sham all produced Recall@5 of 0.75; graph assembly p95 was 123 ms against a 25 ms budget. |

@@ -440,6 +440,28 @@ pub(crate) struct RankedChunk {
     pub lexical_score: Option<f64>,
 }
 
+/// Minimal row used while scanning the vector index.
+///
+/// Search needs only an identity and embedding to maintain its bounded top-k
+/// set. Loading source text and citation metadata for every published chunk
+/// would make one query scale with the total text corpus as well as the vector
+/// corpus, so those fields are hydrated only for the final candidate IDs.
+pub(crate) struct VectorEmbeddingCandidate {
+    pub scan_cursor: i64,
+    pub chunk_id: Uuid,
+    pub embedding: Vec<f32>,
+}
+
+impl std::fmt::Debug for VectorEmbeddingCandidate {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("VectorEmbeddingCandidate")
+            .field("scan_cursor", &self.scan_cursor)
+            .field("embedding_dimensions", &self.embedding.len())
+            .finish()
+    }
+}
+
 struct PendingReviewMetadata {
     source_document_id: String,
     collection_id: String,
@@ -2876,17 +2898,69 @@ impl Database {
         rows.collect::<rusqlite::Result<_>>().map_err(Into::into)
     }
 
-    pub(crate) fn vector_candidates_batch(
+    /// Scans one collection with a process-local row cursor.
+    ///
+    /// SQLite stores the table rowid in `chunks_collection`, so the
+    /// `(collection_id, rowid)` predicate advances through that existing index
+    /// without a growing OFFSET or a temporary sort. The cursor never leaves a
+    /// single search and is not a durable chunk identity.
+    pub(crate) fn vector_embedding_candidates_batch(
         &self,
-        collections: &[Uuid],
+        collection_id: Uuid,
         purpose: SearchPurpose,
         limit: usize,
-        offset: usize,
-    ) -> Result<Vec<RankedChunk>> {
-        if collections.is_empty() || limit == 0 {
+        after_rowid: Option<i64>,
+    ) -> Result<Vec<VectorEmbeddingCandidate>> {
+        if limit == 0 {
             return Ok(Vec::new());
         }
-        let placeholders = repeat_placeholders(collections.len(), 1);
+        let external_clause = if purpose == SearchPurpose::ExternalAi {
+            " AND col.allow_external_ai=1"
+        } else {
+            ""
+        };
+        let cursor_clause = after_rowid
+            .map(|_| " AND ch.rowid > ?2")
+            .unwrap_or_default();
+        let limit_parameter = 2 + usize::from(after_rowid.is_some());
+        let sql = format!(
+            "SELECT ch.rowid,ch.id,ch.embedding
+             FROM chunks ch JOIN concepts co ON co.id=ch.concept_id
+             JOIN source_documents sd ON sd.id=ch.source_document_id
+             JOIN collections col ON col.id=ch.collection_id
+             WHERE co.status='published' AND sd.status='published'
+             AND ch.collection_id=?1{external_clause}{cursor_clause}
+             ORDER BY ch.rowid LIMIT ?{limit_parameter}",
+        );
+        let mut values = vec![rusqlite::types::Value::from(collection_id.to_string())];
+        if let Some(after_rowid) = after_rowid {
+            values.push(after_rowid.into());
+        }
+        values.push(i64::try_from(limit).unwrap_or(i64::MAX).into());
+        let connection = self.connection()?;
+        let mut statement = connection.prepare(&sql)?;
+        let rows = statement.query_map(params_from_iter(values), |row| {
+            let bytes = row.get::<_, Vec<u8>>(2)?;
+            Ok(VectorEmbeddingCandidate {
+                scan_cursor: row.get(0)?,
+                chunk_id: uuid_sql(row.get::<_, String>(1)?)?,
+                embedding: decode_embedding(&bytes).map_err(to_sql_error)?,
+            })
+        })?;
+        rows.collect::<rusqlite::Result<_>>().map_err(Into::into)
+    }
+
+    pub(crate) fn vector_candidates_by_id(
+        &self,
+        chunk_ids: &[Uuid],
+        collections: &[Uuid],
+        purpose: SearchPurpose,
+    ) -> Result<Vec<RankedChunk>> {
+        if chunk_ids.is_empty() || collections.is_empty() {
+            return Ok(Vec::new());
+        }
+        let chunk_placeholders = repeat_placeholders(chunk_ids.len(), 1);
+        let collection_placeholders = repeat_placeholders(collections.len(), chunk_ids.len() + 1);
         let external_clause = if purpose == SearchPurpose::ExternalAi {
             " AND col.allow_external_ai=1"
         } else {
@@ -2900,17 +2974,18 @@ impl Database {
              JOIN source_documents sd ON sd.id=ch.source_document_id
              JOIN collections col ON col.id=ch.collection_id
              WHERE co.status='published' AND sd.status='published'
-             AND ch.collection_id IN ({placeholders}){external_clause}
-             ORDER BY ch.id LIMIT ?{} OFFSET ?{}",
-            collections.len() + 1,
-            collections.len() + 2,
+             AND ch.id IN ({chunk_placeholders})
+             AND ch.collection_id IN ({collection_placeholders}){external_clause}"
         );
-        let mut values = collections
+        let mut values = chunk_ids
             .iter()
             .map(|id| rusqlite::types::Value::from(id.to_string()))
             .collect::<Vec<_>>();
-        values.push(i64::try_from(limit).unwrap_or(i64::MAX).into());
-        values.push(i64::try_from(offset).unwrap_or(i64::MAX).into());
+        values.extend(
+            collections
+                .iter()
+                .map(|id| rusqlite::types::Value::from(id.to_string())),
+        );
         let connection = self.connection()?;
         let mut statement = connection.prepare(&sql)?;
         let rows = statement.query_map(params_from_iter(values), ranked_chunk_from_row)?;

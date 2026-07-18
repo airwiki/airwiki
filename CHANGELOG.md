@@ -25,6 +25,7 @@ All notable user-visible changes to AirWiki will be documented here. The project
 - Showed the local-model recommendation while private services finish starting on fresh installs, without weakening asset verification.
 - Made the desktop layout responsive down to its explicit minimum size, keeping primary actions visible and limiting scrolling to bounded lists and detail panels.
 - Made the first-run journey recoverable with visible processing counts, actionable terminal states, a truthful Wiki-health timestamp, and an explicit way to finish after a search returns no evidence.
+- Made vector retrieval scan each collection with cursor pagination and hydrate full evidence only for the bounded candidate set, so query work no longer grows through repeated SQLite offsets or corpus-wide text loading.
 
 ### Fixed
 

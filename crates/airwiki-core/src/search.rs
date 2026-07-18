@@ -208,7 +208,15 @@ impl HybridSearchEngine {
 
         let database = self.database.clone();
         let query = request.query.clone();
-        let collections = collections.to_vec();
+        // Public callers may provide the same scope more than once. SQL `IN`
+        // historically collapsed those duplicates; preserve that contract now
+        // that vector scanning visits one collection at a time.
+        let mut seen_collections = HashSet::new();
+        let collections = collections
+            .iter()
+            .copied()
+            .filter(|collection_id| seen_collections.insert(*collection_id))
+            .collect::<Vec<_>>();
         let purpose = request.purpose;
         let prepared = run_search_blocking("hybrid retrieval worker task failed", move || {
             prepare_candidates(database, query, collections, purpose, query_embedding)
@@ -218,6 +226,7 @@ impl HybridSearchEngine {
             candidates: deduplicated_candidates,
             visible_snippets,
             relevance_inputs,
+            candidate_snapshot_changed,
         } = prepared;
         let decisions = if relevance_inputs.is_empty() {
             Vec::new()
@@ -276,15 +285,19 @@ impl HybridSearchEngine {
         })
         .await?;
         let removed_during_revalidation = before_revalidation > hits.len();
+        let mut warnings = Vec::new();
+        if candidate_snapshot_changed {
+            warnings.push("results changed during candidate hydration".to_owned());
+        }
+        if removed_during_revalidation {
+            warnings.push("results changed during final publication revalidation".to_owned());
+        }
         Ok(SearchResponse {
             request_id: request.request_id,
             hits,
             offline_nodes: Vec::new(),
-            warnings: removed_during_revalidation
-                .then(|| "results changed during final publication revalidation".to_owned())
-                .into_iter()
-                .collect(),
-            partial: removed_during_revalidation,
+            partial: !warnings.is_empty(),
+            warnings,
         })
     }
 }
@@ -306,6 +319,7 @@ struct PreparedCandidates {
     candidates: Vec<RankedChunk>,
     visible_snippets: Vec<String>,
     relevance_inputs: Vec<RelevanceInput>,
+    candidate_snapshot_changed: bool,
 }
 
 async fn run_search_blocking<T>(
@@ -333,29 +347,52 @@ fn prepare_candidates(
         purpose,
         PRE_DEDUPLICATION_CANDIDATE_LIMIT,
     )?;
-    let mut vector = Vec::with_capacity(PRE_DEDUPLICATION_CANDIDATE_LIMIT * 2);
-    let mut offset = 0;
-    loop {
-        let batch = database.vector_candidates_batch(
-            &collections,
-            purpose,
-            VECTOR_SQL_BATCH_SIZE,
-            offset,
-        )?;
-        let batch_len = batch.len();
-        vector.extend(batch.into_iter().map(|candidate| {
-            let similarity = cosine_similarity(&query_embedding, &candidate.chunk.embedding);
-            (candidate, similarity)
-        }));
-        if vector.len() >= PRE_DEDUPLICATION_CANDIDATE_LIMIT * 2 {
-            sort_and_truncate_vector_candidates(&mut vector, PRE_DEDUPLICATION_CANDIDATE_LIMIT);
+    let mut vector_scores = Vec::with_capacity(PRE_DEDUPLICATION_CANDIDATE_LIMIT * 2);
+    for collection_id in &collections {
+        let mut after_rowid = None;
+        loop {
+            let batch = database.vector_embedding_candidates_batch(
+                *collection_id,
+                purpose,
+                VECTOR_SQL_BATCH_SIZE,
+                after_rowid,
+            )?;
+            let batch_len = batch.len();
+            after_rowid = batch.last().map(|candidate| candidate.scan_cursor);
+            vector_scores.extend(batch.into_iter().map(|candidate| {
+                let similarity = cosine_similarity(&query_embedding, &candidate.embedding);
+                (candidate.chunk_id, similarity)
+            }));
+            if vector_scores.len() >= PRE_DEDUPLICATION_CANDIDATE_LIMIT * 2 {
+                sort_and_truncate_vector_scores(
+                    &mut vector_scores,
+                    PRE_DEDUPLICATION_CANDIDATE_LIMIT,
+                );
+            }
+            if batch_len < VECTOR_SQL_BATCH_SIZE {
+                break;
+            }
         }
-        if batch_len < VECTOR_SQL_BATCH_SIZE {
-            break;
-        }
-        offset += batch_len;
     }
-    sort_and_truncate_vector_candidates(&mut vector, PRE_DEDUPLICATION_CANDIDATE_LIMIT);
+    sort_and_truncate_vector_scores(&mut vector_scores, PRE_DEDUPLICATION_CANDIDATE_LIMIT);
+    let vector_ids = vector_scores
+        .iter()
+        .map(|(chunk_id, _)| *chunk_id)
+        .collect::<Vec<_>>();
+    let mut hydrated_vector = database
+        .vector_candidates_by_id(&vector_ids, &collections, purpose)?
+        .into_iter()
+        .map(|candidate| (candidate.chunk.id, candidate))
+        .collect::<HashMap<_, _>>();
+    let candidate_snapshot_changed = hydrated_vector.len() != vector_ids.len();
+    let vector = vector_scores
+        .into_iter()
+        .filter_map(|(chunk_id, similarity)| {
+            hydrated_vector
+                .remove(&chunk_id)
+                .map(|candidate| (candidate, similarity))
+        })
+        .collect::<Vec<_>>();
 
     let mut candidates = HashMap::<Uuid, RankedChunk>::new();
     let mut scores = HashMap::<Uuid, f64>::new();
@@ -420,6 +457,7 @@ fn prepare_candidates(
         candidates: deduplicated_candidates,
         visible_snippets,
         relevance_inputs,
+        candidate_snapshot_changed,
     })
 }
 
@@ -483,12 +521,12 @@ fn cosine_similarity(left: &[f32], right: &[f32]) -> f32 {
     }
 }
 
-fn sort_and_truncate_vector_candidates(candidates: &mut Vec<(RankedChunk, f32)>, limit: usize) {
-    candidates.sort_by(|(left_candidate, left), (right_candidate, right)| {
+fn sort_and_truncate_vector_scores(candidates: &mut Vec<(Uuid, f32)>, limit: usize) {
+    candidates.sort_by(|(left_id, left), (right_id, right)| {
         right
             .partial_cmp(left)
             .unwrap_or(Ordering::Equal)
-            .then_with(|| left_candidate.chunk.id.cmp(&right_candidate.chunk.id))
+            .then_with(|| left_id.cmp(right_id))
     });
     candidates.truncate(limit);
 }
@@ -801,6 +839,50 @@ mod tests {
                 source_revision: template.source_revision,
             });
         }
+        database.replace_chunks(concept_id, &chunks).unwrap();
+    }
+
+    async fn replace_with_multi_page_vector_candidates(database: &Database, concept_id: Uuid) {
+        let template = database.chunks_for_concept(concept_id).unwrap().remove(0);
+        let query_embedding = DeterministicEmbeddingProvider
+            .embed(&["query: deepneedle".to_owned()])
+            .await
+            .unwrap()
+            .remove(0);
+        let opposite_embedding = query_embedding
+            .iter()
+            .map(|value| -*value)
+            .collect::<Vec<_>>();
+        let candidate_count = VECTOR_SQL_BATCH_SIZE * 2 + 1;
+        let chunks = (0..candidate_count)
+            .map(|index| {
+                let is_target = index + 1 == candidate_count;
+                StoredChunk {
+                    id: Uuid::from_u128(u128::try_from(index + 1).unwrap()),
+                    concept_id: template.concept_id,
+                    source_document_id: template.source_document_id,
+                    collection_id: template.collection_id,
+                    ordinal: u32::try_from(index).unwrap(),
+                    heading_or_page: if is_target {
+                        "Deep page target".to_owned()
+                    } else {
+                        format!("Noise {index}")
+                    },
+                    text: if is_target {
+                        "The unique vector target".to_owned()
+                    } else {
+                        format!("unrelated vector evidence {index}")
+                    },
+                    text_sha256: format!("multi-page-vector-{index}"),
+                    embedding: if is_target {
+                        query_embedding.clone()
+                    } else {
+                        opposite_embedding.clone()
+                    },
+                    source_revision: template.source_revision,
+                }
+            })
+            .collect::<Vec<_>>();
         database.replace_chunks(concept_id, &chunks).unwrap();
     }
 
@@ -1170,6 +1252,68 @@ mod tests {
                 RELEVANCE_CANDIDATE_LIMIT
             );
         }
+    }
+
+    #[tokio::test]
+    async fn vector_scan_finds_a_candidate_after_multiple_sql_pages() {
+        let (database, _collection_id, concept_id) = indexed_database().await;
+        replace_with_multi_page_vector_candidates(&database, concept_id).await;
+        let engine = HybridSearchEngine::new(
+            database,
+            Arc::new(DeterministicEmbeddingProvider),
+            Arc::new(AllRelevantEvidenceRelevanceProvider),
+            "mac",
+        );
+
+        let response = engine
+            .search_local(SearchRequest::new(
+                "deepneedle",
+                SearchPurpose::LocalAssistant,
+                1,
+            ))
+            .await
+            .unwrap();
+
+        assert_eq!(response.hits.len(), 1);
+        assert_eq!(response.hits[0].heading_or_page, "Deep page target");
+    }
+
+    #[tokio::test]
+    async fn duplicate_collection_scope_preserves_vector_ranking() {
+        let (database, collection_id, concept_id) = indexed_database().await;
+        replace_with_multi_page_vector_candidates(&database, concept_id).await;
+        let engine = HybridSearchEngine::new(
+            database,
+            Arc::new(DeterministicEmbeddingProvider),
+            Arc::new(AllRelevantEvidenceRelevanceProvider),
+            "mac",
+        );
+
+        let unique = engine
+            .search_collections(
+                SearchRequest::new("deepneedle", SearchPurpose::LocalAssistant, 10),
+                &[collection_id],
+            )
+            .await
+            .unwrap();
+        let duplicated = engine
+            .search_collections(
+                SearchRequest::new("deepneedle", SearchPurpose::LocalAssistant, 10),
+                &[collection_id; 5],
+            )
+            .await
+            .unwrap();
+
+        let identity = |response: &SearchResponse| {
+            response
+                .hits
+                .iter()
+                .map(|hit| (hit.chunk_id, hit.rank, hit.heading_or_page.clone()))
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(identity(&duplicated), identity(&unique));
+        assert_eq!(duplicated.warnings, unique.warnings);
+        assert_eq!(duplicated.partial, unique.partial);
     }
 
     #[tokio::test]

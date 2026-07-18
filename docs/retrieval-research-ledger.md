@@ -2,7 +2,8 @@
 
 This ledger keeps durable conclusions from bounded search experiments without
 making rejected evaluators, fixtures or candidate mechanisms a maintenance
-dependency. The linked pull requests preserve the reproducible implementation.
+dependency. Linked pull requests preserve the reviewed context available for
+each experiment.
 Green CI means that an experiment ran as designed; it does not mean that its
 candidate belongs in the product.
 
@@ -21,7 +22,7 @@ evaluation path consumes it and focused tests protect that behavior.
 | Reviewed claim identity in the existing mMARCO passage | Preregistered local probe, 2026-07-18 | **Rejected** | Prepending reviewed subject, relation, scope, temporal and polarity fields improved expected-group coverage from 12/18 to 15/18, but unexpected evidence rose from 3 to 4 and one forbidden fact survived. Structured identity is useful candidate context, not an answerability decision; do not retain the adapter or add these fields to the product for this mechanism. |
 | Compact OKF graph on development rankings | [#10](https://github.com/airwiki/airwiki/pull/10), [#11](https://github.com/airwiki/airwiki/pull/11) | **Superseded** | A positive synthetic signal required a real-ranking holdout; it was not sufficient evidence for graph infrastructure. |
 | Compact OKF graph on sealed holdout | [#12](https://github.com/airwiki/airwiki/pull/12) | **Rejected** | Baseline, graph and structural sham all produced Recall@5 of 0.75; graph assembly p95 was 123 ms against a 25 ms budget. |
-| GTE multilingual reranker | [#8](https://github.com/airwiki/airwiki/pull/8), inherited by [#13](https://github.com/airwiki/airwiki/pull/13) | **Rejected** | All ten expected development groups were already inside the source top five, so coverage did not improve. Mean MRR@10 rose from 0.833 to 0.889 and nDCG@10 from 0.877 to 0.925, but the known paraphrase reciprocal rank regressed from 1.0 to 0.5 and the compound case from 1.0 to 0.75. Do not retain its runner, model or fixture. |
+| GTE multilingual reranker | [Exploratory observation in #8](https://github.com/airwiki/airwiki/pull/8) | **Rejected** | All ten expected development groups were already inside the source top five, so coverage did not improve. Mean MRR@10 rose from 0.833 to 0.889 and nDCG@10 from 0.877 to 0.925, but the known paraphrase reciprocal rank regressed from 1.0 to 0.5 and the compound case from 1.0 to 0.75. Do not retain its runner, model or fixture. |
 | mMARCO score ordering | [#13](https://github.com/airwiki/airwiki/pull/13) | **Rejected** | Score order was identical to the existing filter order. The observed bottleneck was the binary relevance mask, not ordering among accepted candidates. |
 | mMARCO abstention calibration | [#14](https://github.com/airwiki/airwiki/pull/14) | **Rejected** | Cutoff support recall fell from 0.75 to 0.4167, four queries lost support and a hard negative remained. |
 | Standalone OKF path signal | [#15](https://github.com/airwiki/airwiki/pull/15) | **Rejected** | The signal connected 17 of 24 hard negatives, so a path alone is not evidence of answerability. |

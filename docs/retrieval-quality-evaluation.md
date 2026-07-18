@@ -16,15 +16,15 @@ contract.
 
 ## Scope
 
-The active schema-v2 fixture at
-`fixtures/retrieval/search-quality-v2.json` has SHA-256
-`2b83ffb0939b4e91a9fdb799d92a4b6ed4e4f775298694c5b9abe3761a2f52f6`.
+The active schema-v3 fixture at
+`fixtures/retrieval/search-quality-v3.json` has SHA-256
+`8a04bf7eec4aa35e6f5cdfa1c7000ab6d9f666814281c466fb82e5c4b10986ff`.
 Its 17 regression, calibration and holdout cases cover direct and paraphrased
 retrieval, cross-language and compound questions, absent and withdrawn facts,
 contradictions, common-name ambiguity, prompt injection, near duplicates,
 authorization, external-chat policy and stable ordering.
 
-V2 preserves the five observed failures from the initial run as regression
+V3 preserves the five observed failures from the initial run as regression
 cases. Every case and document belongs to a domain, and the validator rejects
 overlap between regression, calibration and holdout domains, cross-domain gold
 evidence, answerable cases with merely related evidence, no-answer facts that
@@ -33,11 +33,27 @@ remains serialized as `holdout`, but it has already been observed and now serves
 only as diagnostic transfer evidence. A future promotion decision requires
 fresh domains rather than relabeling this fixture as an unobserved holdout.
 
-The superseded schema-v1 fixture is no longer versioned. Its historical
+Each answerable case separates three roles. `expected_groups` contains direct
+answer evidence and alone determines Recall@5 and MRR@5.
+`allowed_support_fact_ids` contains useful same-domain context that may be
+returned without being counted as false evidence, but it cannot satisfy an
+expected group or improve its reciprocal rank. `forbidden_fact_ids` contains
+evidence that must never be returned for that scope. Every other returned fact
+remains unexpected. The evaluator uses support labels only to validate the
+fixture and score completed runs; the search pipeline does not consult them
+while constructing embeddings, candidates, relevance-model inputs, ranks or
+top-k selection. Non-answerable cases cannot allow support evidence.
+
+The superseded schema-v2 fixture is no longer versioned. Its historical SHA-256
+was `2b83ffb0939b4e91a9fdb799d92a4b6ed4e4f775298694c5b9abe3761a2f52f6`.
+V3 adds the support role and names Atlas explicitly in one formerly ambiguous
+question; it does not change production search behavior or thresholds.
+
+The superseded schema-v1 fixture is also no longer versioned. Its historical
 SHA-256 was
 `accd40d8473ad499469c0fd105eec9f34d70f660c9bdada1254d2325f609e727`;
 the initial results and implementation remain available in
-[PR #7](https://github.com/airwiki/airwiki/pull/7). V2 is the only maintained
+[PR #7](https://github.com/airwiki/airwiki/pull/7). V3 is the only maintained
 source-side retrieval corpus.
 
 The evaluator builds temporary origin and peer databases and uses the production
@@ -50,13 +66,13 @@ publication and search interfaces. It covers:
 - local, peer-authorized, external-AI and federated search scopes;
 - collection policy, grants and result-provenance revalidation.
 
-Report schema 3 also attributes each missing expected group to its source
-candidate pool, binary relevance mask, source top-k truncation or final
-revalidation. The audit wraps the existing relevance provider and never changes
-its decisions. It is an evaluation boundary only; no logits, questions,
-passages or audit state enter the product search API or persistent storage. The
-evaluator also fails if the audited source set is incomplete or repeated
-decisions are unstable.
+Report schema 4 records returned support facts separately and attributes each
+missing expected group to its source candidate pool, binary relevance mask,
+source top-k truncation or final revalidation. The audit wraps the existing
+relevance provider and never changes its decisions. It is an evaluation
+boundary only; no logits, questions, passages or audit state enter the product
+search API or persistent storage. The evaluator also fails if the audited
+source set is incomplete or repeated decisions are unstable.
 
 For a multi-node case, Recall@5 means that required evidence must appear within
 the top five returned by its source node. The evaluator combines that source
@@ -152,14 +168,13 @@ false-evidence control need focused improvement. This goal does not tune the
 fixture, add query decomposition, introduce another model or change product
 protocols merely to turn that observation green.
 
-Schema v2 deterministically validates the corrected corpus and pipeline
-contract. It has not established a passing semantic-quality result for the real
-model artifacts.
+Schema v3 deterministically validates the corrected corpus and pipeline
+contract. Its real-model baseline is recorded below.
 
 ## V2 stage-attribution observation
 
 The macOS arm64 run on 2026-07-18 used the same pinned model revisions and the
-active schema-v2 corpus. Its final quality result still failed:
+now-superseded schema-v2 corpus. Its final quality result still failed:
 
 - regression Recall@5: 0.50 with three unexpected facts;
 - calibration Recall@5: 1.00;
@@ -182,6 +197,30 @@ quality failure is that the selector accepted three non-answering candidates
 while rejecting six answer-bearing candidates. This result supports work on one
 better selector contract; it does not justify changing BM25, E5, RRF, the pool
 size, top-k, policies or the wire protocol.
+
+## V3 corrected-contract observation
+
+A second macOS arm64 run on 2026-07-18 used the same pinned model revisions and
+the active schema-v3 corpus. The corrected contract improved the diagnostic
+baseline without changing production search or thresholds:
+
+- regression Recall@5: 0.6667 with two unexpected facts;
+- calibration Recall@5: 1.00;
+- diagnostic holdout Recall@5: 0.625;
+- overall Recall@5: 0.7222 and overall MRR@5: 0.9167; and
+- zero forbidden-evidence, provenance, duplicate, stability or audit errors.
+
+All 18 expected groups still reached their source candidate pools. The binary
+mMARCO mask accepted 13 and rejected five; no expected group was lost to
+candidate retrieval, source top-k or final revalidation. One conditional Atlas
+rollback fragment was returned as useful support and, correctly, neither
+satisfied an expected group nor counted as false evidence. The two remaining
+unexpected facts are ordinary non-answering output, not forbidden evidence.
+
+The v3 real-model observation still **fails** the quality gate. It establishes
+the selector as the next measured boundary: candidate retrieval, policy,
+provenance and stability remain sound for this corpus, while answerability
+classification still loses expected evidence and accepts unrelated fragments.
 
 Windows real-model evaluation is pending. A macOS result must never be used to
 infer the behavior of the Windows artifacts.

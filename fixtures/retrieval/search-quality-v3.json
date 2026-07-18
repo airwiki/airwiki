@@ -1,5 +1,5 @@
 {
-  "schema_version": 2,
+  "schema_version": 3,
   "collections": [
     {
       "id": "origin_shared",
@@ -424,10 +424,11 @@
       "split": "regression",
       "tags": ["paraphrase", "duplicate"],
       "scope": "local",
-      "question": "¿Qué secuencia restablece la operación luego de una interrupción controlada?",
+      "question": "¿Qué secuencia restablece la operación de Atlas luego de una interrupción controlada?",
       "semantic_keys": ["atlas", "recovery", "procedure"],
       "relevant_fact_ids": ["atlas_recovery_procedure", "atlas_recovery_procedure_duplicate"],
       "expected_groups": [["atlas_recovery_procedure", "atlas_recovery_procedure_duplicate"]],
+      "allowed_support_fact_ids": ["atlas_recovery_rollback"],
       "forbidden_fact_ids": []
     },
     {
@@ -440,6 +441,7 @@
       "semantic_keys": ["atlas", "target", "date"],
       "relevant_fact_ids": ["atlas_target_date"],
       "expected_groups": [["atlas_target_date"]],
+      "allowed_support_fact_ids": [],
       "forbidden_fact_ids": ["atlas_internal_rehearsal"]
     },
     {
@@ -456,6 +458,7 @@
         ["atlas_owner"],
         ["atlas_target_date"]
       ],
+      "allowed_support_fact_ids": ["atlas_recovery_rollback"],
       "forbidden_fact_ids": []
     },
     {
@@ -468,6 +471,7 @@
       "semantic_keys": ["atlas", "internal", "rehearsal", "date"],
       "relevant_fact_ids": ["atlas_internal_rehearsal"],
       "expected_groups": [],
+      "allowed_support_fact_ids": [],
       "forbidden_fact_ids": ["atlas_internal_rehearsal"]
     },
     {
@@ -480,6 +484,7 @@
       "semantic_keys": ["atlas", "recovery", "procedure"],
       "relevant_fact_ids": ["atlas_recovery_procedure", "atlas_recovery_procedure_duplicate"],
       "expected_groups": [["atlas_recovery_procedure", "atlas_recovery_procedure_duplicate"]],
+      "allowed_support_fact_ids": ["atlas_recovery_rollback"],
       "forbidden_fact_ids": ["atlas_note_injection"]
     },
     {
@@ -492,6 +497,7 @@
       "semantic_keys": ["aurora", "owner", "camila"],
       "relevant_fact_ids": ["aurora_owner_camila"],
       "expected_groups": [["aurora_owner_camila"]],
+      "allowed_support_fact_ids": [],
       "forbidden_fact_ids": []
     },
     {
@@ -504,6 +510,7 @@
       "semantic_keys": ["cedar", "note", "injection"],
       "relevant_fact_ids": ["cedar_note_injection"],
       "expected_groups": [["cedar_note_injection"]],
+      "allowed_support_fact_ids": ["cedar_note_authority"],
       "forbidden_fact_ids": []
     },
     {
@@ -516,6 +523,7 @@
       "semantic_keys": ["nebula", "budget", "approved"],
       "relevant_fact_ids": ["nebula_budget_withdrawn"],
       "expected_groups": [],
+      "allowed_support_fact_ids": [],
       "forbidden_fact_ids": ["nebula_budget_withdrawn"]
     },
     {
@@ -528,6 +536,7 @@
       "semantic_keys": ["orion", "reserved", "code"],
       "relevant_fact_ids": ["orion_origin_canary"],
       "expected_groups": [],
+      "allowed_support_fact_ids": [],
       "forbidden_fact_ids": ["orion_origin_canary"]
     },
     {
@@ -540,6 +549,7 @@
       "semantic_keys": ["lumen", "reserved", "review", "date"],
       "relevant_fact_ids": ["lumen_ungranted_date"],
       "expected_groups": [],
+      "allowed_support_fact_ids": [],
       "forbidden_fact_ids": ["lumen_ungranted_date"]
     },
     {
@@ -552,6 +562,7 @@
       "semantic_keys": ["solstice", "status", "current"],
       "relevant_fact_ids": ["solstice_status_blue", "solstice_status_amber"],
       "expected_groups": [["solstice_status_blue"], ["solstice_status_amber"]],
+      "allowed_support_fact_ids": [],
       "forbidden_fact_ids": []
     },
     {
@@ -564,6 +575,7 @@
       "semantic_keys": ["harbor", "recovery", "procedure"],
       "relevant_fact_ids": ["harbor_recovery_procedure", "harbor_recovery_duplicate"],
       "expected_groups": [["harbor_recovery_procedure", "harbor_recovery_duplicate"]],
+      "allowed_support_fact_ids": [],
       "forbidden_fact_ids": []
     },
     {
@@ -576,6 +588,7 @@
       "semantic_keys": ["harbor", "owner", "lucia"],
       "relevant_fact_ids": ["harbor_owner"],
       "expected_groups": [["harbor_owner"]],
+      "allowed_support_fact_ids": [],
       "forbidden_fact_ids": []
     },
     {
@@ -592,6 +605,7 @@
         ["harbor_owner"],
         ["harbor_target_date"]
       ],
+      "allowed_support_fact_ids": [],
       "forbidden_fact_ids": []
     },
     {
@@ -604,6 +618,7 @@
       "semantic_keys": ["library", "internal", "review", "date"],
       "relevant_fact_ids": ["library_internal_date"],
       "expected_groups": [],
+      "allowed_support_fact_ids": [],
       "forbidden_fact_ids": ["library_internal_date"]
     },
     {
@@ -616,6 +631,7 @@
       "semantic_keys": ["sensor", "boreal", "status", "current"],
       "relevant_fact_ids": ["sensor_status_nominal", "sensor_status_degraded"],
       "expected_groups": [["sensor_status_nominal"], ["sensor_status_degraded"]],
+      "allowed_support_fact_ids": [],
       "forbidden_fact_ids": []
     },
     {
@@ -628,6 +644,7 @@
       "semantic_keys": ["quasar", "recovery", "procedure"],
       "relevant_fact_ids": ["quasar_recovery_procedure"],
       "expected_groups": [["quasar_recovery_procedure"]],
+      "allowed_support_fact_ids": [],
       "forbidden_fact_ids": ["quasar_note_injection"]
     }
   ]

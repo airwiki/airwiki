@@ -6,10 +6,14 @@ dependency. The linked pull requests preserve the reproducible implementation.
 Green CI means that an experiment ran as designed; it does not mean that its
 candidate belongs in the product.
 
+A rejected or inconclusive probe leaves only its conclusion in this ledger;
+its adapters, assets and one-off fixtures are removed rather than maintained.
+
 | Candidate | Evidence | Decision | Durable conclusion |
 | --- | --- | --- | --- |
 | Domain-separated retrieval baseline v2 | [#8](https://github.com/airwiki/airwiki/pull/8) | **Accepted baseline** | Keep the 17-case regression corpus and its structural validator. Do not keep the selectors or model-specific runners bundled into the research branch. |
 | Local QA-entailment selector | [#8](https://github.com/airwiki/airwiki/pull/8) | **Rejected** | The candidate missed its predeclared quality gate. Generic answerability machinery is not justified in `main`. |
+| Off-the-shelf QA/NLI thresholds | [#8](https://github.com/airwiki/airwiki/pull/8) | **Rejected** | Multilingual SQuAD2 readers, MiniLM and mDeBERTa NLI, and QNLI did not separate answer-bearing passages from negatives with a threshold. Do not repeat those model probes without a materially different contract. |
 | Reviewed evidence anchors | [#9](https://github.com/airwiki/airwiki/pull/9) | **Rejected** | Coverage reached 9/9 positive needs, but precision was 10/13 and only 5/11 decisions were correct. Reviewed links can supply candidates, but cannot serve as an answerability decision by themselves. |
 | Compact OKF graph on development rankings | [#10](https://github.com/airwiki/airwiki/pull/10), [#11](https://github.com/airwiki/airwiki/pull/11) | **Superseded** | A positive synthetic signal required a real-ranking holdout; it was not sufficient evidence for graph infrastructure. |
 | Compact OKF graph on sealed holdout | [#12](https://github.com/airwiki/airwiki/pull/12) | **Rejected** | Baseline, graph and structural sham all produced Recall@5 of 0.75; graph assembly p95 was 123 ms against a 25 ms budget. |
@@ -18,7 +22,10 @@ candidate belongs in the product.
 | Standalone OKF path signal | [#15](https://github.com/airwiki/airwiki/pull/15) | **Rejected** | The signal connected 17 of 24 hard negatives, so a path alone is not evidence of answerability. |
 | Graph-conditioned bounded diffusion | [#16](https://github.com/airwiki/airwiki/pull/16) | **Inconclusive** | Baseline, real graph and degree-preserving sham all found 26/28 evidence groups, and the corpus exposed zero cutoff opportunities. Do not tune or promote from that fixture. |
 | Retrieval-stage attribution | [Active evaluator](retrieval-quality-evaluation.md#v2-stage-attribution-observation) | **Accepted diagnostic** | Source-candidate Recall@10 was 1.00 for all 18 expected groups. mMARCO rejected all six missing groups and accepted three non-answering fragments; no expected group was lost in candidate generation, top-k truncation or revalidation. Keep stage attribution in the evaluator, not the product path. |
+| Hybrid top-5 without relevance mask | Exact projection from the audited candidate batches, 2026-07-18 | **Rejected** | Returning each source's first five hybrid candidates recovered all 18 expected groups but also emitted 102 false and 3 forbidden facts. Candidate coverage is sufficient; exposing the pool without an answerability selector is not safe. Do not retain a passthrough path. |
+| Rank-only rejected-candidate rescue | Exact candidate-rank audit, 2026-07-18 | **Rejected** | The six missing expected facts occupied source ranks 1, 1, 1, 2, 4 and 4, while the three accepted false facts occupied ranks 2, 3 and 4. No fixed rank cutoff separates them, so rank cannot replace answerability. Do not add a top-N rescue rule. |
 | Qwen3-Reranker-0.6B Q8 selector | [Local bounded probe](#qwen3-reranker-probe), 2026-07-18 | **Rejected** | The llama.cpp rerank endpoint ranked a non-answering meta-summary above the exact answer. The upstream one-token `yes`/`no` prompt classified only 2/6 obvious synthetic pairs correctly and added about 1.06 GiB RSS. Do not add the model, an adapter or another inference runtime. |
+| mMARCO text-only passage ablation | Local bounded probe, 2026-07-18 | **Rejected** | With the same model, query and candidate batches, removing title and heading reduced total Recall@5 from 0.6667 to 0.5556, increased expected groups rejected by the mask from 6 to 8, kept 3 unexpected survivors and introduced 1 forbidden hit. Keep the current passage contract; do not retain the adapter. |
 
 ### Qwen3 reranker probe
 

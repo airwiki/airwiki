@@ -36,6 +36,7 @@ All notable user-visible changes to AirWiki will be documented here. The project
 - Kept production retrieval unchanged after the combined reviewed-claim representation and selector showed higher development coverage but failed false-evidence, no-answer, and correctness gates; observed latency remained descriptive.
 - Recorded that the synthetic mini-graph mechanistic gate passed while keeping it at candidate stage until it is reproduced from healthy OKF bundles and real BM25/E5 rankings on fresh domains.
 - Kept production retrieval unchanged after the real-ranking mini-graph development replay improved candidate-group coverage; a separately authored holdout and end-to-end chunk/reranker evidence remain required.
+- Rejected compact OKF graph nomination for shadow use after the sealed end-to-end holdout matched the wider hybrid baseline and structural sham at 0.75 Recall@5 while exceeding its frozen candidate-assembly budget.
 
 ### Fixed
 

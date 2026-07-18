@@ -932,11 +932,33 @@ cargo run --release --locked -p xtask -- retrieval evaluate-final-mini-graph \
   --relevance-snapshot <verified-mmarco-snapshot>
 ```
 
-The fixture is executed only after both evaluator and fixture are sealed. A
-passing report still sets `production_promotion_ready=false`: it permits a
-content-free shadow integration proposal, not a production behavior change.
-Installed macOS and Windows memory/latency evidence and a real-user corpus gate
-remain separate decisions.
+**Observed sealed result (v1.1, 2026-07-18).** The one permitted amended run
+used the pinned multilingual E5 and mMARCO revisions above on macOS arm64. The
+structural sham rewired 61 of 62 links, retaining one mathematically
+unavoidable original link; no collection remained unchanged. The three arms
+produced identical retrieval quality:
+
+| Measure | B32 | G1 | G1-sham |
+| --- | ---: | ---: | ---: |
+| Group Recall@5 | 0.75 | 0.75 | 0.75 |
+| Macro-domain recall | 0.75 | 0.75 | 0.75 |
+| MRR@5 | 0.9375 | 0.9375 | 0.9375 |
+| Citation precision | 1.00 | 1.00 | 1.00 |
+| No-answer accuracy | 1.00 | 1.00 | 1.00 |
+| Full-query p95 | 454 ms | 447 ms | 467 ms |
+
+G1 improved over both controls in zero of eight domains, both paired-bootstrap
+lower bounds were zero and it lost no group already covered by B32. Provider
+failures, forbidden citations and stale or invalid provenance were all zero.
+The graph pair retained 38,448 bytes and projected in 84 ms, but G1 candidate
+assembly p95 was 123 ms against the frozen 25 ms limit.
+
+The hypothesis therefore fails both the quality and candidate-assembly gates.
+`shadow_eligible` and `production_promotion_ready` remain false, and production
+search is unchanged. The result rejects this one-hop concept-nomination rule;
+it does not establish that every future graph representation is ineffective.
+Any materially different graph thesis requires a new development corpus and a
+new independently sealed holdout rather than tuning against this result.
 
 ### H-AWK-1 development observation
 

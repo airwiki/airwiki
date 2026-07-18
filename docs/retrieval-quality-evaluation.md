@@ -223,12 +223,13 @@ provenance and stability remain sound for this corpus, while answerability
 classification still loses expected evidence and accepts unrelated fragments.
 
 The first [selector adaptation experiment](selector-adaptation-experiment.md)
-was rejected after its one-time promotion observation. The next bounded
-hypothesis is preregistered in the [pool-level abstention
-experiment](pool-null-selector-experiment.md). It keeps retrieval,
-authorization, protocols and the Rust runtime unchanged while testing whether
-pool-local contrastive training and a query-conditioned no-evidence score can
-represent the stricter answerability boundary.
+was rejected after its one-time promotion observation. The subsequent
+[pool-level abstention experiment](pool-null-selector-experiment.md#observed-outcome)
+also completed and was rejected: its two arms eliminated observed false
+evidence but missed the recall and exact-pool gates. Neither candidate is an
+active implementation path. A later experiment must use a materially different
+hypothesis and fresh promotion evidence; this observed corpus remains diagnostic
+only.
 
 Windows real-model evaluation is pending. A macOS result must never be used to
 infer the behavior of the Windows artifacts.

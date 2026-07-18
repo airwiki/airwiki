@@ -1,7 +1,8 @@
 # Pool-level abstention experiment
 
-Status: **preregistered; not executed**. This experiment is disposable research
-and does not authorize a model, policy, runtime or production-search change.
+Status: **completed and rejected on 2026-07-18**. This experiment was disposable
+research and does not authorize a model, policy, runtime or production-search
+change.
 
 ## Question
 
@@ -31,6 +32,27 @@ Calibration, score-gap heuristics and ensembles are excluded. They can abstain
 on uncertain pools, but cannot repair a confidently wrong entity or relation
 and would add another tuning surface or runtime cost.
 
+## Observed outcome
+
+The one-shot compatibility diagnostic completed under the preregistered offline
+contract. Neither arm passed, so the experiment stopped before regression
+diagnostics, fresh holdouts, export or product integration.
+
+| Arm | Answer recall | Lowest direction recall | Precision | Exact-pool success | No-answer or high-risk acceptances | Decision |
+| --- | ---: | ---: | ---: | ---: | ---: | --- |
+| Fixed-boundary control | 0.7083 | 0.5000 | 1.0000 | 0.5625 | 0 | Reject |
+| Query-conditioned no-evidence | 0.7500 | 0.5000 | 1.0000 | 0.6250 | 0 | Reject |
+
+Both arms safely avoided false evidence in this observed split, but missed the
+required 0.90 overall recall, 0.85 recall in every language direction and 0.85
+exact-pool success gates. The query-conditioned arm recovered only two more of
+48 answers than the control and did not make the mechanism eligible for another
+diagnostic. The aggregate [attempt receipt](../experiments/pool-null-selector-v1/evidence/compatibility-attempt.json)
+and [report](../experiments/pool-null-selector-v1/evidence/compatibility-report.json)
+preserve the audited outcome. Their SHA-256 values are respectively
+`39078cb91601032bc910541c1cbc237196923133587fc100ba8d846b1748842b` and
+`cbd797657b716ee27cefd12dc3a23ee1e3ce1e39e80a7477c7197b4037aa995e`.
+
 ## Shared training contract
 
 Both arms reuse the existing `fixtures/selector/answerability-v1/`
@@ -54,21 +76,41 @@ The shared environment is also frozen: Python `3.13.6`, PyTorch `2.7.1`,
 Transformers `4.56.1`, tokenizers `0.22.0`, safetensors `0.6.2` and NumPy
 `2.3.5`, running on CPU in `float32`. AdamW uses `betas=(0.9, 0.999)` and
 `eps=1e-8`. Training uses the pinned model configuration's dropout in
-`model.train()`; evaluation uses
-`model.eval()` with no stochastic or Monte Carlo dropout. The runner seeds
-Python, NumPy and PyTorch, requests deterministic CPU algorithms, and fixes
-PyTorch to four intra-op threads and one inter-op thread. With 120 pools,
-three epochs and one pool per optimizer step, training has exactly 360 steps
-and 36 linear-warmup steps.
+`model.train()`; evaluation uses `model.eval()` with no stochastic or Monte
+Carlo dropout. The runner fixes `PYTHONHASHSEED`, seeds Python, NumPy and
+PyTorch, requests deterministic CPU algorithms and highest-precision `float32`
+matrix multiplication, and fixes PyTorch to four intra-op threads and one
+inter-op thread. AdamW uses neither fused nor `foreach` kernels, and no data
+loader worker is created. With 120 pools, three epochs and one pool per
+optimizer step, training has exactly 360 steps and 36 linear-warmup steps.
+Gradients are clipped to a maximum Euclidean norm of `1.0` immediately before
+every optimizer step. The receipt records package versions and non-identifying
+platform/build metadata; it does not claim byte-level provenance for installed
+Python distributions, so results apply to this frozen local observation.
 
-Visit every six-candidate training pool once per epoch in the seeded shuffle,
-with one complete pool per optimizer step. Use every row; do not resample,
-mine, add or remove negatives. Each mean term below has equal weight so the
-number of negatives cannot silently redefine the objective.
+Sort pools lexicographically by `query_id` and candidates within each pool by
+`passage_id`, then use one `random.Random(seed)` instance to shuffle a fresh
+copy of the ordered pool list at the start of each epoch. Visit every
+six-candidate training pool once per epoch, with one complete pool per optimizer
+step. Use every row; do not resample, mine, add or remove negatives. Each mean
+term below has equal weight so the number of negatives cannot silently redefine
+the objective. During training, both arms forward the same seven sequences: the
+six candidates plus the empty pair. Arm A ignores the empty-pair score and its
+gradient, while Arm B uses it as `z_q`; this keeps pool order, tensor shape and
+dropout consumption identical. Arm A evaluates only the six production inputs.
 
-Training and evaluation tooling stays under ignored `target/` state. It runs
-offline, pins every input and output hash, persists aggregate metrics only, and
-never writes questions, passages, per-pair scores or labels to logs.
+The exact reviewed runner remains in [PR #29](https://github.com/airwiki/airwiki/pull/29)
+at commit `e8091d79660b3be3779efde5f2a8f458dc7e0c5d`; it was removed from
+the maintained tree after rejection. Small aggregate evidence remains outside
+Cargo's regenerable `target/` directory.
+Downloaded assets and checkpoints stayed under ignored `target/` state during
+the run, were never shipped and were deleted after rejection. After explicit
+model preparation, the observed command reexecuted exactly once inside its own
+macOS kernel sandbox with all network access denied and verified there that a
+loopback connection was rejected before creating its receipt.
+It checks every loader-visible model/tokenizer file against an exact manifest,
+persists aggregate numerators, denominators and metrics only, and never writes
+questions, passages, identifiers, per-pair scores or labels to logs.
 
 ## Frozen arms
 
@@ -121,23 +163,34 @@ The arms start independently from the same pinned base weights. Neither arm is
 initialized from the rejected checkpoint. No cutoff, margin, seed, epoch,
 optimizer or loss weight is selected after an observation.
 
-Before loading any visible development or holdout data, the runner writes an
-exclusive attempt receipt that binds the environment, runner, corpus, model
-and tokenizer hashes. It later records only `completed` or a sanitized failure
-code. An existing receipt or report blocks another attempt. The same mechanism
-applies independently to every diagnostic and holdout; crashes do not authorize
-a rerun with the same experiment version.
+After checking only the runtime versions and the already public base-model
+snapshot, but before opening any visible development or holdout file, the runner
+writes and directory-syncs an exclusive attempt receipt. The receipt binds the
+environment, exact runner, preregistered corpus hashes and exact model/tokenizer
+manifest. Corpus bytes are verified and parsed only after that durable guard
+exists. Model preparation publishes a clean read-only snapshot by atomic rename
+and never overwrites it, while `O_EXCL` serializes observed attempts. Hashes are
+checked before and after parsing/loading and again before the report. The runner
+assumes a trusted maintainer account and a quiescent workspace; it detects
+accidental or persistent changes, not a malicious same-account process capable
+of swapping files between system calls or altering the interpreter. It later
+records only `completed` or a sanitized failure code. An existing receipt or
+report blocks another attempt. The same mechanism applies independently to every
+diagnostic and holdout; crashes do not authorize a rerun with the same experiment
+version.
 
 ## Staged decision
 
-### 1. Observed compatibility diagnostic
+### 1. Observed compatibility diagnostic — completed and rejected
 
 The selector-v1 development split was already observed and previously selected
 another candidate's seed and cutoff. It is therefore a diagnostic, not an
 independent falsification or promotion set.
 
-Freeze both runner and checkpoint hashes, then evaluate each arm once. An arm
-is eligible for the next diagnostic only if it satisfies all of these gates:
+Train and freeze both checkpoints before evaluating either arm, then discard
+the training instances and reload each exact checkpoint for its single
+evaluation. An arm is eligible for the next diagnostic only if it satisfies
+all of these gates:
 
 - answer recall at least 0.90 overall and 0.85 in every language direction;
 - precision at least 0.99;
@@ -153,18 +206,21 @@ then the fixed-boundary control. This selection is allowed only because every
 later acceptance gate uses fresh, separately sealed data. Do not tune either
 arm after seeing this diagnostic.
 
-### 2. Observed regression diagnostics
+### 2. Observed regression diagnostics — not run
 
-Run only the selected frozen arm once through the existing relevance-v2 and
-retrieval-v3 evaluators. Those corpora are already observed; they may reject the
-candidate but cannot promote it. The candidate must retain every current
-provenance, authorization, deduplication, stability and ordering invariant,
-meet the documented per-split recall gates, and emit zero unexpected or
-forbidden evidence. Any failure retires the experiment without a fresh corpus.
+This stage was not authorized because neither arm passed stage 1. Its frozen
+contract would have run only the selected frozen arm once through the existing
+relevance-v2 and retrieval-v3 evaluators. Those corpora are already observed;
+they may reject the candidate but cannot promote it. The candidate must retain
+every current provenance, authorization, deduplication, stability and ordering
+invariant, meet the documented per-split recall gates, and emit zero unexpected
+or forbidden evidence. Any failure retires the experiment without a fresh
+corpus.
 
-### 3. Fresh rejection holdout
+### 3. Fresh rejection holdout — not created or run
 
-Only a diagnostic pass permits authoring a fresh sealed rejection holdout. It
+This stage was not authorized because neither arm passed stage 1. Only a
+diagnostic pass permits authoring a fresh sealed rejection holdout. It
 contains 32 ten-candidate pools, balanced across ES-to-ES, ES-to-EN, EN-to-ES
 and EN-to-EN, with new worlds, entity families, relation families and
 paraphrase templates. Each direction contains six answerable pools with exactly
@@ -186,9 +242,10 @@ Run the selected candidate once, offline on CPU, using the same semantic and
 coverage gates as above. Do not retain per-pair scores. A failure retires the
 experiment. A pass only permits the next stage.
 
-### 4. Human-reviewed promotion holdout
+### 4. Human-reviewed promotion holdout — not created or run
 
-A fresh promotion corpus must use new domains and remain unobserved by the
+This stage was not authorized because neither arm passed stage 1. A fresh
+promotion corpus must use new domains and remain unobserved by the
 candidate. It contains 48 ten-candidate pools, twelve per language direction
 and three no-answer pools per direction. Each direction contains nine
 answerable pools with exactly two `answer`, two `support` and six
@@ -254,7 +311,9 @@ the existing policy unchanged. A passing query-conditioned arm would make one
 internal extra score, replace the absolute zero comparison with `z_q`, preserve
 the relative 3.6 window, and still return the same ordered
 `Vec<EvidenceDecision>`. Neither arm requires SQLite, OKF, LAN, MCP or wire
-changes.
+changes. Python and PyTorch are experiment-only maintainer tooling; the shipped
+application remains Rust and a promoted artifact must cross the ONNX parity gate
+before product integration.
 
 If this experiment fails, retire its runner and checkpoints. The next distinct
 hypothesis is a typed evidence-coverage gate: atomic claims with exact source

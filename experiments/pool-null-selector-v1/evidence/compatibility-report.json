@@ -1,0 +1,106 @@
+{
+  "checkpoint_hashes": {
+    "arm_a": {
+      "config.json": "1aa7092d47e252a9ffacd69bdfc67fdf8ec22ecab7723a16334fde92cd2ee779",
+      "model.safetensors": "9ce0ebda949452f87827d7cee4847395611865016696b6f3d60c190d19135fb1"
+    },
+    "arm_b": {
+      "config.json": "1aa7092d47e252a9ffacd69bdfc67fdf8ec22ecab7723a16334fde92cd2ee779",
+      "model.safetensors": "ce6a861cf11383366de197e2515852c125b067a3fadc6bfb05eba2198d90fd5f"
+    }
+  },
+  "decision": "reject",
+  "experiment_id": "pool-null-selector-v1-compatibility-v1",
+  "results": {
+    "arm_a": {
+      "answer_recall": 0.7083333333333334,
+      "counts": {
+        "accepted_answers": 34,
+        "accepted_supports": 0,
+        "accepted_total": 34,
+        "answers": 48,
+        "exact_pools": 18,
+        "high_risk_false_positives": 0,
+        "no_answer_acceptances": 0,
+        "pools": 32,
+        "supports": 24
+      },
+      "direction_counts": {
+        "en-to-en": {
+          "accepted_answers": 10,
+          "answers": 12
+        },
+        "en-to-es": {
+          "accepted_answers": 6,
+          "answers": 12
+        },
+        "es-to-en": {
+          "accepted_answers": 7,
+          "answers": 12
+        },
+        "es-to-es": {
+          "accepted_answers": 11,
+          "answers": 12
+        }
+      },
+      "exact_pool_success": 0.5625,
+      "high_risk_false_positives": 0,
+      "no_answer_acceptances": 0,
+      "passed": false,
+      "precision": 1.0,
+      "recall_by_direction": {
+        "en-to-en": 0.8333333333333334,
+        "en-to-es": 0.5,
+        "es-to-en": 0.5833333333333334,
+        "es-to-es": 0.9166666666666666
+      },
+      "support_acceptance": 0.0
+    },
+    "arm_b": {
+      "answer_recall": 0.75,
+      "counts": {
+        "accepted_answers": 36,
+        "accepted_supports": 0,
+        "accepted_total": 36,
+        "answers": 48,
+        "exact_pools": 20,
+        "high_risk_false_positives": 0,
+        "no_answer_acceptances": 0,
+        "pools": 32,
+        "supports": 24
+      },
+      "direction_counts": {
+        "en-to-en": {
+          "accepted_answers": 10,
+          "answers": 12
+        },
+        "en-to-es": {
+          "accepted_answers": 6,
+          "answers": 12
+        },
+        "es-to-en": {
+          "accepted_answers": 9,
+          "answers": 12
+        },
+        "es-to-es": {
+          "accepted_answers": 11,
+          "answers": 12
+        }
+      },
+      "exact_pool_success": 0.625,
+      "high_risk_false_positives": 0,
+      "no_answer_acceptances": 0,
+      "passed": false,
+      "precision": 1.0,
+      "recall_by_direction": {
+        "en-to-en": 0.8333333333333334,
+        "en-to-es": 0.5,
+        "es-to-en": 0.75,
+        "es-to-es": 0.9166666666666666
+      },
+      "support_acceptance": 0.0
+    }
+  },
+  "selected_arm": null,
+  "started_attempt_sha256": "e0ab301ccaffcbf589538700687e47e0590ac1b694648a9828f7e18a0cd6c872"
+}

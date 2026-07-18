@@ -78,6 +78,7 @@ The workspace separates dependency-light contracts, local domain logic, inferenc
 - [Architecture](docs/architecture.md)
 - [Architecture decisions](docs/adr/README.md)
 - [Retrieval-quality evaluation](docs/retrieval-quality-evaluation.md)
+- [Selector adaptation experiment](docs/selector-adaptation-experiment.md)
 - [Local chat integrations](docs/chat-integrations.md)
 - [Two-node manual acceptance](docs/two-node-runbook.md)
 - [Recovery](docs/recovery.md)

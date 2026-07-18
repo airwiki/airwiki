@@ -20,6 +20,11 @@ or personal information.
   evidence, allowed context and forbidden evidence are separate labels; the
   allowed-context label never satisfies recall or changes model inputs and
   ranking.
+- `selector/answerability-v1/`: bilingual, domain-separated development corpus
+  for the answerability selector. Queries, passages and judgments are stored in
+  separate JSONL files so labels, disclosure and provenance metadata can never
+  enter model input accidentally. All judgments remain `synthetic_draft` and
+  cannot authorize a production-model change.
 
 The expected federated question asks how Atlas is recovered, who is responsible,
 and the target date. A correct answer combines the Mac procedure with the
@@ -50,6 +55,13 @@ real publication, SQLite, hybrid-search, policy and provenance path:
 cargo run --locked -p xtask -- retrieval validate
 ```
 
+Structural selector-corpus validation downloads no model and verifies pool
+balance, labels, evidence spans, split isolation and model-input hygiene:
+
+```bash
+cargo run --locked -p xtask -- selector-corpus validate
+```
+
 The platform-specific retrieval profile requires both already verified model
 snapshots:
 
@@ -60,7 +72,9 @@ cargo run --locked -p xtask -- retrieval evaluate \
 ```
 
 See the [retrieval-quality evaluation profile](../docs/retrieval-quality-evaluation.md)
-for metrics, report hygiene and current results.
+for metrics, report hygiene and current results. The frozen development recipe
+and promotion boundary are documented in the
+[selector adaptation experiment](../docs/selector-adaptation-experiment.md).
 
 For MCP evaluation:
 

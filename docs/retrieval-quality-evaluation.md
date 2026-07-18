@@ -33,10 +33,12 @@ remains serialized as `holdout`, but it has already been observed and now serves
 only as diagnostic transfer evidence. A future promotion decision requires
 fresh domains rather than relabeling this fixture as an unobserved holdout.
 
-The original schema-v1 fixture remains unchanged at
-`fixtures/retrieval/search-quality-v1.json` with SHA-256
-`accd40d8473ad499469c0fd105eec9f34d70f660c9bdada1254d2325f609e727`.
-It preserves the initial measurement and is not the active acceptance corpus.
+The superseded schema-v1 fixture is no longer versioned. Its historical
+SHA-256 was
+`accd40d8473ad499469c0fd105eec9f34d70f660c9bdada1254d2325f609e727`;
+the initial results and implementation remain available in
+[PR #7](https://github.com/airwiki/airwiki/pull/7). V2 is the only maintained
+source-side retrieval corpus.
 
 The evaluator builds temporary origin and peer databases and uses the production
 publication and search interfaces. It covers:

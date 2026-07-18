@@ -54,21 +54,39 @@ The shared environment is also frozen: Python `3.13.6`, PyTorch `2.7.1`,
 Transformers `4.56.1`, tokenizers `0.22.0`, safetensors `0.6.2` and NumPy
 `2.3.5`, running on CPU in `float32`. AdamW uses `betas=(0.9, 0.999)` and
 `eps=1e-8`. Training uses the pinned model configuration's dropout in
-`model.train()`; evaluation uses
-`model.eval()` with no stochastic or Monte Carlo dropout. The runner seeds
-Python, NumPy and PyTorch, requests deterministic CPU algorithms, and fixes
-PyTorch to four intra-op threads and one inter-op thread. With 120 pools,
-three epochs and one pool per optimizer step, training has exactly 360 steps
-and 36 linear-warmup steps.
+`model.train()`; evaluation uses `model.eval()` with no stochastic or Monte
+Carlo dropout. The runner fixes `PYTHONHASHSEED`, seeds Python, NumPy and
+PyTorch, requests deterministic CPU algorithms and highest-precision `float32`
+matrix multiplication, and fixes PyTorch to four intra-op threads and one
+inter-op thread. AdamW uses neither fused nor `foreach` kernels, and no data
+loader worker is created. With 120 pools, three epochs and one pool per
+optimizer step, training has exactly 360 steps and 36 linear-warmup steps.
+Gradients are clipped to a maximum Euclidean norm of `1.0` immediately before
+every optimizer step. The receipt records package versions and non-identifying
+platform/build metadata; it does not claim byte-level provenance for installed
+Python distributions, so results apply to this frozen local observation.
 
-Visit every six-candidate training pool once per epoch in the seeded shuffle,
-with one complete pool per optimizer step. Use every row; do not resample,
-mine, add or remove negatives. Each mean term below has equal weight so the
-number of negatives cannot silently redefine the objective.
+Sort pools lexicographically by `query_id` and candidates within each pool by
+`passage_id`, then use one `random.Random(seed)` instance to shuffle a fresh
+copy of the ordered pool list at the start of each epoch. Visit every
+six-candidate training pool once per epoch, with one complete pool per optimizer
+step. Use every row; do not resample, mine, add or remove negatives. Each mean
+term below has equal weight so the number of negatives cannot silently redefine
+the objective. During training, both arms forward the same seven sequences: the
+six candidates plus the empty pair. Arm A ignores the empty-pair score and its
+gradient, while Arm B uses it as `z_q`; this keeps pool order, tensor shape and
+dropout consumption identical. Arm A evaluates only the six production inputs.
 
-Training and evaluation tooling stays under ignored `target/` state. It runs
-offline, pins every input and output hash, persists aggregate metrics only, and
-never writes questions, passages, per-pair scores or labels to logs.
+The exact reviewed [runner](../experiments/pool-null-selector-v1/runner.py) and
+small aggregate evidence live outside Cargo's regenerable `target/` directory.
+Downloaded assets and checkpoints remain under ignored `target/` state and are
+never shipped. After explicit model preparation, the observed command
+self-reexecutes exactly once inside its own macOS kernel sandbox with all network
+access denied and verifies there that a loopback connection is rejected before
+creating its receipt.
+It checks every loader-visible model/tokenizer file against an exact manifest,
+persists aggregate numerators, denominators and metrics only, and never writes
+questions, passages, identifiers, per-pair scores or labels to logs.
 
 ## Frozen arms
 
@@ -121,12 +139,21 @@ The arms start independently from the same pinned base weights. Neither arm is
 initialized from the rejected checkpoint. No cutoff, margin, seed, epoch,
 optimizer or loss weight is selected after an observation.
 
-Before loading any visible development or holdout data, the runner writes an
-exclusive attempt receipt that binds the environment, runner, corpus, model
-and tokenizer hashes. It later records only `completed` or a sanitized failure
-code. An existing receipt or report blocks another attempt. The same mechanism
-applies independently to every diagnostic and holdout; crashes do not authorize
-a rerun with the same experiment version.
+After checking only the runtime versions and the already public base-model
+snapshot, but before opening any visible development or holdout file, the runner
+writes and directory-syncs an exclusive attempt receipt. The receipt binds the
+environment, exact runner, preregistered corpus hashes and exact model/tokenizer
+manifest. Corpus bytes are verified and parsed only after that durable guard
+exists. Model preparation publishes a clean read-only snapshot by atomic rename
+and never overwrites it, while `O_EXCL` serializes observed attempts. Hashes are
+checked before and after parsing/loading and again before the report. The runner
+assumes a trusted maintainer account and a quiescent workspace; it detects
+accidental or persistent changes, not a malicious same-account process capable
+of swapping files between system calls or altering the interpreter. It later
+records only `completed` or a sanitized failure code. An existing receipt or
+report blocks another attempt. The same mechanism applies independently to every
+diagnostic and holdout; crashes do not authorize a rerun with the same experiment
+version.
 
 ## Staged decision
 
@@ -136,8 +163,10 @@ The selector-v1 development split was already observed and previously selected
 another candidate's seed and cutoff. It is therefore a diagnostic, not an
 independent falsification or promotion set.
 
-Freeze both runner and checkpoint hashes, then evaluate each arm once. An arm
-is eligible for the next diagnostic only if it satisfies all of these gates:
+Train and freeze both checkpoints before evaluating either arm, then discard
+the training instances and reload each exact checkpoint for its single
+evaluation. An arm is eligible for the next diagnostic only if it satisfies
+all of these gates:
 
 - answer recall at least 0.90 overall and 0.85 in every language direction;
 - precision at least 0.99;
@@ -254,7 +283,9 @@ the existing policy unchanged. A passing query-conditioned arm would make one
 internal extra score, replace the absolute zero comparison with `z_q`, preserve
 the relative 3.6 window, and still return the same ordered
 `Vec<EvidenceDecision>`. Neither arm requires SQLite, OKF, LAN, MCP or wire
-changes.
+changes. Python and PyTorch are experiment-only maintainer tooling; the shipped
+application remains Rust and a promoted artifact must cross the ONNX parity gate
+before product integration.
 
 If this experiment fails, retire its runner and checkpoints. The next distinct
 hypothesis is a typed evidence-coverage gate: atomic claims with exact source

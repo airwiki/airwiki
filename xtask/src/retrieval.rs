@@ -24,30 +24,34 @@ use uuid::Uuid;
 
 use crate::{replace_file, workspace_root};
 
-const FIXTURE_PATH: &str = "fixtures/retrieval/search-quality-v1.json";
+const FIXTURE_PATH: &str = "fixtures/retrieval/search-quality-v2.json";
 const REPORT_DIRECTORY: &str = "target/evals";
-const REPORT_SCHEMA_VERSION: u32 = 1;
-const FIXTURE_SCHEMA_VERSION: u32 = 1;
+const REPORT_SCHEMA_VERSION: u32 = 2;
+const FIXTURE_SCHEMA_VERSION: u32 = 2;
 const TOP_K: u8 = 5;
 const MIN_RECALL_AT_FIVE: f64 = 0.9;
 const ORIGIN_NODE_ID: &str = "fixture-origin";
 const PEER_NODE_ID: &str = "fixture-peer";
 const ORIGIN_REQUESTER_ID: &str = "fixture-origin-requester";
 
-const EXPECTED_CASE_IDS: [&str; 13] = [
-    "calibration_common_name",
-    "calibration_direct_recovery",
-    "calibration_external_chat_private",
-    "calibration_injection_requested",
-    "calibration_paraphrase_recovery",
-    "calibration_withdrawn_budget",
-    "holdout_compound_federated",
-    "holdout_conflicting_sources",
-    "holdout_date_cross_language",
-    "holdout_external_ai_policy",
-    "holdout_owner_cross_language",
-    "holdout_peer_without_grant",
-    "holdout_unrelated_injection",
+const EXPECTED_CASE_IDS: [&str; 17] = [
+    "calibration_aurora_owner",
+    "calibration_cedar_injection",
+    "calibration_lumen_peer_without_grant",
+    "calibration_nebula_withdrawn_budget",
+    "calibration_orion_external_private",
+    "calibration_solstice_conflict",
+    "holdout_harbor_compound_federated",
+    "holdout_harbor_owner_cross_language",
+    "holdout_harbor_paraphrase_recovery",
+    "holdout_library_external_policy",
+    "holdout_quasar_unrelated_injection",
+    "holdout_sensor_conflict",
+    "regression_atlas_compound_federated",
+    "regression_atlas_date_cross_language",
+    "regression_atlas_external_ai_policy",
+    "regression_atlas_paraphrase_recovery",
+    "regression_atlas_unrelated_injection",
 ];
 
 const REQUIRED_TAGS: [RetrievalTag; 13] = [
@@ -112,6 +116,7 @@ impl FixtureNode {
 #[serde(deny_unknown_fields)]
 struct FixtureDocument {
     id: String,
+    domain: String,
     collection_id: String,
     publication_state: FixturePublicationState,
     title: String,
@@ -141,6 +146,7 @@ struct FixtureChunk {
 #[serde(deny_unknown_fields)]
 struct FixtureCase {
     id: String,
+    domain: String,
     split: RetrievalSplit,
     tags: Vec<RetrievalTag>,
     scope: RetrievalScope,
@@ -154,6 +160,7 @@ struct FixtureCase {
 #[derive(Debug, Clone, Copy, Deserialize, Serialize, PartialEq, Eq, PartialOrd, Ord)]
 #[serde(rename_all = "snake_case")]
 enum RetrievalSplit {
+    Regression,
     Calibration,
     Holdout,
 }
@@ -403,6 +410,7 @@ struct RetrievalEvaluationReport {
     provider: ProviderIdentity,
     top_k: u8,
     elapsed_ms: u128,
+    regression: AggregateMetrics,
     calibration: AggregateMetrics,
     holdout: AggregateMetrics,
     total: AggregateMetrics,
@@ -490,6 +498,8 @@ fn validate_fixture_data(fixture: &RetrievalFixture) -> Result<()> {
     );
     let mut collection_ids = BTreeSet::new();
     let mut collection_nodes = HashMap::new();
+    let mut collection_grants = HashMap::new();
+    let mut collection_shareability = HashMap::new();
     for collection in &fixture.collections {
         validate_identifier(&collection.id, "collection")?;
         ensure!(
@@ -505,6 +515,8 @@ fn validate_fixture_data(fixture: &RetrievalFixture) -> Result<()> {
             "a granted retrieval collection must be peer-shareable"
         );
         collection_nodes.insert(collection.id.as_str(), collection.node);
+        collection_grants.insert(collection.id.as_str(), collection.granted_to_origin);
+        collection_shareability.insert(collection.id.as_str(), collection.peer_shareable);
     }
     ensure!(
         collection_nodes
@@ -519,10 +531,13 @@ fn validate_fixture_data(fixture: &RetrievalFixture) -> Result<()> {
     let mut document_ids = BTreeSet::new();
     let mut fact_ids = BTreeSet::new();
     let mut facts = HashMap::<&str, &FixtureChunk>::new();
+    let mut fact_domains = HashMap::<&str, &str>::new();
+    let mut fact_collections = HashMap::<&str, &str>::new();
     let mut evidence_keys = HashSet::new();
     let mut has_withdrawn_document = false;
     for document in &fixture.documents {
         validate_identifier(&document.id, "document")?;
+        validate_identifier(&document.domain, "domain")?;
         ensure!(
             document_ids.insert(document.id.as_str()),
             "duplicate retrieval document id"
@@ -571,6 +586,8 @@ fn validate_fixture_data(fixture: &RetrievalFixture) -> Result<()> {
                 "retrieval facts must have unique title, heading and text tuples"
             );
             facts.insert(chunk.id.as_str(), chunk);
+            fact_domains.insert(chunk.id.as_str(), document.domain.as_str());
+            fact_collections.insert(chunk.id.as_str(), document.collection_id.as_str());
         }
     }
     ensure!(
@@ -583,8 +600,13 @@ fn validate_fixture_data(fixture: &RetrievalFixture) -> Result<()> {
     let mut questions = BTreeSet::new();
     let mut splits = BTreeSet::new();
     let mut tags = BTreeSet::new();
+    let mut regression_domains = BTreeSet::new();
+    let mut calibration_domains = BTreeSet::new();
+    let mut holdout_domains = BTreeSet::new();
+    let mut has_peer_without_grant_case = false;
     for case in &fixture.cases {
         validate_identifier(&case.id, "case")?;
+        validate_identifier(&case.domain, "domain")?;
         ensure!(
             case_ids.insert(case.id.as_str()),
             "duplicate retrieval case id"
@@ -606,6 +628,17 @@ fn validate_fixture_data(fixture: &RetrievalFixture) -> Result<()> {
         );
         tags.extend(case_tags);
         splits.insert(case.split);
+        match case.split {
+            RetrievalSplit::Regression => {
+                regression_domains.insert(case.domain.as_str());
+            }
+            RetrievalSplit::Calibration => {
+                calibration_domains.insert(case.domain.as_str());
+            }
+            RetrievalSplit::Holdout => {
+                holdout_domains.insert(case.domain.as_str());
+            }
+        }
 
         let relevant = validate_fact_references(&case.relevant_fact_ids, &fact_ids, "relevant")?;
         let forbidden = validate_fact_references(&case.forbidden_fact_ids, &fact_ids, "forbidden")?;
@@ -613,9 +646,16 @@ fn validate_fixture_data(fixture: &RetrievalFixture) -> Result<()> {
             case.expected_groups.is_empty() || !relevant.is_empty(),
             "an answerable retrieval case needs relevant facts"
         );
+        let mut expected = BTreeSet::new();
         for group in &case.expected_groups {
             ensure!(!group.is_empty(), "retrieval expected group is empty");
             let group_ids = validate_fact_references(group, &fact_ids, "expected group")?;
+            for fact_id in &group_ids {
+                ensure!(
+                    expected.insert(*fact_id),
+                    "retrieval expected groups must be pairwise disjoint"
+                );
+            }
             ensure!(
                 group_ids.iter().all(|id| relevant.contains(id)),
                 "expected retrieval facts must be relevant"
@@ -640,11 +680,60 @@ fn validate_fixture_data(fixture: &RetrievalFixture) -> Result<()> {
                 );
             }
         }
+        if expected.is_empty() {
+            ensure!(
+                relevant.is_subset(&forbidden),
+                "non-answerable relevant facts must be forbidden"
+            );
+        } else {
+            ensure!(
+                relevant == expected,
+                "answerable relevant facts must exactly match expected evidence"
+            );
+        }
+        has_peer_without_grant_case |= case.scope == RetrievalScope::TrustedPeer
+            && expected.is_empty()
+            && !relevant.is_empty()
+            && relevant.iter().all(|fact_id| {
+                fact_collections
+                    .get(fact_id)
+                    .and_then(|collection_id| collection_nodes.get(collection_id))
+                    == Some(&FixtureNode::Peer)
+                    && fact_collections
+                        .get(fact_id)
+                        .and_then(|collection_id| collection_grants.get(collection_id))
+                        == Some(&false)
+                    && fact_collections
+                        .get(fact_id)
+                        .and_then(|collection_id| collection_shareability.get(collection_id))
+                        == Some(&true)
+            });
+        ensure!(
+            relevant.iter().chain(&forbidden).all(|fact_id| {
+                fact_domains.get(fact_id).copied() == Some(case.domain.as_str())
+            }),
+            "retrieval case references evidence from another domain"
+        );
     }
     ensure!(case_ids == expected_ids, "retrieval case id set changed");
     ensure!(
-        splits == BTreeSet::from([RetrievalSplit::Calibration, RetrievalSplit::Holdout]),
-        "retrieval fixture requires calibration and holdout splits"
+        splits
+            == BTreeSet::from([
+                RetrievalSplit::Regression,
+                RetrievalSplit::Calibration,
+                RetrievalSplit::Holdout,
+            ]),
+        "retrieval fixture requires regression, calibration and holdout splits"
+    );
+    ensure!(
+        regression_domains.is_disjoint(&calibration_domains)
+            && regression_domains.is_disjoint(&holdout_domains)
+            && calibration_domains.is_disjoint(&holdout_domains),
+        "retrieval split domains must be pairwise disjoint"
+    );
+    ensure!(
+        has_peer_without_grant_case,
+        "retrieval fixture requires a peer-without-grant case"
     );
     for required in REQUIRED_TAGS {
         ensure!(
@@ -766,9 +855,9 @@ fn fixture_providers(fixture: &RetrievalFixture) -> Result<EvaluationProviders> 
     Ok(EvaluationProviders {
         identity: ProviderIdentity {
             embedding_profile: embeddings.model_id().to_owned(),
-            embedding_revision: "synthetic-v1".to_owned(),
+            embedding_revision: "synthetic-v2".to_owned(),
             relevance_profile: relevance.profile_id().to_owned(),
-            relevance_revision: "synthetic-v1".to_owned(),
+            relevance_revision: "synthetic-v2".to_owned(),
             relevance_artifact_filename: None,
             relevance_artifact_sha256: None,
             thread_count: 1,
@@ -834,6 +923,11 @@ async fn run_evaluation(
             case_started.elapsed().as_millis(),
         ));
     }
+    let regression = aggregate_metrics(
+        case_reports
+            .iter()
+            .filter(|report| report.split == RetrievalSplit::Regression),
+    );
     let calibration = aggregate_metrics(
         case_reports
             .iter()
@@ -845,7 +939,10 @@ async fn run_evaluation(
             .filter(|report| report.split == RetrievalSplit::Holdout),
     );
     let total = aggregate_metrics(case_reports.iter());
-    let passed = split_passes(&calibration) && split_passes(&holdout);
+    let passed = regression_cases_pass(&case_reports)
+        && split_passes(&regression)
+        && split_passes(&calibration)
+        && split_passes(&holdout);
     Ok(RetrievalEvaluationReport {
         schema_version: REPORT_SCHEMA_VERSION,
         fixture_sha256: loaded.sha256.clone(),
@@ -854,6 +951,7 @@ async fn run_evaluation(
         provider: providers.identity,
         top_k: TOP_K,
         elapsed_ms: started.elapsed().as_millis(),
+        regression,
         calibration,
         holdout,
         total,
@@ -1369,6 +1467,13 @@ fn split_passes(metrics: &AggregateMetrics) -> bool {
         && metrics.unstable_case_count == 0
 }
 
+fn regression_cases_pass(reports: &[RetrievalCaseReport]) -> bool {
+    reports
+        .iter()
+        .filter(|report| report.split == RetrievalSplit::Regression)
+        .all(|report| report.passed)
+}
+
 fn validate_model_revisions() -> Result<()> {
     ensure!(
         E5_REVISION == E5_MODEL_REVISION,
@@ -1416,6 +1521,127 @@ mod tests {
         let report = run_evaluation(&loaded, providers).await.unwrap();
 
         assert!(report.passed, "deterministic retrieval report: {report:#?}");
+        assert!(report.regression.case_count > 0);
+    }
+
+    #[test]
+    fn fixture_rejects_overlapping_split_domains() {
+        let mut loaded = load_fixture().unwrap();
+        let case = loaded
+            .fixture
+            .cases
+            .iter_mut()
+            .find(|case| case.id == "calibration_aurora_owner")
+            .unwrap();
+        case.domain = "atlas_acceptance".to_owned();
+        let document = loaded
+            .fixture
+            .documents
+            .iter_mut()
+            .find(|document| document.id == "aurora_coordination")
+            .unwrap();
+        document.domain = "atlas_acceptance".to_owned();
+
+        let error = validate_fixture_data(&loaded.fixture).unwrap_err();
+
+        assert!(error.to_string().contains("pairwise disjoint"));
+    }
+
+    #[test]
+    fn fixture_rejects_cross_domain_evidence() {
+        let mut loaded = load_fixture().unwrap();
+        let case = loaded
+            .fixture
+            .cases
+            .iter_mut()
+            .find(|case| case.id == "holdout_harbor_owner_cross_language")
+            .unwrap();
+        case.domain = "quasar_security".to_owned();
+
+        let error = validate_fixture_data(&loaded.fixture).unwrap_err();
+
+        assert!(error.to_string().contains("another domain"));
+    }
+
+    #[test]
+    fn fixture_rejects_related_but_non_answering_evidence() {
+        let mut loaded = load_fixture().unwrap();
+        let case = loaded
+            .fixture
+            .cases
+            .iter_mut()
+            .find(|case| case.id == "regression_atlas_unrelated_injection")
+            .unwrap();
+        case.relevant_fact_ids
+            .push("atlas_recovery_rollback".to_owned());
+
+        let error = validate_fixture_data(&loaded.fixture).unwrap_err();
+
+        assert!(error.to_string().contains("exactly match"));
+    }
+
+    #[test]
+    fn fixture_rejects_a_fact_reused_across_expected_groups() {
+        let mut loaded = load_fixture().unwrap();
+        let case = loaded
+            .fixture
+            .cases
+            .iter_mut()
+            .find(|case| case.id == "regression_atlas_compound_federated")
+            .unwrap();
+        case.expected_groups.push(vec!["atlas_owner".to_owned()]);
+
+        let error = validate_fixture_data(&loaded.fixture).unwrap_err();
+
+        assert!(error.to_string().contains("pairwise disjoint"));
+    }
+
+    #[test]
+    fn fixture_requires_non_answer_evidence_to_be_forbidden() {
+        let mut loaded = load_fixture().unwrap();
+        let case = loaded
+            .fixture
+            .cases
+            .iter_mut()
+            .find(|case| case.id == "regression_atlas_external_ai_policy")
+            .unwrap();
+        case.forbidden_fact_ids.clear();
+
+        let error = validate_fixture_data(&loaded.fixture).unwrap_err();
+
+        assert!(error.to_string().contains("must be forbidden"));
+    }
+
+    #[test]
+    fn fixture_requires_a_peer_without_grant_case() {
+        let mut loaded = load_fixture().unwrap();
+        let collection = loaded
+            .fixture
+            .collections
+            .iter_mut()
+            .find(|collection| collection.id == "peer_ungranted")
+            .unwrap();
+        collection.granted_to_origin = true;
+
+        let error = validate_fixture_data(&loaded.fixture).unwrap_err();
+
+        assert!(error.to_string().contains("peer-without-grant"));
+    }
+
+    #[test]
+    fn peer_without_grant_case_requires_a_shareable_collection() {
+        let mut loaded = load_fixture().unwrap();
+        let collection = loaded
+            .fixture
+            .collections
+            .iter_mut()
+            .find(|collection| collection.id == "peer_ungranted")
+            .unwrap();
+        collection.peer_shareable = false;
+
+        let error = validate_fixture_data(&loaded.fixture).unwrap_err();
+
+        assert!(error.to_string().contains("peer-without-grant"));
     }
 
     #[test]
@@ -1447,6 +1673,7 @@ mod tests {
             },
             top_k: TOP_K,
             elapsed_ms: 0,
+            regression: AggregateMetrics::default(),
             calibration: AggregateMetrics::default(),
             holdout: AggregateMetrics::default(),
             total: AggregateMetrics::default(),
@@ -1498,6 +1725,39 @@ mod tests {
         let metrics = aggregate_metrics(reports.iter());
 
         assert_eq!(metrics.mean_reciprocal_rank_at_five, Some(0.5));
+    }
+
+    #[test]
+    fn every_regression_case_must_pass_individually() {
+        fn report(id: &str, split: RetrievalSplit, passed: bool) -> RetrievalCaseReport {
+            RetrievalCaseReport {
+                id: id.to_owned(),
+                split,
+                tags: vec![RetrievalTag::Direct],
+                expected_group_count: 1,
+                found_group_count: u32::from(passed),
+                reciprocal_rank_at_five: passed.then_some(1.0),
+                returned_fact_ids: Vec::new(),
+                missing_group_count: u32::from(!passed),
+                unexpected_fact_ids: Vec::new(),
+                forbidden_fact_ids: Vec::new(),
+                provenance_error_count: 0,
+                duplicate_violation_count: 0,
+                repeat_stable: true,
+                top_k_prefix_stable: true,
+                insertion_order_stable: true,
+                elapsed_ms: 0,
+                passed,
+            }
+        }
+
+        let reports = [
+            report("regression_pass", RetrievalSplit::Regression, true),
+            report("regression_fail", RetrievalSplit::Regression, false),
+            report("calibration_fail", RetrievalSplit::Calibration, false),
+        ];
+
+        assert!(!regression_cases_pass(&reports));
     }
 
     #[test]

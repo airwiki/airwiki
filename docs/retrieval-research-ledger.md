@@ -1,0 +1,27 @@
+# Retrieval research ledger
+
+This ledger keeps durable conclusions from bounded search experiments without
+making rejected evaluators, fixtures or candidate mechanisms a maintenance
+dependency. The linked pull requests preserve the reproducible implementation.
+Green CI means that an experiment ran as designed; it does not mean that its
+candidate belongs in the product.
+
+| Candidate | Evidence | Decision | Durable conclusion |
+| --- | --- | --- | --- |
+| Domain-separated retrieval baseline v2 | [#8](https://github.com/airwiki/airwiki/pull/8) | **Accepted baseline** | Keep the 17-case regression corpus and its structural validator. Do not keep the selectors or model-specific runners bundled into the research branch. |
+| Local QA-entailment selector | [#8](https://github.com/airwiki/airwiki/pull/8) | **Rejected** | The candidate missed its predeclared quality gate. Generic answerability machinery is not justified in `main`. |
+| Reviewed evidence anchors | [#9](https://github.com/airwiki/airwiki/pull/9) | **Rejected** | Coverage reached 9/9 positive needs, but precision was 10/13 and only 5/11 decisions were correct. Reviewed links can supply candidates, but cannot serve as an answerability decision by themselves. |
+| Compact OKF graph on development rankings | [#10](https://github.com/airwiki/airwiki/pull/10), [#11](https://github.com/airwiki/airwiki/pull/11) | **Superseded** | A positive synthetic signal required a real-ranking holdout; it was not sufficient evidence for graph infrastructure. |
+| Compact OKF graph on sealed holdout | [#12](https://github.com/airwiki/airwiki/pull/12) | **Rejected** | Baseline, graph and structural sham all produced Recall@5 of 0.75; graph assembly p95 was 123 ms against a 25 ms budget. |
+| mMARCO score ordering | [#13](https://github.com/airwiki/airwiki/pull/13) | **Rejected** | Score order was identical to the existing filter order. The observed bottleneck was the binary relevance mask, not ordering among accepted candidates. |
+| mMARCO abstention calibration | [#14](https://github.com/airwiki/airwiki/pull/14) | **Rejected** | Cutoff support recall fell from 0.75 to 0.4167, four queries lost support and a hard negative remained. |
+| Standalone OKF path signal | [#15](https://github.com/airwiki/airwiki/pull/15) | **Rejected** | The signal connected 17 of 24 hard negatives, so a path alone is not evidence of answerability. |
+| Graph-conditioned bounded diffusion | [#16](https://github.com/airwiki/airwiki/pull/16) | **Inconclusive** | Baseline, real graph and degree-preserving sham all found 26/28 evidence groups, and the corpus exposed zero cutoff opportunities. Do not tune or promote from that fixture. |
+
+## Constraint for the next experiment
+
+Start from the accepted v2 baseline and one explicit observed failure. Measure
+candidate recall before the relevance mask separately from selector errors, use
+fresh domains for promotion evidence, and reject any candidate that weakens
+privacy, provenance, stability or known regression cases. Add reusable code to
+`main` only when it has an active product or evaluation consumer.

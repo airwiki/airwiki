@@ -1,5 +1,7 @@
 use std::{
-    collections::{BTreeSet, HashMap, HashSet},
+    collections::{BTreeMap, BTreeSet, HashMap, HashSet},
+    fs::OpenOptions,
+    io::Write,
     path::{Path, PathBuf},
     sync::{Arc, Mutex},
     time::Instant,
@@ -28,6 +30,43 @@ const FIXTURE_PATH: &str = "fixtures/retrieval/search-quality-v3.json";
 const REPORT_DIRECTORY: &str = "target/evals";
 const REPORT_SCHEMA_VERSION: u32 = 4;
 const FIXTURE_SCHEMA_VERSION: u32 = 3;
+const TYPED_EVIDENCE_SCHEMA_VERSION: u32 = 1;
+const SOURCE_INPUT_FILENAME: &str = "source-input.jsonl";
+const QUESTION_INPUT_FILENAME: &str = "question-input.jsonl";
+const CONTROL_FILENAME: &str = "control.jsonl";
+const COMPLETION_MARKER_FILENAME: &str = ".typed-evidence-complete";
+const COMPLETION_MARKER_TEMP_FILENAME: &str = ".typed-evidence-complete.tmp";
+const TYPED_EVIDENCE_FIXTURE_SHA256: &str =
+    "8a04bf7eec4aa35e6f5cdfa1c7000ab6d9f666814281c466fb82e5c4b10986ff";
+const TYPED_EVIDENCE_EMBEDDING_PROFILE: &str =
+    "multilingual-e5-small@614241f622f53c4eeff9890bdc4f31cfecc418b3";
+const TYPED_EVIDENCE_RELEVANCE_PROFILE: &str = concat!(
+    "mmarco-mMiniLMv2-L12-H384-v1@",
+    "1427fd652930e4ba29e8149678df786c240d8825/evidence-v1"
+);
+const TYPED_EVIDENCE_RELEVANCE_ARTIFACT_FILENAME: &str = "onnx/model_qint8_arm64.onnx";
+const TYPED_EVIDENCE_RELEVANCE_ARTIFACT_SHA256: &str =
+    "1825907d6c1a9001ff78124780bbde20a614a8c3df3b63409cf3c72c6fe5c8b4";
+const TYPED_EVIDENCE_SOURCE_INPUT_SHA256: &str =
+    "c580a9f44623121d0dcd6cb3f2e558812abce81c4cd40b82c3770f2ffcca21ed";
+const TYPED_EVIDENCE_QUESTION_INPUT_SHA256: &str =
+    "185f6a2013e8452a05faaeaed355629fedfa550ace2cbaa5e7c508176858e7f5";
+const TYPED_EVIDENCE_CONTROL_SHA256: &str =
+    "6121e9195ef0f17d76873ff1dfd43550cf98e745d556966ee43e53ac5d702e7f";
+const COMPLETION_MARKER_CONTENTS: &str = concat!(
+    "typed-evidence-prepare-v1\n",
+    "fixture_sha256=8a04bf7eec4aa35e6f5cdfa1c7000ab6d9f666814281c466fb82e5c4b10986ff\n",
+    "target=macos-aarch64\n",
+    "embedding_profile=multilingual-e5-small@614241f622f53c4eeff9890bdc4f31cfecc418b3\n",
+    "embedding_artifact=onnx/model.onnx\n",
+    "embedding_artifact_sha256=ca456c06b3a9505ddfd9131408916dd79290368331e7d76bb621f1cba6bc8665\n",
+    "relevance_profile=mmarco-mMiniLMv2-L12-H384-v1@1427fd652930e4ba29e8149678df786c240d8825/evidence-v1\n",
+    "relevance_artifact=onnx/model_qint8_arm64.onnx\n",
+    "relevance_artifact_sha256=1825907d6c1a9001ff78124780bbde20a614a8c3df3b63409cf3c72c6fe5c8b4\n",
+    "source_input_sha256=c580a9f44623121d0dcd6cb3f2e558812abce81c4cd40b82c3770f2ffcca21ed\n",
+    "question_input_sha256=185f6a2013e8452a05faaeaed355629fedfa550ace2cbaa5e7c508176858e7f5\n",
+    "control_sha256=6121e9195ef0f17d76873ff1dfd43550cf98e745d556966ee43e53ac5d702e7f\n"
+);
 const TOP_K: u8 = 5;
 const MIN_RECALL_AT_FIVE: f64 = 0.9;
 const ORIGIN_NODE_ID: &str = "fixture-origin";
@@ -225,6 +264,7 @@ fn evidence_locator(title: &str, heading: &str) -> EvidenceLocator {
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct AuditedCandidate {
     fact_id: Option<String>,
+    snippet_sha256: String,
     decision: EvidenceDecision,
 }
 
@@ -285,6 +325,7 @@ impl EvidenceRelevanceProvider for AuditedRelevanceProvider {
                     .facts
                     .get(&evidence_locator(&candidate.title, &candidate.heading))
                     .cloned(),
+                snippet_sha256: synthetic_sha256(&candidate.text),
                 decision: *decision,
             })
             .collect();
@@ -438,6 +479,7 @@ impl Drop for EvaluationWorkspace {
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct NormalizedHit {
     fact_id: String,
+    snippet_sha256: String,
     rank: u32,
 }
 
@@ -552,10 +594,122 @@ struct RetrievalEvaluationReport {
     cases: Vec<RetrievalCaseReport>,
 }
 
+#[derive(Debug)]
+struct EvaluationOutcome {
+    report: RetrievalEvaluationReport,
+    controls: Vec<BaselineControlCase>,
+}
+
+#[derive(Debug)]
+struct BaselineControlCase {
+    case_id: String,
+    candidate_pools: Vec<MaskAuditCall>,
+    returned: NormalizedRun,
+}
+
+#[derive(Debug, Serialize)]
+struct SourceInputRecord {
+    source_id: String,
+    title: String,
+    heading: String,
+    text: String,
+    byte_length: u64,
+    text_sha256: String,
+}
+
+#[derive(Debug, Serialize)]
+struct QuestionInputRecord {
+    question_id: String,
+    question: String,
+}
+
+#[derive(Debug, Serialize)]
+struct ControlRecord {
+    schema_version: u32,
+    question_id: String,
+    candidate_pools: Vec<ControlCandidatePoolRecord>,
+    returned_pools: Vec<ControlReturnedPoolRecord>,
+}
+
+#[derive(Debug, Serialize)]
+struct ControlCandidatePoolRecord {
+    source: ControlSource,
+    candidates: Vec<ControlCandidateRecord>,
+}
+
+#[derive(Debug, Serialize)]
+struct ControlReturnedPoolRecord {
+    source: ControlSource,
+    results: Vec<ControlReturnedRecord>,
+}
+
+#[derive(Debug, Serialize)]
+struct ControlCandidateRecord {
+    source_id: String,
+    snippet_sha256: String,
+    decision: ControlDecision,
+}
+
+#[derive(Debug, Serialize)]
+struct ControlReturnedRecord {
+    source_id: String,
+    snippet_sha256: String,
+    rank: u32,
+}
+
+#[derive(Debug, Clone, Copy, Serialize)]
+#[serde(rename_all = "snake_case")]
+enum ControlDecision {
+    Relevant,
+    Irrelevant,
+}
+
+#[derive(Debug, Clone, Copy, Serialize)]
+#[serde(rename_all = "snake_case")]
+enum ControlSource {
+    Origin,
+    Peer,
+}
+
+impl From<FixtureNode> for ControlSource {
+    fn from(value: FixtureNode) -> Self {
+        match value {
+            FixtureNode::Origin => Self::Origin,
+            FixtureNode::Peer => Self::Peer,
+        }
+    }
+}
+
+impl From<EvidenceDecision> for ControlDecision {
+    fn from(value: EvidenceDecision) -> Self {
+        match value {
+            EvidenceDecision::Relevant => Self::Relevant,
+            EvidenceDecision::Irrelevant => Self::Irrelevant,
+        }
+    }
+}
+
+#[derive(Debug)]
+struct OpaqueSourceIds {
+    by_fact_id: HashMap<String, OpaqueSourceIdentity>,
+}
+
+#[derive(Debug)]
+struct OpaqueSourceIdentity {
+    source_id: String,
+}
+
+#[derive(Debug)]
+struct PreparedArtifacts {
+    source_input: String,
+    question_input: String,
+    control: String,
+}
+
 pub async fn validate() -> Result<()> {
     let loaded = load_fixture()?;
     let providers = fixture_providers(&loaded.fixture)?;
-    let report = run_evaluation(&loaded, providers).await?;
+    let report = run_evaluation(&loaded, providers).await?.report;
     ensure!(
         report.passed,
         "deterministic retrieval pipeline did not meet the fixture contract"
@@ -569,8 +723,87 @@ pub async fn validate() -> Result<()> {
 }
 
 pub async fn evaluate(embedding_snapshot: &Path, relevance_snapshot: &Path) -> Result<()> {
-    validate_model_revisions()?;
     let loaded = load_fixture()?;
+    let providers = production_providers(embedding_snapshot, relevance_snapshot)?;
+    let report = run_evaluation(&loaded, providers).await?.report;
+    let destination = write_report(&report)?;
+    ensure!(
+        report.passed,
+        "retrieval pipeline did not meet the acceptance thresholds; report written to {}",
+        destination.display()
+    );
+    println!(
+        "retrieval pipeline passed; report written to {}",
+        destination.display()
+    );
+    Ok(())
+}
+
+pub async fn prepare_typed_evidence(
+    embedding_snapshot: &Path,
+    relevance_snapshot: &Path,
+    output_directory: &Path,
+) -> Result<()> {
+    let loaded = load_fixture()?;
+    validate_typed_evidence_fixture_and_target(&loaded)?;
+    let providers = production_providers(embedding_snapshot, relevance_snapshot)?;
+    validate_typed_evidence_provider(&providers.identity)?;
+    let outcome = run_evaluation(&loaded, providers).await?;
+    validate_control_integrity(&outcome.report.total)?;
+    let artifacts = prepare_artifacts(&loaded.fixture, &outcome.controls)?;
+    validate_prepared_artifact_bytes(&artifacts)?;
+    write_prepared_artifacts(output_directory, &artifacts)?;
+    println!(
+        "prepared {} typed-evidence questions (control quality pass: {})",
+        loaded.fixture.cases.len(),
+        outcome.report.passed
+    );
+    Ok(())
+}
+
+fn validate_typed_evidence_fixture_and_target(loaded: &LoadedFixture) -> Result<()> {
+    ensure!(
+        loaded.sha256 == TYPED_EVIDENCE_FIXTURE_SHA256,
+        "typed-evidence fixture bytes differ from the preregistered corpus"
+    );
+    ensure!(
+        std::env::consts::OS == "macos" && std::env::consts::ARCH == "aarch64",
+        "typed-evidence control must be prepared on the preregistered macOS arm64 target"
+    );
+    Ok(())
+}
+
+fn validate_typed_evidence_provider(provider: &ProviderIdentity) -> Result<()> {
+    ensure!(
+        provider.embedding_profile == TYPED_EVIDENCE_EMBEDDING_PROFILE
+            && provider.embedding_revision == E5_MODEL_REVISION
+            && provider.relevance_profile == TYPED_EVIDENCE_RELEVANCE_PROFILE
+            && provider.relevance_revision == MMARCO_RERANKER_REVISION
+            && provider.relevance_artifact_filename.as_deref()
+                == Some(TYPED_EVIDENCE_RELEVANCE_ARTIFACT_FILENAME)
+            && provider.relevance_artifact_sha256.as_deref()
+                == Some(TYPED_EVIDENCE_RELEVANCE_ARTIFACT_SHA256),
+        "typed-evidence provider differs from the preregistered control"
+    );
+    Ok(())
+}
+
+fn validate_control_integrity(metrics: &AggregateMetrics) -> Result<()> {
+    ensure!(
+        metrics.provenance_error_count == 0
+            && metrics.duplicate_violation_count == 0
+            && metrics.unstable_case_count == 0
+            && metrics.stage_audit_error_count == 0,
+        "typed-evidence control is not reproducible or has incomplete provenance"
+    );
+    Ok(())
+}
+
+fn production_providers(
+    embedding_snapshot: &Path,
+    relevance_snapshot: &Path,
+) -> Result<EvaluationProviders> {
+    validate_model_revisions()?;
     let threads = std::thread::available_parallelism()
         .map(usize::from)
         .unwrap_or(2)
@@ -586,7 +819,7 @@ pub async fn evaluate(embedding_snapshot: &Path, relevance_snapshot: &Path) -> R
     );
     let relevance_artifact =
         platform_relevance_model().context("unsupported retrieval evaluation target")?;
-    let providers = EvaluationProviders {
+    Ok(EvaluationProviders {
         identity: ProviderIdentity {
             embedding_profile: embeddings.model_id().to_owned(),
             embedding_revision: E5_MODEL_REVISION.to_owned(),
@@ -598,19 +831,7 @@ pub async fn evaluate(embedding_snapshot: &Path, relevance_snapshot: &Path) -> R
         },
         embeddings,
         relevance,
-    };
-    let report = run_evaluation(&loaded, providers).await?;
-    let destination = write_report(&report)?;
-    ensure!(
-        report.passed,
-        "retrieval pipeline did not meet the acceptance thresholds; report written to {}",
-        destination.display()
-    );
-    println!(
-        "retrieval pipeline passed; report written to {}",
-        destination.display()
-    );
-    Ok(())
+    })
 }
 
 fn load_fixture() -> Result<LoadedFixture> {
@@ -1114,7 +1335,7 @@ fn normalize_vector(vector: &mut [f32]) {
 async fn run_evaluation(
     loaded: &LoadedFixture,
     providers: EvaluationProviders,
-) -> Result<RetrievalEvaluationReport> {
+) -> Result<EvaluationOutcome> {
     let started = Instant::now();
     let audit = Arc::new(MaskAudit::default());
     let facts = Arc::new(fact_ids_by_locator(&loaded.fixture)?);
@@ -1129,6 +1350,7 @@ async fn run_evaluation(
     let reverse =
         build_corpus(&loaded.fixture, &providers, true, Arc::clone(&audit), facts).await?;
     let mut case_reports = Vec::with_capacity(loaded.fixture.cases.len());
+    let mut controls = Vec::with_capacity(loaded.fixture.cases.len());
     for case in &loaded.fixture.cases {
         let case_started = Instant::now();
         let baseline = run_case(&forward, case, TOP_K).await?;
@@ -1142,6 +1364,11 @@ async fn run_evaluation(
         let audit_stable = baseline_audit == repeated_audit
             && baseline_audit == expanded_audit
             && baseline_audit == reversed_audit;
+        controls.push(BaselineControlCase {
+            case_id: case.id.clone(),
+            candidate_pools: baseline_audit.clone(),
+            returned: baseline.clone(),
+        });
         case_reports.push(score_case(
             case,
             CaseEvaluationRuns {
@@ -1177,21 +1404,24 @@ async fn run_evaluation(
         && split_passes(&regression)
         && split_passes(&calibration)
         && split_passes(&holdout);
-    Ok(RetrievalEvaluationReport {
-        schema_version: REPORT_SCHEMA_VERSION,
-        fixture_sha256: loaded.sha256.clone(),
-        target_os: std::env::consts::OS.to_owned(),
-        target_arch: std::env::consts::ARCH.to_owned(),
-        provider: providers.identity,
-        top_k: TOP_K,
-        elapsed_ms: started.elapsed().as_millis(),
-        regression,
-        calibration,
-        holdout,
-        total,
-        stage_attribution,
-        passed,
-        cases: case_reports,
+    Ok(EvaluationOutcome {
+        report: RetrievalEvaluationReport {
+            schema_version: REPORT_SCHEMA_VERSION,
+            fixture_sha256: loaded.sha256.clone(),
+            target_os: std::env::consts::OS.to_owned(),
+            target_arch: std::env::consts::ARCH.to_owned(),
+            provider: providers.identity,
+            top_k: TOP_K,
+            elapsed_ms: started.elapsed().as_millis(),
+            regression,
+            calibration,
+            holdout,
+            total,
+            stage_attribution,
+            passed,
+            cases: case_reports,
+        },
+        controls,
     })
 }
 
@@ -1503,6 +1733,7 @@ fn normalize_responses(
             }
             normalized.push(NormalizedHit {
                 fact_id: identity.id.clone(),
+                snippet_sha256: synthetic_sha256(&hit.snippet),
                 rank: hit.rank,
             });
         }
@@ -1910,6 +2141,349 @@ fn regression_cases_pass(reports: &[RetrievalCaseReport]) -> bool {
         .all(|report| report.passed)
 }
 
+fn prepare_artifacts(
+    fixture: &RetrievalFixture,
+    controls: &[BaselineControlCase],
+) -> Result<PreparedArtifacts> {
+    let (source_records, source_ids) = build_source_inputs(fixture)?;
+    let (question_records, question_ids) = build_question_inputs(fixture)?;
+    let control_records = build_control_records(controls, &source_ids, &question_ids)?;
+    Ok(PreparedArtifacts {
+        source_input: serialize_jsonl(&source_records)?,
+        question_input: serialize_jsonl(&question_records)?,
+        control: serialize_jsonl(&control_records)?,
+    })
+}
+
+fn build_source_inputs(
+    fixture: &RetrievalFixture,
+) -> Result<(Vec<SourceInputRecord>, OpaqueSourceIds)> {
+    let mut chunks = fixture
+        .documents
+        .iter()
+        .flat_map(|document| {
+            document
+                .chunks
+                .iter()
+                .map(move |chunk| (chunk.id.as_str(), document, chunk))
+        })
+        .collect::<Vec<_>>();
+    chunks.sort_by_key(|(fact_id, _, _)| *fact_id);
+    ensure!(
+        chunks.len() < 1_000,
+        "typed-evidence source input supports at most 999 chunks"
+    );
+
+    let mut records = Vec::with_capacity(chunks.len());
+    let mut by_fact_id = HashMap::with_capacity(chunks.len());
+    for (index, (fact_id, document, chunk)) in chunks.into_iter().enumerate() {
+        let source_id = opaque_id("source", index)?;
+        let text_sha256 = synthetic_sha256(&chunk.text);
+        let previous = by_fact_id.insert(
+            fact_id.to_owned(),
+            OpaqueSourceIdentity {
+                source_id: source_id.clone(),
+            },
+        );
+        ensure!(
+            previous.is_none(),
+            "typed-evidence source IDs are not unique"
+        );
+        records.push(SourceInputRecord {
+            source_id,
+            title: document.title.clone(),
+            heading: chunk.heading.clone(),
+            text: chunk.text.clone(),
+            byte_length: u64::try_from(chunk.text.len())
+                .context("typed-evidence source text is too large")?,
+            text_sha256,
+        });
+    }
+    Ok((records, OpaqueSourceIds { by_fact_id }))
+}
+
+fn build_question_inputs(
+    fixture: &RetrievalFixture,
+) -> Result<(Vec<QuestionInputRecord>, BTreeMap<String, String>)> {
+    let mut cases = fixture.cases.iter().collect::<Vec<_>>();
+    cases.sort_by_key(|case| case.id.as_str());
+    ensure!(
+        cases.len() < 1_000,
+        "typed-evidence question input supports at most 999 cases"
+    );
+
+    let mut records = Vec::with_capacity(cases.len());
+    let mut by_case_id = BTreeMap::new();
+    for (index, case) in cases.into_iter().enumerate() {
+        let question_id = opaque_id("question", index)?;
+        let previous = by_case_id.insert(case.id.clone(), question_id.clone());
+        ensure!(
+            previous.is_none(),
+            "typed-evidence question IDs are not unique"
+        );
+        records.push(QuestionInputRecord {
+            question_id,
+            question: case.question.clone(),
+        });
+    }
+    Ok((records, by_case_id))
+}
+
+fn opaque_id(prefix: &str, zero_based_index: usize) -> Result<String> {
+    let ordinal = zero_based_index
+        .checked_add(1)
+        .context("typed-evidence opaque ID overflow")?;
+    ensure!(
+        ordinal < 1_000,
+        "typed-evidence opaque ID supports at most 999 records"
+    );
+    Ok(format!("{prefix}_{ordinal:03}"))
+}
+
+fn build_control_records(
+    controls: &[BaselineControlCase],
+    source_ids: &OpaqueSourceIds,
+    question_ids: &BTreeMap<String, String>,
+) -> Result<Vec<ControlRecord>> {
+    ensure!(
+        controls.len() == question_ids.len(),
+        "typed-evidence control case count does not match question input"
+    );
+    let mut records = Vec::with_capacity(controls.len());
+    let mut observed_questions = BTreeSet::new();
+    for control in controls {
+        let question_id = question_ids
+            .get(&control.case_id)
+            .with_context(|| format!("missing opaque ID for control case `{}`", control.case_id))?
+            .clone();
+        ensure!(
+            observed_questions.insert(question_id.clone()),
+            "typed-evidence control contains a duplicate question"
+        );
+        ensure!(
+            control.returned.provenance_errors == 0,
+            "typed-evidence control contains a provenance error"
+        );
+        let candidate_pools = control
+            .candidate_pools
+            .iter()
+            .map(|call| {
+                let candidates = call
+                    .candidates
+                    .iter()
+                    .map(|candidate| control_candidate_record(candidate, source_ids))
+                    .collect::<Result<Vec<_>>>()?;
+                Ok(ControlCandidatePoolRecord {
+                    source: call.node.into(),
+                    candidates,
+                })
+            })
+            .collect::<Result<Vec<_>>>()?;
+        let returned_pools = control
+            .returned
+            .sources
+            .iter()
+            .map(|source| {
+                let candidate_pool = control
+                    .candidate_pools
+                    .iter()
+                    .find(|call| call.node == source.node);
+                let results = source
+                    .hits
+                    .iter()
+                    .map(|hit| control_returned_record(hit, candidate_pool, source_ids))
+                    .collect::<Result<Vec<_>>>()?;
+                Ok(ControlReturnedPoolRecord {
+                    source: source.node.into(),
+                    results,
+                })
+            })
+            .collect::<Result<Vec<_>>>()?;
+        records.push(ControlRecord {
+            schema_version: TYPED_EVIDENCE_SCHEMA_VERSION,
+            question_id,
+            candidate_pools,
+            returned_pools,
+        });
+    }
+    records.sort_by(|left, right| left.question_id.cmp(&right.question_id));
+    Ok(records)
+}
+
+fn control_candidate_record(
+    candidate: &AuditedCandidate,
+    source_ids: &OpaqueSourceIds,
+) -> Result<ControlCandidateRecord> {
+    let fact_id = candidate
+        .fact_id
+        .as_deref()
+        .context("typed-evidence candidate has no fixture source mapping")?;
+    let identity = source_ids
+        .by_fact_id
+        .get(fact_id)
+        .context("typed-evidence candidate has no opaque source ID")?;
+    Ok(ControlCandidateRecord {
+        source_id: identity.source_id.clone(),
+        snippet_sha256: candidate.snippet_sha256.clone(),
+        decision: candidate.decision.into(),
+    })
+}
+
+fn control_returned_record(
+    hit: &NormalizedHit,
+    candidate_pool: Option<&MaskAuditCall>,
+    source_ids: &OpaqueSourceIds,
+) -> Result<ControlReturnedRecord> {
+    let identity = source_ids
+        .by_fact_id
+        .get(&hit.fact_id)
+        .context("typed-evidence result has no opaque source ID")?;
+    let candidate = candidate_pool
+        .into_iter()
+        .flat_map(|pool| &pool.candidates)
+        .find(|candidate| candidate.fact_id.as_deref() == Some(hit.fact_id.as_str()))
+        .context("typed-evidence result was not present in its source candidate pool")?;
+    ensure!(
+        hit.snippet_sha256 == candidate.snippet_sha256,
+        "typed-evidence result snippet differs from the exact mMARCO input"
+    );
+    Ok(ControlReturnedRecord {
+        source_id: identity.source_id.clone(),
+        snippet_sha256: hit.snippet_sha256.clone(),
+        rank: hit.rank,
+    })
+}
+
+fn serialize_jsonl<T: Serialize>(records: &[T]) -> Result<String> {
+    let mut contents = String::new();
+    for record in records {
+        contents.push_str(&serde_json::to_string(record)?);
+        contents.push('\n');
+    }
+    Ok(contents)
+}
+
+fn validate_prepared_artifact_bytes(artifacts: &PreparedArtifacts) -> Result<()> {
+    ensure!(
+        synthetic_sha256(&artifacts.source_input) == TYPED_EVIDENCE_SOURCE_INPUT_SHA256
+            && synthetic_sha256(&artifacts.question_input) == TYPED_EVIDENCE_QUESTION_INPUT_SHA256
+            && synthetic_sha256(&artifacts.control) == TYPED_EVIDENCE_CONTROL_SHA256,
+        "typed-evidence prepared bytes differ from the preregistered artifacts"
+    );
+    Ok(())
+}
+
+fn write_prepared_artifacts(output_directory: &Path, artifacts: &PreparedArtifacts) -> Result<()> {
+    let parent = output_directory
+        .parent()
+        .filter(|path| !path.as_os_str().is_empty())
+        .unwrap_or_else(|| Path::new("."));
+    std::fs::create_dir_all(parent).with_context(|| format!("creating {}", parent.display()))?;
+    let metadata =
+        std::fs::metadata(parent).with_context(|| format!("inspecting {}", parent.display()))?;
+    ensure!(
+        metadata.file_type().is_dir(),
+        "typed-evidence output parent must be a real directory"
+    );
+    match std::fs::create_dir(output_directory) {
+        Ok(()) => {}
+        Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {
+            return Err(anyhow!(
+                "refusing to overwrite existing typed-evidence output {}",
+                output_directory.display()
+            ));
+        }
+        Err(error) => {
+            return Err(error).with_context(|| format!("claiming {}", output_directory.display()));
+        }
+    }
+
+    let files = [
+        (SOURCE_INPUT_FILENAME, artifacts.source_input.as_bytes()),
+        (QUESTION_INPUT_FILENAME, artifacts.question_input.as_bytes()),
+        (CONTROL_FILENAME, artifacts.control.as_bytes()),
+    ];
+    for (filename, contents) in files {
+        let destination = output_directory.join(filename);
+        let mut file = OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&destination)
+            .with_context(|| format!("creating {}", destination.display()))?;
+        file.write_all(contents)
+            .with_context(|| format!("writing {}", destination.display()))?;
+        file.sync_all()
+            .with_context(|| format!("syncing {}", destination.display()))?;
+    }
+    validate_prepared_artifact_files(output_directory)?;
+    let marker_temporary = output_directory.join(COMPLETION_MARKER_TEMP_FILENAME);
+    let mut marker_file = OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(&marker_temporary)
+        .with_context(|| format!("creating {}", marker_temporary.display()))?;
+    marker_file
+        .write_all(COMPLETION_MARKER_CONTENTS.as_bytes())
+        .with_context(|| format!("writing {}", marker_temporary.display()))?;
+    marker_file
+        .sync_all()
+        .with_context(|| format!("syncing {}", marker_temporary.display()))?;
+    drop(marker_file);
+    let marker = output_directory.join(COMPLETION_MARKER_FILENAME);
+    std::fs::rename(&marker_temporary, &marker).with_context(|| {
+        format!(
+            "committing {} as {}",
+            marker_temporary.display(),
+            marker.display()
+        )
+    })?;
+    Ok(())
+}
+
+#[cfg(test)]
+fn validate_prepared_artifact_set(output_directory: &Path) -> Result<()> {
+    let marker = output_directory.join(COMPLETION_MARKER_FILENAME);
+    let marker_contents = std::fs::read_to_string(&marker).with_context(|| {
+        format!(
+            "typed-evidence output is incomplete; missing commit marker {}",
+            marker.display()
+        )
+    })?;
+    ensure!(
+        marker_contents == COMPLETION_MARKER_CONTENTS,
+        "typed-evidence output has an invalid commit marker"
+    );
+    validate_prepared_artifact_files(output_directory)
+}
+
+fn validate_prepared_artifact_files(output_directory: &Path) -> Result<()> {
+    for (filename, expected_sha256) in [
+        (SOURCE_INPUT_FILENAME, TYPED_EVIDENCE_SOURCE_INPUT_SHA256),
+        (
+            QUESTION_INPUT_FILENAME,
+            TYPED_EVIDENCE_QUESTION_INPUT_SHA256,
+        ),
+        (CONTROL_FILENAME, TYPED_EVIDENCE_CONTROL_SHA256),
+    ] {
+        let path = output_directory.join(filename);
+        let metadata = std::fs::symlink_metadata(&path)
+            .with_context(|| format!("typed-evidence output is missing {}", path.display()))?;
+        ensure!(
+            metadata.file_type().is_file(),
+            "typed-evidence artifact must be a regular file: {}",
+            path.display()
+        );
+        let bytes = std::fs::read(&path)
+            .with_context(|| format!("reading typed-evidence artifact {}", path.display()))?;
+        ensure!(
+            hex::encode(Sha256::digest(&bytes)) == expected_sha256,
+            "typed-evidence artifact has unexpected bytes: {}",
+            path.display()
+        );
+    }
+    Ok(())
+}
+
 fn validate_model_revisions() -> Result<()> {
     ensure!(
         E5_REVISION == E5_MODEL_REVISION,
@@ -1974,7 +2548,7 @@ mod tests {
         let loaded = load_fixture().unwrap();
         let providers = fixture_providers(&loaded.fixture).unwrap();
 
-        let report = run_evaluation(&loaded, providers).await.unwrap();
+        let report = run_evaluation(&loaded, providers).await.unwrap().report;
 
         assert!(report.passed, "deterministic retrieval report: {report:#?}");
         assert!(report.regression.case_count > 0);
@@ -2035,8 +2609,261 @@ mod tests {
             calls[0].candidates[0].fact_id.as_deref(),
             Some("synthetic_fact")
         );
+        assert_eq!(
+            calls[0].candidates[0].snippet_sha256,
+            synthetic_sha256("content must not enter audit state")
+        );
         assert!(calls[0].candidates[1].fact_id.is_none());
         assert!(audit.take("private synthetic question").unwrap().is_empty());
+    }
+
+    #[test]
+    fn blind_inputs_assign_opaque_ids_in_semantic_id_order() {
+        let loaded = load_fixture().unwrap();
+        let (sources, source_ids) = build_source_inputs(&loaded.fixture).unwrap();
+        let (questions, question_ids) = build_question_inputs(&loaded.fixture).unwrap();
+        let first_fact_id = loaded
+            .fixture
+            .documents
+            .iter()
+            .flat_map(|document| &document.chunks)
+            .map(|chunk| chunk.id.as_str())
+            .min()
+            .unwrap();
+        let first_case_id = loaded
+            .fixture
+            .cases
+            .iter()
+            .map(|case| case.id.as_str())
+            .min()
+            .unwrap();
+
+        assert_eq!(sources[0].source_id, "source_001");
+        assert_eq!(source_ids.by_fact_id[first_fact_id].source_id, "source_001");
+        assert_eq!(questions[0].question_id, "question_001");
+        assert_eq!(question_ids[first_case_id], "question_001");
+    }
+
+    #[test]
+    fn control_jsonl_contains_only_opaque_ids_and_exact_snippet_hashes() {
+        let snippet_sha256 = synthetic_sha256("synthetic candidate");
+        let source_ids = OpaqueSourceIds {
+            by_fact_id: HashMap::from([(
+                "semantic_fact_id".to_owned(),
+                OpaqueSourceIdentity {
+                    source_id: "source_001".to_owned(),
+                },
+            )]),
+        };
+        let question_ids =
+            BTreeMap::from([("semantic_case_id".to_owned(), "question_001".to_owned())]);
+        let controls = vec![BaselineControlCase {
+            case_id: "semantic_case_id".to_owned(),
+            candidate_pools: vec![MaskAuditCall {
+                node: FixtureNode::Origin,
+                candidates: vec![AuditedCandidate {
+                    fact_id: Some("semantic_fact_id".to_owned()),
+                    snippet_sha256: snippet_sha256.clone(),
+                    decision: EvidenceDecision::Relevant,
+                }],
+            }],
+            returned: NormalizedRun {
+                sources: vec![NormalizedSource {
+                    node: FixtureNode::Origin,
+                    hits: vec![NormalizedHit {
+                        fact_id: "semantic_fact_id".to_owned(),
+                        snippet_sha256: snippet_sha256.clone(),
+                        rank: 1,
+                    }],
+                }],
+                provenance_errors: 0,
+            },
+        }];
+
+        let records = build_control_records(&controls, &source_ids, &question_ids).unwrap();
+        let jsonl = serialize_jsonl(&records).unwrap();
+        let expected = format!(
+            "{{\"schema_version\":1,\"question_id\":\"question_001\",\"candidate_pools\":[{{\"source\":\"origin\",\"candidates\":[{{\"source_id\":\"source_001\",\"snippet_sha256\":\"{snippet_sha256}\",\"decision\":\"relevant\"}}]}}],\"returned_pools\":[{{\"source\":\"origin\",\"results\":[{{\"source_id\":\"source_001\",\"snippet_sha256\":\"{snippet_sha256}\",\"rank\":1}}]}}]}}\n"
+        );
+
+        assert_eq!(jsonl, expected);
+        assert!(!jsonl.contains("semantic_fact_id"));
+        assert!(!jsonl.contains("semantic_case_id"));
+        assert!(!jsonl.contains("fixture-origin"));
+    }
+
+    #[test]
+    fn control_rejects_a_returned_snippet_not_seen_by_mmarco() {
+        let source_ids = OpaqueSourceIds {
+            by_fact_id: HashMap::from([(
+                "semantic_fact_id".to_owned(),
+                OpaqueSourceIdentity {
+                    source_id: "source_001".to_owned(),
+                },
+            )]),
+        };
+        let question_ids =
+            BTreeMap::from([("semantic_case_id".to_owned(), "question_001".to_owned())]);
+        let controls = vec![BaselineControlCase {
+            case_id: "semantic_case_id".to_owned(),
+            candidate_pools: vec![MaskAuditCall {
+                node: FixtureNode::Origin,
+                candidates: vec![AuditedCandidate {
+                    fact_id: Some("semantic_fact_id".to_owned()),
+                    snippet_sha256: synthetic_sha256("mMARCO window"),
+                    decision: EvidenceDecision::Relevant,
+                }],
+            }],
+            returned: NormalizedRun {
+                sources: vec![NormalizedSource {
+                    node: FixtureNode::Origin,
+                    hits: vec![NormalizedHit {
+                        fact_id: "semantic_fact_id".to_owned(),
+                        snippet_sha256: synthetic_sha256("different window"),
+                        rank: 1,
+                    }],
+                }],
+                provenance_errors: 0,
+            },
+        }];
+
+        let error = build_control_records(&controls, &source_ids, &question_ids).unwrap_err();
+
+        assert!(error.to_string().contains("exact mMARCO input"));
+    }
+
+    #[test]
+    fn control_preserves_source_identity_for_empty_pools() {
+        let controls = vec![BaselineControlCase {
+            case_id: "semantic_case_id".to_owned(),
+            candidate_pools: vec![MaskAuditCall {
+                node: FixtureNode::Peer,
+                candidates: Vec::new(),
+            }],
+            returned: NormalizedRun {
+                sources: vec![NormalizedSource {
+                    node: FixtureNode::Peer,
+                    hits: Vec::new(),
+                }],
+                provenance_errors: 0,
+            },
+        }];
+        let question_ids =
+            BTreeMap::from([("semantic_case_id".to_owned(), "question_001".to_owned())]);
+
+        let records = build_control_records(
+            &controls,
+            &OpaqueSourceIds {
+                by_fact_id: HashMap::new(),
+            },
+            &question_ids,
+        )
+        .unwrap();
+        let jsonl = serialize_jsonl(&records).unwrap();
+
+        assert!(jsonl.contains("\"source\":\"peer\",\"candidates\":[]"));
+        assert!(jsonl.contains("\"source\":\"peer\",\"results\":[]"));
+    }
+
+    #[test]
+    fn control_integrity_rejects_duplicate_returned_evidence() {
+        let metrics = AggregateMetrics {
+            duplicate_violation_count: 1,
+            ..AggregateMetrics::default()
+        };
+
+        let error = validate_control_integrity(&metrics).unwrap_err();
+
+        assert!(error.to_string().contains("not reproducible"));
+    }
+
+    #[test]
+    fn prepared_artifact_write_refuses_existing_output_directory() {
+        let parent = tempfile::tempdir().unwrap();
+        let directory = parent.path().join("prepared");
+        std::fs::create_dir(&directory).unwrap();
+        let question_path = directory.join(QUESTION_INPUT_FILENAME);
+        std::fs::write(&question_path, "existing\n").unwrap();
+        let artifacts = PreparedArtifacts {
+            source_input: "source\n".to_owned(),
+            question_input: "question\n".to_owned(),
+            control: "control\n".to_owned(),
+        };
+
+        let error = write_prepared_artifacts(&directory, &artifacts).unwrap_err();
+
+        assert!(error.to_string().contains("refusing to overwrite"));
+        assert_eq!(
+            std::fs::read_to_string(question_path).unwrap(),
+            "existing\n"
+        );
+        assert!(!directory.join(SOURCE_INPUT_FILENAME).exists());
+        assert!(!directory.join(CONTROL_FILENAME).exists());
+    }
+
+    #[test]
+    fn prepared_artifact_write_commits_all_exact_bytes() {
+        let parent = tempfile::tempdir().unwrap();
+        let directory = parent.path().join("prepared");
+        let artifacts = sealed_prepared_artifacts();
+
+        write_prepared_artifacts(&directory, &artifacts).unwrap();
+
+        assert_eq!(
+            std::fs::read_to_string(directory.join(SOURCE_INPUT_FILENAME)).unwrap(),
+            artifacts.source_input
+        );
+        assert_eq!(
+            std::fs::read_to_string(directory.join(QUESTION_INPUT_FILENAME)).unwrap(),
+            artifacts.question_input
+        );
+        assert_eq!(
+            std::fs::read_to_string(directory.join(CONTROL_FILENAME)).unwrap(),
+            artifacts.control
+        );
+        validate_prepared_artifact_set(&directory).unwrap();
+        assert!(!directory.join(COMPLETION_MARKER_TEMP_FILENAME).exists());
+    }
+
+    fn sealed_prepared_artifacts() -> PreparedArtifacts {
+        PreparedArtifacts {
+            source_input: include_str!(
+                "../../experiments/typed-evidence-ceiling-v1/prepared/source-input.jsonl"
+            )
+            .to_owned(),
+            question_input: include_str!(
+                "../../experiments/typed-evidence-ceiling-v1/prepared/question-input.jsonl"
+            )
+            .to_owned(),
+            control: include_str!(
+                "../../experiments/typed-evidence-ceiling-v1/prepared/control.jsonl"
+            )
+            .to_owned(),
+        }
+    }
+
+    #[test]
+    fn prepared_artifact_validation_rejects_an_uncommitted_directory() {
+        let parent = tempfile::tempdir().unwrap();
+        let directory = parent.path().join("prepared");
+        std::fs::create_dir(&directory).unwrap();
+        std::fs::write(directory.join(SOURCE_INPUT_FILENAME), "source\n").unwrap();
+        std::fs::write(directory.join(QUESTION_INPUT_FILENAME), "question\n").unwrap();
+        std::fs::write(directory.join(CONTROL_FILENAME), "control\n").unwrap();
+
+        let error = validate_prepared_artifact_set(&directory).unwrap_err();
+
+        assert!(error.to_string().contains("incomplete"));
+    }
+
+    #[test]
+    fn versioned_completion_marker_matches_the_frozen_identity() {
+        assert_eq!(
+            include_str!(
+                "../../experiments/typed-evidence-ceiling-v1/prepared/.typed-evidence-complete"
+            ),
+            COMPLETION_MARKER_CONTENTS
+        );
     }
 
     #[tokio::test]
@@ -2376,6 +3203,7 @@ mod tests {
                     .enumerate()
                     .map(|(index, fact_id)| NormalizedHit {
                         fact_id: (*fact_id).to_owned(),
+                        snippet_sha256: synthetic_sha256(fact_id),
                         rank: u32::try_from(index + 1).unwrap_or(u32::MAX),
                     })
                     .collect(),
@@ -2548,6 +3376,7 @@ mod tests {
         };
         let candidate = |fact_id: &str, decision| AuditedCandidate {
             fact_id: Some(fact_id.to_owned()),
+            snippet_sha256: synthetic_sha256(fact_id),
             decision,
         };
         let calls = vec![MaskAuditCall {
@@ -2609,10 +3438,12 @@ mod tests {
             candidates: vec![
                 AuditedCandidate {
                     fact_id: Some("support".to_owned()),
+                    snippet_sha256: synthetic_sha256("support"),
                     decision: EvidenceDecision::Relevant,
                 },
                 AuditedCandidate {
                     fact_id: Some("answer".to_owned()),
+                    snippet_sha256: synthetic_sha256("answer"),
                     decision: EvidenceDecision::Relevant,
                 },
             ],
@@ -2650,6 +3481,7 @@ mod tests {
             node: FixtureNode::Origin,
             candidates: vec![AuditedCandidate {
                 fact_id: Some("forbidden".to_owned()),
+                snippet_sha256: synthetic_sha256("forbidden"),
                 decision: EvidenceDecision::Relevant,
             }],
         }];

@@ -193,6 +193,43 @@ async fn main() -> Result<()> {
             Some(other) => bail!("unknown retrieval command: {other}"),
             None => bail!("missing retrieval command; expected `validate` or `evaluate`"),
         },
+        "typed-evidence" => match arguments.next().as_deref() {
+            Some("prepare") => {
+                ensure!(
+                    arguments.next().as_deref() == Some("--embedding-snapshot"),
+                    "typed-evidence prepare expects `--embedding-snapshot <path>` first"
+                );
+                let embedding_snapshot = arguments
+                    .next()
+                    .context("typed-evidence prepare is missing the embedding snapshot path")?;
+                ensure!(
+                    arguments.next().as_deref() == Some("--relevance-snapshot"),
+                    "typed-evidence prepare expects `--relevance-snapshot <path>` second"
+                );
+                let relevance_snapshot = arguments
+                    .next()
+                    .context("typed-evidence prepare is missing the relevance snapshot path")?;
+                ensure!(
+                    arguments.next().as_deref() == Some("--output-directory"),
+                    "typed-evidence prepare expects `--output-directory <path>` third"
+                );
+                let output_directory = arguments
+                    .next()
+                    .context("typed-evidence prepare is missing the output directory")?;
+                ensure!(
+                    arguments.next().is_none(),
+                    "typed-evidence prepare received unexpected arguments"
+                );
+                retrieval::prepare_typed_evidence(
+                    Path::new(&embedding_snapshot),
+                    Path::new(&relevance_snapshot),
+                    Path::new(&output_directory),
+                )
+                .await
+            }
+            Some(other) => bail!("unknown typed-evidence command: {other}"),
+            None => bail!("missing typed-evidence command; expected `prepare`"),
+        },
         "selector-corpus" => match arguments.next().as_deref() {
             Some("validate") => {
                 ensure!(
@@ -256,6 +293,9 @@ async fn main() -> Result<()> {
             println!("cargo run --locked -p xtask -- retrieval validate");
             println!(
                 "cargo run --locked -p xtask -- retrieval evaluate --embedding-snapshot <directory> --relevance-snapshot <directory>"
+            );
+            println!(
+                "cargo run --locked -p xtask -- typed-evidence prepare --embedding-snapshot <directory> --relevance-snapshot <directory> --output-directory <directory>"
             );
             println!("cargo run --locked -p xtask -- selector-corpus validate");
             println!("cargo run --locked -p xtask -- licenses generate");

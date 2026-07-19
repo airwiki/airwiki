@@ -25,6 +25,8 @@ use zip::{CompressionMethod, DateTime, ZipArchive, ZipWriter, write::SimpleFileO
 mod docs;
 mod retrieval;
 mod selector_corpus;
+mod typed_evidence_trace;
+mod typed_evidence_v2;
 
 const LICENSE_REPORT: &str = "resources/licenses/THIRD_PARTY_LICENSES.md";
 const NON_CARGO_LICENSE_INVENTORY: &str = "resources/licenses/NON_CARGO_COMPONENTS.md";
@@ -193,6 +195,66 @@ async fn main() -> Result<()> {
             Some(other) => bail!("unknown retrieval command: {other}"),
             None => bail!("missing retrieval command; expected `validate` or `evaluate`"),
         },
+        "typed-evidence-v2" => match arguments.next().as_deref() {
+            Some("prepare") => {
+                ensure!(
+                    arguments.next().as_deref() == Some("--embedding-snapshot"),
+                    "typed-evidence-v2 prepare expects `--embedding-snapshot <path>` first"
+                );
+                let embedding_snapshot = arguments
+                    .next()
+                    .context("typed-evidence-v2 prepare is missing the embedding snapshot")?;
+                ensure!(
+                    arguments.next().as_deref() == Some("--relevance-snapshot"),
+                    "typed-evidence-v2 prepare expects `--relevance-snapshot <path>` second"
+                );
+                let relevance_snapshot = arguments
+                    .next()
+                    .context("typed-evidence-v2 prepare is missing the relevance snapshot")?;
+                ensure!(
+                    arguments.next().as_deref() == Some("--output"),
+                    "typed-evidence-v2 prepare expects `--output <directory>` third"
+                );
+                let output = arguments
+                    .next()
+                    .context("typed-evidence-v2 prepare is missing the output directory")?;
+                ensure!(
+                    arguments.next().is_none(),
+                    "typed-evidence-v2 prepare received unexpected arguments"
+                );
+                retrieval::prepare_typed_v2(
+                    Path::new(&embedding_snapshot),
+                    Path::new(&relevance_snapshot),
+                    Path::new(&output),
+                )
+                .await
+            }
+            Some("annotate") => {
+                ensure!(
+                    arguments.next().is_none(),
+                    "typed-evidence-v2 annotate received unexpected arguments"
+                );
+                typed_evidence_trace::annotate_from_workspace().map(|_| ())
+            }
+            Some("freeze-evidence") => {
+                ensure!(
+                    arguments.next().is_none(),
+                    "typed-evidence-v2 freeze-evidence received unexpected arguments"
+                );
+                retrieval::freeze_typed_v2_evidence()
+            }
+            Some("score") => {
+                ensure!(
+                    arguments.next().is_none(),
+                    "typed-evidence-v2 score received unexpected arguments"
+                );
+                retrieval::score_typed_v2()
+            }
+            Some(other) => bail!("unknown typed-evidence-v2 command: {other}"),
+            None => bail!(
+                "missing typed-evidence-v2 command; expected `prepare`, `annotate`, `freeze-evidence` or `score`"
+            ),
+        },
         "selector-corpus" => match arguments.next().as_deref() {
             Some("validate") => {
                 ensure!(
@@ -257,6 +319,12 @@ async fn main() -> Result<()> {
             println!(
                 "cargo run --locked -p xtask -- retrieval evaluate --embedding-snapshot <directory> --relevance-snapshot <directory>"
             );
+            println!(
+                "cargo run --locked -p xtask -- typed-evidence-v2 prepare --embedding-snapshot <directory> --relevance-snapshot <directory> --output <directory>"
+            );
+            println!("cargo run --locked -p xtask -- typed-evidence-v2 annotate");
+            println!("cargo run --locked -p xtask -- typed-evidence-v2 freeze-evidence");
+            println!("cargo run --locked -p xtask -- typed-evidence-v2 score");
             println!("cargo run --locked -p xtask -- selector-corpus validate");
             println!("cargo run --locked -p xtask -- licenses generate");
             println!("cargo run --locked -p xtask -- licenses check");

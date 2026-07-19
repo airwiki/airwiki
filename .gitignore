@@ -30,3 +30,4 @@ __pycache__/
 /vendor/llama.cpp/
 /resources/llama/
 /models/
+/experiments/typed-evidence-ceiling-v2/evidence/

@@ -80,7 +80,6 @@ The workspace separates dependency-light contracts, local domain logic, inferenc
 - [Retrieval-quality evaluation](docs/retrieval-quality-evaluation.md)
 - [Selector adaptation experiment](docs/selector-adaptation-experiment.md)
 - [Pool-level abstention experiment](docs/pool-null-selector-experiment.md)
-- [Typed-evidence ceiling v2](docs/typed-evidence-ceiling-v2.md)
 - [Local chat integrations](docs/chat-integrations.md)
 - [Two-node manual acceptance](docs/two-node-runbook.md)
 - [Recovery](docs/recovery.md)

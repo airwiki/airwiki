@@ -1,7 +1,5 @@
 use std::{
-    collections::{BTreeMap, BTreeSet, HashMap, HashSet},
-    fs::OpenOptions,
-    io::Write,
+    collections::{BTreeSet, HashMap, HashSet},
     path::{Path, PathBuf},
     sync::{Arc, Mutex},
     time::Instant,
@@ -24,18 +22,7 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use uuid::Uuid;
 
-use crate::{
-    replace_file,
-    typed_evidence_v2::{
-        Case as TypedCase, CaseTag as TypedCaseTag, CeilingReport as TypedCeilingReport,
-        Claim as TypedClaim, ControlSpec as TypedControlSpec, EvaluationSplit,
-        Fixture as TypedFixture, GateSpec as TypedGateSpec, Need as TypedNeed,
-        QuestionAnnotation as TypedQuestionAnnotation, Source as TypedSource,
-        SourceAnnotation as TypedSourceAnnotation, evaluate_ceiling,
-        validate_blind_question_annotation, validate_blind_source_annotation,
-    },
-    workspace_root,
-};
+use crate::{replace_file, workspace_root};
 
 const FIXTURE_PATH: &str = "fixtures/retrieval/search-quality-v3.json";
 const REPORT_DIRECTORY: &str = "target/evals";
@@ -46,28 +33,6 @@ const MIN_RECALL_AT_FIVE: f64 = 0.9;
 const ORIGIN_NODE_ID: &str = "fixture-origin";
 const PEER_NODE_ID: &str = "fixture-peer";
 const ORIGIN_REQUESTER_ID: &str = "fixture-origin-requester";
-const TYPED_V2_FIXTURE_SHA256: &str =
-    "8a04bf7eec4aa35e6f5cdfa1c7000ab6d9f666814281c466fb82e5c4b10986ff";
-const TYPED_V2_CONTROL_SCHEMA_VERSION: u32 = 1;
-const TYPED_V2_ANNOTATION_SCHEMA_VERSION: u32 = 2;
-const TYPED_V2_REPORT_SCHEMA_VERSION: u32 = 1;
-const TYPED_V2_PREPARED_DIRECTORY: &str = "experiments/typed-evidence-ceiling-v2/prepared";
-const TYPED_V2_SOURCE_INPUT_SHA256: &str =
-    "4303eba592c5174c5f37f3aaf35e56df3a25a9270e75a165d35bfebc7516400a";
-const TYPED_V2_QUESTION_INPUT_SHA256: &str =
-    "d71238bf3fa9072a226b995e956a99d0318136b74ac2b60c8e01d22571dff395";
-const TYPED_V2_CONTROL_SHA256: &str =
-    "d52dbf20fec553ee38f29a01bd72f7430bda16ae96978caf925ab38c7bc046f6";
-const TYPED_V2_EVIDENCE_DIRECTORY: &str = "experiments/typed-evidence-ceiling-v2/evidence";
-const TYPED_V2_EVIDENCE_MANIFEST_HASH_PATH: &str =
-    "experiments/typed-evidence-ceiling-v2/evidence-manifest.sha256";
-const TYPED_V2_REPORT_PATH: &str = "target/evals/typed-evidence-v2.json";
-const TYPED_V2_MAX_ARTIFACT_BYTES: u64 = 1024 * 1024;
-const TYPED_V2_PERMUTATION_COUNT: u8 = 8;
-const TYPED_V2_MIN_RECALL_BPS: u16 = 9_000;
-const TYPED_V2_MIN_SPLIT_RECALL_BPS: u16 = 9_000;
-const TYPED_V2_MIN_EXACT_CASE_RATE_BPS: u16 = 8_500;
-const TYPED_V2_MIN_CONTROL_GAIN_BPS: u16 = 1_000;
 
 const EXPECTED_CASE_IDS: [&str; 17] = [
     "calibration_aurora_owner",
@@ -260,7 +225,6 @@ fn evidence_locator(title: &str, heading: &str) -> EvidenceLocator {
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct AuditedCandidate {
     fact_id: Option<String>,
-    snippet_sha256: String,
     decision: EvidenceDecision,
 }
 
@@ -321,7 +285,6 @@ impl EvidenceRelevanceProvider for AuditedRelevanceProvider {
                     .facts
                     .get(&evidence_locator(&candidate.title, &candidate.heading))
                     .cloned(),
-                snippet_sha256: synthetic_sha256(&candidate.text),
                 decision: *decision,
             })
             .collect();
@@ -589,187 +552,10 @@ struct RetrievalEvaluationReport {
     cases: Vec<RetrievalCaseReport>,
 }
 
-#[derive(Debug)]
-struct EvaluationOutcome {
-    report: RetrievalEvaluationReport,
-    controls: Vec<BaselineControlCase>,
-}
-
-#[derive(Debug)]
-struct BaselineControlCase {
-    case_id: String,
-    candidate_pools: Vec<MaskAuditCall>,
-}
-
-#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
-#[serde(deny_unknown_fields)]
-struct TypedSourceInput {
-    source_id: String,
-    source_record_sha256: String,
-    title: String,
-    heading: String,
-    text: String,
-}
-
-#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
-#[serde(deny_unknown_fields)]
-struct TypedQuestionInput {
-    question_id: String,
-    question_record_sha256: String,
-    question: String,
-}
-
-#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
-#[serde(deny_unknown_fields)]
-struct TypedControlRecord {
-    schema_version: u32,
-    question_id: String,
-    candidate_pools: Vec<TypedControlPool>,
-}
-
-#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
-#[serde(deny_unknown_fields)]
-struct TypedControlPool {
-    source: TypedControlSource,
-    source_ids: Vec<String>,
-}
-
-#[derive(Debug, Clone, Copy, Deserialize, Serialize, PartialEq, Eq, PartialOrd, Ord, Hash)]
-#[serde(rename_all = "snake_case")]
-enum TypedControlSource {
-    Origin,
-    Peer,
-}
-
-impl TypedControlSource {
-    const fn fixture_node(self) -> FixtureNode {
-        match self {
-            Self::Origin => FixtureNode::Origin,
-            Self::Peer => FixtureNode::Peer,
-        }
-    }
-}
-
-#[derive(Debug, Clone, Copy, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "snake_case")]
-enum TypedUnresolvedReasonCode {
-    MissingSubject,
-    AmbiguousSubject,
-    AmbiguousRelation,
-    AmbiguousState,
-    UnsupportedStructure,
-}
-
-#[derive(Debug, Deserialize)]
-#[serde(tag = "status", rename_all = "snake_case", deny_unknown_fields)]
-enum TypedSourceAdjudication {
-    Resolved {
-        source_id: String,
-        claims: Vec<TypedClaim>,
-    },
-    Unresolved {
-        source_id: String,
-        reason_code: TypedUnresolvedReasonCode,
-    },
-}
-
-impl TypedSourceAdjudication {
-    fn source_id(&self) -> &str {
-        match self {
-            Self::Resolved { source_id, .. } | Self::Unresolved { source_id, .. } => source_id,
-        }
-    }
-}
-
-#[derive(Debug, Deserialize)]
-#[serde(tag = "status", rename_all = "snake_case", deny_unknown_fields)]
-enum TypedQuestionAdjudication {
-    Resolved {
-        question_id: String,
-        needs: Vec<TypedNeed>,
-    },
-    Unresolved {
-        question_id: String,
-        reason_code: TypedUnresolvedReasonCode,
-    },
-}
-
-impl TypedQuestionAdjudication {
-    fn question_id(&self) -> &str {
-        match self {
-            Self::Resolved { question_id, .. } | Self::Unresolved { question_id, .. } => {
-                question_id
-            }
-        }
-    }
-}
-
-#[derive(Debug, Clone, Copy, Serialize, PartialEq, Eq)]
-struct TypedHistoricalBaseline {
-    expected_group_count: u32,
-    found_group_count: u32,
-    false_evidence_count: u32,
-    forbidden_evidence_count: u32,
-}
-
-#[derive(Debug, Clone, Copy, Serialize, PartialEq, Eq)]
-struct TypedIntegritySummary {
-    transport_error_count: u32,
-    annotation_error_count: u32,
-    authorization_error_count: u32,
-    provenance_error_count: u32,
-    stability_error_count: u32,
-}
-
-#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
-struct TypedArtifactHashes {
-    fixture_sha256: String,
-    control_sha256: String,
-    source_input_sha256: String,
-    question_input_sha256: String,
-    source_adjudication_sha256: String,
-    question_adjudication_sha256: String,
-    evidence_manifest_sha256: String,
-}
-
-#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
-struct TypedSemanticReport {
-    schema_version: u32,
-    artifacts: TypedArtifactHashes,
-    historical_baseline: TypedHistoricalBaseline,
-    integrity: TypedIntegritySummary,
-    controls: TypedControlSpec,
-    gates: TypedGateSpec,
-    ceiling: TypedCeilingReport,
-    passed: bool,
-}
-
-impl From<FixtureNode> for TypedControlSource {
-    fn from(value: FixtureNode) -> Self {
-        match value {
-            FixtureNode::Origin => Self::Origin,
-            FixtureNode::Peer => Self::Peer,
-        }
-    }
-}
-
-#[derive(Debug)]
-struct TypedOpaqueSources {
-    by_fact_id: HashMap<String, String>,
-    text_sha256_by_fact_id: HashMap<String, String>,
-}
-
-#[derive(Debug)]
-struct TypedPreparedArtifacts {
-    source_input: String,
-    question_input: String,
-    control: String,
-}
-
 pub async fn validate() -> Result<()> {
     let loaded = load_fixture()?;
     let providers = fixture_providers(&loaded.fixture)?;
-    let report = run_evaluation(&loaded, providers).await?.report;
+    let report = run_evaluation(&loaded, providers).await?;
     ensure!(
         report.passed,
         "deterministic retrieval pipeline did not meet the fixture contract"
@@ -783,934 +569,8 @@ pub async fn validate() -> Result<()> {
 }
 
 pub async fn evaluate(embedding_snapshot: &Path, relevance_snapshot: &Path) -> Result<()> {
-    let loaded = load_fixture()?;
-    let providers = production_providers(embedding_snapshot, relevance_snapshot)?;
-    let report = run_evaluation(&loaded, providers).await?.report;
-    let destination = write_report(&report)?;
-    ensure!(
-        report.passed,
-        "retrieval pipeline did not meet the acceptance thresholds; report written to {}",
-        destination.display()
-    );
-    println!(
-        "retrieval pipeline passed; report written to {}",
-        destination.display()
-    );
-    Ok(())
-}
-
-pub async fn prepare_typed_v2(
-    embedding_snapshot: &Path,
-    relevance_snapshot: &Path,
-    output_directory: &Path,
-) -> Result<()> {
-    ensure!(
-        std::env::consts::OS == "macos" && std::env::consts::ARCH == "aarch64",
-        "typed-evidence v2 control preparation is frozen to macOS arm64"
-    );
-    let loaded = load_fixture()?;
-    ensure!(
-        loaded.sha256 == TYPED_V2_FIXTURE_SHA256,
-        "typed-evidence v2 fixture differs from the preregistered corpus"
-    );
-    let providers = production_providers(embedding_snapshot, relevance_snapshot)?;
-    let outcome = run_evaluation(&loaded, providers).await?;
-    validate_typed_v2_control(&outcome.report)?;
-    let artifacts = build_typed_v2_artifacts(&loaded.fixture, &outcome.controls)?;
-    write_typed_v2_artifacts(output_directory, &artifacts)?;
-    println!(
-        "source-input.jsonl  {}\nquestion-input.jsonl {}\ncontrol.jsonl       {}",
-        synthetic_sha256(&artifacts.source_input),
-        synthetic_sha256(&artifacts.question_input),
-        synthetic_sha256(&artifacts.control)
-    );
-    Ok(())
-}
-
-pub fn freeze_typed_v2_evidence() -> Result<()> {
-    let workspace = workspace_root();
-    let reviewed_commit = crate::typed_evidence_trace::ensure_reviewed_main(&workspace)?;
-    crate::typed_evidence_trace::ensure_frozen_runner(&workspace)?;
-    let evidence_directory = workspace.join(TYPED_V2_EVIDENCE_DIRECTORY);
-    let verified = crate::typed_evidence_trace::verify_evidence(&evidence_directory)
-        .context("typed-evidence v2 execution evidence is invalid")?;
-    ensure!(
-        verified.repository_commit == reviewed_commit,
-        "typed-evidence v2 evidence was not produced from the current reviewed main"
-    );
-    let destination = workspace.join(TYPED_V2_EVIDENCE_MANIFEST_HASH_PATH);
-    write_typed_v2_one_shot(
-        &destination,
-        format!("{}\n", verified.manifest_sha256).as_bytes(),
-    )?;
-    println!(
-        "typed-evidence v2 manifest hash frozen at {}",
-        destination.display()
-    );
-    Ok(())
-}
-
-pub fn score_typed_v2() -> Result<()> {
-    let workspace = workspace_root();
-    crate::typed_evidence_trace::ensure_reviewed_main(&workspace)?;
-    crate::typed_evidence_trace::ensure_frozen_runner(&workspace)?;
-    score_typed_v2_at(
-        &workspace.join(TYPED_V2_EVIDENCE_DIRECTORY),
-        &workspace.join(TYPED_V2_EVIDENCE_MANIFEST_HASH_PATH),
-        &workspace.join(TYPED_V2_REPORT_PATH),
-    )
-}
-
-fn score_typed_v2_at(
-    evidence_directory: &Path,
-    manifest_hash_path: &Path,
-    output: &Path,
-) -> Result<()> {
-    let frozen_manifest_sha256 = read_typed_v2_manifest_hash(manifest_hash_path)?;
-    let verified = crate::typed_evidence_trace::verify_evidence(evidence_directory)
-        .context("typed-evidence v2 execution evidence is invalid")?;
-    ensure!(
-        verified.manifest_sha256 == frozen_manifest_sha256,
-        "typed-evidence v2 execution manifest differs from the frozen evidence"
-    );
-    let source_input =
-        read_typed_v2_prepared_artifact("source-input.jsonl", TYPED_V2_SOURCE_INPUT_SHA256)?;
-    let question_input =
-        read_typed_v2_prepared_artifact("question-input.jsonl", TYPED_V2_QUESTION_INPUT_SHA256)?;
-    ensure!(
-        verified.source_input == source_input,
-        "typed-evidence v2 source input differs from the frozen prepared artifact"
-    );
-    ensure!(
-        verified.question_input == question_input,
-        "typed-evidence v2 question input differs from the frozen prepared artifact"
-    );
-    ensure!(
-        verified.source_adjudication_sha256
-            == synthetic_sha256_bytes(&verified.source_adjudication),
-        "typed-evidence v2 source adjudication hash is inconsistent"
-    );
-    ensure!(
-        verified.question_adjudication_sha256
-            == synthetic_sha256_bytes(&verified.question_adjudication),
-        "typed-evidence v2 question adjudication hash is inconsistent"
-    );
-
-    validate_typed_v2_blind_evidence(
-        &source_input,
-        &question_input,
-        &verified.source_adjudication,
-        &verified.question_adjudication,
-    )?;
-
-    // The fixture and candidate pools form the scoring key. They are loaded only
-    // after observable execution evidence and both blind adjudications are valid.
-    let loaded = load_fixture()?;
-    ensure!(
-        loaded.sha256 == TYPED_V2_FIXTURE_SHA256,
-        "typed-evidence v2 fixture differs from the preregistered corpus"
-    );
-    let control_bytes = read_typed_v2_prepared_artifact("control.jsonl", TYPED_V2_CONTROL_SHA256)?;
-    let artifacts = TypedArtifactHashes {
-        fixture_sha256: loaded.sha256.clone(),
-        control_sha256: synthetic_sha256_bytes(&control_bytes),
-        source_input_sha256: synthetic_sha256_bytes(&source_input),
-        question_input_sha256: synthetic_sha256_bytes(&question_input),
-        source_adjudication_sha256: verified.source_adjudication_sha256.clone(),
-        question_adjudication_sha256: verified.question_adjudication_sha256.clone(),
-        evidence_manifest_sha256: verified.manifest_sha256.clone(),
-    };
-    let (first_report, first_bytes) = score_typed_v2_once(
-        &loaded.fixture,
-        &source_input,
-        &question_input,
-        &control_bytes,
-        &verified.source_adjudication,
-        &verified.question_adjudication,
-        artifacts.clone(),
-    )?;
-    let (_, second_bytes) = score_typed_v2_once(
-        &loaded.fixture,
-        &source_input,
-        &question_input,
-        &control_bytes,
-        &verified.source_adjudication,
-        &verified.question_adjudication,
-        artifacts,
-    )?;
-    ensure!(
-        first_bytes == second_bytes,
-        "typed-evidence v2 deterministic scorer replay was not byte-identical"
-    );
-
-    write_typed_v2_one_shot(output, &first_bytes)?;
-    ensure!(
-        first_report.passed,
-        "typed-evidence v2 semantic gates failed; report written to {}",
-        output.display()
-    );
-    println!(
-        "typed-evidence v2 semantic gates passed; report written to {}",
-        output.display()
-    );
-    Ok(())
-}
-
-fn validate_typed_v2_blind_evidence(
-    source_input: &[u8],
-    question_input: &[u8],
-    source_adjudication: &[u8],
-    question_adjudication: &[u8],
-) -> Result<()> {
-    let source_inputs = parse_typed_v2_jsonl::<TypedSourceInput>(source_input, "source input")?;
-    let question_inputs =
-        parse_typed_v2_jsonl::<TypedQuestionInput>(question_input, "question input")?;
-    validate_typed_v2_blind_inputs(&source_inputs, &question_inputs)?;
-    let source_adjudications = parse_typed_v2_jsonl::<TypedSourceAdjudication>(
-        source_adjudication,
-        "source adjudication",
-    )?;
-    let question_adjudications = parse_typed_v2_jsonl::<TypedQuestionAdjudication>(
-        question_adjudication,
-        "question adjudication",
-    )?;
-    validate_typed_v2_source_adjudications(&source_inputs, source_adjudications)?;
-    validate_typed_v2_question_adjudications(&question_inputs, question_adjudications)?;
-    Ok(())
-}
-
-fn score_typed_v2_once(
-    fixture: &RetrievalFixture,
-    source_input: &[u8],
-    question_input: &[u8],
-    control: &[u8],
-    source_adjudication: &[u8],
-    question_adjudication: &[u8],
-    artifacts: TypedArtifactHashes,
-) -> Result<(TypedSemanticReport, Vec<u8>)> {
-    let source_inputs = parse_typed_v2_jsonl::<TypedSourceInput>(source_input, "source input")?;
-    let question_inputs =
-        parse_typed_v2_jsonl::<TypedQuestionInput>(question_input, "question input")?;
-    validate_typed_v2_blind_inputs(&source_inputs, &question_inputs)?;
-    let source_adjudications = parse_typed_v2_jsonl::<TypedSourceAdjudication>(
-        source_adjudication,
-        "source adjudication",
-    )?;
-    let question_adjudications = parse_typed_v2_jsonl::<TypedQuestionAdjudication>(
-        question_adjudication,
-        "question adjudication",
-    )?;
-    let source_claims =
-        validate_typed_v2_source_adjudications(&source_inputs, source_adjudications)?;
-    let question_needs =
-        validate_typed_v2_question_adjudications(&question_inputs, question_adjudications)?;
-    let (canonical_sources, opaque_sources) = build_typed_source_inputs(fixture)?;
-    let (canonical_questions, opaque_questions) = build_typed_question_inputs(fixture)?;
-    ensure!(
-        canonical_sources == source_inputs,
-        "typed-evidence v2 source input does not match the frozen fixture"
-    );
-    ensure!(
-        canonical_questions == question_inputs,
-        "typed-evidence v2 question input does not match the frozen fixture"
-    );
-    let controls = parse_typed_v2_jsonl::<TypedControlRecord>(control, "candidate control")?;
-    let scoring_fixture = build_typed_v2_scoring_fixture(
-        fixture,
-        &controls,
-        &opaque_sources,
-        &opaque_questions,
-        source_claims,
-        question_needs,
-    )?;
-    let ceiling = evaluate_ceiling(
-        &scoring_fixture,
-        typed_v2_control_spec(),
-        typed_v2_gate_spec(),
-    )
-    .context("typed-evidence v2 scorer rejected the frozen inputs")?;
-    let report = typed_v2_semantic_report(artifacts, ceiling);
-    let bytes = serialize_typed_v2_report(&report)?;
-    Ok((report, bytes))
-}
-
-fn typed_v2_control_spec() -> TypedControlSpec {
-    TypedControlSpec {
-        permutation_count: TYPED_V2_PERMUTATION_COUNT,
-    }
-}
-
-fn typed_v2_gate_spec() -> TypedGateSpec {
-    TypedGateSpec {
-        min_recall_bps: TYPED_V2_MIN_RECALL_BPS,
-        min_split_recall_bps: TYPED_V2_MIN_SPLIT_RECALL_BPS,
-        min_exact_case_rate_bps: TYPED_V2_MIN_EXACT_CASE_RATE_BPS,
-        max_unexpected_facts: 0,
-        max_forbidden_facts: 0,
-        min_exact_gain_over_structure_bps: TYPED_V2_MIN_CONTROL_GAIN_BPS,
-        min_exact_gain_over_permutations_bps: TYPED_V2_MIN_CONTROL_GAIN_BPS,
-    }
-}
-
-fn typed_v2_semantic_report(
-    artifacts: TypedArtifactHashes,
-    ceiling: TypedCeilingReport,
-) -> TypedSemanticReport {
-    let integrity = TypedIntegritySummary {
-        transport_error_count: 0,
-        annotation_error_count: 0,
-        authorization_error_count: 0,
-        provenance_error_count: 0,
-        stability_error_count: 0,
-    };
-    TypedSemanticReport {
-        schema_version: TYPED_V2_REPORT_SCHEMA_VERSION,
-        artifacts,
-        historical_baseline: TypedHistoricalBaseline {
-            expected_group_count: 18,
-            found_group_count: 13,
-            false_evidence_count: 2,
-            forbidden_evidence_count: 0,
-        },
-        integrity,
-        controls: typed_v2_control_spec(),
-        gates: typed_v2_gate_spec(),
-        passed: ceiling.gates.passed,
-        ceiling,
-    }
-}
-
-fn serialize_typed_v2_report(report: &TypedSemanticReport) -> Result<Vec<u8>> {
-    let mut bytes = serde_json::to_vec(report).context("serializing typed-evidence v2 report")?;
-    bytes.push(b'\n');
-    Ok(bytes)
-}
-
-fn read_typed_v2_manifest_hash(path: &Path) -> Result<String> {
-    let metadata = std::fs::symlink_metadata(path).with_context(
-        || "typed-evidence v2 scoring is disabled until the execution manifest hash is frozen",
-    )?;
-    ensure!(
-        metadata.file_type().is_file()
-            && !metadata.file_type().is_symlink()
-            && metadata.len() == 65,
-        "typed-evidence v2 manifest hash must be a 65-byte regular file"
-    );
-    let bytes = std::fs::read(path).context("reading typed-evidence v2 manifest hash")?;
-    ensure!(
-        bytes.len() == 65 && bytes[64] == b'\n',
-        "typed-evidence v2 manifest hash must be one lowercase SHA-256 with terminal LF"
-    );
-    let value = std::str::from_utf8(&bytes[..64])
-        .context("typed-evidence v2 manifest hash is not UTF-8")?;
-    ensure!(
-        value
-            .bytes()
-            .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte)),
-        "typed-evidence v2 manifest hash must be lowercase hexadecimal"
-    );
-    Ok(value.to_owned())
-}
-
-fn write_typed_v2_one_shot(output: &Path, bytes: &[u8]) -> Result<()> {
-    let parent = output
-        .parent()
-        .filter(|parent| !parent.as_os_str().is_empty())
-        .unwrap_or_else(|| Path::new("."));
-    std::fs::create_dir_all(parent).with_context(|| {
-        format!(
-            "creating typed-evidence v2 artifact parent {}",
-            parent.display()
-        )
-    })?;
-    ensure!(
-        !output.exists(),
-        "typed-evidence v2 one-shot destination already exists"
-    );
-    let temporary = output.with_extension(format!("tmp-{}", Uuid::new_v4()));
-    let write_result = (|| -> Result<()> {
-        let mut file = OpenOptions::new()
-            .write(true)
-            .create_new(true)
-            .open(&temporary)
-            .with_context(|| {
-                format!(
-                    "creating typed-evidence v2 artifact {}",
-                    temporary.display()
-                )
-            })?;
-        file.write_all(bytes).with_context(|| {
-            format!("writing typed-evidence v2 artifact {}", temporary.display())
-        })?;
-        file.sync_all().with_context(|| {
-            format!("syncing typed-evidence v2 artifact {}", temporary.display())
-        })?;
-        std::fs::hard_link(&temporary, output).with_context(|| {
-            format!(
-                "committing one-shot typed-evidence v2 artifact {}",
-                output.display()
-            )
-        })?;
-        Ok(())
-    })();
-    if let Err(error) = write_result {
-        let _ = std::fs::remove_file(&temporary);
-        return Err(error);
-    }
-    std::fs::remove_file(&temporary).with_context(|| {
-        format!(
-            "removing typed-evidence v2 temporary {}",
-            temporary.display()
-        )
-    })?;
-    Ok(())
-}
-
-fn read_typed_v2_prepared_artifact(filename: &str, expected_sha256: &str) -> Result<Vec<u8>> {
-    let path = workspace_root()
-        .join(TYPED_V2_PREPARED_DIRECTORY)
-        .join(filename);
-    let metadata = std::fs::symlink_metadata(&path)
-        .with_context(|| format!("inspecting frozen typed-evidence v2 {filename}"))?;
-    ensure!(
-        metadata.file_type().is_file() && !metadata.file_type().is_symlink(),
-        "frozen typed-evidence v2 {filename} must be a regular file"
-    );
-    ensure!(
-        metadata.len() <= TYPED_V2_MAX_ARTIFACT_BYTES,
-        "frozen typed-evidence v2 {filename} exceeds the size limit"
-    );
-    let bytes = std::fs::read(&path)
-        .with_context(|| format!("reading frozen typed-evidence v2 {filename}"))?;
-    ensure!(
-        synthetic_sha256_bytes(&bytes) == expected_sha256,
-        "frozen typed-evidence v2 {filename} has an unexpected SHA-256"
-    );
-    Ok(bytes)
-}
-
-fn synthetic_sha256_bytes(bytes: &[u8]) -> String {
-    hex::encode(Sha256::digest(bytes))
-}
-
-fn parse_typed_v2_jsonl<T: serde::de::DeserializeOwned>(
-    bytes: &[u8],
-    artifact: &str,
-) -> Result<Vec<T>> {
-    ensure!(
-        !bytes.is_empty() && bytes.len() <= TYPED_V2_MAX_ARTIFACT_BYTES as usize,
-        "typed-evidence v2 {artifact} is empty or exceeds the size limit"
-    );
-    ensure!(
-        bytes.last() == Some(&b'\n')
-            && !bytes[..bytes.len() - 1].ends_with(b"\n")
-            && !bytes.contains(&b'\r')
-            && !bytes.contains(&b'\0'),
-        "typed-evidence v2 {artifact} must be canonical JSONL with one final LF"
-    );
-    bytes[..bytes.len() - 1]
-        .split(|byte| *byte == b'\n')
-        .enumerate()
-        .map(|(index, line)| {
-            ensure!(
-                !line.is_empty(),
-                "typed-evidence v2 {artifact} contains an empty record"
-            );
-            serde_json::from_slice(line).with_context(|| {
-                format!("parsing typed-evidence v2 {artifact} record {}", index + 1)
-            })
-        })
-        .collect()
-}
-
-fn validate_typed_v2_blind_inputs(
-    source_inputs: &[TypedSourceInput],
-    question_inputs: &[TypedQuestionInput],
-) -> Result<()> {
-    ensure!(
-        !source_inputs.is_empty() && source_inputs.len() < 1_000,
-        "typed-evidence v2 source input has an unsupported record count"
-    );
-    ensure!(
-        !question_inputs.is_empty() && question_inputs.len() < 1_000,
-        "typed-evidence v2 question input has an unsupported record count"
-    );
-    for (index, record) in source_inputs.iter().enumerate() {
-        ensure!(
-            record.source_id == typed_opaque_id("source", index)?,
-            "typed-evidence v2 source input IDs are incomplete or out of order"
-        );
-        let record_bytes = serde_json::to_vec(&(
-            record.title.as_str(),
-            record.heading.as_str(),
-            record.text.as_str(),
-        ))?;
-        ensure!(
-            record.source_record_sha256 == hex::encode(Sha256::digest(record_bytes)),
-            "typed-evidence v2 source input contains an invalid record hash"
-        );
-    }
-    for (index, record) in question_inputs.iter().enumerate() {
-        ensure!(
-            record.question_id == typed_opaque_id("question", index)?,
-            "typed-evidence v2 question input IDs are incomplete or out of order"
-        );
-        ensure!(
-            record.question_record_sha256 == synthetic_sha256(&record.question),
-            "typed-evidence v2 question input contains an invalid record hash"
-        );
-    }
-    Ok(())
-}
-
-fn validate_typed_v2_source_adjudications(
-    inputs: &[TypedSourceInput],
-    adjudications: Vec<TypedSourceAdjudication>,
-) -> Result<BTreeMap<String, Vec<TypedClaim>>> {
-    ensure!(
-        adjudications.len() == inputs.len(),
-        "typed-evidence v2 source adjudication is incomplete"
-    );
-    let mut observed = BTreeSet::new();
-    let mut resolved = BTreeMap::new();
-    for (input, adjudication) in inputs.iter().zip(adjudications) {
-        ensure!(
-            observed.insert(adjudication.source_id().to_owned()),
-            "typed-evidence v2 source adjudication contains a duplicate ID"
-        );
-        ensure!(
-            adjudication.source_id() == input.source_id,
-            "typed-evidence v2 source adjudication IDs are incomplete or out of order"
-        );
-        let claims = match adjudication {
-            TypedSourceAdjudication::Resolved { claims, .. } => claims,
-            TypedSourceAdjudication::Unresolved { reason_code, .. } => {
-                return Err(anyhow!(
-                    "typed-evidence v2 source adjudication contains unresolved record {} ({reason_code:?})",
-                    input.source_id
-                ));
-            }
-        };
-        ensure!(
-            !claims.is_empty(),
-            "typed-evidence v2 resolved source annotation has no claims"
-        );
-        validate_typed_v2_claim_quotes(&input.text, &claims)?;
-        let annotation = TypedSourceAnnotation {
-            schema_version: TYPED_V2_ANNOTATION_SCHEMA_VERSION,
-            fact_id: input.source_id.clone(),
-            claims,
-        };
-        validate_blind_source_annotation(&annotation)
-            .context("typed-evidence v2 source adjudication is structurally invalid")?;
-        ensure!(
-            resolved
-                .insert(input.source_id.clone(), annotation.claims)
-                .is_none(),
-            "typed-evidence v2 source adjudication mapping is not unique"
-        );
-    }
-    Ok(resolved)
-}
-
-fn validate_typed_v2_claim_quotes(text: &str, claims: &[TypedClaim]) -> Result<()> {
-    let mut previous = None::<(usize, &str)>;
-    for claim in claims {
-        ensure!(
-            !claim.support_quote.is_empty(),
-            "typed-evidence v2 source claim contains an empty support quote"
-        );
-        let position = text
-            .find(&claim.support_quote)
-            .context("typed-evidence v2 source claim quote is not an exact input substring")?;
-        let current = (position, claim.relation.as_str());
-        ensure!(
-            previous.is_none_or(|previous| previous <= current),
-            "typed-evidence v2 source claims do not preserve text and relation order"
-        );
-        previous = Some(current);
-    }
-    Ok(())
-}
-
-fn validate_typed_v2_question_adjudications(
-    inputs: &[TypedQuestionInput],
-    adjudications: Vec<TypedQuestionAdjudication>,
-) -> Result<BTreeMap<String, Vec<TypedNeed>>> {
-    ensure!(
-        adjudications.len() == inputs.len(),
-        "typed-evidence v2 question adjudication is incomplete"
-    );
-    let mut observed = BTreeSet::new();
-    let mut resolved = BTreeMap::new();
-    for (input, adjudication) in inputs.iter().zip(adjudications) {
-        ensure!(
-            observed.insert(adjudication.question_id().to_owned()),
-            "typed-evidence v2 question adjudication contains a duplicate ID"
-        );
-        ensure!(
-            adjudication.question_id() == input.question_id,
-            "typed-evidence v2 question adjudication IDs are incomplete or out of order"
-        );
-        let needs = match adjudication {
-            TypedQuestionAdjudication::Resolved { needs, .. } => needs,
-            TypedQuestionAdjudication::Unresolved { reason_code, .. } => {
-                return Err(anyhow!(
-                    "typed-evidence v2 question adjudication contains unresolved record {} ({reason_code:?})",
-                    input.question_id
-                ));
-            }
-        };
-        ensure!(
-            !needs.is_empty(),
-            "typed-evidence v2 resolved question annotation has no needs"
-        );
-        validate_typed_v2_need_quotes(&input.question, &needs)?;
-        let annotation = TypedQuestionAnnotation {
-            schema_version: TYPED_V2_ANNOTATION_SCHEMA_VERSION,
-            case_id: input.question_id.clone(),
-            needs,
-        };
-        validate_blind_question_annotation(&annotation)
-            .context("typed-evidence v2 question adjudication is structurally invalid")?;
-        ensure!(
-            resolved
-                .insert(input.question_id.clone(), annotation.needs)
-                .is_none(),
-            "typed-evidence v2 question adjudication mapping is not unique"
-        );
-    }
-    Ok(resolved)
-}
-
-fn validate_typed_v2_need_quotes(question: &str, needs: &[TypedNeed]) -> Result<()> {
-    let mut previous_position = None;
-    for need in needs {
-        ensure!(
-            !need.question_quote.is_empty(),
-            "typed-evidence v2 question need contains an empty quote"
-        );
-        let position = question
-            .find(&need.question_quote)
-            .context("typed-evidence v2 question quote is not an exact input substring")?;
-        ensure!(
-            previous_position.is_none_or(|previous| previous <= position),
-            "typed-evidence v2 question needs do not preserve question order"
-        );
-        previous_position = Some(position);
-    }
-    Ok(())
-}
-
-fn build_typed_v2_scoring_fixture(
-    fixture: &RetrievalFixture,
-    controls: &[TypedControlRecord],
-    opaque_sources: &TypedOpaqueSources,
-    opaque_questions: &BTreeMap<String, String>,
-    mut source_claims: BTreeMap<String, Vec<TypedClaim>>,
-    mut question_needs: BTreeMap<String, Vec<TypedNeed>>,
-) -> Result<TypedFixture> {
-    ensure!(
-        controls.len() == fixture.cases.len(),
-        "typed-evidence v2 candidate control is incomplete"
-    );
-    let fact_by_source_id = invert_typed_v2_mapping(&opaque_sources.by_fact_id, "source")?;
-    let case_by_question_id = invert_typed_v2_mapping(opaque_questions, "question")?;
-    let fact_nodes = typed_v2_fact_nodes(fixture)?;
-    let mut annotations_by_fact = BTreeMap::new();
-    for (source_id, fact_id) in &fact_by_source_id {
-        let claims = source_claims
-            .remove(source_id)
-            .with_context(|| format!("missing typed-evidence v2 annotation for {source_id}"))?;
-        ensure!(
-            annotations_by_fact
-                .insert(
-                    fact_id.clone(),
-                    TypedSourceAnnotation {
-                        schema_version: TYPED_V2_ANNOTATION_SCHEMA_VERSION,
-                        fact_id: fact_id.clone(),
-                        claims,
-                    },
-                )
-                .is_none(),
-            "typed-evidence v2 source annotations are not one-to-one"
-        );
-    }
-    ensure!(
-        source_claims.is_empty(),
-        "typed-evidence v2 source adjudication contains an unknown ID"
-    );
-
-    let cases_by_id = fixture
-        .cases
-        .iter()
-        .map(|case| (case.id.as_str(), case))
-        .collect::<BTreeMap<_, _>>();
-    let mut observed_questions = BTreeSet::new();
-    let mut scored_cases = Vec::with_capacity(controls.len());
-    for control in controls {
-        ensure!(
-            control.schema_version == TYPED_V2_CONTROL_SCHEMA_VERSION,
-            "typed-evidence v2 candidate control uses an unsupported schema"
-        );
-        ensure!(
-            observed_questions.insert(control.question_id.as_str()),
-            "typed-evidence v2 candidate control contains a duplicate question"
-        );
-        let case_id = case_by_question_id
-            .get(&control.question_id)
-            .with_context(|| {
-                format!(
-                    "typed-evidence v2 candidate control references unknown question {}",
-                    control.question_id
-                )
-            })?;
-        let case = cases_by_id
-            .get(case_id.as_str())
-            .context("typed-evidence v2 question mapping references an unknown case")?;
-        let expected_question_id = typed_opaque_id("question", scored_cases.len())?;
-        ensure!(
-            control.question_id == expected_question_id,
-            "typed-evidence v2 candidate control questions are out of order"
-        );
-        validate_typed_v2_control_pools(
-            fixture,
-            case,
-            &control.candidate_pools,
-            &fact_by_source_id,
-            &fact_nodes,
-        )?;
-        let needs = question_needs
-            .remove(&control.question_id)
-            .context("typed-evidence v2 question annotation is missing")?;
-        let pools = control
-            .candidate_pools
-            .iter()
-            .map(|pool| (pool.source, pool))
-            .collect::<BTreeMap<_, _>>();
-        let sources = typed_v2_scope_nodes(case.scope)
-            .into_iter()
-            .map(|node| {
-                let control_source = TypedControlSource::from(node);
-                let source_ids = pools
-                    .get(&control_source)
-                    .map_or(&[][..], |pool| pool.source_ids.as_slice());
-                let ranked_evidence = source_ids
-                    .iter()
-                    .map(|source_id| {
-                        let fact_id = fact_by_source_id.get(source_id).with_context(|| {
-                            format!(
-                                "typed-evidence v2 candidate control references unknown source {source_id}"
-                            )
-                        })?;
-                        annotations_by_fact.get(fact_id).cloned().with_context(|| {
-                            format!("missing typed-evidence v2 annotation for {source_id}")
-                        })
-                    })
-                    .collect::<Result<Vec<_>>>()?;
-                Ok(TypedSource {
-                    source_id: node.label().to_owned(),
-                    ranked_evidence,
-                })
-            })
-            .collect::<Result<Vec<_>>>()?;
-        let mut tags = case
-            .tags
-            .iter()
-            .filter_map(|tag| match tag {
-                RetrievalTag::Compound => Some(TypedCaseTag::Compound),
-                RetrievalTag::Conflict => Some(TypedCaseTag::Conflict),
-                _ => None,
-            })
-            .collect::<Vec<_>>();
-        tags.sort_unstable();
-        tags.dedup();
-        scored_cases.push(TypedCase {
-            case_id: case.id.clone(),
-            split: match case.split {
-                RetrievalSplit::Regression => EvaluationSplit::Regression,
-                RetrievalSplit::Calibration => EvaluationSplit::Calibration,
-                RetrievalSplit::Holdout => EvaluationSplit::Holdout,
-            },
-            tags,
-            question: TypedQuestionAnnotation {
-                schema_version: TYPED_V2_ANNOTATION_SCHEMA_VERSION,
-                case_id: case.id.clone(),
-                needs,
-            },
-            sources,
-            expected_groups: case.expected_groups.clone(),
-            allowed_support_fact_ids: case.allowed_support_fact_ids.clone(),
-            forbidden_fact_ids: case.forbidden_fact_ids.clone(),
-        });
-    }
-    ensure!(
-        observed_questions.len() == opaque_questions.len() && question_needs.is_empty(),
-        "typed-evidence v2 question adjudication or candidate control is incomplete"
-    );
-    Ok(TypedFixture {
-        cases: scored_cases,
-    })
-}
-
-fn invert_typed_v2_mapping<'a>(
-    mapping: impl IntoIterator<Item = (&'a String, &'a String)>,
-    label: &str,
-) -> Result<BTreeMap<String, String>> {
-    let mut inverse = BTreeMap::new();
-    for (real_id, opaque_id) in mapping {
-        ensure!(
-            inverse
-                .insert(opaque_id.to_string(), real_id.to_string())
-                .is_none(),
-            "typed-evidence v2 {label} mapping is not one-to-one"
-        );
-    }
-    Ok(inverse)
-}
-
-fn typed_v2_fact_nodes(fixture: &RetrievalFixture) -> Result<BTreeMap<String, FixtureNode>> {
-    let collection_nodes = fixture
-        .collections
-        .iter()
-        .map(|collection| (collection.id.as_str(), collection.node))
-        .collect::<BTreeMap<_, _>>();
-    let mut nodes = BTreeMap::new();
-    for document in &fixture.documents {
-        let node = collection_nodes
-            .get(document.collection_id.as_str())
-            .copied()
-            .context("typed-evidence v2 document references an unknown collection")?;
-        for chunk in &document.chunks {
-            ensure!(
-                nodes.insert(chunk.id.clone(), node).is_none(),
-                "typed-evidence v2 fact provenance is not unique"
-            );
-        }
-    }
-    Ok(nodes)
-}
-
-fn validate_typed_v2_control_pools(
-    fixture: &RetrievalFixture,
-    case: &FixtureCase,
-    pools: &[TypedControlPool],
-    fact_by_source_id: &BTreeMap<String, String>,
-    fact_nodes: &BTreeMap<String, FixtureNode>,
-) -> Result<()> {
-    let actual_nodes = pools
-        .iter()
-        .map(|pool| pool.source.fixture_node())
-        .collect::<Vec<_>>();
-    let expected_nodes = expected_audit_nodes(fixture, case)
-        .into_iter()
-        .collect::<Vec<_>>();
-    ensure!(
-        actual_nodes == expected_nodes,
-        "typed-evidence v2 candidate control has missing, duplicate or out-of-order source pools"
-    );
-    for pool in pools {
-        ensure!(
-            pool.source_ids.len() <= 10,
-            "typed-evidence v2 candidate pool exceeds the frozen top-ten boundary"
-        );
-        let node = pool.source.fixture_node();
-        let authorized = typed_v2_authorized_fact_ids(fixture, case, node)?;
-        let mut observed = BTreeSet::new();
-        for source_id in &pool.source_ids {
-            ensure!(
-                observed.insert(source_id.as_str()),
-                "typed-evidence v2 candidate pool contains a duplicate source ID"
-            );
-            let fact_id = fact_by_source_id.get(source_id).with_context(|| {
-                format!("typed-evidence v2 candidate pool references unknown source {source_id}")
-            })?;
-            ensure!(
-                fact_nodes.get(fact_id).copied() == Some(node),
-                "typed-evidence v2 candidate provenance does not match its source pool"
-            );
-            ensure!(
-                authorized.contains(fact_id.as_str()),
-                "typed-evidence v2 candidate pool contains unauthorized evidence"
-            );
-        }
-    }
-    Ok(())
-}
-
-fn typed_v2_authorized_fact_ids<'a>(
-    fixture: &'a RetrievalFixture,
-    case: &FixtureCase,
-    node: FixtureNode,
-) -> Result<BTreeSet<&'a str>> {
-    let collections = fixture
-        .collections
-        .iter()
-        .map(|collection| (collection.id.as_str(), collection))
-        .collect::<BTreeMap<_, _>>();
-    let purpose = case.scope.purpose();
-    let mut authorized = BTreeSet::new();
-    for document in &fixture.documents {
-        if document.publication_state != FixturePublicationState::Published {
-            continue;
-        }
-        let collection = collections
-            .get(document.collection_id.as_str())
-            .copied()
-            .context("typed-evidence v2 document references an unknown collection")?;
-        let purpose_allowed = purpose != SearchPurpose::ExternalAi || collection.allow_external_ai;
-        let policy_allowed = match node {
-            FixtureNode::Origin => collection.node == node && purpose_allowed,
-            FixtureNode::Peer => {
-                collection.node == node
-                    && purpose_allowed
-                    && collection.peer_shareable
-                    && collection.granted_to_origin
-            }
-        };
-        if policy_allowed {
-            authorized.extend(document.chunks.iter().map(|chunk| chunk.id.as_str()));
-        }
-    }
-    Ok(authorized)
-}
-
-fn typed_v2_scope_nodes(scope: RetrievalScope) -> Vec<FixtureNode> {
-    match scope {
-        RetrievalScope::Local | RetrievalScope::LocalExternalAi => vec![FixtureNode::Origin],
-        RetrievalScope::TrustedPeer | RetrievalScope::TrustedPeerExternalAi => {
-            vec![FixtureNode::Peer]
-        }
-        RetrievalScope::Federated => vec![FixtureNode::Origin, FixtureNode::Peer],
-    }
-}
-
-fn validate_typed_v2_control(report: &RetrievalEvaluationReport) -> Result<()> {
-    ensure!(
-        report.fixture_sha256 == TYPED_V2_FIXTURE_SHA256,
-        "typed-evidence v2 control used an unexpected fixture"
-    );
-    ensure!(
-        report.total.expected_group_count == 18
-            && report.total.found_group_count == 13
-            && report.total.false_evidence_count == 2
-            && report.total.forbidden_evidence_count == 0,
-        "typed-evidence v2 control no longer matches the observed mMARCO boundary"
-    );
-    ensure!(
-        report.stage_attribution.source_candidate_group_count == 18
-            && report.stage_attribution.mapping_error_count == 0
-            && report.stage_attribution.audit_error_case_count == 0,
-        "typed-evidence v2 control has incomplete candidate coverage or audit errors"
-    );
-    Ok(())
-}
-
-fn production_providers(
-    embedding_snapshot: &Path,
-    relevance_snapshot: &Path,
-) -> Result<EvaluationProviders> {
     validate_model_revisions()?;
+    let loaded = load_fixture()?;
     let threads = std::thread::available_parallelism()
         .map(usize::from)
         .unwrap_or(2)
@@ -1726,7 +586,7 @@ fn production_providers(
     );
     let relevance_artifact =
         platform_relevance_model().context("unsupported retrieval evaluation target")?;
-    Ok(EvaluationProviders {
+    let providers = EvaluationProviders {
         identity: ProviderIdentity {
             embedding_profile: embeddings.model_id().to_owned(),
             embedding_revision: E5_MODEL_REVISION.to_owned(),
@@ -1738,7 +598,19 @@ fn production_providers(
         },
         embeddings,
         relevance,
-    })
+    };
+    let report = run_evaluation(&loaded, providers).await?;
+    let destination = write_report(&report)?;
+    ensure!(
+        report.passed,
+        "retrieval pipeline did not meet the acceptance thresholds; report written to {}",
+        destination.display()
+    );
+    println!(
+        "retrieval pipeline passed; report written to {}",
+        destination.display()
+    );
+    Ok(())
 }
 
 fn load_fixture() -> Result<LoadedFixture> {
@@ -2242,7 +1114,7 @@ fn normalize_vector(vector: &mut [f32]) {
 async fn run_evaluation(
     loaded: &LoadedFixture,
     providers: EvaluationProviders,
-) -> Result<EvaluationOutcome> {
+) -> Result<RetrievalEvaluationReport> {
     let started = Instant::now();
     let audit = Arc::new(MaskAudit::default());
     let facts = Arc::new(fact_ids_by_locator(&loaded.fixture)?);
@@ -2257,7 +1129,6 @@ async fn run_evaluation(
     let reverse =
         build_corpus(&loaded.fixture, &providers, true, Arc::clone(&audit), facts).await?;
     let mut case_reports = Vec::with_capacity(loaded.fixture.cases.len());
-    let mut controls = Vec::with_capacity(loaded.fixture.cases.len());
     for case in &loaded.fixture.cases {
         let case_started = Instant::now();
         let baseline = run_case(&forward, case, TOP_K).await?;
@@ -2271,10 +1142,6 @@ async fn run_evaluation(
         let audit_stable = baseline_audit == repeated_audit
             && baseline_audit == expanded_audit
             && baseline_audit == reversed_audit;
-        controls.push(BaselineControlCase {
-            case_id: case.id.clone(),
-            candidate_pools: baseline_audit.clone(),
-        });
         case_reports.push(score_case(
             case,
             CaseEvaluationRuns {
@@ -2310,24 +1177,21 @@ async fn run_evaluation(
         && split_passes(&regression)
         && split_passes(&calibration)
         && split_passes(&holdout);
-    Ok(EvaluationOutcome {
-        report: RetrievalEvaluationReport {
-            schema_version: REPORT_SCHEMA_VERSION,
-            fixture_sha256: loaded.sha256.clone(),
-            target_os: std::env::consts::OS.to_owned(),
-            target_arch: std::env::consts::ARCH.to_owned(),
-            provider: providers.identity,
-            top_k: TOP_K,
-            elapsed_ms: started.elapsed().as_millis(),
-            regression,
-            calibration,
-            holdout,
-            total,
-            stage_attribution,
-            passed,
-            cases: case_reports,
-        },
-        controls,
+    Ok(RetrievalEvaluationReport {
+        schema_version: REPORT_SCHEMA_VERSION,
+        fixture_sha256: loaded.sha256.clone(),
+        target_os: std::env::consts::OS.to_owned(),
+        target_arch: std::env::consts::ARCH.to_owned(),
+        provider: providers.identity,
+        top_k: TOP_K,
+        elapsed_ms: started.elapsed().as_millis(),
+        regression,
+        calibration,
+        holdout,
+        total,
+        stage_attribution,
+        passed,
+        cases: case_reports,
     })
 }
 
@@ -3046,216 +1910,6 @@ fn regression_cases_pass(reports: &[RetrievalCaseReport]) -> bool {
         .all(|report| report.passed)
 }
 
-fn build_typed_v2_artifacts(
-    fixture: &RetrievalFixture,
-    controls: &[BaselineControlCase],
-) -> Result<TypedPreparedArtifacts> {
-    let (source_records, source_ids) = build_typed_source_inputs(fixture)?;
-    let (question_records, question_ids) = build_typed_question_inputs(fixture)?;
-    let control_records = build_typed_control_records(controls, &source_ids, &question_ids)?;
-    Ok(TypedPreparedArtifacts {
-        source_input: serialize_jsonl(&source_records)?,
-        question_input: serialize_jsonl(&question_records)?,
-        control: serialize_jsonl(&control_records)?,
-    })
-}
-
-fn build_typed_source_inputs(
-    fixture: &RetrievalFixture,
-) -> Result<(Vec<TypedSourceInput>, TypedOpaqueSources)> {
-    let mut chunks = fixture
-        .documents
-        .iter()
-        .flat_map(|document| {
-            document
-                .chunks
-                .iter()
-                .map(move |chunk| (chunk.id.as_str(), document, chunk))
-        })
-        .collect::<Vec<_>>();
-    chunks.sort_by_key(|(fact_id, _, _)| *fact_id);
-    ensure!(
-        chunks.len() < 1_000,
-        "typed-evidence v2 supports at most 999 source records"
-    );
-
-    let mut records = Vec::with_capacity(chunks.len());
-    let mut by_fact_id = HashMap::with_capacity(chunks.len());
-    let mut text_sha256_by_fact_id = HashMap::with_capacity(chunks.len());
-    for (index, (fact_id, document, chunk)) in chunks.into_iter().enumerate() {
-        let source_id = typed_opaque_id("source", index)?;
-        ensure!(
-            by_fact_id
-                .insert(fact_id.to_owned(), source_id.clone())
-                .is_none(),
-            "typed-evidence v2 source mapping is not unique"
-        );
-        ensure!(
-            text_sha256_by_fact_id
-                .insert(fact_id.to_owned(), synthetic_sha256(&chunk.text))
-                .is_none(),
-            "typed-evidence v2 source text mapping is not unique"
-        );
-        let record_bytes = serde_json::to_vec(&(
-            document.title.as_str(),
-            chunk.heading.as_str(),
-            chunk.text.as_str(),
-        ))?;
-        records.push(TypedSourceInput {
-            source_id,
-            source_record_sha256: hex::encode(Sha256::digest(record_bytes)),
-            title: document.title.clone(),
-            heading: chunk.heading.clone(),
-            text: chunk.text.clone(),
-        });
-    }
-    Ok((
-        records,
-        TypedOpaqueSources {
-            by_fact_id,
-            text_sha256_by_fact_id,
-        },
-    ))
-}
-
-fn build_typed_question_inputs(
-    fixture: &RetrievalFixture,
-) -> Result<(Vec<TypedQuestionInput>, BTreeMap<String, String>)> {
-    let mut cases = fixture.cases.iter().collect::<Vec<_>>();
-    cases.sort_by_key(|case| case.id.as_str());
-    ensure!(
-        cases.len() < 1_000,
-        "typed-evidence v2 supports at most 999 question records"
-    );
-
-    let mut records = Vec::with_capacity(cases.len());
-    let mut by_case_id = BTreeMap::new();
-    for (index, case) in cases.into_iter().enumerate() {
-        let question_id = typed_opaque_id("question", index)?;
-        ensure!(
-            by_case_id
-                .insert(case.id.clone(), question_id.clone())
-                .is_none(),
-            "typed-evidence v2 question mapping is not unique"
-        );
-        records.push(TypedQuestionInput {
-            question_id,
-            question_record_sha256: synthetic_sha256(&case.question),
-            question: case.question.clone(),
-        });
-    }
-    Ok((records, by_case_id))
-}
-
-fn typed_opaque_id(prefix: &str, zero_based_index: usize) -> Result<String> {
-    let ordinal = zero_based_index
-        .checked_add(1)
-        .context("typed-evidence v2 opaque ID overflow")?;
-    ensure!(
-        ordinal < 1_000,
-        "typed-evidence v2 supports at most 999 opaque IDs"
-    );
-    Ok(format!("{prefix}_{ordinal:03}"))
-}
-
-fn build_typed_control_records(
-    controls: &[BaselineControlCase],
-    source_ids: &TypedOpaqueSources,
-    question_ids: &BTreeMap<String, String>,
-) -> Result<Vec<TypedControlRecord>> {
-    ensure!(
-        controls.len() == question_ids.len(),
-        "typed-evidence v2 control has an unexpected case count"
-    );
-    let mut records = Vec::with_capacity(controls.len());
-    let mut observed_questions = BTreeSet::new();
-    for control in controls {
-        let question_id = question_ids
-            .get(&control.case_id)
-            .with_context(|| format!("missing opaque ID for `{}`", control.case_id))?
-            .clone();
-        ensure!(
-            observed_questions.insert(question_id.clone()),
-            "typed-evidence v2 control contains a duplicate question"
-        );
-        let candidate_pools = control
-            .candidate_pools
-            .iter()
-            .map(|pool| typed_control_pool(pool, source_ids))
-            .collect::<Result<Vec<_>>>()?;
-        records.push(TypedControlRecord {
-            schema_version: TYPED_V2_CONTROL_SCHEMA_VERSION,
-            question_id,
-            candidate_pools,
-        });
-    }
-    records.sort_by(|left, right| left.question_id.cmp(&right.question_id));
-    Ok(records)
-}
-
-fn typed_control_pool(
-    pool: &MaskAuditCall,
-    source_ids: &TypedOpaqueSources,
-) -> Result<TypedControlPool> {
-    let source_ids = pool
-        .candidates
-        .iter()
-        .map(|candidate| {
-            let fact_id = candidate
-                .fact_id
-                .as_deref()
-                .context("typed-evidence v2 candidate has no fixture mapping")?;
-            let source_id = source_ids
-                .by_fact_id
-                .get(fact_id)
-                .context("typed-evidence v2 candidate has no opaque source ID")?;
-            let expected_text_sha256 = source_ids
-                .text_sha256_by_fact_id
-                .get(fact_id)
-                .context("typed-evidence v2 candidate has no source text hash")?;
-            ensure!(
-                &candidate.snippet_sha256 == expected_text_sha256,
-                "typed-evidence v2 candidate is not the complete frozen source text"
-            );
-            Ok(source_id.clone())
-        })
-        .collect::<Result<Vec<_>>>()?;
-    Ok(TypedControlPool {
-        source: pool.node.into(),
-        source_ids,
-    })
-}
-
-fn serialize_jsonl<T: Serialize>(records: &[T]) -> Result<String> {
-    let mut contents = String::new();
-    for record in records {
-        contents.push_str(&serde_json::to_string(record)?);
-        contents.push('\n');
-    }
-    Ok(contents)
-}
-
-fn write_typed_v2_artifacts(
-    output_directory: &Path,
-    artifacts: &TypedPreparedArtifacts,
-) -> Result<()> {
-    std::fs::create_dir(output_directory).with_context(|| {
-        format!(
-            "creating typed-evidence v2 output directory {}",
-            output_directory.display()
-        )
-    })?;
-    for (filename, contents) in [
-        ("source-input.jsonl", artifacts.source_input.as_str()),
-        ("question-input.jsonl", artifacts.question_input.as_str()),
-        ("control.jsonl", artifacts.control.as_str()),
-    ] {
-        std::fs::write(output_directory.join(filename), contents)
-            .with_context(|| format!("writing typed-evidence v2 {filename}"))?;
-    }
-    Ok(())
-}
-
 fn validate_model_revisions() -> Result<()> {
     ensure!(
         E5_REVISION == E5_MODEL_REVISION,
@@ -3294,7 +1948,6 @@ fn write_report(report: &RetrievalEvaluationReport) -> Result<PathBuf> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::typed_evidence_v2::{Lifecycle, ObjectType, Polarity, Provenance, Qualifier};
 
     #[derive(Clone)]
     struct FixedTestRelevanceProvider {
@@ -3316,223 +1969,14 @@ mod tests {
         }
     }
 
-    fn typed_test_claim(quote: &str, relation: &str) -> TypedClaim {
-        TypedClaim {
-            subject: "synthetic_subject".to_owned(),
-            relation: relation.to_owned(),
-            object_type: ObjectType::Status,
-            object_value: "synthetic_value".to_owned(),
-            qualifiers: Vec::<Qualifier>::new(),
-            polarity: Polarity::Positive,
-            lifecycles: vec![Lifecycle::Current],
-            provenance: Provenance::Direct,
-            support_quote: quote.to_owned(),
-        }
-    }
-
-    fn typed_test_need(quote: &str, relation: &str) -> TypedNeed {
-        TypedNeed {
-            subject: "synthetic_subject".to_owned(),
-            relation: relation.to_owned(),
-            requested_object_types: vec![ObjectType::Status],
-            required_qualifiers: Vec::new(),
-            allowed_polarities: vec![Polarity::Positive],
-            required_lifecycles: vec![Lifecycle::Current],
-            allowed_provenances: vec![Provenance::Direct],
-            question_quote: quote.to_owned(),
-        }
-    }
-
-    #[test]
-    fn typed_v2_jsonl_rejects_unknown_fields_and_extra_terminal_lines() {
-        let unknown = br#"{"source_id":"source_001","source_record_sha256":"hash","title":"title","heading":"heading","text":"text","extra":true}
-"#;
-        let extra_line = br#"{"question_id":"question_001","question_record_sha256":"hash","question":"question"}
-
-"#;
-
-        let unknown_error =
-            parse_typed_v2_jsonl::<TypedSourceInput>(unknown, "source input").unwrap_err();
-        let extra_line_error =
-            parse_typed_v2_jsonl::<TypedQuestionInput>(extra_line, "question input").unwrap_err();
-
-        assert!(unknown_error.to_string().contains("source input record 1"));
-        assert!(extra_line_error.to_string().contains("canonical JSONL"));
-    }
-
-    #[test]
-    fn typed_v2_source_adjudication_requires_exact_quote_and_order() {
-        let inputs = vec![TypedSourceInput {
-            source_id: "source_001".to_owned(),
-            source_record_sha256: "unused".to_owned(),
-            title: "Synthetic".to_owned(),
-            heading: "Order".to_owned(),
-            text: "first evidence then second evidence".to_owned(),
-        }];
-        let reversed = vec![TypedSourceAdjudication::Resolved {
-            source_id: "source_001".to_owned(),
-            claims: vec![
-                typed_test_claim("second evidence", "second_relation"),
-                typed_test_claim("first evidence", "first_relation"),
-            ],
-        }];
-
-        let error = validate_typed_v2_source_adjudications(&inputs, reversed).unwrap_err();
-
-        assert!(error.to_string().contains("preserve text"));
-    }
-
-    #[test]
-    fn typed_v2_question_adjudication_rejects_unresolved_records() {
-        let inputs = vec![TypedQuestionInput {
-            question_id: "question_001".to_owned(),
-            question_record_sha256: "unused".to_owned(),
-            question: "Which synthetic status applies?".to_owned(),
-        }];
-        let unresolved = vec![TypedQuestionAdjudication::Unresolved {
-            question_id: "question_001".to_owned(),
-            reason_code: TypedUnresolvedReasonCode::AmbiguousState,
-        }];
-
-        let error = validate_typed_v2_question_adjudications(&inputs, unresolved).unwrap_err();
-
-        assert!(error.to_string().contains("unresolved record question_001"));
-    }
-
-    #[test]
-    fn typed_v2_control_rejects_unauthorized_candidate() {
-        let loaded = load_fixture().unwrap();
-        let (_, opaque_sources) = build_typed_source_inputs(&loaded.fixture).unwrap();
-        let fact_by_source_id =
-            invert_typed_v2_mapping(&opaque_sources.by_fact_id, "source").unwrap();
-        let fact_nodes = typed_v2_fact_nodes(&loaded.fixture).unwrap();
-        let case = loaded
-            .fixture
-            .cases
-            .iter()
-            .find(|case| case.id == "regression_atlas_external_ai_policy")
-            .unwrap();
-        let node = expected_audit_nodes(&loaded.fixture, case)
-            .into_iter()
-            .next()
-            .unwrap();
-        let authorized_fact = typed_v2_authorized_fact_ids(&loaded.fixture, case, node)
-            .unwrap()
-            .into_iter()
-            .next()
-            .unwrap();
-        let authorized_source = opaque_sources.by_fact_id.get(authorized_fact).unwrap();
-        let mut pools = vec![TypedControlPool {
-            source: TypedControlSource::from(node),
-            source_ids: vec![authorized_source.clone()],
-        }];
-        validate_typed_v2_control_pools(
-            &loaded.fixture,
-            case,
-            &pools,
-            &fact_by_source_id,
-            &fact_nodes,
-        )
-        .unwrap();
-        pools[0].source_ids[0] = opaque_sources
-            .by_fact_id
-            .get("atlas_internal_rehearsal")
-            .unwrap()
-            .clone();
-
-        let error = validate_typed_v2_control_pools(
-            &loaded.fixture,
-            case,
-            &pools,
-            &fact_by_source_id,
-            &fact_nodes,
-        )
-        .unwrap_err();
-
-        assert!(error.to_string().contains("unauthorized evidence"));
-    }
-
-    #[test]
-    fn typed_v2_report_is_one_shot() {
-        let directory = tempfile::tempdir().unwrap();
-        let output = directory.path().join("report.json");
-
-        write_typed_v2_one_shot(&output, b"{}\n").unwrap();
-        let error = write_typed_v2_one_shot(&output, b"{}\n").unwrap_err();
-
-        assert_eq!(std::fs::read(&output).unwrap(), b"{}\n");
-        assert!(error.to_string().contains("already exists"));
-    }
-
-    #[test]
-    fn typed_v2_scoring_is_disabled_before_manifest_freeze() {
-        let directory = tempfile::tempdir().unwrap();
-        let evidence = directory.path().join("missing-evidence");
-        let manifest_hash = directory.path().join("missing-manifest.sha256");
-        let output = directory.path().join("report.json");
-
-        let error = score_typed_v2_at(&evidence, &manifest_hash, &output).unwrap_err();
-
-        assert!(error.to_string().contains("scoring is disabled"));
-        assert!(!output.exists());
-    }
-
-    #[test]
-    fn typed_v2_manifest_hash_requires_canonical_lowercase_sha() {
-        let directory = tempfile::tempdir().unwrap();
-        let path = directory.path().join("manifest.sha256");
-        std::fs::write(&path, format!("{}\n", "ab".repeat(32))).unwrap();
-        assert_eq!(read_typed_v2_manifest_hash(&path).unwrap(), "ab".repeat(32));
-
-        std::fs::write(&path, format!("{}\n", "AB".repeat(32))).unwrap();
-        assert!(read_typed_v2_manifest_hash(&path).is_err());
-        std::fs::write(&path, "ab").unwrap();
-        assert!(read_typed_v2_manifest_hash(&path).is_err());
-    }
-
-    #[cfg(unix)]
-    #[test]
-    fn typed_v2_manifest_hash_rejects_symlink() {
-        use std::os::unix::fs::symlink;
-
-        let directory = tempfile::tempdir().unwrap();
-        let target = directory.path().join("target.sha256");
-        let link = directory.path().join("manifest.sha256");
-        std::fs::write(&target, format!("{}\n", "ab".repeat(32))).unwrap();
-        symlink(&target, &link).unwrap();
-
-        assert!(read_typed_v2_manifest_hash(&link).is_err());
-    }
-
-    #[test]
-    fn typed_v2_blind_validation_rejects_unsorted_sets_before_scoring_key() {
-        let inputs = vec![TypedQuestionInput {
-            question_id: "question_001".to_owned(),
-            question_record_sha256: "unused".to_owned(),
-            question: "Which synthetic status applies?".to_owned(),
-        }];
-        let mut need = typed_test_need("synthetic status", "synthetic_relation");
-        need.allowed_provenances = vec![Provenance::Direct, Provenance::Attributed];
-        let adjudications = vec![TypedQuestionAdjudication::Resolved {
-            question_id: "question_001".to_owned(),
-            needs: vec![need],
-        }];
-
-        let error = validate_typed_v2_question_adjudications(&inputs, adjudications).unwrap_err();
-
-        assert!(error.to_string().contains("structurally invalid"));
-    }
-
     #[tokio::test]
     async fn deterministic_fixture_exercises_the_complete_retrieval_pipeline() {
         let loaded = load_fixture().unwrap();
         let providers = fixture_providers(&loaded.fixture).unwrap();
 
-        let outcome = run_evaluation(&loaded, providers).await.unwrap();
-        let report = &outcome.report;
+        let report = run_evaluation(&loaded, providers).await.unwrap();
 
         assert!(report.passed, "deterministic retrieval report: {report:#?}");
-        assert_eq!(outcome.controls.len(), loaded.fixture.cases.len());
         assert!(report.regression.case_count > 0);
         assert_eq!(
             report.stage_attribution.source_candidate_recall_at_ten,
@@ -4104,7 +2548,6 @@ mod tests {
         };
         let candidate = |fact_id: &str, decision| AuditedCandidate {
             fact_id: Some(fact_id.to_owned()),
-            snippet_sha256: synthetic_sha256(fact_id),
             decision,
         };
         let calls = vec![MaskAuditCall {
@@ -4166,12 +2609,10 @@ mod tests {
             candidates: vec![
                 AuditedCandidate {
                     fact_id: Some("support".to_owned()),
-                    snippet_sha256: synthetic_sha256("support"),
                     decision: EvidenceDecision::Relevant,
                 },
                 AuditedCandidate {
                     fact_id: Some("answer".to_owned()),
-                    snippet_sha256: synthetic_sha256("answer"),
                     decision: EvidenceDecision::Relevant,
                 },
             ],
@@ -4209,7 +2650,6 @@ mod tests {
             node: FixtureNode::Origin,
             candidates: vec![AuditedCandidate {
                 fact_id: Some("forbidden".to_owned()),
-                snippet_sha256: synthetic_sha256("forbidden"),
                 decision: EvidenceDecision::Relevant,
             }],
         }];

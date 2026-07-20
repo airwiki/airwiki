@@ -16,6 +16,7 @@ All notable user-visible changes to AirWiki will be documented here. The project
 - A reproducible retrieval-quality corpus and evaluator covering local and peer-authorized source evidence, abstention, provenance, privacy, contradictions, deduplication, and stable ordering.
 - A preregistered bilingual selector-adaptation corpus and structural validator that keep model inputs separate from evaluation labels, permissions, and provenance metadata.
 - A durable negative-result record for the rejected adapted mMARCO selector, including its one-time aggregate promotion metrics and no-rerun decision.
+- A separately typed external-chat candidate lane that lets a capable consumer inspect authorized passages rejected by AirWiki's lightweight answerability classifier without weakening publication or disclosure policy.
 
 ### Changed
 
@@ -29,6 +30,7 @@ All notable user-visible changes to AirWiki will be documented here. The project
 - Made the first-run journey recoverable with visible processing counts, actionable terminal states, a truthful Wiki-health timestamp, and an explicit way to finish after a search returns no evidence.
 - Made vector retrieval scan each collection with cursor pagination and hydrate full evidence only for the bounded candidate set, so query work no longer grows through repeated SQLite offsets or corpus-wide text loading.
 - Separated direct answers, allowed supporting context, and forbidden evidence in the retrieval evaluation corpus, and corrected an Atlas question that previously depended on hidden fixture context; production search behavior and thresholds are unchanged.
+- Kept local desktop search conservative while allowing external-chat consumers to evaluate bounded candidates independently; evidence wins duplicates and candidates are discarded first when a LAN response reaches its size limit.
 
 ### Fixed
 
@@ -42,3 +44,4 @@ All notable user-visible changes to AirWiki will be documented here. The project
 
 - External-chat access, peer sharing, grants, publication, and ambiguous repairs remain explicit human decisions and fail closed when authorization is uncertain.
 - Remote search results remain read-only evidence cards and never expose a local Wiki navigation action.
+- External-chat candidate output is revalidated at every disclosure boundary and reduced below the bridge transport budget, discarding candidates before evidence when necessary.

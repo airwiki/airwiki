@@ -2,6 +2,7 @@
 
 - Status: Accepted
 - Date: 2026-07-15
+- Answerability clause superseded by: [ADR 0007](0007-separate-evidence-from-authorized-candidates.md)
 
 ## Context
 

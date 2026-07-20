@@ -39,8 +39,9 @@ use airwiki_network::{
     PairingFailureReason, PeerAccess, PeerId, SecretStore, spawn_network,
 };
 use airwiki_types::{
-    CollectionPolicy, DocumentStatus, EnrichmentDraft, FederatedSearch, SearchAuthorization,
-    SearchContractError, SearchPurpose, SearchRequest, SearchResponse,
+    CollectionPolicy, DisclosureLease, DocumentStatus, EnrichmentDraft, FederatedSearch,
+    SearchAuthorization, SearchContractError, SearchHit, SearchPurpose, SearchRequest,
+    SearchResponse,
 };
 use anyhow::{Context, Result, anyhow, bail};
 use async_trait::async_trait;
@@ -288,28 +289,59 @@ fn finalize_authorized_response_blocking(
     );
     if !live_access.trusted || live_access.blocked {
         response.hits.clear();
+        response.authorized_candidates.clear();
     } else {
-        let mut current_hits = Vec::with_capacity(response.hits.len());
-        for hit in response.hits {
-            if live_access.grants.contains(&hit.collection_id)
-                && database
-                    .peer_hit_is_current_under_disclosure(
-                        &lease,
-                        &hit,
-                        &authorization.caller_node_id,
-                        purpose,
-                    )
-                    .map_err(|error| SearchContractError::Backend(error.to_string()))?
-            {
-                current_hits.push(hit);
-            }
-        }
-        response.hits = current_hits;
+        response.hits = retain_disclosable_hits(
+            database,
+            &lease,
+            &live_access.grants,
+            response.hits,
+            &authorization.caller_node_id,
+            purpose,
+        )?;
+        response.authorized_candidates = if purpose == SearchPurpose::ExternalAi {
+            retain_disclosable_hits(
+                database,
+                &lease,
+                &live_access.grants,
+                response.authorized_candidates,
+                &authorization.caller_node_id,
+                purpose,
+            )?
+        } else {
+            Vec::new()
+        };
     }
-    for (index, hit) in response.hits.iter_mut().enumerate() {
+    renumber_search_hits(&mut response.hits);
+    renumber_search_hits(&mut response.authorized_candidates);
+    Ok(AuthorizedSearchResult::new(response, lease))
+}
+
+fn retain_disclosable_hits(
+    database: &Database,
+    lease: &DisclosureLease,
+    grants: &HashSet<Uuid>,
+    hits: Vec<SearchHit>,
+    caller_node_id: &str,
+    purpose: SearchPurpose,
+) -> std::result::Result<Vec<SearchHit>, SearchContractError> {
+    let mut current = Vec::with_capacity(hits.len());
+    for hit in hits {
+        if grants.contains(&hit.collection_id)
+            && database
+                .peer_hit_is_current_under_disclosure(lease, &hit, caller_node_id, purpose)
+                .map_err(|error| SearchContractError::Backend(error.to_string()))?
+        {
+            current.push(hit);
+        }
+    }
+    Ok(current)
+}
+
+fn renumber_search_hits(hits: &mut [SearchHit]) {
+    for (index, hit) in hits.iter_mut().enumerate() {
         hit.rank = u32::try_from(index + 1).unwrap_or(u32::MAX);
     }
-    Ok(AuthorizedSearchResult::new(response, lease))
 }
 
 /// Stable proxy passed to the MCP server before model initialization.
@@ -338,6 +370,31 @@ impl DynamicFederatedSearch {
     fn clear(&self) -> Result<()> {
         *write_lock(&self.backend, "federated search proxy")? = None;
         Ok(())
+    }
+
+    fn revalidate_federated_hits(
+        &self,
+        hits: Vec<SearchHit>,
+        purpose: SearchPurpose,
+    ) -> std::result::Result<Vec<SearchHit>, SearchContractError> {
+        let mut current = Vec::with_capacity(hits.len());
+        for hit in hits {
+            let keep = if hit.node_id == self.local_node_id {
+                self.database
+                    .hit_is_current(&hit, purpose)
+                    .map_err(|error| SearchContractError::Backend(error.to_string()))?
+            } else {
+                PeerId::from_str(&hit.node_id).is_ok_and(|peer| {
+                    let access = self.access.state(&peer);
+                    access.trusted && !access.blocked
+                })
+            };
+            if keep {
+                current.push(hit);
+            }
+        }
+        renumber_search_hits(&mut current);
+        Ok(current)
     }
 
     /// SQLite remains the authority for peers contacted by an outbound search.
@@ -391,33 +448,26 @@ impl FederatedSearch for DynamicFederatedSearch {
             })?;
         let purpose = request.purpose;
         let mut response = backend.search(request).await?;
-        let before_revalidation = response.hits.len();
-        let mut current = Vec::with_capacity(response.hits.len());
-        for hit in response.hits {
-            let keep = if hit.node_id == self.local_node_id {
-                self.database
-                    .hit_is_current(&hit, purpose)
-                    .map_err(|error| SearchContractError::Backend(error.to_string()))?
-            } else {
-                PeerId::from_str(&hit.node_id).is_ok_and(|peer| {
-                    let access = self.access.state(&peer);
-                    access.trusted && !access.blocked
-                })
-            };
-            if keep {
-                current.push(hit);
-            }
-        }
-        for (index, hit) in current.iter_mut().enumerate() {
-            hit.rank = u32::try_from(index + 1).unwrap_or(u32::MAX);
-        }
-        if current.len() < before_revalidation {
+        let before_revalidation = response
+            .hits
+            .len()
+            .saturating_add(response.authorized_candidates.len());
+        response.hits = self.revalidate_federated_hits(response.hits, purpose)?;
+        response.authorized_candidates = if purpose == SearchPurpose::ExternalAi {
+            self.revalidate_federated_hits(response.authorized_candidates, purpose)?
+        } else {
+            Vec::new()
+        };
+        let after_revalidation = response
+            .hits
+            .len()
+            .saturating_add(response.authorized_candidates.len());
+        if after_revalidation < before_revalidation {
             response.partial = true;
             response
                 .warnings
                 .push("results changed during final authorization revalidation".into());
         }
-        response.hits = current;
         Ok(response)
     }
 }
@@ -2795,6 +2845,16 @@ mod tests {
     #[test]
     fn final_disclosure_lease_observes_a_policy_change_before_handoff() {
         let (database, proxy, peer_id, collection_id) = durable_fixture();
+        database
+            .update_collection_policy(
+                collection_id,
+                CollectionPolicy {
+                    local_only: false,
+                    peer_shareable: true,
+                    allow_external_ai: true,
+                },
+            )
+            .unwrap();
         let source_path =
             std::env::temp_dir().join(format!("airwiki-disclosure-race-{}.md", Uuid::new_v4()));
         std::fs::write(&source_path, "Authorized evidence").unwrap();
@@ -2847,10 +2907,10 @@ mod tests {
             .unwrap();
         let authorization = proxy
             .access
-            .authorize(&peer_id, SearchPurpose::LocalAssistant)
+            .authorize(&peer_id, SearchPurpose::ExternalAi)
             .unwrap();
         let mut response = SearchResponse::empty(Uuid::new_v4());
-        response.hits.push(airwiki_types::SearchHit {
+        let hit = airwiki_types::SearchHit {
             concept_id: published.id,
             collection_id,
             chunk_id,
@@ -2863,7 +2923,9 @@ mod tests {
             updated_at: published.updated_at,
             rank: 1,
             node_id: "test-node".into(),
-        });
+        };
+        response.hits.push(hit.clone());
+        response.authorized_candidates.push(hit);
 
         database
             .update_collection_policy(collection_id, CollectionPolicy::local_only())
@@ -2873,11 +2935,12 @@ mod tests {
             &proxy.access,
             response,
             authorization,
-            SearchPurpose::LocalAssistant,
+            SearchPurpose::ExternalAi,
         )
         .unwrap();
 
         assert!(result.response().hits.is_empty());
+        assert!(result.response().authorized_candidates.is_empty());
         std::fs::remove_file(source_path).unwrap();
     }
 

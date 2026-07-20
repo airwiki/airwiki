@@ -12,13 +12,23 @@ AirWiki exposes one read-only Streamable HTTP endpoint:
 http://127.0.0.1:43123/mcp
 ```
 
-`search_airwiki` accepts `question` and optional `top_k`. AirWiki forces the `external_ai` purpose and returns either `relevant_evidence`
-with citations or `no_relevant_evidence`. A bounded `coverage_gap` reports a
-stable local code and authenticated, deduplicated offline-node identifiers.
+`search_airwiki` accepts `question` and optional `top_k`. AirWiki forces the
+`external_ai` purpose and returns typed `evidence`, a separately bounded
+`authorized_candidates` list, and an optional `coverage_gap`. Evidence contains
+either citable relevant items or `no_relevant_evidence`. Candidates passed the
+same publication and disclosure policy but were not verified as answering the
+question by AirWiki's lightweight classifier.
 
-Every source node applies its local relevance gate before creating a hit. The
-nearest available candidate does not cross MCP unless it can answer the
-question. Peer and backend diagnostics are discarded, and AirWiki does
+The serialized MCP result has a global budget below the bridge's 64 KiB HTTP
+limit. AirWiki removes lower-ranked candidates before evidence and reports
+incomplete coverage if reduction was necessary.
+
+Every source node applies its local relevance gate before creating evidence.
+For external-chat searches only, rejected passages may cross MCP as explicitly
+typed candidates after the source rechecks publication, `allow_external_ai`,
+peer grants and revocation. The chat client may use a candidate only when its
+snippet explicitly supports a requested fact. Authorization alone is never a
+relevance claim. Peer and backend diagnostics are discarded, and AirWiki does
 not synthesize a second answer. The listener accepts only
 `Host: 127.0.0.1:43123` or `Host: localhost:43123`.
 

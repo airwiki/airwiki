@@ -53,8 +53,9 @@ Controls are not considered effective end to end until the
 | Pairing impersonation | Six-word SAS derived from identities and nonces, two-minute expiry | A user who skips comparison defeats the control |
 | Private collection reaches cloud chat | `allow_external_ai` defaults off and is rechecked at the source | Human authorization can be wrong; use synthetic fixtures and audit |
 | Ranking returns the least-wrong absent fact | Source node applies the pinned local answerability classifier to the bounded outgoing snippet; failures and timeouts close the path | The classifier is probabilistic; reassess both platforms when model, corpus, or policy changes |
+| External chat treats an authorized candidate as relevant | Candidates exist only for `external_ai`, remain separately typed and bounded, pass the same final authorization checks, lose to duplicate evidence, and carry instructions requiring explicit support | A chat model can still misuse an unrelated authorized snippet; minimize externally enabled collections and run the golden prompt set |
 | DNS rebinding reaches MCP | Loopback bind, exact authority including port, bounded body | Compromised local software can already call loopback |
-| Response-based exfiltration | Ten-hit maximum, bounded snippets, no paths/full documents/embeddings/indexes, global MCP rate limit | Repeated authorized queries may reconstruct information; minimize external-chat collections |
+| Response-based exfiltration | At most ten items per typed lane, bounded snippets, a smaller global serialized MCP budget that drops candidates first, no paths/full documents/embeddings/indexes, and a global MCP rate limit | Repeated authorized queries may reconstruct information; minimize external-chat collections |
 | Another local process imitates a bridge | Loopback and collection policy; client label is diagnostic only | Loopback is not per-process authentication; protect the local account |
 | Duplicate desktop instances corrupt state | Per-user guard before SQLite/MCP/LAN/models, activation limited to `SHOW/OK` | Local name squatting can prevent startup but cannot start duplicate services |
 | Activation message is forged | No parameters or content; effect only shows the window | Not an authorization boundary |
@@ -89,7 +90,9 @@ Controls are not considered effective end to end until the
 - Watchers and reconciliation prepare revisions but never approve them.
 - Incomplete traversal fails closed and creates no uncertain tombstones.
 - A changed source withdraws the previous publication before sharing the new one.
-- The source node authorizes and gates answerability for every search result.
+- The source node authorizes every disclosed search item and gates the evidence
+  lane by answerability. Rejected items may appear only as separately typed
+  `external_ai` candidates.
 - LAN accepts only `/airwiki/search/2.0.0`; there is no v1 fallback.
 - `external_ai` is never inferred from tags, classification, or model output.
 - Originals, local paths, embeddings, indexes, and collection listings do not

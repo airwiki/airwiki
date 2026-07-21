@@ -507,6 +507,7 @@ review-issue-cause-too-many-characters = The document is too large
 review-issue-cause-source-missing = Source file is missing
 review-issue-cause-permission-denied = Permission to read the source file is blocked
 review-issue-cause-processing-failed = Processing failed during local analysis
+review-issue-cause-unknown = Could not prepare this file due to an unknown local error
 review-issue-file-too-large = This file is larger than AirWiki's current limit. Reduce or split it, then scan again.
 review-issue-unreadable = AirWiki could not read this file. Check that it still exists and that you can open it, then scan again.
 review-issue-invalid-utf8 = This Markdown file is not valid UTF-8. Save it as UTF-8, then scan again.

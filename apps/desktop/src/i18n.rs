@@ -136,6 +136,7 @@ pub(crate) const MESSAGE_IDS: &[&str] = &[
     "review-issue-cause-source-missing",
     "review-issue-cause-permission-denied",
     "review-issue-cause-processing-failed",
+    "review-issue-cause-unknown",
     "review-scan-again",
     "review-only-issues",
     "review-issue-file-too-large",

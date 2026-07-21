@@ -3919,7 +3919,7 @@ fn source_issue_cause_message(
         {
             return Some(localization.text("review-issue-cause-processing-failed"));
         }
-        return None;
+        return Some(localization.text("review-issue-cause-unknown"));
     }
 
     Some(localization.text(message))
@@ -4819,8 +4819,10 @@ mod tests {
     use crate::updater::{UpdateSummary, UpdaterStatus, UpdaterView};
     use crate::worker::{
         FirewallOperationView, LanDiscoveryView, LanListenerView, PeerActivityState,
-        PeerTrustState, SearchCoverageView, UpdaterWorkerView, WikiHealthSummaryView,
+        PeerTrustState, SearchCoverageView, SourceIssueView, UpdaterWorkerView,
+        WikiHealthSummaryView,
     };
+    use airwiki_core::SourceIssueCode;
     use std::{
         collections::VecDeque,
         time::{Duration, SystemTime},
@@ -5365,5 +5367,39 @@ mod tests {
         assert!(!should_present_pairing_controls(
             PeerActivityState::Connected,
         ));
+    }
+
+    #[test]
+    fn review_source_issue_shows_unknown_cause_when_not_classified() {
+        let localization = Localization::new(UiLocale::EnUs).unwrap();
+        let issue = SourceIssueView {
+            collection_id: Uuid::nil(),
+            source_name: "unmapped.txt".to_owned(),
+            collection_name: "Collection".to_owned(),
+            code: SourceIssueCode::InvalidPdf,
+            reason: Some("custom-engine-fault".to_owned()),
+        };
+
+        assert_eq!(
+            super::source_issue_cause_message(&localization, &issue, issue.code).unwrap(),
+            localization.text("review-issue-cause-unknown")
+        );
+    }
+
+    #[test]
+    fn review_source_issue_shows_processing_failure_for_superseded_and_failure() {
+        let localization = Localization::new(UiLocale::Es).unwrap();
+        let issue = SourceIssueView {
+            collection_id: Uuid::nil(),
+            source_name: "stale.txt".to_owned(),
+            collection_name: "Collection".to_owned(),
+            code: SourceIssueCode::Superseded,
+            reason: None,
+        };
+
+        assert_eq!(
+            super::source_issue_cause_message(&localization, &issue, issue.code).unwrap(),
+            localization.text("review-issue-cause-processing-failed")
+        );
     }
 }

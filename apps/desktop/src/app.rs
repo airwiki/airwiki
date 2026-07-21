@@ -1401,40 +1401,40 @@ impl AirWikiApp {
                                         ))
                                         .color(Color32::from_rgb(230, 160, 35)),
                                     );
-                                    for issue in collection_issues.iter().take(3) {
-                                        ui.add_space(4.0);
-                                        wrap_rich_text(
-                                            ui,
-                                            RichText::new(format!("• {}", issue.source_name))
-                                                .small()
-                                                .color(ui.visuals().weak_text_color()),
-                                        );
-                                        if let Some(cause_message) = source_issue_cause_message(
-                                            &self.localization,
-                                            issue,
-                                            issue.code,
-                                        ) {
-                                            wrap_rich_text(
-                                                ui,
-                                                RichText::new(format!("  {cause_message}"))
+                                    let issue_list_height =
+                                        (collection_issues.len().min(6) as f32) * 56.0 + 12.0;
+                                    egui::ScrollArea::vertical()
+                                        .id_salt(format!("collection_issues_{}", collection.id))
+                                        .max_height(issue_list_height)
+                                        .auto_shrink([false; 2])
+                                        .show(ui, |ui| {
+                                            for issue in collection_issues.iter() {
+                                                ui.add_space(2.0);
+                                                wrap_rich_text(
+                                                    ui,
+                                                    RichText::new(format!(
+                                                        "• {}",
+                                                        issue.source_name
+                                                    ))
                                                     .small()
                                                     .color(ui.visuals().weak_text_color()),
-                                            );
-                                        }
-                                    }
-                                    if collection_issues.len() > 3 {
-                                        let remaining = collection_issues.len().saturating_sub(3);
-                                        let mut remaining_arguments = FluentArgs::new();
-                                        remaining_arguments.set("count", remaining as i64);
-                                        ui.label(
-                                            RichText::new(self.localization.text_with(
-                                                "review-issues-more",
-                                                Some(&remaining_arguments),
-                                            ))
-                                            .small()
-                                            .color(ui.visuals().weak_text_color()),
-                                        );
-                                    }
+                                                );
+                                                if let Some(cause_message) =
+                                                    source_issue_cause_message(
+                                                        &self.localization,
+                                                        issue,
+                                                        issue.code,
+                                                    )
+                                                {
+                                                    wrap_rich_text(
+                                                        ui,
+                                                        RichText::new(format!("  {cause_message}"))
+                                                            .small()
+                                                            .color(ui.visuals().weak_text_color()),
+                                                    );
+                                                }
+                                            }
+                                        });
                                     if ui
                                         .small_button(self.localization.text("action-open"))
                                         .clicked()

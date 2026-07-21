@@ -2155,10 +2155,7 @@ fn transient_source_issues_from_outcomes(outcomes: &[IngestOutcome]) -> Vec<Tran
 }
 
 fn source_issue_reason(message: &str, code: SourceIssueCode) -> Option<String> {
-    if matches!(
-        code,
-        SourceIssueCode::Superseded | SourceIssueCode::ProcessingFailed
-    ) {
+    if matches!(code, SourceIssueCode::Superseded) {
         return Some("processing-failed".to_owned());
     }
 
@@ -2179,6 +2176,16 @@ fn source_issue_reason(message: &str, code: SourceIssueCode) -> Option<String> {
         "too-many-characters"
     } else if detail.contains("no extractable text layer") {
         "no-text-layer"
+    } else if detail.contains("symbolic link") || detail.contains("symbolic links") {
+        "unreadable"
+    } else if detail.contains("unsupported source file extension")
+        || detail.contains("source format is no longer supported")
+        || detail.contains("source changed")
+        || detail.contains("not a regular file")
+        || detail.contains("document produced no searchable chunks")
+        || detail.contains("could not inspect pdf metadata")
+    {
+        "processing-failed"
     } else if detail.contains("utf-8") || detail.contains("invalid utf") {
         "invalid-utf8"
     } else if detail.contains("page") && detail.contains("maximum")
@@ -2471,6 +2478,23 @@ mod tests {
         .unwrap_or_default();
 
         assert_eq!(reason, "permission-denied");
+    }
+
+    #[test]
+    fn source_issue_reason_supports_processing_failed_non_fatal_messages() {
+        let symlink = source_issue_reason(
+            "symbolic links are not accepted",
+            SourceIssueCode::ProcessingFailed,
+        )
+        .unwrap_or_default();
+        let unsupported = source_issue_reason(
+            "unsupported source file extension",
+            SourceIssueCode::ProcessingFailed,
+        )
+        .unwrap_or_default();
+
+        assert_eq!(symlink, "unreadable");
+        assert_eq!(unsupported, "processing-failed");
     }
 
     #[test]

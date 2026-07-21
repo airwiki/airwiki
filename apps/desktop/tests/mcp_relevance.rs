@@ -55,6 +55,8 @@ async fn core_gate_distinguishes_supported_and_absent_facts_at_the_mcp_boundary(
     assert!(supported.starts_with("HTTP/1.1 200"), "{supported}");
     assert!(supported.contains("\"status\":\"relevant_evidence\""));
     assert!(supported.contains("Reiniciar la cola de pagos"));
+    assert!(supported.contains("\"search_items\""));
+    assert!(supported.contains("\"lane\":\"evidence\""));
 
     let response =
         raw_tool_call(server.local_addr(), &host, "¿Cuál es el presupuesto anual?").await;
@@ -62,6 +64,8 @@ async fn core_gate_distinguishes_supported_and_absent_facts_at_the_mcp_boundary(
     assert!(response.starts_with("HTTP/1.1 200"), "{response}");
     assert!(response.contains("\"status\":\"no_relevant_evidence\""));
     assert!(response.contains("\"authorized_candidates\""));
+    assert!(response.contains("\"search_items\""));
+    assert!(response.contains("\"lane\":\"candidate\""));
     assert!(response.contains("Reiniciar la cola de pagos"));
 
     server.shutdown().await.unwrap();
@@ -98,6 +102,8 @@ async fn rejected_answer_remains_available_as_a_typed_external_ai_candidate() {
     assert!(response.contains("Reiniciar la cola de pagos"));
     assert!(response.contains("\"heading_or_page\":\"Pasos\""));
     assert!(response.contains("\"source_revision\":1"));
+    assert!(response.contains("\"search_items\""));
+    assert!(response.contains("\"lane\":\"candidate\""));
 
     server.shutdown().await.unwrap();
 }

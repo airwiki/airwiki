@@ -486,6 +486,17 @@ models-verifying = Verifying { $artifact }
 models-installing = Installing { $artifact }
 models-complete = Ready: { $artifact }
 models-installed-notice = Local AI is verified and ready
+notice-model-updated = Local AI status updated.
+notice-knowledge-updated = Knowledge status updated.
+notice-connectivity-updated = Local connection status updated.
+notice-operation-complete = AirWiki completed the operation.
+settings-mcp-boundary = Chat access stays on this device, remains read-only, and rechecks folder permission before returning evidence.
+diagnostics-local-identity = Local identity
+diagnostics-local-mcp = Local chat gateway
+diagnostics-database = Database
+diagnostics-okf-bundles = OKF bundles
+diagnostics-sanitized-logs = Sanitized logs
+diagnostics-configuration = Configuration
 tray-start-failed = AirWiki could not start the system tray.
 technical-details = Technical details
 

@@ -219,7 +219,7 @@ impl AirWikiApp {
             models_ready: false,
             install_label: None,
             install_progress: 0.0,
-            node_id: "inicializando…".into(),
+            node_id: "—".into(),
             mcp_url: "http://127.0.0.1:43123/mcp".into(),
             collections: Vec::new(),
             collection_scans: HashMap::new(),
@@ -308,7 +308,9 @@ impl AirWikiApp {
                                 self.onboarding_page = Some(OnboardingPage::Welcome);
                             }
                         }
-                        Err(error) => self.notices.push_back((true, error)),
+                        Err(error) => self
+                            .notices
+                            .push_back((true, sanitized_error_code(&error).to_owned())),
                     }
                 }
                 WorkerEvent::AutostartUpdated { request_id, result } => {
@@ -320,7 +322,9 @@ impl AirWikiApp {
                     }
                     match result {
                         Ok(status) => self.autostart_status = Some(status),
-                        Err(error) => self.notices.push_back((true, error)),
+                        Err(error) => self
+                            .notices
+                            .push_back((true, sanitized_error_code(&error).to_owned())),
                     }
                 }
                 WorkerEvent::UpdaterUpdated { request_id, result } => {
@@ -337,7 +341,9 @@ impl AirWikiApp {
                             self.exit_after_update_launch = updater_launched_installer(&view);
                             self.updater = Some(view);
                         }
-                        Err(error) => self.notices.push_back((true, error)),
+                        Err(error) => self
+                            .notices
+                            .push_back((true, sanitized_error_code(&error).to_owned())),
                     }
                 }
                 WorkerEvent::ConnectivityPlatformUpdated { request_id, result } => {
@@ -398,7 +404,9 @@ impl AirWikiApp {
                             self.wiki_health_error_dismissed = false;
                         }
                         Err(error) => {
-                            self.wiki_health_check = WikiHealthCheckState::Failed(error);
+                            self.wiki_health_check = WikiHealthCheckState::Failed(
+                                sanitized_error_code(&error).to_owned(),
+                            );
                             self.wiki_health_error_dismissed = false;
                         }
                     }
@@ -450,7 +458,8 @@ impl AirWikiApp {
                     self.install_progress = 0.0;
                 }
                 WorkerEvent::InstallQueued(message) => {
-                    self.install_label = Some(message);
+                    self.install_label =
+                        Some(localized_worker_notice(&self.localization, &message));
                     self.install_progress = 0.0;
                 }
                 WorkerEvent::ModelsReady => {
@@ -461,6 +470,7 @@ impl AirWikiApp {
                         .push_back((false, self.localization.text("models-installed-notice")));
                 }
                 WorkerEvent::RestartRequired(message) => {
+                    let message = localized_worker_notice(&self.localization, &message);
                     self.restart_required = Some(message.clone());
                     self.notices.push_back((false, message));
                 }
@@ -580,7 +590,7 @@ impl AirWikiApp {
                         }
                         Err(error) => {
                             self.search_completed = false;
-                            self.search_error = Some(error);
+                            self.search_error = Some(sanitized_error_code(&error).to_owned());
                         }
                     }
                 }
@@ -588,8 +598,12 @@ impl AirWikiApp {
                     self.integrations.apply_result(request_id, result);
                 }
                 WorkerEvent::Peers(peers) => self.peers = peers,
-                WorkerEvent::Notice(message) => self.notices.push_back((false, message)),
-                WorkerEvent::Error(message) => self.notices.push_back((true, message)),
+                WorkerEvent::Notice(message) => self
+                    .notices
+                    .push_back((false, localized_worker_notice(&self.localization, &message))),
+                WorkerEvent::Error(message) => self
+                    .notices
+                    .push_back((true, sanitized_error_code(&message).to_owned())),
             }
         }
         deduplicate_notices(&mut self.notices);
@@ -684,7 +698,7 @@ impl AirWikiApp {
                     ui.label(
                         RichText::new(format!("v{}", env!("CARGO_PKG_VERSION")))
                             .small()
-                            .color(Color32::GRAY),
+                            .color(ui.visuals().weak_text_color()),
                     );
                     ui.label(model_status);
                 });
@@ -766,7 +780,7 @@ impl AirWikiApp {
                                 ui.end_row();
                             });
                         for issue in &report.issues {
-                            ui.colored_label(Color32::from_rgb(210, 75, 70), issue);
+                            ui.colored_label(crate::theme::ERROR_CORAL, issue);
                         }
                     });
                 } else {
@@ -804,7 +818,7 @@ impl AirWikiApp {
                         }
                         if state.degraded {
                             ui.colored_label(
-                                Color32::from_rgb(210, 145, 50),
+                                crate::theme::WARNING_AMBER,
                                 self.localization.text("models-profile-reduced"),
                             );
                         }
@@ -838,7 +852,7 @@ impl AirWikiApp {
                                 .text_with("models-download-size", Some(&arguments)),
                         );
                         for issue in &state.issues {
-                            ui.colored_label(Color32::from_rgb(210, 75, 70), issue);
+                            ui.colored_label(crate::theme::ERROR_CORAL, issue);
                         }
                         if let (Some(license), Some(url), Some(revision)) =
                             (&state.license, &state.license_url, &state.revision)
@@ -910,7 +924,7 @@ impl AirWikiApp {
                             }
                             if already_active {
                                 ui.colored_label(
-                                    Color32::from_rgb(70, 160, 110),
+                                    crate::theme::VERIFIED_GREEN,
                                     self.localization.text("models-recommended-active"),
                                 );
                             } else if already_pending {
@@ -931,13 +945,13 @@ impl AirWikiApp {
                         );
                     }
                     if let Some(message) = &self.restart_required {
-                        ui.colored_label(Color32::from_rgb(70, 160, 110), message);
+                        ui.colored_label(crate::theme::VERIFIED_GREEN, message);
                     }
                     ui.separator();
                     ui.label(
                         RichText::new(self.localization.text("models-multimodal-future"))
                             .small()
-                            .color(Color32::GRAY),
+                            .color(ui.visuals().weak_text_color()),
                     );
                 });
             });
@@ -1088,7 +1102,11 @@ impl AirWikiApp {
                     self.localization.text("home-wiki-not-checked")
                 }
             };
-            ui.label(RichText::new(checked).small().color(Color32::GRAY));
+            ui.label(
+                RichText::new(checked)
+                    .small()
+                    .color(ui.visuals().weak_text_color()),
+            );
             let action = if matches!(self.wiki_health_check, WikiHealthCheckState::Failed(_)) {
                 "action-retry"
             } else {
@@ -1308,7 +1326,7 @@ impl AirWikiApp {
                     .text_with("collections-monitoring", Some(&monitoring_arguments)),
             )
             .small()
-            .color(Color32::GRAY),
+            .color(ui.visuals().weak_text_color()),
         );
         ui.add_space(8.0);
         egui::Frame::group(ui.style()).show(ui, |ui| {
@@ -1399,7 +1417,7 @@ impl AirWikiApp {
                                             "review-issues-group",
                                             Some(&issues_arguments),
                                         ))
-                                        .color(Color32::from_rgb(230, 160, 35)),
+                                        .color(crate::theme::WARNING_AMBER),
                                     );
                                     let issue_list_height =
                                         (collection_issues.len().min(6) as f32) * 56.0 + 12.0;
@@ -1461,7 +1479,7 @@ impl AirWikiApp {
                                                 Some(&arguments),
                                             ))
                                             .small()
-                                            .color(Color32::GRAY),
+                                            .color(ui.visuals().weak_text_color()),
                                         );
                                     }
                                     if let Some(summary) = maintenance_issue_summary(
@@ -1527,11 +1545,11 @@ impl AirWikiApp {
                             ui.label(
                                 RichText::new(&local_only)
                                     .small()
-                                    .color(Color32::from_rgb(70, 160, 110)),
+                                    .color(crate::theme::VERIFIED_GREEN),
                             );
                         }
                         if collection.allow_external_ai {
-                            ui.colored_label(Color32::from_rgb(205, 120, 35), &cloud_warning);
+                            ui.colored_label(crate::theme::WARNING_AMBER, &cloud_warning);
                         }
                         let external_ai_applies = external_ai_changed
                             && external_ai_change == ExternalAiPolicyChange::ApplyDisable;
@@ -1580,7 +1598,7 @@ impl AirWikiApp {
             .show(context, |ui| {
                 ui.heading(collection_name);
                 ui.label(body);
-                ui.colored_label(Color32::from_rgb(205, 120, 35), warning);
+                ui.colored_label(crate::theme::WARNING_AMBER, warning);
                 ui.horizontal(|ui| {
                     if ui.button(cancel).clicked() {
                         decision = Some(false);
@@ -1764,7 +1782,7 @@ impl AirWikiApp {
                                 .text_with("review-issues-group", Some(&arguments)),
                         )
                         .strong()
-                        .color(Color32::from_rgb(230, 160, 35)),
+                        .color(crate::theme::WARNING_AMBER),
                     );
                     ui.add_space(4.0);
                     for issue in issues {
@@ -2055,7 +2073,7 @@ impl AirWikiApp {
         }
         self.search_error_feedback(ui);
         if let Some(message) = search_coverage_message(&self.localization, self.search_coverage) {
-            ui.colored_label(Color32::from_rgb(205, 145, 30), message);
+            ui.colored_label(crate::theme::WARNING_AMBER, message);
         }
         if show_empty_state && self.search_completed && self.search_hits.is_empty() {
             empty_state(
@@ -2108,7 +2126,7 @@ impl AirWikiApp {
                             }
                             SearchResultAvailability::LocalUnavailable => {
                                 ui.colored_label(
-                                    Color32::from_rgb(205, 145, 30),
+                                    crate::theme::WARNING_AMBER,
                                     self.localization.text("search-local-unavailable"),
                                 );
                             }
@@ -2163,7 +2181,7 @@ impl AirWikiApp {
             return;
         };
         ui.colored_label(
-            Color32::from_rgb(220, 70, 70),
+            crate::theme::ERROR_CORAL,
             self.localization.text("search-error-title"),
         );
         ui.collapsing(self.localization.text("technical-details"), |ui| {
@@ -2252,7 +2270,7 @@ impl AirWikiApp {
                 });
                 if !self.manual_multiaddress.trim().is_empty() && manual_address.is_none() {
                     ui.colored_label(
-                        Color32::from_rgb(220, 90, 70),
+                        crate::theme::ERROR_CORAL,
                         self.localization.text("devices-manual-invalid"),
                     );
                 }
@@ -2454,7 +2472,7 @@ impl AirWikiApp {
                             if snapshot.network_profile == NetworkProfileState::Public =>
                         {
                             ui.colored_label(
-                                Color32::from_rgb(220, 90, 70),
+                                crate::theme::ERROR_CORAL,
                                 self.localization.text("connectivity-public-network"),
                             );
                             if ui
@@ -2482,7 +2500,7 @@ impl AirWikiApp {
                                 "connectivity-firewall-block-all-inbound"
                             };
                             ui.colored_label(
-                                Color32::from_rgb(220, 90, 70),
+                                crate::theme::ERROR_CORAL,
                                 self.localization.text(message),
                             );
                             if ui
@@ -2518,7 +2536,7 @@ impl AirWikiApp {
                             if snapshot.firewall == FirewallDiagnosticState::RulesMissing =>
                         {
                             ui.colored_label(
-                                Color32::from_rgb(205, 145, 30),
+                                crate::theme::WARNING_AMBER,
                                 self.localization
                                     .text("connectivity-firewall-helper-repair"),
                             );
@@ -2534,7 +2552,7 @@ impl AirWikiApp {
                                 "connectivity-issue-firewall-conflict"
                             };
                             ui.colored_label(
-                                Color32::from_rgb(220, 90, 70),
+                                crate::theme::ERROR_CORAL,
                                 self.localization.text(warning),
                             );
                             ui.label(
@@ -2561,7 +2579,7 @@ impl AirWikiApp {
                             if snapshot.firewall == FirewallDiagnosticState::ManagedPolicy =>
                         {
                             ui.colored_label(
-                                Color32::from_rgb(205, 145, 30),
+                                crate::theme::WARNING_AMBER,
                                 self.localization.text("connectivity-admin-needed"),
                             );
                         }
@@ -2573,7 +2591,7 @@ impl AirWikiApp {
                             || self.lan_discovery == LanDiscoveryView::Failed =>
                         {
                             ui.colored_label(
-                                Color32::from_rgb(220, 90, 70),
+                                crate::theme::ERROR_CORAL,
                                 self.localization.text("connectivity-failed"),
                             );
                             #[cfg(target_os = "macos")]
@@ -2598,7 +2616,7 @@ impl AirWikiApp {
                         }
                         _ => {
                             ui.colored_label(
-                                Color32::from_rgb(205, 145, 30),
+                                crate::theme::WARNING_AMBER,
                                 self.localization.text("connectivity-not-ready"),
                             );
                         }
@@ -2683,11 +2701,8 @@ impl AirWikiApp {
                     install: true,
                 });
             } else {
-                self.notices.push_back((
-                    true,
-                    self.localization
-                        .text("connectivity-issue-firewall-state-changed"),
-                ));
+                self.notices
+                    .push_back((true, "connectivity_state_changed".to_owned()));
                 if self.connectivity_request_id.is_none() {
                     self.request_connectivity_refresh();
                 }
@@ -2709,160 +2724,161 @@ impl AirWikiApp {
             .max_height(settings_height)
             .auto_shrink([false; 2])
             .show(ui, |ui| {
-        let mut locale = self
-            .preferences
-            .map_or(LocalePreference::System, |preferences| preferences.locale);
-        ui.horizontal(|ui| {
-            let language_label = ui.label(self.localization.text("settings-language"));
-            egui::ComboBox::from_id_salt("ui_locale")
-                .selected_text(match locale {
-                    LocalePreference::System => self.localization.text("language-system"),
-                    LocalePreference::Es => self.localization.text("language-spanish"),
-                    LocalePreference::En => self.localization.text("language-english"),
-                })
-                .show_ui(ui, |ui| {
-                    ui.selectable_value(
-                        &mut locale,
-                        LocalePreference::System,
-                        self.localization.text("language-system"),
-                    );
-                    ui.selectable_value(
-                        &mut locale,
-                        LocalePreference::Es,
-                        self.localization.text("language-spanish"),
-                    );
-                    ui.selectable_value(
-                        &mut locale,
-                        LocalePreference::En,
-                        self.localization.text("language-english"),
-                    );
-                })
-                .response
-                .labelled_by(language_label.id);
-        });
-        if self
-            .preferences
-            .is_some_and(|current| current.locale != locale)
-        {
-            self.update_preferences(|preferences| preferences.locale = locale, false);
-        }
-        ui.add_space(12.0);
-        ui.horizontal(|ui| {
-            let mut arguments = FluentArgs::new();
-            arguments.set(
-                "status",
-                autostart_status_label(&self.localization, self.autostart_status),
-            );
-            ui.label(
-                self.localization
-                    .text_with("settings-login-status", Some(&arguments)),
-            );
-            let operation_idle = self.autostart_request_id.is_none();
-            if ui
-                .add_enabled(
-                    operation_idle,
-                    egui::Button::new(self.localization.text("action-enable")),
-                )
-                .clicked()
-            {
-                self.request_autostart(true);
-            }
-            if ui
-                .add_enabled(
-                    operation_idle,
-                    egui::Button::new(self.localization.text("action-disable")),
-                )
-                .clicked()
-            {
-                self.request_autostart(false);
-            }
-            if ui
-                .add_enabled(
-                    operation_idle,
-                    egui::Button::new(self.localization.text("settings-refresh-status")),
-                )
-                .clicked()
-            {
-                let request_id = Uuid::new_v4();
-                self.autostart_request_id = Some(request_id);
-                self.worker
-                    .send(WorkerCommand::RefreshAutostart { request_id });
-            }
-            if self.autostart_request_id.is_some() {
-                ui.spinner();
-            }
-        });
-        ui.add_space(12.0);
-        self.update_settings(ui);
-        ui.add_space(12.0);
-        ui.collapsing(
-            self.localization.text("settings-advanced-diagnostics"),
-            |ui| {
-                egui::Grid::new("settings")
-                    .num_columns(2)
-                    .spacing([24.0, 12.0])
-                    .show(ui, |ui| {
-                        ui.label("Identidad local");
-                        wrap_monospace(ui, &self.node_id);
-                        ui.end_row();
-                        ui.label("MCP local");
-                        wrap_monospace(ui, &self.mcp_url);
-                        ui.end_row();
-                        ui.label("Base de datos");
-                        wrap_monospace(ui, self.paths.database.display().to_string());
-                        ui.end_row();
-                        ui.label("Bundles OKF");
-                        wrap_monospace(ui, self.paths.vaults.display().to_string());
-                        ui.end_row();
-                        ui.label("Logs sanitizados");
-                        wrap_monospace(ui, self.paths.logs.display().to_string());
-                        ui.end_row();
-                        ui.label("Configuración");
-                        wrap_monospace(ui, self.paths.config.display().to_string());
-                        ui.end_row();
-                    });
-            },
-        );
-        ui.add_space(12.0);
-        if let Some(state) = self.model_state.clone() {
-            egui::Frame::group(ui.style()).show(ui, |ui| {
-                ui.heading(self.localization.text("settings-local-ai"));
-                let mut profile_arguments = FluentArgs::new();
-                profile_arguments.set("profile", profile_label(&self.localization, state.profile));
-                ui.label(
-                    self.localization
-                        .text_with("settings-model-profile", Some(&profile_arguments)),
-                );
-                let mut active_arguments = FluentArgs::new();
-                active_arguments.set(
-                    "model",
-                    state
-                        .active_model_id
-                        .clone()
-                        .unwrap_or_else(|| self.localization.text("settings-model-none")),
-                );
-                ui.label(
-                    self.localization
-                        .text_with("settings-model-active", Some(&active_arguments)),
-                );
-                if let Some(pending) = &state.pending_model_id {
+                let mut locale = self
+                    .preferences
+                    .map_or(LocalePreference::System, |preferences| preferences.locale);
+                ui.horizontal(|ui| {
+                    let language_label = ui.label(self.localization.text("settings-language"));
+                    egui::ComboBox::from_id_salt("ui_locale")
+                        .selected_text(match locale {
+                            LocalePreference::System => self.localization.text("language-system"),
+                            LocalePreference::Es => self.localization.text("language-spanish"),
+                            LocalePreference::En => self.localization.text("language-english"),
+                        })
+                        .show_ui(ui, |ui| {
+                            ui.selectable_value(
+                                &mut locale,
+                                LocalePreference::System,
+                                self.localization.text("language-system"),
+                            );
+                            ui.selectable_value(
+                                &mut locale,
+                                LocalePreference::Es,
+                                self.localization.text("language-spanish"),
+                            );
+                            ui.selectable_value(
+                                &mut locale,
+                                LocalePreference::En,
+                                self.localization.text("language-english"),
+                            );
+                        })
+                        .response
+                        .labelled_by(language_label.id);
+                });
+                if self
+                    .preferences
+                    .is_some_and(|current| current.locale != locale)
+                {
+                    self.update_preferences(|preferences| preferences.locale = locale, false);
+                }
+                ui.add_space(12.0);
+                ui.horizontal(|ui| {
                     let mut arguments = FluentArgs::new();
-                    arguments.set("model", pending.as_str());
+                    arguments.set(
+                        "status",
+                        autostart_status_label(&self.localization, self.autostart_status),
+                    );
                     ui.label(
                         self.localization
-                            .text_with("models-pending-restart", Some(&arguments)),
+                            .text_with("settings-login-status", Some(&arguments)),
                     );
+                    let operation_idle = self.autostart_request_id.is_none();
+                    if ui
+                        .add_enabled(
+                            operation_idle,
+                            egui::Button::new(self.localization.text("action-enable")),
+                        )
+                        .clicked()
+                    {
+                        self.request_autostart(true);
+                    }
+                    if ui
+                        .add_enabled(
+                            operation_idle,
+                            egui::Button::new(self.localization.text("action-disable")),
+                        )
+                        .clicked()
+                    {
+                        self.request_autostart(false);
+                    }
+                    if ui
+                        .add_enabled(
+                            operation_idle,
+                            egui::Button::new(self.localization.text("settings-refresh-status")),
+                        )
+                        .clicked()
+                    {
+                        let request_id = Uuid::new_v4();
+                        self.autostart_request_id = Some(request_id);
+                        self.worker
+                            .send(WorkerCommand::RefreshAutostart { request_id });
+                    }
+                    if self.autostart_request_id.is_some() {
+                        ui.spinner();
+                    }
+                });
+                ui.add_space(12.0);
+                self.update_settings(ui);
+                ui.add_space(12.0);
+                ui.collapsing(
+                    self.localization.text("settings-advanced-diagnostics"),
+                    |ui| {
+                        egui::Grid::new("settings")
+                            .num_columns(2)
+                            .spacing([24.0, 12.0])
+                            .show(ui, |ui| {
+                                ui.label(self.localization.text("diagnostics-local-identity"));
+                                wrap_monospace(ui, &self.node_id);
+                                ui.end_row();
+                                ui.label(self.localization.text("diagnostics-local-mcp"));
+                                wrap_monospace(ui, &self.mcp_url);
+                                ui.end_row();
+                                ui.label(self.localization.text("diagnostics-database"));
+                                wrap_monospace(ui, self.paths.database.display().to_string());
+                                ui.end_row();
+                                ui.label(self.localization.text("diagnostics-okf-bundles"));
+                                wrap_monospace(ui, self.paths.vaults.display().to_string());
+                                ui.end_row();
+                                ui.label(self.localization.text("diagnostics-sanitized-logs"));
+                                wrap_monospace(ui, self.paths.logs.display().to_string());
+                                ui.end_row();
+                                ui.label(self.localization.text("diagnostics-configuration"));
+                                wrap_monospace(ui, self.paths.config.display().to_string());
+                                ui.end_row();
+                            });
+                    },
+                );
+                ui.add_space(12.0);
+                if let Some(state) = self.model_state.clone() {
+                    egui::Frame::group(ui.style()).show(ui, |ui| {
+                        ui.heading(self.localization.text("settings-local-ai"));
+                        let mut profile_arguments = FluentArgs::new();
+                        profile_arguments
+                            .set("profile", profile_label(&self.localization, state.profile));
+                        ui.label(
+                            self.localization
+                                .text_with("settings-model-profile", Some(&profile_arguments)),
+                        );
+                        let mut active_arguments = FluentArgs::new();
+                        active_arguments.set(
+                            "model",
+                            state
+                                .active_model_id
+                                .clone()
+                                .unwrap_or_else(|| self.localization.text("settings-model-none")),
+                        );
+                        ui.label(
+                            self.localization
+                                .text_with("settings-model-active", Some(&active_arguments)),
+                        );
+                        if let Some(pending) = &state.pending_model_id {
+                            let mut arguments = FluentArgs::new();
+                            arguments.set("model", pending.as_str());
+                            ui.label(
+                                self.localization
+                                    .text_with("models-pending-restart", Some(&arguments)),
+                            );
+                        }
+                        if ui
+                            .button(self.localization.text("settings-manage-models"))
+                            .clicked()
+                        {
+                            self.screen = Screen::Models;
+                        }
+                    });
+                    ui.add_space(12.0);
                 }
-                if ui
-                    .button(self.localization.text("settings-manage-models"))
-                    .clicked()
-                {
-                    self.screen = Screen::Models;
-                }
-            });
-            ui.add_space(12.0);
-        }
-        ui.label("MCP escucha únicamente en 127.0.0.1. La herramienta es de solo lectura y revalida allow_external_ai en el nodo fuente.");
+                ui.label(self.localization.text("settings-mcp-boundary"));
             });
     }
 
@@ -2928,9 +2944,9 @@ impl AirWikiApp {
             egui::Panel::bottom("notices").show(root, |ui| {
                 for (error, message) in &self.notices {
                     let color = if *error {
-                        Color32::from_rgb(220, 70, 70)
+                        crate::theme::ERROR_CORAL
                     } else {
-                        Color32::from_rgb(70, 160, 110)
+                        crate::theme::VERIFIED_GREEN
                     };
                     let summary = if *error {
                         human_error_summary(&self.localization, message)
@@ -2960,7 +2976,7 @@ impl AirWikiApp {
         egui::Frame::group(ui.style()).show(ui, |ui| {
             ui.horizontal_wrapped(|ui| {
                 ui.colored_label(
-                    Color32::from_rgb(220, 70, 70),
+                    crate::theme::ERROR_CORAL,
                     human_error_summary(&self.localization, &message),
                 );
                 if ui
@@ -3001,7 +3017,7 @@ impl AirWikiApp {
         egui::Panel::bottom("onboarding_notices").show(root, |ui| {
             for (_, message) in relevant {
                 ui.colored_label(
-                    Color32::from_rgb(220, 70, 70),
+                    crate::theme::ERROR_CORAL,
                     human_error_summary(&self.localization, message),
                 );
                 ui.collapsing(self.localization.text("technical-details"), |ui| {
@@ -3056,7 +3072,7 @@ impl AirWikiApp {
                 Some(UpdaterWorkerView::Ready(view)) => {
                     if let Some(issue) = view.last_issue {
                         let message = update_issue_label(&self.localization, issue.code);
-                        ui.colored_label(Color32::from_rgb(205, 145, 30), message);
+                        ui.colored_label(crate::theme::WARNING_AMBER, message);
                     }
                     match view.status {
                         UpdaterStatus::Idle => {
@@ -3298,7 +3314,7 @@ impl AirWikiApp {
 
         if !state.issues.is_empty() {
             ui.colored_label(
-                Color32::from_rgb(220, 90, 70),
+                crate::theme::ERROR_CORAL,
                 self.localization.text("error-local-ai"),
             );
             ui.collapsing(self.localization.text("technical-details"), |ui| {
@@ -3351,7 +3367,7 @@ impl AirWikiApp {
         let already_pending = state.pending_model_id.as_deref() == recommended;
         if already_active {
             ui.colored_label(
-                Color32::from_rgb(70, 160, 110),
+                crate::theme::VERIFIED_GREEN,
                 self.localization.text("models-recommended-active"),
             );
         } else {
@@ -3501,7 +3517,7 @@ impl AirWikiApp {
                                 );
                                 if !self.collections.is_empty() {
                                     ui.colored_label(
-                                        Color32::from_rgb(70, 160, 110),
+                                        crate::theme::VERIFIED_GREEN,
                                         self.localization.text("onboarding-collection-linked"),
                                     );
                                 }
@@ -3897,15 +3913,16 @@ fn readiness_status_presentation(
     status: ReadinessStatus,
 ) -> (String, Color32) {
     let (message, color) = match status {
-        ReadinessStatus::Ready => ("status-ready", Color32::from_rgb(70, 160, 110)),
-        ReadinessStatus::Working => ("status-working", Color32::from_rgb(60, 145, 205)),
+        ReadinessStatus::Ready => ("status-ready", crate::theme::VERIFIED_GREEN),
+        ReadinessStatus::Working => ("status-working", crate::theme::AIR_BLUE),
         ReadinessStatus::NeedsPermission => {
-            ("status-needs-permission", Color32::from_rgb(205, 145, 30))
+            ("status-needs-permission", crate::theme::WARNING_AMBER)
         }
-        ReadinessStatus::NeedsAttention => {
-            ("status-needs-attention", Color32::from_rgb(220, 90, 70))
-        }
-        ReadinessStatus::OptionalDisabled => ("status-optional-disabled", Color32::GRAY),
+        ReadinessStatus::NeedsAttention => ("status-needs-attention", crate::theme::ERROR_CORAL),
+        ReadinessStatus::OptionalDisabled => (
+            "status-optional-disabled",
+            crate::theme::secondary_text(true),
+        ),
     };
     (localization.text(message), color)
 }
@@ -3915,18 +3932,20 @@ fn maintenance_status_presentation(
     status: airwiki_core::CollectionMaintenanceStatus,
 ) -> (String, Color32) {
     let (message, color) = match status {
-        airwiki_core::CollectionMaintenanceStatus::Never => ("maintenance-never", Color32::GRAY),
+        airwiki_core::CollectionMaintenanceStatus::Never => {
+            ("maintenance-never", crate::theme::secondary_text(true))
+        }
         airwiki_core::CollectionMaintenanceStatus::Success => {
-            ("maintenance-success", Color32::from_rgb(70, 160, 110))
+            ("maintenance-success", crate::theme::VERIFIED_GREEN)
         }
         airwiki_core::CollectionMaintenanceStatus::Partial => {
-            ("maintenance-partial", Color32::from_rgb(205, 145, 30))
+            ("maintenance-partial", crate::theme::WARNING_AMBER)
         }
         airwiki_core::CollectionMaintenanceStatus::Failed => {
-            ("maintenance-failed", Color32::from_rgb(220, 90, 70))
+            ("maintenance-failed", crate::theme::ERROR_CORAL)
         }
         airwiki_core::CollectionMaintenanceStatus::Quarantined => {
-            ("maintenance-quarantined", Color32::from_rgb(220, 90, 70))
+            ("maintenance-quarantined", crate::theme::ERROR_CORAL)
         }
     };
     (localization.text(message), color)
@@ -4049,7 +4068,7 @@ fn show_review_issue(
                 RichText::new(localization.text("review-issue-status"))
                     .small()
                     .strong()
-                    .color(Color32::from_rgb(230, 160, 35)),
+                    .color(crate::theme::WARNING_AMBER),
             );
             ui.add(
                 egui::Label::new(
@@ -4200,31 +4219,95 @@ fn firewall_operation_update_applies(
     state.is_none() || presentation_request_id == Some(event_request_id)
 }
 
-fn human_error_summary(localization: &Localization, message: &str) -> String {
+fn sanitized_error_code(message: &str) -> &'static str {
     let normalized = message.to_lowercase();
-    let message_id = if normalized.contains("modelo") || normalized.contains("inferencia") {
-        "error-local-ai"
+    if normalized.contains("private services")
+        || normalized.contains("servicios privados")
+        || normalized.contains("device identity")
+        || normalized.contains("identidad ed25519")
+        || normalized.contains("keychain")
+        || normalized.contains("llavero")
+    {
+        "startup_services_unavailable"
+    } else if normalized.contains("modelo")
+        || normalized.contains("model")
+        || normalized.contains("inferencia")
+        || normalized.contains("local_ai")
+    {
+        "local_ai_unavailable"
     } else if normalized.contains("colección")
+        || normalized.contains("collection")
         || normalized.contains("carpeta")
+        || normalized.contains("folder")
         || normalized.contains("scan")
         || normalized.contains("watcher")
     {
-        "error-collection"
+        "collection_unavailable"
     } else if normalized.contains("lan")
         || normalized.contains("red local")
+        || normalized.contains("network")
+        || normalized.contains("connectivity")
         || normalized.contains("firewall")
         || normalized.contains("empareja")
+        || normalized.contains("pairing")
     {
-        "error-connectivity"
+        "connectivity_unavailable"
+    } else if normalized.contains("search") || normalized.contains("búsqueda") {
+        "search_unavailable"
     } else if normalized.contains("integración")
+        || normalized.contains("integration")
         || normalized.contains("mcp")
         || normalized.contains("chat")
     {
-        "error-chat"
-    } else if normalized.contains("actualiza") {
-        "error-update"
+        "chat_integration_unavailable"
+    } else if normalized.contains("actualiza") || normalized.contains("update") {
+        "update_unavailable"
     } else {
-        "error-generic"
+        "operation_failed"
+    }
+}
+
+fn human_error_summary(localization: &Localization, message: &str) -> String {
+    let message_id = match sanitized_error_code(message) {
+        "local_ai_unavailable" => "error-local-ai",
+        "collection_unavailable" => "error-collection",
+        "connectivity_unavailable" => "error-connectivity",
+        "chat_integration_unavailable" => "error-chat",
+        "update_unavailable" => "error-update",
+        _ => "error-generic",
+    };
+    localization.text(message_id)
+}
+
+fn localized_worker_notice(localization: &Localization, message: &str) -> String {
+    if localization.locale() == UiLocale::Es {
+        return message.to_owned();
+    }
+    let normalized = message.to_lowercase();
+    let message_id = if normalized.contains("modelo")
+        || normalized.contains("model")
+        || normalized.contains("descarga")
+        || normalized.contains("instal")
+        || normalized.contains("verifica")
+    {
+        "notice-model-updated"
+    } else if normalized.contains("documento")
+        || normalized.contains("borrador")
+        || normalized.contains("public")
+        || normalized.contains("wiki")
+        || normalized.contains("colección")
+    {
+        "notice-knowledge-updated"
+    } else if normalized.contains("lan")
+        || normalized.contains("red local")
+        || normalized.contains("equipo")
+        || normalized.contains("peer")
+        || normalized.contains("empareja")
+        || normalized.contains("sas")
+    {
+        "notice-connectivity-updated"
+    } else {
+        "notice-operation-complete"
     };
     localization.text(message_id)
 }
@@ -4232,22 +4315,27 @@ fn human_error_summary(localization: &Localization, message: &str) -> String {
 fn onboarding_error_is_relevant(page: OnboardingPage, message: &str) -> bool {
     let normalized = message.to_lowercase();
     let contains_any = |terms: &[&str]| terms.iter().any(|term| normalized.contains(term));
-    if contains_any(&[
-        "private services",
-        "servicios privados",
-        "device identity",
-        "identidad ed25519",
-        "keychain",
-        "llavero",
-    ]) {
+    if normalized == "startup_services_unavailable"
+        || contains_any(&[
+            "private services",
+            "servicios privados",
+            "device identity",
+            "identidad ed25519",
+            "keychain",
+            "llavero",
+        ])
+    {
         return true;
     }
     match page {
         OnboardingPage::Welcome => false,
-        OnboardingPage::Model => contains_any(&[
-            "model", "modelo", "infer", "asset", "artifact", "hash", "memory", "memoria", "disk",
-            "space", "espacio",
-        ]),
+        OnboardingPage::Model => {
+            normalized == "local_ai_unavailable"
+                || contains_any(&[
+                    "model", "modelo", "infer", "asset", "artifact", "hash", "memory", "memoria",
+                    "disk", "space", "espacio",
+                ])
+        }
         OnboardingPage::Collection | OnboardingPage::Processing | OnboardingPage::Review => {
             contains_any(&[
                 "collection",
@@ -4260,7 +4348,8 @@ fn onboarding_error_is_relevant(page: OnboardingPage, message: &str) -> bool {
             ])
         }
         OnboardingPage::Search => {
-            contains_any(&["search", "búsqueda", "index", "índice", "fts", "embedding"])
+            normalized == "search_unavailable"
+                || contains_any(&["search", "búsqueda", "index", "índice", "fts", "embedding"])
         }
     }
 }
@@ -4567,7 +4656,7 @@ impl eframe::App for AirWikiApp {
         if let Some(error) = self.shell.ensure_tray() {
             self.notices.push_back((
                 true,
-                format!("{} {error}", self.localization.text("tray-start-failed")),
+                sanitized_error_code(&format!("tray unavailable: {error}")).to_owned(),
             ));
             self.shell.show(context);
         }
@@ -4633,16 +4722,7 @@ impl eframe::App for AirWikiApp {
 }
 
 fn configure_style(context: &egui::Context) {
-    let mut style = (*context.global_style()).clone();
-    style.spacing.item_spacing = egui::vec2(10.0, 8.0);
-    style.spacing.button_padding = egui::vec2(14.0, 8.0);
-    style.spacing.interact_size.y = 36.0;
-    style.visuals.selection.bg_fill = first_knowledge::AIR_BLUE;
-    style.visuals.selection.stroke = egui::Stroke::new(1.0, Color32::WHITE);
-    style.visuals.widgets.active.corner_radius = egui::CornerRadius::same(8);
-    style.visuals.widgets.hovered.corner_radius = egui::CornerRadius::same(8);
-    style.visuals.widgets.inactive.corner_radius = egui::CornerRadius::same(8);
-    context.set_global_style(style);
+    crate::theme::apply(context);
 }
 
 fn nav(ui: &mut egui::Ui, current: &mut Screen, target: Screen, label: &str) {
@@ -4671,7 +4751,7 @@ fn wrap_rich_text(ui: &mut egui::Ui, text: RichText) {
 
 fn page_title(ui: &mut egui::Ui, title: &str, subtitle: &str) {
     ui.heading(RichText::new(title).size(28.0));
-    ui.label(RichText::new(subtitle).color(Color32::GRAY));
+    ui.label(RichText::new(subtitle).color(crate::theme::secondary_text(ui.visuals().dark_mode)));
     ui.add_space(18.0);
 }
 
@@ -4912,13 +4992,14 @@ mod tests {
         advance_onboarding_page, classify_external_ai_policy_change, classify_search_result,
         collection_maintenance_needs_recovery, connectivity_runtime_is_active, deduplicate_notices,
         elapsed_minutes, firewall_configuration_is_current, firewall_operation_update_applies,
-        firewall_state_offers_advanced_recovery, human_error_summary, model_action_label,
-        onboarding_error_is_relevant, onboarding_page_for_state,
+        firewall_state_offers_advanced_recovery, human_error_summary, localized_worker_notice,
+        model_action_label, onboarding_error_is_relevant, onboarding_page_for_state,
         onboarding_review_requires_recovery, onboarding_search_completion,
         parse_manual_ipv4_address, peer_activity_message_id, primary_action_explanation,
-        primary_action_title, review_fields_stack, search_coverage_message, search_result_applies,
-        search_result_origin_label, should_present_pairing_controls, updater_launched_installer,
-        visible_journey_states, wiki_health_readiness_inputs, wiki_health_result_applies,
+        primary_action_title, review_fields_stack, sanitized_error_code, search_coverage_message,
+        search_result_applies, search_result_origin_label, should_present_pairing_controls,
+        updater_launched_installer, visible_journey_states, wiki_health_readiness_inputs,
+        wiki_health_result_applies,
     };
     use crate::connectivity_platform::{
         ConnectivityPlatformSnapshot, FirewallDiagnosticState, FirewallHelperState,
@@ -5155,14 +5236,27 @@ mod tests {
     #[test]
     fn technical_errors_are_reduced_to_human_categories() {
         let localization = Localization::new(UiLocale::Es).unwrap();
+        let raw = "La colección 123e4567-e89b-12d3-a456-426614174000 falló en /private/path";
         assert_eq!(
-            human_error_summary(
-                &localization,
-                "La colección 123e4567-e89b-12d3-a456-426614174000 falló en /private/path"
-            ),
+            human_error_summary(&localization, raw),
             "Una carpeta de conocimiento necesita atención."
         );
-        assert!(!human_error_summary(&localization, "falló").contains("/"));
+        assert_eq!(sanitized_error_code(raw), "collection_unavailable");
+        assert!(!sanitized_error_code(raw).contains("private"));
+    }
+
+    #[test]
+    fn english_worker_notices_never_reuse_spanish_runtime_copy() {
+        let localization = Localization::new(UiLocale::EnUs).unwrap();
+
+        assert_eq!(
+            localized_worker_notice(&localization, "La red local está lista"),
+            "Local connection status updated."
+        );
+        assert_eq!(
+            localized_worker_notice(&localization, "Modelos locales verificados y listos"),
+            "Local AI status updated."
+        );
     }
 
     #[test]

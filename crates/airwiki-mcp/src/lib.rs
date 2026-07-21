@@ -433,7 +433,11 @@ impl AsyncTool<AirWikiMcp> for SearchAirWikiTool {
                 rate_limiter.try_acquire(Instant::now())?;
                 let request_id = request.request_id;
                 let response = search.search(request).await.map_err(|error| {
-                    tracing::warn!(%request_id, error_kind = contract_error_kind(&error), "AirWiki MCP knowledge search failed");
+                    let _ = request_id;
+                    tracing::warn!(
+                        error_kind = contract_error_kind(&error),
+                        "AirWiki MCP knowledge search failed"
+                    );
                     contract_error_to_mcp(error)
                 })?;
                 output_from_response(request_id, top_k, response)

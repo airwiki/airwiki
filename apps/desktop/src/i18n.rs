@@ -199,6 +199,10 @@ impl Localization {
         self.current = locale;
     }
 
+    pub(crate) const fn locale(&self) -> UiLocale {
+        self.current
+    }
+
     pub(crate) fn text(&self, id: &str) -> String {
         self.text_with(id, None)
     }

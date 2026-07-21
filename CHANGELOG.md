@@ -31,6 +31,8 @@ All notable user-visible changes to AirWiki will be documented here. The project
 - Made vector retrieval scan each collection with cursor pagination and hydrate full evidence only for the bounded candidate set, so query work no longer grows through repeated SQLite offsets or corpus-wide text loading.
 - Separated direct answers, allowed supporting context, and forbidden evidence in the retrieval evaluation corpus, and corrected an Atlas question that previously depended on hidden fixture context; production search behavior and thresholds are unchanged.
 - Kept local desktop search conservative while allowing external-chat consumers to evaluate bounded candidates independently; evidence wins duplicates and candidates are discarded first when a LAN response reaches its size limit.
+- Refined the desktop visual system with an evidence-oriented palette, clearer type hierarchy, roomier controls, and contrast-tested primary and secondary text in dark and light themes.
+- Completed the English presentation boundary for worker notices and advanced diagnostics so changing locale no longer leaves Spanish operational text in the interface.
 
 ### Fixed
 
@@ -44,6 +46,8 @@ All notable user-visible changes to AirWiki will be documented here. The project
 
 ### Security
 
+- Sanitized desktop, LAN, MCP, and inference diagnostics so default logs and technical-detail panels expose stable error categories instead of peer IDs, request IDs, collection IDs, endpoints, local paths, or raw backend errors.
+- Supervised model lifecycle and authorized-search tasks through owned Tokio task sets so shutdown cancels and joins in-flight work deterministically.
 - External-chat access, peer sharing, grants, publication, and ambiguous repairs remain explicit human decisions and fail closed when authorization is uncertain.
 - Remote search results remain read-only evidence cards and never expose a local Wiki navigation action.
 - External-chat candidate output is revalidated at every disclosure boundary and reduced below the bridge transport budget, discarding candidates before evidence when necessary.

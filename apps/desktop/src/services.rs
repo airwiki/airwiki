@@ -1670,9 +1670,8 @@ impl DesktopServices {
             Ok(mut snapshots) => {
                 snapshots.insert(collection_id, issues);
             }
-            Err(error) => tracing::warn!(
+            Err(_) => tracing::warn!(
                 error_kind = "source_issue_snapshot",
-                %error,
                 "source issue snapshot could not be refreshed"
             ),
         }
@@ -1864,11 +1863,11 @@ impl DesktopServices {
                 effect.notice = Some("Peer revocado y conexiones cerradas".into());
             }
             NetworkEvent::InboundSearchCompleted {
-                peer,
-                request_id,
+                peer: _,
+                request_id: _,
                 hits,
             } => {
-                tracing::info!(%peer, %request_id, hits, "served authorized LAN search");
+                tracing::info!(hits, "served authorized LAN search");
             }
             NetworkEvent::Warning { peer, kind } => {
                 tracing::warn!(
@@ -2041,9 +2040,8 @@ fn restore_access_control(database: &Database) -> Result<AccessControl> {
                     grants: grants.remove(&peer.peer_id).unwrap_or_default(),
                 },
             ),
-            Err(error) => tracing::warn!(
-                peer_id = %peer.peer_id,
-                %error,
+            Err(_) => tracing::warn!(
+                error_kind = "malformed_persisted_peer_id",
                 "ignoring malformed persisted PeerId"
             ),
         }

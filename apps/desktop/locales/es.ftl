@@ -486,6 +486,17 @@ models-verifying = Verificando { $artifact }
 models-installing = Instalando { $artifact }
 models-complete = Listo: { $artifact }
 models-installed-notice = La IA local está verificada y lista
+notice-model-updated = Se actualizó el estado de la IA local.
+notice-knowledge-updated = Se actualizó el estado del conocimiento.
+notice-connectivity-updated = Se actualizó el estado de la conexión local.
+notice-operation-complete = AirWiki completó la operación.
+settings-mcp-boundary = El acceso de los chats permanece en este equipo, es de solo lectura y vuelve a comprobar el permiso de la carpeta antes de devolver evidencia.
+diagnostics-local-identity = Identidad local
+diagnostics-local-mcp = Puerta de enlace local para chats
+diagnostics-database = Base de datos
+diagnostics-okf-bundles = Bundles OKF
+diagnostics-sanitized-logs = Logs sanitizados
+diagnostics-configuration = Configuración
 tray-start-failed = AirWiki no pudo iniciar la bandeja del sistema.
 technical-details = Detalles técnicos
 

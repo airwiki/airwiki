@@ -20,7 +20,7 @@ use libp2p::swarm::{
 };
 use libp2p::{Multiaddr, PeerId, StreamProtocol, Swarm, tcp, yamux};
 use tokio::sync::{broadcast, mpsc, oneshot};
-use tokio::task::JoinHandle;
+use tokio::task::{JoinHandle, JoinSet};
 use tracing::{info, warn};
 
 use crate::access::{AccessControl, AccessError};
@@ -465,6 +465,7 @@ struct Runtime {
     listen_addresses: HashSet<Multiaddr>,
     backend_result_tx: mpsc::Sender<BackendResult>,
     backend_result_rx: mpsc::Receiver<BackendResult>,
+    backend_tasks: JoinSet<()>,
 }
 
 pub fn spawn_network(
@@ -573,6 +574,7 @@ pub fn spawn_network(
         listen_addresses: HashSet::new(),
         backend_result_tx,
         backend_result_rx,
+        backend_tasks: JoinSet::new(),
     };
     let task = tokio::spawn(runtime.run());
     Ok((handle, initial_events, task))
@@ -613,16 +615,26 @@ impl Runtime {
                         self.handle_backend_result(result);
                     }
                 }
+                completion = self.backend_tasks.join_next(), if !self.backend_tasks.is_empty() => {
+                    if completion.is_some_and(|result| result.is_err()) {
+                        warn!(
+                            error_kind = "authorized_search_task_join",
+                            "an authorized search task did not join cleanly"
+                        );
+                    }
+                }
                 _ = maintenance.tick() => self.maintenance(),
             }
         }
+        self.backend_tasks.abort_all();
+        while self.backend_tasks.join_next().await.is_some() {}
         self.restore_pairing_blocks_for_shutdown();
         for (_, query) in self.queries.drain() {
             let _ = query.reply.send(Err(NetworkError::RuntimeStopped));
         }
         self.listener_ready.store(false, Ordering::Release);
         self.listener_unavailable.store(true, Ordering::Release);
-        info!(peer = %self.local_peer_id, "LAN runtime stopped");
+        info!("LAN runtime stopped");
         if let Some(completed) = shutdown_completed {
             let _ = completed.send(());
         }
@@ -959,9 +971,8 @@ impl Runtime {
                             .record_authenticated_outbound(peer_id, address)
                         {
                             Ok(address) => self.swarm.add_peer_address(peer_id, address),
-                            Err(error) => warn!(
-                                %peer_id,
-                                error = %error,
+                            Err(_) => warn!(
+                                error_kind = "non_lan_authenticated_address",
                                 "ignored non-LAN authenticated outbound address"
                             ),
                         }
@@ -1038,9 +1049,8 @@ impl Runtime {
                                 .event_tx
                                 .send(NetworkEvent::Discovered { peer, address });
                         }
-                        Err(error) => warn!(
-                            %peer,
-                            error = %error,
+                        Err(_) => warn!(
+                            error_kind = "invalid_mdns_address",
                             "ignored invalid mDNS address"
                         ),
                     }
@@ -1055,9 +1065,8 @@ impl Runtime {
                                 .send(NetworkEvent::DiscoveryExpired { peer, address });
                         }
                         Ok(None) => {}
-                        Err(error) => warn!(
-                            %peer,
-                            error = %error,
+                        Err(_) => warn!(
+                            error_kind = "invalid_expired_mdns_address",
                             "ignored invalid expired mDNS address"
                         ),
                     }
@@ -1143,7 +1152,7 @@ impl Runtime {
         let result_tx = self.backend_result_tx.clone();
         let deadline = self.config.search_deadline;
         let local_node = self.local_peer_id.to_string();
-        tokio::spawn(async move {
+        self.backend_tasks.spawn(async move {
             let request_id = request.request_id;
             let allowed: HashSet<_> = authorization.allowed_collections.iter().copied().collect();
             let result = tokio::time::timeout(
@@ -1191,7 +1200,10 @@ impl Runtime {
                     None,
                 ),
                 Ok(Err(error)) => {
-                    warn!(%peer, error_kind = search_error_kind(&error), "authorized search backend failed");
+                    warn!(
+                        error_kind = search_error_kind(&error),
+                        "authorized search backend failed"
+                    );
                     (
                         error_response(SearchWireErrorCode::Internal, "search backend failed"),
                         None,
@@ -1455,7 +1467,7 @@ impl Runtime {
                 self.pairing_confirms.remove(&request_id);
                 if hello_failed {
                     self.fail_pairing(peer, PairingFailureReason::HandshakeFailed);
-                    warn!(%peer, "pairing Hello failed");
+                    warn!(error_kind = "pairing_hello_failed", "pairing Hello failed");
                 } else {
                     let _ = error;
                     self.emit_warning(Some(peer), NetworkWarningKind::PairingProtocolFailed);

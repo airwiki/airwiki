@@ -393,8 +393,7 @@ impl KnowledgeUi {
                 {
                     return self.recover_page_after_stale(
                         collection_id,
-                        "La página recibida no corresponde al snapshot solicitado; actualiza la wiki"
-                            .to_owned(),
+                        "knowledge-error-stale-snapshot".to_owned(),
                     );
                 }
                 self.page_error = None;
@@ -545,9 +544,9 @@ impl KnowledgeUi {
         if let Some((error, message)) = &self.link_notice {
             ui.colored_label(
                 if *error {
-                    Color32::from_rgb(220, 85, 85)
+                    crate::theme::ERROR_CORAL
                 } else {
-                    Color32::from_rgb(205, 145, 30)
+                    crate::theme::WARNING_AMBER
                 },
                 localized_knowledge_notice(localization, message),
             );
@@ -702,7 +701,8 @@ impl KnowledgeUi {
             ui.heading(RichText::new(localization.text("knowledge-title")).size(28.0));
             ui.add(
                 egui::Label::new(
-                    RichText::new(localization.text("knowledge-subtitle")).color(Color32::GRAY),
+                    RichText::new(localization.text("knowledge-subtitle"))
+                        .color(ui.visuals().weak_text_color()),
                 )
                 .wrap(),
             );
@@ -790,7 +790,7 @@ impl KnowledgeUi {
                         localization.text_with("knowledge-concept-count", Some(&arguments)),
                     )
                     .small()
-                    .color(Color32::GRAY),
+                    .color(ui.visuals().weak_text_color()),
                 );
             }
         });
@@ -1009,13 +1009,13 @@ impl KnowledgeUi {
                         RichText::new(short_fingerprint(&page.fingerprint))
                             .monospace()
                             .small()
-                            .color(Color32::GRAY),
+                            .color(ui.visuals().weak_text_color()),
                     );
                 });
             });
             if page.truncated {
                 ui.colored_label(
-                    Color32::from_rgb(205, 145, 30),
+                    crate::theme::WARNING_AMBER,
                     localization.text("knowledge-page-truncated"),
                 );
             }
@@ -1077,7 +1077,7 @@ impl KnowledgeUi {
                     if page.backlinks.is_empty() {
                         ui.label(
                             RichText::new(localization.text("knowledge-no-backlinks"))
-                                .color(Color32::GRAY),
+                                .color(ui.visuals().weak_text_color()),
                         );
                     }
                     for backlink in &page.backlinks {
@@ -1224,7 +1224,7 @@ impl KnowledgeUi {
                     ui.label(
                         RichText::new(payload.tags.join(", "))
                             .small()
-                            .color(Color32::GRAY),
+                            .color(ui.visuals().weak_text_color()),
                     );
                 }
             });
@@ -1270,7 +1270,7 @@ impl KnowledgeUi {
         }
         if matches!(bundle.state, KnowledgeBundleState::Empty) {
             ui.colored_label(
-                Color32::from_rgb(205, 145, 30),
+                crate::theme::WARNING_AMBER,
                 localization.text("knowledge-health-empty-warning"),
             );
             ui.add_space(8.0);
@@ -1287,19 +1287,19 @@ impl KnowledgeUi {
                 ui,
                 &localization.text("knowledge-health-warnings"),
                 report.warning_count,
-                Color32::from_rgb(205, 145, 30),
+                crate::theme::WARNING_AMBER,
             );
             health_card(
                 ui,
                 &localization.text("knowledge-health-errors"),
                 report.error_count,
-                Color32::from_rgb(220, 75, 75),
+                crate::theme::ERROR_CORAL,
             );
             ui.vertical(|ui| {
                 ui.label(
                     RichText::new(localization.text("knowledge-health-last-check"))
                         .small()
-                        .color(Color32::GRAY),
+                        .color(ui.visuals().weak_text_color()),
                 );
                 ui.label(
                     report
@@ -1316,24 +1316,24 @@ impl KnowledgeUi {
         let guided_repair_available = content_repair && !history_recovery && !manual_recovery;
         if history_recovery {
             ui.colored_label(
-                Color32::from_rgb(205, 145, 30),
+                crate::theme::WARNING_AMBER,
                 localization.text("knowledge-repair-history-blocked"),
             );
             ui.label(
                 RichText::new(localization.text("knowledge-repair-history-body"))
                     .small()
-                    .color(Color32::GRAY),
+                    .color(ui.visuals().weak_text_color()),
             );
         }
         if manual_recovery {
             ui.colored_label(
-                Color32::from_rgb(205, 145, 30),
+                crate::theme::WARNING_AMBER,
                 localization.text("knowledge-repair-manual-title"),
             );
             ui.label(
                 RichText::new(localization.text("knowledge-repair-manual-body"))
                     .small()
-                    .color(Color32::GRAY),
+                    .color(ui.visuals().weak_text_color()),
             );
         }
         if let Some((_, error)) = self
@@ -1342,11 +1342,11 @@ impl KnowledgeUi {
             .filter(|(collection_id, _)| *collection_id == bundle.collection_id)
         {
             ui.colored_label(
-                Color32::from_rgb(220, 75, 75),
+                crate::theme::ERROR_CORAL,
                 localized_guided_repair_error(localization, error),
             );
             ui.collapsing(localization.text("action-details"), |ui| {
-                wrap_monospace(ui, error);
+                wrap_monospace(ui, sanitized_knowledge_error_code(error));
             });
         }
         if let Some(result) = self
@@ -1358,7 +1358,7 @@ impl KnowledgeUi {
             arguments.set("reviewed", result.concepts_returned_to_review.len());
             arguments.set("orphans", result.orphan_concepts_removed.len());
             ui.colored_label(
-                Color32::from_rgb(70, 160, 110),
+                crate::theme::VERIFIED_GREEN,
                 localization.text_with("knowledge-repair-complete", Some(&arguments)),
             );
         }
@@ -1380,7 +1380,7 @@ impl KnowledgeUi {
             ui.label(
                 RichText::new(localization.text("knowledge-repair-review-help"))
                     .small()
-                    .color(Color32::GRAY),
+                    .color(ui.visuals().weak_text_color()),
             );
         }
         ui.add_space(10.0);
@@ -1484,7 +1484,7 @@ impl KnowledgeUi {
             .default_width(560.0)
             .show(context, |ui| {
                 ui.colored_label(
-                    Color32::from_rgb(205, 145, 30),
+                    crate::theme::WARNING_AMBER,
                     RichText::new(localization.text("knowledge-repair-confirm-warning")).strong(),
                 );
                 ui.label(localization.text("knowledge-repair-confirm-body"));
@@ -1518,7 +1518,7 @@ impl KnowledgeUi {
                 ui.label(
                     RichText::new(localization.text("knowledge-repair-snapshot-note"))
                         .small()
-                        .color(Color32::GRAY),
+                        .color(ui.visuals().weak_text_color()),
                 );
                 if executing {
                     ui.horizontal(|ui| {
@@ -2291,17 +2291,17 @@ fn bundle_state_badge(
 
 fn bundle_state_visual(bundle: &KnowledgeBundleView) -> (&'static str, Color32) {
     match bundle.state {
-        KnowledgeBundleState::Empty => ("knowledge-state-empty", Color32::GRAY),
+        KnowledgeBundleState::Empty => {
+            ("knowledge-state-empty", crate::theme::secondary_text(true))
+        }
         KnowledgeBundleState::Ready if bundle.health.error_count > 0 => {
-            ("knowledge-state-attention", Color32::from_rgb(220, 75, 75))
+            ("knowledge-state-attention", crate::theme::ERROR_CORAL)
         }
         KnowledgeBundleState::Ready if bundle.health.warning_count > 0 => {
-            ("knowledge-state-review", Color32::from_rgb(205, 145, 30))
+            ("knowledge-state-review", crate::theme::WARNING_AMBER)
         }
-        KnowledgeBundleState::Ready => ("knowledge-state-ready", Color32::from_rgb(70, 170, 110)),
-        KnowledgeBundleState::Updating => {
-            ("knowledge-state-updating", Color32::from_rgb(205, 145, 30))
-        }
+        KnowledgeBundleState::Ready => ("knowledge-state-ready", crate::theme::VERIFIED_GREEN),
+        KnowledgeBundleState::Updating => ("knowledge-state-updating", crate::theme::WARNING_AMBER),
     }
 }
 
@@ -2315,30 +2315,25 @@ fn link_status(
 ) -> (String, Color32) {
     let (message, color) = match disposition {
         KnowledgeLinkDisposition::Internal(_) => {
-            ("knowledge-link-internal", Color32::from_rgb(70, 170, 110))
+            ("knowledge-link-internal", crate::theme::VERIFIED_GREEN)
         }
         KnowledgeLinkDisposition::External => {
             ("knowledge-link-external", Color32::from_rgb(80, 145, 205))
         }
-        KnowledgeLinkDisposition::Broken => (
-            "knowledge-link-broken-status",
-            Color32::from_rgb(205, 145, 30),
-        ),
-        KnowledgeLinkDisposition::Unsafe => (
-            "knowledge-link-blocked-status",
-            Color32::from_rgb(220, 75, 75),
-        ),
+        KnowledgeLinkDisposition::Broken => {
+            ("knowledge-link-broken-status", crate::theme::WARNING_AMBER)
+        }
+        KnowledgeLinkDisposition::Unsafe => {
+            ("knowledge-link-blocked-status", crate::theme::ERROR_CORAL)
+        }
     };
     (localization.text(message), color)
 }
 
 fn severity_visual(localization: &Localization, severity: &HealthSeverity) -> (String, Color32) {
     let (message, color) = match severity {
-        HealthSeverity::Error => ("knowledge-severity-error", Color32::from_rgb(220, 75, 75)),
-        HealthSeverity::Warning => (
-            "knowledge-severity-warning",
-            Color32::from_rgb(205, 145, 30),
-        ),
+        HealthSeverity::Error => ("knowledge-severity-error", crate::theme::ERROR_CORAL),
+        HealthSeverity::Warning => ("knowledge-severity-warning", crate::theme::WARNING_AMBER),
         HealthSeverity::Info => ("knowledge-severity-info", Color32::from_rgb(80, 145, 205)),
     };
     (localization.text(message), color)
@@ -2359,7 +2354,11 @@ fn health_card(ui: &mut egui::Ui, label: &str, value: usize, color: Color32) {
     egui::Frame::group(ui.style()).show(ui, |ui| {
         ui.set_min_width(130.0);
         ui.label(RichText::new(value.to_string()).size(25.0).color(color));
-        ui.label(RichText::new(label).small().color(Color32::GRAY));
+        ui.label(
+            RichText::new(label)
+                .small()
+                .color(ui.visuals().weak_text_color()),
+        );
     });
 }
 
@@ -2367,7 +2366,7 @@ fn empty_state(ui: &mut egui::Ui, title: &str, body: &str) {
     ui.centered_and_justified(|ui| {
         ui.vertical_centered(|ui| {
             ui.heading(title);
-            ui.label(RichText::new(body).color(Color32::GRAY));
+            ui.label(RichText::new(body).color(ui.visuals().weak_text_color()));
         });
     });
 }
@@ -2376,17 +2375,38 @@ fn error_state(ui: &mut egui::Ui, localization: &Localization, title: &str, erro
     ui.centered_and_justified(|ui| {
         ui.vertical_centered(|ui| {
             ui.colored_label(
-                Color32::from_rgb(220, 75, 75),
+                crate::theme::ERROR_CORAL,
                 RichText::new(title).size(20.0).strong(),
             );
             ui.label(localized_knowledge_error(localization, error));
             if error != "knowledge-error-wrong-collection" {
                 ui.collapsing(localization.text("action-details"), |ui| {
-                    ui.label(error);
+                    ui.label(sanitized_knowledge_error_code(error));
                 });
             }
         });
     });
+}
+
+fn sanitized_knowledge_error_code(error: &str) -> &'static str {
+    match error {
+        "knowledge-error-wrong-collection" => "knowledge-error-wrong-collection",
+        "knowledge-error-stale-snapshot" => "knowledge-error-stale-snapshot",
+        "wiki_repair_history_requires_human" => "wiki_repair_history_requires_human",
+        "wiki_repair_bundle_updating" => "wiki_repair_bundle_updating",
+        "wiki_repair_stale_preview" => "wiki_repair_stale_preview",
+        "wiki_repair_confirmation_required" => "wiki_repair_confirmation_required",
+        "wiki_repair_unresolved_scope" => "wiki_repair_unresolved_scope",
+        "wiki_repair_unsafe_layout" => "wiki_repair_unsafe_layout",
+        "wiki_repair_snapshot_too_large" => "wiki_repair_snapshot_too_large",
+        "wiki_repair_post_validation_failed" => "wiki_repair_post_validation_failed",
+        "wiki_repair_rollback_failed" => "wiki_repair_rollback_failed",
+        "wiki_repair_operation_in_progress" => "wiki_repair_operation_in_progress",
+        "wiki_repair_worker_panicked" => "wiki_repair_worker_panicked",
+        "wiki_repair_preview_wrong_collection" => "wiki_repair_preview_wrong_collection",
+        "wiki_repair_result_wrong_collection" => "wiki_repair_result_wrong_collection",
+        _ => "knowledge_operation_failed",
+    }
 }
 
 #[cfg(test)]

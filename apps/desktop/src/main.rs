@@ -14,6 +14,7 @@ mod model_config;
 mod paths;
 mod readiness;
 mod services;
+mod theme;
 mod updater;
 mod worker;
 

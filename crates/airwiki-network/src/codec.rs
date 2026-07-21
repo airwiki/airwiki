@@ -158,11 +158,43 @@ pub fn response_fits(response: &SearchWireResponse) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use airwiki_types::{DEFAULT_TOP_K, SearchPurpose};
+    use airwiki_types::{DEFAULT_TOP_K, SearchHit, SearchPurpose};
+    use chrono::Utc;
     use futures::io::Cursor;
     use libp2p::request_response::Codec as _;
 
     use super::*;
+
+    #[derive(serde::Deserialize, serde::Serialize)]
+    enum LegacySearchWireResponse {
+        Success(LegacySearchResponse),
+    }
+
+    #[derive(serde::Deserialize, serde::Serialize)]
+    struct LegacySearchResponse {
+        request_id: uuid::Uuid,
+        hits: Vec<SearchHit>,
+        offline_nodes: Vec<String>,
+        warnings: Vec<String>,
+        partial: bool,
+    }
+
+    fn candidate() -> SearchHit {
+        SearchHit {
+            concept_id: uuid::Uuid::new_v4(),
+            collection_id: uuid::Uuid::new_v4(),
+            chunk_id: uuid::Uuid::new_v4(),
+            title: "Candidate".to_owned(),
+            snippet: "Authorized but unverified".to_owned(),
+            heading_or_page: "Section".to_owned(),
+            logical_resource_uri: "urn:airwiki:synthetic".to_owned(),
+            source_revision: 1,
+            source_sha256: "a".repeat(64),
+            updated_at: Utc::now(),
+            rank: 1,
+            node_id: "synthetic".to_owned(),
+        }
+    }
 
     #[tokio::test]
     async fn codec_round_trips_valid_request() {
@@ -247,5 +279,63 @@ mod tests {
             .await
             .unwrap_err();
         assert_eq!(error.kind(), io::ErrorKind::InvalidData);
+    }
+
+    #[tokio::test]
+    async fn codec_round_trips_authorized_candidates() {
+        let protocol = StreamProtocol::new(airwiki_types::SEARCH_PROTOCOL);
+        let mut response = SearchResponse::empty(uuid::Uuid::new_v4());
+        response.authorized_candidates.push(candidate());
+        let mut bytes = Cursor::new(Vec::new());
+        BoundedSearchCodec
+            .write_response(&protocol, &mut bytes, SearchWireResponse::Success(response))
+            .await
+            .unwrap();
+        bytes.set_position(0);
+
+        let decoded = BoundedSearchCodec
+            .read_response(&protocol, &mut bytes)
+            .await
+            .unwrap();
+        let SearchWireResponse::Success(decoded) = decoded else {
+            panic!("expected success response");
+        };
+        assert_eq!(decoded.authorized_candidates.len(), 1);
+    }
+
+    #[tokio::test]
+    async fn codec_defaults_candidates_from_legacy_response() {
+        let protocol = StreamProtocol::new(airwiki_types::SEARCH_PROTOCOL);
+        let request_id = uuid::Uuid::new_v4();
+        let legacy = LegacySearchWireResponse::Success(LegacySearchResponse {
+            request_id,
+            hits: Vec::new(),
+            offline_nodes: Vec::new(),
+            warnings: Vec::new(),
+            partial: false,
+        });
+        let mut bytes = Cursor::new(encode_bounded(&legacy, MAX_RESPONSE_BYTES).unwrap());
+
+        let decoded = BoundedSearchCodec
+            .read_response(&protocol, &mut bytes)
+            .await
+            .unwrap();
+        let SearchWireResponse::Success(decoded) = decoded else {
+            panic!("expected legacy success response");
+        };
+        assert_eq!(decoded.request_id, request_id);
+        assert!(decoded.authorized_candidates.is_empty());
+    }
+
+    #[test]
+    fn legacy_decoder_ignores_the_additive_candidate_field() {
+        let mut response = SearchResponse::empty(uuid::Uuid::new_v4());
+        response.authorized_candidates.push(candidate());
+        let encoded =
+            encode_bounded(&SearchWireResponse::Success(response), MAX_RESPONSE_BYTES).unwrap();
+
+        let legacy: LegacySearchWireResponse = ciborium::from_reader(encoded.as_slice()).unwrap();
+
+        assert!(matches!(legacy, LegacySearchWireResponse::Success(_)));
     }
 }

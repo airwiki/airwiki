@@ -302,6 +302,13 @@ impl SearchHit {
 pub struct SearchResponse {
     pub request_id: Uuid,
     pub hits: Vec<SearchHit>,
+    /// Authorized snippets rejected by AirWiki's lightweight answerability filter.
+    ///
+    /// These items passed the same publication and disclosure checks as `hits`, but
+    /// callers must not treat them as verified evidence without evaluating whether
+    /// they explicitly answer the question.
+    #[serde(default)]
+    pub authorized_candidates: Vec<SearchHit>,
     #[serde(default)]
     pub offline_nodes: Vec<String>,
     #[serde(default)]
@@ -314,6 +321,7 @@ impl SearchResponse {
         Self {
             request_id,
             hits: Vec::new(),
+            authorized_candidates: Vec::new(),
             offline_nodes: Vec::new(),
             warnings: Vec::new(),
             partial: false,

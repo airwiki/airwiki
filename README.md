@@ -6,7 +6,7 @@
 
 AirWiki is an open-source, local-first Rust desktop knowledge base that turns folders of text-based Markdown and PDF files into human-reviewed OKF wikis. It is intended for individuals, communities, small teams, and organizations without assuming a particular company structure or network topology.
 
-Original documents remain on their source device. When LAN collaboration is explicitly enabled, federated search returns authorized snippets and citations rather than complete documents. Local chat integrations use a per-user MCP bridge and never require AirWiki to store provider API keys.
+Original documents remain on their source device. When LAN collaboration is explicitly enabled, federated search returns bounded authorized snippets and citations rather than complete documents. Local chat integrations distinguish answerability-accepted evidence from separately typed candidates that the chat model must verify, use a per-user MCP bridge, and never require AirWiki to store provider API keys.
 
 ## Project status
 

@@ -176,11 +176,19 @@ impl HybridSearchEngine {
         let mut response = self.search_collections(request, &collections).await?;
         let database = self.database.clone();
         let hits = std::mem::take(&mut response.hits);
+        let authorized_candidates = std::mem::take(&mut response.authorized_candidates);
+        let hits_peer_id = peer_id.clone();
         response.hits =
             run_search_blocking("peer search revalidation worker task failed", move || {
-                revalidate_peer_hits(database, hits, peer_id, purpose)
+                revalidate_peer_hits(database, hits, hits_peer_id, purpose)
             })
             .await?;
+        let database = self.database.clone();
+        response.authorized_candidates = run_search_blocking(
+            "peer candidate revalidation worker task failed",
+            move || revalidate_peer_hits(database, authorized_candidates, peer_id, purpose),
+        )
+        .await?;
         Ok(response)
     }
 
@@ -244,14 +252,12 @@ impl HybridSearchEngine {
         }
 
         let mut hits = Vec::new();
+        let mut authorized_candidates = Vec::new();
         for ((candidate, snippet), decision) in deduplicated_candidates
             .into_iter()
             .zip(visible_snippets)
             .zip(decisions)
         {
-            if decision == EvidenceDecision::Irrelevant {
-                continue;
-            }
             let chunk_id = public_chunk_id(
                 &candidate.source_sha256,
                 candidate.chunk.ordinal,
@@ -268,23 +274,42 @@ impl HybridSearchEngine {
                 source_revision: candidate.chunk.source_revision,
                 source_sha256: candidate.source_sha256,
                 updated_at: candidate.updated_at,
-                rank: u32::try_from(hits.len() + 1).unwrap_or(u32::MAX),
+                rank: 0,
                 node_id: self.node_id.clone(),
             };
             hit.sanitize_for_wire();
-            hits.push(hit);
-            if hits.len() == usize::from(request.top_k) {
+            let destination = match decision {
+                EvidenceDecision::Relevant => &mut hits,
+                EvidenceDecision::Irrelevant if purpose == SearchPurpose::ExternalAi => {
+                    &mut authorized_candidates
+                }
+                EvidenceDecision::Irrelevant => continue,
+            };
+            if destination.len() < usize::from(request.top_k) {
+                hit.rank = u32::try_from(destination.len() + 1).unwrap_or(u32::MAX);
+                destination.push(hit);
+            }
+            let candidate_lane_complete = purpose != SearchPurpose::ExternalAi
+                || authorized_candidates.len() == usize::from(request.top_k);
+            if hits.len() == usize::from(request.top_k) && candidate_lane_complete {
                 break;
             }
         }
-        let before_revalidation = hits.len();
+        let before_revalidation = hits.len().saturating_add(authorized_candidates.len());
         let database = self.database.clone();
         let purpose = request.purpose;
         let hits = run_search_blocking("local search revalidation worker task failed", move || {
             revalidate_local_hits(database, hits, purpose)
         })
         .await?;
-        let removed_during_revalidation = before_revalidation > hits.len();
+        let database = self.database.clone();
+        let authorized_candidates = run_search_blocking(
+            "local candidate revalidation worker task failed",
+            move || revalidate_local_hits(database, authorized_candidates, purpose),
+        )
+        .await?;
+        let removed_during_revalidation =
+            before_revalidation > hits.len().saturating_add(authorized_candidates.len());
         let mut warnings = Vec::new();
         if candidate_snapshot_changed {
             warnings.push("results changed during candidate hydration".to_owned());
@@ -295,6 +320,7 @@ impl HybridSearchEngine {
         Ok(SearchResponse {
             request_id: request.request_id,
             hits,
+            authorized_candidates,
             offline_nodes: Vec::new(),
             partial: !warnings.is_empty(),
             warnings,
@@ -609,6 +635,7 @@ mod tests {
     struct WithdrawsDuringRelevance {
         database: Database,
         source_document_id: Uuid,
+        decision: EvidenceDecision,
     }
 
     #[derive(Debug, Clone, Default)]
@@ -692,7 +719,7 @@ mod tests {
             self.database
                 .mark_deleted(self.source_document_id)
                 .map_err(|_| EvidenceRelevanceError::InferenceFailed)?;
-            Ok(vec![EvidenceDecision::Relevant; candidates.len()])
+            Ok(vec![self.decision; candidates.len()])
         }
     }
 
@@ -759,6 +786,19 @@ mod tests {
         .unwrap();
         db.approve_concept(concept.id, draft).unwrap();
         (db, collection.id, concept.id)
+    }
+
+    fn allow_external_ai(database: &Database, collection_id: Uuid) {
+        database
+            .update_collection_policy(
+                collection_id,
+                CollectionPolicy {
+                    local_only: false,
+                    peer_shareable: true,
+                    allow_external_ai: true,
+                },
+            )
+            .unwrap();
     }
 
     async fn replace_with_ranked_fixture_chunks(database: &Database, concept_id: Uuid) {
@@ -1115,6 +1155,30 @@ mod tests {
             .await
             .unwrap();
         assert!(remote.hits.is_empty());
+        assert!(remote.authorized_candidates.is_empty());
+    }
+
+    #[tokio::test]
+    async fn external_ai_policy_blocks_rejected_candidates_before_disclosure() {
+        let (database, _collection_id, _concept_id) = indexed_database().await;
+        let engine = HybridSearchEngine::new(
+            database,
+            Arc::new(DeterministicEmbeddingProvider),
+            Arc::new(DeterministicEvidenceRelevanceProvider),
+            "mac",
+        );
+
+        let response = engine
+            .search_local(SearchRequest::new(
+                "presupuesto anual",
+                SearchPurpose::ExternalAi,
+                5,
+            ))
+            .await
+            .unwrap();
+
+        assert!(response.hits.is_empty());
+        assert!(response.authorized_candidates.is_empty());
     }
 
     #[tokio::test]
@@ -1150,8 +1214,9 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn irrelevant_candidates_produce_complete_empty_response() {
-        let (database, _collection_id, _concept_id) = indexed_database().await;
+    async fn irrelevant_candidates_remain_authorized_but_separate_from_evidence() {
+        let (database, collection_id, _concept_id) = indexed_database().await;
+        allow_external_ai(&database, collection_id);
         let engine = HybridSearchEngine::new(
             database,
             Arc::new(DeterministicEmbeddingProvider),
@@ -1162,20 +1227,23 @@ mod tests {
         let response = engine
             .search_local(SearchRequest::new(
                 "presupuesto anual",
-                SearchPurpose::LocalAssistant,
+                SearchPurpose::ExternalAi,
                 5,
             ))
             .await
             .unwrap();
 
         assert!(response.hits.is_empty());
+        assert_eq!(response.authorized_candidates.len(), 1);
+        assert_eq!(response.authorized_candidates[0].rank, 1);
         assert!(!response.partial);
         assert!(response.warnings.is_empty());
     }
 
     #[tokio::test]
     async fn relevance_gate_classifies_only_the_exact_visible_snippet() {
-        let (database, _collection_id, concept_id) = indexed_database().await;
+        let (database, collection_id, concept_id) = indexed_database().await;
+        allow_external_ai(&database, collection_id);
         let template = database.chunks_for_concept(concept_id).unwrap().remove(0);
         let text = format!(
             "Pagos al inicio. {} OUTSIDE_VISIBLE_SNIPPET",
@@ -1213,15 +1281,35 @@ mod tests {
         );
 
         let response = engine
+            .search_local(SearchRequest::new("pagos", SearchPurpose::ExternalAi, 1))
+            .await
+            .unwrap();
+
+        assert!(response.hits.is_empty());
+        assert_eq!(response.authorized_candidates.len(), 1);
+    }
+
+    #[tokio::test]
+    async fn local_assistant_does_not_receive_irrelevant_candidates() {
+        let (database, _collection_id, _concept_id) = indexed_database().await;
+        let engine = HybridSearchEngine::new(
+            database,
+            Arc::new(DeterministicEmbeddingProvider),
+            Arc::new(DeterministicEvidenceRelevanceProvider),
+            "mac",
+        );
+
+        let response = engine
             .search_local(SearchRequest::new(
-                "pagos",
+                "presupuesto anual",
                 SearchPurpose::LocalAssistant,
-                1,
+                5,
             ))
             .await
             .unwrap();
 
         assert!(response.hits.is_empty());
+        assert!(response.authorized_candidates.is_empty());
     }
 
     #[tokio::test]
@@ -1447,7 +1535,7 @@ mod tests {
 
     #[tokio::test]
     async fn relevance_filter_preserves_rrf_order_and_renumbers_hits() {
-        let (database, _collection_id, concept_id) = indexed_database().await;
+        let (database, collection_id, concept_id) = indexed_database().await;
         replace_with_ranked_fixture_chunks(&database, concept_id).await;
         let baseline = HybridSearchEngine::new(
             database.clone(),
@@ -1462,6 +1550,7 @@ mod tests {
         ))
         .await
         .unwrap();
+        allow_external_ai(&database, collection_id);
         let filtered = HybridSearchEngine::new(
             database,
             Arc::new(DeterministicEmbeddingProvider),
@@ -1474,11 +1563,7 @@ mod tests {
             }),
             "mac",
         )
-        .search_local(SearchRequest::new(
-            "pagos",
-            SearchPurpose::LocalAssistant,
-            3,
-        ))
+        .search_local(SearchRequest::new("pagos", SearchPurpose::ExternalAi, 3))
         .await
         .unwrap();
 
@@ -1500,6 +1585,8 @@ mod tests {
             filtered.hits.iter().map(|hit| hit.rank).collect::<Vec<_>>(),
             vec![1, 2]
         );
+        assert_eq!(filtered.authorized_candidates.len(), 1);
+        assert_eq!(filtered.authorized_candidates[0].rank, 1);
     }
 
     #[tokio::test]
@@ -1516,6 +1603,7 @@ mod tests {
             Arc::new(WithdrawsDuringRelevance {
                 database,
                 source_document_id,
+                decision: EvidenceDecision::Relevant,
             }),
             "mac",
         );
@@ -1530,6 +1618,38 @@ mod tests {
             .unwrap();
 
         assert!(response.hits.is_empty());
+        assert!(response.authorized_candidates.is_empty());
+        assert!(response.partial);
+        assert_eq!(response.warnings.len(), 1);
+    }
+
+    #[tokio::test]
+    async fn candidate_publication_is_revalidated_after_relevance_classification() {
+        let (database, collection_id, concept_id) = indexed_database().await;
+        allow_external_ai(&database, collection_id);
+        let source_document_id = database
+            .concept(concept_id)
+            .unwrap()
+            .unwrap()
+            .source_document_id;
+        let engine = HybridSearchEngine::new(
+            database.clone(),
+            Arc::new(DeterministicEmbeddingProvider),
+            Arc::new(WithdrawsDuringRelevance {
+                database,
+                source_document_id,
+                decision: EvidenceDecision::Irrelevant,
+            }),
+            "mac",
+        );
+
+        let response = engine
+            .search_local(SearchRequest::new("pagos", SearchPurpose::ExternalAi, 5))
+            .await
+            .unwrap();
+
+        assert!(response.hits.is_empty());
+        assert!(response.authorized_candidates.is_empty());
         assert!(response.partial);
         assert_eq!(response.warnings.len(), 1);
     }

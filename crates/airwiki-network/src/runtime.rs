@@ -9,7 +9,7 @@ use std::time::{Duration, Instant};
 
 use airwiki_types::{
     DisclosureLease, FederatedSearch, SearchAuthorization, SearchContractError, SearchHit,
-    SearchRequest, SearchResponse,
+    SearchPurpose, SearchRequest, SearchResponse,
 };
 use async_trait::async_trait;
 use futures::StreamExt;
@@ -1161,8 +1161,21 @@ impl Runtime {
                     response
                         .hits
                         .retain(|hit| allowed.contains(&hit.collection_id));
+                    response
+                        .authorized_candidates
+                        .retain(|hit| allowed.contains(&hit.collection_id));
+                    if request.purpose != SearchPurpose::ExternalAi {
+                        response.authorized_candidates.clear();
+                    }
                     response.hits.truncate(usize::from(request.top_k));
-                    for hit in &mut response.hits {
+                    response
+                        .authorized_candidates
+                        .truncate(usize::from(request.top_k));
+                    for hit in response
+                        .hits
+                        .iter_mut()
+                        .chain(&mut response.authorized_candidates)
+                    {
                         hit.sanitize_for_wire();
                         hit.node_id.clone_from(&local_node);
                     }
@@ -1691,7 +1704,13 @@ fn deliver_backend_response(
         success
             .hits
             .retain(|hit| access.grants.contains(&hit.collection_id));
+        success
+            .authorized_candidates
+            .retain(|hit| access.grants.contains(&hit.collection_id));
         for (index, hit) in success.hits.iter_mut().enumerate() {
+            hit.rank = u32::try_from(index + 1).unwrap_or(u32::MAX);
+        }
+        for (index, hit) in success.authorized_candidates.iter_mut().enumerate() {
             hit.rank = u32::try_from(index + 1).unwrap_or(u32::MAX);
         }
         hit_count = success.hits.len();
@@ -1780,6 +1799,19 @@ fn shrink_to_wire_limit(response: &mut SearchWireResponse) {
         let SearchWireResponse::Success(success) = response else {
             return;
         };
+        if success.authorized_candidates.pop().is_some() {
+            success.partial = true;
+            if !success
+                .warnings
+                .iter()
+                .any(|warning| warning == "response truncated to 256 KiB")
+            {
+                success
+                    .warnings
+                    .push("response truncated to 256 KiB".to_owned());
+            }
+            continue;
+        }
         if success.hits.pop().is_some() {
             success.partial = true;
             if !success
@@ -1808,47 +1840,28 @@ fn fuse_peer_rankings(
 ) {
     const RRF_K: f64 = 60.0;
     let mut fused: HashMap<(String, uuid::Uuid), (SearchHit, f64)> = HashMap::new();
+    let mut fused_candidates: HashMap<(String, uuid::Uuid), (SearchHit, f64)> = HashMap::new();
+    let include_candidates = query.request.purpose == SearchPurpose::ExternalAi;
     let mut warnings = query.warnings;
     for (peer, mut response) in query.responses {
         sanitize_untrusted_search_diagnostics(&mut response);
         if response.partial {
             warnings.push(format!("peer {peer}: remote results may be incomplete"));
         }
-        for (position, mut hit) in response.hits.into_iter().enumerate() {
-            // Noise authenticates the sending peer. Response-controlled
-            // metadata must never choose the citation identity, otherwise a
-            // peer could impersonate another trusted node and evade a final
-            // in-flight revocation check.
-            hit.node_id = peer.to_string();
-            let rank = if hit.rank == 0 {
-                (position + 1) as u32
-            } else {
-                hit.rank
-            };
-            let contribution = 1.0 / (RRF_K + f64::from(rank));
-            hit.sanitize_for_wire();
-            let key = (hit.source_sha256.clone(), hit.chunk_id);
-            fused
-                .entry(key)
-                .and_modify(|(_, score)| *score += contribution)
-                .or_insert((hit, contribution));
+        add_peer_rankings(&mut fused, &peer, response.hits, RRF_K);
+        if include_candidates {
+            add_peer_rankings(
+                &mut fused_candidates,
+                &peer,
+                response.authorized_candidates,
+                RRF_K,
+            );
         }
     }
-    let mut ranked: Vec<_> = fused.into_values().collect();
-    ranked.sort_by(|left, right| {
-        right
-            .1
-            .total_cmp(&left.1)
-            .then_with(|| left.0.title.cmp(&right.0.title))
-    });
-    let mut hits: Vec<_> = ranked
-        .into_iter()
-        .take(usize::from(query.request.top_k))
-        .map(|(hit, _)| hit)
-        .collect();
-    for (index, hit) in hits.iter_mut().enumerate() {
-        hit.rank = (index + 1) as u32;
-    }
+    let hits = finish_fused_rankings(fused, query.request.top_k);
+    let mut authorized_candidates = rank_fused_rankings(fused_candidates);
+    remove_evidence_duplicates(&hits, &mut authorized_candidates);
+    truncate_and_renumber(&mut authorized_candidates, query.request.top_k);
     let mut offline_nodes: Vec<_> = query
         .offline
         .into_iter()
@@ -1863,12 +1876,73 @@ fn fuse_peer_rankings(
         SearchResponse {
             request_id: query.request.request_id,
             hits,
+            authorized_candidates,
             offline_nodes,
             warnings,
             partial,
         },
         query.reply,
     )
+}
+
+fn remove_evidence_duplicates(hits: &[SearchHit], candidates: &mut Vec<SearchHit>) {
+    let evidence = hits
+        .iter()
+        .map(|hit| (hit.source_sha256.as_str(), hit.chunk_id))
+        .collect::<HashSet<_>>();
+    candidates.retain(|hit| !evidence.contains(&(hit.source_sha256.as_str(), hit.chunk_id)));
+}
+
+fn add_peer_rankings(
+    fused: &mut HashMap<(String, uuid::Uuid), (SearchHit, f64)>,
+    peer: &PeerId,
+    hits: Vec<SearchHit>,
+    rrf_k: f64,
+) {
+    for (position, mut hit) in hits.into_iter().enumerate() {
+        // Noise authenticates the sending peer. Response-controlled metadata
+        // must never choose the citation identity.
+        hit.node_id = peer.to_string();
+        let rank = if hit.rank == 0 {
+            u32::try_from(position.saturating_add(1)).unwrap_or(u32::MAX)
+        } else {
+            hit.rank
+        };
+        let contribution = 1.0 / (rrf_k + f64::from(rank));
+        hit.sanitize_for_wire();
+        let key = (hit.source_sha256.clone(), hit.chunk_id);
+        fused
+            .entry(key)
+            .and_modify(|(_, score)| *score += contribution)
+            .or_insert((hit, contribution));
+    }
+}
+
+fn finish_fused_rankings(
+    fused: HashMap<(String, uuid::Uuid), (SearchHit, f64)>,
+    top_k: u8,
+) -> Vec<SearchHit> {
+    let mut hits = rank_fused_rankings(fused);
+    truncate_and_renumber(&mut hits, top_k);
+    hits
+}
+
+fn rank_fused_rankings(fused: HashMap<(String, uuid::Uuid), (SearchHit, f64)>) -> Vec<SearchHit> {
+    let mut ranked: Vec<_> = fused.into_values().collect();
+    ranked.sort_by(|left, right| {
+        right
+            .1
+            .total_cmp(&left.1)
+            .then_with(|| left.0.title.cmp(&right.0.title))
+    });
+    ranked.into_iter().map(|(hit, _)| hit).collect()
+}
+
+fn truncate_and_renumber(hits: &mut Vec<SearchHit>, top_k: u8) {
+    hits.truncate(usize::from(top_k));
+    for (index, hit) in hits.iter_mut().enumerate() {
+        hit.rank = u32::try_from(index.saturating_add(1)).unwrap_or(u32::MAX);
+    }
 }
 
 impl From<AccessError> for NetworkError {
@@ -2052,6 +2126,46 @@ mod tests {
 
         assert_eq!(hit_count, 0);
         assert!(matches!(sent, Some(SearchWireResponse::Error(_))));
+    }
+
+    #[test]
+    fn final_transport_barrier_removes_candidate_without_current_grant() {
+        let access = AccessControl::default();
+        let peer = PeerId::random();
+        let granted_collection = uuid::Uuid::new_v4();
+        let ungranted_collection = uuid::Uuid::new_v4();
+        access.mark_trusted(peer);
+        access.grant(peer, granted_collection).unwrap();
+        let authorization = access
+            .authorize(&peer, airwiki_types::SearchPurpose::ExternalAi)
+            .unwrap();
+        let request = SearchRequest::new("authorized", airwiki_types::SearchPurpose::ExternalAi, 1);
+        let mut response = fixture_response(
+            &request,
+            &authorization,
+            granted_collection,
+            "authorized evidence",
+        );
+        let mut candidate = response.hits[0].clone();
+        candidate.collection_id = ungranted_collection;
+        response.authorized_candidates.push(candidate);
+        let lease = authorization.acquire_disclosure_lease();
+        let mut sent = None;
+
+        deliver_backend_response(
+            &access,
+            peer,
+            SearchWireResponse::Success(response),
+            1,
+            Some(lease),
+            |response| sent = Some(response),
+        );
+
+        let Some(SearchWireResponse::Success(sent)) = sent else {
+            panic!("expected an authorized response");
+        };
+        assert_eq!(sent.hits.len(), 1);
+        assert!(sent.authorized_candidates.is_empty());
     }
 
     async fn wait_for_connected(events: &mut broadcast::Receiver<NetworkEvent>, expected: PeerId) {
@@ -2331,6 +2445,64 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn peer_ranking_discards_candidates_for_local_assistant_requests() {
+        let request = SearchRequest::new("query", airwiki_types::SearchPurpose::LocalAssistant, 5);
+        let (reply, _receiver) = oneshot::channel();
+        let mut remote = SearchResponse::empty(request.request_id);
+        remote.authorized_candidates.push(hit(
+            "candidate",
+            1,
+            "candidate-hash",
+            uuid::Uuid::new_v4(),
+        ));
+        let query = QueryAggregate {
+            request,
+            pending: HashMap::new(),
+            connecting: HashSet::new(),
+            responses: vec![(PeerId::random(), remote)],
+            offline: HashSet::new(),
+            warnings: Vec::new(),
+            deadline: Instant::now(),
+            reply,
+        };
+
+        let (response, _) = fuse_peer_rankings(query);
+
+        assert!(response.authorized_candidates.is_empty());
+    }
+
+    #[tokio::test]
+    async fn peer_evidence_duplicate_does_not_displace_unique_candidate_at_top_k() {
+        let request = SearchRequest::new("query", airwiki_types::SearchPurpose::ExternalAi, 1);
+        let duplicate = uuid::Uuid::new_v4();
+        let (reply, _receiver) = oneshot::channel();
+        let mut remote = SearchResponse::empty(request.request_id);
+        remote.hits.push(hit("evidence", 1, "same", duplicate));
+        remote
+            .authorized_candidates
+            .push(hit("duplicate", 1, "same", duplicate));
+        remote
+            .authorized_candidates
+            .push(hit("unique", 2, "unique", uuid::Uuid::new_v4()));
+        let query = QueryAggregate {
+            request,
+            pending: HashMap::new(),
+            connecting: HashSet::new(),
+            responses: vec![(PeerId::random(), remote)],
+            offline: HashSet::new(),
+            warnings: Vec::new(),
+            deadline: Instant::now(),
+            reply,
+        };
+
+        let (response, _) = fuse_peer_rankings(query);
+
+        assert_eq!(response.authorized_candidates.len(), 1);
+        assert_eq!(response.authorized_candidates[0].title, "unique");
+        assert_eq!(response.authorized_candidates[0].rank, 1);
+    }
+
+    #[tokio::test]
     async fn authenticated_peer_overrides_claimed_hit_node_identity() {
         let request = SearchRequest::new("query", airwiki_types::SearchPurpose::ExternalAi, 1);
         let authenticated_peer = PeerId::random();
@@ -2480,6 +2652,28 @@ mod tests {
         let mut wire = SearchWireResponse::Success(response);
         shrink_to_wire_limit(&mut wire);
         assert!(response_fits(&wire));
+    }
+
+    #[test]
+    fn wire_reduction_discards_candidates_before_evidence() {
+        let mut response = SearchResponse::empty(uuid::Uuid::new_v4());
+        response
+            .hits
+            .push(hit("evidence", 1, "evidence", uuid::Uuid::new_v4()));
+        for _ in 0..10 {
+            let mut oversized = hit("candidate", 1, "candidate", uuid::Uuid::new_v4());
+            oversized.snippet = "x".repeat(100_000);
+            response.authorized_candidates.push(oversized);
+        }
+        let mut wire = SearchWireResponse::Success(response);
+
+        shrink_to_wire_limit(&mut wire);
+
+        let SearchWireResponse::Success(response) = wire else {
+            panic!("expected success response");
+        };
+        assert_eq!(response.hits.len(), 1);
+        assert!(response.authorized_candidates.len() < 10);
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 4)]

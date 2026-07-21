@@ -1,6 +1,6 @@
 //! Local + LAN result coordination for desktop search and MCP.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
 use airwiki_types::{
@@ -67,6 +67,7 @@ fn fuse_local_and_peers(
     peers: Result<SearchResponse, SearchContractError>,
 ) -> SearchResponse {
     let mut sources = Vec::with_capacity(2);
+    let mut candidate_sources = Vec::with_capacity(2);
     let mut warnings = Vec::new();
     let mut offline_nodes = Vec::new();
     let mut partial = false;
@@ -76,6 +77,7 @@ fn fuse_local_and_peers(
         request.request_id,
         local,
         &mut sources,
+        &mut candidate_sources,
         &mut warnings,
         &mut offline_nodes,
         &mut partial,
@@ -85,11 +87,53 @@ fn fuse_local_and_peers(
         request.request_id,
         peers,
         &mut sources,
+        &mut candidate_sources,
         &mut warnings,
         &mut offline_nodes,
         &mut partial,
     );
 
+    let mut hits = fuse_rankings(sources);
+    truncate_and_renumber(&mut hits, request.top_k);
+    let mut authorized_candidates = if request.purpose == airwiki_types::SearchPurpose::ExternalAi {
+        fuse_rankings(candidate_sources)
+    } else {
+        Vec::new()
+    };
+    remove_evidence_duplicates(&hits, &mut authorized_candidates);
+    truncate_and_renumber(&mut authorized_candidates, request.top_k);
+
+    offline_nodes.sort();
+    offline_nodes.dedup();
+    warnings.sort();
+    warnings.dedup();
+    partial |= !offline_nodes.is_empty() || !warnings.is_empty();
+    SearchResponse {
+        request_id: request.request_id,
+        hits,
+        authorized_candidates,
+        offline_nodes,
+        warnings,
+        partial,
+    }
+}
+
+fn remove_evidence_duplicates(hits: &[SearchHit], candidates: &mut Vec<SearchHit>) {
+    let evidence = hits
+        .iter()
+        .map(|hit| (hit.source_sha256.as_str(), hit.chunk_id))
+        .collect::<HashSet<_>>();
+    candidates.retain(|hit| !evidence.contains(&(hit.source_sha256.as_str(), hit.chunk_id)));
+}
+
+fn truncate_and_renumber(hits: &mut Vec<SearchHit>, top_k: u8) {
+    hits.truncate(usize::from(top_k));
+    for (position, hit) in hits.iter_mut().enumerate() {
+        hit.rank = u32::try_from(position.saturating_add(1)).unwrap_or(u32::MAX);
+    }
+}
+
+fn fuse_rankings(sources: Vec<Vec<SearchHit>>) -> Vec<SearchHit> {
     let mut fused: HashMap<(String, uuid::Uuid), (SearchHit, f64)> = HashMap::new();
     for hits in sources {
         for (position, mut hit) in hits.into_iter().enumerate() {
@@ -115,27 +159,7 @@ fn fuse_local_and_peers(
             .total_cmp(&left.1)
             .then_with(|| left.0.title.cmp(&right.0.title))
     });
-    let mut hits: Vec<_> = ranked
-        .into_iter()
-        .take(usize::from(request.top_k))
-        .map(|(hit, _)| hit)
-        .collect();
-    for (position, hit) in hits.iter_mut().enumerate() {
-        hit.rank = (position + 1) as u32;
-    }
-
-    offline_nodes.sort();
-    offline_nodes.dedup();
-    warnings.sort();
-    warnings.dedup();
-    partial |= !offline_nodes.is_empty() || !warnings.is_empty();
-    SearchResponse {
-        request_id: request.request_id,
-        hits,
-        offline_nodes,
-        warnings,
-        partial,
-    }
+    ranked.into_iter().map(|(hit, _)| hit).collect()
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -144,6 +168,7 @@ fn collect_source(
     expected_request_id: uuid::Uuid,
     source: Result<SearchResponse, SearchContractError>,
     hits: &mut Vec<Vec<SearchHit>>,
+    authorized_candidates: &mut Vec<Vec<SearchHit>>,
     warnings: &mut Vec<String>,
     offline_nodes: &mut Vec<String>,
     partial: &mut bool,
@@ -157,6 +182,7 @@ fn collect_source(
                 warnings.push(format!("{label} search reported incomplete results"));
             }
             hits.push(response.hits);
+            authorized_candidates.push(response.authorized_candidates);
         }
         Ok(_) => {
             *partial = true;
@@ -217,7 +243,7 @@ mod tests {
 
     #[tokio::test]
     async fn local_results_survive_when_lan_fails() {
-        let request = SearchRequest::new("pagos", airwiki_types::SearchPurpose::LocalAssistant, 5);
+        let request = SearchRequest::new("pagos", airwiki_types::SearchPurpose::ExternalAi, 5);
         let mut local = SearchResponse::empty(request.request_id);
         local
             .hits
@@ -275,6 +301,79 @@ mod tests {
         assert_eq!(response.hits[0].logical_resource_uri, local_identity.2);
         assert_eq!(response.hits[0].source_revision, local_identity.3);
         assert_eq!(response.hits[0].rank, 1);
+    }
+
+    #[tokio::test]
+    async fn federation_keeps_candidates_separate_and_evidence_wins_duplicates() {
+        let request = SearchRequest::new("pagos", airwiki_types::SearchPurpose::ExternalAi, 5);
+        let duplicate = uuid::Uuid::new_v4();
+        let candidate_only = uuid::Uuid::new_v4();
+        let evidence = hit("local evidence", 1, "same", duplicate);
+        let mut local = SearchResponse::empty(request.request_id);
+        local.hits.push(evidence);
+        let mut remote = SearchResponse::empty(request.request_id);
+        remote
+            .authorized_candidates
+            .push(hit("duplicate candidate", 1, "same", duplicate));
+        remote
+            .authorized_candidates
+            .push(hit("candidate only", 2, "candidate", candidate_only));
+        let coordinator = FederatedCoordinator::with_backends(
+            FakeSearch::returns(Ok(local)),
+            FakeSearch::returns(Ok(remote)),
+        );
+
+        let response = coordinator.search(request).await.unwrap();
+
+        assert_eq!(response.hits.len(), 1);
+        assert_eq!(response.authorized_candidates.len(), 1);
+        assert_eq!(response.authorized_candidates[0].title, "candidate only");
+        assert_eq!(response.authorized_candidates[0].rank, 1);
+    }
+
+    #[tokio::test]
+    async fn local_assistant_discards_candidates_from_any_backend() {
+        let request = SearchRequest::new("pagos", airwiki_types::SearchPurpose::LocalAssistant, 5);
+        let mut remote = SearchResponse::empty(request.request_id);
+        remote.authorized_candidates.push(hit(
+            "unexpected candidate",
+            1,
+            "candidate",
+            uuid::Uuid::new_v4(),
+        ));
+        let coordinator = FederatedCoordinator::with_backends(
+            FakeSearch::returns(Ok(SearchResponse::empty(request.request_id))),
+            FakeSearch::returns(Ok(remote)),
+        );
+
+        let response = coordinator.search(request).await.unwrap();
+
+        assert!(response.authorized_candidates.is_empty());
+    }
+
+    #[tokio::test]
+    async fn evidence_duplicate_does_not_displace_a_unique_candidate_at_top_k() {
+        let request = SearchRequest::new("pagos", airwiki_types::SearchPurpose::ExternalAi, 1);
+        let duplicate = uuid::Uuid::new_v4();
+        let mut local = SearchResponse::empty(request.request_id);
+        local.hits.push(hit("evidence", 1, "same", duplicate));
+        let mut remote = SearchResponse::empty(request.request_id);
+        remote
+            .authorized_candidates
+            .push(hit("duplicate", 1, "same", duplicate));
+        remote
+            .authorized_candidates
+            .push(hit("unique", 2, "unique", uuid::Uuid::new_v4()));
+        let coordinator = FederatedCoordinator::with_backends(
+            FakeSearch::returns(Ok(local)),
+            FakeSearch::returns(Ok(remote)),
+        );
+
+        let response = coordinator.search(request).await.unwrap();
+
+        assert_eq!(response.authorized_candidates.len(), 1);
+        assert_eq!(response.authorized_candidates[0].title, "unique");
+        assert_eq!(response.authorized_candidates[0].rank, 1);
     }
 
     #[tokio::test]

@@ -114,6 +114,9 @@ service.
 - LAN search requires authenticated pairing, collection policy and a grant at
   the source node.
 - Local MCP requires `allow_external_ai`; it does not imply peer sharing.
+- External-chat search separates answerability-accepted evidence from bounded
+  authorized candidates. Both lanes are revalidated against current policy;
+  local desktop search receives only evidence.
 - MCP and model runtime listeners bind only to loopback.
 - The client label reported by a bridge is diagnostic, never authentication.
 - When state is uncertain, searchable exposure fails closed.

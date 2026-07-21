@@ -3,13 +3,31 @@ use std::sync::Arc;
 
 use airwiki_core::{
     Database, DeterministicEmbeddingProvider, DeterministicEvidenceRelevanceProvider,
-    EmbeddingProvider, HybridSearchEngine, OkfPublicationMaterializer, StoredChunk, sha256_file,
+    EmbeddingProvider, EvidenceDecision, EvidenceRelevanceError, EvidenceRelevanceProvider,
+    HybridSearchEngine, OkfPublicationMaterializer, RelevanceInput, StoredChunk, sha256_file,
 };
 use airwiki_mcp::{MCP_PATH, McpServerConfig, start_mcp_server};
 use airwiki_network::{MemorySecretStore, NodeIdentity};
 use airwiki_types::{CollectionPolicy, ConceptType, EnrichmentDraft};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use uuid::Uuid;
+
+struct RejectAllEvidence;
+
+#[async_trait::async_trait]
+impl EvidenceRelevanceProvider for RejectAllEvidence {
+    fn profile_id(&self) -> &str {
+        "reject-all-mcp-candidate-fixture"
+    }
+
+    async fn classify(
+        &self,
+        _question: &str,
+        candidates: &[RelevanceInput],
+    ) -> Result<Vec<EvidenceDecision>, EvidenceRelevanceError> {
+        Ok(vec![EvidenceDecision::Irrelevant; candidates.len()])
+    }
+}
 
 #[tokio::test]
 async fn core_gate_distinguishes_supported_and_absent_facts_at_the_mcp_boundary() {
@@ -43,7 +61,43 @@ async fn core_gate_distinguishes_supported_and_absent_facts_at_the_mcp_boundary(
 
     assert!(response.starts_with("HTTP/1.1 200"), "{response}");
     assert!(response.contains("\"status\":\"no_relevant_evidence\""));
-    assert!(!response.contains("Reiniciar la cola de pagos"));
+    assert!(response.contains("\"authorized_candidates\""));
+    assert!(response.contains("Reiniciar la cola de pagos"));
+
+    server.shutdown().await.unwrap();
+}
+
+#[tokio::test]
+async fn rejected_answer_remains_available_as_a_typed_external_ai_candidate() {
+    let node_id = NodeIdentity::load_or_create(&MemorySecretStore::default())
+        .unwrap()
+        .peer_id()
+        .to_string();
+    let database = published_fixture(&node_id).await;
+    let search = Arc::new(HybridSearchEngine::new(
+        database,
+        Arc::new(DeterministicEmbeddingProvider),
+        Arc::new(RejectAllEvidence),
+        node_id,
+    ));
+    let server = start_mcp_server(McpServerConfig::default().with_port(0), search)
+        .await
+        .unwrap();
+    let host = format!("127.0.0.1:{}", server.local_addr().port());
+
+    let response = raw_tool_call(
+        server.local_addr(),
+        &host,
+        "¿Cómo se recupera el servicio de pagos?",
+    )
+    .await;
+
+    assert!(response.starts_with("HTTP/1.1 200"), "{response}");
+    assert!(response.contains("\"status\":\"no_relevant_evidence\""));
+    assert!(response.contains("\"authorized_candidates\""));
+    assert!(response.contains("Reiniciar la cola de pagos"));
+    assert!(response.contains("\"heading_or_page\":\"Pasos\""));
+    assert!(response.contains("\"source_revision\":1"));
 
     server.shutdown().await.unwrap();
 }

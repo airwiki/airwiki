@@ -3893,6 +3893,38 @@ fn source_issue_message(
     localization.text(message_id)
 }
 
+fn source_issue_cause_message(
+    localization: &Localization,
+    issue: &SourceIssueView,
+    code: airwiki_core::SourceIssueCode,
+) -> Option<String> {
+    let cause = issue.reason.as_deref().unwrap_or("");
+    let message = match cause {
+        "file-too-large" => "review-issue-cause-file-too-large",
+        "unreadable" => "review-issue-cause-unreadable",
+        "invalid-utf8" => "review-issue-cause-invalid-utf8",
+        "invalid-pdf" => "review-issue-cause-invalid-pdf",
+        "encrypted-pdf" => "review-issue-cause-encrypted-pdf",
+        "too-many-pages" => "review-issue-cause-too-many-pages",
+        "no-text-layer" => "review-issue-cause-no-text-layer",
+        "too-many-characters" => "review-issue-cause-too-many-characters",
+        "source-missing" => "review-issue-cause-source-missing",
+        "permission-denied" => "review-issue-cause-permission-denied",
+        "processing-failed" => "review-issue-cause-processing-failed",
+        _ => "",
+    };
+    if message.is_empty() {
+        if code == airwiki_core::SourceIssueCode::Superseded
+            || code == airwiki_core::SourceIssueCode::ProcessingFailed
+        {
+            return Some(localization.text("review-issue-cause-processing-failed"));
+        }
+        return None;
+    }
+
+    Some(localization.text(message))
+}
+
 fn show_review_issue(
     ui: &mut egui::Ui,
     localization: &Localization,
@@ -3925,6 +3957,21 @@ fn show_review_issue(
                 )
                 .wrap(),
             );
+            if let Some(cause_message) = source_issue_cause_message(localization, issue, issue.code)
+            {
+                ui.add(
+                    egui::Label::new(
+                        RichText::new({
+                            let mut arguments = FluentArgs::new();
+                            arguments.set("cause", cause_message);
+                            localization.text_with("review-issue-cause", Some(&arguments))
+                        })
+                        .small()
+                        .color(ui.visuals().weak_text_color()),
+                    )
+                    .wrap(),
+                );
+            }
             requested_rescan = ui
                 .add_enabled(
                     !scanning,

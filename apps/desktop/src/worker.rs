@@ -951,7 +951,7 @@ async fn run_worker(
     send(
         &events,
         WorkerEvent::Ready {
-            node_id: "inicializando…".to_owned(),
+            node_id: "—".to_owned(),
             mcp_url: "http://127.0.0.1:43123/mcp".to_owned(),
             collections: Vec::new(),
             reviews: Vec::new(),
@@ -1027,6 +1027,7 @@ async fn run_worker(
         desktop_config.automatic_update_checks && updater.is_some(),
     );
     let mut recommendation = select_model(desktop_config.profile, &hardware);
+    let mut lifecycle = JoinSet::<()>::new();
 
     let asset_manager = match AssetManager::new(paths.data.clone()) {
         Ok(manager) => manager.with_bundled_runtime(paths.bundled_llama_server()),
@@ -1046,7 +1047,13 @@ async fn run_worker(
     // assets twice.
     let initial_model_state_scheduled = should_schedule_initial_model_state(&desktop_config);
     if initial_model_state_scheduled {
-        send_model_state(&events, &asset_manager, &desktop_config, &recommendation);
+        send_model_state(
+            &mut lifecycle,
+            &events,
+            &asset_manager,
+            &desktop_config,
+            &recommendation,
+        );
     }
     // Storage, MCP and local search must be available even when Windows cannot
     // safely expose a LAN listener. The optional runtime is started only after
@@ -1132,7 +1139,10 @@ async fn run_worker(
                     *collection_id,
                     "no se pudo crear el watcher de la colección",
                 );
-                tracing::warn!(%collection_id, "collection watcher could not start");
+                tracing::warn!(
+                    error_kind = "collection_watcher_start_failed",
+                    "collection watcher could not start"
+                );
             }
             send(
                 &events,
@@ -1232,6 +1242,7 @@ async fn run_worker(
             )),
         );
         spawn_verification(
+            &mut lifecycle,
             asset_manager.clone(),
             verifying_selection.clone(),
             internal_tx.clone(),
@@ -1246,7 +1257,13 @@ async fn run_worker(
         );
         send(&events, WorkerEvent::ModelsMissing);
         if !initial_model_state_scheduled {
-            send_model_state(&events, &asset_manager, &desktop_config, &recommendation);
+            send_model_state(
+                &mut lifecycle,
+                &events,
+                &asset_manager,
+                &desktop_config,
+                &recommendation,
+            );
         }
     }
 
@@ -1322,6 +1339,7 @@ async fn run_worker(
                                 if !persist_config(&desktop_config, &paths, &events) {
                                     desktop_config = previous_config;
                                     send_model_state(
+                                        &mut lifecycle,
                                         &events,
                                         &asset_manager,
                                         &desktop_config,
@@ -1330,6 +1348,7 @@ async fn run_worker(
                                     continue;
                                 }
                                 start_install(
+                                    &mut lifecycle,
                                     &asset_manager,
                                     selection,
                                     &events,
@@ -1376,6 +1395,7 @@ async fn run_worker(
                                 ),
                             );
                             send_model_state(
+                                &mut lifecycle,
                                 &events,
                                 &asset_manager,
                                 &desktop_config,
@@ -1391,6 +1411,7 @@ async fn run_worker(
                         );
                         if !persist_config(&updated_config, &paths, &events) {
                             send_model_state(
+                                &mut lifecycle,
                                 &events,
                                 &asset_manager,
                                 &desktop_config,
@@ -1410,6 +1431,7 @@ async fn run_worker(
                             );
                         }
                         send_model_state(
+                            &mut lifecycle,
                             &events,
                             &asset_manager,
                             &desktop_config,
@@ -1419,6 +1441,7 @@ async fn run_worker(
                             && let Some(selection) = recommendation.selection.clone()
                         {
                             spawn_profile_activation_probe(
+                                &mut lifecycle,
                                 asset_manager.clone(),
                                 selection,
                                 internal_tx.clone(),
@@ -1975,6 +1998,7 @@ async fn run_worker(
                                         send(&events, WorkerEvent::InstallStopped);
                                         send(&events, WorkerEvent::ModelsMissing);
                                         send_model_state(
+                                            &mut lifecycle,
                                             &events,
                                             &asset_manager,
                                             &desktop_config,
@@ -1983,6 +2007,7 @@ async fn run_worker(
                                         continue;
                                     }
                                     start_install(
+                                        &mut lifecycle,
                                         &asset_manager,
                                         selection,
                                         &events,
@@ -2021,6 +2046,7 @@ async fn run_worker(
                                 {
                                     verifying_selection = active;
                                     spawn_verification(
+                                        &mut lifecycle,
                                         asset_manager.clone(),
                                         verifying_selection.clone(),
                                         internal_tx.clone(),
@@ -2030,14 +2056,18 @@ async fn run_worker(
                                     send(&events, WorkerEvent::ModelsMissing);
                                 }
                                 send_model_state(
+                                    &mut lifecycle,
                                     &events,
                                     &asset_manager,
                                     &desktop_config,
                                     &recommendation,
                                 );
                             }
-                            Err(error) => {
-                                tracing::info!(model = verifying_selection.model_id, %error, "installed model is missing or invalid");
+                            Err(_) => {
+                                tracing::info!(
+                                    error_kind = "installed_model_invalid",
+                                    "installed model is missing or invalid"
+                                );
                                 model_lifecycle = ModelLifecycle::Missing;
                                 send(
                                     &events,
@@ -2051,6 +2081,7 @@ async fn run_worker(
                                 send(&events, WorkerEvent::ModelsMissing);
                                 if !initial_model_state_scheduled {
                                     send_model_state(
+                                        &mut lifecycle,
                                         &events,
                                         &asset_manager,
                                         &desktop_config,
@@ -2101,6 +2132,7 @@ async fn run_worker(
                                         );
                                     }
                                     send_model_state_with_known_plan(
+                                        &mut lifecycle,
                                         &events,
                                         &asset_manager,
                                         &desktop_config,
@@ -2132,6 +2164,7 @@ async fn run_worker(
                                     send(&events, WorkerEvent::ModelsMissing);
                                 }
                                 send_model_state(
+                                    &mut lifecycle,
                                     &events,
                                     &asset_manager,
                                     &desktop_config,
@@ -2159,6 +2192,7 @@ async fn run_worker(
                                     send(&events, WorkerEvent::ModelsMissing);
                                 }
                                 send_model_state(
+                                    &mut lifecycle,
                                     &events,
                                     &asset_manager,
                                     &desktop_config,
@@ -2191,6 +2225,7 @@ async fn run_worker(
                                         )),
                                     );
                                     send_model_state_with_known_plan(
+                                        &mut lifecycle,
                                         &events,
                                         &asset_manager,
                                         &desktop_config,
@@ -2205,9 +2240,8 @@ async fn run_worker(
                                 %model_id,
                                 "ignored stale profile activation probe"
                             ),
-                            Err(error) => tracing::debug!(
-                                %model_id,
-                                %error,
+                            Err(_) => tracing::debug!(
+                                error_kind = "recommended_model_incomplete",
                                 "recommended model is not fully installed yet"
                             ),
                         }
@@ -2284,11 +2318,6 @@ async fn run_worker(
                             tracing::warn!(
                                 error_kind = "watcher_restart",
                                 failure_count = failures.len(),
-                                collection_ids = %failures
-                                    .iter()
-                                    .map(|(collection_id, _)| collection_id.to_string())
-                                    .collect::<Vec<_>>()
-                                    .join(","),
                                 "collection watcher restart remains pending"
                             );
                             for (collection_id, _) in &failures {
@@ -2393,13 +2422,20 @@ async fn run_worker(
                         already_pending_count = summary.already_pending,
                         "periodic collection reconciliation checked"
                     ),
-                    Err(error) => tracing::warn!(
+                    Err(_) => tracing::warn!(
                         reason = "periodic_safety_reconciliation",
                         checked_at = %checked_at.to_rfc3339(),
                         error_kind = "collection_listing",
-                        %error,
                         "periodic collection reconciliation could not inspect collections"
                     ),
+                }
+            }
+            completion = lifecycle.join_next(), if !lifecycle.is_empty() => {
+                if completion.is_some_and(|result| result.is_err()) {
+                    tracing::warn!(
+                        error_kind = "model_lifecycle_task_join",
+                        "a supervised model lifecycle task did not join cleanly"
+                    );
                 }
             }
             completion = background.join_next(), if !background.is_empty() => {
@@ -2476,14 +2512,14 @@ async fn run_worker(
                                 "un escaneo terminó después de perderse el watcher",
                             );
                         } else {
-                          match result {
+                            match result {
                             Ok(outcomes) => {
-                                if let Err(error) =
-                                    services.clear_startup_preflight_block(collection_id)
+                                if services
+                                    .clear_startup_preflight_block(collection_id)
+                                    .is_err()
                                 {
                                     tracing::warn!(
                                         error_kind = "startup_preflight_state",
-                                        %error,
                                         "a successful scan could not clear its startup block"
                                     );
                                 }
@@ -2510,7 +2546,7 @@ async fn run_worker(
                                     "falló la reconciliación completa del filesystem observado",
                                 );
                             }
-                          }
+                            }
                         }
                         refresh_content_views(&services, &events);
                         let ready = scan_scheduler.finish(collection_id);
@@ -2707,11 +2743,9 @@ async fn run_worker(
                                 );
                             }
                             Ok(false) => {}
-                            Err(error) => {
+                            Err(_) => {
                                 tracing::warn!(
-                                    %collection_id,
                                     error_kind = "wiki_derived_maintenance",
-                                    %error,
                                     "automatic derived Wiki maintenance was not applied"
                                 );
                                 send(
@@ -3059,6 +3093,7 @@ async fn run_worker(
                                     );
                                 }
                                 send_model_state_with_known_plan(
+                                    &mut lifecycle,
                                     &events,
                                     &asset_manager,
                                     &desktop_config,
@@ -3071,6 +3106,7 @@ async fn run_worker(
                                 ) && let Some(selection) = recommendation.selection.clone()
                                 {
                                     spawn_profile_activation_probe(
+                                        &mut lifecycle,
                                         asset_manager.clone(),
                                         selection,
                                         internal_tx.clone(),
@@ -3088,6 +3124,7 @@ async fn run_worker(
                                     accept_selection_licenses(&mut desktop_config, &selection);
                                     if persist_config(&desktop_config, &paths, &events) {
                                         start_install(
+                                            &mut lifecycle,
                                             &asset_manager,
                                             selection,
                                             &events,
@@ -3130,6 +3167,7 @@ async fn run_worker(
                                     verifying_selection = active;
                                     model_lifecycle = ModelLifecycle::Verifying;
                                     spawn_verification(
+                                        &mut lifecycle,
                                         asset_manager.clone(),
                                         verifying_selection.clone(),
                                         internal_tx.clone(),
@@ -3143,6 +3181,7 @@ async fn run_worker(
                                     send(&events, WorkerEvent::ModelsMissing);
                                 }
                                 send_model_state_with_known_plan(
+                                    &mut lifecycle,
                                     &events,
                                     &asset_manager,
                                     &desktop_config,
@@ -3263,8 +3302,10 @@ async fn run_worker(
     if let Some(cancel) = install_cancel {
         cancel.cancel();
     }
-    // JoinSet aborts every in-flight search/scan and joining releases their Arc
-    // references before DesktopServices is consumed for deterministic cleanup.
+    lifecycle.abort_all();
+    while lifecycle.join_next().await.is_some() {}
+    // JoinSets abort every in-flight search, scan and model operation. Joining
+    // releases their Arc references before services are consumed for cleanup.
     background.abort_all();
     while background.join_next().await.is_some() {}
     drop(watchers);
@@ -3744,15 +3785,17 @@ fn persist_config(config: &DesktopConfig, paths: &AppPaths, events: &Sender<Work
 }
 
 fn send_model_state(
+    lifecycle: &mut JoinSet<()>,
     events: &Sender<WorkerEvent>,
     manager: &AssetManager,
     config: &DesktopConfig,
     decision: &ModelDecision,
 ) {
-    send_model_state_with_known_plan(events, manager, config, decision, None);
+    send_model_state_with_known_plan(lifecycle, events, manager, config, decision, None);
 }
 
 fn send_model_state_with_known_plan(
+    lifecycle: &mut JoinSet<()>,
     events: &Sender<WorkerEvent>,
     manager: &AssetManager,
     config: &DesktopConfig,
@@ -3765,7 +3808,7 @@ fn send_model_state_with_known_plan(
     let config = config.clone();
     let decision = decision.clone();
     let known_plan = matching_known_install_plan(known_plan, &decision);
-    tokio::spawn(async move {
+    lifecycle.spawn(async move {
         // Snapshot verification can hash several GiB. Serialize it so rapid profile changes
         // discard queued stale requests instead of starting redundant filesystem work.
         let _plan_guard = MODEL_STATE_PLAN_GATE.lock().await;
@@ -3951,11 +3994,12 @@ fn spawn_quarantine(
 }
 
 fn spawn_verification(
+    lifecycle: &mut JoinSet<()>,
     manager: AssetManager,
     selection: ModelSelection,
     completion_tx: UnboundedSender<InternalEvent>,
 ) {
-    tokio::spawn(async move {
+    lifecycle.spawn(async move {
         let result = AssertUnwindSafe(manager.verify_selection(&selection))
             .catch_unwind()
             .await
@@ -3966,11 +4010,12 @@ fn spawn_verification(
 }
 
 fn spawn_profile_activation_probe(
+    lifecycle: &mut JoinSet<()>,
     manager: AssetManager,
     selection: ModelSelection,
     completion_tx: UnboundedSender<InternalEvent>,
 ) {
-    tokio::spawn(async move {
+    lifecycle.spawn(async move {
         let model_id = selection.model_id.to_owned();
         let result = AssertUnwindSafe(manager.verify_selection(&selection))
             .catch_unwind()
@@ -3982,6 +4027,7 @@ fn spawn_profile_activation_probe(
 }
 
 fn start_install(
+    lifecycle: &mut JoinSet<()>,
     manager: &AssetManager,
     selection: ModelSelection,
     events: &Sender<WorkerEvent>,
@@ -3995,7 +4041,7 @@ fn start_install(
     let manager = manager.clone();
     let progress_tx = events.clone();
     let completion_tx = completion_tx.clone();
-    tokio::spawn(async move {
+    lifecycle.spawn(async move {
         let mut transient_retries = 0_u32;
         let result = loop {
             let attempt_progress = progress_tx.clone();
@@ -5544,8 +5590,10 @@ mod tests {
             fits_available_disk: true,
         };
         let (events, receiver) = mpsc::channel();
+        let mut lifecycle = JoinSet::new();
 
         send_model_state_with_known_plan(
+            &mut lifecycle,
             &events,
             &manager,
             &DesktopConfig::default(),

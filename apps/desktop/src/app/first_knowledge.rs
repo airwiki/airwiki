@@ -2,13 +2,13 @@ use eframe::egui::{self, Color32, RichText, Stroke};
 use fluent_bundle::FluentArgs;
 
 use crate::i18n::Localization;
-use crate::layout::LayoutDensity;
+use crate::{layout::LayoutDensity, theme};
 
-pub(super) const AIR_BLUE: Color32 = Color32::from_rgb(34, 151, 245);
-const AIR_AQUA: Color32 = Color32::from_rgb(22, 199, 215);
+pub(super) const AIR_BLUE: Color32 = theme::AIR_BLUE;
+const AIR_AQUA: Color32 = theme::EVIDENCE_CYAN;
 const AIR_INK: Color32 = Color32::from_rgb(13, 47, 95);
-const AIR_SLATE: Color32 = Color32::from_rgb(105, 119, 138);
-const AIR_AMBER: Color32 = Color32::from_rgb(227, 163, 60);
+const AIR_SLATE: Color32 = Color32::from_rgb(116, 139, 164);
+const AIR_AMBER: Color32 = theme::WARNING_AMBER;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) enum JourneyStepState {
@@ -238,16 +238,8 @@ pub(super) fn work_surface<R>(
     density: LayoutDensity,
     add_contents: impl FnOnce(&mut egui::Ui) -> R,
 ) -> R {
-    let fill = if ui.visuals().dark_mode {
-        Color32::from_rgb(18, 28, 42)
-    } else {
-        Color32::from_rgb(247, 250, 252)
-    };
-    let border = if ui.visuals().dark_mode {
-        Color32::from_rgb(48, 70, 94)
-    } else {
-        Color32::from_rgb(216, 230, 242)
-    };
+    let fill = theme::surface(ui.visuals().dark_mode);
+    let border = theme::border(ui.visuals().dark_mode);
     egui::Frame::new()
         .fill(fill)
         .stroke(Stroke::new(1.0, border))
@@ -278,7 +270,7 @@ pub(super) fn privacy_note(ui: &mut egui::Ui, localization: &Localization) {
         ui.label(
             RichText::new(localization.text("onboarding-privacy-local"))
                 .small()
-                .color(ui.visuals().weak_text_color()),
+                .color(theme::secondary_text(ui.visuals().dark_mode)),
         );
     });
 }

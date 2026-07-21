@@ -228,7 +228,7 @@ impl LlamaSupervisor {
             process_guard,
             endpoint,
         } = spawned;
-        info!(url = endpoint.base_url, "llama-server is ready on loopback");
+        info!("llama-server is ready on loopback");
         *state = Some(RunningServer {
             child,
             _process_guard: process_guard,

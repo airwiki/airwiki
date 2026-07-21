@@ -445,6 +445,7 @@ struct NormalizedHit {
 struct NormalizedSource {
     node: FixtureNode,
     hits: Vec<NormalizedHit>,
+    authorized_candidates: Vec<NormalizedHit>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -471,11 +472,14 @@ struct RetrievalCaseReport {
     tags: Vec<RetrievalTag>,
     expected_group_count: u32,
     found_group_count: u32,
+    effective_found_group_count: u32,
     reciprocal_rank_at_five: Option<f64>,
     returned_fact_ids: Vec<String>,
     returned_support_fact_ids: Vec<String>,
+    returned_candidate_fact_ids: Vec<String>,
     missing_group_count: u32,
     unexpected_fact_ids: Vec<String>,
+    candidate_only_group_count: u32,
     forbidden_fact_ids: Vec<String>,
     provenance_error_count: u32,
     duplicate_violation_count: u32,
@@ -524,7 +528,10 @@ struct AggregateMetrics {
     case_count: u32,
     expected_group_count: u32,
     found_group_count: u32,
+    effective_found_group_count: u32,
+    candidate_only_group_count: u32,
     recall_at_five: Option<f64>,
+    candidate_recall_at_five: Option<f64>,
     mean_reciprocal_rank_at_five: Option<f64>,
     false_evidence_count: u32,
     forbidden_evidence_count: u32,
@@ -1456,6 +1463,7 @@ fn expected_public_chunk_id(source_sha256: &str, ordinal: u32, text_sha256: &str
 }
 
 async fn run_case(corpus: &FixtureCorpus, case: &FixtureCase, top_k: u8) -> Result<NormalizedRun> {
+    let include_candidates = matches!(case.scope.purpose(), SearchPurpose::ExternalAi);
     let request = SearchRequest::new(&case.question, case.scope.purpose(), top_k);
     let responses = match case.scope {
         RetrievalScope::Local | RetrievalScope::LocalExternalAi => vec![(
@@ -1480,41 +1488,67 @@ async fn run_case(corpus: &FixtureCorpus, case: &FixtureCase, top_k: u8) -> Resu
             vec![(FixtureNode::Origin, local?), (FixtureNode::Peer, peer?)]
         }
     };
-    normalize_responses(responses, &corpus.facts_by_provenance)
+    normalize_responses(responses, include_candidates, &corpus.facts_by_provenance)
 }
 
 fn normalize_responses(
     responses: Vec<(FixtureNode, airwiki_types::SearchResponse)>,
+    include_candidates: bool,
     facts: &HashMap<(String, String), FactIdentity>,
 ) -> Result<NormalizedRun> {
     let mut sources = Vec::with_capacity(responses.len());
     let mut provenance_errors = 0_u32;
     for (node, response) in responses {
-        let mut normalized = Vec::with_capacity(response.hits.len());
+        let mut hits = Vec::with_capacity(response.hits.len());
         for (index, hit) in response.hits.into_iter().enumerate() {
-            let expected_rank = u32::try_from(index + 1).unwrap_or(u32::MAX);
-            let identity = facts.get(&(hit.source_sha256.clone(), hit.heading_or_page.clone()));
-            let Some(identity) = identity else {
-                provenance_errors = provenance_errors.saturating_add(1);
-                continue;
-            };
-            if !hit_has_valid_provenance(&hit, identity, node, expected_rank) {
-                provenance_errors = provenance_errors.saturating_add(1);
+            normalize_hit(index, hit, node, facts, &mut hits, &mut provenance_errors);
+        }
+        let mut authorized_candidates = Vec::with_capacity(response.authorized_candidates.len());
+        if include_candidates {
+            for (index, hit) in response.authorized_candidates.into_iter().enumerate() {
+                normalize_hit(
+                    index,
+                    hit,
+                    node,
+                    facts,
+                    &mut authorized_candidates,
+                    &mut provenance_errors,
+                );
             }
-            normalized.push(NormalizedHit {
-                fact_id: identity.id.clone(),
-                rank: hit.rank,
-            });
         }
         sources.push(NormalizedSource {
             node,
-            hits: normalized,
+            hits,
+            authorized_candidates,
         });
     }
     Ok(NormalizedRun {
         sources,
         provenance_errors,
     })
+}
+
+fn normalize_hit(
+    index: usize,
+    hit: SearchHit,
+    node: FixtureNode,
+    facts: &HashMap<(String, String), FactIdentity>,
+    out: &mut Vec<NormalizedHit>,
+    provenance_errors: &mut u32,
+) {
+    let expected_rank = u32::try_from(index + 1).unwrap_or(u32::MAX);
+    let identity = facts.get(&(hit.source_sha256.clone(), hit.heading_or_page.clone()));
+    let Some(identity) = identity else {
+        *provenance_errors = provenance_errors.saturating_add(1);
+        return;
+    };
+    if !hit_has_valid_provenance(&hit, identity, node, expected_rank) {
+        *provenance_errors = provenance_errors.saturating_add(1);
+    }
+    out.push(NormalizedHit {
+        fact_id: identity.id.clone(),
+        rank: hit.rank,
+    });
 }
 
 fn hit_has_valid_provenance(
@@ -1559,7 +1593,16 @@ fn score_case(
         .iter()
         .flat_map(|source| source.hits.iter())
         .collect::<Vec<_>>();
+    let returned_candidates = baseline
+        .sources
+        .iter()
+        .flat_map(|source| source.authorized_candidates.iter())
+        .collect::<Vec<_>>();
     let returned_ids = returned
+        .iter()
+        .map(|hit| hit.fact_id.as_str())
+        .collect::<Vec<_>>();
+    let returned_candidate_ids = returned_candidates
         .iter()
         .map(|hit| hit.fact_id.as_str())
         .collect::<Vec<_>>();
@@ -1585,13 +1628,33 @@ fn score_case(
         .map(String::as_str)
         .collect::<HashSet<_>>();
 
+    let returned_ids_set = returned_ids.iter().copied().collect::<HashSet<_>>();
+    let returned_candidate_ids_set = returned_candidate_ids
+        .iter()
+        .copied()
+        .collect::<HashSet<_>>();
+    let effective_returned_ids = returned_ids_set
+        .union(&returned_candidate_ids_set)
+        .copied()
+        .collect::<HashSet<_>>();
+    let group_has = |group: &[String], ids: &HashSet<&str>| {
+        group.iter().any(|fact_id| ids.contains(fact_id.as_str()))
+    };
     let found_group_count = case
         .expected_groups
         .iter()
+        .filter(|group| group_has(group, &returned_ids_set))
+        .count();
+    let effective_found_group_count = case
+        .expected_groups
+        .iter()
+        .filter(|group| group_has(group, &effective_returned_ids))
+        .count();
+    let candidate_only_group_count = case
+        .expected_groups
+        .iter()
         .filter(|group| {
-            group
-                .iter()
-                .any(|fact_id| returned_ids.contains(&fact_id.as_str()))
+            group_has(group, &returned_candidate_ids_set) && !group_has(group, &returned_ids_set)
         })
         .count();
     let duplicate_violation_count = case
@@ -1601,7 +1664,7 @@ fn score_case(
         .filter(|group| {
             group
                 .iter()
-                .filter(|fact_id| returned_ids.contains(&fact_id.as_str()))
+                .filter(|fact_id| returned_ids_set.contains(&fact_id.as_str()))
                 .count()
                 > 1
         })
@@ -1626,6 +1689,13 @@ fn score_case(
         .iter()
         .copied()
         .filter(|fact_id| allowed_support.contains(fact_id))
+        .map(str::to_owned)
+        .collect::<BTreeSet<_>>()
+        .into_iter()
+        .collect::<Vec<_>>();
+    let returned_candidate_fact_ids = returned_candidate_ids
+        .iter()
+        .copied()
         .map(str::to_owned)
         .collect::<BTreeSet<_>>()
         .into_iter()
@@ -1661,10 +1731,13 @@ fn score_case(
         tags: case.tags.clone(),
         expected_group_count: u32::try_from(expected_group_count).unwrap_or(u32::MAX),
         found_group_count: u32::try_from(found_group_count).unwrap_or(u32::MAX),
+        effective_found_group_count: u32::try_from(effective_found_group_count).unwrap_or(u32::MAX),
         reciprocal_rank_at_five,
         returned_fact_ids: returned_ids.into_iter().map(str::to_owned).collect(),
         returned_support_fact_ids,
+        returned_candidate_fact_ids,
         missing_group_count: u32::try_from(missing_group_count).unwrap_or(u32::MAX),
+        candidate_only_group_count: u32::try_from(candidate_only_group_count).unwrap_or(u32::MAX),
         unexpected_fact_ids,
         forbidden_fact_ids: returned_forbidden_fact_ids,
         provenance_error_count,
@@ -1814,6 +1887,12 @@ fn aggregate_metrics<'a>(
         metrics.found_group_count = metrics
             .found_group_count
             .saturating_add(report.found_group_count);
+        metrics.effective_found_group_count = metrics
+            .effective_found_group_count
+            .saturating_add(report.effective_found_group_count);
+        metrics.candidate_only_group_count = metrics
+            .candidate_only_group_count
+            .saturating_add(report.candidate_only_group_count);
         metrics.false_evidence_count = metrics
             .false_evidence_count
             .saturating_add(u32::try_from(report.unexpected_fact_ids.len()).unwrap_or(u32::MAX));
@@ -1839,6 +1918,9 @@ fn aggregate_metrics<'a>(
     }
     metrics.recall_at_five = (metrics.expected_group_count > 0)
         .then(|| f64::from(metrics.found_group_count) / f64::from(metrics.expected_group_count));
+    metrics.candidate_recall_at_five = (metrics.expected_group_count > 0).then(|| {
+        f64::from(metrics.effective_found_group_count) / f64::from(metrics.expected_group_count)
+    });
     metrics.mean_reciprocal_rank_at_five =
         (reciprocal_rank_count > 0).then(|| reciprocal_rank_sum / f64::from(reciprocal_rank_count));
     metrics
@@ -1986,6 +2068,8 @@ mod tests {
             report.stage_attribution.mask_surviving_recall_at_ten,
             Some(1.0)
         );
+        assert_eq!(report.total.candidate_recall_at_five, Some(1.0));
+        assert!(report.total.effective_found_group_count >= report.total.found_group_count);
         assert_eq!(report.stage_attribution.mapping_error_count, 0);
     }
 
@@ -2379,6 +2463,7 @@ mod tests {
                         rank: u32::try_from(index + 1).unwrap_or(u32::MAX),
                     })
                     .collect(),
+                authorized_candidates: Vec::new(),
             }],
             provenance_errors: 0,
         };
@@ -2443,10 +2528,13 @@ mod tests {
                 split: RetrievalSplit::Calibration,
                 tags: vec![RetrievalTag::Direct],
                 expected_group_count: expected,
+                effective_found_group_count: expected,
                 found_group_count: u32::from(reciprocal_rank.is_some()),
                 reciprocal_rank_at_five: reciprocal_rank,
                 returned_fact_ids: Vec::new(),
                 returned_support_fact_ids: Vec::new(),
+                returned_candidate_fact_ids: Vec::new(),
+                candidate_only_group_count: 0,
                 missing_group_count: u32::from(reciprocal_rank.is_none()),
                 unexpected_fact_ids: Vec::new(),
                 forbidden_fact_ids: Vec::new(),
@@ -2486,10 +2574,13 @@ mod tests {
                 split,
                 tags: vec![RetrievalTag::Direct],
                 expected_group_count: 1,
+                effective_found_group_count: u32::from(passed),
                 found_group_count: u32::from(passed),
                 reciprocal_rank_at_five: passed.then_some(1.0),
                 returned_fact_ids: Vec::new(),
                 returned_support_fact_ids: Vec::new(),
+                returned_candidate_fact_ids: Vec::new(),
+                candidate_only_group_count: 0,
                 missing_group_count: u32::from(!passed),
                 unexpected_fact_ids: Vec::new(),
                 forbidden_fact_ids: Vec::new(),

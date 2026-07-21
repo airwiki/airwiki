@@ -492,6 +492,7 @@ review-empty-title = No documents are waiting
 review-empty-body = New versions appear here after local enrichment.
 review-ready-group = Ready for review ({ $count })
 review-issues-group = Needs attention ({ $count })
+review-issues-more = and { $count } more
 review-issue-status = Could not prepare
 review-scan-again = Scan folder again
 review-only-issues = No file is ready for review yet. Fix the files marked “Needs attention”, then scan the folder again.

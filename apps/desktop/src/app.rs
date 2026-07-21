@@ -1370,6 +1370,11 @@ impl AirWikiApp {
             .auto_shrink([false; 2])
             .show(ui, |ui| {
                 for collection in &mut self.collections {
+                    let collection_issues = self
+                        .source_issues
+                        .iter()
+                        .filter(|issue| issue.collection_id == collection.id)
+                        .collect::<Vec<_>>();
                     let scan_state = self.collection_scans.get(&collection.id).copied();
                     let mut counts_arguments = FluentArgs::new();
                     counts_arguments.set("documents", collection.document_count);
@@ -1386,6 +1391,57 @@ impl AirWikiApp {
                                     wrap_monospace(ui, collection.folder.display().to_string());
                                 });
                                 ui.label(&counts);
+                                if !collection_issues.is_empty() {
+                                    let mut issues_arguments = FluentArgs::new();
+                                    issues_arguments.set("count", collection_issues.len() as i64);
+                                    ui.label(
+                                        RichText::new(self.localization.text_with(
+                                            "review-issues-group",
+                                            Some(&issues_arguments),
+                                        ))
+                                        .color(Color32::from_rgb(230, 160, 35)),
+                                    );
+                                    for issue in collection_issues.iter().take(3) {
+                                        ui.add_space(4.0);
+                                        wrap_rich_text(
+                                            ui,
+                                            RichText::new(format!("• {}", issue.source_name))
+                                                .small()
+                                                .color(ui.visuals().weak_text_color()),
+                                        );
+                                        if let Some(cause_message) = source_issue_cause_message(
+                                            &self.localization,
+                                            issue,
+                                            issue.code,
+                                        ) {
+                                            wrap_rich_text(
+                                                ui,
+                                                RichText::new(format!("  {cause_message}"))
+                                                    .small()
+                                                    .color(ui.visuals().weak_text_color()),
+                                            );
+                                        }
+                                    }
+                                    if collection_issues.len() > 3 {
+                                        let remaining = collection_issues.len().saturating_sub(3);
+                                        let mut remaining_arguments = FluentArgs::new();
+                                        remaining_arguments.set("count", remaining as i64);
+                                        ui.label(
+                                            RichText::new(self.localization.text_with(
+                                                "review-issues-more",
+                                                Some(&remaining_arguments),
+                                            ))
+                                            .small()
+                                            .color(ui.visuals().weak_text_color()),
+                                        );
+                                    }
+                                    if ui
+                                        .small_button(self.localization.text("action-open"))
+                                        .clicked()
+                                    {
+                                        self.screen = Screen::Review;
+                                    }
+                                }
                                 if let Some(maintenance) = &collection.maintenance {
                                     let (label, color) = maintenance_status_presentation(
                                         &self.localization,
@@ -4566,6 +4622,10 @@ fn wrap_monospace(ui: &mut egui::Ui, value: impl AsRef<str>) {
             .selectable(false)
             .wrap(),
     );
+}
+
+fn wrap_rich_text(ui: &mut egui::Ui, text: RichText) {
+    ui.add(egui::Label::new(text).selectable(false).wrap());
 }
 
 fn page_title(ui: &mut egui::Ui, title: &str, subtitle: &str) {

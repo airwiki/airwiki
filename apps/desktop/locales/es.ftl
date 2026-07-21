@@ -492,6 +492,7 @@ review-empty-title = No hay documentos pendientes
 review-empty-body = Las nuevas versiones aparecerán aquí después del enriquecimiento local.
 review-ready-group = Listos para revisar ({ $count })
 review-issues-group = Necesitan atención ({ $count })
+review-issues-more = y { $count } más
 review-issue-status = No se pudo preparar
 review-scan-again = Volver a escanear la carpeta
 review-only-issues = Todavía no hay archivos listos para revisar. Corrige los archivos marcados como “Necesitan atención” y vuelve a escanear la carpeta.

@@ -19,7 +19,7 @@ use egui_graphs::{
 };
 use uuid::Uuid;
 
-use super::first_knowledge::AIR_BLUE;
+use super::{first_knowledge::AIR_BLUE, wrap_monospace};
 use crate::{i18n::Localization, layout::ResponsiveLayout};
 
 const MAX_GRAPH_CONCEPTS: usize = 500;
@@ -1346,7 +1346,7 @@ impl KnowledgeUi {
                 localized_guided_repair_error(localization, error),
             );
             ui.collapsing(localization.text("action-details"), |ui| {
-                ui.monospace(error);
+                wrap_monospace(ui, error);
             });
         }
         if let Some(result) = self
@@ -1439,7 +1439,7 @@ impl KnowledgeUi {
                             .color(ui.visuals().weak_text_color()),
                         );
                         ui.collapsing(localization.text("action-details"), |ui| {
-                            ui.monospace(&issue.code);
+                            wrap_monospace(ui, &issue.code);
                             ui.label(&issue.message);
                         });
                     });
@@ -1508,7 +1508,7 @@ impl KnowledgeUi {
                     .show(ui, |ui| {
                         for file in &preview.files {
                             ui.horizontal_wrapped(|ui| {
-                                ui.monospace(file.page.relative_path());
+                                wrap_monospace(ui, file.page.relative_path());
                                 ui.label("—");
                                 ui.label(localized_repair_change(localization, file.change));
                             });

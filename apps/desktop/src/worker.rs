@@ -141,6 +141,7 @@ pub struct SourceIssueView {
     pub source_name: String,
     pub collection_name: String,
     pub code: airwiki_core::SourceIssueCode,
+    pub reason: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

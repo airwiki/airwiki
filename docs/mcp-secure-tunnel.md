@@ -14,10 +14,15 @@ http://127.0.0.1:43123/mcp
 
 `search_airwiki` accepts `question` and optional `top_k`. AirWiki forces the
 `external_ai` purpose and returns typed `evidence`, a separately bounded
-`authorized_candidates` list, and an optional `coverage_gap`. Evidence contains
+`authorized_candidates` list, a flattened `search_items` lane view,
+and an optional `coverage_gap`. Evidence contains
 either citable relevant items or `no_relevant_evidence`. Candidates passed the
 same publication and disclosure policy but were not verified as answering the
-question by AirWiki's lightweight classifier.
+question by AirWiki's lightweight classifier. `search_items` is intended for
+client implementations that prefer one stream and must be treated as
+untrusted evidence metadata with explicit `lane` context.
+Each typed lane contributes at most the requested `top_k`, so `search_items`
+can contain up to twice that number while preserving both lanes.
 
 The serialized MCP result has a global budget below the bridge's 64 KiB HTTP
 limit. AirWiki removes lower-ranked candidates before evidence and reports

@@ -584,6 +584,7 @@ struct LivePeer {
 struct TransientSourceIssue {
     path: PathBuf,
     code: SourceIssueCode,
+    reason: Option<String>,
 }
 
 /// Side effects useful to the worker after applying a network event.
@@ -1612,7 +1613,7 @@ impl DesktopServices {
             .into_iter()
             .map(|collection| (collection.id, collection.name))
             .collect::<HashMap<_, _>>();
-        let mut issues = HashMap::<(Uuid, PathBuf), SourceIssueCode>::new();
+        let mut issues = HashMap::<(Uuid, PathBuf), (SourceIssueCode, Option<String>)>::new();
         for collection_id in collections.keys().copied() {
             for source in self.database.list_sources(collection_id)? {
                 if source.status != DocumentStatus::Failed {
@@ -1623,7 +1624,11 @@ impl DesktopServices {
                     SourceIssueCode::from_error,
                 );
                 if code.is_user_visible() {
-                    issues.insert((collection_id, source.source_path), code);
+                    let reason = source
+                        .last_error
+                        .as_deref()
+                        .and_then(|message| source_issue_reason(message, code));
+                    issues.insert((collection_id, source.source_path), (code, reason));
                 }
             }
         }
@@ -1631,19 +1636,23 @@ impl DesktopServices {
             read_lock(&self.transient_source_issues, "source issue snapshot")?.iter()
         {
             for issue in transient {
-                issues.insert((*collection_id, issue.path.clone()), issue.code);
+                issues.insert(
+                    (*collection_id, issue.path.clone()),
+                    (issue.code, issue.reason.clone()),
+                );
             }
         }
 
         let mut views = issues
             .into_iter()
-            .filter_map(|((collection_id, path), code)| {
+            .filter_map(|((collection_id, path), (code, reason))| {
                 let collection_name = collections.get(&collection_id)?;
                 Some(source_issue_view(
                     collection_id,
                     collection_name,
                     &path,
                     code,
+                    reason,
                 ))
             })
             .collect::<Vec<_>>();
@@ -2114,12 +2123,14 @@ fn source_issue_view(
     collection_name: &str,
     path: &Path,
     code: SourceIssueCode,
+    reason: Option<String>,
 ) -> SourceIssueView {
     SourceIssueView {
         collection_id,
         source_name: source_display_name(path),
         collection_name: collection_name.to_owned(),
         code,
+        reason,
     }
 }
 
@@ -2131,14 +2142,77 @@ fn transient_source_issues_from_outcomes(outcomes: &[IngestOutcome]) -> Vec<Tran
                 source_document_id: None,
                 path,
                 code,
+                error,
                 ..
             } if code.is_user_visible() => Some(TransientSourceIssue {
                 path: path.clone(),
                 code: *code,
+                reason: source_issue_reason(error, *code),
             }),
             _ => None,
         })
         .collect()
+}
+
+fn source_issue_reason(message: &str, code: SourceIssueCode) -> Option<String> {
+    if matches!(code, SourceIssueCode::Superseded) {
+        return Some("processing-failed".to_owned());
+    }
+
+    let detail = message.to_lowercase();
+    let token = if detail.contains("no such file")
+        || detail.contains("not found")
+        || detail.contains("does not exist")
+    {
+        "source-missing"
+    } else if detail.contains("permission denied") || detail.contains("access denied") {
+        "permission-denied"
+    } else if detail.contains("encrypted pdf")
+        || detail.contains("password")
+        || detail.contains("encrypted")
+    {
+        "encrypted-pdf"
+    } else if detail.contains("character limit") {
+        "too-many-characters"
+    } else if detail.contains("no extractable text layer") {
+        "no-text-layer"
+    } else if detail.contains("symbolic link") || detail.contains("symbolic links") {
+        "unreadable"
+    } else if detail.contains("unsupported source file extension")
+        || detail.contains("source format is no longer supported")
+        || detail.contains("source changed")
+        || detail.contains("not a regular file")
+        || detail.contains("document produced no searchable chunks")
+        || detail.contains("could not inspect pdf metadata")
+    {
+        "processing-failed"
+    } else if detail.contains("utf-8") || detail.contains("invalid utf") {
+        "invalid-utf8"
+    } else if detail.contains("page") && detail.contains("maximum")
+        || detail.contains("too many pages")
+        || detail.contains("pdf has") && detail.contains("pages")
+    {
+        "too-many-pages"
+    } else if detail.contains("could not parse pdf")
+        || detail.contains("could not inspect")
+        || detail.contains("invalid pdf")
+    {
+        "invalid-pdf"
+    } else {
+        match code {
+            SourceIssueCode::FileTooLarge => "file-too-large",
+            SourceIssueCode::Unreadable => "unreadable",
+            SourceIssueCode::InvalidUtf8 => "invalid-utf8",
+            SourceIssueCode::InvalidPdf => "invalid-pdf",
+            SourceIssueCode::EncryptedPdf => "encrypted-pdf",
+            SourceIssueCode::TooManyPages => "too-many-pages",
+            SourceIssueCode::NoTextLayer => "no-text-layer",
+            SourceIssueCode::TooManyCharacters => "too-many-characters",
+            SourceIssueCode::Superseded | SourceIssueCode::ProcessingFailed => "processing-failed",
+        }
+    };
+
+    Some(token.to_owned())
 }
 
 fn clear_pairing(peers: &RwLock<HashMap<PeerId, LivePeer>>, peer: PeerId) -> Result<()> {
@@ -2389,9 +2463,47 @@ mod tests {
             "Synthetic collection",
             Path::new("/private/customer/secret-report.pdf"),
             SourceIssueCode::InvalidPdf,
+            None,
         );
 
         assert_eq!(view.source_name, "secret-report.pdf");
+    }
+
+    #[test]
+    fn source_issue_reason_prefers_trailing_cause_detail() {
+        let reason = source_issue_reason(
+            "parse failed: permission denied",
+            SourceIssueCode::Unreadable,
+        )
+        .unwrap_or_default();
+
+        assert_eq!(reason, "permission-denied");
+    }
+
+    #[test]
+    fn source_issue_reason_supports_processing_failed_non_fatal_messages() {
+        let symlink = source_issue_reason(
+            "symbolic links are not accepted",
+            SourceIssueCode::ProcessingFailed,
+        )
+        .unwrap_or_default();
+        let unsupported = source_issue_reason(
+            "unsupported source file extension",
+            SourceIssueCode::ProcessingFailed,
+        )
+        .unwrap_or_default();
+
+        assert_eq!(symlink, "unreadable");
+        assert_eq!(unsupported, "processing-failed");
+    }
+
+    #[test]
+    fn source_issue_reason_uses_known_code_when_no_special_pattern_exists() {
+        let long_reason = "x".repeat(250);
+        let reason = source_issue_reason(&long_reason, SourceIssueCode::Unreadable)
+            .expect("should return a sanitized reason");
+
+        assert_eq!(reason, "unreadable");
     }
 
     #[test]

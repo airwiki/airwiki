@@ -7,7 +7,7 @@ use crate::integrations::{
 };
 use crate::readiness::OptionalFeatureState;
 
-use super::page_title;
+use super::{page_title, wrap_monospace};
 
 #[derive(Debug)]
 pub(super) enum IntegrationsUiAction {
@@ -239,7 +239,7 @@ impl ChatIntegrationsUi {
                             .small()
                             .color(Color32::GRAY),
                     );
-                    ui.monospace(path.display().to_string());
+                    wrap_monospace(ui, path.display().to_string());
                 }
             });
             if integration.restart_required
@@ -396,7 +396,7 @@ impl ChatIntegrationsUi {
                             .small()
                             .color(Color32::GRAY),
                     );
-                    ui.monospace(path.display().to_string());
+                    wrap_monospace(ui, path.display().to_string());
                 }
                 ui.add_space(8.0);
                 ui.horizontal(|ui| {

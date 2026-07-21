@@ -34,6 +34,8 @@ All notable user-visible changes to AirWiki will be documented here. The project
 
 ### Fixed
 
+- Preserved both evidence and authorized-candidate lanes in flattened MCP output, and improved localized, width-safe diagnostics for source files that could not be processed.
+
 - Made the first pending review immediately selectable and localized model diagnostics used by the normal setup flow.
 - Showed files that could not be prepared alongside review drafts with a safe, localized cause and a folder rescan action.
 - Removed flaky filesystem-watcher and reranker timing assumptions from macOS CI and made Windows hashing tests load their required PowerShell module explicitly.

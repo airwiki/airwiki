@@ -7,7 +7,7 @@ use crate::integrations::{
 };
 use crate::readiness::OptionalFeatureState;
 
-use super::page_title;
+use super::{page_title, wrap_monospace};
 
 #[derive(Debug)]
 pub(super) enum IntegrationsUiAction {
@@ -33,14 +33,6 @@ pub(super) struct ChatIntegrationsUi {
     snapshot_before_request: Option<ChatIntegrationsSnapshot>,
     confirmation: Option<Confirmation>,
     inline_error: Option<String>,
-}
-
-fn wrap_monospace(ui: &mut egui::Ui, value: impl AsRef<str>) {
-    ui.add(
-        egui::Label::new(RichText::new(value.as_ref()).monospace())
-            .selectable(false)
-            .wrap(),
-    );
 }
 
 impl ChatIntegrationsUi {

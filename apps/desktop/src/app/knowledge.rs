@@ -19,7 +19,7 @@ use egui_graphs::{
 };
 use uuid::Uuid;
 
-use super::first_knowledge::AIR_BLUE;
+use super::{first_knowledge::AIR_BLUE, wrap_monospace};
 use crate::{i18n::Localization, layout::ResponsiveLayout};
 
 const MAX_GRAPH_CONCEPTS: usize = 500;
@@ -31,14 +31,6 @@ const TREE_WIDTH: f32 = 270.0;
 const NARROW_TREE_WIDTH: f32 = 220.0;
 const DETAILS_WIDTH: f32 = 310.0;
 const NARROW_WIKI_THRESHOLD: f32 = 760.0;
-
-fn wrap_monospace(ui: &mut egui::Ui, value: impl AsRef<str>) {
-    ui.add(
-        egui::Label::new(RichText::new(value.as_ref()).monospace())
-            .selectable(false)
-            .wrap(),
-    );
-}
 
 #[derive(Debug, Clone)]
 pub(super) enum KnowledgeAction {

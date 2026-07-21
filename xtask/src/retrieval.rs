@@ -531,7 +531,7 @@ struct AggregateMetrics {
     effective_found_group_count: u32,
     candidate_only_group_count: u32,
     recall_at_five: Option<f64>,
-    candidate_recall_at_five: Option<f64>,
+    effective_recall_at_five: Option<f64>,
     mean_reciprocal_rank_at_five: Option<f64>,
     false_evidence_count: u32,
     forbidden_evidence_count: u32,
@@ -1918,7 +1918,7 @@ fn aggregate_metrics<'a>(
     }
     metrics.recall_at_five = (metrics.expected_group_count > 0)
         .then(|| f64::from(metrics.found_group_count) / f64::from(metrics.expected_group_count));
-    metrics.candidate_recall_at_five = (metrics.expected_group_count > 0).then(|| {
+    metrics.effective_recall_at_five = (metrics.expected_group_count > 0).then(|| {
         f64::from(metrics.effective_found_group_count) / f64::from(metrics.expected_group_count)
     });
     metrics.mean_reciprocal_rank_at_five =
@@ -2068,7 +2068,7 @@ mod tests {
             report.stage_attribution.mask_surviving_recall_at_ten,
             Some(1.0)
         );
-        assert_eq!(report.total.candidate_recall_at_five, Some(1.0));
+        assert_eq!(report.total.effective_recall_at_five, Some(1.0));
         assert!(report.total.effective_found_group_count >= report.total.found_group_count);
         assert_eq!(report.stage_attribution.mapping_error_count, 0);
     }

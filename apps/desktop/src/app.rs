@@ -1419,20 +1419,21 @@ impl AirWikiApp {
                                                     .small()
                                                     .color(ui.visuals().weak_text_color()),
                                                 );
-                                                if let Some(cause_message) =
-                                                    source_issue_cause_message(
-                                                        &self.localization,
-                                                        issue,
-                                                        issue.code,
-                                                    )
-                                                {
-                                                    wrap_rich_text(
-                                                        ui,
-                                                        RichText::new(format!("  {cause_message}"))
-                                                            .small()
-                                                            .color(ui.visuals().weak_text_color()),
-                                                    );
-                                                }
+                                                let cause_message = source_issue_cause_message(
+                                                    &self.localization,
+                                                    issue,
+                                                    issue.code,
+                                                )
+                                                .unwrap_or_else(|| {
+                                                    self.localization
+                                                        .text("review-issue-cause-unknown")
+                                                });
+                                                wrap_rich_text(
+                                                    ui,
+                                                    RichText::new(format!("  {cause_message}"))
+                                                        .small()
+                                                        .color(ui.visuals().weak_text_color()),
+                                                );
                                             }
                                         });
                                     if ui
@@ -1463,7 +1464,11 @@ impl AirWikiApp {
                                             .color(Color32::GRAY),
                                         );
                                     }
-                                    if let Some(summary) = &maintenance.issue_summary {
+                                    if let Some(summary) = maintenance_issue_summary(
+                                        &self.localization,
+                                        maintenance.issue_code.as_deref(),
+                                        maintenance.issue_summary.as_deref(),
+                                    ) {
                                         ui.label(summary);
                                     }
                                 }
@@ -1479,32 +1484,26 @@ impl AirWikiApp {
                                     });
                                 }
                             });
-                            ui.with_layout(
-                                egui::Layout::right_to_left(egui::Align::Center),
-                                |ui| {
-                                    if ui.button(&relink).clicked()
-                                        && let Some(folder) = rfd::FileDialog::new().pick_folder()
-                                    {
-                                        self.worker.send(WorkerCommand::RelinkCollection {
-                                            collection_id: collection.id,
-                                            folder,
-                                        });
-                                    }
-                                    if ui
-                                        .add_enabled(
-                                            scan_state.is_none(),
-                                            egui::Button::new(&retry),
-                                        )
-                                        .clicked()
-                                    {
-                                        self.collection_scans
-                                            .insert(collection.id, CollectionScanState::Queued);
-                                        self.knowledge.collection_scan_started(collection.id);
-                                        self.worker
-                                            .send(WorkerCommand::RescanCollection(collection.id));
-                                    }
-                                },
-                            );
+                            ui.horizontal_wrapped(|ui| {
+                                if ui
+                                    .add_enabled(scan_state.is_none(), egui::Button::new(&retry))
+                                    .clicked()
+                                {
+                                    self.collection_scans
+                                        .insert(collection.id, CollectionScanState::Queued);
+                                    self.knowledge.collection_scan_started(collection.id);
+                                    self.worker
+                                        .send(WorkerCommand::RescanCollection(collection.id));
+                                }
+                                if ui.button(&relink).clicked()
+                                    && let Some(folder) = rfd::FileDialog::new().pick_folder()
+                                {
+                                    self.worker.send(WorkerCommand::RelinkCollection {
+                                        collection_id: collection.id,
+                                        folder,
+                                    });
+                                }
+                            });
                         });
                         ui.separator();
                         let external_ai_before = collection.allow_external_ai;
@@ -3978,10 +3977,52 @@ fn source_issue_cause_message(
         {
             return Some(localization.text("review-issue-cause-processing-failed"));
         }
+        if let Some(reason) = source_issue_raw_reason_preview(issue.reason.as_deref(), 120) {
+            let mut arguments = FluentArgs::new();
+            arguments.set("reason", reason);
+            return Some(localization.text_with("review-issue-cause-unmapped", Some(&arguments)));
+        }
         return Some(localization.text("review-issue-cause-unknown"));
     }
 
     Some(localization.text(message))
+}
+
+fn maintenance_issue_summary(
+    localization: &Localization,
+    issue_code: Option<&str>,
+    persisted_summary: Option<&str>,
+) -> Option<String> {
+    let message = match issue_code {
+        Some("collection_scan_partial") => Some("collections-maintenance-partial"),
+        Some("collection_scan_failed") => Some("collections-maintenance-failed"),
+        Some("collection_quarantined") => Some("collections-maintenance-quarantined"),
+        _ => None,
+    };
+    message
+        .map(|message| localization.text(message))
+        .or_else(|| persisted_summary.map(str::to_owned))
+}
+
+fn source_issue_raw_reason_preview(reason: Option<&str>, max_chars: usize) -> Option<String> {
+    let reason = reason?.trim();
+    if reason.is_empty() {
+        return None;
+    }
+    let collapsed = reason
+        .replace(['\n', '\r', '\t'], " ")
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ");
+    let collapsed = collapsed.trim();
+    if collapsed.is_empty() {
+        return None;
+    }
+    if collapsed.chars().count() <= max_chars {
+        return Some(collapsed.to_owned());
+    }
+    let truncated = collapsed.chars().take(max_chars).collect::<String>();
+    Some(format!("{truncated}…"))
 }
 
 fn show_review_issue(
@@ -4864,6 +4905,8 @@ fn review_fields_stack(available_width: f32) -> bool {
 
 #[cfg(test)]
 mod tests {
+    use fluent_bundle::FluentArgs;
+
     use super::{
         ExternalAiPolicyChange, OnboardingPage, SearchResultAvailability, WikiHealthCheckState,
         advance_onboarding_page, classify_external_ai_policy_change, classify_search_result,
@@ -5448,12 +5491,31 @@ mod tests {
             source_name: "unmapped.txt".to_owned(),
             collection_name: "Collection".to_owned(),
             code: SourceIssueCode::InvalidPdf,
-            reason: Some("custom-engine-fault".to_owned()),
+            reason: None,
         };
 
         assert_eq!(
             super::source_issue_cause_message(&localization, &issue, issue.code).unwrap(),
             localization.text("review-issue-cause-unknown")
+        );
+    }
+
+    #[test]
+    fn review_source_issue_shows_unmapped_reason_when_present() {
+        let localization = Localization::new(UiLocale::EnUs).unwrap();
+        let issue = SourceIssueView {
+            collection_id: Uuid::nil(),
+            source_name: "mystery.md".to_owned(),
+            collection_name: "Collection".to_owned(),
+            code: SourceIssueCode::InvalidPdf,
+            reason: Some("custom-engine-fault".to_owned()),
+        };
+        let mut arguments = FluentArgs::new();
+        arguments.set("reason", "custom-engine-fault");
+
+        assert_eq!(
+            super::source_issue_cause_message(&localization, &issue, issue.code).unwrap(),
+            localization.text_with("review-issue-cause-unmapped", Some(&arguments))
         );
     }
 
@@ -5471,6 +5533,43 @@ mod tests {
         assert_eq!(
             super::source_issue_cause_message(&localization, &issue, issue.code).unwrap(),
             localization.text("review-issue-cause-processing-failed")
+        );
+    }
+
+    #[test]
+    fn source_issue_raw_reason_preview_truncates_long_reasons() {
+        let preview = super::source_issue_raw_reason_preview(
+            Some("very long reason with line\nbreaks and spaces"),
+            16,
+        );
+        assert_eq!(preview, Some("very long reason…".to_owned()));
+    }
+
+    #[test]
+    fn maintenance_issue_summary_localizes_known_persisted_code() {
+        let localization = Localization::new(UiLocale::Es).unwrap();
+
+        assert_eq!(
+            super::maintenance_issue_summary(
+                &localization,
+                Some("collection_scan_partial"),
+                Some("One or more files could not be processed."),
+            ),
+            Some(localization.text("collections-maintenance-partial"))
+        );
+    }
+
+    #[test]
+    fn maintenance_issue_summary_preserves_safe_fallback_for_future_code() {
+        let localization = Localization::new(UiLocale::EnUs).unwrap();
+
+        assert_eq!(
+            super::maintenance_issue_summary(
+                &localization,
+                Some("future_issue"),
+                Some("Future safe summary"),
+            ),
+            Some("Future safe summary".to_owned())
         );
     }
 }

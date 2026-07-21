@@ -35,6 +35,14 @@ pub(super) struct ChatIntegrationsUi {
     inline_error: Option<String>,
 }
 
+fn wrap_monospace(ui: &mut egui::Ui, value: impl AsRef<str>) {
+    ui.add(
+        egui::Label::new(RichText::new(value.as_ref()).monospace())
+            .selectable(false)
+            .wrap(),
+    );
+}
+
 impl ChatIntegrationsUi {
     pub(super) fn refresh_if_idle(&mut self) -> Option<IntegrationsUiAction> {
         (self.snapshot.is_none() && self.pending_request_id.is_none())
@@ -239,7 +247,7 @@ impl ChatIntegrationsUi {
                             .small()
                             .color(Color32::GRAY),
                     );
-                    ui.monospace(path.display().to_string());
+                    wrap_monospace(ui, path.display().to_string());
                 }
             });
             if integration.restart_required
@@ -396,7 +404,7 @@ impl ChatIntegrationsUi {
                             .small()
                             .color(Color32::GRAY),
                     );
-                    ui.monospace(path.display().to_string());
+                    wrap_monospace(ui, path.display().to_string());
                 }
                 ui.add_space(8.0);
                 ui.horizontal(|ui| {

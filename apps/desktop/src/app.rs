@@ -1325,7 +1325,7 @@ impl AirWikiApp {
                 }
             });
             if let Some(path) = &self.new_collection_folder {
-                ui.monospace(path.display().to_string());
+                wrap_monospace(ui, path.display().to_string());
             }
             let enabled =
                 !self.new_collection_name.trim().is_empty() && self.new_collection_folder.is_some();
@@ -1383,7 +1383,7 @@ impl AirWikiApp {
                                 ui.heading(&collection.name);
                                 ui.label(&linked);
                                 ui.collapsing(&technical_details, |ui| {
-                                    ui.monospace(collection.folder.display().to_string());
+                                    wrap_monospace(ui, collection.folder.display().to_string());
                                 });
                                 ui.label(&counts);
                                 if let Some(maintenance) = &collection.maintenance {
@@ -2072,11 +2072,14 @@ impl AirWikiApp {
                                 self.localization
                                     .text_with("search-revision", Some(&arguments)),
                             );
-                            ui.monospace(format!(
-                                "{}… · {}",
-                                &hit.source_sha256[..hit.source_sha256.len().min(12)],
-                                origin
-                            ));
+                            wrap_monospace(
+                                ui,
+                                format!(
+                                    "{}… · {}",
+                                    &hit.source_sha256[..hit.source_sha256.len().min(12)],
+                                    origin
+                                ),
+                            );
                             ui.add(
                                 egui::Label::new(
                                     RichText::new(&hit.logical_resource_uri).monospace(),
@@ -2155,8 +2158,8 @@ impl AirWikiApp {
                 if !self.lan_local_addresses.is_empty() {
                     ui.label(self.localization.text("devices-this-address"));
                     for address in &self.lan_local_addresses {
-                        ui.horizontal(|ui| {
-                            ui.monospace(address);
+                        ui.horizontal_wrapped(|ui| {
+                            wrap_monospace(ui, address);
                             if ui
                                 .small_button(self.localization.text("action-copy"))
                                 .clicked()
@@ -2231,8 +2234,8 @@ impl AirWikiApp {
                             ui.vertical(|ui| {
                                 ui.heading(peer.device_name.as_deref().unwrap_or(&nearby_device));
                                 ui.collapsing(&technical_details, |ui| {
-                                    ui.monospace(&peer.peer_id);
-                                    ui.monospace(&peer.address);
+                                    wrap_monospace(ui, &peer.peer_id);
+                                    wrap_monospace(ui, &peer.address);
                                 });
                             });
                             ui.with_layout(
@@ -2745,22 +2748,22 @@ impl AirWikiApp {
                     .spacing([24.0, 12.0])
                     .show(ui, |ui| {
                         ui.label("Identidad local");
-                        ui.monospace(&self.node_id);
+                        wrap_monospace(ui, &self.node_id);
                         ui.end_row();
                         ui.label("MCP local");
-                        ui.monospace(&self.mcp_url);
+                        wrap_monospace(ui, &self.mcp_url);
                         ui.end_row();
                         ui.label("Base de datos");
-                        ui.monospace(self.paths.database.display().to_string());
+                        wrap_monospace(ui, self.paths.database.display().to_string());
                         ui.end_row();
                         ui.label("Bundles OKF");
-                        ui.monospace(self.paths.vaults.display().to_string());
+                        wrap_monospace(ui, self.paths.vaults.display().to_string());
                         ui.end_row();
                         ui.label("Logs sanitizados");
-                        ui.monospace(self.paths.logs.display().to_string());
+                        wrap_monospace(ui, self.paths.logs.display().to_string());
                         ui.end_row();
                         ui.label("Configuración");
-                        ui.monospace(self.paths.config.display().to_string());
+                        wrap_monospace(ui, self.paths.config.display().to_string());
                         ui.end_row();
                     });
             },
@@ -4555,6 +4558,14 @@ fn nav(ui: &mut egui::Ui, current: &mut Screen, target: Screen, label: &str) {
     {
         *current = target;
     }
+}
+
+fn wrap_monospace(ui: &mut egui::Ui, value: impl AsRef<str>) {
+    ui.add(
+        egui::Label::new(RichText::new(value.as_ref()).monospace())
+            .selectable(false)
+            .wrap(),
+    );
 }
 
 fn page_title(ui: &mut egui::Ui, title: &str, subtitle: &str) {

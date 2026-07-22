@@ -28,6 +28,15 @@ entry with an absolute expiry. Never commit the validation host's private keys,
 database, address, operator username or raw logs. An expired bootstrap is
 ignored even if it remains in an older local database.
 
+For an installed acceptance candidate, inject the temporary registry at build
+time with `AIRWIKI_BOOTSTRAP_FEDERATION_INDEXES`. The value contains at most
+three semicolon-separated entries, each encoded as
+`version|expiry-rfc3339|peer-id|multiaddr`. Keep the value in the local
+acceptance workspace only; do not place it in source control, shared CI output
+or package logs. The desktop validates every pinned identity and multiaddress,
+rejects duplicate identities and registry downgrades, and ignores entries after
+their absolute expiry.
+
 Obtain each identity explicitly, outside normal logs:
 
 ```powershell

@@ -50,7 +50,7 @@ use airwiki_types::{
 };
 use anyhow::{Context, Result, anyhow, bail};
 use async_trait::async_trait;
-use chrono::{Duration as ChronoDuration, Utc};
+use chrono::{DateTime, Duration as ChronoDuration, Utc};
 use tokio::{
     sync::{Mutex as AsyncMutex, broadcast, mpsc},
     task::JoinHandle,
@@ -82,6 +82,80 @@ const REVIEW_EVIDENCE_PAGE_SIZE: usize = 20;
 const REVIEW_EVIDENCE_EXCERPT_MAX_BYTES: usize = 4 * 1024;
 const LAN_LISTENER_START_GRACE: Duration = Duration::from_secs(10);
 const STARTUP_COLLECTION_DISCOVERY_TIMEOUT: Duration = Duration::from_secs(5);
+const BUNDLED_BOOTSTRAP_FEDERATION_INDEXES: Option<&str> =
+    option_env!("AIRWIKI_BOOTSTRAP_FEDERATION_INDEXES");
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct BundledBootstrapFederationIndex {
+    peer_id: String,
+    multiaddr: String,
+    registry_version: u32,
+    expires_at: DateTime<Utc>,
+}
+
+fn parse_bundled_bootstrap_federation_indexes(
+    encoded: Option<&str>,
+) -> Result<Vec<BundledBootstrapFederationIndex>> {
+    let Some(encoded) = encoded.map(str::trim).filter(|value| !value.is_empty()) else {
+        return Ok(Vec::new());
+    };
+    let entries = encoded.split(';').collect::<Vec<_>>();
+    if entries.len() > 3 {
+        bail!("el registro bootstrap federado excede tres índices");
+    }
+
+    let mut peers = HashSet::new();
+    let mut parsed = Vec::with_capacity(entries.len());
+    for entry in entries {
+        let fields = entry.split('|').map(str::trim).collect::<Vec<_>>();
+        let [version, expiry, peer_id, multiaddr] = fields.as_slice() else {
+            bail!("una entrada bootstrap federada no tiene cuatro campos");
+        };
+        let registry_version = version
+            .parse::<u32>()
+            .context("la versión del registro bootstrap federado no es válida")?;
+        if registry_version == 0 {
+            bail!("la versión del registro bootstrap federado debe ser positiva");
+        }
+        let expires_at = DateTime::parse_from_rfc3339(expiry)
+            .context("la expiración bootstrap federada no es RFC 3339")?
+            .with_timezone(&Utc);
+        let peer =
+            PeerId::from_str(peer_id).context("la identidad bootstrap federada no es válida")?;
+        let address = Multiaddr::from_str(multiaddr)
+            .context("la dirección bootstrap federada no es válida")?;
+        let peer_id = peer.to_string();
+        if !peers.insert(peer_id.clone()) {
+            bail!("el registro bootstrap federado repite una identidad");
+        }
+        parsed.push(BundledBootstrapFederationIndex {
+            peer_id,
+            multiaddr: address.to_string(),
+            registry_version,
+            expires_at,
+        });
+    }
+    Ok(parsed)
+}
+
+fn install_bundled_bootstrap_federation_indexes(
+    database: &Database,
+    indexes: Vec<BundledBootstrapFederationIndex>,
+) -> Result<()> {
+    let now = Utc::now();
+    for index in indexes {
+        if index.expires_at <= now {
+            continue;
+        }
+        database.upsert_bootstrap_federation_index(
+            &index.peer_id,
+            &index.multiaddr,
+            index.registry_version,
+            index.expires_at,
+        )?;
+    }
+    Ok(())
+}
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub(crate) struct WikiHealthRollup {
@@ -810,6 +884,17 @@ impl DesktopServices {
         let core_paths = CoreAppPaths::at(&paths.data);
         core_paths.ensure()?;
         let database = Database::open(&paths.database)?;
+        let bundled_bootstrap_indexes =
+            parse_bundled_bootstrap_federation_indexes(BUNDLED_BOOTSTRAP_FEDERATION_INDEXES)?;
+        let bootstrap_database = database.clone();
+        tokio::task::spawn_blocking(move || {
+            install_bundled_bootstrap_federation_indexes(
+                &bootstrap_database,
+                bundled_bootstrap_indexes,
+            )
+        })
+        .await
+        .context("se detuvo el worker del registro bootstrap federado")??;
         let recovery_database = database.clone();
         let recovery = tokio::task::spawn_blocking(move || {
             OkfPublicationMaterializer::new(recovery_database).recover_pending()
@@ -3201,6 +3286,57 @@ mod tests {
     use super::*;
 
     struct EmptyFederatedSearch;
+
+    fn test_public_peer_id() -> String {
+        NodeIdentity::load_or_create(&MemorySecretStore::default())
+            .unwrap()
+            .peer_id()
+            .to_string()
+    }
+
+    #[test]
+    fn bundled_bootstrap_registry_parses_and_installs_three_pinned_indexes() {
+        let encoded = format!(
+            "7|2099-01-01T00:00:00Z|{}|/ip6/2001:db8::1/udp/42042/quic-v1;\
+             7|2099-01-01T00:00:00Z|{}|/ip6/2001:db8::2/udp/42044/quic-v1;\
+             7|2099-01-01T00:00:00Z|{}|/ip6/2001:db8::3/udp/42046/quic-v1",
+            test_public_peer_id(),
+            test_public_peer_id(),
+            test_public_peer_id(),
+        );
+        let indexes = parse_bundled_bootstrap_federation_indexes(Some(&encoded)).unwrap();
+        let database = Database::in_memory().unwrap();
+
+        install_bundled_bootstrap_federation_indexes(&database, indexes).unwrap();
+
+        let installed = database.list_federation_indexes().unwrap();
+        assert_eq!(installed.len(), 3);
+        assert!(installed.iter().all(|index| {
+            index.source == "bootstrap"
+                && index.enabled
+                && index.registry_version == 7
+                && index.expires_at.is_some()
+        }));
+    }
+
+    #[test]
+    fn bundled_bootstrap_registry_rejects_duplicates_and_ignores_expired_entries() {
+        let peer_id = test_public_peer_id();
+        let duplicate = format!(
+            "2|2099-01-01T00:00:00Z|{peer_id}|/ip6/2001:db8::1/tcp/42042;\
+             2|2099-01-01T00:00:00Z|{peer_id}|/ip6/2001:db8::2/tcp/42044"
+        );
+        assert!(parse_bundled_bootstrap_federation_indexes(Some(&duplicate)).is_err());
+
+        let expired = format!(
+            "1|2020-01-01T00:00:00Z|{}|/ip6/2001:db8::1/tcp/42042",
+            test_public_peer_id()
+        );
+        let database = Database::in_memory().unwrap();
+        let indexes = parse_bundled_bootstrap_federation_indexes(Some(&expired)).unwrap();
+        install_bundled_bootstrap_federation_indexes(&database, indexes).unwrap();
+        assert!(database.list_federation_indexes().unwrap().is_empty());
+    }
 
     #[test]
     fn source_issue_view_exposes_only_the_file_name() {

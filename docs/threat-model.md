@@ -16,6 +16,7 @@ Controls are not considered effective end to end until the
 - extracted text, metadata, OKF concepts, and embeddings;
 - SQLite state, audit events, and local paths;
 - Ed25519 device identity and trusted-peer state;
+- separate public-publisher identity, signed manifests and tombstones;
 - collection grants and `allow_external_ai` policy;
 - local models, runtime, and pinned artifact identities;
 - snippets returned through LAN or MCP;
@@ -44,12 +45,20 @@ Controls are not considered effective end to end until the
 9. **Desktop → update transport.** Remote metadata and bytes remain untrusted
    until updater and native signatures pass. Public update distribution is not
    active in the current baseline.
+10. **Publisher → public federation.** Replaceable indexes receive signed,
+    expiring routing metadata only. Unpaired readers receive bounded snippets or
+    concept summaries directly from the owner over Noise-authenticated QUIC or
+    relay routes. The owner remains the authorization authority.
 
 ## Threats and controls
 
 | Threat | Design control | Residual risk / validation |
 | --- | --- | --- |
 | Unauthorized LAN peer queries data | Noise, SAS pairing, trust state, per-collection grants, rate limits | Excessive grants still disclose data; test full grant and revocation matrix |
+| Private or stale content reaches a public reader | Separate opt-in, reviewed-publication checks, signed sequence and fingerprint, final disclosure lease, immediate owner-side revocation | A third party can retain previously returned metadata or snippets |
+| Malicious index redirects or ranks content | Expected index PeerId is pinned; owner manifests are independently signed; index rank selects routes but never final ranking | An index can omit publishers, delay tombstones, or degrade availability until replaced |
+| Public queries exhaust an owner | Three-index, 64-candidate, 12-peer and two-collection caps; bounded payloads, semaphores, rate limits, 800 ms peer and 1.5 s global deadlines | Distributed abuse can still consume bounded relay and inference capacity |
+| Public identity correlates readers | Readers use one ephemeral identity per application session; LAN and publisher identities are separate | Network observers and relays can still correlate IP and timing |
 | Pairing impersonation | Six-word SAS derived from identities and nonces, two-minute expiry | A user who skips comparison defeats the control |
 | Private collection reaches cloud chat | `allow_external_ai` defaults off and is rechecked at the source | Human authorization can be wrong; use synthetic fixtures and audit |
 | Ranking returns the least-wrong absent fact | Source node applies the pinned local answerability classifier to the bounded outgoing snippet; failures and timeouts close the path | The classifier is probabilistic; reassess both platforms when model, corpus, or policy changes |
@@ -94,6 +103,9 @@ Controls are not considered effective end to end until the
   lane by answerability. Rejected items may appear only as separately typed
   `external_ai` candidates.
 - LAN accepts only `/airwiki/search/2.0.0`; there is no v1 fallback.
+- Public catalog, search and browse use separate v1 protocols and never bypass
+  reviewed publication. Public browse cannot return originals, paths, chunks,
+  embeddings or edit operations.
 - `external_ai` is never inferred from tags, classification, or model output.
 - Originals, local paths, embeddings, indexes, and collection listings do not
   cross LAN.
@@ -106,6 +118,8 @@ Controls are not considered effective end to end until the
 - Autostart and remote update checks require explicit consent.
 - The firewall helper never opens MCP, Public profile, Internet, file sharing, or
   global network discovery.
+- Public publishers reserve relays through outbound connections; public
+  federation never installs a Windows Public-profile rule.
 - Updates require valid signatures and confirmation and are never silent.
 
 ## Current development blockers and residual risks
@@ -119,6 +133,14 @@ Controls are not considered effective end to end until the
 - Loopback does not isolate processes running under the same user account.
 - Relevance classification has residual false-positive and false-negative risk.
 - A compromised or modified trusted source node can mislabel its own v2 results.
+- Public federation still needs dedicated review and installed cross-NAT
+  acceptance before promotion; bootstrap and relay hosts are validation
+  infrastructure, not a supported availability promise.
+- Bootstrap entries are versioned and expire. Community indexes remain
+  replaceable, and an expired validation endpoint is ignored rather than being
+  treated as an authority.
+- Local publisher blocks are checked before dialing or browsing and contain
+  only the stable public publisher identity; they do not notify the publisher.
 
 ## Temporary dependency-audit exceptions
 

@@ -192,6 +192,47 @@ impl HybridSearchEngine {
         Ok(response)
     }
 
+    /// Searches only explicitly Internet-public collections. Public search is
+    /// evidence-only: making content public cannot enable the separately typed
+    /// external-AI candidate lane by caller assertion.
+    pub async fn search_public(
+        &self,
+        request: airwiki_types::PublicSearchRequest,
+    ) -> Result<SearchResponse> {
+        request.validate()?;
+        let database = self.database.clone();
+        let requested = request
+            .collections
+            .iter()
+            .map(|collection| collection.collection_id)
+            .collect::<Vec<_>>();
+        let collections =
+            run_search_blocking("public search scope worker task failed", move || {
+                database.publicly_searchable_collections(&requested)
+            })
+            .await?;
+        if collections.is_empty() {
+            bail!("no requested collection is publicly accessible");
+        }
+        let local_request = SearchRequest {
+            protocol_version: airwiki_types::SEARCH_PROTOCOL.to_owned(),
+            request_id: request.request_id,
+            query: request.query,
+            purpose: SearchPurpose::LocalAssistant,
+            top_k: request.top_k,
+        };
+        let mut response = self.search_collections(local_request, &collections).await?;
+        let database = self.database.clone();
+        let hits = std::mem::take(&mut response.hits);
+        response.hits =
+            run_search_blocking("public search revalidation worker task failed", move || {
+                revalidate_public_hits(database, hits)
+            })
+            .await?;
+        response.authorized_candidates.clear();
+        Ok(response)
+    }
+
     pub async fn search_collections(
         &self,
         request: SearchRequest,
@@ -518,6 +559,17 @@ fn revalidate_peer_hits(
     Ok(current_hits)
 }
 
+fn revalidate_public_hits(database: Database, hits: Vec<SearchHit>) -> Result<Vec<SearchHit>> {
+    let mut current_hits = Vec::with_capacity(hits.len());
+    for hit in hits {
+        if database.public_hit_is_current(&hit)? {
+            current_hits.push(hit);
+        }
+    }
+    renumber_hits(&mut current_hits);
+    Ok(current_hits)
+}
+
 fn renumber_hits(hits: &mut [SearchHit]) {
     for (index, hit) in hits.iter_mut().enumerate() {
         hit.rank = u32::try_from(index + 1).unwrap_or(u32::MAX);
@@ -603,7 +655,8 @@ mod tests {
     use std::time::Duration;
 
     use airwiki_types::{
-        CollectionPolicy, ConceptType, DEFAULT_TOP_K, EnrichmentDraft, SearchPurpose,
+        CollectionPolicy, ConceptType, DEFAULT_TOP_K, EnrichmentDraft, PUBLIC_SEARCH_PROTOCOL,
+        PublicSearchRequest, SearchPurpose,
     };
     use chrono::Utc;
 
@@ -734,6 +787,7 @@ mod tests {
                     local_only: false,
                     peer_shareable: true,
                     allow_external_ai: false,
+                    internet_public: false,
                 },
             )
             .unwrap();
@@ -796,6 +850,7 @@ mod tests {
                     local_only: false,
                     peer_shareable: true,
                     allow_external_ai: true,
+                    internet_public: false,
                 },
             )
             .unwrap();
@@ -1022,6 +1077,46 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn public_search_requires_live_public_policy_but_no_peer_grant() {
+        let (db, collection_id, _concept_id) = indexed_database().await;
+        let engine = HybridSearchEngine::new(
+            db.clone(),
+            Arc::new(DeterministicEmbeddingProvider),
+            Arc::new(DeterministicEvidenceRelevanceProvider),
+            "publisher",
+        );
+        let request = || PublicSearchRequest {
+            protocol_version: PUBLIC_SEARCH_PROTOCOL.to_owned(),
+            request_id: Uuid::new_v4(),
+            query: "recuperar pagos".to_owned(),
+            purpose: SearchPurpose::LocalAssistant,
+            collections: vec![airwiki_types::PublicCollectionTarget {
+                collection_id,
+                manifest_sequence: 1,
+                publication_fingerprint: "a".repeat(64),
+            }],
+            top_k: 5,
+        };
+
+        assert!(engine.search_public(request()).await.is_err());
+        db.update_collection_policy(
+            collection_id,
+            CollectionPolicy {
+                local_only: false,
+                peer_shareable: false,
+                allow_external_ai: false,
+                internet_public: true,
+            },
+        )
+        .unwrap();
+        assert_eq!(engine.search_public(request()).await.unwrap().hits.len(), 1);
+
+        db.update_collection_policy(collection_id, CollectionPolicy::local_only())
+            .unwrap();
+        assert!(engine.search_public(request()).await.is_err());
+    }
+
+    #[tokio::test]
     async fn search_exposes_content_stable_chunk_identity() {
         let (db, _collection_id, _concept_id) = indexed_database().await;
         let engine = HybridSearchEngine::new(
@@ -1097,6 +1192,7 @@ mod tests {
                 local_only: false,
                 peer_shareable: true,
                 allow_external_ai: true,
+                internet_public: false,
             },
         )
         .unwrap();
@@ -1121,6 +1217,7 @@ mod tests {
                 local_only: true,
                 peer_shareable: false,
                 allow_external_ai: true,
+                internet_public: false,
             },
         )
         .unwrap();

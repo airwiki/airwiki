@@ -2,6 +2,7 @@
 resolver = "2"
 members = [
     "apps/desktop",
+    "apps/federation-index",
     "apps/mcp-bridge",
     "apps/windows-firewall-helper",
     "crates/airwiki-core",

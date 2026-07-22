@@ -18,6 +18,7 @@ apps/desktop ───────┬──> airwiki-core ───────�
                     └──> airwiki-windows-firewall-helper (Windows only)
 
 apps/mcp-bridge ───────> airwiki-mcp ───────────> airwiki-types
+apps/federation-index ─> airwiki-network ───────> airwiki-types
 
 xtask ──────────────┬──> airwiki-core
                     ├──> airwiki-inference
@@ -35,6 +36,9 @@ xtask ──────────────┬──> airwiki-core
 - `apps/mcp-bridge` is a thin executable over `airwiki-mcp`. At runtime it exposes
   stdio to a local chat client and forwards only to the desktop's fixed loopback
   MCP endpoint.
+- `apps/federation-index` stores signed, expiring public routing manifests in
+  SQLite/WAL. It has no publication authority and stores no document content,
+  snippets, embeddings or source paths.
 - `apps/windows-firewall-helper` is a narrow elevated process. The desktop may
   invoke only its fixed install/remove operations on Windows. See
   [ADR 0006](adr/0006-windows-firewall-privilege-boundary.md) for the privilege
@@ -113,6 +117,9 @@ service.
 - Local publication always requires review.
 - LAN search requires authenticated pairing, collection policy and a grant at
   the source node.
+- Public federation is a separate opt-in. Discovery needs no pairing or grant,
+  but the owner revalidates current publication, sequence and fingerprint under
+  a disclosure lease before every response. See [ADR 0008](adr/0008-public-federation.md).
 - Local MCP requires `allow_external_ai`; it does not imply peer sharing.
 - External-chat search separates answerability-accepted evidence from bounded
   authorized candidates. Both lanes are revalidated against current policy;

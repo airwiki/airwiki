@@ -6,6 +6,8 @@ All notable user-visible changes to AirWiki will be documented here. The project
 
 ### Added
 
+- Added experimental opt-in public federation with separate publisher identity, signed expiring routing manifests, replaceable indexes, QUIC/relay transport, owner-served search and paginated browse.
+- Added expiring versioned bootstrap metadata, local publisher blocking, bounded fan-out pruning, and sanitized direct/relay and announcement status for public federation.
 - Initial development baseline for local ingestion, human-reviewed OKF publication, LAN federation, and read-only local chat integration.
 - Contributor guidance, architecture decisions, synthetic fixtures, and proportional validation commands.
 - A proportional code-review contract, pull-request template, and read-only DCO validation for contributions.

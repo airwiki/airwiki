@@ -1235,6 +1235,7 @@ async fn build_corpus(
                 local_only: !collection.peer_shareable && !collection.allow_external_ai,
                 peer_shareable: collection.peer_shareable,
                 allow_external_ai: collection.allow_external_ai,
+                internet_public: false,
             },
         )?;
         match collection.node {

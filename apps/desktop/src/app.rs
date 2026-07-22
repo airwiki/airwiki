@@ -7,10 +7,10 @@ use std::{
 use airwiki_inference::{
     E5_FILES, HardwareReport, InstallEvent, MMARCO_COMMON_FILES, ModelProfile,
 };
-use airwiki_network::ManualLanAddress;
+use airwiki_network::{ManualLanAddress, PublicRouteKind};
 use airwiki_types::{
-    ConceptType, DEFAULT_TOP_K, EnrichmentDraft, SearchHit, SearchPurpose, SuggestedEntity,
-    SuggestedLink,
+    ConceptType, DEFAULT_TOP_K, EnrichmentDraft, PublicConceptSummary, SearchHit, SearchPurpose,
+    SuggestedEntity, SuggestedLink,
 };
 use eframe::egui::{self, Color32, RichText};
 use egui_extras::{Size, StripBuilder};
@@ -135,6 +135,7 @@ pub struct AirWikiApp {
     wiki_health_check: WikiHealthCheckState,
     wiki_health_error_dismissed: bool,
     external_ai_confirmation: Option<Uuid>,
+    public_collection_confirmation: Option<Uuid>,
     onboarding_page: Option<OnboardingPage>,
     onboarding_finishing: bool,
     paths: AppPaths,
@@ -157,11 +158,24 @@ pub struct AirWikiApp {
     peers: Vec<PeerView>,
     search_question: String,
     search_top_k: u8,
+    search_public_network: bool,
+    public_route_kind: PublicRouteKind,
+    federation_index_peer: String,
+    federation_index_address: String,
+    public_publisher_block_input: String,
+    blocked_public_publishers: Vec<String>,
     search_hits: Vec<SearchHit>,
     search_coverage: SearchCoverageView,
     search_request_id: Option<Uuid>,
     search_completed: bool,
     search_error: Option<String>,
+    public_browse_request_id: Option<Uuid>,
+    public_browse_publisher: String,
+    public_browse_collection: Option<Uuid>,
+    public_browse_concepts: Vec<PublicConceptSummary>,
+    public_browse_next_cursor: Option<String>,
+    public_browse_error: Option<String>,
+    public_browse_open: bool,
     new_collection_name: String,
     new_collection_folder: Option<PathBuf>,
     manual_multiaddress: String,
@@ -206,6 +220,7 @@ impl AirWikiApp {
             wiki_health_check: WikiHealthCheckState::Loading,
             wiki_health_error_dismissed: false,
             external_ai_confirmation: None,
+            public_collection_confirmation: None,
             onboarding_page: None,
             onboarding_finishing: false,
             worker: WorkerHandle::spawn(paths.clone()),
@@ -228,11 +243,24 @@ impl AirWikiApp {
             peers: Vec::new(),
             search_question: String::new(),
             search_top_k: DEFAULT_TOP_K,
+            search_public_network: false,
+            public_route_kind: PublicRouteKind::Offline,
+            federation_index_peer: String::new(),
+            federation_index_address: String::new(),
+            public_publisher_block_input: String::new(),
+            blocked_public_publishers: Vec::new(),
             search_hits: Vec::new(),
             search_coverage: SearchCoverageView::Complete,
             search_request_id: None,
             search_completed: false,
             search_error: None,
+            public_browse_request_id: None,
+            public_browse_publisher: String::new(),
+            public_browse_collection: None,
+            public_browse_concepts: Vec::new(),
+            public_browse_next_cursor: None,
+            public_browse_error: None,
+            public_browse_open: false,
             new_collection_name: String::new(),
             new_collection_folder: None,
             manual_multiaddress: String::new(),
@@ -255,6 +283,7 @@ impl AirWikiApp {
                     collections,
                     reviews,
                     source_issues,
+                    blocked_public_publishers,
                 } => {
                     self.node_id = node_id;
                     self.mcp_url = mcp_url;
@@ -263,6 +292,7 @@ impl AirWikiApp {
                         selected_review_after_refresh(self.selected_review, &reviews);
                     self.reviews = reviews;
                     self.source_issues = source_issues;
+                    self.blocked_public_publishers = blocked_public_publishers;
                     self.refresh_integrations_if_needed();
                 }
                 WorkerEvent::Hardware(report) => self.hardware = Some(report),
@@ -576,21 +606,47 @@ impl AirWikiApp {
                         self.send_knowledge_action(action);
                     }
                 }
+                WorkerEvent::SearchPartial { request_id, hits } => {
+                    if !search_result_applies(self.search_request_id, request_id) {
+                        continue;
+                    }
+                    self.search_hits = hits;
+                    self.search_coverage = SearchCoverageView::Partial;
+                    self.search_error = None;
+                }
                 WorkerEvent::SearchFinished { request_id, result } => {
                     if !search_result_applies(self.search_request_id, request_id) {
                         continue;
                     }
                     self.search_request_id = None;
                     match result {
-                        Ok((hits, coverage)) => {
+                        Ok((hits, coverage, route_kind)) => {
                             self.search_completed = true;
                             self.search_hits = hits;
                             self.search_coverage = coverage;
+                            self.public_route_kind = route_kind;
                             self.search_error = None;
                         }
                         Err(error) => {
                             self.search_completed = false;
                             self.search_error = Some(sanitized_error_code(&error).to_owned());
+                        }
+                    }
+                }
+                WorkerEvent::PublicBrowseFinished { request_id, result } => {
+                    if self.public_browse_request_id != Some(request_id) {
+                        continue;
+                    }
+                    self.public_browse_request_id = None;
+                    match result {
+                        Ok((mut concepts, next_cursor)) => {
+                            self.public_browse_concepts.append(&mut concepts);
+                            self.public_browse_next_cursor = next_cursor;
+                            self.public_browse_error = None;
+                        }
+                        Err(error) => {
+                            self.public_browse_error =
+                                Some(sanitized_error_code(&error).to_owned());
                         }
                     }
                 }
@@ -1381,6 +1437,7 @@ impl AirWikiApp {
         let local_only = self.localization.text("collections-local-only");
         let cloud_warning = self.localization.text("collections-cloud-warning");
         let mut requested_external_ai_confirmation = None;
+        let mut requested_public_confirmation = None;
         let list_height = ui.available_height().max(0.0);
         egui::ScrollArea::vertical()
             .id_salt("collections_list")
@@ -1531,6 +1588,17 @@ impl AirWikiApp {
                         let external_ai_changed = ui
                             .checkbox(&mut collection.allow_external_ai, &allow_chat)
                             .changed();
+                        let public_before = collection.internet_public;
+                        let public_changed = ui
+                            .checkbox(
+                                &mut collection.internet_public,
+                                self.localization.text("collections-public-network"),
+                            )
+                            .changed();
+                        if !public_before && collection.internet_public {
+                            collection.internet_public = false;
+                            requested_public_confirmation = Some(collection.id);
+                        }
                         let external_ai_change = classify_external_ai_policy_change(
                             external_ai_before,
                             collection.allow_external_ai,
@@ -1539,8 +1607,9 @@ impl AirWikiApp {
                             collection.allow_external_ai = false;
                             requested_external_ai_confirmation = Some(collection.id);
                         }
-                        collection.local_only =
-                            !collection.peer_shareable && !collection.allow_external_ai;
+                        collection.local_only = !collection.peer_shareable
+                            && !collection.allow_external_ai
+                            && !collection.internet_public;
                         if collection.local_only {
                             ui.label(
                                 RichText::new(&local_only)
@@ -1551,14 +1620,70 @@ impl AirWikiApp {
                         if collection.allow_external_ai {
                             ui.colored_label(crate::theme::WARNING_AMBER, &cloud_warning);
                         }
+                        if collection.internet_public {
+                            let mut status_args = FluentArgs::new();
+                            status_args.set(
+                                "indexes",
+                                i64::try_from(collection.public_accepted_indexes)
+                                    .unwrap_or(i64::MAX),
+                            );
+                            let status_key = if collection.public_accepted_indexes == 0 {
+                                "collections-public-announcement-offline"
+                            } else {
+                                "collections-public-announcement-online"
+                            };
+                            ui.label(self.localization.text_with(status_key, Some(&status_args)));
+                            if let Some(last) = collection.public_last_announced_at {
+                                ui.label(
+                                    RichText::new(format!("{} UTC", last.format("%Y-%m-%d %H:%M")))
+                                        .small()
+                                        .color(ui.visuals().weak_text_color()),
+                                );
+                            }
+                            if let Some(expiry) = collection.public_expires_at {
+                                ui.label(
+                                    RichText::new(format!(
+                                        "{} UTC",
+                                        expiry.format("%Y-%m-%d %H:%M")
+                                    ))
+                                    .small()
+                                    .color(ui.visuals().weak_text_color()),
+                                );
+                            }
+                            ui.label(self.localization.text("collections-public-description"));
+                            ui.text_edit_multiline(&mut collection.public_description);
+                            ui.label(self.localization.text("collections-public-languages"));
+                            ui.text_edit_singleline(&mut collection.public_languages);
+                            if ui
+                                .button(self.localization.text("collections-public-profile-save"))
+                                .clicked()
+                            {
+                                let languages = collection
+                                    .public_languages
+                                    .split(',')
+                                    .map(str::trim)
+                                    .filter(|language| !language.is_empty())
+                                    .map(str::to_owned)
+                                    .collect();
+                                self.worker
+                                    .send(WorkerCommand::UpdatePublicCollectionProfile {
+                                        collection_id: collection.id,
+                                        description: collection.public_description.clone(),
+                                        languages,
+                                    });
+                            }
+                        }
                         let external_ai_applies = external_ai_changed
                             && external_ai_change == ExternalAiPolicyChange::ApplyDisable;
-                        if peer_changed || external_ai_applies {
+                        let public_disable =
+                            public_changed && public_before && !collection.internet_public;
+                        if peer_changed || external_ai_applies || public_disable {
                             self.worker.send(WorkerCommand::UpdateCollectionPolicy {
                                 collection_id: collection.id,
                                 local_only: collection.local_only,
                                 peer_shareable: collection.peer_shareable,
                                 allow_external_ai: collection.allow_external_ai,
+                                internet_public: collection.internet_public,
                             });
                         }
                     });
@@ -1568,7 +1693,11 @@ impl AirWikiApp {
         if let Some(collection_id) = requested_external_ai_confirmation {
             self.external_ai_confirmation = Some(collection_id);
         }
+        if let Some(collection_id) = requested_public_confirmation {
+            self.public_collection_confirmation = Some(collection_id);
+        }
         self.external_ai_confirmation_window(ui.ctx());
+        self.public_collection_confirmation_window(ui.ctx());
     }
 
     fn external_ai_confirmation_window(&mut self, context: &egui::Context) {
@@ -1629,6 +1758,70 @@ impl AirWikiApp {
             local_only: collection.local_only,
             peer_shareable: collection.peer_shareable,
             allow_external_ai: true,
+            internet_public: collection.internet_public,
+        });
+    }
+
+    fn public_collection_confirmation_window(&mut self, context: &egui::Context) {
+        let Some(collection_id) = self.public_collection_confirmation else {
+            return;
+        };
+        let Some(collection_name) = self
+            .collections
+            .iter()
+            .find(|collection| collection.id == collection_id)
+            .map(|collection| collection.name.clone())
+        else {
+            self.public_collection_confirmation = None;
+            return;
+        };
+        let mut decision = None;
+        egui::Window::new(self.localization.text("collections-public-confirm-title"))
+            .id(egui::Id::new("public_collection_confirmation"))
+            .collapsible(false)
+            .resizable(false)
+            .anchor(egui::Align2::CENTER_CENTER, egui::Vec2::ZERO)
+            .show(context, |ui| {
+                ui.heading(collection_name);
+                ui.label(self.localization.text("collections-public-confirm-body"));
+                ui.colored_label(
+                    crate::theme::WARNING_AMBER,
+                    self.localization.text("collections-public-confirm-warning"),
+                );
+                ui.horizontal(|ui| {
+                    if ui.button(self.localization.text("action-cancel")).clicked() {
+                        decision = Some(false);
+                    }
+                    if ui
+                        .button(self.localization.text("action-confirm"))
+                        .clicked()
+                    {
+                        decision = Some(true);
+                    }
+                });
+            });
+        let Some(confirmed) = decision else {
+            return;
+        };
+        self.public_collection_confirmation = None;
+        if !confirmed {
+            return;
+        }
+        let Some(collection) = self
+            .collections
+            .iter_mut()
+            .find(|collection| collection.id == collection_id)
+        else {
+            return;
+        };
+        collection.internet_public = true;
+        collection.local_only = false;
+        self.worker.send(WorkerCommand::UpdateCollectionPolicy {
+            collection_id,
+            local_only: false,
+            peer_shareable: collection.peer_shareable,
+            allow_external_ai: collection.allow_external_ai,
+            internet_public: true,
         });
     }
 
@@ -1967,6 +2160,7 @@ impl AirWikiApp {
         if let Some(target) = self.search_feedback(ui, true) {
             self.open_search_evidence(target);
         }
+        self.public_browse_window(ui.ctx());
     }
 
     fn search_form(&mut self, ui: &mut egui::Ui, show_top_k: bool) {
@@ -1974,6 +2168,74 @@ impl AirWikiApp {
         let search_running = self.search_request_id.is_some();
         let enabled = !self.search_question.trim().is_empty() && !search_running;
         let mut submit_clicked = false;
+        ui.checkbox(
+            &mut self.search_public_network,
+            self.localization.text("search-public-network"),
+        );
+        if self.search_public_network {
+            let status = match self.public_route_kind {
+                PublicRouteKind::Offline => "search-public-route-offline",
+                PublicRouteKind::Relay => "search-public-route-relay",
+                PublicRouteKind::Direct => "search-public-route-direct",
+            };
+            ui.label(self.localization.text(status));
+        }
+        ui.collapsing(
+            self.localization.text("search-public-index-advanced"),
+            |ui| {
+                ui.label(self.localization.text("search-public-index-help"));
+                ui.text_edit_singleline(&mut self.federation_index_peer);
+                ui.text_edit_singleline(&mut self.federation_index_address);
+                let valid = !self.federation_index_peer.trim().is_empty()
+                    && !self.federation_index_address.trim().is_empty();
+                if ui
+                    .add_enabled(
+                        valid,
+                        egui::Button::new(self.localization.text("search-public-index-add")),
+                    )
+                    .clicked()
+                {
+                    self.worker.send(WorkerCommand::AddFederationIndex {
+                        peer_id: self.federation_index_peer.trim().to_owned(),
+                        address: self.federation_index_address.trim().to_owned(),
+                    });
+                    self.federation_index_peer.clear();
+                    self.federation_index_address.clear();
+                }
+                let can_remove = !self.federation_index_peer.trim().is_empty();
+                if ui
+                    .add_enabled(
+                        can_remove,
+                        egui::Button::new(self.localization.text("search-public-index-remove")),
+                    )
+                    .clicked()
+                {
+                    self.worker.send(WorkerCommand::RemoveFederationIndex {
+                        peer_id: self.federation_index_peer.trim().to_owned(),
+                    });
+                }
+                ui.separator();
+                ui.label(self.localization.text("search-public-unblock-help"));
+                let mut unblock_publisher = None;
+                for publisher_id in &self.blocked_public_publishers {
+                    ui.horizontal(|ui| {
+                        ui.monospace(abbreviate_publisher_id(publisher_id));
+                        if ui
+                            .button(self.localization.text("search-public-unblock-publisher"))
+                            .clicked()
+                        {
+                            unblock_publisher = Some(publisher_id.clone());
+                        }
+                    });
+                }
+                if let Some(publisher_id) = unblock_publisher {
+                    self.worker.send(WorkerCommand::SetPublicPublisherBlocked {
+                        publisher_id,
+                        blocked: false,
+                    });
+                }
+            },
+        );
         let response = if layout.is_narrow() {
             let question_label = ui.label(self.localization.text("search-question"));
             let response = ui
@@ -2057,6 +2319,7 @@ impl AirWikiApp {
                 question: self.search_question.trim().to_owned(),
                 top_k: self.search_top_k,
                 purpose: SearchPurpose::LocalAssistant,
+                public_network: self.search_public_network,
             });
         }
     }
@@ -2067,6 +2330,7 @@ impl AirWikiApp {
         show_empty_state: bool,
     ) -> Option<SearchEvidenceTarget> {
         let mut selected_evidence = None;
+        let mut requested_public_browse = None;
         if self.search_request_id.is_some() {
             ui.spinner();
             ui.label(self.localization.text("search-running"));
@@ -2136,6 +2400,14 @@ impl AirWikiApp {
                                         .small()
                                         .color(ui.visuals().weak_text_color()),
                                 );
+                                if self.search_public_network
+                                    && ui
+                                        .button(self.localization.text("search-browse-public"))
+                                        .clicked()
+                                {
+                                    requested_public_browse =
+                                        Some((hit.node_id.clone(), hit.collection_id));
+                                }
                             }
                         });
                         ui.collapsing(self.localization.text("search-citation-details"), |ui| {
@@ -2164,7 +2436,94 @@ impl AirWikiApp {
                     });
                 }
             });
+        if let Some((publisher_id, collection_id)) = requested_public_browse {
+            self.public_browse_open = true;
+            self.public_browse_publisher = publisher_id;
+            self.public_browse_collection = Some(collection_id);
+            self.public_browse_concepts.clear();
+            self.public_browse_next_cursor = None;
+            self.public_browse_error = None;
+            self.request_public_browse(None);
+        }
         selected_evidence
+    }
+
+    fn request_public_browse(&mut self, cursor: Option<String>) {
+        let Some(collection_id) = self.public_browse_collection else {
+            return;
+        };
+        let request_id = Uuid::new_v4();
+        self.public_browse_request_id = Some(request_id);
+        self.worker.send(WorkerCommand::BrowsePublicCollection {
+            request_id,
+            publisher_id: self.public_browse_publisher.clone(),
+            collection_id,
+            cursor,
+        });
+    }
+
+    fn public_browse_window(&mut self, context: &egui::Context) {
+        if !self.public_browse_open {
+            return;
+        }
+        let mut open = self.public_browse_open;
+        let mut load_more = false;
+        let mut block_publisher = false;
+        egui::Window::new(self.localization.text("search-public-browse-title"))
+            .open(&mut open)
+            .resizable(true)
+            .default_width(620.0)
+            .show(context, |ui| {
+                ui.horizontal_wrapped(|ui| {
+                    ui.label(self.localization.text("search-public-publisher"));
+                    wrap_monospace(ui, abbreviate_publisher_id(&self.public_browse_publisher));
+                    if ui
+                        .button(self.localization.text("search-public-block-publisher"))
+                        .clicked()
+                    {
+                        block_publisher = true;
+                    }
+                });
+                if self.public_browse_request_id.is_some() {
+                    ui.spinner();
+                }
+                if let Some(error) = &self.public_browse_error {
+                    ui.colored_label(crate::theme::ERROR_CORAL, error);
+                }
+                egui::ScrollArea::vertical().show(ui, |ui| {
+                    for concept in &self.public_browse_concepts {
+                        egui::Frame::group(ui.style()).show(ui, |ui| {
+                            ui.heading(&concept.title);
+                            ui.label(RichText::new(concept.concept_type.to_string()).small());
+                            ui.label(&concept.summary);
+                            ui.label(RichText::new(&concept.language).small());
+                        });
+                        ui.add_space(6.0);
+                    }
+                });
+                if self.public_browse_next_cursor.is_some()
+                    && self.public_browse_request_id.is_none()
+                    && ui
+                        .button(self.localization.text("search-public-browse-more"))
+                        .clicked()
+                {
+                    load_more = true;
+                }
+            });
+        self.public_browse_open = open;
+        if load_more {
+            self.request_public_browse(self.public_browse_next_cursor.clone());
+        }
+        if block_publisher {
+            let publisher_id = self.public_browse_publisher.clone();
+            self.public_publisher_block_input = publisher_id.clone();
+            self.worker.send(WorkerCommand::SetPublicPublisherBlocked {
+                publisher_id: publisher_id.clone(),
+                blocked: true,
+            });
+            self.search_hits.retain(|hit| hit.node_id != publisher_id);
+            self.public_browse_open = false;
+        }
     }
 
     fn open_search_evidence(&mut self, target: SearchEvidenceTarget) {
@@ -4764,6 +5123,15 @@ fn empty_state(ui: &mut egui::Ui, title: &str, body: &str) {
         });
         ui.add_space(20.0);
     });
+}
+
+fn abbreviate_publisher_id(publisher_id: &str) -> String {
+    let prefix: String = publisher_id.chars().take(12).collect();
+    if prefix.len() == publisher_id.len() {
+        prefix
+    } else {
+        format!("{prefix}…")
+    }
 }
 
 fn deduplicate_notices(notices: &mut VecDeque<(bool, String)>) {

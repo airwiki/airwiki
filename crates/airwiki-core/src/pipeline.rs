@@ -1025,6 +1025,7 @@ mod tests {
                     local_only: false,
                     peer_shareable: true,
                     allow_external_ai: true,
+                    internet_public: false,
                 },
             )
             .unwrap();

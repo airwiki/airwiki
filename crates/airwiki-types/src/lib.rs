@@ -1,5 +1,9 @@
 //! Stable domain and wire contracts shared by the desktop, storage, LAN and MCP crates.
 
+mod public;
+
+pub use public::*;
+
 use std::fmt;
 use std::sync::{Arc, Condvar, Mutex, MutexGuard};
 
@@ -10,6 +14,9 @@ use thiserror::Error;
 use uuid::Uuid;
 
 pub const SEARCH_PROTOCOL: &str = "/airwiki/search/2.0.0";
+pub const PUBLIC_CATALOG_PROTOCOL: &str = "/airwiki/public-catalog/1.0.0";
+pub const PUBLIC_SEARCH_PROTOCOL: &str = "/airwiki/public-search/1.0.0";
+pub const PUBLIC_BROWSE_PROTOCOL: &str = "/airwiki/public-browse/1.0.0";
 pub const MAX_QUERY_BYTES: usize = 2 * 1024;
 pub const MAX_SNIPPET_CHARS: usize = 1_200;
 pub const MAX_HEADING_OR_PAGE_CHARS: usize = 300;
@@ -76,7 +83,7 @@ pub enum SearchPurpose {
 /// Independent collection egress controls.
 ///
 /// `local_only` is retained in persisted and serialized data for compatibility,
-/// but is derived from the two explicit opt-ins by [`Self::normalize`].
+/// but is derived from the three explicit opt-ins by [`Self::normalize`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub struct CollectionPolicy {
     #[serde(default = "default_true")]
@@ -85,6 +92,8 @@ pub struct CollectionPolicy {
     pub peer_shareable: bool,
     #[serde(default)]
     pub allow_external_ai: bool,
+    #[serde(default)]
+    pub internet_public: bool,
 }
 
 impl Default for CollectionPolicy {
@@ -103,6 +112,7 @@ impl CollectionPolicy {
             local_only: true,
             peer_shareable: false,
             allow_external_ai: false,
+            internet_public: false,
         }
     }
 
@@ -111,12 +121,13 @@ impl CollectionPolicy {
             local_only: false,
             peer_shareable: true,
             allow_external_ai: false,
+            internet_public: false,
         }
     }
 
     /// Whether neither peer sharing nor disclosure to an external AI is enabled.
     pub const fn is_local_only(self) -> bool {
-        !self.peer_shareable && !self.allow_external_ai
+        !self.peer_shareable && !self.allow_external_ai && !self.internet_public
     }
 
     /// Whether a search executed on this device may use the collection.
@@ -138,6 +149,14 @@ impl CollectionPolicy {
     /// Compatibility alias for remote-peer authorization.
     pub const fn can_serve(self, purpose: SearchPurpose) -> bool {
         self.can_serve_peer(purpose)
+    }
+
+    /// Whether this collection may be served to an unpaired Internet reader.
+    ///
+    /// Publication state is revalidated independently immediately before
+    /// disclosure; this opt-in never publishes a draft.
+    pub const fn can_serve_public(self) -> bool {
+        self.internet_public
     }
 
     pub fn normalize(&mut self) {
@@ -584,6 +603,7 @@ mod tests {
                     local_only: false,
                     peer_shareable: false,
                     allow_external_ai: true,
+                    internet_public: false,
                 },
                 false,
                 true,
@@ -596,6 +616,7 @@ mod tests {
                     local_only: false,
                     peer_shareable: true,
                     allow_external_ai: true,
+                    internet_public: false,
                 },
                 false,
                 true,
@@ -640,6 +661,7 @@ mod tests {
             local_only: true,
             peer_shareable: false,
             allow_external_ai: true,
+            internet_public: false,
         };
 
         policy.normalize();
@@ -650,6 +672,7 @@ mod tests {
                 local_only: false,
                 peer_shareable: false,
                 allow_external_ai: true,
+                internet_public: false,
             }
         );
     }

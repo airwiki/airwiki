@@ -23,10 +23,15 @@ futures = "0.3.31"
 keyring = { version = "3.6.3", optional = true, features = ["apple-native", "windows-native"] }
 libp2p = { version = "0.56.0", default-features = false, features = [
     "cbor",
+    "autonat",
+    "dcutr",
+    "dns",
     "ed25519",
     "macros",
     "mdns",
     "noise",
+    "quic",
+    "relay",
     "request-response",
     "tcp",
     "tokio",
@@ -35,12 +40,15 @@ libp2p = { version = "0.56.0", default-features = false, features = [
 parking_lot = "0.12.5"
 rand = "0.9.2"
 serde.workspace = true
+chrono.workspace = true
 sha2 = "0.10.9"
 thiserror.workspace = true
 tokio.workspace = true
+tokio-util = "0.7.18"
 tracing.workspace = true
 uuid.workspace = true
 
 [dev-dependencies]
 chrono.workspace = true
 tempfile = "3.23.0"
+tokio = { workspace = true, features = ["test-util"] }

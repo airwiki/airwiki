@@ -15,6 +15,7 @@ tests, operational runbooks or evaluation reports.
 | [0005](0005-lan-identity-pairing-and-authorization.md) | Bind LAN authorization to persistent identity and human-confirmed SAS | Accepted | 2026-07-15 | Answerability-only disclosure clause superseded by ADR 0007 |
 | [0006](0006-windows-firewall-privilege-boundary.md) | Isolate Windows firewall changes in a narrow elevated helper | Accepted | 2026-07-16 | — |
 | [0007](0007-separate-evidence-from-authorized-candidates.md) | Separate answerability-accepted evidence from authorized external-chat candidates | Accepted | 2026-07-20 | Supersedes ADR 0001 and the answerability-only disclosure clause in ADR 0005 |
+| [0008](0008-public-federation.md) | Separate opt-in public federation from LAN authorization | Accepted | 2026-07-21 | Keeps ADR 0005 unchanged |
 
 ## Policy
 

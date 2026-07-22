@@ -193,6 +193,204 @@ dependencies = [
 ]
 
 [[package]]
+name = "airwiki-core"
+version = "0.2.0"
+dependencies = [
+ "airwiki-inference",
+ "airwiki-types",
+ "anyhow",
+ "async-trait",
+ "chrono",
+ "directories",
+ "fastembed",
+ "hex",
+ "lopdf",
+ "notify",
+ "pulldown-cmark",
+ "reqwest",
+ "rusqlite",
+ "serde",
+ "serde_json",
+ "serde_yaml_ng",
+ "sha2 0.10.9",
+ "tempfile",
+ "thiserror 2.0.18",
+ "tokenizers",
+ "tokio",
+ "tracing",
+ "uuid",
+ "walkdir",
+ "windows-sys 0.61.2",
+]
+
+[[package]]
+name = "airwiki-desktop"
+version = "0.2.0"
+dependencies = [
+ "airwiki-core",
+ "airwiki-inference",
+ "airwiki-mcp",
+ "airwiki-network",
+ "airwiki-types",
+ "airwiki-windows-firewall-helper",
+ "anyhow",
+ "async-trait",
+ "cargo-packager-updater",
+ "chrono",
+ "directories",
+ "eframe",
+ "egui_commonmark",
+ "egui_extras",
+ "egui_graphs",
+ "fluent-bundle",
+ "futures",
+ "interprocess",
+ "objc2-foundation 0.3.2",
+ "objc2-service-management",
+ "rfd",
+ "serde",
+ "serde_json",
+ "single-instance",
+ "sys-locale",
+ "tempfile",
+ "thiserror 2.0.18",
+ "tokio",
+ "tokio-util",
+ "tracing",
+ "tracing-appender",
+ "tracing-subscriber",
+ "tray-icon",
+ "unic-langid",
+ "uuid",
+ "windows 0.62.2",
+ "winreg",
+ "winresource",
+]
+
+[[package]]
+name = "airwiki-federation-index"
+version = "0.2.0"
+dependencies = [
+ "airwiki-network",
+ "airwiki-types",
+ "anyhow",
+ "async-trait",
+ "chrono",
+ "ciborium",
+ "libp2p",
+ "rusqlite",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "thiserror 2.0.18",
+ "tokio",
+ "tokio-util",
+ "tracing",
+ "tracing-subscriber",
+ "uuid",
+]
+
+[[package]]
+name = "airwiki-inference"
+version = "0.2.0"
+dependencies = [
+ "anyhow",
+ "flate2",
+ "futures-util",
+ "hex",
+ "rand 0.9.4",
+ "reqwest",
+ "serde",
+ "serde_json",
+ "sha2 0.10.9",
+ "sysinfo",
+ "tar",
+ "tempfile",
+ "thiserror 2.0.18",
+ "tokio",
+ "tokio-util",
+ "tracing",
+ "windows 0.62.2",
+ "zip",
+]
+
+[[package]]
+name = "airwiki-mcp"
+version = "0.2.0"
+dependencies = [
+ "airwiki-types",
+ "async-trait",
+ "axum",
+ "chrono",
+ "reqwest",
+ "rmcp",
+ "schemars",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.18",
+ "tokio",
+ "tokio-util",
+ "tower-http 0.7.0",
+ "tracing",
+ "uuid",
+]
+
+[[package]]
+name = "airwiki-mcp-bridge"
+version = "0.2.0"
+dependencies = [
+ "airwiki-mcp",
+ "serde_json",
+ "tokio",
+]
+
+[[package]]
+name = "airwiki-network"
+version = "0.2.0"
+dependencies = [
+ "airwiki-types",
+ "async-trait",
+ "base64 0.22.1",
+ "bip39",
+ "chrono",
+ "ciborium",
+ "futures",
+ "keyring",
+ "libp2p",
+ "parking_lot",
+ "rand 0.9.4",
+ "serde",
+ "sha2 0.10.9",
+ "tempfile",
+ "thiserror 2.0.18",
+ "tokio",
+ "tokio-util",
+ "tracing",
+ "uuid",
+]
+
+[[package]]
+name = "airwiki-types"
+version = "0.2.0"
+dependencies = [
+ "async-trait",
+ "chrono",
+ "serde",
+ "thiserror 2.0.18",
+ "uuid",
+]
+
+[[package]]
+name = "airwiki-windows-firewall-helper"
+version = "0.2.0"
+dependencies = [
+ "tempfile",
+ "thiserror 2.0.18",
+ "windows 0.62.2",
+ "winresource",
+]
+
+[[package]]
 name = "allocator-api2"
 version = "0.2.21"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -724,117 +922,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "airwiki-core"
-version = "0.2.0"
-dependencies = [
- "anyhow",
- "async-trait",
- "airwiki-inference",
- "airwiki-types",
- "chrono",
- "directories",
- "fastembed",
- "hex",
- "lopdf",
- "notify",
- "pulldown-cmark",
- "reqwest",
- "rusqlite",
- "serde",
- "serde_json",
- "serde_yaml_ng",
- "sha2 0.10.9",
- "tempfile",
- "thiserror 2.0.18",
- "tokenizers",
- "tokio",
- "tracing",
- "uuid",
- "walkdir",
- "windows-sys 0.61.2",
-]
-
-[[package]]
-name = "airwiki-inference"
-version = "0.2.0"
-dependencies = [
- "anyhow",
- "flate2",
- "futures-util",
- "hex",
- "rand 0.9.4",
- "reqwest",
- "serde",
- "serde_json",
- "sha2 0.10.9",
- "sysinfo",
- "tar",
- "tempfile",
- "thiserror 2.0.18",
- "tokio",
- "tokio-util",
- "tracing",
- "windows 0.62.2",
- "zip",
-]
-
-[[package]]
-name = "airwiki-mcp"
-version = "0.2.0"
-dependencies = [
- "async-trait",
- "axum",
- "airwiki-types",
- "chrono",
- "reqwest",
- "rmcp",
- "schemars",
- "serde",
- "serde_json",
- "thiserror 2.0.18",
- "tokio",
- "tokio-util",
- "tower-http 0.7.0",
- "tracing",
- "uuid",
-]
-
-[[package]]
-name = "airwiki-network"
-version = "0.2.0"
-dependencies = [
- "async-trait",
- "base64 0.22.1",
- "bip39",
- "airwiki-types",
- "chrono",
- "ciborium",
- "futures",
- "keyring",
- "libp2p",
- "parking_lot",
- "rand 0.9.4",
- "serde",
- "sha2 0.10.9",
- "tempfile",
- "thiserror 2.0.18",
- "tokio",
- "tracing",
- "uuid",
-]
-
-[[package]]
-name = "airwiki-types"
-version = "0.2.0"
-dependencies = [
- "async-trait",
- "chrono",
- "serde",
- "thiserror 2.0.18",
- "uuid",
-]
-
-[[package]]
 name = "bs58"
 version = "0.5.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1172,69 +1259,6 @@ dependencies = [
  "ryu",
  "serde",
  "static_assertions",
-]
-
-[[package]]
-name = "airwiki-desktop"
-version = "0.2.0"
-dependencies = [
- "anyhow",
- "async-trait",
- "airwiki-core",
- "airwiki-inference",
- "airwiki-mcp",
- "airwiki-network",
- "airwiki-types",
- "cargo-packager-updater",
- "chrono",
- "airwiki-windows-firewall-helper",
- "directories",
- "eframe",
- "egui_commonmark",
- "egui_extras",
- "egui_graphs",
- "fluent-bundle",
- "futures",
- "interprocess",
- "objc2-foundation 0.3.2",
- "objc2-service-management",
- "rfd",
- "serde",
- "serde_json",
- "single-instance",
- "sys-locale",
- "tempfile",
- "thiserror 2.0.18",
- "tokio",
- "tokio-util",
- "tracing",
- "tracing-appender",
- "tracing-subscriber",
- "tray-icon",
- "unic-langid",
- "uuid",
- "windows 0.62.2",
- "winreg",
- "winresource",
-]
-
-[[package]]
-name = "airwiki-mcp-bridge"
-version = "0.2.0"
-dependencies = [
- "airwiki-mcp",
- "serde_json",
- "tokio",
-]
-
-[[package]]
-name = "airwiki-windows-firewall-helper"
-version = "0.2.0"
-dependencies = [
- "tempfile",
- "thiserror 2.0.18",
- "windows 0.62.2",
- "winresource",
 ]
 
 [[package]]
@@ -1819,6 +1843,12 @@ name = "dpi"
 version = "0.1.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d8b14ccef22fc6f5a8f4d7d768562a182c04ce9a3b3157b91390b52ddfdf1a76"
+
+[[package]]
+name = "dtoa"
+version = "1.0.11"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "4c3cf4824e2d5f025c7b531afcb2325364084a16806f6d47fbc1f5fbd9960590"
 
 [[package]]
 name = "dunce"
@@ -3579,13 +3609,17 @@ dependencies = [
  "futures-timer",
  "getrandom 0.2.17",
  "libp2p-allow-block-list",
+ "libp2p-autonat",
  "libp2p-connection-limits",
  "libp2p-core",
+ "libp2p-dcutr",
  "libp2p-dns",
  "libp2p-identity",
  "libp2p-mdns",
+ "libp2p-metrics",
  "libp2p-noise",
  "libp2p-quic",
+ "libp2p-relay",
  "libp2p-request-response",
  "libp2p-swarm",
  "libp2p-tcp",
@@ -3606,6 +3640,31 @@ dependencies = [
  "libp2p-core",
  "libp2p-identity",
  "libp2p-swarm",
+]
+
+[[package]]
+name = "libp2p-autonat"
+version = "0.15.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "fab5e25c49a7d48dac83d95d8f3bac0a290d8a5df717012f6e34ce9886396c0b"
+dependencies = [
+ "async-trait",
+ "asynchronous-codec",
+ "either",
+ "futures",
+ "futures-bounded",
+ "futures-timer",
+ "libp2p-core",
+ "libp2p-identity",
+ "libp2p-request-response",
+ "libp2p-swarm",
+ "quick-protobuf",
+ "quick-protobuf-codec",
+ "rand 0.8.6",
+ "rand_core 0.6.4",
+ "thiserror 2.0.18",
+ "tracing",
+ "web-time",
 ]
 
 [[package]]
@@ -3641,6 +3700,28 @@ dependencies = [
  "thiserror 2.0.18",
  "tracing",
  "unsigned-varint 0.8.0",
+ "web-time",
+]
+
+[[package]]
+name = "libp2p-dcutr"
+version = "0.14.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "2b4107305e12158af3e66960b6181789c547394c9c9a8696f721521602bfc73a"
+dependencies = [
+ "asynchronous-codec",
+ "either",
+ "futures",
+ "futures-bounded",
+ "futures-timer",
+ "hashlink",
+ "libp2p-core",
+ "libp2p-identity",
+ "libp2p-swarm",
+ "quick-protobuf",
+ "quick-protobuf-codec",
+ "thiserror 2.0.18",
+ "tracing",
  "web-time",
 ]
 
@@ -3698,6 +3779,23 @@ dependencies = [
 ]
 
 [[package]]
+name = "libp2p-metrics"
+version = "0.17.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "805a555148522cb3414493a5153451910cb1a146c53ffbf4385708349baf62b7"
+dependencies = [
+ "futures",
+ "libp2p-core",
+ "libp2p-dcutr",
+ "libp2p-identity",
+ "libp2p-relay",
+ "libp2p-swarm",
+ "pin-project",
+ "prometheus-client",
+ "web-time",
+]
+
+[[package]]
 name = "libp2p-noise"
 version = "0.46.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3741,6 +3839,30 @@ dependencies = [
  "thiserror 2.0.18",
  "tokio",
  "tracing",
+]
+
+[[package]]
+name = "libp2p-relay"
+version = "0.21.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d8b9b0392ed623243ad298326b9f806d51191829ac7585cc825c54c6c67b04d9"
+dependencies = [
+ "asynchronous-codec",
+ "bytes",
+ "either",
+ "futures",
+ "futures-bounded",
+ "futures-timer",
+ "libp2p-core",
+ "libp2p-identity",
+ "libp2p-swarm",
+ "quick-protobuf",
+ "quick-protobuf-codec",
+ "rand 0.8.6",
+ "static_assertions",
+ "thiserror 2.0.18",
+ "tracing",
+ "web-time",
 ]
 
 [[package]]
@@ -5329,6 +5451,29 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "3d595e54a326bc53c1c197b32d295e14b169e3cfeaa8dc82b529f947fba6bcf5"
 
 [[package]]
+name = "prometheus-client"
+version = "0.23.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "cf41c1a7c32ed72abe5082fb19505b969095c12da9f5732a4bc9878757fd087c"
+dependencies = [
+ "dtoa",
+ "itoa",
+ "parking_lot",
+ "prometheus-client-derive-encode",
+]
+
+[[package]]
+name = "prometheus-client-derive-encode"
+version = "0.4.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "440f724eba9f6996b75d63681b0a92b06947f1457076d503a4d2e2c8f56442b8"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn",
+]
+
+[[package]]
 name = "prost"
 version = "0.14.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5381,6 +5526,19 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "9d6da84cc204722a989e01ba2f6e1e276e190f22263d0cb6ce8526fcdb0d2e1f"
 dependencies = [
  "byteorder",
+]
+
+[[package]]
+name = "quick-protobuf-codec"
+version = "0.3.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "15a0580ab32b169745d7a39db2ba969226ca16738931be152a3209b409de2474"
+dependencies = [
+ "asynchronous-codec",
+ "bytes",
+ "quick-protobuf",
+ "thiserror 1.0.69",
+ "unsigned-varint 0.8.0",
 ]
 
 [[package]]
@@ -8372,12 +8530,12 @@ dependencies = [
 name = "xtask"
 version = "0.2.0"
 dependencies = [
- "anyhow",
- "async-trait",
- "base64 0.22.1",
  "airwiki-core",
  "airwiki-inference",
  "airwiki-types",
+ "anyhow",
+ "async-trait",
+ "base64 0.22.1",
  "hex",
  "minisign-verify",
  "serde",

@@ -36,16 +36,21 @@ use airwiki_network::{
     AccessControl, AuthorizedSearchBackend, AuthorizedSearchResult, FederatedCoordinator,
     KeyringSecretStore, MAX_MDNS_ADDRESSES_PER_PEER, MAX_VOLATILE_LAN_PEERS, ManualLanAddress,
     Multiaddr, NetworkConfig, NetworkEvent, NetworkHandle, NetworkWarningKind, NodeIdentity,
-    PairingFailureReason, PeerAccess, PeerId, SecretStore, spawn_network,
+    PairingFailureReason, PeerAccess, PeerId, PublicBrowseDelivery, PublicIndexEndpoint,
+    PublicReader, PublicRouteKind, PublicSearchDelivery, PublicSourceBackend,
+    PublicSourceBackendError, PublicSourceServerConfig, SecretStore, relay_circuit_address,
+    relayed_peer_address, run_public_source_server, sign_manifest, sign_tombstone, spawn_network,
 };
 use airwiki_types::{
     CollectionPolicy, DisclosureLease, DocumentStatus, EnrichmentDraft, FederatedSearch,
+    PUBLIC_CATALOG_PROTOCOL, PublicBrowsePage, PublicBrowseRequest, PublicCollectionManifest,
+    PublicCollectionRevision, PublicCollectionTombstone, PublicSearchRequest, PublicSearchResponse,
     SearchAuthorization, SearchContractError, SearchHit, SearchPurpose, SearchRequest,
     SearchResponse,
 };
 use anyhow::{Context, Result, anyhow, bail};
 use async_trait::async_trait;
-use chrono::Utc;
+use chrono::{Duration as ChronoDuration, Utc};
 use tokio::{
     sync::{Mutex as AsyncMutex, broadcast, mpsc},
     task::JoinHandle,
@@ -344,6 +349,155 @@ fn renumber_search_hits(hits: &mut [SearchHit]) {
     }
 }
 
+pub struct DynamicPublicSourceBackend {
+    database: Database,
+    engine: Arc<DynamicAuthorizedSearchBackend>,
+    publisher_id: String,
+}
+
+impl DynamicPublicSourceBackend {
+    fn new(
+        database: Database,
+        engine: Arc<DynamicAuthorizedSearchBackend>,
+        publisher_id: String,
+    ) -> Self {
+        Self {
+            database,
+            engine,
+            publisher_id,
+        }
+    }
+
+    fn engine(&self) -> Result<Arc<HybridSearchEngine>, PublicSourceBackendError> {
+        read_lock(&self.engine.engine, "public search proxy")
+            .map_err(|_| PublicSourceBackendError::Unavailable)?
+            .clone()
+            .ok_or(PublicSourceBackendError::Unavailable)
+    }
+}
+
+#[async_trait]
+impl PublicSourceBackend for DynamicPublicSourceBackend {
+    async fn search(
+        &self,
+        request: PublicSearchRequest,
+    ) -> std::result::Result<PublicSearchDelivery, PublicSourceBackendError> {
+        request
+            .validate()
+            .map_err(|_| PublicSourceBackendError::Invalid)?;
+        let collection_targets = request.collections.clone();
+        let mut response = self
+            .engine()?
+            .search_public(request)
+            .await
+            .map_err(|_| PublicSourceBackendError::Unavailable)?;
+        let database = self.database.clone();
+        let publisher_id = self.publisher_id.clone();
+        tokio::task::spawn_blocking(move || {
+            let lease = database.disclosure_gate().acquire_disclosure();
+            let mut revisions = Vec::with_capacity(collection_targets.len());
+            for target in &collection_targets {
+                let Some(manifest_sequence) = database
+                    .public_manifest_sequence_under_disclosure(&lease, target.collection_id)
+                    .map_err(|_| PublicSourceBackendError::Unavailable)?
+                else {
+                    return Err(PublicSourceBackendError::NotPublic);
+                };
+                let fingerprint = database
+                    .public_collection_fingerprint_under_disclosure(&lease, target.collection_id)
+                    .map_err(|_| PublicSourceBackendError::NotPublic)?;
+                if manifest_sequence < target.manifest_sequence
+                    || fingerprint != target.publication_fingerprint
+                {
+                    return Err(PublicSourceBackendError::NotPublic);
+                }
+                revisions.push(PublicCollectionRevision {
+                    collection_id: target.collection_id,
+                    manifest_sequence,
+                });
+            }
+            let mut current = Vec::with_capacity(response.hits.len());
+            for mut hit in response.hits {
+                if database
+                    .public_hit_is_current_under_disclosure(&lease, &hit)
+                    .map_err(|_| PublicSourceBackendError::Unavailable)?
+                {
+                    hit.node_id.clone_from(&publisher_id);
+                    current.push(hit);
+                }
+            }
+            renumber_search_hits(&mut current);
+            response.hits = current;
+            response.authorized_candidates.clear();
+            if revisions.is_empty() {
+                return Err(PublicSourceBackendError::NotPublic);
+            }
+            Ok(PublicSearchDelivery::new(
+                PublicSearchResponse {
+                    protocol_version: airwiki_types::PUBLIC_SEARCH_PROTOCOL.to_owned(),
+                    manifest_sequences: revisions,
+                    response,
+                },
+                lease,
+            ))
+        })
+        .await
+        .map_err(|_| PublicSourceBackendError::Unavailable)?
+    }
+
+    async fn browse(
+        &self,
+        request: PublicBrowseRequest,
+    ) -> std::result::Result<PublicBrowseDelivery, PublicSourceBackendError> {
+        request
+            .validate()
+            .map_err(|_| PublicSourceBackendError::Invalid)?;
+        let cursor = request
+            .cursor
+            .as_deref()
+            .map(Uuid::parse_str)
+            .transpose()
+            .map_err(|_| PublicSourceBackendError::Invalid)?;
+        let database = self.database.clone();
+        let publisher_id = self.publisher_id.clone();
+        tokio::task::spawn_blocking(move || {
+            let lease = database.disclosure_gate().acquire_disclosure();
+            let concepts = database
+                .public_concept_page_under_disclosure(
+                    &lease,
+                    &publisher_id,
+                    request.collection_id,
+                    cursor,
+                    request.limit,
+                )
+                .map_err(|_| PublicSourceBackendError::NotPublic)?;
+            let manifest_sequence = database
+                .public_manifest_sequence_under_disclosure(&lease, request.collection_id)
+                .map_err(|_| PublicSourceBackendError::Unavailable)?
+                .ok_or(PublicSourceBackendError::NotPublic)?;
+            let next_cursor = (concepts.len() == usize::from(request.limit))
+                .then(|| {
+                    concepts
+                        .last()
+                        .map(|concept| concept.concept_id.to_string())
+                })
+                .flatten();
+            Ok(PublicBrowseDelivery::new(
+                PublicBrowsePage {
+                    protocol_version: airwiki_types::PUBLIC_BROWSE_PROTOCOL.to_owned(),
+                    request_id: request.request_id,
+                    manifest_sequence,
+                    concepts,
+                    next_cursor,
+                },
+                lease,
+            ))
+        })
+        .await
+        .map_err(|_| PublicSourceBackendError::Unavailable)?
+    }
+}
+
 /// Stable proxy passed to the MCP server before model initialization.
 pub struct DynamicFederatedSearch {
     database: Database,
@@ -563,6 +717,18 @@ struct NetworkRuntime {
     started_at: Instant,
 }
 
+struct PublicNetworkRuntime {
+    cancellation: CancellationToken,
+    source_task: JoinHandle<()>,
+    renewal_task: JoinHandle<()>,
+}
+
+enum PreparedPublicAnnouncement {
+    Manifest(airwiki_types::SignedPublicCollectionManifest),
+    Tombstone(airwiki_types::SignedPublicCollectionTombstone),
+    Missing,
+}
+
 /// Keeps the runtime generation attached until the worker consumes the event.
 /// An old event can already be queued when LAN is disabled or restarted.
 #[derive(Debug, Clone)]
@@ -601,10 +767,15 @@ pub struct DesktopServices {
     database: Database,
     node_id: String,
     identity: NodeIdentity,
+    public_identity: NodeIdentity,
     access: AccessControl,
     authorized_proxy: Arc<DynamicAuthorizedSearchBackend>,
+    public_source_proxy: Arc<DynamicPublicSourceBackend>,
     federated_proxy: Arc<DynamicFederatedSearch>,
     network: Mutex<Option<NetworkRuntime>>,
+    public_network: Mutex<Option<PublicNetworkRuntime>>,
+    public_reader: Arc<PublicReader>,
+    public_announcements: RwLock<HashMap<Uuid, PublicAnnouncementState>>,
     search_topology: AsyncMutex<()>,
     network_generation: Arc<AtomicU64>,
     network_events: broadcast::Sender<SequencedNetworkEvent>,
@@ -613,6 +784,13 @@ pub struct DesktopServices {
     live_peers: RwLock<HashMap<PeerId, LivePeer>>,
     startup_preflight_blocked: RwLock<HashSet<Uuid>>,
     transient_source_issues: RwLock<HashMap<Uuid, Vec<TransientSourceIssue>>>,
+}
+
+#[derive(Debug, Clone, Copy)]
+struct PublicAnnouncementState {
+    accepted_indexes: usize,
+    last_announced_at: chrono::DateTime<Utc>,
+    expires_at: chrono::DateTime<Utc>,
 }
 
 impl DesktopServices {
@@ -648,12 +826,19 @@ impl DesktopServices {
         }
         let identity = NodeIdentity::load_or_create(secret_store.as_ref())
             .context("no se pudo cargar la identidad Ed25519 del dispositivo")?;
+        let public_identity = NodeIdentity::load_or_create_public_publisher(secret_store.as_ref())
+            .context("no se pudo cargar la identidad pública Ed25519")?;
         let node_id = identity.peer_id().to_string();
         let access = restore_access_control(&database)?;
 
         let authorized_proxy = Arc::new(DynamicAuthorizedSearchBackend::new(
             database.clone(),
             access.clone(),
+        ));
+        let public_source_proxy = Arc::new(DynamicPublicSourceBackend::new(
+            database.clone(),
+            Arc::clone(&authorized_proxy),
+            public_identity.peer_id().to_string(),
         ));
         let (network_events, _) = broadcast::channel(128);
         let network_generation = Arc::new(AtomicU64::new(1));
@@ -675,6 +860,12 @@ impl DesktopServices {
             access.clone(),
             node_id.clone(),
         ));
+        let public_reader = Arc::new(PublicReader::new());
+        for publisher_id in database.list_blocked_public_publishers()? {
+            public_reader
+                .set_publisher_blocked(publisher_id, true)
+                .await;
+        }
         let mcp = match start_mcp_server(McpServerConfig::default(), federated_proxy.clone()).await
         {
             Ok(handle) => handle,
@@ -688,15 +879,20 @@ impl DesktopServices {
             }
         };
 
-        Ok(Self {
+        let services = Self {
             core_paths,
             database,
             node_id,
             identity,
+            public_identity,
             access,
             authorized_proxy,
+            public_source_proxy,
             federated_proxy,
             network: Mutex::new(network),
+            public_network: Mutex::new(None),
+            public_reader,
+            public_announcements: RwLock::new(HashMap::new()),
             search_topology: AsyncMutex::new(()),
             network_generation,
             network_events,
@@ -705,7 +901,9 @@ impl DesktopServices {
             live_peers: RwLock::new(HashMap::new()),
             startup_preflight_blocked: RwLock::new(HashSet::new()),
             transient_source_issues: RwLock::new(HashMap::new()),
-        })
+        };
+        services.reconcile_public_network().await?;
+        Ok(services)
     }
 
     pub fn node_id(&self) -> &str {
@@ -937,6 +1135,12 @@ impl DesktopServices {
         if let Some(old) = old {
             old.supervisor.stop().await?;
         }
+        if self.renew_public_manifests().await.is_err() {
+            tracing::warn!(
+                error_kind = "public_manifest_renewal_failed",
+                "public collection announcements could not be renewed"
+            );
+        }
         Ok(())
     }
 
@@ -1076,8 +1280,187 @@ impl DesktopServices {
                 "local_only": effective.local_only,
                 "peer_shareable": effective.peer_shareable,
                 "allow_external_ai": effective.allow_external_ai,
+                "internet_public": effective.internet_public,
             }),
         )
+    }
+
+    pub async fn reconcile_public_network(&self) -> Result<()> {
+        let should_run = self
+            .database
+            .list_collections()?
+            .into_iter()
+            .any(|collection| collection.policy.internet_public);
+        let relay_addresses = self.public_relay_listen_addresses()?;
+        let current = {
+            let mut guard = mutex_lock(&self.public_network, "public network runtime")?;
+            if should_run && guard.is_none() {
+                let listen_addresses = ["/ip4/0.0.0.0/udp/42043/quic-v1", "/ip4/0.0.0.0/tcp/42043"]
+                    .into_iter()
+                    .map(str::parse)
+                    .collect::<std::result::Result<Vec<Multiaddr>, _>>()
+                    .context("la dirección pública integrada no es válida")?;
+                let cancellation = CancellationToken::new();
+                let task_cancellation = cancellation.clone();
+                let identity = self.public_identity.clone();
+                let backend: Arc<dyn PublicSourceBackend> = self.public_source_proxy.clone();
+                let mut server_config = PublicSourceServerConfig::new(listen_addresses);
+                server_config.relay_addresses = relay_addresses;
+                let source_task = tokio::spawn(async move {
+                    if run_public_source_server(identity, server_config, backend, task_cancellation)
+                        .await
+                        .is_err()
+                    {
+                        tracing::warn!(
+                            error_kind = "public_source_runtime_stopped",
+                            "public source runtime stopped"
+                        );
+                    }
+                });
+                let renewal_task = tokio::spawn(run_public_manifest_renewal(
+                    self.database.clone(),
+                    self.public_identity.clone(),
+                    Arc::clone(&self.public_reader),
+                    cancellation.clone(),
+                ));
+                *guard = Some(PublicNetworkRuntime {
+                    cancellation,
+                    source_task,
+                    renewal_task,
+                });
+                None
+            } else if !should_run {
+                guard.take()
+            } else {
+                None
+            }
+        };
+        if let Some(runtime) = current {
+            runtime.cancellation.cancel();
+            let _ = runtime.source_task.await;
+            let _ = runtime.renewal_task.await;
+        }
+        Ok(())
+    }
+
+    pub async fn restart_public_network(&self) -> Result<()> {
+        let runtime = mutex_lock(&self.public_network, "public network runtime")?.take();
+        if let Some(runtime) = runtime {
+            runtime.cancellation.cancel();
+            let _ = runtime.source_task.await;
+            let _ = runtime.renewal_task.await;
+        }
+        self.reconcile_public_network().await
+    }
+
+    pub async fn sync_public_collection(&self, collection_id: Uuid) -> Result<()> {
+        let database = self.database.clone();
+        let identity = self.public_identity.clone();
+        let prepared = tokio::task::spawn_blocking(move || {
+            prepare_public_announcement(&database, &identity, collection_id)
+        })
+        .await
+        .context("se detuvo el worker del anuncio público")??;
+        let (endpoints, announcement) = prepared;
+        if endpoints.is_empty() {
+            write_lock(&self.public_announcements, "public announcement state")?.insert(
+                collection_id,
+                PublicAnnouncementState {
+                    accepted_indexes: 0,
+                    last_announced_at: Utc::now(),
+                    expires_at: Utc::now(),
+                },
+            );
+            self.audit(
+                "public_collection_not_announced",
+                "collection",
+                Some(collection_id.to_string()),
+                serde_json::json!({"reason": "no_index_configured"}),
+            )?;
+            return Ok(());
+        }
+        let accepted = match announcement {
+            PreparedPublicAnnouncement::Manifest(manifest) => self
+                .public_reader
+                .register_manifest(&endpoints, manifest)
+                .await
+                .map_err(|error| anyhow!(error.to_string()))?,
+            PreparedPublicAnnouncement::Tombstone(tombstone) => self
+                .public_reader
+                .withdraw_manifest(&endpoints, tombstone)
+                .await
+                .map_err(|error| anyhow!(error.to_string()))?,
+            PreparedPublicAnnouncement::Missing => return Ok(()),
+        };
+        let now = Utc::now();
+        write_lock(&self.public_announcements, "public announcement state")?.insert(
+            collection_id,
+            PublicAnnouncementState {
+                accepted_indexes: accepted,
+                last_announced_at: now,
+                expires_at: now + ChronoDuration::minutes(15),
+            },
+        );
+        self.audit(
+            "public_collection_catalog_updated",
+            "collection",
+            Some(collection_id.to_string()),
+            serde_json::json!({"accepted_indexes": accepted}),
+        )
+    }
+
+    pub async fn sync_all_public_collections(&self) -> Result<()> {
+        let database = self.database.clone();
+        let collection_ids = tokio::task::spawn_blocking(move || {
+            database.list_collections().map(|collections| {
+                collections
+                    .into_iter()
+                    .filter(|item| item.policy.internet_public)
+                    .map(|item| item.id)
+                    .collect::<Vec<_>>()
+            })
+        })
+        .await
+        .context("se detuvo el worker de colecciones públicas")??;
+        for collection_id in collection_ids {
+            self.sync_public_collection(collection_id).await?;
+        }
+        Ok(())
+    }
+
+    pub async fn renew_public_manifests(&self) -> Result<()> {
+        let database = self.database.clone();
+        tokio::task::spawn_blocking(move || {
+            for collection in database.list_collections()? {
+                if collection.policy.internet_public {
+                    let _ = database.bump_public_manifest_sequence(collection.id)?;
+                }
+            }
+            Result::<()>::Ok(())
+        })
+        .await
+        .context("se detuvo el worker de renovación pública")??;
+        self.sync_all_public_collections().await
+    }
+
+    fn public_relay_listen_addresses(&self) -> Result<Vec<Multiaddr>> {
+        self.database
+            .list_federation_indexes()?
+            .into_iter()
+            .filter(federation_index_is_active)
+            .take(3)
+            .map(|index| {
+                let peer = PeerId::from_str(&index.peer_id)
+                    .context("la identidad del relay público no es válida")?;
+                let address = Multiaddr::from_str(&index.multiaddr)
+                    .context("la dirección del relay público no es válida")?;
+                Ok(relay_circuit_address(address, peer))
+            })
+            .collect()
+    }
+
+    fn public_index_endpoints(&self) -> Result<Vec<PublicIndexEndpoint>> {
+        federation_index_endpoints(&self.database)
     }
 
     pub async fn scan_collection(&self, collection_id: Uuid) -> Result<Vec<IngestOutcome>> {
@@ -1092,6 +1475,7 @@ impl DesktopServices {
     /// while another scan is still performing inference.
     pub fn preflight_collection(&self, collection_id: Uuid) -> Result<()> {
         let _ = self.pipeline()?.preflight_collection(collection_id)?;
+        let _ = self.database.bump_public_manifest_sequence(collection_id)?;
         Ok(())
     }
 
@@ -1115,10 +1499,16 @@ impl DesktopServices {
         concept_id: Uuid,
         expected_review_version: &ReviewVersionToken,
         draft: EnrichmentDraft,
-    ) -> Result<()> {
+    ) -> Result<Uuid> {
+        let collection_id = self
+            .database
+            .concept(concept_id)?
+            .context("el concepto a publicar no existe")?
+            .collection_id;
         self.pipeline()?
             .approve(concept_id, ReviewEdits { draft }, expected_review_version)?;
-        Ok(())
+        let _ = self.database.bump_public_manifest_sequence(collection_id)?;
+        Ok(collection_id)
     }
 
     /// A rejection is fail-closed: the concept remains in NeedsReview and is
@@ -1153,6 +1543,120 @@ impl DesktopServices {
     ) -> std::result::Result<SearchResponse, SearchContractError> {
         self.federated_proxy
             .search(SearchRequest::new(question, purpose, top_k))
+            .await
+    }
+
+    pub async fn search_with_public(
+        &self,
+        question: impl Into<String>,
+        top_k: u8,
+        purpose: SearchPurpose,
+        partials: mpsc::Sender<SearchResponse>,
+    ) -> std::result::Result<SearchResponse, SearchContractError> {
+        let endpoints = self
+            .public_index_endpoints()
+            .map_err(|error| SearchContractError::Backend(error.to_string()))?;
+        let request = SearchRequest::new(question, purpose, top_k);
+        let (trusted, public) = tokio::join!(
+            self.federated_proxy.search(request.clone()),
+            self.public_reader
+                .search_with_partials(&endpoints, request, partials),
+        );
+        match (trusted, public) {
+            (Ok(trusted), Ok(public)) => Ok(merge_public_search_responses(
+                trusted,
+                public,
+                usize::from(top_k),
+            )),
+            (Ok(mut trusted), Err(_)) => {
+                trusted.partial = true;
+                trusted
+                    .warnings
+                    .push("public network is unavailable".to_owned());
+                Ok(trusted)
+            }
+            (Err(_), Ok(mut public)) => {
+                public.partial = true;
+                public
+                    .warnings
+                    .push("local or LAN search is unavailable".to_owned());
+                Ok(public)
+            }
+            (Err(error), Err(_)) => Err(error),
+        }
+    }
+
+    pub fn public_route_kind(&self) -> PublicRouteKind {
+        self.public_reader.route_kind()
+    }
+
+    pub fn add_federation_index(&self, peer_id: &str, address: &str) -> Result<()> {
+        let peer = PeerId::from_str(peer_id).context("la identidad del índice no es válida")?;
+        let address =
+            Multiaddr::from_str(address).context("la dirección del índice no es válida")?;
+        self.database.upsert_federation_index(
+            &peer.to_string(),
+            &address.to_string(),
+            true,
+            "community",
+        )?;
+        self.audit(
+            "federation_index_added",
+            "federation_index",
+            None,
+            serde_json::json!({"source": "community"}),
+        )
+    }
+
+    pub fn remove_federation_index(&self, peer_id: &str) -> Result<()> {
+        let peer = PeerId::from_str(peer_id).context("la identidad del índice no es válida")?;
+        self.database
+            .set_federation_index_enabled(&peer.to_string(), false)?;
+        self.audit(
+            "federation_index_disabled",
+            "federation_index",
+            None,
+            serde_json::json!({"source": "community"}),
+        )
+    }
+
+    pub async fn set_public_publisher_blocked(
+        &self,
+        publisher_id: &str,
+        blocked: bool,
+    ) -> Result<()> {
+        let publisher = PeerId::from_str(publisher_id)
+            .context("la identidad del publicador no es válida")?
+            .to_string();
+        self.database
+            .set_public_publisher_blocked(&publisher, blocked)?;
+        self.public_reader
+            .set_publisher_blocked(publisher, blocked)
+            .await;
+        self.audit(
+            if blocked {
+                "public_publisher_blocked"
+            } else {
+                "public_publisher_unblocked"
+            },
+            "public_publisher",
+            None,
+            serde_json::json!({"blocked": blocked}),
+        )
+    }
+
+    pub fn blocked_public_publishers(&self) -> Result<Vec<String>> {
+        self.database.list_blocked_public_publishers()
+    }
+
+    pub async fn browse_public_collection(
+        &self,
+        publisher_id: &str,
+        collection_id: Uuid,
+        cursor: Option<String>,
+    ) -> std::result::Result<PublicBrowsePage, SearchContractError> {
+        self.public_reader
+            .browse_collection(publisher_id, collection_id, cursor, 50)
             .await
     }
 
@@ -1404,11 +1908,14 @@ impl DesktopServices {
     }
 
     pub fn collection_views(&self) -> Result<Vec<CollectionView>> {
+        let announcements = read_lock(&self.public_announcements, "public announcement state")?;
         self.database
             .list_collections()?
             .into_iter()
             .map(|collection| {
                 let stats = self.database.collection_stats(collection.id)?;
+                let public_profile = self.database.public_collection_profile(collection.id)?;
+                let announcement = announcements.get(&collection.id).copied();
                 Ok(CollectionView {
                     id: collection.id,
                     name: collection.name,
@@ -1420,10 +1927,39 @@ impl DesktopServices {
                     local_only: collection.policy.local_only,
                     peer_shareable: collection.policy.peer_shareable,
                     allow_external_ai: collection.policy.allow_external_ai,
+                    internet_public: collection.policy.internet_public,
+                    public_description: public_profile
+                        .as_ref()
+                        .map(|profile| profile.description.clone())
+                        .unwrap_or_default(),
+                    public_languages: public_profile
+                        .map(|profile| profile.languages.join(", "))
+                        .unwrap_or_default(),
+                    public_accepted_indexes: announcement
+                        .map(|state| state.accepted_indexes)
+                        .unwrap_or_default(),
+                    public_last_announced_at: announcement.map(|state| state.last_announced_at),
+                    public_expires_at: announcement.map(|state| state.expires_at),
                     maintenance: self.database.collection_maintenance(collection.id)?,
                 })
             })
             .collect()
+    }
+
+    pub fn update_public_collection_profile(
+        &self,
+        collection_id: Uuid,
+        description: &str,
+        languages: &[String],
+    ) -> Result<()> {
+        self.database
+            .update_public_collection_profile(collection_id, description, languages)?;
+        self.audit(
+            "public_collection_profile_updated",
+            "collection",
+            Some(collection_id.to_string()),
+            serde_json::json!({"language_count": languages.len()}),
+        )
     }
 
     /// Builds the read-only bundle snapshot used by the local Wiki, graph and
@@ -1901,6 +2437,16 @@ impl DesktopServices {
             runtime.event_forwarder.abort();
             runtime.task.abort();
         }
+        let public_network = self
+            .public_network
+            .get_mut()
+            .map_err(|_| anyhow!("public network runtime lock is poisoned"))?
+            .take();
+        if let Some(runtime) = public_network {
+            runtime.cancellation.cancel();
+            let _ = runtime.source_task.await;
+            let _ = runtime.renewal_task.await;
+        }
         Ok(())
     }
 
@@ -2150,6 +2696,208 @@ fn transient_source_issues_from_outcomes(outcomes: &[IngestOutcome]) -> Vec<Tran
             _ => None,
         })
         .collect()
+}
+
+fn merge_public_search_responses(
+    mut trusted: SearchResponse,
+    public: SearchResponse,
+    top_k: usize,
+) -> SearchResponse {
+    const RRF_K: f64 = 60.0;
+    let mut fused = HashMap::<(String, Uuid), (SearchHit, f64)>::new();
+    for hits in [std::mem::take(&mut trusted.hits), public.hits] {
+        for (position, hit) in hits.into_iter().enumerate() {
+            let rank = if hit.rank == 0 {
+                u32::try_from(position + 1).unwrap_or(u32::MAX)
+            } else {
+                hit.rank
+            };
+            let score = 1.0 / (RRF_K + f64::from(rank));
+            let key = (hit.source_sha256.clone(), hit.chunk_id);
+            fused
+                .entry(key)
+                .and_modify(|(_, total)| *total += score)
+                .or_insert((hit, score));
+        }
+    }
+    let mut fused = fused.into_values().collect::<Vec<_>>();
+    fused.sort_by(|left, right| {
+        right
+            .1
+            .total_cmp(&left.1)
+            .then_with(|| left.0.title.cmp(&right.0.title))
+    });
+    trusted.hits = fused
+        .into_iter()
+        .take(top_k)
+        .enumerate()
+        .map(|(position, (mut hit, _))| {
+            hit.rank = u32::try_from(position + 1).unwrap_or(u32::MAX);
+            hit
+        })
+        .collect();
+    trusted.offline_nodes.extend(public.offline_nodes);
+    trusted.offline_nodes.sort();
+    trusted.offline_nodes.dedup();
+    trusted.warnings.extend(public.warnings);
+    trusted.partial |= public.partial;
+    trusted
+}
+
+fn federation_index_is_active(index: &airwiki_core::FederationIndexRecord) -> bool {
+    index.enabled && index.expires_at.is_none_or(|expiry| expiry > Utc::now())
+}
+
+fn federation_index_endpoints(database: &Database) -> Result<Vec<PublicIndexEndpoint>> {
+    database
+        .list_federation_indexes()?
+        .into_iter()
+        .filter(federation_index_is_active)
+        .take(3)
+        .map(|index| {
+            Ok(PublicIndexEndpoint {
+                peer_id: PeerId::from_str(&index.peer_id)
+                    .context("la identidad del índice federado no es válida")?,
+                address: Multiaddr::from_str(&index.multiaddr)
+                    .context("la dirección del índice federado no es válida")?,
+            })
+        })
+        .collect()
+}
+
+fn prepare_public_announcement(
+    database: &Database,
+    identity: &NodeIdentity,
+    collection_id: Uuid,
+) -> Result<(Vec<PublicIndexEndpoint>, PreparedPublicAnnouncement)> {
+    let endpoints = federation_index_endpoints(database)?;
+    let Some(collection) = database.collection(collection_id)? else {
+        return Ok((endpoints, PreparedPublicAnnouncement::Missing));
+    };
+    let Some(profile) = database.public_collection_profile(collection_id)? else {
+        return Ok((endpoints, PreparedPublicAnnouncement::Missing));
+    };
+    let publisher_id = identity.peer_id().to_string();
+    if !collection.policy.internet_public {
+        let tombstone = sign_tombstone(
+            identity.keypair(),
+            PublicCollectionTombstone {
+                protocol_version: PUBLIC_CATALOG_PROTOCOL.to_owned(),
+                publisher_id,
+                collection_id,
+                sequence: profile.manifest_sequence,
+                withdrawn_at: Utc::now(),
+            },
+        )?;
+        return Ok((endpoints, PreparedPublicAnnouncement::Tombstone(tombstone)));
+    }
+    let material = database.public_manifest_material(collection_id)?;
+    if material.concept_count == 0 {
+        let tombstone = sign_tombstone(
+            identity.keypair(),
+            PublicCollectionTombstone {
+                protocol_version: PUBLIC_CATALOG_PROTOCOL.to_owned(),
+                publisher_id,
+                collection_id,
+                sequence: profile.manifest_sequence,
+                withdrawn_at: Utc::now(),
+            },
+        )?;
+        return Ok((endpoints, PreparedPublicAnnouncement::Tombstone(tombstone)));
+    }
+    let fingerprint = database.public_collection_fingerprint(collection_id)?;
+    let routes = endpoints
+        .iter()
+        .map(|endpoint| {
+            relayed_peer_address(
+                endpoint.address.clone(),
+                endpoint.peer_id,
+                identity.peer_id(),
+            )
+            .to_string()
+        })
+        .collect();
+    let now = Utc::now();
+    let manifest = sign_manifest(
+        identity.keypair(),
+        PublicCollectionManifest {
+            protocol_version: PUBLIC_CATALOG_PROTOCOL.to_owned(),
+            publisher_id,
+            collection_id,
+            sequence: profile.manifest_sequence,
+            publication_fingerprint: fingerprint,
+            name: collection.name,
+            description: profile.description,
+            languages: profile.languages,
+            concept_count: material.concept_count,
+            routing_terms: material.routing_terms,
+            routes,
+            updated_at: material.updated_at.max(now),
+            expires_at: now + ChronoDuration::minutes(15),
+        },
+    )?;
+    Ok((endpoints, PreparedPublicAnnouncement::Manifest(manifest)))
+}
+
+async fn run_public_manifest_renewal(
+    database: Database,
+    identity: NodeIdentity,
+    reader: Arc<PublicReader>,
+    cancellation: CancellationToken,
+) {
+    loop {
+        tokio::select! {
+            biased;
+            () = cancellation.cancelled() => return,
+            () = tokio::time::sleep(Duration::from_secs(5 * 60)) => {}
+        }
+        let database = database.clone();
+        let identity = identity.clone();
+        let prepared = tokio::task::spawn_blocking(move || {
+            let mut updates = Vec::new();
+            for collection in database.list_collections()? {
+                if !collection.policy.internet_public {
+                    continue;
+                }
+                let _ = database.bump_public_manifest_sequence(collection.id)?;
+                updates.push(prepare_public_announcement(
+                    &database,
+                    &identity,
+                    collection.id,
+                )?);
+            }
+            Result::<Vec<_>>::Ok(updates)
+        })
+        .await;
+        let Ok(Ok(updates)) = prepared else {
+            tracing::warn!(
+                error_kind = "public_manifest_preparation_failed",
+                "public manifest renewal failed"
+            );
+            continue;
+        };
+        let mut accepted = 0_usize;
+        let mut failed = 0_usize;
+        for (endpoints, update) in updates {
+            if endpoints.is_empty() {
+                continue;
+            }
+            let result = match update {
+                PreparedPublicAnnouncement::Manifest(manifest) => {
+                    reader.register_manifest(&endpoints, manifest).await
+                }
+                PreparedPublicAnnouncement::Tombstone(tombstone) => {
+                    reader.withdraw_manifest(&endpoints, tombstone).await
+                }
+                PreparedPublicAnnouncement::Missing => continue,
+            };
+            match result {
+                Ok(count) => accepted = accepted.saturating_add(count),
+                Err(_) => failed = failed.saturating_add(1),
+            }
+        }
+        tracing::info!(accepted, failed, "public manifests renewed");
+    }
 }
 
 fn source_issue_reason(message: &str, code: SourceIssueCode) -> Option<String> {
@@ -2903,6 +3651,7 @@ mod tests {
                     local_only: true,
                     peer_shareable: false,
                     allow_external_ai: true,
+                    internet_public: false,
                 },
             )
             .unwrap();
@@ -2925,6 +3674,7 @@ mod tests {
                     local_only: false,
                     peer_shareable: true,
                     allow_external_ai: true,
+                    internet_public: false,
                 },
             )
             .unwrap();
@@ -2962,6 +3712,7 @@ mod tests {
                     local_only: false,
                     peer_shareable: true,
                     allow_external_ai: true,
+                    internet_public: false,
                 },
             )
             .unwrap();

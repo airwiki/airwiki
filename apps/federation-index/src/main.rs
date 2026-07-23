@@ -9,6 +9,7 @@ use airwiki_federation_index::{CatalogBackend, CatalogStore};
 use airwiki_network::{
     FileSecretStore, Multiaddr, NodeIdentity, PublicCatalogServerConfig, run_public_catalog_server,
 };
+use tokio::signal;
 use tokio_util::sync::CancellationToken;
 
 enum LaunchMode {
@@ -60,12 +61,31 @@ fn parse_multiaddr(address: OsString, kind: &str) -> Result<Multiaddr, String> {
     Multiaddr::from_str(&address).map_err(|_| format!("{kind} multiaddress is invalid"))
 }
 
+async fn shutdown_signal() -> std::io::Result<()> {
+    #[cfg(unix)]
+    {
+        let mut terminate = signal::unix::signal(signal::unix::SignalKind::terminate())?;
+        tokio::select! {
+            result = signal::ctrl_c() => result,
+            _ = terminate.recv() => Ok(()),
+        }
+    }
+    #[cfg(not(unix))]
+    {
+        signal::ctrl_c().await
+    }
+}
+
 #[tokio::main]
 async fn main() -> ExitCode {
     tracing_subscriber::fmt()
         .with_env_filter(
             tracing_subscriber::EnvFilter::try_from_default_env()
-                .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("info")),
+                .unwrap_or_else(|_| {
+                    tracing_subscriber::EnvFilter::new(
+                        "warn,airwiki_federation_index=info,airwiki_network=info,libp2p=off,libp2p_swarm=off",
+                    )
+                }),
         )
         .init();
     let mut args = env::args_os().skip(1);
@@ -123,7 +143,7 @@ async fn main() -> ExitCode {
                 ExitCode::FAILURE
             }
         },
-        signal = tokio::signal::ctrl_c() => {
+        signal = shutdown_signal() => {
             if signal.is_err() {
                 return ExitCode::FAILURE;
             }

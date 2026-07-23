@@ -1,4 +1,4 @@
-use std::net::TcpListener;
+use std::net::{Ipv4Addr, SocketAddrV4, TcpListener, UdpSocket};
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -188,20 +188,23 @@ async fn public_search_round_trip_needs_no_lan_pairing_or_grant() {
 
 #[tokio::test]
 async fn public_search_and_browse_use_outbound_relay_reservation() {
-    let index_port = available_port();
-    let source_port = available_port();
+    let (index_port, source_port) = available_udp_ports();
     let index_identity = identity();
     let source_identity = identity();
     let collection_id = Uuid::new_v4();
-    let index_address: Multiaddr = format!("/ip4/127.0.0.1/tcp/{index_port}").parse().unwrap();
-    let source_address: Multiaddr = format!("/ip4/127.0.0.1/tcp/{source_port}").parse().unwrap();
+    let index_address: Multiaddr = format!("/ip4/127.0.0.1/udp/{index_port}/quic-v1")
+        .parse()
+        .unwrap();
+    let source_address: Multiaddr = format!("/ip4/127.0.0.1/udp/{source_port}/quic-v1")
+        .parse()
+        .unwrap();
     let catalog_cancellation = CancellationToken::new();
     let source_cancellation = CancellationToken::new();
     let catalog_task = tokio::spawn(run_public_catalog_server(
         index_identity.clone(),
         airwiki_network::PublicCatalogServerConfig::new(vec![index_address.clone()])
             .with_external_addresses(vec![
-                format!("/dns4/relay.invalid/tcp/{index_port}")
+                format!("/dns4/relay.invalid/udp/{index_port}/quic-v1")
                     .parse()
                     .unwrap(),
             ]),
@@ -215,12 +218,13 @@ async fn public_search_and_browse_use_outbound_relay_reservation() {
         index_address.clone(),
         index_identity.peer_id(),
     )];
+    let source_backend = Arc::new(PublicFixtureBackend {
+        gate: DisclosureGate::default(),
+    });
     let source_task = tokio::spawn(run_public_source_server(
         source_identity.clone(),
         source_config,
-        Arc::new(PublicFixtureBackend {
-            gate: DisclosureGate::default(),
-        }),
+        source_backend.clone(),
         source_cancellation.clone(),
     ));
     tokio::time::sleep(Duration::from_millis(250)).await;
@@ -262,7 +266,7 @@ async fn public_search_and_browse_use_outbound_relay_reservation() {
 
     let response = reader
         .search(
-            &[endpoint],
+            std::slice::from_ref(&endpoint),
             SearchRequest::new("atlas recovery", SearchPurpose::LocalAssistant, 5),
         )
         .await
@@ -273,14 +277,52 @@ async fn public_search_and_browse_use_outbound_relay_reservation() {
     assert_eq!(page.concepts.len(), 1);
     assert_eq!(reader.route_kind(), PublicRouteKind::Relay);
 
-    catalog_cancellation.cancel();
     source_cancellation.cancel();
-    tokio::time::timeout(Duration::from_secs(2), catalog_task)
+    tokio::time::timeout(Duration::from_secs(2), source_task)
         .await
         .unwrap()
         .unwrap()
         .unwrap();
-    tokio::time::timeout(Duration::from_secs(2), source_task)
+
+    UdpSocket::bind(SocketAddrV4::new(Ipv4Addr::LOCALHOST, source_port))
+        .expect("relay shutdown should release the source QUIC listener before returning");
+
+    let restarted_cancellation = CancellationToken::new();
+    let mut restarted_config = PublicSourceServerConfig::new(vec![
+        format!("/ip4/127.0.0.1/udp/{source_port}/quic-v1")
+            .parse()
+            .unwrap(),
+    ]);
+    restarted_config.relay_addresses = vec![relay_circuit_address(
+        endpoint.address.clone(),
+        index_identity.peer_id(),
+    )];
+    let restarted_task = tokio::spawn(run_public_source_server(
+        source_identity,
+        restarted_config,
+        source_backend,
+        restarted_cancellation.clone(),
+    ));
+    tokio::time::sleep(Duration::from_millis(250)).await;
+
+    let response = reader
+        .search(
+            std::slice::from_ref(&endpoint),
+            SearchRequest::new("atlas recovery", SearchPurpose::LocalAssistant, 5),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.hits.len(), 1);
+    assert_eq!(reader.route_kind(), PublicRouteKind::Relay);
+
+    restarted_cancellation.cancel();
+    tokio::time::timeout(Duration::from_secs(2), restarted_task)
+        .await
+        .unwrap()
+        .unwrap()
+        .unwrap();
+    catalog_cancellation.cancel();
+    tokio::time::timeout(Duration::from_secs(2), catalog_task)
         .await
         .unwrap()
         .unwrap()
@@ -297,4 +339,13 @@ fn available_port() -> u16 {
         .local_addr()
         .unwrap()
         .port()
+}
+
+fn available_udp_ports() -> (u16, u16) {
+    let first = UdpSocket::bind((Ipv4Addr::LOCALHOST, 0)).unwrap();
+    let second = UdpSocket::bind((Ipv4Addr::LOCALHOST, 0)).unwrap();
+    (
+        first.local_addr().unwrap().port(),
+        second.local_addr().unwrap().port(),
+    )
 }

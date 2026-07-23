@@ -24,6 +24,7 @@ const PUBLIC_CONCURRENT_STREAMS: usize = 64;
 const PUBLIC_INBOUND_TASKS: usize = 32;
 const PUBLIC_LISTEN_RETRY: Duration = Duration::from_millis(250);
 const PUBLIC_LISTENER_SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(2);
+const PUBLIC_LISTENER_RELEASE_TIMEOUT: Duration = Duration::from_secs(2);
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum PublicSearchWireResponse {
@@ -159,14 +160,16 @@ pub async fn run_public_source_server(
             "no public source listen address".to_owned(),
         ));
     }
-    let addresses = config
-        .listen_addresses
-        .into_iter()
+    let request_timeout = config.request_timeout;
+    let listen_addresses = config.listen_addresses;
+    let addresses = listen_addresses
+        .iter()
+        .cloned()
         .chain(config.relay_addresses)
         .collect::<Vec<_>>();
     let mut retry_count = 0_u32;
     let (mut swarm, mut listeners) = loop {
-        let mut swarm = public_source_swarm(&identity, config.request_timeout)?;
+        let mut swarm = public_source_swarm(&identity, request_timeout)?;
         let mut listeners = Vec::with_capacity(addresses.len());
         let mut retry = false;
         for address in &addresses {
@@ -211,9 +214,15 @@ pub async fn run_public_source_server(
                     .drain(..)
                     .filter(|listener| swarm.remove_listener(*listener))
                     .collect::<HashSet<_>>();
+                let connected_peers = swarm.connected_peers().copied().collect::<Vec<_>>();
+                for peer in connected_peers {
+                    let _ = swarm.disconnect_peer_id(peer);
+                }
                 tasks.abort_all();
                 while tasks.join_next().await.is_some() {}
-                await_listener_shutdown(&mut swarm, pending_listeners).await;
+                await_swarm_shutdown(&mut swarm, pending_listeners).await;
+                drop(swarm);
+                await_listener_release(&listen_addresses).await;
                 return Ok(());
             }
             completion = tasks.join_next(), if !tasks.is_empty() => {
@@ -264,15 +273,15 @@ pub async fn run_public_source_server(
     }
 }
 
-async fn await_listener_shutdown(
+async fn await_swarm_shutdown(
     swarm: &mut libp2p::Swarm<SourceBehaviour>,
     mut pending_listeners: HashSet<ListenerId>,
 ) {
-    if pending_listeners.is_empty() {
+    if pending_listeners.is_empty() && swarm.connected_peers().next().is_none() {
         return;
     }
     let shutdown = async {
-        while !pending_listeners.is_empty() {
+        while !pending_listeners.is_empty() || swarm.connected_peers().next().is_some() {
             if let SwarmEvent::ListenerClosed { listener_id, .. } =
                 futures::StreamExt::select_next_some(&mut *swarm).await
             {
@@ -286,8 +295,33 @@ async fn await_listener_shutdown(
     {
         tracing::warn!(
             pending_listener_count = pending_listeners.len(),
-            error_kind = "public_source_listener_shutdown_timeout",
-            "public source listeners did not close before the shutdown deadline"
+            pending_peer_count = swarm.connected_peers().count(),
+            error_kind = "public_source_shutdown_timeout",
+            "public source transport did not close before the shutdown deadline"
+        );
+    }
+}
+
+async fn await_listener_release(addresses: &[Multiaddr]) {
+    let release = async {
+        loop {
+            if addresses.iter().all(listener_address_is_available) {
+                return;
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    };
+    if tokio::time::timeout(PUBLIC_LISTENER_RELEASE_TIMEOUT, release)
+        .await
+        .is_err()
+    {
+        tracing::warn!(
+            pending_listener_count = addresses
+                .iter()
+                .filter(|address| !listener_address_is_available(address))
+                .count(),
+            error_kind = "public_source_listener_release_timeout",
+            "public source listener sockets remain temporarily unavailable"
         );
     }
 }
@@ -337,6 +371,17 @@ fn public_source_swarm(
 }
 
 fn listener_address_is_in_use(address: &Multiaddr) -> bool {
+    matches!(
+        probe_listener_address(address),
+        Some(Err(error)) if error.kind() == std::io::ErrorKind::AddrInUse
+    )
+}
+
+fn listener_address_is_available(address: &Multiaddr) -> bool {
+    matches!(probe_listener_address(address), Some(Ok(())))
+}
+
+fn probe_listener_address(address: &Multiaddr) -> Option<std::io::Result<()>> {
     use libp2p::multiaddr::Protocol;
 
     let protocols = address.iter().collect::<Vec<_>>();
@@ -353,12 +398,9 @@ fn listener_address_is_in_use(address: &Multiaddr) -> bool {
         [Protocol::Ip6(ip), Protocol::Udp(port), Protocol::QuicV1] => {
             std::net::UdpSocket::bind(std::net::SocketAddrV6::new(*ip, *port, 0, 0)).map(drop)
         }
-        _ => return false,
+        _ => return None,
     };
-    match bind {
-        Ok(()) => false,
-        Err(error) => error.kind() == std::io::ErrorKind::AddrInUse,
-    }
+    Some(bind)
 }
 
 fn public_behaviour<Request, Response>(

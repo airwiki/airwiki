@@ -20,6 +20,7 @@ const PUBLIC_REQUEST_BYTES: u64 = 16 * 1024;
 const PUBLIC_RESPONSE_BYTES: u64 = 256 * 1024;
 const PUBLIC_CONCURRENT_STREAMS: usize = 64;
 const PUBLIC_INBOUND_TASKS: usize = 32;
+const PUBLIC_LISTEN_RETRY: Duration = Duration::from_millis(250);
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum PublicSearchWireResponse {
@@ -155,58 +156,48 @@ pub async fn run_public_source_server(
             "no public source listen address".to_owned(),
         ));
     }
-    let search = public_behaviour(PUBLIC_SEARCH_PROTOCOL, config.request_timeout)?;
-    let browse = public_behaviour(PUBLIC_BROWSE_PROTOCOL, config.request_timeout)?;
-    let local_peer = identity.peer_id();
-    let mut swarm = SwarmBuilder::with_existing_identity(identity.keypair().clone())
-        .with_tokio()
-        .with_tcp(
-            libp2p::tcp::Config::default(),
-            libp2p::noise::Config::new,
-            libp2p::yamux::Config::default,
-        )
-        .map_err(|error| NetworkError::Transport(error.to_string()))?
-        .with_quic()
-        .with_dns()
-        .map_err(|error| NetworkError::Transport(error.to_string()))?
-        .with_relay_client(libp2p::noise::Config::new, libp2p::yamux::Config::default)
-        .map_err(|error| NetworkError::Transport(error.to_string()))?
-        .with_behaviour(move |_, relay| SourceBehaviour {
-            search,
-            browse,
-            relay,
-            dcutr: libp2p::dcutr::Behaviour::new(local_peer),
-            autonat: libp2p::autonat::Behaviour::new(
-                local_peer,
-                libp2p::autonat::Config::default(),
-            ),
-            limits: libp2p::connection_limits::Behaviour::new(
-                libp2p::connection_limits::ConnectionLimits::default()
-                    .with_max_pending_incoming(Some(32))
-                    .with_max_pending_outgoing(Some(32))
-                    .with_max_established_incoming(Some(64))
-                    .with_max_established_outgoing(Some(32))
-                    .with_max_established(Some(96))
-                    .with_max_established_per_peer(Some(4)),
-            ),
-        })
-        .map_err(|error| NetworkError::Transport(error.to_string()))?
-        .build();
-    let mut listeners = Vec::new();
-    for address in config.listen_addresses {
-        listeners.push(
-            swarm
-                .listen_on(address)
-                .map_err(|error| NetworkError::Listen(error.to_string()))?,
-        );
-    }
-    for address in config.relay_addresses {
-        listeners.push(
-            swarm
-                .listen_on(address)
-                .map_err(|error| NetworkError::Listen(error.to_string()))?,
-        );
-    }
+    let addresses = config
+        .listen_addresses
+        .into_iter()
+        .chain(config.relay_addresses)
+        .collect::<Vec<_>>();
+    let mut retry_count = 0_u32;
+    let (mut swarm, mut listeners) = loop {
+        let mut swarm = public_source_swarm(&identity, config.request_timeout)?;
+        let mut listeners = Vec::with_capacity(addresses.len());
+        let mut retry = false;
+        for address in &addresses {
+            match swarm.listen_on(address.clone()) {
+                Ok(listener) => listeners.push(listener),
+                Err(_) if listener_address_is_in_use(address) => {
+                    retry = true;
+                    break;
+                }
+                Err(_) => {
+                    return Err(NetworkError::Listen(
+                        "public source listener configuration is invalid".to_owned(),
+                    ));
+                }
+            }
+        }
+        if !retry {
+            break (swarm, listeners);
+        }
+        drop(swarm);
+        retry_count = retry_count.saturating_add(1);
+        if retry_count == 1 || retry_count.is_multiple_of(20) {
+            tracing::warn!(
+                retry_count,
+                error_kind = "public_source_listen_retry",
+                "public source listeners are temporarily unavailable"
+            );
+        }
+        tokio::select! {
+            biased;
+            () = cancellation.cancelled() => return Ok(()),
+            () = tokio::time::sleep(PUBLIC_LISTEN_RETRY) => {}
+        }
+    };
     let limiter = PeerRateLimiter::new(60, Duration::from_secs(60));
     let mut tasks = JoinSet::new();
     loop {
@@ -268,6 +259,75 @@ pub async fn run_public_source_server(
     }
 }
 
+fn public_source_swarm(
+    identity: &NodeIdentity,
+    request_timeout: Duration,
+) -> Result<libp2p::Swarm<SourceBehaviour>, NetworkError> {
+    let search = public_behaviour(PUBLIC_SEARCH_PROTOCOL, request_timeout)?;
+    let browse = public_behaviour(PUBLIC_BROWSE_PROTOCOL, request_timeout)?;
+    let local_peer = identity.peer_id();
+    let swarm = SwarmBuilder::with_existing_identity(identity.keypair().clone())
+        .with_tokio()
+        .with_tcp(
+            libp2p::tcp::Config::default(),
+            libp2p::noise::Config::new,
+            libp2p::yamux::Config::default,
+        )
+        .map_err(|error| NetworkError::Transport(error.to_string()))?
+        .with_quic()
+        .with_dns()
+        .map_err(|error| NetworkError::Transport(error.to_string()))?
+        .with_relay_client(libp2p::noise::Config::new, libp2p::yamux::Config::default)
+        .map_err(|error| NetworkError::Transport(error.to_string()))?
+        .with_behaviour(move |_, relay| SourceBehaviour {
+            search,
+            browse,
+            relay,
+            dcutr: libp2p::dcutr::Behaviour::new(local_peer),
+            autonat: libp2p::autonat::Behaviour::new(
+                local_peer,
+                libp2p::autonat::Config::default(),
+            ),
+            limits: libp2p::connection_limits::Behaviour::new(
+                libp2p::connection_limits::ConnectionLimits::default()
+                    .with_max_pending_incoming(Some(32))
+                    .with_max_pending_outgoing(Some(32))
+                    .with_max_established_incoming(Some(64))
+                    .with_max_established_outgoing(Some(32))
+                    .with_max_established(Some(96))
+                    .with_max_established_per_peer(Some(4)),
+            ),
+        })
+        .map_err(|error| NetworkError::Transport(error.to_string()))?
+        .build();
+    Ok(swarm)
+}
+
+fn listener_address_is_in_use(address: &Multiaddr) -> bool {
+    use libp2p::multiaddr::Protocol;
+
+    let protocols = address.iter().collect::<Vec<_>>();
+    let bind = match protocols.as_slice() {
+        [Protocol::Ip4(ip), Protocol::Tcp(port)] => {
+            std::net::TcpListener::bind(std::net::SocketAddrV4::new(*ip, *port)).map(drop)
+        }
+        [Protocol::Ip6(ip), Protocol::Tcp(port)] => {
+            std::net::TcpListener::bind(std::net::SocketAddrV6::new(*ip, *port, 0, 0)).map(drop)
+        }
+        [Protocol::Ip4(ip), Protocol::Udp(port), Protocol::QuicV1] => {
+            std::net::UdpSocket::bind(std::net::SocketAddrV4::new(*ip, *port)).map(drop)
+        }
+        [Protocol::Ip6(ip), Protocol::Udp(port), Protocol::QuicV1] => {
+            std::net::UdpSocket::bind(std::net::SocketAddrV6::new(*ip, *port, 0, 0)).map(drop)
+        }
+        _ => return false,
+    };
+    match bind {
+        Ok(()) => false,
+        Err(error) => error.kind() == std::io::ErrorKind::AddrInUse,
+    }
+}
+
 fn public_behaviour<Request, Response>(
     protocol: &'static str,
     timeout: Duration,
@@ -311,7 +371,7 @@ fn send_completion(behaviour: &mut SourceBehaviour, completion: Completion) {
 
 #[cfg(test)]
 mod tests {
-    use std::net::{Ipv4Addr, SocketAddrV4, UdpSocket};
+    use std::net::{Ipv4Addr, SocketAddrV4, TcpListener, UdpSocket};
 
     use airwiki_types::{PublicBrowseRequest, PublicSearchRequest};
 
@@ -382,5 +442,89 @@ mod tests {
             .expect("public source server should stop cleanly");
 
         UdpSocket::bind(socket_address).expect("cancellation should release the QUIC listener");
+    }
+
+    #[tokio::test]
+    async fn busy_tcp_and_quic_ports_are_retried_until_available() {
+        let udp_reservation = UdpSocket::bind(SocketAddrV4::new(Ipv4Addr::LOCALHOST, 0))
+            .expect("reserve an ephemeral UDP port");
+        let port = udp_reservation
+            .local_addr()
+            .expect("read reserved UDP port")
+            .port();
+        let tcp_probe = TcpListener::bind(SocketAddrV4::new(Ipv4Addr::LOCALHOST, port))
+            .expect("matching TCP port should be available");
+        drop(tcp_probe);
+
+        let identity = NodeIdentity::load_or_create(&MemorySecretStore::default())
+            .expect("create test identity");
+        let listen_addresses = vec![
+            format!("/ip4/127.0.0.1/tcp/{port}")
+                .parse()
+                .expect("parse TCP listen address"),
+            format!("/ip4/127.0.0.1/udp/{port}/quic-v1")
+                .parse()
+                .expect("parse QUIC listen address"),
+        ];
+
+        let cancellation = CancellationToken::new();
+        let server = tokio::spawn(run_public_source_server(
+            identity,
+            PublicSourceServerConfig::new(listen_addresses),
+            Arc::new(RejectingBackend),
+            cancellation.clone(),
+        ));
+
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        if server.is_finished() {
+            panic!(
+                "public source server should wait for busy listeners: {:?}",
+                server.await
+            );
+        }
+        drop(udp_reservation);
+
+        tokio::time::timeout(Duration::from_secs(2), async {
+            loop {
+                let tcp_busy =
+                    TcpListener::bind(SocketAddrV4::new(Ipv4Addr::LOCALHOST, port)).is_err();
+                let udp_busy =
+                    UdpSocket::bind(SocketAddrV4::new(Ipv4Addr::LOCALHOST, port)).is_err();
+                if tcp_busy && udp_busy {
+                    break;
+                }
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+        })
+        .await
+        .expect("public source server should claim released listeners");
+
+        cancellation.cancel();
+        tokio::time::timeout(Duration::from_secs(2), server)
+            .await
+            .expect("public source server should stop promptly")
+            .expect("public source task should not panic")
+            .expect("public source server should stop cleanly");
+    }
+
+    #[tokio::test]
+    async fn unsupported_listener_returns_an_error_without_retrying() {
+        let identity = NodeIdentity::load_or_create(&MemorySecretStore::default())
+            .expect("create test identity");
+        let unsupported = "/memory/1".parse().expect("parse unsupported address");
+
+        let result = tokio::time::timeout(
+            Duration::from_secs(2),
+            run_public_source_server(
+                identity,
+                PublicSourceServerConfig::new(vec![unsupported]),
+                Arc::new(RejectingBackend),
+                CancellationToken::new(),
+            ),
+        )
+        .await
+        .expect("unsupported listener should fail without retrying");
+
+        assert!(matches!(result, Err(NetworkError::Listen(_))));
     }
 }

@@ -16,6 +16,27 @@ AirWiki candidates on different NATs. Use synthetic documents only.
 4. Confirm index logs contain only bounded counts, duration and error classes;
    they must not contain PeerIds, IPs, queries, snippets or routes.
 
+### Azure validation relay
+
+For temporary Azure acceptance, use one Ubuntu 24.04 x64 VM with a Standard
+static public IPv4 and a managed OS disk. A direct VM address is sufficient for
+this bounded validation workload; do not add a load balancer, public database,
+container registry or general inbound rule.
+
+Associate a Network Security Group that allows SSH only from the maintainer's
+current public address and allows TCP/UDP `42042` from the Internet. All other
+inbound traffic remains denied by the Standard public IP secure-by-default
+policy. Install the release binary with
+`packaging/federation-index/azure-install.sh`; the script creates an
+unprivileged `airwiki` service, persists SQLite and identity under
+`/var/lib/airwiki-federation`, and advertises the same static IPv4 used by both
+listeners.
+
+Put every temporary Azure resource in one dedicated resource group. After
+acceptance, expire the bootstrap registry first and then delete the whole
+resource group so the VM, disk, NIC, NSG and public IP cannot continue billing
+independently.
+
 ### Temporary validation host
 
 Use a dedicated Windows x64 validation PC on a network different from both

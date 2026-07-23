@@ -1529,11 +1529,8 @@ impl DesktopServices {
     }
 
     fn public_relay_listen_addresses(&self) -> Result<Vec<Multiaddr>> {
-        self.database
-            .list_federation_indexes()?
+        selected_federation_indexes(&self.database)?
             .into_iter()
-            .filter(federation_index_is_active)
-            .take(3)
             .map(|index| {
                 let peer = PeerId::from_str(&index.peer_id)
                     .context("la identidad del relay público no es válida")?;
@@ -2833,12 +2830,34 @@ fn federation_index_is_active(index: &airwiki_core::FederationIndexRecord) -> bo
     index.enabled && index.expires_at.is_none_or(|expiry| expiry > Utc::now())
 }
 
-fn federation_index_endpoints(database: &Database) -> Result<Vec<PublicIndexEndpoint>> {
-    database
+fn selected_federation_indexes(
+    database: &Database,
+) -> Result<Vec<airwiki_core::FederationIndexRecord>> {
+    let mut indexes = database
         .list_federation_indexes()?
         .into_iter()
         .filter(federation_index_is_active)
-        .take(3)
+        .collect::<Vec<_>>();
+    indexes.sort_by(|left, right| {
+        federation_index_priority(left)
+            .cmp(&federation_index_priority(right))
+            .then_with(|| left.peer_id.cmp(&right.peer_id))
+    });
+    indexes.truncate(3);
+    Ok(indexes)
+}
+
+fn federation_index_priority(index: &airwiki_core::FederationIndexRecord) -> u8 {
+    match index.source.as_str() {
+        "community" => 0,
+        "bootstrap" => 1,
+        _ => 2,
+    }
+}
+
+fn federation_index_endpoints(database: &Database) -> Result<Vec<PublicIndexEndpoint>> {
+    selected_federation_indexes(database)?
+        .into_iter()
         .map(|index| {
             Ok(PublicIndexEndpoint {
                 peer_id: PeerId::from_str(&index.peer_id)
@@ -3336,6 +3355,44 @@ mod tests {
         let indexes = parse_bundled_bootstrap_federation_indexes(Some(&expired)).unwrap();
         install_bundled_bootstrap_federation_indexes(&database, indexes).unwrap();
         assert!(database.list_federation_indexes().unwrap().is_empty());
+    }
+
+    #[test]
+    fn community_index_takes_priority_over_the_bundled_index_budget() {
+        let database = Database::in_memory().unwrap();
+        for offset in 1..=3 {
+            database
+                .upsert_bootstrap_federation_index(
+                    &test_public_peer_id(),
+                    &format!("/ip6/2001:db8::{offset}/tcp/42042"),
+                    1,
+                    Utc::now() + ChronoDuration::days(1),
+                )
+                .unwrap();
+        }
+        let community_peer_id = test_public_peer_id();
+        database
+            .upsert_federation_index(
+                &community_peer_id,
+                "/ip6/2001:db8::4/tcp/42042",
+                true,
+                "community",
+            )
+            .unwrap();
+
+        let selected = selected_federation_indexes(&database).unwrap();
+
+        assert_eq!(selected.len(), 3);
+        let first = selected.first().unwrap();
+        assert_eq!(first.peer_id, community_peer_id);
+        assert_eq!(first.source, "community");
+        assert_eq!(
+            selected
+                .iter()
+                .filter(|index| index.source == "bootstrap")
+                .count(),
+            2
+        );
     }
 
     #[test]

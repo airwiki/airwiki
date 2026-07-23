@@ -6,7 +6,10 @@ AirWiki candidates on different NATs. Use synthetic documents only.
 ## Setup
 
 1. Start at least one `airwiki-federation-index` on a reachable host and record
-   its exact PeerId and TCP/QUIC multiaddresses.
+   its exact PeerId and TCP/QUIC multiaddresses. Pass each externally reachable
+   address with `--external-address`; bind addresses and externally advertised
+   addresses are intentionally separate. A wildcard bind such as `0.0.0.0`
+   must never be advertised.
 2. Add that pinned PeerId and address to both desktops under **Public network**.
 3. On the publisher, create a synthetic collection, review and publish one
    document, then enable public exposure and accept the disclosure warning.
@@ -42,6 +45,21 @@ Obtain each identity explicitly, outside normal logs:
 ```powershell
 airwiki-federation-index.exe C:\AirWikiFederation\index-1.db --print-peer-id
 ```
+
+Start each process with its wildcard bind addresses and the corresponding
+public addresses confirmed from another network. For example:
+
+```powershell
+airwiki-federation-index.exe C:\AirWikiFederation\index-1.db `
+  --external-address /ip6/2001:db8::10/tcp/42042 `
+  --external-address /ip6/2001:db8::10/udp/42042/quic-v1 `
+  /ip6/::/tcp/42042 /ip6/::/udp/42042/quic-v1
+```
+
+The documentation-only `2001:db8::/32` address above must be replaced locally;
+never commit or share the validation host address. If neither transport is
+reachable from another network, the machine cannot act as a relay even when
+its local listener and firewall rule are healthy.
 
 After the validation window, stop all three processes, move their databases and
 secret directories to the Recycle Bin, and remove the validation-host firewall

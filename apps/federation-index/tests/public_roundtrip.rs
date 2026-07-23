@@ -5,8 +5,9 @@ use std::time::Duration;
 use airwiki_federation_index::{CatalogBackend, CatalogStore};
 use airwiki_network::{
     MemorySecretStore, Multiaddr, NodeIdentity, PublicBrowseDelivery, PublicIndexEndpoint,
-    PublicReader, PublicSearchDelivery, PublicSourceBackend, PublicSourceBackendError,
-    PublicSourceServerConfig, run_public_catalog_server, run_public_source_server, sign_manifest,
+    PublicReader, PublicRouteKind, PublicSearchDelivery, PublicSourceBackend,
+    PublicSourceBackendError, PublicSourceServerConfig, relay_circuit_address,
+    relayed_peer_address, run_public_catalog_server, run_public_source_server, sign_manifest,
 };
 use airwiki_types::{
     ConceptType, DisclosureGate, PUBLIC_BROWSE_PROTOCOL, PUBLIC_CATALOG_PROTOCOL,
@@ -170,6 +171,107 @@ async fn public_search_round_trip_needs_no_lan_pairing_or_grant() {
     let page = reader.browse(&manifest, None, 50).await.unwrap();
     assert_eq!(page.concepts.len(), 1);
     assert_eq!(page.concepts[0].collection_id, collection_id);
+
+    catalog_cancellation.cancel();
+    source_cancellation.cancel();
+    tokio::time::timeout(Duration::from_secs(2), catalog_task)
+        .await
+        .unwrap()
+        .unwrap()
+        .unwrap();
+    tokio::time::timeout(Duration::from_secs(2), source_task)
+        .await
+        .unwrap()
+        .unwrap()
+        .unwrap();
+}
+
+#[tokio::test]
+async fn public_search_and_browse_use_outbound_relay_reservation() {
+    let index_port = available_port();
+    let source_port = available_port();
+    let index_identity = identity();
+    let source_identity = identity();
+    let collection_id = Uuid::new_v4();
+    let index_address: Multiaddr = format!("/ip4/127.0.0.1/tcp/{index_port}").parse().unwrap();
+    let source_address: Multiaddr = format!("/ip4/127.0.0.1/tcp/{source_port}").parse().unwrap();
+    let catalog_cancellation = CancellationToken::new();
+    let source_cancellation = CancellationToken::new();
+    let catalog_task = tokio::spawn(run_public_catalog_server(
+        index_identity.clone(),
+        airwiki_network::PublicCatalogServerConfig::new(vec![index_address.clone()])
+            .with_external_addresses(vec![
+                format!("/dns4/relay.invalid/tcp/{index_port}")
+                    .parse()
+                    .unwrap(),
+            ]),
+        Arc::new(CatalogBackend::new(Arc::new(
+            CatalogStore::in_memory().unwrap(),
+        ))),
+        catalog_cancellation.clone(),
+    ));
+    let mut source_config = PublicSourceServerConfig::new(vec![source_address]);
+    source_config.relay_addresses = vec![relay_circuit_address(
+        index_address.clone(),
+        index_identity.peer_id(),
+    )];
+    let source_task = tokio::spawn(run_public_source_server(
+        source_identity.clone(),
+        source_config,
+        Arc::new(PublicFixtureBackend {
+            gate: DisclosureGate::default(),
+        }),
+        source_cancellation.clone(),
+    ));
+    tokio::time::sleep(Duration::from_millis(250)).await;
+
+    let endpoint = PublicIndexEndpoint {
+        peer_id: index_identity.peer_id(),
+        address: index_address.clone(),
+    };
+    let now = Utc::now();
+    let relayed_route = relayed_peer_address(
+        index_address,
+        index_identity.peer_id(),
+        source_identity.peer_id(),
+    );
+    let manifest = sign_manifest(
+        source_identity.keypair(),
+        PublicCollectionManifest {
+            protocol_version: PUBLIC_CATALOG_PROTOCOL.to_owned(),
+            publisher_id: source_identity.peer_id().to_string(),
+            collection_id,
+            sequence: 1,
+            publication_fingerprint: "a".repeat(64),
+            name: "Atlas public runbooks".to_owned(),
+            description: "Synthetic public collection".to_owned(),
+            languages: vec!["en".to_owned()],
+            concept_count: 1,
+            routing_terms: vec!["atlas".to_owned(), "recovery".to_owned()],
+            routes: vec![relayed_route.to_string()],
+            updated_at: now,
+            expires_at: now + ChronoDuration::minutes(15),
+        },
+    )
+    .unwrap();
+    let reader = PublicReader::new();
+    reader
+        .register_manifest(std::slice::from_ref(&endpoint), manifest.clone())
+        .await
+        .unwrap();
+
+    let response = reader
+        .search(
+            &[endpoint],
+            SearchRequest::new("atlas recovery", SearchPurpose::LocalAssistant, 5),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.hits.len(), 1);
+    assert_eq!(reader.route_kind(), PublicRouteKind::Relay);
+    let page = reader.browse(&manifest, None, 50).await.unwrap();
+    assert_eq!(page.concepts.len(), 1);
+    assert_eq!(reader.route_kind(), PublicRouteKind::Relay);
 
     catalog_cancellation.cancel();
     source_cancellation.cancel();

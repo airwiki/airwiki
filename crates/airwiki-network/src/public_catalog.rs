@@ -87,6 +87,7 @@ pub trait PublicCatalogBackend: Send + Sync + 'static {
 #[derive(Debug, Clone)]
 pub struct PublicCatalogServerConfig {
     pub listen_addresses: Vec<Multiaddr>,
+    pub external_addresses: Vec<Multiaddr>,
     pub request_timeout: Duration,
 }
 
@@ -108,8 +109,14 @@ impl PublicCatalogServerConfig {
     pub fn new(listen_addresses: Vec<Multiaddr>) -> Self {
         Self {
             listen_addresses,
+            external_addresses: Vec::new(),
             request_timeout: Duration::from_millis(800),
         }
+    }
+
+    pub fn with_external_addresses(mut self, external_addresses: Vec<Multiaddr>) -> Self {
+        self.external_addresses = external_addresses;
+        self
     }
 }
 
@@ -169,6 +176,10 @@ pub async fn run_public_catalog_server(
             .listen_on(address)
             .map_err(|error| NetworkError::Listen(error.to_string()))?;
     }
+    for address in config.external_addresses {
+        validate_relay_external_address(&address)?;
+        swarm.add_external_address(address);
+    }
     let limiter = PeerRateLimiter::new(120, Duration::from_secs(60));
     let mut tasks = JoinSet::<CatalogCompletion>::new();
     loop {
@@ -216,6 +227,66 @@ pub async fn run_public_catalog_server(
     }
 }
 
+fn validate_relay_external_address(address: &Multiaddr) -> Result<(), NetworkError> {
+    use libp2p::multiaddr::Protocol;
+
+    let protocols = address.iter().collect::<Vec<_>>();
+    let valid = match protocols.as_slice() {
+        [host, Protocol::Tcp(port)] if *port != 0 => relay_host_is_publicly_routable(host),
+        [host, Protocol::Udp(port), Protocol::QuicV1] if *port != 0 => {
+            relay_host_is_publicly_routable(host)
+        }
+        _ => false,
+    };
+    if !valid {
+        return Err(NetworkError::Listen(
+            "invalid public relay external address".to_owned(),
+        ));
+    }
+    Ok(())
+}
+
+fn relay_host_is_publicly_routable(host: &libp2p::multiaddr::Protocol<'_>) -> bool {
+    match host {
+        libp2p::multiaddr::Protocol::Ip4(ip) => ipv4_is_publicly_routable(*ip),
+        libp2p::multiaddr::Protocol::Ip6(ip) => ipv6_is_publicly_routable(*ip),
+        libp2p::multiaddr::Protocol::Dns(_)
+        | libp2p::multiaddr::Protocol::Dns4(_)
+        | libp2p::multiaddr::Protocol::Dns6(_)
+        | libp2p::multiaddr::Protocol::Dnsaddr(_) => true,
+        _ => false,
+    }
+}
+
+fn ipv4_is_publicly_routable(ip: std::net::Ipv4Addr) -> bool {
+    let [first, second, third, fourth] = ip.octets();
+    !(first == 0
+        || ip.is_private()
+        || (first == 100 && (64..=127).contains(&second))
+        || ip.is_loopback()
+        || ip.is_link_local()
+        || (first == 192 && second == 0 && third == 0 && !matches!(fourth, 9 | 10))
+        || ip.is_documentation()
+        || (first == 198 && matches!(second, 18 | 19))
+        || first >= 240
+        || ip.is_broadcast()
+        || ip.is_multicast())
+}
+
+fn ipv6_is_publicly_routable(ip: std::net::Ipv6Addr) -> bool {
+    let segments = ip.segments();
+    let is_global_unicast = segments[0] & 0xe000 == 0x2000;
+    let is_documentation =
+        matches!(segments, [0x2001, 0xdb8, ..]) || matches!(segments, [0x3fff, 0..=0x0fff, ..]);
+    let is_special_2001 = matches!(segments, [0x2001, second, ..] if second < 0x0200)
+        && !(u128::from_be_bytes(ip.octets()) == 0x2001_0001_0000_0000_0000_0000_0000_0001
+            || u128::from_be_bytes(ip.octets()) == 0x2001_0001_0000_0000_0000_0000_0000_0002
+            || matches!(segments, [0x2001, 3, ..])
+            || matches!(segments, [0x2001, 4, 0x0112, ..])
+            || matches!(segments, [0x2001, 0x20..=0x3f, ..]));
+    is_global_unicast && !is_documentation && !is_special_2001 && !matches!(segments, [0x2002, ..])
+}
+
 async fn handle_request(
     backend: &dyn PublicCatalogBackend,
     request: CatalogWireRequest,
@@ -229,5 +300,48 @@ async fn handle_request(
         Ok(Some(manifests)) => CatalogWireResponse::Results(manifests),
         Ok(None) => CatalogWireResponse::Accepted,
         Err(error) => CatalogWireResponse::Rejected(error.rejection()),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn relay_external_address_rejects_non_public_hosts() {
+        let wildcard = "/ip4/0.0.0.0/tcp/42042".parse().unwrap();
+        let loopback = "/ip4/127.0.0.1/tcp/42042".parse().unwrap();
+        let private = "/ip4/192.168.1.10/tcp/42042".parse().unwrap();
+        let documentation = "/ip6/2001:db8::10/udp/42042/quic-v1".parse().unwrap();
+
+        assert!(validate_relay_external_address(&wildcard).is_err());
+        assert!(validate_relay_external_address(&loopback).is_err());
+        assert!(validate_relay_external_address(&private).is_err());
+        assert!(validate_relay_external_address(&documentation).is_err());
+    }
+
+    #[test]
+    fn relay_external_address_rejects_incomplete_or_extended_transports() {
+        let quic_without_udp = "/dns4/relay.example.org/quic-v1".parse().unwrap();
+        let tcp_with_peer = format!(
+            "/dns4/relay.example.org/tcp/42042/p2p/{}",
+            libp2p::PeerId::random()
+        )
+        .parse()
+        .unwrap();
+
+        assert!(validate_relay_external_address(&quic_without_udp).is_err());
+        assert!(validate_relay_external_address(&tcp_with_peer).is_err());
+    }
+
+    #[test]
+    fn relay_external_address_accepts_direct_tcp_and_quic_routes() {
+        let tcp = "/dns4/relay.example.org/tcp/42042".parse().unwrap();
+        let quic = "/ip6/2606:4700:4700::1111/udp/42042/quic-v1"
+            .parse()
+            .unwrap();
+
+        assert!(validate_relay_external_address(&tcp).is_ok());
+        assert!(validate_relay_external_address(&quic).is_ok());
     }
 }

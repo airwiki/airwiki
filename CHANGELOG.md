@@ -38,6 +38,7 @@ All notable user-visible changes to AirWiki will be documented here. The project
 
 ### Fixed
 
+- Made public relay reservations advertise only operator-confirmed external addresses and covered owner search and browse through an outbound relay circuit.
 - Preserved both evidence and authorized-candidate lanes in flattened MCP output, and improved localized, width-safe diagnostics for source files that could not be processed.
 
 - Made the first pending review immediately selectable and localized model diagnostics used by the normal setup flow.

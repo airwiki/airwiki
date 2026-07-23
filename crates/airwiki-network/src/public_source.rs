@@ -1,3 +1,4 @@
+use std::collections::HashSet;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -6,6 +7,7 @@ use airwiki_types::{
     PublicBrowseRequest, PublicSearchRequest, PublicSearchResponse,
 };
 use async_trait::async_trait;
+use libp2p::core::transport::ListenerId;
 use libp2p::request_response::{self, ProtocolSupport, ResponseChannel};
 use libp2p::swarm::{NetworkBehaviour, SwarmEvent};
 use libp2p::{Multiaddr, StreamProtocol, SwarmBuilder};
@@ -21,6 +23,7 @@ const PUBLIC_RESPONSE_BYTES: u64 = 256 * 1024;
 const PUBLIC_CONCURRENT_STREAMS: usize = 64;
 const PUBLIC_INBOUND_TASKS: usize = 32;
 const PUBLIC_LISTEN_RETRY: Duration = Duration::from_millis(250);
+const PUBLIC_LISTENER_SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(2);
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum PublicSearchWireResponse {
@@ -204,11 +207,13 @@ pub async fn run_public_source_server(
         tokio::select! {
             biased;
             () = cancellation.cancelled() => {
-                for listener in listeners.drain(..) {
-                    let _ = swarm.remove_listener(listener);
-                }
+                let pending_listeners = listeners
+                    .drain(..)
+                    .filter(|listener| swarm.remove_listener(*listener))
+                    .collect::<HashSet<_>>();
                 tasks.abort_all();
                 while tasks.join_next().await.is_some() {}
+                await_listener_shutdown(&mut swarm, pending_listeners).await;
                 return Ok(());
             }
             completion = tasks.join_next(), if !tasks.is_empty() => {
@@ -256,6 +261,34 @@ pub async fn run_public_source_server(
                 }
             }
         }
+    }
+}
+
+async fn await_listener_shutdown(
+    swarm: &mut libp2p::Swarm<SourceBehaviour>,
+    mut pending_listeners: HashSet<ListenerId>,
+) {
+    if pending_listeners.is_empty() {
+        return;
+    }
+    let shutdown = async {
+        while !pending_listeners.is_empty() {
+            if let SwarmEvent::ListenerClosed { listener_id, .. } =
+                futures::StreamExt::select_next_some(&mut *swarm).await
+            {
+                pending_listeners.remove(&listener_id);
+            }
+        }
+    };
+    if tokio::time::timeout(PUBLIC_LISTENER_SHUTDOWN_TIMEOUT, shutdown)
+        .await
+        .is_err()
+    {
+        tracing::warn!(
+            pending_listener_count = pending_listeners.len(),
+            error_kind = "public_source_listener_shutdown_timeout",
+            "public source listeners did not close before the shutdown deadline"
+        );
     }
 }
 
@@ -442,6 +475,61 @@ mod tests {
             .expect("public source server should stop cleanly");
 
         UdpSocket::bind(socket_address).expect("cancellation should release the QUIC listener");
+    }
+
+    #[tokio::test]
+    async fn cancellation_releases_tcp_and_quic_listeners() {
+        let reservation = UdpSocket::bind(SocketAddrV4::new(Ipv4Addr::LOCALHOST, 0))
+            .expect("reserve an ephemeral UDP port");
+        let port = reservation.local_addr().expect("read reserved port").port();
+        drop(reservation);
+        let tcp_probe = TcpListener::bind(SocketAddrV4::new(Ipv4Addr::LOCALHOST, port))
+            .expect("matching TCP port should be available");
+        drop(tcp_probe);
+
+        let identity = NodeIdentity::load_or_create(&MemorySecretStore::default())
+            .expect("create test identity");
+        let listen_addresses = vec![
+            format!("/ip4/127.0.0.1/udp/{port}/quic-v1")
+                .parse()
+                .expect("parse QUIC listen address"),
+            format!("/ip4/127.0.0.1/tcp/{port}")
+                .parse()
+                .expect("parse TCP listen address"),
+        ];
+        let cancellation = CancellationToken::new();
+        let server = tokio::spawn(run_public_source_server(
+            identity,
+            PublicSourceServerConfig::new(listen_addresses),
+            Arc::new(RejectingBackend),
+            cancellation.clone(),
+        ));
+
+        let socket_address = SocketAddrV4::new(Ipv4Addr::LOCALHOST, port);
+        tokio::time::timeout(Duration::from_secs(2), async {
+            loop {
+                let tcp_busy = TcpListener::bind(socket_address).is_err();
+                let udp_busy = UdpSocket::bind(socket_address).is_err();
+                if tcp_busy && udp_busy {
+                    break;
+                }
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+        })
+        .await
+        .expect("public TCP and QUIC listeners should bind");
+
+        cancellation.cancel();
+        tokio::time::timeout(Duration::from_secs(3), server)
+            .await
+            .expect("public source server should stop promptly")
+            .expect("public source task should not panic")
+            .expect("public source server should stop cleanly");
+
+        TcpListener::bind(socket_address)
+            .expect("cancellation should release the public TCP listener");
+        UdpSocket::bind(socket_address)
+            .expect("cancellation should release the public QUIC listener");
     }
 
     #[tokio::test]

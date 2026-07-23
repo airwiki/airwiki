@@ -40,7 +40,7 @@ All notable user-visible changes to AirWiki will be documented here. The project
 
 - Allowed fresh installations to defer the optional local-model download so public read-only discovery is not blocked by unrelated inference setup.
 - Made public relay reservations advertise only operator-confirmed external addresses and covered owner search and browse through an outbound relay circuit.
-- Made public source listeners recover automatically when Windows retains a TCP or QUIC port briefly during rapid unpublish and republish.
+- Made public source listeners recover automatically after rapid unpublish and republish by waiting for libp2p to finish closing every TCP and QUIC listener before starting the replacement swarm.
 - Preserved both evidence and authorized-candidate lanes in flattened MCP output, and improved localized, width-safe diagnostics for source files that could not be processed.
 
 - Made the first pending review immediately selectable and localized model diagnostics used by the normal setup flow.

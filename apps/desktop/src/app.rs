@@ -3865,6 +3865,17 @@ impl AirWikiApp {
                                     {
                                         self.onboarding_page = Some(self.next_onboarding_page());
                                     }
+                                    if ui
+                                        .add_enabled(
+                                            !self.onboarding_finishing,
+                                            egui::Link::new(
+                                                self.localization.text("onboarding-skip"),
+                                            ),
+                                        )
+                                        .clicked()
+                                    {
+                                        self.finish_onboarding();
+                                    }
                                 });
                             }
                             OnboardingPage::Collection => {

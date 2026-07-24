@@ -78,8 +78,13 @@ three semicolon-separated entries, each encoded as
 `version|expiry-rfc3339|peer-id|multiaddr`. Keep the value in the local
 acceptance workspace only; do not place it in source control, shared CI output
 or package logs. The desktop validates every pinned identity and multiaddress,
-rejects duplicate identities and registry downgrades, and ignores entries after
-their absolute expiry.
+requires every entry to carry the same version, rejects duplicate identities,
+registry downgrades and same-version mutation of the effective bootstrap set,
+and ignores each entry after its absolute expiry. An identity already configured
+as a community index is a user-owned override: its bundled address and expiry
+do not form part of the effective bootstrap set and are ignored. Installing a
+higher version atomically retires only older bootstrap entries; community
+indexes are never replaced or removed by the bundled registry.
 
 Obtain each identity explicitly, outside normal logs:
 

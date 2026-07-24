@@ -1,3 +1,4 @@
+use std::collections::{BTreeSet, HashSet};
 use std::ops::{Deref, DerefMut};
 use std::path::{Path, PathBuf};
 use std::str::FromStr;
@@ -88,6 +89,13 @@ pub struct FederationIndexRecord {
     pub expires_at: Option<DateTime<Utc>>,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BootstrapFederationIndexEntry {
+    pub peer_id: String,
+    pub multiaddr: String,
+    pub expires_at: DateTime<Utc>,
 }
 
 #[derive(Debug, Clone)]
@@ -1139,84 +1147,143 @@ impl Database {
         rows.collect::<rusqlite::Result<_>>().map_err(Into::into)
     }
 
-    pub fn upsert_federation_index(
+    pub fn upsert_community_federation_index(
         &self,
         peer_id: &str,
         multiaddr: &str,
         enabled: bool,
-        source: &str,
     ) -> Result<()> {
         if peer_id.is_empty()
             || peer_id.len() > 128
             || multiaddr.is_empty()
             || multiaddr.len() > 500
-            || !matches!(source, "bootstrap" | "community")
         {
             bail!("federation index configuration is invalid");
         }
         let now = Utc::now().to_rfc3339();
         self.connection()?.execute(
-            "INSERT INTO federation_indexes(peer_id,multiaddr,enabled,source,created_at,updated_at)
-             VALUES (?1,?2,?3,?4,?5,?5)
-             ON CONFLICT(peer_id) DO UPDATE SET multiaddr=?2,enabled=?3,source=?4,updated_at=?5",
-            params![peer_id, multiaddr, enabled, source, now],
+            "INSERT INTO federation_indexes
+             (peer_id,multiaddr,enabled,source,registry_version,expires_at,created_at,updated_at)
+             VALUES (?1,?2,?3,'community',0,NULL,?4,?4)
+             ON CONFLICT(peer_id) DO UPDATE SET multiaddr=?2,enabled=?3,source='community',
+               expires_at=NULL,updated_at=?4",
+            params![peer_id, multiaddr, enabled, now],
         )?;
         Ok(())
     }
 
-    pub fn upsert_bootstrap_federation_index(
+    pub fn replace_bootstrap_federation_indexes(
         &self,
-        peer_id: &str,
-        multiaddr: &str,
         registry_version: u32,
-        expires_at: DateTime<Utc>,
+        indexes: &[BootstrapFederationIndexEntry],
     ) -> Result<()> {
-        if peer_id.is_empty()
-            || peer_id.len() > 128
-            || multiaddr.is_empty()
-            || multiaddr.len() > 500
-            || registry_version == 0
-            || expires_at <= Utc::now()
+        let now = Utc::now();
+        let mut peers = HashSet::with_capacity(indexes.len());
+        if registry_version == 0
+            || indexes.is_empty()
+            || indexes.len() > 3
+            || indexes.iter().any(|index| {
+                index.peer_id.is_empty()
+                    || index.peer_id.len() > 128
+                    || index.multiaddr.is_empty()
+                    || index.multiaddr.len() > 500
+                    || !peers.insert(index.peer_id.as_str())
+            })
         {
-            bail!("bootstrap federation index metadata is invalid");
+            bail!("bootstrap federation index registry is invalid");
         }
+
         let mut connection = self.connection()?;
         let transaction = connection.transaction()?;
-        let existing = transaction
-            .query_row(
-                "SELECT multiaddr,source,registry_version,expires_at
-                 FROM federation_indexes WHERE peer_id=?1",
-                [peer_id],
-                |row| {
+        let mut active = Vec::with_capacity(indexes.len());
+        let mut community_peers = Vec::with_capacity(indexes.len());
+        for index in indexes.iter().filter(|index| index.expires_at > now) {
+            let source = transaction
+                .query_row(
+                    "SELECT source FROM federation_indexes WHERE peer_id=?1",
+                    [&index.peer_id],
+                    |row| row.get::<_, String>(0),
+                )
+                .optional()?;
+            if source.as_deref() == Some("community") {
+                community_peers.push(index.peer_id.as_str());
+            } else {
+                active.push(index);
+            }
+        }
+        if active.is_empty() && community_peers.is_empty() {
+            return Ok(());
+        }
+        let known_version = transaction.query_row(
+            "SELECT MAX(registry_version) FROM federation_indexes",
+            [],
+            |row| row.get::<_, Option<u32>>(0),
+        )?;
+        if known_version.is_some_and(|known| known > registry_version) {
+            bail!("bootstrap federation index registry downgrade rejected");
+        }
+
+        // Community entries are user-owned overrides. Their bundled address and
+        // expiry are deliberately ignored, so same-version equality covers only
+        // the effective bootstrap rows that this registry is allowed to manage.
+        let expected = active
+            .iter()
+            .map(|index| {
+                (
+                    index.peer_id.clone(),
+                    index.multiaddr.clone(),
+                    index.expires_at.to_rfc3339(),
+                )
+            })
+            .collect::<BTreeSet<_>>();
+        if known_version == Some(registry_version) {
+            let mut statement = transaction.prepare(
+                "SELECT peer_id,multiaddr,expires_at FROM federation_indexes
+                 WHERE source='bootstrap' AND registry_version=?1 AND expires_at>?2",
+            )?;
+            let actual = statement
+                .query_map(params![registry_version, now.to_rfc3339()], |row| {
                     Ok((
                         row.get::<_, String>(0)?,
                         row.get::<_, String>(1)?,
-                        row.get::<_, u32>(2)?,
-                        row.get::<_, Option<String>>(3)?,
+                        row.get::<_, String>(2)?,
                     ))
-                },
-            )
-            .optional()?;
-        let expiry = expires_at.to_rfc3339();
-        if let Some((known_address, known_source, known_version, known_expiry)) = existing {
-            if known_version > registry_version {
-                bail!("bootstrap federation index registry downgrade rejected");
-            }
-            if known_source == "bootstrap" && known_version == registry_version {
-                if known_address == multiaddr && known_expiry.as_deref() == Some(expiry.as_str()) {
-                    return Ok(());
-                }
+                })?
+                .collect::<rusqlite::Result<BTreeSet<_>>>()?;
+            if actual != expected {
                 bail!("bootstrap federation index mutation requires a newer registry version");
             }
+        } else {
+            let updated_at = now.to_rfc3339();
+            for index in active {
+                transaction.execute(
+                    "INSERT INTO federation_indexes
+                     (peer_id,multiaddr,enabled,source,registry_version,expires_at,created_at,updated_at)
+                     VALUES (?1,?2,1,'bootstrap',?3,?4,?5,?5)
+                     ON CONFLICT(peer_id) DO UPDATE SET multiaddr=?2,enabled=1,source='bootstrap',
+                       registry_version=?3,expires_at=?4,updated_at=?5",
+                    params![
+                        index.peer_id,
+                        index.multiaddr,
+                        registry_version,
+                        index.expires_at.to_rfc3339(),
+                        updated_at,
+                    ],
+                )?;
+            }
         }
-        let now = Utc::now().to_rfc3339();
+        let updated_at = now.to_rfc3339();
+        for peer_id in community_peers {
+            transaction.execute(
+                "UPDATE federation_indexes SET registry_version=?2,updated_at=?3
+                 WHERE peer_id=?1 AND source='community' AND registry_version<>?2",
+                params![peer_id, registry_version, updated_at],
+            )?;
+        }
         transaction.execute(
-            "INSERT INTO federation_indexes
-             (peer_id,multiaddr,enabled,source,registry_version,expires_at,created_at,updated_at)
-             VALUES (?1,?2,1,'bootstrap',?3,?4,?5,?5)
-             ON CONFLICT(peer_id) DO UPDATE SET multiaddr=?2,enabled=1,source='bootstrap',
-               registry_version=?3,expires_at=?4,updated_at=?5",
-            params![peer_id, multiaddr, registry_version, expiry, now],
+            "DELETE FROM federation_indexes
+             WHERE source='bootstrap' AND registry_version < ?1",
+            [registry_version],
         )?;
         transaction.commit()?;
         Ok(())
@@ -1234,9 +1301,14 @@ impl Database {
             .map_err(Into::into)
     }
 
-    pub fn set_federation_index_enabled(&self, peer_id: &str, enabled: bool) -> Result<()> {
+    pub fn set_community_federation_index_enabled(
+        &self,
+        peer_id: &str,
+        enabled: bool,
+    ) -> Result<()> {
         let count = self.connection()?.execute(
-            "UPDATE federation_indexes SET enabled=?2,updated_at=?3 WHERE peer_id=?1",
+            "UPDATE federation_indexes SET enabled=?2,updated_at=?3
+             WHERE peer_id=?1 AND source='community'",
             params![peer_id, enabled, Utc::now().to_rfc3339()],
         )?;
         if count == 0 {
@@ -4578,13 +4650,13 @@ mod tests {
     fn bootstrap_indexes_preserve_registry_version_and_expiry() {
         let (_temp, db, _collection) = setup();
         let expiry = Utc::now() + chrono::Duration::days(30);
-        db.upsert_bootstrap_federation_index(
-            "12D3KooWSyntheticBootstrap",
-            "/ip4/203.0.113.10/tcp/42042",
-            1,
-            expiry,
-        )
-        .unwrap();
+        let indexes = [BootstrapFederationIndexEntry {
+            peer_id: "12D3KooWSyntheticBootstrap".to_owned(),
+            multiaddr: "/ip4/203.0.113.10/tcp/42042".to_owned(),
+            expires_at: expiry,
+        }];
+        db.replace_bootstrap_federation_indexes(1, &indexes)
+            .unwrap();
 
         let indexes = db.list_federation_indexes().unwrap();
         assert_eq!(indexes.len(), 1);
@@ -4599,23 +4671,308 @@ mod tests {
         let peer = "12D3KooWSyntheticBootstrap";
         let first_address = "/ip4/203.0.113.10/tcp/42042";
         let expiry = Utc::now() + chrono::Duration::days(30);
-        db.upsert_bootstrap_federation_index(peer, first_address, 2, expiry)
-            .unwrap();
+        let first = [BootstrapFederationIndexEntry {
+            peer_id: peer.to_owned(),
+            multiaddr: first_address.to_owned(),
+            expires_at: expiry,
+        }];
+        db.replace_bootstrap_federation_indexes(2, &first).unwrap();
 
+        assert!(db.replace_bootstrap_federation_indexes(1, &first).is_err());
+        let mutated = [BootstrapFederationIndexEntry {
+            peer_id: peer.to_owned(),
+            multiaddr: "/ip4/203.0.113.11/tcp/42042".to_owned(),
+            expires_at: expiry,
+        }];
         assert!(
-            db.upsert_bootstrap_federation_index(peer, first_address, 1, expiry)
+            db.replace_bootstrap_federation_indexes(2, &mutated)
                 .is_err()
         );
-        assert!(
-            db.upsert_bootstrap_federation_index(peer, "/ip4/203.0.113.11/tcp/42042", 2, expiry,)
-                .is_err()
-        );
-        db.upsert_bootstrap_federation_index(peer, first_address, 2, expiry)
-            .unwrap();
+        db.replace_bootstrap_federation_indexes(2, &first).unwrap();
 
         let indexes = db.list_federation_indexes().unwrap();
         assert_eq!(indexes[0].multiaddr, first_address);
         assert_eq!(indexes[0].registry_version, 2);
+    }
+
+    #[test]
+    fn bootstrap_registry_replacement_retires_older_entries_and_preserves_community_indexes() {
+        let (_temp, db, _collection) = setup();
+        let expiry = Utc::now() + chrono::Duration::days(30);
+        let old = vec![
+            BootstrapFederationIndexEntry {
+                peer_id: "12D3KooWOldBootstrapOne".to_owned(),
+                multiaddr: "/ip4/203.0.113.10/tcp/42042".to_owned(),
+                expires_at: expiry,
+            },
+            BootstrapFederationIndexEntry {
+                peer_id: "12D3KooWOldBootstrapTwo".to_owned(),
+                multiaddr: "/ip4/203.0.113.11/tcp/42044".to_owned(),
+                expires_at: expiry,
+            },
+        ];
+        db.replace_bootstrap_federation_indexes(1, &old).unwrap();
+        db.upsert_community_federation_index(
+            "12D3KooWCommunityIndex",
+            "/ip4/203.0.113.12/tcp/42046",
+            true,
+        )
+        .unwrap();
+        let replacement = vec![
+            BootstrapFederationIndexEntry {
+                peer_id: "12D3KooWNewBootstrapOne".to_owned(),
+                multiaddr: "/ip4/203.0.113.20/udp/42042/quic-v1".to_owned(),
+                expires_at: expiry,
+            },
+            BootstrapFederationIndexEntry {
+                peer_id: "12D3KooWNewBootstrapTwo".to_owned(),
+                multiaddr: "/ip4/203.0.113.21/udp/42044/quic-v1".to_owned(),
+                expires_at: expiry,
+            },
+        ];
+
+        db.replace_bootstrap_federation_indexes(2, &replacement)
+            .unwrap();
+        db.replace_bootstrap_federation_indexes(2, &replacement)
+            .unwrap();
+
+        let indexes = db.list_federation_indexes().unwrap();
+        assert_eq!(indexes.len(), 3);
+        assert_eq!(
+            indexes
+                .iter()
+                .filter(|index| index.source == "bootstrap")
+                .count(),
+            2
+        );
+        assert!(indexes.iter().any(|index| {
+            index.peer_id == "12D3KooWCommunityIndex" && index.source == "community"
+        }));
+        assert!(
+            indexes
+                .iter()
+                .filter(|index| index.source == "bootstrap")
+                .all(|index| index.registry_version == 2
+                    && index.peer_id != "12D3KooWOldBootstrapOne"
+                    && index.peer_id != "12D3KooWOldBootstrapTwo")
+        );
+
+        let mut mutated = replacement.clone();
+        mutated[0].multiaddr = "/ip4/203.0.113.30/udp/42042/quic-v1".to_owned();
+        assert!(
+            db.replace_bootstrap_federation_indexes(2, &mutated)
+                .is_err()
+        );
+        assert!(
+            db.replace_bootstrap_federation_indexes(1, &replacement)
+                .is_err()
+        );
+        assert_eq!(db.list_federation_indexes().unwrap(), indexes);
+    }
+
+    #[test]
+    fn bootstrap_registry_ignores_expired_entries_and_never_overwrites_community_indexes() {
+        let (_temp, db, _collection) = setup();
+        let community_peer = "12D3KooWCommunityCollision";
+        let community_address = "/ip4/203.0.113.40/tcp/42042";
+        db.upsert_community_federation_index(community_peer, community_address, true)
+            .unwrap();
+        let now = Utc::now();
+        let registry = vec![
+            BootstrapFederationIndexEntry {
+                peer_id: community_peer.to_owned(),
+                multiaddr: "/ip4/203.0.113.41/udp/42042/quic-v1".to_owned(),
+                expires_at: now + chrono::Duration::days(1),
+            },
+            BootstrapFederationIndexEntry {
+                peer_id: "12D3KooWShortLivedBootstrap".to_owned(),
+                multiaddr: "/ip4/203.0.113.42/udp/42044/quic-v1".to_owned(),
+                expires_at: now - chrono::Duration::seconds(1),
+            },
+            BootstrapFederationIndexEntry {
+                peer_id: "12D3KooWActiveBootstrap".to_owned(),
+                multiaddr: "/ip4/203.0.113.43/udp/42046/quic-v1".to_owned(),
+                expires_at: now + chrono::Duration::days(1),
+            },
+        ];
+
+        db.replace_bootstrap_federation_indexes(2, &registry)
+            .unwrap();
+        db.replace_bootstrap_federation_indexes(2, &registry)
+            .unwrap();
+
+        let indexes = db.list_federation_indexes().unwrap();
+        assert_eq!(indexes.len(), 2);
+        assert!(indexes.iter().any(|index| {
+            index.peer_id == community_peer
+                && index.multiaddr == community_address
+                && index.source == "community"
+                && index.expires_at.is_none()
+        }));
+        assert!(indexes.iter().any(|index| {
+            index.peer_id == "12D3KooWActiveBootstrap"
+                && index.source == "bootstrap"
+                && index.registry_version == 2
+        }));
+        assert!(
+            indexes
+                .iter()
+                .all(|index| index.peer_id != "12D3KooWShortLivedBootstrap")
+        );
+
+        let next_registry = [BootstrapFederationIndexEntry {
+            peer_id: "12D3KooWNextBootstrap".to_owned(),
+            multiaddr: "/ip4/203.0.113.44/udp/42042/quic-v1".to_owned(),
+            expires_at: now + chrono::Duration::days(2),
+        }];
+        db.replace_bootstrap_federation_indexes(3, &next_registry)
+            .unwrap();
+        let replaced = db.list_federation_indexes().unwrap();
+        assert_eq!(replaced.len(), 2);
+        assert!(replaced.iter().any(|index| {
+            index.peer_id == community_peer
+                && index.multiaddr == community_address
+                && index.source == "community"
+        }));
+        assert!(replaced.iter().any(|index| {
+            index.peer_id == "12D3KooWNextBootstrap"
+                && index.source == "bootstrap"
+                && index.registry_version == 3
+        }));
+    }
+
+    #[test]
+    fn bootstrap_registry_restart_tolerates_one_entry_expiring_before_the_others() {
+        let (_temp, db, _collection) = setup();
+        let now = Utc::now();
+        let expiring_peer = "12D3KooWExpiringBootstrap";
+        let mut registry = vec![
+            BootstrapFederationIndexEntry {
+                peer_id: expiring_peer.to_owned(),
+                multiaddr: "/ip4/203.0.113.50/udp/42042/quic-v1".to_owned(),
+                expires_at: now + chrono::Duration::days(1),
+            },
+            BootstrapFederationIndexEntry {
+                peer_id: "12D3KooWLongerBootstrap".to_owned(),
+                multiaddr: "/ip4/203.0.113.51/udp/42044/quic-v1".to_owned(),
+                expires_at: now + chrono::Duration::days(2),
+            },
+        ];
+        db.replace_bootstrap_federation_indexes(4, &registry)
+            .unwrap();
+        db.connection()
+            .unwrap()
+            .execute(
+                "UPDATE federation_indexes SET expires_at=?2 WHERE peer_id=?1",
+                params![
+                    expiring_peer,
+                    (Utc::now() - chrono::Duration::seconds(1)).to_rfc3339()
+                ],
+            )
+            .unwrap();
+        registry[0].expires_at = Utc::now() - chrono::Duration::seconds(1);
+
+        db.replace_bootstrap_federation_indexes(4, &registry)
+            .unwrap();
+
+        let indexes = db.list_federation_indexes().unwrap();
+        assert_eq!(
+            indexes
+                .iter()
+                .filter(|index| index.source == "bootstrap")
+                .count(),
+            2
+        );
+        assert_eq!(
+            indexes
+                .iter()
+                .filter(|index| {
+                    index.source == "bootstrap"
+                        && index.expires_at.is_some_and(|expiry| expiry > Utc::now())
+                })
+                .count(),
+            1
+        );
+    }
+
+    #[test]
+    fn community_collisions_retain_the_global_registry_version_and_allow_old_bootstrap_cleanup() {
+        let (_temp, db, _collection) = setup();
+        let now = Utc::now();
+        let old_registry = [BootstrapFederationIndexEntry {
+            peer_id: "12D3KooWOldBootstrap".to_owned(),
+            multiaddr: "/ip4/203.0.113.60/udp/42042/quic-v1".to_owned(),
+            expires_at: now + chrono::Duration::days(1),
+        }];
+        db.replace_bootstrap_federation_indexes(1, &old_registry)
+            .unwrap();
+        let community_peer = "12D3KooWCommunityOnlyRegistry";
+        let community_address = "/ip4/203.0.113.61/tcp/42044";
+        db.upsert_community_federation_index(community_peer, community_address, true)
+            .unwrap();
+        let community_registry = [BootstrapFederationIndexEntry {
+            peer_id: community_peer.to_owned(),
+            multiaddr: "/ip4/203.0.113.62/udp/42044/quic-v1".to_owned(),
+            expires_at: now + chrono::Duration::days(2),
+        }];
+
+        db.replace_bootstrap_federation_indexes(2, &community_registry)
+            .unwrap();
+
+        let indexes = db.list_federation_indexes().unwrap();
+        assert_eq!(indexes.len(), 1);
+        assert_eq!(indexes[0].peer_id, community_peer);
+        assert_eq!(indexes[0].multiaddr, community_address);
+        assert_eq!(indexes[0].source, "community");
+        assert_eq!(indexes[0].registry_version, 2);
+        assert!(indexes[0].expires_at.is_none());
+        let ignored_community_mutation = [BootstrapFederationIndexEntry {
+            peer_id: community_peer.to_owned(),
+            multiaddr: "/ip4/203.0.113.63/udp/42046/quic-v1".to_owned(),
+            expires_at: now + chrono::Duration::days(3),
+        }];
+        db.replace_bootstrap_federation_indexes(2, &ignored_community_mutation)
+            .unwrap();
+        assert_eq!(db.list_federation_indexes().unwrap(), indexes);
+        assert!(
+            db.replace_bootstrap_federation_indexes(1, &old_registry)
+                .is_err()
+        );
+    }
+
+    #[test]
+    fn promoting_the_last_bootstrap_to_community_does_not_allow_registry_downgrade() {
+        let (_temp, db, _collection) = setup();
+        let expiry = Utc::now() + chrono::Duration::days(1);
+        let current = [BootstrapFederationIndexEntry {
+            peer_id: "12D3KooWPromotedBootstrap".to_owned(),
+            multiaddr: "/ip4/203.0.113.70/udp/42042/quic-v1".to_owned(),
+            expires_at: expiry,
+        }];
+        db.replace_bootstrap_federation_indexes(5, &current)
+            .unwrap();
+        db.upsert_community_federation_index(
+            "12D3KooWPromotedBootstrap",
+            "/ip4/203.0.113.71/tcp/42042",
+            true,
+        )
+        .unwrap();
+
+        let promoted = db.list_federation_indexes().unwrap();
+        assert_eq!(promoted.len(), 1);
+        assert_eq!(promoted[0].source, "community");
+        assert_eq!(promoted[0].registry_version, 5);
+        assert!(promoted[0].expires_at.is_none());
+
+        let downgrade = [BootstrapFederationIndexEntry {
+            peer_id: "12D3KooWDowngradedBootstrap".to_owned(),
+            multiaddr: "/ip4/203.0.113.72/udp/42044/quic-v1".to_owned(),
+            expires_at: expiry,
+        }];
+        assert!(
+            db.replace_bootstrap_federation_indexes(4, &downgrade)
+                .is_err()
+        );
     }
 
     #[test]

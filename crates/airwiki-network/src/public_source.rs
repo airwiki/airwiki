@@ -521,21 +521,27 @@ mod tests {
 
     #[tokio::test]
     async fn cancellation_releases_tcp_and_quic_listeners() {
-        let reservation = UdpSocket::bind(SocketAddrV4::new(Ipv4Addr::LOCALHOST, 0))
+        let tcp_reservation = TcpListener::bind(SocketAddrV4::new(Ipv4Addr::LOCALHOST, 0))
+            .expect("reserve an ephemeral TCP port");
+        let tcp_port = tcp_reservation
+            .local_addr()
+            .expect("read reserved TCP port")
+            .port();
+        let udp_reservation = UdpSocket::bind(SocketAddrV4::new(Ipv4Addr::LOCALHOST, 0))
             .expect("reserve an ephemeral UDP port");
-        let port = reservation.local_addr().expect("read reserved port").port();
-        drop(reservation);
-        let tcp_probe = TcpListener::bind(SocketAddrV4::new(Ipv4Addr::LOCALHOST, port))
-            .expect("matching TCP port should be available");
-        drop(tcp_probe);
+        let udp_port = udp_reservation
+            .local_addr()
+            .expect("read reserved UDP port")
+            .port();
+        drop((tcp_reservation, udp_reservation));
 
         let identity = NodeIdentity::load_or_create(&MemorySecretStore::default())
             .expect("create test identity");
         let listen_addresses = vec![
-            format!("/ip4/127.0.0.1/udp/{port}/quic-v1")
+            format!("/ip4/127.0.0.1/udp/{udp_port}/quic-v1")
                 .parse()
                 .expect("parse QUIC listen address"),
-            format!("/ip4/127.0.0.1/tcp/{port}")
+            format!("/ip4/127.0.0.1/tcp/{tcp_port}")
                 .parse()
                 .expect("parse TCP listen address"),
         ];
@@ -547,11 +553,12 @@ mod tests {
             cancellation.clone(),
         ));
 
-        let socket_address = SocketAddrV4::new(Ipv4Addr::LOCALHOST, port);
+        let tcp_address = SocketAddrV4::new(Ipv4Addr::LOCALHOST, tcp_port);
+        let udp_address = SocketAddrV4::new(Ipv4Addr::LOCALHOST, udp_port);
         tokio::time::timeout(Duration::from_secs(2), async {
             loop {
-                let tcp_busy = TcpListener::bind(socket_address).is_err();
-                let udp_busy = UdpSocket::bind(socket_address).is_err();
+                let tcp_busy = TcpListener::bind(tcp_address).is_err();
+                let udp_busy = UdpSocket::bind(udp_address).is_err();
                 if tcp_busy && udp_busy {
                     break;
                 }
@@ -568,31 +575,33 @@ mod tests {
             .expect("public source task should not panic")
             .expect("public source server should stop cleanly");
 
-        TcpListener::bind(socket_address)
+        TcpListener::bind(tcp_address)
             .expect("cancellation should release the public TCP listener");
-        UdpSocket::bind(socket_address)
-            .expect("cancellation should release the public QUIC listener");
+        UdpSocket::bind(udp_address).expect("cancellation should release the public QUIC listener");
     }
 
     #[tokio::test]
     async fn busy_tcp_and_quic_ports_are_retried_until_available() {
+        let tcp_reservation = TcpListener::bind(SocketAddrV4::new(Ipv4Addr::LOCALHOST, 0))
+            .expect("reserve an ephemeral TCP port");
+        let tcp_port = tcp_reservation
+            .local_addr()
+            .expect("read reserved TCP port")
+            .port();
         let udp_reservation = UdpSocket::bind(SocketAddrV4::new(Ipv4Addr::LOCALHOST, 0))
             .expect("reserve an ephemeral UDP port");
-        let port = udp_reservation
+        let udp_port = udp_reservation
             .local_addr()
             .expect("read reserved UDP port")
             .port();
-        let tcp_probe = TcpListener::bind(SocketAddrV4::new(Ipv4Addr::LOCALHOST, port))
-            .expect("matching TCP port should be available");
-        drop(tcp_probe);
 
         let identity = NodeIdentity::load_or_create(&MemorySecretStore::default())
             .expect("create test identity");
         let listen_addresses = vec![
-            format!("/ip4/127.0.0.1/tcp/{port}")
+            format!("/ip4/127.0.0.1/tcp/{tcp_port}")
                 .parse()
                 .expect("parse TCP listen address"),
-            format!("/ip4/127.0.0.1/udp/{port}/quic-v1")
+            format!("/ip4/127.0.0.1/udp/{udp_port}/quic-v1")
                 .parse()
                 .expect("parse QUIC listen address"),
         ];
@@ -612,14 +621,14 @@ mod tests {
                 server.await
             );
         }
-        drop(udp_reservation);
+        drop((tcp_reservation, udp_reservation));
 
         tokio::time::timeout(Duration::from_secs(2), async {
             loop {
                 let tcp_busy =
-                    TcpListener::bind(SocketAddrV4::new(Ipv4Addr::LOCALHOST, port)).is_err();
+                    TcpListener::bind(SocketAddrV4::new(Ipv4Addr::LOCALHOST, tcp_port)).is_err();
                 let udp_busy =
-                    UdpSocket::bind(SocketAddrV4::new(Ipv4Addr::LOCALHOST, port)).is_err();
+                    UdpSocket::bind(SocketAddrV4::new(Ipv4Addr::LOCALHOST, udp_port)).is_err();
                 if tcp_busy && udp_busy {
                     break;
                 }

@@ -18,14 +18,14 @@ use std::{
 };
 
 use airwiki_core::{
-    AppPaths as CoreAppPaths, AuditEvent, CollectionRecord, Database, E5Tokenizer,
-    EmbeddingProvider, EvidenceDecision, EvidenceRelevanceProvider, FastEmbedE5Small,
-    FastEmbedMmarcoReranker, FolderWatcher, GenerationProvider, GenerationRuntimeConfig,
-    GuidedRepairPreview, GuidedRepairResult, HybridSearchEngine, IngestOutcome, IngestPipeline,
-    KnowledgeBundleState, KnowledgeBundleView, KnowledgePageId, KnowledgePageView,
-    LlamaServerProvider, OkfBundleInspector, OkfPublicationMaterializer, PinnedE5Snapshot,
-    PinnedMmarcoRerankerSnapshot, RelevanceInput, ReviewEdits, ReviewVersionToken, SourceIssueCode,
-    Tokenizer, WikiRepairExecutor, WikiRepairPlanner,
+    AppPaths as CoreAppPaths, AuditEvent, BootstrapFederationIndexEntry, CollectionRecord,
+    Database, E5Tokenizer, EmbeddingProvider, EvidenceDecision, EvidenceRelevanceProvider,
+    FastEmbedE5Small, FastEmbedMmarcoReranker, FolderWatcher, GenerationProvider,
+    GenerationRuntimeConfig, GuidedRepairPreview, GuidedRepairResult, HybridSearchEngine,
+    IngestOutcome, IngestPipeline, KnowledgeBundleState, KnowledgeBundleView, KnowledgePageId,
+    KnowledgePageView, LlamaServerProvider, OkfBundleInspector, OkfPublicationMaterializer,
+    PinnedE5Snapshot, PinnedMmarcoRerankerSnapshot, RelevanceInput, ReviewEdits,
+    ReviewVersionToken, SourceIssueCode, Tokenizer, WikiRepairExecutor, WikiRepairPlanner,
 };
 use airwiki_inference::{
     GenerationSettings, InstallOutcome, LlamaSupervisor, ModelSelection, SupervisorConfig,
@@ -106,6 +106,7 @@ fn parse_bundled_bootstrap_federation_indexes(
     }
 
     let mut peers = HashSet::new();
+    let mut common_registry_version = None;
     let mut parsed = Vec::with_capacity(entries.len());
     for entry in entries {
         let fields = entry.split('|').map(str::trim).collect::<Vec<_>>();
@@ -117,6 +118,11 @@ fn parse_bundled_bootstrap_federation_indexes(
             .context("la versión del registro bootstrap federado no es válida")?;
         if registry_version == 0 {
             bail!("la versión del registro bootstrap federado debe ser positiva");
+        }
+        if let Some(known_version) = common_registry_version.replace(registry_version)
+            && known_version != registry_version
+        {
+            bail!("el registro bootstrap federado mezcla versiones");
         }
         let expires_at = DateTime::parse_from_rfc3339(expiry)
             .context("la expiración bootstrap federada no es RFC 3339")?
@@ -143,19 +149,18 @@ fn install_bundled_bootstrap_federation_indexes(
     database: &Database,
     indexes: Vec<BundledBootstrapFederationIndex>,
 ) -> Result<()> {
-    let now = Utc::now();
-    for index in indexes {
-        if index.expires_at <= now {
-            continue;
-        }
-        database.upsert_bootstrap_federation_index(
-            &index.peer_id,
-            &index.multiaddr,
-            index.registry_version,
-            index.expires_at,
-        )?;
-    }
-    Ok(())
+    let Some(registry_version) = indexes.first().map(|index| index.registry_version) else {
+        return Ok(());
+    };
+    let entries = indexes
+        .into_iter()
+        .map(|index| BootstrapFederationIndexEntry {
+            peer_id: index.peer_id,
+            multiaddr: index.multiaddr,
+            expires_at: index.expires_at,
+        })
+        .collect::<Vec<_>>();
+    database.replace_bootstrap_federation_indexes(registry_version, &entries)
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
@@ -1778,11 +1783,10 @@ impl DesktopServices {
         let peer = PeerId::from_str(peer_id).context("la identidad del índice no es válida")?;
         let address =
             Multiaddr::from_str(address).context("la dirección del índice no es válida")?;
-        self.database.upsert_federation_index(
+        self.database.upsert_community_federation_index(
             &peer.to_string(),
             &address.to_string(),
             true,
-            "community",
         )?;
         self.audit(
             "federation_index_added",
@@ -1795,7 +1799,7 @@ impl DesktopServices {
     pub fn remove_federation_index(&self, peer_id: &str) -> Result<()> {
         let peer = PeerId::from_str(peer_id).context("la identidad del índice no es válida")?;
         self.database
-            .set_federation_index_enabled(&peer.to_string(), false)?;
+            .set_community_federation_index_enabled(&peer.to_string(), false)?;
         self.audit(
             "federation_index_disabled",
             "federation_index",
@@ -3458,17 +3462,47 @@ mod tests {
         );
         let indexes = parse_bundled_bootstrap_federation_indexes(Some(&encoded)).unwrap();
         let database = Database::in_memory().unwrap();
+        database
+            .replace_bootstrap_federation_indexes(
+                6,
+                &[BootstrapFederationIndexEntry {
+                    peer_id: test_public_peer_id(),
+                    multiaddr: "/ip6/2001:db8::10/tcp/42042".to_owned(),
+                    expires_at: Utc::now() + ChronoDuration::days(1),
+                }],
+            )
+            .unwrap();
+        database
+            .upsert_community_federation_index(
+                &test_public_peer_id(),
+                "/ip6/2001:db8::11/tcp/42044",
+                true,
+            )
+            .unwrap();
 
         install_bundled_bootstrap_federation_indexes(&database, indexes).unwrap();
 
         let installed = database.list_federation_indexes().unwrap();
-        assert_eq!(installed.len(), 3);
-        assert!(installed.iter().all(|index| {
-            index.source == "bootstrap"
-                && index.enabled
-                && index.registry_version == 7
-                && index.expires_at.is_some()
-        }));
+        assert_eq!(installed.len(), 4);
+        assert_eq!(
+            installed
+                .iter()
+                .filter(|index| {
+                    index.source == "bootstrap"
+                        && index.enabled
+                        && index.registry_version == 7
+                        && index.expires_at.is_some()
+                })
+                .count(),
+            3
+        );
+        assert_eq!(
+            installed
+                .iter()
+                .filter(|index| index.source == "community")
+                .count(),
+            1
+        );
     }
 
     #[test]
@@ -3479,6 +3513,13 @@ mod tests {
              2|2099-01-01T00:00:00Z|{peer_id}|/ip6/2001:db8::2/tcp/42044"
         );
         assert!(parse_bundled_bootstrap_federation_indexes(Some(&duplicate)).is_err());
+        let mixed_versions = format!(
+            "1|2099-01-01T00:00:00Z|{}|/ip6/2001:db8::1/tcp/42042;\
+             2|2099-01-01T00:00:00Z|{}|/ip6/2001:db8::2/tcp/42044",
+            test_public_peer_id(),
+            test_public_peer_id(),
+        );
+        assert!(parse_bundled_bootstrap_federation_indexes(Some(&mixed_versions)).is_err());
 
         let expired = format!(
             "1|2020-01-01T00:00:00Z|{}|/ip6/2001:db8::1/tcp/42042",
@@ -3582,23 +3623,22 @@ mod tests {
     #[test]
     fn community_index_takes_priority_over_the_bundled_index_budget() {
         let database = Database::in_memory().unwrap();
-        for offset in 1..=3 {
-            database
-                .upsert_bootstrap_federation_index(
-                    &test_public_peer_id(),
-                    &format!("/ip6/2001:db8::{offset}/tcp/42042"),
-                    1,
-                    Utc::now() + ChronoDuration::days(1),
-                )
-                .unwrap();
-        }
+        let bootstrap = (1..=3)
+            .map(|offset| BootstrapFederationIndexEntry {
+                peer_id: test_public_peer_id(),
+                multiaddr: format!("/ip6/2001:db8::{offset}/tcp/42042"),
+                expires_at: Utc::now() + ChronoDuration::days(1),
+            })
+            .collect::<Vec<_>>();
+        database
+            .replace_bootstrap_federation_indexes(1, &bootstrap)
+            .unwrap();
         let community_peer_id = test_public_peer_id();
         database
-            .upsert_federation_index(
+            .upsert_community_federation_index(
                 &community_peer_id,
                 "/ip6/2001:db8::4/tcp/42042",
                 true,
-                "community",
             )
             .unwrap();
 

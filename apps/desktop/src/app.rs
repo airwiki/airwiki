@@ -7,10 +7,10 @@ use std::{
 use airwiki_inference::{
     E5_FILES, HardwareReport, InstallEvent, MMARCO_COMMON_FILES, ModelProfile,
 };
-use airwiki_network::{ManualLanAddress, PublicRouteKind};
+use airwiki_network::{ManualLanAddress, PublicCollectionAvailability, PublicRouteKind};
 use airwiki_types::{
-    ConceptType, DEFAULT_TOP_K, EnrichmentDraft, PublicConceptSummary, SearchHit, SearchPurpose,
-    SuggestedEntity, SuggestedLink,
+    ConceptType, DEFAULT_TOP_K, EnrichmentDraft, PublicCollectionSummary, PublicConceptSummary,
+    SearchHit, SearchPurpose, SuggestedEntity, SuggestedLink,
 };
 use eframe::egui::{self, Color32, RichText};
 use egui_extras::{Size, StripBuilder};
@@ -55,8 +55,8 @@ use crate::{
         CollectionScanState, CollectionView, ConnectivityIssueCode, DesktopPreferencesUpdate,
         DesktopPreferencesView, FirewallOperationView, LanDiscoveryView, LanListenerView,
         ModelStateView, PERIODIC_RECONCILE_INTERVAL, PeerActivityState, PeerTrustState, PeerView,
-        ReviewItemView, SearchCoverageView, SourceIssueView, UpdaterWorkerView,
-        WikiHealthSummaryView, WorkerCommand, WorkerEvent, WorkerHandle,
+        PublicAnnouncementStatusView, ReviewItemView, SearchCoverageView, SourceIssueView,
+        UpdaterWorkerView, WikiHealthSummaryView, WorkerCommand, WorkerEvent, WorkerHandle,
     },
 };
 
@@ -172,6 +172,8 @@ pub struct AirWikiApp {
     public_browse_request_id: Option<Uuid>,
     public_browse_publisher: String,
     public_browse_collection: Option<Uuid>,
+    public_browse_summary: Option<PublicCollectionSummary>,
+    public_browse_availability: PublicCollectionAvailability,
     public_browse_concepts: Vec<PublicConceptSummary>,
     public_browse_next_cursor: Option<String>,
     public_browse_error: Option<String>,
@@ -257,6 +259,8 @@ impl AirWikiApp {
             public_browse_request_id: None,
             public_browse_publisher: String::new(),
             public_browse_collection: None,
+            public_browse_summary: None,
+            public_browse_availability: PublicCollectionAvailability::Offline,
             public_browse_concepts: Vec::new(),
             public_browse_next_cursor: None,
             public_browse_error: None,
@@ -639,9 +643,13 @@ impl AirWikiApp {
                     }
                     self.public_browse_request_id = None;
                     match result {
-                        Ok((mut concepts, next_cursor)) => {
-                            self.public_browse_concepts.append(&mut concepts);
-                            self.public_browse_next_cursor = next_cursor;
+                        Ok(result) => {
+                            self.public_browse_summary = Some(result.summary);
+                            self.public_browse_availability = result.availability;
+                            if let Some(mut page) = result.page {
+                                self.public_browse_concepts.append(&mut page.concepts);
+                                self.public_browse_next_cursor = page.next_cursor;
+                            }
                             self.public_browse_error = None;
                         }
                         Err(error) => {
@@ -1621,30 +1629,61 @@ impl AirWikiApp {
                             ui.colored_label(crate::theme::WARNING_AMBER, &cloud_warning);
                         }
                         if collection.internet_public {
-                            let mut status_args = FluentArgs::new();
-                            status_args.set(
-                                "indexes",
-                                i64::try_from(collection.public_accepted_indexes)
-                                    .unwrap_or(i64::MAX),
-                            );
-                            let status_key = if collection.public_accepted_indexes == 0 {
-                                "collections-public-announcement-offline"
-                            } else {
-                                "collections-public-announcement-online"
+                            let announcement_times = match collection.public_announcement {
+                                PublicAnnouncementStatusView::Offline => {
+                                    ui.label(
+                                        self.localization
+                                            .text("collections-public-announcement-offline"),
+                                    );
+                                    None
+                                }
+                                PublicAnnouncementStatusView::Advertised {
+                                    accepted_indexes,
+                                    last_announced_at,
+                                    expires_at,
+                                } => {
+                                    let mut status_args = FluentArgs::new();
+                                    status_args.set(
+                                        "indexes",
+                                        i64::try_from(accepted_indexes).unwrap_or(i64::MAX),
+                                    );
+                                    ui.label(self.localization.text_with(
+                                        "collections-public-announcement-online",
+                                        Some(&status_args),
+                                    ));
+                                    Some((last_announced_at, expires_at))
+                                }
+                                PublicAnnouncementStatusView::Expired {
+                                    last_announced_at,
+                                    expires_at,
+                                } => {
+                                    ui.colored_label(
+                                        crate::theme::WARNING_AMBER,
+                                        self.localization
+                                            .text("collections-public-announcement-expired"),
+                                    );
+                                    Some((last_announced_at, expires_at))
+                                }
                             };
-                            ui.label(self.localization.text_with(status_key, Some(&status_args)));
-                            if let Some(last) = collection.public_last_announced_at {
+                            if let Some((last, expiry)) = announcement_times {
+                                let mut last_args = FluentArgs::new();
+                                last_args
+                                    .set("timestamp", last.format("%Y-%m-%d %H:%M").to_string());
                                 ui.label(
-                                    RichText::new(format!("{} UTC", last.format("%Y-%m-%d %H:%M")))
-                                        .small()
-                                        .color(ui.visuals().weak_text_color()),
+                                    RichText::new(self.localization.text_with(
+                                        "collections-public-last-renewal",
+                                        Some(&last_args),
+                                    ))
+                                    .small()
+                                    .color(ui.visuals().weak_text_color()),
                                 );
-                            }
-                            if let Some(expiry) = collection.public_expires_at {
+                                let mut expiry_args = FluentArgs::new();
+                                expiry_args
+                                    .set("timestamp", expiry.format("%Y-%m-%d %H:%M").to_string());
                                 ui.label(
-                                    RichText::new(format!(
-                                        "{} UTC",
-                                        expiry.format("%Y-%m-%d %H:%M")
+                                    RichText::new(self.localization.text_with(
+                                        "collections-public-expiry",
+                                        Some(&expiry_args),
                                     ))
                                     .small()
                                     .color(ui.visuals().weak_text_color()),
@@ -2440,6 +2479,8 @@ impl AirWikiApp {
             self.public_browse_open = true;
             self.public_browse_publisher = publisher_id;
             self.public_browse_collection = Some(collection_id);
+            self.public_browse_summary = None;
+            self.public_browse_availability = PublicCollectionAvailability::Offline;
             self.public_browse_concepts.clear();
             self.public_browse_next_cursor = None;
             self.public_browse_error = None;
@@ -2484,6 +2525,62 @@ impl AirWikiApp {
                         block_publisher = true;
                     }
                 });
+                let availability_key = match self.public_browse_availability {
+                    PublicCollectionAvailability::Available(PublicRouteKind::Direct) => {
+                        "search-public-route-direct"
+                    }
+                    PublicCollectionAvailability::Available(PublicRouteKind::Relay) => {
+                        "search-public-route-relay"
+                    }
+                    PublicCollectionAvailability::Available(PublicRouteKind::Offline)
+                    | PublicCollectionAvailability::Offline => "search-public-route-offline",
+                    PublicCollectionAvailability::Expired => "search-public-browse-expired",
+                };
+                let availability = self.localization.text(availability_key);
+                if matches!(
+                    self.public_browse_availability,
+                    PublicCollectionAvailability::Expired | PublicCollectionAvailability::Offline
+                ) {
+                    ui.colored_label(crate::theme::WARNING_AMBER, availability);
+                } else {
+                    ui.label(availability);
+                }
+                if let Some(summary) = &self.public_browse_summary {
+                    ui.heading(&summary.name);
+                    if !summary.description.is_empty() {
+                        ui.label(&summary.description);
+                    }
+                    let mut profile_args = FluentArgs::new();
+                    profile_args.set("languages", summary.languages.join(", "));
+                    profile_args.set("concepts", i64::from(summary.concept_count));
+                    ui.label(
+                        RichText::new(
+                            self.localization
+                                .text_with("search-public-collection-profile", Some(&profile_args)),
+                        )
+                        .small()
+                        .color(ui.visuals().weak_text_color()),
+                    );
+                    let mut expiry_args = FluentArgs::new();
+                    expiry_args.set(
+                        "timestamp",
+                        summary.expires_at.format("%Y-%m-%d %H:%M").to_string(),
+                    );
+                    ui.label(
+                        RichText::new(
+                            self.localization
+                                .text_with("collections-public-expiry", Some(&expiry_args)),
+                        )
+                        .small()
+                        .color(ui.visuals().weak_text_color()),
+                    );
+                    ui.label(
+                        RichText::new(self.localization.text("search-public-provenance"))
+                            .small()
+                            .color(ui.visuals().weak_text_color()),
+                    );
+                    ui.separator();
+                }
                 if self.public_browse_request_id.is_some() {
                     ui.spinner();
                 }
@@ -2497,6 +2594,24 @@ impl AirWikiApp {
                             ui.label(RichText::new(concept.concept_type.to_string()).small());
                             ui.label(&concept.summary);
                             ui.label(RichText::new(&concept.language).small());
+                            if !concept.tags.is_empty() {
+                                ui.label(
+                                    RichText::new(concept.tags.join(" · "))
+                                        .small()
+                                        .color(ui.visuals().weak_text_color()),
+                                );
+                            }
+                            let mut revision_args = FluentArgs::new();
+                            revision_args.set("revision", i64::from(concept.source_revision));
+                            ui.label(
+                                RichText::new(
+                                    self.localization
+                                        .text_with("search-revision", Some(&revision_args)),
+                                )
+                                .small()
+                                .color(ui.visuals().weak_text_color()),
+                            );
+                            wrap_monospace(ui, concept.logical_resource_uri.clone());
                         });
                         ui.add_space(6.0);
                     }

@@ -8,6 +8,7 @@ use std::sync::Arc;
 use airwiki_federation_index::{CatalogBackend, CatalogStore};
 use airwiki_network::{
     FileSecretStore, Multiaddr, NodeIdentity, PublicCatalogServerConfig, run_public_catalog_server,
+    validate_public_relay_external_address,
 };
 use tokio::signal;
 use tokio_util::sync::CancellationToken;
@@ -61,6 +62,18 @@ fn parse_multiaddr(address: OsString, kind: &str) -> Result<Multiaddr, String> {
     Multiaddr::from_str(&address).map_err(|_| format!("{kind} multiaddress is invalid"))
 }
 
+fn validate_external_addresses(args: Vec<OsString>) -> Result<(), String> {
+    if args.is_empty() {
+        return Err("--validate-external-address requires a multiaddress".to_owned());
+    }
+    for address in args {
+        let address = parse_multiaddr(address, "external")?;
+        validate_public_relay_external_address(&address)
+            .map_err(|_| "external multiaddress is not publicly routable".to_owned())?;
+    }
+    Ok(())
+}
+
 async fn shutdown_signal() -> std::io::Result<()> {
     #[cfg(unix)]
     {
@@ -89,12 +102,22 @@ async fn main() -> ExitCode {
         )
         .init();
     let mut args = env::args_os().skip(1);
-    let Some(path) = args.next().map(PathBuf::from) else {
+    let Some(first) = args.next() else {
         eprintln!(
-            "usage: airwiki-federation-index <database-path> [--print-peer-id | [--external-address multiaddr]... [listen-multiaddr]...]"
+            "usage: airwiki-federation-index <database-path> [--print-peer-id | [--external-address multiaddr]... [listen-multiaddr]...] | --validate-external-address <multiaddr>..."
         );
         return ExitCode::FAILURE;
     };
+    if first == "--validate-external-address" {
+        return match validate_external_addresses(args.collect()) {
+            Ok(()) => ExitCode::SUCCESS,
+            Err(error) => {
+                eprintln!("{error}");
+                ExitCode::FAILURE
+            }
+        };
+    }
+    let path = PathBuf::from(first);
     let (print_peer_id, listen_addresses, external_addresses) =
         match parse_launch_mode(args.collect()) {
             Ok(LaunchMode::PrintPeerId) => (true, Vec::new(), Vec::new()),
@@ -212,5 +235,19 @@ mod tests {
         };
         assert_eq!(listen_addresses.len(), 1);
         assert_eq!(external_addresses.len(), 1);
+    }
+
+    #[test]
+    fn external_address_preflight_rejects_noncanonical_and_nonpublic_ipv4() {
+        assert!(
+            validate_external_addresses(vec![OsString::from("/ip4/001.002.003.004/tcp/42042")])
+                .is_err()
+        );
+        assert!(
+            validate_external_addresses(vec![OsString::from("/ip4/10.0.0.1/tcp/42042")]).is_err()
+        );
+        assert!(
+            validate_external_addresses(vec![OsString::from("/ip4/8.8.8.8/tcp/42042")]).is_ok()
+        );
     }
 }

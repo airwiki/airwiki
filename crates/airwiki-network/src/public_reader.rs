@@ -5,9 +5,9 @@ use std::time::Duration;
 
 use airwiki_types::{
     PUBLIC_BROWSE_PROTOCOL, PUBLIC_CATALOG_PROTOCOL, PUBLIC_SEARCH_PROTOCOL, PublicBrowsePage,
-    PublicBrowseRequest, PublicCatalogQuery, PublicCollectionTarget, PublicSearchRequest,
-    SearchContractError, SearchHit, SearchRequest, SearchResponse, SignedPublicCollectionManifest,
-    SignedPublicCollectionTombstone,
+    PublicBrowseRequest, PublicCatalogQuery, PublicCollectionSummary, PublicCollectionTarget,
+    PublicSearchRequest, SearchContractError, SearchHit, SearchRequest, SearchResponse,
+    SignedPublicCollectionManifest, SignedPublicCollectionTombstone,
 };
 use libp2p::identity::Keypair;
 use libp2p::request_response::{self, OutboundRequestId, ProtocolSupport};
@@ -18,7 +18,7 @@ use tokio::time::{Instant, timeout_at};
 
 use crate::{
     CatalogWireRequest, CatalogWireResponse, NetworkError, PublicBrowseWireResponse,
-    PublicSearchWireResponse, verify_manifest,
+    PublicSearchWireResponse, PublicSourceRejection, verify_manifest,
 };
 
 const INDEX_DEADLINE: Duration = Duration::from_millis(300);
@@ -43,11 +43,37 @@ pub struct PublicReader {
     route_kind: AtomicU8,
 }
 
+/// Reachability observed for the owner of a public collection.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PublicRouteKind {
+    /// No successful public route has been observed in this reader session.
     Offline,
+    /// The owner answered through a circuit relay.
     Relay,
+    /// The owner answered over a direct transport.
     Direct,
+}
+
+/// Current availability of a federated public collection.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PublicCollectionAvailability {
+    /// The owner answered and the route class is known.
+    Available(PublicRouteKind),
+    /// The signed collection manifest has expired.
+    Expired,
+    /// The owner could not be reached before the public deadline.
+    Offline,
+}
+
+/// Public collection metadata, optional page content, and current availability.
+#[derive(Debug, Clone)]
+pub struct PublicBrowseResult {
+    /// Signed collection profile selected by the routing indexes.
+    pub summary: PublicCollectionSummary,
+    /// Page returned by the owner; absent for expired or offline collections.
+    pub page: Option<PublicBrowsePage>,
+    /// Availability observed while resolving this page.
+    pub availability: PublicCollectionAvailability,
 }
 
 impl Default for PublicReader {
@@ -123,7 +149,7 @@ impl PublicReader {
             limit: airwiki_types::MAX_PUBLIC_CANDIDATES,
         };
         let mut pending_catalog = HashSet::new();
-        for endpoint in indexes.iter().take(MAX_INDEXES) {
+        for endpoint in bounded_indexes(indexes) {
             swarm.add_peer_address(endpoint.peer_id, endpoint.address.clone());
             pending_catalog.insert(swarm.behaviour_mut().catalog.send_request(
                 &endpoint.peer_id,
@@ -136,6 +162,7 @@ impl PublicReader {
             ));
         }
         let mut manifests = Vec::new();
+        let mut catalog_state = CatalogQueryState::default();
         let index_deadline = public_index_deadline(started);
         while !pending_catalog.is_empty() {
             let event = match timeout_at(
@@ -147,8 +174,15 @@ impl PublicReader {
                 Ok(event) => event,
                 Err(_) => break,
             };
-            collect_catalog_event(event, &mut pending_catalog, &mut manifests);
+            collect_catalog_event(
+                event,
+                &mut pending_catalog,
+                &mut manifests,
+                &mut catalog_state,
+            );
         }
+        catalog_state.failed = catalog_state.failed.saturating_add(pending_catalog.len());
+        let catalog_partial = catalog_query_is_partial(catalog_state)?;
         let candidates = {
             let blocked = self.blocked_publishers.read().await;
             select_candidates(manifests)
@@ -157,7 +191,11 @@ impl PublicReader {
                 .collect::<Vec<_>>()
         };
         if candidates.is_empty() {
-            return Ok(SearchResponse::empty(request.request_id));
+            return Ok(public_search_response(
+                request.request_id,
+                Vec::new(),
+                catalog_partial,
+            ));
         }
         {
             let mut cache = self.manifests.write().await;
@@ -205,7 +243,7 @@ impl PublicReader {
             pending_search.insert(request_id, collections);
         }
         let mut sources = Vec::new();
-        let mut partial = !pending_catalog.is_empty();
+        let mut partial = catalog_partial;
         while !pending_search.is_empty() {
             let peer_deadline = public_peer_deadline(started, Instant::now());
             let event = match timeout_at(
@@ -225,6 +263,7 @@ impl PublicReader {
             collect_search_event(
                 event,
                 request.request_id,
+                request.top_k,
                 &mut pending_search,
                 &mut sources,
                 &mut partial,
@@ -251,18 +290,7 @@ impl PublicReader {
         for (position, hit) in hits.iter_mut().enumerate() {
             hit.rank = u32::try_from(position + 1).unwrap_or(u32::MAX);
         }
-        Ok(SearchResponse {
-            request_id: request.request_id,
-            hits,
-            authorized_candidates: Vec::new(),
-            offline_nodes: Vec::new(),
-            warnings: if partial {
-                vec!["public search returned partial results".to_owned()]
-            } else {
-                Vec::new()
-            },
-            partial,
-        })
+        Ok(public_search_response(request.request_id, hits, partial))
     }
 
     pub async fn browse(
@@ -301,7 +329,10 @@ impl PublicReader {
         request
             .validate()
             .map_err(|error| SearchContractError::Backend(error.to_string()))?;
-        let outbound = swarm.behaviour_mut().browse.send_request(&peer, request);
+        let outbound = swarm
+            .behaviour_mut()
+            .browse
+            .send_request(&peer, request.clone());
         let deadline = Instant::now() + GLOBAL_DEADLINE;
         loop {
             let event = timeout_at(deadline, futures::StreamExt::select_next_some(&mut swarm))
@@ -321,13 +352,21 @@ impl PublicReader {
             {
                 return match response {
                     PublicBrowseWireResponse::Success(page)
-                        if page.manifest_sequence >= manifest.manifest.sequence =>
+                        if page.manifest_sequence >= manifest.manifest.sequence
+                            && page
+                                .validate_for(&request, &manifest.manifest.publisher_id)
+                                .is_ok() =>
                     {
                         Ok(page)
                     }
                     PublicBrowseWireResponse::Success(_) => Err(SearchContractError::Unauthorized),
-                    PublicBrowseWireResponse::Rejected(_) => Err(SearchContractError::Unavailable(
-                        "public browse was rejected".to_owned(),
+                    PublicBrowseWireResponse::Rejected(
+                        PublicSourceRejection::Invalid | PublicSourceRejection::NotPublic,
+                    ) => Err(SearchContractError::Unauthorized),
+                    PublicBrowseWireResponse::Rejected(
+                        PublicSourceRejection::Busy | PublicSourceRejection::Unavailable,
+                    ) => Err(SearchContractError::Unavailable(
+                        "public browse source is unavailable".to_owned(),
                     )),
                 };
             }
@@ -340,7 +379,7 @@ impl PublicReader {
         collection_id: uuid::Uuid,
         cursor: Option<String>,
         limit: u8,
-    ) -> Result<PublicBrowsePage, SearchContractError> {
+    ) -> Result<PublicBrowseResult, SearchContractError> {
         let manifest = self
             .manifests
             .read()
@@ -352,7 +391,35 @@ impl PublicReader {
                     "public collection route is no longer available".to_owned(),
                 )
             })?;
-        self.browse(&manifest, cursor, limit).await
+        if self
+            .blocked_publishers
+            .read()
+            .await
+            .contains(&manifest.manifest.publisher_id)
+        {
+            return Err(SearchContractError::Unauthorized);
+        }
+        let summary = manifest.manifest.summary();
+        if manifest.manifest.expires_at <= chrono::Utc::now() {
+            return Ok(PublicBrowseResult {
+                summary,
+                page: None,
+                availability: PublicCollectionAvailability::Expired,
+            });
+        }
+        match self.browse(&manifest, cursor, limit).await {
+            Ok(page) => Ok(PublicBrowseResult {
+                summary,
+                page: Some(page),
+                availability: PublicCollectionAvailability::Available(self.route_kind()),
+            }),
+            Err(SearchContractError::Unavailable(_)) => Ok(PublicBrowseResult {
+                summary,
+                page: None,
+                availability: PublicCollectionAvailability::Offline,
+            }),
+            Err(error) => Err(error),
+        }
     }
 
     pub async fn register_manifest(
@@ -381,7 +448,7 @@ impl PublicReader {
         let mut swarm = reader_swarm(self.identity.clone())
             .map_err(|error| SearchContractError::Unavailable(error.to_string()))?;
         let mut pending = HashSet::new();
-        for endpoint in indexes.iter().take(MAX_INDEXES) {
+        for endpoint in bounded_indexes(indexes) {
             swarm.add_peer_address(endpoint.peer_id, endpoint.address.clone());
             pending.insert(
                 swarm
@@ -517,6 +584,7 @@ fn collect_catalog_event(
     event: SwarmEvent<ReaderBehaviourEvent>,
     pending: &mut HashSet<OutboundRequestId>,
     manifests: &mut Vec<SignedPublicCollectionManifest>,
+    state: &mut CatalogQueryState,
 ) {
     match event {
         SwarmEvent::Behaviour(ReaderBehaviourEvent::Catalog(
@@ -529,27 +597,74 @@ fn collect_catalog_event(
                 ..
             },
         )) => {
-            pending.remove(&request_id);
+            if !pending.remove(&request_id) {
+                return;
+            }
             if let CatalogWireResponse::Results(results) = response {
-                manifests.extend(
-                    results
-                        .into_iter()
-                        .filter(|manifest| verify_manifest(manifest, chrono::Utc::now()).is_ok()),
-                );
+                state.successful = state.successful.saturating_add(1);
+                for manifest in results {
+                    if verify_manifest(&manifest, chrono::Utc::now()).is_ok() {
+                        manifests.push(manifest);
+                    } else {
+                        state.invalid_manifest = true;
+                    }
+                }
+            } else {
+                state.failed = state.failed.saturating_add(1);
             }
         }
         SwarmEvent::Behaviour(ReaderBehaviourEvent::Catalog(
             request_response::Event::OutboundFailure { request_id, .. },
-        )) => {
-            pending.remove(&request_id);
+        )) if pending.remove(&request_id) => {
+            state.failed = state.failed.saturating_add(1);
         }
         _ => {}
+    }
+}
+
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+struct CatalogQueryState {
+    successful: usize,
+    failed: usize,
+    invalid_manifest: bool,
+}
+
+fn bounded_indexes(indexes: &[PublicIndexEndpoint]) -> impl Iterator<Item = &PublicIndexEndpoint> {
+    indexes.iter().take(MAX_INDEXES)
+}
+
+fn catalog_query_is_partial(state: CatalogQueryState) -> Result<bool, SearchContractError> {
+    if state.successful == 0 {
+        return Err(SearchContractError::Unavailable(
+            "public federation indexes are offline".to_owned(),
+        ));
+    }
+    Ok(state.failed > 0 || state.invalid_manifest)
+}
+
+fn public_search_response(
+    request_id: uuid::Uuid,
+    hits: Vec<SearchHit>,
+    partial: bool,
+) -> SearchResponse {
+    SearchResponse {
+        request_id,
+        hits,
+        authorized_candidates: Vec::new(),
+        offline_nodes: Vec::new(),
+        warnings: if partial {
+            vec!["public search returned partial results".to_owned()]
+        } else {
+            Vec::new()
+        },
+        partial,
     }
 }
 
 fn collect_search_event(
     event: SwarmEvent<ReaderBehaviourEvent>,
     expected_request_id: uuid::Uuid,
+    top_k: u8,
     pending: &mut HashMap<OutboundRequestId, Vec<SignedPublicCollectionManifest>>,
     sources: &mut Vec<Vec<SearchHit>>,
     partial: &mut bool,
@@ -566,11 +681,24 @@ fn collect_search_event(
                 && let Some(manifests) = pending.remove(&request_id)
             {
                 match response {
-                    PublicSearchWireResponse::Success(response)
+                    PublicSearchWireResponse::Success(mut response)
                         if response.protocol_version == PUBLIC_SEARCH_PROTOCOL
                             && response.response.request_id == expected_request_id
-                            && revisions_are_current(&response.manifest_sequences, &manifests) =>
+                            && revisions_are_current(&response.manifest_sequences, &manifests)
+                            && public_search_hits_are_valid(
+                                &response.response.hits,
+                                &manifests,
+                                top_k,
+                            ) =>
                     {
+                        if let Some(publisher_id) = manifests
+                            .first()
+                            .map(|manifest| &manifest.manifest.publisher_id)
+                        {
+                            for hit in &mut response.response.hits {
+                                hit.node_id.clone_from(publisher_id);
+                            }
+                        }
                         sources.push(response.response.hits);
                     }
                     _ => *partial = true,
@@ -584,6 +712,26 @@ fn collect_search_event(
         }
         _ => {}
     }
+}
+
+fn public_search_hits_are_valid(
+    hits: &[SearchHit],
+    manifests: &[SignedPublicCollectionManifest],
+    top_k: u8,
+) -> bool {
+    if hits.len() > usize::from(top_k) {
+        return false;
+    }
+    let collections = manifests
+        .iter()
+        .map(|manifest| manifest.manifest.collection_id)
+        .collect::<HashSet<_>>();
+    let mut identities = HashSet::with_capacity(hits.len());
+    hits.iter().enumerate().all(|(position, hit)| {
+        hit.rank == u32::try_from(position + 1).unwrap_or(u32::MAX)
+            && collections.contains(&hit.collection_id)
+            && identities.insert((hit.source_sha256.clone(), hit.chunk_id))
+    })
 }
 
 fn revisions_are_current(
@@ -734,10 +882,11 @@ fn pending_cannot_change_top_k(
         return false;
     }
     let mut scores = scores.into_values().collect::<Vec<_>>();
-    scores.sort_by(f64::total_cmp);
-    let kth_score = scores[scores.len() - top_k];
+    scores.sort_by(|left, right| right.total_cmp(left));
+    let kth_score = scores[top_k - 1];
     let pending_upper_bound = pending_sources as f64 / (RRF_K + 1.0);
-    kth_score > pending_upper_bound
+    let strongest_challenger = scores.get(top_k).copied().unwrap_or_default() + pending_upper_bound;
+    kth_score > strongest_challenger.max(pending_upper_bound)
 }
 
 #[cfg(test)]
@@ -795,6 +944,97 @@ mod tests {
 
         let two_sources = vec![vec![hit(chunk, 1)], vec![hit(chunk, 1)]];
         assert!(pending_cannot_change_top_k(&two_sources, 1, 1));
+    }
+
+    #[test]
+    fn conservative_pruning_preserves_ties_and_incomplete_top_k() {
+        let first = uuid::Uuid::new_v4();
+        let second = uuid::Uuid::new_v4();
+        let incomplete = vec![vec![hit(first, 1)]];
+        assert!(!pending_cannot_change_top_k(&incomplete, 1, 2));
+
+        let tied = vec![vec![hit(first, 1)], vec![hit(second, 1)]];
+        assert!(!pending_cannot_change_top_k(&tied, 1, 2));
+    }
+
+    #[test]
+    fn conservative_pruning_accounts_for_accumulated_challenger_scores() {
+        let leader = uuid::Uuid::new_v4();
+        let challenger = uuid::Uuid::new_v4();
+        let sources = vec![
+            vec![hit(leader, 1), hit(challenger, 2)],
+            vec![hit(leader, 1), hit(challenger, 2)],
+        ];
+
+        assert!(!pending_cannot_change_top_k(&sources, 1, 1));
+    }
+
+    #[test]
+    fn public_search_hits_reject_duplicates_excess_and_foreign_collections() {
+        let collection_id = uuid::Uuid::new_v4();
+        let manifests = vec![manifest("publisher".to_owned(), collection_id)];
+        let mut valid = hit(uuid::Uuid::new_v4(), 1);
+        valid.collection_id = collection_id;
+        assert!(public_search_hits_are_valid(
+            std::slice::from_ref(&valid),
+            &manifests,
+            1
+        ));
+        assert!(!public_search_hits_are_valid(
+            &[valid.clone(), valid.clone()],
+            &manifests,
+            2
+        ));
+
+        let mut foreign = hit(uuid::Uuid::new_v4(), 1);
+        foreign.collection_id = uuid::Uuid::new_v4();
+        assert!(!public_search_hits_are_valid(&[foreign], &manifests, 1));
+
+        let mut excess = hit(uuid::Uuid::new_v4(), 2);
+        excess.collection_id = collection_id;
+        assert!(!public_search_hits_are_valid(
+            &[valid.clone(), excess],
+            &manifests,
+            1
+        ));
+
+        let mut zero_rank = valid;
+        zero_rank.rank = 0;
+        assert!(!public_search_hits_are_valid(&[zero_rank], &manifests, 1));
+    }
+
+    #[test]
+    fn catalog_query_classifies_complete_partial_and_offline_states() {
+        assert!(
+            !catalog_query_is_partial(CatalogQueryState {
+                successful: 3,
+                ..CatalogQueryState::default()
+            })
+            .unwrap()
+        );
+        assert!(
+            catalog_query_is_partial(CatalogQueryState {
+                successful: 2,
+                failed: 1,
+                ..CatalogQueryState::default()
+            })
+            .unwrap()
+        );
+        assert!(catalog_query_is_partial(CatalogQueryState::default()).is_err());
+    }
+
+    #[test]
+    fn index_fan_out_is_bounded_to_three() {
+        let indexes = (0..5)
+            .map(|ordinal| PublicIndexEndpoint {
+                peer_id: PeerId::random(),
+                address: format!("/ip4/127.0.0.1/tcp/{}", 42_000 + ordinal)
+                    .parse()
+                    .unwrap(),
+            })
+            .collect::<Vec<_>>();
+
+        assert_eq!(bounded_indexes(&indexes).count(), MAX_INDEXES);
     }
 
     #[test]

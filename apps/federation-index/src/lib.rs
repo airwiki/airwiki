@@ -460,6 +460,12 @@ mod tests {
             },
         )
         .unwrap();
+        let mut tampered_tombstone = tombstone.clone();
+        tampered_tombstone.tombstone.sequence = 3;
+        assert!(matches!(
+            store.withdraw(&tampered_tombstone),
+            Err(CatalogStoreError::Verification)
+        ));
         store.withdraw(&tombstone).unwrap();
         assert!(store.query(&query("atlas"), now).unwrap().is_empty());
     }
@@ -511,5 +517,33 @@ mod tests {
             Err(CatalogStoreError::StaleSequence)
         ));
         assert!(store.query(&query("atlas"), now).unwrap().is_empty());
+    }
+
+    #[test]
+    fn publisher_registration_limit_rejects_the_next_distinct_collection() {
+        let store = CatalogStore::in_memory().unwrap();
+        let keypair = Keypair::generate_ed25519();
+        let now = Utc::now();
+        for ordinal in 0..MAX_COLLECTIONS_PER_PUBLISHER {
+            store
+                .register(
+                    &signed_manifest(&keypair, Uuid::from_u128(u128::from(ordinal) + 1), 1, now),
+                    now,
+                )
+                .unwrap();
+        }
+
+        assert!(matches!(
+            store.register(
+                &signed_manifest(
+                    &keypair,
+                    Uuid::from_u128(u128::from(MAX_COLLECTIONS_PER_PUBLISHER) + 1),
+                    1,
+                    now,
+                ),
+                now,
+            ),
+            Err(CatalogStoreError::PublisherLimit)
+        ));
     }
 }

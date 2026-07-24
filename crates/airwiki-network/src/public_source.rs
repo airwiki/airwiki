@@ -242,9 +242,20 @@ pub async fn run_public_source_server(
         .into_iter()
         .map(RelayListener::new)
         .collect::<Vec<_>>();
-    retry_due_relay_listeners(&mut swarm, &mut relay_listeners);
     let limiter = PeerRateLimiter::new(60, Duration::from_secs(60));
     let mut tasks = JoinSet::new();
+    if let Err(error) = retry_due_relay_listeners(&mut swarm, &mut relay_listeners) {
+        prepare_public_source_shutdown(
+            &mut swarm,
+            &mut direct_listeners,
+            &mut relay_listeners,
+            &mut tasks,
+        )
+        .await;
+        drop(swarm);
+        await_listener_release(&listen_addresses).await;
+        return Err(error);
+    }
     loop {
         let relay_retry_at = relay_listeners
             .iter()
@@ -253,27 +264,32 @@ pub async fn run_public_source_server(
         tokio::select! {
             biased;
             () = cancellation.cancelled() => {
-                let relay_listener_ids = relay_listeners
-                    .iter_mut()
-                    .filter_map(|listener| listener.listener_id.take());
-                let pending_listeners = direct_listeners
-                    .drain(..)
-                    .chain(relay_listener_ids)
-                    .filter(|listener| swarm.remove_listener(*listener))
-                    .collect::<HashSet<_>>();
-                let connected_peers = swarm.connected_peers().copied().collect::<Vec<_>>();
-                for peer in connected_peers {
-                    let _ = swarm.disconnect_peer_id(peer);
-                }
-                tasks.abort_all();
-                while tasks.join_next().await.is_some() {}
-                await_swarm_shutdown(&mut swarm, pending_listeners).await;
+                prepare_public_source_shutdown(
+                    &mut swarm,
+                    &mut direct_listeners,
+                    &mut relay_listeners,
+                    &mut tasks,
+                )
+                .await;
                 drop(swarm);
                 await_listener_release(&listen_addresses).await;
                 return Ok(());
             }
             () = wait_for_relay_retry(relay_retry_at) => {
-                retry_due_relay_listeners(&mut swarm, &mut relay_listeners);
+                if let Err(error) =
+                    retry_due_relay_listeners(&mut swarm, &mut relay_listeners)
+                {
+                    prepare_public_source_shutdown(
+                        &mut swarm,
+                        &mut direct_listeners,
+                        &mut relay_listeners,
+                        &mut tasks,
+                    )
+                    .await;
+                    drop(swarm);
+                    await_listener_release(&listen_addresses).await;
+                    return Err(error);
+                }
             }
             completion = tasks.join_next(), if !tasks.is_empty() => {
                 if let Some(Ok(completion)) = completion {
@@ -395,7 +411,7 @@ async fn wait_for_relay_retry(retry_at: Option<TokioInstant>) {
 fn retry_due_relay_listeners(
     swarm: &mut libp2p::Swarm<SourceBehaviour>,
     relay_listeners: &mut [RelayListener],
-) {
+) -> Result<(), NetworkError> {
     let now = TokioInstant::now();
     for listener in relay_listeners {
         if listener.listener_id.is_some() || listener.retry_at.is_none_or(|retry_at| retry_at > now)
@@ -408,15 +424,13 @@ fn retry_due_relay_listeners(
                 listener.retry_at = None;
             }
             Err(_) => {
-                let delay = listener.schedule_retry();
-                tracing::warn!(
-                    error_kind = "public_source_relay_listen_retry",
-                    retry_delay_ms = duration_millis(delay),
-                    "public source relay listener could not start"
-                );
+                return Err(NetworkError::Listen(
+                    "public source relay listener configuration is invalid".to_owned(),
+                ));
             }
         }
     }
+    Ok(())
 }
 
 fn ready_relay_count(relay_listeners: &[RelayListener]) -> usize {
@@ -424,6 +438,29 @@ fn ready_relay_count(relay_listeners: &[RelayListener]) -> usize {
         .iter()
         .filter(|listener| listener.ready)
         .count()
+}
+
+async fn prepare_public_source_shutdown(
+    swarm: &mut libp2p::Swarm<SourceBehaviour>,
+    direct_listeners: &mut Vec<ListenerId>,
+    relay_listeners: &mut [RelayListener],
+    tasks: &mut JoinSet<Completion>,
+) {
+    let relay_listener_ids = relay_listeners
+        .iter_mut()
+        .filter_map(|listener| listener.listener_id.take());
+    let pending_listeners = direct_listeners
+        .drain(..)
+        .chain(relay_listener_ids)
+        .filter(|listener| swarm.remove_listener(*listener))
+        .collect::<HashSet<_>>();
+    let connected_peers = swarm.connected_peers().copied().collect::<Vec<_>>();
+    for peer in connected_peers {
+        let _ = swarm.disconnect_peer_id(peer);
+    }
+    tasks.abort_all();
+    while tasks.join_next().await.is_some() {}
+    await_swarm_shutdown(swarm, pending_listeners).await;
 }
 
 async fn await_swarm_shutdown(
@@ -646,6 +683,46 @@ mod tests {
             assert_eq!(relay_retry_delay(retry_count), expected_delay);
         }
         assert_eq!(relay_retry_delay(u32::MAX), Duration::from_secs(10));
+    }
+
+    #[tokio::test]
+    async fn invalid_relay_listener_configuration_fails_closed() {
+        let reservation = UdpSocket::bind(SocketAddrV4::new(Ipv4Addr::LOCALHOST, 0))
+            .expect("reserve an ephemeral UDP port");
+        let port = reservation.local_addr().expect("read reserved port").port();
+        drop(reservation);
+
+        let identity = NodeIdentity::load_or_create(&MemorySecretStore::default())
+            .expect("create test identity");
+        let listen_address = format!("/ip4/127.0.0.1/udp/{port}/quic-v1")
+            .parse()
+            .expect("parse direct listen address");
+        let mut config = PublicSourceServerConfig::new(vec![listen_address]);
+        config.relay_addresses = vec![
+            "/memory/1"
+                .parse()
+                .expect("parse unsupported relay address"),
+        ];
+
+        let result = tokio::time::timeout(
+            Duration::from_secs(1),
+            run_public_source_server(
+                identity,
+                config,
+                Arc::new(RejectingBackend),
+                CancellationToken::new(),
+            ),
+        )
+        .await
+        .expect("invalid relay configuration should fail without retrying");
+
+        assert!(matches!(
+            result,
+            Err(NetworkError::Listen(message))
+                if message == "public source relay listener configuration is invalid"
+        ));
+        UdpSocket::bind(SocketAddrV4::new(Ipv4Addr::LOCALHOST, port))
+            .expect("failure should release the direct listener");
     }
 
     #[tokio::test]

@@ -332,6 +332,126 @@ async fn public_search_and_browse_use_outbound_relay_reservation() {
         .unwrap();
 }
 
+#[tokio::test]
+async fn public_source_retries_relay_reservation_when_relay_starts_late() {
+    let (index_port, source_port) = available_udp_ports();
+    let index_identity = identity();
+    let source_identity = identity();
+    let collection_id = Uuid::new_v4();
+    let index_address: Multiaddr = format!("/ip4/127.0.0.1/udp/{index_port}/quic-v1")
+        .parse()
+        .unwrap();
+    let source_address: Multiaddr = format!("/ip4/127.0.0.1/udp/{source_port}/quic-v1")
+        .parse()
+        .unwrap();
+    let source_cancellation = CancellationToken::new();
+    let mut source_config = PublicSourceServerConfig::new(vec![source_address]);
+    source_config.relay_addresses = vec![relay_circuit_address(
+        index_address.clone(),
+        index_identity.peer_id(),
+    )];
+    let source_task = tokio::spawn(run_public_source_server(
+        source_identity.clone(),
+        source_config,
+        Arc::new(PublicFixtureBackend {
+            gate: DisclosureGate::default(),
+            publisher_id: source_identity.peer_id().to_string(),
+        }),
+        source_cancellation.clone(),
+    ));
+
+    tokio::time::sleep(Duration::from_millis(400)).await;
+    assert!(
+        !source_task.is_finished(),
+        "a transient relay outage must not stop the public source"
+    );
+
+    let catalog_cancellation = CancellationToken::new();
+    let catalog_task = tokio::spawn(run_public_catalog_server(
+        index_identity.clone(),
+        airwiki_network::PublicCatalogServerConfig::new(vec![index_address.clone()])
+            .with_external_addresses(vec![
+                format!("/dns4/relay.invalid/udp/{index_port}/quic-v1")
+                    .parse()
+                    .unwrap(),
+            ]),
+        Arc::new(CatalogBackend::new(Arc::new(
+            CatalogStore::in_memory().unwrap(),
+        ))),
+        catalog_cancellation.clone(),
+    ));
+    tokio::time::sleep(Duration::from_millis(100)).await;
+
+    let endpoint = PublicIndexEndpoint {
+        peer_id: index_identity.peer_id(),
+        address: index_address.clone(),
+    };
+    let now = Utc::now();
+    let manifest = sign_manifest(
+        source_identity.keypair(),
+        PublicCollectionManifest {
+            protocol_version: PUBLIC_CATALOG_PROTOCOL.to_owned(),
+            publisher_id: source_identity.peer_id().to_string(),
+            collection_id,
+            sequence: 1,
+            publication_fingerprint: "a".repeat(64),
+            name: "Atlas public runbooks".to_owned(),
+            description: "Synthetic public collection".to_owned(),
+            languages: vec!["en".to_owned()],
+            concept_count: 1,
+            routing_terms: vec!["atlas".to_owned(), "recovery".to_owned()],
+            routes: vec![
+                relayed_peer_address(
+                    index_address,
+                    index_identity.peer_id(),
+                    source_identity.peer_id(),
+                )
+                .to_string(),
+            ],
+            updated_at: now,
+            expires_at: now + ChronoDuration::minutes(15),
+        },
+    )
+    .unwrap();
+    let reader = PublicReader::new();
+    reader
+        .register_manifest(std::slice::from_ref(&endpoint), manifest)
+        .await
+        .unwrap();
+
+    let response = tokio::time::timeout(Duration::from_secs(5), async {
+        loop {
+            if let Ok(response) = reader
+                .search(
+                    std::slice::from_ref(&endpoint),
+                    SearchRequest::new("atlas recovery", SearchPurpose::LocalAssistant, 5),
+                )
+                .await
+                && !response.hits.is_empty()
+            {
+                return response;
+            }
+            tokio::time::sleep(Duration::from_millis(100)).await;
+        }
+    })
+    .await
+    .expect("the source should reserve the relay after it becomes available");
+    assert_eq!(response.hits.len(), 1);
+
+    source_cancellation.cancel();
+    tokio::time::timeout(Duration::from_secs(2), source_task)
+        .await
+        .unwrap()
+        .unwrap()
+        .unwrap();
+    catalog_cancellation.cancel();
+    tokio::time::timeout(Duration::from_secs(2), catalog_task)
+        .await
+        .unwrap()
+        .unwrap()
+        .unwrap();
+}
+
 fn identity() -> NodeIdentity {
     NodeIdentity::load_or_create(&MemorySecretStore::default()).unwrap()
 }

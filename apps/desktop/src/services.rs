@@ -36,8 +36,8 @@ use airwiki_network::{
     AccessControl, AuthorizedSearchBackend, AuthorizedSearchResult, FederatedCoordinator,
     KeyringSecretStore, MAX_MDNS_ADDRESSES_PER_PEER, MAX_VOLATILE_LAN_PEERS, ManualLanAddress,
     Multiaddr, NetworkConfig, NetworkEvent, NetworkHandle, NetworkWarningKind, NodeIdentity,
-    PairingFailureReason, PeerAccess, PeerId, PublicBrowseDelivery, PublicIndexEndpoint,
-    PublicReader, PublicRouteKind, PublicSearchDelivery, PublicSourceBackend,
+    PairingFailureReason, PeerAccess, PeerId, PublicBrowseDelivery, PublicBrowseResult,
+    PublicIndexEndpoint, PublicReader, PublicRouteKind, PublicSearchDelivery, PublicSourceBackend,
     PublicSourceBackendError, PublicSourceServerConfig, SecretStore, relay_circuit_address,
     relayed_peer_address, run_public_source_server, sign_manifest, sign_tombstone, spawn_network,
 };
@@ -62,8 +62,9 @@ use crate::{
     manual_lan_route,
     paths::AppPaths,
     worker::{
-        CollectionView, PeerActivityState, PeerTrustState, PeerView, ReviewEvidenceErrorView,
-        ReviewEvidenceExcerptView, ReviewEvidencePageView, ReviewItemView, SourceIssueView,
+        CollectionView, PeerActivityState, PeerTrustState, PeerView, PublicAnnouncementStatusView,
+        ReviewEvidenceErrorView, ReviewEvidenceExcerptView, ReviewEvidencePageView, ReviewItemView,
+        SourceIssueView,
     },
 };
 
@@ -423,6 +424,48 @@ fn renumber_search_hits(hits: &mut [SearchHit]) {
     }
 }
 
+fn revalidate_public_targets(
+    database: &Database,
+    lease: &DisclosureLease,
+    targets: &[airwiki_types::PublicCollectionTarget],
+) -> std::result::Result<Vec<PublicCollectionRevision>, PublicSourceBackendError> {
+    let mut revisions = Vec::with_capacity(targets.len());
+    for target in targets {
+        let Some(manifest_sequence) = database
+            .public_manifest_sequence_under_disclosure(lease, target.collection_id)
+            .map_err(|_| PublicSourceBackendError::Unavailable)?
+        else {
+            return Err(PublicSourceBackendError::NotPublic);
+        };
+        let fingerprint = database
+            .public_collection_fingerprint_under_disclosure(lease, target.collection_id)
+            .map_err(|_| PublicSourceBackendError::NotPublic)?;
+        if manifest_sequence < target.manifest_sequence
+            || fingerprint != target.publication_fingerprint
+        {
+            return Err(PublicSourceBackendError::NotPublic);
+        }
+        revisions.push(PublicCollectionRevision {
+            collection_id: target.collection_id,
+            manifest_sequence,
+        });
+    }
+    Ok(revisions)
+}
+
+fn public_page_next_cursor(
+    concepts: &[airwiki_types::PublicConceptSummary],
+    has_more: bool,
+) -> Option<String> {
+    if has_more {
+        concepts
+            .last()
+            .map(|concept| concept.concept_id.to_string())
+    } else {
+        None
+    }
+}
+
 pub struct DynamicPublicSourceBackend {
     database: Database,
     engine: Arc<DynamicAuthorizedSearchBackend>,
@@ -469,27 +512,7 @@ impl PublicSourceBackend for DynamicPublicSourceBackend {
         let publisher_id = self.publisher_id.clone();
         tokio::task::spawn_blocking(move || {
             let lease = database.disclosure_gate().acquire_disclosure();
-            let mut revisions = Vec::with_capacity(collection_targets.len());
-            for target in &collection_targets {
-                let Some(manifest_sequence) = database
-                    .public_manifest_sequence_under_disclosure(&lease, target.collection_id)
-                    .map_err(|_| PublicSourceBackendError::Unavailable)?
-                else {
-                    return Err(PublicSourceBackendError::NotPublic);
-                };
-                let fingerprint = database
-                    .public_collection_fingerprint_under_disclosure(&lease, target.collection_id)
-                    .map_err(|_| PublicSourceBackendError::NotPublic)?;
-                if manifest_sequence < target.manifest_sequence
-                    || fingerprint != target.publication_fingerprint
-                {
-                    return Err(PublicSourceBackendError::NotPublic);
-                }
-                revisions.push(PublicCollectionRevision {
-                    collection_id: target.collection_id,
-                    manifest_sequence,
-                });
-            }
+            let revisions = revalidate_public_targets(&database, &lease, &collection_targets)?;
             let mut current = Vec::with_capacity(response.hits.len());
             for mut hit in response.hits {
                 if database
@@ -545,17 +568,29 @@ impl PublicSourceBackend for DynamicPublicSourceBackend {
                     request.limit,
                 )
                 .map_err(|_| PublicSourceBackendError::NotPublic)?;
+            if concepts.is_empty() {
+                return Err(PublicSourceBackendError::NotPublic);
+            }
             let manifest_sequence = database
                 .public_manifest_sequence_under_disclosure(&lease, request.collection_id)
                 .map_err(|_| PublicSourceBackendError::Unavailable)?
                 .ok_or(PublicSourceBackendError::NotPublic)?;
-            let next_cursor = (concepts.len() == usize::from(request.limit))
-                .then(|| {
-                    concepts
-                        .last()
-                        .map(|concept| concept.concept_id.to_string())
-                })
-                .flatten();
+            let last_concept_id = concepts.last().map(|concept| concept.concept_id);
+            let has_more = if concepts.len() == usize::from(request.limit) {
+                !database
+                    .public_concept_page_under_disclosure(
+                        &lease,
+                        &publisher_id,
+                        request.collection_id,
+                        last_concept_id,
+                        1,
+                    )
+                    .map_err(|_| PublicSourceBackendError::Unavailable)?
+                    .is_empty()
+            } else {
+                false
+            };
+            let next_cursor = public_page_next_cursor(&concepts, has_more);
             Ok(PublicBrowseDelivery::new(
                 PublicBrowsePage {
                     protocol_version: airwiki_types::PUBLIC_BROWSE_PROTOCOL.to_owned(),
@@ -849,7 +884,7 @@ pub struct DesktopServices {
     network: Mutex<Option<NetworkRuntime>>,
     public_network: Mutex<Option<PublicNetworkRuntime>>,
     public_reader: Arc<PublicReader>,
-    public_announcements: RwLock<HashMap<Uuid, PublicAnnouncementState>>,
+    public_announcements: Arc<RwLock<HashMap<Uuid, PublicAnnouncementState>>>,
     search_topology: AsyncMutex<()>,
     network_generation: Arc<AtomicU64>,
     network_events: broadcast::Sender<SequencedNetworkEvent>,
@@ -865,6 +900,72 @@ struct PublicAnnouncementState {
     accepted_indexes: usize,
     last_announced_at: chrono::DateTime<Utc>,
     expires_at: chrono::DateTime<Utc>,
+}
+
+fn public_announcement_view(
+    announcement: Option<PublicAnnouncementState>,
+    now: chrono::DateTime<Utc>,
+) -> PublicAnnouncementStatusView {
+    match announcement {
+        Some(state) if state.accepted_indexes == 0 => PublicAnnouncementStatusView::Offline,
+        Some(state) if state.expires_at <= now => PublicAnnouncementStatusView::Expired {
+            last_announced_at: state.last_announced_at,
+            expires_at: state.expires_at,
+        },
+        Some(state) => PublicAnnouncementStatusView::Advertised {
+            accepted_indexes: state.accepted_indexes,
+            last_announced_at: state.last_announced_at,
+            expires_at: state.expires_at,
+        },
+        None => PublicAnnouncementStatusView::Offline,
+    }
+}
+
+fn update_public_announcement_state(
+    announcements: &RwLock<HashMap<Uuid, PublicAnnouncementState>>,
+    collection_id: Uuid,
+    state: Option<PublicAnnouncementState>,
+) {
+    let Ok(mut announcements) = write_lock(announcements, "public announcement state") else {
+        tracing::warn!(
+            error_kind = "public_announcement_state_unavailable",
+            "public announcement state could not be updated"
+        );
+        return;
+    };
+    if let Some(state) = state {
+        announcements.insert(collection_id, state);
+    } else {
+        announcements.remove(&collection_id);
+    }
+}
+
+fn record_public_announcement_failure(
+    announcements: &RwLock<HashMap<Uuid, PublicAnnouncementState>>,
+    collection_id: Uuid,
+    now: chrono::DateTime<Utc>,
+) {
+    let Ok(mut announcements) = write_lock(announcements, "public announcement state") else {
+        tracing::warn!(
+            error_kind = "public_announcement_state_unavailable",
+            "public announcement state could not be updated"
+        );
+        return;
+    };
+    if announcements
+        .get(&collection_id)
+        .is_some_and(|state| state.accepted_indexes > 0 && state.expires_at > now)
+    {
+        return;
+    }
+    announcements.insert(
+        collection_id,
+        PublicAnnouncementState {
+            accepted_indexes: 0,
+            last_announced_at: now,
+            expires_at: now,
+        },
+    );
 }
 
 impl DesktopServices {
@@ -977,7 +1078,7 @@ impl DesktopServices {
             network: Mutex::new(network),
             public_network: Mutex::new(None),
             public_reader,
-            public_announcements: RwLock::new(HashMap::new()),
+            public_announcements: Arc::new(RwLock::new(HashMap::new())),
             search_topology: AsyncMutex::new(()),
             network_generation,
             network_events,
@@ -1406,6 +1507,7 @@ impl DesktopServices {
                     self.database.clone(),
                     self.public_identity.clone(),
                     Arc::clone(&self.public_reader),
+                    Arc::clone(&self.public_announcements),
                     cancellation.clone(),
                 ));
                 *guard = Some(PublicNetworkRuntime {
@@ -1736,7 +1838,7 @@ impl DesktopServices {
         publisher_id: &str,
         collection_id: Uuid,
         cursor: Option<String>,
-    ) -> std::result::Result<PublicBrowsePage, SearchContractError> {
+    ) -> std::result::Result<PublicBrowseResult, SearchContractError> {
         self.public_reader
             .browse_collection(publisher_id, collection_id, cursor, 50)
             .await
@@ -2017,11 +2119,7 @@ impl DesktopServices {
                     public_languages: public_profile
                         .map(|profile| profile.languages.join(", "))
                         .unwrap_or_default(),
-                    public_accepted_indexes: announcement
-                        .map(|state| state.accepted_indexes)
-                        .unwrap_or_default(),
-                    public_last_announced_at: announcement.map(|state| state.last_announced_at),
-                    public_expires_at: announcement.map(|state| state.expires_at),
+                    public_announcement: public_announcement_view(announcement, Utc::now()),
                     maintenance: self.database.collection_maintenance(collection.id)?,
                 })
             })
@@ -2947,6 +3045,7 @@ async fn run_public_manifest_renewal(
     database: Database,
     identity: NodeIdentity,
     reader: Arc<PublicReader>,
+    public_announcements: Arc<RwLock<HashMap<Uuid, PublicAnnouncementState>>>,
     cancellation: CancellationToken,
 ) {
     loop {
@@ -2964,11 +3063,9 @@ async fn run_public_manifest_renewal(
                     continue;
                 }
                 let _ = database.bump_public_manifest_sequence(collection.id)?;
-                updates.push(prepare_public_announcement(
-                    &database,
-                    &identity,
-                    collection.id,
-                )?);
+                let (endpoints, update) =
+                    prepare_public_announcement(&database, &identity, collection.id)?;
+                updates.push((collection.id, endpoints, update));
             }
             Result::<Vec<_>>::Ok(updates)
         })
@@ -2982,10 +3079,28 @@ async fn run_public_manifest_renewal(
         };
         let mut accepted = 0_usize;
         let mut failed = 0_usize;
-        for (endpoints, update) in updates {
+        for (collection_id, endpoints, update) in updates {
             if endpoints.is_empty() {
+                let now = Utc::now();
+                update_public_announcement_state(
+                    &public_announcements,
+                    collection_id,
+                    Some(PublicAnnouncementState {
+                        accepted_indexes: 0,
+                        last_announced_at: now,
+                        expires_at: now,
+                    }),
+                );
                 continue;
             }
+            let expires_at = match &update {
+                PreparedPublicAnnouncement::Manifest(manifest) => {
+                    Some(manifest.manifest.expires_at)
+                }
+                PreparedPublicAnnouncement::Tombstone(_) | PreparedPublicAnnouncement::Missing => {
+                    None
+                }
+            };
             let result = match update {
                 PreparedPublicAnnouncement::Manifest(manifest) => {
                     reader.register_manifest(&endpoints, manifest).await
@@ -2996,8 +3111,26 @@ async fn run_public_manifest_renewal(
                 PreparedPublicAnnouncement::Missing => continue,
             };
             match result {
-                Ok(count) => accepted = accepted.saturating_add(count),
-                Err(_) => failed = failed.saturating_add(1),
+                Ok(count) => {
+                    accepted = accepted.saturating_add(count);
+                    update_public_announcement_state(
+                        &public_announcements,
+                        collection_id,
+                        expires_at.map(|expires_at| PublicAnnouncementState {
+                            accepted_indexes: count,
+                            last_announced_at: Utc::now(),
+                            expires_at,
+                        }),
+                    );
+                }
+                Err(_) => {
+                    failed = failed.saturating_add(1);
+                    record_public_announcement_failure(
+                        &public_announcements,
+                        collection_id,
+                        Utc::now(),
+                    );
+                }
             }
         }
         tracing::info!(accepted, failed, "public manifests renewed");
@@ -3355,6 +3488,95 @@ mod tests {
         let indexes = parse_bundled_bootstrap_federation_indexes(Some(&expired)).unwrap();
         install_bundled_bootstrap_federation_indexes(&database, indexes).unwrap();
         assert!(database.list_federation_indexes().unwrap().is_empty());
+    }
+
+    #[test]
+    fn public_announcement_status_distinguishes_advertised_expired_and_offline() {
+        let now = Utc::now();
+        let advertised = PublicAnnouncementState {
+            accepted_indexes: 2,
+            last_announced_at: now,
+            expires_at: now + ChronoDuration::minutes(15),
+        };
+        assert!(matches!(
+            public_announcement_view(Some(advertised), now),
+            PublicAnnouncementStatusView::Advertised {
+                accepted_indexes: 2,
+                ..
+            }
+        ));
+        let expired = PublicAnnouncementState {
+            expires_at: now,
+            ..advertised
+        };
+        assert!(matches!(
+            public_announcement_view(Some(expired), now),
+            PublicAnnouncementStatusView::Expired { .. }
+        ));
+        assert_eq!(
+            public_announcement_view(None, now),
+            PublicAnnouncementStatusView::Offline
+        );
+    }
+
+    #[test]
+    fn successful_renewal_replaces_the_visible_announcement_expiry() {
+        let now = Utc::now();
+        let announcements = RwLock::new(HashMap::new());
+        let collection_id = Uuid::new_v4();
+        update_public_announcement_state(
+            &announcements,
+            collection_id,
+            Some(PublicAnnouncementState {
+                accepted_indexes: 1,
+                last_announced_at: now,
+                expires_at: now + ChronoDuration::minutes(15),
+            }),
+        );
+        let renewed_at = now + ChronoDuration::minutes(5);
+        let renewed_expiry = renewed_at + ChronoDuration::minutes(15);
+        update_public_announcement_state(
+            &announcements,
+            collection_id,
+            Some(PublicAnnouncementState {
+                accepted_indexes: 3,
+                last_announced_at: renewed_at,
+                expires_at: renewed_expiry,
+            }),
+        );
+        record_public_announcement_failure(
+            &announcements,
+            collection_id,
+            renewed_at + ChronoDuration::minutes(5),
+        );
+
+        let state = read_lock(&announcements, "test announcements")
+            .unwrap()
+            .get(&collection_id)
+            .copied()
+            .unwrap();
+        assert_eq!(state.accepted_indexes, 3);
+        assert_eq!(state.last_announced_at, renewed_at);
+        assert_eq!(state.expires_at, renewed_expiry);
+        assert!(matches!(
+            public_announcement_view(Some(state), renewed_at),
+            PublicAnnouncementStatusView::Advertised {
+                accepted_indexes: 3,
+                ..
+            }
+        ));
+
+        let after_expiry = renewed_expiry + ChronoDuration::seconds(1);
+        record_public_announcement_failure(&announcements, collection_id, after_expiry);
+        let failed = read_lock(&announcements, "test announcements")
+            .unwrap()
+            .get(&collection_id)
+            .copied()
+            .unwrap();
+        assert_eq!(
+            public_announcement_view(Some(failed), after_expiry),
+            PublicAnnouncementStatusView::Offline
+        );
     }
 
     #[test]
@@ -4026,6 +4248,236 @@ mod tests {
         assert!(matches!(
             proxy.durable_authorized_collections(&authorization, SearchPurpose::LocalAssistant),
             Err(SearchContractError::Unauthorized)
+        ));
+    }
+
+    #[tokio::test]
+    async fn public_browse_rejects_private_collections_and_unreviewed_drafts() {
+        let temporary = tempfile::tempdir().unwrap();
+        let database = Database::in_memory().unwrap();
+        for directory in [
+            "private-source",
+            "private-wiki",
+            "public-source",
+            "public-wiki",
+        ] {
+            std::fs::create_dir_all(temporary.path().join(directory)).unwrap();
+        }
+        let private = database
+            .create_collection(
+                "private",
+                temporary.path().join("private-source"),
+                temporary.path().join("private-wiki"),
+                CollectionPolicy::local_only(),
+            )
+            .unwrap();
+        let public = database
+            .create_collection(
+                "public",
+                temporary.path().join("public-source"),
+                temporary.path().join("public-wiki"),
+                CollectionPolicy::local_only(),
+            )
+            .unwrap();
+        database
+            .update_collection_policy(
+                public.id,
+                CollectionPolicy {
+                    local_only: false,
+                    peer_shareable: false,
+                    allow_external_ai: false,
+                    internet_public: true,
+                },
+            )
+            .unwrap();
+        let source_path = temporary.path().join("public-source/draft.md");
+        std::fs::write(&source_path, "Synthetic draft").unwrap();
+        let source_hash = airwiki_core::sha256_file(&source_path).unwrap();
+        let source = database
+            .register_source(public.id, &source_path, &source_hash, "markdown", 15)
+            .unwrap();
+        database.mark_extracted(source.id(), 0, 15).unwrap();
+        let draft = EnrichmentDraft {
+            concept_type: airwiki_types::ConceptType::Document,
+            title: "Synthetic draft".into(),
+            description: "Synthetic unreviewed draft".into(),
+            language: "en".into(),
+            tags: Vec::new(),
+            entities: Vec::new(),
+            links: Vec::new(),
+            summary: "Not reviewed".into(),
+            classification_confidence: 1.0,
+            classification_explanation: "fixture".into(),
+        };
+        let concept = database
+            .save_enrichment(source.id(), draft.clone(), "test-node", "test-model")
+            .unwrap();
+        let access = AccessControl::with_disclosure_gate(database.disclosure_gate());
+        let engine = Arc::new(DynamicAuthorizedSearchBackend::new(
+            database.clone(),
+            access,
+        ));
+        let backend =
+            DynamicPublicSourceBackend::new(database.clone(), engine, test_public_peer_id());
+
+        for collection_id in [private.id, public.id] {
+            let result = backend
+                .browse(PublicBrowseRequest {
+                    protocol_version: airwiki_types::PUBLIC_BROWSE_PROTOCOL.to_owned(),
+                    request_id: Uuid::new_v4(),
+                    collection_id,
+                    cursor: None,
+                    limit: 50,
+                })
+                .await;
+            assert!(matches!(result, Err(PublicSourceBackendError::NotPublic)));
+        }
+
+        database
+            .replace_chunks(
+                concept.id,
+                &[airwiki_core::StoredChunk {
+                    id: Uuid::new_v4(),
+                    concept_id: concept.id,
+                    source_document_id: source.id(),
+                    collection_id: public.id,
+                    ordinal: 0,
+                    heading_or_page: "Fixture".into(),
+                    text: "Synthetic draft".into(),
+                    text_sha256: "chunk-hash".into(),
+                    embedding: vec![0.0; airwiki_core::EMBEDDING_DIMENSIONS],
+                    source_revision: 1,
+                }],
+            )
+            .unwrap();
+        let review_version = database
+            .review_evidence_page(concept.id, 1, None, None, 1)
+            .unwrap()
+            .unwrap()
+            .review_version;
+        OkfPublicationMaterializer::new(database.clone())
+            .approve(concept.id, draft, &review_version)
+            .unwrap();
+        assert_eq!(
+            database.concept(concept.id).unwrap().unwrap().status,
+            DocumentStatus::Published
+        );
+        assert_eq!(
+            database
+                .source_document(source.id())
+                .unwrap()
+                .unwrap()
+                .status,
+            DocumentStatus::Published
+        );
+        assert_eq!(
+            database
+                .public_concept_page(&test_public_peer_id(), public.id, None, 50)
+                .unwrap()
+                .len(),
+            1
+        );
+        {
+            let lease = database.disclosure_gate().acquire_disclosure();
+            assert!(
+                database
+                    .public_manifest_sequence_under_disclosure(&lease, public.id)
+                    .unwrap()
+                    .is_some()
+            );
+            let concepts = database
+                .public_concept_page_under_disclosure(
+                    &lease,
+                    &backend.publisher_id,
+                    public.id,
+                    None,
+                    1,
+                )
+                .unwrap();
+            assert_eq!(concepts.len(), 1);
+            let has_more = !database
+                .public_concept_page_under_disclosure(
+                    &lease,
+                    &backend.publisher_id,
+                    public.id,
+                    Some(concepts[0].concept_id),
+                    1,
+                )
+                .unwrap()
+                .is_empty();
+            assert!(!has_more);
+            assert_eq!(public_page_next_cursor(&concepts, has_more), None);
+            assert_eq!(
+                public_page_next_cursor(&concepts, true),
+                Some(concepts[0].concept_id.to_string())
+            );
+        }
+        let published = backend
+            .browse(PublicBrowseRequest {
+                protocol_version: airwiki_types::PUBLIC_BROWSE_PROTOCOL.to_owned(),
+                request_id: Uuid::new_v4(),
+                collection_id: public.id,
+                cursor: None,
+                limit: 1,
+            })
+            .await;
+        assert!(
+            published.is_ok(),
+            "public browse failed: {:?}",
+            published.as_ref().err()
+        );
+        drop(published);
+
+        {
+            let lease = database.disclosure_gate().acquire_disclosure();
+            let sequence = database
+                .public_manifest_sequence_under_disclosure(&lease, public.id)
+                .unwrap()
+                .unwrap();
+            let fingerprint = database
+                .public_collection_fingerprint_under_disclosure(&lease, public.id)
+                .unwrap();
+            let current = airwiki_types::PublicCollectionTarget {
+                collection_id: public.id,
+                manifest_sequence: sequence,
+                publication_fingerprint: fingerprint.clone(),
+            };
+            assert!(revalidate_public_targets(&database, &lease, &[current]).is_ok());
+            let stale_fingerprint = airwiki_types::PublicCollectionTarget {
+                collection_id: public.id,
+                manifest_sequence: sequence,
+                publication_fingerprint: "0".repeat(64),
+            };
+            assert!(matches!(
+                revalidate_public_targets(&database, &lease, &[stale_fingerprint]),
+                Err(PublicSourceBackendError::NotPublic)
+            ));
+            let future_sequence = airwiki_types::PublicCollectionTarget {
+                collection_id: public.id,
+                manifest_sequence: sequence.saturating_add(1),
+                publication_fingerprint: fingerprint,
+            };
+            assert!(matches!(
+                revalidate_public_targets(&database, &lease, &[future_sequence]),
+                Err(PublicSourceBackendError::NotPublic)
+            ));
+        }
+
+        database
+            .register_source(public.id, &source_path, "changed-hash", "markdown", 15)
+            .unwrap();
+        let withdrawn = backend
+            .browse(PublicBrowseRequest {
+                protocol_version: airwiki_types::PUBLIC_BROWSE_PROTOCOL.to_owned(),
+                request_id: Uuid::new_v4(),
+                collection_id: public.id,
+                cursor: None,
+                limit: 50,
+            })
+            .await;
+        assert!(matches!(
+            withdrawn,
+            Err(PublicSourceBackendError::NotPublic)
         ));
     }
 }

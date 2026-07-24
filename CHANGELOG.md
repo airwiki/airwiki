@@ -8,6 +8,7 @@ All notable user-visible changes to AirWiki will be documented here. The project
 
 - Added experimental opt-in public federation with separate publisher identity, signed expiring routing manifests, replaceable indexes, QUIC/relay transport, owner-served search and paginated browse.
 - Added expiring versioned bootstrap metadata, local publisher blocking, bounded fan-out pruning, and sanitized direct/relay and announcement status for public federation.
+- Added a complete public collection card with profile, provenance, expiry, route, paginated concept metadata, and explicit advertised/expired/offline states.
 - Initial development baseline for local ingestion, human-reviewed OKF publication, LAN federation, and read-only local chat integration.
 - Contributor guidance, architecture decisions, synthetic fixtures, and proportional validation commands.
 - A proportional code-review contract, pull-request template, and read-only DCO validation for contributions.
@@ -41,6 +42,7 @@ All notable user-visible changes to AirWiki will be documented here. The project
 - Allowed fresh installations to defer the optional local-model download so public read-only discovery is not blocked by unrelated inference setup.
 - Made public relay reservations advertise only operator-confirmed external addresses and covered owner search and browse through an outbound relay circuit.
 - Made public source listeners recover automatically after rapid unpublish and republish by closing relay connections and waiting until every TCP and QUIC socket is reusable before starting the replacement swarm.
+- Made public index outages report partial or offline state accurately instead of appearing as a complete empty search, and made public browse reject empty unreviewed or withdrawn revisions.
 - Preserved both evidence and authorized-candidate lanes in flattened MCP output, and improved localized, width-safe diagnostics for source files that could not be processed.
 
 - Made the first pending review immediately selectable and localized model diagnostics used by the normal setup flow.
@@ -50,6 +52,9 @@ All notable user-visible changes to AirWiki will be documented here. The project
 - Kept Wiki Health recovery actions honest: filesystem and ambiguous findings now require manual recovery instead of offering a guided repair that cannot complete, while missing pages are no longer rendered as dead links.
 
 ### Security
+
+- Rejected malformed public rankings before RRF fusion and made early fan-out cancellation account conservatively for every accumulated challenger.
+- Hardened Azure relay installation with exact binary checks, shared public-route preflight, and fail-closed service replacement.
 
 - Sanitized desktop, LAN, MCP, and inference diagnostics so default logs and technical-detail panels expose stable error categories instead of peer IDs, request IDs, collection IDs, endpoints, local paths, or raw backend errors.
 - Supervised model lifecycle and authorized-search tasks through owned Tokio task sets so shutdown cancels and joins in-flight work deterministically.

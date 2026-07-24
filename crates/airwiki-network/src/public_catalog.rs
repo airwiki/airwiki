@@ -177,7 +177,7 @@ pub async fn run_public_catalog_server(
             .map_err(|error| NetworkError::Listen(error.to_string()))?;
     }
     for address in config.external_addresses {
-        validate_relay_external_address(&address)?;
+        validate_public_relay_external_address(&address)?;
         swarm.add_external_address(address);
     }
     let limiter = PeerRateLimiter::new(120, Duration::from_secs(60));
@@ -227,7 +227,8 @@ pub async fn run_public_catalog_server(
     }
 }
 
-fn validate_relay_external_address(address: &Multiaddr) -> Result<(), NetworkError> {
+/// Rejects advertised relay routes that are malformed or not publicly routable.
+pub fn validate_public_relay_external_address(address: &Multiaddr) -> Result<(), NetworkError> {
     use libp2p::multiaddr::Protocol;
 
     let protocols = address.iter().collect::<Vec<_>>();
@@ -314,10 +315,10 @@ mod tests {
         let private = "/ip4/192.168.1.10/tcp/42042".parse().unwrap();
         let documentation = "/ip6/2001:db8::10/udp/42042/quic-v1".parse().unwrap();
 
-        assert!(validate_relay_external_address(&wildcard).is_err());
-        assert!(validate_relay_external_address(&loopback).is_err());
-        assert!(validate_relay_external_address(&private).is_err());
-        assert!(validate_relay_external_address(&documentation).is_err());
+        assert!(validate_public_relay_external_address(&wildcard).is_err());
+        assert!(validate_public_relay_external_address(&loopback).is_err());
+        assert!(validate_public_relay_external_address(&private).is_err());
+        assert!(validate_public_relay_external_address(&documentation).is_err());
     }
 
     #[test]
@@ -330,8 +331,8 @@ mod tests {
         .parse()
         .unwrap();
 
-        assert!(validate_relay_external_address(&quic_without_udp).is_err());
-        assert!(validate_relay_external_address(&tcp_with_peer).is_err());
+        assert!(validate_public_relay_external_address(&quic_without_udp).is_err());
+        assert!(validate_public_relay_external_address(&tcp_with_peer).is_err());
     }
 
     #[test]
@@ -341,7 +342,7 @@ mod tests {
             .parse()
             .unwrap();
 
-        assert!(validate_relay_external_address(&tcp).is_ok());
-        assert!(validate_relay_external_address(&quic).is_ok());
+        assert!(validate_public_relay_external_address(&tcp).is_ok());
+        assert!(validate_public_relay_external_address(&quic).is_ok());
     }
 }

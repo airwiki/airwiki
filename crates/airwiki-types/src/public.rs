@@ -4,7 +4,7 @@ use thiserror::Error;
 use uuid::Uuid;
 
 use crate::{
-    ConceptType, MAX_QUERY_BYTES, MAX_TOP_K, MIN_TOP_K, PUBLIC_BROWSE_PROTOCOL,
+    ConceptType, MAX_QUERY_BYTES, MAX_SNIPPET_CHARS, MAX_TOP_K, MIN_TOP_K, PUBLIC_BROWSE_PROTOCOL,
     PUBLIC_CATALOG_PROTOCOL, PUBLIC_SEARCH_PROTOCOL, SearchPurpose, SearchResponse,
 };
 
@@ -253,6 +253,49 @@ pub struct PublicBrowsePage {
     pub next_cursor: Option<String>,
 }
 
+impl PublicBrowsePage {
+    pub fn validate_for(
+        &self,
+        request: &PublicBrowseRequest,
+        publisher_id: &str,
+    ) -> Result<(), PublicContractError> {
+        if self.protocol_version != PUBLIC_BROWSE_PROTOCOL
+            || self.request_id != request.request_id
+            || self.concepts.len() > usize::from(request.limit)
+        {
+            return Err(PublicContractError::InvalidLimit);
+        }
+        if self
+            .next_cursor
+            .as_ref()
+            .is_some_and(|cursor| cursor.len() > 128 || cursor.chars().any(char::is_control))
+        {
+            return Err(PublicContractError::InvalidLimit);
+        }
+        for concept in &self.concepts {
+            if concept.publisher_id != publisher_id
+                || concept.collection_id != request.collection_id
+                || concept.tags.len() > 64
+            {
+                return Err(PublicContractError::TooManyItems);
+            }
+            validate_text(&concept.title, 240)?;
+            validate_optional_text(&concept.description, 1_000)?;
+            validate_text(&concept.language, 16)?;
+            validate_optional_text(&concept.logical_resource_uri, 2_048)?;
+            if concept.summary.chars().count() > MAX_SNIPPET_CHARS
+                || concept.summary.chars().any(char::is_control)
+            {
+                return Err(PublicContractError::InvalidText);
+            }
+            for tag in &concept.tags {
+                validate_text(tag, 64)?;
+            }
+        }
+        Ok(())
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Error)]
 pub enum PublicContractError {
     #[error("unsupported public protocol")]
@@ -281,4 +324,120 @@ fn validate_optional_text(value: &str, max_bytes: usize) -> Result<(), PublicCon
         return Err(PublicContractError::InvalidText);
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use chrono::Duration;
+
+    use super::*;
+
+    fn manifest() -> PublicCollectionManifest {
+        let now = Utc::now();
+        PublicCollectionManifest {
+            protocol_version: PUBLIC_CATALOG_PROTOCOL.to_owned(),
+            publisher_id: "publisher".to_owned(),
+            collection_id: Uuid::new_v4(),
+            sequence: 1,
+            publication_fingerprint: "a".repeat(64),
+            name: "Synthetic collection".to_owned(),
+            description: "Bounded public profile".to_owned(),
+            languages: vec!["en".to_owned()],
+            concept_count: 1,
+            routing_terms: vec!["synthetic".to_owned()],
+            routes: vec!["/ip4/127.0.0.1/tcp/42042".to_owned()],
+            updated_at: now,
+            expires_at: now + Duration::minutes(15),
+        }
+    }
+
+    #[test]
+    fn public_manifest_rejects_oversized_profile_and_routing_payloads() {
+        let now = Utc::now();
+        let mut oversized_profile = manifest();
+        oversized_profile.description = "x".repeat(1_001);
+        assert!(oversized_profile.validate(now).is_err());
+
+        let mut oversized_routing = manifest();
+        oversized_routing.routing_terms = (0..=MAX_PUBLIC_ROUTING_TERMS)
+            .map(|ordinal| format!("term-{ordinal}"))
+            .collect();
+        assert!(oversized_routing.validate(now).is_err());
+    }
+
+    #[test]
+    fn public_requests_reject_excessive_queries_collections_and_cursors() {
+        let catalog = PublicCatalogQuery {
+            protocol_version: PUBLIC_CATALOG_PROTOCOL.to_owned(),
+            request_id: Uuid::new_v4(),
+            query: "x".repeat(MAX_QUERY_BYTES + 1),
+            languages: Vec::new(),
+            limit: MAX_PUBLIC_CANDIDATES,
+        };
+        assert!(catalog.validate().is_err());
+
+        let search = PublicSearchRequest {
+            protocol_version: PUBLIC_SEARCH_PROTOCOL.to_owned(),
+            request_id: Uuid::new_v4(),
+            query: "synthetic".to_owned(),
+            purpose: SearchPurpose::LocalAssistant,
+            collections: (0..3)
+                .map(|_| PublicCollectionTarget {
+                    collection_id: Uuid::new_v4(),
+                    manifest_sequence: 1,
+                    publication_fingerprint: "a".repeat(64),
+                })
+                .collect(),
+            top_k: MIN_TOP_K,
+        };
+        assert!(search.validate().is_err());
+
+        let browse = PublicBrowseRequest {
+            protocol_version: PUBLIC_BROWSE_PROTOCOL.to_owned(),
+            request_id: Uuid::new_v4(),
+            collection_id: Uuid::new_v4(),
+            cursor: Some("x".repeat(129)),
+            limit: MAX_PUBLIC_PAGE_SIZE,
+        };
+        assert!(browse.validate().is_err());
+    }
+
+    #[test]
+    fn public_browse_page_rejects_excessive_or_cross_collection_results() {
+        let publisher_id = "publisher";
+        let collection_id = Uuid::new_v4();
+        let request = PublicBrowseRequest {
+            protocol_version: PUBLIC_BROWSE_PROTOCOL.to_owned(),
+            request_id: Uuid::new_v4(),
+            collection_id,
+            cursor: None,
+            limit: 1,
+        };
+        let concept = PublicConceptSummary {
+            publisher_id: publisher_id.to_owned(),
+            collection_id,
+            concept_id: Uuid::new_v4(),
+            concept_type: ConceptType::Document,
+            title: "Synthetic concept".to_owned(),
+            description: String::new(),
+            language: "en".to_owned(),
+            tags: Vec::new(),
+            summary: "Bounded summary".to_owned(),
+            logical_resource_uri: "urn:airwiki:synthetic".to_owned(),
+            source_revision: 1,
+            updated_at: Utc::now(),
+        };
+        let mut page = PublicBrowsePage {
+            protocol_version: PUBLIC_BROWSE_PROTOCOL.to_owned(),
+            request_id: request.request_id,
+            manifest_sequence: 1,
+            concepts: vec![concept.clone(), concept],
+            next_cursor: None,
+        };
+        assert!(page.validate_for(&request, publisher_id).is_err());
+
+        page.concepts.truncate(1);
+        page.concepts[0].collection_id = Uuid::new_v4();
+        assert!(page.validate_for(&request, publisher_id).is_err());
+    }
 }

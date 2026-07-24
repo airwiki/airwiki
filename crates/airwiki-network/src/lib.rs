@@ -36,11 +36,15 @@ pub use pairing::{PAIRING_PROTOCOL, PAIRING_TTL, PairingCode, PairingNonce, deri
 pub use public_catalog::{
     CatalogRejection, CatalogWireRequest, CatalogWireResponse, PublicCatalogBackend,
     PublicCatalogBackendError, PublicCatalogServerConfig, run_public_catalog_server,
+    validate_public_relay_external_address,
 };
 pub use public_manifest::{
     PublicManifestError, sign_manifest, sign_tombstone, verify_manifest, verify_tombstone,
 };
-pub use public_reader::{PublicIndexEndpoint, PublicReader, PublicRouteKind};
+pub use public_reader::{
+    PublicBrowseResult, PublicCollectionAvailability, PublicIndexEndpoint, PublicReader,
+    PublicRouteKind,
+};
 pub use public_source::{
     PublicBrowseDelivery, PublicBrowseWireResponse, PublicSearchDelivery, PublicSearchWireResponse,
     PublicSourceBackend, PublicSourceBackendError, PublicSourceRejection, PublicSourceServerConfig,

@@ -22,11 +22,8 @@ use airwiki_inference::{
     selection_for_model,
 };
 use airwiki_mcp::{McpClientActivity, McpClientKind};
-use airwiki_network::{NetworkEvent, PublicRouteKind};
-use airwiki_types::{
-    CollectionPolicy, EnrichmentDraft, PublicConceptSummary, SearchHit, SearchPurpose,
-    SearchResponse,
-};
+use airwiki_network::{NetworkEvent, PublicBrowseResult, PublicRouteKind};
+use airwiki_types::{CollectionPolicy, EnrichmentDraft, SearchHit, SearchPurpose, SearchResponse};
 use futures::FutureExt;
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
 use tokio::task::JoinSet;
@@ -74,10 +71,22 @@ pub struct CollectionView {
     pub internet_public: bool,
     pub public_description: String,
     pub public_languages: String,
-    pub public_accepted_indexes: usize,
-    pub public_last_announced_at: Option<chrono::DateTime<chrono::Utc>>,
-    pub public_expires_at: Option<chrono::DateTime<chrono::Utc>>,
+    pub public_announcement: PublicAnnouncementStatusView,
     pub maintenance: Option<CollectionMaintenanceRecord>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PublicAnnouncementStatusView {
+    Offline,
+    Advertised {
+        accepted_indexes: usize,
+        last_announced_at: chrono::DateTime<chrono::Utc>,
+        expires_at: chrono::DateTime<chrono::Utc>,
+    },
+    Expired {
+        last_announced_at: chrono::DateTime<chrono::Utc>,
+        expires_at: chrono::DateTime<chrono::Utc>,
+    },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -561,7 +570,7 @@ pub enum WorkerEvent {
     },
     PublicBrowseFinished {
         request_id: Uuid,
-        result: Result<(Vec<PublicConceptSummary>, Option<String>), String>,
+        result: Result<PublicBrowseResult, String>,
     },
     ChatIntegrationsUpdated {
         request_id: Uuid,
@@ -722,7 +731,7 @@ enum BackgroundCompletion {
     },
     PublicBrowse {
         request_id: Uuid,
-        result: Result<airwiki_types::PublicBrowsePage, String>,
+        result: Result<PublicBrowseResult, String>,
     },
     ChatIntegrations {
         request_id: Uuid,
@@ -2784,7 +2793,6 @@ async fn run_worker(
                     }
                     Some(Ok(BackgroundCompletion::PublicBrowse { request_id, result })) => {
                         let result = result
-                            .map(|page| (page.concepts, page.next_cursor))
                             .map_err(|error| format!("Falló la navegación pública: {error}"));
                         send(&events, WorkerEvent::PublicBrowseFinished { request_id, result });
                     }

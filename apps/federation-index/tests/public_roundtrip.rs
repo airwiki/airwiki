@@ -23,6 +23,7 @@ use uuid::Uuid;
 #[derive(Debug)]
 struct PublicFixtureBackend {
     gate: DisclosureGate,
+    publisher_id: String,
 }
 
 #[async_trait]
@@ -81,7 +82,7 @@ impl PublicSourceBackend for PublicFixtureBackend {
                 request_id: request.request_id,
                 manifest_sequence: 1,
                 concepts: vec![airwiki_types::PublicConceptSummary {
-                    publisher_id: "replaced-by-transport".to_owned(),
+                    publisher_id: self.publisher_id.clone(),
                     collection_id: request.collection_id,
                     concept_id: Uuid::new_v4(),
                     concept_type: ConceptType::Procedure,
@@ -125,6 +126,7 @@ async fn public_search_round_trip_needs_no_lan_pairing_or_grant() {
         PublicSourceServerConfig::new(vec![source_address.clone()]),
         Arc::new(PublicFixtureBackend {
             gate: DisclosureGate::default(),
+            publisher_id: source_identity.peer_id().to_string(),
         }),
         source_cancellation.clone(),
     ));
@@ -220,6 +222,7 @@ async fn public_search_and_browse_use_outbound_relay_reservation() {
     )];
     let source_backend = Arc::new(PublicFixtureBackend {
         gate: DisclosureGate::default(),
+        publisher_id: source_identity.peer_id().to_string(),
     });
     let source_task = tokio::spawn(run_public_source_server(
         source_identity.clone(),

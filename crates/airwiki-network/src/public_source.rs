@@ -1,4 +1,5 @@
 use std::collections::HashSet;
+use std::future;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -14,6 +15,7 @@ use libp2p::{Multiaddr, StreamProtocol, SwarmBuilder};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 use tokio::task::JoinSet;
+use tokio::time::Instant as TokioInstant;
 use tokio_util::sync::CancellationToken;
 
 use crate::{NetworkError, NodeIdentity, PeerRateLimiter};
@@ -23,6 +25,7 @@ const PUBLIC_RESPONSE_BYTES: u64 = 256 * 1024;
 const PUBLIC_CONCURRENT_STREAMS: usize = 64;
 const PUBLIC_INBOUND_TASKS: usize = 32;
 const PUBLIC_LISTEN_RETRY: Duration = Duration::from_millis(250);
+const PUBLIC_RELAY_RETRY_MAX: Duration = Duration::from_secs(10);
 const PUBLIC_LISTENER_SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(2);
 const PUBLIC_LISTENER_RELEASE_TIMEOUT: Duration = Duration::from_secs(2);
 
@@ -149,6 +152,41 @@ enum Completion {
     },
 }
 
+struct RelayListener {
+    address: Multiaddr,
+    listener_id: Option<ListenerId>,
+    ready: bool,
+    retry_count: u32,
+    retry_at: Option<TokioInstant>,
+}
+
+impl RelayListener {
+    fn new(address: Multiaddr) -> Self {
+        Self {
+            address,
+            listener_id: None,
+            ready: false,
+            retry_count: 0,
+            retry_at: Some(TokioInstant::now()),
+        }
+    }
+
+    fn schedule_retry(&mut self) -> Duration {
+        self.listener_id = None;
+        self.ready = false;
+        self.retry_count = self.retry_count.saturating_add(1);
+        let delay = relay_retry_delay(self.retry_count);
+        self.retry_at = Some(TokioInstant::now() + delay);
+        delay
+    }
+
+    fn mark_ready(&mut self) {
+        self.ready = true;
+        self.retry_count = 0;
+        self.retry_at = None;
+    }
+}
+
 pub async fn run_public_source_server(
     identity: NodeIdentity,
     config: PublicSourceServerConfig,
@@ -162,17 +200,12 @@ pub async fn run_public_source_server(
     }
     let request_timeout = config.request_timeout;
     let listen_addresses = config.listen_addresses;
-    let addresses = listen_addresses
-        .iter()
-        .cloned()
-        .chain(config.relay_addresses)
-        .collect::<Vec<_>>();
     let mut retry_count = 0_u32;
-    let (mut swarm, mut listeners) = loop {
+    let (mut swarm, mut direct_listeners) = loop {
         let mut swarm = public_source_swarm(&identity, request_timeout)?;
-        let mut listeners = Vec::with_capacity(addresses.len());
+        let mut listeners = Vec::with_capacity(listen_addresses.len());
         let mut retry = false;
-        for address in &addresses {
+        for address in &listen_addresses {
             match swarm.listen_on(address.clone()) {
                 Ok(listener) => listeners.push(listener),
                 Err(_) if listener_address_is_in_use(address) => {
@@ -204,14 +237,28 @@ pub async fn run_public_source_server(
             () = tokio::time::sleep(PUBLIC_LISTEN_RETRY) => {}
         }
     };
+    let mut relay_listeners = config
+        .relay_addresses
+        .into_iter()
+        .map(RelayListener::new)
+        .collect::<Vec<_>>();
+    retry_due_relay_listeners(&mut swarm, &mut relay_listeners);
     let limiter = PeerRateLimiter::new(60, Duration::from_secs(60));
     let mut tasks = JoinSet::new();
     loop {
+        let relay_retry_at = relay_listeners
+            .iter()
+            .filter_map(|listener| listener.retry_at)
+            .min();
         tokio::select! {
             biased;
             () = cancellation.cancelled() => {
-                let pending_listeners = listeners
+                let relay_listener_ids = relay_listeners
+                    .iter_mut()
+                    .filter_map(|listener| listener.listener_id.take());
+                let pending_listeners = direct_listeners
                     .drain(..)
+                    .chain(relay_listener_ids)
                     .filter(|listener| swarm.remove_listener(*listener))
                     .collect::<HashSet<_>>();
                 let connected_peers = swarm.connected_peers().copied().collect::<Vec<_>>();
@@ -224,6 +271,9 @@ pub async fn run_public_source_server(
                 drop(swarm);
                 await_listener_release(&listen_addresses).await;
                 return Ok(());
+            }
+            () = wait_for_relay_retry(relay_retry_at) => {
+                retry_due_relay_listeners(&mut swarm, &mut relay_listeners);
             }
             completion = tasks.join_next(), if !tasks.is_empty() => {
                 if let Some(Ok(completion)) = completion {
@@ -244,7 +294,10 @@ pub async fn run_public_source_server(
                             } else {
                                 let backend = Arc::clone(&backend);
                                 tasks.spawn(async move {
-                                    Completion::Search { channel, result: backend.search(request).await }
+                                    Completion::Search {
+                                        channel,
+                                        result: backend.search(request).await,
+                                    }
                                 });
                             }
                         }
@@ -261,9 +314,61 @@ pub async fn run_public_source_server(
                             } else {
                                 let backend = Arc::clone(&backend);
                                 tasks.spawn(async move {
-                                    Completion::Browse { channel, result: backend.browse(request).await }
+                                    Completion::Browse {
+                                        channel,
+                                        result: backend.browse(request).await,
+                                    }
                                 });
                             }
+                        }
+                    }
+                    SwarmEvent::NewListenAddr { listener_id, .. } => {
+                        if let Some(listener) = relay_listeners
+                            .iter_mut()
+                            .find(|listener| listener.listener_id == Some(listener_id))
+                        {
+                            listener.mark_ready();
+                            tracing::info!(
+                                ready_relay_count = ready_relay_count(&relay_listeners),
+                                configured_relay_count = relay_listeners.len(),
+                                "public source relay reservation is ready"
+                            );
+                        }
+                    }
+                    SwarmEvent::ListenerError { listener_id, .. } => {
+                        if relay_listeners
+                            .iter()
+                            .any(|listener| listener.listener_id == Some(listener_id))
+                        {
+                            tracing::warn!(
+                                error_kind = "public_source_relay_listener_error",
+                                ready_relay_count = ready_relay_count(&relay_listeners),
+                                configured_relay_count = relay_listeners.len(),
+                                "public source relay listener reported an error"
+                            );
+                        }
+                    }
+                    SwarmEvent::ListenerClosed {
+                        listener_id,
+                        reason,
+                        ..
+                    } => {
+                        if let Some(index) = relay_listeners
+                            .iter()
+                            .position(|listener| listener.listener_id == Some(listener_id))
+                        {
+                            let delay = relay_listeners[index].schedule_retry();
+                            tracing::warn!(
+                                error_kind = if reason.is_err() {
+                                    "public_source_relay_reservation_failed"
+                                } else {
+                                    "public_source_relay_reservation_closed"
+                                },
+                                retry_delay_ms = duration_millis(delay),
+                                ready_relay_count = ready_relay_count(&relay_listeners),
+                                configured_relay_count = relay_listeners.len(),
+                                "public source relay reservation will be retried"
+                            );
                         }
                     }
                     _ => {}
@@ -271,6 +376,54 @@ pub async fn run_public_source_server(
             }
         }
     }
+}
+
+fn relay_retry_delay(retry_count: u32) -> Duration {
+    let factor = 1_u32 << retry_count.saturating_sub(1).min(6);
+    PUBLIC_LISTEN_RETRY
+        .saturating_mul(factor)
+        .min(PUBLIC_RELAY_RETRY_MAX)
+}
+
+async fn wait_for_relay_retry(retry_at: Option<TokioInstant>) {
+    match retry_at {
+        Some(retry_at) => tokio::time::sleep_until(retry_at).await,
+        None => future::pending().await,
+    }
+}
+
+fn retry_due_relay_listeners(
+    swarm: &mut libp2p::Swarm<SourceBehaviour>,
+    relay_listeners: &mut [RelayListener],
+) {
+    let now = TokioInstant::now();
+    for listener in relay_listeners {
+        if listener.listener_id.is_some() || listener.retry_at.is_none_or(|retry_at| retry_at > now)
+        {
+            continue;
+        }
+        match swarm.listen_on(listener.address.clone()) {
+            Ok(listener_id) => {
+                listener.listener_id = Some(listener_id);
+                listener.retry_at = None;
+            }
+            Err(_) => {
+                let delay = listener.schedule_retry();
+                tracing::warn!(
+                    error_kind = "public_source_relay_listen_retry",
+                    retry_delay_ms = duration_millis(delay),
+                    "public source relay listener could not start"
+                );
+            }
+        }
+    }
+}
+
+fn ready_relay_count(relay_listeners: &[RelayListener]) -> usize {
+    relay_listeners
+        .iter()
+        .filter(|listener| listener.ready)
+        .count()
 }
 
 async fn await_swarm_shutdown(
@@ -444,6 +597,10 @@ fn send_completion(behaviour: &mut SourceBehaviour, completion: Completion) {
     }
 }
 
+fn duration_millis(duration: Duration) -> u64 {
+    u64::try_from(duration.as_millis()).unwrap_or(u64::MAX)
+}
+
 #[cfg(test)]
 mod tests {
     use std::net::{Ipv4Addr, SocketAddrV4, TcpListener, UdpSocket};
@@ -470,6 +627,25 @@ mod tests {
         ) -> Result<PublicBrowseDelivery, PublicSourceBackendError> {
             Err(PublicSourceBackendError::Unavailable)
         }
+    }
+
+    #[test]
+    fn relay_retry_backoff_starts_at_250_ms_and_caps_at_10_seconds() {
+        let expected = [
+            Duration::from_millis(250),
+            Duration::from_millis(500),
+            Duration::from_secs(1),
+            Duration::from_secs(2),
+            Duration::from_secs(4),
+            Duration::from_secs(8),
+            Duration::from_secs(10),
+            Duration::from_secs(10),
+        ];
+
+        for (retry_count, expected_delay) in (1_u32..).zip(expected) {
+            assert_eq!(relay_retry_delay(retry_count), expected_delay);
+        }
+        assert_eq!(relay_retry_delay(u32::MAX), Duration::from_secs(10));
     }
 
     #[tokio::test]

@@ -6,7 +6,7 @@
 
 AirWiki is an open-source, local-first Rust desktop knowledge base that turns folders of text-based Markdown and PDF files into human-reviewed OKF wikis. It is intended for individuals, communities, small teams, and organizations without assuming a particular company structure or network topology.
 
-Original documents remain on their source device. When LAN collaboration is explicitly enabled, federated search returns bounded authorized snippets and citations rather than complete documents. Local chat integrations distinguish answerability-accepted evidence from separately typed candidates that the chat model must verify, use a per-user MCP bridge, and never require AirWiki to store provider API keys.
+Original documents remain on their source device. LAN collaboration returns bounded authorized snippets after pairing and grants. An experimental, separately opted-in public network can advertise reviewed collections through replaceable signed indexes and serve search or browse results directly from the owner without replicating documents. Local chat integrations distinguish answerability-accepted evidence from separately typed candidates that the chat model must verify, use a per-user MCP bridge, and never require AirWiki to store provider API keys.
 
 ## Project status
 
@@ -21,6 +21,7 @@ Tested development targets are macOS arm64 and Windows x64. Linux, web, and mobi
 - Compare each proposed draft with revision-bound local evidence and require human review before publishing an OKF wiki concept.
 - Search locally with lexical and vector evidence.
 - Discover, pair, authorize, and search other AirWiki nodes on a LAN.
+- Opt selected reviewed collections into experimental public search and browse through signed federated routing indexes.
 - Expose explicitly approved evidence through a read-only local MCP integration.
 - Inspect published OKF bundles and their health without changing source files.
 
@@ -93,4 +94,4 @@ The workspace separates dependency-light contracts, local domain logic, inferenc
 
 ## Deliberate limits
 
-The current product does not provide OCR, DOCX ingestion, image/audio/video processing, DHT or Internet relay, source-document replication, accounts, SSO, remote editing, MCP write operations, a system daemon, silent updates, or web/mobile access.
+The current product does not provide OCR, DOCX ingestion, image/audio/video processing, DHT, a supported always-on public relay service, source-document replication, accounts, SSO, remote editing, MCP write operations, a system daemon, silent updates, or web/mobile access. Experimental federation can use explicitly configured validation or community relays.

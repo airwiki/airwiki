@@ -1,8 +1,8 @@
 //! Authenticated, collection-scoped AirWiki knowledge search over a local network.
 //!
-//! The crate deliberately implements a narrow libp2p stack: mDNS discovery, TCP,
-//! Noise, Yamux and bounded request/response CBOR. It has no DHT, gossip, relay,
-//! UPnP, QUIC or document replication.
+//! LAN and opt-in public federation use separate protocols and identities. The
+//! public stack adds QUIC and relay traversal without widening LAN grants or
+//! replicating documents.
 
 use std::time::Duration;
 
@@ -14,6 +14,10 @@ pub mod codec;
 pub mod coordinator;
 pub mod identity;
 pub mod pairing;
+pub mod public_catalog;
+pub mod public_manifest;
+pub mod public_reader;
+pub mod public_source;
 pub mod rate_limit;
 pub mod runtime;
 
@@ -26,14 +30,59 @@ pub use coordinator::FederatedCoordinator;
 #[cfg(feature = "os-keyring")]
 pub use identity::KeyringSecretStore;
 pub use identity::{FileSecretStore, IdentityError, MemorySecretStore, NodeIdentity, SecretStore};
+pub use libp2p::identity::Keypair;
 pub use libp2p::{Multiaddr, PeerId};
 pub use pairing::{PAIRING_PROTOCOL, PAIRING_TTL, PairingCode, PairingNonce, derive_sas};
+pub use public_catalog::{
+    CatalogRejection, CatalogWireRequest, CatalogWireResponse, PublicCatalogBackend,
+    PublicCatalogBackendError, PublicCatalogServerConfig, run_public_catalog_server,
+    validate_public_relay_external_address,
+};
+pub use public_manifest::{
+    PublicManifestError, sign_manifest, sign_tombstone, verify_manifest, verify_tombstone,
+};
+pub use public_reader::{
+    PublicBrowseResult, PublicCollectionAvailability, PublicIndexEndpoint, PublicReader,
+    PublicRouteKind,
+};
+pub use public_source::{
+    PublicBrowseDelivery, PublicBrowseWireResponse, PublicSearchDelivery, PublicSearchWireResponse,
+    PublicSourceBackend, PublicSourceBackendError, PublicSourceRejection, PublicSourceServerConfig,
+    run_public_source_server,
+};
+pub use rate_limit::PeerRateLimiter;
 pub use runtime::{
     AuthorizedSearchBackend, AuthorizedSearchResult, NetworkConfig, NetworkEvent, NetworkHandle,
     NetworkWarningKind, PairingFailureReason, spawn_network,
 };
 
 pub const SEARCH_DEADLINE: Duration = Duration::from_secs(3);
+
+/// Converts a relay endpoint into the circuit-listen address used by a
+/// publisher. Keeping this detail here avoids leaking libp2p protocol internals
+/// into application composition code.
+pub fn relay_circuit_address(mut address: Multiaddr, relay_peer: PeerId) -> Multiaddr {
+    if !address
+        .iter()
+        .any(|protocol| matches!(protocol, libp2p::multiaddr::Protocol::P2p(_)))
+    {
+        address.push(libp2p::multiaddr::Protocol::P2p(relay_peer));
+    }
+    address.push(libp2p::multiaddr::Protocol::P2pCircuit);
+    address
+}
+
+/// Builds the routable address advertised for a peer listening through a
+/// circuit relay.
+pub fn relayed_peer_address(
+    address: Multiaddr,
+    relay_peer: PeerId,
+    target_peer: PeerId,
+) -> Multiaddr {
+    let mut address = relay_circuit_address(address, relay_peer);
+    address.push(libp2p::multiaddr::Protocol::P2p(target_peer));
+    address
+}
 
 #[derive(Debug, Error)]
 pub enum NetworkError {

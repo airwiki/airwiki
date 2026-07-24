@@ -58,9 +58,9 @@ pub use search::{
 pub use storage::{
     AuditEvent, CollectionMaintenanceCounts, CollectionMaintenanceRecord,
     CollectionMaintenanceResult, CollectionMaintenanceStatus, CollectionRecord, CollectionStats,
-    ConceptRecord, Database, GrantRecord, JobRecord, PeerRecord, ReviewEvidenceChunkRecord,
-    ReviewEvidencePageRecord, ReviewReanalysisClaim, ReviewVersionToken, SourceDocumentRecord,
-    StoredChunk,
+    ConceptRecord, Database, FederationIndexRecord, GrantRecord, JobRecord, PeerRecord,
+    ReviewEvidenceChunkRecord, ReviewEvidencePageRecord, ReviewReanalysisClaim, ReviewVersionToken,
+    SourceDocumentRecord, StoredChunk,
 };
 
 /// Embedding dimensionality required by multilingual-e5-small.

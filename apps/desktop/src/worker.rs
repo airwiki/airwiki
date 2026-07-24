@@ -22,7 +22,7 @@ use airwiki_inference::{
     selection_for_model,
 };
 use airwiki_mcp::{McpClientActivity, McpClientKind};
-use airwiki_network::NetworkEvent;
+use airwiki_network::{NetworkEvent, PublicBrowseResult, PublicRouteKind};
 use airwiki_types::{CollectionPolicy, EnrichmentDraft, SearchHit, SearchPurpose, SearchResponse};
 use futures::FutureExt;
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
@@ -68,7 +68,25 @@ pub struct CollectionView {
     pub local_only: bool,
     pub peer_shareable: bool,
     pub allow_external_ai: bool,
+    pub internet_public: bool,
+    pub public_description: String,
+    pub public_languages: String,
+    pub public_announcement: PublicAnnouncementStatusView,
     pub maintenance: Option<CollectionMaintenanceRecord>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PublicAnnouncementStatusView {
+    Offline,
+    Advertised {
+        accepted_indexes: usize,
+        last_announced_at: chrono::DateTime<chrono::Utc>,
+        expires_at: chrono::DateTime<chrono::Utc>,
+    },
+    Expired {
+        last_announced_at: chrono::DateTime<chrono::Utc>,
+        expires_at: chrono::DateTime<chrono::Utc>,
+    },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -367,6 +385,7 @@ pub enum WorkerCommand {
         local_only: bool,
         peer_shareable: bool,
         allow_external_ai: bool,
+        internet_public: bool,
     },
     Approve {
         concept_id: Uuid,
@@ -401,6 +420,29 @@ pub enum WorkerCommand {
         question: String,
         top_k: u8,
         purpose: SearchPurpose,
+        public_network: bool,
+    },
+    AddFederationIndex {
+        peer_id: String,
+        address: String,
+    },
+    RemoveFederationIndex {
+        peer_id: String,
+    },
+    UpdatePublicCollectionProfile {
+        collection_id: Uuid,
+        description: String,
+        languages: Vec<String>,
+    },
+    BrowsePublicCollection {
+        request_id: Uuid,
+        publisher_id: String,
+        collection_id: Uuid,
+        cursor: Option<String>,
+    },
+    SetPublicPublisherBlocked {
+        publisher_id: String,
+        blocked: bool,
     },
     ManageChatIntegration {
         request_id: Uuid,
@@ -435,6 +477,7 @@ pub enum WorkerEvent {
         collections: Vec<CollectionView>,
         reviews: Vec<ReviewItemView>,
         source_issues: Vec<SourceIssueView>,
+        blocked_public_publishers: Vec<String>,
     },
     Hardware(HardwareReport),
     ModelState(ModelStateView),
@@ -519,7 +562,15 @@ pub enum WorkerEvent {
     },
     SearchFinished {
         request_id: Uuid,
-        result: Result<(Vec<SearchHit>, SearchCoverageView), String>,
+        result: Result<(Vec<SearchHit>, SearchCoverageView, PublicRouteKind), String>,
+    },
+    SearchPartial {
+        request_id: Uuid,
+        hits: Vec<SearchHit>,
+    },
+    PublicBrowseFinished {
+        request_id: Uuid,
+        result: Result<PublicBrowseResult, String>,
     },
     ChatIntegrationsUpdated {
         request_id: Uuid,
@@ -676,6 +727,11 @@ enum BackgroundCompletion {
     Search {
         request_id: Uuid,
         result: Result<SearchResponse, String>,
+        route_kind: PublicRouteKind,
+    },
+    PublicBrowse {
+        request_id: Uuid,
+        result: Result<PublicBrowseResult, String>,
     },
     ChatIntegrations {
         request_id: Uuid,
@@ -956,6 +1012,7 @@ async fn run_worker(
             collections: Vec::new(),
             reviews: Vec::new(),
             source_issues: Vec::new(),
+            blocked_public_publishers: Vec::new(),
         },
     );
 
@@ -1783,10 +1840,14 @@ async fn run_worker(
                             );
                         }
                     }
-                    WorkerCommand::UpdateCollectionPolicy { collection_id, local_only, peer_shareable, allow_external_ai } => {
-                        let policy = CollectionPolicy { local_only, peer_shareable, allow_external_ai };
+                    WorkerCommand::UpdateCollectionPolicy { collection_id, local_only, peer_shareable, allow_external_ai, internet_public } => {
+                        let policy = CollectionPolicy { local_only, peer_shareable, allow_external_ai, internet_public };
                         if let Err(error) = services.update_collection_policy(collection_id, policy) {
                             send(&events, WorkerEvent::Error(format!("No se pudo actualizar la política: {error:#}")));
+                        } else if let Err(error) = services.reconcile_public_network().await {
+                            send(&events, WorkerEvent::Error(format!("No se pudo actualizar la red pública: {error:#}")));
+                        } else if let Err(error) = services.sync_public_collection(collection_id).await {
+                            send(&events, WorkerEvent::Error(format!("No se pudo sincronizar el anuncio público: {error:#}")));
                         }
                         refresh_content_views(&services, &events);
                     }
@@ -1892,15 +1953,82 @@ async fn run_worker(
                         question,
                         top_k,
                         purpose,
+                        public_network,
                     } => {
                         spawn_search(
                             &services,
                             &mut background,
-                            request_id,
-                            question,
-                            top_k,
-                            purpose,
+                            &events,
+                            SearchTask {
+                                request_id,
+                                question,
+                                top_k,
+                                purpose,
+                                public_network,
+                            },
                         );
+                    }
+                    WorkerCommand::AddFederationIndex { peer_id, address } => {
+                        match services.add_federation_index(&peer_id, &address) {
+                            Ok(()) => match services.restart_public_network().await {
+                                Ok(()) => match services.sync_all_public_collections().await {
+                                    Ok(()) => send(&events, WorkerEvent::Notice("Índice comunitario agregado".into())),
+                                    Err(error) => send(&events, WorkerEvent::Error(format!("El índice se agregó, pero no se pudieron sincronizar los anuncios: {error:#}"))),
+                                },
+                                Err(error) => send(&events, WorkerEvent::Error(format!("El índice se agregó, pero no se pudo reiniciar la red pública: {error:#}"))),
+                            },
+                            Err(error) => send(&events, WorkerEvent::Error(format!("No se pudo agregar el índice: {error:#}"))),
+                        }
+                    }
+                    WorkerCommand::RemoveFederationIndex { peer_id } => {
+                        match services.remove_federation_index(&peer_id) {
+                            Ok(()) => match services.restart_public_network().await {
+                                Ok(()) => send(&events, WorkerEvent::Notice("Índice comunitario desactivado".into())),
+                                Err(error) => send(&events, WorkerEvent::Error(format!("El índice se desactivó, pero no se pudo reiniciar la red pública: {error:#}"))),
+                            },
+                            Err(error) => send(&events, WorkerEvent::Error(format!("No se pudo desactivar el índice: {error:#}"))),
+                        }
+                    }
+                    WorkerCommand::UpdatePublicCollectionProfile { collection_id, description, languages } => {
+                        match services.update_public_collection_profile(collection_id, &description, &languages) {
+                            Ok(()) => match services.sync_public_collection(collection_id).await {
+                                Ok(()) => send(&events, WorkerEvent::Notice("Perfil público actualizado".into())),
+                                Err(error) => send(&events, WorkerEvent::Error(format!("El perfil se guardó, pero no se pudo anunciar: {error:#}"))),
+                            },
+                            Err(error) => send(&events, WorkerEvent::Error(format!("No se pudo actualizar el perfil público: {error:#}"))),
+                        }
+                        refresh_content_views(&services, &events);
+                    }
+                    WorkerCommand::BrowsePublicCollection { request_id, publisher_id, collection_id, cursor } => {
+                        let services = Arc::clone(&services);
+                        background.spawn(async move {
+                            let result = services
+                                .browse_public_collection(&publisher_id, collection_id, cursor)
+                                .await
+                                .map_err(|error| error.to_string());
+                            BackgroundCompletion::PublicBrowse { request_id, result }
+                        });
+                    }
+                    WorkerCommand::SetPublicPublisherBlocked { publisher_id, blocked } => {
+                        match services.set_public_publisher_blocked(&publisher_id, blocked).await {
+                            Ok(()) => {
+                                send(
+                                    &events,
+                                    WorkerEvent::Notice(if blocked {
+                                        "Publicador público bloqueado en este dispositivo".into()
+                                    } else {
+                                        "Publicador público desbloqueado".into()
+                                    }),
+                                );
+                                send_ready(&services, &events);
+                            }
+                            Err(error) => send(
+                                &events,
+                                WorkerEvent::Error(format!(
+                                    "No se pudo actualizar el bloqueo del publicador: {error:#}"
+                                )),
+                            ),
+                        }
                     }
                     WorkerCommand::ManageChatIntegration { request_id, action } => {
                         if active_integration_request.is_some() {
@@ -2651,17 +2779,22 @@ async fn run_worker(
                             result,
                         ),
                     ),
-                    Some(Ok(BackgroundCompletion::Search { request_id, result })) => {
+                    Some(Ok(BackgroundCompletion::Search { request_id, result, route_kind })) => {
                         let result = result
                             .map(|response| {
                                 let coverage = search_coverage_view(&response);
-                                (response.hits, coverage)
+                                (response.hits, coverage, route_kind)
                             })
                             .map_err(|error| format!("Falló la búsqueda: {error}"));
                         send(
                             &events,
                             WorkerEvent::SearchFinished { request_id, result },
                         );
+                    }
+                    Some(Ok(BackgroundCompletion::PublicBrowse { request_id, result })) => {
+                        let result = result
+                            .map_err(|error| format!("Falló la navegación pública: {error}"));
+                        send(&events, WorkerEvent::PublicBrowseFinished { request_id, result });
                     }
                     Some(Ok(BackgroundCompletion::ChatIntegrations {
                         request_id,
@@ -3330,8 +3463,9 @@ fn send_ready(services: &DesktopServices, events: &Sender<WorkerEvent>) {
         services.collection_views(),
         services.review_views(),
         services.source_issue_views(),
+        services.blocked_public_publishers(),
     ) {
-        (Ok(collections), Ok(reviews), Ok(source_issues)) => send(
+        (Ok(collections), Ok(reviews), Ok(source_issues), Ok(blocked_public_publishers)) => send(
             events,
             WorkerEvent::Ready {
                 node_id: services.node_id().to_owned(),
@@ -3339,9 +3473,13 @@ fn send_ready(services: &DesktopServices, events: &Sender<WorkerEvent>) {
                 collections,
                 reviews,
                 source_issues,
+                blocked_public_publishers,
             },
         ),
-        (Err(error), _, _) | (_, Err(error), _) | (_, _, Err(error)) => send(
+        (Err(error), _, _, _)
+        | (_, Err(error), _, _)
+        | (_, _, Err(error), _)
+        | (_, _, _, Err(error)) => send(
             events,
             WorkerEvent::Error(format!("No se pudo cargar el estado local: {error:#}")),
         ),
@@ -4331,11 +4469,24 @@ fn spawn_preflight(
 ) {
     let services = Arc::clone(services);
     background.spawn(async move {
-        let result =
-            tokio::task::spawn_blocking(move || services.preflight_collection(collection_id))
+        let preflight_services = Arc::clone(&services);
+        let result = tokio::task::spawn_blocking(move || {
+            preflight_services.preflight_collection(collection_id)
+        })
+        .await
+        .map_err(|error| format!("falló el worker de prevalidación: {error}"))
+        .and_then(|result| result.map_err(|error| format!("{error:#}")));
+        if result.is_ok()
+            && services
+                .sync_public_collection(collection_id)
                 .await
-                .map_err(|error| format!("falló el worker de prevalidación: {error}"))
-                .and_then(|result| result.map_err(|error| format!("{error:#}")));
+                .is_err()
+        {
+            tracing::warn!(
+                error_kind = "public_manifest_sync_after_preflight",
+                "public collection withdrawal could not be announced"
+            );
+        }
         BackgroundCompletion::Preflight {
             collection_id,
             result,
@@ -4387,12 +4538,29 @@ fn spawn_review_approval(
 ) {
     let services = Arc::clone(services);
     background.spawn(async move {
+        let approval_services = Arc::clone(&services);
         let result = tokio::task::spawn_blocking(move || {
-            services.approve_review(concept_id, &expected_review_version, draft)
+            approval_services.approve_review(concept_id, &expected_review_version, draft)
         })
         .await
         .map_err(|error| format!("falló el worker de publicación: {error}"))
         .and_then(|result| result.map_err(|error| format!("{error:#}")));
+        let result = match result {
+            Ok(collection_id) => {
+                if services
+                    .sync_public_collection(collection_id)
+                    .await
+                    .is_err()
+                {
+                    tracing::warn!(
+                        error_kind = "public_manifest_sync_after_publication",
+                        "published collection manifest could not be refreshed"
+                    );
+                }
+                Ok(())
+            }
+            Err(error) => Err(error),
+        };
         BackgroundCompletion::Approve { concept_id, result }
     });
 }
@@ -4500,22 +4668,67 @@ fn spawn_knowledge_page(
     });
 }
 
-fn spawn_search(
-    services: &Arc<DesktopServices>,
-    background: &mut JoinSet<BackgroundCompletion>,
+struct SearchTask {
     request_id: Uuid,
     question: String,
     top_k: u8,
     purpose: SearchPurpose,
+    public_network: bool,
+}
+
+fn spawn_search(
+    services: &Arc<DesktopServices>,
+    background: &mut JoinSet<BackgroundCompletion>,
+    events: &Sender<WorkerEvent>,
+    task: SearchTask,
 ) {
     let services = Arc::clone(services);
+    let events = events.clone();
     background.spawn(async move {
-        let result = AssertUnwindSafe(services.search(question, top_k, purpose))
+        let SearchTask {
+            request_id,
+            question,
+            top_k,
+            purpose,
+            public_network,
+        } = task;
+        let search = async {
+            if public_network {
+                let (partial_tx, mut partial_rx) = tokio::sync::mpsc::channel(4);
+                let search = services.search_with_public(question, top_k, purpose, partial_tx);
+                tokio::pin!(search);
+                loop {
+                    tokio::select! {
+                        result = &mut search => break result,
+                        partial = partial_rx.recv() => {
+                            if let Some(partial) = partial {
+                                send(&events, WorkerEvent::SearchPartial {
+                                    request_id,
+                                    hits: partial.hits,
+                                });
+                            }
+                        }
+                    }
+                }
+            } else {
+                services.search(question, top_k, purpose).await
+            }
+        };
+        let result = AssertUnwindSafe(search)
             .catch_unwind()
             .await
             .map_err(panic_message)
             .and_then(|result| result.map_err(|error| error.to_string()));
-        BackgroundCompletion::Search { request_id, result }
+        let route_kind = if public_network {
+            services.public_route_kind()
+        } else {
+            PublicRouteKind::Offline
+        };
+        BackgroundCompletion::Search {
+            request_id,
+            result,
+            route_kind,
+        }
     });
 }
 

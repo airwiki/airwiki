@@ -905,28 +905,67 @@ unit=airwiki-federation-index-1.service
 state="$(systemctl is-active "${unit}" 2>/dev/null || true)"
 restarts="$(systemctl show "${unit}" --property=NRestarts --value 2>/dev/null || true)"
 memory="$(systemctl show "${unit}" --property=MemoryCurrent --value 2>/dev/null || true)"
-printf "service_state=%s\nrestart_count=%s\nmemory_current_bytes=%s\n" "${state:-unknown}" "${restarts:-unknown}" "${memory:-unknown}"
+case "${state}" in
+    active | inactive | failed | activating | deactivating) ;;
+    *) state=unknown ;;
+esac
+case "${restarts}" in
+    "" | *[!0-9]*) restarts=unknown ;;
+esac
+case "${memory}" in
+    "" | *[!0-9]*) memory=unknown ;;
+esac
+printf "service_state=%s\nrestart_count=%s\nmemory_current_bytes=%s\n" "${state}" "${restarts}" "${memory}"
 journalctl --unit "${unit}" --since "-24 hours" --output cat --no-pager 2>/dev/null |
     sed -n "s/.*error_kind=\"\{0,1\}\([a-z0-9_-]\{1,64\}\).*/\1/p" |
     sort |
     uniq -c |
     awk "{ if (\$2 ~ /^[a-z0-9_-]+$/) printf \"error_class=%s count=%s\\n\", \$2, \$1 }"
 '
-    message="$(
+    response="$(
         az vm run-command invoke \
             --resource-group "${group}" \
             --name "${node}" \
             --command-id RunShellScript \
             --scripts "${status_script}" \
-            --query "value[0].message" \
-            -o tsv
+            -o json
     )"
-    printf '%s\n' "${message}" |
-        sed -n \
-            -e '/^service_state=\(active\|inactive\|failed\|activating\|deactivating\|unknown\)$/p' \
-            -e '/^restart_count=\([0-9][0-9]*\|unknown\)$/p' \
-            -e '/^memory_current_bytes=\([0-9][0-9]*\|unknown\)$/p' \
-            -e '/^error_class=[a-z0-9_-][a-z0-9_-]* count=[0-9][0-9]*$/p'
+    message="$(
+        printf '%s\n' "${response}" |
+            jq -er '.value[0].message | select(type == "string" and length > 0)'
+    )"
+    sanitized_status="$(
+        printf '%s\n' "${message}" |
+            tr -d '\r' |
+            awk '
+            /^service_state=(active|inactive|failed|activating|deactivating|unknown)$/ {
+                service_state += 1
+                if (service_state == 1) print
+                next
+            }
+            /^restart_count=([0-9]+|unknown)$/ {
+                restart_count += 1
+                if (restart_count == 1) print
+                next
+            }
+            /^memory_current_bytes=([0-9]+|unknown)$/ {
+                memory_current_bytes += 1
+                if (memory_current_bytes == 1) print
+                next
+            }
+            /^error_class=[a-z0-9_-]+ count=[0-9]+$/ {
+                print
+                next
+            }
+            END {
+                if (service_state != 1 || restart_count != 1 ||
+                    memory_current_bytes != 1) {
+                    exit 1
+                }
+            }
+        '
+    )"
+    printf '%s\n' "${sanitized_status}"
 }
 
 status_node() {

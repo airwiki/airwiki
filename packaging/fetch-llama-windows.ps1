@@ -485,7 +485,10 @@ if ($ArchiveRoots.Count -ne 1 -or -not $ArchiveRoots[0].PSIsContainer -or
     $ArchiveRoots[0].Name -ne $Policy.source.root_directory) {
     throw "the pinned source archive has an unexpected root layout"
 }
-foreach ($Entry in Get-ChildItem -LiteralPath $Source -Force -Recurse) {
+$ExtendedSource = ConvertTo-WindowsExtendedLengthPath `
+    $Source `
+    "llama.cpp extracted source"
+foreach ($Entry in Get-ChildItem -LiteralPath $ExtendedSource -Force -Recurse) {
     if (($Entry.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) {
         throw "the pinned source archive produced a reparse point"
     }
@@ -639,7 +642,10 @@ foreach ($BlockedLauncher in @(
 if ($LASTEXITCODE -ne 0) {
     throw "llama.cpp server build failed"
 }
-if (@(Get-ChildItem -LiteralPath $Build -Recurse -File -Filter *.dll).Count -ne 0) {
+$ExtendedBuild = ConvertTo-WindowsExtendedLengthPath `
+    $Build `
+    "llama.cpp build output"
+if (@(Get-ChildItem -LiteralPath $ExtendedBuild -Recurse -File -Filter *.dll).Count -ne 0) {
     throw "the static llama.cpp build unexpectedly produced a DLL"
 }
 $Server = Join-Path $Build "bin\llama-server.exe"

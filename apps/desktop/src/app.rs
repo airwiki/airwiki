@@ -4633,6 +4633,9 @@ fn search_coverage_message(
             arguments.set("count", count);
             Some(localization.text_with("search-coverage-offline-devices", Some(&arguments)))
         }
+        SearchCoverageView::PublicNetworkOffline => {
+            Some(localization.text("search-coverage-public-offline"))
+        }
         SearchCoverageView::Partial => Some(localization.text("search-coverage-partial")),
     }
 }
@@ -5802,6 +5805,9 @@ mod tests {
             let disabled =
                 search_coverage_message(&localization, SearchCoverageView::FederationDisabled)
                     .unwrap();
+            let public_offline =
+                search_coverage_message(&localization, SearchCoverageView::PublicNetworkOffline)
+                    .unwrap();
 
             assert!(
                 offline.contains('2') && offline.contains(expected_offline),
@@ -5809,6 +5815,7 @@ mod tests {
             );
             assert!(!offline.contains("12D3Koo"));
             assert!(!disabled.contains("federation_disabled"));
+            assert!(!public_offline.contains("public_network_offline"));
         }
         let localization = Localization::new(UiLocale::Es).unwrap();
         assert_eq!(

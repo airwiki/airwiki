@@ -619,6 +619,7 @@ search-coverage-offline-devices = { $count ->
     [one] One other device did not respond. These results may be incomplete.
    *[other] { $count } other devices did not respond. These results may be incomplete.
 }
+search-coverage-public-offline = The public network is offline. Local and paired-device search remain available.
 search-coverage-partial = One part of the search did not complete. The available results are shown.
 
 settings-title = Settings

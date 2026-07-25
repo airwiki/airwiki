@@ -48,7 +48,7 @@ use crate::{
     paths::AppPaths,
     services::{
         CollectionWatchEvent, CollectionWatcherHandle, DesktopServices, ModelRuntimePaths,
-        WikiHealthRollup,
+        PUBLIC_NETWORK_OFFLINE_WARNING, WikiHealthRollup,
     },
     updater::{
         PackagerUpdateBackend, UpdateSchedule, UpdaterBuildConfig, UpdaterDisabledReason,
@@ -274,6 +274,7 @@ pub enum SearchCoverageView {
     Complete,
     FederationDisabled,
     OfflineDevices { count: usize },
+    PublicNetworkOffline,
     Partial,
 }
 
@@ -4814,6 +4815,9 @@ fn search_coverage_view(response: &SearchResponse) -> SearchCoverageView {
     if response.warnings.len() == 1 && response.warnings[0] == "federation_disabled" {
         return SearchCoverageView::FederationDisabled;
     }
+    if response.warnings.len() == 1 && response.warnings[0] == PUBLIC_NETWORK_OFFLINE_WARNING {
+        return SearchCoverageView::PublicNetworkOffline;
+    }
     if response.partial || !response.warnings.is_empty() {
         SearchCoverageView::Partial
     } else {
@@ -5137,6 +5141,29 @@ mod tests {
         );
 
         response.warnings.push("another backend gap".to_owned());
+        assert_eq!(search_coverage_view(&response), SearchCoverageView::Partial);
+    }
+
+    #[test]
+    fn search_coverage_reports_public_network_offline_without_exposing_backend_details() {
+        let mut response = SearchResponse::empty(Uuid::new_v4());
+        response.partial = true;
+        response
+            .warnings
+            .push(PUBLIC_NETWORK_OFFLINE_WARNING.to_owned());
+
+        assert_eq!(
+            search_coverage_view(&response),
+            SearchCoverageView::PublicNetworkOffline
+        );
+
+        response.warnings.push("another backend gap".to_owned());
+        assert_eq!(search_coverage_view(&response), SearchCoverageView::Partial);
+
+        response.warnings = vec![
+            "federation_disabled".to_owned(),
+            PUBLIC_NETWORK_OFFLINE_WARNING.to_owned(),
+        ];
         assert_eq!(search_coverage_view(&response), SearchCoverageView::Partial);
     }
 

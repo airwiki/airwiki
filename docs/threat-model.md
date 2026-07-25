@@ -59,6 +59,8 @@ Controls are not considered effective end to end until the
 | Malicious index redirects or ranks content | Expected index PeerId is pinned; owner manifests are independently signed; index rank selects routes but never final ranking | An index can omit publishers, delay tombstones, or degrade availability until replaced |
 | Public queries exhaust an owner | Three-index, 64-candidate, 12-peer and two-collection caps; bounded payloads, semaphores, rate limits, 800 ms peer and 1.5 s global deadlines | Distributed abuse can still consume bounded relay and inference capacity |
 | Public identity correlates readers | Readers use one ephemeral identity per application session; LAN and publisher identities are separate | Network observers and relays can still correlate IP and timing |
+| Public beta infrastructure exceeds its operating budget | Two minimal independent nodes, live retail-price preflight, per-node monthly budgets, forecast/actual alerts, platform consumption review and whole-group retirement | Azure budgets alert but do not hard-cap spend; notification and cost data can lag |
+| Public beta host or identity is replaced | Pinned image and binary hash, Azure-attested SSH host key, one persistent identity/database per node, compiled expiring registry and higher-version rotation | Older candidates can use only their unchanged or unexpired pinned entries |
 | Pairing impersonation | Six-word SAS derived from identities and nonces, two-minute expiry | A user who skips comparison defeats the control |
 | Private collection reaches cloud chat | `allow_external_ai` defaults off and is rechecked at the source | Human authorization can be wrong; use synthetic fixtures and audit |
 | Ranking returns the least-wrong absent fact | Source node applies the pinned local answerability classifier to the bounded outgoing snippet; failures and timeouts close the path | The classifier is probabilistic; reassess both platforms when model, corpus, or policy changes |
@@ -139,6 +141,10 @@ Controls are not considered effective end to end until the
 - Bootstrap entries are versioned and expire. Community indexes remain
   replaceable, and an expired validation endpoint is ignored rather than being
   treated as an authority.
+- The public beta uses two independent Azure nodes without guest telemetry or
+  remote configuration. Budget alerts are operational signals, not a hard
+  spending cap; the documented emergency control is bootstrap revocation and
+  deletion of both dedicated resource groups.
 - Local publisher blocks are checked before dialing or browsing and contain
   only the stable public publisher identity; they do not notify the publisher.
 

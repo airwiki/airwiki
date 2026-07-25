@@ -39,6 +39,29 @@ jobs:
         if: runner.os == 'Windows'
         shell: powershell
         run: ./packaging/test-windows-long-paths.ps1
+      - name: macOS beta bootstrap packaging policy
+        if: runner.os == 'macOS'
+        shell: bash
+        run: |
+          install -d -m 0700 target/private
+          printf '%s\n' \
+            '7|2099-01-01T00:00:00Z|synthetic-a|synthetic-endpoint-a;7|2099-01-01T00:00:00Z|synthetic-b|synthetic-endpoint-b' \
+            > target/private/synthetic.bootstrap
+          chmod 0600 target/private/synthetic.bootstrap
+          AIRWIKI_BETA_CANDIDATE_SHA="$(git rev-parse HEAD)" \
+            ./packaging/package-beta-macos.sh \
+              --validate-only target/private/synthetic.bootstrap
+      - name: Windows beta bootstrap packaging policy
+        if: runner.os == 'Windows'
+        shell: powershell
+        run: |
+          New-Item -ItemType Directory -Force target\private | Out-Null
+          Set-Content -LiteralPath target\private\synthetic.bootstrap -NoNewline `
+            -Value '7|2099-01-01T00:00:00Z|synthetic-a|synthetic-endpoint-a;7|2099-01-01T00:00:00Z|synthetic-b|synthetic-endpoint-b'
+          $env:AIRWIKI_BETA_CANDIDATE_SHA = (git rev-parse HEAD).Trim()
+          ./packaging/package-beta-windows.ps1 `
+            -BootstrapFile target\private\synthetic.bootstrap `
+            -ValidateOnly
       - name: Formatting
         run: cargo fmt --all -- --check
       - name: Clippy

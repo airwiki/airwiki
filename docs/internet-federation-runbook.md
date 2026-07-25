@@ -16,6 +16,15 @@ AirWiki candidates on different NATs. Use synthetic documents only.
 4. Confirm index logs contain only bounded counts, duration and error classes;
    they must not contain PeerIds, IPs, queries, snippets or routes.
 
+### Public beta infrastructure
+
+The operable two-region beta, cost gate, private bootstrap lifecycle,
+observability, failover and retirement procedures are defined in
+[Public federation beta v1 infrastructure](public-beta-infrastructure.md).
+Use that deployment for beta candidate acceptance. The single-host Azure and
+Windows procedures below remain temporary validation options and do not satisfy
+the independent-node beta closure criterion.
+
 ### Azure validation relay
 
 For temporary Azure acceptance, use one Ubuntu 24.04 x64 VM with a Standard

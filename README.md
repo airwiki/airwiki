@@ -83,6 +83,7 @@ The workspace separates dependency-light contracts, local domain logic, inferenc
 - [Pool-level abstention experiment](docs/pool-null-selector-experiment.md)
 - [Local chat integrations](docs/chat-integrations.md)
 - [Two-node manual acceptance](docs/two-node-runbook.md)
+- [Public federation beta infrastructure](docs/public-beta-infrastructure.md)
 - [Recovery](docs/recovery.md)
 - [Threat model](docs/threat-model.md)
 - [Development packaging](docs/packaging.md)

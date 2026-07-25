@@ -56,7 +56,7 @@ impl PublicCatalogBackend for CatalogBackend {
         let store = std::sync::Arc::clone(&self.store);
         tokio::task::spawn_blocking(move || store.register(&manifest, Utc::now()))
             .await
-            .map_err(|_| PublicCatalogBackendError::Internal)?
+            .map_err(map_catalog_join_error)?
             .map_err(map_backend_error)
     }
 
@@ -67,7 +67,7 @@ impl PublicCatalogBackend for CatalogBackend {
         let store = std::sync::Arc::clone(&self.store);
         tokio::task::spawn_blocking(move || store.withdraw(&tombstone))
             .await
-            .map_err(|_| PublicCatalogBackendError::Internal)?
+            .map_err(map_catalog_join_error)?
             .map_err(map_backend_error)
     }
 
@@ -82,12 +82,34 @@ impl PublicCatalogBackend for CatalogBackend {
             store.query(&query, now)
         })
         .await
-        .map_err(|_| PublicCatalogBackendError::Internal)?
+        .map_err(map_catalog_join_error)?
         .map_err(map_backend_error)
     }
 }
 
+fn map_catalog_join_error(_: tokio::task::JoinError) -> PublicCatalogBackendError {
+    tracing::error!(
+        error_kind = "catalog_worker_failed",
+        "public catalog blocking worker failed"
+    );
+    PublicCatalogBackendError::Internal
+}
+
+fn catalog_error_kind(error: &CatalogStoreError) -> &'static str {
+    match error {
+        CatalogStoreError::Persistence(_) => "catalog_persistence_failed",
+        CatalogStoreError::Encoding => "catalog_encoding_failed",
+        CatalogStoreError::Verification => "catalog_verification_rejected",
+        CatalogStoreError::StaleSequence => "catalog_stale_rejected",
+        CatalogStoreError::InvalidQuery => "catalog_query_rejected",
+        CatalogStoreError::PublisherLimit => "catalog_capacity_rejected",
+        CatalogStoreError::Lock => "catalog_busy",
+    }
+}
+
 fn map_backend_error(error: CatalogStoreError) -> PublicCatalogBackendError {
+    let error_kind = catalog_error_kind(&error);
+    tracing::warn!(error_kind, "public catalog operation failed");
     match error {
         CatalogStoreError::Verification
         | CatalogStoreError::InvalidQuery
@@ -545,5 +567,31 @@ mod tests {
             ),
             Err(CatalogStoreError::PublisherLimit)
         ));
+    }
+
+    #[test]
+    fn operational_error_classes_are_fixed_and_sanitized() {
+        let cases = [
+            (
+                CatalogStoreError::Persistence(rusqlite::Error::InvalidQuery),
+                "catalog_persistence_failed",
+            ),
+            (CatalogStoreError::Encoding, "catalog_encoding_failed"),
+            (
+                CatalogStoreError::Verification,
+                "catalog_verification_rejected",
+            ),
+            (CatalogStoreError::StaleSequence, "catalog_stale_rejected"),
+            (CatalogStoreError::InvalidQuery, "catalog_query_rejected"),
+            (
+                CatalogStoreError::PublisherLimit,
+                "catalog_capacity_rejected",
+            ),
+            (CatalogStoreError::Lock, "catalog_busy"),
+        ];
+
+        for (error, expected) in cases {
+            assert_eq!(catalog_error_kind(&error), expected);
+        }
     }
 }

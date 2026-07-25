@@ -23,6 +23,7 @@ const MIGRATION_2: &str = include_str!("../migrations/0002_publication_claims.sq
 const MIGRATION_3: &str = include_str!("../migrations/0003_collection_maintenance.sql");
 const MIGRATION_4: &str = include_str!("../migrations/0004_public_federation.sql");
 const MIGRATION_5: &str = include_str!("../migrations/0005_public_federation_hardening.sql");
+const MIGRATION_6: &str = include_str!("../migrations/0006_bootstrap_registry_state.sql");
 
 #[derive(Debug, Clone)]
 pub struct Database {
@@ -749,7 +750,13 @@ impl Database {
             tx.pragma_update(None, "user_version", 5)?;
             tx.commit()?;
         }
-        if version > 5 {
+        if version < 6 {
+            let tx = connection.transaction()?;
+            tx.execute_batch(MIGRATION_6)?;
+            tx.pragma_update(None, "user_version", 6)?;
+            tx.commit()?;
+        }
+        if version > 6 {
             bail!("database schema {version} is newer than this application supports");
         }
         let database = Self {
@@ -1211,14 +1218,14 @@ impl Database {
                 active.push(index);
             }
         }
-        if active.is_empty() && community_peers.is_empty() {
-            return Ok(());
-        }
-        let known_version = transaction.query_row(
-            "SELECT MAX(registry_version) FROM federation_indexes",
-            [],
-            |row| row.get::<_, Option<u32>>(0),
-        )?;
+        let known_version = transaction
+            .query_row(
+                "SELECT registry_version FROM federation_bootstrap_registry_state
+             WHERE singleton=1",
+                [],
+                |row| row.get::<_, u32>(0),
+            )
+            .optional()?;
         if known_version.is_some_and(|known| known > registry_version) {
             bail!("bootstrap federation index registry downgrade rejected");
         }
@@ -1285,6 +1292,15 @@ impl Database {
              WHERE source='bootstrap' AND registry_version < ?1",
             [registry_version],
         )?;
+        if known_version != Some(registry_version) {
+            transaction.execute(
+                "INSERT INTO federation_bootstrap_registry_state(singleton,registry_version,updated_at)
+                 VALUES (1,?1,?2)
+                 ON CONFLICT(singleton) DO UPDATE
+                 SET registry_version=?1,updated_at=?2",
+                params![registry_version, now.to_rfc3339()],
+            )?;
+        }
         transaction.commit()?;
         Ok(())
     }
@@ -3432,6 +3448,7 @@ impl Database {
                 | "collection_maintenance"
                 | "public_collection_profiles"
                 | "federation_indexes"
+                | "federation_bootstrap_registry_state"
                 | "public_publisher_blocks"
         ) {
             bail!("unsupported table name");
@@ -4541,7 +4558,7 @@ mod tests {
         let temp = tempfile::tempdir().unwrap();
         let path = temp.path().join("db.sqlite");
         let db = Database::open(&path).unwrap();
-        assert_eq!(db.schema_version().unwrap(), 5);
+        assert_eq!(db.schema_version().unwrap(), 6);
         for table in [
             "collections",
             "source_documents",
@@ -4555,12 +4572,13 @@ mod tests {
             "collection_maintenance",
             "public_collection_profiles",
             "federation_indexes",
+            "federation_bootstrap_registry_state",
             "public_publisher_blocks",
         ] {
             assert_eq!(db.count(table).unwrap(), 0);
         }
         drop(db);
-        assert_eq!(Database::open(path).unwrap().schema_version().unwrap(), 5);
+        assert_eq!(Database::open(path).unwrap().schema_version().unwrap(), 6);
     }
 
     #[test]
@@ -4842,6 +4860,54 @@ mod tests {
     }
 
     #[test]
+    fn fully_expired_higher_registry_retires_all_older_bootstrap_indexes() {
+        let (_temp, db, _collection) = setup();
+        let active = [BootstrapFederationIndexEntry {
+            peer_id: "12D3KooWActiveBeforeExpiry".to_owned(),
+            multiaddr: "/ip4/203.0.113.45/udp/42042/quic-v1".to_owned(),
+            expires_at: Utc::now() + chrono::Duration::days(1),
+        }];
+        db.replace_bootstrap_federation_indexes(7, &active).unwrap();
+        let expired = [BootstrapFederationIndexEntry {
+            peer_id: "12D3KooWExpiredReplacement".to_owned(),
+            multiaddr: "/ip4/203.0.113.46/udp/42044/quic-v1".to_owned(),
+            expires_at: Utc::now() - chrono::Duration::seconds(1),
+        }];
+
+        db.replace_bootstrap_federation_indexes(8, &expired)
+            .unwrap();
+
+        assert!(
+            db.list_federation_indexes()
+                .unwrap()
+                .iter()
+                .all(|index| index.source != "bootstrap")
+        );
+    }
+
+    #[test]
+    fn fully_expired_registry_version_still_rejects_downgrade() {
+        let (_temp, db, _collection) = setup();
+        let expired = [BootstrapFederationIndexEntry {
+            peer_id: "12D3KooWExpiredVersionMarker".to_owned(),
+            multiaddr: "/ip4/203.0.113.47/udp/42042/quic-v1".to_owned(),
+            expires_at: Utc::now() - chrono::Duration::seconds(1),
+        }];
+        db.replace_bootstrap_federation_indexes(10, &expired)
+            .unwrap();
+        let downgrade = [BootstrapFederationIndexEntry {
+            peer_id: "12D3KooWDowngradeAfterExpiry".to_owned(),
+            multiaddr: "/ip4/203.0.113.48/udp/42044/quic-v1".to_owned(),
+            expires_at: Utc::now() + chrono::Duration::days(1),
+        }];
+
+        assert!(
+            db.replace_bootstrap_federation_indexes(9, &downgrade)
+                .is_err()
+        );
+    }
+
+    #[test]
     fn bootstrap_registry_restart_tolerates_one_entry_expiring_before_the_others() {
         let (_temp, db, _collection) = setup();
         let now = Utc::now();
@@ -5029,7 +5095,7 @@ mod tests {
         drop(connection);
 
         let database = Database::open(&path).unwrap();
-        assert_eq!(database.schema_version().unwrap(), 5);
+        assert_eq!(database.schema_version().unwrap(), 6);
         assert_eq!(database.count("collections").unwrap(), 1);
         assert_eq!(database.count("source_documents").unwrap(), 1);
         assert_eq!(database.count("publication_claims").unwrap(), 0);
@@ -5069,7 +5135,7 @@ mod tests {
 
         let database = Database::open(&path).unwrap();
 
-        assert_eq!(database.schema_version().unwrap(), 5);
+        assert_eq!(database.schema_version().unwrap(), 6);
         assert!(
             database
                 .collection(collection_id)
@@ -5108,7 +5174,7 @@ mod tests {
 
         let database = Database::open(&path).unwrap();
         let collection = database.collection(collection_id).unwrap().unwrap();
-        assert_eq!(database.schema_version().unwrap(), 5);
+        assert_eq!(database.schema_version().unwrap(), 6);
         assert!(collection.policy.peer_shareable);
         assert!(collection.policy.allow_external_ai);
         assert!(!collection.policy.internet_public);
@@ -5142,12 +5208,57 @@ mod tests {
         drop(connection);
 
         let database = Database::open(path).unwrap();
-        assert_eq!(database.schema_version().unwrap(), 5);
+        assert_eq!(database.schema_version().unwrap(), 6);
         let indexes = database.list_federation_indexes().unwrap();
         assert_eq!(indexes.len(), 1);
         assert_eq!(indexes[0].registry_version, 0);
         assert!(indexes[0].expires_at.is_none());
         assert_eq!(database.count("public_publisher_blocks").unwrap(), 0);
+    }
+
+    #[test]
+    fn migration_six_preserves_the_highest_bootstrap_registry_version() {
+        let temp = tempfile::tempdir().unwrap();
+        let path = temp.path().join("version-five.sqlite");
+        let mut connection = Connection::open(&path).unwrap();
+        let tx = connection.transaction().unwrap();
+        tx.execute_batch(MIGRATION_1).unwrap();
+        tx.execute_batch(MIGRATION_2).unwrap();
+        tx.execute_batch(MIGRATION_3).unwrap();
+        tx.execute_batch(MIGRATION_4).unwrap();
+        tx.execute_batch(MIGRATION_5).unwrap();
+        let now = Utc::now().to_rfc3339();
+        tx.execute(
+            "INSERT INTO federation_indexes
+             (peer_id,multiaddr,enabled,source,registry_version,expires_at,created_at,updated_at)
+             VALUES ('12D3KooWMigratedBootstrap','/ip4/203.0.113.80/udp/42042/quic-v1',
+                     1,'bootstrap',12,?1,?2,?2)",
+            params![(Utc::now() + chrono::Duration::days(1)).to_rfc3339(), now],
+        )
+        .unwrap();
+        tx.pragma_update(None, "user_version", 5).unwrap();
+        tx.commit().unwrap();
+        drop(connection);
+
+        let database = Database::open(path).unwrap();
+        let downgrade = [BootstrapFederationIndexEntry {
+            peer_id: "12D3KooWMigrationDowngrade".to_owned(),
+            multiaddr: "/ip4/203.0.113.81/udp/42044/quic-v1".to_owned(),
+            expires_at: Utc::now() + chrono::Duration::days(1),
+        }];
+
+        assert_eq!(database.schema_version().unwrap(), 6);
+        assert_eq!(
+            database
+                .count("federation_bootstrap_registry_state")
+                .unwrap(),
+            1
+        );
+        assert!(
+            database
+                .replace_bootstrap_federation_indexes(11, &downgrade)
+                .is_err()
+        );
     }
 
     #[test]

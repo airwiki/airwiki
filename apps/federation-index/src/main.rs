@@ -89,6 +89,11 @@ async fn shutdown_signal() -> std::io::Result<()> {
     }
 }
 
+fn operational_failure(error_kind: &'static str) -> ExitCode {
+    tracing::error!(error_kind, "public federation index operation failed");
+    ExitCode::FAILURE
+}
+
 #[tokio::main]
 async fn main() -> ExitCode {
     tracing_subscriber::fmt()
@@ -126,24 +131,22 @@ async fn main() -> ExitCode {
                 external_addresses,
             }) => (false, listen_addresses, external_addresses),
             Err(error) => {
+                tracing::error!(
+                    error_kind = "configuration_invalid",
+                    "public federation index configuration rejected"
+                );
                 eprintln!("{error}");
                 return ExitCode::FAILURE;
             }
         };
     let store = match CatalogStore::open(&path) {
         Ok(store) => Arc::new(store),
-        Err(error) => {
-            eprintln!("{error}");
-            return ExitCode::FAILURE;
-        }
+        Err(_) => return operational_failure("catalog_open_failed"),
     };
     let secrets = FileSecretStore::new(path.with_extension("secrets"));
     let identity = match NodeIdentity::load_or_create_at(&secrets, "federation-index-ed25519-v1") {
         Ok(identity) => identity,
-        Err(error) => {
-            eprintln!("{error}");
-            return ExitCode::FAILURE;
-        }
+        Err(_) => return operational_failure("identity_store_failed"),
     };
     if print_peer_id {
         println!("{}", identity.peer_id());
@@ -161,22 +164,16 @@ async fn main() -> ExitCode {
     tokio::select! {
         result = &mut server => match result {
             Ok(()) => ExitCode::SUCCESS,
-            Err(error) => {
-                eprintln!("{error}");
-                ExitCode::FAILURE
-            }
+            Err(_) => operational_failure("catalog_server_failed"),
         },
         signal = shutdown_signal() => {
             if signal.is_err() {
-                return ExitCode::FAILURE;
+                return operational_failure("shutdown_signal_failed");
             }
             cancellation.cancel();
             match server.await {
                 Ok(()) => ExitCode::SUCCESS,
-                Err(error) => {
-                    eprintln!("{error}");
-                    ExitCode::FAILURE
-                }
+                Err(_) => operational_failure("catalog_shutdown_failed"),
             }
         }
     }

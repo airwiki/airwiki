@@ -10,6 +10,28 @@ env:
   CARGO_TERM_COLOR: always
 
 jobs:
+  linux-x64-federation-index:
+    name: Linux x64 federation index
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+      - uses: dtolnay/rust-toolchain@fa04a1451ff1842e2626ccb99004d0195b455a88 # master
+        with:
+          toolchain: 1.96.1
+      - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+      - name: Build federation index
+        run: cargo build --release --locked -p airwiki-federation-index
+      - name: Verify Linux x64 candidate
+        run: |
+          file target/release/airwiki-federation-index |
+            grep -F 'ELF 64-bit LSB pie executable, x86-64'
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: airwiki-linux-x64-federation-index
+          path: target/release/airwiki-federation-index
+          if-no-files-found: error
+
   macos-arm64:
     name: macOS arm64 app and DMG
     runs-on: macos-14

@@ -6,6 +6,12 @@ All notable user-visible changes to AirWiki will be documented here. The project
 
 ### Added
 
+- Added a bounded two-region Azure beta deployment for the public federation
+  index/relay, with a live USD 50 monthly cost gate, per-node budgets,
+  availability alerts, hardened single-node services, private versioned
+  bootstrap packaging, durable expiry and downgrade protection, sanitized
+  status, failover, recoverable single-node replacement and whole-group
+  retirement.
 - Added experimental opt-in public federation with separate publisher identity, signed expiring routing manifests, replaceable indexes, QUIC/relay transport, owner-served search and paginated browse.
 - Added expiring versioned bootstrap metadata, local publisher blocking, bounded fan-out pruning, and sanitized direct/relay and announcement status for public federation.
 - Added a complete public collection card with profile, provenance, expiry, route, paginated concept metadata, and explicit advertised/expired/offline states.

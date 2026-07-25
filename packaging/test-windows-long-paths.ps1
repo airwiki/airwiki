@@ -11,10 +11,10 @@ $Current = $ExtendedTestRoot
 try {
     [IO.Directory]::CreateDirectory($ExtendedTestRoot) | Out-Null
     while ($Current.Length -le 280) {
-        $Current = Join-Path $Current "segment-0123456789abcdef"
+        $Current = $Current.TrimEnd('\') + "\segment-0123456789abcdef"
     }
     [IO.Directory]::CreateDirectory($Current) | Out-Null
-    $Sentinel = Join-Path $Current "sentinel.txt"
+    $Sentinel = $Current.TrimEnd('\') + "\sentinel.txt"
     [IO.File]::WriteAllText($Sentinel, "synthetic")
 
     $Entries = @(Get-ChildItem -LiteralPath $ExtendedTestRoot -Force -Recurse)

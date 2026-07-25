@@ -21,7 +21,7 @@ use crate::{
     PublicSearchWireResponse, PublicSourceRejection, verify_manifest,
 };
 
-const INDEX_DEADLINE: Duration = Duration::from_millis(300);
+const INDEX_DEADLINE: Duration = Duration::from_millis(1_000);
 const PEER_DEADLINE: Duration = Duration::from_millis(800);
 const GLOBAL_DEADLINE: Duration = Duration::from_millis(1_500);
 const MAX_INDEXES: usize = 3;
@@ -1125,7 +1125,7 @@ mod tests {
     }
 
     #[tokio::test(start_paused = true)]
-    async fn public_deadlines_are_bounded_at_300_800_and_1500_milliseconds() {
+    async fn public_deadlines_are_bounded_at_1000_800_and_1500_milliseconds() {
         let started = Instant::now();
         assert_eq!(
             public_index_deadline(started).duration_since(started),

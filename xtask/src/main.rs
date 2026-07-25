@@ -2759,10 +2759,14 @@ fn verify_windows_uninstaller() -> Result<()> {
         .context("reading the managed Windows NSIS template")?;
     let smoke = fs::read_to_string(root.join("packaging/smoke-install-windows.ps1"))
         .context("reading the Windows built-installer smoke matrix")?;
+    let validated_smoke =
+        fs::read_to_string(root.join("packaging/smoke-validated-windows-installer.ps1"))
+            .context("reading the validated Windows installer smoke")?;
     let updater = fs::read_to_string(root.join("apps/desktop/src/updater.rs"))
         .context("reading the Windows updater implementation")?;
     verify_windows_installer_preflight_sources(&template)?;
     verify_windows_installer_smoke_sources(&smoke)?;
+    verify_validated_installer_smoke_sources(&validated_smoke)?;
     verify_windows_uninstaller_sources(&config, &template)?;
     verify_windows_update_handoff_sources(&template, &updater)
 }
@@ -2964,6 +2968,80 @@ fn powershell_executable_exact_slices(
         code.get(offset + marker_offset..)
             .is_some_and(|candidate| candidate.starts_with(executable_marker))
     })
+}
+
+fn verify_validated_installer_smoke_sources(smoke: &str) -> Result<()> {
+    let source = powershell_source_views(smoke)?;
+    let invoke = powershell_function(source.code.as_str(), "Invoke-Process")?;
+    let exact_start = "$Process = Start-Process -FilePath $Path -ArgumentList $Arguments -PassThru";
+    let bounded_wait = "$Process.WaitForExit($ProcessWaitMilliseconds)";
+    let mark_unconfirmed = "$script:ProcessTerminationUnconfirmed = $true";
+    let kill = "$Process.Kill()";
+    let cleanup_wait = "$Process.WaitForExit($ProcessCleanupWaitMilliseconds)";
+    let mark_confirmed = "$script:ProcessTerminationUnconfirmed = $false";
+    let exit_code = "$ExitCode = $Process.ExitCode";
+    let dispose = "$Process.Dispose()";
+
+    let ordered_invoke_markers = [
+        exact_start,
+        bounded_wait,
+        mark_unconfirmed,
+        kill,
+        cleanup_wait,
+        mark_confirmed,
+        exit_code,
+        dispose,
+    ];
+    let mut previous_offset = None;
+    for marker in ordered_invoke_markers {
+        let offset = invoke
+            .find(marker)
+            .with_context(|| format!("validated installer smoke must execute {marker}"))?;
+        ensure!(
+            previous_offset.is_none_or(|previous| previous < offset),
+            "validated installer smoke must retain exact-process recovery ordering"
+        );
+        previous_offset = Some(offset);
+    }
+    ensure!(
+        !invoke.contains("-Wait"),
+        "validated installer smoke must not wait for the installer child tree"
+    );
+
+    let cleanup = powershell_function(source.code.as_str(), "Invoke-AutomaticCleanup")?;
+    let recovery_gate = "if ($script:ProcessTerminationUnconfirmed) {";
+    let manual_recovery = "throw ";
+    let remove_install = "Remove-ExactRegisteredInstall";
+    let gate_offset = cleanup.find(recovery_gate).context(
+        "validated installer smoke must gate automatic cleanup on confirmed termination",
+    )?;
+    let manual_offset = cleanup.find(manual_recovery).context(
+        "validated installer smoke must require manual recovery when termination is unconfirmed",
+    )?;
+    let remove_offset = cleanup
+        .find(remove_install)
+        .context("validated installer smoke must retain exact automatic cleanup")?;
+    ensure!(
+        gate_offset < manual_offset && manual_offset < remove_offset,
+        "validated installer smoke must fail closed before automatic cleanup"
+    );
+    ensure!(
+        powershell_executable_exact(
+            &source,
+            "        ($script:ProcessTerminationUnconfirmed -or",
+            "$script:ProcessTerminationUnconfirmed",
+        ),
+        "validated installer smoke must enter recovery when termination is unconfirmed"
+    );
+    ensure!(
+        powershell_executable_exact(
+            &source,
+            "            Invoke-AutomaticCleanup",
+            "Invoke-AutomaticCleanup",
+        ),
+        "validated installer smoke must route recovery through the termination gate"
+    );
+    Ok(())
 }
 
 fn verify_powershell_mutation_process_guards(code: &str) -> Result<()> {
@@ -7310,20 +7388,78 @@ mod tests {
             workspace_root().join("packaging/smoke-validated-windows-installer.ps1"),
         )
         .unwrap();
-        let invoke_process = smoke
-            .split_once("function Invoke-Process")
-            .and_then(|(_, rest)| rest.split_once("function Get-DesktopProcesses"))
-            .map(|(function, _)| function);
+
+        verify_validated_installer_smoke_sources(&smoke).unwrap();
+    }
+
+    #[test]
+    fn validated_installer_smoke_rejects_commented_process_termination() {
+        let smoke = fs::read_to_string(
+            workspace_root().join("packaging/smoke-validated-windows-installer.ps1"),
+        )
+        .unwrap();
+        let unsafe_smoke = smoke.replacen(
+            "            $Process.Kill()",
+            "            # $Process.Kill()",
+            1,
+        );
+        assert_ne!(
+            unsafe_smoke, smoke,
+            "process termination fixture did not match"
+        );
+
+        let error = verify_validated_installer_smoke_sources(&unsafe_smoke).unwrap_err();
+
+        assert!(error.to_string().contains("$Process.Kill()"));
+    }
+
+    #[test]
+    fn validated_installer_smoke_rejects_inert_unconfirmed_state() {
+        let smoke = fs::read_to_string(
+            workspace_root().join("packaging/smoke-validated-windows-installer.ps1"),
+        )
+        .unwrap();
+        let unsafe_smoke = smoke.replacen(
+            "            $script:ProcessTerminationUnconfirmed = $true",
+            "            '$script:ProcessTerminationUnconfirmed = $true'",
+            1,
+        );
+        assert_ne!(
+            unsafe_smoke, smoke,
+            "unconfirmed-termination fixture did not match"
+        );
+
+        let error = verify_validated_installer_smoke_sources(&unsafe_smoke).unwrap_err();
 
         assert!(
-            invoke_process.is_some_and(|function| {
-                function
-                    .contains("Start-Process -FilePath $Path -ArgumentList $Arguments -PassThru")
-                    && function.contains("$Process.WaitForExit($ProcessWaitMilliseconds)")
-                    && function.contains("$Process.WaitForExit($ProcessCleanupWaitMilliseconds)")
-                    && !function.contains("-Wait")
-            }),
-            "validated installer smoke must wait for the exact installer process, not its child tree"
+            error
+                .to_string()
+                .contains("$script:ProcessTerminationUnconfirmed = $true")
+        );
+    }
+
+    #[test]
+    fn validated_installer_smoke_rejects_inert_automatic_cleanup_gate() {
+        let smoke = fs::read_to_string(
+            workspace_root().join("packaging/smoke-validated-windows-installer.ps1"),
+        )
+        .unwrap();
+        let unsafe_smoke = smoke.replacen(
+            "    if ($script:ProcessTerminationUnconfirmed) {",
+            "    if ($false) {\n        '$script:ProcessTerminationUnconfirmed'",
+            1,
+        );
+        assert_ne!(
+            unsafe_smoke, smoke,
+            "automatic cleanup fixture did not match"
+        );
+
+        let error = verify_validated_installer_smoke_sources(&unsafe_smoke).unwrap_err();
+
+        assert!(
+            error
+                .to_string()
+                .contains("gate automatic cleanup on confirmed termination")
         );
     }
 }

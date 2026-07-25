@@ -18,6 +18,7 @@ $McpRequestTimeoutSeconds = 8
 $McpRequestId = 991
 $ProcessWaitMilliseconds = 120000
 $ProcessCleanupWaitMilliseconds = 10000
+$script:ProcessTerminationUnconfirmed = $false
 
 . (Join-Path $PSScriptRoot "windows-runtime.ps1")
 . (Join-Path $PSScriptRoot "windows-payload.ps1")
@@ -30,10 +31,12 @@ function Invoke-Process(
     $Process = Start-Process -FilePath $Path -ArgumentList $Arguments -PassThru
     try {
         if (-not $Process.WaitForExit($ProcessWaitMilliseconds)) {
+            $script:ProcessTerminationUnconfirmed = $true
             $Process.Kill()
             if (-not $Process.WaitForExit($ProcessCleanupWaitMilliseconds)) {
-                throw "$Label timeout cleanup did not complete"
+                throw "$Label termination was not confirmed after timeout cleanup"
             }
+            $script:ProcessTerminationUnconfirmed = $false
             throw "$Label did not exit within the bounded wait"
         }
         $ExitCode = $Process.ExitCode
@@ -47,6 +50,13 @@ function Invoke-Process(
 
 function Get-DesktopProcesses {
     return @(Get-CimInstance Win32_Process -Filter "Name = 'airwiki.exe'")
+}
+
+function Invoke-AutomaticCleanup {
+    if ($script:ProcessTerminationUnconfirmed) {
+        throw "automatic cleanup was skipped because process termination was not confirmed; recover the partial per-user installation manually"
+    }
+    Remove-ExactRegisteredInstall
 }
 
 function Test-SamePath([string] $Left, [string] $Right) {
@@ -300,12 +310,18 @@ try {
     $Failure = $_
 } finally {
     if ($InstalledByThisRun -and
-        ((Test-AnyManagedInstallState) -or (@(Get-DesktopProcesses)).Count -ne 0)) {
+        ($script:ProcessTerminationUnconfirmed -or
+            (Test-AnyManagedInstallState) -or
+            (@(Get-DesktopProcesses)).Count -ne 0)) {
         try {
-            Remove-ExactRegisteredInstall
+            Invoke-AutomaticCleanup
             $InstalledByThisRun = $false
         } catch {
-            $CleanupFailure = "automatic cleanup was unsafe because the installed state was incomplete or conflicting; remove the partial per-user installation manually"
+            $CleanupFailure = if ($script:ProcessTerminationUnconfirmed) {
+                "automatic cleanup was skipped because process termination was not confirmed; recover the partial per-user installation manually"
+            } else {
+                "automatic cleanup was unsafe because the installed state was incomplete or conflicting; remove the partial per-user installation manually"
+            }
         }
     }
 }

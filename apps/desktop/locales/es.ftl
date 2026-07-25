@@ -619,6 +619,7 @@ search-coverage-offline-devices = { $count ->
     [one] Otro equipo no respondió. Estos resultados pueden estar incompletos.
    *[other] { $count } equipos no respondieron. Estos resultados pueden estar incompletos.
 }
+search-coverage-public-offline = La red pública está offline. La búsqueda local y en equipos emparejados sigue disponible.
 search-coverage-partial = Una parte de la búsqueda no pudo completarse. Se muestran los resultados disponibles.
 
 settings-title = Configuración

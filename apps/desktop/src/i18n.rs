@@ -110,6 +110,7 @@ pub(crate) const MESSAGE_IDS: &[&str] = &[
     "search-local-unavailable",
     "search-coverage-federation-disabled",
     "search-coverage-offline-devices",
+    "search-coverage-public-offline",
     "search-coverage-partial",
     "devices-title",
     "devices-searching",

@@ -70,6 +70,7 @@ use crate::{
 
 const KEYRING_SERVICE: &str = "io.github.airwiki.AirWiki";
 const KEYRING_ACCOUNT: &str = "device-identity";
+pub(crate) const PUBLIC_NETWORK_OFFLINE_WARNING: &str = "public_network_offline";
 const MODEL_SMOKE_TEST_DOCUMENT: &str = "Documento sintético de diagnóstico local. Título: Prueba de AirWiki. Contenido: verificar que el enriquecimiento estructurado funciona sin utilizar información de la empresa.";
 const RELEVANCE_SMOKE_TEST_QUESTION: &str = "¿Cómo se recupera el servicio Atlas?";
 const RELEVANCE_SMOKE_TEST_PASSAGES: [&str; 2] = [
@@ -1761,7 +1762,7 @@ impl DesktopServices {
                 trusted.partial = true;
                 trusted
                     .warnings
-                    .push("public network is unavailable".to_owned());
+                    .push(PUBLIC_NETWORK_OFFLINE_WARNING.to_owned());
                 Ok(trusted)
             }
             (Err(_), Ok(mut public)) => {

@@ -287,11 +287,16 @@ create_budget() {
                 }
             }
         }' >"${body_file}"
+    az rest \
+        --method put \
+        --uri "${budget_uri}" \
+        --body "@${body_file}" \
+        --output none \
+        --only-show-errors
     budget_currency="$(
         az rest \
-            --method put \
+            --method get \
             --uri "${budget_uri}" \
-            --body "@${body_file}" \
             --query "properties.currentSpend.unit" \
             -o tsv \
             --only-show-errors

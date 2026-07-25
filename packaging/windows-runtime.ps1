@@ -19,6 +19,18 @@ function Assert-WindowsAbsolutePath([string] $Path, [string] $Label) {
     }
 }
 
+function ConvertTo-WindowsExtendedLengthPath([string] $Path, [string] $Label) {
+    Assert-WindowsAbsolutePath $Path $Label
+    $FullPath = [IO.Path]::GetFullPath($Path)
+    if ($FullPath.StartsWith("\\?\", [StringComparison]::Ordinal)) {
+        return $FullPath
+    }
+    if ($FullPath.StartsWith("\\", [StringComparison]::Ordinal)) {
+        return "\\?\UNC\" + $FullPath.Substring(2)
+    }
+    return "\\?\" + $FullPath
+}
+
 function Test-WindowsOrdinalSequenceEqual([object[]] $Expected, [object[]] $Actual) {
     $ExpectedItems = @($Expected)
     $ActualItems = @($Actual)

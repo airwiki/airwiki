@@ -7303,4 +7303,27 @@ mod tests {
                 && signed.contains("Get-VerifiedWindowsRegularFile $Mcpb")
         );
     }
+
+    #[test]
+    fn validated_installer_smoke_waits_for_the_exact_installer_process() {
+        let smoke = fs::read_to_string(
+            workspace_root().join("packaging/smoke-validated-windows-installer.ps1"),
+        )
+        .unwrap();
+        let invoke_process = smoke
+            .split_once("function Invoke-Process")
+            .and_then(|(_, rest)| rest.split_once("function Get-DesktopProcesses"))
+            .map(|(function, _)| function);
+
+        assert!(
+            invoke_process.is_some_and(|function| {
+                function
+                    .contains("Start-Process -FilePath $Path -ArgumentList $Arguments -PassThru")
+                    && function.contains("$Process.WaitForExit($ProcessWaitMilliseconds)")
+                    && function.contains("$Process.WaitForExit($ProcessCleanupWaitMilliseconds)")
+                    && !function.contains("-Wait")
+            }),
+            "validated installer smoke must wait for the exact installer process, not its child tree"
+        );
+    }
 }

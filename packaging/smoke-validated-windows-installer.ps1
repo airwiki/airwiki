@@ -16,6 +16,8 @@ $StateWaitMilliseconds = 15000
 $ModelReadyWaitMilliseconds = 900000
 $McpRequestTimeoutSeconds = 8
 $McpRequestId = 991
+$ProcessWaitMilliseconds = 120000
+$ProcessCleanupWaitMilliseconds = 10000
 
 . (Join-Path $PSScriptRoot "windows-runtime.ps1")
 . (Join-Path $PSScriptRoot "windows-payload.ps1")
@@ -25,13 +27,19 @@ function Invoke-Process(
     [string[]] $Arguments,
     [string] $Label
 ) {
-    $Process = Start-Process `
-        -FilePath $Path `
-        -ArgumentList $Arguments `
-        -Wait `
-        -PassThru
-    $ExitCode = $Process.ExitCode
-    $Process.Dispose()
+    $Process = Start-Process -FilePath $Path -ArgumentList $Arguments -PassThru
+    try {
+        if (-not $Process.WaitForExit($ProcessWaitMilliseconds)) {
+            $Process.Kill()
+            if (-not $Process.WaitForExit($ProcessCleanupWaitMilliseconds)) {
+                throw "$Label timeout cleanup did not complete"
+            }
+            throw "$Label did not exit within the bounded wait"
+        }
+        $ExitCode = $Process.ExitCode
+    } finally {
+        $Process.Dispose()
+    }
     if ($ExitCode -ne 0) {
         throw "$Label returned a nonzero exit code"
     }

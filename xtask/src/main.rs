@@ -2978,6 +2978,7 @@ fn verify_validated_installer_smoke_sources(smoke: &str) -> Result<()> {
     let mark_unconfirmed = "$script:ProcessTerminationUnconfirmed = $true";
     let kill = "$Process.Kill()";
     let cleanup_wait = "$Process.WaitForExit($ProcessCleanupWaitMilliseconds)";
+    let cleanup_timeout_throw = "throw ";
     let mark_confirmed = "$script:ProcessTerminationUnconfirmed = $false";
     let exit_code = "$ExitCode = $Process.ExitCode";
     let dispose = "$Process.Dispose()";
@@ -2988,6 +2989,7 @@ fn verify_validated_installer_smoke_sources(smoke: &str) -> Result<()> {
         mark_unconfirmed,
         kill,
         cleanup_wait,
+        cleanup_timeout_throw,
         mark_confirmed,
         exit_code,
         dispose,
@@ -7435,6 +7437,31 @@ mod tests {
             error
                 .to_string()
                 .contains("$script:ProcessTerminationUnconfirmed = $true")
+        );
+    }
+
+    #[test]
+    fn validated_installer_smoke_rejects_inert_unconfirmed_termination_throw() {
+        let smoke = fs::read_to_string(
+            workspace_root().join("packaging/smoke-validated-windows-installer.ps1"),
+        )
+        .unwrap();
+        let unsafe_smoke = smoke.replacen(
+            "                throw \"$Label termination was not confirmed after timeout cleanup\"",
+            "                'throw $Label termination was not confirmed after timeout cleanup'",
+            1,
+        );
+        assert_ne!(
+            unsafe_smoke, smoke,
+            "unconfirmed-termination throw fixture did not match"
+        );
+
+        let error = verify_validated_installer_smoke_sources(&unsafe_smoke).unwrap_err();
+
+        assert!(
+            error
+                .to_string()
+                .contains("exact-process recovery ordering")
         );
     }
 

@@ -250,7 +250,7 @@ if (-not $BundleItem.PSIsContainer) {
     throw "BundleRoot must be a directory"
 }
 $BundleRoot = $BundleItem.FullName
-$InstallDir = Join-Path $env:LOCALAPPDATA "AirWiki"
+$InstallDir = Join-Path (Join-Path $env:LOCALAPPDATA "Programs") "AirWiki"
 $UninstallRegistryPath = "HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\AirWiki"
 $ProductRegistryPath = "HKCU:\Software\AirWiki\AirWiki"
 $AutostartRegistryPath = "HKCU:\Software\Microsoft\Windows\CurrentVersion\Run"

@@ -107,6 +107,23 @@ interactive user session, opens the application, verifies local MCP/model
 operation, and uninstalls. It is an internal acceptance test, not public-release
 evidence.
 
+Current-user packages install binaries below `%LOCALAPPDATA%\Programs\AirWiki`.
+The separate local-first data roots remain under the documented
+`%LOCALAPPDATA%\airwiki\AirWiki` and `%APPDATA%\airwiki\AirWiki` locations, so
+launching the installed app cannot add mutable data to the verified package
+payload. The directory is fixed: the installer has no directory-selection page
+and rejects, before any page or write, any effective path (including `/D`) that
+is not the case-insensitive exact fixed path. Rejecting aliases instead of
+canonicalizing them avoids 8.3, junction, traversal, and trailing-dot
+equivalence bypasses. Existing `Programs` and `AirWiki` path components are
+also rejected if Windows marks either as a reparse point.
+
+An unsupported development candidate previously installed directly under
+`%LOCALAPPDATA%\AirWiki` is not migrated in place because that tree can already
+contain user data. The new installer fails closed without uninstalling it.
+Uninstall that older candidate while leaving the data-removal option unchecked,
+then install the new candidate; the two data roots remain intact by default.
+
 ### Windows trust boundaries
 
 - The firewall helper is a sibling of the desktop, requests administrator only

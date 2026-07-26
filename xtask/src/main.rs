@@ -2972,6 +2972,14 @@ fn powershell_executable_exact_slices(
 
 fn verify_validated_installer_smoke_sources(smoke: &str) -> Result<()> {
     let source = powershell_source_views(smoke)?;
+    ensure!(
+        powershell_executable_exact(
+            &source,
+            "$InstallDir = Join-Path (Join-Path $env:LOCALAPPDATA \"Programs\") \"AirWiki\"",
+            "$InstallDir = Join-Path (",
+        ),
+        "validated installer smoke must keep installed binaries outside the AirWiki data root"
+    );
     let invoke = powershell_function(source.code.as_str(), "Invoke-Process")?;
     let exact_start = "$Process = Start-Process -FilePath $Path -ArgumentList $Arguments -PassThru";
     let bounded_wait = "$Process.WaitForExit($ProcessWaitMilliseconds)";
@@ -3201,9 +3209,21 @@ fn verify_windows_installer_smoke_sources(smoke: &str) -> Result<()> {
             )
             && code
                 .contains("$ProgramDataRoot = (Resolve-Path -LiteralPath $env:ProgramData).Path")
+            && code
+                .contains("$LocalAppDataRoot = (Resolve-Path -LiteralPath $env:LOCALAPPDATA).Path")
+            && source
+                .normalized
+                .contains("$ProgramsRoot = Join-Path $LocalAppDataRoot \"Programs\"")
+            && source
+                .normalized
+                .contains("$InstallDir = Join-Path $ProgramsRoot \"AirWiki\"")
+            && source.normalized.contains(
+                "$OwnerMarker = Join-Path $ProgramDataRoot \"airwiki-installer-gate-$RunSuffix.owner\""
+            )
+            && code.contains("-AllowedRoot $ProgramsRoot")
             && code.contains("[IO.Path]::IsPathRooted($InstallDir)")
             && code.contains("$InstallDir -match"),
-        "Windows built-installer smoke matrix must gate the host before any owned state under resolved ProgramData"
+        "Windows built-installer smoke matrix must gate the host, use the fixed binary path, and keep separate ProgramData deletion authority"
     );
     ensure!(
         powershell_executable_exact(
@@ -3758,6 +3778,18 @@ fn verify_windows_installer_preflight_sources(template: &str) -> Result<()> {
         ),
         "NSIS classifier must reject WiX and NSIS coexistence"
     );
+    ensure!(
+        classify.contains("ReadRegStr $7 SHCTX \"${MANUPRODUCTKEY}\" \"\"")
+            && classify.contains(
+                "    ${If} $NsisMetadataState == \"${NSIS_METADATA_ABSENT}\"\n      ${If} $7 != \"\"\n        Goto classify_reject"
+            )
+            && classify.contains("StrCpy $8 \"$\\\"$7$\\\"\"")
+            && classify.contains("StrCmp $4 $8 0 classify_reject")
+            && classify.contains("StrCpy $8 \"$\\\"$7\\uninstall.exe$\\\"\"")
+            && classify.contains("StrCmp $5 $8 0 classify_reject")
+            && classify.contains("StrCpy $ExistingNsisInstallLocation $7"),
+        "NSIS classifier must reject orphaned or incoherent product install locations"
+    );
 
     let init = nsis_function(template, ".onInit")?;
     let first_action = init
@@ -3789,14 +3821,25 @@ fn verify_windows_installer_preflight_sources(template: &str) -> Result<()> {
     let restore = init
         .find("Call RestorePreviousInstallLocation")
         .context("NSIS install-location restoration marker is missing")?;
+    let validate_location = init
+        .find("Call ValidateInstallLocation")
+        .context("NSIS must validate the effective install location from .onInit")?;
     ensure!(
         platform_call < option_parse
             && option_parse < context
             && context < classify_call
             && classify_call < policy_call
-            && policy_call < language
-            && policy_call < restore,
-        "NSIS platform and version policy must run before the language selector and every write"
+            && policy_call < restore
+            && restore < validate_location
+            && validate_location < language,
+        "NSIS platform, version, and install-location policy must run before every page and write"
+    );
+    let restore_function = nsis_function(template, "RestorePreviousInstallLocation")?;
+    ensure!(
+        restore_function.contains(
+            "  ${If} $ExistingInstallKind == \"nsis\"\n    StrCpy $INSTDIR $ExistingNsisInstallLocation\n  ${EndIf}"
+        ) && !restore_function.contains("ReadRegStr"),
+        "NSIS may restore only the coherent install location accepted by its classifier"
     );
     ensure!(
         !nsis_function(template, "PageReinstall")?.contains("nsis_tauri_utils::SemverCompare"),
@@ -4010,6 +4053,64 @@ fn verify_windows_uninstaller_sources(config: &str, template: &str) -> Result<()
     ensure!(
         template.contains("cargo-packager 0.11.8's default NSIS template"),
         "the managed NSIS template must record its pinned upstream base"
+    );
+    ensure!(
+        template.contains("StrCpy $INSTDIR \"$LOCALAPPDATA\\Programs\\${PRODUCTNAME}\"")
+            && !template
+                .lines()
+                .map(str::trim)
+                .any(|line| line == "StrCpy $INSTDIR \"$LOCALAPPDATA\\${PRODUCTNAME}\""),
+        "Windows per-user binaries must not overlap the case-insensitive AirWiki data root"
+    );
+    let reject_location = nsis_function(template, "RejectUnsafeInstallLocation")?;
+    ensure!(
+        reject_location.contains("IfSilent unsafe_install_location_abort")
+            && reject_location
+                .contains("MessageBox MB_OK|MB_ICONSTOP \"$(UnsafeInstallLocation)\"")
+            && reject_location.contains("SetErrorLevel 2")
+            && reject_location.contains("Abort"),
+        "Windows installer must reject an unsafe location without writing or exposing raw paths"
+    );
+    let location_guard = nsis_function(template, "ValidateInstallLocation")?;
+    ensure!(
+        location_guard.contains("GetFullPathName $0 \"$LOCALAPPDATA\"")
+            && location_guard.contains("StrCpy $0 \"$0\\Programs\\${PRODUCTNAME}\"")
+            && location_guard.contains("StrCpy $1 \"$INSTDIR\"")
+            && location_guard.matches("${StrCase} $0 $0 \"L\"").count() == 1
+            && location_guard.matches("${StrCase} $1 $1 \"L\"").count() == 1
+            && location_guard
+                .contains("StrCmp $0 $1 install_location_valid unsafe_install_location")
+            && location_guard.contains(
+                "System::Call 'kernel32::GetFileAttributesW(w \"$LOCALAPPDATA\\Programs\")i .r2'"
+            )
+            && location_guard.contains(
+                "System::Call 'kernel32::GetFileAttributesW(w \"$LOCALAPPDATA\\Programs\\${PRODUCTNAME}\")i .r2'"
+            )
+            && location_guard.matches("IntOp $3 $2 & 0x0400").count() == 2
+            && location_guard.contains("Call RejectUnsafeInstallLocation"),
+        "Windows installer must accept only the exact fixed binary path and reject existing reparse components"
+    );
+    ensure!(
+        !template.contains("!insertmacro MUI_PAGE_DIRECTORY"),
+        "Windows installer must not offer a directory page that can bypass the fixed binary path"
+    );
+    let install_start = template
+        .find("Section Install")
+        .context("NSIS template has no install section")?;
+    let install_end = template[install_start..]
+        .find("SectionEnd")
+        .map(|offset| install_start + offset)
+        .context("NSIS install section is not terminated")?;
+    let install = &template[install_start..install_end];
+    let final_location_guard = install
+        .find("Call ValidateInstallLocation")
+        .context("NSIS install section must revalidate the final directory selection")?;
+    let first_install_write = install
+        .find("SetOutPath $INSTDIR")
+        .context("NSIS install section has no output path")?;
+    ensure!(
+        final_location_guard < first_install_write,
+        "Windows installer must validate the final effective path before its first write"
     );
 
     let uninstall_start = template
@@ -5686,18 +5787,18 @@ mod tests {
     fn windows_installer_preflight_precedes_the_first_runtime_write() {
         let (template, _) = windows_update_handoff_sources();
         let unsafe_template = template.replacen(
-            "  Call EnforceInstallPolicy\n\n  !if \"${DISPLAYLANGUAGESELECTOR}\" == \"true\"\n    !insertmacro MUI_LANGDLL_DISPLAY\n  !endif",
-            "  !if \"${DISPLAYLANGUAGESELECTOR}\" == \"true\"\n    !insertmacro MUI_LANGDLL_DISPLAY\n  !endif\n\n  Call EnforceInstallPolicy",
+            "  Call ValidateInstallLocation\n\n  !if \"${DISPLAYLANGUAGESELECTOR}\" == \"true\"\n    !insertmacro MUI_LANGDLL_DISPLAY\n  !endif",
+            "  !if \"${DISPLAYLANGUAGESELECTOR}\" == \"true\"\n    !insertmacro MUI_LANGDLL_DISPLAY\n  !endif\n\n  Call ValidateInstallLocation",
             1,
+        );
+        assert_ne!(
+            unsafe_template, template,
+            "pre-page install-location fixture did not match"
         );
 
         let error = verify_windows_installer_preflight_sources(&unsafe_template).unwrap_err();
 
-        assert!(
-            error
-                .to_string()
-                .contains("before the language selector and every write")
-        );
+        assert!(error.to_string().contains("before every page and write"));
     }
 
     #[test]
@@ -6039,6 +6140,87 @@ mod tests {
         let error = verify_windows_uninstaller_sources(&unsafe_config, &template).unwrap_err();
 
         assert!(error.to_string().contains("exactly the two managed"));
+    }
+
+    #[test]
+    fn windows_installer_rejects_a_per_user_path_that_overlaps_appdata() {
+        let (config, template) = windows_uninstaller_sources();
+        let unsafe_template = template.replace(
+            "StrCpy $INSTDIR \"$LOCALAPPDATA\\Programs\\${PRODUCTNAME}\"",
+            "StrCpy $INSTDIR \"$LOCALAPPDATA\\${PRODUCTNAME}\"",
+        );
+        assert_ne!(
+            unsafe_template, template,
+            "per-user install path fixture did not match"
+        );
+
+        let error = verify_windows_uninstaller_sources(&config, &unsafe_template).unwrap_err();
+
+        assert!(error.to_string().contains("must not overlap"));
+    }
+
+    #[test]
+    fn windows_installer_rejects_restoring_an_unclassified_product_path() {
+        let template =
+            fs::read_to_string(workspace_root().join("packaging/windows/installer.nsi")).unwrap();
+        let unsafe_template = template.replace(
+            "  ${If} $ExistingInstallKind == \"nsis\"\n    StrCpy $INSTDIR $ExistingNsisInstallLocation\n  ${EndIf}",
+            "  ReadRegStr $4 SHCTX \"${MANUPRODUCTKEY}\" \"\"\n  StrCpy $INSTDIR $4",
+        );
+        assert_ne!(
+            unsafe_template, template,
+            "classified restore fixture did not match"
+        );
+
+        let error = verify_windows_installer_preflight_sources(&unsafe_template).unwrap_err();
+
+        assert!(error.to_string().contains("restore only the coherent"));
+    }
+
+    #[test]
+    fn windows_installer_rejects_a_missing_final_runtime_overlap_guard() {
+        let (config, template) = windows_uninstaller_sources();
+        let unsafe_template = template.replacen(
+            "Section Install\n  ; Revalidate the effective command-line/default path before every write.\n  Call ValidateInstallLocation",
+            "Section Install",
+            1,
+        );
+        assert_ne!(
+            unsafe_template, template,
+            "final install-location guard fixture did not match"
+        );
+
+        let error = verify_windows_uninstaller_sources(&config, &unsafe_template).unwrap_err();
+
+        assert!(error.to_string().contains("revalidate the final"));
+    }
+
+    #[test]
+    fn windows_installer_rejects_case_sensitive_overlap_validation() {
+        let (config, template) = windows_uninstaller_sources();
+        let unsafe_template = template.replacen("  ${StrCase} $0 $0 \"L\"", "  StrCpy $0 $0", 1);
+        assert_ne!(
+            unsafe_template, template,
+            "case-insensitive install-location fixture did not match"
+        );
+
+        let error = verify_windows_uninstaller_sources(&config, &unsafe_template).unwrap_err();
+
+        assert!(error.to_string().contains("exact fixed binary path"));
+    }
+
+    #[test]
+    fn windows_installer_rejects_a_missing_reparse_component_guard() {
+        let (config, template) = windows_uninstaller_sources();
+        let unsafe_template = template.replacen("  IntOp $3 $2 & 0x0400\n", "", 1);
+        assert_ne!(
+            unsafe_template, template,
+            "reparse-component fixture did not match"
+        );
+
+        let error = verify_windows_uninstaller_sources(&config, &unsafe_template).unwrap_err();
+
+        assert!(error.to_string().contains("reparse components"));
     }
 
     #[test]
@@ -7542,5 +7724,25 @@ mod tests {
                 .to_string()
                 .contains("wait for the exact registered installation")
         );
+    }
+
+    #[test]
+    fn validated_installer_smoke_rejects_an_appdata_overlapping_install_path() {
+        let smoke = fs::read_to_string(
+            workspace_root().join("packaging/smoke-validated-windows-installer.ps1"),
+        )
+        .unwrap();
+        let unsafe_smoke = smoke.replace(
+            "$InstallDir = Join-Path (Join-Path $env:LOCALAPPDATA \"Programs\") \"AirWiki\"",
+            "$InstallDir = Join-Path $env:LOCALAPPDATA \"AirWiki\"",
+        );
+        assert_ne!(
+            unsafe_smoke, smoke,
+            "validated installer path fixture did not match"
+        );
+
+        let error = verify_validated_installer_smoke_sources(&unsafe_smoke).unwrap_err();
+
+        assert!(error.to_string().contains("outside the AirWiki data root"));
     }
 }

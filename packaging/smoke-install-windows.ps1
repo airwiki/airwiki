@@ -532,19 +532,21 @@ function Get-ExistingAirWikiWixCount {
 function Assert-OwnedCleanupLocation {
     Assert-NoReparsePath $ProgramDataRoot
     Assert-NoReparsePath $OwnerMarker
+    Assert-NoReparsePath $LocalAppDataRoot
     if ([IO.File]::ReadAllText($OwnerMarker) -cne $OwnerToken) {
         throw "installer-matrix ownership marker changed"
     }
-    $ExpectedParent = [IO.Path]::GetFullPath($ProgramDataRoot).TrimEnd(
-        [char[]]@([IO.Path]::DirectorySeparatorChar, [IO.Path]::AltDirectorySeparatorChar)
+    $ExpectedInstallDir = [IO.Path]::GetFullPath(
+        (Join-Path $ProgramsRoot "AirWiki")
     )
-    $ActualParent = [IO.Path]::GetDirectoryName([IO.Path]::GetFullPath($InstallDir))
-    if (-not $ActualParent.Equals($ExpectedParent, [StringComparison]::OrdinalIgnoreCase) -or
-        -not [IO.Path]::GetFileName($InstallDir).StartsWith(
-            "airwiki-installer-gate-",
-            [StringComparison]::Ordinal
-        )) {
-        throw "installer-matrix directory escaped the owned root"
+    if (-not [IO.Path]::GetFullPath($InstallDir).Equals(
+        $ExpectedInstallDir,
+        [StringComparison]::OrdinalIgnoreCase
+    )) {
+        throw "installer-matrix directory is not the fixed per-user binary path"
+    }
+    if (Test-Path -LiteralPath $ProgramsRoot) {
+        Assert-NoReparsePath $ProgramsRoot
     }
     if (Test-Path -LiteralPath $InstallDir) {
         Assert-NoReparsePath $InstallDir
@@ -656,13 +658,15 @@ try {
         throw "the system-owned installer gate root is unavailable"
     }
     $ProgramDataRoot = (Resolve-Path -LiteralPath $env:ProgramData).Path
+    $LocalAppDataRoot = (Resolve-Path -LiteralPath $env:LOCALAPPDATA).Path
+    $ProgramsRoot = Join-Path $LocalAppDataRoot "Programs"
     $Root = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
     $ReleaseDir = Join-Path $Root "target\x86_64-pc-windows-msvc\release"
     $Mcpb = Join-Path $Root "target\mcpb\x86_64-pc-windows-msvc\airwiki-claude.mcpb"
     $OutDir = Join-Path $Root "target\packages\windows"
     $RunSuffix = [Guid]::NewGuid().ToString("N")
-    $InstallDir = Join-Path $ProgramDataRoot "airwiki-installer-gate-$RunSuffix"
-    $OwnerMarker = "$InstallDir.owner"
+    $InstallDir = Join-Path $ProgramsRoot "AirWiki"
+    $OwnerMarker = Join-Path $ProgramDataRoot "airwiki-installer-gate-$RunSuffix.owner"
     $OwnerToken = [Guid]::NewGuid().ToString("N")
     $RegistryOwner = [Guid]::NewGuid().ToString("D")
     $WixUninstallRoot = "HKLM:\Software\Microsoft\Windows\CurrentVersion\Uninstall"
@@ -683,6 +687,10 @@ try {
     . (Join-Path $PSScriptRoot "windows-safe-staging.ps1")
 
     Assert-NoReparsePath $ProgramDataRoot
+    Assert-NoReparsePath $LocalAppDataRoot
+    if (Test-Path -LiteralPath $ProgramsRoot) {
+        Assert-NoReparsePath $ProgramsRoot
+    }
     if (-not [IO.Path]::IsPathRooted($InstallDir) -or $InstallDir -match '\s') {
         throw "the installer gate path must be absolute and whitespace-free"
     }
@@ -915,7 +923,7 @@ try {
                 Assert-MutationProcessPrecondition $CurrentCase
                 Remove-AirWikiWindowsStagingPath `
                     -Path $InstallDir `
-                    -AllowedRoot $ProgramDataRoot `
+                    -AllowedRoot $ProgramsRoot `
                     -Label "Windows installer matrix staging"
             }
             Invoke-CleanupStep "owner-marker" {

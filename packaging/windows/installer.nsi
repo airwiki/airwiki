@@ -273,19 +273,16 @@ Function PageLeaveReinstall
   reinst_done:
 FunctionEnd
 
-; 5. Choose install directoy page
-!define MUI_PAGE_CUSTOMFUNCTION_PRE SkipIfPassive
-!insertmacro MUI_PAGE_DIRECTORY
-
-; 6. Start menu shortcut page
+; 5. Start menu shortcut page. The current-user binary directory is fixed so
+; path aliases cannot overlap the local-first data roots.
 !define MUI_PAGE_CUSTOMFUNCTION_PRE SkipIfPassive
 Var AppStartMenuFolder
 !insertmacro MUI_PAGE_STARTMENU Application $AppStartMenuFolder
 
-; 7. Installation page
+; 6. Installation page
 !insertmacro MUI_PAGE_INSTFILES
 
-; 8. Finish page
+; 7. Finish page
 ;
 ; Don't auto jump to finish page after installation page,
 ; because the installation page has useful info that can be used debug any issues with the installer.
@@ -357,6 +354,8 @@ LangString UnsupportedWindowsServer ${LANG_ENGLISH} "Windows Server is not suppo
 LangString UnsupportedWindowsServer ${LANG_SPANISH} "Windows Server no es compatible. AirWiki requiere Windows 10 u 11 cliente."
 LangString UnsupportedWindowsArchitecture ${LANG_ENGLISH} "AirWiki requires native x64 Windows on an AMD64 processor."
 LangString UnsupportedWindowsArchitecture ${LANG_SPANISH} "AirWiki requiere Windows x64 nativo en un procesador AMD64."
+LangString UnsafeInstallLocation ${LANG_ENGLISH} "AirWiki binaries must be installed outside AirWiki's local data folders. Uninstall an older development candidate while preserving its data, then install this candidate again."
+LangString UnsafeInstallLocation ${LANG_SPANISH} "Los binarios de AirWiki deben instalarse fuera de las carpetas de datos locales. Desinstala un candidato de desarrollo anterior conservando sus datos y vuelve a instalar este candidato."
 !insertmacro MUI_RESERVEFILE_LANGDLL
 {{#each language_files}}
   !include "{{this}}"
@@ -395,6 +394,7 @@ Var SilentMode
 Var PlatformRejectionMessage
 Var PassiveMode
 Var UpdaterMode
+Var ExistingNsisInstallLocation
 
 Function RejectUnsupportedPlatform
   IfSilent platform_reject_abort
@@ -427,6 +427,7 @@ Function ClassifyExistingInstallation
   StrCpy $WixMetadataCount 0
   StrCpy $WixCandidateKey ""
   StrCpy $NsisMetadataState "${NSIS_METADATA_ABSENT}"
+  StrCpy $ExistingNsisInstallLocation ""
 
   ; Validate the signed candidate independently of registry state.
   nsis_tauri_utils::SemverCompare "${VERSION}" "${VERSION_SENTINEL}"
@@ -481,6 +482,21 @@ Function ClassifyExistingInstallation
     Goto classify_evaluate
 
   classify_evaluate:
+    ReadRegStr $7 SHCTX "${MANUPRODUCTKEY}" ""
+    ${If} $NsisMetadataState == "${NSIS_METADATA_ABSENT}"
+      ${If} $7 != ""
+        Goto classify_reject
+      ${EndIf}
+    ${ElseIf} $NsisMetadataState == "${NSIS_METADATA_COMPLETE}"
+      ${If} $7 == ""
+        Goto classify_reject
+      ${EndIf}
+      StrCpy $8 "$\"$7$\""
+      StrCmp $4 $8 0 classify_reject
+      StrCpy $8 "$\"$7\uninstall.exe$\""
+      StrCmp $5 $8 0 classify_reject
+      StrCpy $ExistingNsisInstallLocation $7
+    ${EndIf}
     ${If} $WixMetadataCount > 1
       Goto classify_reject
     ${EndIf}
@@ -556,6 +572,41 @@ Function EnforceInstallPolicy
   ${EndIf}
 FunctionEnd
 
+Function RejectUnsafeInstallLocation
+  IfSilent unsafe_install_location_abort
+  MessageBox MB_OK|MB_ICONSTOP "$(UnsafeInstallLocation)"
+  unsafe_install_location_abort:
+    SetErrorLevel 2
+    Abort
+FunctionEnd
+
+Function ValidateInstallLocation
+  ClearErrors
+  GetFullPathName $0 "$LOCALAPPDATA"
+  IfErrors unsafe_install_location
+  StrCpy $0 "$0\Programs\${PRODUCTNAME}"
+  StrCpy $1 "$INSTDIR"
+  ${StrCase} $0 $0 "L"
+  ${StrCase} $1 $1 "L"
+  StrCmp $0 $1 install_location_valid unsafe_install_location
+
+  install_location_valid:
+  System::Call 'kernel32::GetFileAttributesW(w "$LOCALAPPDATA\Programs")i .r2'
+  StrCmp $2 -1 install_location_leaf_attributes
+  IntOp $3 $2 & 0x0400
+  StrCmp $3 0 install_location_leaf_attributes unsafe_install_location
+  install_location_leaf_attributes:
+  System::Call 'kernel32::GetFileAttributesW(w "$LOCALAPPDATA\Programs\${PRODUCTNAME}")i .r2'
+  StrCmp $2 -1 install_location_safe
+  IntOp $3 $2 & 0x0400
+  StrCmp $3 0 install_location_safe unsafe_install_location
+  install_location_safe:
+  Return
+
+  unsafe_install_location:
+    Call RejectUnsafeInstallLocation
+FunctionEnd
+
 Function .onInit
   Call EnforceSupportedWindows
 
@@ -576,10 +627,6 @@ Function .onInit
   Call ClassifyExistingInstallation
   Call EnforceInstallPolicy
 
-  !if "${DISPLAYLANGUAGESELECTOR}" == "true"
-    !insertmacro MUI_LANGDLL_DISPLAY
-  !endif
-
   ${If} $INSTDIR == ""
     ; Set default install location
     !if "${INSTALLMODE}" == "perMachine"
@@ -595,12 +642,19 @@ Function .onInit
         StrCpy $INSTDIR "$PROGRAMFILES\${PRODUCTNAME}"
       ${EndIf}
     !else if "${INSTALLMODE}" == "currentUser"
-      StrCpy $INSTDIR "$LOCALAPPDATA\${PRODUCTNAME}"
+      ; Keep installed binaries outside the local-first data root
+      ; ($LOCALAPPDATA\airwiki\AirWiki on case-insensitive Windows).
+      StrCpy $INSTDIR "$LOCALAPPDATA\Programs\${PRODUCTNAME}"
     !endif
 
     Call RestorePreviousInstallLocation
   ${EndIf}
 
+  Call ValidateInstallLocation
+
+  !if "${DISPLAYLANGUAGESELECTOR}" == "true"
+    !insertmacro MUI_LANGDLL_DISPLAY
+  !endif
 
   !if "${INSTALLMODE}" == "both"
     !insertmacro MULTIUSER_INIT
@@ -666,6 +720,8 @@ Function WaitForAirWikiUpdateShutdown
 FunctionEnd
 
 Section Install
+  ; Revalidate the effective command-line/default path before every write.
+  Call ValidateInstallLocation
   SetOutPath $INSTDIR
 
   Call WaitForAirWikiUpdateShutdown
@@ -873,9 +929,9 @@ Section Uninstall
 SectionEnd
 
 Function RestorePreviousInstallLocation
-  ReadRegStr $4 SHCTX "${MANUPRODUCTKEY}" ""
-  StrCmp $4 "" +2 0
-    StrCpy $INSTDIR $4
+  ${If} $ExistingInstallKind == "nsis"
+    StrCpy $INSTDIR $ExistingNsisInstallLocation
+  ${EndIf}
 FunctionEnd
 
 Function SkipIfPassive

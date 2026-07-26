@@ -3043,6 +3043,35 @@ fn verify_validated_installer_smoke_sources(smoke: &str) -> Result<()> {
         ),
         "validated installer smoke must route recovery through the termination gate"
     );
+
+    let materialization =
+        powershell_function(source.code.as_str(), "Wait-ForExactRegisteredUninstaller")?;
+    let materialization_markers = [
+        "$Deadline = [DateTime]::UtcNow.AddMilliseconds($StateWaitMilliseconds)",
+        "return (Get-ExactRegisteredUninstaller)",
+        "Start-Sleep -Milliseconds 250",
+        "} while ([DateTime]::UtcNow -lt $Deadline)",
+        "throw ",
+    ];
+    let mut previous_materialization_offset = None;
+    for marker in materialization_markers {
+        let offset = materialization.find(marker).with_context(|| {
+            format!("validated installer smoke must execute bounded materialization step {marker}")
+        })?;
+        ensure!(
+            previous_materialization_offset.is_none_or(|previous| previous < offset),
+            "validated installer smoke must retain bounded materialization ordering"
+        );
+        previous_materialization_offset = Some(offset);
+    }
+    ensure!(
+        powershell_executable_exact(
+            &source,
+            "    $RegisteredUninstaller = Wait-ForExactRegisteredUninstaller",
+            "Wait-ForExactRegisteredUninstaller",
+        ),
+        "validated installer smoke must wait for the exact registered installation"
+    );
     Ok(())
 }
 
@@ -7487,6 +7516,31 @@ mod tests {
             error
                 .to_string()
                 .contains("gate automatic cleanup on confirmed termination")
+        );
+    }
+
+    #[test]
+    fn validated_installer_smoke_rejects_inert_registration_materialization_wait() {
+        let smoke = fs::read_to_string(
+            workspace_root().join("packaging/smoke-validated-windows-installer.ps1"),
+        )
+        .unwrap();
+        let unsafe_smoke = smoke.replacen(
+            "    $RegisteredUninstaller = Wait-ForExactRegisteredUninstaller",
+            "    '$RegisteredUninstaller = Wait-ForExactRegisteredUninstaller'",
+            1,
+        );
+        assert_ne!(
+            unsafe_smoke, smoke,
+            "registration materialization fixture did not match"
+        );
+
+        let error = verify_validated_installer_smoke_sources(&unsafe_smoke).unwrap_err();
+
+        assert!(
+            error
+                .to_string()
+                .contains("wait for the exact registered installation")
         );
     }
 }

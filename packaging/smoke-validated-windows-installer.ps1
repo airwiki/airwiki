@@ -113,6 +113,18 @@ function Get-ExactRegisteredUninstaller {
     return $ExpectedUninstaller
 }
 
+function Wait-ForExactRegisteredUninstaller {
+    $Deadline = [DateTime]::UtcNow.AddMilliseconds($StateWaitMilliseconds)
+    do {
+        try {
+            return (Get-ExactRegisteredUninstaller)
+        } catch {
+            Start-Sleep -Milliseconds 250
+        }
+    } while ([DateTime]::UtcNow -lt $Deadline)
+    throw "the per-user installation did not become complete and coherently registered"
+}
+
 function Test-AnyManagedInstallState {
     return (Test-Path -LiteralPath $InstallDir) -or
         (Test-Path -LiteralPath $UninstallRegistryPath) -or
@@ -268,7 +280,7 @@ $Failure = $null
 $CleanupFailure = $null
 try {
     Invoke-Process $Installer @("/S", "/NS", "/R") "installer"
-    $RegisteredUninstaller = Get-ExactRegisteredUninstaller
+    $RegisteredUninstaller = Wait-ForExactRegisteredUninstaller
 
     $Deadline = [DateTime]::UtcNow.AddSeconds(30)
     do {

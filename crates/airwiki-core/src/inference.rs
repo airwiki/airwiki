@@ -297,9 +297,9 @@ fn recommended_request_timeout(config: &GenerationRuntimeConfig) -> Duration {
     // permitted output while retaining finite lower and upper bounds.
     let model_id = config.model_id.to_ascii_lowercase();
     let millis_per_output_token = if model_id.contains("e4b") {
-        750_u64
+        1_250_u64
     } else if model_id.contains("e2b") || model_id.contains("gemma") {
-        500
+        1_000
     } else {
         250
     };
@@ -1100,8 +1100,11 @@ mod tests {
         let mut qwen = GenerationRuntimeConfig::for_model("qwen3-1.7b-q8");
         qwen.max_output_tokens = 384;
 
-        assert_eq!(recommended_request_timeout(&e4b), Duration::from_secs(408));
-        assert_eq!(recommended_request_timeout(&e2b), Duration::from_secs(312));
+        assert_eq!(
+            recommended_request_timeout(&e4b),
+            MAX_GENERATION_REQUEST_TIMEOUT
+        );
+        assert_eq!(recommended_request_timeout(&e2b), Duration::from_secs(504));
         assert_eq!(recommended_request_timeout(&qwen), Duration::from_secs(216));
 
         qwen.max_output_tokens = 1;

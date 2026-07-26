@@ -54,6 +54,8 @@ ${StrLoc}
 !define NSIS_METADATA_ABSENT "absent"
 !define NSIS_METADATA_COMPLETE "complete"
 !define NSIS_METADATA_PARTIAL "partial"
+!define PAYLOAD_REMOVAL_ATTEMPTS 150
+!define PAYLOAD_REMOVAL_DELAY_MS 100
 !define UNINSTROOT "Software\Microsoft\Windows\CurrentVersion\Uninstall"
 
 !if "${INSTALLMODE}" != "currentUser"
@@ -364,6 +366,10 @@ LangString removeFirewallRules ${LANG_ENGLISH} "Remove AirWiki's restricted loca
 LangString removeFirewallRules ${LANG_SPANISH} "Quitar las reglas restringidas de red local de AirWiki (requiere aprobación de administrador)"
 LangString firewallRulesRemain ${LANG_ENGLISH} "Windows could not remove the firewall rules. Uninstallation will continue and the rules will remain until removed from Windows Security."
 LangString firewallRulesRemain ${LANG_SPANISH} "Windows no pudo quitar las reglas del firewall. La desinstalación continuará y las reglas permanecerán hasta quitarlas desde Seguridad de Windows."
+LangString installedPayloadRemovalFailed ${LANG_ENGLISH} "Windows could not remove AirWiki's installed application files. Uninstallation stopped without deleting local data."
+LangString installedPayloadRemovalFailed ${LANG_SPANISH} "Windows no pudo quitar los archivos instalados de AirWiki. La desinstalación se detuvo sin borrar los datos locales."
+LangString untrustedUninstallState ${LANG_ENGLISH} "AirWiki could not verify this uninstaller against the fixed per-user installation. No application files or local data were removed."
+LangString untrustedUninstallState ${LANG_SPANISH} "AirWiki no pudo verificar este desinstalador contra la instalación fija del usuario. No se quitaron archivos de la aplicación ni datos locales."
 
 !macro SetContext
   !if "${INSTALLMODE}" == "currentUser"
@@ -395,6 +401,10 @@ Var PlatformRejectionMessage
 Var PassiveMode
 Var UpdaterMode
 Var ExistingNsisInstallLocation
+Var ManagedPayloadPath
+Var ManagedPayloadAttempts
+Var ManagedValidationPath
+Var ManagedValidationParent
 
 Function RejectUnsupportedPlatform
   IfSilent platform_reject_abort
@@ -818,6 +828,88 @@ Function .onInstSuccess
   run_done:
 FunctionEnd
 
+Function un.RejectUntrustedUninstallState
+  SetErrorLevel 2
+  Abort "$(untrustedUninstallState)"
+FunctionEnd
+
+Function un.ValidateUninstallAuthority
+  ClearErrors
+  GetFullPathName $0 "$LOCALAPPDATA"
+  IfErrors untrusted_uninstall_state
+  StrCpy $0 "$0\Programs\${PRODUCTNAME}"
+  GetFullPathName $1 "$INSTDIR"
+  IfErrors untrusted_uninstall_state
+  System::Call 'kernel32::lstrcmpiW(w r0, w r1)i .r2'
+  StrCmp $2 0 uninstall_path_matches untrusted_uninstall_state
+
+  uninstall_path_matches:
+  System::Call 'kernel32::GetFileAttributesW(w "$LOCALAPPDATA\Programs")i .r2'
+  StrCmp $2 -1 untrusted_uninstall_state
+  IntOp $3 $2 & 0x0010
+  StrCmp $3 0 untrusted_uninstall_state
+  IntOp $3 $2 & 0x0400
+  StrCmp $3 0 uninstall_leaf_attributes untrusted_uninstall_state
+
+  uninstall_leaf_attributes:
+  System::Call 'kernel32::GetFileAttributesW(w "$INSTDIR")i .r2'
+  StrCmp $2 -1 untrusted_uninstall_state
+  IntOp $3 $2 & 0x0010
+  StrCmp $3 0 untrusted_uninstall_state
+  IntOp $3 $2 & 0x0400
+  StrCmp $3 0 uninstall_binary_attributes untrusted_uninstall_state
+
+  uninstall_binary_attributes:
+  System::Call 'kernel32::GetFileAttributesW(w "$INSTDIR\uninstall.exe")i .r2'
+  StrCmp $2 -1 untrusted_uninstall_state
+  IntOp $3 $2 & 0x0010
+  StrCmp $3 0 uninstall_binary_reparse untrusted_uninstall_state
+  uninstall_binary_reparse:
+  IntOp $3 $2 & 0x0400
+  StrCmp $3 0 uninstall_registry_authority untrusted_uninstall_state
+
+  uninstall_registry_authority:
+  ReadRegStr $0 SHCTX "${UNINSTKEY}" "DisplayName"
+  StrCmp $0 "${PRODUCTNAME}" 0 untrusted_uninstall_state
+  ReadRegStr $0 SHCTX "${UNINSTKEY}" "Publisher"
+  StrCmp $0 "${MANUFACTURER}" 0 untrusted_uninstall_state
+  ReadRegStr $0 SHCTX "${UNINSTKEY}" "DisplayVersion"
+  StrCmp $0 "${VERSION}" 0 untrusted_uninstall_state
+  ReadRegStr $0 SHCTX "${UNINSTKEY}" "InstallLocation"
+  StrCpy $1 "$\"$INSTDIR$\""
+  StrCmp $0 $1 0 untrusted_uninstall_state
+  ReadRegStr $0 SHCTX "${UNINSTKEY}" "UninstallString"
+  StrCpy $1 "$\"$INSTDIR\uninstall.exe$\""
+  StrCmp $0 $1 0 untrusted_uninstall_state
+  ReadRegStr $0 SHCTX "${MANUPRODUCTKEY}" ""
+  StrCmp $0 $INSTDIR uninstall_authority_valid untrusted_uninstall_state
+
+  untrusted_uninstall_state:
+    Call un.RejectUntrustedUninstallState
+  uninstall_authority_valid:
+FunctionEnd
+
+Function un.ValidateManagedPayloadTree
+  Push "$INSTDIR\${MAINBINARYNAME}.exe"
+  Call un.ValidateManagedPath
+  Push "$INSTDIR\uninstall.exe"
+  Call un.ValidateManagedPath
+  {{#each resources}}
+    Push "$INSTDIR\\{{this}}"
+    Call un.ValidateManagedPath
+  {{/each}}
+  {{#each binaries}}
+    Push "$INSTDIR\\{{this}}"
+    Call un.ValidateManagedPath
+  {{/each}}
+  {{#each resources_dirs}}
+    Push "$INSTDIR\\{{this}}"
+    Call un.ValidateManagedPath
+  {{/each}}
+  Push "$INSTDIR\integrations"
+  Call un.ValidateManagedPath
+FunctionEnd
+
 Function un.onInit
   !insertmacro SetContext
 
@@ -826,11 +918,71 @@ Function un.onInit
   !endif
 
   !insertmacro MUI_UNGETLANGUAGE
+  Call un.ValidateUninstallAuthority
+  Call un.ValidateManagedPayloadTree
+FunctionEnd
+
+Function un.RemoveManagedFile
+  Pop $ManagedPayloadPath
+  StrCpy $ManagedPayloadAttempts 0
+  managed_file_remove_retry:
+    Push "$ManagedPayloadPath"
+    Call un.ValidateManagedPath
+    ClearErrors
+    Delete "$ManagedPayloadPath"
+    IfFileExists "$ManagedPayloadPath" 0 managed_file_remove_done
+    IntOp $ManagedPayloadAttempts $ManagedPayloadAttempts + 1
+    ${If} $ManagedPayloadAttempts >= ${PAYLOAD_REMOVAL_ATTEMPTS}
+      SetErrorLevel 2
+      Abort "$(installedPayloadRemovalFailed)"
+    ${EndIf}
+    Sleep ${PAYLOAD_REMOVAL_DELAY_MS}
+    Goto managed_file_remove_retry
+  managed_file_remove_done:
+FunctionEnd
+
+Function un.RemoveManagedDirectory
+  Pop $ManagedPayloadPath
+  StrCpy $ManagedPayloadAttempts 0
+  managed_directory_remove_retry:
+    Push "$ManagedPayloadPath"
+    Call un.ValidateManagedPath
+    ClearErrors
+    RMDir "$ManagedPayloadPath"
+    IfFileExists "$ManagedPayloadPath\*.*" 0 managed_directory_remove_done
+    IntOp $ManagedPayloadAttempts $ManagedPayloadAttempts + 1
+    ${If} $ManagedPayloadAttempts >= ${PAYLOAD_REMOVAL_ATTEMPTS}
+      SetErrorLevel 2
+      Abort "$(installedPayloadRemovalFailed)"
+    ${EndIf}
+    Sleep ${PAYLOAD_REMOVAL_DELAY_MS}
+    Goto managed_directory_remove_retry
+  managed_directory_remove_done:
+FunctionEnd
+
+Function un.ValidateManagedPath
+  Pop $ManagedValidationPath
+  managed_path_validation_loop:
+    System::Call 'kernel32::GetFileAttributesW(w "$ManagedValidationPath")i .r2'
+    StrCmp $2 -1 managed_path_validation_parent
+    IntOp $3 $2 & 0x0400
+    StrCmp $3 0 managed_path_validation_parent untrusted_managed_path
+
+  managed_path_validation_parent:
+    System::Call 'kernel32::lstrcmpiW(w "$ManagedValidationPath", w "$INSTDIR")i .r2'
+    StrCmp $2 0 managed_path_valid
+    ${GetParent} "$ManagedValidationPath" $ManagedValidationParent
+    System::Call 'kernel32::lstrcmpiW(w "$ManagedValidationParent", w "$ManagedValidationPath")i .r2'
+    StrCmp $2 0 untrusted_managed_path
+    StrCpy $ManagedValidationPath "$ManagedValidationParent"
+    Goto managed_path_validation_loop
+
+  untrusted_managed_path:
+    Call un.RejectUntrustedUninstallState
+  managed_path_valid:
 FunctionEnd
 
 Section Uninstall
-  !insertmacro CheckIfAppIsRunning
-
   ; Delete only the exact per-user autostart command managed by AirWiki.
   ; A value with the same name but different bytes is a conflict and is preserved.
   ReadRegStr $R0 HKCU "${AUTOSTARTKEY}" "${AUTOSTARTVALUENAME}"
@@ -852,16 +1004,19 @@ Section Uninstall
 
   ; Delete the app directory and its content from disk
   ; Copy main executable
-  Delete "$INSTDIR\${MAINBINARYNAME}.exe"
+  Push "$INSTDIR\${MAINBINARYNAME}.exe"
+  Call un.RemoveManagedFile
 
   ; Delete resources
   {{#each resources}}
-    Delete "$INSTDIR\\{{this}}"
+    Push "$INSTDIR\\{{this}}"
+    Call un.RemoveManagedFile
   {{/each}}
 
   ; Delete external binaries
   {{#each binaries}}
-    Delete "$INSTDIR\\{{this}}"
+    Push "$INSTDIR\\{{this}}"
+    Call un.RemoveManagedFile
   {{/each}}
 
   ; Delete app associations
@@ -880,15 +1035,22 @@ Section Uninstall
   {{/each}}
 
   ; Delete uninstaller
-  Delete "$INSTDIR\uninstall.exe"
+  Push "$INSTDIR\uninstall.exe"
+  Call un.RemoveManagedFile
 
   {{#each resources_dirs}}
-  RMDir /REBOOTOK "$INSTDIR\\{{this}}"
+  Push "$INSTDIR\\{{this}}"
+  {{/each}}
+  ; Pop the sorted directory list in reverse so children are removed first.
+  {{#each resources_dirs}}
+  Call un.RemoveManagedDirectory
   {{/each}}
   ; A resource targeted at integrations/bridge makes cargo-packager emit only
   ; the leaf directory. Remove the empty app-owned parent as well.
-  RMDir "$INSTDIR\integrations"
-  RMDir "$INSTDIR"
+  Push "$INSTDIR\integrations"
+  Call un.RemoveManagedDirectory
+  Push "$INSTDIR"
+  Call un.RemoveManagedDirectory
 
   ; Remove start menu shortcut
   !insertmacro MUI_STARTMENU_GETFOLDER Application $AppStartMenuFolder

@@ -2975,6 +2975,14 @@ fn verify_validated_installer_smoke_sources(smoke: &str) -> Result<()> {
     ensure!(
         powershell_executable_exact(
             &source,
+            "$ModelReadyWaitMilliseconds = 1800000",
+            "$ModelReadyWaitMilliseconds =",
+        ),
+        "validated installer smoke must allow a bounded cold model download and verification window"
+    );
+    ensure!(
+        powershell_executable_exact(
+            &source,
             "$InstallDir = Join-Path (Join-Path $env:LOCALAPPDATA \"Programs\") \"AirWiki\"",
             "$InstallDir = Join-Path (",
         ),
@@ -3018,6 +3026,46 @@ fn verify_validated_installer_smoke_sources(smoke: &str) -> Result<()> {
         "validated installer smoke must not wait for the installer child tree"
     );
 
+    let stop_desktop = powershell_function(source.code.as_str(), "Stop-ExactDesktopProcess")?;
+    let stop_markers = [
+        "Assert-NoForeignDesktopProcess $ExpectedExecutable",
+        "$Process = [Diagnostics.Process]::GetProcessById([int] $Matches[0].ProcessId)",
+        "$SafeHandle = $Process.SafeHandle",
+        "Test-SamePath ([string] $Process.MainModule.FileName) $ExpectedExecutable",
+        "$Process.Kill()",
+        "$Process.WaitForExit($ProcessCleanupWaitMilliseconds)",
+        "$Process.Dispose()",
+        "(@(Get-DesktopProcesses)).Count -ne 0",
+    ];
+    let mut previous_stop_offset = None;
+    for marker in stop_markers {
+        let offset = stop_desktop.find(marker).with_context(|| {
+            format!("validated installer smoke must supervise exact desktop stop with {marker}")
+        })?;
+        ensure!(
+            previous_stop_offset.is_none_or(|previous| previous < offset),
+            "validated installer smoke must retain exact desktop stop ordering"
+        );
+        previous_stop_offset = Some(offset);
+    }
+    let remove_install =
+        powershell_function(source.code.as_str(), "Remove-ExactRegisteredInstall")?;
+    let remove_install_source =
+        powershell_function(source.normalized.as_str(), "Remove-ExactRegisteredInstall")?;
+    let get_uninstaller = remove_install
+        .find("$Uninstaller = Get-ExactRegisteredUninstaller")
+        .context("validated installer cleanup must revalidate the registered uninstaller")?;
+    let stop_exact = remove_install
+        .find("Stop-ExactDesktopProcess $DesktopExecutable")
+        .context("validated installer cleanup must stop only its exact desktop process")?;
+    let invoke_uninstaller = remove_install_source
+        .find("Invoke-Process $Uninstaller @(\"/S\") \"uninstaller\"")
+        .context("validated installer cleanup must invoke its validated uninstaller")?;
+    ensure!(
+        get_uninstaller < stop_exact && stop_exact < invoke_uninstaller,
+        "validated installer cleanup must validate, stop the exact process, then uninstall"
+    );
+
     let cleanup = powershell_function(source.code.as_str(), "Invoke-AutomaticCleanup")?;
     let recovery_gate = "if ($script:ProcessTerminationUnconfirmed) {";
     let manual_recovery = "throw ";
@@ -3050,6 +3098,14 @@ fn verify_validated_installer_smoke_sources(smoke: &str) -> Result<()> {
             "Invoke-AutomaticCleanup",
         ),
         "validated installer smoke must route recovery through the termination gate"
+    );
+    ensure!(
+        powershell_executable_exact(
+            &source,
+            "    Wait-ForModelsReady\n\n    Remove-ExactRegisteredInstall\n    $InstalledByThisRun = $false",
+            "Remove-ExactRegisteredInstall",
+        ),
+        "validated installer smoke must stop the exact desktop process before its successful uninstall"
     );
 
     let materialization =
@@ -3087,6 +3143,8 @@ fn verify_powershell_mutation_process_guards(code: &str) -> Result<()> {
     let mutation_starts = [
         "Start-Process ",
         "[IO.File]::WriteAllText(",
+        "Copy-Item ",
+        "Move-Item ",
         "New-Item ",
         "New-ItemProperty ",
         "Remove-Item ",
@@ -3638,6 +3696,81 @@ fn verify_windows_installer_smoke_sources(smoke: &str) -> Result<()> {
         "Windows built-installer smoke matrix must check the restart precondition, supervise the exact updater handoff, and recover without broad process ownership"
     );
 
+    let invoke_uninstaller = powershell_function(code, "Invoke-UninstallerCase")?;
+    ensure!(
+        invoke_uninstaller.contains("Assert-MutationProcessPrecondition $CaseId")
+            && invoke_uninstaller.contains("$Process = Start-Process `")
+            && invoke_uninstaller.contains("$Process.WaitForExit($InstallerWaitMilliseconds)")
+            && invoke_uninstaller.contains("$Process.WaitForExit($ProcessCleanupWaitMilliseconds)")
+            && invoke_uninstaller.contains("$Process.Kill()")
+            && invoke_uninstaller.contains("$Process.Dispose()")
+            && invoke_uninstaller.contains("$ExitCode -ne $ExpectedExit")
+            && !invoke_uninstaller.contains("-Wait"),
+        "Windows uninstaller authority cases must use a retained bounded process and exact exit code"
+    );
+    let start_lock = powershell_function(code, "Start-DeleteLockProcess")?;
+    let start_lock_source = powershell_function(smoke, "Start-DeleteLockProcess")?;
+    let stop_fixture = powershell_function(code, "Stop-OwnedFixtureProcess")?;
+    ensure!(
+        start_lock.contains("Assert-MutationProcessPrecondition $CaseId")
+            && start_lock.contains("$Process = Start-Process `")
+            && start_lock.contains("-FilePath $PowerShellExecutable")
+            && start_lock_source.contains("\"-File\"")
+            && start_lock_source.contains("\"`\"$DeleteLockHelper`\"\"")
+            && start_lock_source.contains("\"`\"$ReadyMarker`\"\"")
+            && start_lock_source.contains("[string] $HoldMilliseconds")
+            && start_lock.contains("$Process.HasExited")
+            && start_lock.contains("Stop-OwnedFixtureProcess $Process")
+            && stop_fixture.contains("if (-not $Process.HasExited)")
+            && stop_fixture.contains("$Process.Kill()")
+            && stop_fixture.contains("$Process.WaitForExit($ProcessCleanupWaitMilliseconds)")
+            && stop_fixture.contains("$Process.Dispose()"),
+        "Windows uninstaller lock fixtures must retain and bound only their exact helper processes"
+    );
+    ensure!(
+        powershell_executable_exact(
+            &source,
+            "Invoke-UninstallerCase `\n            $CopiedUninstaller `\n            @(\"/S\", \"_?=$CopiedUninstallerRoot\") `\n            2 `\n            $CurrentCase",
+            "Invoke-UninstallerCase",
+        ) && powershell_executable_exact(
+            &source,
+            "Invoke-UninstallerCase `\n            $InstalledUninstaller `\n            @(\"/S\", \"_?=$OverrideUninstallerRoot\") `\n            2 `\n            $CurrentCase",
+            "Invoke-UninstallerCase",
+        ) && powershell_executable_exact(
+            &source,
+            "New-Item -ItemType Junction -Path $InstalledLlamaRoot -Target $ReparseTarget `\n                -ErrorAction Stop | Out-Null\n            Invoke-UninstallerCase `\n                $InstalledUninstaller `\n                @(\"/S\", \"_?=$InstallDir\") `\n                2 `\n                $CurrentCase",
+            "New-Item -ItemType Junction",
+        ) && powershell_executable_exact(
+            &source,
+            "$OwnedDeleteLockProcess = Start-DeleteLockProcess `\n                $DesktopExecutable `\n                $SustainedLockReady `\n                30000 `\n                $CurrentCase\n            Invoke-UninstallerCase `\n                $InstalledUninstaller `\n                @(\"/S\", \"_?=$InstallDir\") `\n                2 `\n                $CurrentCase",
+            "$OwnedDeleteLockProcess = Start-DeleteLockProcess",
+        ) && powershell_executable_exact(
+            &source,
+            "$OwnedDeleteLockProcess = Start-DeleteLockProcess `\n            $DesktopExecutable `\n            $ReleasedLockReady `\n            5000 `\n            $CurrentCase\n        Invoke-UninstallerCase $InstalledUninstaller @(\"/S\") 0 $CurrentCase",
+            "$OwnedDeleteLockProcess = Start-DeleteLockProcess",
+        ) && powershell_executable_exact(
+            &source,
+            "if ($OwnedForeignProcess.HasExited) {\n            throw \"uninstaller terminated a foreign homonym process\"\n        }",
+            "if ($OwnedForeignProcess.HasExited)",
+        ) && code
+            .matches("Assert-DataRootPresence $DataRootPresence")
+            .count()
+            == 5,
+        "Windows uninstaller smoke must reject copied, overridden, reparse, and sustained-lock cases, then pass released-lock cleanup without killing a foreign homonym"
+    );
+    ensure!(
+        powershell_executable_exact(
+            &source,
+            "Invoke-CleanupStep \"uninstaller-fixture-processes\" {\n            Stop-OwnedFixtureProcess $OwnedDeleteLockProcess \"delete-lock fixture\"\n            $script:OwnedDeleteLockProcess = $null\n            Stop-OwnedFixtureProcess $OwnedForeignProcess \"foreign homonym fixture\"\n            $script:OwnedForeignProcess = $null\n        }",
+            "Invoke-CleanupStep",
+        ) && powershell_executable_exact(
+            &source,
+            "Invoke-CleanupStep \"uninstaller-authority-fixture\" {\n                Assert-OwnedUninstallerAuthorityFixture\n                Assert-MutationProcessPrecondition $CurrentCase\n                Remove-AirWikiWindowsStagingPath `",
+            "Invoke-CleanupStep",
+        ),
+        "Windows uninstaller fixture processes and owned staging must recover independently"
+    );
+
     ensure!(
         powershell_executable_exact(
             &source,
@@ -4122,6 +4255,60 @@ fn verify_windows_uninstaller_sources(config: &str, template: &str) -> Result<()
         .context("NSIS uninstall section is not terminated")?;
     let uninstall = &template[uninstall_start..uninstall_end];
 
+    let uninstall_init = nsis_function(template, "un.onInit")?;
+    let language_init = uninstall_init
+        .find("!insertmacro MUI_UNGETLANGUAGE")
+        .context("uninstaller must initialize its language before a localized rejection")?;
+    let authority_call = uninstall_init
+        .find("Call un.ValidateUninstallAuthority")
+        .context("uninstaller must validate its fixed-path authority before cleanup")?;
+    let tree_call = uninstall_init
+        .find("Call un.ValidateManagedPayloadTree")
+        .context("uninstaller must validate its managed payload tree before cleanup")?;
+    ensure!(
+        language_init < authority_call && authority_call < tree_call,
+        "uninstaller authority and payload-tree validation must precede cleanup"
+    );
+    let uninstall_authority = nsis_function(template, "un.ValidateUninstallAuthority")?;
+    ensure!(
+        uninstall_authority.contains("GetFullPathName $0 \"$LOCALAPPDATA\"")
+            && uninstall_authority.contains("StrCpy $0 \"$0\\Programs\\${PRODUCTNAME}\"")
+            && uninstall_authority.contains("GetFullPathName $1 \"$INSTDIR\"")
+            && uninstall_authority.contains("kernel32::lstrcmpiW(w r0, w r1)")
+            && uninstall_authority
+                .contains("kernel32::GetFileAttributesW(w \"$LOCALAPPDATA\\Programs\")")
+            && uninstall_authority.contains("kernel32::GetFileAttributesW(w \"$INSTDIR\")")
+            && uninstall_authority
+                .contains("kernel32::GetFileAttributesW(w \"$INSTDIR\\uninstall.exe\")")
+            && uninstall_authority.matches("IntOp $3 $2 & 0x0400").count() == 3
+            && uninstall_authority.contains(
+                "IntOp $3 $2 & 0x0010\n  StrCmp $3 0 uninstall_binary_reparse untrusted_uninstall_state\n  uninstall_binary_reparse:\n  IntOp $3 $2 & 0x0400\n  StrCmp $3 0 uninstall_registry_authority untrusted_uninstall_state"
+            )
+            && uninstall_authority.contains("ReadRegStr $0 SHCTX \"${UNINSTKEY}\" \"DisplayName\"")
+            && uninstall_authority.contains("ReadRegStr $0 SHCTX \"${UNINSTKEY}\" \"Publisher\"")
+            && uninstall_authority
+                .contains("ReadRegStr $0 SHCTX \"${UNINSTKEY}\" \"DisplayVersion\"")
+            && uninstall_authority
+                .contains("ReadRegStr $0 SHCTX \"${UNINSTKEY}\" \"InstallLocation\"")
+            && uninstall_authority
+                .contains("ReadRegStr $0 SHCTX \"${UNINSTKEY}\" \"UninstallString\"")
+            && uninstall_authority.contains("ReadRegStr $0 SHCTX \"${MANUPRODUCTKEY}\" \"\"")
+            && uninstall_authority.contains("Call un.RejectUntrustedUninstallState"),
+        "uninstaller must bind authority to the fixed non-reparse path and coherent registry"
+    );
+    let payload_tree = nsis_function(template, "un.ValidateManagedPayloadTree")?;
+    ensure!(
+        payload_tree
+            .contains("Push \"$INSTDIR\\${MAINBINARYNAME}.exe\"\n  Call un.ValidateManagedPath")
+            && payload_tree
+                .contains("Push \"$INSTDIR\\uninstall.exe\"\n  Call un.ValidateManagedPath")
+            && payload_tree
+                .contains("Push \"$INSTDIR\\\\{{this}}\"\n    Call un.ValidateManagedPath")
+            && payload_tree
+                .contains("Push \"$INSTDIR\\integrations\"\n  Call un.ValidateManagedPath"),
+        "uninstaller must reject descendant reparses before its first cleanup mutation"
+    );
+
     let autostart_read = uninstall
         .find("ReadRegStr $R0 HKCU \"${AUTOSTARTKEY}\" \"${AUTOSTARTVALUENAME}\"")
         .context("uninstaller does not read the exact managed autostart value")?;
@@ -4186,6 +4373,61 @@ fn verify_windows_uninstaller_sources(config: &str, template: &str) -> Result<()
         !template.contains("SendMessage $RemoveFirewallCheckbox ${BM_SETCHECK}")
             && !template.contains("SendMessage $DeleteAppDataCheckbox ${BM_SETCHECK}"),
         "firewall and data deletion choices must remain unchecked by default"
+    );
+
+    let remove_file = nsis_function(template, "un.RemoveManagedFile")?;
+    ensure!(
+        remove_file.contains("Push \"$ManagedPayloadPath\"\n    Call un.ValidateManagedPath")
+            && remove_file.contains("Delete \"$ManagedPayloadPath\"")
+            && remove_file
+                .contains("IfFileExists \"$ManagedPayloadPath\" 0 managed_file_remove_done")
+            && remove_file.contains("${If} $ManagedPayloadAttempts >= ${PAYLOAD_REMOVAL_ATTEMPTS}")
+            && remove_file.contains("Sleep ${PAYLOAD_REMOVAL_DELAY_MS}")
+            && remove_file.contains("SetErrorLevel 2")
+            && remove_file.contains("Abort \"$(installedPayloadRemovalFailed)\""),
+        "Windows uninstaller must retry exact managed file removal and fail closed"
+    );
+    let remove_directory = nsis_function(template, "un.RemoveManagedDirectory")?;
+    ensure!(
+        remove_directory.contains("Push \"$ManagedPayloadPath\"\n    Call un.ValidateManagedPath")
+            && remove_directory.contains("RMDir \"$ManagedPayloadPath\"")
+            && remove_directory.contains(
+                "IfFileExists \"$ManagedPayloadPath\\*.*\" 0 managed_directory_remove_done"
+            )
+            && remove_directory
+                .contains("${If} $ManagedPayloadAttempts >= ${PAYLOAD_REMOVAL_ATTEMPTS}")
+            && remove_directory.contains("Sleep ${PAYLOAD_REMOVAL_DELAY_MS}")
+            && remove_directory.contains("SetErrorLevel 2")
+            && remove_directory.contains("Abort \"$(installedPayloadRemovalFailed)\""),
+        "Windows uninstaller must retry exact managed directory removal and fail closed"
+    );
+    let managed_path = nsis_function(template, "un.ValidateManagedPath")?;
+    ensure!(
+        managed_path.contains("kernel32::GetFileAttributesW(w \"$ManagedValidationPath\")")
+            && managed_path.contains("IntOp $3 $2 & 0x0400")
+            && managed_path
+                .contains("kernel32::lstrcmpiW(w \"$ManagedValidationPath\", w \"$INSTDIR\")")
+            && managed_path
+                .contains("${GetParent} \"$ManagedValidationPath\" $ManagedValidationParent")
+            && managed_path.contains("Call un.RejectUntrustedUninstallState"),
+        "managed payload removal must reject reparses in every descendant path component"
+    );
+    ensure!(
+        !uninstall.contains("!insertmacro CheckIfAppIsRunning")
+            && !uninstall.contains("nsis_tauri_utils::KillProcess"),
+        "uninstaller must not find or terminate processes by executable name"
+    );
+    ensure!(
+        uninstall.contains("Push \"$INSTDIR\\${MAINBINARYNAME}.exe\"\n  Call un.RemoveManagedFile")
+            && uninstall.contains("Push \"$INSTDIR\\\\{{this}}\"\n    Call un.RemoveManagedFile")
+            && uninstall.contains("Push \"$INSTDIR\\uninstall.exe\"\n  Call un.RemoveManagedFile")
+            && uninstall.contains(
+                "{{#each resources_dirs}}\n  Push \"$INSTDIR\\\\{{this}}\"\n  {{/each}}\n  ; Pop the sorted directory list in reverse so children are removed first.\n  {{#each resources_dirs}}\n  Call un.RemoveManagedDirectory\n  {{/each}}"
+            )
+            && uninstall
+                .contains("Push \"$INSTDIR\\integrations\"\n  Call un.RemoveManagedDirectory")
+            && uninstall.contains("Push \"$INSTDIR\"\n  Call un.RemoveManagedDirectory"),
+        "Windows uninstaller must route every managed payload class through bounded removal"
     );
 
     let data_cleanup = uninstall
@@ -4338,6 +4580,110 @@ mod tests {
         let (config, template) = windows_uninstaller_sources();
 
         verify_windows_uninstaller_sources(&config, &template).unwrap();
+    }
+
+    #[test]
+    fn windows_uninstaller_rejects_unbounded_managed_file_removal() {
+        let (config, template) = windows_uninstaller_sources();
+        let unsafe_template = template.replacen(
+            "    Sleep ${PAYLOAD_REMOVAL_DELAY_MS}\n    Goto managed_file_remove_retry",
+            "    Goto managed_file_remove_retry",
+            1,
+        );
+        assert_ne!(
+            unsafe_template, template,
+            "managed file removal retry fixture did not match"
+        );
+
+        let error = verify_windows_uninstaller_sources(&config, &unsafe_template).unwrap_err();
+
+        assert!(error.to_string().contains("managed file removal"));
+    }
+
+    #[test]
+    fn windows_uninstaller_rejects_direct_payload_deletion() {
+        let (config, template) = windows_uninstaller_sources();
+        let unsafe_template = template.replacen(
+            "  Push \"$INSTDIR\\${MAINBINARYNAME}.exe\"\n  Call un.RemoveManagedFile",
+            "  Delete \"$INSTDIR\\${MAINBINARYNAME}.exe\"",
+            1,
+        );
+        assert_ne!(
+            unsafe_template, template,
+            "managed payload routing fixture did not match"
+        );
+
+        let error = verify_windows_uninstaller_sources(&config, &unsafe_template).unwrap_err();
+
+        assert!(error.to_string().contains("every managed payload class"));
+    }
+
+    #[test]
+    fn windows_uninstaller_rejects_missing_fixed_path_authority() {
+        let (config, template) = windows_uninstaller_sources();
+        let unsafe_template = template.replacen("  Call un.ValidateUninstallAuthority\n", "", 1);
+        assert_ne!(
+            unsafe_template, template,
+            "uninstall authority fixture did not match"
+        );
+
+        let error = verify_windows_uninstaller_sources(&config, &unsafe_template).unwrap_err();
+
+        assert!(error.to_string().contains("fixed-path authority"));
+    }
+
+    #[test]
+    fn windows_uninstaller_rejects_a_reparse_bypass_in_binary_authority() {
+        let (config, template) = windows_uninstaller_sources();
+        let unsafe_template = template.replacen(
+            "  StrCmp $3 0 uninstall_binary_reparse untrusted_uninstall_state\n  uninstall_binary_reparse:\n",
+            "  StrCmp $3 0 +2 untrusted_uninstall_state\n  uninstall_binary_reparse:\n",
+            1,
+        );
+        assert_ne!(
+            unsafe_template, template,
+            "uninstaller binary reparse control-flow fixture did not match"
+        );
+
+        let error = verify_windows_uninstaller_sources(&config, &unsafe_template).unwrap_err();
+
+        assert!(error.to_string().contains("fixed non-reparse path"));
+    }
+
+    #[test]
+    fn windows_uninstaller_rejects_missing_descendant_reparse_validation() {
+        let (config, template) = windows_uninstaller_sources();
+        let unsafe_template = template.replacen(
+            "    ${GetParent} \"$ManagedValidationPath\" $ManagedValidationParent\n",
+            "",
+            1,
+        );
+        assert_ne!(
+            unsafe_template, template,
+            "descendant reparse validation fixture did not match"
+        );
+
+        let error = verify_windows_uninstaller_sources(&config, &unsafe_template).unwrap_err();
+
+        assert!(error.to_string().contains("descendant path component"));
+    }
+
+    #[test]
+    fn windows_uninstaller_rejects_name_based_process_termination() {
+        let (config, template) = windows_uninstaller_sources();
+        let unsafe_template = template.replacen(
+            "Section Uninstall\n",
+            "Section Uninstall\n  !insertmacro CheckIfAppIsRunning\n",
+            1,
+        );
+        assert_ne!(
+            unsafe_template, template,
+            "name-based process termination fixture did not match"
+        );
+
+        let error = verify_windows_uninstaller_sources(&config, &unsafe_template).unwrap_err();
+
+        assert!(error.to_string().contains("executable name"));
     }
 
     #[test]
@@ -4873,8 +5219,8 @@ mod tests {
     fn windows_installer_preflight_smoke_guards_uninstaller_invocations_immediately() {
         let smoke = windows_installer_smoke_source();
         verify_windows_installer_smoke_sources(&smoke).unwrap();
-        let sink = "        $UninstallProcess = Start-Process `";
-        let unsafe_smoke = smoke.replacen(sink, &format!("        $null = Get-Date\n{sink}"), 1);
+        let sink = "    $Process = Start-Process `\n        -FilePath $Executable `";
+        let unsafe_smoke = smoke.replacen(sink, &format!("    $null = Get-Date\n{sink}"), 1);
         assert_ne!(
             unsafe_smoke, smoke,
             "uninstaller precondition fixture did not match"
@@ -7627,6 +7973,48 @@ mod tests {
     }
 
     #[test]
+    fn validated_installer_smoke_rejects_a_short_cold_model_window() {
+        let smoke = fs::read_to_string(
+            workspace_root().join("packaging/smoke-validated-windows-installer.ps1"),
+        )
+        .unwrap();
+        let unsafe_smoke = smoke.replacen(
+            "$ModelReadyWaitMilliseconds = 1800000",
+            "$ModelReadyWaitMilliseconds = 900000",
+            1,
+        );
+        assert_ne!(
+            unsafe_smoke, smoke,
+            "cold model readiness window fixture did not match"
+        );
+
+        let error = verify_validated_installer_smoke_sources(&unsafe_smoke).unwrap_err();
+
+        assert!(error.to_string().contains("cold model download"));
+    }
+
+    #[test]
+    fn validated_installer_smoke_rejects_inert_exact_process_cleanup() {
+        let smoke = fs::read_to_string(
+            workspace_root().join("packaging/smoke-validated-windows-installer.ps1"),
+        )
+        .unwrap();
+        let unsafe_smoke = smoke.replacen(
+            "    Stop-ExactDesktopProcess $DesktopExecutable",
+            "    'Stop-ExactDesktopProcess $DesktopExecutable'",
+            1,
+        );
+        assert_ne!(
+            unsafe_smoke, smoke,
+            "exact desktop cleanup fixture did not match"
+        );
+
+        let error = verify_validated_installer_smoke_sources(&unsafe_smoke).unwrap_err();
+
+        assert!(error.to_string().contains("exact desktop process"));
+    }
+
+    #[test]
     fn validated_installer_smoke_rejects_inert_unconfirmed_state() {
         let smoke = fs::read_to_string(
             workspace_root().join("packaging/smoke-validated-windows-installer.ps1"),
@@ -7699,6 +8087,27 @@ mod tests {
                 .to_string()
                 .contains("gate automatic cleanup on confirmed termination")
         );
+    }
+
+    #[test]
+    fn validated_installer_smoke_rejects_a_success_uninstall_without_exact_process_stop() {
+        let smoke = fs::read_to_string(
+            workspace_root().join("packaging/smoke-validated-windows-installer.ps1"),
+        )
+        .unwrap();
+        let unsafe_smoke = smoke.replacen(
+            "    Wait-ForModelsReady\n\n    Remove-ExactRegisteredInstall\n    $InstalledByThisRun = $false",
+            "    Wait-ForModelsReady\n\n    Invoke-Process $RegisteredUninstaller @(\"/S\") \"uninstaller\"\n    $InstalledByThisRun = $false",
+            1,
+        );
+        assert_ne!(
+            unsafe_smoke, smoke,
+            "successful exact desktop stop fixture did not match"
+        );
+
+        let error = verify_validated_installer_smoke_sources(&unsafe_smoke).unwrap_err();
+
+        assert!(error.to_string().contains("successful uninstall"));
     }
 
     #[test]

@@ -13,7 +13,7 @@ $ErrorActionPreference = "Stop"
 Set-StrictMode -Version Latest
 
 $StateWaitMilliseconds = 15000
-$ModelReadyWaitMilliseconds = 900000
+$ModelReadyWaitMilliseconds = 1800000
 $McpRequestTimeoutSeconds = 8
 $McpRequestId = 991
 $ProcessWaitMilliseconds = 120000
@@ -74,6 +74,37 @@ function Assert-NoForeignDesktopProcess([string] $ExpectedExecutable) {
         if (-not (Test-SamePath ([string] $Process.ExecutablePath) $ExpectedExecutable)) {
             throw "another AirWiki executable is running; close it before this smoke test"
         }
+    }
+}
+
+function Stop-ExactDesktopProcess([string] $ExpectedExecutable) {
+    Assert-NoForeignDesktopProcess $ExpectedExecutable
+    $Matches = @(Get-DesktopProcesses)
+    if ($Matches.Count -eq 0) {
+        return
+    }
+    if ($Matches.Count -ne 1) {
+        throw "the installed desktop process state is ambiguous"
+    }
+
+    $Process = [Diagnostics.Process]::GetProcessById([int] $Matches[0].ProcessId)
+    try {
+        $SafeHandle = $Process.SafeHandle
+        if ($SafeHandle.IsInvalid -or $SafeHandle.IsClosed -or $Process.HasExited) {
+            throw "the installed desktop process identity is unavailable"
+        }
+        if (-not (Test-SamePath ([string] $Process.MainModule.FileName) $ExpectedExecutable)) {
+            throw "the installed desktop process identity changed"
+        }
+        $Process.Kill()
+        if (-not $Process.WaitForExit($ProcessCleanupWaitMilliseconds)) {
+            throw "the installed desktop process did not exit within the bounded wait"
+        }
+    } finally {
+        $Process.Dispose()
+    }
+    if ((@(Get-DesktopProcesses)).Count -ne 0) {
+        throw "the installed desktop process did not remain stopped"
     }
 }
 
@@ -154,6 +185,7 @@ function Wait-ForManagedStateRemoval {
 
 function Remove-ExactRegisteredInstall {
     $Uninstaller = Get-ExactRegisteredUninstaller
+    Stop-ExactDesktopProcess $DesktopExecutable
     Invoke-Process $Uninstaller @("/S") "uninstaller"
     Wait-ForManagedStateRemoval
 }
@@ -315,8 +347,7 @@ try {
         "installed application payload"
     Wait-ForModelsReady
 
-    Invoke-Process $RegisteredUninstaller @("/S") "uninstaller"
-    Wait-ForManagedStateRemoval
+    Remove-ExactRegisteredInstall
     $InstalledByThisRun = $false
 } catch {
     $Failure = $_

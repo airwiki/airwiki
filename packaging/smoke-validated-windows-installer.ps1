@@ -220,7 +220,7 @@ function Wait-ForModelsReady {
     } | ConvertTo-Json -Depth 6 -Compress
     $Deadline = [DateTime]::UtcNow.AddMilliseconds($ModelReadyWaitMilliseconds)
     do {
-        $ResponseLines = @(& $Curl `
+        $ResponseLines = @($Body | & $Curl `
             --silent `
             --show-error `
             --noproxy "*" `
@@ -229,7 +229,7 @@ function Wait-ForModelsReady {
             --header "Connection: close" `
             --header "Content-Type: application/json" `
             --header "Accept: application/json, text/event-stream" `
-            --data-binary $Body `
+            --data-binary "@-" `
             "http://127.0.0.1:43123/mcp" 2>$null)
         if ($LASTEXITCODE -eq 0) {
             try {

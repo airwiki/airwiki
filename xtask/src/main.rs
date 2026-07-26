@@ -2988,6 +2988,32 @@ fn verify_validated_installer_smoke_sources(smoke: &str) -> Result<()> {
         ),
         "validated installer smoke must keep installed binaries outside the AirWiki data root"
     );
+    let model_readiness_stdin = r#"$ResponseLines = @($Body | & $Curl `
+            --silent `
+            --show-error `
+            --noproxy "*" `
+            --connect-timeout 2 `
+            --max-time $McpRequestTimeoutSeconds `
+            --header "Connection: close" `
+            --header "Content-Type: application/json" `
+            --header "Accept: application/json, text/event-stream" `
+            --data-binary "@-" `"#;
+    ensure!(
+        powershell_executable_exact_in_function(
+            &source,
+            "Wait-ForModelsReady",
+            model_readiness_stdin,
+            "$ResponseLines = @($Body | & $Curl `",
+        )?,
+        "validated installer smoke must send MCP JSON through stdin for Windows PowerShell 5"
+    );
+    let model_readiness_code = powershell_function(source.code.as_str(), "Wait-ForModelsReady")?;
+    ensure!(
+        model_readiness_code.matches("& $Curl").count() == 1
+            && model_readiness_code.matches("$Body").count() == 2
+            && !model_readiness_code.contains("--data-binary $Body"),
+        "validated installer smoke must not pass MCP JSON as a native argument"
+    );
     let invoke = powershell_function(source.code.as_str(), "Invoke-Process")?;
     let exact_start = "$Process = Start-Process -FilePath $Path -ArgumentList $Arguments -PassThru";
     let bounded_wait = "$Process.WaitForExit($ProcessWaitMilliseconds)";
@@ -8013,6 +8039,56 @@ mod tests {
         let error = verify_validated_installer_smoke_sources(&unsafe_smoke).unwrap_err();
 
         assert!(error.to_string().contains("cold model download"));
+    }
+
+    #[test]
+    fn validated_installer_smoke_rejects_a_native_json_argument() {
+        let smoke = fs::read_to_string(
+            workspace_root().join("packaging/smoke-validated-windows-installer.ps1"),
+        )
+        .unwrap();
+        let unsafe_smoke = smoke
+            .replacen(
+                "$ResponseLines = @($Body | & $Curl `",
+                "$ResponseLines = @(& $Curl `",
+                1,
+            )
+            .replacen("--data-binary \"@-\" `", "--data-binary $Body `", 1);
+        assert_ne!(
+            unsafe_smoke, smoke,
+            "validated installer JSON transport fixture did not match"
+        );
+
+        let error = verify_validated_installer_smoke_sources(&unsafe_smoke).unwrap_err();
+
+        assert!(error.to_string().contains("JSON through stdin"));
+    }
+
+    #[test]
+    fn validated_installer_smoke_rejects_commented_stdin_with_data_raw() {
+        let smoke = fs::read_to_string(
+            workspace_root().join("packaging/smoke-validated-windows-installer.ps1"),
+        )
+        .unwrap();
+        let unsafe_smoke = smoke
+            .replacen(
+                "$ResponseLines = @($Body | & $Curl `",
+                "# $ResponseLines = @($Body | & $Curl `\n        $ResponseLines = @(& $Curl `",
+                1,
+            )
+            .replacen(
+                "--data-binary \"@-\" `",
+                "# --data-binary \"@-\" `\n            --data-raw $Body `",
+                1,
+            );
+        assert_ne!(
+            unsafe_smoke, smoke,
+            "commented stdin JSON transport fixture did not match"
+        );
+
+        let error = verify_validated_installer_smoke_sources(&unsafe_smoke).unwrap_err();
+
+        assert!(error.to_string().contains("JSON through stdin"));
     }
 
     #[test]

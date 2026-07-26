@@ -142,9 +142,19 @@ Build both candidates from the same clean commit and that same private file:
 
 ```bash
 export AIRWIKI_BETA_CANDIDATE_SHA="$(git rev-parse HEAD)"
+export AIRWIKI_SIGNING_PURPOSE=development
+export AIRWIKI_SIGNING_IDENTITY="<stable Apple Development identity>"
 packaging/package-beta-macos.sh \
   target/private/federation-beta-v1.bootstrap
 ```
+
+Installed macOS beta candidates use one stable Apple Development identity so
+the operating-system keychain can recognize successive builds without granting
+each ad-hoc binary access to the persistent device identities. This is internal
+development signing only; it does not make the candidate a supported public
+release and does not replace Developer ID signing, notarization or stapling.
+Omit both signing variables only for isolated source/package checks that never
+reuse persistent keychain state.
 
 On the Windows x64 builder:
 

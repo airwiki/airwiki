@@ -6875,7 +6875,7 @@ mod tests {
     }
 
     #[test]
-    fn macos_packaging_supports_development_and_release_signing() {
+    fn macos_packaging_supports_adhoc_development_and_release_signing() {
         let root = workspace_root();
         let config = fs::read_to_string(root.join("packaging/macos/Packager.toml")).unwrap();
         let script = fs::read_to_string(root.join("packaging/package-macos.sh")).unwrap();
@@ -6884,17 +6884,39 @@ mod tests {
             !config.contains("signingIdentity")
                 && config.contains("./packaging/sign-macos-bridge.sh")
                 && script.contains("SIGNING_IDENTITY=${AIRWIKI_SIGNING_IDENTITY:--}")
+                && script.contains("SIGNING_PURPOSE=${AIRWIKI_SIGNING_PURPOSE:-}")
+                && script.contains("SIGNING_PURPOSE=adhoc")
+                && script.contains("SIGNING_PURPOSE=release")
+                && script.contains("development | release)")
                 && script.contains(
                     "codesign --force --sign \"$SIGNING_IDENTITY\" --options runtime --timestamp"
                 )
                 && script.contains("Contents/_CodeSignature/CodeResources")
                 && script.contains("codesign --verify --deep --strict")
                 && script.contains("Signature=adhoc")
+                && script.contains("Authority=Apple Development:")
                 && script.contains("Authority=Developer ID Application:")
                 && script.contains("Runtime Version=")
                 && script.contains("Sealed Resources version=")
                 && !script.contains("codesign --force --deep")
         );
+    }
+
+    #[test]
+    fn macos_packaging_validates_signing_purpose_before_mutating_staging() {
+        let script =
+            fs::read_to_string(workspace_root().join("packaging/package-macos.sh")).unwrap();
+        let purpose_validation = script
+            .find("case \"$SIGNING_PURPOSE\" in")
+            .expect("signing-purpose validation must exist");
+        let staging_cleanup = script
+            .find("rm -rf -- \"$APP\"")
+            .expect("staging cleanup must exist");
+
+        assert!(purpose_validation < staging_cleanup);
+        assert!(script.contains("ad-hoc packaging must use the ad-hoc signing identity"));
+        assert!(script.contains("identified packaging requires a non-ad-hoc signing identity"));
+        assert!(script.contains("AIRWIKI_SIGNING_PURPOSE must be adhoc, development or release"));
     }
 
     #[test]

@@ -21,6 +21,33 @@ LAUNCH_AGENT_SOURCE="$ROOT/packaging/macos/io.github.airwiki.AirWiki.background.
 LAUNCH_AGENT_DIR="$APP/Contents/Library/LaunchAgents"
 LAUNCH_AGENT="$LAUNCH_AGENT_DIR/io.github.airwiki.AirWiki.background.plist"
 SIGNING_IDENTITY=${AIRWIKI_SIGNING_IDENTITY:--}
+SIGNING_PURPOSE=${AIRWIKI_SIGNING_PURPOSE:-}
+
+if [ -z "$SIGNING_PURPOSE" ]; then
+  if [ "$SIGNING_IDENTITY" = "-" ]; then
+    SIGNING_PURPOSE=adhoc
+  else
+    SIGNING_PURPOSE=release
+  fi
+fi
+case "$SIGNING_PURPOSE" in
+  adhoc)
+    if [ "$SIGNING_IDENTITY" != "-" ]; then
+      echo "ad-hoc packaging must use the ad-hoc signing identity" >&2
+      exit 1
+    fi
+    ;;
+  development | release)
+    if [ "$SIGNING_IDENTITY" = "-" ]; then
+      echo "identified packaging requires a non-ad-hoc signing identity" >&2
+      exit 1
+    fi
+    ;;
+  *)
+    echo "AIRWIKI_SIGNING_PURPOSE must be adhoc, development or release" >&2
+    exit 1
+    ;;
+esac
 
 # A failed build must never cause the fallback to package an older bundle.
 rm -rf -- "$APP"
@@ -180,23 +207,35 @@ if ! SIGNATURE_DETAILS=$(codesign -dv --verbose=4 "$APP" 2>&1); then
   echo "could not inspect packaged application signature" >&2
   exit 1
 fi
-if [ "$SIGNING_IDENTITY" = "-" ]; then
-  case "$SIGNATURE_DETAILS" in
-    *"Signature=adhoc"*"Sealed Resources version="*) ;;
-    *)
-      echo "development application is not fully ad-hoc signed" >&2
-      exit 1
-      ;;
-  esac
-else
-  case "$SIGNATURE_DETAILS" in
-    *"Authority=Developer ID Application:"*"TeamIdentifier="*"Runtime Version="*) ;;
-    *)
-      echo "release application is not Developer ID signed with Hardened Runtime" >&2
-      exit 1
-      ;;
-  esac
-fi
+case "$SIGNING_PURPOSE" in
+  adhoc)
+    case "$SIGNATURE_DETAILS" in
+      *"Signature=adhoc"*"Sealed Resources version="*) ;;
+      *)
+        echo "development application is not fully ad-hoc signed" >&2
+        exit 1
+        ;;
+    esac
+    ;;
+  development)
+    case "$SIGNATURE_DETAILS" in
+      *"Authority=Apple Development:"*"TeamIdentifier="*"Runtime Version="*"Sealed Resources version="*) ;;
+      *)
+        echo "development application is not Apple Development signed with Hardened Runtime" >&2
+        exit 1
+        ;;
+    esac
+    ;;
+  release)
+    case "$SIGNATURE_DETAILS" in
+      *"Authority=Developer ID Application:"*"TeamIdentifier="*"Runtime Version="*"Sealed Resources version="*) ;;
+      *)
+        echo "release application is not Developer ID signed with Hardened Runtime" >&2
+        exit 1
+        ;;
+    esac
+    ;;
+esac
 
 # cargo-packager creates the .app before invoking Finder for DMG cosmetics. Its
 # DMG may therefore be missing on headless runs and, when present, predates the

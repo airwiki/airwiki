@@ -48,7 +48,8 @@ use crate::{
     paths::AppPaths,
     services::{
         CollectionWatchEvent, CollectionWatcherHandle, DesktopServices, ModelRuntimePaths,
-        PUBLIC_NETWORK_OFFLINE_WARNING, WikiHealthRollup,
+        PUBLIC_NETWORK_OFFLINE_WARNING, WikiHealthRollup, classify_model_activation_failure,
+        model_activation_elapsed_bucket,
     },
     updater::{
         PackagerUpdateBackend, UpdateSchedule, UpdaterBuildConfig, UpdaterDisabledReason,
@@ -4246,11 +4247,34 @@ fn spawn_model_enable(
     let services = Arc::clone(services);
     let model_id = paths.selection.model_id.to_owned();
     background.spawn(async move {
-        let result = AssertUnwindSafe(services.enable_models(paths))
+        let started = Instant::now();
+        let result = match AssertUnwindSafe(services.enable_models(paths))
             .catch_unwind()
             .await
-            .map_err(panic_message)
-            .and_then(|result| result.map_err(|error| format!("{error:#}")));
+        {
+            Ok(Ok(())) => Ok(()),
+            Ok(Err(error)) => {
+                let failure = classify_model_activation_failure(&error);
+                tracing::warn!(
+                    event = "model_activation_failed",
+                    error_kind = failure.error_kind,
+                    elapsed_bucket = model_activation_elapsed_bucket(started.elapsed()),
+                    exit_class = failure.exit_class,
+                    "model activation failed"
+                );
+                Err(format!("{error:#}"))
+            }
+            Err(payload) => {
+                tracing::warn!(
+                    event = "model_activation_failed",
+                    error_kind = "activation_internal",
+                    elapsed_bucket = model_activation_elapsed_bucket(started.elapsed()),
+                    exit_class = "unknown",
+                    "model activation failed"
+                );
+                Err(panic_message(payload))
+            }
+        };
         BackgroundCompletion::ModelsEnabled { model_id, result }
     });
 }

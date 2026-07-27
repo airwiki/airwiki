@@ -24,4 +24,7 @@ pub use catalog::{
 };
 pub use client::{GenerationConfig, LlamaClient};
 pub use diagnostic::{HardwareReport, diagnose_hardware};
-pub use supervisor::{LlamaEndpoint, LlamaSupervisor, ServerReasoningMode, SupervisorConfig};
+pub use supervisor::{
+    LlamaEndpoint, LlamaSupervisor, LlamaSupervisorFailure, LlamaSupervisorFailureKind,
+    RuntimeExitClass, ServerReasoningMode, SupervisorConfig,
+};

@@ -18,6 +18,37 @@ $McpRequestTimeoutSeconds = 8
 $McpRequestId = 991
 $ProcessWaitMilliseconds = 120000
 $ProcessCleanupWaitMilliseconds = 10000
+$ActivationLogFlushWaitMilliseconds = 3000
+$ActivationLogPollMilliseconds = 100
+$ActivationLogReadLimitBytes = 1048576
+$ModelActivationErrorKinds = @(
+    "configuration",
+    "onnx_init",
+    "embedding_smoke",
+    "reranker_smoke",
+    "runtime_spawn",
+    "runtime_exit_before_health",
+    "runtime_health_timeout",
+    "runtime_state",
+    "generation_timeout",
+    "generation_unavailable",
+    "generation_protocol",
+    "generation_invalid",
+    "activation_internal"
+)
+$ModelActivationElapsedBuckets = @(
+    "under_5s",
+    "5s_to_30s",
+    "30s_to_120s",
+    "120s_to_300s",
+    "over_300s"
+)
+$ModelActivationExitClasses = @(
+    "none",
+    "success",
+    "failure",
+    "unknown"
+)
 $script:ProcessTerminationUnconfirmed = $false
 
 . (Join-Path $PSScriptRoot "windows-runtime.ps1")
@@ -66,6 +97,228 @@ function Test-SamePath([string] $Left, [string] $Right) {
     return [IO.Path]::GetFullPath($Left).Equals(
         [IO.Path]::GetFullPath($Right),
         [StringComparison]::OrdinalIgnoreCase
+    )
+}
+
+function Get-ExactModelRuntimeProcess(
+    [int] $DesktopProcessId,
+    [string] $ExpectedExecutable
+) {
+    $Matches = @(
+        Get-CimInstance Win32_Process `
+            -Filter "ParentProcessId = $DesktopProcessId AND Name = 'llama-server.exe'"
+    )
+    if ($Matches.Count -eq 0) {
+        return $null
+    }
+    if ($Matches.Count -ne 1) {
+        throw "the installed model runtime process state is ambiguous"
+    }
+    if (-not (Test-SamePath ([string] $Matches[0].ExecutablePath) $ExpectedExecutable)) {
+        throw "the installed model runtime process identity changed"
+    }
+    return $Matches[0]
+}
+
+function Test-ModelRuntimeExitedBeforeReady(
+    [int] $DesktopProcessId,
+    [string] $ExpectedExecutable,
+    [ref] $ObservedProcessId
+) {
+    $RuntimeProcess = Get-ExactModelRuntimeProcess `
+        $DesktopProcessId `
+        $ExpectedExecutable
+    if ($null -eq $RuntimeProcess) {
+        return $null -ne $ObservedProcessId.Value
+    }
+
+    $CurrentProcessId = [int] $RuntimeProcess.ProcessId
+    if ($null -eq $ObservedProcessId.Value) {
+        $ObservedProcessId.Value = $CurrentProcessId
+        return $false
+    }
+    return [int] $ObservedProcessId.Value -ne $CurrentProcessId
+}
+
+function Assert-RegularActivationLogDirectory([string] $Directory) {
+    if (-not (Test-Path -LiteralPath $Directory)) {
+        return $false
+    }
+    $Item = Get-Item -LiteralPath $Directory -Force -ErrorAction Stop
+    if (-not $Item.PSIsContainer -or
+        (($Item.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0)) {
+        throw "the local activation log directory is not a regular directory"
+    }
+    return $true
+}
+
+function Get-ActivationLogFiles([string] $Directory) {
+    if (-not (Assert-RegularActivationLogDirectory $Directory)) {
+        return @()
+    }
+    $Files = @(
+        Get-ChildItem -LiteralPath $Directory -File -Force -ErrorAction Stop |
+            Where-Object Name -Match '^airwiki[.]log([.][0-9]{4}-[0-9]{2}-[0-9]{2})?$' |
+            Sort-Object Name
+    )
+    foreach ($File in $Files) {
+        if (($File.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) {
+            throw "the local activation log is not a regular file"
+        }
+    }
+    return $Files
+}
+
+function New-ActivationLogCursor([string] $Directory) {
+    $Offsets = @{}
+    $Buffers = @{}
+    foreach ($File in @(Get-ActivationLogFiles $Directory)) {
+        $Offsets[$File.FullName] = [long] $File.Length
+        $Buffers[$File.FullName] = ""
+    }
+    return [PSCustomObject]@{
+        Directory = $Directory
+        Offsets = $Offsets
+        Buffers = $Buffers
+        TotalBytes = [long] 0
+    }
+}
+
+function Update-ActivationLogCursor($Cursor) {
+    foreach ($File in @(Get-ActivationLogFiles ([string] $Cursor.Directory))) {
+        $Path = $File.FullName
+        $Offset = if ($Cursor.Offsets.ContainsKey($Path)) {
+            [long] $Cursor.Offsets[$Path]
+        } else {
+            [long] 0
+        }
+        if ([long] $File.Length -lt $Offset) {
+            throw "the local activation log changed unexpectedly"
+        }
+
+        $Length = [long] $File.Length - $Offset
+        if ($Length -eq 0) {
+            continue
+        }
+        if ($Cursor.TotalBytes + $Length -gt $ActivationLogReadLimitBytes) {
+            throw "the bounded local activation log window was exceeded"
+        }
+
+        $Stream = [IO.File]::Open(
+            $Path,
+            [IO.FileMode]::Open,
+            [IO.FileAccess]::Read,
+            [IO.FileShare]::ReadWrite -bor [IO.FileShare]::Delete
+        )
+        try {
+            $null = $Stream.Seek($Offset, [IO.SeekOrigin]::Begin)
+            $Bytes = New-Object byte[] $Length
+            $Read = 0
+            while ($Read -lt $Length) {
+                $Count = $Stream.Read($Bytes, $Read, $Length - $Read)
+                if ($Count -eq 0) {
+                    break
+                }
+                $Read += $Count
+            }
+        } finally {
+            $Stream.Dispose()
+        }
+        if ($Read -eq 0) {
+            continue
+        }
+
+        $Text = [Text.Encoding]::UTF8.GetString($Bytes, 0, $Read)
+        $Existing = if ($Cursor.Buffers.ContainsKey($Path)) {
+            [string] $Cursor.Buffers[$Path]
+        } else {
+            ""
+        }
+        $Cursor.Buffers[$Path] = $Existing + $Text
+        $Cursor.Offsets[$Path] = $Offset + $Read
+        $Cursor.TotalBytes += $Read
+    }
+}
+
+function Get-SanitizedModelActivationFailure($Cursor) {
+    # The tracing formatter does not make field order part of its contract.
+    # Match each closed field independently and never return the source line.
+    $Failure = $null
+    foreach ($Text in @($Cursor.Buffers.Values)) {
+        foreach ($Line in @([string] $Text -split "`r?`n")) {
+            if (-not $Line.Contains("model activation failed") -or
+                $Line -notmatch '\bevent="model_activation_failed"') {
+                continue
+            }
+
+            $ErrorKindMatch = [regex]::Match(
+                $Line,
+                '\berror_kind="([a-z0-9_]+)"'
+            )
+            $ElapsedBucketMatch = [regex]::Match(
+                $Line,
+                '\belapsed_bucket="([a-z0-9_]+)"'
+            )
+            $ExitClassMatch = [regex]::Match(
+                $Line,
+                '\bexit_class="([a-z0-9_]+)"'
+            )
+            if (-not $ErrorKindMatch.Success -or
+                -not $ElapsedBucketMatch.Success -or
+                -not $ExitClassMatch.Success) {
+                continue
+            }
+
+            $ErrorKind = $ErrorKindMatch.Groups[1].Value
+            $ElapsedBucket = $ElapsedBucketMatch.Groups[1].Value
+            $ExitClass = $ExitClassMatch.Groups[1].Value
+            if ($ModelActivationErrorKinds -cnotcontains $ErrorKind -or
+                $ModelActivationElapsedBuckets -cnotcontains $ElapsedBucket -or
+                $ModelActivationExitClasses -cnotcontains $ExitClass) {
+                continue
+            }
+            $Failure = [PSCustomObject]@{
+                ErrorKind = $ErrorKind
+                ElapsedBucket = $ElapsedBucket
+                ExitClass = $ExitClass
+            }
+        }
+    }
+    return $Failure
+}
+
+function Throw-SanitizedModelActivationFailure($Failure) {
+    throw (
+        "the installed models did not become ready " +
+        "failure_class=model_activation_failed " +
+        "error_kind=$($Failure.ErrorKind) " +
+        "elapsed_bucket=$($Failure.ElapsedBucket) " +
+        "exit_class=$($Failure.ExitClass) " +
+        "available_memory_bucket=$AvailableMemoryBucket"
+    )
+}
+
+function Throw-IfModelActivationFailed {
+    Update-ActivationLogCursor $ActivationLogCursor
+    $Failure = Get-SanitizedModelActivationFailure $ActivationLogCursor
+    if ($null -ne $Failure) {
+        Throw-SanitizedModelActivationFailure $Failure
+    }
+}
+
+function Throw-ModelRuntimeExitedBeforeReady {
+    $Deadline = [DateTime]::UtcNow.AddMilliseconds($ActivationLogFlushWaitMilliseconds)
+    do {
+        Throw-IfModelActivationFailed
+        if ([DateTime]::UtcNow -ge $Deadline) {
+            break
+        }
+        Start-Sleep -Milliseconds $ActivationLogPollMilliseconds
+    } while ($true)
+    throw (
+        "the installed model runtime exited before models became ready " +
+        "failure_class=runtime_exited_before_ready " +
+        "available_memory_bucket=$AvailableMemoryBucket"
     )
 }
 
@@ -218,8 +471,16 @@ function Wait-ForModelsReady {
             }
         }
     } | ConvertTo-Json -Depth 6 -Compress
+    $ObservedRuntimeProcessId = $null
     $Deadline = [DateTime]::UtcNow.AddMilliseconds($ModelReadyWaitMilliseconds)
     do {
+        Throw-IfModelActivationFailed
+        if (Test-ModelRuntimeExitedBeforeReady `
+            $ExpectedDesktopProcessId `
+            $ExpectedRuntimeExecutable `
+            ([ref] $ObservedRuntimeProcessId)) {
+            Throw-ModelRuntimeExitedBeforeReady
+        }
         $ResponseLines = @($Body | & $Curl `
             --silent `
             --show-error `
@@ -249,9 +510,19 @@ function Wait-ForModelsReady {
                 }
             } catch { }
         }
+        Throw-IfModelActivationFailed
+        if (Test-ModelRuntimeExitedBeforeReady `
+            $ExpectedDesktopProcessId `
+            $ExpectedRuntimeExecutable `
+            ([ref] $ObservedRuntimeProcessId)) {
+            Throw-ModelRuntimeExitedBeforeReady
+        }
         Start-Sleep -Seconds 3
     } while ([DateTime]::UtcNow -lt $Deadline)
-    throw "the installed application did not make its local models operational in time"
+    throw (
+        "the installed application did not make its local models operational in time " +
+        "failure_class=models_timeout available_memory_bucket=$AvailableMemoryBucket"
+    )
 }
 
 if (-not $AuthorizeDestructiveInstallerSmoke) {
@@ -269,6 +540,14 @@ if ([int] $Os.ProductType -ne 1 -or [version] $Os.Version -lt [version] "10.0" -
 }
 if ([string]::IsNullOrWhiteSpace($env:LOCALAPPDATA)) {
     throw "Windows did not expose the per-user local application data directory"
+}
+$AvailableMemoryBytes = [uint64] $Os.FreePhysicalMemory * 1024
+$AvailableMemoryBucket = if ($AvailableMemoryBytes -lt 2GB) {
+    "under_2gib"
+} elseif ($AvailableMemoryBytes -lt 4GB) {
+    "2gib_to_4gib"
+} else {
+    "over_4gib"
 }
 
 $InstallerItem = Get-Item -LiteralPath $Installer -ErrorAction Stop
@@ -288,6 +567,9 @@ $ProductRegistryPath = "HKCU:\Software\AirWiki\AirWiki"
 $AutostartRegistryPath = "HKCU:\Software\Microsoft\Windows\CurrentVersion\Run"
 $AutostartValueName = "AirWiki"
 $DesktopExecutable = Join-Path $InstallDir "airwiki.exe"
+$ExpectedRuntimeExecutable = Join-Path $InstallDir "llama\llama-server.exe"
+$ActivationLogDirectory = Join-Path $env:LOCALAPPDATA "airwiki\AirWiki\data\logs"
+$ActivationLogCursor = New-ActivationLogCursor $ActivationLogDirectory
 $BundleFiles = [ordered]@{
     "airwiki.exe" = Join-Path $BundleRoot "airwiki.exe"
     "integrations/bridge/airwiki-mcp-bridge.exe" = `
@@ -324,6 +606,7 @@ try {
     if ($DesktopProcesses.Count -ne 1) {
         throw "the installed desktop did not open from its per-user path"
     }
+    $ExpectedDesktopProcessId = [int] $DesktopProcesses[0].ProcessId
 
     $ExpectedInstalled = New-WindowsPayloadManifest
     foreach ($Entry in $BundleFiles.GetEnumerator()) {

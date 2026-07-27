@@ -17,6 +17,7 @@ use std::{
     time::{Duration, Instant},
 };
 
+use airwiki_core::inference::GenerationFailure;
 use airwiki_core::{
     AppPaths as CoreAppPaths, AuditEvent, BootstrapFederationIndexEntry, CollectionRecord,
     Database, E5Tokenizer, EmbeddingProvider, EvidenceDecision, EvidenceRelevanceProvider,
@@ -28,8 +29,8 @@ use airwiki_core::{
     ReviewVersionToken, SourceIssueCode, Tokenizer, WikiRepairExecutor, WikiRepairPlanner,
 };
 use airwiki_inference::{
-    GenerationSettings, InstallOutcome, LlamaSupervisor, ModelSelection, SupervisorConfig,
-    ThinkingControl,
+    GenerationSettings, InstallOutcome, LlamaSupervisor, LlamaSupervisorFailure, ModelSelection,
+    SupervisorConfig, ThinkingControl,
 };
 use airwiki_mcp::{McpClientActivitySnapshot, McpServerConfig, McpServerHandle, start_mcp_server};
 use airwiki_network::{
@@ -86,6 +87,88 @@ const LAN_LISTENER_START_GRACE: Duration = Duration::from_secs(10);
 const STARTUP_COLLECTION_DISCOVERY_TIMEOUT: Duration = Duration::from_secs(5);
 const BUNDLED_BOOTSTRAP_FEDERATION_INDEXES: Option<&str> =
     option_env!("AIRWIKI_BOOTSTRAP_FEDERATION_INDEXES");
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ModelActivationStage {
+    Configuration,
+    OnnxInit,
+    EmbeddingSmoke,
+    RerankerSmoke,
+}
+
+impl ModelActivationStage {
+    const fn error_kind(self) -> &'static str {
+        match self {
+            Self::Configuration => "configuration",
+            Self::OnnxInit => "onnx_init",
+            Self::EmbeddingSmoke => "embedding_smoke",
+            Self::RerankerSmoke => "reranker_smoke",
+        }
+    }
+}
+
+#[derive(Debug, thiserror::Error)]
+#[error("model activation stage failed")]
+struct ModelActivationStageFailure {
+    stage: ModelActivationStage,
+}
+
+impl ModelActivationStageFailure {
+    const fn new(stage: ModelActivationStage) -> Self {
+        Self { stage }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct ModelActivationFailureView {
+    pub error_kind: &'static str,
+    pub exit_class: &'static str,
+}
+
+pub(crate) fn classify_model_activation_failure(
+    error: &anyhow::Error,
+) -> ModelActivationFailureView {
+    if let Some(failure) = error.downcast_ref::<GenerationFailure>() {
+        return ModelActivationFailureView {
+            error_kind: failure.kind().error_kind(),
+            exit_class: "none",
+        };
+    }
+    if let Some(failure) = error.downcast_ref::<LlamaSupervisorFailure>() {
+        return ModelActivationFailureView {
+            error_kind: failure.kind().error_kind(),
+            exit_class: failure.exit_class().as_str(),
+        };
+    }
+    if let Some(failure) = error.downcast_ref::<ModelActivationStageFailure>() {
+        return ModelActivationFailureView {
+            error_kind: failure.stage.error_kind(),
+            exit_class: "none",
+        };
+    }
+    ModelActivationFailureView {
+        error_kind: "activation_internal",
+        exit_class: "unknown",
+    }
+}
+
+pub(crate) const fn model_activation_elapsed_bucket(elapsed: Duration) -> &'static str {
+    if elapsed.as_secs() < 5 {
+        "under_5s"
+    } else if elapsed.as_secs() < 30 {
+        "5s_to_30s"
+    } else if elapsed.as_secs() < 120 {
+        "30s_to_120s"
+    } else if elapsed.as_secs() < 300 {
+        "120s_to_300s"
+    } else {
+        "over_300s"
+    }
+}
+
+fn activation_stage<T>(result: Result<T>, stage: ModelActivationStage) -> Result<T> {
+    result.map_err(|error| error.context(ModelActivationStageFailure::new(stage)))
+}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct BundledBootstrapFederationIndex {
@@ -790,10 +873,13 @@ impl GenerationProvider for SupervisedGenerationProvider {
 
     async fn enrich(&self, document_text: &str) -> Result<EnrichmentDraft> {
         let endpoint = self.supervisor.ensure_running().await?;
-        let provider = LlamaServerProvider::with_config(
-            &endpoint.base_url,
-            endpoint.bearer_token(),
-            self.runtime_config.clone(),
+        let provider = activation_stage(
+            LlamaServerProvider::with_config(
+                &endpoint.base_url,
+                endpoint.bearer_token(),
+                self.runtime_config.clone(),
+            ),
+            ModelActivationStage::Configuration,
         )?;
         // Hierarchical enrichment can span several individually bounded HTTP
         // calls. Keep the sidecar leased for the whole operation so its idle
@@ -1155,7 +1241,7 @@ impl DesktopServices {
     /// Initializes ONNX/tokenizer state off the async executor's worker threads,
     /// then atomically enables local, LAN and MCP search.
     pub async fn enable_models(&self, paths: ModelRuntimePaths) -> Result<()> {
-        paths.validate()?;
+        activation_stage(paths.validate(), ModelActivationStage::Configuration)?;
         let selection = paths.selection.clone();
         let generation_settings = paths.generation_settings;
         let mut supervisor_config = SupervisorConfig::bundled(paths.llama_server, paths.model);
@@ -1168,7 +1254,7 @@ impl DesktopServices {
             .map(usize::from)
             .unwrap_or(2)
             .clamp(1, 4);
-        let (embeddings, tokenizer, relevance) = tokio::task::spawn_blocking(move || {
+        let loaded = tokio::task::spawn_blocking(move || {
             let snapshot = PinnedE5Snapshot::open(e5_snapshot_path)?;
             let embeddings: Arc<dyn EmbeddingProvider> =
                 Arc::new(FastEmbedE5Small::from_snapshot(&snapshot, threads)?);
@@ -1180,16 +1266,28 @@ impl DesktopServices {
             Ok::<_, anyhow::Error>((embeddings, tokenizer, relevance))
         })
         .await
-        .context("falló el worker de inicialización de los modelos de búsqueda")??;
+        .map_err(anyhow::Error::new);
+        let loaded = activation_stage(loaded, ModelActivationStage::OnnxInit)
+            .context("falló el worker de inicialización de los modelos de búsqueda")?;
+        let (embeddings, tokenizer, relevance) =
+            activation_stage(loaded, ModelActivationStage::OnnxInit)?;
 
-        let smoke_embeddings = embeddings
-            .embed(&[format!("query: {MODEL_SMOKE_TEST_DOCUMENT}")])
-            .await
-            .context("falló el smoke test de multilingual-e5-small")?;
+        let smoke_embeddings = activation_stage(
+            embeddings
+                .embed(&[format!("query: {MODEL_SMOKE_TEST_DOCUMENT}")])
+                .await,
+            ModelActivationStage::EmbeddingSmoke,
+        )
+        .context("falló el smoke test de multilingual-e5-small")?;
         if smoke_embeddings.len() != 1
             || smoke_embeddings[0].len() != airwiki_core::EMBEDDING_DIMENSIONS
         {
-            bail!("el smoke test de embeddings devolvió una forma inesperada");
+            return activation_stage(
+                Err(anyhow!(
+                    "el smoke test de embeddings devolvió una forma inesperada"
+                )),
+                ModelActivationStage::EmbeddingSmoke,
+            );
         }
 
         let relevance_inputs = RELEVANCE_SMOKE_TEST_PASSAGES
@@ -1200,12 +1298,21 @@ impl DesktopServices {
                 text: text.to_owned(),
             })
             .collect::<Vec<_>>();
-        let relevance_decisions = relevance
-            .classify(RELEVANCE_SMOKE_TEST_QUESTION, &relevance_inputs)
-            .await
-            .context("falló el smoke test del clasificador de relevancia")?;
+        let relevance_decisions = activation_stage(
+            relevance
+                .classify(RELEVANCE_SMOKE_TEST_QUESTION, &relevance_inputs)
+                .await
+                .map_err(anyhow::Error::new),
+            ModelActivationStage::RerankerSmoke,
+        )
+        .context("falló el smoke test del clasificador de relevancia")?;
         if relevance_decisions != [EvidenceDecision::Relevant, EvidenceDecision::Irrelevant] {
-            bail!("el smoke test de relevancia devolvió decisiones inesperadas");
+            return activation_stage(
+                Err(anyhow!(
+                    "el smoke test de relevancia devolvió decisiones inesperadas"
+                )),
+                ModelActivationStage::RerankerSmoke,
+            );
         }
 
         let generation_provider = SupervisedGenerationProvider {
@@ -3449,6 +3556,43 @@ mod tests {
             .unwrap()
             .peer_id()
             .to_string()
+    }
+
+    #[test]
+    fn model_activation_stage_is_preserved_as_a_sanitized_class() {
+        let error = activation_stage::<()>(
+            Err(anyhow!("synthetic activation detail")),
+            ModelActivationStage::OnnxInit,
+        )
+        .unwrap_err();
+
+        assert_eq!(
+            classify_model_activation_failure(&error),
+            ModelActivationFailureView {
+                error_kind: "onnx_init",
+                exit_class: "none",
+            }
+        );
+    }
+
+    #[test]
+    fn model_activation_elapsed_buckets_have_stable_boundaries() {
+        for (seconds, expected) in [
+            (0, "under_5s"),
+            (4, "under_5s"),
+            (5, "5s_to_30s"),
+            (29, "5s_to_30s"),
+            (30, "30s_to_120s"),
+            (119, "30s_to_120s"),
+            (120, "120s_to_300s"),
+            (299, "120s_to_300s"),
+            (300, "over_300s"),
+        ] {
+            assert_eq!(
+                model_activation_elapsed_bucket(Duration::from_secs(seconds)),
+                expected
+            );
+        }
     }
 
     #[test]

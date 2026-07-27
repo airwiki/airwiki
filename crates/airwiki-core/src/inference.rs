@@ -1,4 +1,4 @@
-use std::{collections::HashMap, time::Duration};
+use std::{collections::HashMap, fmt, time::Duration};
 
 use airwiki_types::{ConceptType, EnrichmentDraft};
 use anyhow::{Context, Result, anyhow, bail};
@@ -133,6 +133,41 @@ pub struct LlamaServerProvider {
     request_timeout: Duration,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum GenerationFailureKind {
+    Timeout,
+    Unavailable,
+    Protocol,
+    Invalid,
+}
+
+impl GenerationFailureKind {
+    pub const fn error_kind(self) -> &'static str {
+        match self {
+            Self::Timeout => "generation_timeout",
+            Self::Unavailable => "generation_unavailable",
+            Self::Protocol => "generation_protocol",
+            Self::Invalid => "generation_invalid",
+        }
+    }
+}
+
+#[derive(Debug, thiserror::Error)]
+#[error("local generation failed")]
+pub struct GenerationFailure {
+    kind: GenerationFailureKind,
+}
+
+impl GenerationFailure {
+    const fn new(kind: GenerationFailureKind) -> Self {
+        Self { kind }
+    }
+
+    pub const fn kind(&self) -> GenerationFailureKind {
+        self.kind
+    }
+}
+
 impl LlamaServerProvider {
     pub fn new(endpoint: impl Into<String>, bearer_token: &str) -> Result<Self> {
         Self::with_config(endpoint, bearer_token, GenerationRuntimeConfig::default())
@@ -219,25 +254,56 @@ impl LlamaServerProvider {
             .await
             .map_err(|error| self.request_error("request", error))?
             .error_for_status()
-            .context("llama-server rejected the request")?;
+            .map_err(|error| {
+                self.classified_error(
+                    GenerationFailureKind::Protocol,
+                    "llama-server rejected the request",
+                    error,
+                )
+            })?;
         let value: Value = response
             .json()
             .await
             .map_err(|error| self.request_error("response body", error))?;
         parse_completion_response(&value, self.config.max_output_tokens)
+            .map_err(|error| error.context(GenerationFailure::new(GenerationFailureKind::Invalid)))
     }
 
     fn request_error(&self, stage: &str, error: reqwest::Error) -> anyhow::Error {
         let model_id = &self.config.model_id;
         if error.is_timeout() {
-            anyhow::Error::new(error).context(format!(
-                "llama-server {stage} for model {model_id} timed out after {}",
-                format_duration(self.request_timeout)
-            ))
+            self.classified_error(
+                GenerationFailureKind::Timeout,
+                format!(
+                    "llama-server {stage} for model {model_id} timed out after {}",
+                    format_duration(self.request_timeout)
+                ),
+                error,
+            )
+        } else if error.is_connect() {
+            self.classified_error(
+                GenerationFailureKind::Unavailable,
+                format!("llama-server {stage} failed for model {model_id}"),
+                error,
+            )
         } else {
-            anyhow::Error::new(error)
-                .context(format!("llama-server {stage} failed for model {model_id}"))
+            self.classified_error(
+                GenerationFailureKind::Protocol,
+                format!("llama-server {stage} failed for model {model_id}"),
+                error,
+            )
         }
+    }
+
+    fn classified_error(
+        &self,
+        kind: GenerationFailureKind,
+        context: impl fmt::Display + Send + Sync + 'static,
+        error: reqwest::Error,
+    ) -> anyhow::Error {
+        anyhow::Error::new(error)
+            .context(GenerationFailure::new(kind))
+            .context(context)
     }
 
     async fn summarize_piece(&self, text: &str) -> Result<String> {
@@ -381,7 +447,12 @@ impl GenerationProvider for LlamaServerProvider {
         let content = self
             .completion(ENRICHMENT_SYSTEM_PROMPT, &bounded, enrichment_schema())
             .await?;
-        let mut draft: EnrichmentDraft = serde_json::from_value(parse_json_content(&content)?)
+        let value = parse_json_content(&content).map_err(|error| {
+            error.context(GenerationFailure::new(GenerationFailureKind::Invalid))
+        })?;
+        let mut draft: EnrichmentDraft = serde_json::from_value(value)
+            .map_err(anyhow::Error::new)
+            .map_err(|error| error.context(GenerationFailure::new(GenerationFailureKind::Invalid)))
             .context("LLM enrichment did not match the required schema")?;
         draft.sanitize();
         draft.tags.truncate(MAX_TAGS);
@@ -1139,6 +1210,12 @@ mod tests {
         let detailed = format!("{error:#}");
 
         assert!(detailed.contains("request for model gemma-4-e4b-q4 timed out after 25 ms"));
+        assert_eq!(
+            error
+                .downcast_ref::<GenerationFailure>()
+                .map(GenerationFailure::kind),
+            Some(GenerationFailureKind::Timeout)
+        );
         assert!(
             error.chain().count() > 1,
             "missing reqwest cause: {detailed}"

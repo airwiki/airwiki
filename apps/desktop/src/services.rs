@@ -17,7 +17,7 @@ use std::{
     time::{Duration, Instant},
 };
 
-use airwiki_core::inference::GenerationFailure;
+use airwiki_core::inference::{GenerationFailure, GenerationFailureKind};
 use airwiki_core::{
     AppPaths as CoreAppPaths, AuditEvent, BootstrapFederationIndexEntry, CollectionRecord,
     Database, E5Tokenizer, EmbeddingProvider, EvidenceDecision, EvidenceRelevanceProvider,
@@ -29,8 +29,9 @@ use airwiki_core::{
     ReviewVersionToken, SourceIssueCode, Tokenizer, WikiRepairExecutor, WikiRepairPlanner,
 };
 use airwiki_inference::{
-    GenerationSettings, InstallOutcome, LlamaSupervisor, LlamaSupervisorFailure, ModelSelection,
-    SupervisorConfig, ThinkingControl,
+    GenerationSettings, InstallOutcome, LlamaSupervisor, LlamaSupervisorFailure,
+    LlamaSupervisorFailureKind, ModelSelection, RuntimeExitClass, SupervisorConfig,
+    ThinkingControl,
 };
 use airwiki_mcp::{McpClientActivitySnapshot, McpServerConfig, McpServerHandle, start_mcp_server};
 use airwiki_network::{
@@ -61,6 +62,10 @@ use uuid::Uuid;
 
 use crate::{
     manual_lan_route,
+    model_activation_status::{
+        ModelActivationElapsedBucket, ModelActivationErrorKind, ModelActivationExitClass,
+        ModelActivationFailureView,
+    },
     paths::AppPaths,
     worker::{
         CollectionView, PeerActivityState, PeerTrustState, PeerView, PublicAnnouncementStatusView,
@@ -97,12 +102,12 @@ enum ModelActivationStage {
 }
 
 impl ModelActivationStage {
-    const fn error_kind(self) -> &'static str {
+    const fn error_kind(self) -> ModelActivationErrorKind {
         match self {
-            Self::Configuration => "configuration",
-            Self::OnnxInit => "onnx_init",
-            Self::EmbeddingSmoke => "embedding_smoke",
-            Self::RerankerSmoke => "reranker_smoke",
+            Self::Configuration => ModelActivationErrorKind::Configuration,
+            Self::OnnxInit => ModelActivationErrorKind::OnnxInit,
+            Self::EmbeddingSmoke => ModelActivationErrorKind::EmbeddingSmoke,
+            Self::RerankerSmoke => ModelActivationErrorKind::RerankerSmoke,
         }
     }
 }
@@ -119,50 +124,67 @@ impl ModelActivationStageFailure {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) struct ModelActivationFailureView {
-    pub error_kind: &'static str,
-    pub exit_class: &'static str,
-}
-
 pub(crate) fn classify_model_activation_failure(
     error: &anyhow::Error,
 ) -> ModelActivationFailureView {
     if let Some(failure) = error.downcast_ref::<GenerationFailure>() {
         return ModelActivationFailureView {
-            error_kind: failure.kind().error_kind(),
-            exit_class: "none",
+            error_kind: match failure.kind() {
+                GenerationFailureKind::Timeout => ModelActivationErrorKind::GenerationTimeout,
+                GenerationFailureKind::Unavailable => {
+                    ModelActivationErrorKind::GenerationUnavailable
+                }
+                GenerationFailureKind::Protocol => ModelActivationErrorKind::GenerationProtocol,
+                GenerationFailureKind::Invalid => ModelActivationErrorKind::GenerationInvalid,
+            },
+            exit_class: ModelActivationExitClass::None,
         };
     }
     if let Some(failure) = error.downcast_ref::<LlamaSupervisorFailure>() {
         return ModelActivationFailureView {
-            error_kind: failure.kind().error_kind(),
-            exit_class: failure.exit_class().as_str(),
+            error_kind: match failure.kind() {
+                LlamaSupervisorFailureKind::RuntimeSpawn => ModelActivationErrorKind::RuntimeSpawn,
+                LlamaSupervisorFailureKind::RuntimeExitedBeforeHealth => {
+                    ModelActivationErrorKind::RuntimeExitBeforeHealth
+                }
+                LlamaSupervisorFailureKind::RuntimeHealthTimeout => {
+                    ModelActivationErrorKind::RuntimeHealthTimeout
+                }
+                LlamaSupervisorFailureKind::RuntimeState => ModelActivationErrorKind::RuntimeState,
+            },
+            exit_class: match failure.exit_class() {
+                RuntimeExitClass::None => ModelActivationExitClass::None,
+                RuntimeExitClass::Success => ModelActivationExitClass::Success,
+                RuntimeExitClass::Failure => ModelActivationExitClass::Failure,
+                RuntimeExitClass::Unknown => ModelActivationExitClass::Unknown,
+            },
         };
     }
     if let Some(failure) = error.downcast_ref::<ModelActivationStageFailure>() {
         return ModelActivationFailureView {
             error_kind: failure.stage.error_kind(),
-            exit_class: "none",
+            exit_class: ModelActivationExitClass::None,
         };
     }
     ModelActivationFailureView {
-        error_kind: "activation_internal",
-        exit_class: "unknown",
+        error_kind: ModelActivationErrorKind::ActivationInternal,
+        exit_class: ModelActivationExitClass::Unknown,
     }
 }
 
-pub(crate) const fn model_activation_elapsed_bucket(elapsed: Duration) -> &'static str {
+pub(crate) const fn model_activation_elapsed_bucket(
+    elapsed: Duration,
+) -> ModelActivationElapsedBucket {
     if elapsed.as_secs() < 5 {
-        "under_5s"
+        ModelActivationElapsedBucket::Under5s
     } else if elapsed.as_secs() < 30 {
-        "5s_to_30s"
+        ModelActivationElapsedBucket::From5sTo30s
     } else if elapsed.as_secs() < 120 {
-        "30s_to_120s"
+        ModelActivationElapsedBucket::From30sTo120s
     } else if elapsed.as_secs() < 300 {
-        "120s_to_300s"
+        ModelActivationElapsedBucket::From120sTo300s
     } else {
-        "over_300s"
+        ModelActivationElapsedBucket::Over300s
     }
 }
 
@@ -3569,8 +3591,8 @@ mod tests {
         assert_eq!(
             classify_model_activation_failure(&error),
             ModelActivationFailureView {
-                error_kind: "onnx_init",
-                exit_class: "none",
+                error_kind: ModelActivationErrorKind::OnnxInit,
+                exit_class: ModelActivationExitClass::None,
             }
         );
     }
@@ -3578,15 +3600,15 @@ mod tests {
     #[test]
     fn model_activation_elapsed_buckets_have_stable_boundaries() {
         for (seconds, expected) in [
-            (0, "under_5s"),
-            (4, "under_5s"),
-            (5, "5s_to_30s"),
-            (29, "5s_to_30s"),
-            (30, "30s_to_120s"),
-            (119, "30s_to_120s"),
-            (120, "120s_to_300s"),
-            (299, "120s_to_300s"),
-            (300, "over_300s"),
+            (0, ModelActivationElapsedBucket::Under5s),
+            (4, ModelActivationElapsedBucket::Under5s),
+            (5, ModelActivationElapsedBucket::From5sTo30s),
+            (29, ModelActivationElapsedBucket::From5sTo30s),
+            (30, ModelActivationElapsedBucket::From30sTo120s),
+            (119, ModelActivationElapsedBucket::From30sTo120s),
+            (120, ModelActivationElapsedBucket::From120sTo300s),
+            (299, ModelActivationElapsedBucket::From120sTo300s),
+            (300, ModelActivationElapsedBucket::Over300s),
         ] {
             assert_eq!(
                 model_activation_elapsed_bucket(Duration::from_secs(seconds)),

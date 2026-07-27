@@ -1,7 +1,7 @@
 use std::{
     collections::{HashMap, HashSet, VecDeque},
     panic::AssertUnwindSafe,
-    path::PathBuf,
+    path::{Path, PathBuf},
     sync::{
         Arc, Mutex,
         atomic::{AtomicU64, Ordering},
@@ -41,6 +41,10 @@ use crate::{
     integrations::{
         ChatClientKind, ChatIntegrationManager, ChatIntegrationsSnapshot, IntegrationAction,
         IntegrationStatus, IntegrationView,
+    },
+    model_activation_status::{
+        MODEL_ACTIVATION_STATUS_FILE, ModelActivationErrorKind, ModelActivationExitClass,
+        ModelActivationFailureView, ModelActivationStatus, persist_model_activation_status,
     },
     model_config::{
         CloseBehavior, DesktopConfig, LanPreference, LocalePreference, ONBOARDING_VERSION,
@@ -2114,6 +2118,7 @@ async fn run_worker(
                                     &services,
                                     &mut background,
                                     ModelRuntimePaths::from_install(&outcome),
+                                    paths.logs.join(MODEL_ACTIVATION_STATUS_FILE),
                                 );
                             }
                             Err(_error) if queued_install => {
@@ -2278,6 +2283,7 @@ async fn run_worker(
                                         &services,
                                         &mut background,
                                         ModelRuntimePaths::from_install(&outcome),
+                                        paths.logs.join(MODEL_ACTIVATION_STATUS_FILE),
                                     );
                                 }
                             }
@@ -4243,33 +4249,54 @@ fn spawn_model_enable(
     services: &Arc<DesktopServices>,
     background: &mut JoinSet<BackgroundCompletion>,
     paths: ModelRuntimePaths,
+    status_path: PathBuf,
 ) {
     let services = Arc::clone(services);
     let model_id = paths.selection.model_id.to_owned();
     background.spawn(async move {
         let started = Instant::now();
+        persist_activation_status(&status_path, ModelActivationStatus::starting()).await;
         let result = match AssertUnwindSafe(services.enable_models(paths))
             .catch_unwind()
             .await
         {
-            Ok(Ok(())) => Ok(()),
+            Ok(Ok(())) => {
+                persist_activation_status(&status_path, ModelActivationStatus::ready()).await;
+                Ok(())
+            }
             Ok(Err(error)) => {
                 let failure = classify_model_activation_failure(&error);
+                let elapsed_bucket = model_activation_elapsed_bucket(started.elapsed());
+                persist_activation_status(
+                    &status_path,
+                    ModelActivationStatus::failed(failure, elapsed_bucket),
+                )
+                .await;
                 tracing::warn!(
                     event = "model_activation_failed",
-                    error_kind = failure.error_kind,
-                    elapsed_bucket = model_activation_elapsed_bucket(started.elapsed()),
-                    exit_class = failure.exit_class,
+                    error_kind = failure.error_kind.as_str(),
+                    elapsed_bucket = elapsed_bucket.as_str(),
+                    exit_class = failure.exit_class.as_str(),
                     "model activation failed"
                 );
                 Err(format!("{error:#}"))
             }
             Err(payload) => {
+                let failure = ModelActivationFailureView {
+                    error_kind: ModelActivationErrorKind::ActivationInternal,
+                    exit_class: ModelActivationExitClass::Unknown,
+                };
+                let elapsed_bucket = model_activation_elapsed_bucket(started.elapsed());
+                persist_activation_status(
+                    &status_path,
+                    ModelActivationStatus::failed(failure, elapsed_bucket),
+                )
+                .await;
                 tracing::warn!(
                     event = "model_activation_failed",
-                    error_kind = "activation_internal",
-                    elapsed_bucket = model_activation_elapsed_bucket(started.elapsed()),
-                    exit_class = "unknown",
+                    error_kind = failure.error_kind.as_str(),
+                    elapsed_bucket = elapsed_bucket.as_str(),
+                    exit_class = failure.exit_class.as_str(),
                     "model activation failed"
                 );
                 Err(panic_message(payload))
@@ -4277,6 +4304,16 @@ fn spawn_model_enable(
         };
         BackgroundCompletion::ModelsEnabled { model_id, result }
     });
+}
+
+async fn persist_activation_status(path: &Path, status: ModelActivationStatus) {
+    if let Err(error) = persist_model_activation_status(path.to_path_buf(), status).await {
+        tracing::warn!(
+            event = "model_activation_status_write_failed",
+            error_kind = error.error_kind(),
+            "model activation status write failed"
+        );
+    }
 }
 
 fn settled_model_lifecycle(services: &DesktopServices) -> ModelLifecycle {

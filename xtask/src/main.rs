@@ -2794,6 +2794,16 @@ fn powershell_function<'a>(source: &'a str, name: &str) -> Result<&'a str> {
         .with_context(|| format!("PowerShell {name} function offsets are invalid"))
 }
 
+fn powershell_executable_fingerprint(code: &str) -> String {
+    let canonical = code
+        .lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty())
+        .collect::<Vec<_>>()
+        .join("\n");
+    hex::encode(Sha256::digest(canonical.as_bytes()))
+}
+
 struct PowerShellSourceViews {
     normalized: String,
     code: String,
@@ -3040,6 +3050,7 @@ fn verify_validated_installer_smoke_sources(smoke: &str) -> Result<()> {
     );
     let failure_class_allowlist = r#"$InstallerSmokeFailureClasses = @(
     "model_activation_failed",
+    "desktop_exited_before_ready",
     "runtime_exited_before_ready",
     "models_timeout",
     "powershell_runtime"
@@ -3051,6 +3062,19 @@ fn verify_validated_installer_smoke_sources(smoke: &str) -> Result<()> {
             "$InstallerSmokeFailureClasses =",
         ),
         "validated installer smoke must retain the executable closed failure class allowlist"
+    );
+    let activation_state_allowlist = r#"$ModelActivationStates = @(
+    "starting",
+    "ready",
+    "failed"
+)"#;
+    ensure!(
+        powershell_executable_exact(
+            &source,
+            activation_state_allowlist,
+            "$ModelActivationStates =",
+        ),
+        "validated installer smoke must retain the executable closed activation state allowlist"
     );
     let cleanup_status_allowlist = r#"$InstallerSmokeCleanupStatuses = @(
     "not_needed",
@@ -3079,6 +3103,108 @@ fn verify_validated_installer_smoke_sources(smoke: &str) -> Result<()> {
             && structured_code.contains("$ModelActivationElapsedBuckets -ccontains $ElapsedBucket")
             && structured_code.contains("$script:StructuredFailure = [PSCustomObject]@{"),
         "validated installer smoke must create typed failures through closed executable allowlists"
+    );
+    let activation_status_range =
+        powershell_function_range(source.code.as_str(), "Get-SanitizedModelActivationStatus")?;
+    let activation_status_code = source
+        .code
+        .get(activation_status_range.clone())
+        .context("sanitized model activation status function offsets are invalid")?;
+    let activation_status_normalized = source
+        .normalized
+        .get(activation_status_range)
+        .context("normalized model activation status function offsets are invalid")?;
+    let activation_status_fingerprint =
+        powershell_executable_fingerprint(activation_status_normalized);
+    let stale_gate = activation_status_code
+        .find("if (-not $Changed -and -not $Cursor.ObservedStarting) {")
+        .context("validated installer smoke must ignore unchanged activation status")?;
+    let status_open = activation_status_code
+        .find("$Stream = [IO.File]::Open(")
+        .context("validated installer smoke must open changed activation status")?;
+    let activation_status_returns = activation_status_code
+        .lines()
+        .map(str::trim)
+        .filter(|line| line.starts_with("return"))
+        .collect::<Vec<_>>();
+    let activation_status_lower = activation_status_code.to_ascii_lowercase();
+    ensure!(
+        stale_gate < status_open
+            && activation_status_code
+                .contains("Get-RegularActivationStatusItem ([string] $Cursor.Path)")
+            && activation_status_code
+                .contains("$Stream.Length -gt $ActivationStatusReadLimitBytes",)
+            && activation_status_code.contains("$Record.PSObject.Properties.Name | Sort-Object")
+            && activation_status_code.contains("$ModelActivationStates -cnotcontains $State")
+            && activation_status_code
+                .contains("$ModelActivationErrorKinds -cnotcontains $ErrorKind")
+            && activation_status_code
+                .contains("$ModelActivationElapsedBuckets -cnotcontains $ElapsedBucket")
+            && activation_status_code
+                .contains("$ModelActivationExitClasses -cnotcontains $ExitClass")
+            && activation_status_code.contains("$Cursor.ObservedStarting = $true")
+            && !activation_status_lower.contains("[console]::")
+            && !activation_status_lower.contains("$host")
+            && !activation_status_lower.contains("write-")
+            && !activation_status_lower.contains("out-host")
+            && !activation_status_lower.contains("out-default")
+            && !activation_status_lower.contains("out-file")
+            && !activation_status_lower.contains("tee-object")
+            && !activation_status_code.contains(".Exception"),
+        "validated installer smoke must parse only the bounded durable activation status schema"
+    );
+    ensure!(
+        activation_status_returns.len() == 5
+            && activation_status_returns[..3] == ["return $null"; 3]
+            && activation_status_returns[3..]
+                .iter()
+                .all(|line| line.starts_with("return [PSCustomObject]@{")),
+        "validated installer smoke durable activation status reader must retain fixed control-flow exits"
+    );
+    ensure!(
+        activation_status_fingerprint
+            == "729da59e518132e0476bdcfd6198b538d8be1c17a1b9d64dddfc1782fcd321a0",
+        "validated installer smoke durable activation status executable fingerprint changed: {activation_status_fingerprint}"
+    );
+    let activation_failure_range =
+        powershell_function_range(source.code.as_str(), "Throw-IfModelActivationFailed")?;
+    let activation_failure_reader = source
+        .code
+        .get(activation_failure_range.clone())
+        .context("durable activation failure reader offsets are invalid")?;
+    let activation_failure_normalized = source
+        .normalized
+        .get(activation_failure_range)
+        .context("normalized durable activation failure reader offsets are invalid")?;
+    let activation_failure_fingerprint =
+        powershell_executable_fingerprint(activation_failure_normalized);
+    ensure!(
+        !activation_failure_reader
+            .lines()
+            .map(str::trim)
+            .filter_map(|line| line.split_whitespace().next())
+            .any(|command| ["return", "exit", "throw"]
+                .iter()
+                .any(|blocked| command.eq_ignore_ascii_case(blocked))
+                || command.to_ascii_lowercase().starts_with("write-")
+                || command.to_ascii_lowercase().starts_with("out-")
+                || command.eq_ignore_ascii_case("tee-object")),
+        "validated installer smoke must not bypass or emit from the durable activation failure reader"
+    );
+    let status_read = activation_failure_reader
+        .find("$Status = Get-SanitizedModelActivationStatus $ActivationStatusCursor")
+        .context("validated installer smoke must consult durable activation status")?;
+    let log_read = activation_failure_reader
+        .find("Update-ActivationLogCursor $ActivationLogCursor")
+        .context("validated installer smoke must retain the sanitized log fallback")?;
+    ensure!(
+        status_read < log_read,
+        "validated installer smoke must consult durable activation status before the log fallback"
+    );
+    ensure!(
+        activation_failure_fingerprint
+            == "2519f4012ef2e08865a6d088d5310888e099a293f1ba6b17620d5e7fab77ef87",
+        "validated installer smoke durable activation failure executable fingerprint changed: {activation_failure_fingerprint}"
     );
     let sanitized_range =
         powershell_function_range(source.code.as_str(), "Get-SanitizedInstallerSmokeFailure")?;
@@ -3202,7 +3328,12 @@ fn verify_validated_installer_smoke_sources(smoke: &str) -> Result<()> {
         )? && powershell_executable_exact_in_function(
             &source,
             "Throw-ModelRuntimeExitedBeforeReady",
-            "    Set-StructuredInstallerSmokeFailure `\n        \"runtime_exited_before_ready\" `\n        $null `\n        $null `\n        \"failure\"",
+            "    Set-StructuredInstallerSmokeFailure `\n        \"runtime_exited_before_ready\" `\n        $null `\n        $null `\n        \"unknown\"",
+            "Set-StructuredInstallerSmokeFailure",
+        )? && powershell_executable_exact_in_function(
+            &source,
+            "Throw-IfDesktopExitedBeforeReady",
+            "    Set-StructuredInstallerSmokeFailure `\n        \"desktop_exited_before_ready\" `\n        $null `\n        $null `\n        $ExitClass",
             "Set-StructuredInstallerSmokeFailure",
         )? && powershell_executable_exact_in_function(
             &source,
@@ -3211,6 +3342,14 @@ fn verify_validated_installer_smoke_sources(smoke: &str) -> Result<()> {
             "Set-StructuredInstallerSmokeFailure",
         )?,
         "validated installer smoke must preserve typed model failure classes structurally"
+    );
+    ensure!(
+        powershell_executable_exact(
+            &source,
+            "$ActivationStatusPath = Join-Path $ActivationLogDirectory \"model-activation-status.json\"\n    $ActivationStatusCursor = New-ActivationStatusCursor $ActivationStatusPath",
+            "$ActivationStatusPath =",
+        ),
+        "validated installer smoke must establish the durable activation status cursor before launch"
     );
     let model_readiness_stdin = r#"$ResponseLines = @($Body | & $Curl `
             --silent `
@@ -8532,6 +8671,60 @@ mod tests {
                 "",
                 "closed failure class",
             ),
+            (
+                "missing durable activation status",
+                "    $Status = Get-SanitizedModelActivationStatus $ActivationStatusCursor\n",
+                "    '$Status = Get-SanitizedModelActivationStatus $ActivationStatusCursor'\n",
+                "durable activation status",
+            ),
+            (
+                "raw durable status output",
+                "    $Item = Get-RegularActivationStatusItem ([string] $Cursor.Path)\n",
+                "    Write-Output $Cursor.Path\n    $Item = Get-RegularActivationStatusItem ([string] $Cursor.Path)\n",
+                "bounded durable activation status",
+            ),
+            (
+                "host leak from durable status",
+                "    $Item = Get-RegularActivationStatusItem ([string] $Cursor.Path)\n",
+                "    Write-Host $Cursor.Path\n    $Item = Get-RegularActivationStatusItem ([string] $Cursor.Path)\n",
+                "bounded durable activation status",
+            ),
+            (
+                "implicit pipeline leak from durable status",
+                "    $Item = Get-RegularActivationStatusItem ([string] $Cursor.Path)\n",
+                "    $Cursor.Path\n    $Item = Get-RegularActivationStatusItem ([string] $Cursor.Path)\n",
+                "executable fingerprint changed",
+            ),
+            (
+                "terminal durable status literal mutation",
+                "        State = \"failed\"\n",
+                "        State = \"readyx\"\n",
+                "executable fingerprint changed",
+            ),
+            (
+                "early return from durable status",
+                "function Get-SanitizedModelActivationStatus($Cursor) {\n",
+                "function Get-SanitizedModelActivationStatus($Cursor) {\n    return $null\n",
+                "fixed control-flow exits",
+            ),
+            (
+                "early return from activation failure reader",
+                "function Throw-IfModelActivationFailed {\n",
+                "function Throw-IfModelActivationFailed {\n    return\n",
+                "must not bypass",
+            ),
+            (
+                "inert stale activation status gate",
+                "    if (-not $Changed -and -not $Cursor.ObservedStarting) {\n",
+                "    if ($false) { '$Cursor.ObservedStarting'\n",
+                "ignore unchanged activation status",
+            ),
+            (
+                "invented runtime exit class",
+                "        \"unknown\"\n    throw \"the installed model runtime exited before models became ready\"",
+                "        \"failure\"\n    throw \"the installed model runtime exited before models became ready\"",
+                "typed model failure classes",
+            ),
         ];
         for (label, original, replacement, expected_error) in cases {
             let unsafe_smoke = smoke.replacen(original, replacement, 1);
@@ -8542,5 +8735,32 @@ mod tests {
                 "{label} failed through an unexpected gate: {error:#}"
             );
         }
+    }
+
+    #[test]
+    fn validated_installer_smoke_rejects_an_inert_durable_status_wrapper() {
+        let smoke = fs::read_to_string(
+            workspace_root().join("packaging/smoke-validated-windows-installer.ps1"),
+        )
+        .unwrap();
+        let unsafe_smoke = smoke
+            .replacen(
+                "function Get-SanitizedModelActivationStatus($Cursor) {\n",
+                "function Get-SanitizedModelActivationStatus($Cursor) {\n    if ($false) {\n",
+                1,
+            )
+            .replacen(
+                "\n}\n\nfunction Assert-RegularActivationLogDirectory",
+                "\n    }\n}\n\nfunction Assert-RegularActivationLogDirectory",
+                1,
+            );
+        assert_ne!(
+            unsafe_smoke, smoke,
+            "durable status wrapper fixture did not match"
+        );
+
+        let error = verify_validated_installer_smoke_sources(&unsafe_smoke).unwrap_err();
+
+        assert!(error.to_string().contains("executable fingerprint changed"));
     }
 }

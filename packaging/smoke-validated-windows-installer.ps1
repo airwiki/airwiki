@@ -18,9 +18,10 @@ $McpRequestTimeoutSeconds = 8
 $McpRequestId = 991
 $ProcessWaitMilliseconds = 120000
 $ProcessCleanupWaitMilliseconds = 10000
-$ActivationLogFlushWaitMilliseconds = 3000
+$ActivationStatusSettleWaitMilliseconds = 30000
 $ActivationLogPollMilliseconds = 100
 $ActivationLogReadLimitBytes = 1048576
+$ActivationStatusReadLimitBytes = 4096
 $ModelActivationErrorKinds = @(
     "configuration",
     "onnx_init",
@@ -49,6 +50,11 @@ $ModelActivationExitClasses = @(
     "failure",
     "unknown"
 )
+$ModelActivationStates = @(
+    "starting",
+    "ready",
+    "failed"
+)
 $InstallerSmokeStages = @(
     "preflight",
     "installer",
@@ -62,6 +68,7 @@ $InstallerSmokeStages = @(
 )
 $InstallerSmokeFailureClasses = @(
     "model_activation_failed",
+    "desktop_exited_before_ready",
     "runtime_exited_before_ready",
     "models_timeout",
     "powershell_runtime"
@@ -81,6 +88,7 @@ $InstallerSmokeCleanupStatuses = @(
 $script:ProcessTerminationUnconfirmed = $false
 $script:TerminalStage = "preflight"
 $script:StructuredFailure = $null
+$ExpectedDesktopProcess = $null
 
 function Set-StructuredInstallerSmokeFailure(
     [string] $FailureClass,
@@ -200,6 +208,133 @@ function Test-ModelRuntimeExitedBeforeReady(
         return $false
     }
     return [int] $ObservedProcessId.Value -ne $CurrentProcessId
+}
+
+function Get-RegularActivationStatusItem([string] $Path) {
+    if (-not (Test-Path -LiteralPath $Path)) {
+        return $null
+    }
+    $Item = Get-Item -LiteralPath $Path -Force -ErrorAction Stop
+    if ($Item.PSIsContainer -or
+        (($Item.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) -or
+        [long] $Item.Length -le 0 -or
+        [long] $Item.Length -gt $ActivationStatusReadLimitBytes) {
+        throw "the local activation status is not a bounded regular file"
+    }
+    return $Item
+}
+
+function New-ActivationStatusCursor([string] $Path) {
+    $Item = Get-RegularActivationStatusItem $Path
+    return [PSCustomObject]@{
+        Path = $Path
+        BaselineLength = if ($null -eq $Item) { [long] -1 } else { [long] $Item.Length }
+        BaselineWriteTicks = if ($null -eq $Item) {
+            [long] -1
+        } else {
+            [long] $Item.LastWriteTimeUtc.Ticks
+        }
+        ObservedStarting = $false
+    }
+}
+
+function Get-SanitizedModelActivationStatus($Cursor) {
+    $Item = Get-RegularActivationStatusItem ([string] $Cursor.Path)
+    if ($null -eq $Item) {
+        return $null
+    }
+    $Changed = [long] $Item.Length -ne [long] $Cursor.BaselineLength -or
+        [long] $Item.LastWriteTimeUtc.Ticks -ne [long] $Cursor.BaselineWriteTicks
+    if (-not $Changed -and -not $Cursor.ObservedStarting) {
+        return $null
+    }
+
+    $Stream = [IO.File]::Open(
+        $Item.FullName,
+        [IO.FileMode]::Open,
+        [IO.FileAccess]::Read,
+        [IO.FileShare]::ReadWrite -bor [IO.FileShare]::Delete
+    )
+    try {
+        if ($Stream.Length -le 0 -or
+            $Stream.Length -gt $ActivationStatusReadLimitBytes) {
+            throw "the local activation status exceeded its bounded schema"
+        }
+        $Bytes = New-Object byte[] $Stream.Length
+        $Read = 0
+        while ($Read -lt $Bytes.Length) {
+            $Count = $Stream.Read($Bytes, $Read, $Bytes.Length - $Read)
+            if ($Count -eq 0) {
+                break
+            }
+            $Read += $Count
+        }
+    } finally {
+        $Stream.Dispose()
+    }
+    if ($Read -ne $Bytes.Length) {
+        throw "the local activation status could not be read atomically"
+    }
+
+    $Utf8 = New-Object Text.UTF8Encoding($false, $true)
+    $Record = $Utf8.GetString($Bytes).Trim() |
+        ConvertFrom-Json -ErrorAction Stop
+    $ExpectedProperties = @(
+        "elapsed_bucket",
+        "error_kind",
+        "exit_class",
+        "schema_version",
+        "state"
+    )
+    $ActualProperties = @(
+        $Record.PSObject.Properties.Name | Sort-Object
+    )
+    if ([string]::Join("|", $ActualProperties) -cne
+        [string]::Join("|", $ExpectedProperties) -or
+        ($Record.schema_version -isnot [int] -and
+            $Record.schema_version -isnot [long]) -or
+        [int] $Record.schema_version -ne 1) {
+        throw "the local activation status schema is invalid"
+    }
+
+    $State = [string] $Record.state
+    if ($ModelActivationStates -cnotcontains $State) {
+        throw "the local activation status state is invalid"
+    }
+    if ($State -eq "starting") {
+        if ($Changed) {
+            $Cursor.ObservedStarting = $true
+        }
+        if ($null -ne $Record.error_kind -or
+            $null -ne $Record.elapsed_bucket -or
+            $null -ne $Record.exit_class) {
+            throw "the local activation starting record is invalid"
+        }
+        return $null
+    }
+    if ($State -eq "ready") {
+        if ($null -ne $Record.error_kind -or
+            $null -ne $Record.elapsed_bucket -or
+            $null -ne $Record.exit_class) {
+            throw "the local activation ready record is invalid"
+        }
+        return [PSCustomObject]@{ State = "ready" }
+    }
+
+    $ErrorKind = [string] $Record.error_kind
+    $ElapsedBucket = [string] $Record.elapsed_bucket
+    $ExitClass = [string] $Record.exit_class
+    if ($ModelActivationErrorKinds -cnotcontains $ErrorKind -or
+        $ModelActivationElapsedBuckets -cnotcontains $ElapsedBucket -or
+        $ModelActivationExitClasses -cnotcontains $ExitClass) {
+        throw "the local activation failure record is invalid"
+    }
+    return [PSCustomObject]@{
+        State = "failed"
+        ErrorKind = $ErrorKind
+        ElapsedBucket = $ElapsedBucket
+        ExitClass = $ExitClass
+    }
 }
 
 function Assert-RegularActivationLogDirectory([string] $Directory) {
@@ -359,6 +494,10 @@ function Throw-SanitizedModelActivationFailure($Failure) {
 }
 
 function Throw-IfModelActivationFailed {
+    $Status = Get-SanitizedModelActivationStatus $ActivationStatusCursor
+    if ($null -ne $Status -and $Status.State -eq "failed") {
+        Throw-SanitizedModelActivationFailure $Status
+    }
     Update-ActivationLogCursor $ActivationLogCursor
     $Failure = Get-SanitizedModelActivationFailure $ActivationLogCursor
     if ($null -ne $Failure) {
@@ -366,10 +505,31 @@ function Throw-IfModelActivationFailed {
     }
 }
 
+function Throw-IfDesktopExitedBeforeReady {
+    if ($null -eq $ExpectedDesktopProcess -or
+        -not $ExpectedDesktopProcess.HasExited) {
+        return
+    }
+    $ExitClass = if ($ExpectedDesktopProcess.ExitCode -eq 0) {
+        "success"
+    } else {
+        "failure"
+    }
+    Set-StructuredInstallerSmokeFailure `
+        "desktop_exited_before_ready" `
+        $null `
+        $null `
+        $ExitClass
+    throw "the installed desktop exited before models became ready"
+}
+
 function Throw-ModelRuntimeExitedBeforeReady {
-    $Deadline = [DateTime]::UtcNow.AddMilliseconds($ActivationLogFlushWaitMilliseconds)
+    $Deadline = [DateTime]::UtcNow.AddMilliseconds(
+        $ActivationStatusSettleWaitMilliseconds
+    )
     do {
         Throw-IfModelActivationFailed
+        Throw-IfDesktopExitedBeforeReady
         if ([DateTime]::UtcNow -ge $Deadline) {
             break
         }
@@ -379,7 +539,7 @@ function Throw-ModelRuntimeExitedBeforeReady {
         "runtime_exited_before_ready" `
         $null `
         $null `
-        "failure"
+        "unknown"
     throw "the installed model runtime exited before models became ready"
 }
 
@@ -536,6 +696,7 @@ function Wait-ForModelsReady {
     $Deadline = [DateTime]::UtcNow.AddMilliseconds($ModelReadyWaitMilliseconds)
     do {
         Throw-IfModelActivationFailed
+        Throw-IfDesktopExitedBeforeReady
         if (Test-ModelRuntimeExitedBeforeReady `
             $ExpectedDesktopProcessId `
             $ExpectedRuntimeExecutable `
@@ -572,6 +733,7 @@ function Wait-ForModelsReady {
             } catch { }
         }
         Throw-IfModelActivationFailed
+        Throw-IfDesktopExitedBeforeReady
         if (Test-ModelRuntimeExitedBeforeReady `
             $ExpectedDesktopProcessId `
             $ExpectedRuntimeExecutable `
@@ -717,6 +879,8 @@ try {
     $DesktopExecutable = Join-Path $InstallDir "airwiki.exe"
     $ExpectedRuntimeExecutable = Join-Path $InstallDir "llama\llama-server.exe"
     $ActivationLogDirectory = Join-Path $env:LOCALAPPDATA "airwiki\AirWiki\data\logs"
+    $ActivationStatusPath = Join-Path $ActivationLogDirectory "model-activation-status.json"
+    $ActivationStatusCursor = New-ActivationStatusCursor $ActivationStatusPath
     $ActivationLogCursor = New-ActivationLogCursor $ActivationLogDirectory
     $BundleFiles = [ordered]@{
         "airwiki.exe" = Join-Path $BundleRoot "airwiki.exe"
@@ -757,6 +921,18 @@ try {
         throw "the installed desktop did not open from its per-user path"
     }
     $ExpectedDesktopProcessId = [int] $DesktopProcesses[0].ProcessId
+    $ExpectedDesktopProcess = [Diagnostics.Process]::GetProcessById(
+        $ExpectedDesktopProcessId
+    )
+    $ExpectedDesktopSafeHandle = $ExpectedDesktopProcess.SafeHandle
+    if ($ExpectedDesktopSafeHandle.IsInvalid -or
+        $ExpectedDesktopSafeHandle.IsClosed -or
+        $ExpectedDesktopProcess.HasExited -or
+        -not (Test-SamePath `
+            ([string] $ExpectedDesktopProcess.MainModule.FileName) `
+            $DesktopExecutable)) {
+        throw "the installed desktop process identity is unavailable"
+    }
 
     $script:TerminalStage = "payload_validation"
     $ExpectedInstalled = New-WindowsPayloadManifest
@@ -814,6 +990,10 @@ try {
                 $CleanupStatus = "failed"
             }
         }
+    }
+    if ($null -ne $ExpectedDesktopProcess) {
+        $ExpectedDesktopProcess.Dispose()
+        $ExpectedDesktopProcess = $null
     }
 }
 

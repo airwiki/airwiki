@@ -1,11 +1,11 @@
 app-title = AirWiki
-nav-home = Home
-nav-collections = Knowledge folders
+nav-home = Today
+nav-collections = Library
 nav-review = Review
 nav-wiki = Wiki
-nav-search = Search
+nav-search = Ask
 nav-integrations = Chats
-nav-devices = Other devices
+nav-devices = Connections
 nav-settings = Settings
 
 status-ready = Ready
@@ -13,6 +13,10 @@ status-working = Working
 status-needs-permission = Needs permission
 status-needs-attention = Needs attention
 status-optional-disabled = Optional · Off
+status-review-count = { $count ->
+    [one] { $count } awaiting review
+   *[other] { $count } awaiting review
+}
 
 dashboard-title = Your knowledge
 dashboard-subtitle = AirWiki keeps local knowledge organized and shows only the next action that needs you.
@@ -31,6 +35,16 @@ journey-step-done = Complete
 journey-step-current = Current step
 journey-step-next = Next
 home-next-step = Next step
+home-title = Today
+home-collection-count = { $count ->
+    [one] { $count } knowledge folder
+   *[other] { $count } knowledge folders
+}
+home-published-count = { $count ->
+    [one] { $count } published
+   *[other] { $count } published
+}
+home-private-default = Private by default
 home-optional-title = Grow your setup when you are ready
 home-optional-body = Other devices, chat apps, background operation, and updates are optional.
 
@@ -99,7 +113,7 @@ primary-button-open-health = Open Health
 primary-button-view-options = View options
 primary-button-view-diagnostics = View diagnostics
 
-collections-title = Knowledge folders
+collections-title = Library
 collections-subtitle = Each knowledge folder watches one local folder and maintains an independent OKF bundle.
 collections-monitoring = Automatic monitoring runs while the app is open, with a full reconciliation every { $minutes } minutes when local AI is ready.
 collections-new = New knowledge folder
@@ -224,7 +238,7 @@ search-placeholder = What do you want to know?
 search-empty-title = No matching evidence found
 search-empty-body = Try a more specific phrase or use words that appear in the published document.
 search-error-title = This search could not be completed
-devices-title = Other devices
+devices-title = Connections
 devices-searching = Looking for devices on your local network…
 devices-manual-advanced = Manual connection (advanced)
 devices-this-address = This device's manual connection address:
@@ -602,7 +616,7 @@ review-entity-type = Entity type
 review-link-label = Link label
 review-link-target = Link target
 
-search-title = Search your knowledge
+search-title = Ask your knowledge
 search-subtitle = Combines the local index with paired devices; results may be partial.
 search-action = Search
 search-running = Searching available devices…

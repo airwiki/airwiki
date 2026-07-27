@@ -1,31 +1,37 @@
 use eframe::egui::{self, Color32};
 
-pub(crate) const AIR_BLUE: Color32 = Color32::from_rgb(34, 151, 245);
-pub(crate) const EVIDENCE_CYAN: Color32 = Color32::from_rgb(22, 199, 215);
+/// Broadsheet's restrained cyan plate, darkened so white button text remains legible.
+pub(crate) const AIR_BLUE: Color32 = Color32::from_rgb(0, 103, 134);
+pub(crate) const EVIDENCE_CYAN: Color32 = Color32::from_rgb(0, 169, 209);
+const ATTENTION_MAGENTA_LIGHT: Color32 = Color32::from_rgb(170, 11, 86);
+const ATTENTION_MAGENTA_DARK: Color32 = Color32::from_rgb(255, 117, 181);
 pub(crate) const VERIFIED_GREEN: Color32 = Color32::from_rgb(87, 200, 137);
 pub(crate) const WARNING_AMBER: Color32 = Color32::from_rgb(230, 162, 60);
 pub(crate) const ERROR_CORAL: Color32 = Color32::from_rgb(255, 123, 117);
+const VERIFIED_GREEN_LIGHT: Color32 = Color32::from_rgb(39, 100, 72);
+const WARNING_AMBER_LIGHT: Color32 = Color32::from_rgb(122, 78, 0);
+const ERROR_CORAL_LIGHT: Color32 = Color32::from_rgb(168, 50, 50);
 
-const INK_DARK: Color32 = Color32::from_rgb(18, 28, 42);
-const SURFACE_DARK: Color32 = Color32::from_rgb(24, 37, 54);
-const BORDER_DARK: Color32 = Color32::from_rgb(58, 80, 105);
-const TEXT_DARK: Color32 = Color32::from_rgb(238, 244, 250);
-const SECONDARY_DARK: Color32 = Color32::from_rgb(184, 199, 217);
+const PAPER_DARK: Color32 = Color32::from_rgb(32, 30, 29);
+const SURFACE_DARK: Color32 = Color32::from_rgb(45, 43, 43);
+const BORDER_DARK: Color32 = Color32::from_rgb(96, 93, 93);
+const TEXT_DARK: Color32 = Color32::from_rgb(248, 244, 244);
+const SECONDARY_DARK: Color32 = Color32::from_rgb(186, 182, 182);
 
-const INK_LIGHT: Color32 = Color32::from_rgb(247, 250, 252);
-const SURFACE_LIGHT: Color32 = Color32::WHITE;
-const BORDER_LIGHT: Color32 = Color32::from_rgb(204, 218, 232);
-const TEXT_LIGHT: Color32 = Color32::from_rgb(24, 42, 61);
-const SECONDARY_LIGHT: Color32 = Color32::from_rgb(73, 97, 120);
+const PAPER_LIGHT: Color32 = Color32::from_rgb(243, 242, 242);
+const SURFACE_LIGHT: Color32 = Color32::from_rgb(234, 233, 233);
+const BORDER_LIGHT: Color32 = Color32::from_rgb(196, 193, 193);
+const TEXT_LIGHT: Color32 = Color32::from_rgb(32, 30, 29);
+const SECONDARY_LIGHT: Color32 = Color32::from_rgb(96, 93, 93);
 
 pub(crate) fn apply(context: &egui::Context) {
     let mut style = (*context.global_style()).clone();
-    style.spacing.item_spacing = egui::vec2(10.0, 8.0);
-    style.spacing.button_padding = egui::vec2(14.0, 8.0);
+    style.spacing.item_spacing = egui::vec2(10.0, 10.0);
+    style.spacing.button_padding = egui::vec2(12.0, 7.0);
     style.spacing.interact_size.y = 36.0;
     style
         .text_styles
-        .insert(egui::TextStyle::Heading, egui::FontId::proportional(28.0));
+        .insert(egui::TextStyle::Heading, egui::FontId::proportional(32.0));
     style
         .text_styles
         .insert(egui::TextStyle::Body, egui::FontId::proportional(15.0));
@@ -34,29 +40,48 @@ pub(crate) fn apply(context: &egui::Context) {
         .insert(egui::TextStyle::Button, egui::FontId::proportional(14.0));
     style
         .text_styles
-        .insert(egui::TextStyle::Small, egui::FontId::proportional(12.5));
+        .insert(egui::TextStyle::Small, egui::FontId::proportional(12.0));
     style
         .text_styles
-        .insert(egui::TextStyle::Monospace, egui::FontId::monospace(13.0));
+        .insert(egui::TextStyle::Monospace, egui::FontId::monospace(12.5));
     style.visuals.selection.bg_fill = AIR_BLUE;
-    style.visuals.selection.stroke = egui::Stroke::new(1.0, Color32::WHITE);
-    style.visuals.widgets.active.corner_radius = egui::CornerRadius::same(8);
-    style.visuals.widgets.hovered.corner_radius = egui::CornerRadius::same(8);
-    style.visuals.widgets.inactive.corner_radius = egui::CornerRadius::same(8);
+    style.visuals.selection.stroke = egui::Stroke::new(2.0, Color32::WHITE);
+    style.visuals.hyperlink_color = hyperlink(style.visuals.dark_mode);
+    style.visuals.widgets.active.corner_radius = egui::CornerRadius::same(2);
+    style.visuals.widgets.hovered.corner_radius = egui::CornerRadius::same(2);
+    style.visuals.widgets.inactive.corner_radius = egui::CornerRadius::same(2);
+    style.visuals.widgets.noninteractive.corner_radius = egui::CornerRadius::same(2);
+    style.visuals.window_corner_radius = egui::CornerRadius::same(2);
     if style.visuals.dark_mode {
-        style.visuals.panel_fill = INK_DARK;
+        style.visuals.panel_fill = PAPER_DARK;
         style.visuals.window_fill = SURFACE_DARK;
         style.visuals.window_stroke.color = BORDER_DARK;
+        style.visuals.widgets.noninteractive.bg_fill = SURFACE_DARK;
+        style.visuals.widgets.noninteractive.bg_stroke.color = BORDER_DARK;
+        style.visuals.widgets.inactive.weak_bg_fill = SURFACE_DARK;
+        style.visuals.widgets.inactive.bg_stroke.color = BORDER_DARK;
+        style.visuals.faint_bg_color = SURFACE_DARK;
+        style.visuals.extreme_bg_color = PAPER_DARK;
         style.visuals.override_text_color = Some(TEXT_DARK);
         style.visuals.weak_text_color = Some(SECONDARY_DARK);
     } else {
-        style.visuals.panel_fill = INK_LIGHT;
+        style.visuals.panel_fill = PAPER_LIGHT;
         style.visuals.window_fill = SURFACE_LIGHT;
         style.visuals.window_stroke.color = BORDER_LIGHT;
+        style.visuals.widgets.noninteractive.bg_fill = SURFACE_LIGHT;
+        style.visuals.widgets.noninteractive.bg_stroke.color = BORDER_LIGHT;
+        style.visuals.widgets.inactive.weak_bg_fill = SURFACE_LIGHT;
+        style.visuals.widgets.inactive.bg_stroke.color = BORDER_LIGHT;
+        style.visuals.faint_bg_color = SURFACE_LIGHT;
+        style.visuals.extreme_bg_color = PAPER_LIGHT;
         style.visuals.override_text_color = Some(TEXT_LIGHT);
         style.visuals.weak_text_color = Some(SECONDARY_LIGHT);
     }
     context.set_global_style(style);
+}
+
+pub(crate) fn paper(dark_mode: bool) -> Color32 {
+    if dark_mode { PAPER_DARK } else { PAPER_LIGHT }
 }
 
 pub(crate) fn surface(dark_mode: bool) -> Color32 {
@@ -64,6 +89,50 @@ pub(crate) fn surface(dark_mode: bool) -> Color32 {
         SURFACE_DARK
     } else {
         SURFACE_LIGHT
+    }
+}
+
+pub(crate) fn ink(dark_mode: bool) -> Color32 {
+    if dark_mode { TEXT_DARK } else { TEXT_LIGHT }
+}
+
+pub(crate) fn accent_text(dark_mode: bool) -> Color32 {
+    if dark_mode { EVIDENCE_CYAN } else { AIR_BLUE }
+}
+
+pub(crate) fn hyperlink(dark_mode: bool) -> Color32 {
+    accent_text(dark_mode)
+}
+
+pub(crate) fn verified_text(dark_mode: bool) -> Color32 {
+    if dark_mode {
+        VERIFIED_GREEN
+    } else {
+        VERIFIED_GREEN_LIGHT
+    }
+}
+
+pub(crate) fn warning_text(dark_mode: bool) -> Color32 {
+    if dark_mode {
+        WARNING_AMBER
+    } else {
+        WARNING_AMBER_LIGHT
+    }
+}
+
+pub(crate) fn error_text(dark_mode: bool) -> Color32 {
+    if dark_mode {
+        ERROR_CORAL
+    } else {
+        ERROR_CORAL_LIGHT
+    }
+}
+
+pub(crate) fn attention(dark_mode: bool) -> Color32 {
+    if dark_mode {
+        ATTENTION_MAGENTA_DARK
+    } else {
+        ATTENTION_MAGENTA_LIGHT
     }
 }
 
@@ -86,15 +155,48 @@ mod tests {
     #[test]
     fn text_tokens_meet_normal_text_contrast_in_both_themes() {
         for (foreground, background) in [
-            (TEXT_DARK, INK_DARK),
-            (SECONDARY_DARK, INK_DARK),
-            (TEXT_LIGHT, INK_LIGHT),
-            (SECONDARY_LIGHT, INK_LIGHT),
-            (ERROR_CORAL, INK_DARK),
-            (VERIFIED_GREEN, INK_DARK),
-            (WARNING_AMBER, INK_DARK),
+            (TEXT_DARK, PAPER_DARK),
+            (SECONDARY_DARK, PAPER_DARK),
+            (TEXT_LIGHT, PAPER_LIGHT),
+            (SECONDARY_LIGHT, PAPER_LIGHT),
+            (Color32::WHITE, AIR_BLUE),
+            (ATTENTION_MAGENTA_DARK, PAPER_DARK),
+            (ATTENTION_MAGENTA_LIGHT, PAPER_LIGHT),
         ] {
             assert!(contrast_ratio(foreground, background) >= 4.5);
+        }
+    }
+
+    #[test]
+    fn hyperlinks_meet_normal_text_contrast_on_real_backgrounds() {
+        for dark_mode in [false, true] {
+            for background in [paper(dark_mode), surface(dark_mode)] {
+                assert!(contrast_ratio(hyperlink(dark_mode), background) >= 4.5);
+            }
+        }
+    }
+
+    #[test]
+    fn accent_text_meets_normal_text_contrast_on_real_backgrounds() {
+        for dark_mode in [false, true] {
+            for background in [paper(dark_mode), surface(dark_mode)] {
+                assert!(contrast_ratio(accent_text(dark_mode), background) >= 4.5);
+            }
+        }
+    }
+
+    #[test]
+    fn status_text_meets_normal_text_contrast_on_real_backgrounds() {
+        for dark_mode in [false, true] {
+            for background in [paper(dark_mode), surface(dark_mode)] {
+                for foreground in [
+                    verified_text(dark_mode),
+                    warning_text(dark_mode),
+                    error_text(dark_mode),
+                ] {
+                    assert!(contrast_ratio(foreground, background) >= 4.5);
+                }
+            }
         }
     }
 

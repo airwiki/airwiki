@@ -115,7 +115,7 @@ impl ChatIntegrationsUi {
 
         if let Some(error) = &self.inline_error {
             ui.colored_label(
-                crate::theme::ERROR_CORAL,
+                crate::theme::error_text(ui.visuals().dark_mode),
                 super::human_error_summary(localization, error),
             );
         }
@@ -187,7 +187,7 @@ impl ChatIntegrationsUi {
                 .map_or(0, |snapshot| snapshot.external_ai_collection_count);
             if count == 0 {
                 ui.colored_label(
-                    crate::theme::WARNING_AMBER,
+                    crate::theme::warning_text(ui.visuals().dark_mode),
                     localization.text("integrations-no-chat-folders"),
                 );
             } else {
@@ -221,11 +221,12 @@ impl ChatIntegrationsUi {
         egui::Frame::group(ui.style()).show(ui, |ui| {
             ui.horizontal(|ui| {
                 ui.heading(integration.client.display_name());
-                let (label, color) = status_presentation(localization, &integration.status);
+                let (label, color) =
+                    status_presentation(localization, &integration.status, ui.visuals().dark_mode);
                 ui.colored_label(color, label);
                 if integration.activity_recent {
                     ui.colored_label(
-                        crate::theme::VERIFIED_GREEN,
+                        crate::theme::verified_text(ui.visuals().dark_mode),
                         localization.text("integrations-recent-activity"),
                     );
                 }
@@ -258,7 +259,7 @@ impl ChatIntegrationsUi {
                 ui.label(
                     RichText::new(localization.text("integrations-restart-chatgpt"))
                         .small()
-                        .color(crate::theme::WARNING_AMBER),
+                        .color(crate::theme::warning_text(ui.visuals().dark_mode)),
                 );
             }
             ui.horizontal(|ui| {
@@ -385,7 +386,7 @@ impl ChatIntegrationsUi {
                     IntegrationAction::Connect(_) => {
                         ui.label(localization.text("integrations-confirm-connect-body"));
                         ui.colored_label(
-                            crate::theme::WARNING_AMBER,
+                            crate::theme::warning_text(ui.visuals().dark_mode),
                             localization.text("integrations-confirm-cloud-warning"),
                         );
                         ui.label(localization.text("integrations-confirm-open-reminder"));
@@ -448,34 +449,45 @@ fn action_client(action: IntegrationAction) -> Option<ChatClientKind> {
 fn status_presentation(
     localization: &Localization,
     status: &IntegrationStatus,
+    dark_mode: bool,
 ) -> (String, Color32) {
     let (message, color) = match status {
         IntegrationStatus::NotInstalled => (
             "integration-status-not-installed",
-            crate::theme::secondary_text(true),
+            crate::theme::secondary_text(dark_mode),
         ),
-        IntegrationStatus::Available => ("integration-status-available", crate::theme::AIR_BLUE),
+        IntegrationStatus::Available => (
+            "integration-status-available",
+            crate::theme::accent_text(dark_mode),
+        ),
         IntegrationStatus::Configuring => (
             "integration-status-configuring",
-            crate::theme::WARNING_AMBER,
+            crate::theme::warning_text(dark_mode),
         ),
         IntegrationStatus::AwaitingClientApproval => (
             "integration-status-awaiting-approval",
-            crate::theme::WARNING_AMBER,
+            crate::theme::warning_text(dark_mode),
         ),
         IntegrationStatus::Configured => (
             "integration-status-configured",
-            crate::theme::VERIFIED_GREEN,
+            crate::theme::verified_text(dark_mode),
         ),
         IntegrationStatus::UpdateAvailable => (
             "integration-status-update-available",
-            crate::theme::WARNING_AMBER,
+            crate::theme::warning_text(dark_mode),
         ),
-        IntegrationStatus::Conflict => ("integration-status-conflict", crate::theme::ERROR_CORAL),
-        IntegrationStatus::Unsupported => {
-            ("integration-status-unsupported", crate::theme::ERROR_CORAL)
-        }
-        IntegrationStatus::Error => ("integration-status-error", crate::theme::ERROR_CORAL),
+        IntegrationStatus::Conflict => (
+            "integration-status-conflict",
+            crate::theme::error_text(dark_mode),
+        ),
+        IntegrationStatus::Unsupported => (
+            "integration-status-unsupported",
+            crate::theme::error_text(dark_mode),
+        ),
+        IntegrationStatus::Error => (
+            "integration-status-error",
+            crate::theme::error_text(dark_mode),
+        ),
     };
     (localization.text(message), color)
 }

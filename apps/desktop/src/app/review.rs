@@ -508,7 +508,10 @@ pub(super) fn show_review_evidence_panel(
                     ReviewEvidenceErrorView::MissingEvidence => "review-evidence-missing",
                     ReviewEvidenceErrorView::Unavailable => "review-evidence-unavailable",
                 };
-                ui.colored_label(crate::theme::WARNING_AMBER, localization.text(message_id));
+                ui.colored_label(
+                    crate::theme::warning_text(ui.visuals().dark_mode),
+                    localization.text(message_id),
+                );
                 if ui
                     .button(localization.text("review-evidence-retry"))
                     .clicked()

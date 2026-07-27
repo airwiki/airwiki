@@ -1,11 +1,11 @@
 app-title = AirWiki
-nav-home = Inicio
-nav-collections = Carpetas de conocimiento
+nav-home = Hoy
+nav-collections = Biblioteca
 nav-review = Revisión
 nav-wiki = Wiki
-nav-search = Buscar
+nav-search = Preguntar
 nav-integrations = Chats
-nav-devices = Otros equipos
+nav-devices = Conexiones
 nav-settings = Configuración
 
 status-ready = Listo
@@ -13,6 +13,10 @@ status-working = Trabajando
 status-needs-permission = Necesita permiso
 status-needs-attention = Necesita atención
 status-optional-disabled = Opcional · Desactivado
+status-review-count = { $count ->
+    [one] { $count } por revisar
+   *[other] { $count } por revisar
+}
 
 dashboard-title = Tu conocimiento
 dashboard-subtitle = AirWiki mantiene el conocimiento local organizado y muestra únicamente la próxima acción que necesita tu atención.
@@ -31,6 +35,16 @@ journey-step-done = Completado
 journey-step-current = Paso actual
 journey-step-next = Siguiente
 home-next-step = Próximo paso
+home-title = Hoy
+home-collection-count = { $count ->
+    [one] { $count } carpeta de conocimiento
+   *[other] { $count } carpetas de conocimiento
+}
+home-published-count = { $count ->
+    [one] { $count } publicado
+   *[other] { $count } publicados
+}
+home-private-default = Privado por defecto
 home-optional-title = Amplía la configuración cuando quieras
 home-optional-body = Otros equipos, chats, segundo plano y actualizaciones son opcionales.
 
@@ -99,7 +113,7 @@ primary-button-open-health = Abrir Salud
 primary-button-view-options = Ver opciones
 primary-button-view-diagnostics = Ver diagnóstico
 
-collections-title = Carpetas de conocimiento
+collections-title = Biblioteca
 collections-subtitle = Cada carpeta de conocimiento observa una carpeta local y mantiene un bundle OKF independiente.
 collections-monitoring = El monitoreo automático funciona mientras la app está abierta y hace una reconciliación completa cada { $minutes } minutos cuando la IA local está lista.
 collections-new = Nueva carpeta de conocimiento
@@ -224,7 +238,7 @@ search-placeholder = ¿Qué quieres saber?
 search-empty-title = No encontramos evidencia coincidente
 search-empty-body = Prueba una frase más específica o usa palabras que aparezcan en el documento publicado.
 search-error-title = No se pudo completar esta búsqueda
-devices-title = Otros equipos
+devices-title = Conexiones
 devices-searching = Buscando equipos en tu red local…
 devices-manual-advanced = Conexión manual (avanzado)
 devices-this-address = Dirección de este equipo para conexión manual:
@@ -602,7 +616,7 @@ review-entity-type = Tipo de entidad
 review-link-label = Etiqueta del enlace
 review-link-target = Destino del enlace
 
-search-title = Busca en tu conocimiento
+search-title = Pregunta a tu conocimiento
 search-subtitle = Combina el índice local con los equipos emparejados; los resultados pueden ser parciales.
 search-action = Buscar
 search-running = Consultando los equipos disponibles…

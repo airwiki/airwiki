@@ -544,9 +544,9 @@ impl KnowledgeUi {
         if let Some((error, message)) = &self.link_notice {
             ui.colored_label(
                 if *error {
-                    crate::theme::ERROR_CORAL
+                    crate::theme::error_text(ui.visuals().dark_mode)
                 } else {
-                    crate::theme::WARNING_AMBER
+                    crate::theme::warning_text(ui.visuals().dark_mode)
                 },
                 localized_knowledge_notice(localization, message),
             );
@@ -698,7 +698,11 @@ impl KnowledgeUi {
         let mut refresh_requested = false;
 
         let title = |ui: &mut egui::Ui| {
-            ui.heading(RichText::new(localization.text("knowledge-title")).size(28.0));
+            ui.heading(
+                RichText::new(localization.text("knowledge-title"))
+                    .size(34.0)
+                    .strong(),
+            );
             ui.add(
                 egui::Label::new(
                     RichText::new(localization.text("knowledge-subtitle"))
@@ -1015,7 +1019,7 @@ impl KnowledgeUi {
             });
             if page.truncated {
                 ui.colored_label(
-                    crate::theme::WARNING_AMBER,
+                    crate::theme::warning_text(ui.visuals().dark_mode),
                     localization.text("knowledge-page-truncated"),
                 );
             }
@@ -1092,7 +1096,8 @@ impl KnowledgeUi {
                     link_arguments.set("count", page.outgoing_links.len());
                     ui.heading(localization.text_with("knowledge-links", Some(&link_arguments)));
                     for link in &page.outgoing_links {
-                        let (status, color) = link_status(localization, &link.disposition);
+                        let (status, color) =
+                            link_status(localization, &link.disposition, ui.visuals().dark_mode);
                         ui.horizontal_wrapped(|ui| {
                             ui.colored_label(color, status);
                             ui.label(if link.label.is_empty() {
@@ -1270,7 +1275,7 @@ impl KnowledgeUi {
         }
         if matches!(bundle.state, KnowledgeBundleState::Empty) {
             ui.colored_label(
-                crate::theme::WARNING_AMBER,
+                crate::theme::warning_text(ui.visuals().dark_mode),
                 localization.text("knowledge-health-empty-warning"),
             );
             ui.add_space(8.0);
@@ -1281,19 +1286,19 @@ impl KnowledgeUi {
                 ui,
                 &localization.text("knowledge-health-concepts"),
                 report.total_concepts,
-                Color32::from_rgb(80, 145, 205),
+                crate::theme::accent_text(ui.visuals().dark_mode),
             );
             health_card(
                 ui,
                 &localization.text("knowledge-health-warnings"),
                 report.warning_count,
-                crate::theme::WARNING_AMBER,
+                crate::theme::warning_text(ui.visuals().dark_mode),
             );
             health_card(
                 ui,
                 &localization.text("knowledge-health-errors"),
                 report.error_count,
-                crate::theme::ERROR_CORAL,
+                crate::theme::error_text(ui.visuals().dark_mode),
             );
             ui.vertical(|ui| {
                 ui.label(
@@ -1316,7 +1321,7 @@ impl KnowledgeUi {
         let guided_repair_available = content_repair && !history_recovery && !manual_recovery;
         if history_recovery {
             ui.colored_label(
-                crate::theme::WARNING_AMBER,
+                crate::theme::warning_text(ui.visuals().dark_mode),
                 localization.text("knowledge-repair-history-blocked"),
             );
             ui.label(
@@ -1327,7 +1332,7 @@ impl KnowledgeUi {
         }
         if manual_recovery {
             ui.colored_label(
-                crate::theme::WARNING_AMBER,
+                crate::theme::warning_text(ui.visuals().dark_mode),
                 localization.text("knowledge-repair-manual-title"),
             );
             ui.label(
@@ -1342,7 +1347,7 @@ impl KnowledgeUi {
             .filter(|(collection_id, _)| *collection_id == bundle.collection_id)
         {
             ui.colored_label(
-                crate::theme::ERROR_CORAL,
+                crate::theme::error_text(ui.visuals().dark_mode),
                 localized_guided_repair_error(localization, error),
             );
             ui.collapsing(localization.text("action-details"), |ui| {
@@ -1358,7 +1363,7 @@ impl KnowledgeUi {
             arguments.set("reviewed", result.concepts_returned_to_review.len());
             arguments.set("orphans", result.orphan_concepts_removed.len());
             ui.colored_label(
-                crate::theme::VERIFIED_GREEN,
+                crate::theme::verified_text(ui.visuals().dark_mode),
                 localization.text_with("knowledge-repair-complete", Some(&arguments)),
             );
         }
@@ -1403,7 +1408,8 @@ impl KnowledgeUi {
             .show(ui, |ui| {
                 for issue in &report.issues {
                     egui::Frame::group(ui.style()).show(ui, |ui| {
-                        let (label, color) = severity_visual(localization, &issue.severity);
+                        let (label, color) =
+                            severity_visual(localization, &issue.severity, ui.visuals().dark_mode);
                         ui.horizontal(|ui| {
                             ui.colored_label(color, RichText::new(label).strong());
                             if let Some(page_id) = issue.page {
@@ -1484,7 +1490,7 @@ impl KnowledgeUi {
             .default_width(560.0)
             .show(context, |ui| {
                 ui.colored_label(
-                    crate::theme::WARNING_AMBER,
+                    crate::theme::warning_text(ui.visuals().dark_mode),
                     RichText::new(localization.text("knowledge-repair-confirm-warning")).strong(),
                 );
                 ui.label(localization.text("knowledge-repair-confirm-body"));
@@ -2040,7 +2046,7 @@ fn search_evidence_trace(
                 egui::Label::new(
                     RichText::new(localization.text("knowledge-search-evidence-title"))
                         .strong()
-                        .color(AIR_BLUE),
+                        .color(crate::theme::accent_text(ui.visuals().dark_mode)),
                 )
                 .sense(egui::Sense::focusable_noninteractive()),
             );
@@ -2284,24 +2290,33 @@ fn bundle_state_badge(
     localization: &Localization,
     bundle: &KnowledgeBundleView,
 ) {
-    let (message, color) = bundle_state_visual(bundle);
+    let (message, color) = bundle_state_visual(bundle, ui.visuals().dark_mode);
     let label = localization.text(message);
     ui.colored_label(color, RichText::new(format!("● {label}")).strong());
 }
 
-fn bundle_state_visual(bundle: &KnowledgeBundleView) -> (&'static str, Color32) {
+fn bundle_state_visual(bundle: &KnowledgeBundleView, dark_mode: bool) -> (&'static str, Color32) {
     match bundle.state {
-        KnowledgeBundleState::Empty => {
-            ("knowledge-state-empty", crate::theme::secondary_text(true))
-        }
-        KnowledgeBundleState::Ready if bundle.health.error_count > 0 => {
-            ("knowledge-state-attention", crate::theme::ERROR_CORAL)
-        }
-        KnowledgeBundleState::Ready if bundle.health.warning_count > 0 => {
-            ("knowledge-state-review", crate::theme::WARNING_AMBER)
-        }
-        KnowledgeBundleState::Ready => ("knowledge-state-ready", crate::theme::VERIFIED_GREEN),
-        KnowledgeBundleState::Updating => ("knowledge-state-updating", crate::theme::WARNING_AMBER),
+        KnowledgeBundleState::Empty => (
+            "knowledge-state-empty",
+            crate::theme::secondary_text(dark_mode),
+        ),
+        KnowledgeBundleState::Ready if bundle.health.error_count > 0 => (
+            "knowledge-state-attention",
+            crate::theme::error_text(dark_mode),
+        ),
+        KnowledgeBundleState::Ready if bundle.health.warning_count > 0 => (
+            "knowledge-state-review",
+            crate::theme::warning_text(dark_mode),
+        ),
+        KnowledgeBundleState::Ready => (
+            "knowledge-state-ready",
+            crate::theme::verified_text(dark_mode),
+        ),
+        KnowledgeBundleState::Updating => (
+            "knowledge-state-updating",
+            crate::theme::warning_text(dark_mode),
+        ),
     }
 }
 
@@ -2312,29 +2327,47 @@ fn empty_bundle_has_health_findings(bundle: &KnowledgeBundleView) -> bool {
 fn link_status(
     localization: &Localization,
     disposition: &KnowledgeLinkDisposition,
+    dark_mode: bool,
 ) -> (String, Color32) {
     let (message, color) = match disposition {
-        KnowledgeLinkDisposition::Internal(_) => {
-            ("knowledge-link-internal", crate::theme::VERIFIED_GREEN)
-        }
-        KnowledgeLinkDisposition::External => {
-            ("knowledge-link-external", Color32::from_rgb(80, 145, 205))
-        }
-        KnowledgeLinkDisposition::Broken => {
-            ("knowledge-link-broken-status", crate::theme::WARNING_AMBER)
-        }
-        KnowledgeLinkDisposition::Unsafe => {
-            ("knowledge-link-blocked-status", crate::theme::ERROR_CORAL)
-        }
+        KnowledgeLinkDisposition::Internal(_) => (
+            "knowledge-link-internal",
+            crate::theme::verified_text(dark_mode),
+        ),
+        KnowledgeLinkDisposition::External => (
+            "knowledge-link-external",
+            crate::theme::accent_text(dark_mode),
+        ),
+        KnowledgeLinkDisposition::Broken => (
+            "knowledge-link-broken-status",
+            crate::theme::warning_text(dark_mode),
+        ),
+        KnowledgeLinkDisposition::Unsafe => (
+            "knowledge-link-blocked-status",
+            crate::theme::error_text(dark_mode),
+        ),
     };
     (localization.text(message), color)
 }
 
-fn severity_visual(localization: &Localization, severity: &HealthSeverity) -> (String, Color32) {
+fn severity_visual(
+    localization: &Localization,
+    severity: &HealthSeverity,
+    dark_mode: bool,
+) -> (String, Color32) {
     let (message, color) = match severity {
-        HealthSeverity::Error => ("knowledge-severity-error", crate::theme::ERROR_CORAL),
-        HealthSeverity::Warning => ("knowledge-severity-warning", crate::theme::WARNING_AMBER),
-        HealthSeverity::Info => ("knowledge-severity-info", Color32::from_rgb(80, 145, 205)),
+        HealthSeverity::Error => (
+            "knowledge-severity-error",
+            crate::theme::error_text(dark_mode),
+        ),
+        HealthSeverity::Warning => (
+            "knowledge-severity-warning",
+            crate::theme::warning_text(dark_mode),
+        ),
+        HealthSeverity::Info => (
+            "knowledge-severity-info",
+            crate::theme::accent_text(dark_mode),
+        ),
     };
     (localization.text(message), color)
 }
@@ -2375,7 +2408,7 @@ fn error_state(ui: &mut egui::Ui, localization: &Localization, title: &str, erro
     ui.centered_and_justified(|ui| {
         ui.vertical_centered(|ui| {
             ui.colored_label(
-                crate::theme::ERROR_CORAL,
+                crate::theme::error_text(ui.visuals().dark_mode),
                 RichText::new(title).size(20.0).strong(),
             );
             ui.label(localized_knowledge_error(localization, error));
@@ -2433,11 +2466,31 @@ mod tests {
         SearchEvidenceTarget, build_graph, bundle_state_visual, deterministic_graph_position,
         empty_bundle_has_health_findings, graph_requires_filter, health_has_guided_content_repair,
         health_has_manual_intervention, health_issue_page_available, health_recovery_message_id,
-        normalized_http_url, short_fingerprint, truncate_chars,
+        link_status, normalized_http_url, severity_visual, short_fingerprint, truncate_chars,
     };
 
     fn localization() -> Localization {
         Localization::new(UiLocale::EnUs).unwrap()
+    }
+
+    #[test]
+    fn informational_text_consumers_use_the_adaptive_accent() {
+        let localization = localization();
+
+        for dark_mode in [false, true] {
+            let (_, external_link_color) = link_status(
+                &localization,
+                &KnowledgeLinkDisposition::External,
+                dark_mode,
+            );
+            let (_, info_severity_color) =
+                severity_visual(&localization, &HealthSeverity::Info, dark_mode);
+
+            assert_eq!(
+                [external_link_color, info_severity_color],
+                [crate::theme::accent_text(dark_mode); 2]
+            );
+        }
     }
 
     #[test]
@@ -3182,7 +3235,10 @@ mod tests {
         let mut view = bundle(Uuid::new_v4());
         view.health.error_count = 1;
 
-        assert_eq!(bundle_state_visual(&view).0, "knowledge-state-attention");
+        assert_eq!(
+            bundle_state_visual(&view, false).0,
+            "knowledge-state-attention"
+        );
     }
 
     #[test]
@@ -3190,7 +3246,10 @@ mod tests {
         let mut view = bundle(Uuid::new_v4());
         view.health.warning_count = 1;
 
-        assert_eq!(bundle_state_visual(&view).0, "knowledge-state-review");
+        assert_eq!(
+            bundle_state_visual(&view, false).0,
+            "knowledge-state-review"
+        );
     }
 
     #[test]

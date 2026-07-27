@@ -1,7 +1,7 @@
 use eframe::egui;
 
 pub(crate) const INITIAL_WINDOW_SIZE: [f32; 2] = [1180.0, 760.0];
-pub(crate) const MINIMUM_WINDOW_SIZE: [f32; 2] = [1020.0, 640.0];
+pub(crate) const MINIMUM_WINDOW_SIZE: [f32; 2] = [860.0, 600.0];
 
 const COMPACT_HEIGHT_THRESHOLD: f32 = 700.0;
 const NARROW_WIDTH_THRESHOLD: f32 = 760.0;
@@ -68,7 +68,7 @@ mod tests {
 
     #[test]
     fn minimum_content_area_uses_compact_narrow_layout() {
-        let layout = ResponsiveLayout::from_available(egui::vec2(675.0, 600.0));
+        let layout = ResponsiveLayout::from_available(egui::vec2(635.0, 540.0));
 
         assert_eq!(
             layout,

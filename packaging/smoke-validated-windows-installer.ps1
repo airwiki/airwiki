@@ -49,10 +49,72 @@ $ModelActivationExitClasses = @(
     "failure",
     "unknown"
 )
+$InstallerSmokeStages = @(
+    "preflight",
+    "installer",
+    "registration",
+    "desktop_correlation",
+    "payload_validation",
+    "models",
+    "uninstall_cleanup",
+    "complete",
+    "unknown"
+)
+$InstallerSmokeFailureClasses = @(
+    "model_activation_failed",
+    "runtime_exited_before_ready",
+    "models_timeout",
+    "powershell_runtime"
+)
+$AvailableMemoryBuckets = @(
+    "unknown",
+    "under_2gib",
+    "2gib_to_4gib",
+    "over_4gib"
+)
+$InstallerSmokeCleanupStatuses = @(
+    "not_needed",
+    "pass",
+    "failed",
+    "unknown"
+)
 $script:ProcessTerminationUnconfirmed = $false
+$script:TerminalStage = "preflight"
+$script:StructuredFailure = $null
 
-. (Join-Path $PSScriptRoot "windows-runtime.ps1")
-. (Join-Path $PSScriptRoot "windows-payload.ps1")
+function Set-StructuredInstallerSmokeFailure(
+    [string] $FailureClass,
+    $ErrorKind,
+    $ElapsedBucket,
+    [string] $ExitClass
+) {
+    $SafeClass = $FailureClass
+    $SafeErrorKind = $null
+    $SafeElapsedBucket = $null
+    $SafeExitClass = $ExitClass
+
+    if ($InstallerSmokeFailureClasses -cnotcontains $SafeClass -or
+        $ModelActivationExitClasses -cnotcontains $SafeExitClass) {
+        $SafeClass = "powershell_runtime"
+        $SafeExitClass = "failure"
+    } elseif ($SafeClass -eq "model_activation_failed") {
+        if ($ModelActivationErrorKinds -ccontains $ErrorKind -and
+            $ModelActivationElapsedBuckets -ccontains $ElapsedBucket) {
+            $SafeErrorKind = $ErrorKind
+            $SafeElapsedBucket = $ElapsedBucket
+        } else {
+            $SafeClass = "powershell_runtime"
+            $SafeExitClass = "failure"
+        }
+    }
+
+    $script:StructuredFailure = [PSCustomObject]@{
+        FailureClass = $SafeClass
+        ErrorKind = $SafeErrorKind
+        ElapsedBucket = $SafeElapsedBucket
+        ExitClass = $SafeExitClass
+    }
+}
 
 function Invoke-Process(
     [string] $Path,
@@ -288,14 +350,12 @@ function Get-SanitizedModelActivationFailure($Cursor) {
 }
 
 function Throw-SanitizedModelActivationFailure($Failure) {
-    throw (
-        "the installed models did not become ready " +
-        "failure_class=model_activation_failed " +
-        "error_kind=$($Failure.ErrorKind) " +
-        "elapsed_bucket=$($Failure.ElapsedBucket) " +
-        "exit_class=$($Failure.ExitClass) " +
-        "available_memory_bucket=$AvailableMemoryBucket"
-    )
+    Set-StructuredInstallerSmokeFailure `
+        "model_activation_failed" `
+        $Failure.ErrorKind `
+        $Failure.ElapsedBucket `
+        $Failure.ExitClass
+    throw "the installed models did not become ready"
 }
 
 function Throw-IfModelActivationFailed {
@@ -315,11 +375,12 @@ function Throw-ModelRuntimeExitedBeforeReady {
         }
         Start-Sleep -Milliseconds $ActivationLogPollMilliseconds
     } while ($true)
-    throw (
-        "the installed model runtime exited before models became ready " +
-        "failure_class=runtime_exited_before_ready " +
-        "available_memory_bucket=$AvailableMemoryBucket"
-    )
+    Set-StructuredInstallerSmokeFailure `
+        "runtime_exited_before_ready" `
+        $null `
+        $null `
+        "failure"
+    throw "the installed model runtime exited before models became ready"
 }
 
 function Assert-NoForeignDesktopProcess([string] $ExpectedExecutable) {
@@ -519,83 +580,172 @@ function Wait-ForModelsReady {
         }
         Start-Sleep -Seconds 3
     } while ([DateTime]::UtcNow -lt $Deadline)
-    throw (
-        "the installed application did not make its local models operational in time " +
-        "failure_class=models_timeout available_memory_bucket=$AvailableMemoryBucket"
-    )
+    Set-StructuredInstallerSmokeFailure `
+        "models_timeout" `
+        $null `
+        $null `
+        "failure"
+    throw "the installed application did not make its local models operational in time"
 }
 
-if (-not $AuthorizeDestructiveInstallerSmoke) {
-    throw "the validated installer smoke test requires explicit destructive authorization"
-}
-if ([Environment]::OSVersion.Platform -ne [PlatformID]::Win32NT -or
-    -not [Environment]::Is64BitProcess) {
-    throw "the validated installer smoke test requires 64-bit Windows"
-}
-$Os = Get-CimInstance Win32_OperatingSystem
-$Processors = @(Get-CimInstance Win32_Processor)
-if ([int] $Os.ProductType -ne 1 -or [version] $Os.Version -lt [version] "10.0" -or
-    $Processors.Count -eq 0 -or @($Processors | Where-Object Architecture -ne 9).Count -ne 0) {
-    throw "the validated installer smoke test requires native x64 Windows 10 or 11 client"
-}
-if ([string]::IsNullOrWhiteSpace($env:LOCALAPPDATA)) {
-    throw "Windows did not expose the per-user local application data directory"
-}
-$AvailableMemoryBytes = [uint64] $Os.FreePhysicalMemory * 1024
-$AvailableMemoryBucket = if ($AvailableMemoryBytes -lt 2GB) {
-    "under_2gib"
-} elseif ($AvailableMemoryBytes -lt 4GB) {
-    "2gib_to_4gib"
-} else {
-    "over_4gib"
-}
+$InstalledByThisRun = $false
+$PrimaryFailed = $false
+$CleanupStatus = "not_needed"
+$AvailableMemoryBucket = "unknown"
+$InstallerHash = ""
 
-$InstallerItem = Get-Item -LiteralPath $Installer -ErrorAction Stop
-$BundleItem = Get-Item -LiteralPath $BundleRoot -ErrorAction Stop
-if (-not $InstallerItem.PSIsContainer -and $InstallerItem.Extension -ieq ".exe") {
-    $Installer = $InstallerItem.FullName
-} else {
-    throw "Installer must be one Windows executable"
-}
-if (-not $BundleItem.PSIsContainer) {
-    throw "BundleRoot must be a directory"
-}
-$BundleRoot = $BundleItem.FullName
-$InstallDir = Join-Path (Join-Path $env:LOCALAPPDATA "Programs") "AirWiki"
-$UninstallRegistryPath = "HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\AirWiki"
-$ProductRegistryPath = "HKCU:\Software\AirWiki\AirWiki"
-$AutostartRegistryPath = "HKCU:\Software\Microsoft\Windows\CurrentVersion\Run"
-$AutostartValueName = "AirWiki"
-$DesktopExecutable = Join-Path $InstallDir "airwiki.exe"
-$ExpectedRuntimeExecutable = Join-Path $InstallDir "llama\llama-server.exe"
-$ActivationLogDirectory = Join-Path $env:LOCALAPPDATA "airwiki\AirWiki\data\logs"
-$ActivationLogCursor = New-ActivationLogCursor $ActivationLogDirectory
-$BundleFiles = [ordered]@{
-    "airwiki.exe" = Join-Path $BundleRoot "airwiki.exe"
-    "integrations/bridge/airwiki-mcp-bridge.exe" = `
-        Join-Path $BundleRoot "airwiki-mcp-bridge.exe"
-    "airwiki-windows-firewall-helper.exe" = `
-        Join-Path $BundleRoot "airwiki-windows-firewall-helper.exe"
-    "llama/llama-server.exe" = Join-Path $BundleRoot "llama\llama-server.exe"
-    "llama/BUILD-MANIFEST.json" = Join-Path $BundleRoot "llama\BUILD-MANIFEST.json"
-}
-foreach ($Entry in $BundleFiles.GetEnumerator()) {
-    if (-not (Test-Path -LiteralPath $Entry.Value -PathType Leaf)) {
-        throw "$($Entry.Key) is missing from the validated bundle"
+function Get-SanitizedInstallerSmokeFailure([string] $CurrentCleanupStatus) {
+    $Stage = [string] $script:TerminalStage
+    if ($InstallerSmokeStages -cnotcontains $Stage) {
+        $Stage = "unknown"
+    }
+    $MemoryBucket = [string] $AvailableMemoryBucket
+    if ($AvailableMemoryBuckets -cnotcontains $MemoryBucket) {
+        $MemoryBucket = "unknown"
+    }
+    if ($InstallerSmokeCleanupStatuses -cnotcontains $CurrentCleanupStatus) {
+        $CurrentCleanupStatus = "unknown"
+    }
+
+    $FailureClass = "powershell_runtime"
+    $ErrorKind = $null
+    $ElapsedBucket = $null
+    $ExitClass = "failure"
+
+    if ($null -ne $script:StructuredFailure) {
+        $CandidateClass = [string] $script:StructuredFailure.FailureClass
+        $CandidateExitClass = [string] $script:StructuredFailure.ExitClass
+        if ($InstallerSmokeFailureClasses -ccontains $CandidateClass -and
+            $ModelActivationExitClasses -ccontains $CandidateExitClass) {
+            $FailureClass = $CandidateClass
+            $ExitClass = $CandidateExitClass
+        }
+
+        if ($FailureClass -eq "model_activation_failed") {
+            $CandidateErrorKind = [string] $script:StructuredFailure.ErrorKind
+            $CandidateElapsedBucket = `
+                [string] $script:StructuredFailure.ElapsedBucket
+            if ($ModelActivationErrorKinds -ccontains $CandidateErrorKind -and
+                $ModelActivationElapsedBuckets -ccontains
+                    $CandidateElapsedBucket) {
+                $ErrorKind = $CandidateErrorKind
+                $ElapsedBucket = $CandidateElapsedBucket
+            } else {
+                $FailureClass = "powershell_runtime"
+                $ExitClass = "failure"
+            }
+        }
+    }
+
+    return [PSCustomObject]@{
+        FailureClass = $FailureClass
+        Stage = $Stage
+        ErrorKind = $ErrorKind
+        ElapsedBucket = $ElapsedBucket
+        ExitClass = $ExitClass
+        AvailableMemoryBucket = $MemoryBucket
+        CleanupStatus = $CurrentCleanupStatus
     }
 }
 
-if ((Test-AnyManagedInstallState) -or (@(Get-DesktopProcesses)).Count -ne 0) {
-    throw "the validated installer smoke test requires a clean initial state; remove the existing installation manually"
+function Write-SanitizedInstallerSmokeFailure($Record) {
+    $Line = (
+        "WINDOWS_VALIDATED_INSTALLER_SMOKE_FAIL " +
+        "failure_class=$($Record.FailureClass) " +
+        "stage=$($Record.Stage) " +
+        "exit_class=$($Record.ExitClass) " +
+        "available_memory_bucket=$($Record.AvailableMemoryBucket) " +
+        "cleanup_status=$($Record.CleanupStatus)"
+    )
+    if ($null -ne $Record.ErrorKind) {
+        $Line += " error_kind=$($Record.ErrorKind)"
+    }
+    if ($null -ne $Record.ElapsedBucket) {
+        $Line += " elapsed_bucket=$($Record.ElapsedBucket)"
+    }
+    [Console]::Out.WriteLine($Line)
 }
 
-$InstalledByThisRun = $true
-$Failure = $null
-$CleanupFailure = $null
 try {
+    . (Join-Path $PSScriptRoot "windows-runtime.ps1")
+    . (Join-Path $PSScriptRoot "windows-payload.ps1")
+
+    if (-not $AuthorizeDestructiveInstallerSmoke) {
+        throw "the validated installer smoke test requires explicit destructive authorization"
+    }
+    if ([Environment]::OSVersion.Platform -ne [PlatformID]::Win32NT -or
+        -not [Environment]::Is64BitProcess) {
+        throw "the validated installer smoke test requires 64-bit Windows"
+    }
+    $Os = Get-CimInstance Win32_OperatingSystem
+    $Processors = @(Get-CimInstance Win32_Processor)
+    if ([int] $Os.ProductType -ne 1 -or
+        [version] $Os.Version -lt [version] "10.0" -or
+        $Processors.Count -eq 0 -or
+        @($Processors | Where-Object Architecture -ne 9).Count -ne 0) {
+        throw "the validated installer smoke test requires native x64 Windows 10 or 11 client"
+    }
+    if ([string]::IsNullOrWhiteSpace($env:LOCALAPPDATA)) {
+        throw "Windows did not expose the per-user local application data directory"
+    }
+    $AvailableMemoryBytes = [uint64] $Os.FreePhysicalMemory * 1024
+    $AvailableMemoryBucket = if ($AvailableMemoryBytes -lt 2GB) {
+        "under_2gib"
+    } elseif ($AvailableMemoryBytes -lt 4GB) {
+        "2gib_to_4gib"
+    } else {
+        "over_4gib"
+    }
+
+    $InstallerItem = Get-Item -LiteralPath $Installer -ErrorAction Stop
+    $BundleItem = Get-Item -LiteralPath $BundleRoot -ErrorAction Stop
+    if (-not $InstallerItem.PSIsContainer -and
+        $InstallerItem.Extension -ieq ".exe") {
+        $Installer = $InstallerItem.FullName
+    } else {
+        throw "Installer must be one Windows executable"
+    }
+    if (-not $BundleItem.PSIsContainer) {
+        throw "BundleRoot must be a directory"
+    }
+    $BundleRoot = $BundleItem.FullName
+    $InstallDir = Join-Path (Join-Path $env:LOCALAPPDATA "Programs") "AirWiki"
+    $UninstallRegistryPath = "HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\AirWiki"
+    $ProductRegistryPath = "HKCU:\Software\AirWiki\AirWiki"
+    $AutostartRegistryPath = "HKCU:\Software\Microsoft\Windows\CurrentVersion\Run"
+    $AutostartValueName = "AirWiki"
+    $DesktopExecutable = Join-Path $InstallDir "airwiki.exe"
+    $ExpectedRuntimeExecutable = Join-Path $InstallDir "llama\llama-server.exe"
+    $ActivationLogDirectory = Join-Path $env:LOCALAPPDATA "airwiki\AirWiki\data\logs"
+    $ActivationLogCursor = New-ActivationLogCursor $ActivationLogDirectory
+    $BundleFiles = [ordered]@{
+        "airwiki.exe" = Join-Path $BundleRoot "airwiki.exe"
+        "integrations/bridge/airwiki-mcp-bridge.exe" = `
+            Join-Path $BundleRoot "airwiki-mcp-bridge.exe"
+        "airwiki-windows-firewall-helper.exe" = `
+            Join-Path $BundleRoot "airwiki-windows-firewall-helper.exe"
+        "llama/llama-server.exe" = Join-Path $BundleRoot "llama\llama-server.exe"
+        "llama/BUILD-MANIFEST.json" = Join-Path $BundleRoot "llama\BUILD-MANIFEST.json"
+    }
+    foreach ($Entry in $BundleFiles.GetEnumerator()) {
+        if (-not (Test-Path -LiteralPath $Entry.Value -PathType Leaf)) {
+            throw "$($Entry.Key) is missing from the validated bundle"
+        }
+    }
+
+    if ((Test-AnyManagedInstallState) -or
+        (@(Get-DesktopProcesses)).Count -ne 0) {
+        throw "the validated installer smoke test requires a clean initial state; remove the existing installation manually"
+    }
+
+    $script:TerminalStage = "installer"
+    $InstalledByThisRun = $true
     Invoke-Process $Installer @("/S", "/NS", "/R") "installer"
+
+    $script:TerminalStage = "registration"
     $RegisteredUninstaller = Wait-ForExactRegisteredUninstaller
 
+    $script:TerminalStage = "desktop_correlation"
     $Deadline = [DateTime]::UtcNow.AddSeconds(30)
     do {
         Assert-NoForeignDesktopProcess $DesktopExecutable
@@ -608,6 +758,7 @@ try {
     }
     $ExpectedDesktopProcessId = [int] $DesktopProcesses[0].ProcessId
 
+    $script:TerminalStage = "payload_validation"
     $ExpectedInstalled = New-WindowsPayloadManifest
     foreach ($Entry in $BundleFiles.GetEnumerator()) {
         Add-WindowsPayloadFile `
@@ -628,43 +779,56 @@ try {
         $ExpectedInstalled `
         $ActualInstalled `
         "installed application payload"
+
+    $script:TerminalStage = "models"
     Wait-ForModelsReady
 
+    $script:TerminalStage = "uninstall_cleanup"
     Remove-ExactRegisteredInstall
     $InstalledByThisRun = $false
+    $CleanupStatus = "pass"
+
+    $script:TerminalStage = "complete"
+    $InstallerHash = (
+        Get-FileHash -LiteralPath $Installer -Algorithm SHA256
+    ).Hash.ToLowerInvariant()
 } catch {
-    $Failure = $_
+    $PrimaryFailed = $true
 } finally {
-    if ($InstalledByThisRun -and
-        ($script:ProcessTerminationUnconfirmed -or
-            (Test-AnyManagedInstallState) -or
-            (@(Get-DesktopProcesses)).Count -ne 0)) {
+    if ($InstalledByThisRun) {
+        $CleanupRequired = $false
         try {
-            Invoke-AutomaticCleanup
-            $InstalledByThisRun = $false
+            $CleanupRequired = $script:ProcessTerminationUnconfirmed -or
+                (Test-AnyManagedInstallState) -or
+                (@(Get-DesktopProcesses)).Count -ne 0
         } catch {
-            $CleanupFailure = if ($script:ProcessTerminationUnconfirmed) {
-                "automatic cleanup was skipped because process termination was not confirmed; recover the partial per-user installation manually"
-            } else {
-                "automatic cleanup was unsafe because the installed state was incomplete or conflicting; remove the partial per-user installation manually"
+            $PrimaryFailed = $true
+            $CleanupStatus = "failed"
+        }
+        if ($CleanupRequired -and $CleanupStatus -ne "failed") {
+            try {
+                Invoke-AutomaticCleanup
+                $InstalledByThisRun = $false
+                $CleanupStatus = "pass"
+            } catch {
+                $CleanupStatus = "failed"
             }
         }
     }
 }
 
-if ($null -ne $CleanupFailure) {
-    $PrimaryFailure = if ($null -ne $Failure) {
-        $Failure.Exception.Message
-    } else {
-        "the validated installer smoke test did not complete"
+if ($PrimaryFailed -or $CleanupStatus -eq "failed") {
+    try {
+        $SanitizedFailure = Get-SanitizedInstallerSmokeFailure $CleanupStatus
+        Write-SanitizedInstallerSmokeFailure $SanitizedFailure
+    } catch {
+        [Console]::Out.WriteLine(
+            "WINDOWS_VALIDATED_INSTALLER_SMOKE_FAIL failure_class=powershell_runtime stage=unknown exit_class=failure available_memory_bucket=unknown cleanup_status=unknown"
+        )
     }
-    throw "$PrimaryFailure; $CleanupFailure"
-}
-if ($null -ne $Failure) {
-    throw $Failure
+    exit 1
 }
 
-$InstallerHash = (Get-FileHash -LiteralPath $Installer -Algorithm SHA256).Hash.ToLowerInvariant()
 [Console]::Out.WriteLine(
     "WINDOWS_VALIDATED_INSTALLER_SMOKE_PASS installer_sha256=$InstallerHash models_ready=pass uninstall=pass"
 )

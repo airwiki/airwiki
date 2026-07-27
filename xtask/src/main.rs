@@ -2962,12 +2962,20 @@ fn powershell_executable_exact_slices(
     exact: &str,
     executable_marker: &str,
 ) -> bool {
-    let Some(marker_offset) = exact.find(executable_marker) else {
-        return false;
-    };
-    normalized.match_indices(exact).any(|(offset, _)| {
+    powershell_executable_exact_offset_slices(normalized, code, exact, executable_marker).is_some()
+}
+
+fn powershell_executable_exact_offset_slices(
+    normalized: &str,
+    code: &str,
+    exact: &str,
+    executable_marker: &str,
+) -> Option<usize> {
+    let marker_offset = exact.find(executable_marker)?;
+    normalized.match_indices(exact).find_map(|(offset, _)| {
         code.get(offset + marker_offset..)
             .is_some_and(|candidate| candidate.starts_with(executable_marker))
+            .then_some(offset)
     })
 }
 
@@ -2988,6 +2996,221 @@ fn verify_validated_installer_smoke_sources(smoke: &str) -> Result<()> {
             "$InstallDir = Join-Path (",
         ),
         "validated installer smoke must keep installed binaries outside the AirWiki data root"
+    );
+    let ordered_stages = [
+        "preflight",
+        "installer",
+        "registration",
+        "desktop_correlation",
+        "payload_validation",
+        "models",
+        "uninstall_cleanup",
+        "complete",
+    ];
+    let mut previous_stage_offset = None;
+    for stage in ordered_stages {
+        let assignment = format!("$script:TerminalStage = \"{stage}\"");
+        let offset = powershell_executable_exact_offset_slices(
+            source.normalized.as_str(),
+            source.code.as_str(),
+            assignment.as_str(),
+            "$script:TerminalStage =",
+        )
+        .with_context(|| format!("validated installer smoke has no `{stage}` stage"))?;
+        ensure!(
+            previous_stage_offset.is_none_or(|previous| previous < offset),
+            "validated installer smoke must retain terminal stage ordering"
+        );
+        previous_stage_offset = Some(offset);
+    }
+    let stage_allowlist = r#"$InstallerSmokeStages = @(
+    "preflight",
+    "installer",
+    "registration",
+    "desktop_correlation",
+    "payload_validation",
+    "models",
+    "uninstall_cleanup",
+    "complete",
+    "unknown"
+)"#;
+    ensure!(
+        powershell_executable_exact(&source, stage_allowlist, "$InstallerSmokeStages =",),
+        "validated installer smoke must retain the executable closed stage allowlist"
+    );
+    let failure_class_allowlist = r#"$InstallerSmokeFailureClasses = @(
+    "model_activation_failed",
+    "runtime_exited_before_ready",
+    "models_timeout",
+    "powershell_runtime"
+)"#;
+    ensure!(
+        powershell_executable_exact(
+            &source,
+            failure_class_allowlist,
+            "$InstallerSmokeFailureClasses =",
+        ),
+        "validated installer smoke must retain the executable closed failure class allowlist"
+    );
+    let cleanup_status_allowlist = r#"$InstallerSmokeCleanupStatuses = @(
+    "not_needed",
+    "pass",
+    "failed",
+    "unknown"
+)"#;
+    ensure!(
+        powershell_executable_exact(
+            &source,
+            cleanup_status_allowlist,
+            "$InstallerSmokeCleanupStatuses =",
+        ),
+        "validated installer smoke must retain the executable closed cleanup status allowlist"
+    );
+    let structured_range =
+        powershell_function_range(source.code.as_str(), "Set-StructuredInstallerSmokeFailure")?;
+    let structured_code = source
+        .code
+        .get(structured_range)
+        .context("structured installer smoke failure function offsets are invalid")?;
+    ensure!(
+        structured_code.contains("$InstallerSmokeFailureClasses -cnotcontains $SafeClass")
+            && structured_code.contains("$ModelActivationExitClasses -cnotcontains $SafeExitClass")
+            && structured_code.contains("$ModelActivationErrorKinds -ccontains $ErrorKind")
+            && structured_code.contains("$ModelActivationElapsedBuckets -ccontains $ElapsedBucket")
+            && structured_code.contains("$script:StructuredFailure = [PSCustomObject]@{"),
+        "validated installer smoke must create typed failures through closed executable allowlists"
+    );
+    let sanitized_range =
+        powershell_function_range(source.code.as_str(), "Get-SanitizedInstallerSmokeFailure")?;
+    let sanitized_code = source
+        .code
+        .get(sanitized_range)
+        .context("sanitized installer smoke failure function offsets are invalid")?;
+    ensure!(
+        sanitized_code.contains("$InstallerSmokeStages -cnotcontains $Stage")
+            && sanitized_code
+                .contains("$AvailableMemoryBuckets -cnotcontains $MemoryBucket")
+            && sanitized_code.contains(
+                "$InstallerSmokeCleanupStatuses -cnotcontains $CurrentCleanupStatus",
+            )
+            && sanitized_code
+                .contains("$InstallerSmokeFailureClasses -ccontains $CandidateClass")
+            && sanitized_code
+                .contains("$ModelActivationExitClasses -ccontains $CandidateExitClass")
+            && sanitized_code
+                .contains("$ModelActivationErrorKinds -ccontains $CandidateErrorKind")
+            && sanitized_code.contains(
+                "$ModelActivationElapsedBuckets -ccontains\n                    $CandidateElapsedBucket",
+            )
+            && !sanitized_code.contains("[regex]")
+            && !sanitized_code.contains(".Exception")
+            && !sanitized_code.contains("[Console]::")
+            && !sanitized_code.contains("Write-Output"),
+        "validated installer smoke must reduce only structured failures without writing raw errors"
+    );
+    let writer_record = r#"$Line = (
+        "WINDOWS_VALIDATED_INSTALLER_SMOKE_FAIL " +
+        "failure_class=$($Record.FailureClass) " +
+        "stage=$($Record.Stage) " +
+        "exit_class=$($Record.ExitClass) " +
+        "available_memory_bucket=$($Record.AvailableMemoryBucket) " +
+        "cleanup_status=$($Record.CleanupStatus)"
+    )"#;
+    ensure!(
+        powershell_executable_exact_in_function(
+            &source,
+            "Write-SanitizedInstallerSmokeFailure",
+            writer_record,
+            "$Line = (",
+        )? && powershell_executable_exact_in_function(
+            &source,
+            "Write-SanitizedInstallerSmokeFailure",
+            "    [Console]::Out.WriteLine($Line)",
+            "[Console]::Out.WriteLine($Line)",
+        )?,
+        "validated installer smoke terminal writer must emit only sanitized record fields"
+    );
+    let writer_range =
+        powershell_function_range(source.code.as_str(), "Write-SanitizedInstallerSmokeFailure")?;
+    let writer_code = source
+        .code
+        .get(writer_range)
+        .context("sanitized installer smoke writer offsets are invalid")?;
+    ensure!(
+        !writer_code.contains("$Failure")
+            && !writer_code.contains(".Exception")
+            && !writer_code.contains("ErrorOutput"),
+        "validated installer smoke terminal writer must not access raw failure data"
+    );
+    let captured_imports = r#"try {
+    . (Join-Path $PSScriptRoot "windows-runtime.ps1")
+    . (Join-Path $PSScriptRoot "windows-payload.ps1")"#;
+    ensure!(
+        powershell_executable_exact(&source, captured_imports, ". (Join-Path"),
+        "validated installer smoke must import helpers inside the sanitized failure boundary"
+    );
+    let captured_hash = r#"$script:TerminalStage = "complete"
+    $InstallerHash = (
+        Get-FileHash -LiteralPath $Installer -Algorithm SHA256
+    ).Hash.ToLowerInvariant()
+} catch {
+    $PrimaryFailed = $true"#;
+    ensure!(
+        powershell_executable_exact(&source, captured_hash, "Get-FileHash"),
+        "validated installer smoke must hash evidence inside the sanitized failure boundary"
+    );
+    let guarded_cleanup = r#"if ($InstalledByThisRun) {
+        $CleanupRequired = $false
+        try {
+            $CleanupRequired = $script:ProcessTerminationUnconfirmed -or
+                (Test-AnyManagedInstallState) -or
+                (@(Get-DesktopProcesses)).Count -ne 0
+        } catch {
+            $PrimaryFailed = $true
+            $CleanupStatus = "failed"
+        }"#;
+    ensure!(
+        powershell_executable_exact(&source, guarded_cleanup, "$CleanupRequired ="),
+        "validated installer smoke must guard cleanup-state evaluation inside finally"
+    );
+    let terminal_boundary = r#"if ($PrimaryFailed -or $CleanupStatus -eq "failed") {
+    try {
+        $SanitizedFailure = Get-SanitizedInstallerSmokeFailure $CleanupStatus
+        Write-SanitizedInstallerSmokeFailure $SanitizedFailure
+    } catch {
+        [Console]::Out.WriteLine(
+            "WINDOWS_VALIDATED_INSTALLER_SMOKE_FAIL failure_class=powershell_runtime stage=unknown exit_class=failure available_memory_bucket=unknown cleanup_status=unknown"
+        )
+    }
+    exit 1
+}"#;
+    ensure!(
+        powershell_executable_exact(
+            &source,
+            terminal_boundary,
+            "Write-SanitizedInstallerSmokeFailure",
+        ) && !source.code.contains(".Exception")
+            && !source.code.contains("ErrorOutput"),
+        "validated installer smoke must terminate only through the sanitized failure boundary"
+    );
+    ensure!(
+        powershell_executable_exact_in_function(
+            &source,
+            "Throw-SanitizedModelActivationFailure",
+            "    Set-StructuredInstallerSmokeFailure `\n        \"model_activation_failed\" `\n        $Failure.ErrorKind `\n        $Failure.ElapsedBucket `\n        $Failure.ExitClass",
+            "Set-StructuredInstallerSmokeFailure",
+        )? && powershell_executable_exact_in_function(
+            &source,
+            "Throw-ModelRuntimeExitedBeforeReady",
+            "    Set-StructuredInstallerSmokeFailure `\n        \"runtime_exited_before_ready\" `\n        $null `\n        $null `\n        \"failure\"",
+            "Set-StructuredInstallerSmokeFailure",
+        )? && powershell_executable_exact_in_function(
+            &source,
+            "Wait-ForModelsReady",
+            "    Set-StructuredInstallerSmokeFailure `\n        \"models_timeout\" `\n        $null `\n        $null `\n        \"failure\"",
+            "Set-StructuredInstallerSmokeFailure",
+        )?,
+        "validated installer smoke must preserve typed model failure classes structurally"
     );
     let model_readiness_stdin = r#"$ResponseLines = @($Body | & $Curl `
             --silent `
@@ -3113,7 +3336,7 @@ fn verify_validated_installer_smoke_sources(smoke: &str) -> Result<()> {
     ensure!(
         powershell_executable_exact(
             &source,
-            "        ($script:ProcessTerminationUnconfirmed -or",
+            "            $CleanupRequired = $script:ProcessTerminationUnconfirmed -or",
             "$script:ProcessTerminationUnconfirmed",
         ),
         "validated installer smoke must enter recovery when termination is unconfirmed"
@@ -3129,7 +3352,7 @@ fn verify_validated_installer_smoke_sources(smoke: &str) -> Result<()> {
     ensure!(
         powershell_executable_exact(
             &source,
-            "    Wait-ForModelsReady\n\n    Remove-ExactRegisteredInstall\n    $InstalledByThisRun = $false",
+            "    $script:TerminalStage = \"models\"\n    Wait-ForModelsReady\n\n    $script:TerminalStage = \"uninstall_cleanup\"\n    Remove-ExactRegisteredInstall\n    $InstalledByThisRun = $false",
             "Remove-ExactRegisteredInstall",
         ),
         "validated installer smoke must stop the exact desktop process before its successful uninstall"
@@ -8195,8 +8418,8 @@ mod tests {
         )
         .unwrap();
         let unsafe_smoke = smoke.replacen(
-            "    Wait-ForModelsReady\n\n    Remove-ExactRegisteredInstall\n    $InstalledByThisRun = $false",
-            "    Wait-ForModelsReady\n\n    Invoke-Process $RegisteredUninstaller @(\"/S\") \"uninstaller\"\n    $InstalledByThisRun = $false",
+            "    $script:TerminalStage = \"models\"\n    Wait-ForModelsReady\n\n    $script:TerminalStage = \"uninstall_cleanup\"\n    Remove-ExactRegisteredInstall\n    $InstalledByThisRun = $false",
+            "    $script:TerminalStage = \"models\"\n    Wait-ForModelsReady\n\n    $script:TerminalStage = \"uninstall_cleanup\"\n    Invoke-Process $RegisteredUninstaller @(\"/S\") \"uninstaller\"\n    $InstalledByThisRun = $false",
             1,
         );
         assert_ne!(
@@ -8252,5 +8475,72 @@ mod tests {
         let error = verify_validated_installer_smoke_sources(&unsafe_smoke).unwrap_err();
 
         assert!(error.to_string().contains("outside the AirWiki data root"));
+    }
+
+    #[test]
+    fn validated_installer_smoke_rejects_inert_or_leaky_failure_boundaries() {
+        let smoke = fs::read_to_string(
+            workspace_root().join("packaging/smoke-validated-windows-installer.ps1"),
+        )
+        .unwrap();
+        let cases = [
+            (
+                "missing stage",
+                "    $script:TerminalStage = \"registration\"\n",
+                "",
+                "registration",
+            ),
+            (
+                "inert stage",
+                "    $script:TerminalStage = \"registration\"\n",
+                "    # $script:TerminalStage = \"registration\"\n    '$script:TerminalStage = \"registration\"'\n",
+                "registration",
+            ),
+            (
+                "commented allowlist",
+                "$InstallerSmokeFailureClasses = @(",
+                "# $InstallerSmokeFailureClasses = @(",
+                "closed failure class",
+            ),
+            (
+                "raw terminal error",
+                "    [Console]::Out.WriteLine($Line)",
+                "    [Console]::Out.WriteLine($Failure.Exception.Message)",
+                "sanitized record fields",
+            ),
+            (
+                "uncaptured imports",
+                "try {\n    . (Join-Path $PSScriptRoot \"windows-runtime.ps1\")\n    . (Join-Path $PSScriptRoot \"windows-payload.ps1\")",
+                ". (Join-Path $PSScriptRoot \"windows-runtime.ps1\")\n. (Join-Path $PSScriptRoot \"windows-payload.ps1\")\n\ntry {",
+                "import helpers",
+            ),
+            (
+                "uncaptured hash",
+                "        Get-FileHash -LiteralPath $Installer -Algorithm SHA256",
+                "        # Get-FileHash -LiteralPath $Installer -Algorithm SHA256",
+                "hash evidence",
+            ),
+            (
+                "inert cleanup guard",
+                "        try {\n            $CleanupRequired = $script:ProcessTerminationUnconfirmed -or",
+                "        try {\n            '$CleanupRequired = $script:ProcessTerminationUnconfirmed -or'",
+                "cleanup-state evaluation",
+            ),
+            (
+                "missing runtime fallback",
+                "    \"powershell_runtime\"\n",
+                "",
+                "closed failure class",
+            ),
+        ];
+        for (label, original, replacement, expected_error) in cases {
+            let unsafe_smoke = smoke.replacen(original, replacement, 1);
+            assert_ne!(unsafe_smoke, smoke, "{label} fixture did not match");
+            let error = verify_validated_installer_smoke_sources(&unsafe_smoke).unwrap_err();
+            assert!(
+                error.to_string().contains(expected_error),
+                "{label} failed through an unexpected gate: {error:#}"
+            );
+        }
     }
 }

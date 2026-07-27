@@ -1737,6 +1737,7 @@ fn validate_windows_llama_runtime_supply_chain(root: &Path) -> Result<()> {
         "-DGGML_OPENMP=OFF",
         "-DGGML_NATIVE=OFF",
         "-DGGML_AVX2=ON",
+        "-DGGML_BMI2=OFF",
         "-DGGML_LTO=OFF",
         "-DLLAMA_OPENSSL=OFF",
         "-DLLAMA_LLGUIDANCE=OFF",

@@ -292,9 +292,9 @@ impl LlamaServerProvider {
 
 fn recommended_request_timeout(config: &GenerationRuntimeConfig) -> Duration {
     // This is a deadline rather than an expected latency. Routed models can
-    // emit structured JSON materially more slowly under memory pressure,
-    // especially on an 8 GiB Windows node. Scale the allowance with the maximum
-    // permitted output while retaining finite lower and upper bounds.
+    // emit structured JSON materially more slowly under memory pressure on
+    // CPU-only nodes. Scale the allowance with the maximum permitted output
+    // while retaining finite lower and upper bounds.
     let model_id = config.model_id.to_ascii_lowercase();
     let millis_per_output_token =
         if model_id.contains("e4b") || model_id.contains("e2b") || model_id.contains("gemma") {

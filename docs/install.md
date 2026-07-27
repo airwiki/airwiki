@@ -66,10 +66,12 @@ silently replaces the active model.
 | Quality | Prefer the larger supported model and visibly fall back when hardware is insufficient. |
 
 A clean installation prepares one generative model, multilingual embeddings,
-and the local relevance classifier. A verified legacy Qwen installation may be
-retained as a fallback but is not downloaded on a clean install. Candidate model
-updates become active only after verification and restart; a failed smoke test
-keeps the previous model.
+and the local relevance classifier. On the minimum-memory Windows profile,
+Automatic and Efficient select the smaller pinned Qwen model so the complete
+enrichment smoke test remains representative and bounded; systems with more
+memory select the eligible Gemma profile. Candidate model updates become active
+only after verification and restart; a failed smoke test keeps the previous
+model.
 
 The pinned model revisions, filenames, sizes, hashes, and platform constraints
 live in the `airwiki-inference` catalog and its tests. Build manifests authenticate

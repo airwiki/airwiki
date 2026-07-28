@@ -917,10 +917,36 @@ case "${memory}" in
 esac
 printf "service_state=%s\nrestart_count=%s\nmemory_current_bytes=%s\n" "${state}" "${restarts}" "${memory}"
 journalctl --unit "${unit}" --since "-24 hours" --output cat --no-pager 2>/dev/null |
-    sed -n "s/.*error_kind=\"\{0,1\}\([a-z0-9_-]\{1,64\}\).*/\1/p" |
+    sed -n "s/.*error_kind=\"\{0,1\}\([a-z0-9_-]\{1,64\}\).*/error_class=\1/p" |
     sort |
     uniq -c |
-    awk "{ if (\$2 ~ /^[a-z0-9_-]+$/) printf \"error_class=%s count=%s\\n\", \$2, \$1 }"
+    awk "{ if (\$2 ~ /^error_class=[a-z0-9_-]+$/) printf \"%s count=%s\\n\", \$2, \$1 }"
+journalctl --unit "${unit}" --since "-24 hours" --output cat --no-pager 2>/dev/null |
+    sed -n "s/.*relay_class=\"\{0,1\}\(public_relay_[a-z0-9_-]\{1,64\}\)\"\{0,1\} count=\([0-9][0-9]*\).*/\1 \2/p" |
+    awk "
+    BEGIN {
+        allowed[\"public_relay_reservation_accepted\"] = 1
+        allowed[\"public_relay_reservation_renewed\"] = 1
+        allowed[\"public_relay_reservation_accept_failed\"] = 1
+        allowed[\"public_relay_reservation_denied\"] = 1
+        allowed[\"public_relay_reservation_deny_failed\"] = 1
+        allowed[\"public_relay_reservation_closed\"] = 1
+        allowed[\"public_relay_reservation_timed_out\"] = 1
+        allowed[\"public_relay_circuit_denied\"] = 1
+        allowed[\"public_relay_circuit_deny_failed\"] = 1
+        allowed[\"public_relay_circuit_outbound_connect_failed\"] = 1
+        allowed[\"public_relay_circuit_accept_failed\"] = 1
+        allowed[\"public_relay_circuit_failed\"] = 1
+    }
+    \$1 in allowed && \$2 ~ /^[0-9]+$/ {
+        counts[\$1] += \$2
+    }
+    END {
+        for (relay_class in counts) {
+            printf \"relay_class=%s count=%.0f\\n\", relay_class, counts[relay_class]
+        }
+    }" |
+    sort
 '
     response="$(
         az vm run-command invoke \
@@ -957,11 +983,35 @@ journalctl --unit "${unit}" --since "-24 hours" --output cat --no-pager 2>/dev/n
                 print
                 next
             }
+            /^relay_class=[a-z0-9_-]+ count=[0-9]+$/ {
+                relay_class = $1
+                sub(/^relay_class=/, "", relay_class)
+                count = $2
+                sub(/^count=/, "", count)
+                if (relay_class in allowed_relay_classes) {
+                    printf "relay_class=%s count=%s\n", relay_class, count
+                }
+                next
+            }
             END {
                 if (service_state != 1 || restart_count != 1 ||
                     memory_current_bytes != 1) {
                     exit 1
                 }
+            }
+            BEGIN {
+                allowed_relay_classes["public_relay_reservation_accepted"] = 1
+                allowed_relay_classes["public_relay_reservation_renewed"] = 1
+                allowed_relay_classes["public_relay_reservation_accept_failed"] = 1
+                allowed_relay_classes["public_relay_reservation_denied"] = 1
+                allowed_relay_classes["public_relay_reservation_deny_failed"] = 1
+                allowed_relay_classes["public_relay_reservation_closed"] = 1
+                allowed_relay_classes["public_relay_reservation_timed_out"] = 1
+                allowed_relay_classes["public_relay_circuit_denied"] = 1
+                allowed_relay_classes["public_relay_circuit_deny_failed"] = 1
+                allowed_relay_classes["public_relay_circuit_outbound_connect_failed"] = 1
+                allowed_relay_classes["public_relay_circuit_accept_failed"] = 1
+                allowed_relay_classes["public_relay_circuit_failed"] = 1
             }
         '
     )"

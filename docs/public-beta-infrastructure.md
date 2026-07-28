@@ -190,11 +190,15 @@ For each node it emits only:
 - VM power state and Azure availability metric;
 - month-to-date budget spend;
 - systemd service state, restart count and current memory;
-- counts grouped by fixed, sanitized error class for the last 24 hours.
+- counts grouped by fixed, sanitized error class for the last 24 hours;
+- 15-minute relay outcome counts grouped by a fixed `relay_class` allowlist.
 
 It never prints an identity, address, route, request, snippet or raw log.
 The index emits those fixed classes at startup, identity, worker, persistence,
-verification, capacity, query, server and shutdown failure boundaries.
+verification, capacity, query, server, relay lifecycle and shutdown boundaries.
+Relay lifecycle output is aggregated, omits normal reader circuit
+acceptance/closure, has no per-event timestamp and flushes once during graceful
+shutdown.
 Azure's platform availability metric and action-group email require no guest
 telemetry agent or Log Analytics workspace. CPU, disk and network consumption
 remain available as standard Azure platform metrics for incident diagnosis.

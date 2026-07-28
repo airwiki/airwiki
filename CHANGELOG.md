@@ -62,6 +62,9 @@ All notable user-visible changes to AirWiki will be documented here. The project
 
 ### Security
 
+- Added 15-minute, identifier-free relay outcome counts grouped by a fixed
+  status allowlist, without reader-success events, per-event timestamps or
+  guest log shipping.
 - Rejected malformed public rankings before RRF fusion and made early fan-out cancellation account conservatively for every accumulated challenger.
 - Hardened Azure relay installation with exact binary checks, shared public-route preflight, and fail-closed service replacement.
 

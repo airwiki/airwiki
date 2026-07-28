@@ -19,7 +19,6 @@ use crate::{NetworkError, NodeIdentity, PeerRateLimiter};
 const CATALOG_REQUEST_BYTES: u64 = 128 * 1024;
 const CATALOG_RESPONSE_BYTES: u64 = 512 * 1024;
 const CATALOG_CONCURRENT_STREAMS: usize = 64;
-const PUBLIC_RELAY_RESERVATION_DURATION: Duration = Duration::from_secs(20 * 60);
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum CatalogWireRequest {
@@ -147,7 +146,7 @@ pub async fn run_public_catalog_server(
     );
     let behaviour = CatalogBehaviour {
         catalog,
-        relay: libp2p::relay::Behaviour::new(identity.peer_id(), public_relay_config()),
+        relay: libp2p::relay::Behaviour::new(identity.peer_id(), libp2p::relay::Config::default()),
         limits: libp2p::connection_limits::Behaviour::new(
             libp2p::connection_limits::ConnectionLimits::default()
                 .with_max_pending_incoming(Some(128))
@@ -225,13 +224,6 @@ pub async fn run_public_catalog_server(
                 }
             }
         }
-    }
-}
-
-fn public_relay_config() -> libp2p::relay::Config {
-    libp2p::relay::Config {
-        reservation_duration: PUBLIC_RELAY_RESERVATION_DURATION,
-        ..Default::default()
     }
 }
 
@@ -315,29 +307,6 @@ async fn handle_request(
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn relay_reservation_renews_before_azure_tcp_idle_timeout() {
-        const AZURE_NODE_TEMPLATE: &str =
-            include_str!("../../../packaging/federation-index/azure-beta-node.json");
-        let timeout_minutes = AZURE_NODE_TEMPLATE
-            .lines()
-            .find_map(|line| {
-                line.trim()
-                    .strip_prefix("\"idleTimeoutInMinutes\":")
-                    .map(|value| value.trim().trim_end_matches(','))
-            })
-            .unwrap()
-            .parse::<u64>()
-            .unwrap();
-        let renewal_seconds = public_relay_config()
-            .reservation_duration
-            .as_secs()
-            .saturating_mul(3)
-            / 4;
-
-        assert!(renewal_seconds < timeout_minutes.saturating_mul(60));
-    }
 
     #[test]
     fn relay_external_address_rejects_non_public_hosts() {

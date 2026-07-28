@@ -45,9 +45,6 @@ All notable user-visible changes to AirWiki will be documented here. The project
 
 ### Fixed
 
-- Kept long-lived public relay reservations below Azure's TCP idle cutoff with
-  a bounded lease and renewal interval, and exposed the versioned public-IP
-  setting through sanitized operational status.
 - Gave CPU-only Windows model activation an explicit bounded request class so
   the supported Qwen profile is not held to the accelerated-generation
   deadline during its startup smoke test.

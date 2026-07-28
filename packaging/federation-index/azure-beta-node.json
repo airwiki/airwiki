@@ -94,7 +94,6 @@
         "tier": "Regional"
       },
       "properties": {
-        "idleTimeoutInMinutes": 30,
         "publicIPAllocationMethod": "Static",
         "publicIPAddressVersion": "IPv4"
       }

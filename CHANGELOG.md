@@ -45,6 +45,9 @@ All notable user-visible changes to AirWiki will be documented here. The project
 
 ### Fixed
 
+- Gave CPU-only Windows model activation an explicit bounded request class so
+  the supported Qwen profile is not held to the accelerated-generation
+  deadline during its startup smoke test.
 - Allowed fresh installations to defer the optional local-model download so public read-only discovery is not blocked by unrelated inference setup.
 - Made public relay reservations advertise only operator-confirmed external addresses and covered owner search and browse through an outbound relay circuit.
 - Made public source listeners recover automatically after rapid unpublish and republish by closing relay connections and waiting until every TCP and QUIC socket is reusable before starting the replacement swarm.

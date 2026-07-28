@@ -17,7 +17,7 @@ use std::{
     time::{Duration, Instant},
 };
 
-use airwiki_core::inference::{GenerationFailure, GenerationFailureKind};
+use airwiki_core::inference::{GenerationExecutionClass, GenerationFailure, GenerationFailureKind};
 use airwiki_core::{
     AppPaths as CoreAppPaths, AuditEvent, BootstrapFederationIndexEntry, CollectionRecord,
     Database, E5Tokenizer, EmbeddingProvider, EvidenceDecision, EvidenceRelevanceProvider,
@@ -31,7 +31,7 @@ use airwiki_core::{
 use airwiki_inference::{
     GenerationSettings, InstallOutcome, LlamaSupervisor, LlamaSupervisorFailure,
     LlamaSupervisorFailureKind, ModelSelection, RuntimeExitClass, SupervisorConfig,
-    ThinkingControl,
+    ThinkingControl, bundled_runtime_is_accelerated,
 };
 use airwiki_mcp::{McpClientActivitySnapshot, McpServerConfig, McpServerHandle, start_mcp_server};
 use airwiki_network::{
@@ -83,6 +83,15 @@ const RELEVANCE_SMOKE_TEST_PASSAGES: [&str; 2] = [
     "Procedimiento de recuperación de Atlas: restaurar el snapshot y validar el servicio.",
     "El presupuesto del evento comunitario se revisará el próximo trimestre.",
 ];
+
+const fn bundled_generation_execution_class() -> GenerationExecutionClass {
+    if bundled_runtime_is_accelerated() {
+        GenerationExecutionClass::Accelerated
+    } else {
+        GenerationExecutionClass::CpuOnly
+    }
+}
+
 const KNOWLEDGE_READ_ATTEMPTS: usize = 3;
 const KNOWLEDGE_READ_RETRY_DELAY: Duration = Duration::from_millis(100);
 const KNOWLEDGE_PAGE_MAX_BYTES: usize = 1024 * 1024;
@@ -1349,6 +1358,7 @@ impl DesktopServices {
                     ThinkingControl::None => None,
                     ThinkingControl::NoThinkDirective => Some("/no_think".to_owned()),
                 },
+                execution_class: bundled_generation_execution_class(),
             },
         };
         if let Err(error) = generation_provider.enrich(MODEL_SMOKE_TEST_DOCUMENT).await {
@@ -3615,6 +3625,17 @@ mod tests {
                 expected
             );
         }
+    }
+
+    #[test]
+    fn bundled_generation_execution_class_matches_platform_acceleration() {
+        let expected = if bundled_runtime_is_accelerated() {
+            GenerationExecutionClass::Accelerated
+        } else {
+            GenerationExecutionClass::CpuOnly
+        };
+
+        assert_eq!(bundled_generation_execution_class(), expected);
     }
 
     #[test]

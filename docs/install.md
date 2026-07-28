@@ -71,7 +71,9 @@ Automatic and Efficient select the smaller pinned Qwen model so the complete
 enrichment smoke test remains representative and bounded; systems with more
 memory select the eligible Gemma profile. Candidate model updates become active
 only after verification and restart; a failed smoke test keeps the previous
-model.
+model. CPU-only Windows activation uses a finite ten-minute deadline for its
+single generative smoke request because the supported minimum hardware can be
+materially slower than an accelerated Mac.
 
 The pinned model revisions, filenames, sizes, hashes, and platform constraints
 live in the `airwiki-inference` catalog and its tests. Build manifests authenticate

@@ -26,5 +26,5 @@ pub use client::{GenerationConfig, LlamaClient};
 pub use diagnostic::{HardwareReport, diagnose_hardware};
 pub use supervisor::{
     LlamaEndpoint, LlamaSupervisor, LlamaSupervisorFailure, LlamaSupervisorFailureKind,
-    RuntimeExitClass, ServerReasoningMode, SupervisorConfig,
+    RuntimeExitClass, ServerReasoningMode, SupervisorConfig, bundled_runtime_is_accelerated,
 };

@@ -53,6 +53,12 @@ pub trait EmbeddingProvider: Send + Sync {
     async fn embed(&self, texts: &[String]) -> Result<Vec<Vec<f32>>>;
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum GenerationExecutionClass {
+    Accelerated,
+    CpuOnly,
+}
+
 /// OpenAI-compatible client for a llama.cpp sidecar bound to loopback.
 #[derive(Debug, Clone, PartialEq)]
 pub struct GenerationRuntimeConfig {
@@ -61,10 +67,11 @@ pub struct GenerationRuntimeConfig {
     pub max_input_tokens: usize,
     pub max_output_tokens: usize,
     pub thinking_directive: Option<String>,
+    pub execution_class: GenerationExecutionClass,
 }
 
 impl GenerationRuntimeConfig {
-    /// Safe defaults for a model that does not use Qwen-specific directives.
+    /// Conservative defaults for a CPU-only model without Qwen-specific directives.
     pub fn for_model(model_id: impl Into<String>) -> Self {
         Self {
             model_id: model_id.into(),
@@ -72,6 +79,7 @@ impl GenerationRuntimeConfig {
             max_input_tokens: MAX_GENERATION_INPUT_TOKENS,
             max_output_tokens: MAX_GENERATION_OUTPUT_TOKENS,
             thinking_directive: None,
+            execution_class: GenerationExecutionClass::CpuOnly,
         }
     }
 
@@ -362,8 +370,10 @@ fn recommended_request_timeout(config: &GenerationRuntimeConfig) -> Duration {
     // CPU-only nodes. Scale the allowance with the maximum permitted output
     // while retaining finite lower and upper bounds.
     let model_id = config.model_id.to_ascii_lowercase();
+    let slow_model =
+        model_id.contains("e4b") || model_id.contains("e2b") || model_id.contains("gemma");
     let millis_per_output_token =
-        if model_id.contains("e4b") || model_id.contains("e2b") || model_id.contains("gemma") {
+        if config.execution_class == GenerationExecutionClass::CpuOnly || slow_model {
             1_250_u64
         } else {
             250
@@ -1162,13 +1172,15 @@ mod tests {
     }
 
     #[test]
-    fn request_deadline_scales_with_model_and_output_budget() {
+    fn request_deadline_scales_with_execution_class_model_and_output_budget() {
         let mut e4b = GenerationRuntimeConfig::for_model("gemma-4-e4b-q4");
         e4b.max_output_tokens = 384;
         let mut e2b = GenerationRuntimeConfig::for_model("gemma-4-e2b-q4");
         e2b.max_output_tokens = 384;
-        let mut qwen = GenerationRuntimeConfig::for_model("qwen3-1.7b-q8");
-        qwen.max_output_tokens = 384;
+        let mut cpu_qwen = GenerationRuntimeConfig::for_model("qwen3-1.7b-q8");
+        cpu_qwen.max_output_tokens = 384;
+        let mut accelerated_qwen = cpu_qwen.clone();
+        accelerated_qwen.execution_class = GenerationExecutionClass::Accelerated;
 
         assert_eq!(
             recommended_request_timeout(&e4b),
@@ -1178,11 +1190,18 @@ mod tests {
             recommended_request_timeout(&e2b),
             MAX_GENERATION_REQUEST_TIMEOUT
         );
-        assert_eq!(recommended_request_timeout(&qwen), Duration::from_secs(216));
-
-        qwen.max_output_tokens = 1;
         assert_eq!(
-            recommended_request_timeout(&qwen),
+            recommended_request_timeout(&cpu_qwen),
+            MAX_GENERATION_REQUEST_TIMEOUT
+        );
+        assert_eq!(
+            recommended_request_timeout(&accelerated_qwen),
+            Duration::from_secs(216)
+        );
+
+        cpu_qwen.max_output_tokens = 1;
+        assert_eq!(
+            recommended_request_timeout(&cpu_qwen),
             MIN_GENERATION_REQUEST_TIMEOUT
         );
     }

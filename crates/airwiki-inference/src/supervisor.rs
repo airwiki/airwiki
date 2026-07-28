@@ -441,12 +441,17 @@ fn server_command(config: &SupervisorConfig, address: SocketAddr, token: &str) -
     if let Some(mmproj) = &config.mmproj_path {
         command.arg("--mmproj").arg(mmproj);
     }
-    if cfg!(target_os = "macos") {
+    if bundled_runtime_is_accelerated() {
         command.arg("--n-gpu-layers").arg("99");
     } else {
         command.arg("--n-gpu-layers").arg("0");
     }
     command
+}
+
+/// Whether the bundled runtime enables GPU layers on this platform.
+pub const fn bundled_runtime_is_accelerated() -> bool {
+    cfg!(target_os = "macos")
 }
 
 fn reserve_loopback_port() -> Result<u16> {
@@ -584,6 +589,16 @@ mod tests {
             .find(|pair| pair[0] == "--reasoning-budget")
             .expect("reasoning budget must be present when reasoning is off");
         assert_eq!(budget[1], "0");
+        let gpu_layers = args
+            .windows(2)
+            .find(|pair| pair[0] == "--n-gpu-layers")
+            .expect("GPU layer configuration must be present");
+        let expected_gpu_layers = if bundled_runtime_is_accelerated() {
+            "99"
+        } else {
+            "0"
+        };
+        assert_eq!(gpu_layers[1], expected_gpu_layers);
     }
 
     #[cfg(target_os = "windows")]

@@ -3194,16 +3194,23 @@ fn verify_validated_installer_smoke_sources(smoke: &str) -> Result<()> {
     let status_read = activation_failure_reader
         .find("$Status = Get-SanitizedModelActivationStatus $ActivationStatusCursor")
         .context("validated installer smoke must consult durable activation status")?;
+    let fallback_gate = activation_failure_reader
+        .find(
+            "if (-not $ActivationStatusCursor.ObservedStarting -and\n        $null -eq $Status) {",
+        )
+        .context(
+            "validated installer smoke must disable the legacy log fallback after observing current durable activation status",
+        )?;
     let log_read = activation_failure_reader
         .find("Update-ActivationLogCursor $ActivationLogCursor")
         .context("validated installer smoke must retain the sanitized log fallback")?;
     ensure!(
-        status_read < log_read,
-        "validated installer smoke must consult durable activation status before the log fallback"
+        status_read < fallback_gate && fallback_gate < log_read,
+        "validated installer smoke must gate the legacy log fallback after consulting durable activation status"
     );
     ensure!(
         activation_failure_fingerprint
-            == "2519f4012ef2e08865a6d088d5310888e099a293f1ba6b17620d5e7fab77ef87",
+            == "8c785e4ae041883ae613138a34beb8677a9adf862a96e27fa9b1a3a83f50dcd4",
         "validated installer smoke durable activation failure executable fingerprint changed: {activation_failure_fingerprint}"
     );
     let sanitized_range =
@@ -8712,6 +8719,12 @@ mod tests {
                 "function Throw-IfModelActivationFailed {\n",
                 "function Throw-IfModelActivationFailed {\n    return\n",
                 "must not bypass",
+            ),
+            (
+                "ungated legacy activation log fallback",
+                "    if (-not $ActivationStatusCursor.ObservedStarting -and\n        $null -eq $Status) {\n",
+                "    if ($true) {\n",
+                "disable the legacy log fallback",
             ),
             (
                 "inert stale activation status gate",

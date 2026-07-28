@@ -498,10 +498,13 @@ function Throw-IfModelActivationFailed {
     if ($null -ne $Status -and $Status.State -eq "failed") {
         Throw-SanitizedModelActivationFailure $Status
     }
-    Update-ActivationLogCursor $ActivationLogCursor
-    $Failure = Get-SanitizedModelActivationFailure $ActivationLogCursor
-    if ($null -ne $Failure) {
-        Throw-SanitizedModelActivationFailure $Failure
+    if (-not $ActivationStatusCursor.ObservedStarting -and
+        $null -eq $Status) {
+        Update-ActivationLogCursor $ActivationLogCursor
+        $Failure = Get-SanitizedModelActivationFailure $ActivationLogCursor
+        if ($null -ne $Failure) {
+            Throw-SanitizedModelActivationFailure $Failure
+        }
     }
 }
 

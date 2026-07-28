@@ -13,6 +13,7 @@ readonly budget_api_version="2024-08-01"
 readonly budget_name="airwiki-federation-beta-v1"
 readonly action_group_name="airwiki-beta-operator"
 readonly availability_alert_name="airwiki-beta-vm-unavailable"
+readonly public_ip_idle_timeout_minutes="30"
 
 script_directory="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)"
 readonly script_directory
@@ -391,6 +392,18 @@ deploy_node() {
             maintainerCidr="${maintainer_cidr}" \
         --output none \
         --only-show-errors
+
+    actual_idle_timeout="$(
+        az network public-ip show \
+            --resource-group "${group}" \
+            --name "${node}-pip" \
+            --query idleTimeoutInMinutes \
+            -o tsv
+    )"
+    if [ "${actual_idle_timeout}" != "${public_ip_idle_timeout_minutes}" ]; then
+        echo "the beta public IP does not enforce the required TCP idle timeout" >&2
+        exit 1
+    fi
 
     az monitor action-group create \
         --resource-group "${group}" \
@@ -991,6 +1004,16 @@ status_node() {
             --query "instanceView.statuses[?starts_with(code, 'PowerState/')].code | [0]" \
             -o tsv
     )"
+    public_ip_idle_timeout="$(
+        az network public-ip show \
+            --resource-group "${group}" \
+            --name "${node}-pip" \
+            --query idleTimeoutInMinutes \
+            -o tsv 2>/dev/null || true
+    )"
+    case "${public_ip_idle_timeout}" in
+        '' | *[!0-9]*) public_ip_idle_timeout=unknown ;;
+    esac
     vm_id="$(az vm show --resource-group "${group}" --name "${node}" --query id -o tsv)"
     availability="$(
         az monitor metrics list \
@@ -1028,6 +1051,7 @@ status_node() {
     printf '%s\n' \
         "${label}:" \
         "power_state=${power_state:-unknown}" \
+        "public_ip_idle_timeout_minutes=${public_ip_idle_timeout}" \
         "availability_metric=${availability:-unknown}" \
         "month_to_date_cost_usd=${spend:-pending}"
     if [ "${power_state}" = "PowerState/running" ]; then

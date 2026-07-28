@@ -25,6 +25,15 @@ transports. SSH accepts only one maintainer IPv4 `/32`; password authentication
 is disabled. All other inbound traffic is denied by the Standard public-IP and
 network-security-group defaults.
 
+Each Standard IPv4 address fixes the TCP idle timeout at 30 minutes. The relay
+grants 20-minute reservations, and the pinned relay client renews them after
+three quarters of that lease, so the TCP control connection carries renewal
+traffic after approximately 15 minutes. This stays below Azure's idle cutoff
+without adding a keepalive protocol. The setting does not open another port,
+weaken the network-security group, affect QUIC or change the fixed monthly
+resource cost. Deployment fails and rolls back if Azure does not report the
+configured value.
+
 The template pins Ubuntu 24.04 x64 image version `24.04.202607140`, enables
 Trusted Launch, Secure Boot and vTPM, and keeps boot diagnostics disabled.
 Systemd limits capabilities, namespaces, address families, file writes, memory,
@@ -188,6 +197,7 @@ packaging/federation-index/azure-beta.sh status
 For each node it emits only:
 
 - VM power state and Azure availability metric;
+- configured public-IP TCP idle timeout;
 - month-to-date budget spend;
 - systemd service state, restart count and current memory;
 - counts grouped by fixed, sanitized error class for the last 24 hours.
@@ -203,7 +213,8 @@ Do not enable guest log shipping for this beta.
 Routine checks:
 
 - daily during the first beta week, then weekly: both services active, no
-  unexpected restart increase, availability healthy and spend below 75%;
+  unexpected restart increase, TCP idle timeout still 30 minutes, availability
+  healthy and spend below 75%;
 - weekly: public probe from a network outside Azure, once per node;
 - before every candidate: live cost check, bootstrap expiry and version;
 - 30 days before expiry: start registry renewal;
@@ -228,12 +239,17 @@ Recovery order:
 
 1. If the process failed, inspect only sanitized error-class counts and restart
    the existing unit. Its database and identity remain on the managed disk.
-2. If the VM failed, restart it and confirm the same identity implicitly by a
+2. If relay reservations repeatedly close while both catalogs remain healthy,
+   confirm that both public IPs still report the versioned 30-minute TCP idle
+   timeout and the running candidate uses the versioned 20-minute relay lease.
+   Restore those exact values before changing application timeouts, retrying
+   publication or opening another firewall rule.
+3. If the VM failed, restart it and confirm the same identity implicitly by a
    successful pinned probe. Do not publish the identity in evidence.
-3. If a disk or identity is lost, use the single-node replacement sequence
+4. If a disk or identity is lost, use the single-node replacement sequence
    below and issue a higher bootstrap registry. Do not pretend to recover the
    old identity. Publishers repopulate the routing-only SQLite catalog.
-4. If one region is unavailable, operate on the other node until the failed
+5. If one region is unavailable, operate on the other node until the failed
    region recovers or is replaced. Never point both registry entries at one
    host.
 

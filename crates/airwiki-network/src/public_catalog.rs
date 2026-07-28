@@ -118,6 +118,15 @@ enum PublicRelayClass {
     CircuitDenyFailed,
     CircuitOutboundConnectFailed,
     CircuitAcceptFailed,
+    CircuitConnectionRefused,
+    CircuitConnectionAborted,
+    CircuitConnectionReset,
+    CircuitNotConnected,
+    CircuitBrokenPipe,
+    CircuitTimedOut,
+    CircuitWriteZero,
+    CircuitUnexpectedEof,
+    CircuitPermissionDenied,
     CircuitFailed,
 }
 
@@ -135,6 +144,15 @@ impl PublicRelayClass {
             Self::CircuitDenyFailed => "public_relay_circuit_deny_failed",
             Self::CircuitOutboundConnectFailed => "public_relay_circuit_outbound_connect_failed",
             Self::CircuitAcceptFailed => "public_relay_circuit_accept_failed",
+            Self::CircuitConnectionRefused => "public_relay_circuit_connection_refused",
+            Self::CircuitConnectionAborted => "public_relay_circuit_connection_aborted",
+            Self::CircuitConnectionReset => "public_relay_circuit_connection_reset",
+            Self::CircuitNotConnected => "public_relay_circuit_not_connected",
+            Self::CircuitBrokenPipe => "public_relay_circuit_broken_pipe",
+            Self::CircuitTimedOut => "public_relay_circuit_timed_out",
+            Self::CircuitWriteZero => "public_relay_circuit_write_zero",
+            Self::CircuitUnexpectedEof => "public_relay_circuit_unexpected_eof",
+            Self::CircuitPermissionDenied => "public_relay_circuit_permission_denied",
             Self::CircuitFailed => "public_relay_circuit_failed",
         }
     }
@@ -339,9 +357,24 @@ fn classify_public_relay_event(event: &libp2p::relay::Event) -> Option<PublicRel
             Some(PublicRelayClass::CircuitAcceptFailed)
         }
         libp2p::relay::Event::CircuitClosed { error: None, .. } => None,
-        libp2p::relay::Event::CircuitClosed { error: Some(_), .. } => {
-            Some(PublicRelayClass::CircuitFailed)
-        }
+        libp2p::relay::Event::CircuitClosed {
+            error: Some(error), ..
+        } => Some(classify_public_relay_io_error(error)),
+    }
+}
+
+fn classify_public_relay_io_error(error: &std::io::Error) -> PublicRelayClass {
+    match error.kind() {
+        std::io::ErrorKind::ConnectionRefused => PublicRelayClass::CircuitConnectionRefused,
+        std::io::ErrorKind::ConnectionAborted => PublicRelayClass::CircuitConnectionAborted,
+        std::io::ErrorKind::ConnectionReset => PublicRelayClass::CircuitConnectionReset,
+        std::io::ErrorKind::NotConnected => PublicRelayClass::CircuitNotConnected,
+        std::io::ErrorKind::BrokenPipe => PublicRelayClass::CircuitBrokenPipe,
+        std::io::ErrorKind::TimedOut => PublicRelayClass::CircuitTimedOut,
+        std::io::ErrorKind::WriteZero => PublicRelayClass::CircuitWriteZero,
+        std::io::ErrorKind::UnexpectedEof => PublicRelayClass::CircuitUnexpectedEof,
+        std::io::ErrorKind::PermissionDenied => PublicRelayClass::CircuitPermissionDenied,
+        _ => PublicRelayClass::CircuitFailed,
     }
 }
 
@@ -350,7 +383,9 @@ fn emit_public_relay_summary(snapshot: BTreeMap<PublicRelayClass, u64>) {
         tracing::info!(
             relay_class = class.name(),
             count,
-            "public relay lifecycle summary"
+            "public_relay_summary relay_class={} count={}",
+            class.name(),
+            count
         );
     }
 }
@@ -506,6 +541,15 @@ mod tests {
             PublicRelayClass::CircuitDenyFailed,
             PublicRelayClass::CircuitOutboundConnectFailed,
             PublicRelayClass::CircuitAcceptFailed,
+            PublicRelayClass::CircuitConnectionRefused,
+            PublicRelayClass::CircuitConnectionAborted,
+            PublicRelayClass::CircuitConnectionReset,
+            PublicRelayClass::CircuitNotConnected,
+            PublicRelayClass::CircuitBrokenPipe,
+            PublicRelayClass::CircuitTimedOut,
+            PublicRelayClass::CircuitWriteZero,
+            PublicRelayClass::CircuitUnexpectedEof,
+            PublicRelayClass::CircuitPermissionDenied,
             PublicRelayClass::CircuitFailed,
         ]
         .map(PublicRelayClass::name);
@@ -524,7 +568,49 @@ mod tests {
                 "public_relay_circuit_deny_failed",
                 "public_relay_circuit_outbound_connect_failed",
                 "public_relay_circuit_accept_failed",
+                "public_relay_circuit_connection_refused",
+                "public_relay_circuit_connection_aborted",
+                "public_relay_circuit_connection_reset",
+                "public_relay_circuit_not_connected",
+                "public_relay_circuit_broken_pipe",
+                "public_relay_circuit_timed_out",
+                "public_relay_circuit_write_zero",
+                "public_relay_circuit_unexpected_eof",
+                "public_relay_circuit_permission_denied",
                 "public_relay_circuit_failed",
+            ]
+        );
+    }
+
+    #[test]
+    fn relay_circuit_io_failures_use_fixed_sanitized_classes() {
+        let classes = [
+            std::io::ErrorKind::ConnectionRefused,
+            std::io::ErrorKind::ConnectionAborted,
+            std::io::ErrorKind::ConnectionReset,
+            std::io::ErrorKind::NotConnected,
+            std::io::ErrorKind::BrokenPipe,
+            std::io::ErrorKind::TimedOut,
+            std::io::ErrorKind::WriteZero,
+            std::io::ErrorKind::UnexpectedEof,
+            std::io::ErrorKind::PermissionDenied,
+            std::io::ErrorKind::InvalidData,
+        ]
+        .map(|kind| classify_public_relay_io_error(&std::io::Error::from(kind)));
+
+        assert_eq!(
+            classes,
+            [
+                PublicRelayClass::CircuitConnectionRefused,
+                PublicRelayClass::CircuitConnectionAborted,
+                PublicRelayClass::CircuitConnectionReset,
+                PublicRelayClass::CircuitNotConnected,
+                PublicRelayClass::CircuitBrokenPipe,
+                PublicRelayClass::CircuitTimedOut,
+                PublicRelayClass::CircuitWriteZero,
+                PublicRelayClass::CircuitUnexpectedEof,
+                PublicRelayClass::CircuitPermissionDenied,
+                PublicRelayClass::CircuitFailed,
             ]
         );
     }

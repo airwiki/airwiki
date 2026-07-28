@@ -198,7 +198,8 @@ The index emits those fixed classes at startup, identity, worker, persistence,
 verification, capacity, query, server, relay lifecycle and shutdown boundaries.
 Relay lifecycle output is aggregated, omits normal reader circuit
 acceptance/closure, has no per-event timestamp and flushes once during graceful
-shutdown.
+shutdown. Circuit I/O failures expose only a fixed operating-system error-kind
+bucket, never the underlying error text or endpoint.
 Azure's platform availability metric and action-group email require no guest
 telemetry agent or Log Analytics workspace. CPU, disk and network consumption
 remain available as standard Azure platform metrics for incident diagnosis.

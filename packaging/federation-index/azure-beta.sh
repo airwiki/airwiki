@@ -922,7 +922,6 @@ journalctl --unit "${unit}" --since "-24 hours" --output cat --no-pager 2>/dev/n
     uniq -c |
     awk "{ if (\$2 ~ /^error_class=[a-z0-9_-]+$/) printf \"%s count=%s\\n\", \$2, \$1 }"
 journalctl --unit "${unit}" --since "-24 hours" --output cat --no-pager 2>/dev/null |
-    sed -n "s/.*relay_class=\"\{0,1\}\(public_relay_[a-z0-9_-]\{1,64\}\)\"\{0,1\} count=\([0-9][0-9]*\).*/\1 \2/p" |
     awk "
     BEGIN {
         allowed[\"public_relay_reservation_accepted\"] = 1
@@ -936,10 +935,27 @@ journalctl --unit "${unit}" --since "-24 hours" --output cat --no-pager 2>/dev/n
         allowed[\"public_relay_circuit_deny_failed\"] = 1
         allowed[\"public_relay_circuit_outbound_connect_failed\"] = 1
         allowed[\"public_relay_circuit_accept_failed\"] = 1
+        allowed[\"public_relay_circuit_connection_refused\"] = 1
+        allowed[\"public_relay_circuit_connection_aborted\"] = 1
+        allowed[\"public_relay_circuit_connection_reset\"] = 1
+        allowed[\"public_relay_circuit_not_connected\"] = 1
+        allowed[\"public_relay_circuit_broken_pipe\"] = 1
+        allowed[\"public_relay_circuit_timed_out\"] = 1
+        allowed[\"public_relay_circuit_write_zero\"] = 1
+        allowed[\"public_relay_circuit_unexpected_eof\"] = 1
+        allowed[\"public_relay_circuit_permission_denied\"] = 1
         allowed[\"public_relay_circuit_failed\"] = 1
     }
-    \$1 in allowed && \$2 ~ /^[0-9]+$/ {
-        counts[\$1] += \$2
+    /public_relay_summary/ {
+        if (!match(\$0, /public_relay_summary relay_class=public_relay_[a-z0-9_-]+ count=[0-9]+([[:space:]]|$)/)) next
+        summary = substr(\$0, RSTART, RLENGTH)
+        if (!match(summary, /relay_class=public_relay_[a-z0-9_-]+/)) next
+        relay_class = substr(summary, RSTART + 12, RLENGTH - 12)
+        if (!(relay_class in allowed)) next
+        if (!match(summary, /count=[0-9]+/)) next
+        count = substr(summary, RSTART + 6, RLENGTH - 6)
+        if (count !~ /^[0-9]+$/) next
+        counts[relay_class] += count
     }
     END {
         for (relay_class in counts) {
@@ -1011,6 +1027,15 @@ journalctl --unit "${unit}" --since "-24 hours" --output cat --no-pager 2>/dev/n
                 allowed_relay_classes["public_relay_circuit_deny_failed"] = 1
                 allowed_relay_classes["public_relay_circuit_outbound_connect_failed"] = 1
                 allowed_relay_classes["public_relay_circuit_accept_failed"] = 1
+                allowed_relay_classes["public_relay_circuit_connection_refused"] = 1
+                allowed_relay_classes["public_relay_circuit_connection_aborted"] = 1
+                allowed_relay_classes["public_relay_circuit_connection_reset"] = 1
+                allowed_relay_classes["public_relay_circuit_not_connected"] = 1
+                allowed_relay_classes["public_relay_circuit_broken_pipe"] = 1
+                allowed_relay_classes["public_relay_circuit_timed_out"] = 1
+                allowed_relay_classes["public_relay_circuit_write_zero"] = 1
+                allowed_relay_classes["public_relay_circuit_unexpected_eof"] = 1
+                allowed_relay_classes["public_relay_circuit_permission_denied"] = 1
                 allowed_relay_classes["public_relay_circuit_failed"] = 1
             }
         '

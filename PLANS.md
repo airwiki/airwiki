@@ -42,7 +42,10 @@ manual network or community-index configuration.
 
 - [x] Deploy and harden two independent nodes with budgets and alerts.
 - [x] Validate repository gates and install the macOS v1 candidate.
-- [ ] Classify and correct the Windows pre-activation installation failure.
+- [x] Classify and correct the Windows pre-activation installation failure.
+- [x] Complete the rebuilt Windows installation, model, enrichment and MCP
+      smoke without a Public-profile firewall rule.
+- [x] Correct the reproduced cross-NAT owner-stage and route-evidence defects.
 - [ ] Rebuild and pass installed smoke on both final v1 candidates.
 - [ ] Pass bidirectional cross-NAT, relay and both failover recoveries.
 - [ ] Pass sequential isolated v1, revoked v2, expired v3 and clean v1 recovery.
@@ -71,6 +74,15 @@ manual network or community-index configuration.
   a bounded strict-JSON model/runtime probe; keep production enrichment
   unchanged and require two real synthetic enrichments, human review,
   publication and MCP retrieval from the rebuilt installed candidate.
+- 2026-07-29: Bidirectional installed cross-NAT search reached valid catalog
+  candidates while both publishers had two ready relay reservations, but the
+  owner stage failed before connection. The 800 ms response budget was also
+  clipping cold relay setup, and global route state could misattribute another
+  connection or concurrent request. Keep the publisher response budget
+  unchanged, add a separate bounded cold-connection budget, and return route
+  evidence only with the matching request's valid owner response. Independent
+  review of the correction found no remaining P0-P2; installed cross-NAT
+  measurement remains the acceptance authority.
 
 ## Template
 

@@ -139,7 +139,7 @@ impl PublicCatalogBackend for DelayedCatalogBackend {
 
 #[derive(Debug)]
 struct DelayedPublicSourceBackend {
-    inner: PublicFixtureBackend,
+    inner: Arc<PublicFixtureBackend>,
     delay: Duration,
 }
 
@@ -157,6 +157,7 @@ impl PublicSourceBackend for DelayedPublicSourceBackend {
         &self,
         request: PublicBrowseRequest,
     ) -> Result<PublicBrowseDelivery, PublicSourceBackendError> {
+        tokio::time::sleep(self.delay).await;
         self.inner.browse(request).await
     }
 }
@@ -275,10 +276,10 @@ async fn public_search_preserves_owner_stage_after_slow_catalog() {
         source_identity.clone(),
         PublicSourceServerConfig::new(vec![source_address.clone()]),
         Arc::new(DelayedPublicSourceBackend {
-            inner: PublicFixtureBackend {
+            inner: Arc::new(PublicFixtureBackend {
                 gate: DisclosureGate::default(),
                 publisher_id: source_identity.peer_id().to_string(),
-            },
+            }),
             delay: Duration::from_millis(700),
         }),
         source_cancellation.clone(),
@@ -339,6 +340,149 @@ async fn public_search_preserves_owner_stage_after_slow_catalog() {
 }
 
 #[tokio::test]
+async fn concurrent_public_routes_do_not_cross_between_success_and_timeout() {
+    let index_port = available_port();
+    let fast_source_port = available_port();
+    let slow_source_port = available_port();
+    let index_identity = identity();
+    let fast_source_identity = identity();
+    let slow_source_identity = identity();
+    let fast_collection_id = Uuid::new_v4();
+    let slow_collection_id = Uuid::new_v4();
+    let index_address: Multiaddr = format!("/ip4/127.0.0.1/tcp/{index_port}").parse().unwrap();
+    let fast_source_address: Multiaddr = format!("/ip4/127.0.0.1/tcp/{fast_source_port}")
+        .parse()
+        .unwrap();
+    let slow_source_address: Multiaddr = format!("/ip4/127.0.0.1/tcp/{slow_source_port}")
+        .parse()
+        .unwrap();
+    let catalog_cancellation = CancellationToken::new();
+    let fast_source_cancellation = CancellationToken::new();
+    let slow_source_cancellation = CancellationToken::new();
+    let catalog_task = tokio::spawn(run_public_catalog_server(
+        index_identity.clone(),
+        airwiki_network::PublicCatalogServerConfig::new(vec![index_address.clone()]),
+        Arc::new(CatalogBackend::new(Arc::new(
+            CatalogStore::in_memory().unwrap(),
+        ))),
+        catalog_cancellation.clone(),
+    ));
+    let fast_source_task = tokio::spawn(run_public_source_server(
+        fast_source_identity.clone(),
+        PublicSourceServerConfig::new(vec![fast_source_address.clone()]),
+        Arc::new(PublicFixtureBackend {
+            gate: DisclosureGate::default(),
+            publisher_id: fast_source_identity.peer_id().to_string(),
+        }),
+        fast_source_cancellation.clone(),
+    ));
+    let slow_source_task = tokio::spawn(run_public_source_server(
+        slow_source_identity.clone(),
+        PublicSourceServerConfig::new(vec![slow_source_address.clone()]),
+        Arc::new(DelayedPublicSourceBackend {
+            inner: Arc::new(PublicFixtureBackend {
+                gate: DisclosureGate::default(),
+                publisher_id: slow_source_identity.peer_id().to_string(),
+            }),
+            delay: Duration::from_millis(900),
+        }),
+        slow_source_cancellation.clone(),
+    ));
+    tokio::time::sleep(Duration::from_millis(50)).await;
+
+    let endpoint = PublicIndexEndpoint {
+        peer_id: index_identity.peer_id(),
+        address: index_address,
+    };
+    let now = Utc::now();
+    let fast_manifest = sign_manifest(
+        fast_source_identity.keypair(),
+        PublicCollectionManifest {
+            protocol_version: PUBLIC_CATALOG_PROTOCOL.to_owned(),
+            publisher_id: fast_source_identity.peer_id().to_string(),
+            collection_id: fast_collection_id,
+            sequence: 1,
+            publication_fingerprint: "a".repeat(64),
+            name: "Fast owner fixture".to_owned(),
+            description: String::new(),
+            languages: vec!["en".to_owned()],
+            concept_count: 1,
+            routing_terms: vec!["fastowner".to_owned()],
+            routes: vec![fast_source_address.to_string()],
+            updated_at: now,
+            expires_at: now + ChronoDuration::minutes(15),
+        },
+    )
+    .unwrap();
+    let slow_manifest = sign_manifest(
+        slow_source_identity.keypair(),
+        PublicCollectionManifest {
+            protocol_version: PUBLIC_CATALOG_PROTOCOL.to_owned(),
+            publisher_id: slow_source_identity.peer_id().to_string(),
+            collection_id: slow_collection_id,
+            sequence: 1,
+            publication_fingerprint: "b".repeat(64),
+            name: "Slow owner fixture".to_owned(),
+            description: String::new(),
+            languages: vec!["en".to_owned()],
+            concept_count: 1,
+            routing_terms: vec!["slowowner".to_owned()],
+            routes: vec![slow_source_address.to_string()],
+            updated_at: now,
+            expires_at: now + ChronoDuration::minutes(15),
+        },
+    )
+    .unwrap();
+    let reader = PublicReader::new();
+    reader
+        .register_manifest(std::slice::from_ref(&endpoint), fast_manifest)
+        .await
+        .unwrap();
+    reader
+        .register_manifest(std::slice::from_ref(&endpoint), slow_manifest)
+        .await
+        .unwrap();
+
+    let (fast_result, slow_result) = tokio::join!(
+        reader.search_with_route(
+            std::slice::from_ref(&endpoint),
+            SearchRequest::new("fastowner", SearchPurpose::LocalAssistant, 5),
+        ),
+        reader.search_with_route(
+            std::slice::from_ref(&endpoint),
+            SearchRequest::new("slowowner", SearchPurpose::LocalAssistant, 5),
+        ),
+    );
+    let fast_result = fast_result.unwrap();
+    let slow_result = slow_result.unwrap();
+
+    assert_eq!(fast_result.response.hits.len(), 1);
+    assert_eq!(fast_result.route_kind, PublicRouteKind::Direct);
+    assert!(slow_result.response.partial);
+    assert!(slow_result.response.hits.is_empty());
+    assert_eq!(slow_result.route_kind, PublicRouteKind::Offline);
+
+    fast_source_cancellation.cancel();
+    tokio::time::timeout(Duration::from_secs(2), fast_source_task)
+        .await
+        .unwrap()
+        .unwrap()
+        .unwrap();
+    slow_source_cancellation.cancel();
+    tokio::time::timeout(Duration::from_secs(2), slow_source_task)
+        .await
+        .unwrap()
+        .unwrap()
+        .unwrap();
+    catalog_cancellation.cancel();
+    tokio::time::timeout(Duration::from_secs(2), catalog_task)
+        .await
+        .unwrap()
+        .unwrap()
+        .unwrap();
+}
+
+#[tokio::test]
 async fn public_search_and_browse_use_outbound_relay_reservation() {
     let (index_port, source_port) = available_udp_ports();
     let index_identity = identity();
@@ -374,10 +518,14 @@ async fn public_search_and_browse_use_outbound_relay_reservation() {
         gate: DisclosureGate::default(),
         publisher_id: source_identity.peer_id().to_string(),
     });
+    let delayed_source_backend = Arc::new(DelayedPublicSourceBackend {
+        inner: Arc::clone(&source_backend),
+        delay: Duration::from_millis(650),
+    });
     let source_task = tokio::spawn(run_public_source_server(
         source_identity.clone(),
         source_config,
-        source_backend.clone(),
+        delayed_source_backend.clone(),
         source_cancellation.clone(),
     ));
     tokio::time::sleep(Duration::from_millis(250)).await;
@@ -417,18 +565,29 @@ async fn public_search_and_browse_use_outbound_relay_reservation() {
         .await
         .unwrap();
 
-    let response = reader
-        .search(
+    let result = reader
+        .search_with_route(
             std::slice::from_ref(&endpoint),
             SearchRequest::new("atlas recovery", SearchPurpose::LocalAssistant, 5),
         )
         .await
         .unwrap();
-    assert_eq!(response.hits.len(), 1);
-    assert_eq!(reader.route_kind(), PublicRouteKind::Relay);
-    let page = reader.browse(&manifest, None, 50).await.unwrap();
-    assert_eq!(page.concepts.len(), 1);
-    assert_eq!(reader.route_kind(), PublicRouteKind::Relay);
+    assert_eq!(result.response.hits.len(), 1);
+    assert_eq!(result.route_kind, PublicRouteKind::Relay);
+    let browsed = reader
+        .browse_collection(
+            &source_identity.peer_id().to_string(),
+            collection_id,
+            None,
+            50,
+        )
+        .await
+        .unwrap();
+    assert_eq!(
+        browsed.availability,
+        airwiki_network::PublicCollectionAvailability::Available(PublicRouteKind::Relay)
+    );
+    assert_eq!(browsed.page.unwrap().concepts.len(), 1);
 
     source_cancellation.cancel();
     tokio::time::timeout(Duration::from_secs(2), source_task)
@@ -453,20 +612,20 @@ async fn public_search_and_browse_use_outbound_relay_reservation() {
     let restarted_task = tokio::spawn(run_public_source_server(
         source_identity,
         restarted_config,
-        source_backend,
+        delayed_source_backend,
         restarted_cancellation.clone(),
     ));
     tokio::time::sleep(Duration::from_millis(250)).await;
 
-    let response = reader
-        .search(
+    let result = reader
+        .search_with_route(
             std::slice::from_ref(&endpoint),
             SearchRequest::new("atlas recovery", SearchPurpose::LocalAssistant, 5),
         )
         .await
         .unwrap();
-    assert_eq!(response.hits.len(), 1);
-    assert_eq!(reader.route_kind(), PublicRouteKind::Relay);
+    assert_eq!(result.response.hits.len(), 1);
+    assert_eq!(result.route_kind, PublicRouteKind::Relay);
 
     restarted_cancellation.cancel();
     tokio::time::timeout(Duration::from_secs(2), restarted_task)

@@ -39,9 +39,10 @@ use airwiki_network::{
     KeyringSecretStore, MAX_MDNS_ADDRESSES_PER_PEER, MAX_VOLATILE_LAN_PEERS, ManualLanAddress,
     Multiaddr, NetworkConfig, NetworkEvent, NetworkHandle, NetworkWarningKind, NodeIdentity,
     PairingFailureReason, PeerAccess, PeerId, PublicBrowseDelivery, PublicBrowseResult,
-    PublicIndexEndpoint, PublicReader, PublicRouteKind, PublicSearchDelivery, PublicSourceBackend,
-    PublicSourceBackendError, PublicSourceServerConfig, SecretStore, relay_circuit_address,
-    relayed_peer_address, run_public_source_server, sign_manifest, sign_tombstone, spawn_network,
+    PublicIndexEndpoint, PublicReader, PublicRouteKind, PublicSearchDelivery, PublicSearchResult,
+    PublicSourceBackend, PublicSourceBackendError, PublicSourceServerConfig, SecretStore,
+    relay_circuit_address, relayed_peer_address, run_public_source_server, sign_manifest,
+    sign_tombstone, spawn_network,
 };
 use airwiki_types::{
     CollectionPolicy, DisclosureLease, DocumentStatus, EnrichmentDraft, FederatedSearch,
@@ -1898,7 +1899,7 @@ impl DesktopServices {
         top_k: u8,
         purpose: SearchPurpose,
         partials: mpsc::Sender<SearchResponse>,
-    ) -> std::result::Result<SearchResponse, SearchContractError> {
+    ) -> std::result::Result<(SearchResponse, PublicRouteKind), SearchContractError> {
         let endpoints = self
             .public_index_endpoints()
             .map_err(|error| SearchContractError::Backend(error.to_string()))?;
@@ -1906,34 +1907,41 @@ impl DesktopServices {
         let (trusted, public) = tokio::join!(
             self.federated_proxy.search(request.clone()),
             self.public_reader
-                .search_with_partials(&endpoints, request, partials),
+                .search_with_route_and_partials(&endpoints, request, partials),
         );
         match (trusted, public) {
-            (Ok(trusted), Ok(public)) => Ok(merge_public_search_responses(
-                trusted,
-                public,
-                usize::from(top_k),
+            (
+                Ok(trusted),
+                Ok(PublicSearchResult {
+                    response,
+                    route_kind,
+                }),
+            ) => Ok((
+                merge_public_search_responses(trusted, response, usize::from(top_k)),
+                route_kind,
             )),
             (Ok(mut trusted), Err(_)) => {
                 trusted.partial = true;
                 trusted
                     .warnings
                     .push(PUBLIC_NETWORK_OFFLINE_WARNING.to_owned());
-                Ok(trusted)
+                Ok((trusted, PublicRouteKind::Offline))
             }
-            (Err(_), Ok(mut public)) => {
-                public.partial = true;
-                public
+            (
+                Err(_),
+                Ok(PublicSearchResult {
+                    mut response,
+                    route_kind,
+                }),
+            ) => {
+                response.partial = true;
+                response
                     .warnings
                     .push("local or LAN search is unavailable".to_owned());
-                Ok(public)
+                Ok((response, route_kind))
             }
             (Err(error), Err(_)) => Err(error),
         }
-    }
-
-    pub fn public_route_kind(&self) -> PublicRouteKind {
-        self.public_reader.route_kind()
     }
 
     pub fn add_federation_index(&self, peer_id: &str, address: &str) -> Result<()> {

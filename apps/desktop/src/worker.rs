@@ -4811,18 +4811,30 @@ fn spawn_search(
                     }
                 }
             } else {
-                services.search(question, top_k, purpose).await
+                services
+                    .search(question, top_k, purpose)
+                    .await
+                    .map(|response| (response, PublicRouteKind::Offline))
             }
         };
         let result = AssertUnwindSafe(search)
             .catch_unwind()
             .await
             .map_err(panic_message)
-            .and_then(|result| result.map_err(|error| error.to_string()));
-        let route_kind = if public_network {
-            services.public_route_kind()
-        } else {
-            PublicRouteKind::Offline
+            .and_then(|result| result.map_err(|error| error.to_string()))
+            .map(|(response, route_kind)| {
+                (
+                    response,
+                    if public_network {
+                        route_kind
+                    } else {
+                        PublicRouteKind::Offline
+                    },
+                )
+            });
+        let (result, route_kind) = match result {
+            Ok((response, route_kind)) => (Ok(response), route_kind),
+            Err(error) => (Err(error), PublicRouteKind::Offline),
         };
         BackgroundCompletion::Search {
             request_id,

@@ -139,8 +139,12 @@ later candidate as usable without community indexes.
   use remains an outbound connection.
 - Blocking a publisher removes its results and prevents browse or a new
   connection until that identity is explicitly unblocked locally.
-- The UI reports whether the successful content route was direct or relayed,
-  plus accepted-index count and announcement expiry without exposing addresses.
+- The UI reports direct or relayed only after a protocol-valid owner response on
+  that request's matching connection. An index connection, owner timeout or
+  concurrent search must remain offline. For a multi-owner result, Relay means
+  at least one accepted response used a relay; Direct means every accepted owner
+  response was direct. It also reports accepted-index count and announcement
+  expiry without exposing addresses.
 
 Record the commit, package hashes, OS/build versions, direct-versus-relay
 outcome, timings for first partial and complete results, and sanitized failure

@@ -43,7 +43,7 @@ pub use public_manifest::{
 };
 pub use public_reader::{
     PublicBrowseResult, PublicCollectionAvailability, PublicIndexEndpoint, PublicReader,
-    PublicRouteKind,
+    PublicRouteKind, PublicSearchResult,
 };
 pub use public_source::{
     PublicBrowseDelivery, PublicBrowseWireResponse, PublicSearchDelivery, PublicSearchWireResponse,

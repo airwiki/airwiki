@@ -31,10 +31,16 @@ The wire protocols are separate:
 
 Indexes select at most 64 collections. A reader contacts at most three indexes
 and twelve publisher peers, with two collections per peer, bounded concurrency,
-deadlines and cancellation. Publishers revalidate public policy, reviewed
-publication, manifest sequence and publication fingerprint under a disclosure
-lease immediately before returning content. Disabling public exposure changes
-durable policy first, stops serving content, and emits a signed tombstone.
+deadlines and cancellation. A cold owner connection has a separate bounded
+budget from the owner response, and route classification is scoped to one
+request and accepted only with a protocol-valid response on that owner's
+observed connection. A multi-owner search reports Relay when any accepted
+response used a relay and reports Direct only when every accepted response was
+direct, so relay evidence is not hidden by another direct response. Publishers
+revalidate public policy, reviewed publication, manifest sequence and
+publication fingerprint under a disclosure lease immediately before returning
+content. Disabling public exposure changes durable policy first, stops serving
+content, and emits a signed tombstone.
 
 QUIC/Noise is preferred. AutoNAT, Circuit Relay and DCUtR support publishers
 behind NAT; relay connections are outbound and no Windows Public-profile

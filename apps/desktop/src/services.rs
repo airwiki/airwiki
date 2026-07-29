@@ -896,6 +896,23 @@ struct SupervisedGenerationProvider {
     runtime_config: GenerationRuntimeConfig,
 }
 
+impl SupervisedGenerationProvider {
+    async fn verify_activation_smoke(&self) -> Result<()> {
+        let endpoint = self.supervisor.ensure_running().await?;
+        let provider = activation_stage(
+            LlamaServerProvider::for_activation_smoke(
+                &endpoint.base_url,
+                endpoint.bearer_token(),
+                self.runtime_config.clone(),
+            ),
+            ModelActivationStage::Configuration,
+        )?;
+        let result = provider.verify_activation_smoke().await;
+        self.supervisor.mark_activity().await;
+        result
+    }
+}
+
 #[async_trait]
 impl GenerationProvider for SupervisedGenerationProvider {
     fn model_id(&self) -> &str {
@@ -1361,7 +1378,7 @@ impl DesktopServices {
                 execution_class: bundled_generation_execution_class(),
             },
         };
-        if let Err(error) = generation_provider.enrich(MODEL_SMOKE_TEST_DOCUMENT).await {
+        if let Err(error) = generation_provider.verify_activation_smoke().await {
             let _ = supervisor.stop().await;
             return Err(error).with_context(|| {
                 format!(

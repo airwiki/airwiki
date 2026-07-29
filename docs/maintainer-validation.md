@@ -59,3 +59,10 @@ for the pipeline scope and current platform observation.
 Manual platform gates must use installed applications in interactive desktop
 sessions. A macOS build cannot certify Windows behavior, and an SSH-launched
 process cannot substitute for the real Windows user session.
+
+The installed-model activation probe verifies only the selected model, its
+supervised loopback transport, and one bounded strict-JSON response. Candidate
+acceptance must separately exercise full production enrichment on at least two
+synthetic documents, confirm that neither draft used fallback metadata, complete
+human review and publication, and retrieve the published revision through MCP.
+Record only the sanitized fields allowed above.

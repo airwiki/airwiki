@@ -68,12 +68,14 @@ silently replaces the active model.
 A clean installation prepares one generative model, multilingual embeddings,
 and the local relevance classifier. On the minimum-memory Windows profile,
 Automatic and Efficient select the smaller pinned Qwen model so the complete
-enrichment smoke test remains representative and bounded; systems with more
-memory select the eligible Gemma profile. Candidate model updates become active
-only after verification and restart; a failed smoke test keeps the previous
-model. CPU-only Windows activation uses a finite ten-minute deadline for its
-single generative smoke request because the supported minimum hardware can be
-materially slower than an accelerated Mac.
+installed acceptance journey remains representative; systems with more memory
+select the eligible Gemma profile. Candidate model updates become active only
+after verification and restart; a failed smoke test keeps the previous model.
+Activation uses one compact, bounded strict-JSON health probe. The catalog's
+production enrichment budget and hardware-specific request deadline remain
+unchanged. The activation probe does not replace installed validation of real
+enrichment, human review and publication, and MCP retrieval from a synthetic
+document.
 
 The pinned model revisions, filenames, sizes, hashes, and platform constraints
 live in the `airwiki-inference` catalog and its tests. Build manifests authenticate
@@ -84,7 +86,8 @@ Before enabling search, startup:
 
 1. verifies installed hashes and runtime provenance;
 2. loads embeddings and the relevance classifier;
-3. runs local embedding, relevance, and enrichment smoke tests; and
+3. runs local embedding and relevance smoke tests plus the bounded strict-JSON
+   generation health probe; and
 4. reconciles every watched collection.
 
 LAN and MCP remain closed when any required step fails.

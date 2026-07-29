@@ -45,6 +45,9 @@ All notable user-visible changes to AirWiki will be documented here. The project
 
 ### Fixed
 
+- Replaced the installed-model activation enrichment with a bounded strict-JSON
+  health probe, while retaining the full production enrichment budget and its
+  installed-candidate acceptance journey.
 - Made the installed Windows smoke fail immediately with a closed, durable
   model-installation stage when asset preparation fails before activation,
   instead of hiding the failure behind the general model-readiness timeout.

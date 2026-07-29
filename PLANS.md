@@ -7,7 +7,7 @@ A plan records intent and acceptance, not a transcript, command log, or speculat
 ## Public infrastructure beta v1 closure
 
 Status: Active
-Last updated: 2026-07-28
+Last updated: 2026-07-29
 
 ### User-visible outcome
 
@@ -65,6 +65,12 @@ manual network or community-index configuration.
   readiness timeout. Extend the closed durable contract at the inference
   boundary before another installed run; the resulting stage must identify the
   underlying correction.
+- 2026-07-29: The corrected installed status then reproduced
+  `generation_timeout` twice on eligible minimum-class Windows hardware during
+  the full enrichment used as an activation check. Replace only that check with
+  a bounded strict-JSON model/runtime probe; keep production enrichment
+  unchanged and require two real synthetic enrichments, human review,
+  publication and MCP retrieval from the rebuilt installed candidate.
 
 ## Template
 

@@ -68,6 +68,7 @@ enum Screen {
     Review,
     Knowledge,
     Search,
+    Public,
     Integrations,
     Nodes,
     Settings,
@@ -108,6 +109,70 @@ enum SearchResultAvailability {
     LocalAvailable,
     LocalUnavailable,
     Remote { device_name: Option<String> },
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+enum SearchSurface {
+    Ask,
+    Public,
+}
+
+#[derive(Debug)]
+struct SearchViewState {
+    question: String,
+    top_k: u8,
+    hits: Vec<SearchHit>,
+    coverage: SearchCoverageView,
+    completed: bool,
+    error: Option<String>,
+    submitted_public_network: bool,
+    route_kind: PublicRouteKind,
+}
+
+impl SearchViewState {
+    fn new() -> Self {
+        Self {
+            question: String::new(),
+            top_k: DEFAULT_TOP_K,
+            hits: Vec::new(),
+            coverage: SearchCoverageView::Complete,
+            completed: false,
+            error: None,
+            submitted_public_network: false,
+            route_kind: PublicRouteKind::Offline,
+        }
+    }
+
+    fn clear_feedback(&mut self) {
+        self.hits.clear();
+        self.coverage = SearchCoverageView::Complete;
+        self.completed = false;
+        self.error = None;
+    }
+
+    fn begin_search(&mut self, public_network: bool) {
+        self.clear_feedback();
+        self.submitted_public_network = public_network;
+    }
+
+    fn complete(
+        &mut self,
+        hits: Vec<SearchHit>,
+        coverage: SearchCoverageView,
+        route_kind: PublicRouteKind,
+    ) {
+        self.completed = true;
+        self.hits = hits;
+        self.coverage = coverage;
+        self.error = None;
+        self.route_kind = route_kind;
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct ActiveSearch {
+    request_id: Uuid,
+    surface: SearchSurface,
 }
 
 pub struct AirWikiApp {
@@ -156,19 +221,14 @@ pub struct AirWikiApp {
     reviews: Vec<ReviewItemView>,
     source_issues: Vec<SourceIssueView>,
     peers: Vec<PeerView>,
-    search_question: String,
-    search_top_k: u8,
+    ask_search: SearchViewState,
+    public_search: SearchViewState,
+    active_search: Option<ActiveSearch>,
     search_public_network: bool,
-    public_route_kind: PublicRouteKind,
     federation_index_peer: String,
     federation_index_address: String,
     public_publisher_block_input: String,
     blocked_public_publishers: Vec<String>,
-    search_hits: Vec<SearchHit>,
-    search_coverage: SearchCoverageView,
-    search_request_id: Option<Uuid>,
-    search_completed: bool,
-    search_error: Option<String>,
     public_browse_request_id: Option<Uuid>,
     public_browse_publisher: String,
     public_browse_collection: Option<Uuid>,
@@ -243,19 +303,14 @@ impl AirWikiApp {
             reviews: Vec::new(),
             source_issues: Vec::new(),
             peers: Vec::new(),
-            search_question: String::new(),
-            search_top_k: DEFAULT_TOP_K,
+            ask_search: SearchViewState::new(),
+            public_search: SearchViewState::new(),
+            active_search: None,
             search_public_network: false,
-            public_route_kind: PublicRouteKind::Offline,
             federation_index_peer: String::new(),
             federation_index_address: String::new(),
             public_publisher_block_input: String::new(),
             blocked_public_publishers: Vec::new(),
-            search_hits: Vec::new(),
-            search_coverage: SearchCoverageView::Complete,
-            search_request_id: None,
-            search_completed: false,
-            search_error: None,
             public_browse_request_id: None,
             public_browse_publisher: String::new(),
             public_browse_collection: None,
@@ -611,29 +666,30 @@ impl AirWikiApp {
                     }
                 }
                 WorkerEvent::SearchPartial { request_id, hits } => {
-                    if !search_result_applies(self.search_request_id, request_id) {
+                    let Some(surface) = search_response_surface(self.active_search, request_id)
+                    else {
                         continue;
-                    }
-                    self.search_hits = hits;
-                    self.search_coverage = SearchCoverageView::Partial;
-                    self.search_error = None;
+                    };
+                    let search = self.search_state_mut(surface);
+                    search.hits = hits;
+                    search.coverage = SearchCoverageView::Partial;
+                    search.error = None;
                 }
                 WorkerEvent::SearchFinished { request_id, result } => {
-                    if !search_result_applies(self.search_request_id, request_id) {
+                    let Some(surface) = search_response_surface(self.active_search, request_id)
+                    else {
                         continue;
-                    }
-                    self.search_request_id = None;
+                    };
+                    self.active_search = None;
                     match result {
                         Ok((hits, coverage, route_kind)) => {
-                            self.search_completed = true;
-                            self.search_hits = hits;
-                            self.search_coverage = coverage;
-                            self.public_route_kind = route_kind;
-                            self.search_error = None;
+                            self.search_state_mut(surface)
+                                .complete(hits, coverage, route_kind);
                         }
                         Err(error) => {
-                            self.search_completed = false;
-                            self.search_error = Some(sanitized_error_code(&error).to_owned());
+                            let search = self.search_state_mut(surface);
+                            search.completed = false;
+                            search.error = Some(sanitized_error_code(&error).to_owned());
                         }
                     }
                 }
@@ -736,7 +792,7 @@ impl AirWikiApp {
         );
         let wiki = self.localization.text("nav-wiki");
         let search = self.localization.text("nav-search");
-        let integrations = self.localization.text("nav-integrations");
+        let public = self.localization.text("nav-public");
         let devices = self.localization.text("nav-devices");
         let settings = self.localization.text("nav-settings");
         egui::Panel::left("navigation")
@@ -744,32 +800,24 @@ impl AirWikiApp {
             .frame(
                 egui::Frame::new()
                     .fill(crate::theme::surface(root.visuals().dark_mode))
-                    .inner_margin(egui::Margin::symmetric(16, 0)),
+                    .inner_margin(egui::Margin::symmetric(22, 0)),
             )
             .show(root, |ui| {
                 ui.add_space(22.0);
-                ui.heading(RichText::new("AirWiki").size(24.0).strong());
-                ui.add_space(7.0);
-                ui.painter().hline(
-                    ui.available_rect_before_wrap().x_range(),
-                    ui.cursor().top(),
-                    egui::Stroke::new(3.0, crate::theme::ink(ui.visuals().dark_mode)),
+                ui.heading(
+                    RichText::new("AirWiki")
+                        .size(21.0)
+                        .family(crate::theme::semibold_font_family()),
                 );
-                ui.add_space(18.0);
-                ui.spacing_mut().item_spacing.y = 4.0;
+                ui.add_space(24.0);
+                ui.spacing_mut().item_spacing.y = 2.0;
                 nav(ui, &mut self.screen, Screen::Setup, &home);
                 nav(ui, &mut self.screen, Screen::Collections, &collections);
                 nav(ui, &mut self.screen, Screen::Review, &review);
                 nav(ui, &mut self.screen, Screen::Knowledge, &wiki);
                 nav(ui, &mut self.screen, Screen::Search, &search);
-                ui.add_space(10.0);
-                ui.separator();
-                ui.add_space(6.0);
-                nav(ui, &mut self.screen, Screen::Integrations, &integrations);
+                nav(ui, &mut self.screen, Screen::Public, &public);
                 nav(ui, &mut self.screen, Screen::Nodes, &devices);
-                ui.add_space(10.0);
-                ui.separator();
-                ui.add_space(6.0);
                 nav(ui, &mut self.screen, Screen::Settings, &settings);
             });
     }
@@ -839,7 +887,7 @@ impl AirWikiApp {
             .auto_shrink([false; 2])
             .show(ui, |ui| {
                 if let Some(report) = &self.hardware {
-                    egui::Frame::group(ui.style()).show(ui, |ui| {
+                    crate::theme::surface_frame(ui.visuals().dark_mode).show(ui, |ui| {
                         ui.heading(self.localization.text("models-diagnostics"));
                         egui::Grid::new("diagnostic_grid")
                             .num_columns(2)
@@ -906,7 +954,7 @@ impl AirWikiApp {
                     ui.label(self.localization.text("models-diagnosing"));
                 }
                 ui.add_space(14.0);
-                egui::Frame::group(ui.style()).show(ui, |ui| {
+                crate::theme::surface_frame(ui.visuals().dark_mode).show(ui, |ui| {
                     ui.heading(self.localization.text("models-local-title"));
                     ui.label(self.localization.text("models-local-body"));
                     if let Some(state) = self.model_state.clone() {
@@ -1103,15 +1151,16 @@ impl AirWikiApp {
             published_count,
             layout.density,
         );
-        ui.add_space(if layout.is_compact() { 10.0 } else { 18.0 });
+        ui.add_space(if layout.is_compact() { 20.0 } else { 36.0 });
         if layout.is_narrow() {
             first_knowledge::work_surface(ui, layout.density, |ui| {
                 self.home_primary_story(ui, journey, document_count);
             });
-            ui.add_space(10.0);
+            ui.add_space(30.0);
             self.home_ask_column(ui, &readiness);
         } else {
-            let lead_width = (ui.available_width() * 0.6).max(360.0);
+            let column_gap = 56.0;
+            let lead_width = ((ui.available_width() - column_gap) * 0.6).max(360.0);
             ui.horizontal_top(|ui| {
                 ui.allocate_ui_with_layout(
                     egui::vec2(lead_width, 0.0),
@@ -1122,7 +1171,7 @@ impl AirWikiApp {
                         });
                     },
                 );
-                ui.add_space(10.0);
+                ui.add_space(column_gap);
                 ui.allocate_ui_with_layout(
                     egui::vec2(ui.available_width(), 0.0),
                     egui::Layout::top_down(egui::Align::Min),
@@ -1130,7 +1179,7 @@ impl AirWikiApp {
                 );
             });
         }
-        ui.add_space(if layout.is_compact() { 8.0 } else { 16.0 });
+        ui.add_space(if layout.is_compact() { 20.0 } else { 36.0 });
         ui.collapsing(self.localization.text("home-optional-title"), |ui| {
             ui.label(self.localization.text("home-optional-body"));
             ui.add_space(8.0);
@@ -1225,13 +1274,13 @@ impl AirWikiApp {
         ui.label(
             RichText::new(self.localization.text("home-next-step"))
                 .small()
-                .strong()
+                .family(crate::theme::semibold_font_family())
                 .color(crate::theme::attention(ui.visuals().dark_mode)),
         );
         match journey.cta {
             Some(FirstKnowledgeCta::Recommended(action)) => {
                 ui.heading(
-                    RichText::new(primary_action_title(&self.localization, action)).size(26.0),
+                    RichText::new(primary_action_title(&self.localization, action)).size(30.0),
                 );
                 ui.add(
                     egui::Label::new(primary_action_explanation(&self.localization, action)).wrap(),
@@ -1249,7 +1298,7 @@ impl AirWikiApp {
             }
             Some(FirstKnowledgeCta::SearchKnowledge) => {
                 ui.heading(
-                    RichText::new(self.localization.text("onboarding-search-title")).size(26.0),
+                    RichText::new(self.localization.text("onboarding-search-title")).size(30.0),
                 );
                 ui.label(self.localization.text("onboarding-search-body"));
                 ui.add_space(10.0);
@@ -1264,7 +1313,7 @@ impl AirWikiApp {
             }
             None => {
                 let (title, body) = journey_stage_copy(&self.localization, journey.current_stage);
-                ui.heading(RichText::new(title).size(26.0));
+                ui.heading(RichText::new(title).size(30.0));
                 ui.label(body);
                 ui.add_space(10.0);
                 if journey.current_stage == FirstKnowledgeStage::ProcessKnowledge
@@ -1300,23 +1349,30 @@ impl AirWikiApp {
     ) {
         ui.heading(
             RichText::new(self.localization.text("onboarding-search-title"))
-                .size(22.0)
-                .strong(),
+                .size(24.0)
+                .family(crate::theme::semibold_font_family()),
         );
         ui.add(
             egui::Label::new(self.localization.text("onboarding-search-body"))
                 .wrap()
                 .selectable(false),
         );
-        if ui
-            .add(first_knowledge::primary_button(
-                self.localization.text("search-action"),
-            ))
-            .clicked()
-        {
-            self.screen = Screen::Search;
-        }
-        ui.add_space(12.0);
+        ui.horizontal(|ui| {
+            ui.add_sized(
+                [(ui.available_width() - 82.0).max(140.0), 36.0],
+                egui::TextEdit::singleline(&mut self.ask_search.question)
+                    .hint_text(self.localization.text("search-placeholder")),
+            );
+            if ui
+                .add(first_knowledge::primary_button(
+                    self.localization.text("search-action"),
+                ))
+                .clicked()
+            {
+                self.screen = Screen::Search;
+            }
+        });
+        ui.add_space(20.0);
         ui.separator();
         first_knowledge::privacy_note(ui, &self.localization);
         ui.add_space(8.0);
@@ -1549,41 +1605,7 @@ impl AirWikiApp {
             .small()
             .color(ui.visuals().weak_text_color()),
         );
-        ui.add_space(8.0);
-        egui::Frame::group(ui.style()).show(ui, |ui| {
-            ui.heading(self.localization.text("collections-new"));
-            ui.horizontal(|ui| {
-                let name_label = ui.label(self.localization.text("collections-name"));
-                ui.text_edit_singleline(&mut self.new_collection_name)
-                    .labelled_by(name_label.id);
-                if ui
-                    .button(self.localization.text("collections-choose-folder"))
-                    .clicked()
-                {
-                    self.new_collection_folder = rfd::FileDialog::new().pick_folder();
-                }
-            });
-            if let Some(path) = &self.new_collection_folder {
-                wrap_monospace(ui, path.display().to_string());
-            }
-            let enabled =
-                !self.new_collection_name.trim().is_empty() && self.new_collection_folder.is_some();
-            if ui
-                .add_enabled(
-                    enabled,
-                    egui::Button::new(self.localization.text("collections-create-scan")),
-                )
-                .clicked()
-                && let Some(folder) = self.new_collection_folder.take()
-            {
-                self.worker.send(WorkerCommand::AddCollection {
-                    name: self.new_collection_name.trim().to_owned(),
-                    folder,
-                });
-                self.new_collection_name.clear();
-            }
-        });
-        ui.add_space(12.0);
+        ui.add_space(20.0);
         if self.collections.is_empty() {
             empty_state(
                 ui,
@@ -1603,26 +1625,39 @@ impl AirWikiApp {
         let cloud_warning = self.localization.text("collections-cloud-warning");
         let mut requested_external_ai_confirmation = None;
         let mut requested_public_confirmation = None;
-        let list_height = ui.available_height().max(0.0);
-        egui::ScrollArea::vertical()
-            .id_salt("collections_list")
-            .max_height(list_height)
-            .auto_shrink([false; 2])
-            .show(ui, |ui| {
-                for collection in &mut self.collections {
-                    let collection_issues = self
-                        .source_issues
-                        .iter()
-                        .filter(|issue| issue.collection_id == collection.id)
-                        .collect::<Vec<_>>();
-                    let scan_state = self.collection_scans.get(&collection.id).copied();
-                    let mut counts_arguments = FluentArgs::new();
-                    counts_arguments.set("documents", collection.document_count);
-                    counts_arguments.set("published", collection.published_count);
-                    let counts = self
-                        .localization
-                        .text_with("collections-counts", Some(&counts_arguments));
-                    egui::Frame::group(ui.style()).show(ui, |ui| {
+        ui.vertical(|ui| {
+            ui.horizontal(|ui| {
+                ui.label(
+                    RichText::new(self.localization.text("collections-table-folder"))
+                        .small()
+                        .family(crate::theme::semibold_font_family())
+                        .color(ui.visuals().weak_text_color()),
+                );
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    ui.label(
+                        RichText::new(self.localization.text("collections-table-activity"))
+                            .small()
+                            .family(crate::theme::semibold_font_family())
+                            .color(ui.visuals().weak_text_color()),
+                    );
+                });
+            });
+            ui.separator();
+            for collection in &mut self.collections {
+                let collection_issues = self
+                    .source_issues
+                    .iter()
+                    .filter(|issue| issue.collection_id == collection.id)
+                    .collect::<Vec<_>>();
+                let scan_state = self.collection_scans.get(&collection.id).copied();
+                let mut counts_arguments = FluentArgs::new();
+                counts_arguments.set("documents", collection.document_count);
+                counts_arguments.set("published", collection.published_count);
+                let counts = self
+                    .localization
+                    .text_with("collections-counts", Some(&counts_arguments));
+                ui.push_id(collection.id, |ui| {
+                    egui::Frame::new().show(ui, |ui| {
                         ui.horizontal(|ui| {
                             ui.vertical(|ui| {
                                 ui.heading(&collection.name);
@@ -1746,150 +1781,207 @@ impl AirWikiApp {
                                 }
                             });
                         });
-                        ui.separator();
-                        let external_ai_before = collection.allow_external_ai;
-                        let peer_changed = ui
-                            .checkbox(&mut collection.peer_shareable, &share_peers)
-                            .changed();
-                        let external_ai_changed = ui
-                            .checkbox(&mut collection.allow_external_ai, &allow_chat)
-                            .changed();
-                        let public_before = collection.internet_public;
-                        let public_changed = ui
-                            .checkbox(
-                                &mut collection.internet_public,
-                                self.localization.text("collections-public-network"),
-                            )
-                            .changed();
-                        if !public_before && collection.internet_public {
-                            collection.internet_public = false;
-                            requested_public_confirmation = Some(collection.id);
-                        }
-                        let external_ai_change = classify_external_ai_policy_change(
-                            external_ai_before,
-                            collection.allow_external_ai,
-                        );
-                        if external_ai_change == ExternalAiPolicyChange::ConfirmEnable {
-                            collection.allow_external_ai = false;
-                            requested_external_ai_confirmation = Some(collection.id);
-                        }
-                        collection.local_only = !collection.peer_shareable
-                            && !collection.allow_external_ai
-                            && !collection.internet_public;
-                        if collection.local_only {
-                            ui.label(
-                                RichText::new(&local_only)
-                                    .small()
-                                    .color(crate::theme::verified_text(ui.visuals().dark_mode)),
-                            );
-                        }
-                        if collection.allow_external_ai {
-                            ui.colored_label(
-                                crate::theme::warning_text(ui.visuals().dark_mode),
-                                &cloud_warning,
-                            );
-                        }
-                        if collection.internet_public {
-                            let announcement_times = match collection.public_announcement {
-                                PublicAnnouncementStatusView::Offline => {
-                                    ui.label(
-                                        self.localization
-                                            .text("collections-public-announcement-offline"),
-                                    );
-                                    None
+                        ui.collapsing(
+                            self.localization.text("collections-sharing-details"),
+                            |ui| {
+                                ui.separator();
+                                let external_ai_before = collection.allow_external_ai;
+                                let peer_changed = ui
+                                    .checkbox(&mut collection.peer_shareable, &share_peers)
+                                    .changed();
+                                let external_ai_changed = ui
+                                    .checkbox(&mut collection.allow_external_ai, &allow_chat)
+                                    .changed();
+                                let public_before = collection.internet_public;
+                                let public_changed = ui
+                                    .checkbox(
+                                        &mut collection.internet_public,
+                                        self.localization.text("collections-public-network"),
+                                    )
+                                    .changed();
+                                if !public_before && collection.internet_public {
+                                    collection.internet_public = false;
+                                    requested_public_confirmation = Some(collection.id);
                                 }
-                                PublicAnnouncementStatusView::Advertised {
-                                    accepted_indexes,
-                                    last_announced_at,
-                                    expires_at,
-                                } => {
-                                    let mut status_args = FluentArgs::new();
-                                    status_args.set(
-                                        "indexes",
-                                        i64::try_from(accepted_indexes).unwrap_or(i64::MAX),
-                                    );
-                                    ui.label(self.localization.text_with(
-                                        "collections-public-announcement-online",
-                                        Some(&status_args),
+                                let external_ai_change = classify_external_ai_policy_change(
+                                    external_ai_before,
+                                    collection.allow_external_ai,
+                                );
+                                if external_ai_change == ExternalAiPolicyChange::ConfirmEnable {
+                                    collection.allow_external_ai = false;
+                                    requested_external_ai_confirmation = Some(collection.id);
+                                }
+                                collection.local_only = !collection.peer_shareable
+                                    && !collection.allow_external_ai
+                                    && !collection.internet_public;
+                                if collection.local_only {
+                                    ui.label(RichText::new(&local_only).small().color(
+                                        crate::theme::verified_text(ui.visuals().dark_mode),
                                     ));
-                                    Some((last_announced_at, expires_at))
                                 }
-                                PublicAnnouncementStatusView::Expired {
-                                    last_announced_at,
-                                    expires_at,
-                                } => {
+                                if collection.allow_external_ai {
                                     ui.colored_label(
                                         crate::theme::warning_text(ui.visuals().dark_mode),
-                                        self.localization
-                                            .text("collections-public-announcement-expired"),
+                                        &cloud_warning,
                                     );
-                                    Some((last_announced_at, expires_at))
                                 }
-                            };
-                            if let Some((last, expiry)) = announcement_times {
-                                let mut last_args = FluentArgs::new();
-                                last_args
-                                    .set("timestamp", last.format("%Y-%m-%d %H:%M").to_string());
-                                ui.label(
-                                    RichText::new(self.localization.text_with(
-                                        "collections-public-last-renewal",
-                                        Some(&last_args),
-                                    ))
-                                    .small()
-                                    .color(ui.visuals().weak_text_color()),
-                                );
-                                let mut expiry_args = FluentArgs::new();
-                                expiry_args
-                                    .set("timestamp", expiry.format("%Y-%m-%d %H:%M").to_string());
-                                ui.label(
-                                    RichText::new(self.localization.text_with(
-                                        "collections-public-expiry",
-                                        Some(&expiry_args),
-                                    ))
-                                    .small()
-                                    .color(ui.visuals().weak_text_color()),
-                                );
-                            }
-                            ui.label(self.localization.text("collections-public-description"));
-                            ui.text_edit_multiline(&mut collection.public_description);
-                            ui.label(self.localization.text("collections-public-languages"));
-                            ui.text_edit_singleline(&mut collection.public_languages);
-                            if ui
-                                .button(self.localization.text("collections-public-profile-save"))
-                                .clicked()
-                            {
-                                let languages = collection
-                                    .public_languages
-                                    .split(',')
-                                    .map(str::trim)
-                                    .filter(|language| !language.is_empty())
-                                    .map(str::to_owned)
-                                    .collect();
-                                self.worker
-                                    .send(WorkerCommand::UpdatePublicCollectionProfile {
+                                if collection.internet_public {
+                                    let announcement_times = match collection.public_announcement {
+                                        PublicAnnouncementStatusView::Offline => {
+                                            ui.label(
+                                                self.localization.text(
+                                                    "collections-public-announcement-offline",
+                                                ),
+                                            );
+                                            None
+                                        }
+                                        PublicAnnouncementStatusView::Advertised {
+                                            accepted_indexes,
+                                            last_announced_at,
+                                            expires_at,
+                                        } => {
+                                            let mut status_args = FluentArgs::new();
+                                            status_args.set(
+                                                "indexes",
+                                                i64::try_from(accepted_indexes).unwrap_or(i64::MAX),
+                                            );
+                                            ui.label(self.localization.text_with(
+                                                "collections-public-announcement-online",
+                                                Some(&status_args),
+                                            ));
+                                            Some((last_announced_at, expires_at))
+                                        }
+                                        PublicAnnouncementStatusView::Expired {
+                                            last_announced_at,
+                                            expires_at,
+                                        } => {
+                                            ui.colored_label(
+                                                crate::theme::warning_text(ui.visuals().dark_mode),
+                                                self.localization.text(
+                                                    "collections-public-announcement-expired",
+                                                ),
+                                            );
+                                            Some((last_announced_at, expires_at))
+                                        }
+                                    };
+                                    if let Some((last, expiry)) = announcement_times {
+                                        let mut last_args = FluentArgs::new();
+                                        last_args.set(
+                                            "timestamp",
+                                            last.format("%Y-%m-%d %H:%M").to_string(),
+                                        );
+                                        ui.label(
+                                            RichText::new(self.localization.text_with(
+                                                "collections-public-last-renewal",
+                                                Some(&last_args),
+                                            ))
+                                            .small()
+                                            .color(ui.visuals().weak_text_color()),
+                                        );
+                                        let mut expiry_args = FluentArgs::new();
+                                        expiry_args.set(
+                                            "timestamp",
+                                            expiry.format("%Y-%m-%d %H:%M").to_string(),
+                                        );
+                                        ui.label(
+                                            RichText::new(self.localization.text_with(
+                                                "collections-public-expiry",
+                                                Some(&expiry_args),
+                                            ))
+                                            .small()
+                                            .color(ui.visuals().weak_text_color()),
+                                        );
+                                    }
+                                    ui.label(
+                                        self.localization.text("collections-public-description"),
+                                    );
+                                    ui.text_edit_multiline(&mut collection.public_description);
+                                    ui.label(
+                                        self.localization.text("collections-public-languages"),
+                                    );
+                                    ui.text_edit_singleline(&mut collection.public_languages);
+                                    if ui
+                                        .button(
+                                            self.localization
+                                                .text("collections-public-profile-save"),
+                                        )
+                                        .clicked()
+                                    {
+                                        let languages = collection
+                                            .public_languages
+                                            .split(',')
+                                            .map(str::trim)
+                                            .filter(|language| !language.is_empty())
+                                            .map(str::to_owned)
+                                            .collect();
+                                        self.worker.send(
+                                            WorkerCommand::UpdatePublicCollectionProfile {
+                                                collection_id: collection.id,
+                                                description: collection.public_description.clone(),
+                                                languages,
+                                            },
+                                        );
+                                    }
+                                }
+                                let external_ai_applies = external_ai_changed
+                                    && external_ai_change == ExternalAiPolicyChange::ApplyDisable;
+                                let public_disable =
+                                    public_changed && public_before && !collection.internet_public;
+                                if peer_changed || external_ai_applies || public_disable {
+                                    self.worker.send(WorkerCommand::UpdateCollectionPolicy {
                                         collection_id: collection.id,
-                                        description: collection.public_description.clone(),
-                                        languages,
+                                        local_only: collection.local_only,
+                                        peer_shareable: collection.peer_shareable,
+                                        allow_external_ai: collection.allow_external_ai,
+                                        internet_public: collection.internet_public,
                                     });
-                            }
-                        }
-                        let external_ai_applies = external_ai_changed
-                            && external_ai_change == ExternalAiPolicyChange::ApplyDisable;
-                        let public_disable =
-                            public_changed && public_before && !collection.internet_public;
-                        if peer_changed || external_ai_applies || public_disable {
-                            self.worker.send(WorkerCommand::UpdateCollectionPolicy {
-                                collection_id: collection.id,
-                                local_only: collection.local_only,
-                                peer_shareable: collection.peer_shareable,
-                                allow_external_ai: collection.allow_external_ai,
-                                internet_public: collection.internet_public,
-                            });
-                        }
+                                }
+                            },
+                        );
                     });
-                    ui.add_space(8.0);
-                }
-            });
+                });
+                ui.separator();
+                ui.add_space(8.0);
+            }
+        });
+        ui.add_space(28.0);
+        ui.heading(self.localization.text("collections-new"));
+        ui.label(
+            RichText::new(self.localization.text("collections-new-body"))
+                .small()
+                .color(ui.visuals().weak_text_color()),
+        );
+        ui.add_space(8.0);
+        ui.horizontal_wrapped(|ui| {
+            let name_label = ui.label(self.localization.text("collections-name"));
+            ui.text_edit_singleline(&mut self.new_collection_name)
+                .labelled_by(name_label.id);
+            if ui
+                .button(self.localization.text("collections-choose-folder"))
+                .clicked()
+            {
+                self.new_collection_folder = rfd::FileDialog::new().pick_folder();
+            }
+            let enabled =
+                !self.new_collection_name.trim().is_empty() && self.new_collection_folder.is_some();
+            if ui
+                .add_enabled(
+                    enabled,
+                    egui::Button::new(self.localization.text("collections-create-scan")),
+                )
+                .clicked()
+                && let Some(folder) = self.new_collection_folder.take()
+            {
+                self.worker.send(WorkerCommand::AddCollection {
+                    name: self.new_collection_name.trim().to_owned(),
+                    folder,
+                });
+                self.new_collection_name.clear();
+            }
+        });
+        if let Some(path) = &self.new_collection_folder {
+            wrap_monospace(ui, path.display().to_string());
+        }
         if let Some(collection_id) = requested_external_ai_confirmation {
             self.external_ai_confirmation = Some(collection_id);
         }
@@ -2083,7 +2175,10 @@ impl AirWikiApp {
         requested_rescan: &mut Option<Uuid>,
     ) {
         ui.horizontal_wrapped(|ui| {
-            ui.label(RichText::new(self.localization.text("review-document-selector")).strong());
+            ui.label(
+                RichText::new(self.localization.text("review-document-selector"))
+                    .family(crate::theme::semibold_font_family()),
+            );
             let selected_text = self
                 .selected_review
                 .and_then(|id| self.reviews.iter().find(|item| item.concept_id == id))
@@ -2147,7 +2242,7 @@ impl AirWikiApp {
                             self.localization
                                 .text_with("review-ready-group", Some(&arguments)),
                         )
-                        .strong(),
+                        .family(crate::theme::semibold_font_family()),
                     );
                     ui.add_space(4.0);
                     for item in &self.reviews {
@@ -2174,7 +2269,7 @@ impl AirWikiApp {
                             self.localization
                                 .text_with("review-issues-group", Some(&arguments)),
                         )
-                        .strong()
+                        .family(crate::theme::semibold_font_family())
                         .color(crate::theme::warning_text(ui.visuals().dark_mode)),
                     );
                     ui.add_space(4.0);
@@ -2356,87 +2451,69 @@ impl AirWikiApp {
             &self.localization.text("search-title"),
             &self.localization.text("search-subtitle"),
         );
-        self.search_form(ui, true);
-        if let Some(target) = self.search_feedback(ui, true) {
+        self.search_form(ui, true, SearchSurface::Ask, true);
+        if let Some(target) = self.search_feedback(ui, true, SearchSurface::Ask) {
             self.open_search_evidence(target);
         }
         self.public_browse_window(ui.ctx());
     }
 
-    fn search_form(&mut self, ui: &mut egui::Ui, show_top_k: bool) {
+    fn search_state(&self, surface: SearchSurface) -> &SearchViewState {
+        match surface {
+            SearchSurface::Ask => &self.ask_search,
+            SearchSurface::Public => &self.public_search,
+        }
+    }
+
+    fn search_state_mut(&mut self, surface: SearchSurface) -> &mut SearchViewState {
+        match surface {
+            SearchSurface::Ask => &mut self.ask_search,
+            SearchSurface::Public => &mut self.public_search,
+        }
+    }
+
+    fn search_form(
+        &mut self,
+        ui: &mut egui::Ui,
+        show_top_k: bool,
+        surface: SearchSurface,
+        allow_ask_public_network: bool,
+    ) {
         let layout = ResponsiveLayout::from_available(ui.available_size());
-        let search_running = self.search_request_id.is_some();
-        let enabled = !self.search_question.trim().is_empty() && !search_running;
-        let mut submit_clicked = false;
-        let response = if layout.is_narrow() {
-            let question_label = ui.label(self.localization.text("search-question"));
-            let response = ui
-                .add_enabled_ui(!search_running, |ui| {
-                    ui.add_sized(
-                        [ui.available_width(), 36.0],
-                        egui::TextEdit::singleline(&mut self.search_question)
-                            .hint_text(self.localization.text("search-placeholder")),
-                    )
-                })
-                .inner
-                .labelled_by(question_label.id);
-            ui.horizontal(|ui| {
-                if show_top_k {
-                    ui.add_enabled(
-                        !search_running,
-                        egui::DragValue::new(&mut self.search_top_k)
-                            .range(1..=10)
-                            .prefix("Top "),
-                    );
-                }
-                submit_clicked = ui
-                    .add_enabled(
-                        enabled,
-                        first_knowledge::primary_button(self.localization.text("search-action")),
-                    )
-                    .clicked();
-            });
-            response
-        } else {
-            ui.horizontal(|ui| {
-                let question_label = ui.label(self.localization.text("search-question"));
-                let reserved_width = if show_top_k { 190.0 } else { 100.0 };
-                let field_width = (ui.available_width() - reserved_width).clamp(220.0, 520.0);
-                let response = ui
-                    .add_enabled_ui(!search_running, |ui| {
-                        ui.add_sized(
-                            [field_width, 36.0],
-                            egui::TextEdit::singleline(&mut self.search_question)
-                                .hint_text(self.localization.text("search-placeholder")),
-                        )
-                    })
-                    .inner
-                    .labelled_by(question_label.id);
-                if show_top_k {
-                    ui.add_enabled(
-                        !search_running,
-                        egui::DragValue::new(&mut self.search_top_k)
-                            .range(1..=10)
-                            .prefix("Top "),
-                    );
-                }
-                submit_clicked = ui
-                    .add_enabled(
-                        enabled,
-                        first_knowledge::primary_button(self.localization.text("search-action")),
-                    )
-                    .clicked();
-                response
+        let search_running = self.active_search.is_some();
+        let question_label = self.localization.text("search-question");
+        let placeholder = self.localization.text("search-placeholder");
+        let action_label = self.localization.text("search-action");
+        let (response, submit_clicked) = ui
+            .push_id(surface, |ui| {
+                show_search_inputs(
+                    ui,
+                    layout,
+                    self.search_state_mut(surface),
+                    search_running,
+                    show_top_k,
+                    SearchInputText {
+                        question: &question_label,
+                        placeholder: &placeholder,
+                        action: &action_label,
+                    },
+                )
             })
-            .inner
-        };
+            .inner;
         ui.add_space(4.0);
-        ui.checkbox(
-            &mut self.search_public_network,
-            self.localization.text("search-public-network"),
+        if surface == SearchSurface::Ask && allow_ask_public_network {
+            ui.checkbox(
+                &mut self.search_public_network,
+                self.localization.text("search-public-network"),
+            );
+        }
+        let public_network = effective_public_search(
+            surface == SearchSurface::Public,
+            allow_ask_public_network,
+            self.search_public_network,
         );
-        if self.search_public_network {
-            let status = match self.public_route_kind {
+        if public_network {
+            let status = match self.search_state(surface).route_kind {
                 PublicRouteKind::Offline => "search-public-route-offline",
                 PublicRouteKind::Relay => "search-public-route-relay",
                 PublicRouteKind::Direct => "search-public-route-direct",
@@ -2500,27 +2577,29 @@ impl AirWikiApp {
             );
         }
         let submit = submit_clicked
-            || (enabled
+            || (!self.search_state(surface).question.trim().is_empty()
+                && !search_running
                 && response.lost_focus()
                 && ui.input(|input| input.key_pressed(egui::Key::Enter)));
         if response.changed() {
-            self.search_completed = false;
-            self.search_hits.clear();
-            self.search_error = None;
+            self.search_state_mut(surface).clear_feedback();
         }
         if submit {
             let request_id = Uuid::new_v4();
-            self.search_request_id = Some(request_id);
-            self.search_completed = false;
-            self.search_error = None;
-            self.search_hits.clear();
-            self.search_coverage = SearchCoverageView::Complete;
+            let search = self.search_state_mut(surface);
+            search.begin_search(public_network);
+            let question = search.question.trim().to_owned();
+            let top_k = search.top_k;
+            self.active_search = Some(ActiveSearch {
+                request_id,
+                surface,
+            });
             self.worker.send(WorkerCommand::Search {
                 request_id,
-                question: self.search_question.trim().to_owned(),
-                top_k: self.search_top_k,
+                question,
+                top_k,
                 purpose: SearchPurpose::LocalAssistant,
-                public_network: self.search_public_network,
+                public_network,
             });
         }
     }
@@ -2529,18 +2608,23 @@ impl AirWikiApp {
         &mut self,
         ui: &mut egui::Ui,
         show_empty_state: bool,
+        surface: SearchSurface,
     ) -> Option<SearchEvidenceTarget> {
         let mut selected_evidence = None;
         let mut requested_public_browse = None;
-        if self.search_request_id.is_some() {
+        if self
+            .active_search
+            .is_some_and(|active| active.surface == surface)
+        {
             ui.spinner();
             ui.label(self.localization.text("search-running"));
         }
-        self.search_error_feedback(ui);
-        if let Some(message) = search_coverage_message(&self.localization, self.search_coverage) {
+        self.search_error_feedback(ui, surface);
+        let search = self.search_state(surface);
+        if let Some(message) = search_coverage_message(&self.localization, search.coverage) {
             ui.colored_label(crate::theme::warning_text(ui.visuals().dark_mode), message);
         }
-        if show_empty_state && self.search_completed && self.search_hits.is_empty() {
+        if show_empty_state && search.completed && search.hits.is_empty() {
             empty_state(
                 ui,
                 &self.localization.text("search-empty-title"),
@@ -2549,11 +2633,11 @@ impl AirWikiApp {
         }
         let results_height = ui.available_height().max(0.0);
         egui::ScrollArea::vertical()
-            .id_salt("search_results")
+            .id_salt(("search_results", surface))
             .max_height(results_height)
             .auto_shrink([false; 2])
             .show(ui, |ui| {
-                for hit in &self.search_hits {
+                for hit in &self.search_state(surface).hits {
                     let collection_exists = self
                         .collections
                         .iter()
@@ -2571,9 +2655,12 @@ impl AirWikiApp {
                     );
                     let origin = search_result_origin_label(&self.localization, &availability);
                     ui.add_space(8.0);
-                    egui::Frame::group(ui.style()).show(ui, |ui| {
+                    crate::theme::surface_frame(ui.visuals().dark_mode).show(ui, |ui| {
                         ui.heading(format!("{}. {}", hit.rank, hit.title));
-                        ui.label(RichText::new(&hit.heading_or_page).strong());
+                        ui.label(
+                            RichText::new(&hit.heading_or_page)
+                                .family(crate::theme::semibold_font_family()),
+                        );
                         ui.label(&hit.snippet);
                         ui.horizontal_wrapped(|ui| match &availability {
                             SearchResultAvailability::LocalAvailable => {
@@ -2601,7 +2688,7 @@ impl AirWikiApp {
                                         .small()
                                         .color(ui.visuals().weak_text_color()),
                                 );
-                                if self.search_public_network
+                                if self.search_state(surface).submitted_public_network
                                     && ui
                                         .button(self.localization.text("search-browse-public"))
                                         .clicked()
@@ -2754,7 +2841,7 @@ impl AirWikiApp {
                 }
                 egui::ScrollArea::vertical().show(ui, |ui| {
                     for concept in &self.public_browse_concepts {
-                        egui::Frame::group(ui.style()).show(ui, |ui| {
+                        crate::theme::surface_frame(ui.visuals().dark_mode).show(ui, |ui| {
                             ui.heading(&concept.title);
                             ui.label(RichText::new(concept.concept_type.to_string()).small());
                             ui.label(&concept.summary);
@@ -2801,7 +2888,11 @@ impl AirWikiApp {
                 publisher_id: publisher_id.clone(),
                 blocked: true,
             });
-            self.search_hits.retain(|hit| hit.node_id != publisher_id);
+            remove_blocked_publisher_hits(
+                &mut self.ask_search,
+                &mut self.public_search,
+                &publisher_id,
+            );
             self.public_browse_open = false;
         }
     }
@@ -2815,8 +2906,8 @@ impl AirWikiApp {
         }
     }
 
-    fn search_error_feedback(&self, ui: &mut egui::Ui) {
-        let Some(error) = &self.search_error else {
+    fn search_error_feedback(&self, ui: &mut egui::Ui, surface: SearchSurface) {
+        let Some(error) = &self.search_state(surface).error else {
             return;
         };
         ui.colored_label(
@@ -2825,7 +2916,7 @@ impl AirWikiApp {
         );
         ui.collapsing(self.localization.text("technical-details"), |ui| {
             egui::ScrollArea::vertical()
-                .id_salt("search_error_details")
+                .id_salt(("search_error_details", surface))
                 .max_height(88.0)
                 .auto_shrink([false, true])
                 .show(ui, |ui| {
@@ -2847,6 +2938,115 @@ impl AirWikiApp {
         }
     }
 
+    fn public_network(&mut self, ui: &mut egui::Ui) {
+        page_title(
+            ui,
+            &self.localization.text("public-title"),
+            &self.localization.text("public-subtitle"),
+        );
+        ui.label(
+            RichText::new(self.localization.text("public-experimental"))
+                .small()
+                .family(crate::theme::semibold_font_family())
+                .color(crate::theme::attention(ui.visuals().dark_mode)),
+        );
+        ui.add_space(18.0);
+        let route_status = match self.public_search.route_kind {
+            PublicRouteKind::Offline => "search-public-route-offline",
+            PublicRouteKind::Relay => "search-public-route-relay",
+            PublicRouteKind::Direct => "search-public-route-direct",
+        };
+        ui.horizontal_wrapped(|ui| {
+            ui.label(
+                RichText::new(self.localization.text("public-route-title"))
+                    .small()
+                    .family(crate::theme::semibold_font_family()),
+            );
+            ui.label(
+                RichText::new(self.localization.text(route_status))
+                    .small()
+                    .color(ui.visuals().weak_text_color()),
+            );
+        });
+        ui.add_space(28.0);
+        ui.label(
+            RichText::new(self.localization.text("public-collections-title"))
+                .small()
+                .family(crate::theme::semibold_font_family())
+                .color(ui.visuals().weak_text_color()),
+        );
+        ui.add_space(6.0);
+        if self.collections.is_empty() {
+            ui.label(
+                RichText::new(self.localization.text("public-collections-empty"))
+                    .color(ui.visuals().weak_text_color()),
+            );
+        } else {
+            for collection in &self.collections {
+                ui.push_id(collection.id, |ui| {
+                    ui.horizontal_wrapped(|ui| {
+                        ui.heading(RichText::new(&collection.name).size(22.0));
+                        if collection.internet_public {
+                            ui.colored_label(
+                                crate::theme::accent_text(ui.visuals().dark_mode),
+                                self.localization.text("public-visible"),
+                            );
+                        } else {
+                            ui.label(
+                                RichText::new(self.localization.text("public-private"))
+                                    .color(ui.visuals().weak_text_color()),
+                            );
+                        }
+                    });
+                    if collection.internet_public {
+                        let status = match collection.public_announcement {
+                            PublicAnnouncementStatusView::Offline => {
+                                "collections-public-announcement-offline"
+                            }
+                            PublicAnnouncementStatusView::Advertised { .. } => {
+                                "public-announcement-online"
+                            }
+                            PublicAnnouncementStatusView::Expired { .. } => {
+                                "collections-public-announcement-expired"
+                            }
+                        };
+                        ui.label(
+                            RichText::new(self.localization.text(status))
+                                .small()
+                                .color(ui.visuals().weak_text_color()),
+                        );
+                    } else {
+                        ui.label(
+                            RichText::new(self.localization.text("public-private-summary"))
+                                .small()
+                                .color(ui.visuals().weak_text_color()),
+                        );
+                    }
+                });
+                ui.add_space(12.0);
+                ui.separator();
+                ui.add_space(12.0);
+            }
+        }
+        if ui
+            .button(self.localization.text("public-manage-collections"))
+            .clicked()
+        {
+            self.screen = Screen::Collections;
+        }
+        ui.add_space(24.0);
+        ui.heading(RichText::new(self.localization.text("public-discover-title")).size(24.0));
+        ui.label(
+            RichText::new(self.localization.text("public-discover-body"))
+                .color(ui.visuals().weak_text_color()),
+        );
+        self.search_form(ui, true, SearchSurface::Public, false);
+        if let Some(target) = self.search_feedback(ui, true, SearchSurface::Public) {
+            self.open_search_evidence(target);
+        }
+        self.public_browse_window(ui.ctx());
+    }
+
     fn refresh_integrations_if_needed(&mut self) {
         let Some(IntegrationsUiAction::Run { request_id, action }) =
             self.integrations.refresh_if_idle()
@@ -2863,10 +3063,20 @@ impl AirWikiApp {
             &self.localization.text("devices-title"),
             &self.localization.text("devices-subtitle"),
         );
+        ui.horizontal_wrapped(|ui| {
+            ui.label(self.localization.text("connections-chat-summary"));
+            if ui
+                .button(self.localization.text("connections-open-chats"))
+                .clicked()
+            {
+                self.screen = Screen::Integrations;
+            }
+        });
+        ui.add_space(20.0);
         self.connectivity_panel(ui);
         ui.add_space(10.0);
         ui.collapsing(self.localization.text("devices-manual-advanced"), |ui| {
-            egui::Frame::group(ui.style()).show(ui, |ui| {
+            crate::theme::surface_frame(ui.visuals().dark_mode).show(ui, |ui| {
                 if !self.lan_local_addresses.is_empty() {
                     ui.label(self.localization.text("devices-this-address"));
                     for address in &self.lan_local_addresses {
@@ -2941,7 +3151,7 @@ impl AirWikiApp {
             .auto_shrink([false; 2])
             .show(ui, |ui| {
                 for peer in &mut self.peers {
-                    egui::Frame::group(ui.style()).show(ui, |ui| {
+                    crate::theme::surface_frame(ui.visuals().dark_mode).show(ui, |ui| {
                         ui.horizontal(|ui| {
                             ui.vertical(|ui| {
                                 ui.heading(peer.device_name.as_deref().unwrap_or(&nearby_device));
@@ -3051,7 +3261,7 @@ impl AirWikiApp {
             .map_or(LanPreference::Undecided, |preferences| {
                 preferences.lan_preference
             });
-        egui::Frame::group(ui.style()).show(ui, |ui| {
+        crate::theme::surface_frame(ui.visuals().dark_mode).show(ui, |ui| {
             ui.heading(self.localization.text("connectivity-title"));
             match preference {
                 LanPreference::Undecided => {
@@ -3483,7 +3693,7 @@ impl AirWikiApp {
                 );
                 ui.add_space(12.0);
                 if let Some(state) = self.model_state.clone() {
-                    egui::Frame::group(ui.style()).show(ui, |ui| {
+                    crate::theme::surface_frame(ui.visuals().dark_mode).show(ui, |ui| {
                         ui.heading(self.localization.text("settings-local-ai"));
                         let mut profile_arguments = FluentArgs::new();
                         profile_arguments
@@ -3616,7 +3826,7 @@ impl AirWikiApp {
         };
         let message = message.clone();
         let mut dismiss = false;
-        egui::Frame::group(ui.style()).show(ui, |ui| {
+        crate::theme::surface_frame(ui.visuals().dark_mode).show(ui, |ui| {
             ui.horizontal_wrapped(|ui| {
                 ui.colored_label(
                     crate::theme::error_text(ui.visuals().dark_mode),
@@ -3693,7 +3903,7 @@ impl AirWikiApp {
     }
 
     fn update_settings(&mut self, ui: &mut egui::Ui) {
-        egui::Frame::group(ui.style()).show(ui, |ui| {
+        crate::theme::surface_frame(ui.visuals().dark_mode).show(ui, |ui| {
             ui.heading(self.localization.text("updates-title"));
             if let Some(preferences) = self.preferences {
                 let mut automatic = preferences.automatic_update_checks;
@@ -3933,7 +4143,7 @@ impl AirWikiApp {
         ui.label(
             RichText::new(self.localization.text("onboarding-model-recommended"))
                 .small()
-                .strong()
+                .family(crate::theme::semibold_font_family())
                 .color(ui.visuals().weak_text_color()),
         );
         if let Some(display_name) = &state.recommended_display_name {
@@ -4384,12 +4594,15 @@ impl AirWikiApp {
                                         &self.localization.text("onboarding-search-body"),
                                         layout.density,
                                     );
-                                    self.search_form(ui, false);
+                                    self.search_form(ui, false, SearchSurface::Ask, false);
                                     ui.add_space(if layout.is_compact() { 8.0 } else { 16.0 });
-                                    let selected_evidence = if self.search_request_id.is_some() {
-                                        self.search_feedback(ui, false)
-                                    } else if self.search_error.is_some() {
-                                        self.search_error_feedback(ui);
+                                    let selected_evidence = if self
+                                        .active_search
+                                        .is_some_and(|active| active.surface == SearchSurface::Ask)
+                                    {
+                                        self.search_feedback(ui, false, SearchSurface::Ask)
+                                    } else if self.ask_search.error.is_some() {
+                                        self.search_error_feedback(ui, SearchSurface::Ask);
                                         ui.add_space(8.0);
                                         if ui
                                             .add_enabled(
@@ -4407,8 +4620,8 @@ impl AirWikiApp {
                                     } else {
                                         let (title_id, body_id, button_id) =
                                             onboarding_search_completion(
-                                                self.search_completed,
-                                                !self.search_hits.is_empty(),
+                                                self.ask_search.completed,
+                                                !self.ask_search.hits.is_empty(),
                                             );
                                         ui.heading(self.localization.text(title_id));
                                         ui.label(self.localization.text(body_id));
@@ -4423,7 +4636,7 @@ impl AirWikiApp {
                                         {
                                             self.finish_onboarding();
                                         }
-                                        self.search_feedback(ui, false)
+                                        self.search_feedback(ui, false, SearchSurface::Ask)
                                     };
                                     if let Some(target) = selected_evidence {
                                         self.open_search_evidence(target);
@@ -4730,7 +4943,9 @@ fn show_review_issue(
         .inner_margin(egui::Margin::same(10))
         .show(ui, |ui| {
             ui.set_min_width(ui.available_width());
-            ui.label(RichText::new(&issue.source_name).strong());
+            ui.label(
+                RichText::new(&issue.source_name).family(crate::theme::semibold_font_family()),
+            );
             ui.label(
                 RichText::new(&issue.collection_name)
                     .small()
@@ -4739,7 +4954,7 @@ fn show_review_issue(
             ui.label(
                 RichText::new(localization.text("review-issue-status"))
                     .small()
-                    .strong()
+                    .family(crate::theme::semibold_font_family())
                     .color(crate::theme::warning_text(ui.visuals().dark_mode)),
             );
             ui.add(
@@ -5147,10 +5362,14 @@ fn onboarding_title(
     density: crate::layout::LayoutDensity,
 ) {
     let (title_size, body_size, gap) = match density {
-        crate::layout::LayoutDensity::Compact => (20.0, 14.0, 8.0),
-        crate::layout::LayoutDensity::Comfortable => (24.0, 15.0, 16.0),
+        crate::layout::LayoutDensity::Compact => (28.0, 14.0, 12.0),
+        crate::layout::LayoutDensity::Comfortable => (38.0, 15.0, 20.0),
     };
-    ui.heading(RichText::new(title).size(title_size).strong());
+    ui.heading(
+        RichText::new(title)
+            .size(title_size)
+            .family(crate::theme::semibold_font_family()),
+    );
     ui.add(egui::Label::new(RichText::new(body).size(body_size)).wrap());
     ui.add_space(gap);
 }
@@ -5398,11 +5617,12 @@ impl eframe::App for AirWikiApp {
 
     fn ui(&mut self, root: &mut egui::Ui, _frame: &mut eframe::Frame) {
         if self.onboarding_page.is_some() {
+            let layout = ResponsiveLayout::from_available(root.available_size());
             egui::CentralPanel::default()
                 .frame(
                     egui::Frame::new()
                         .fill(crate::theme::paper(root.visuals().dark_mode))
-                        .inner_margin(egui::Margin::symmetric(30, 20)),
+                        .inner_margin(layout.content_margin()),
                 )
                 .show(root, |ui| {
                     self.onboarding(ui);
@@ -5416,11 +5636,12 @@ impl eframe::App for AirWikiApp {
         if self.screen != Screen::Setup {
             self.notices(root);
         }
+        let layout = ResponsiveLayout::from_available(root.available_size());
         egui::CentralPanel::default()
             .frame(
                 egui::Frame::new()
                     .fill(crate::theme::paper(root.visuals().dark_mode))
-                    .inner_margin(egui::Margin::symmetric(30, 20)),
+                    .inner_margin(layout.content_margin()),
             )
             .show(root, |ui| match self.screen {
                 Screen::Setup => {
@@ -5435,10 +5656,41 @@ impl eframe::App for AirWikiApp {
                         });
                 }
                 Screen::Models => self.setup(ui),
-                Screen::Collections => self.collections(ui),
+                Screen::Collections => {
+                    let viewport = ui.available_size();
+                    egui::ScrollArea::vertical()
+                        .id_salt("collections_page_scroll")
+                        .max_height(viewport.y)
+                        .auto_shrink([false; 2])
+                        .show(ui, |ui| {
+                            ui.set_min_width(viewport.x);
+                            self.collections(ui);
+                        });
+                }
                 Screen::Review => self.review(ui),
                 Screen::Knowledge => self.knowledge(ui),
-                Screen::Search => self.search(ui),
+                Screen::Search => {
+                    let viewport = ui.available_size();
+                    egui::ScrollArea::vertical()
+                        .id_salt("search_page_scroll")
+                        .max_height(viewport.y)
+                        .auto_shrink([false; 2])
+                        .show(ui, |ui| {
+                            ui.set_min_width(viewport.x);
+                            self.search(ui);
+                        });
+                }
+                Screen::Public => {
+                    let viewport = ui.available_size();
+                    egui::ScrollArea::vertical()
+                        .id_salt("public_page_scroll")
+                        .max_height(viewport.y)
+                        .auto_shrink([false; 2])
+                        .show(ui, |ui| {
+                            ui.set_min_width(viewport.x);
+                            self.public_network(ui);
+                        });
+                }
                 Screen::Integrations => self.integrations(ui),
                 Screen::Nodes => self.nodes(ui),
                 Screen::Settings => self.settings(ui),
@@ -5452,19 +5704,147 @@ fn configure_style(context: &egui::Context) {
 }
 
 fn nav(ui: &mut egui::Ui, current: &mut Screen, target: Screen, label: &str) {
-    let selected = *current == target;
-    let mut button = egui::Button::selectable(selected, RichText::new(label).size(14.0))
+    let selected = nav_is_selected(*current, target);
+    let dark_mode = ui.visuals().dark_mode;
+    let mut label = RichText::new(label).size(15.0);
+    if selected {
+        label = label
+            .family(crate::theme::semibold_font_family())
+            .color(crate::theme::accent_text(dark_mode));
+    }
+    let mut button = egui::Button::new("")
+        .left_text(label)
+        .selected(selected)
+        .frame_when_inactive(false)
         .corner_radius(egui::CornerRadius::same(1));
     if selected {
         button = button
-            .fill(crate::theme::paper(ui.visuals().dark_mode))
-            .stroke(egui::Stroke::new(
-                1.0,
-                crate::theme::border(ui.visuals().dark_mode),
-            ));
+            .fill(crate::theme::paper(dark_mode))
+            .stroke(egui::Stroke::new(2.0, crate::theme::accent_text(dark_mode)));
     }
-    if ui.add_sized([178.0, 34.0], button).clicked() {
+    let response = ui.add_sized([166.0, 36.0], button);
+    if selected {
+        ui.painter().line_segment(
+            [
+                egui::pos2(response.rect.left() + 1.0, response.rect.top() + 4.0),
+                egui::pos2(response.rect.left() + 1.0, response.rect.bottom() - 4.0),
+            ],
+            egui::Stroke::new(3.0, crate::theme::accent_text(dark_mode)),
+        );
+    }
+    if response.clicked() {
         *current = target;
+    }
+}
+
+fn nav_is_selected(current: Screen, target: Screen) -> bool {
+    current == target || (current == Screen::Integrations && target == Screen::Nodes)
+}
+
+const fn effective_public_search(
+    public_only: bool,
+    allow_ask_public_network: bool,
+    ask_preference: bool,
+) -> bool {
+    public_only || (allow_ask_public_network && ask_preference)
+}
+
+struct SearchInputText<'a> {
+    question: &'a str,
+    placeholder: &'a str,
+    action: &'a str,
+}
+
+fn show_search_inputs(
+    ui: &mut egui::Ui,
+    layout: ResponsiveLayout,
+    search: &mut SearchViewState,
+    search_running: bool,
+    show_top_k: bool,
+    text: SearchInputText<'_>,
+) -> (egui::Response, bool) {
+    let mut submit_clicked = false;
+    let response = if layout.is_narrow() {
+        let question_label = ui.label(text.question);
+        let response = ui
+            .add_enabled_ui(!search_running, |ui| {
+                ui.add_sized(
+                    [ui.available_width(), 36.0],
+                    egui::TextEdit::singleline(&mut search.question).hint_text(text.placeholder),
+                )
+            })
+            .inner
+            .labelled_by(question_label.id);
+        ui.horizontal(|ui| {
+            if show_top_k {
+                ui.add_enabled(
+                    !search_running,
+                    egui::DragValue::new(&mut search.top_k)
+                        .range(1..=10)
+                        .prefix("Top "),
+                );
+            }
+            submit_clicked = ui
+                .add_enabled(
+                    !search.question.trim().is_empty() && !search_running,
+                    first_knowledge::primary_button(text.action.to_owned()),
+                )
+                .clicked();
+        });
+        response
+    } else {
+        ui.horizontal(|ui| {
+            let question_label = ui.label(text.question);
+            let reserved_width = if show_top_k { 190.0 } else { 100.0 };
+            let field_width = (ui.available_width() - reserved_width).clamp(220.0, 520.0);
+            let response = ui
+                .add_enabled_ui(!search_running, |ui| {
+                    ui.add_sized(
+                        [field_width, 36.0],
+                        egui::TextEdit::singleline(&mut search.question)
+                            .hint_text(text.placeholder),
+                    )
+                })
+                .inner
+                .labelled_by(question_label.id);
+            if show_top_k {
+                ui.add_enabled(
+                    !search_running,
+                    egui::DragValue::new(&mut search.top_k)
+                        .range(1..=10)
+                        .prefix("Top "),
+                );
+            }
+            submit_clicked = ui
+                .add_enabled(
+                    !search.question.trim().is_empty() && !search_running,
+                    first_knowledge::primary_button(text.action.to_owned()),
+                )
+                .clicked();
+            response
+        })
+        .inner
+    };
+    (response, submit_clicked)
+}
+
+fn search_response_surface(
+    active_search: Option<ActiveSearch>,
+    event_request_id: Uuid,
+) -> Option<SearchSurface> {
+    active_search
+        .filter(|active| active.request_id == event_request_id)
+        .map(|active| active.surface)
+}
+
+fn remove_blocked_publisher_hits(
+    ask_search: &mut SearchViewState,
+    public_search: &mut SearchViewState,
+    publisher_id: &str,
+) {
+    public_search.hits.retain(|hit| hit.node_id != publisher_id);
+    if ask_search.submitted_public_network {
+        ask_search.hits.retain(|hit| hit.node_id != publisher_id);
     }
 }
 
@@ -5481,7 +5861,11 @@ fn wrap_rich_text(ui: &mut egui::Ui, text: RichText) {
 }
 
 fn page_title(ui: &mut egui::Ui, title: &str, subtitle: &str) {
-    ui.heading(RichText::new(title).size(34.0).strong());
+    ui.heading(
+        RichText::new(title)
+            .size(32.0)
+            .family(crate::theme::semibold_font_family()),
+    );
     ui.add(
         egui::Label::new(
             RichText::new(subtitle)
@@ -5490,31 +5874,18 @@ fn page_title(ui: &mut egui::Ui, title: &str, subtitle: &str) {
         )
         .wrap(),
     );
-    ui.add_space(10.0);
-    ui.painter().hline(
-        ui.available_rect_before_wrap().x_range(),
-        ui.cursor().top(),
-        egui::Stroke::new(1.0, crate::theme::border(ui.visuals().dark_mode)),
-    );
-    ui.add_space(12.0);
+    ui.add_space(24.0);
 }
 
 fn empty_state(ui: &mut egui::Ui, title: &str, body: &str) {
     egui::Frame::new()
         .fill(crate::theme::surface(ui.visuals().dark_mode))
-        .stroke(egui::Stroke::new(
-            1.0,
-            crate::theme::border(ui.visuals().dark_mode),
-        ))
+        .stroke(egui::Stroke::NONE)
         .corner_radius(egui::CornerRadius::same(2))
-        .inner_margin(egui::Margin::same(20))
+        .inner_margin(egui::Margin::same(24))
         .show(ui, |ui| {
-            ui.add_space(20.0);
-            ui.vertical_centered(|ui| {
-                ui.heading(RichText::new(title).size(24.0));
-                ui.label(body);
-            });
-            ui.add_space(20.0);
+            ui.heading(RichText::new(title).size(24.0));
+            ui.add(egui::Label::new(body).wrap());
         });
 }
 
@@ -5530,10 +5901,6 @@ fn abbreviate_publisher_id(publisher_id: &str) -> String {
 fn deduplicate_notices(notices: &mut VecDeque<(bool, String)>) {
     let mut seen = HashSet::new();
     notices.retain(|notice| seen.insert(notice.clone()));
-}
-
-fn search_result_applies(active_request_id: Option<Uuid>, event_request_id: Uuid) -> bool {
-    active_request_id == Some(event_request_id)
 }
 
 fn wiki_health_result_applies(last_generation: u64, event_generation: u64) -> bool {
@@ -5614,7 +5981,14 @@ fn parse_manual_ipv4_address(input: &str) -> Option<ManualLanAddress> {
 }
 
 fn edit_draft(ui: &mut egui::Ui, localization: &Localization, draft: &mut EnrichmentDraft) {
-    ui.heading(localization.text("review-metadata-title"));
+    ui.add(
+        egui::Label::new(
+            RichText::new(localization.text("review-metadata-title"))
+                .size(24.0)
+                .family(crate::theme::semibold_font_family()),
+        )
+        .wrap(),
+    );
     egui::ComboBox::from_label(localization.text("review-field-type"))
         .selected_text(draft.concept_type.to_string())
         .show_ui(ui, |ui| {
@@ -5750,18 +6124,21 @@ mod tests {
     use fluent_bundle::FluentArgs;
 
     use super::{
-        ExternalAiPolicyChange, OnboardingPage, SearchResultAvailability, WikiHealthCheckState,
-        advance_onboarding_page, classify_external_ai_policy_change, classify_search_result,
+        ActiveSearch, ExternalAiPolicyChange, OnboardingPage, Screen, SearchResultAvailability,
+        SearchSurface, SearchViewState, WikiHealthCheckState, advance_onboarding_page,
+        classify_external_ai_policy_change, classify_search_result,
         collection_maintenance_needs_recovery, connectivity_runtime_is_active, deduplicate_notices,
-        elapsed_minutes, firewall_configuration_is_current, firewall_operation_update_applies,
-        firewall_state_offers_advanced_recovery, focused_control_needs_scroll, human_error_summary,
-        localized_worker_notice, model_action_label, onboarding_error_is_relevant,
+        effective_public_search, elapsed_minutes, firewall_configuration_is_current,
+        firewall_operation_update_applies, firewall_state_offers_advanced_recovery,
+        focused_control_needs_scroll, human_error_summary, localized_worker_notice,
+        model_action_label, nav_is_selected, onboarding_error_is_relevant,
         onboarding_page_for_state, onboarding_review_requires_recovery,
         onboarding_search_completion, parse_manual_ipv4_address, peer_activity_message_id,
-        primary_action_explanation, primary_action_title, review_fields_stack,
-        sanitized_error_code, search_coverage_message, search_result_applies,
-        search_result_origin_label, should_present_pairing_controls, updater_launched_installer,
-        visible_journey_states, wiki_health_readiness_inputs, wiki_health_result_applies,
+        primary_action_explanation, primary_action_title, remove_blocked_publisher_hits,
+        review_fields_stack, sanitized_error_code, search_coverage_message,
+        search_response_surface, search_result_origin_label, should_present_pairing_controls,
+        updater_launched_installer, visible_journey_states, wiki_health_readiness_inputs,
+        wiki_health_result_applies,
     };
     use crate::connectivity_platform::{
         ConnectivityPlatformSnapshot, FirewallDiagnosticState, FirewallHelperState,
@@ -5780,11 +6157,83 @@ mod tests {
         WikiHealthSummaryView,
     };
     use airwiki_core::SourceIssueCode;
+    use airwiki_network::PublicRouteKind;
+    use airwiki_types::SearchHit;
+    use chrono::Utc;
     use std::{
         collections::VecDeque,
         time::{Duration, SystemTime},
     };
     use uuid::Uuid;
+
+    fn synthetic_search_hit(node_id: &str) -> SearchHit {
+        SearchHit {
+            concept_id: Uuid::new_v4(),
+            collection_id: Uuid::new_v4(),
+            chunk_id: Uuid::new_v4(),
+            title: "Synthetic result".to_owned(),
+            snippet: "Synthetic evidence".to_owned(),
+            heading_or_page: "Fixture".to_owned(),
+            logical_resource_uri: "airwiki://fixture".to_owned(),
+            source_revision: 1,
+            source_sha256: "fixture-sha256".to_owned(),
+            updated_at: Utc::now(),
+            rank: 1,
+            node_id: node_id.to_owned(),
+        }
+    }
+
+    #[test]
+    fn active_navigation_is_independent_from_keyboard_focus() {
+        assert!(nav_is_selected(Screen::Public, Screen::Public));
+        assert!(!nav_is_selected(Screen::Public, Screen::Collections));
+        assert!(nav_is_selected(Screen::Integrations, Screen::Nodes));
+    }
+
+    #[test]
+    fn public_screen_does_not_change_the_ask_search_preference() {
+        for ask_preference in [false, true] {
+            let original_preference = ask_preference;
+
+            assert!(effective_public_search(true, false, ask_preference));
+            assert_eq!(ask_preference, original_preference);
+        }
+    }
+
+    #[test]
+    fn ask_and_public_keep_independent_drafts_and_feedback() {
+        let mut ask = SearchViewState::new();
+        let public = SearchViewState::new();
+
+        ask.question = "local draft".to_owned();
+        ask.completed = true;
+        ask.coverage = SearchCoverageView::Partial;
+        ask.error = Some("fixture-error".to_owned());
+
+        assert_eq!(ask.question, "local draft");
+        assert!(ask.completed);
+        assert!(ask.error.is_some());
+        assert!(public.question.is_empty());
+        assert!(!public.completed);
+        assert_eq!(public.coverage, SearchCoverageView::Complete);
+        assert!(public.error.is_none());
+    }
+
+    #[test]
+    fn public_search_is_always_public_while_ask_remains_opt_in() {
+        assert!(effective_public_search(true, false, false));
+        assert!(effective_public_search(true, false, true));
+        assert!(!effective_public_search(false, true, false));
+        assert!(effective_public_search(false, true, true));
+    }
+
+    #[test]
+    fn onboarding_search_stays_local_without_mutating_the_ask_preference() {
+        let ask_preference = true;
+
+        assert!(!effective_public_search(false, false, ask_preference));
+        assert!(ask_preference);
+    }
 
     #[test]
     fn first_run_targets_the_earliest_unfinished_knowledge_step() {
@@ -6221,12 +6670,98 @@ mod tests {
     }
 
     #[test]
-    fn search_results_apply_only_to_the_active_request() {
-        let active = Uuid::new_v4();
+    fn search_responses_apply_only_to_the_active_request_surface() {
+        let request_id = Uuid::new_v4();
+        let active = Some(ActiveSearch {
+            request_id,
+            surface: SearchSurface::Public,
+        });
 
-        assert!(search_result_applies(Some(active), active));
-        assert!(!search_result_applies(Some(active), Uuid::new_v4()));
-        assert!(!search_result_applies(None, active));
+        assert_eq!(
+            search_response_surface(active, request_id),
+            Some(SearchSurface::Public)
+        );
+        assert_eq!(search_response_surface(active, Uuid::new_v4()), None);
+        assert_eq!(search_response_surface(None, request_id), None);
+    }
+
+    #[test]
+    fn local_ask_completion_does_not_overwrite_the_last_public_route() {
+        let mut ask = SearchViewState::new();
+        let mut public = SearchViewState::new();
+        public.complete(
+            Vec::new(),
+            SearchCoverageView::Complete,
+            PublicRouteKind::Relay,
+        );
+
+        ask.complete(
+            Vec::new(),
+            SearchCoverageView::Complete,
+            PublicRouteKind::Offline,
+        );
+
+        assert_eq!(public.route_kind, PublicRouteKind::Relay);
+    }
+
+    #[test]
+    fn public_ask_completion_keeps_each_surface_route_independent() {
+        let mut ask = SearchViewState::new();
+        let mut public = SearchViewState::new();
+        public.complete(
+            Vec::new(),
+            SearchCoverageView::Complete,
+            PublicRouteKind::Relay,
+        );
+
+        ask.complete(
+            Vec::new(),
+            SearchCoverageView::Complete,
+            PublicRouteKind::Direct,
+        );
+
+        assert_eq!(
+            (ask.route_kind, public.route_kind),
+            (PublicRouteKind::Direct, PublicRouteKind::Relay)
+        );
+    }
+
+    #[test]
+    fn blocking_a_publisher_removes_only_publicly_sourced_hits() {
+        let blocked_publisher = "blocked-publisher";
+        let retained_publisher = "retained-publisher";
+        let mut ask = SearchViewState::new();
+        let mut public = SearchViewState::new();
+        ask.submitted_public_network = true;
+        ask.hits = vec![
+            synthetic_search_hit(blocked_publisher),
+            synthetic_search_hit(retained_publisher),
+        ];
+        public.hits = vec![
+            synthetic_search_hit(blocked_publisher),
+            synthetic_search_hit(retained_publisher),
+        ];
+
+        remove_blocked_publisher_hits(&mut ask, &mut public, blocked_publisher);
+
+        assert_eq!(ask.hits.len(), 1);
+        assert_eq!(ask.hits[0].node_id, retained_publisher);
+        assert_eq!(public.hits.len(), 1);
+        assert_eq!(public.hits[0].node_id, retained_publisher);
+    }
+
+    #[test]
+    fn blocking_a_publisher_preserves_local_only_ask_feedback() {
+        let blocked_publisher = "blocked-publisher";
+        let mut ask = SearchViewState::new();
+        let mut public = SearchViewState::new();
+        ask.hits.push(synthetic_search_hit(blocked_publisher));
+        public.hits.push(synthetic_search_hit(blocked_publisher));
+
+        remove_blocked_publisher_hits(&mut ask, &mut public, blocked_publisher);
+
+        assert_eq!(ask.hits.len(), 1);
+        assert!(public.hits.is_empty());
     }
 
     #[test]

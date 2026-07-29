@@ -9,9 +9,9 @@ use crate::i18n::Localization;
 use crate::worker::{ReviewEvidenceErrorView, ReviewEvidencePageView};
 
 const NARROW_REVIEW_THRESHOLD: f32 = 850.0;
-pub(super) const REVIEW_QUEUE_WIDTH: f32 = 230.0;
+pub(super) const REVIEW_QUEUE_WIDTH: f32 = 240.0;
 pub(super) const REVIEW_PANEL_GAP: f32 = 12.0;
-pub(super) const REVIEW_EVIDENCE_RATIO: f32 = 0.42;
+pub(super) const REVIEW_EVIDENCE_RATIO: f32 = 0.419;
 pub(super) const REVIEW_ACTION_BAR_HEIGHT: f32 = 92.0;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -429,7 +429,14 @@ pub(super) fn show_review_evidence_panel(
     error: Option<ReviewEvidenceErrorView>,
     loading: bool,
 ) -> Option<ReviewEvidencePanelIntent> {
-    ui.heading(localization.text("review-evidence-title"));
+    ui.add(
+        egui::Label::new(
+            RichText::new(localization.text("review-evidence-title"))
+                .size(24.0)
+                .family(crate::theme::semibold_font_family()),
+        )
+        .wrap(),
+    );
     ui.add(
         egui::Label::new(
             RichText::new(localization.text("review-evidence-body"))
@@ -443,7 +450,7 @@ pub(super) fn show_review_evidence_panel(
     ui.label(
         RichText::new(localization.text_with("review-evidence-revision", Some(&revision_args)))
             .small()
-            .strong(),
+            .family(crate::theme::semibold_font_family()),
     );
     ui.separator();
 
@@ -471,7 +478,9 @@ pub(super) fn show_review_evidence_panel(
                             } else {
                                 excerpt.heading_or_page.clone()
                             };
-                            ui.label(RichText::new(heading).strong());
+                            ui.label(
+                                RichText::new(heading).family(crate::theme::semibold_font_family()),
+                            );
                             ui.add(egui::Label::new(&excerpt.text).wrap().selectable(true));
                             if excerpt.truncated {
                                 ui.label(

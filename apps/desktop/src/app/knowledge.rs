@@ -701,7 +701,7 @@ impl KnowledgeUi {
             ui.heading(
                 RichText::new(localization.text("knowledge-title"))
                     .size(34.0)
-                    .strong(),
+                    .family(crate::theme::semibold_font_family()),
             );
             ui.add(
                 egui::Label::new(
@@ -870,7 +870,7 @@ impl KnowledgeUi {
         bundle: &KnowledgeBundleView,
     ) -> Option<KnowledgePageId> {
         let mut requested = None;
-        egui::Frame::group(ui.style()).show(ui, |ui| {
+        crate::theme::surface_frame(ui.visuals().dark_mode).show(ui, |ui| {
             ui.set_min_height(ui.available_height());
             ui.heading(localization.text("knowledge-pages"));
             ui.add(
@@ -969,7 +969,7 @@ impl KnowledgeUi {
         bundle: &KnowledgeBundleView,
     ) -> Option<KnowledgePageId> {
         let mut requested = None;
-        egui::Frame::group(ui.style()).show(ui, |ui| {
+        crate::theme::surface_frame(ui.visuals().dark_mode).show(ui, |ui| {
             ui.set_min_height(ui.available_height());
             if self.page_pending.is_some() {
                 ui.centered_and_justified(|ui| {
@@ -1051,7 +1051,7 @@ impl KnowledgeUi {
         bundle: &KnowledgeBundleView,
     ) -> Option<KnowledgePageId> {
         let mut requested = None;
-        egui::Frame::group(ui.style()).show(ui, |ui| {
+        crate::theme::surface_frame(ui.visuals().dark_mode).show(ui, |ui| {
             ui.set_min_height(ui.available_height());
             let Some(page) = self.page.clone() else {
                 ui.label(localization.text("knowledge-details-placeholder"));
@@ -1063,7 +1063,11 @@ impl KnowledgeUi {
                 .show(ui, |ui| {
                     ui.heading(localization.text("knowledge-metadata"));
                     for (key, value) in &page.metadata {
-                        ui.label(RichText::new(key).small().strong());
+                        ui.label(
+                            RichText::new(key)
+                                .small()
+                                .family(crate::theme::semibold_font_family()),
+                        );
                         ui.add(
                             egui::Label::new(RichText::new(value).monospace().small())
                                 .selectable(true)
@@ -1223,7 +1227,7 @@ impl KnowledgeUi {
             .map(|node| node.payload().clone())
         {
             graph_response.on_hover_ui(|ui| {
-                ui.label(RichText::new(payload.title).strong());
+                ui.label(RichText::new(payload.title).family(crate::theme::semibold_font_family()));
                 ui.label(payload.concept_type);
                 if !payload.tags.is_empty() {
                     ui.label(
@@ -1407,11 +1411,14 @@ impl KnowledgeUi {
             .auto_shrink([false; 2])
             .show(ui, |ui| {
                 for issue in &report.issues {
-                    egui::Frame::group(ui.style()).show(ui, |ui| {
+                    crate::theme::surface_frame(ui.visuals().dark_mode).show(ui, |ui| {
                         let (label, color) =
                             severity_visual(localization, &issue.severity, ui.visuals().dark_mode);
                         ui.horizontal(|ui| {
-                            ui.colored_label(color, RichText::new(label).strong());
+                            ui.colored_label(
+                                color,
+                                RichText::new(label).family(crate::theme::semibold_font_family()),
+                            );
                             if let Some(page_id) = issue.page {
                                 ui.with_layout(
                                     egui::Layout::right_to_left(egui::Align::Center),
@@ -1491,12 +1498,14 @@ impl KnowledgeUi {
             .show(context, |ui| {
                 ui.colored_label(
                     crate::theme::warning_text(ui.visuals().dark_mode),
-                    RichText::new(localization.text("knowledge-repair-confirm-warning")).strong(),
+                    RichText::new(localization.text("knowledge-repair-confirm-warning"))
+                        .family(crate::theme::semibold_font_family()),
                 );
                 ui.label(localization.text("knowledge-repair-confirm-body"));
                 ui.add_space(8.0);
                 ui.label(
-                    RichText::new(localization.text("knowledge-repair-authority-title")).strong(),
+                    RichText::new(localization.text("knowledge-repair-authority-title"))
+                        .family(crate::theme::semibold_font_family()),
                 );
                 for authority in &preview.authorities {
                     ui.label(format!(
@@ -1506,7 +1515,8 @@ impl KnowledgeUi {
                 }
                 ui.add_space(8.0);
                 ui.label(
-                    RichText::new(localization.text("knowledge-repair-changes-title")).strong(),
+                    RichText::new(localization.text("knowledge-repair-changes-title"))
+                        .family(crate::theme::semibold_font_family()),
                 );
                 egui::ScrollArea::vertical()
                     .id_salt("knowledge_guided_repair_files")
@@ -2045,7 +2055,7 @@ fn search_evidence_trace(
             let title = ui.add(
                 egui::Label::new(
                     RichText::new(localization.text("knowledge-search-evidence-title"))
-                        .strong()
+                        .family(crate::theme::semibold_font_family())
                         .color(crate::theme::accent_text(ui.visuals().dark_mode)),
                 )
                 .sense(egui::Sense::focusable_noninteractive()),
@@ -2292,7 +2302,10 @@ fn bundle_state_badge(
 ) {
     let (message, color) = bundle_state_visual(bundle, ui.visuals().dark_mode);
     let label = localization.text(message);
-    ui.colored_label(color, RichText::new(format!("● {label}")).strong());
+    ui.colored_label(
+        color,
+        RichText::new(format!("● {label}")).family(crate::theme::semibold_font_family()),
+    );
 }
 
 fn bundle_state_visual(bundle: &KnowledgeBundleView, dark_mode: bool) -> (&'static str, Color32) {
@@ -2384,7 +2397,7 @@ fn concept_color(concept_type: &str) -> Color32 {
 }
 
 fn health_card(ui: &mut egui::Ui, label: &str, value: usize, color: Color32) {
-    egui::Frame::group(ui.style()).show(ui, |ui| {
+    crate::theme::surface_frame(ui.visuals().dark_mode).show(ui, |ui| {
         ui.set_min_width(130.0);
         ui.label(RichText::new(value.to_string()).size(25.0).color(color));
         ui.label(
@@ -2409,7 +2422,9 @@ fn error_state(ui: &mut egui::Ui, localization: &Localization, title: &str, erro
         ui.vertical_centered(|ui| {
             ui.colored_label(
                 crate::theme::error_text(ui.visuals().dark_mode),
-                RichText::new(title).size(20.0).strong(),
+                RichText::new(title)
+                    .size(20.0)
+                    .family(crate::theme::semibold_font_family()),
             );
             ui.label(localized_knowledge_error(localization, error));
             if error != "knowledge-error-wrong-collection" {

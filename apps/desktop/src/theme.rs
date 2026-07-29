@@ -1,4 +1,6 @@
-use eframe::egui::{self, Color32};
+use std::sync::Arc;
+
+use eframe::egui::{self, Color32, FontData, FontDefinitions, FontFamily};
 
 /// Broadsheet's restrained cyan plate, darkened so white button text remains legible.
 pub(crate) const AIR_BLUE: Color32 = Color32::from_rgb(0, 103, 134);
@@ -23,21 +25,30 @@ const SURFACE_LIGHT: Color32 = Color32::from_rgb(234, 233, 233);
 const BORDER_LIGHT: Color32 = Color32::from_rgb(196, 193, 193);
 const TEXT_LIGHT: Color32 = Color32::from_rgb(32, 30, 29);
 const SECONDARY_LIGHT: Color32 = Color32::from_rgb(96, 93, 93);
+const EDITORIAL_REGULAR_FONT: &str = "Source Serif 4 Regular";
+const EDITORIAL_SEMIBOLD_FONT: &str = "Source Serif 4 Semibold";
 
 pub(crate) fn apply(context: &egui::Context) {
+    install_editorial_font(context);
+
     let mut style = (*context.global_style()).clone();
+    // The authoritative AirWiki design is a paper-like light interface. Keep
+    // the presentation stable across operating-system appearance settings.
+    style.visuals = egui::Visuals::light();
     style.spacing.item_spacing = egui::vec2(10.0, 10.0);
     style.spacing.button_padding = egui::vec2(12.0, 7.0);
     style.spacing.interact_size.y = 36.0;
-    style
-        .text_styles
-        .insert(egui::TextStyle::Heading, egui::FontId::proportional(32.0));
+    style.text_styles.insert(
+        egui::TextStyle::Heading,
+        egui::FontId::new(32.0, semibold_font_family()),
+    );
     style
         .text_styles
         .insert(egui::TextStyle::Body, egui::FontId::proportional(15.0));
-    style
-        .text_styles
-        .insert(egui::TextStyle::Button, egui::FontId::proportional(14.0));
+    style.text_styles.insert(
+        egui::TextStyle::Button,
+        egui::FontId::new(14.0, semibold_font_family()),
+    );
     style
         .text_styles
         .insert(egui::TextStyle::Small, egui::FontId::proportional(12.0));
@@ -78,6 +89,34 @@ pub(crate) fn apply(context: &egui::Context) {
         style.visuals.weak_text_color = Some(SECONDARY_LIGHT);
     }
     context.set_global_style(style);
+}
+
+fn install_editorial_font(context: &egui::Context) {
+    let mut fonts = FontDefinitions::default();
+    fonts.font_data.insert(
+        EDITORIAL_REGULAR_FONT.to_owned(),
+        Arc::new(FontData::from_static(include_bytes!(
+            "../assets/SourceSerif4-Regular.ttf"
+        ))),
+    );
+    fonts.font_data.insert(
+        EDITORIAL_SEMIBOLD_FONT.to_owned(),
+        Arc::new(FontData::from_static(include_bytes!(
+            "../assets/SourceSerif4-Semibold.ttf"
+        ))),
+    );
+    if let Some(proportional) = fonts.families.get_mut(&FontFamily::Proportional) {
+        proportional.insert(0, EDITORIAL_REGULAR_FONT.to_owned());
+    }
+    fonts.families.insert(
+        semibold_font_family(),
+        vec![EDITORIAL_SEMIBOLD_FONT.to_owned()],
+    );
+    context.set_fonts(fonts);
+}
+
+pub(crate) fn semibold_font_family() -> FontFamily {
+    FontFamily::Name(EDITORIAL_SEMIBOLD_FONT.into())
 }
 
 pub(crate) fn paper(dark_mode: bool) -> Color32 {
@@ -148,9 +187,47 @@ pub(crate) fn secondary_text(dark_mode: bool) -> Color32 {
     }
 }
 
+pub(crate) fn surface_frame(dark_mode: bool) -> egui::Frame {
+    egui::Frame::new()
+        .fill(surface(dark_mode))
+        .stroke(egui::Stroke::NONE)
+        .corner_radius(egui::CornerRadius::same(2))
+        .inner_margin(egui::Margin::same(15))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn authoritative_presentation_uses_light_paper_tokens() {
+        let context = egui::Context::default();
+
+        apply(&context);
+        let style = context.global_style();
+
+        assert!(!style.visuals.dark_mode);
+        assert_eq!(style.visuals.panel_fill, PAPER_LIGHT);
+        assert_eq!(style.visuals.override_text_color, Some(TEXT_LIGHT));
+    }
+
+    #[test]
+    fn headings_and_buttons_use_the_explicit_semibold_family() {
+        let context = egui::Context::default();
+
+        apply(&context);
+        let style = context.global_style();
+
+        assert_eq!(
+            style.text_styles[&egui::TextStyle::Heading].family,
+            semibold_font_family()
+        );
+        assert_eq!(
+            style.text_styles[&egui::TextStyle::Button].family,
+            semibold_font_family()
+        );
+        assert!(!include_bytes!("../assets/SourceSerif4-Semibold.ttf").is_empty());
+    }
 
     #[test]
     fn text_tokens_meet_normal_text_contrast_in_both_themes() {

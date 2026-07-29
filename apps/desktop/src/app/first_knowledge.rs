@@ -6,8 +6,6 @@ use crate::{layout::LayoutDensity, theme};
 
 pub(super) const AIR_BLUE: Color32 = theme::AIR_BLUE;
 const AIR_AQUA: Color32 = theme::EVIDENCE_CYAN;
-const AIR_SLATE: Color32 = Color32::from_rgb(125, 121, 121);
-const AIR_AMBER: Color32 = theme::WARNING_AMBER;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) enum JourneyStepState {
@@ -58,7 +56,7 @@ pub(super) fn show_processing_progress(
     ui.add(
         egui::Label::new(
             RichText::new(localization.text_with("onboarding-processing-counts", Some(&arguments)))
-                .strong()
+                .family(theme::semibold_font_family())
                 .color(color),
         )
         .wrap(),
@@ -67,8 +65,8 @@ pub(super) fn show_processing_progress(
 
 pub(super) const fn journey_header_height(density: LayoutDensity) -> f32 {
     match density {
-        LayoutDensity::Compact => 206.0,
-        LayoutDensity::Comfortable => 238.0,
+        LayoutDensity::Compact => 54.0,
+        LayoutDensity::Comfortable => 62.0,
     }
 }
 
@@ -87,21 +85,21 @@ pub(super) fn show_today_header(
     density: LayoutDensity,
 ) {
     let ink = theme::ink(ui.visuals().dark_mode);
-    ui.painter().hline(
-        ui.available_rect_before_wrap().x_range(),
-        ui.cursor().top(),
-        Stroke::new(3.0, ink),
-    );
-    ui.add_space(10.0);
     ui.heading(
         RichText::new(localization.text("home-title"))
             .size(match density {
                 LayoutDensity::Compact => 38.0,
                 LayoutDensity::Comfortable => 46.0,
             })
-            .strong(),
+            .family(theme::semibold_font_family()),
     );
-    ui.add_space(5.0);
+    ui.add_space(10.0);
+    ui.painter().hline(
+        ui.available_rect_before_wrap().x_range(),
+        ui.cursor().top(),
+        Stroke::new(3.0, ink),
+    );
+    ui.add_space(8.0);
 
     let mut collection_arguments = FluentArgs::new();
     collection_arguments.set("count", collection_count);
@@ -113,7 +111,7 @@ pub(super) fn show_today_header(
                 localization.text_with("home-collection-count", Some(&collection_arguments)),
             )
             .small()
-            .strong(),
+            .family(theme::semibold_font_family()),
         );
         ui.separator();
         ui.label(
@@ -121,7 +119,7 @@ pub(super) fn show_today_header(
                 localization.text_with("home-published-count", Some(&published_arguments)),
             )
             .small()
-            .strong(),
+            .family(theme::semibold_font_family()),
         );
         ui.separator();
         ui.label(
@@ -138,60 +136,41 @@ pub(super) fn show_today_header(
     );
 }
 
-pub(super) const fn surface_margin(density: LayoutDensity) -> i8 {
-    match density {
-        LayoutDensity::Compact => 14,
-        LayoutDensity::Comfortable => 22,
-    }
-}
-
 pub(super) fn show_journey_header(
     ui: &mut egui::Ui,
     localization: &Localization,
     states: [JourneyStepState; 5],
     density: LayoutDensity,
 ) {
-    show_header(ui, localization, density);
-    ui.add_space(match density {
-        LayoutDensity::Compact => 8.0,
-        LayoutDensity::Comfortable => 20.0,
-    });
-    show_route(ui, localization, states, density);
-}
-
-fn show_header(ui: &mut egui::Ui, localization: &Localization, density: LayoutDensity) {
-    let (eyebrow_size, title_size, subtitle_size, title_gap) = match density {
-        LayoutDensity::Compact => (11.0, 30.0, 14.0, 2.0),
-        LayoutDensity::Comfortable => (12.0, 40.0, 16.0, 4.0),
-    };
-    let rule_color = theme::ink(ui.visuals().dark_mode);
+    let current = states
+        .iter()
+        .position(|state| {
+            matches!(
+                state,
+                JourneyStepState::Current | JourneyStepState::Attention
+            )
+        })
+        .map_or(states.len(), |index| index + 1);
+    let mut arguments = FluentArgs::new();
+    arguments.set("current", current);
+    arguments.set("total", states.len());
+    let ink = theme::ink(ui.visuals().dark_mode);
     ui.painter().hline(
         ui.available_rect_before_wrap().x_range(),
         ui.cursor().top(),
-        Stroke::new(3.0, rule_color),
+        Stroke::new(3.0, ink),
     );
-    ui.add_space(10.0);
+    ui.add_space(match density {
+        LayoutDensity::Compact => 8.0,
+        LayoutDensity::Comfortable => 10.0,
+    });
     ui.label(
-        RichText::new(localization.text("first-knowledge-eyebrow"))
-            .size(eyebrow_size)
-            .strong()
+        RichText::new(localization.text_with("onboarding-progress", Some(&arguments)))
+            .size(12.0)
+            .family(theme::semibold_font_family())
             .color(theme::accent_text(ui.visuals().dark_mode)),
     );
-    ui.add_space(title_gap);
-    ui.heading(
-        RichText::new(localization.text("first-knowledge-title"))
-            .size(title_size)
-            .strong(),
-    );
-    ui.add(
-        egui::Label::new(
-            RichText::new(localization.text("first-knowledge-subtitle"))
-                .size(subtitle_size)
-                .color(ui.visuals().weak_text_color()),
-        )
-        .wrap(),
-    );
-    ui.add_space(8.0);
+    ui.add_space(10.0);
     ui.painter().hline(
         ui.available_rect_before_wrap().x_range(),
         ui.cursor().top(),
@@ -199,134 +178,30 @@ fn show_header(ui: &mut egui::Ui, localization: &Localization, density: LayoutDe
     );
 }
 
-pub(super) fn show_route(
-    ui: &mut egui::Ui,
-    localization: &Localization,
-    states: [JourneyStepState; 5],
-    density: LayoutDensity,
-) {
-    let labels = [
-        localization.text("journey-prepare"),
-        localization.text("journey-read"),
-        localization.text("journey-review"),
-        localization.text("journey-publish"),
-        localization.text("journey-ask"),
-    ];
-    let accessible_summary = labels
-        .iter()
-        .zip(states)
-        .map(|(label, state)| {
-            let state = localization.text(match state {
-                JourneyStepState::Complete => "journey-step-done",
-                JourneyStepState::Current | JourneyStepState::Attention => "journey-step-current",
-                JourneyStepState::Upcoming => "journey-step-next",
-            });
-            format!("{label}: {state}")
-        })
-        .collect::<Vec<_>>()
-        .join(". ");
-
-    ui.label(
-        RichText::new(localization.text("journey-title"))
-            .size(13.0)
-            .strong()
-            .color(ui.visuals().weak_text_color()),
-    );
-    ui.add_space(match density {
-        LayoutDensity::Compact => 4.0,
-        LayoutDensity::Comfortable => 8.0,
-    });
-
-    let route_height = match density {
-        LayoutDensity::Compact => 58.0,
-        LayoutDensity::Comfortable => 78.0,
-    };
-    let desired_size = egui::vec2(ui.available_width().max(1.0), route_height);
-    let (rect, response) = ui.allocate_exact_size(desired_size, egui::Sense::hover());
-    response.widget_info(|| {
-        egui::WidgetInfo::labeled(egui::WidgetType::Other, true, accessible_summary.clone())
-    });
-
-    let painter = ui.painter_at(rect);
-    let side_padding = 34.0;
-    let y = rect.top()
-        + match density {
-            LayoutDensity::Compact => 18.0,
-            LayoutDensity::Comfortable => 22.0,
-        };
-    let usable_width = (rect.width() - side_padding * 2.0).max(0.0);
-    let spacing = usable_width / 4.0;
-    let points: [egui::Pos2; 5] = std::array::from_fn(|index| {
-        egui::pos2(rect.left() + side_padding + spacing * index as f32, y)
-    });
-
-    for index in 0..4 {
-        let completed = matches!(
-            (states[index], states[index + 1]),
-            (JourneyStepState::Complete, JourneyStepState::Complete)
-                | (JourneyStepState::Complete, JourneyStepState::Current)
-                | (JourneyStepState::Complete, JourneyStepState::Attention)
-        );
-        painter.line_segment(
-            [points[index], points[index + 1]],
-            Stroke::new(2.0, if completed { AIR_BLUE } else { route_muted(ui) }),
-        );
-    }
-
-    for ((point, state), label) in points.into_iter().zip(states).zip(labels.iter()) {
-        paint_node(&painter, point, state);
-        let label_color = if matches!(state, JourneyStepState::Upcoming) {
-            ui.visuals().weak_text_color()
-        } else {
-            ui.visuals().text_color()
-        };
-        painter.text(
-            egui::pos2(
-                point.x,
-                rect.top()
-                    + match density {
-                        LayoutDensity::Compact => 42.0,
-                        LayoutDensity::Comfortable => 50.0,
-                    },
-            ),
-            egui::Align2::CENTER_CENTER,
-            label,
-            egui::FontId::proportional(match density {
-                LayoutDensity::Compact => 12.0,
-                LayoutDensity::Comfortable => 13.0,
-            }),
-            label_color,
-        );
-    }
-}
-
 pub(super) fn work_surface<R>(
     ui: &mut egui::Ui,
     density: LayoutDensity,
     add_contents: impl FnOnce(&mut egui::Ui) -> R,
 ) -> R {
-    let fill = theme::surface(ui.visuals().dark_mode);
-    let border = theme::border(ui.visuals().dark_mode);
-    egui::Frame::new()
-        .fill(fill)
-        .stroke(Stroke::new(1.0, border))
-        .corner_radius(egui::CornerRadius::same(2))
-        .inner_margin(egui::Margin::same(surface_margin(density)))
-        .show(ui, |ui| {
-            ui.set_min_width(ui.available_width());
-            if density == LayoutDensity::Compact {
-                ui.spacing_mut().item_spacing.y = 5.0;
-            }
-            add_contents(ui)
-        })
-        .inner
+    ui.scope(|ui| {
+        ui.set_min_width(ui.available_width());
+        if density == LayoutDensity::Compact {
+            ui.spacing_mut().item_spacing.y = 5.0;
+        }
+        add_contents(ui)
+    })
+    .inner
 }
 
 pub(super) fn primary_button(label: String) -> egui::Button<'static> {
-    egui::Button::new(RichText::new(label).strong().color(Color32::WHITE))
-        .fill(AIR_BLUE)
-        .stroke(Stroke::new(1.0, AIR_BLUE))
-        .corner_radius(egui::CornerRadius::same(2))
+    egui::Button::new(
+        RichText::new(label)
+            .family(theme::semibold_font_family())
+            .color(Color32::WHITE),
+    )
+    .fill(AIR_BLUE)
+    .stroke(Stroke::new(1.0, AIR_BLUE))
+    .corner_radius(egui::CornerRadius::same(2))
 }
 
 pub(super) fn privacy_note(ui: &mut egui::Ui, localization: &Localization) {
@@ -344,83 +219,6 @@ pub(super) fn privacy_note(ui: &mut egui::Ui, localization: &Localization) {
                 .color(theme::secondary_text(ui.visuals().dark_mode)),
         );
     });
-}
-
-fn route_muted(ui: &egui::Ui) -> Color32 {
-    if ui.visuals().dark_mode {
-        Color32::from_rgb(58, 73, 91)
-    } else {
-        Color32::from_rgb(205, 218, 230)
-    }
-}
-
-fn paint_node(painter: &egui::Painter, center: egui::Pos2, state: JourneyStepState) {
-    match state {
-        JourneyStepState::Complete => {
-            painter.rect_filled(
-                egui::Rect::from_center_size(center, egui::vec2(20.0, 20.0)),
-                1.0,
-                AIR_BLUE,
-            );
-            painter.line_segment(
-                [
-                    center + egui::vec2(-4.0, 0.0),
-                    center + egui::vec2(-1.0, 3.0),
-                ],
-                Stroke::new(2.0, Color32::WHITE),
-            );
-            painter.line_segment(
-                [
-                    center + egui::vec2(-1.0, 3.0),
-                    center + egui::vec2(5.0, -4.0),
-                ],
-                Stroke::new(2.0, Color32::WHITE),
-            );
-        }
-        JourneyStepState::Current => {
-            painter.rect_filled(
-                egui::Rect::from_center_size(center, egui::vec2(22.0, 22.0)),
-                1.0,
-                AIR_BLUE,
-            );
-            painter.rect_stroke(
-                egui::Rect::from_center_size(center, egui::vec2(30.0, 30.0)),
-                1.0,
-                Stroke::new(2.0, AIR_AQUA),
-                egui::StrokeKind::Outside,
-            );
-            painter.rect_filled(
-                egui::Rect::from_center_size(center, egui::vec2(6.0, 6.0)),
-                1.0,
-                Color32::WHITE,
-            );
-        }
-        JourneyStepState::Upcoming => {
-            painter.rect_filled(
-                egui::Rect::from_center_size(center, egui::vec2(18.0, 18.0)),
-                1.0,
-                AIR_SLATE,
-            );
-            painter.rect_filled(
-                egui::Rect::from_center_size(center, egui::vec2(8.0, 8.0)),
-                1.0,
-                Color32::WHITE,
-            );
-        }
-        JourneyStepState::Attention => {
-            painter.rect_filled(
-                egui::Rect::from_center_size(center, egui::vec2(22.0, 22.0)),
-                1.0,
-                AIR_AMBER,
-            );
-            painter.rect_filled(
-                egui::Rect::from_center_size(center + egui::vec2(0.0, -2.0), egui::vec2(2.5, 7.0)),
-                1.0,
-                Color32::WHITE,
-            );
-            painter.circle_filled(center + egui::vec2(0.0, 4.5), 1.5, Color32::WHITE);
-        }
-    }
 }
 
 #[cfg(test)]

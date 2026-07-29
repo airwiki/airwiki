@@ -179,7 +179,7 @@ impl ChatIntegrationsUi {
         localization: &Localization,
         actions: &mut Vec<IntegrationsUiAction>,
     ) {
-        egui::Frame::group(ui.style()).show(ui, |ui| {
+        crate::theme::surface_frame(ui.visuals().dark_mode).show(ui, |ui| {
             ui.heading(localization.text("integrations-privacy-title"));
             let count = self
                 .snapshot
@@ -218,7 +218,7 @@ impl ChatIntegrationsUi {
         integration: &IntegrationView,
         actions: &mut Vec<IntegrationsUiAction>,
     ) {
-        egui::Frame::group(ui.style()).show(ui, |ui| {
+        crate::theme::surface_frame(ui.visuals().dark_mode).show(ui, |ui| {
             ui.horizontal(|ui| {
                 ui.heading(integration.client.display_name());
                 let (label, color) =

@@ -269,6 +269,16 @@ fn install_bundled_bootstrap_federation_indexes(
     let Some(registry_version) = indexes.first().map(|index| index.registry_version) else {
         return Ok(());
     };
+    if database
+        .bootstrap_federation_registry_version()?
+        .is_some_and(|persisted| persisted > registry_version)
+    {
+        tracing::warn!(
+            error_kind = "bundled_bootstrap_registry_older_than_persisted",
+            "ignored an older bundled bootstrap registry"
+        );
+        return Ok(());
+    }
     let entries = indexes
         .into_iter()
         .map(|index| BootstrapFederationIndexEntry {
@@ -4016,6 +4026,79 @@ mod tests {
         let indexes = parse_bundled_bootstrap_federation_indexes(Some(&expired)).unwrap();
         install_bundled_bootstrap_federation_indexes(&database, indexes).unwrap();
         assert!(database.list_federation_indexes().unwrap().is_empty());
+    }
+
+    #[test]
+    fn older_bundled_bootstrap_preserves_a_newer_active_registry() {
+        let database = Database::in_memory().unwrap();
+        let active_peer = test_public_peer_id();
+        let active = parse_bundled_bootstrap_federation_indexes(Some(&format!(
+            "2|2099-01-01T00:00:00Z|{active_peer}|/ip6/2001:db8::20/tcp/42042"
+        )))
+        .unwrap();
+        install_bundled_bootstrap_federation_indexes(&database, active).unwrap();
+
+        let older_peer = test_public_peer_id();
+        let older = parse_bundled_bootstrap_federation_indexes(Some(&format!(
+            "1|2099-01-01T00:00:00Z|{older_peer}|/ip6/2001:db8::10/tcp/42042"
+        )))
+        .unwrap();
+        install_bundled_bootstrap_federation_indexes(&database, older).unwrap();
+
+        let active_indexes = database.list_federation_indexes().unwrap();
+        assert_eq!(
+            database.bootstrap_federation_registry_version().unwrap(),
+            Some(2)
+        );
+        assert_eq!(active_indexes.len(), 1);
+        assert_eq!(active_indexes[0].peer_id, active_peer);
+        assert_eq!(active_indexes[0].registry_version, 2);
+    }
+
+    #[test]
+    fn older_bundled_bootstrap_preserves_a_newer_expired_registry() {
+        let database = Database::in_memory().unwrap();
+        let expired_peer = test_public_peer_id();
+        let expired = parse_bundled_bootstrap_federation_indexes(Some(&format!(
+            "3|2020-01-01T00:00:00Z|{expired_peer}|/ip6/2001:db8::30/tcp/42042"
+        )))
+        .unwrap();
+        install_bundled_bootstrap_federation_indexes(&database, expired).unwrap();
+        let older_peer = test_public_peer_id();
+        let older = parse_bundled_bootstrap_federation_indexes(Some(&format!(
+            "1|2099-01-01T00:00:00Z|{older_peer}|/ip6/2001:db8::10/tcp/42042"
+        )))
+        .unwrap();
+        install_bundled_bootstrap_federation_indexes(&database, older).unwrap();
+
+        assert_eq!(
+            database.bootstrap_federation_registry_version().unwrap(),
+            Some(3)
+        );
+        assert!(
+            database
+                .list_federation_indexes()
+                .unwrap()
+                .iter()
+                .all(|index| index.source != "bootstrap")
+        );
+    }
+
+    #[test]
+    fn bundled_bootstrap_same_version_mutation_still_fails_closed() {
+        let database = Database::in_memory().unwrap();
+        let peer = test_public_peer_id();
+        let original = parse_bundled_bootstrap_federation_indexes(Some(&format!(
+            "2|2099-01-01T00:00:00Z|{peer}|/ip6/2001:db8::20/tcp/42042"
+        )))
+        .unwrap();
+        install_bundled_bootstrap_federation_indexes(&database, original).unwrap();
+        let mutation = parse_bundled_bootstrap_federation_indexes(Some(&format!(
+            "2|2099-01-01T00:00:00Z|{peer}|/ip6/2001:db8::21/tcp/42042"
+        )))
+        .unwrap();
+
+        assert!(install_bundled_bootstrap_federation_indexes(&database, mutation).is_err());
     }
 
     #[test]

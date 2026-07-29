@@ -64,6 +64,10 @@ All notable user-visible changes to AirWiki will be documented here. The project
   routes or withdraw the manifest when none are usable. Announcement status is
   sequence-aware so a slow older update cannot replace newer local state, and
   renewal cancellation no longer waits through every pending catalog update.
+- Kept local, LAN and MCP services available when an older installed candidate
+  carries a bootstrap registry below the persisted high-water mark. The newer
+  registry remains authoritative, while same-version mutation and invalid
+  registries continue to fail closed.
 - Gave CPU-only Windows model activation an explicit bounded request class so
   the supported Qwen profile is not held to the accelerated-generation
   deadline during its startup smoke test.

@@ -93,7 +93,9 @@ and ignores each entry after its absolute expiry. An identity already configured
 as a community index is a user-owned override: its bundled address and expiry
 do not form part of the effective bootstrap set and are ignored. Installing a
 higher version atomically retires only older bootstrap entries; community
-indexes are never replaced or removed by the bundled registry.
+indexes are never replaced or removed by the bundled registry. Reinstalling a
+candidate with a lower bundled version leaves the persisted higher registry
+unchanged and does not prevent local, LAN or MCP startup.
 
 Obtain each identity explicitly, outside normal logs:
 

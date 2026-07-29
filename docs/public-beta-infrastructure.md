@@ -173,6 +173,10 @@ entries. Community indexes remain user-owned and are not removed.
 Schema version 6 persists the highest accepted bootstrap registry version
 separately from its effective rows, so a fully expired higher registry can
 retire every older bootstrap entry without reopening the downgrade path.
+If an older installed candidate carries a lower bundled registry, the persisted
+higher version remains authoritative and the older bundle is ignored without
+preventing local, LAN or MCP startup. Same-version mutation and malformed
+registries still fail closed.
 
 There is no remote bootstrap download. Rotation requires a new candidate with a
 higher registry version.

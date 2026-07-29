@@ -1305,6 +1305,20 @@ impl Database {
         Ok(())
     }
 
+    /// Returns the highest bundled bootstrap registry version accepted by this
+    /// database, including a version whose entries have all expired.
+    pub fn bootstrap_federation_registry_version(&self) -> Result<Option<u32>> {
+        self.connection()?
+            .query_row(
+                "SELECT registry_version FROM federation_bootstrap_registry_state
+                 WHERE singleton=1",
+                [],
+                |row| row.get(0),
+            )
+            .optional()
+            .map_err(Into::into)
+    }
+
     pub fn list_federation_indexes(&self) -> Result<Vec<FederationIndexRecord>> {
         let connection = self.connection()?;
         let mut statement = connection.prepare(

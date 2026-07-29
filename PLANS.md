@@ -48,6 +48,8 @@ manual network or community-index configuration.
 - [x] Correct the reproduced cross-NAT owner-stage and route-evidence defects.
 - [x] Correct the reproduced relay-readiness announcement and concurrent local
       publisher-block defects with deterministic regressions.
+- [x] Keep private services available when an older candidate encounters a
+      persisted higher bootstrap registry without relaxing downgrade defense.
 - [ ] Rebuild and pass installed smoke on both final v1 candidates.
 - [ ] Pass bidirectional cross-NAT, relay and both failover recoveries.
 - [ ] Pass sequential isolated v1, revoked v2, expired v3 and clean v1 recovery.
@@ -95,6 +97,14 @@ manual network or community-index configuration.
   renewal cancellation interrupt pending catalog updates. Both defects
   invalidate the previous candidate commit and require the complete build and
   installed acceptance matrix to restart from the corrected commit.
+- 2026-07-29: Installing v1 over the isolated v2 lifecycle state preserved the
+  registry high-water but aborted all private services when the strict storage
+  downgrade rejection reached the composition root. Treat only a strictly
+  older bundled registry as an expected no-op before mutation, retain the
+  transactional downgrade and same-version defenses, and require installed
+  v2-to-v1 and expired-v3-to-v1 proof that local, LAN and MCP remain available.
+  This defect invalidates the current candidates and restarts the complete
+  build and installed acceptance matrix from the next corrected commit.
 
 ## Template
 

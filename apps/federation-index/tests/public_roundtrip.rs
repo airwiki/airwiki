@@ -4,16 +4,18 @@ use std::time::Duration;
 
 use airwiki_federation_index::{CatalogBackend, CatalogStore};
 use airwiki_network::{
-    MemorySecretStore, Multiaddr, NodeIdentity, PublicBrowseDelivery, PublicIndexEndpoint,
-    PublicReader, PublicRouteKind, PublicSearchDelivery, PublicSourceBackend,
-    PublicSourceBackendError, PublicSourceServerConfig, relay_circuit_address,
-    relayed_peer_address, run_public_catalog_server, run_public_source_server, sign_manifest,
+    MemorySecretStore, Multiaddr, NodeIdentity, PublicBrowseDelivery, PublicCatalogBackend,
+    PublicCatalogBackendError, PublicIndexEndpoint, PublicReader, PublicRouteKind,
+    PublicSearchDelivery, PublicSourceBackend, PublicSourceBackendError, PublicSourceServerConfig,
+    relay_circuit_address, relayed_peer_address, run_public_catalog_server,
+    run_public_source_server, sign_manifest,
 };
 use airwiki_types::{
     ConceptType, DisclosureGate, PUBLIC_BROWSE_PROTOCOL, PUBLIC_CATALOG_PROTOCOL,
-    PUBLIC_SEARCH_PROTOCOL, PublicBrowsePage, PublicBrowseRequest, PublicCollectionManifest,
-    PublicCollectionRevision, PublicSearchRequest, PublicSearchResponse, SearchHit, SearchPurpose,
-    SearchRequest, SearchResponse,
+    PUBLIC_SEARCH_PROTOCOL, PublicBrowsePage, PublicBrowseRequest, PublicCatalogQuery,
+    PublicCollectionManifest, PublicCollectionRevision, PublicSearchRequest, PublicSearchResponse,
+    SearchHit, SearchPurpose, SearchRequest, SearchResponse, SignedPublicCollectionManifest,
+    SignedPublicCollectionTombstone,
 };
 use async_trait::async_trait;
 use chrono::{Duration as ChronoDuration, Utc};
@@ -102,6 +104,63 @@ impl PublicSourceBackend for PublicFixtureBackend {
     }
 }
 
+#[derive(Debug, Clone)]
+struct DelayedCatalogBackend {
+    inner: CatalogBackend,
+    delay: Duration,
+}
+
+#[async_trait]
+impl PublicCatalogBackend for DelayedCatalogBackend {
+    async fn register(
+        &self,
+        manifest: SignedPublicCollectionManifest,
+    ) -> Result<(), PublicCatalogBackendError> {
+        tokio::time::sleep(self.delay).await;
+        self.inner.register(manifest).await
+    }
+
+    async fn withdraw(
+        &self,
+        tombstone: SignedPublicCollectionTombstone,
+    ) -> Result<(), PublicCatalogBackendError> {
+        tokio::time::sleep(self.delay).await;
+        self.inner.withdraw(tombstone).await
+    }
+
+    async fn query(
+        &self,
+        query: PublicCatalogQuery,
+    ) -> Result<Vec<SignedPublicCollectionManifest>, PublicCatalogBackendError> {
+        tokio::time::sleep(self.delay).await;
+        self.inner.query(query).await
+    }
+}
+
+#[derive(Debug)]
+struct DelayedPublicSourceBackend {
+    inner: PublicFixtureBackend,
+    delay: Duration,
+}
+
+#[async_trait]
+impl PublicSourceBackend for DelayedPublicSourceBackend {
+    async fn search(
+        &self,
+        request: PublicSearchRequest,
+    ) -> Result<PublicSearchDelivery, PublicSourceBackendError> {
+        tokio::time::sleep(self.delay).await;
+        self.inner.search(request).await
+    }
+
+    async fn browse(
+        &self,
+        request: PublicBrowseRequest,
+    ) -> Result<PublicBrowseDelivery, PublicSourceBackendError> {
+        self.inner.browse(request).await
+    }
+}
+
 #[tokio::test]
 async fn public_search_round_trip_needs_no_lan_pairing_or_grant() {
     let index_port = available_port();
@@ -173,6 +232,97 @@ async fn public_search_round_trip_needs_no_lan_pairing_or_grant() {
     let page = reader.browse(&manifest, None, 50).await.unwrap();
     assert_eq!(page.concepts.len(), 1);
     assert_eq!(page.concepts[0].collection_id, collection_id);
+
+    catalog_cancellation.cancel();
+    source_cancellation.cancel();
+    tokio::time::timeout(Duration::from_secs(2), catalog_task)
+        .await
+        .unwrap()
+        .unwrap()
+        .unwrap();
+    tokio::time::timeout(Duration::from_secs(2), source_task)
+        .await
+        .unwrap()
+        .unwrap()
+        .unwrap();
+}
+
+#[tokio::test]
+async fn public_search_preserves_owner_stage_after_slow_catalog() {
+    let index_port = available_port();
+    let source_port = available_port();
+    let index_identity = identity();
+    let source_identity = identity();
+    let collection_id = Uuid::new_v4();
+    let index_address: Multiaddr = format!("/ip4/127.0.0.1/tcp/{index_port}").parse().unwrap();
+    let source_address: Multiaddr = format!("/ip4/127.0.0.1/tcp/{source_port}").parse().unwrap();
+    let catalog_cancellation = CancellationToken::new();
+    let source_cancellation = CancellationToken::new();
+    let catalog_backend = CatalogBackend::new(Arc::new(CatalogStore::in_memory().unwrap()));
+    let mut catalog_config =
+        airwiki_network::PublicCatalogServerConfig::new(vec![index_address.clone()]);
+    catalog_config.request_timeout = Duration::from_millis(950);
+    let catalog_task = tokio::spawn(run_public_catalog_server(
+        index_identity.clone(),
+        catalog_config,
+        Arc::new(DelayedCatalogBackend {
+            inner: catalog_backend,
+            delay: Duration::from_millis(850),
+        }),
+        catalog_cancellation.clone(),
+    ));
+    let source_task = tokio::spawn(run_public_source_server(
+        source_identity.clone(),
+        PublicSourceServerConfig::new(vec![source_address.clone()]),
+        Arc::new(DelayedPublicSourceBackend {
+            inner: PublicFixtureBackend {
+                gate: DisclosureGate::default(),
+                publisher_id: source_identity.peer_id().to_string(),
+            },
+            delay: Duration::from_millis(700),
+        }),
+        source_cancellation.clone(),
+    ));
+    tokio::time::sleep(Duration::from_millis(50)).await;
+
+    let endpoint = PublicIndexEndpoint {
+        peer_id: index_identity.peer_id(),
+        address: index_address,
+    };
+    let now = Utc::now();
+    let manifest = sign_manifest(
+        source_identity.keypair(),
+        PublicCollectionManifest {
+            protocol_version: PUBLIC_CATALOG_PROTOCOL.to_owned(),
+            publisher_id: source_identity.peer_id().to_string(),
+            collection_id,
+            sequence: 1,
+            publication_fingerprint: "a".repeat(64),
+            name: "Atlas public runbooks".to_owned(),
+            description: "Synthetic public collection".to_owned(),
+            languages: vec!["en".to_owned()],
+            concept_count: 1,
+            routing_terms: vec!["atlas".to_owned(), "recovery".to_owned()],
+            routes: vec![source_address.to_string()],
+            updated_at: now,
+            expires_at: now + ChronoDuration::minutes(15),
+        },
+    )
+    .unwrap();
+    let reader = PublicReader::new();
+    reader
+        .register_manifest(std::slice::from_ref(&endpoint), manifest)
+        .await
+        .unwrap();
+    let response = reader
+        .search(
+            &[endpoint],
+            SearchRequest::new("atlas recovery", SearchPurpose::LocalAssistant, 5),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.hits.len(), 1);
+    assert!(!response.partial);
 
     catalog_cancellation.cancel();
     source_cancellation.cancel();

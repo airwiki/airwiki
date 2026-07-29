@@ -23,7 +23,6 @@ use crate::{
 
 const INDEX_DEADLINE: Duration = Duration::from_millis(1_000);
 const PEER_DEADLINE: Duration = Duration::from_millis(800);
-const GLOBAL_DEADLINE: Duration = Duration::from_millis(1_500);
 const MAX_INDEXES: usize = 3;
 const MAX_PUBLIC_PEERS: usize = 12;
 const RRF_K: f64 = 60.0;
@@ -242,10 +241,10 @@ impl PublicReader {
                 .send_request(&peer, public_request);
             pending_search.insert(request_id, collections);
         }
+        let peer_deadline = public_peer_deadline(Instant::now());
         let mut sources = Vec::new();
         let mut partial = catalog_partial;
         while !pending_search.is_empty() {
-            let peer_deadline = public_peer_deadline(started, Instant::now());
             let event = match timeout_at(
                 peer_deadline,
                 futures::StreamExt::select_next_some(&mut swarm),
@@ -333,7 +332,7 @@ impl PublicReader {
             .behaviour_mut()
             .browse
             .send_request(&peer, request.clone());
-        let deadline = Instant::now() + GLOBAL_DEADLINE;
+        let deadline = public_peer_deadline(Instant::now());
         loop {
             let event = timeout_at(deadline, futures::StreamExt::select_next_some(&mut swarm))
                 .await
@@ -341,34 +340,47 @@ impl PublicReader {
                     SearchContractError::Unavailable("public browse timed out".to_owned())
                 })?;
             self.record_route(&event);
-            if let SwarmEvent::Behaviour(ReaderBehaviourEvent::Browse(
-                request_response::Event::Message { message, .. },
-            )) = event
-                && let request_response::Message::Response {
-                    request_id,
-                    response,
-                } = message
-                && request_id == outbound
-            {
-                return match response {
-                    PublicBrowseWireResponse::Success(page)
-                        if page.manifest_sequence >= manifest.manifest.sequence
-                            && page
-                                .validate_for(&request, &manifest.manifest.publisher_id)
-                                .is_ok() =>
-                    {
-                        Ok(page)
-                    }
-                    PublicBrowseWireResponse::Success(_) => Err(SearchContractError::Unauthorized),
-                    PublicBrowseWireResponse::Rejected(
-                        PublicSourceRejection::Invalid | PublicSourceRejection::NotPublic,
-                    ) => Err(SearchContractError::Unauthorized),
-                    PublicBrowseWireResponse::Rejected(
-                        PublicSourceRejection::Busy | PublicSourceRejection::Unavailable,
-                    ) => Err(SearchContractError::Unavailable(
+            match event {
+                SwarmEvent::Behaviour(ReaderBehaviourEvent::Browse(
+                    request_response::Event::Message {
+                        message:
+                            request_response::Message::Response {
+                                request_id,
+                                response,
+                            },
+                        ..
+                    },
+                )) if request_id == outbound => {
+                    return match response {
+                        PublicBrowseWireResponse::Success(page)
+                            if page.manifest_sequence >= manifest.manifest.sequence
+                                && page
+                                    .validate_for(&request, &manifest.manifest.publisher_id)
+                                    .is_ok() =>
+                        {
+                            Ok(page)
+                        }
+                        PublicBrowseWireResponse::Success(_) => {
+                            Err(SearchContractError::Unauthorized)
+                        }
+                        PublicBrowseWireResponse::Rejected(
+                            PublicSourceRejection::Invalid | PublicSourceRejection::NotPublic,
+                        ) => Err(SearchContractError::Unauthorized),
+                        PublicBrowseWireResponse::Rejected(
+                            PublicSourceRejection::Busy | PublicSourceRejection::Unavailable,
+                        ) => Err(SearchContractError::Unavailable(
+                            "public browse source is unavailable".to_owned(),
+                        )),
+                    };
+                }
+                SwarmEvent::Behaviour(ReaderBehaviourEvent::Browse(
+                    request_response::Event::OutboundFailure { request_id, .. },
+                )) if request_id == outbound => {
+                    return Err(SearchContractError::Unavailable(
                         "public browse source is unavailable".to_owned(),
-                    )),
-                };
+                    ));
+                }
+                _ => {}
             }
         }
     }
@@ -462,7 +474,7 @@ impl PublicReader {
                 "no public federation index is configured".to_owned(),
             ));
         }
-        let deadline = Instant::now() + PEER_DEADLINE;
+        let deadline = Instant::now() + INDEX_DEADLINE;
         let mut accepted = 0_usize;
         while !pending.is_empty() {
             let event = match timeout_at(deadline, futures::StreamExt::select_next_some(&mut swarm))
@@ -523,9 +535,14 @@ struct ReaderBehaviour {
 
 fn reader_swarm(identity: Keypair) -> Result<Swarm<ReaderBehaviour>, NetworkError> {
     let local_peer = identity.public().to_peer_id();
-    let catalog = outbound_behaviour(PUBLIC_CATALOG_PROTOCOL, 128 * 1024, 512 * 1024)?;
-    let search = outbound_behaviour(PUBLIC_SEARCH_PROTOCOL, 16 * 1024, 256 * 1024)?;
-    let browse = outbound_behaviour(PUBLIC_BROWSE_PROTOCOL, 16 * 1024, 256 * 1024)?;
+    let catalog = outbound_behaviour(
+        PUBLIC_CATALOG_PROTOCOL,
+        128 * 1024,
+        512 * 1024,
+        INDEX_DEADLINE,
+    )?;
+    let search = outbound_behaviour(PUBLIC_SEARCH_PROTOCOL, 16 * 1024, 256 * 1024, PEER_DEADLINE)?;
+    let browse = outbound_behaviour(PUBLIC_BROWSE_PROTOCOL, 16 * 1024, 256 * 1024, PEER_DEADLINE)?;
     SwarmBuilder::with_existing_identity(identity)
         .with_tokio()
         .with_tcp(
@@ -561,6 +578,7 @@ fn outbound_behaviour<Request, Response>(
     protocol: &'static str,
     request_bytes: u64,
     response_bytes: u64,
+    request_timeout: Duration,
 ) -> Result<request_response::cbor::Behaviour<Request, Response>, NetworkError>
 where
     Request: serde::Serialize + serde::de::DeserializeOwned + Send + 'static,
@@ -575,7 +593,7 @@ where
         codec,
         [(protocol, ProtocolSupport::Outbound)],
         request_response::Config::default()
-            .with_request_timeout(PEER_DEADLINE)
+            .with_request_timeout(request_timeout)
             .with_max_concurrent_streams(32),
     ))
 }
@@ -853,12 +871,8 @@ fn public_index_deadline(started: Instant) -> Instant {
     started + INDEX_DEADLINE
 }
 
-fn public_global_deadline(started: Instant) -> Instant {
-    started + GLOBAL_DEADLINE
-}
-
-fn public_peer_deadline(started: Instant, now: Instant) -> Instant {
-    (now + PEER_DEADLINE).min(public_global_deadline(started))
+fn public_peer_deadline(started: Instant) -> Instant {
+    started + PEER_DEADLINE
 }
 
 fn pending_cannot_change_top_k(
@@ -1125,26 +1139,33 @@ mod tests {
     }
 
     #[tokio::test(start_paused = true)]
-    async fn public_deadlines_are_bounded_at_1000_800_and_1500_milliseconds() {
+    async fn public_deadlines_preserve_the_full_peer_stage_after_slow_catalog() {
         let started = Instant::now();
         assert_eq!(
             public_index_deadline(started).duration_since(started),
             INDEX_DEADLINE
         );
+        tokio::time::timeout_at(
+            public_index_deadline(started),
+            tokio::time::sleep(Duration::from_millis(900)),
+        )
+        .await
+        .expect("slow cross-region catalog stays within its bounded stage");
+
+        let peer_started = Instant::now();
         assert_eq!(
-            public_peer_deadline(started, started).duration_since(started),
+            public_peer_deadline(peer_started).duration_since(peer_started),
             PEER_DEADLINE
         );
-
-        tokio::time::advance(Duration::from_millis(1_000)).await;
-
+        tokio::time::timeout_at(
+            public_peer_deadline(peer_started),
+            tokio::time::sleep(Duration::from_millis(700)),
+        )
+        .await
+        .expect("owner receives a fresh bounded stage after catalog");
         assert_eq!(
-            public_peer_deadline(started, Instant::now()),
-            public_global_deadline(started)
-        );
-        assert_eq!(
-            public_global_deadline(started).duration_since(started),
-            GLOBAL_DEADLINE
+            Instant::now().duration_since(started),
+            Duration::from_millis(1_600)
         );
     }
 }

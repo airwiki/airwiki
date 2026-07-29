@@ -45,6 +45,9 @@ All notable user-visible changes to AirWiki will be documented here. The project
 
 ### Fixed
 
+- Preserved the full bounded owner-response budget after a cross-region public
+  catalog query instead of aborting an accepted relay circuit early, and
+  applied the complete one-second index budget to catalog updates.
 - Gave CPU-only Windows model activation an explicit bounded request class so
   the supported Qwen profile is not held to the accelerated-generation
   deadline during its startup smoke test.

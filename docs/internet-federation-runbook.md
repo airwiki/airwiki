@@ -133,11 +133,15 @@ later candidate as usable without community indexes.
 - Disabling exposure immediately makes search and browse fail at the owner;
   after the tombstone reaches the index the catalog entry disappears.
 - Restarting the publisher renews the signed manifest with a higher sequence.
+- A manifest lists only relays with a ready outbound reservation. Losing one
+  reservation advances the sequence and removes that route; losing the final
+  reservation withdraws the manifest until a route is ready again.
 - A stale fingerprint, replayed sequence, invalid signature and expired
   manifest are rejected.
 - On Windows, no AirWiki firewall rule is enabled for the Public profile. Relay
   use remains an outbound connection.
-- Blocking a publisher removes its results and prevents browse or a new
+- Blocking a publisher removes completed and in-flight results, partial
+  updates, route evidence and cached browse access, and prevents a new
   connection until that identity is explicitly unblocked locally.
 - The UI reports direct or relayed only after a protocol-valid owner response on
   that request's matching connection. An index connection, owner timeout or

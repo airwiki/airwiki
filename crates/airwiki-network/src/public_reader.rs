@@ -235,6 +235,13 @@ impl PublicReader {
         let owner_peers = groups.iter().map(|(peer, _)| *peer).collect::<HashSet<_>>();
         let mut pending_search = HashMap::<OutboundRequestId, PendingOwnerSearch>::new();
         for (peer, collections) in groups {
+            let blocked = self.blocked_publishers.read().await;
+            if collections
+                .first()
+                .is_some_and(|manifest| blocked.contains(&manifest.manifest.publisher_id))
+            {
+                continue;
+            }
             for manifest in &collections {
                 for route in &manifest.manifest.routes {
                     if let Ok(address) = Multiaddr::from_str(route) {
@@ -271,7 +278,7 @@ impl PublicReader {
         }
         let owner_deadlines = public_owner_deadlines(Instant::now());
         let mut route_tracker = OwnerRouteTracker::new(owner_peers, owner_deadlines.connect);
-        let mut route_kind = PublicRouteKind::Offline;
+        let mut accepted_routes = HashMap::new();
         let mut sources = Vec::new();
         let mut partial = catalog_partial;
         while !pending_search.is_empty() {
@@ -294,26 +301,31 @@ impl PublicReader {
                     break;
                 }
             };
-            let previous_source_count = sources.len();
             let observed_at = Instant::now();
             route_tracker.observe_swarm_event(&event, observed_at);
-            if let Some(observed_route) = collect_search_event(
+            let blocked = self.blocked_publishers.read().await;
+            let accepted_route = collect_search_event(
                 ObservedReaderEvent {
                     event,
                     at: observed_at,
                 },
-                request.request_id,
-                request.top_k,
+                ExpectedSearchResponse {
+                    request_id: request.request_id,
+                    top_k: request.top_k,
+                },
                 &mut pending_search,
                 &mut sources,
                 &mut partial,
                 &route_tracker,
-            ) {
-                route_kind = merge_route_kind(route_kind, observed_route);
+                &blocked,
+            );
+            let accepted_source = accepted_route.is_some();
+            retain_unblocked_sources(&mut sources, &blocked);
+            accepted_routes.retain(|publisher_id, _| !blocked.contains(publisher_id));
+            if let Some(accepted_route) = accepted_route {
+                accepted_routes.insert(accepted_route.publisher_id, accepted_route.route_kind);
             }
-            if sources.len() > previous_source_count
-                && let Some(partials) = partials
-            {
+            if accepted_source && let Some(partials) = partials {
                 emit_partial(partials, request.request_id, request.top_k, &sources);
             }
             if !pending_search.is_empty()
@@ -328,6 +340,12 @@ impl PublicReader {
             }
         }
         partial |= !pending_search.is_empty();
+        let blocked = self.blocked_publishers.read().await;
+        retain_unblocked_sources(&mut sources, &blocked);
+        accepted_routes.retain(|publisher_id, _| !blocked.contains(publisher_id));
+        let route_kind = accepted_routes
+            .into_values()
+            .fold(PublicRouteKind::Offline, merge_route_kind);
         let mut hits = fuse_rankings(sources);
         hits.truncate(usize::from(request.top_k));
         for (position, hit) in hits.iter_mut().enumerate() {
@@ -345,7 +363,12 @@ impl PublicReader {
         cursor: Option<String>,
         limit: u8,
     ) -> Result<PublicBrowsePage, SearchContractError> {
-        Ok(self.browse_with_route(manifest, cursor, limit).await?.page)
+        let result = self.browse_with_route(manifest, cursor, limit).await?;
+        let blocked = self.blocked_publishers.read().await;
+        if blocked.contains(&manifest.manifest.publisher_id) {
+            return Err(SearchContractError::Unauthorized);
+        }
+        Ok(result.page)
     }
 
     async fn browse_with_route(
@@ -421,6 +444,10 @@ impl PublicReader {
                 )) if request_id == outbound => {
                     return match response {
                         PublicBrowseWireResponse::Success(page) => {
+                            let blocked = self.blocked_publishers.read().await;
+                            if blocked.contains(&manifest.manifest.publisher_id) {
+                                return Err(SearchContractError::Unauthorized);
+                            }
                             if page.manifest_sequence < manifest.manifest.sequence
                                 || page
                                     .validate_for(&request, &manifest.manifest.publisher_id)
@@ -500,13 +527,22 @@ impl PublicReader {
         }
         let summary = manifest.manifest.summary();
         if manifest.manifest.expires_at <= chrono::Utc::now() {
+            let blocked = self.blocked_publishers.read().await;
+            if blocked.contains(&manifest.manifest.publisher_id) {
+                return Err(SearchContractError::Unauthorized);
+            }
             return Ok(PublicBrowseResult {
                 summary,
                 page: None,
                 availability: PublicCollectionAvailability::Expired,
             });
         }
-        match self.browse_with_route(&manifest, cursor, limit).await {
+        let result = self.browse_with_route(&manifest, cursor, limit).await;
+        let blocked = self.blocked_publishers.read().await;
+        if blocked.contains(&manifest.manifest.publisher_id) {
+            return Err(SearchContractError::Unauthorized);
+        }
+        match result {
             Ok(result) => Ok(PublicBrowseResult {
                 summary,
                 page: Some(result.page),
@@ -885,9 +921,20 @@ struct ObservedReaderEvent {
     at: Instant,
 }
 
+#[derive(Clone, Copy)]
+struct ExpectedSearchResponse {
+    request_id: uuid::Uuid,
+    top_k: u8,
+}
+
 struct PendingOwnerSearch {
     peer: PeerId,
     manifests: Vec<SignedPublicCollectionManifest>,
+}
+
+struct AcceptedOwnerRoute {
+    publisher_id: String,
+    route_kind: PublicRouteKind,
 }
 
 fn pending_owner_peers(
@@ -898,13 +945,13 @@ fn pending_owner_peers(
 
 fn collect_search_event(
     observed: ObservedReaderEvent,
-    expected_request_id: uuid::Uuid,
-    top_k: u8,
+    expected: ExpectedSearchResponse,
     pending: &mut HashMap<OutboundRequestId, PendingOwnerSearch>,
     sources: &mut Vec<Vec<SearchHit>>,
     partial: &mut bool,
     route_tracker: &OwnerRouteTracker,
-) -> Option<PublicRouteKind> {
+    blocked_publishers: &HashSet<String>,
+) -> Option<AcceptedOwnerRoute> {
     match observed.event {
         SwarmEvent::Behaviour(ReaderBehaviourEvent::Search(request_response::Event::Message {
             peer,
@@ -921,15 +968,29 @@ fn collect_search_event(
                 match response {
                     PublicSearchWireResponse::Success(mut response)
                         if response.protocol_version == PUBLIC_SEARCH_PROTOCOL
-                            && response.response.request_id == expected_request_id
+                            && response.response.request_id == expected.request_id
                             && peer == pending_owner.peer
                             && revisions_are_current(&response.manifest_sequences, &manifests)
                             && public_search_hits_are_valid(
                                 &response.response.hits,
                                 &manifests,
-                                top_k,
+                                expected.top_k,
                             ) =>
                     {
+                        let Some(publisher_id) = manifests
+                            .first()
+                            .map(|manifest| manifest.manifest.publisher_id.clone())
+                        else {
+                            *partial = true;
+                            return None;
+                        };
+                        if publisher_id != peer.to_string() {
+                            *partial = true;
+                            return None;
+                        }
+                        if blocked_publishers.contains(&publisher_id) {
+                            return None;
+                        }
                         let route_kind = match route_tracker.route_for_response(
                             peer,
                             connection_id,
@@ -945,22 +1006,14 @@ fn collect_search_event(
                                 return None;
                             }
                         };
-                        if manifests.first().is_none_or(|manifest| {
-                            manifest.manifest.publisher_id != peer.to_string()
-                        }) {
-                            *partial = true;
-                            return None;
-                        }
-                        if let Some(publisher_id) = manifests
-                            .first()
-                            .map(|manifest| &manifest.manifest.publisher_id)
-                        {
-                            for hit in &mut response.response.hits {
-                                hit.node_id.clone_from(publisher_id);
-                            }
+                        for hit in &mut response.response.hits {
+                            hit.node_id.clone_from(&publisher_id);
                         }
                         sources.push(response.response.hits);
-                        return Some(route_kind);
+                        return Some(AcceptedOwnerRoute {
+                            publisher_id,
+                            route_kind,
+                        });
                     }
                     _ => *partial = true,
                 }
@@ -1085,6 +1138,16 @@ fn group_candidates_by_peer(
         }
     }
     groups
+}
+
+fn retain_unblocked_sources(
+    sources: &mut Vec<Vec<SearchHit>>,
+    blocked_publishers: &HashSet<String>,
+) {
+    sources.retain(|hits| {
+        hits.first()
+            .is_none_or(|hit| !blocked_publishers.contains(&hit.node_id))
+    });
 }
 
 fn fuse_rankings(sources: Vec<Vec<SearchHit>>) -> Vec<SearchHit> {

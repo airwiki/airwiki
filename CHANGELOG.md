@@ -59,6 +59,11 @@ All notable user-visible changes to AirWiki will be documented here. The project
   response on the matching connection can establish the reported route. This
   replaces the unsafe process-global reader route getter with request-scoped
   results while preserving the route-free streaming search API.
+- Limited signed publisher manifests to relay routes with a live outbound
+  reservation, and made readiness changes immediately reannounce the remaining
+  routes or withdraw the manifest when none are usable. Announcement status is
+  sequence-aware so a slow older update cannot replace newer local state, and
+  renewal cancellation no longer waits through every pending catalog update.
 - Gave CPU-only Windows model activation an explicit bounded request class so
   the supported Qwen profile is not held to the accelerated-generation
   deadline during its startup smoke test.
@@ -79,6 +84,9 @@ All notable user-visible changes to AirWiki will be documented here. The project
 - Added 15-minute, identifier-free relay outcome counts grouped by a fixed
   status allowlist, without reader-success events, per-event timestamps or
   guest log shipping; circuit I/O failures retain only fixed error-kind buckets.
+- Made a completed local publisher block a final disclosure barrier for
+  in-flight public search hits, partial updates, route evidence and browse
+  responses, including manifests already held in the local route cache.
 - Rejected malformed public rankings before RRF fusion and made early fan-out cancellation account conservatively for every accumulated challenger.
 - Hardened Azure relay installation with exact binary checks, shared public-route preflight, and fail-closed service replacement.
 

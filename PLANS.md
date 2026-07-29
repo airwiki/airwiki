@@ -46,6 +46,8 @@ manual network or community-index configuration.
 - [x] Complete the rebuilt Windows installation, model, enrichment and MCP
       smoke without a Public-profile firewall rule.
 - [x] Correct the reproduced cross-NAT owner-stage and route-evidence defects.
+- [x] Correct the reproduced relay-readiness announcement and concurrent local
+      publisher-block defects with deterministic regressions.
 - [ ] Rebuild and pass installed smoke on both final v1 candidates.
 - [ ] Pass bidirectional cross-NAT, relay and both failover recoveries.
 - [ ] Pass sequential isolated v1, revoked v2, expired v3 and clean v1 recovery.
@@ -83,6 +85,16 @@ manual network or community-index configuration.
   evidence only with the matching request's valid owner response. Independent
   review of the correction found no remaining P0-P2; installed cross-NAT
   measurement remains the acceptance authority.
+- 2026-07-29: A single-node outage exposed manifests that still listed a relay
+  before its outbound reservation was ready, and a deterministic concurrency
+  test proved that an in-flight public response could outlive a completed local
+  publisher block. Publish only routes backed by live reservations, reannounce
+  or tombstone immediately when readiness changes, and hold the local block
+  barrier through response acceptance and delivery. Serialize sequence
+  allocation, reject late local status completions by sequence, and make
+  renewal cancellation interrupt pending catalog updates. Both defects
+  invalidate the previous candidate commit and require the complete build and
+  installed acceptance matrix to restart from the corrected commit.
 
 ## Template
 

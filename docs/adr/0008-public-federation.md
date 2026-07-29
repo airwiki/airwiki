@@ -44,7 +44,11 @@ content, and emits a signed tombstone.
 
 QUIC/Noise is preferred. AutoNAT, Circuit Relay and DCUtR support publishers
 behind NAT; relay connections are outbound and no Windows Public-profile
-firewall rule is installed. ADR 0005 and LAN grants remain unchanged.
+firewall rule is installed. A publisher includes a relay route only after the
+matching outbound reservation produces a usable circuit-listen address.
+Readiness changes advance the manifest sequence and immediately reannounce the
+remaining routes or emit a tombstone when none remain. ADR 0005 and LAN grants
+remain unchanged.
 
 ## Consequences
 

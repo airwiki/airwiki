@@ -35,6 +35,17 @@ All notable user-visible changes to AirWiki will be documented here. The project
 - Separated direct answers, allowed supporting context, and forbidden evidence in the retrieval evaluation corpus, and corrected an Atlas question that previously depended on hidden fixture context; production search behavior and thresholds are unchanged.
 - Kept local desktop search conservative while allowing external-chat consumers to evaluate bounded candidates independently; evidence wins duplicates and candidates are discarded first when a LAN response reaches its size limit.
 - Refined the desktop visual system with an evidence-oriented palette, clearer type hierarchy, roomier controls, and contrast-tested primary and secondary text in dark and light themes.
+- Matched the desktop knowledge journey to the reviewed AirWiki broadsheet design with embedded editorial typography, a stable light-paper shell, restrained surfaces, and wide and compact compositions.
+- Extended the reviewed broadsheet design across Today, Review, Wiki, Ask, Public,
+  Connections, Settings and first-run states, with responsive editorial layouts,
+  accessible cyan actions, compact Wiki rows and consistent empty, loading and
+  recovery treatments.
+- Kept public beta bootstrap discovery automatic in the normal interface by
+  removing manual community-index fields, adding disable-only recovery for
+  legacy overrides, and preserving local publisher blocking without displaying
+  network identities.
+- Brought chat-client status and actions into Ask while retaining the detailed
+  chat-management subroute for recovery and diagnostics.
 - Completed the English presentation boundary for worker notices and advanced diagnostics so changing locale no longer leaves Spanish operational text in the interface.
 
 ### Fixed

@@ -1,10 +1,30 @@
 # Inventory of Components Not Managed by Cargo
 
-This inventory covers components outside Cargo that are involved in the Windows installer. The
-artifacts are identified by SHA-256. The included legal texts were copied from the exact artifacts
-or tags listed below, with line endings normalized to LF and a single trailing newline added. The
-application, the MCP bridge, and their Rust dependencies are covered by
-`THIRD_PARTY_LICENSES.md`.
+This inventory covers distributed components outside Cargo, including application assets and
+components involved in the Windows installer. The artifacts are identified by SHA-256. The
+included legal texts were copied from the exact artifacts or tags listed below, with line endings
+normalized to LF and a single trailing newline added. The application, the MCP bridge, and their
+Rust dependencies are covered by `THIRD_PARTY_LICENSES.md`.
+
+## Source Serif 4
+
+The desktop application embeds the unmodified Source Serif 4 Regular and Semibold TTFs from
+Adobe's upstream `release` branch to reproduce the reviewed editorial interface without depending
+on a system font.
+
+- Pinned revision: `5f220b17d27ed64873f22cde0dd593685387bd19` from Adobe's `release`
+  branch.
+- Regular source:
+  `https://raw.githubusercontent.com/adobe-fonts/source-serif/5f220b17d27ed64873f22cde0dd593685387bd19/TTF/SourceSerif4-Regular.ttf`.
+  Size: `261868` bytes; SHA-256:
+  `e5a4ee6a3d87bb9024796be390c6771e2a0eb1883dae25effaf57ca01668e24b`.
+- Semibold source:
+  `https://raw.githubusercontent.com/adobe-fonts/source-serif/5f220b17d27ed64873f22cde0dd593685387bd19/TTF/SourceSerif4-Semibold.ttf`.
+  Size: `272088` bytes; SHA-256:
+  `36db62940cb5728b12b1802476dc7fcf4c6c519a7bdd476ba23a4e555fc4655f`.
+- License: SIL Open Font License 1.1, with Reserved Font Name `Source`.
+- Included legal text: `non-cargo/Source-Serif-4-OFL-1.1.txt`, normalized SHA-256
+  `c21d7293d87b6d7ab1d0229a2f55b77f33a7613a6a4e66f6693d68d7d8d09464`.
 
 ## llama.cpp b9946: Windows runtime built from source
 

@@ -30,7 +30,21 @@ const LICENSE_REPORT: &str = "resources/licenses/THIRD_PARTY_LICENSES.md";
 const NON_CARGO_LICENSE_INVENTORY: &str = "resources/licenses/NON_CARGO_COMPONENTS.md";
 const APPLICATION_ID_LICENSE_ERROR: &str =
     "missing_verified_redistribution_license: nsis-applicationid-1.1";
-const VERIFIED_NON_CARGO_LEGAL_TEXTS: [(&str, &str); 21] = [
+const VERIFIED_NON_CARGO_ASSETS: [(&str, &str); 2] = [
+    (
+        "apps/desktop/assets/SourceSerif4-Regular.ttf",
+        "e5a4ee6a3d87bb9024796be390c6771e2a0eb1883dae25effaf57ca01668e24b",
+    ),
+    (
+        "apps/desktop/assets/SourceSerif4-Semibold.ttf",
+        "36db62940cb5728b12b1802476dc7fcf4c6c519a7bdd476ba23a4e555fc4655f",
+    ),
+];
+const VERIFIED_NON_CARGO_LEGAL_TEXTS: [(&str, &str); 22] = [
+    (
+        "resources/licenses/non-cargo/Source-Serif-4-OFL-1.1.txt",
+        "c21d7293d87b6d7ab1d0229a2f55b77f33a7613a6a4e66f6693d68d7d8d09464",
+    ),
     (
         "resources/licenses/non-cargo/NSIS-3.09-COPYING.txt",
         "1aab7a7da0a0d0f8a7857be09fe403ec807eb55c60c1264f1bbd17144482a222",
@@ -1585,6 +1599,17 @@ fn validate_workflow_uses_at(
 }
 
 fn validate_non_cargo_legal_inventory(root: &Path) -> Result<()> {
+    for (relative_path, expected_sha256) in VERIFIED_NON_CARGO_ASSETS {
+        let path = root.join(relative_path);
+        let bytes = read_regular_file(&path, MAX_LEGAL_FILE_BYTES)?;
+        let actual_sha256 = hex::encode(Sha256::digest(&bytes));
+        ensure!(
+            actual_sha256 == expected_sha256,
+            "verified non-Cargo asset {} has SHA-256 {actual_sha256}, expected {expected_sha256}",
+            path.display()
+        );
+    }
+
     for (relative_path, expected_sha256) in VERIFIED_NON_CARGO_LEGAL_TEXTS {
         let path = root.join(relative_path);
         let bytes = read_regular_file(&path, MAX_LEGAL_FILE_BYTES)?;
@@ -1600,6 +1625,11 @@ fn validate_non_cargo_legal_inventory(root: &Path) -> Result<()> {
     let inventory = String::from_utf8(read_regular_file(&inventory_path, MAX_LEGAL_FILE_BYTES)?)
         .with_context(|| format!("{} is not UTF-8", inventory_path.display()))?;
     for required in [
+        "e5a4ee6a3d87bb9024796be390c6771e2a0eb1883dae25effaf57ca01668e24b",
+        "36db62940cb5728b12b1802476dc7fcf4c6c519a7bdd476ba23a4e555fc4655f",
+        "5f220b17d27ed64873f22cde0dd593685387bd19",
+        "SIL Open Font License 1.1",
+        "c21d7293d87b6d7ab1d0229a2f55b77f33a7613a6a4e66f6693d68d7d8d09464",
         "f5dc52eef1f3884230520199bac6f36b82d643d86b003ce51bd24b05c6ba7c91",
         "62677d44c9721779c2219571a5d3afdf4fcf4668b5dc475f5f5668d31d3e8ae9",
         "Common Public License 1.0",
@@ -1641,6 +1671,8 @@ fn validate_non_cargo_legal_inventory(root: &Path) -> Result<()> {
     let notices = String::from_utf8(read_regular_file(&notices_path, MAX_LEGAL_FILE_BYTES)?)
         .with_context(|| format!("{} is not UTF-8", notices_path.display()))?;
     for required in [
+        "Source Serif 4",
+        "SIL Open Font License 1.1",
         "NSIS 3.09",
         "Common Public License 1.0",
         "nsis-tauri-utils 0.2.1",

@@ -6,6 +6,7 @@ AirWiki source is licensed under Apache-2.0 and incorporates or downloads third-
 
 | Component | Version / revision | Pinned file size | License | Source |
 | --- | --- | ---: | --- | --- |
+| Source Serif 4 Regular and Semibold | `5f220b17d27ed64873f22cde0dd593685387bd19` | 261,868 and 272,088 bytes | SIL Open Font License 1.1 | [adobe-fonts/source-serif](https://github.com/adobe-fonts/source-serif/tree/5f220b17d27ed64873f22cde0dd593685387bd19/TTF) |
 | llama.cpp | `b9946` / `fb30ba9a6c5b4674174d06aed14794832ab33278` | macOS archive; Windows source archive: 36,865,897 bytes | MIT and vendored terms below | [ggml-org/llama.cpp](https://github.com/ggml-org/llama.cpp/tree/fb30ba9a6c5b4674174d06aed14794832ab33278) |
 | Gemma 4 E2B Q4 | `69536a21d70340464240401ba38223d805f6a709` | 3,349,514,112 bytes | Apache-2.0 | [google/gemma-4-E2B-it-qat-q4_0-gguf](https://huggingface.co/google/gemma-4-E2B-it-qat-q4_0-gguf/tree/69536a21d70340464240401ba38223d805f6a709) |
 | Gemma 4 E4B Q4 | `7edc6763a77bbca236126a361613b834c5ea0f7a` | 5,154,939,136 bytes | Apache-2.0 | [google/gemma-4-E4B-it-qat-q4_0-gguf](https://huggingface.co/google/gemma-4-E4B-it-qat-q4_0-gguf/tree/7edc6763a77bbca236126a361613b834c5ea0f7a) |
@@ -14,6 +15,9 @@ AirWiki source is licensed under Apache-2.0 and incorporates or downloads third-
 | mMARCO mMiniLMv2 L12 H384 v1 | `1427fd652930e4ba29e8149678df786c240d8825` | 135,704,242 bytes on macOS or 135,704,241 bytes on Windows, across five files | Apache-2.0 | [cross-encoder/mmarco-mMiniLMv2-L12-H384-v1](https://huggingface.co/cross-encoder/mmarco-mMiniLMv2-L12-H384-v1/tree/1427fd652930e4ba29e8149678df786c240d8825) |
 
 On first use, the application downloads only the Gemma core selected for the detected hardware and any missing files from the pinned embedding and relevance snapshots. A previously installed and verified Qwen model is retained as a legacy fallback; it is not downloaded by a clean installation. The desktop enables the `fastembed-runtime` integration; CI uses deterministic providers and does not download model weights.
+
+Source Serif 4 is embedded in the desktop executable and used only for interface typography. Its
+OFL 1.1 text is included under `licenses/non-cargo/Source-Serif-4-OFL-1.1.txt`.
 
 ### llama.cpp Windows source build
 

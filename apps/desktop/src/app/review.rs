@@ -1,18 +1,15 @@
 use std::{collections::BTreeMap, fmt};
 
 use airwiki_core::ReviewVersionToken;
-use eframe::egui::{self, Color32, RichText};
+use eframe::egui::{self, RichText};
 use fluent_bundle::FluentArgs;
 use uuid::Uuid;
 
 use crate::i18n::Localization;
 use crate::worker::{ReviewEvidenceErrorView, ReviewEvidencePageView};
 
-const NARROW_REVIEW_THRESHOLD: f32 = 850.0;
-pub(super) const REVIEW_QUEUE_WIDTH: f32 = 230.0;
-pub(super) const REVIEW_PANEL_GAP: f32 = 12.0;
-pub(super) const REVIEW_EVIDENCE_RATIO: f32 = 0.42;
-pub(super) const REVIEW_ACTION_BAR_HEIGHT: f32 = 92.0;
+const NARROW_REVIEW_THRESHOLD: f32 = 760.0;
+pub(super) const REVIEW_QUEUE_WIDTH: f32 = 250.0;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) enum ReviewLayoutMode {
@@ -28,10 +25,11 @@ pub(super) const fn review_layout_mode(available_width: f32) -> ReviewLayoutMode
     }
 }
 
-pub(super) fn review_comparison_widths(available_width: f32) -> (f32, f32) {
-    let usable_width = (available_width - REVIEW_PANEL_GAP).max(0.0);
-    let evidence_width = usable_width * REVIEW_EVIDENCE_RATIO;
-    (evidence_width, usable_width - evidence_width)
+pub(super) const fn review_action_bar_height(mode: ReviewLayoutMode) -> f32 {
+    match mode {
+        ReviewLayoutMode::CompactCompare => 124.0,
+        ReviewLayoutMode::QueueCompare => 94.0,
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -429,100 +427,103 @@ pub(super) fn show_review_evidence_panel(
     error: Option<ReviewEvidenceErrorView>,
     loading: bool,
 ) -> Option<ReviewEvidencePanelIntent> {
-    ui.heading(localization.text("review-evidence-title"));
     ui.add(
         egui::Label::new(
-            RichText::new(localization.text("review-evidence-body"))
-                .small()
-                .color(ui.visuals().weak_text_color()),
+            RichText::new(localization.text("review-evidence-editorial-title"))
+                .size(13.0)
+                .family(crate::theme::semibold_font_family())
+                .color(crate::theme::secondary_text(ui.visuals().dark_mode)),
         )
         .wrap(),
     );
-    let mut revision_args = FluentArgs::new();
-    revision_args.set("revision", i64::from(source_revision));
-    ui.label(
-        RichText::new(localization.text_with("review-evidence-revision", Some(&revision_args)))
-            .small()
-            .strong(),
-    );
-    ui.separator();
 
     let mut intent = None;
-    let scroll_height = ui.available_height().max(0.0);
-    egui::ScrollArea::vertical()
-        .id_salt(("review_evidence", concept_id, source_revision))
-        .max_height(scroll_height)
-        .auto_shrink([false; 2])
-        .show(ui, |ui| {
-            if let Some(page) = page {
-                for excerpt in &page.excerpts {
-                    egui::Frame::new()
-                        .fill(Color32::from_rgba_unmultiplied(34, 151, 245, 12))
-                        .stroke(egui::Stroke::new(
-                            1.0,
-                            Color32::from_rgba_unmultiplied(34, 151, 245, 55),
-                        ))
-                        .corner_radius(egui::CornerRadius::same(8))
-                        .inner_margin(egui::Margin::same(10))
-                        .show(ui, |ui| {
-                            ui.set_min_width(ui.available_width());
-                            let heading = if excerpt.heading_or_page.trim().is_empty() {
-                                localization.text("review-evidence-untitled-section")
-                            } else {
-                                excerpt.heading_or_page.clone()
-                            };
-                            ui.label(RichText::new(heading).strong());
-                            ui.add(egui::Label::new(&excerpt.text).wrap().selectable(true));
-                            if excerpt.truncated {
-                                ui.label(
-                                    RichText::new(localization.text("review-evidence-truncated"))
-                                        .small()
-                                        .italics()
-                                        .color(ui.visuals().weak_text_color()),
-                                );
-                            }
-                        });
-                    ui.add_space(6.0);
-                }
-
-                let mut progress_args = FluentArgs::new();
-                progress_args.set("shown", page.excerpts.len() as i64);
-                progress_args.set("total", page.total_chunks as i64);
-                ui.label(
-                    RichText::new(
-                        localization.text_with("review-evidence-progress", Some(&progress_args)),
-                    )
-                    .small()
-                    .color(ui.visuals().weak_text_color()),
-                );
+    ui.push_id(("review_evidence", concept_id, source_revision), |ui| {
+        if let Some(page) = page {
+            for excerpt in &page.excerpts {
+                ui.add_space(8.0);
+                egui::Frame::new()
+                    .inner_margin(egui::Margin {
+                        left: 24,
+                        ..egui::Margin::ZERO
+                    })
+                    .show(ui, |ui| {
+                        ui.add(
+                            egui::Label::new(
+                                RichText::new(format!("“{}”", excerpt.text)).italics(),
+                            )
+                            .wrap()
+                            .selectable(true),
+                        );
+                        let heading = if excerpt.heading_or_page.trim().is_empty() {
+                            localization.text("review-evidence-untitled-section")
+                        } else {
+                            excerpt.heading_or_page.clone()
+                        };
+                        let mut revision_args = FluentArgs::new();
+                        revision_args.set("revision", i64::from(source_revision));
+                        ui.label(
+                            RichText::new(format!(
+                                "{} · {}",
+                                heading,
+                                localization
+                                    .text_with("review-evidence-revision", Some(&revision_args))
+                            ))
+                            .small()
+                            .color(ui.visuals().weak_text_color()),
+                        );
+                        if excerpt.truncated {
+                            ui.label(
+                                RichText::new(localization.text("review-evidence-truncated"))
+                                    .small()
+                                    .italics()
+                                    .color(ui.visuals().weak_text_color()),
+                            );
+                        }
+                    });
             }
 
-            if loading {
-                ui.horizontal(|ui| {
-                    ui.spinner();
-                    ui.label(localization.text("review-evidence-loading"));
-                });
-            } else if let Some(error) = error {
-                let message_id = match error {
-                    ReviewEvidenceErrorView::NoLongerPending => "review-evidence-no-longer-pending",
-                    ReviewEvidenceErrorView::MissingEvidence => "review-evidence-missing",
-                    ReviewEvidenceErrorView::Unavailable => "review-evidence-unavailable",
-                };
-                ui.colored_label(crate::theme::WARNING_AMBER, localization.text(message_id));
-                if ui
-                    .button(localization.text("review-evidence-retry"))
-                    .clicked()
-                {
-                    intent = Some(ReviewEvidencePanelIntent::Retry);
-                }
-            } else if page.is_some_and(|page| page.next_ordinal.is_some())
-                && ui
-                    .button(localization.text("review-evidence-load-more"))
-                    .clicked()
+            let mut progress_args = FluentArgs::new();
+            progress_args.set("shown", page.excerpts.len() as i64);
+            progress_args.set("total", page.total_chunks as i64);
+            ui.label(
+                RichText::new(
+                    localization.text_with("review-evidence-progress", Some(&progress_args)),
+                )
+                .small()
+                .color(ui.visuals().weak_text_color()),
+            );
+        }
+
+        if loading {
+            ui.horizontal(|ui| {
+                ui.spinner();
+                ui.label(localization.text("review-evidence-loading"));
+            });
+        } else if let Some(error) = error {
+            let message_id = match error {
+                ReviewEvidenceErrorView::NoLongerPending => "review-evidence-no-longer-pending",
+                ReviewEvidenceErrorView::MissingEvidence => "review-evidence-missing",
+                ReviewEvidenceErrorView::Unavailable => "review-evidence-unavailable",
+            };
+            ui.colored_label(
+                crate::theme::warning_text(ui.visuals().dark_mode),
+                localization.text(message_id),
+            );
+            if ui
+                .button(localization.text("review-evidence-retry"))
+                .clicked()
             {
-                intent = Some(ReviewEvidencePanelIntent::LoadMore);
+                intent = Some(ReviewEvidencePanelIntent::Retry);
             }
-        });
+        } else if page.is_some_and(|page| page.next_ordinal.is_some())
+            && ui
+                .button(localization.text("review-evidence-load-more"))
+                .clicked()
+        {
+            intent = Some(ReviewEvidencePanelIntent::LoadMore);
+        }
+    });
     intent
 }
 
@@ -533,29 +534,36 @@ mod tests {
 
     #[test]
     fn width_below_threshold_uses_compact_compare_layout() {
-        assert_eq!(review_layout_mode(849.0), ReviewLayoutMode::CompactCompare);
+        assert_eq!(review_layout_mode(759.0), ReviewLayoutMode::CompactCompare);
     }
 
     #[test]
     fn threshold_width_keeps_the_queue_visible() {
-        assert_eq!(review_layout_mode(850.0), ReviewLayoutMode::QueueCompare);
+        assert_eq!(review_layout_mode(760.0), ReviewLayoutMode::QueueCompare);
     }
 
     #[test]
-    fn minimum_content_width_keeps_both_comparison_panels_usable() {
-        let (evidence, draft) = review_comparison_widths(675.0);
-
-        assert!(evidence >= 275.0);
-        assert!(draft >= 380.0);
+    fn compact_review_footer_reserves_space_for_wrapped_actions() {
+        assert_eq!(
+            review_action_bar_height(ReviewLayoutMode::CompactCompare),
+            124.0
+        );
+        assert_eq!(
+            review_action_bar_height(ReviewLayoutMode::QueueCompare),
+            94.0
+        );
     }
 
     #[test]
-    fn queue_threshold_preserves_comparison_minimums() {
-        let detail_width = 850.0 - REVIEW_QUEUE_WIDTH - REVIEW_PANEL_GAP;
-        let (evidence, draft) = review_comparison_widths(detail_width);
+    fn canonical_queue_keeps_wide_reader_footer_after_column_split() {
+        let canonical_content_width = 970.0;
+        let mode = review_layout_mode(canonical_content_width);
+        let reader_width = canonical_content_width - REVIEW_QUEUE_WIDTH;
 
-        assert!(evidence >= 240.0);
-        assert!(draft >= 340.0);
+        assert_eq!(reader_width, 720.0);
+        assert!(reader_width < NARROW_REVIEW_THRESHOLD);
+        assert_eq!(mode, ReviewLayoutMode::QueueCompare);
+        assert_eq!(review_action_bar_height(mode), 94.0);
     }
 
     #[test]

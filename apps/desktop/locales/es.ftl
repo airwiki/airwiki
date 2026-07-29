@@ -1,18 +1,71 @@
 app-title = AirWiki
-nav-home = Inicio
-nav-collections = Carpetas de conocimiento
+nav-home = Hoy
+nav-collections = Biblioteca
 nav-review = Revisión
 nav-wiki = Wiki
-nav-search = Buscar
+nav-search = Preguntar
 nav-integrations = Chats
-nav-devices = Otros equipos
+nav-public = Red pública
+nav-devices = Conexiones
 nav-settings = Configuración
+
+public-title = Red pública
+public-subtitle = Un índice descentralizado y voluntario de wikis publicadas, legible por personas e IA sin vinculación ni cuentas. Publicar es deliberado, por colección; los fragmentos siempre se sirven en vivo desde el equipo propietario.
+public-experimental = Experimental
+public-route-title = Conexión pública
+public-collections-title = Tus colecciones
+public-collections-empty = Agrega una carpeta a la Biblioteca antes de publicar conocimiento revisado.
+public-visible = Pública
+public-private = Privada
+public-private-summary = El conocimiento publicado sigue siendo privado hasta que habilites esta colección explícitamente.
+public-private-attention-summary = Resuelve sus incidencias antes de publicar: el contenido retirado no puede anunciarse.
+public-publish-blocked-by-attention = No se habilitó la publicación porque esta colección ahora requiere atención. Resuelve sus incidencias e inténtalo de nuevo.
+public-announcement-online = El anuncio está disponible
+public-status-reachable = Accesible
+public-status-offline = Sin conexión
+public-status-expired = Caducado
+public-reader-view = Vista de lector
+public-manage-collections = Gestionar publicación en Biblioteca
+public-make-public = Hacer pública…
+public-stop-publishing = Dejar de publicar
+public-discover-title = Encontrar conocimiento público
+public-discover-body = El descubrimiento consulta hasta tres índices federados; lees con una identidad efímera. Ningún índice es canónico.
+public-search-placeholder = p. ej., botánica de campo
+public-search-action = Buscar índices
+public-search-running = Buscando en los índices públicos…
+public-community-indexes-kicker = Recuperación avanzada
+public-community-indexes-recovery-title = Hay índices públicos heredados habilitados
+public-community-indexes-recovery-body = { $count ->
+    [one] Una versión de desarrollo anterior agregó un índice habilitado. Desactívalo para usar únicamente el bootstrap beta versionado; su registro local se conservará desactivado.
+   *[other] Una versión de desarrollo anterior agregó { $count } índices habilitados. Desactívalos para usar únicamente el bootstrap beta versionado; sus registros locales se conservarán desactivados.
+}
+public-community-indexes-disable-action = Desactivar índices heredados…
+public-community-indexes-confirm-title = ¿Desactivar los índices públicos heredados?
+public-community-indexes-confirm-body = { $count ->
+    [one] Esto desactiva un índice configurado por el usuario, reinicia la conexión pública y vuelve a anunciar las colecciones públicas mediante los índices beta incluidos. No cambia el conocimiento publicado ni el acceso LAN.
+   *[other] Esto desactiva { $count } índices configurados por el usuario, reinicia la conexión pública y vuelve a anunciar las colecciones públicas mediante los índices beta incluidos. No cambia el conocimiento publicado ni el acceso LAN.
+}
+public-community-indexes-confirm-action = Desactivar índices heredados
+public-community-indexes-disabled = { $count ->
+    [one] Se desactivó un índice público heredado.
+   *[other] Se desactivaron { $count } índices públicos heredados.
+}
+connections-chat-summary = El acceso de chats se gestiona por separado de la vinculación de dispositivos.
+connections-open-chats = Gestionar chats
+connections-network-title = RED LOCAL
+connections-devices-title = EQUIPOS EMPAREJADOS Y CERCANOS
 
 status-ready = Listo
 status-working = Trabajando
 status-needs-permission = Necesita permiso
 status-needs-attention = Necesita atención
 status-optional-disabled = Opcional · Desactivado
+status-development-build = compilación de desarrollo
+status-review-count = { $count ->
+    [one] { $count } por revisar
+   *[other] { $count } por revisar
+}
+status-details = Detalles de estado
 
 dashboard-title = Tu conocimiento
 dashboard-subtitle = AirWiki mantiene el conocimiento local organizado y muestra únicamente la próxima acción que necesita tu atención.
@@ -21,6 +74,7 @@ dashboard-all-ready = Todo está listo
 first-knowledge-eyebrow = Privado de forma predeterminada
 first-knowledge-title = Convierte una carpeta en conocimiento que puedas verificar
 first-knowledge-subtitle = AirWiki prepara borradores localmente. Tú decides qué forma parte de tu Wiki.
+onboarding-progress = Primer inicio · Paso { $current } de { $total }
 journey-title = Tu recorrido hacia una respuesta útil
 journey-prepare = Preparar
 journey-read = Leer
@@ -31,6 +85,47 @@ journey-step-done = Completado
 journey-step-current = Paso actual
 journey-step-next = Siguiente
 home-next-step = Próximo paso
+home-lead-kicker = Principal — necesita tu atención
+home-ask-kicker = Pregunta a tu wiki
+home-ask-placeholder = ¿quién coordina los seguimientos del piloto?
+home-recently-published = Publicado recientemente
+home-review-drafts-title = { $count ->
+    [one] Un borrador espera tu revisión
+   *[other] { $count } borradores esperan tu revisión
+}
+home-review-drafts-body = AirWiki leyó tus carpetas y preparó conceptos privados, cada uno comparado con evidencia local. Nada se publica —ni se comparte— hasta que lo apruebas.
+home-attention-kicker = Atención
+home-source-issue-title = No se pudo leer por completo { $collection }
+home-source-issue-body = { $count ->
+    [one] Un documento falló durante el análisis local. Los conceptos derivados de él quedan fuera de las respuestas hasta que un nuevo escaneo tenga éxito; todo lo demás sigue funcionando.
+   *[other] { $count } documentos fallaron durante el análisis local. Los conceptos derivados de ellos quedan fuera de las respuestas hasta que un nuevo escaneo tenga éxito; todo lo demás sigue funcionando.
+}
+home-source-issue-action = Resolver en Biblioteca
+home-collection-published-summary = { $count ->
+    [one] { $count } concepto revisado
+   *[other] { $count } conceptos revisados
+}
+home-no-recently-published = Tus conceptos revisados aparecerán aquí.
+review-evidence-editorial-title = Evidencia — verificada contra la revisión de origen
+review-queue-subtitle = Nada se publica sin ti.
+review-draft-kicker = Borrador
+review-revision-label = revisión
+review-revision-short = rev
+review-edit-metadata = Editar metadatos propuestos
+review-close-metadata = Cerrar editor de metadatos
+review-open-source = Abrir documento de origen
+review-open-source-unavailable = AirWiki no expone una ruta al documento de origen en la interfaz. Los extractos verificados de abajo son la fuente disponible para la revisión.
+review-draft-counter = Borrador { $current } de { $total }
+home-title = Hoy
+home-collection-count = { $count ->
+    [one] { $count } carpeta de conocimiento
+   *[other] { $count } carpetas de conocimiento
+}
+home-published-count = { $count ->
+    [one] { $count } publicado
+   *[other] { $count } publicados
+}
+home-private-default = Privado por defecto
 home-optional-title = Amplía la configuración cuando quieras
 home-optional-body = Otros equipos, chats, segundo plano y actualizaciones son opcionales.
 
@@ -99,10 +194,11 @@ primary-button-open-health = Abrir Salud
 primary-button-view-options = Ver opciones
 primary-button-view-diagnostics = Ver diagnóstico
 
-collections-title = Carpetas de conocimiento
-collections-subtitle = Cada carpeta de conocimiento observa una carpeta local y mantiene un bundle OKF independiente.
+collections-title = Biblioteca
+collections-subtitle = Cada carpeta se observa en modo de solo lectura y conserva su propio bundle OKF. Los archivos originales nunca se modifican.
 collections-monitoring = El monitoreo automático funciona mientras la app está abierta y hace una reconciliación completa cada { $minutes } minutos cuando la IA local está lista.
 collections-new = Nueva carpeta de conocimiento
+collections-new-body = Vincula otra carpeta local con archivos Markdown o PDF con texto.
 collections-name = Nombre
 collections-choose-folder = Elegir carpeta…
 collections-create-scan = Crear y escanear
@@ -110,9 +206,18 @@ collections-empty-title = Todavía no hay carpetas de conocimiento
 collections-empty-body = Crea una para importar Markdown o PDF con texto.
 collections-linked = Carpeta vinculada y supervisada
 collections-counts = { $documents } documentos · { $published } publicados
+collections-attention-counts =
+    { $review ->
+        [one] 1 pendiente de revisión
+       *[other] { $review } pendientes de revisión
+    } ·
+    { $failed ->
+        [one] 1 incidencia
+       *[other] { $failed } incidencias
+    }
 collections-last-scan = Último escaneo: { $time }
 collections-relink = Volver a vincular carpeta…
-collections-retry = Reintentar ahora
+collections-retry = Escanear ahora
 collections-scan-queued = En cola
 collections-scan-running = Escaneando
 collections-maintenance-partial = No se pudo procesar uno o más archivos.
@@ -120,6 +225,13 @@ collections-maintenance-failed = No se pudo reconciliar la carpeta de conocimien
 collections-maintenance-quarantined = No se pudo supervisar ni reconciliar la carpeta de conocimiento de forma segura.
 collections-policy-peers = Compartir con equipos autorizados
 collections-policy-chat = Permitir en chats externos
+collections-sharing-details = Uso compartido y detalles de la carpeta
+collections-table-folder = Carpeta de conocimiento
+collections-table-activity = Actividad
+collections-table-document = Documento
+collections-table-status = Estado
+collections-documents-attention = Documentos que necesitan atención
+collections-status-review = Pendiente de revisión
 collections-local-only = Solo local
 collections-cloud-warning = Los fragmentos autorizados pueden entrar en la nube del proveedor del chat.
 collections-chat-confirm-title = ¿Permitir esta carpeta en chats externos?
@@ -132,27 +244,29 @@ collections-public-announcement-offline = Anuncio sin índices disponibles
 collections-public-announcement-expired = El último anuncio público expiró
 collections-public-last-renewal = Última renovación: { $timestamp } UTC
 collections-public-expiry = Expira: { $timestamp } UTC
-collections-public-confirm-title = ¿Publicar esta colección en Internet?
-collections-public-confirm-body = Los lectores podrán buscar y navegar el conocimiento publicado sin vincular sus dispositivos.
-collections-public-confirm-warning = Los metadatos, resúmenes y fragmentos publicados podrán ser copiados o procesados por terceros, incluida IA. Los borradores nunca se publican.
+collections-public-confirm-title = ¿Hacer pública “{ $name }”?
+collections-public-confirm-body = Los nombres, resúmenes y fragmentos de sus conceptos publicados podrán ser copiados o procesados por cualquiera, incluidos sistemas de IA. Los borradores y archivos originales nunca salen de este dispositivo, y cada documento sigue requiriendo tu revisión antes de publicarse.
+collections-public-confirm-withdrawal = Puedes dejar de publicar en cualquier momento: el contenido deja de responder inmediatamente, aunque los índices pueden mostrar una entrada obsoleta hasta que caduque.
+collections-public-confirm-action = Hacer pública
 search-public-network = Buscar en la red pública experimental
 search-public-route-offline = Ruta pública: sin conexión confirmada
 search-public-route-relay = Ruta pública: relay
 search-public-route-direct = Ruta pública: directa
-search-public-index-advanced = Configuración avanzada de índices públicos
-search-public-index-help = Agrega la identidad y multiaddress publicadas por un índice comunitario. AirWiki verifica que ambas coincidan durante Noise.
-search-public-index-add = Agregar índice
-search-public-index-remove = Desactivar índice por PeerId
-search-browse-public = Navegar colección
+search-public-publisher-controls = Controles de publicadores en este equipo
+search-browse-public = Ver como lector
 search-public-browse-title = Colección pública
 search-public-publisher = Publicador
 search-public-browse-expired = La ficha pública expiró
 search-public-collection-profile = { $concepts } concepto(s) · Idiomas: { $languages }
 search-public-provenance = Procedencia: red pública de AirWiki
 search-public-block-publisher = Bloquear en este dispositivo
-search-public-unblock-help = Identidad de un publicador bloqueado
+search-public-unblock-help = Los publicadores bloqueados aparecen sin exponer identidades de red.
+search-public-blocked-publisher = Publicador bloqueado { $number }
 search-public-unblock-publisher = Desbloquear publicador
+search-public-source-revision = Revisión de fuente { $revision }
 search-public-browse-more = Cargar más
+search-public-search-this-collection = Buscar en esta colección
+search-public-search-this-collection-unavailable = El contrato de búsqueda actual no permite limitar la búsqueda pública a una colección.
 collections-chat-confirm-body = Esto cambia la política de privacidad de la carpeta. Ninguna evidencia podrá salir de este equipo hasta que confirmes.
 maintenance-never = Aún no se escaneó
 maintenance-success = Último escaneo correcto
@@ -161,8 +275,19 @@ maintenance-failed = El último escaneo necesita atención
 maintenance-quarantined = El contenido compartido está retirado hasta recuperarse
 
 onboarding-welcome-title = Te damos la bienvenida a AirWiki
-onboarding-welcome-body = Empieza con una carpeta local y termina con una respuesta que puedas rastrear hasta su fuente.
-onboarding-model-title = Preparar la IA local
+onboarding-welcome-body = AirWiki convierte carpetas con Markdown y PDF en una wiki que tú revisas y publicas. Todo se ejecuta en este equipo.
+onboarding-machine-check-title = Comprobación del equipo
+onboarding-machine-checking = AirWiki está comprobando este equipo antes de proponer un perfil de modelo local.
+onboarding-machine-supported = Según este equipo, AirWiki propondrá un perfil de modelo local a continuación.
+onboarding-machine-needs-attention = Este equipo necesita atención antes de poder ejecutar el modelo local
+onboarding-machine-unsupported = Esta versión no puede ejecutar el modelo local en este equipo
+onboarding-machine-checking-platform = Comprobando la plataforma y la arquitectura…
+onboarding-machine-checking-memory = Comprobando la memoria total…
+onboarding-machine-checking-disk = Comprobando el espacio libre para los modelos…
+onboarding-machine-platform = { $platform } detectado
+onboarding-machine-memory = { $memory } GB de memoria total
+onboarding-machine-free-disk = { $disk } GB libres para los modelos
+onboarding-model-title = Elige un perfil de modelo local
 onboarding-collection-title = Agregar tu primera carpeta de conocimiento
 onboarding-processing-title = Preparando tus primeros borradores
 onboarding-review-title = Revisa lo que preparó AirWiki
@@ -174,12 +299,28 @@ onboarding-complete-title = AirWiki está listo
 onboarding-next = Continuar
 onboarding-back = Atrás
 onboarding-skip = Configurar más tarde
-onboarding-finish = Finalizar
-onboarding-model-body = AirWiki eligió el perfil de modelo más seguro que admite este equipo. Prepara metadata y resúmenes, pero nunca puede publicar por ti.
+onboarding-finish = Finalizar configuración
+onboarding-model-body = El modelo se ejecuta sólo en este equipo. Prepara metadatos provisionales y comprueba si los pasajes citados respaldan una pregunta; no puede publicar, conceder acceso ni enviar nada.
+onboarding-model-profile-automatic = Automático
+onboarding-model-profile-automatic-body = Recomendado para este equipo: { $model }.
+onboarding-model-profile-small = Pequeño
+onboarding-model-profile-small-body = Borradores más rápidos y con menos memoria.
+onboarding-model-profile-quality = Calidad
+onboarding-model-profile-quality-body = Borradores de mayor calidad cuando este equipo tiene memoria suficiente.
+onboarding-model-download-note = Las descargas necesitan red una vez; después la curación y la búsqueda funcionan sin conexión.
+onboarding-model-required = Descarga y verifica un modelo local antes de continuar.
 onboarding-model-recommended = Recomendado para este equipo
 onboarding-model-private = El modelo y el análisis de documentos permanecen en este equipo después de completar la descarga verificada.
 onboarding-model-details = Detalles del modelo y las licencias
-onboarding-model-change-later = Después podrás comparar los perfiles Eficiente y Calidad desde Configuración.
+onboarding-model-change-later = Después podrás comparar otros perfiles desde Configuración.
+onboarding-permissions-title = Cada permiso, explicado
+onboarding-permissions-body = Nada se activa hasta que tú lo indiques, y cada opción se puede desactivar más tarde en Configuración.
+onboarding-permissions-folder-title = Acceso a carpetas
+onboarding-permissions-folder-body = Eliges cada carpeta explícitamente. AirWiki nunca inspecciona el resto de tus archivos.
+onboarding-permissions-network-title = Red local
+onboarding-permissions-network-body = Opcional. Actívala sólo cuando quieras emparejar otro equipo.
+onboarding-permissions-login-title = Iniciar al entrar
+onboarding-permissions-login-body = Opcional. Mantiene el trabajo local disponible sin crear un servicio del sistema.
 onboarding-processing-body = AirWiki está leyendo archivos compatibles y preparando borradores privados. Puedes cerrar y volver a abrir la app sin crear duplicados.
 onboarding-processing-scanning = Leyendo archivos compatibles
 onboarding-processing-enriching = Creando borradores con la IA local
@@ -224,18 +365,21 @@ search-placeholder = ¿Qué quieres saber?
 search-empty-title = No encontramos evidencia coincidente
 search-empty-body = Prueba una frase más específica o usa palabras que aparezcan en el documento publicado.
 search-error-title = No se pudo completar esta búsqueda
-devices-title = Otros equipos
+devices-title = Conexiones
 devices-searching = Buscando equipos en tu red local…
 devices-manual-advanced = Conexión manual (avanzado)
 devices-this-address = Dirección de este equipo para conexión manual:
 devices-manual-invalid = Usa una dirección IPv4 local, un puerto TCP y, opcionalmente, el identificador del equipo.
 devices-manual-requires-lan = Activa la conexión local antes de conectar manualmente.
-devices-subtitle = El código de seis palabras debe coincidir en ambas pantallas antes de confiar en el equipo.
+devices-subtitle = Tus otros equipos en esta red. El código de seis palabras debe coincidir en ambas pantallas antes de confiar en el equipo.
+devices-pairing-title = Emparejar un equipo
+devices-code-compare = Compara el código de seis palabras
 devices-empty-title = No hay otros equipos visibles
 devices-empty-body = Cuando la red local está activa, AirWiki busca equipos automáticamente.
 devices-nearby = Equipo cercano
 devices-pair = Emparejar
-devices-code-matches = Coincide
+devices-code-matches = Los códigos coinciden
+devices-pairing-warning = Las mismas seis palabras deben aparecer en “{ $device }”. Si son distintas, cancela: la conexión no es privada.
 devices-code-does-not-match = No coincide
 devices-revoke = Revocar y bloquear
 devices-pair-again = Volver a emparejar
@@ -348,13 +492,22 @@ integration-summary-conflict = Debes revisar una configuración existente antes 
 integration-summary-unsupported = Esta versión instalada no es compatible con la conexión guiada.
 integration-summary-error = No se pudo comprobar esta integración. Abre los detalles técnicos para diagnosticarla.
 
-knowledge-title = Conocimiento publicado
-knowledge-subtitle = Tu Wiki OKF local, sus relaciones internas y la salud del bundle.
-knowledge-tab-wiki = Wiki
+knowledge-title = Wiki
+knowledge-subtitle = Todo lo que aparece aquí fue revisado y publicado por una persona. Las fuentes se citan por revisión.
+knowledge-tab-wiki = Índice
+knowledge-index-kicker = CONCEPTOS PUBLICADOS
+knowledge-all-concepts = Todos los conceptos
+knowledge-last-checked = Última comprobación
+knowledge-open-bundle-log = Abrir registro del bundle
 knowledge-tab-graph = Grafo
 knowledge-tab-health = Salud
 knowledge-select-collection = Seleccionar carpeta
-knowledge-concept-count = { $count } conceptos
+knowledge-concept-count = { $count ->
+    [one] 1 concepto
+   *[other] { $count } conceptos
+}
+knowledge-concept-healthy = Saludable
+knowledge-concept-attention = Necesita atención
 knowledge-no-collections-title = No hay carpetas de conocimiento
 knowledge-no-collections-body = Crea una carpeta y publica al menos un documento para construir su Wiki.
 knowledge-bundle-error-title = No se pudo inspeccionar el bundle OKF
@@ -376,12 +529,20 @@ knowledge-page-error-title = No se pudo cargar la página
 knowledge-select-page = Selecciona una página del árbol.
 knowledge-page-truncated = Aquí solo se muestra la primera parte; el archivo publicado no fue modificado.
 knowledge-page-missing = La página ya no está disponible en la Wiki actual
-knowledge-details-placeholder = Metadata y enlaces entrantes
-knowledge-metadata = Metadata
-knowledge-backlinks = Enlaces entrantes ({ $count })
-knowledge-no-backlinks = Sin referencias entrantes
-knowledge-links = Enlaces ({ $count })
+knowledge-details-placeholder = Fuentes y conceptos relacionados
+knowledge-metadata = Fuentes
+knowledge-source-resource = Fuente publicada
+knowledge-source-revision = Revisión de origen { $revision }
+knowledge-additional-metadata = Metadatos publicados adicionales
+knowledge-source-metadata-unavailable = No hay un recurso de origen publicado disponible para este concepto.
+knowledge-backlinks = Citado por ({ $count })
+knowledge-no-backlinks = Sin citas
+knowledge-links = Conceptos enlazados ({ $count })
+knowledge-no-linked-concepts = Sin conceptos enlazados
 knowledge-graph-description = Cómo se conectan las páginas publicadas entre sí.
+knowledge-graph-caption = Los conceptos cian no tienen advertencias ni errores; los magenta necesitan atención. Las conexiones provienen de los enlaces publicados de la Wiki.
+knowledge-graph-visible-limit = Se muestran { $shown } de { $total } conceptos en el lienzo. Usa los filtros o la lista de teclado para explorar todos los conceptos publicados.
+knowledge-graph-node-list = Explorar conceptos del grafo con el teclado
 knowledge-graph-filter-title = Filtra antes de crear el grafo
 knowledge-graph-filter-body = Hay { $count } conceptos. Reduce el resultado a { $limit }; AirWiki mantiene la portada de la Wiki como punto de partida.
 knowledge-graph-counts = { $nodes } nodos · { $links } enlaces
@@ -602,9 +763,21 @@ review-entity-type = Tipo de entidad
 review-link-label = Etiqueta del enlace
 review-link-target = Destino del enlace
 
-search-title = Busca en tu conocimiento
-search-subtitle = Combina el índice local con los equipos emparejados; los resultados pueden ser parciales.
-search-action = Buscar
+search-title = Preguntar
+search-subtitle = Los pasajes citados provienen únicamente de conocimiento publicado, aquí o en tu aplicación de chat.
+search-chat-title = O pregunta desde tu aplicación de chat
+search-chat-body = Puente de solo lectura por usuario. El permiso de la carpeta se vuelve a comprobar antes de devolver evidencia; no se guardan claves de API.
+search-chat-action = Gestionar aplicaciones de chat
+search-action = Preguntar
+search-sources = Fuentes
+search-scope-searches = Busca en:
+search-scope-device = Este equipo
+search-scope-paired = Equipos emparejados
+search-scope-include-public = Incluir la red pública
+search-scope-note-device = Se buscan los conceptos publicados en este equipo. La vinculación está desactivada o no hay un equipo de confianza disponible.
+search-scope-note-paired = Se buscan los conceptos publicados en este equipo y los fragmentos autorizados de equipos emparejados.
+search-scope-note-public = El conocimiento local y emparejado sigue disponible. Tu consulta se envía a un máximo de tres índices federados y a los publicadores seleccionados; tus documentos permanecen en este equipo.
+search-top-passage = Pasaje citado principal
 search-running = Consultando los equipos disponibles…
 search-citation-details = Detalles de la cita
 search-revision = Revisión { $revision }
@@ -623,16 +796,19 @@ search-coverage-public-offline = La red pública está offline. La búsqueda loc
 search-coverage-partial = Una parte de la búsqueda no pudo completarse. Se muestran los resultados disponibles.
 
 settings-title = Configuración
-settings-subtitle = Administra el idioma, la disponibilidad en segundo plano, la IA local y las actualizaciones firmadas.
+settings-subtitle = Idioma, disponibilidad en segundo plano, IA local y actualizaciones firmadas.
+settings-general = GENERAL
+settings-background = Iniciar al acceder
 settings-language = Idioma
-settings-login-status = Inicio de sesión: { $status }
+settings-login-status = Mantiene disponibles en segundo plano la supervisión y la búsqueda en equipos emparejados. Estado actual: { $status }.
 settings-refresh-status = Actualizar estado
 settings-advanced-diagnostics = Diagnóstico avanzado
 settings-local-ai = IA local
+settings-local-ai-body = El modelo prepara metadatos provisionales y comprueba si los pasajes citados respaldan una pregunta en este equipo. No puede publicar, conceder acceso ni enviar nada a ningún lugar.
 settings-model-profile = Perfil: { $profile }
-settings-model-active = Activo: { $model }
+settings-model-active = Modelo activo: { $model }
 settings-model-none = ninguno
-settings-manage-models = Administrar modelos desde Inicio
+settings-manage-models = Cambiar perfil de modelo…
 action-enable = Activar
 action-disable = Desactivar
 action-remove = Quitar

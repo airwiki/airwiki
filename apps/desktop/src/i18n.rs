@@ -309,6 +309,58 @@ mod tests {
     }
 
     #[test]
+    fn home_counters_use_locale_appropriate_plural_forms() {
+        for (locale, singular, plural, published_singular, published_plural) in [
+            (
+                UiLocale::EnUs,
+                "1 knowledge folder",
+                "2 knowledge folders",
+                "1 published",
+                "2 published",
+            ),
+            (
+                UiLocale::Es,
+                "1 carpeta de conocimiento",
+                "2 carpetas de conocimiento",
+                "1 publicado",
+                "2 publicados",
+            ),
+        ] {
+            let localization = Localization::new(locale).unwrap();
+            let mut arguments = FluentArgs::new();
+            let without_bidi_isolates = |value: String| value.replace(['\u{2068}', '\u{2069}'], "");
+
+            arguments.set("count", 1);
+            assert_eq!(
+                without_bidi_isolates(
+                    localization.text_with("home-collection-count", Some(&arguments))
+                ),
+                singular
+            );
+            assert_eq!(
+                without_bidi_isolates(
+                    localization.text_with("home-published-count", Some(&arguments))
+                ),
+                published_singular
+            );
+
+            arguments.set("count", 2);
+            assert_eq!(
+                without_bidi_isolates(
+                    localization.text_with("home-collection-count", Some(&arguments))
+                ),
+                plural
+            );
+            assert_eq!(
+                without_bidi_isolates(
+                    localization.text_with("home-published-count", Some(&arguments))
+                ),
+                published_plural
+            );
+        }
+    }
+
+    #[test]
     fn catalogs_have_the_same_messages_and_parameters() {
         assert_eq!(catalog_shape(EN_US_SOURCE), catalog_shape(ES_SOURCE));
     }

@@ -7,7 +7,7 @@ use crate::integrations::{
 };
 use crate::readiness::OptionalFeatureState;
 
-use super::{page_title, wrap_monospace};
+use super::{blocking_modal_decision, editorial_modal_frame, page_title, wrap_monospace};
 
 #[derive(Debug)]
 pub(super) enum IntegrationsUiAction {
@@ -23,6 +23,7 @@ struct Confirmation {
     client: ChatClientKind,
     action: IntegrationAction,
     path: Option<std::path::PathBuf>,
+    return_focus: egui::Id,
 }
 
 #[derive(Debug, Default)]
@@ -33,12 +34,19 @@ pub(super) struct ChatIntegrationsUi {
     snapshot_before_request: Option<ChatIntegrationsSnapshot>,
     confirmation: Option<Confirmation>,
     inline_error: Option<String>,
+    automatic_refresh_attempted: bool,
 }
 
 impl ChatIntegrationsUi {
     pub(super) fn refresh_if_idle(&mut self) -> Option<IntegrationsUiAction> {
-        (self.snapshot.is_none() && self.pending_request_id.is_none())
-            .then(|| self.start_request(IntegrationAction::Refresh))
+        if self.snapshot.is_some()
+            || self.pending_request_id.is_some()
+            || self.automatic_refresh_attempted
+        {
+            return None;
+        }
+        self.automatic_refresh_attempted = true;
+        Some(self.start_request(IntegrationAction::Refresh))
     }
 
     pub(super) fn readiness_state(&self) -> OptionalFeatureState {
@@ -115,7 +123,7 @@ impl ChatIntegrationsUi {
 
         if let Some(error) = &self.inline_error {
             ui.colored_label(
-                crate::theme::ERROR_CORAL,
+                crate::theme::error_text(ui.visuals().dark_mode),
                 super::human_error_summary(localization, error),
             );
         }
@@ -139,7 +147,53 @@ impl ChatIntegrationsUi {
             ui.spinner();
         }
 
-        self.confirmation_window(ui.ctx(), localization, &mut actions);
+        self.confirmation_window(ui.ctx(), localization, &mut actions, true);
+        actions
+    }
+
+    pub(super) fn show_compact(
+        &mut self,
+        ui: &mut egui::Ui,
+        localization: &Localization,
+    ) -> Vec<IntegrationsUiAction> {
+        let mut actions = Vec::new();
+        if let Some(action) = self.refresh_if_idle() {
+            actions.push(action);
+        }
+
+        if let Some(error) = &self.inline_error {
+            ui.colored_label(
+                crate::theme::error_text(ui.visuals().dark_mode),
+                super::human_error_summary(localization, error),
+            );
+        }
+
+        if let Some(snapshot) = self.snapshot.clone() {
+            for integration in &snapshot.integrations {
+                ui.push_id(("compact_chat_integration", integration.client), |ui| {
+                    self.compact_integration_row(ui, localization, integration, &mut actions);
+                });
+                ui.add_space(6.0);
+            }
+        }
+
+        ui.horizontal_wrapped(|ui| {
+            if ui
+                .add_enabled(
+                    self.pending_request_id.is_none(),
+                    egui::Button::new(localization.text("integrations-refresh")),
+                )
+                .clicked()
+            {
+                actions.push(self.start_request(IntegrationAction::Refresh));
+            }
+            if self.pending_request_id.is_some() {
+                ui.spinner();
+                ui.label(localization.text("integrations-checking"));
+            }
+        });
+
+        self.confirmation_window(ui.ctx(), localization, &mut actions, false);
         actions
     }
 
@@ -170,6 +224,7 @@ impl ChatIntegrationsUi {
     pub(super) fn collections_changed(&mut self) {
         if self.pending_request_id.is_none() {
             self.snapshot = None;
+            self.automatic_refresh_attempted = false;
         }
     }
 
@@ -179,7 +234,7 @@ impl ChatIntegrationsUi {
         localization: &Localization,
         actions: &mut Vec<IntegrationsUiAction>,
     ) {
-        egui::Frame::group(ui.style()).show(ui, |ui| {
+        crate::theme::surface_frame(ui.visuals().dark_mode).show(ui, |ui| {
             ui.heading(localization.text("integrations-privacy-title"));
             let count = self
                 .snapshot
@@ -187,7 +242,7 @@ impl ChatIntegrationsUi {
                 .map_or(0, |snapshot| snapshot.external_ai_collection_count);
             if count == 0 {
                 ui.colored_label(
-                    crate::theme::WARNING_AMBER,
+                    crate::theme::warning_text(ui.visuals().dark_mode),
                     localization.text("integrations-no-chat-folders"),
                 );
             } else {
@@ -218,14 +273,15 @@ impl ChatIntegrationsUi {
         integration: &IntegrationView,
         actions: &mut Vec<IntegrationsUiAction>,
     ) {
-        egui::Frame::group(ui.style()).show(ui, |ui| {
+        crate::theme::surface_frame(ui.visuals().dark_mode).show(ui, |ui| {
             ui.horizontal(|ui| {
                 ui.heading(integration.client.display_name());
-                let (label, color) = status_presentation(localization, &integration.status);
+                let (label, color) =
+                    status_presentation(localization, &integration.status, ui.visuals().dark_mode);
                 ui.colored_label(color, label);
                 if integration.activity_recent {
                     ui.colored_label(
-                        crate::theme::VERIFIED_GREEN,
+                        crate::theme::verified_text(ui.visuals().dark_mode),
                         localization.text("integrations-recent-activity"),
                     );
                 }
@@ -258,102 +314,140 @@ impl ChatIntegrationsUi {
                 ui.label(
                     RichText::new(localization.text("integrations-restart-chatgpt"))
                         .small()
-                        .color(crate::theme::WARNING_AMBER),
+                        .color(crate::theme::warning_text(ui.visuals().dark_mode)),
                 );
             }
-            ui.horizontal(|ui| {
-                let enabled = self.pending_request_id.is_none();
-                match integration.status {
-                    IntegrationStatus::Available => {
-                        if ui
-                            .add_enabled(
-                                enabled,
-                                egui::Button::new(localization.text("integrations-connect")),
-                            )
-                            .clicked()
-                        {
-                            self.confirmation = Some(Confirmation {
-                                client: integration.client,
-                                action: IntegrationAction::Connect(integration.client),
-                                path: integration.planned_path.clone(),
-                            });
-                        }
-                    }
-                    IntegrationStatus::Configured => {
-                        if integration.client == ChatClientKind::ClaudeDesktop {
-                            if ui
-                                .add_enabled(
-                                    enabled,
-                                    egui::Button::new(
-                                        localization.text("integrations-open-settings"),
-                                    ),
-                                )
-                                .clicked()
-                            {
-                                actions.push(
-                                    self.start_request(IntegrationAction::OpenClaudeSettings),
-                                );
-                            }
-                        } else if ui
-                            .add_enabled(
-                                enabled,
-                                egui::Button::new(localization.text("integrations-disconnect")),
-                            )
-                            .clicked()
-                        {
-                            self.confirmation = Some(Confirmation {
-                                client: integration.client,
-                                action: IntegrationAction::Disconnect(integration.client),
-                                path: integration.planned_path.clone(),
-                            });
-                        }
-                    }
-                    IntegrationStatus::UpdateAvailable => {
-                        if ui
-                            .add_enabled(
-                                enabled,
-                                egui::Button::new(localization.text("integrations-update")),
-                            )
-                            .clicked()
-                        {
-                            self.confirmation = Some(Confirmation {
-                                client: integration.client,
-                                action: IntegrationAction::Connect(integration.client),
-                                path: integration.planned_path.clone(),
-                            });
-                        }
-                    }
-                    IntegrationStatus::AwaitingClientApproval => {
-                        if ui
-                            .add_enabled(
-                                enabled,
-                                egui::Button::new(localization.text("integrations-installed")),
-                            )
-                            .on_hover_text(localization.text("integrations-installed-help"))
-                            .clicked()
-                        {
-                            actions.push(
-                                self.start_request(IntegrationAction::ConfirmClaudeInstalled),
-                            );
-                        }
-                        if ui
-                            .add_enabled(
-                                enabled,
-                                egui::Button::new(localization.text("integrations-open-claude")),
-                            )
-                            .clicked()
-                        {
-                            actions.push(self.start_request(IntegrationAction::OpenClaudeSettings));
-                        }
-                    }
-                    IntegrationStatus::NotInstalled
-                    | IntegrationStatus::Configuring
-                    | IntegrationStatus::Conflict
-                    | IntegrationStatus::Unsupported
-                    | IntegrationStatus::Error => {}
-                }
+            ui.horizontal_wrapped(|ui| {
+                self.integration_action_buttons(ui, localization, integration, actions);
             });
         });
+    }
+
+    fn compact_integration_row(
+        &mut self,
+        ui: &mut egui::Ui,
+        localization: &Localization,
+        integration: &IntegrationView,
+        actions: &mut Vec<IntegrationsUiAction>,
+    ) {
+        egui::Frame::new()
+            .fill(crate::theme::surface(ui.visuals().dark_mode))
+            .corner_radius(egui::CornerRadius::same(2))
+            .inner_margin(egui::Margin::symmetric(12, 8))
+            .show(ui, |ui| {
+                ui.set_min_width(ui.available_width());
+                ui.horizontal_wrapped(|ui| {
+                    ui.label(
+                        RichText::new(integration.client.display_name())
+                            .size(15.0)
+                            .family(crate::theme::semibold_font_family()),
+                    );
+                    let (label, color) = status_presentation(
+                        localization,
+                        &integration.status,
+                        ui.visuals().dark_mode,
+                    );
+                    ui.label(
+                        RichText::new(label)
+                            .size(12.0)
+                            .family(crate::theme::semibold_font_family())
+                            .color(color),
+                    );
+                    self.integration_action_buttons(ui, localization, integration, actions);
+                });
+            });
+    }
+
+    fn integration_action_buttons(
+        &mut self,
+        ui: &mut egui::Ui,
+        localization: &Localization,
+        integration: &IntegrationView,
+        actions: &mut Vec<IntegrationsUiAction>,
+    ) {
+        let enabled = self.pending_request_id.is_none();
+        match integration.status {
+            IntegrationStatus::Available => {
+                let response = ui.add_enabled(
+                    enabled,
+                    egui::Button::new(localization.text("integrations-connect")),
+                );
+                if response.clicked() {
+                    self.confirmation = Some(Confirmation {
+                        client: integration.client,
+                        action: IntegrationAction::Connect(integration.client),
+                        path: integration.planned_path.clone(),
+                        return_focus: response.id,
+                    });
+                }
+            }
+            IntegrationStatus::Configured => {
+                if integration.client == ChatClientKind::ClaudeDesktop {
+                    if ui
+                        .add_enabled(
+                            enabled,
+                            egui::Button::new(localization.text("integrations-open-settings")),
+                        )
+                        .clicked()
+                    {
+                        actions.push(self.start_request(IntegrationAction::OpenClaudeSettings));
+                    }
+                } else {
+                    let response = ui.add_enabled(
+                        enabled,
+                        egui::Button::new(localization.text("integrations-disconnect")),
+                    );
+                    if response.clicked() {
+                        self.confirmation = Some(Confirmation {
+                            client: integration.client,
+                            action: IntegrationAction::Disconnect(integration.client),
+                            path: integration.planned_path.clone(),
+                            return_focus: response.id,
+                        });
+                    }
+                }
+            }
+            IntegrationStatus::UpdateAvailable => {
+                let response = ui.add_enabled(
+                    enabled,
+                    egui::Button::new(localization.text("integrations-update")),
+                );
+                if response.clicked() {
+                    self.confirmation = Some(Confirmation {
+                        client: integration.client,
+                        action: IntegrationAction::Connect(integration.client),
+                        path: integration.planned_path.clone(),
+                        return_focus: response.id,
+                    });
+                }
+            }
+            IntegrationStatus::AwaitingClientApproval => {
+                if ui
+                    .add_enabled(
+                        enabled,
+                        egui::Button::new(localization.text("integrations-installed")),
+                    )
+                    .on_hover_text(localization.text("integrations-installed-help"))
+                    .clicked()
+                {
+                    actions.push(self.start_request(IntegrationAction::ConfirmClaudeInstalled));
+                }
+                if ui
+                    .add_enabled(
+                        enabled,
+                        egui::Button::new(localization.text("integrations-open-claude")),
+                    )
+                    .clicked()
+                {
+                    actions.push(self.start_request(IntegrationAction::OpenClaudeSettings));
+                }
+            }
+            IntegrationStatus::NotInstalled
+            | IntegrationStatus::Configuring
+            | IntegrationStatus::Conflict
+            | IntegrationStatus::Unsupported
+            | IntegrationStatus::Error => {}
+        }
     }
 
     fn confirmation_window(
@@ -361,6 +455,7 @@ impl ChatIntegrationsUi {
         context: &egui::Context,
         localization: &Localization,
         actions: &mut Vec<IntegrationsUiAction>,
+        show_managed_path: bool,
     ) {
         let Some(confirmation) = self.confirmation.clone() else {
             return;
@@ -374,18 +469,36 @@ impl ChatIntegrationsUi {
             | IntegrationAction::ConfirmClaudeInstalled
             | IntegrationAction::OpenClaudeSettings => return,
         };
-        egui::Window::new(title)
-            .id(egui::Id::new("chat_integration_confirmation"))
-            .collapsible(false)
-            .resizable(false)
-            .anchor(egui::Align2::CENTER_CENTER, egui::Vec2::ZERO)
+        let modal_id = egui::Id::new(("chat_integration_confirmation", confirmation.client));
+        let focus_id = modal_id.with("initial_focus");
+        let newly_opened =
+            !context.data_mut(|data| data.get_temp::<bool>(focus_id).unwrap_or(false));
+        if newly_opened {
+            egui::Popup::close_all(context);
+            context.data_mut(|data| data.insert_temp(focus_id, true));
+        }
+        let dark_mode = context.global_style().visuals.dark_mode;
+        let response = egui::Modal::new(modal_id)
+            .frame(editorial_modal_frame(dark_mode))
+            .backdrop_color(egui::Color32::from_black_alpha(128))
             .show(context, |ui| {
-                ui.heading(confirmation.client.display_name());
+                ui.set_width(400.0);
+                let mut decision = None;
+                ui.heading(
+                    RichText::new(title)
+                        .size(20.0)
+                        .family(crate::theme::semibold_font_family()),
+                );
+                ui.label(
+                    RichText::new(confirmation.client.display_name())
+                        .family(crate::theme::semibold_font_family()),
+                );
+                ui.add_space(8.0);
                 match confirmation.action {
                     IntegrationAction::Connect(_) => {
                         ui.label(localization.text("integrations-confirm-connect-body"));
                         ui.colored_label(
-                            crate::theme::WARNING_AMBER,
+                            crate::theme::warning_text(ui.visuals().dark_mode),
                             localization.text("integrations-confirm-cloud-warning"),
                         );
                         ui.label(localization.text("integrations-confirm-open-reminder"));
@@ -397,7 +510,7 @@ impl ChatIntegrationsUi {
                     | IntegrationAction::ConfirmClaudeInstalled
                     | IntegrationAction::OpenClaudeSettings => {}
                 }
-                if let Some(path) = &confirmation.path {
+                if show_managed_path && let Some(path) = &confirmation.path {
                     ui.label(
                         RichText::new(localization.text("integrations-planned-path"))
                             .small()
@@ -405,17 +518,37 @@ impl ChatIntegrationsUi {
                     );
                     wrap_monospace(ui, path.display().to_string());
                 }
-                ui.add_space(8.0);
-                ui.horizontal(|ui| {
-                    if ui.button(localization.text("action-cancel")).clicked() {
-                        self.confirmation = None;
-                    }
+                ui.add_space(18.0);
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                     if ui.button(localization.text("action-confirm")).clicked() {
-                        self.confirmation = None;
-                        actions.push(self.start_request(confirmation.action));
+                        decision = Some(true);
+                    }
+                    let cancel = ui.add(crate::theme::ghost_button(
+                        localization.text("action-cancel"),
+                        ui.visuals().dark_mode,
+                    ));
+                    if newly_opened {
+                        cancel.request_focus();
+                    }
+                    if cancel.clicked() {
+                        decision = Some(false);
                     }
                 });
+                decision
             });
+        let escaped = response.is_top_modal
+            && context
+                .input_mut(|input| input.consume_key(egui::Modifiers::NONE, egui::Key::Escape));
+        let decision = blocking_modal_decision(response.inner, escaped);
+        let Some(confirmed) = decision else {
+            return;
+        };
+        context.data_mut(|data| data.remove::<bool>(focus_id));
+        self.confirmation = None;
+        context.memory_mut(|memory| memory.request_focus(confirmation.return_focus));
+        if confirmed {
+            actions.push(self.start_request(confirmation.action));
+        }
     }
 
     fn start_request(&mut self, action: IntegrationAction) -> IntegrationsUiAction {
@@ -448,34 +581,45 @@ fn action_client(action: IntegrationAction) -> Option<ChatClientKind> {
 fn status_presentation(
     localization: &Localization,
     status: &IntegrationStatus,
+    dark_mode: bool,
 ) -> (String, Color32) {
     let (message, color) = match status {
         IntegrationStatus::NotInstalled => (
             "integration-status-not-installed",
-            crate::theme::secondary_text(true),
+            crate::theme::secondary_text(dark_mode),
         ),
-        IntegrationStatus::Available => ("integration-status-available", crate::theme::AIR_BLUE),
+        IntegrationStatus::Available => (
+            "integration-status-available",
+            crate::theme::accent_text(dark_mode),
+        ),
         IntegrationStatus::Configuring => (
             "integration-status-configuring",
-            crate::theme::WARNING_AMBER,
+            crate::theme::warning_text(dark_mode),
         ),
         IntegrationStatus::AwaitingClientApproval => (
             "integration-status-awaiting-approval",
-            crate::theme::WARNING_AMBER,
+            crate::theme::warning_text(dark_mode),
         ),
         IntegrationStatus::Configured => (
             "integration-status-configured",
-            crate::theme::VERIFIED_GREEN,
+            crate::theme::verified_text(dark_mode),
         ),
         IntegrationStatus::UpdateAvailable => (
             "integration-status-update-available",
-            crate::theme::WARNING_AMBER,
+            crate::theme::warning_text(dark_mode),
         ),
-        IntegrationStatus::Conflict => ("integration-status-conflict", crate::theme::ERROR_CORAL),
-        IntegrationStatus::Unsupported => {
-            ("integration-status-unsupported", crate::theme::ERROR_CORAL)
-        }
-        IntegrationStatus::Error => ("integration-status-error", crate::theme::ERROR_CORAL),
+        IntegrationStatus::Conflict => (
+            "integration-status-conflict",
+            crate::theme::error_text(dark_mode),
+        ),
+        IntegrationStatus::Unsupported => (
+            "integration-status-unsupported",
+            crate::theme::error_text(dark_mode),
+        ),
+        IntegrationStatus::Error => (
+            "integration-status-error",
+            crate::theme::error_text(dark_mode),
+        ),
     };
     (localization.text(message), color)
 }
@@ -561,6 +705,34 @@ mod tests {
             ui.snapshot.as_ref().unwrap().integrations[0].status,
             IntegrationStatus::Available
         );
+    }
+
+    #[test]
+    fn failed_initial_refresh_waits_for_explicit_retry() {
+        let mut ui = ChatIntegrationsUi::default();
+        let request_id = match ui.refresh_if_idle().unwrap() {
+            IntegrationsUiAction::Run { request_id, .. } => request_id,
+            IntegrationsUiAction::OpenCollections => panic!("unexpected navigation"),
+        };
+
+        ui.apply_result(request_id, Err("failed".to_owned()));
+
+        assert!(ui.refresh_if_idle().is_none());
+        assert!(ui.inline_error.is_some());
+    }
+
+    #[test]
+    fn collection_changes_rearm_the_automatic_refresh() {
+        let mut ui = ChatIntegrationsUi {
+            snapshot: Some(snapshot("available")),
+            automatic_refresh_attempted: true,
+            ..ChatIntegrationsUi::default()
+        };
+
+        ui.collections_changed();
+
+        assert!(ui.snapshot.is_none());
+        assert!(ui.refresh_if_idle().is_some());
     }
 
     #[test]

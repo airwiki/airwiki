@@ -1,18 +1,71 @@
 app-title = AirWiki
-nav-home = Home
-nav-collections = Knowledge folders
+nav-home = Today
+nav-collections = Library
 nav-review = Review
 nav-wiki = Wiki
-nav-search = Search
+nav-search = Ask
 nav-integrations = Chats
-nav-devices = Other devices
+nav-public = Public network
+nav-devices = Connections
 nav-settings = Settings
+
+public-title = Public network
+public-subtitle = An opt-in, decentralized index of published wikis — readable by people and AI without pairing or accounts. Publishing is deliberate, per collection; snippets are always served live from the owner’s device.
+public-experimental = Experimental
+public-route-title = Public connection
+public-collections-title = Your collections
+public-collections-empty = Add a Library folder before publishing reviewed knowledge.
+public-visible = Public
+public-private = Private
+public-private-summary = Published knowledge stays private until you explicitly enable this collection.
+public-private-attention-summary = Resolve its attention items before publishing — withdrawn content cannot be announced.
+public-publish-blocked-by-attention = Publication was not enabled because this collection now needs attention. Resolve its items and try again.
+public-announcement-online = Announcement is available
+public-status-reachable = Reachable
+public-status-offline = Offline
+public-status-expired = Expired
+public-reader-view = Reader view
+public-manage-collections = Manage publication in Library
+public-make-public = Make public…
+public-stop-publishing = Stop publishing
+public-discover-title = Find public knowledge
+public-discover-body = Discovery asks up to three federated indexes; you read as an ephemeral identity. No index is canonical.
+public-search-placeholder = e.g. field botany
+public-search-action = Search indexes
+public-search-running = Searching public indexes…
+public-community-indexes-kicker = Advanced recovery
+public-community-indexes-recovery-title = Legacy public indexes are enabled
+public-community-indexes-recovery-body = { $count ->
+    [one] One enabled index was added by an earlier development build. Disable it to use only the versioned beta bootstrap; its local record will be retained as disabled.
+   *[other] { $count } enabled indexes were added by an earlier development build. Disable them to use only the versioned beta bootstrap; their local records will be retained as disabled.
+}
+public-community-indexes-disable-action = Disable legacy indexes…
+public-community-indexes-confirm-title = Disable legacy public indexes?
+public-community-indexes-confirm-body = { $count ->
+    [one] This disables one user-configured index, restarts the public connection and re-announces public collections through the bundled beta indexes. It does not change published knowledge or LAN access.
+   *[other] This disables { $count } user-configured indexes, restarts the public connection and re-announces public collections through the bundled beta indexes. It does not change published knowledge or LAN access.
+}
+public-community-indexes-confirm-action = Disable legacy indexes
+public-community-indexes-disabled = { $count ->
+    [one] One legacy public index was disabled.
+   *[other] { $count } legacy public indexes were disabled.
+}
+connections-chat-summary = Chat access is managed separately from device pairing.
+connections-open-chats = Manage chats
+connections-network-title = LOCAL NETWORK
+connections-devices-title = PAIRED AND NEARBY DEVICES
 
 status-ready = Ready
 status-working = Working
 status-needs-permission = Needs permission
 status-needs-attention = Needs attention
 status-optional-disabled = Optional · Off
+status-development-build = development build
+status-review-count = { $count ->
+    [one] { $count } awaiting review
+   *[other] { $count } awaiting review
+}
+status-details = Status details
 
 dashboard-title = Your knowledge
 dashboard-subtitle = AirWiki keeps local knowledge organized and shows only the next action that needs you.
@@ -21,6 +74,7 @@ dashboard-all-ready = Everything is ready
 first-knowledge-eyebrow = Private by default
 first-knowledge-title = Turn a folder into knowledge you can verify
 first-knowledge-subtitle = AirWiki prepares drafts locally. You decide what becomes part of your Wiki.
+onboarding-progress = First run · Step { $current } of { $total }
 journey-title = Your path to a useful answer
 journey-prepare = Prepare
 journey-read = Read
@@ -31,6 +85,47 @@ journey-step-done = Complete
 journey-step-current = Current step
 journey-step-next = Next
 home-next-step = Next step
+home-lead-kicker = Lead — needs you
+home-ask-kicker = Ask your wiki
+home-ask-placeholder = who owns the pilot check-ins?
+home-recently-published = Recently published
+home-review-drafts-title = { $count ->
+    [one] One draft awaits your review
+   *[other] { $count } drafts await your review
+}
+home-review-drafts-body = AirWiki read your folders and prepared private concepts, each compared against local evidence. Nothing is published — or shared anywhere — until you approve it.
+home-attention-kicker = Attention
+home-source-issue-title = { $collection } could not be fully read
+home-source-issue-body = { $count ->
+    [one] One document failed local analysis. Concepts drawn from it are withheld from answers until a new scan succeeds; everything else keeps working.
+   *[other] { $count } documents failed local analysis. Concepts drawn from them are withheld from answers until a new scan succeeds; everything else keeps working.
+}
+home-source-issue-action = Resolve in Library
+home-collection-published-summary = { $count ->
+    [one] { $count } reviewed concept
+   *[other] { $count } reviewed concepts
+}
+home-no-recently-published = Your reviewed concepts will appear here.
+review-evidence-editorial-title = Evidence — verified against the source revision
+review-queue-subtitle = Nothing publishes without you.
+review-draft-kicker = Draft
+review-revision-label = revision
+review-revision-short = rev
+review-edit-metadata = Edit proposed metadata
+review-close-metadata = Close metadata editor
+review-open-source = Open source document
+review-open-source-unavailable = AirWiki does not expose a source-document path to the interface. The verified excerpts below are the available review source.
+review-draft-counter = Draft { $current } of { $total }
+home-title = Today
+home-collection-count = { $count ->
+    [one] { $count } knowledge folder
+   *[other] { $count } knowledge folders
+}
+home-published-count = { $count ->
+    [one] { $count } published
+   *[other] { $count } published
+}
+home-private-default = Private by default
 home-optional-title = Grow your setup when you are ready
 home-optional-body = Other devices, chat apps, background operation, and updates are optional.
 
@@ -99,10 +194,11 @@ primary-button-open-health = Open Health
 primary-button-view-options = View options
 primary-button-view-diagnostics = View diagnostics
 
-collections-title = Knowledge folders
-collections-subtitle = Each knowledge folder watches one local folder and maintains an independent OKF bundle.
+collections-title = Library
+collections-subtitle = Each folder is watched read-only and keeps its own OKF bundle. Original files are never modified.
 collections-monitoring = Automatic monitoring runs while the app is open, with a full reconciliation every { $minutes } minutes when local AI is ready.
 collections-new = New knowledge folder
+collections-new-body = Link another local folder of Markdown or text-based PDF files.
 collections-name = Name
 collections-choose-folder = Choose folder…
 collections-create-scan = Create and scan
@@ -110,9 +206,18 @@ collections-empty-title = No knowledge folders yet
 collections-empty-body = Create one to import Markdown or text-based PDF files.
 collections-linked = Folder linked and monitored
 collections-counts = { $documents } documents · { $published } published
+collections-attention-counts =
+    { $review ->
+        [one] 1 awaiting review
+       *[other] { $review } awaiting review
+    } ·
+    { $failed ->
+        [one] 1 issue
+       *[other] { $failed } issues
+    }
 collections-last-scan = Last scan: { $time }
 collections-relink = Link a different folder…
-collections-retry = Try again now
+collections-retry = Scan now
 collections-scan-queued = Queued
 collections-scan-running = Scanning
 collections-maintenance-partial = One or more files could not be processed.
@@ -120,6 +225,13 @@ collections-maintenance-failed = The knowledge folder could not be reconciled.
 collections-maintenance-quarantined = The knowledge folder could not be monitored or reconciled safely.
 collections-policy-peers = Share with authorized devices
 collections-policy-chat = Allow in external chats
+collections-sharing-details = Sharing and folder details
+collections-table-folder = Knowledge folder
+collections-table-activity = Activity
+collections-table-document = Document
+collections-table-status = Status
+collections-documents-attention = Documents needing attention
+collections-status-review = Awaiting review
 collections-local-only = Local only
 collections-cloud-warning = Authorized excerpts may enter the chat provider's cloud.
 collections-chat-confirm-title = Allow this folder in external chats?
@@ -132,27 +244,29 @@ collections-public-announcement-offline = Announcement has no available indexes
 collections-public-announcement-expired = The last public announcement expired
 collections-public-last-renewal = Last renewal: { $timestamp } UTC
 collections-public-expiry = Expires: { $timestamp } UTC
-collections-public-confirm-title = Publish this collection on the Internet?
-collections-public-confirm-body = Readers will be able to search and browse published knowledge without pairing their devices.
-collections-public-confirm-warning = Published metadata, summaries, and snippets may be copied or processed by third parties, including AI. Drafts are never published.
+collections-public-confirm-title = Make “{ $name }” public?
+collections-public-confirm-body = Its published concepts’ names, summaries and snippets can be copied or processed by anyone — including AI systems. Drafts and original files never leave this device, and every document still requires your review before publishing.
+collections-public-confirm-withdrawal = You can stop publishing at any time: content stops responding immediately, though indexes may show a stale entry until it expires.
+collections-public-confirm-action = Make public
 search-public-network = Search the experimental public network
 search-public-route-offline = Public route: no confirmed connection
 search-public-route-relay = Public route: relay
 search-public-route-direct = Public route: direct
-search-public-index-advanced = Advanced public index configuration
-search-public-index-help = Add the identity and multiaddress published by a community index. AirWiki verifies that they match during Noise.
-search-public-index-add = Add index
-search-public-index-remove = Disable index by PeerId
-search-browse-public = Browse collection
+search-public-publisher-controls = Publisher controls on this device
+search-browse-public = View as reader
 search-public-browse-title = Public collection
 search-public-publisher = Publisher
 search-public-browse-expired = The public collection card expired
 search-public-collection-profile = { $concepts } concept(s) · Languages: { $languages }
 search-public-provenance = Provenance: AirWiki public network
 search-public-block-publisher = Block on this device
-search-public-unblock-help = Blocked publisher identity
+search-public-unblock-help = Blocked publishers are listed without exposing network identities.
+search-public-blocked-publisher = Blocked publisher { $number }
 search-public-unblock-publisher = Unblock publisher
+search-public-source-revision = Source revision { $revision }
 search-public-browse-more = Load more
+search-public-search-this-collection = Search this collection
+search-public-search-this-collection-unavailable = Collection-scoped public search is not supported by the current search contract.
 collections-chat-confirm-body = This changes the folder's privacy policy. No evidence may leave this device until you confirm.
 maintenance-never = Not scanned yet
 maintenance-success = Last scan completed successfully
@@ -161,8 +275,19 @@ maintenance-failed = The last scan needs attention
 maintenance-quarantined = Shared content is withdrawn until recovery
 
 onboarding-welcome-title = Welcome to AirWiki
-onboarding-welcome-body = Start with one local folder and finish with an answer you can trace back to its source.
-onboarding-model-title = Prepare local AI
+onboarding-welcome-body = AirWiki turns folders of Markdown and PDF files into a wiki you review and publish yourself. Everything runs on this machine.
+onboarding-machine-check-title = Machine check
+onboarding-machine-checking = AirWiki is checking this machine before proposing a local model profile.
+onboarding-machine-supported = Based on this machine, AirWiki will propose a local model profile next.
+onboarding-machine-needs-attention = This machine needs attention before it can run the local model
+onboarding-machine-unsupported = This build cannot run the local model on this machine
+onboarding-machine-checking-platform = Checking the platform and architecture…
+onboarding-machine-checking-memory = Checking total memory…
+onboarding-machine-checking-disk = Checking free disk for model assets…
+onboarding-machine-platform = { $platform } detected
+onboarding-machine-memory = { $memory } GB total memory
+onboarding-machine-free-disk = { $disk } GB free disk for model assets
+onboarding-model-title = Choose a local model profile
 onboarding-collection-title = Add your first knowledge folder
 onboarding-processing-title = Preparing your first drafts
 onboarding-review-title = Review what AirWiki prepared
@@ -174,12 +299,28 @@ onboarding-complete-title = AirWiki is ready
 onboarding-next = Continue
 onboarding-back = Back
 onboarding-skip = Set up later
-onboarding-finish = Finish
-onboarding-model-body = AirWiki selected the safest model profile supported by this device. It prepares metadata and summaries, but it can never publish for you.
+onboarding-finish = Finish setup
+onboarding-model-body = The model runs only on this device. It prepares draft metadata and checks whether cited passages support a question — it cannot publish, grant access, or send anything anywhere.
+onboarding-model-profile-automatic = Automatic
+onboarding-model-profile-automatic-body = Recommended for this machine: { $model }.
+onboarding-model-profile-small = Small
+onboarding-model-profile-small-body = Faster, lower-memory drafts.
+onboarding-model-profile-quality = Quality
+onboarding-model-profile-quality-body = Higher-quality drafts when this device has enough memory.
+onboarding-model-download-note = Downloads need network access once; curation and search then work offline.
+onboarding-model-required = Download and verify a local model before continuing.
 onboarding-model-recommended = Recommended for this device
 onboarding-model-private = The model and document analysis stay on this device after the verified download completes.
 onboarding-model-details = Model and license details
-onboarding-model-change-later = You can compare Efficient and Quality profiles later from Settings.
+onboarding-model-change-later = You can compare other profiles later from Settings.
+onboarding-permissions-title = Every permission, explained
+onboarding-permissions-body = Nothing below is enabled until you say so, and each one can be turned off later in Settings.
+onboarding-permissions-folder-title = Folder access
+onboarding-permissions-folder-body = You choose each folder explicitly. AirWiki never scans the rest of your files.
+onboarding-permissions-network-title = Local network
+onboarding-permissions-network-body = Optional. Enable it only when you want to pair another device.
+onboarding-permissions-login-title = Start at sign-in
+onboarding-permissions-login-body = Optional. Keeps local maintenance available without creating a system service.
 onboarding-processing-body = AirWiki is reading supported files and preparing private drafts. You can close and reopen the app without creating duplicates.
 onboarding-processing-scanning = Reading supported files
 onboarding-processing-enriching = Creating drafts with local AI
@@ -224,18 +365,21 @@ search-placeholder = What do you want to know?
 search-empty-title = No matching evidence found
 search-empty-body = Try a more specific phrase or use words that appear in the published document.
 search-error-title = This search could not be completed
-devices-title = Other devices
+devices-title = Connections
 devices-searching = Looking for devices on your local network…
 devices-manual-advanced = Manual connection (advanced)
 devices-this-address = This device's manual connection address:
 devices-manual-invalid = Use a local IPv4 address, a TCP port, and optionally the device identifier.
 devices-manual-requires-lan = Enable local networking before connecting manually.
-devices-subtitle = The six-word code must match on both screens before you trust a device.
+devices-subtitle = Your other devices on this network. The six-word code must match on both screens before you trust a device.
+devices-pairing-title = Pair a device
+devices-code-compare = Compare the six-word code
 devices-empty-title = No other devices are visible
 devices-empty-body = When local networking is enabled, AirWiki finds devices automatically.
 devices-nearby = Nearby device
 devices-pair = Pair
-devices-code-matches = It matches
+devices-code-matches = The codes match
+devices-pairing-warning = The same six words must appear on “{ $device }”. If they differ, cancel — the connection is not private.
 devices-code-does-not-match = It does not match
 devices-revoke = Revoke and block
 devices-pair-again = Pair again
@@ -348,13 +492,22 @@ integration-summary-conflict = An existing setting must be reviewed before AirWi
 integration-summary-unsupported = This installed version is not compatible with the guided connection.
 integration-summary-error = This integration could not be checked. Open technical details for diagnostics.
 
-knowledge-title = Published knowledge
-knowledge-subtitle = Your local OKF Wiki, its internal relationships, and bundle health.
-knowledge-tab-wiki = Wiki
+knowledge-title = Wiki
+knowledge-subtitle = Everything here was reviewed and published by a person. Sources are cited by revision.
+knowledge-tab-wiki = Index
+knowledge-index-kicker = PUBLISHED CONCEPTS
+knowledge-all-concepts = All concepts
+knowledge-last-checked = Last checked
+knowledge-open-bundle-log = Open bundle log
 knowledge-tab-graph = Graph
 knowledge-tab-health = Health
 knowledge-select-collection = Select a folder
-knowledge-concept-count = { $count } concepts
+knowledge-concept-count = { $count ->
+    [one] 1 concept
+   *[other] { $count } concepts
+}
+knowledge-concept-healthy = Healthy
+knowledge-concept-attention = Needs attention
 knowledge-no-collections-title = No knowledge folders
 knowledge-no-collections-body = Create a folder and publish at least one document to build its Wiki.
 knowledge-bundle-error-title = The OKF bundle could not be inspected
@@ -376,12 +529,20 @@ knowledge-page-error-title = The page could not be loaded
 knowledge-select-page = Select a page from the tree.
 knowledge-page-truncated = Only the first part is shown here; the published file was not changed.
 knowledge-page-missing = This page is no longer available in the current Wiki
-knowledge-details-placeholder = Metadata and incoming links
-knowledge-metadata = Metadata
-knowledge-backlinks = Incoming links ({ $count })
-knowledge-no-backlinks = No incoming references
-knowledge-links = Links ({ $count })
+knowledge-details-placeholder = Sources and related concepts
+knowledge-metadata = Sources
+knowledge-source-resource = Published source
+knowledge-source-revision = Source revision { $revision }
+knowledge-additional-metadata = Additional published metadata
+knowledge-source-metadata-unavailable = A published source resource is not available for this concept.
+knowledge-backlinks = Cited by ({ $count })
+knowledge-no-backlinks = No citations
+knowledge-links = Linked concepts ({ $count })
+knowledge-no-linked-concepts = No linked concepts
 knowledge-graph-description = How published pages connect to each other.
+knowledge-graph-caption = Cyan concepts have no warning or error findings; magenta concepts need attention. Connections come from published Wiki links.
+knowledge-graph-visible-limit = Showing { $shown } of { $total } concepts on the canvas. Use filters or the keyboard list to explore all published concepts.
+knowledge-graph-node-list = Browse graph concepts with the keyboard
 knowledge-graph-filter-title = Filter before creating the graph
 knowledge-graph-filter-body = There are { $count } concepts. Narrow the result to { $limit }; AirWiki keeps the Wiki home page as the starting point.
 knowledge-graph-counts = { $nodes } nodes · { $links } links
@@ -602,9 +763,21 @@ review-entity-type = Entity type
 review-link-label = Link label
 review-link-target = Link target
 
-search-title = Search your knowledge
-search-subtitle = Combines the local index with paired devices; results may be partial.
-search-action = Search
+search-title = Ask
+search-subtitle = Cited passages come only from published knowledge — here or in your chat app.
+search-chat-title = Or ask from your chat app
+search-chat-body = Read-only, per-user bridge. Folder permission is rechecked before any evidence is returned; no API keys are stored.
+search-chat-action = Manage chat apps
+search-action = Ask
+search-sources = Sources
+search-scope-searches = Searches:
+search-scope-device = This device
+search-scope-paired = Paired devices
+search-scope-include-public = Include public network
+search-scope-note-device = Published concepts on this device are searched. Pairing is off or no trusted device is available.
+search-scope-note-paired = Published concepts on this device and authorized snippets from paired devices are searched.
+search-scope-note-public = Local and paired knowledge remain available. Your query is sent to up to three federated indexes and selected publishers; your documents stay on this device.
+search-top-passage = Top cited passage
 search-running = Searching available devices…
 search-citation-details = Citation details
 search-revision = Revision { $revision }
@@ -623,16 +796,19 @@ search-coverage-public-offline = The public network is offline. Local and paired
 search-coverage-partial = One part of the search did not complete. The available results are shown.
 
 settings-title = Settings
-settings-subtitle = Manage language, background availability, local AI, and signed updates.
+settings-subtitle = Language, background availability, local AI, and signed updates.
+settings-general = GENERAL
+settings-background = Start at sign-in
 settings-language = Language
-settings-login-status = Start at sign-in: { $status }
+settings-login-status = Keeps monitoring and paired search available in the background. Currently { $status }.
 settings-refresh-status = Refresh status
 settings-advanced-diagnostics = Advanced diagnostics
 settings-local-ai = Local AI
+settings-local-ai-body = The model prepares draft metadata and checks whether cited passages support a question on this device. It cannot publish, grant access, or send anything anywhere.
 settings-model-profile = Profile: { $profile }
-settings-model-active = Active: { $model }
+settings-model-active = Active model: { $model }
 settings-model-none = none
-settings-manage-models = Manage models from Home
+settings-manage-models = Change model profile…
 action-enable = Enable
 action-disable = Disable
 action-remove = Remove

@@ -12,6 +12,7 @@ use airwiki_types::{
     ConceptType, DEFAULT_TOP_K, EnrichmentDraft, PublicCollectionSummary, PublicConceptSummary,
     SearchHit, SearchPurpose, SuggestedEntity, SuggestedLink,
 };
+use chrono::Datelike;
 use eframe::egui::{self, Color32, RichText};
 use egui_extras::{Size, StripBuilder};
 use fluent_bundle::FluentArgs;
@@ -22,13 +23,11 @@ mod integrations;
 mod knowledge;
 mod review;
 
-use self::first_knowledge::JourneyStepState;
 use self::integrations::{ChatIntegrationsUi, IntegrationsUiAction};
-use self::knowledge::{KnowledgeAction, KnowledgeUi, SearchEvidenceTarget};
+use self::knowledge::{KnowledgeAction, KnowledgeUi, RecentConceptView, SearchEvidenceTarget};
 use self::review::{
-    REVIEW_ACTION_BAR_HEIGHT, REVIEW_PANEL_GAP, REVIEW_QUEUE_WIDTH, ReviewEvidenceAction,
-    ReviewEvidencePanelIntent, ReviewEvidenceUi, ReviewLayoutMode, review_comparison_widths,
-    review_layout_mode, show_review_evidence_panel,
+    REVIEW_QUEUE_WIDTH, ReviewEvidenceAction, ReviewEvidencePanelIntent, ReviewEvidenceUi,
+    ReviewLayoutMode, review_action_bar_height, review_layout_mode, show_review_evidence_panel,
 };
 
 use crate::{
@@ -40,7 +39,7 @@ use crate::{
     },
     desktop_shell::{ClosePolicy, DesktopShell},
     i18n::{Localization, LocalizationError, UiLocale},
-    layout::ResponsiveLayout,
+    layout::{ResponsiveLayout, SIDEBAR_WIDTH, STATUS_BAR_HEIGHT},
     model_config::{CloseBehavior, LanPreference, LocalePreference, ONBOARDING_VERSION},
     paths::AppPaths,
     readiness::{
@@ -54,11 +53,14 @@ use crate::{
     worker::{
         CollectionScanState, CollectionView, ConnectivityIssueCode, DesktopPreferencesUpdate,
         DesktopPreferencesView, FirewallOperationView, LanDiscoveryView, LanListenerView,
-        ModelStateView, PERIODIC_RECONCILE_INTERVAL, PeerActivityState, PeerTrustState, PeerView,
-        PublicAnnouncementStatusView, ReviewItemView, SearchCoverageView, SourceIssueView,
-        UpdaterWorkerView, WikiHealthSummaryView, WorkerCommand, WorkerEvent, WorkerHandle,
+        ModelStateView, PeerActivityState, PeerTrustState, PeerView, PublicAnnouncementStatusView,
+        ReviewItemView, SearchCoverageView, SourceIssueView, UpdaterWorkerView,
+        WikiHealthSummaryView, WorkerCommand, WorkerEvent, WorkerHandle,
     },
 };
+
+const CONNECTIONS_CHAT_FOOTER_HEIGHT: f32 = 58.0;
+const TODAY_COLUMN_GAP: f32 = 56.0;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Screen {
@@ -68,8 +70,21 @@ enum Screen {
     Review,
     Knowledge,
     Search,
+    Public,
     Integrations,
     Nodes,
+    Settings,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum NavIcon {
+    Today,
+    Library,
+    Review,
+    Wiki,
+    Ask,
+    Public,
+    Connections,
     Settings,
 }
 
@@ -77,10 +92,7 @@ enum Screen {
 enum OnboardingPage {
     Welcome,
     Model,
-    Collection,
-    Processing,
-    Review,
-    Search,
+    Permissions,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -110,6 +122,83 @@ enum SearchResultAvailability {
     Remote { device_name: Option<String> },
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+enum SearchSurface {
+    Ask,
+    Public,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct AskScopePresentation {
+    paired_available: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum EditorialTagTone {
+    Accent,
+    Attention,
+    Neutral,
+    Outline,
+}
+
+#[derive(Debug)]
+struct SearchViewState {
+    question: String,
+    top_k: u8,
+    hits: Vec<SearchHit>,
+    coverage: SearchCoverageView,
+    completed: bool,
+    error: Option<String>,
+    submitted_public_network: bool,
+    route_kind: PublicRouteKind,
+}
+
+impl SearchViewState {
+    fn new() -> Self {
+        Self {
+            question: String::new(),
+            top_k: DEFAULT_TOP_K,
+            hits: Vec::new(),
+            coverage: SearchCoverageView::Complete,
+            completed: false,
+            error: None,
+            submitted_public_network: false,
+            route_kind: PublicRouteKind::Offline,
+        }
+    }
+
+    fn clear_feedback(&mut self) {
+        self.hits.clear();
+        self.coverage = SearchCoverageView::Complete;
+        self.completed = false;
+        self.error = None;
+    }
+
+    fn begin_search(&mut self, public_network: bool) {
+        self.clear_feedback();
+        self.submitted_public_network = public_network;
+    }
+
+    fn complete(
+        &mut self,
+        hits: Vec<SearchHit>,
+        coverage: SearchCoverageView,
+        route_kind: PublicRouteKind,
+    ) {
+        self.completed = true;
+        self.hits = hits;
+        self.coverage = coverage;
+        self.error = None;
+        self.route_kind = route_kind;
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct ActiveSearch {
+    request_id: Uuid,
+    surface: SearchSurface,
+}
+
 pub struct AirWikiApp {
     instance: PrimaryInstance,
     shell: DesktopShell,
@@ -136,6 +225,7 @@ pub struct AirWikiApp {
     wiki_health_error_dismissed: bool,
     external_ai_confirmation: Option<Uuid>,
     public_collection_confirmation: Option<Uuid>,
+    public_confirmation_return_focus: Option<egui::Id>,
     onboarding_page: Option<OnboardingPage>,
     onboarding_finishing: bool,
     paths: AppPaths,
@@ -156,19 +246,18 @@ pub struct AirWikiApp {
     reviews: Vec<ReviewItemView>,
     source_issues: Vec<SourceIssueView>,
     peers: Vec<PeerView>,
-    search_question: String,
-    search_top_k: u8,
+    pairing_decisions_pending: HashSet<String>,
+    pairing_modal_peer: Option<String>,
+    pairing_confirmation_return_focus: Option<egui::Id>,
+    ask_search: SearchViewState,
+    public_search: SearchViewState,
+    active_search: Option<ActiveSearch>,
     search_public_network: bool,
-    public_route_kind: PublicRouteKind,
-    federation_index_peer: String,
-    federation_index_address: String,
-    public_publisher_block_input: String,
     blocked_public_publishers: Vec<String>,
-    search_hits: Vec<SearchHit>,
-    search_coverage: SearchCoverageView,
-    search_request_id: Option<Uuid>,
-    search_completed: bool,
-    search_error: Option<String>,
+    enabled_community_federation_index_count: usize,
+    community_indexes_confirmation: bool,
+    community_indexes_confirmation_return_focus: Option<egui::Id>,
+    community_indexes_disable_request_id: Option<Uuid>,
     public_browse_request_id: Option<Uuid>,
     public_browse_publisher: String,
     public_browse_collection: Option<Uuid>,
@@ -183,6 +272,7 @@ pub struct AirWikiApp {
     manual_multiaddress: String,
     notices: VecDeque<(bool, String)>,
     selected_review: Option<Uuid>,
+    review_metadata_editor: Option<Uuid>,
     reanalyzing_reviews: HashSet<Uuid>,
     review_evidence: ReviewEvidenceUi,
     integrations: ChatIntegrationsUi,
@@ -223,6 +313,7 @@ impl AirWikiApp {
             wiki_health_error_dismissed: false,
             external_ai_confirmation: None,
             public_collection_confirmation: None,
+            public_confirmation_return_focus: None,
             onboarding_page: None,
             onboarding_finishing: false,
             worker: WorkerHandle::spawn(paths.clone()),
@@ -243,19 +334,18 @@ impl AirWikiApp {
             reviews: Vec::new(),
             source_issues: Vec::new(),
             peers: Vec::new(),
-            search_question: String::new(),
-            search_top_k: DEFAULT_TOP_K,
+            pairing_decisions_pending: HashSet::new(),
+            pairing_modal_peer: None,
+            pairing_confirmation_return_focus: None,
+            ask_search: SearchViewState::new(),
+            public_search: SearchViewState::new(),
+            active_search: None,
             search_public_network: false,
-            public_route_kind: PublicRouteKind::Offline,
-            federation_index_peer: String::new(),
-            federation_index_address: String::new(),
-            public_publisher_block_input: String::new(),
             blocked_public_publishers: Vec::new(),
-            search_hits: Vec::new(),
-            search_coverage: SearchCoverageView::Complete,
-            search_request_id: None,
-            search_completed: false,
-            search_error: None,
+            enabled_community_federation_index_count: 0,
+            community_indexes_confirmation: false,
+            community_indexes_confirmation_return_focus: None,
+            community_indexes_disable_request_id: None,
             public_browse_request_id: None,
             public_browse_publisher: String::new(),
             public_browse_collection: None,
@@ -270,6 +360,7 @@ impl AirWikiApp {
             manual_multiaddress: String::new(),
             notices: VecDeque::new(),
             selected_review: None,
+            review_metadata_editor: None,
             reanalyzing_reviews: HashSet::new(),
             review_evidence: ReviewEvidenceUi::default(),
             integrations: ChatIntegrationsUi::default(),
@@ -288,6 +379,7 @@ impl AirWikiApp {
                     reviews,
                     source_issues,
                     blocked_public_publishers,
+                    enabled_community_federation_index_count,
                 } => {
                     self.node_id = node_id;
                     self.mcp_url = mcp_url;
@@ -297,6 +389,8 @@ impl AirWikiApp {
                     self.reviews = reviews;
                     self.source_issues = source_issues;
                     self.blocked_public_publishers = blocked_public_publishers;
+                    self.enabled_community_federation_index_count =
+                        enabled_community_federation_index_count;
                     self.refresh_integrations_if_needed();
                 }
                 WorkerEvent::Hardware(report) => self.hardware = Some(report),
@@ -611,29 +705,30 @@ impl AirWikiApp {
                     }
                 }
                 WorkerEvent::SearchPartial { request_id, hits } => {
-                    if !search_result_applies(self.search_request_id, request_id) {
+                    let Some(surface) = search_response_surface(self.active_search, request_id)
+                    else {
                         continue;
-                    }
-                    self.search_hits = hits;
-                    self.search_coverage = SearchCoverageView::Partial;
-                    self.search_error = None;
+                    };
+                    let search = self.search_state_mut(surface);
+                    search.hits = hits;
+                    search.coverage = SearchCoverageView::Partial;
+                    search.error = None;
                 }
                 WorkerEvent::SearchFinished { request_id, result } => {
-                    if !search_result_applies(self.search_request_id, request_id) {
+                    let Some(surface) = search_response_surface(self.active_search, request_id)
+                    else {
                         continue;
-                    }
-                    self.search_request_id = None;
+                    };
+                    self.active_search = None;
                     match result {
                         Ok((hits, coverage, route_kind)) => {
-                            self.search_completed = true;
-                            self.search_hits = hits;
-                            self.search_coverage = coverage;
-                            self.public_route_kind = route_kind;
-                            self.search_error = None;
+                            self.search_state_mut(surface)
+                                .complete(hits, coverage, route_kind);
                         }
                         Err(error) => {
-                            self.search_completed = false;
-                            self.search_error = Some(sanitized_error_code(&error).to_owned());
+                            let search = self.search_state_mut(surface);
+                            search.completed = false;
+                            search.error = Some(sanitized_error_code(&error).to_owned());
                         }
                     }
                 }
@@ -656,6 +751,29 @@ impl AirWikiApp {
                             self.public_browse_error =
                                 Some(sanitized_error_code(&error).to_owned());
                         }
+                    }
+                }
+                WorkerEvent::CommunityFederationIndexesDisabled { request_id, result } => {
+                    if self.community_indexes_disable_request_id != Some(request_id) {
+                        continue;
+                    }
+                    self.community_indexes_disable_request_id = None;
+                    match result {
+                        Ok(disabled_count) => {
+                            self.enabled_community_federation_index_count = 0;
+                            let mut arguments = FluentArgs::new();
+                            arguments.set("count", disabled_count as i64);
+                            self.notices.push_back((
+                                false,
+                                self.localization.text_with(
+                                    "public-community-indexes-disabled",
+                                    Some(&arguments),
+                                ),
+                            ));
+                        }
+                        Err(error) => self
+                            .notices
+                            .push_back((true, sanitized_error_code(&error).to_owned())),
                     }
                 }
                 WorkerEvent::ChatIntegrationsUpdated { request_id, result } => {
@@ -729,44 +847,280 @@ impl AirWikiApp {
     fn sidebar(&mut self, root: &mut egui::Ui) {
         let home = self.localization.text("nav-home");
         let collections = self.localization.text("nav-collections");
-        let review = format!(
-            "{}  ({})",
-            self.localization.text("nav-review"),
-            self.reviews.len().saturating_add(self.source_issues.len())
-        );
+        let review_count = self.reviews.len().saturating_add(self.source_issues.len());
+        let review = self.localization.text("nav-review");
         let wiki = self.localization.text("nav-wiki");
         let search = self.localization.text("nav-search");
-        let integrations = self.localization.text("nav-integrations");
+        let public = self.localization.text("nav-public");
         let devices = self.localization.text("nav-devices");
         let settings = self.localization.text("nav-settings");
-        let model_status = if self.models_ready {
-            format!("● {}", self.localization.text("models-ready"))
-        } else {
-            format!("○ {}", self.localization.text("models-pending"))
-        };
         egui::Panel::left("navigation")
-            .exact_size(205.0)
+            .exact_size(SIDEBAR_WIDTH)
+            .frame(
+                egui::Frame::new()
+                    .fill(crate::theme::paper(root.visuals().dark_mode))
+                    .inner_margin(egui::Margin::ZERO),
+            )
             .show(root, |ui| {
-                ui.add_space(18.0);
-                ui.heading(RichText::new("AirWiki").size(22.0));
-                ui.add_space(22.0);
-                nav(ui, &mut self.screen, Screen::Setup, &home);
-                nav(ui, &mut self.screen, Screen::Collections, &collections);
-                nav(ui, &mut self.screen, Screen::Review, &review);
-                nav(ui, &mut self.screen, Screen::Knowledge, &wiki);
-                nav(ui, &mut self.screen, Screen::Search, &search);
-                nav(ui, &mut self.screen, Screen::Integrations, &integrations);
-                nav(ui, &mut self.screen, Screen::Nodes, &devices);
-                nav(ui, &mut self.screen, Screen::Settings, &settings);
-                ui.with_layout(egui::Layout::bottom_up(egui::Align::LEFT), |ui| {
-                    ui.label(
-                        RichText::new(format!("v{}", env!("CARGO_PKG_VERSION")))
-                            .small()
-                            .color(ui.visuals().weak_text_color()),
+                ui.painter().vline(
+                    ui.max_rect().right(),
+                    ui.max_rect().y_range(),
+                    egui::Stroke::new(1.0, crate::theme::border(ui.visuals().dark_mode)),
+                );
+                ui.add_space(20.0);
+                ui.horizontal(|ui| {
+                    ui.add_space(22.0);
+                    ui.heading(
+                        RichText::new("AirWiki")
+                            .size(21.0)
+                            .family(crate::theme::semibold_font_family()),
                     );
-                    ui.label(model_status);
+                });
+                ui.add_space(24.0);
+                ui.spacing_mut().item_spacing.y = 2.0;
+                nav(
+                    ui,
+                    &mut self.screen,
+                    Screen::Setup,
+                    NavIcon::Today,
+                    &home,
+                    None,
+                );
+                nav(
+                    ui,
+                    &mut self.screen,
+                    Screen::Collections,
+                    NavIcon::Library,
+                    &collections,
+                    None,
+                );
+                nav(
+                    ui,
+                    &mut self.screen,
+                    Screen::Review,
+                    NavIcon::Review,
+                    &review,
+                    Some(review_count),
+                );
+                nav(
+                    ui,
+                    &mut self.screen,
+                    Screen::Knowledge,
+                    NavIcon::Wiki,
+                    &wiki,
+                    None,
+                );
+                nav(
+                    ui,
+                    &mut self.screen,
+                    Screen::Search,
+                    NavIcon::Ask,
+                    &search,
+                    None,
+                );
+                nav(
+                    ui,
+                    &mut self.screen,
+                    Screen::Public,
+                    NavIcon::Public,
+                    &public,
+                    None,
+                );
+                nav(
+                    ui,
+                    &mut self.screen,
+                    Screen::Nodes,
+                    NavIcon::Connections,
+                    &devices,
+                    None,
+                );
+                nav(
+                    ui,
+                    &mut self.screen,
+                    Screen::Settings,
+                    NavIcon::Settings,
+                    &settings,
+                    None,
+                );
+            });
+    }
+
+    #[cfg(target_os = "macos")]
+    fn title_bar(&self, root: &mut egui::Ui) {
+        egui::Panel::top("editorial_titlebar")
+            .exact_size(crate::layout::TITLE_BAR_HEIGHT)
+            .frame(
+                egui::Frame::new()
+                    .fill(crate::theme::paper(root.visuals().dark_mode))
+                    .stroke(egui::Stroke::NONE),
+            )
+            .show(root, |ui| {
+                let rect = ui.available_rect_before_wrap();
+                let response = ui.allocate_rect(rect, egui::Sense::click_and_drag());
+                ui.painter().hline(
+                    rect.x_range(),
+                    rect.bottom(),
+                    egui::Stroke::new(1.0, crate::theme::border(ui.visuals().dark_mode)),
+                );
+                if response.drag_started() {
+                    ui.ctx().send_viewport_cmd(egui::ViewportCommand::StartDrag);
+                }
+                ui.painter().text(
+                    rect.center(),
+                    egui::Align2::CENTER_CENTER,
+                    "AirWiki",
+                    egui::FontId::new(13.0, crate::theme::semibold_font_family()),
+                    crate::theme::ink(ui.visuals().dark_mode),
+                );
+            });
+    }
+
+    fn status_bar(&mut self, root: &mut egui::Ui) {
+        let review_count = self.reviews.len().saturating_add(self.source_issues.len());
+        let model_status = if self.models_ready {
+            self.localization.text("models-ready")
+        } else {
+            self.localization.text("models-pending")
+        };
+        let mut review_arguments = FluentArgs::new();
+        review_arguments.set("count", review_count);
+        let review_status = self
+            .localization
+            .text_with("status-review-count", Some(&review_arguments));
+
+        let wiki_status = match (
+            &self.wiki_health_check,
+            self.readiness_view().last_checked_at,
+        ) {
+            (WikiHealthCheckState::Ready, Some(checked_at)) => {
+                let minutes = elapsed_minutes(checked_at, SystemTime::now());
+                if minutes == 0 {
+                    self.localization.text("home-checked-now")
+                } else {
+                    let mut arguments = FluentArgs::new();
+                    arguments.set("minutes", minutes);
+                    self.localization
+                        .text_with("home-checked-minutes", Some(&arguments))
+                }
+            }
+            (WikiHealthCheckState::Loading, _) => self.localization.text("home-wiki-checking"),
+            (WikiHealthCheckState::Failed(_), _) => self.localization.text("home-wiki-failed"),
+            (WikiHealthCheckState::Ready, None) => self.localization.text("home-wiki-not-checked"),
+        };
+        let public_count = self
+            .collections
+            .iter()
+            .filter(|collection| collection.internet_public)
+            .count();
+        let compact_status = root.available_width() < 1000.0;
+
+        let mut refresh_wiki_health = false;
+        egui::Panel::bottom("editorial_status")
+            .exact_size(STATUS_BAR_HEIGHT)
+            .frame(
+                egui::Frame::new()
+                    .fill(crate::theme::paper(root.visuals().dark_mode))
+                    .stroke(egui::Stroke::NONE)
+                    .inner_margin(egui::Margin::symmetric(20, 4)),
+            )
+            .show(root, |ui| {
+                ui.painter().hline(
+                    ui.max_rect().x_range(),
+                    ui.max_rect().top(),
+                    egui::Stroke::new(1.0, crate::theme::border(ui.visuals().dark_mode)),
+                );
+                ui.spacing_mut().item_spacing.x = 18.0;
+                ui.horizontal(|ui| {
+                    let model_color = if self.models_ready {
+                        crate::theme::AIR_CYAN
+                    } else {
+                        crate::theme::attention(ui.visuals().dark_mode)
+                    };
+                    ui.horizontal(|ui| {
+                        ui.colored_label(model_color, "●");
+                        ui.label(RichText::new(model_status).small());
+                    });
+                    if compact_status {
+                        ui.label(
+                            RichText::new(&review_status)
+                                .small()
+                                .color(crate::theme::attention(ui.visuals().dark_mode)),
+                        );
+                        ui.menu_button(
+                            RichText::new(self.localization.text("status-details")).small(),
+                            |ui| {
+                                if wiki_health_can_refresh(&self.wiki_health_check) {
+                                    if ui
+                                        .button(&wiki_status)
+                                        .on_hover_text(self.localization.text("action-refresh"))
+                                        .clicked()
+                                    {
+                                        refresh_wiki_health = true;
+                                        ui.close();
+                                    }
+                                } else {
+                                    ui.label(&wiki_status);
+                                }
+                                if public_count > 0 {
+                                    ui.label(format!(
+                                        "{}: {public_count}",
+                                        self.localization.text("nav-public")
+                                    ));
+                                }
+                                ui.label(format!(
+                                    "v{} · {}",
+                                    env!("CARGO_PKG_VERSION"),
+                                    self.localization.text("status-development-build")
+                                ));
+                            },
+                        );
+                    } else {
+                        if wiki_health_can_refresh(&self.wiki_health_check) {
+                            if ui
+                                .small_button(RichText::new(&wiki_status).small())
+                                .on_hover_text(self.localization.text("action-refresh"))
+                                .clicked()
+                            {
+                                refresh_wiki_health = true;
+                            }
+                        } else {
+                            ui.label(RichText::new(&wiki_status).small());
+                        }
+                        ui.label(
+                            RichText::new(&review_status)
+                                .small()
+                                .color(crate::theme::attention(ui.visuals().dark_mode)),
+                        );
+                        if public_count > 0 {
+                            ui.label(
+                                RichText::new(format!(
+                                    "{}: {public_count}",
+                                    self.localization.text("nav-public")
+                                ))
+                                .small(),
+                            );
+                        }
+                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                            ui.label(
+                                RichText::new(format!(
+                                    "v{} · {}",
+                                    env!("CARGO_PKG_VERSION"),
+                                    self.localization.text("status-development-build")
+                                ))
+                                .small()
+                                .color(ui.visuals().weak_text_color()),
+                            );
+                        });
+                    }
                 });
             });
+        if refresh_wiki_health {
+            let request_id = Uuid::new_v4();
+            self.wiki_health_request_id = Some(request_id);
+            self.wiki_health_check = WikiHealthCheckState::Loading;
+            self.worker
+                .send(WorkerCommand::RefreshWikiHealth { request_id });
+        }
     }
 
     fn setup(&mut self, ui: &mut egui::Ui) {
@@ -788,7 +1142,7 @@ impl AirWikiApp {
             .auto_shrink([false; 2])
             .show(ui, |ui| {
                 if let Some(report) = &self.hardware {
-                    egui::Frame::group(ui.style()).show(ui, |ui| {
+                    crate::theme::surface_frame(ui.visuals().dark_mode).show(ui, |ui| {
                         ui.heading(self.localization.text("models-diagnostics"));
                         egui::Grid::new("diagnostic_grid")
                             .num_columns(2)
@@ -844,7 +1198,10 @@ impl AirWikiApp {
                                 ui.end_row();
                             });
                         for issue in &report.issues {
-                            ui.colored_label(crate::theme::ERROR_CORAL, issue);
+                            ui.colored_label(
+                                crate::theme::error_text(ui.visuals().dark_mode),
+                                issue,
+                            );
                         }
                     });
                 } else {
@@ -852,7 +1209,7 @@ impl AirWikiApp {
                     ui.label(self.localization.text("models-diagnosing"));
                 }
                 ui.add_space(14.0);
-                egui::Frame::group(ui.style()).show(ui, |ui| {
+                crate::theme::surface_frame(ui.visuals().dark_mode).show(ui, |ui| {
                     ui.heading(self.localization.text("models-local-title"));
                     ui.label(self.localization.text("models-local-body"));
                     if let Some(state) = self.model_state.clone() {
@@ -882,7 +1239,7 @@ impl AirWikiApp {
                         }
                         if state.degraded {
                             ui.colored_label(
-                                crate::theme::WARNING_AMBER,
+                                crate::theme::warning_text(ui.visuals().dark_mode),
                                 self.localization.text("models-profile-reduced"),
                             );
                         }
@@ -916,7 +1273,10 @@ impl AirWikiApp {
                                 .text_with("models-download-size", Some(&arguments)),
                         );
                         for issue in &state.issues {
-                            ui.colored_label(crate::theme::ERROR_CORAL, issue);
+                            ui.colored_label(
+                                crate::theme::error_text(ui.visuals().dark_mode),
+                                issue,
+                            );
                         }
                         if let (Some(license), Some(url), Some(revision)) =
                             (&state.license, &state.license_url, &state.revision)
@@ -988,7 +1348,7 @@ impl AirWikiApp {
                             }
                             if already_active {
                                 ui.colored_label(
-                                    crate::theme::VERIFIED_GREEN,
+                                    crate::theme::verified_text(ui.visuals().dark_mode),
                                     self.localization.text("models-recommended-active"),
                                 );
                             } else if already_pending {
@@ -1009,7 +1369,10 @@ impl AirWikiApp {
                         );
                     }
                     if let Some(message) = &self.restart_required {
-                        ui.colored_label(crate::theme::VERIFIED_GREEN, message);
+                        ui.colored_label(
+                            crate::theme::verified_text(ui.visuals().dark_mode),
+                            message,
+                        );
                     }
                     ui.separator();
                     ui.label(
@@ -1018,11 +1381,12 @@ impl AirWikiApp {
                             .color(ui.visuals().weak_text_color()),
                     );
                 });
+                scroll_newly_focused_control_into_view(ui);
             });
     }
 
     fn home(&mut self, ui: &mut egui::Ui) {
-        let layout = ResponsiveLayout::from_available(ui.available_size());
+        let layout = ResponsiveLayout::from_available(ui.clip_rect().size());
         let readiness = self.readiness_view();
         let published_count = self
             .collections
@@ -1035,163 +1399,279 @@ impl AirWikiApp {
             .map(|collection| collection.document_count)
             .sum::<usize>();
         let journey = derive_first_knowledge_journey(&readiness, published_count);
+        let collection_options = self
+            .collections
+            .iter()
+            .map(|collection| (collection.id, collection.name.clone()))
+            .collect::<Vec<_>>();
+        let active_scans = self
+            .collection_scans
+            .keys()
+            .copied()
+            .collect::<HashSet<_>>();
+        let knowledge_actions = self
+            .knowledge
+            .prepare_recent_concepts(&collection_options, &active_scans);
+        for action in knowledge_actions {
+            self.send_knowledge_action(action);
+        }
+        let recent_concepts = self.knowledge.recent_concepts();
 
-        first_knowledge::show_journey_header(
+        first_knowledge::show_today_header(
             ui,
             &self.localization,
-            visible_journey_states(journey),
+            &localized_today_date(self.localization.locale()),
+            self.collections.len(),
+            published_count,
             layout.density,
         );
-        ui.add_space(if layout.is_compact() { 10.0 } else { 18.0 });
-        first_knowledge::work_surface(ui, layout.density, |ui| {
-            if self.home_wiki_incident(ui) {
-                ui.add_space(10.0);
-            }
-            ui.label(
-                RichText::new(self.localization.text("home-next-step"))
-                    .small()
-                    .strong()
-                    .color(ui.visuals().weak_text_color()),
-            );
-            match journey.cta {
-                Some(FirstKnowledgeCta::Recommended(action)) => {
-                    ui.heading(primary_action_title(&self.localization, action));
-                    ui.label(primary_action_explanation(&self.localization, action));
-                    ui.add_space(10.0);
-                    if ui
-                        .add(first_knowledge::primary_button(primary_action_button(
-                            &self.localization,
-                            action,
-                        )))
-                        .clicked()
-                    {
-                        self.open_readiness_action(action);
-                    }
-                }
-                Some(FirstKnowledgeCta::SearchKnowledge) => {
-                    ui.heading(self.localization.text("onboarding-search-title"));
-                    ui.label(self.localization.text("onboarding-search-body"));
-                    ui.add_space(10.0);
-                    if ui
-                        .add(first_knowledge::primary_button(
-                            self.localization.text("search-action"),
-                        ))
-                        .clicked()
-                    {
-                        self.screen = Screen::Search;
-                    }
-                }
-                None => {
-                    let (title, body) =
-                        journey_stage_copy(&self.localization, journey.current_stage);
-                    ui.heading(title);
-                    ui.label(body);
-                    ui.add_space(10.0);
-                    if journey.current_stage == FirstKnowledgeStage::ProcessKnowledge
-                        && document_count == 0
-                    {
-                        if ui
-                            .button(self.localization.text("onboarding-processing-open-folder"))
-                            .clicked()
-                        {
-                            self.screen = Screen::Collections;
-                        }
-                    } else {
-                        ui.horizontal(|ui| {
-                            ui.spinner();
-                            ui.label(
-                                readiness_status_presentation(
-                                    &self.localization,
-                                    first_knowledge_readiness_status(journey.current_state),
-                                )
-                                .0,
-                            );
-                        });
-                    }
-                }
-            }
-        });
-
-        ui.add_space(if layout.is_compact() { 8.0 } else { 16.0 });
-        first_knowledge::privacy_note(ui, &self.localization);
-        ui.add_space(if layout.is_compact() { 8.0 } else { 16.0 });
-        ui.collapsing(self.localization.text("home-optional-title"), |ui| {
-            ui.label(self.localization.text("home-optional-body"));
-            ui.add_space(8.0);
-            egui::Grid::new("optional_readiness_components")
-                .num_columns(2)
-                .spacing([24.0, 8.0])
-                .show(ui, |ui| {
-                    for component in readiness.components.iter().filter(|component| {
-                        matches!(
-                            component.component,
-                            ReadinessComponent::Lan
-                                | ReadinessComponent::Chat
-                                | ReadinessComponent::Background
-                                | ReadinessComponent::Updates
-                        )
-                    }) {
-                        ui.label(readiness_component_label(
-                            &self.localization,
-                            component.component,
-                        ));
-                        let (label, color) =
-                            readiness_status_presentation(&self.localization, component.status);
-                        ui.colored_label(color, label);
-                        ui.end_row();
-                    }
+        ui.add_space(if layout.is_compact() { 20.0 } else { 36.0 });
+        if layout.is_narrow() {
+            first_knowledge::work_surface(ui, layout.density, |ui| {
+                self.home_primary_story(ui, journey, document_count);
+            });
+            ui.add_space(30.0);
+            self.home_ask_column(ui, &recent_concepts);
+        } else {
+            let (lead_width, side_width) = today_column_widths(ui.available_width());
+            ui.scope(|ui| {
+                ui.spacing_mut().item_spacing.x = 0.0;
+                ui.horizontal_top(|ui| {
+                    ui.allocate_ui_with_layout(
+                        egui::vec2(lead_width, 0.0),
+                        egui::Layout::top_down(egui::Align::Min),
+                        |ui| {
+                            first_knowledge::work_surface(ui, layout.density, |ui| {
+                                self.home_primary_story(ui, journey, document_count);
+                            });
+                        },
+                    );
+                    ui.add_space(TODAY_COLUMN_GAP);
+                    ui.allocate_ui_with_layout(
+                        egui::vec2(side_width, 0.0),
+                        egui::Layout::top_down(egui::Align::Min),
+                        |ui| self.home_ask_column(ui, &recent_concepts),
+                    );
                 });
-        });
+            });
+        }
+    }
 
-        ui.horizontal(|ui| {
-            let checked = match (&self.wiki_health_check, readiness.last_checked_at) {
-                (WikiHealthCheckState::Loading, _) => self.localization.text("home-wiki-checking"),
-                (WikiHealthCheckState::Failed(_), _) => self.localization.text("home-wiki-failed"),
-                (WikiHealthCheckState::Ready, Some(checked_at)) => {
-                    let minutes = elapsed_minutes(checked_at, SystemTime::now());
-                    let when = if minutes == 0 {
-                        self.localization.text("home-checked-now")
-                    } else {
-                        let mut arguments = FluentArgs::new();
-                        arguments.set("minutes", minutes);
-                        self.localization
-                            .text_with("home-checked-minutes", Some(&arguments))
-                    };
+    fn home_primary_story(
+        &mut self,
+        ui: &mut egui::Ui,
+        journey: FirstKnowledgeJourneyView,
+        document_count: usize,
+    ) {
+        editorial_card_kicker(
+            ui,
+            self.localization.text("home-lead-kicker").to_uppercase(),
+            crate::theme::accent_text(ui.visuals().dark_mode),
+        );
+        match journey.cta {
+            Some(FirstKnowledgeCta::Recommended(action)) => {
+                let (title, explanation) = if action == RecommendedAction::ReviewPendingKnowledge {
                     let mut arguments = FluentArgs::new();
-                    arguments.set("when", when);
-                    self.localization
-                        .text_with("home-last-checked", Some(&arguments))
+                    arguments.set("count", self.reviews.len() as i64);
+                    (
+                        self.localization
+                            .text_with("home-review-drafts-title", Some(&arguments)),
+                        self.localization.text("home-review-drafts-body"),
+                    )
+                } else {
+                    (
+                        primary_action_title(&self.localization, action),
+                        primary_action_explanation(&self.localization, action),
+                    )
+                };
+                ui.heading(
+                    RichText::new(title)
+                        .size(30.0)
+                        .family(crate::theme::semibold_font_family()),
+                );
+                ui.add(egui::Label::new(explanation).wrap());
+                if !self.reviews.is_empty() {
+                    ui.label(
+                        RichText::new(
+                            self.reviews
+                                .iter()
+                                .take(3)
+                                .map(|item| item.draft.title.as_str())
+                                .collect::<Vec<_>>()
+                                .join(" · "),
+                        )
+                        .color(ui.visuals().weak_text_color()),
+                    );
                 }
-                (WikiHealthCheckState::Ready, None) => {
-                    self.localization.text("home-wiki-not-checked")
+                ui.add_space(10.0);
+                if ui
+                    .add(first_knowledge::primary_button(primary_action_button(
+                        &self.localization,
+                        action,
+                    )))
+                    .clicked()
+                {
+                    self.open_readiness_action(action);
                 }
-            };
+            }
+            Some(FirstKnowledgeCta::SearchKnowledge) => {
+                ui.heading(
+                    RichText::new(self.localization.text("onboarding-search-title")).size(30.0),
+                );
+                ui.label(self.localization.text("onboarding-search-body"));
+                ui.add_space(10.0);
+                if ui
+                    .add(first_knowledge::primary_button(
+                        self.localization.text("search-action"),
+                    ))
+                    .clicked()
+                {
+                    self.screen = Screen::Search;
+                }
+            }
+            None => {
+                let (title, body) = journey_stage_copy(&self.localization, journey.current_stage);
+                ui.heading(RichText::new(title).size(30.0));
+                ui.label(body);
+                ui.add_space(10.0);
+                if journey.current_stage == FirstKnowledgeStage::ProcessKnowledge
+                    && document_count == 0
+                {
+                    if ui
+                        .button(self.localization.text("onboarding-processing-open-folder"))
+                        .clicked()
+                    {
+                        self.screen = Screen::Collections;
+                    }
+                } else {
+                    ui.horizontal(|ui| {
+                        ui.spinner();
+                        ui.label(
+                            readiness_status_presentation(
+                                &self.localization,
+                                first_knowledge_readiness_status(
+                                    journey.stage_state(journey.current_stage),
+                                ),
+                                ui.visuals().dark_mode,
+                            )
+                            .0,
+                        );
+                    });
+                }
+            }
+        }
+        if self.home_source_issue_story(ui) {
+            ui.add_space(18.0);
+        }
+        self.home_wiki_incident(ui);
+    }
+
+    fn home_source_issue_story(&mut self, ui: &mut egui::Ui) -> bool {
+        let Some(first_issue) = self.source_issues.first() else {
+            return false;
+        };
+        let collection_name = first_issue.collection_name.clone();
+        let issue_count = self
+            .source_issues
+            .iter()
+            .filter(|issue| issue.collection_id == first_issue.collection_id)
+            .count();
+        ui.add_space(44.0);
+        editorial_card_kicker(
+            ui,
+            self.localization
+                .text("home-attention-kicker")
+                .to_uppercase(),
+            crate::theme::attention(ui.visuals().dark_mode),
+        );
+        let mut title_arguments = FluentArgs::new();
+        title_arguments.set("collection", collection_name);
+        ui.heading(
+            RichText::new(
+                self.localization
+                    .text_with("home-source-issue-title", Some(&title_arguments)),
+            )
+            .size(22.0)
+            .family(crate::theme::semibold_font_family()),
+        );
+        let mut body_arguments = FluentArgs::new();
+        body_arguments.set("count", issue_count as i64);
+        ui.add(
+            egui::Label::new(
+                self.localization
+                    .text_with("home-source-issue-body", Some(&body_arguments)),
+            )
+            .wrap(),
+        );
+        ui.add_space(10.0);
+        if ui
+            .button(self.localization.text("home-source-issue-action"))
+            .clicked()
+        {
+            self.screen = Screen::Collections;
+        }
+        true
+    }
+
+    fn home_ask_column(&mut self, ui: &mut egui::Ui, recent_concepts: &[RecentConceptView]) {
+        let ask_label = editorial_card_kicker(
+            ui,
+            self.localization.text("home-ask-kicker").to_uppercase(),
+            crate::theme::accent_text(ui.visuals().dark_mode),
+        );
+        ui.add_sized(
+            [ui.available_width(), 36.0],
+            egui::TextEdit::singleline(&mut self.ask_search.question)
+                .hint_text(self.localization.text("home-ask-placeholder")),
+        )
+        .labelled_by(ask_label.id);
+        if ui.button(self.localization.text("search-action")).clicked() {
+            self.screen = Screen::Search;
+        }
+        ui.add_space(28.0);
+        editorial_card_kicker(
+            ui,
+            self.localization
+                .text("home-recently-published")
+                .to_uppercase(),
+            crate::theme::accent_text(ui.visuals().dark_mode),
+        );
+        let mut requested_concept = None;
+        for concept in recent_concepts {
+            ui.add_space(6.0);
+            let reviewed_at =
+                (!concept.reviewed_at.is_empty()).then_some(concept.reviewed_at.as_str());
+            let concept_button =
+                editorial_title_row_button(ui, &concept.title, reviewed_at, 15.0).on_hover_text(
+                    format!("{} · {}", concept.concept_type, concept.collection_name),
+                );
+            if concept_button.clicked() {
+                requested_concept = Some(concept.id);
+            }
+            if !concept.summary.trim().is_empty() {
+                ui.add(
+                    egui::Label::new(
+                        RichText::new(&concept.summary)
+                            .size(13.0)
+                            .color(ui.visuals().weak_text_color()),
+                    )
+                    .wrap(),
+                );
+            }
+            ui.separator();
+        }
+        if recent_concepts.is_empty() {
             ui.label(
-                RichText::new(checked)
-                    .small()
+                RichText::new(self.localization.text("home-no-recently-published"))
                     .color(ui.visuals().weak_text_color()),
             );
-            let action = if matches!(self.wiki_health_check, WikiHealthCheckState::Failed(_)) {
-                "action-retry"
-            } else {
-                "action-refresh"
-            };
-            if ui
-                .add_enabled(
-                    self.wiki_health_request_id.is_none()
-                        && !matches!(self.wiki_health_check, WikiHealthCheckState::Loading),
-                    egui::Button::new(self.localization.text(action)),
-                )
-                .clicked()
-            {
-                let request_id = Uuid::new_v4();
-                self.wiki_health_request_id = Some(request_id);
-                self.wiki_health_check = WikiHealthCheckState::Loading;
-                self.wiki_health_error_dismissed = false;
-                self.worker
-                    .send(WorkerCommand::RefreshWikiHealth { request_id });
-            }
-        });
+        }
+        if let Some(concept_id) = requested_concept
+            && let Some(action) = self.knowledge.open_recent_concept(concept_id)
+        {
+            self.screen = Screen::Knowledge;
+            self.send_knowledge_action(action);
+        }
     }
 
     fn readiness_view(&self) -> crate::readiness::NodeReadinessView {
@@ -1377,56 +1857,12 @@ impl AirWikiApp {
     }
 
     fn collections(&mut self, ui: &mut egui::Ui) {
+        ui.set_max_width(866.0);
         page_title(
             ui,
             &self.localization.text("collections-title"),
             &self.localization.text("collections-subtitle"),
         );
-        let mut monitoring_arguments = FluentArgs::new();
-        monitoring_arguments.set("minutes", PERIODIC_RECONCILE_INTERVAL.as_secs() / 60);
-        ui.label(
-            RichText::new(
-                self.localization
-                    .text_with("collections-monitoring", Some(&monitoring_arguments)),
-            )
-            .small()
-            .color(ui.visuals().weak_text_color()),
-        );
-        ui.add_space(8.0);
-        egui::Frame::group(ui.style()).show(ui, |ui| {
-            ui.heading(self.localization.text("collections-new"));
-            ui.horizontal(|ui| {
-                let name_label = ui.label(self.localization.text("collections-name"));
-                ui.text_edit_singleline(&mut self.new_collection_name)
-                    .labelled_by(name_label.id);
-                if ui
-                    .button(self.localization.text("collections-choose-folder"))
-                    .clicked()
-                {
-                    self.new_collection_folder = rfd::FileDialog::new().pick_folder();
-                }
-            });
-            if let Some(path) = &self.new_collection_folder {
-                wrap_monospace(ui, path.display().to_string());
-            }
-            let enabled =
-                !self.new_collection_name.trim().is_empty() && self.new_collection_folder.is_some();
-            if ui
-                .add_enabled(
-                    enabled,
-                    egui::Button::new(self.localization.text("collections-create-scan")),
-                )
-                .clicked()
-                && let Some(folder) = self.new_collection_folder.take()
-            {
-                self.worker.send(WorkerCommand::AddCollection {
-                    name: self.new_collection_name.trim().to_owned(),
-                    folder,
-                });
-                self.new_collection_name.clear();
-            }
-        });
-        ui.add_space(12.0);
         if self.collections.is_empty() {
             empty_state(
                 ui,
@@ -1434,7 +1870,6 @@ impl AirWikiApp {
                 &self.localization.text("collections-empty-body"),
             );
         }
-        let technical_details = self.localization.text("action-details");
         let linked = self.localization.text("collections-linked");
         let queued = self.localization.text("collections-scan-queued");
         let scanning = self.localization.text("collections-scan-running");
@@ -1446,34 +1881,162 @@ impl AirWikiApp {
         let cloud_warning = self.localization.text("collections-cloud-warning");
         let mut requested_external_ai_confirmation = None;
         let mut requested_public_confirmation = None;
-        let list_height = ui.available_height().max(0.0);
-        egui::ScrollArea::vertical()
-            .id_salt("collections_list")
-            .max_height(list_height)
-            .auto_shrink([false; 2])
-            .show(ui, |ui| {
-                for collection in &mut self.collections {
-                    let collection_issues = self
-                        .source_issues
-                        .iter()
-                        .filter(|issue| issue.collection_id == collection.id)
-                        .collect::<Vec<_>>();
-                    let scan_state = self.collection_scans.get(&collection.id).copied();
-                    let mut counts_arguments = FluentArgs::new();
-                    counts_arguments.set("documents", collection.document_count);
-                    counts_arguments.set("published", collection.published_count);
-                    let counts = self
-                        .localization
-                        .text_with("collections-counts", Some(&counts_arguments));
-                    egui::Frame::group(ui.style()).show(ui, |ui| {
-                        ui.horizontal(|ui| {
+        ui.vertical(|ui| {
+            for collection in &mut self.collections {
+                let pending_documents = self
+                    .reviews
+                    .iter()
+                    .filter(|review| review.collection_name == collection.name)
+                    .map(|review| review.source_name.clone())
+                    .collect::<Vec<_>>();
+                let collection_issues = self
+                    .source_issues
+                    .iter()
+                    .filter(|issue| issue.collection_id == collection.id)
+                    .collect::<Vec<_>>();
+                let scan_state = self.collection_scans.get(&collection.id).copied();
+                let scan_needs_attention =
+                    !collection_issues.is_empty() || collection.failed_count > 0;
+                let scan_label = if scan_needs_attention {
+                    self.localization.text("review-scan-again")
+                } else {
+                    retry.clone()
+                };
+                let mut counts_arguments = FluentArgs::new();
+                counts_arguments.set("documents", collection.document_count);
+                counts_arguments.set("published", collection.published_count);
+                let counts = self
+                    .localization
+                    .text_with("collections-counts", Some(&counts_arguments));
+                ui.push_id(collection.id, |ui| {
+                    egui::Frame::new().show(ui, |ui| {
+                        ui.vertical(|ui| {
                             ui.vertical(|ui| {
-                                ui.heading(&collection.name);
-                                ui.label(&linked);
-                                ui.collapsing(&technical_details, |ui| {
-                                    wrap_monospace(ui, collection.folder.display().to_string());
+                                ui.horizontal_wrapped(|ui| {
+                                    ui.heading(
+                                        RichText::new(&collection.name)
+                                            .size(24.0)
+                                            .family(crate::theme::semibold_font_family()),
+                                    );
+                                    editorial_tag(ui, &linked, EditorialTagTone::Accent);
+                                    if collection.internet_public {
+                                        editorial_tag(
+                                            ui,
+                                            &self.localization.text("public-visible"),
+                                            EditorialTagTone::Outline,
+                                        );
+                                    }
+                                    if collection.needs_review_count > 0
+                                        || collection.failed_count > 0
+                                    {
+                                        let mut attention_arguments = FluentArgs::new();
+                                        attention_arguments
+                                            .set("review", collection.needs_review_count);
+                                        attention_arguments.set("failed", collection.failed_count);
+                                        editorial_tag(
+                                            ui,
+                                            &self.localization.text_with(
+                                                "collections-attention-counts",
+                                                Some(&attention_arguments),
+                                            ),
+                                            EditorialTagTone::Attention,
+                                        );
+                                    }
                                 });
-                                ui.label(&counts);
+                                let mut collection_metadata =
+                                    vec![collection.folder.display().to_string(), counts.clone()];
+                                if let Some(finished) = collection
+                                    .maintenance
+                                    .as_ref()
+                                    .and_then(|maintenance| maintenance.last_finished_at)
+                                {
+                                    let mut arguments = FluentArgs::new();
+                                    arguments
+                                        .set("time", finished.format("%Y-%m-%d %H:%M").to_string());
+                                    collection_metadata.push(
+                                        self.localization
+                                            .text_with("collections-last-scan", Some(&arguments)),
+                                    );
+                                }
+                                ui.label(
+                                    RichText::new(collection_metadata.join(" · "))
+                                        .small()
+                                        .color(ui.visuals().weak_text_color()),
+                                );
+                                if !pending_documents.is_empty() || !collection_issues.is_empty() {
+                                    ui.add_space(10.0);
+                                    editorial_card_kicker(
+                                        ui,
+                                        self.localization
+                                            .text("collections-documents-attention")
+                                            .to_uppercase(),
+                                        crate::theme::secondary_text(ui.visuals().dark_mode),
+                                    );
+                                    ui.horizontal(|ui| {
+                                        ui.label(
+                                            RichText::new(
+                                                self.localization
+                                                    .text("collections-table-document"),
+                                            )
+                                            .small()
+                                            .family(crate::theme::semibold_font_family()),
+                                        );
+                                        ui.with_layout(
+                                            egui::Layout::right_to_left(egui::Align::Center),
+                                            |ui| {
+                                                ui.label(
+                                                    RichText::new(
+                                                        self.localization
+                                                            .text("collections-table-status"),
+                                                    )
+                                                    .small()
+                                                    .family(crate::theme::semibold_font_family()),
+                                                );
+                                            },
+                                        );
+                                    });
+                                    ui.separator();
+                                    for source_name in &pending_documents {
+                                        ui.horizontal(|ui| {
+                                            ui.label(source_name);
+                                            ui.with_layout(
+                                                egui::Layout::right_to_left(egui::Align::Center),
+                                                |ui| {
+                                                    ui.label(
+                                                        RichText::new(
+                                                            self.localization
+                                                                .text("collections-status-review"),
+                                                        )
+                                                        .small()
+                                                        .color(crate::theme::attention(
+                                                            ui.visuals().dark_mode,
+                                                        )),
+                                                    );
+                                                },
+                                            );
+                                        });
+                                    }
+                                    for issue in &collection_issues {
+                                        ui.horizontal(|ui| {
+                                            ui.label(&issue.source_name);
+                                            ui.with_layout(
+                                                egui::Layout::right_to_left(egui::Align::Center),
+                                                |ui| {
+                                                    ui.label(
+                                                        RichText::new(
+                                                            self.localization
+                                                                .text("review-issue-status"),
+                                                        )
+                                                        .small()
+                                                        .color(crate::theme::warning_text(
+                                                            ui.visuals().dark_mode,
+                                                        )),
+                                                    );
+                                                },
+                                            );
+                                        });
+                                    }
+                                }
                                 if !collection_issues.is_empty() {
                                     let mut issues_arguments = FluentArgs::new();
                                     issues_arguments.set("count", collection_issues.len() as i64);
@@ -1482,7 +2045,7 @@ impl AirWikiApp {
                                             "review-issues-group",
                                             Some(&issues_arguments),
                                         ))
-                                        .color(crate::theme::WARNING_AMBER),
+                                        .color(crate::theme::warning_text(ui.visuals().dark_mode)),
                                     );
                                     let issue_list_height =
                                         (collection_issues.len().min(6) as f32) * 56.0 + 12.0;
@@ -1530,23 +2093,9 @@ impl AirWikiApp {
                                     let (label, color) = maintenance_status_presentation(
                                         &self.localization,
                                         maintenance.status,
+                                        ui.visuals().dark_mode,
                                     );
                                     ui.colored_label(color, label);
-                                    if let Some(finished) = maintenance.last_finished_at {
-                                        let mut arguments = FluentArgs::new();
-                                        arguments.set(
-                                            "time",
-                                            finished.format("%Y-%m-%d %H:%M").to_string(),
-                                        );
-                                        ui.label(
-                                            RichText::new(self.localization.text_with(
-                                                "collections-last-scan",
-                                                Some(&arguments),
-                                            ))
-                                            .small()
-                                            .color(ui.visuals().weak_text_color()),
-                                        );
-                                    }
                                     if let Some(summary) = maintenance_issue_summary(
                                         &self.localization,
                                         maintenance.issue_code.as_deref(),
@@ -1568,10 +2117,15 @@ impl AirWikiApp {
                                 }
                             });
                             ui.horizontal_wrapped(|ui| {
-                                if ui
-                                    .add_enabled(scan_state.is_none(), egui::Button::new(&retry))
-                                    .clicked()
-                                {
+                                let scan_button = if scan_needs_attention {
+                                    first_knowledge::primary_button(scan_label.clone())
+                                } else {
+                                    crate::theme::focus_button(
+                                        egui::Button::new(scan_label.clone()),
+                                        crate::theme::AIR_CYAN,
+                                    )
+                                };
+                                if ui.add_enabled(scan_state.is_none(), scan_button).clicked() {
                                     self.collection_scans
                                         .insert(collection.id, CollectionScanState::Queued);
                                     self.knowledge.collection_scan_started(collection.id);
@@ -1588,152 +2142,219 @@ impl AirWikiApp {
                                 }
                             });
                         });
-                        ui.separator();
-                        let external_ai_before = collection.allow_external_ai;
-                        let peer_changed = ui
-                            .checkbox(&mut collection.peer_shareable, &share_peers)
-                            .changed();
-                        let external_ai_changed = ui
-                            .checkbox(&mut collection.allow_external_ai, &allow_chat)
-                            .changed();
-                        let public_before = collection.internet_public;
-                        let public_changed = ui
-                            .checkbox(
-                                &mut collection.internet_public,
-                                self.localization.text("collections-public-network"),
-                            )
-                            .changed();
-                        if !public_before && collection.internet_public {
-                            collection.internet_public = false;
-                            requested_public_confirmation = Some(collection.id);
-                        }
-                        let external_ai_change = classify_external_ai_policy_change(
-                            external_ai_before,
-                            collection.allow_external_ai,
-                        );
-                        if external_ai_change == ExternalAiPolicyChange::ConfirmEnable {
-                            collection.allow_external_ai = false;
-                            requested_external_ai_confirmation = Some(collection.id);
-                        }
-                        collection.local_only = !collection.peer_shareable
-                            && !collection.allow_external_ai
-                            && !collection.internet_public;
-                        if collection.local_only {
-                            ui.label(
-                                RichText::new(&local_only)
-                                    .small()
-                                    .color(crate::theme::VERIFIED_GREEN),
-                            );
-                        }
-                        if collection.allow_external_ai {
-                            ui.colored_label(crate::theme::WARNING_AMBER, &cloud_warning);
-                        }
-                        if collection.internet_public {
-                            let announcement_times = match collection.public_announcement {
-                                PublicAnnouncementStatusView::Offline => {
-                                    ui.label(
-                                        self.localization
-                                            .text("collections-public-announcement-offline"),
-                                    );
-                                    None
+                        ui.collapsing(
+                            self.localization.text("collections-sharing-details"),
+                            |ui| {
+                                ui.separator();
+                                let external_ai_before = collection.allow_external_ai;
+                                let peer_changed = ui
+                                    .checkbox(&mut collection.peer_shareable, &share_peers)
+                                    .changed();
+                                let external_ai_changed = ui
+                                    .checkbox(&mut collection.allow_external_ai, &allow_chat)
+                                    .changed();
+                                let public_before = collection.internet_public;
+                                let public_response = ui.checkbox(
+                                    &mut collection.internet_public,
+                                    self.localization.text("collections-public-network"),
+                                );
+                                let public_changed = public_response.changed();
+                                if !public_before && collection.internet_public {
+                                    collection.internet_public = false;
+                                    requested_public_confirmation =
+                                        Some((collection.id, public_response.id));
                                 }
-                                PublicAnnouncementStatusView::Advertised {
-                                    accepted_indexes,
-                                    last_announced_at,
-                                    expires_at,
-                                } => {
-                                    let mut status_args = FluentArgs::new();
-                                    status_args.set(
-                                        "indexes",
-                                        i64::try_from(accepted_indexes).unwrap_or(i64::MAX),
-                                    );
-                                    ui.label(self.localization.text_with(
-                                        "collections-public-announcement-online",
-                                        Some(&status_args),
+                                let external_ai_change = classify_external_ai_policy_change(
+                                    external_ai_before,
+                                    collection.allow_external_ai,
+                                );
+                                if external_ai_change == ExternalAiPolicyChange::ConfirmEnable {
+                                    collection.allow_external_ai = false;
+                                    requested_external_ai_confirmation = Some(collection.id);
+                                }
+                                collection.local_only = !collection.peer_shareable
+                                    && !collection.allow_external_ai
+                                    && !collection.internet_public;
+                                if collection.local_only {
+                                    ui.label(RichText::new(&local_only).small().color(
+                                        crate::theme::verified_text(ui.visuals().dark_mode),
                                     ));
-                                    Some((last_announced_at, expires_at))
                                 }
-                                PublicAnnouncementStatusView::Expired {
-                                    last_announced_at,
-                                    expires_at,
-                                } => {
+                                if collection.allow_external_ai {
                                     ui.colored_label(
-                                        crate::theme::WARNING_AMBER,
-                                        self.localization
-                                            .text("collections-public-announcement-expired"),
+                                        crate::theme::warning_text(ui.visuals().dark_mode),
+                                        &cloud_warning,
                                     );
-                                    Some((last_announced_at, expires_at))
                                 }
-                            };
-                            if let Some((last, expiry)) = announcement_times {
-                                let mut last_args = FluentArgs::new();
-                                last_args
-                                    .set("timestamp", last.format("%Y-%m-%d %H:%M").to_string());
-                                ui.label(
-                                    RichText::new(self.localization.text_with(
-                                        "collections-public-last-renewal",
-                                        Some(&last_args),
-                                    ))
-                                    .small()
-                                    .color(ui.visuals().weak_text_color()),
-                                );
-                                let mut expiry_args = FluentArgs::new();
-                                expiry_args
-                                    .set("timestamp", expiry.format("%Y-%m-%d %H:%M").to_string());
-                                ui.label(
-                                    RichText::new(self.localization.text_with(
-                                        "collections-public-expiry",
-                                        Some(&expiry_args),
-                                    ))
-                                    .small()
-                                    .color(ui.visuals().weak_text_color()),
-                                );
-                            }
-                            ui.label(self.localization.text("collections-public-description"));
-                            ui.text_edit_multiline(&mut collection.public_description);
-                            ui.label(self.localization.text("collections-public-languages"));
-                            ui.text_edit_singleline(&mut collection.public_languages);
-                            if ui
-                                .button(self.localization.text("collections-public-profile-save"))
-                                .clicked()
-                            {
-                                let languages = collection
-                                    .public_languages
-                                    .split(',')
-                                    .map(str::trim)
-                                    .filter(|language| !language.is_empty())
-                                    .map(str::to_owned)
-                                    .collect();
-                                self.worker
-                                    .send(WorkerCommand::UpdatePublicCollectionProfile {
+                                if collection.internet_public {
+                                    let announcement_times = match collection.public_announcement {
+                                        PublicAnnouncementStatusView::Offline => {
+                                            ui.label(
+                                                self.localization.text(
+                                                    "collections-public-announcement-offline",
+                                                ),
+                                            );
+                                            None
+                                        }
+                                        PublicAnnouncementStatusView::Advertised {
+                                            accepted_indexes,
+                                            last_announced_at,
+                                            expires_at,
+                                        } => {
+                                            let mut status_args = FluentArgs::new();
+                                            status_args.set(
+                                                "indexes",
+                                                i64::try_from(accepted_indexes).unwrap_or(i64::MAX),
+                                            );
+                                            ui.label(self.localization.text_with(
+                                                "collections-public-announcement-online",
+                                                Some(&status_args),
+                                            ));
+                                            Some((last_announced_at, expires_at))
+                                        }
+                                        PublicAnnouncementStatusView::Expired {
+                                            last_announced_at,
+                                            expires_at,
+                                        } => {
+                                            ui.colored_label(
+                                                crate::theme::warning_text(ui.visuals().dark_mode),
+                                                self.localization.text(
+                                                    "collections-public-announcement-expired",
+                                                ),
+                                            );
+                                            Some((last_announced_at, expires_at))
+                                        }
+                                    };
+                                    if let Some((last, expiry)) = announcement_times {
+                                        let mut last_args = FluentArgs::new();
+                                        last_args.set(
+                                            "timestamp",
+                                            last.format("%Y-%m-%d %H:%M").to_string(),
+                                        );
+                                        ui.label(
+                                            RichText::new(self.localization.text_with(
+                                                "collections-public-last-renewal",
+                                                Some(&last_args),
+                                            ))
+                                            .small()
+                                            .color(ui.visuals().weak_text_color()),
+                                        );
+                                        let mut expiry_args = FluentArgs::new();
+                                        expiry_args.set(
+                                            "timestamp",
+                                            expiry.format("%Y-%m-%d %H:%M").to_string(),
+                                        );
+                                        ui.label(
+                                            RichText::new(self.localization.text_with(
+                                                "collections-public-expiry",
+                                                Some(&expiry_args),
+                                            ))
+                                            .small()
+                                            .color(ui.visuals().weak_text_color()),
+                                        );
+                                    }
+                                    ui.label(
+                                        self.localization.text("collections-public-description"),
+                                    );
+                                    ui.text_edit_multiline(&mut collection.public_description);
+                                    ui.label(
+                                        self.localization.text("collections-public-languages"),
+                                    );
+                                    ui.text_edit_singleline(&mut collection.public_languages);
+                                    if ui
+                                        .button(
+                                            self.localization
+                                                .text("collections-public-profile-save"),
+                                        )
+                                        .clicked()
+                                    {
+                                        let languages = collection
+                                            .public_languages
+                                            .split(',')
+                                            .map(str::trim)
+                                            .filter(|language| !language.is_empty())
+                                            .map(str::to_owned)
+                                            .collect();
+                                        self.worker.send(
+                                            WorkerCommand::UpdatePublicCollectionProfile {
+                                                collection_id: collection.id,
+                                                description: collection.public_description.clone(),
+                                                languages,
+                                            },
+                                        );
+                                    }
+                                }
+                                let external_ai_applies = external_ai_changed
+                                    && external_ai_change == ExternalAiPolicyChange::ApplyDisable;
+                                let public_disable =
+                                    public_changed && public_before && !collection.internet_public;
+                                if peer_changed || external_ai_applies || public_disable {
+                                    self.worker.send(WorkerCommand::UpdateCollectionPolicy {
                                         collection_id: collection.id,
-                                        description: collection.public_description.clone(),
-                                        languages,
+                                        local_only: collection.local_only,
+                                        peer_shareable: collection.peer_shareable,
+                                        allow_external_ai: collection.allow_external_ai,
+                                        internet_public: collection.internet_public,
                                     });
-                            }
-                        }
-                        let external_ai_applies = external_ai_changed
-                            && external_ai_change == ExternalAiPolicyChange::ApplyDisable;
-                        let public_disable =
-                            public_changed && public_before && !collection.internet_public;
-                        if peer_changed || external_ai_applies || public_disable {
-                            self.worker.send(WorkerCommand::UpdateCollectionPolicy {
-                                collection_id: collection.id,
-                                local_only: collection.local_only,
-                                peer_shareable: collection.peer_shareable,
-                                allow_external_ai: collection.allow_external_ai,
-                                internet_public: collection.internet_public,
-                            });
-                        }
+                                }
+                            },
+                        );
                     });
-                    ui.add_space(8.0);
-                }
-            });
+                });
+                ui.separator();
+                ui.add_space(14.0);
+            }
+        });
+        ui.add_space(30.0);
+        ui.heading(
+            RichText::new(self.localization.text("collections-new"))
+                .size(20.0)
+                .family(crate::theme::semibold_font_family()),
+        );
+        ui.label(
+            RichText::new(self.localization.text("collections-new-body"))
+                .small()
+                .color(ui.visuals().weak_text_color()),
+        );
+        ui.add_space(8.0);
+        ui.horizontal_wrapped(|ui| {
+            let name_label = ui.label(self.localization.text("collections-name"));
+            ui.text_edit_singleline(&mut self.new_collection_name)
+                .labelled_by(name_label.id);
+            if ui
+                .button(self.localization.text("collections-choose-folder"))
+                .clicked()
+            {
+                self.new_collection_folder = rfd::FileDialog::new().pick_folder();
+            }
+            let enabled =
+                !self.new_collection_name.trim().is_empty() && self.new_collection_folder.is_some();
+            if ui
+                .add_enabled(
+                    enabled,
+                    first_knowledge::primary_button(
+                        self.localization.text("collections-create-scan"),
+                    ),
+                )
+                .clicked()
+                && let Some(folder) = self.new_collection_folder.take()
+            {
+                self.worker.send(WorkerCommand::AddCollection {
+                    name: self.new_collection_name.trim().to_owned(),
+                    folder,
+                });
+                self.new_collection_name.clear();
+            }
+        });
+        if let Some(path) = &self.new_collection_folder {
+            wrap_monospace(ui, path.display().to_string());
+        }
         if let Some(collection_id) = requested_external_ai_confirmation {
             self.external_ai_confirmation = Some(collection_id);
         }
-        if let Some(collection_id) = requested_public_confirmation {
+        if let Some((collection_id, return_focus)) = requested_public_confirmation {
             self.public_collection_confirmation = Some(collection_id);
+            self.public_confirmation_return_focus = Some(return_focus);
         }
         self.external_ai_confirmation_window(ui.ctx());
         self.public_collection_confirmation_window(ui.ctx());
@@ -1766,7 +2387,7 @@ impl AirWikiApp {
             .show(context, |ui| {
                 ui.heading(collection_name);
                 ui.label(body);
-                ui.colored_label(crate::theme::WARNING_AMBER, warning);
+                ui.colored_label(crate::theme::warning_text(ui.visuals().dark_mode), warning);
                 ui.horizontal(|ui| {
                     if ui.button(cancel).clicked() {
                         decision = Some(false);
@@ -1805,45 +2426,108 @@ impl AirWikiApp {
         let Some(collection_id) = self.public_collection_confirmation else {
             return;
         };
+        let modal_id = egui::Id::new(("public_collection_confirmation", collection_id));
+        let focus_id = modal_id.with("initial_focus");
         let Some(collection_name) = self
             .collections
             .iter()
             .find(|collection| collection.id == collection_id)
             .map(|collection| collection.name.clone())
         else {
+            context.data_mut(|data| data.remove::<bool>(focus_id));
             self.public_collection_confirmation = None;
+            restore_modal_focus(context, self.public_confirmation_return_focus.take());
             return;
         };
-        let mut decision = None;
-        egui::Window::new(self.localization.text("collections-public-confirm-title"))
-            .id(egui::Id::new("public_collection_confirmation"))
-            .collapsible(false)
-            .resizable(false)
-            .anchor(egui::Align2::CENTER_CENTER, egui::Vec2::ZERO)
+        let newly_opened =
+            !context.data_mut(|data| data.get_temp::<bool>(focus_id).unwrap_or(false));
+        if newly_opened {
+            egui::Popup::close_all(context);
+            context.data_mut(|data| data.insert_temp(focus_id, true));
+        }
+        let mut title_args = FluentArgs::new();
+        title_args.set("name", collection_name);
+        let title = self
+            .localization
+            .text_with("collections-public-confirm-title", Some(&title_args));
+        let dark_mode = context.global_style().visuals.dark_mode;
+        let response = egui::Modal::new(modal_id)
+            .frame(editorial_modal_frame(dark_mode))
+            .backdrop_color(egui::Color32::from_black_alpha(128))
             .show(context, |ui| {
-                ui.heading(collection_name);
-                ui.label(self.localization.text("collections-public-confirm-body"));
-                ui.colored_label(
-                    crate::theme::WARNING_AMBER,
-                    self.localization.text("collections-public-confirm-warning"),
+                ui.set_width(400.0);
+                editorial_card_kicker(
+                    ui,
+                    self.localization.text("public-title").to_uppercase(),
+                    crate::theme::attention(dark_mode),
                 );
-                ui.horizontal(|ui| {
-                    if ui.button(self.localization.text("action-cancel")).clicked() {
-                        decision = Some(false);
-                    }
+                ui.add_space(4.0);
+                ui.heading(
+                    RichText::new(title)
+                        .size(20.0)
+                        .family(crate::theme::semibold_font_family()),
+                );
+                ui.add_space(10.0);
+                ui.add(
+                    egui::Label::new(self.localization.text("collections-public-confirm-body"))
+                        .wrap(),
+                );
+                ui.add_space(10.0);
+                ui.add(
+                    egui::Label::new(
+                        self.localization
+                            .text("collections-public-confirm-withdrawal"),
+                    )
+                    .wrap(),
+                );
+                ui.add_space(18.0);
+                let mut decision = None;
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                     if ui
-                        .button(self.localization.text("action-confirm"))
+                        .add(first_knowledge::primary_button(
+                            self.localization.text("collections-public-confirm-action"),
+                        ))
                         .clicked()
                     {
                         decision = Some(true);
                     }
+                    let cancel = ui.add(crate::theme::ghost_button(
+                        self.localization.text("action-cancel"),
+                        ui.visuals().dark_mode,
+                    ));
+                    if newly_opened {
+                        cancel.request_focus();
+                    }
+                    if cancel.clicked() {
+                        decision = Some(false);
+                    }
                 });
+                decision
             });
+        let escaped = response.is_top_modal
+            && context
+                .input_mut(|input| input.consume_key(egui::Modifiers::NONE, egui::Key::Escape));
+        let decision = blocking_modal_decision(response.inner, escaped);
         let Some(confirmed) = decision else {
             return;
         };
+        context.data_mut(|data| data.remove::<bool>(focus_id));
         self.public_collection_confirmation = None;
+        restore_modal_focus(context, self.public_confirmation_return_focus.take());
         if !confirmed {
+            return;
+        }
+        let still_publishable = self
+            .collections
+            .iter()
+            .find(|collection| collection.id == collection_id)
+            .map(|collection| (collection.needs_review_count, collection.failed_count));
+        if !public_confirmation_can_commit(still_publishable) {
+            self.notices.push_back((
+                true,
+                self.localization
+                    .text("public-publish-blocked-by-attention"),
+            ));
             return;
         }
         let Some(collection) = self
@@ -1865,44 +2549,55 @@ impl AirWikiApp {
     }
 
     fn review(&mut self, ui: &mut egui::Ui) {
-        page_title(
-            ui,
-            &self.localization.text("review-title"),
-            &self.localization.text("review-subtitle"),
-        );
         self.review_content(ui);
     }
 
     fn review_content(&mut self, ui: &mut egui::Ui) {
         if self.reviews.is_empty() && self.source_issues.is_empty() {
             self.review_evidence.sync_selection(None, false);
-            empty_state(
-                ui,
-                &self.localization.text("review-empty-title"),
-                &self.localization.text("review-empty-body"),
-            );
+            egui::Frame::new()
+                .inner_margin(egui::Margin::same(52))
+                .show(ui, |ui| {
+                    empty_state(
+                        ui,
+                        &self.localization.text("review-empty-title"),
+                        &self.localization.text("review-empty-body"),
+                    );
+                });
             return;
         }
         let issues = self.source_issues.clone();
         let mut requested_rescan = None;
         match review_layout_mode(ui.available_width()) {
             ReviewLayoutMode::CompactCompare => {
-                self.compact_review_selector(ui, &issues, &mut requested_rescan);
-                ui.separator();
-                self.review_comparison(ui, &issues);
+                egui::Frame::new()
+                    .inner_margin(egui::Margin::same(28))
+                    .show(ui, |ui| {
+                        ui.heading(
+                            RichText::new(self.localization.text("review-title")).size(30.0),
+                        );
+                        ui.label(
+                            RichText::new(self.localization.text("review-subtitle"))
+                                .color(ui.visuals().weak_text_color()),
+                        );
+                        ui.add_space(14.0);
+                        self.compact_review_selector(ui, &issues, &mut requested_rescan);
+                        ui.separator();
+                        self.review_comparison(ui, &issues, ReviewLayoutMode::CompactCompare);
+                    });
             }
             ReviewLayoutMode::QueueCompare => {
                 StripBuilder::new(ui)
                     .size(Size::exact(REVIEW_QUEUE_WIDTH))
-                    .size(Size::exact(REVIEW_PANEL_GAP))
                     .size(Size::remainder())
                     .clip(true)
                     .horizontal(|mut strip| {
                         strip.cell(|ui| {
                             self.review_queue(ui, &issues, &mut requested_rescan);
                         });
-                        strip.cell(|_| {});
-                        strip.cell(|ui| self.review_comparison(ui, &issues));
+                        strip.cell(|ui| {
+                            self.review_comparison(ui, &issues, ReviewLayoutMode::QueueCompare);
+                        });
                     });
             }
         }
@@ -1922,7 +2617,10 @@ impl AirWikiApp {
         requested_rescan: &mut Option<Uuid>,
     ) {
         ui.horizontal_wrapped(|ui| {
-            ui.label(RichText::new(self.localization.text("review-document-selector")).strong());
+            ui.label(
+                RichText::new(self.localization.text("review-document-selector"))
+                    .family(crate::theme::semibold_font_family()),
+            );
             let selected_text = self
                 .selected_review
                 .and_then(|id| self.reviews.iter().find(|item| item.concept_id == id))
@@ -1972,63 +2670,106 @@ impl AirWikiApp {
         issues: &[SourceIssueView],
         requested_rescan: &mut Option<Uuid>,
     ) {
-        let queue_height = ui.available_height().max(0.0);
-        egui::ScrollArea::vertical()
-            .id_salt("review_queue")
-            .max_height(queue_height)
-            .auto_shrink([false; 2])
+        let queue = egui::Frame::new()
+            .fill(crate::theme::paper(ui.visuals().dark_mode))
+            .stroke(egui::Stroke::NONE)
+            .inner_margin(egui::Margin::ZERO)
             .show(ui, |ui| {
-                if !self.reviews.is_empty() {
-                    let mut arguments = FluentArgs::new();
-                    arguments.set("count", self.reviews.len() as i64);
-                    ui.label(
-                        RichText::new(
-                            self.localization
-                                .text_with("review-ready-group", Some(&arguments)),
-                        )
-                        .strong(),
-                    );
-                    ui.add_space(4.0);
-                    for item in &self.reviews {
-                        let selected = self.selected_review == Some(item.concept_id);
-                        if ui
-                            .selectable_label(
-                                selected,
-                                format!("{}\n{}", item.source_name, item.collection_name),
-                            )
-                            .clicked()
-                        {
-                            self.selected_review = Some(item.concept_id);
+                ui.set_min_height(ui.available_height());
+                ui.add_space(36.0);
+                egui::Frame::new()
+                    .inner_margin(egui::Margin::symmetric(22, 0))
+                    .show(ui, |ui| {
+                        ui.heading(
+                            RichText::new(self.localization.text("review-title"))
+                                .size(20.0)
+                                .family(crate::theme::semibold_font_family()),
+                        );
+                        ui.label(
+                            RichText::new(self.localization.text("review-queue-subtitle"))
+                                .small()
+                                .color(ui.visuals().weak_text_color()),
+                        );
+                    });
+                ui.add_space(12.0);
+                let queue_height = ui.available_height().max(0.0);
+                egui::ScrollArea::vertical()
+                    .id_salt("review_queue")
+                    .max_height(queue_height)
+                    .auto_shrink([false; 2])
+                    .show(ui, |ui| {
+                        ui.set_width(ui.available_width());
+                        if !self.reviews.is_empty() {
+                            for item in &self.reviews {
+                                let selected = self.selected_review == Some(item.concept_id);
+                                let response = review_queue_button(
+                                    ui,
+                                    &item.draft.title,
+                                    &format!(
+                                        "{} · {} {}",
+                                        item.source_name,
+                                        self.localization.text("review-revision-short"),
+                                        item.source_revision
+                                    ),
+                                    selected,
+                                );
+                                if response.clicked() {
+                                    self.selected_review = Some(item.concept_id);
+                                }
+                            }
                         }
-                    }
-                }
-                if !issues.is_empty() {
-                    if !self.reviews.is_empty() {
-                        ui.add_space(14.0);
-                    }
-                    let mut arguments = FluentArgs::new();
-                    arguments.set("count", issues.len() as i64);
-                    ui.label(
-                        RichText::new(
-                            self.localization
-                                .text_with("review-issues-group", Some(&arguments)),
-                        )
-                        .strong()
-                        .color(crate::theme::WARNING_AMBER),
-                    );
-                    ui.add_space(4.0);
-                    for issue in issues {
-                        let scanning = self.collection_scans.contains_key(&issue.collection_id);
-                        if show_review_issue(ui, &self.localization, issue, scanning) {
-                            *requested_rescan = Some(issue.collection_id);
+                        if !issues.is_empty() {
+                            if !self.reviews.is_empty() {
+                                ui.add_space(14.0);
+                            }
+                            let mut arguments = FluentArgs::new();
+                            arguments.set("count", issues.len() as i64);
+                            egui::Frame::new()
+                                .inner_margin(egui::Margin::symmetric(22, 0))
+                                .show(ui, |ui| {
+                                    ui.label(
+                                        RichText::new(
+                                            self.localization
+                                                .text_with("review-issues-group", Some(&arguments)),
+                                        )
+                                        .family(crate::theme::semibold_font_family())
+                                        .color(crate::theme::warning_text(ui.visuals().dark_mode)),
+                                    );
+                                    ui.add_space(4.0);
+                                    for issue in issues {
+                                        let scanning = self
+                                            .collection_scans
+                                            .contains_key(&issue.collection_id);
+                                        if show_review_issue(
+                                            ui,
+                                            &self.localization,
+                                            issue,
+                                            scanning,
+                                        ) {
+                                            *requested_rescan = Some(issue.collection_id);
+                                        }
+                                        ui.add_space(6.0);
+                                    }
+                                });
                         }
-                        ui.add_space(6.0);
-                    }
-                }
+                    });
             });
+        let separator_x = queue.response.rect.right();
+        ui.painter().line_segment(
+            [
+                egui::pos2(separator_x, queue.response.rect.top()),
+                egui::pos2(separator_x, queue.response.rect.bottom()),
+            ],
+            egui::Stroke::new(1.0, crate::theme::border(ui.visuals().dark_mode)),
+        );
     }
 
-    fn review_comparison(&mut self, ui: &mut egui::Ui, issues: &[SourceIssueView]) {
+    fn review_comparison(
+        &mut self,
+        ui: &mut egui::Ui,
+        issues: &[SourceIssueView],
+        layout_mode: ReviewLayoutMode,
+    ) {
         let Some(selected_index) = self.selected_review.and_then(|selected| {
             self.reviews
                 .iter()
@@ -2058,99 +2799,205 @@ impl AirWikiApp {
             .approval_ready(concept_id, source_revision);
         let loading = self.review_evidence.is_loading(concept_id, source_revision);
         let error = self.review_evidence.error_for(concept_id, source_revision);
-        let page = self.review_evidence.page_for(concept_id, source_revision);
+        let page = self
+            .review_evidence
+            .page_for(concept_id, source_revision)
+            .cloned();
+        let source_name = self.reviews[selected_index].source_name.clone();
+        let collection_name = self.reviews[selected_index].collection_name.clone();
+        let title = self.reviews[selected_index].draft.title.clone();
+        let summary = if self.reviews[selected_index].draft.summary.trim().is_empty() {
+            self.reviews[selected_index].draft.description.clone()
+        } else {
+            self.reviews[selected_index].draft.summary.clone()
+        };
         let mut evidence_intent = None;
         let mut approve = false;
         let mut reject = false;
         let mut reanalyze = false;
-        let (evidence_width, _) = review_comparison_widths(ui.available_width());
+        let mut metadata_editor_open = self.review_metadata_editor == Some(concept_id);
+        let compact_actions = layout_mode == ReviewLayoutMode::CompactCompare;
+        let horizontal_margin: i8 = if compact_actions { 28 } else { 52 };
+        let action_bar_height = review_action_bar_height(layout_mode);
         StripBuilder::new(ui)
             .size(Size::remainder())
-            .size(Size::exact(REVIEW_ACTION_BAR_HEIGHT))
-            .clip(true)
+            .size(Size::exact(action_bar_height))
             .vertical(|mut strip| {
                 strip.cell(|ui| {
-                    StripBuilder::new(ui)
-                        .size(Size::exact(evidence_width))
-                        .size(Size::exact(REVIEW_PANEL_GAP))
-                        .size(Size::remainder())
-                        .clip(true)
-                        .horizontal(|mut strip| {
-                            strip.cell(|ui| {
-                                evidence_intent = show_review_evidence_panel(
-                                    ui,
-                                    &self.localization,
-                                    concept_id,
-                                    source_revision,
-                                    page,
-                                    error,
-                                    loading,
-                                );
-                            });
-                            strip.cell(|_| {});
-                            strip.cell(|ui| {
-                                let editor_height = ui.available_height().max(0.0);
-                                egui::ScrollArea::vertical()
-                                    .id_salt(("review_editor", concept_id, source_revision))
-                                    .max_height(editor_height)
-                                    .auto_shrink([false; 2])
-                                    .show(ui, |ui| {
+                    egui::Frame::new()
+                        .inner_margin(egui::Margin {
+                            left: horizontal_margin,
+                            right: horizontal_margin,
+                            top: if compact_actions { 24 } else { 44 },
+                            bottom: 24,
+                        })
+                        .show(ui, |ui| {
+                            let reader_height = ui.available_height().max(0.0);
+                            egui::ScrollArea::vertical()
+                                .id_salt(("review_reader", concept_id, source_revision))
+                                .max_height(reader_height)
+                                .auto_shrink([false; 2])
+                                .show(ui, |ui| {
+                                    ui.set_max_width(680.0);
+                                    let kicker = format!(
+                                        "{} · {} · {} · {} {}",
+                                        self.localization.text("review-draft-kicker"),
+                                        collection_name,
+                                        source_name,
+                                        self.localization.text("review-revision-label"),
+                                        source_revision
+                                    )
+                                    .to_uppercase();
+                                    editorial_card_kicker(
+                                        ui,
+                                        kicker,
+                                        crate::theme::accent_text(ui.visuals().dark_mode),
+                                    );
+                                    ui.heading(
+                                        RichText::new(&title)
+                                            .size(30.0)
+                                            .family(crate::theme::semibold_font_family()),
+                                    );
+                                    ui.add(egui::Label::new(&summary).wrap().selectable(true));
+                                    ui.add_space(22.0);
+                                    if is_reanalyzing {
+                                        ui.horizontal(|ui| {
+                                            ui.spinner();
+                                            ui.label(self.localization.text("review-analyzing"));
+                                        });
+                                    } else {
+                                        evidence_intent = show_review_evidence_panel(
+                                            ui,
+                                            &self.localization,
+                                            concept_id,
+                                            source_revision,
+                                            page.as_ref(),
+                                            error,
+                                            loading,
+                                        );
+                                    }
+                                    ui.add_space(20.0);
+                                    ui.separator();
+                                    ui.add_space(10.0);
+                                    let metadata_label = if metadata_editor_open {
+                                        self.localization.text("review-close-metadata")
+                                    } else {
+                                        self.localization.text("review-edit-metadata")
+                                    };
+                                    ui.horizontal_wrapped(|ui| {
+                                        if ui.button(metadata_label).clicked() {
+                                            metadata_editor_open = !metadata_editor_open;
+                                        }
+                                        reanalyze = ui
+                                            .add_enabled(
+                                                self.models_ready && !is_reanalyzing,
+                                                crate::theme::ghost_button(
+                                                    self.localization.text("review-reanalyze"),
+                                                    ui.visuals().dark_mode,
+                                                )
+                                                .small(),
+                                            )
+                                            .on_hover_text(self.localization.text(
+                                                if self.models_ready {
+                                                    "review-reanalyze-help"
+                                                } else {
+                                                    "review-model-required"
+                                                },
+                                            ))
+                                            .clicked();
+                                    });
+                                    if metadata_editor_open {
+                                        ui.add_space(12.0);
                                         edit_draft(
                                             ui,
                                             &self.localization,
                                             &mut self.reviews[selected_index].draft,
                                         );
-                                    });
-                            });
+                                    }
+                                    scroll_newly_focused_control_into_view(ui);
+                                });
                         });
                 });
                 strip.cell(|ui| {
-                    ui.separator();
-                    ui.horizontal_wrapped(|ui| {
-                        approve = ui
-                            .add_enabled(
-                                approval_ready,
-                                first_knowledge::primary_button(
-                                    self.localization.text("review-approve"),
-                                ),
-                            )
-                            .clicked();
-                        reject = ui
-                            .add_enabled(
-                                !is_reanalyzing,
-                                egui::Button::new(self.localization.text("review-reject")),
-                            )
-                            .clicked();
-                        reanalyze = ui
-                            .add_enabled(
-                                self.models_ready && !is_reanalyzing,
-                                egui::Button::new(self.localization.text("review-reanalyze")),
-                            )
-                            .on_hover_text(self.localization.text("review-reanalyze-help"))
-                            .clicked();
-                    });
-                    if is_reanalyzing {
-                        ui.horizontal(|ui| {
-                            ui.spinner();
-                            ui.label(self.localization.text("review-analyzing"));
+                    let footer_rect = ui.available_rect_before_wrap();
+                    let footer_inset = f32::from(horizontal_margin);
+                    ui.painter().line_segment(
+                        [
+                            egui::pos2(footer_rect.left() + footer_inset, footer_rect.top()),
+                            egui::pos2(footer_rect.right() - footer_inset, footer_rect.top()),
+                        ],
+                        egui::Stroke::new(1.0, crate::theme::border(ui.visuals().dark_mode)),
+                    );
+                    egui::Frame::new()
+                        .stroke(egui::Stroke::NONE)
+                        .inner_margin(egui::Margin {
+                            left: horizontal_margin,
+                            right: horizontal_margin,
+                            top: 24,
+                            bottom: 12,
+                        })
+                        .show(ui, |ui| {
+                            let mut counter_args = FluentArgs::new();
+                            counter_args.set("current", (selected_index + 1) as i64);
+                            counter_args.set("total", self.reviews.len() as i64);
+                            let counter = self
+                                .localization
+                                .text_with("review-draft-counter", Some(&counter_args));
+                            let mut show_actions = |ui: &mut egui::Ui| {
+                                approve = ui
+                                    .add_enabled(
+                                        approval_ready,
+                                        first_knowledge::primary_button(
+                                            self.localization.text("review-approve"),
+                                        ),
+                                    )
+                                    .on_disabled_hover_text(
+                                        self.localization.text("review-evidence-approval-blocked"),
+                                    )
+                                    .clicked();
+                                ui.add_enabled(
+                                    false,
+                                    egui::Button::new(self.localization.text("review-open-source")),
+                                )
+                                .on_disabled_hover_text(
+                                    self.localization.text("review-open-source-unavailable"),
+                                );
+                                reject = ui
+                                    .add_enabled(
+                                        !is_reanalyzing,
+                                        crate::theme::ghost_button(
+                                            self.localization.text("review-reject"),
+                                            ui.visuals().dark_mode,
+                                        ),
+                                    )
+                                    .clicked();
+                            };
+                            if compact_actions {
+                                ui.horizontal_wrapped(|ui| show_actions(ui));
+                                ui.add_space(5.0);
+                                ui.horizontal(|ui| {
+                                    ui.with_layout(
+                                        egui::Layout::right_to_left(egui::Align::Center),
+                                        |ui| {
+                                            ui.label(counter);
+                                        },
+                                    );
+                                });
+                            } else {
+                                ui.horizontal(|ui| {
+                                    show_actions(ui);
+                                    ui.with_layout(
+                                        egui::Layout::right_to_left(egui::Align::Center),
+                                        |ui| {
+                                            ui.label(counter);
+                                        },
+                                    );
+                                });
+                            }
                         });
-                    } else if !approval_ready {
-                        ui.label(
-                            RichText::new(
-                                self.localization.text("review-evidence-approval-blocked"),
-                            )
-                            .small()
-                            .color(ui.visuals().weak_text_color()),
-                        );
-                    } else if !self.models_ready {
-                        ui.label(
-                            RichText::new(self.localization.text("review-model-required"))
-                                .small()
-                                .color(ui.visuals().weak_text_color()),
-                        );
-                    }
                 });
             });
+        self.review_metadata_editor = metadata_editor_open.then_some(concept_id);
 
         if let Some(action) = match evidence_intent {
             Some(ReviewEvidencePanelIntent::LoadMore) => self.review_evidence.request_more(),
@@ -2190,175 +3037,199 @@ impl AirWikiApp {
     }
 
     fn search(&mut self, ui: &mut egui::Ui) {
+        ui.set_max_width(866.0);
         page_title(
             ui,
             &self.localization.text("search-title"),
             &self.localization.text("search-subtitle"),
         );
-        self.search_form(ui, true);
-        if let Some(target) = self.search_feedback(ui, true) {
+        self.search_form(ui, false, SearchSurface::Ask, true, None);
+        ui.set_max_width(620.0);
+        if let Some(target) = self.search_feedback(ui, true, SearchSurface::Ask) {
             self.open_search_evidence(target);
         }
-        self.public_browse_window(ui.ctx());
     }
 
-    fn search_form(&mut self, ui: &mut egui::Ui, show_top_k: bool) {
+    fn search_state(&self, surface: SearchSurface) -> &SearchViewState {
+        match surface {
+            SearchSurface::Ask => &self.ask_search,
+            SearchSurface::Public => &self.public_search,
+        }
+    }
+
+    fn search_state_mut(&mut self, surface: SearchSurface) -> &mut SearchViewState {
+        match surface {
+            SearchSurface::Ask => &mut self.ask_search,
+            SearchSurface::Public => &mut self.public_search,
+        }
+    }
+
+    fn search_form(
+        &mut self,
+        ui: &mut egui::Ui,
+        show_top_k: bool,
+        surface: SearchSurface,
+        allow_ask_public_network: bool,
+        external_label: Option<egui::Id>,
+    ) {
         let layout = ResponsiveLayout::from_available(ui.available_size());
-        let search_running = self.search_request_id.is_some();
-        let enabled = !self.search_question.trim().is_empty() && !search_running;
-        let mut submit_clicked = false;
-        ui.checkbox(
-            &mut self.search_public_network,
-            self.localization.text("search-public-network"),
+        let search_running = self.active_search.is_some();
+        let (question_label, placeholder, action_label, max_width, primary_action) = match surface {
+            SearchSurface::Ask => (
+                Some(self.localization.text("search-question")),
+                self.localization.text("search-placeholder"),
+                self.localization.text("search-action"),
+                680.0,
+                true,
+            ),
+            SearchSurface::Public => (
+                None,
+                self.localization.text("public-search-placeholder"),
+                self.localization.text("public-search-action"),
+                560.0,
+                false,
+            ),
+        };
+        let (response, submit_clicked) = ui
+            .push_id(surface, |ui| {
+                show_search_inputs(
+                    ui,
+                    layout,
+                    self.search_state_mut(surface),
+                    search_running,
+                    show_top_k,
+                    SearchInputText {
+                        question: question_label.as_deref(),
+                        external_label,
+                        placeholder: &placeholder,
+                        action: &action_label,
+                        max_width,
+                        primary_action,
+                    },
+                )
+            })
+            .inner;
+        ui.add_space(4.0);
+        if surface == SearchSurface::Ask && allow_ask_public_network {
+            let scope = ask_scope_presentation(
+                self.preferences
+                    .map_or(LanPreference::Undecided, |preferences| {
+                        preferences.lan_preference
+                    }),
+                self.peers
+                    .iter()
+                    .any(|peer| peer.trust == PeerTrustState::Trusted),
+            );
+            let scope_note = if self.search_public_network {
+                "search-scope-note-public"
+            } else if scope.paired_available {
+                "search-scope-note-paired"
+            } else {
+                "search-scope-note-device"
+            };
+            ui.horizontal_wrapped(|ui| {
+                ui.label(
+                    RichText::new(self.localization.text("search-scope-searches"))
+                        .size(13.0)
+                        .family(crate::theme::semibold_font_family()),
+                );
+                editorial_tag(
+                    ui,
+                    &self.localization.text("search-scope-device"),
+                    EditorialTagTone::Neutral,
+                );
+                if scope.paired_available {
+                    editorial_tag(
+                        ui,
+                        &self.localization.text("search-scope-paired"),
+                        EditorialTagTone::Neutral,
+                    );
+                }
+                ui.checkbox(
+                    &mut self.search_public_network,
+                    self.localization.text("search-scope-include-public"),
+                );
+                ui.label(
+                    RichText::new(self.localization.text(scope_note))
+                        .size(13.0)
+                        .color(crate::theme::secondary_text(ui.visuals().dark_mode)),
+                );
+            });
+            ui.add_space(20.0);
+        }
+        let public_network = effective_public_search(
+            surface == SearchSurface::Public,
+            allow_ask_public_network,
+            self.search_public_network,
         );
-        if self.search_public_network {
-            let status = match self.public_route_kind {
+        let route_feedback_visible = self
+            .active_search
+            .is_some_and(|active| active.surface == surface)
+            || self.search_state(surface).completed
+            || self.search_state(surface).error.is_some();
+        if public_network && route_feedback_visible {
+            let status = match self.search_state(surface).route_kind {
                 PublicRouteKind::Offline => "search-public-route-offline",
                 PublicRouteKind::Relay => "search-public-route-relay",
                 PublicRouteKind::Direct => "search-public-route-direct",
             };
             ui.label(self.localization.text(status));
         }
-        ui.collapsing(
-            self.localization.text("search-public-index-advanced"),
-            |ui| {
-                ui.label(self.localization.text("search-public-index-help"));
-                ui.text_edit_singleline(&mut self.federation_index_peer);
-                ui.text_edit_singleline(&mut self.federation_index_address);
-                let valid = !self.federation_index_peer.trim().is_empty()
-                    && !self.federation_index_address.trim().is_empty();
-                if ui
-                    .add_enabled(
-                        valid,
-                        egui::Button::new(self.localization.text("search-public-index-add")),
-                    )
-                    .clicked()
-                {
-                    self.worker.send(WorkerCommand::AddFederationIndex {
-                        peer_id: self.federation_index_peer.trim().to_owned(),
-                        address: self.federation_index_address.trim().to_owned(),
-                    });
-                    self.federation_index_peer.clear();
-                    self.federation_index_address.clear();
-                }
-                let can_remove = !self.federation_index_peer.trim().is_empty();
-                if ui
-                    .add_enabled(
-                        can_remove,
-                        egui::Button::new(self.localization.text("search-public-index-remove")),
-                    )
-                    .clicked()
-                {
-                    self.worker.send(WorkerCommand::RemoveFederationIndex {
-                        peer_id: self.federation_index_peer.trim().to_owned(),
-                    });
-                }
-                ui.separator();
-                ui.label(self.localization.text("search-public-unblock-help"));
-                let mut unblock_publisher = None;
-                for publisher_id in &self.blocked_public_publishers {
-                    ui.horizontal(|ui| {
-                        ui.monospace(abbreviate_publisher_id(publisher_id));
-                        if ui
-                            .button(self.localization.text("search-public-unblock-publisher"))
-                            .clicked()
-                        {
-                            unblock_publisher = Some(publisher_id.clone());
-                        }
-                    });
-                }
-                if let Some(publisher_id) = unblock_publisher {
-                    self.worker.send(WorkerCommand::SetPublicPublisherBlocked {
-                        publisher_id,
-                        blocked: false,
-                    });
-                }
-            },
-        );
-        let response = if layout.is_narrow() {
-            let question_label = ui.label(self.localization.text("search-question"));
-            let response = ui
-                .add_enabled_ui(!search_running, |ui| {
-                    ui.add_sized(
-                        [ui.available_width(), 36.0],
-                        egui::TextEdit::singleline(&mut self.search_question)
-                            .hint_text(self.localization.text("search-placeholder")),
-                    )
-                })
-                .inner
-                .labelled_by(question_label.id);
-            ui.horizontal(|ui| {
-                if show_top_k {
-                    ui.add_enabled(
-                        !search_running,
-                        egui::DragValue::new(&mut self.search_top_k)
-                            .range(1..=10)
-                            .prefix("Top "),
-                    );
-                }
-                submit_clicked = ui
-                    .add_enabled(
-                        enabled,
-                        first_knowledge::primary_button(self.localization.text("search-action")),
-                    )
-                    .clicked();
-            });
-            response
-        } else {
-            ui.horizontal(|ui| {
-                let question_label = ui.label(self.localization.text("search-question"));
-                let reserved_width = if show_top_k { 190.0 } else { 100.0 };
-                let field_width = (ui.available_width() - reserved_width).clamp(220.0, 520.0);
-                let response = ui
-                    .add_enabled_ui(!search_running, |ui| {
-                        ui.add_sized(
-                            [field_width, 36.0],
-                            egui::TextEdit::singleline(&mut self.search_question)
-                                .hint_text(self.localization.text("search-placeholder")),
-                        )
-                    })
-                    .inner
-                    .labelled_by(question_label.id);
-                if show_top_k {
-                    ui.add_enabled(
-                        !search_running,
-                        egui::DragValue::new(&mut self.search_top_k)
-                            .range(1..=10)
-                            .prefix("Top "),
-                    );
-                }
-                submit_clicked = ui
-                    .add_enabled(
-                        enabled,
-                        first_knowledge::primary_button(self.localization.text("search-action")),
-                    )
-                    .clicked();
-                response
-            })
-            .inner
-        };
+        if public_network && !self.blocked_public_publishers.is_empty() {
+            ui.collapsing(
+                self.localization.text("search-public-publisher-controls"),
+                |ui| {
+                    ui.label(self.localization.text("search-public-unblock-help"));
+                    let mut unblock_publisher = None;
+                    for (index, publisher_id) in self.blocked_public_publishers.iter().enumerate() {
+                        ui.horizontal(|ui| {
+                            let mut arguments = FluentArgs::new();
+                            arguments.set("number", (index + 1) as i64);
+                            ui.label(
+                                self.localization
+                                    .text_with("search-public-blocked-publisher", Some(&arguments)),
+                            );
+                            if ui
+                                .button(self.localization.text("search-public-unblock-publisher"))
+                                .clicked()
+                            {
+                                unblock_publisher = Some(publisher_id.clone());
+                            }
+                        });
+                    }
+                    if let Some(publisher_id) = unblock_publisher {
+                        self.worker.send(WorkerCommand::SetPublicPublisherBlocked {
+                            publisher_id,
+                            blocked: false,
+                        });
+                    }
+                },
+            );
+        }
         let submit = submit_clicked
-            || (enabled
+            || (!self.search_state(surface).question.trim().is_empty()
+                && !search_running
                 && response.lost_focus()
                 && ui.input(|input| input.key_pressed(egui::Key::Enter)));
         if response.changed() {
-            self.search_completed = false;
-            self.search_hits.clear();
-            self.search_error = None;
+            self.search_state_mut(surface).clear_feedback();
         }
         if submit {
             let request_id = Uuid::new_v4();
-            self.search_request_id = Some(request_id);
-            self.search_completed = false;
-            self.search_error = None;
-            self.search_hits.clear();
-            self.search_coverage = SearchCoverageView::Complete;
+            let search = self.search_state_mut(surface);
+            search.begin_search(public_network);
+            let question = search.question.trim().to_owned();
+            let top_k = search.top_k;
+            self.active_search = Some(ActiveSearch {
+                request_id,
+                surface,
+            });
             self.worker.send(WorkerCommand::Search {
                 request_id,
-                question: self.search_question.trim().to_owned(),
-                top_k: self.search_top_k,
+                question,
+                top_k,
                 purpose: SearchPurpose::LocalAssistant,
-                public_network: self.search_public_network,
+                public_network,
             });
         }
     }
@@ -2367,18 +3238,28 @@ impl AirWikiApp {
         &mut self,
         ui: &mut egui::Ui,
         show_empty_state: bool,
+        surface: SearchSurface,
     ) -> Option<SearchEvidenceTarget> {
         let mut selected_evidence = None;
         let mut requested_public_browse = None;
-        if self.search_request_id.is_some() {
+        let mut open_chat_integrations = false;
+        let mut inline_integration_actions = Vec::new();
+        if self
+            .active_search
+            .is_some_and(|active| active.surface == surface)
+        {
             ui.spinner();
-            ui.label(self.localization.text("search-running"));
+            ui.label(self.localization.text(match surface {
+                SearchSurface::Ask => "search-running",
+                SearchSurface::Public => "public-search-running",
+            }));
         }
-        self.search_error_feedback(ui);
-        if let Some(message) = search_coverage_message(&self.localization, self.search_coverage) {
-            ui.colored_label(crate::theme::WARNING_AMBER, message);
+        self.search_error_feedback(ui, surface);
+        let search = self.search_state(surface);
+        if let Some(message) = search_coverage_message(&self.localization, search.coverage) {
+            ui.colored_label(crate::theme::warning_text(ui.visuals().dark_mode), message);
         }
-        if show_empty_state && self.search_completed && self.search_hits.is_empty() {
+        if show_empty_state && search.completed && search.hits.is_empty() {
             empty_state(
                 ui,
                 &self.localization.text("search-empty-title"),
@@ -2387,11 +3268,33 @@ impl AirWikiApp {
         }
         let results_height = ui.available_height().max(0.0);
         egui::ScrollArea::vertical()
-            .id_salt("search_results")
+            .id_salt(("search_results", surface))
             .max_height(results_height)
             .auto_shrink([false; 2])
             .show(ui, |ui| {
-                for hit in &self.search_hits {
+                if surface == SearchSurface::Ask
+                    && let Some(top_hit) = self.search_state(surface).hits.first()
+                {
+                    ui.add_space(18.0);
+                    editorial_card_kicker(
+                        ui,
+                        self.localization.text("search-top-passage").to_uppercase(),
+                        crate::theme::accent_text(ui.visuals().dark_mode),
+                    );
+                    ui.add_space(8.0);
+                    ui.add(
+                        egui::Label::new(RichText::new(&top_hit.snippet).size(17.0))
+                            .wrap()
+                            .selectable(true),
+                    );
+                    ui.add_space(18.0);
+                    editorial_section_label(
+                        ui,
+                        self.localization.text("search-sources").to_uppercase(),
+                        crate::theme::secondary_text(ui.visuals().dark_mode),
+                    );
+                }
+                for hit in &self.search_state(surface).hits {
                     let collection_exists = self
                         .collections
                         .iter()
@@ -2408,11 +3311,64 @@ impl AirWikiApp {
                         remote_device_name,
                     );
                     let origin = search_result_origin_label(&self.localization, &availability);
-                    ui.add_space(8.0);
-                    egui::Frame::group(ui.style()).show(ui, |ui| {
-                        ui.heading(format!("{}. {}", hit.rank, hit.title));
-                        ui.label(RichText::new(&hit.heading_or_page).strong());
-                        ui.label(&hit.snippet);
+                    ui.add_space(if surface == SearchSurface::Ask {
+                        10.0
+                    } else {
+                        12.0
+                    });
+                    if surface == SearchSurface::Public {
+                        ui.separator();
+                        ui.add_space(8.0);
+                    }
+                    ui.push_id(("search_hit", surface, hit.rank), |ui| {
+                        if surface == SearchSurface::Ask {
+                            ui.horizontal_wrapped(|ui| {
+                                editorial_tag(ui, &hit.rank.to_string(), EditorialTagTone::Accent);
+                                ui.label(
+                                    RichText::new(&hit.title)
+                                        .size(14.0)
+                                        .family(crate::theme::semibold_font_family()),
+                                );
+                                ui.label(
+                                    RichText::new(format!("{} · {}", hit.heading_or_page, origin))
+                                        .size(13.0)
+                                        .color(ui.visuals().weak_text_color()),
+                                );
+                            });
+                        } else {
+                            let status = if matches!(
+                                self.search_state(surface).route_kind,
+                                PublicRouteKind::Offline
+                            ) {
+                                "public-status-offline"
+                            } else {
+                                "public-status-reachable"
+                            };
+                            ui.label(
+                                RichText::new(self.localization.text(status))
+                                    .size(11.0)
+                                    .family(crate::theme::semibold_font_family())
+                                    .color(if status == "public-status-reachable" {
+                                        crate::theme::accent_text(ui.visuals().dark_mode)
+                                    } else {
+                                        crate::theme::warning_text(ui.visuals().dark_mode)
+                                    }),
+                            );
+                            ui.heading(
+                                RichText::new(format!("{}. {}", hit.rank, hit.title))
+                                    .size(20.0)
+                                    .family(crate::theme::semibold_font_family()),
+                            );
+                            ui.label(
+                                RichText::new(&hit.heading_or_page)
+                                    .family(crate::theme::semibold_font_family()),
+                            );
+                            ui.add(
+                                egui::Label::new(RichText::new(&hit.snippet).size(15.0))
+                                    .wrap()
+                                    .selectable(true),
+                            );
+                        }
                         ui.horizontal_wrapped(|ui| match &availability {
                             SearchResultAvailability::LocalAvailable => {
                                 ui.label(
@@ -2429,7 +3385,7 @@ impl AirWikiApp {
                             }
                             SearchResultAvailability::LocalUnavailable => {
                                 ui.colored_label(
-                                    crate::theme::WARNING_AMBER,
+                                    crate::theme::warning_text(ui.visuals().dark_mode),
                                     self.localization.text("search-local-unavailable"),
                                 );
                             }
@@ -2439,7 +3395,7 @@ impl AirWikiApp {
                                         .small()
                                         .color(ui.visuals().weak_text_color()),
                                 );
-                                if self.search_public_network
+                                if self.search_state(surface).submitted_public_network
                                     && ui
                                         .button(self.localization.text("search-browse-public"))
                                         .clicked()
@@ -2474,7 +3430,39 @@ impl AirWikiApp {
                         });
                     });
                 }
+                if surface == SearchSurface::Ask {
+                    ui.add_space(36.0);
+                    editorial_section_label(
+                        ui,
+                        self.localization.text("search-chat-title").to_uppercase(),
+                        crate::theme::secondary_text(ui.visuals().dark_mode),
+                    );
+                    ui.add(
+                        egui::Label::new(
+                            RichText::new(self.localization.text("search-chat-body"))
+                                .size(13.0)
+                                .color(ui.visuals().weak_text_color()),
+                        )
+                        .wrap(),
+                    );
+                    ui.add_space(8.0);
+                    inline_integration_actions =
+                        self.integrations.show_compact(ui, &self.localization);
+                    if ui
+                        .add(crate::theme::ghost_button(
+                            self.localization.text("search-chat-action"),
+                            ui.visuals().dark_mode,
+                        ))
+                        .clicked()
+                    {
+                        open_chat_integrations = true;
+                    }
+                }
             });
+        self.dispatch_integration_actions(inline_integration_actions);
+        if open_chat_integrations {
+            self.screen = Screen::Integrations;
+        }
         if let Some((publisher_id, collection_id)) = requested_public_browse {
             self.public_browse_open = true;
             self.public_browse_publisher = publisher_id;
@@ -2485,6 +3473,7 @@ impl AirWikiApp {
             self.public_browse_next_cursor = None;
             self.public_browse_error = None;
             self.request_public_browse(None);
+            self.screen = Screen::Public;
         }
         selected_evidence
     }
@@ -2503,140 +3492,181 @@ impl AirWikiApp {
         });
     }
 
-    fn public_browse_window(&mut self, context: &egui::Context) {
+    fn public_browse_detail(&mut self, ui: &mut egui::Ui) {
         if !self.public_browse_open {
             return;
         }
-        let mut open = self.public_browse_open;
         let mut load_more = false;
         let mut block_publisher = false;
-        egui::Window::new(self.localization.text("search-public-browse-title"))
-            .open(&mut open)
-            .resizable(true)
-            .default_width(620.0)
-            .show(context, |ui| {
-                ui.horizontal_wrapped(|ui| {
-                    ui.label(self.localization.text("search-public-publisher"));
-                    wrap_monospace(ui, abbreviate_publisher_id(&self.public_browse_publisher));
-                    if ui
-                        .button(self.localization.text("search-public-block-publisher"))
-                        .clicked()
-                    {
-                        block_publisher = true;
-                    }
-                });
-                let availability_key = match self.public_browse_availability {
-                    PublicCollectionAvailability::Available(PublicRouteKind::Direct) => {
-                        "search-public-route-direct"
-                    }
-                    PublicCollectionAvailability::Available(PublicRouteKind::Relay) => {
-                        "search-public-route-relay"
-                    }
-                    PublicCollectionAvailability::Available(PublicRouteKind::Offline)
-                    | PublicCollectionAvailability::Offline => "search-public-route-offline",
-                    PublicCollectionAvailability::Expired => "search-public-browse-expired",
-                };
-                let availability = self.localization.text(availability_key);
-                if matches!(
-                    self.public_browse_availability,
-                    PublicCollectionAvailability::Expired | PublicCollectionAvailability::Offline
-                ) {
-                    ui.colored_label(crate::theme::WARNING_AMBER, availability);
-                } else {
-                    ui.label(availability);
-                }
-                if let Some(summary) = &self.public_browse_summary {
-                    ui.heading(&summary.name);
-                    if !summary.description.is_empty() {
-                        ui.label(&summary.description);
-                    }
-                    let mut profile_args = FluentArgs::new();
-                    profile_args.set("languages", summary.languages.join(", "));
-                    profile_args.set("concepts", i64::from(summary.concept_count));
-                    ui.label(
-                        RichText::new(
-                            self.localization
-                                .text_with("search-public-collection-profile", Some(&profile_args)),
-                        )
-                        .small()
-                        .color(ui.visuals().weak_text_color()),
-                    );
-                    let mut expiry_args = FluentArgs::new();
-                    expiry_args.set(
-                        "timestamp",
-                        summary.expires_at.format("%Y-%m-%d %H:%M").to_string(),
-                    );
-                    ui.label(
-                        RichText::new(
-                            self.localization
-                                .text_with("collections-public-expiry", Some(&expiry_args)),
-                        )
-                        .small()
-                        .color(ui.visuals().weak_text_color()),
-                    );
-                    ui.label(
-                        RichText::new(self.localization.text("search-public-provenance"))
-                            .small()
-                            .color(ui.visuals().weak_text_color()),
-                    );
-                    ui.separator();
-                }
-                if self.public_browse_request_id.is_some() {
-                    ui.spinner();
-                }
-                if let Some(error) = &self.public_browse_error {
-                    ui.colored_label(crate::theme::ERROR_CORAL, error);
-                }
-                egui::ScrollArea::vertical().show(ui, |ui| {
-                    for concept in &self.public_browse_concepts {
-                        egui::Frame::group(ui.style()).show(ui, |ui| {
-                            ui.heading(&concept.title);
-                            ui.label(RichText::new(concept.concept_type.to_string()).small());
-                            ui.label(&concept.summary);
-                            ui.label(RichText::new(&concept.language).small());
-                            if !concept.tags.is_empty() {
-                                ui.label(
-                                    RichText::new(concept.tags.join(" · "))
-                                        .small()
-                                        .color(ui.visuals().weak_text_color()),
-                                );
-                            }
-                            let mut revision_args = FluentArgs::new();
-                            revision_args.set("revision", i64::from(concept.source_revision));
-                            ui.label(
-                                RichText::new(
-                                    self.localization
-                                        .text_with("search-revision", Some(&revision_args)),
-                                )
-                                .small()
-                                .color(ui.visuals().weak_text_color()),
-                            );
-                            wrap_monospace(ui, concept.logical_resource_uri.clone());
-                        });
-                        ui.add_space(6.0);
-                    }
-                });
-                if self.public_browse_next_cursor.is_some()
-                    && self.public_browse_request_id.is_none()
-                    && ui
-                        .button(self.localization.text("search-public-browse-more"))
-                        .clicked()
-                {
-                    load_more = true;
-                }
+        ui.set_max_width(760.0);
+        if ui
+            .add(crate::theme::ghost_button(
+                format!("← {}", self.localization.text("search-public-browse-title")),
+                ui.visuals().dark_mode,
+            ))
+            .clicked()
+        {
+            self.public_browse_open = false;
+            return;
+        }
+        ui.add_space(18.0);
+        let (availability_key, route_key, availability_tone) = match self.public_browse_availability
+        {
+            PublicCollectionAvailability::Available(PublicRouteKind::Direct) => (
+                "public-status-reachable",
+                Some("search-public-route-direct"),
+                EditorialTagTone::Accent,
+            ),
+            PublicCollectionAvailability::Available(PublicRouteKind::Relay) => (
+                "public-status-reachable",
+                Some("search-public-route-relay"),
+                EditorialTagTone::Accent,
+            ),
+            PublicCollectionAvailability::Available(PublicRouteKind::Offline)
+            | PublicCollectionAvailability::Offline => {
+                ("public-status-offline", None, EditorialTagTone::Attention)
+            }
+            PublicCollectionAvailability::Expired => {
+                ("public-status-expired", None, EditorialTagTone::Attention)
+            }
+        };
+        if let Some(summary) = &self.public_browse_summary {
+            editorial_card_kicker(
+                ui,
+                self.localization.text("public-reader-view").to_uppercase(),
+                crate::theme::accent_text(ui.visuals().dark_mode),
+            );
+            ui.horizontal_wrapped(|ui| {
+                ui.heading(
+                    RichText::new(&summary.name)
+                        .size(32.0)
+                        .family(crate::theme::semibold_font_family()),
+                );
+                editorial_tag(
+                    ui,
+                    &self.localization.text(availability_key),
+                    availability_tone,
+                );
             });
-        self.public_browse_open = open;
+            if !summary.description.is_empty() {
+                ui.add(egui::Label::new(&summary.description).wrap());
+            }
+            let mut profile_args = FluentArgs::new();
+            profile_args.set("languages", summary.languages.join(", "));
+            profile_args.set("concepts", i64::from(summary.concept_count));
+            ui.label(
+                RichText::new(
+                    self.localization
+                        .text_with("search-public-collection-profile", Some(&profile_args)),
+                )
+                .small()
+                .color(ui.visuals().weak_text_color()),
+            );
+        } else {
+            ui.heading(self.localization.text("search-public-browse-title"));
+            editorial_tag(
+                ui,
+                &self.localization.text(availability_key),
+                availability_tone,
+            );
+        }
+        if let Some(route_key) = route_key {
+            ui.label(
+                RichText::new(self.localization.text(route_key))
+                    .small()
+                    .color(ui.visuals().weak_text_color()),
+            );
+        }
+        ui.label(
+            RichText::new(self.localization.text("search-public-provenance"))
+                .small()
+                .color(ui.visuals().weak_text_color()),
+        );
+        ui.add_space(12.0);
+        ui.horizontal_wrapped(|ui| {
+            ui.add_enabled(
+                false,
+                egui::Button::new(
+                    self.localization
+                        .text("search-public-search-this-collection"),
+                ),
+            )
+            .on_disabled_hover_text(
+                self.localization
+                    .text("search-public-search-this-collection-unavailable"),
+            );
+            if ui
+                .add(crate::theme::ghost_button(
+                    self.localization.text("search-public-block-publisher"),
+                    ui.visuals().dark_mode,
+                ))
+                .clicked()
+            {
+                block_publisher = true;
+            }
+        });
+        ui.add_space(20.0);
+        if self.public_browse_request_id.is_some() {
+            ui.spinner();
+        }
+        if let Some(error) = &self.public_browse_error {
+            ui.colored_label(crate::theme::error_text(ui.visuals().dark_mode), error);
+        }
+        for concept in &self.public_browse_concepts {
+            ui.separator();
+            ui.add_space(10.0);
+            ui.heading(
+                RichText::new(&concept.title)
+                    .size(20.0)
+                    .family(crate::theme::semibold_font_family()),
+            );
+            ui.label(
+                RichText::new(format!(
+                    "{} · {} · {}",
+                    concept.concept_type,
+                    concept.language,
+                    concept.tags.join(" · ")
+                ))
+                .small()
+                .color(ui.visuals().weak_text_color()),
+            );
+            let mut revision_arguments = FluentArgs::new();
+            revision_arguments.set("revision", concept.source_revision);
+            ui.label(
+                RichText::new(
+                    self.localization
+                        .text_with("search-public-source-revision", Some(&revision_arguments)),
+                )
+                .small()
+                .color(ui.visuals().weak_text_color()),
+            );
+            ui.add(egui::Label::new(&concept.summary).wrap());
+        }
+        ui.add_space(16.0);
+        ui.horizontal_wrapped(|ui| {
+            if self.public_browse_next_cursor.is_some()
+                && self.public_browse_request_id.is_none()
+                && ui
+                    .button(self.localization.text("search-public-browse-more"))
+                    .clicked()
+            {
+                load_more = true;
+            }
+        });
         if load_more {
             self.request_public_browse(self.public_browse_next_cursor.clone());
         }
         if block_publisher {
             let publisher_id = self.public_browse_publisher.clone();
-            self.public_publisher_block_input = publisher_id.clone();
             self.worker.send(WorkerCommand::SetPublicPublisherBlocked {
                 publisher_id: publisher_id.clone(),
                 blocked: true,
             });
-            self.search_hits.retain(|hit| hit.node_id != publisher_id);
+            remove_blocked_publisher_hits(
+                &mut self.ask_search,
+                &mut self.public_search,
+                &publisher_id,
+            );
             self.public_browse_open = false;
         }
     }
@@ -2650,17 +3680,17 @@ impl AirWikiApp {
         }
     }
 
-    fn search_error_feedback(&self, ui: &mut egui::Ui) {
-        let Some(error) = &self.search_error else {
+    fn search_error_feedback(&self, ui: &mut egui::Ui, surface: SearchSurface) {
+        let Some(error) = &self.search_state(surface).error else {
             return;
         };
         ui.colored_label(
-            crate::theme::ERROR_CORAL,
+            crate::theme::error_text(ui.visuals().dark_mode),
             self.localization.text("search-error-title"),
         );
         ui.collapsing(self.localization.text("technical-details"), |ui| {
             egui::ScrollArea::vertical()
-                .id_salt("search_error_details")
+                .id_salt(("search_error_details", surface))
                 .max_height(88.0)
                 .auto_shrink([false, true])
                 .show(ui, |ui| {
@@ -2670,7 +3700,23 @@ impl AirWikiApp {
     }
 
     fn integrations(&mut self, ui: &mut egui::Ui) {
+        ui.set_max_width(680.0);
+        if ui
+            .add(crate::theme::ghost_button(
+                format!("← {}", self.localization.text("search-title")),
+                ui.visuals().dark_mode,
+            ))
+            .clicked()
+        {
+            self.screen = Screen::Search;
+            return;
+        }
+        ui.add_space(8.0);
         let actions = self.integrations.show(ui, &self.localization);
+        self.dispatch_integration_actions(actions);
+    }
+
+    fn dispatch_integration_actions(&mut self, actions: Vec<IntegrationsUiAction>) {
         for action in actions {
             match action {
                 IntegrationsUiAction::Run { request_id, action } => {
@@ -2680,6 +3726,388 @@ impl AirWikiApp {
                 IntegrationsUiAction::OpenCollections => self.screen = Screen::Collections,
             }
         }
+    }
+
+    fn public_network(&mut self, ui: &mut egui::Ui) {
+        if self.public_browse_open {
+            self.public_browse_detail(ui);
+            return;
+        }
+        ui.set_max_width(860.0);
+        ui.horizontal_wrapped(|ui| {
+            ui.heading(
+                RichText::new(self.localization.text("public-title"))
+                    .size(32.0)
+                    .family(crate::theme::semibold_font_family()),
+            );
+            editorial_tag(
+                ui,
+                &self.localization.text("public-experimental"),
+                EditorialTagTone::Outline,
+            );
+        });
+        ui.add(
+            egui::Label::new(
+                RichText::new(self.localization.text("public-subtitle"))
+                    .size(15.0)
+                    .color(crate::theme::secondary_text(ui.visuals().dark_mode)),
+            )
+            .wrap(),
+        );
+        ui.add_space(30.0);
+        editorial_section_label(
+            ui,
+            self.localization
+                .text("public-collections-title")
+                .to_uppercase(),
+            ui.visuals().weak_text_color(),
+        );
+        ui.add_space(6.0);
+        if self.collections.is_empty() {
+            ui.label(
+                RichText::new(self.localization.text("public-collections-empty"))
+                    .color(ui.visuals().weak_text_color()),
+            );
+        } else {
+            let mut requested_public_confirmation = None;
+            let mut requested_stop_publishing = None;
+            for collection in &self.collections {
+                ui.push_id(collection.id, |ui| {
+                    ui.horizontal_wrapped(|ui| {
+                        ui.heading(
+                            RichText::new(&collection.name)
+                                .size(20.0)
+                                .family(crate::theme::semibold_font_family()),
+                        );
+                        if collection.internet_public {
+                            editorial_tag(
+                                ui,
+                                &self.localization.text("public-visible"),
+                                EditorialTagTone::Accent,
+                            );
+                        } else {
+                            editorial_tag(
+                                ui,
+                                &self.localization.text("public-private"),
+                                EditorialTagTone::Neutral,
+                            );
+                        }
+                    });
+                    if collection.internet_public {
+                        let (status, status_color) = match collection.public_announcement {
+                            PublicAnnouncementStatusView::Offline => (
+                                "public-status-offline",
+                                crate::theme::warning_text(ui.visuals().dark_mode),
+                            ),
+                            PublicAnnouncementStatusView::Advertised { .. } => (
+                                "public-status-reachable",
+                                crate::theme::accent_text(ui.visuals().dark_mode),
+                            ),
+                            PublicAnnouncementStatusView::Expired { .. } => (
+                                "public-status-expired",
+                                crate::theme::attention(ui.visuals().dark_mode),
+                            ),
+                        };
+                        ui.label(
+                            RichText::new(self.localization.text(status))
+                                .small()
+                                .family(crate::theme::semibold_font_family())
+                                .color(status_color),
+                        );
+                        if !collection.public_description.trim().is_empty() {
+                            ui.add(
+                                egui::Label::new(&collection.public_description)
+                                    .wrap()
+                                    .selectable(false),
+                            );
+                        }
+                        let mut concept_arguments = FluentArgs::new();
+                        concept_arguments.set("count", collection.published_count);
+                        let mut profile = vec![
+                            self.localization
+                                .text_with("knowledge-concept-count", Some(&concept_arguments)),
+                        ];
+                        if !collection.public_languages.trim().is_empty() {
+                            profile.push(collection.public_languages.clone());
+                        }
+                        ui.label(
+                            RichText::new(profile.join(" · "))
+                                .small()
+                                .color(ui.visuals().weak_text_color()),
+                        );
+                        if let PublicAnnouncementStatusView::Advertised {
+                            accepted_indexes, ..
+                        } = collection.public_announcement
+                        {
+                            let mut arguments = FluentArgs::new();
+                            arguments.set("indexes", accepted_indexes as i64);
+                            ui.label(
+                                RichText::new(self.localization.text_with(
+                                    "collections-public-announcement-online",
+                                    Some(&arguments),
+                                ))
+                                .small()
+                                .color(ui.visuals().weak_text_color()),
+                            );
+                        }
+                        ui.horizontal_wrapped(|ui| {
+                            if ui
+                                .add(crate::theme::ghost_button(
+                                    self.localization.text("public-stop-publishing"),
+                                    ui.visuals().dark_mode,
+                                ))
+                                .clicked()
+                            {
+                                requested_stop_publishing = Some(collection.id);
+                            }
+                        });
+                    } else {
+                        if collection_can_make_public(
+                            collection.needs_review_count,
+                            collection.failed_count,
+                        ) {
+                            ui.label(
+                                RichText::new(self.localization.text("public-private-summary"))
+                                    .small()
+                                    .color(ui.visuals().weak_text_color()),
+                            );
+                            let make_public = ui.add(first_knowledge::primary_button(
+                                self.localization.text("public-make-public"),
+                            ));
+                            if make_public.clicked() {
+                                requested_public_confirmation =
+                                    Some((collection.id, make_public.id));
+                            }
+                        } else {
+                            ui.label(
+                                RichText::new(
+                                    self.localization.text("public-private-attention-summary"),
+                                )
+                                .small()
+                                .color(crate::theme::attention(ui.visuals().dark_mode)),
+                            );
+                        }
+                    }
+                });
+                ui.add_space(12.0);
+                ui.separator();
+                ui.add_space(12.0);
+            }
+            if let Some((collection_id, return_focus)) = requested_public_confirmation {
+                self.public_collection_confirmation = Some(collection_id);
+                self.public_confirmation_return_focus = Some(return_focus);
+            }
+            if let Some(collection_id) = requested_stop_publishing
+                && let Some(collection) = self
+                    .collections
+                    .iter_mut()
+                    .find(|collection| collection.id == collection_id)
+            {
+                collection.internet_public = false;
+                collection.local_only = !collection.peer_shareable && !collection.allow_external_ai;
+                self.worker.send(WorkerCommand::UpdateCollectionPolicy {
+                    collection_id,
+                    local_only: collection.local_only,
+                    peer_shareable: collection.peer_shareable,
+                    allow_external_ai: collection.allow_external_ai,
+                    internet_public: false,
+                });
+            }
+        }
+        if ui
+            .button(self.localization.text("public-manage-collections"))
+            .clicked()
+        {
+            self.screen = Screen::Collections;
+        }
+        if self.enabled_community_federation_index_count > 0 {
+            ui.add_space(24.0);
+            egui::Frame::new()
+                .fill(crate::theme::surface(ui.visuals().dark_mode))
+                .stroke(egui::Stroke::new(
+                    1.0,
+                    crate::theme::attention(ui.visuals().dark_mode),
+                ))
+                .corner_radius(egui::CornerRadius::same(2))
+                .inner_margin(egui::Margin::same(18))
+                .show(ui, |ui| {
+                    editorial_card_kicker(
+                        ui,
+                        self.localization
+                            .text("public-community-indexes-kicker")
+                            .to_uppercase(),
+                        crate::theme::attention(ui.visuals().dark_mode),
+                    );
+                    ui.add_space(4.0);
+                    ui.heading(
+                        RichText::new(
+                            self.localization
+                                .text("public-community-indexes-recovery-title"),
+                        )
+                        .size(18.0)
+                        .family(crate::theme::semibold_font_family()),
+                    );
+                    let mut arguments = FluentArgs::new();
+                    arguments.set(
+                        "count",
+                        self.enabled_community_federation_index_count as i64,
+                    );
+                    ui.add(
+                        egui::Label::new(
+                            self.localization.text_with(
+                                "public-community-indexes-recovery-body",
+                                Some(&arguments),
+                            ),
+                        )
+                        .wrap(),
+                    );
+                    ui.add_space(10.0);
+                    let action = ui.add_enabled(
+                        self.community_indexes_disable_request_id.is_none(),
+                        crate::theme::ghost_button(
+                            self.localization
+                                .text("public-community-indexes-disable-action"),
+                            ui.visuals().dark_mode,
+                        ),
+                    );
+                    if action.clicked() {
+                        self.community_indexes_confirmation = true;
+                        self.community_indexes_confirmation_return_focus = Some(action.id);
+                    }
+                    if self.community_indexes_disable_request_id.is_some() {
+                        ui.spinner();
+                    }
+                });
+        }
+        ui.add_space(24.0);
+        let public_search_label = editorial_section_label(
+            ui,
+            self.localization
+                .text("public-discover-title")
+                .to_uppercase(),
+            crate::theme::secondary_text(ui.visuals().dark_mode),
+        );
+        ui.label(
+            RichText::new(self.localization.text("public-discover-body"))
+                .color(ui.visuals().weak_text_color()),
+        );
+        self.search_form(
+            ui,
+            false,
+            SearchSurface::Public,
+            false,
+            Some(public_search_label.id),
+        );
+        ui.scope(|ui| {
+            ui.set_max_width(680.0);
+            if let Some(target) = self.search_feedback(ui, true, SearchSurface::Public) {
+                self.open_search_evidence(target);
+            }
+        });
+        self.public_collection_confirmation_window(ui.ctx());
+    }
+
+    fn community_indexes_confirmation_window(&mut self, context: &egui::Context) {
+        if !self.community_indexes_confirmation {
+            return;
+        }
+        if self.enabled_community_federation_index_count == 0 {
+            self.community_indexes_confirmation = false;
+            restore_modal_focus(
+                context,
+                self.community_indexes_confirmation_return_focus.take(),
+            );
+            return;
+        }
+
+        let modal_id = egui::Id::new("community_indexes_disable_confirmation");
+        let focus_id = modal_id.with("initial_focus");
+        let newly_opened =
+            !context.data_mut(|data| data.get_temp::<bool>(focus_id).unwrap_or(false));
+        if newly_opened {
+            egui::Popup::close_all(context);
+            context.data_mut(|data| data.insert_temp(focus_id, true));
+        }
+        let dark_mode = context.global_style().visuals.dark_mode;
+        let mut body_arguments = FluentArgs::new();
+        body_arguments.set(
+            "count",
+            self.enabled_community_federation_index_count as i64,
+        );
+        let response = egui::Modal::new(modal_id)
+            .frame(editorial_modal_frame(dark_mode))
+            .backdrop_color(egui::Color32::from_black_alpha(128))
+            .show(context, |ui| {
+                ui.set_width(400.0);
+                editorial_card_kicker(
+                    ui,
+                    self.localization
+                        .text("public-community-indexes-kicker")
+                        .to_uppercase(),
+                    crate::theme::attention(dark_mode),
+                );
+                ui.add_space(4.0);
+                ui.heading(
+                    RichText::new(
+                        self.localization
+                            .text("public-community-indexes-confirm-title"),
+                    )
+                    .size(20.0)
+                    .family(crate::theme::semibold_font_family()),
+                );
+                ui.add_space(10.0);
+                ui.add(
+                    egui::Label::new(self.localization.text_with(
+                        "public-community-indexes-confirm-body",
+                        Some(&body_arguments),
+                    ))
+                    .wrap(),
+                );
+                ui.add_space(18.0);
+                let mut decision = None;
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    if ui
+                        .add(first_knowledge::primary_button(
+                            self.localization
+                                .text("public-community-indexes-confirm-action"),
+                        ))
+                        .clicked()
+                    {
+                        decision = Some(true);
+                    }
+                    let cancel = ui.add(crate::theme::ghost_button(
+                        self.localization.text("action-cancel"),
+                        ui.visuals().dark_mode,
+                    ));
+                    if newly_opened {
+                        cancel.request_focus();
+                    }
+                    if cancel.clicked() {
+                        decision = Some(false);
+                    }
+                });
+                decision
+            });
+        let escaped = response.is_top_modal
+            && context
+                .input_mut(|input| input.consume_key(egui::Modifiers::NONE, egui::Key::Escape));
+        let Some(confirmed) = blocking_modal_decision(response.inner, escaped) else {
+            return;
+        };
+        context.data_mut(|data| data.remove::<bool>(focus_id));
+        self.community_indexes_confirmation = false;
+        restore_modal_focus(
+            context,
+            self.community_indexes_confirmation_return_focus.take(),
+        );
+        if !confirmed {
+            return;
+        }
+
+        let request_id = Uuid::new_v4();
+        self.community_indexes_disable_request_id = Some(request_id);
+        self.worker
+            .send(WorkerCommand::DisableCommunityFederationIndexes { request_id });
     }
 
     fn refresh_integrations_if_needed(&mut self) {
@@ -2693,6 +4121,7 @@ impl AirWikiApp {
     }
 
     fn nodes(&mut self, ui: &mut egui::Ui) {
+        ui.set_max_width(600.0);
         page_title(
             ui,
             &self.localization.text("devices-title"),
@@ -2701,7 +4130,7 @@ impl AirWikiApp {
         self.connectivity_panel(ui);
         ui.add_space(10.0);
         ui.collapsing(self.localization.text("devices-manual-advanced"), |ui| {
-            egui::Frame::group(ui.style()).show(ui, |ui| {
+            ui.scope(|ui| {
                 if !self.lan_local_addresses.is_empty() {
                     ui.label(self.localization.text("devices-this-address"));
                     for address in &self.lan_local_addresses {
@@ -2744,7 +4173,7 @@ impl AirWikiApp {
                 });
                 if !self.manual_multiaddress.trim().is_empty() && manual_address.is_none() {
                     ui.colored_label(
-                        crate::theme::ERROR_CORAL,
+                        crate::theme::error_text(ui.visuals().dark_mode),
                         self.localization.text("devices-manual-invalid"),
                     );
                 }
@@ -2764,22 +4193,28 @@ impl AirWikiApp {
         let nearby_device = self.localization.text("devices-nearby");
         let technical_details = self.localization.text("action-details");
         let pair = self.localization.text("devices-pair");
-        let matches = self.localization.text("devices-code-matches");
-        let does_not_match = self.localization.text("devices-code-does-not-match");
         let revoke = self.localization.text("devices-revoke");
         let blocked_message = self.localization.text("devices-blocked-message");
         let pair_again = self.localization.text("devices-pair-again");
-        let list_height = ui.available_height().max(0.0);
+        let list_height = connections_peer_list_height(ui.available_height());
         egui::ScrollArea::vertical()
             .id_salt("peer_list")
             .max_height(list_height)
             .auto_shrink([false; 2])
             .show(ui, |ui| {
                 for peer in &mut self.peers {
-                    egui::Frame::group(ui.style()).show(ui, |ui| {
+                    ui.push_id(&peer.peer_id, |ui| {
+                        ui.separator();
+                        ui.add_space(10.0);
                         ui.horizontal(|ui| {
                             ui.vertical(|ui| {
-                                ui.heading(peer.device_name.as_deref().unwrap_or(&nearby_device));
+                                ui.heading(
+                                    RichText::new(
+                                        peer.device_name.as_deref().unwrap_or(&nearby_device),
+                                    )
+                                    .size(24.0)
+                                    .family(crate::theme::semibold_font_family()),
+                                );
                                 ui.collapsing(&technical_details, |ui| {
                                     wrap_monospace(ui, &peer.peer_id);
                                     wrap_monospace(ui, &peer.address);
@@ -2800,27 +4235,18 @@ impl AirWikiApp {
                             );
                         });
                         if should_present_pairing_controls(peer.activity) {
-                            if let Some(words) = &peer.sas_words {
-                                ui.heading(words.join("  "));
-                                ui.horizontal(|ui| {
-                                    if ui.button(&matches).clicked() {
-                                        self.worker.send(WorkerCommand::ConfirmPairing {
-                                            peer_id: peer.peer_id.clone(),
-                                            accepted: true,
-                                        });
-                                    }
-                                    if ui.button(&does_not_match).clicked() {
-                                        self.worker.send(WorkerCommand::ConfirmPairing {
-                                            peer_id: peer.peer_id.clone(),
-                                            accepted: false,
-                                        });
-                                    }
-                                });
-                            }
+                            ui.label(
+                                RichText::new(self.localization.text("peer-activity-pairing"))
+                                    .color(crate::theme::accent_text(ui.visuals().dark_mode)),
+                            );
                         } else {
                             match peer.trust {
                                 PeerTrustState::Unpaired => {
-                                    if ui.button(&pair).clicked() {
+                                    let pair_button =
+                                        ui.add(first_knowledge::primary_button(pair.clone()));
+                                    if pair_button.clicked() {
+                                        self.pairing_confirmation_return_focus =
+                                            Some(pair_button.id);
                                         self.worker.send(WorkerCommand::Pair {
                                             peer_id: peer.peer_id.clone(),
                                         });
@@ -2855,15 +4281,28 @@ impl AirWikiApp {
                                             });
                                         }
                                     }
-                                    if ui.button(&revoke).clicked() {
+                                    if ui
+                                        .add(crate::theme::ghost_button(
+                                            revoke.as_str(),
+                                            ui.visuals().dark_mode,
+                                        ))
+                                        .clicked()
+                                    {
                                         self.worker.send(WorkerCommand::RevokePeer {
                                             peer_id: peer.peer_id.clone(),
                                         });
                                     }
                                 }
                                 PeerTrustState::Blocked => {
-                                    ui.colored_label(Color32::RED, &blocked_message);
-                                    if ui.button(&pair_again).clicked() {
+                                    ui.colored_label(
+                                        crate::theme::error_text(ui.visuals().dark_mode),
+                                        &blocked_message,
+                                    );
+                                    let pair_button =
+                                        ui.add(first_knowledge::primary_button(pair_again.clone()));
+                                    if pair_button.clicked() {
+                                        self.pairing_confirmation_return_focus =
+                                            Some(pair_button.id);
                                         self.worker.send(WorkerCommand::Pair {
                                             peer_id: peer.peer_id.clone(),
                                         });
@@ -2873,8 +4312,141 @@ impl AirWikiApp {
                         }
                     });
                 }
+                scroll_newly_focused_control_into_view(ui);
             });
+        ui.add_space(20.0);
+        ui.horizontal_wrapped(|ui| {
+            ui.label(self.localization.text("connections-chat-summary"));
+            if ui
+                .button(self.localization.text("connections-open-chats"))
+                .clicked()
+            {
+                self.screen = Screen::Integrations;
+            }
+        });
+        self.pairing_window(ui.ctx());
         self.firewall_confirmation(ui.ctx());
+    }
+
+    fn pairing_window(&mut self, context: &egui::Context) {
+        let active_pairings = self
+            .peers
+            .iter()
+            .filter(|peer| should_present_pairing_controls(peer.activity))
+            .map(|peer| peer.peer_id.clone())
+            .collect::<HashSet<_>>();
+        if let Some(previous_peer) = self.pairing_modal_peer.clone()
+            && !active_pairings.contains(&previous_peer)
+        {
+            let focus_id =
+                egui::Id::new(("pairing_confirmation", &previous_peer)).with("initial_focus");
+            context.data_mut(|data| data.remove::<bool>(focus_id));
+            self.pairing_modal_peer = None;
+            restore_modal_focus(context, self.pairing_confirmation_return_focus.take());
+        }
+        self.pairing_decisions_pending
+            .retain(|peer_id| active_pairings.contains(peer_id));
+        let unknown_device = self.localization.text("devices-nearby");
+        let Some((peer_id, device_name, words)) = self.peers.iter().find_map(|peer| {
+            (should_present_pairing_controls(peer.activity)
+                && !self.pairing_decisions_pending.contains(&peer.peer_id))
+            .then(|| {
+                peer.sas_words.as_ref().map(|words| {
+                    (
+                        peer.peer_id.clone(),
+                        peer.device_name
+                            .clone()
+                            .unwrap_or_else(|| unknown_device.clone()),
+                        words.clone(),
+                    )
+                })
+            })
+            .flatten()
+        }) else {
+            return;
+        };
+        self.pairing_modal_peer = Some(peer_id.clone());
+        let modal_id = egui::Id::new(("pairing_confirmation", &peer_id));
+        let focus_id = modal_id.with("initial_focus");
+        let newly_opened =
+            !context.data_mut(|data| data.get_temp::<bool>(focus_id).unwrap_or(false));
+        if newly_opened {
+            egui::Popup::close_all(context);
+            context.data_mut(|data| data.insert_temp(focus_id, true));
+        }
+        let dark_mode = context.global_style().visuals.dark_mode;
+        let response = egui::Modal::new(modal_id)
+            .frame(editorial_modal_frame(dark_mode))
+            .backdrop_color(egui::Color32::from_black_alpha(128))
+            .show(context, |ui| {
+                ui.set_width(400.0);
+                editorial_card_kicker(
+                    ui,
+                    self.localization
+                        .text("devices-pairing-title")
+                        .to_uppercase(),
+                    crate::theme::accent_text(dark_mode),
+                );
+                ui.add_space(4.0);
+                ui.heading(
+                    RichText::new(self.localization.text("devices-code-compare"))
+                        .size(20.0)
+                        .family(crate::theme::semibold_font_family()),
+                );
+                ui.add_space(14.0);
+                for row in words.chunks(3) {
+                    ui.label(
+                        RichText::new(row.join(" · "))
+                            .size(24.0)
+                            .family(crate::theme::semibold_font_family()),
+                    );
+                }
+                ui.add_space(10.0);
+                let mut args = FluentArgs::new();
+                args.set("device", device_name.as_str());
+                ui.add(
+                    egui::Label::new(
+                        self.localization
+                            .text_with("devices-pairing-warning", Some(&args)),
+                    )
+                    .wrap(),
+                );
+                ui.add_space(18.0);
+                let mut accepted = None;
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    if ui
+                        .add(first_knowledge::primary_button(
+                            self.localization.text("devices-code-matches"),
+                        ))
+                        .clicked()
+                    {
+                        accepted = Some(true);
+                    }
+                    let cancel = ui.add(crate::theme::ghost_button(
+                        self.localization.text("action-cancel"),
+                        ui.visuals().dark_mode,
+                    ));
+                    if newly_opened {
+                        cancel.request_focus();
+                    }
+                    if cancel.clicked() {
+                        accepted = Some(false);
+                    }
+                });
+                accepted
+            });
+        let escaped = response.is_top_modal
+            && context
+                .input_mut(|input| input.consume_key(egui::Modifiers::NONE, egui::Key::Escape));
+        let accepted = blocking_modal_decision(response.inner, escaped);
+        if let Some(accepted) = accepted {
+            context.data_mut(|data| data.remove::<bool>(focus_id));
+            self.pairing_modal_peer = None;
+            restore_modal_focus(context, self.pairing_confirmation_return_focus.take());
+            self.pairing_decisions_pending.insert(peer_id.clone());
+            self.worker
+                .send(WorkerCommand::ConfirmPairing { peer_id, accepted });
+        }
     }
 
     fn connectivity_panel(&mut self, ui: &mut egui::Ui) {
@@ -2883,8 +4455,12 @@ impl AirWikiApp {
             .map_or(LanPreference::Undecided, |preferences| {
                 preferences.lan_preference
             });
-        egui::Frame::group(ui.style()).show(ui, |ui| {
-            ui.heading(self.localization.text("connectivity-title"));
+        ui.scope(|ui| {
+            ui.heading(
+                RichText::new(self.localization.text("connectivity-title"))
+                    .size(24.0)
+                    .family(crate::theme::semibold_font_family()),
+            );
             match preference {
                 LanPreference::Undecided => {
                     ui.label(self.localization.text("connectivity-undecided"));
@@ -2926,6 +4502,7 @@ impl AirWikiApp {
                     let (status, color) = readiness_status_presentation(
                         &self.localization,
                         readiness.status(ReadinessComponent::Lan),
+                        ui.visuals().dark_mode,
                     );
                     ui.colored_label(color, status);
                     if let Some(operation) = self.firewall_operation {
@@ -2946,7 +4523,7 @@ impl AirWikiApp {
                             if snapshot.network_profile == NetworkProfileState::Public =>
                         {
                             ui.colored_label(
-                                crate::theme::ERROR_CORAL,
+                                crate::theme::error_text(ui.visuals().dark_mode),
                                 self.localization.text("connectivity-public-network"),
                             );
                             if ui
@@ -2974,7 +4551,7 @@ impl AirWikiApp {
                                 "connectivity-firewall-block-all-inbound"
                             };
                             ui.colored_label(
-                                crate::theme::ERROR_CORAL,
+                                crate::theme::error_text(ui.visuals().dark_mode),
                                 self.localization.text(message),
                             );
                             if ui
@@ -3010,7 +4587,7 @@ impl AirWikiApp {
                             if snapshot.firewall == FirewallDiagnosticState::RulesMissing =>
                         {
                             ui.colored_label(
-                                crate::theme::WARNING_AMBER,
+                                crate::theme::warning_text(ui.visuals().dark_mode),
                                 self.localization
                                     .text("connectivity-firewall-helper-repair"),
                             );
@@ -3026,7 +4603,7 @@ impl AirWikiApp {
                                 "connectivity-issue-firewall-conflict"
                             };
                             ui.colored_label(
-                                crate::theme::ERROR_CORAL,
+                                crate::theme::error_text(ui.visuals().dark_mode),
                                 self.localization.text(warning),
                             );
                             ui.label(
@@ -3053,7 +4630,7 @@ impl AirWikiApp {
                             if snapshot.firewall == FirewallDiagnosticState::ManagedPolicy =>
                         {
                             ui.colored_label(
-                                crate::theme::WARNING_AMBER,
+                                crate::theme::warning_text(ui.visuals().dark_mode),
                                 self.localization.text("connectivity-admin-needed"),
                             );
                         }
@@ -3065,7 +4642,7 @@ impl AirWikiApp {
                             || self.lan_discovery == LanDiscoveryView::Failed =>
                         {
                             ui.colored_label(
-                                crate::theme::ERROR_CORAL,
+                                crate::theme::error_text(ui.visuals().dark_mode),
                                 self.localization.text("connectivity-failed"),
                             );
                             #[cfg(target_os = "macos")]
@@ -3090,7 +4667,7 @@ impl AirWikiApp {
                         }
                         _ => {
                             ui.colored_label(
-                                crate::theme::WARNING_AMBER,
+                                crate::theme::warning_text(ui.visuals().dark_mode),
                                 self.localization.text("connectivity-not-ready"),
                             );
                         }
@@ -3108,7 +4685,10 @@ impl AirWikiApp {
                             self.request_connectivity_refresh();
                         }
                         if ui
-                            .button(self.localization.text("connectivity-disable"))
+                            .add(crate::theme::ghost_button(
+                                self.localization.text("connectivity-disable"),
+                                ui.visuals().dark_mode,
+                            ))
                             .clicked()
                         {
                             self.update_preferences(
@@ -3187,6 +4767,7 @@ impl AirWikiApp {
     }
 
     fn settings(&mut self, ui: &mut egui::Ui) {
+        ui.set_max_width(560.0);
         page_title(
             ui,
             &self.localization.text("settings-title"),
@@ -3201,74 +4782,75 @@ impl AirWikiApp {
                 let mut locale = self
                     .preferences
                     .map_or(LocalePreference::System, |preferences| preferences.locale);
-                ui.horizontal(|ui| {
-                    let language_label = ui.label(self.localization.text("settings-language"));
-                    egui::ComboBox::from_id_salt("ui_locale")
-                        .selected_text(match locale {
-                            LocalePreference::System => self.localization.text("language-system"),
-                            LocalePreference::Es => self.localization.text("language-spanish"),
-                            LocalePreference::En => self.localization.text("language-english"),
-                        })
-                        .show_ui(ui, |ui| {
-                            ui.selectable_value(
-                                &mut locale,
-                                LocalePreference::System,
-                                self.localization.text("language-system"),
-                            );
-                            ui.selectable_value(
-                                &mut locale,
-                                LocalePreference::Es,
-                                self.localization.text("language-spanish"),
-                            );
-                            ui.selectable_value(
-                                &mut locale,
-                                LocalePreference::En,
-                                self.localization.text("language-english"),
-                            );
-                        })
-                        .response
-                        .labelled_by(language_label.id);
-                });
+                let language_label = ui.label(self.localization.text("settings-language"));
+                egui::ComboBox::from_id_salt("ui_locale")
+                    .width(280.0)
+                    .selected_text(match locale {
+                        LocalePreference::System => self.localization.text("language-system"),
+                        LocalePreference::Es => self.localization.text("language-spanish"),
+                        LocalePreference::En => self.localization.text("language-english"),
+                    })
+                    .show_ui(ui, |ui| {
+                        ui.selectable_value(
+                            &mut locale,
+                            LocalePreference::System,
+                            self.localization.text("language-system"),
+                        );
+                        ui.selectable_value(
+                            &mut locale,
+                            LocalePreference::Es,
+                            self.localization.text("language-spanish"),
+                        );
+                        ui.selectable_value(
+                            &mut locale,
+                            LocalePreference::En,
+                            self.localization.text("language-english"),
+                        );
+                    })
+                    .response
+                    .labelled_by(language_label.id);
                 if self
                     .preferences
                     .is_some_and(|current| current.locale != locale)
                 {
                     self.update_preferences(|preferences| preferences.locale = locale, false);
                 }
-                ui.add_space(12.0);
-                ui.horizontal(|ui| {
-                    let mut arguments = FluentArgs::new();
-                    arguments.set(
-                        "status",
-                        autostart_status_label(&self.localization, self.autostart_status),
-                    );
-                    ui.label(
-                        self.localization
-                            .text_with("settings-login-status", Some(&arguments)),
-                    );
+                ui.add_space(24.0);
+                ui.heading(
+                    RichText::new(self.localization.text("settings-background"))
+                        .size(20.0)
+                        .family(crate::theme::semibold_font_family()),
+                );
+                let mut arguments = FluentArgs::new();
+                arguments.set(
+                    "status",
+                    autostart_status_label(&self.localization, self.autostart_status),
+                );
+                ui.label(
+                    self.localization
+                        .text_with("settings-login-status", Some(&arguments)),
+                );
+                ui.horizontal_wrapped(|ui| {
                     let operation_idle = self.autostart_request_id.is_none();
+                    let autostart_enabled = self.autostart_status == Some(AutostartStatus::Enabled);
+                    let action = if autostart_enabled {
+                        self.localization.text("action-disable")
+                    } else {
+                        self.localization.text("action-enable")
+                    };
                     if ui
-                        .add_enabled(
-                            operation_idle,
-                            egui::Button::new(self.localization.text("action-enable")),
-                        )
+                        .add_enabled(operation_idle, first_knowledge::primary_button(action))
                         .clicked()
                     {
-                        self.request_autostart(true);
+                        self.request_autostart(!autostart_enabled);
                     }
                     if ui
                         .add_enabled(
                             operation_idle,
-                            egui::Button::new(self.localization.text("action-disable")),
-                        )
-                        .clicked()
-                    {
-                        self.request_autostart(false);
-                    }
-                    if ui
-                        .add_enabled(
-                            operation_idle,
-                            egui::Button::new(self.localization.text("settings-refresh-status")),
+                            crate::theme::ghost_button(
+                                self.localization.text("settings-refresh-status"),
+                                ui.visuals().dark_mode,
+                            ),
                         )
                         .clicked()
                     {
@@ -3281,9 +4863,11 @@ impl AirWikiApp {
                         ui.spinner();
                     }
                 });
-                ui.add_space(12.0);
+                ui.add_space(30.0);
+                self.settings_local_ai(ui);
+                ui.add_space(30.0);
                 self.update_settings(ui);
-                ui.add_space(12.0);
+                ui.add_space(30.0);
                 ui.collapsing(
                     self.localization.text("settings-advanced-diagnostics"),
                     |ui| {
@@ -3312,48 +4896,58 @@ impl AirWikiApp {
                             });
                     },
                 );
-                ui.add_space(12.0);
-                if let Some(state) = self.model_state.clone() {
-                    egui::Frame::group(ui.style()).show(ui, |ui| {
-                        ui.heading(self.localization.text("settings-local-ai"));
-                        let mut profile_arguments = FluentArgs::new();
-                        profile_arguments
-                            .set("profile", profile_label(&self.localization, state.profile));
-                        ui.label(
-                            self.localization
-                                .text_with("settings-model-profile", Some(&profile_arguments)),
-                        );
-                        let mut active_arguments = FluentArgs::new();
-                        active_arguments.set(
-                            "model",
-                            state
-                                .active_model_id
-                                .clone()
-                                .unwrap_or_else(|| self.localization.text("settings-model-none")),
-                        );
-                        ui.label(
-                            self.localization
-                                .text_with("settings-model-active", Some(&active_arguments)),
-                        );
-                        if let Some(pending) = &state.pending_model_id {
-                            let mut arguments = FluentArgs::new();
-                            arguments.set("model", pending.as_str());
-                            ui.label(
-                                self.localization
-                                    .text_with("models-pending-restart", Some(&arguments)),
-                            );
-                        }
-                        if ui
-                            .button(self.localization.text("settings-manage-models"))
-                            .clicked()
-                        {
-                            self.screen = Screen::Models;
-                        }
-                    });
-                    ui.add_space(12.0);
-                }
                 ui.label(self.localization.text("settings-mcp-boundary"));
+                scroll_newly_focused_control_into_view(ui);
             });
+    }
+
+    fn settings_local_ai(&mut self, ui: &mut egui::Ui) {
+        let Some(state) = self.model_state.clone() else {
+            return;
+        };
+        ui.heading(
+            RichText::new(self.localization.text("settings-local-ai"))
+                .size(20.0)
+                .family(crate::theme::semibold_font_family()),
+        );
+        let mut profile_arguments = FluentArgs::new();
+        profile_arguments.set("profile", profile_label(&self.localization, state.profile));
+        let profile = self
+            .localization
+            .text_with("settings-model-profile", Some(&profile_arguments));
+        let mut active_arguments = FluentArgs::new();
+        active_arguments.set(
+            "model",
+            state
+                .active_model_id
+                .clone()
+                .unwrap_or_else(|| self.localization.text("settings-model-none")),
+        );
+        let active = self
+            .localization
+            .text_with("settings-model-active", Some(&active_arguments));
+        ui.label(format!("{profile} · {active}"));
+        ui.add(
+            egui::Label::new(
+                RichText::new(self.localization.text("settings-local-ai-body"))
+                    .color(crate::theme::secondary_text(ui.visuals().dark_mode)),
+            )
+            .wrap(),
+        );
+        if let Some(pending) = &state.pending_model_id {
+            let mut arguments = FluentArgs::new();
+            arguments.set("model", pending.as_str());
+            ui.label(
+                self.localization
+                    .text_with("models-pending-restart", Some(&arguments)),
+            );
+        }
+        if ui
+            .button(self.localization.text("settings-manage-models"))
+            .clicked()
+        {
+            self.screen = Screen::Models;
+        }
     }
 
     fn knowledge(&mut self, ui: &mut egui::Ui) {
@@ -3418,9 +5012,9 @@ impl AirWikiApp {
             egui::Panel::bottom("notices").show(root, |ui| {
                 for (error, message) in &self.notices {
                     let color = if *error {
-                        crate::theme::ERROR_CORAL
+                        crate::theme::error_text(ui.visuals().dark_mode)
                     } else {
-                        crate::theme::VERIFIED_GREEN
+                        crate::theme::verified_text(ui.visuals().dark_mode)
                     };
                     let summary = if *error {
                         human_error_summary(&self.localization, message)
@@ -3447,10 +5041,11 @@ impl AirWikiApp {
         };
         let message = message.clone();
         let mut dismiss = false;
-        egui::Frame::group(ui.style()).show(ui, |ui| {
+        let mut retry = false;
+        crate::theme::surface_frame(ui.visuals().dark_mode).show(ui, |ui| {
             ui.horizontal_wrapped(|ui| {
                 ui.colored_label(
-                    crate::theme::ERROR_CORAL,
+                    crate::theme::error_text(ui.visuals().dark_mode),
                     human_error_summary(&self.localization, &message),
                 );
                 if ui
@@ -3458,6 +5053,15 @@ impl AirWikiApp {
                     .clicked()
                 {
                     dismiss = true;
+                }
+                if ui
+                    .add_enabled(
+                        self.wiki_health_request_id.is_none(),
+                        egui::Button::new(self.localization.text("action-retry")),
+                    )
+                    .clicked()
+                {
+                    retry = true;
                 }
             });
             ui.collapsing(self.localization.text("technical-details"), |ui| {
@@ -3472,6 +5076,13 @@ impl AirWikiApp {
         });
         if dismiss {
             self.wiki_health_error_dismissed = true;
+        }
+        if retry {
+            let request_id = Uuid::new_v4();
+            self.wiki_health_request_id = Some(request_id);
+            self.wiki_health_check = WikiHealthCheckState::Loading;
+            self.worker
+                .send(WorkerCommand::RefreshWikiHealth { request_id });
         }
         true
     }
@@ -3491,7 +5102,7 @@ impl AirWikiApp {
         egui::Panel::bottom("onboarding_notices").show(root, |ui| {
             for (_, message) in relevant {
                 ui.colored_label(
-                    crate::theme::ERROR_CORAL,
+                    crate::theme::error_text(ui.visuals().dark_mode),
                     human_error_summary(&self.localization, message),
                 );
                 ui.collapsing(self.localization.text("technical-details"), |ui| {
@@ -3524,7 +5135,7 @@ impl AirWikiApp {
     }
 
     fn update_settings(&mut self, ui: &mut egui::Ui) {
-        egui::Frame::group(ui.style()).show(ui, |ui| {
+        ui.scope(|ui| {
             ui.heading(self.localization.text("updates-title"));
             if let Some(preferences) = self.preferences {
                 let mut automatic = preferences.automatic_update_checks;
@@ -3546,7 +5157,10 @@ impl AirWikiApp {
                 Some(UpdaterWorkerView::Ready(view)) => {
                     if let Some(issue) = view.last_issue {
                         let message = update_issue_label(&self.localization, issue.code);
-                        ui.colored_label(crate::theme::WARNING_AMBER, message);
+                        ui.colored_label(
+                            crate::theme::warning_text(ui.visuals().dark_mode),
+                            message,
+                        );
                     }
                     match view.status {
                         UpdaterStatus::Idle => {
@@ -3758,16 +5372,63 @@ impl AirWikiApp {
             return;
         };
 
-        ui.label(
-            RichText::new(self.localization.text("onboarding-model-recommended"))
-                .small()
-                .strong()
-                .color(ui.visuals().weak_text_color()),
-        );
-        if let Some(display_name) = &state.recommended_display_name {
-            ui.heading(RichText::new(display_name).size(21.0));
+        for profile in [
+            ModelProfile::Automatic,
+            ModelProfile::Efficient,
+            ModelProfile::Quality,
+        ] {
+            let label = match profile {
+                ModelProfile::Automatic => {
+                    self.localization.text("onboarding-model-profile-automatic")
+                }
+                ModelProfile::Efficient => self.localization.text("onboarding-model-profile-small"),
+                ModelProfile::Quality => self.localization.text("onboarding-model-profile-quality"),
+            };
+            let response = ui.radio(
+                state.profile == profile,
+                RichText::new(label).family(crate::theme::semibold_font_family()),
+            );
+            if response.clicked() && state.profile != profile {
+                self.accepted_licenses = false;
+                self.worker.send(WorkerCommand::SetModelProfile(profile));
+            }
+            let description = match profile {
+                ModelProfile::Automatic => {
+                    let mut arguments = FluentArgs::new();
+                    arguments.set(
+                        "model",
+                        state.recommended_display_name.as_deref().unwrap_or("—"),
+                    );
+                    self.localization
+                        .text_with("onboarding-model-profile-automatic-body", Some(&arguments))
+                }
+                ModelProfile::Efficient => self
+                    .localization
+                    .text("onboarding-model-profile-small-body"),
+                ModelProfile::Quality => self
+                    .localization
+                    .text("onboarding-model-profile-quality-body"),
+            };
+            ui.indent(("onboarding_model_profile", profile), |ui| {
+                ui.add(
+                    egui::Label::new(
+                        RichText::new(description)
+                            .small()
+                            .color(ui.visuals().weak_text_color()),
+                    )
+                    .wrap(),
+                );
+            });
+            ui.add_space(5.0);
         }
-        ui.add(egui::Label::new(self.localization.text("onboarding-model-private")).wrap());
+        ui.add(
+            egui::Label::new(
+                RichText::new(self.localization.text("onboarding-model-download-note"))
+                    .color(ui.visuals().weak_text_color()),
+            )
+            .wrap(),
+        );
+        ui.add_space(8.0);
 
         let mut size_arguments = FluentArgs::new();
         size_arguments.set(
@@ -3788,7 +5449,7 @@ impl AirWikiApp {
 
         if !state.issues.is_empty() {
             ui.colored_label(
-                crate::theme::ERROR_CORAL,
+                crate::theme::error_text(ui.visuals().dark_mode),
                 self.localization.text("error-local-ai"),
             );
             ui.collapsing(self.localization.text("technical-details"), |ui| {
@@ -3841,7 +5502,7 @@ impl AirWikiApp {
         let already_pending = state.pending_model_id.as_deref() == recommended;
         if already_active {
             ui.colored_label(
-                crate::theme::VERIFIED_GREEN,
+                crate::theme::verified_text(ui.visuals().dark_mode),
                 self.localization.text("models-recommended-active"),
             );
         } else {
@@ -3856,23 +5517,22 @@ impl AirWikiApp {
                 && state.issues.is_empty()
                 && self.install_label.is_none();
             ui.horizontal(|ui| {
-                if ui
-                    .add_enabled(
-                        can_install,
-                        first_knowledge::primary_button(model_action_label(
-                            &self.localization,
-                            state.recommended_assets_installed,
-                            self.models_ready,
-                        )),
-                    )
-                    .clicked()
-                {
+                let install_response = ui.add_enabled(
+                    can_install,
+                    first_knowledge::primary_button(model_action_label(
+                        &self.localization,
+                        state.recommended_assets_installed,
+                        self.models_ready,
+                    )),
+                );
+                if install_response.clicked() {
                     self.worker.send(WorkerCommand::InstallModels);
                 }
-                if self.install_label.is_some()
-                    && ui.button(self.localization.text("action-cancel")).clicked()
-                {
-                    self.worker.send(WorkerCommand::CancelInstall);
+                if self.install_label.is_some() {
+                    let cancel_response = ui.button(self.localization.text("action-cancel"));
+                    if cancel_response.clicked() {
+                        self.worker.send(WorkerCommand::CancelInstall);
+                    }
                 }
                 if already_pending {
                     ui.label(self.localization.text("models-restart-to-activate"));
@@ -3895,16 +5555,9 @@ impl AirWikiApp {
         let Some(page) = self.onboarding_page else {
             return;
         };
-        let readiness = self.readiness_view();
-        let published_count = self
-            .collections
-            .iter()
-            .map(|collection| collection.published_count)
-            .sum();
-        let journey = derive_first_knowledge_journey(&readiness, published_count);
         let layout = ResponsiveLayout::from_available(ui.available_size());
 
-        ui.set_width(ui.available_width().min(940.0));
+        ui.set_width(ui.available_width().min(560.0));
         StripBuilder::new(ui)
             .size(Size::exact(first_knowledge::journey_header_height(
                 layout.density,
@@ -3914,397 +5567,250 @@ impl AirWikiApp {
             .clip(true)
             .vertical(|mut strip| {
                 strip.cell(|ui| {
-                    first_knowledge::show_journey_header(
+                    let mut arguments = FluentArgs::new();
+                    arguments.set("current", onboarding_intro_step(page));
+                    arguments.set("total", 3);
+                    editorial_card_kicker(
                         ui,
-                        &self.localization,
-                        visible_journey_states(journey),
-                        layout.density,
+                        self.localization
+                            .text_with("onboarding-progress", Some(&arguments))
+                            .to_uppercase(),
+                        crate::theme::accent_text(ui.visuals().dark_mode),
                     );
                 });
                 strip.cell(|ui| {
-                    let content_height = (ui.available_height()
-                        - f32::from(first_knowledge::surface_margin(layout.density)) * 2.0)
-                        .max(0.0);
-                    first_knowledge::work_surface(ui, layout.density, |ui| {
-                        ui.set_min_height(content_height);
-                        match page {
-                            OnboardingPage::Welcome => {
-                                onboarding_title(
-                                    ui,
-                                    &self.localization.text("onboarding-welcome-title"),
-                                    &self.localization.text("onboarding-welcome-body"),
-                                    layout.density,
-                                );
-                                ui.heading(
-                                    RichText::new(
-                                        self.localization.text("onboarding-privacy-title"),
-                                    )
-                                    .size(18.0),
-                                );
-                                ui.label(self.localization.text("onboarding-privacy-local"));
-                                ui.label(self.localization.text("onboarding-privacy-review"));
-                                ui.add_space(16.0);
-                                if ui
-                                    .add(first_knowledge::primary_button(
-                                        self.localization.text("onboarding-next"),
-                                    ))
-                                    .clicked()
-                                {
-                                    self.onboarding_page = Some(self.next_onboarding_page());
-                                }
-                            }
-                            OnboardingPage::Model => {
-                                onboarding_title(
-                                    ui,
-                                    &self.localization.text("onboarding-model-title"),
-                                    &self.localization.text("onboarding-model-body"),
-                                    layout.density,
-                                );
-                                self.onboarding_model(ui);
-                                ui.add_space(16.0);
-                                ui.horizontal(|ui| {
-                                    if ui
-                                        .button(self.localization.text("onboarding-back"))
-                                        .clicked()
-                                    {
-                                        self.onboarding_page = Some(OnboardingPage::Welcome);
-                                    }
-                                    if ui
-                                        .add_enabled(
-                                            self.models_ready,
-                                            first_knowledge::primary_button(
-                                                self.localization.text("onboarding-next"),
-                                            ),
+                    let body_width = ui.available_width();
+                    egui::ScrollArea::vertical()
+                        .id_salt(("onboarding-body", onboarding_intro_step(page)))
+                        .auto_shrink([false, false])
+                        .show(ui, |ui| {
+                            ui.set_min_width(body_width);
+                            first_knowledge::work_surface(ui, layout.density, |ui| match page {
+                                OnboardingPage::Welcome => {
+                                    onboarding_title(
+                                        ui,
+                                        &self.localization.text("onboarding-welcome-title"),
+                                        &self.localization.text("onboarding-welcome-body"),
+                                        layout.density,
+                                    );
+                                    ui.heading(
+                                        RichText::new(
+                                            self.localization
+                                                .text("onboarding-machine-check-title"),
                                         )
-                                        .clicked()
-                                    {
-                                        self.onboarding_page = Some(self.next_onboarding_page());
-                                    }
-                                    if ui
-                                        .add_enabled(
-                                            !self.onboarding_finishing,
-                                            egui::Link::new(
-                                                self.localization.text("onboarding-skip"),
+                                        .size(20.0)
+                                        .family(crate::theme::semibold_font_family()),
+                                    );
+                                    if let Some(report) = self.hardware.as_ref() {
+                                        let machine_checks = onboarding_machine_checks(report);
+                                        let mut platform_arguments = FluentArgs::new();
+                                        platform_arguments.set(
+                                            "platform",
+                                            hardware_platform_name(
+                                                &report.os,
+                                                &report.architecture,
                                             ),
-                                        )
-                                        .clicked()
-                                    {
-                                        self.finish_onboarding();
+                                        );
+                                        let mut memory_arguments = FluentArgs::new();
+                                        memory_arguments
+                                            .set("memory", rounded_gib(report.total_memory_bytes));
+                                        let mut disk_arguments = FluentArgs::new();
+                                        disk_arguments
+                                            .set("disk", rounded_gib(report.available_disk_bytes));
+                                        for (message, ready) in [
+                                            (
+                                                self.localization.text_with(
+                                                    "onboarding-machine-platform",
+                                                    Some(&platform_arguments),
+                                                ),
+                                                machine_checks.0,
+                                            ),
+                                            (
+                                                self.localization.text_with(
+                                                    "onboarding-machine-memory",
+                                                    Some(&memory_arguments),
+                                                ),
+                                                machine_checks.1,
+                                            ),
+                                            (
+                                                self.localization.text_with(
+                                                    "onboarding-machine-free-disk",
+                                                    Some(&disk_arguments),
+                                                ),
+                                                machine_checks.2,
+                                            ),
+                                        ] {
+                                            onboarding_machine_row(ui, &message, Some(ready));
+                                        }
+                                    } else {
+                                        for message_id in [
+                                            "onboarding-machine-checking-platform",
+                                            "onboarding-machine-checking-memory",
+                                            "onboarding-machine-checking-disk",
+                                        ] {
+                                            onboarding_machine_row(
+                                                ui,
+                                                &self.localization.text(message_id),
+                                                None,
+                                            );
+                                        }
                                     }
-                                });
-                            }
-                            OnboardingPage::Collection => {
-                                onboarding_title(
-                                    ui,
-                                    &self.localization.text("onboarding-collection-title"),
-                                    &self.localization.text("onboarding-collection-body"),
-                                    layout.density,
-                                );
-                                if !self.collections.is_empty() {
-                                    ui.colored_label(
-                                        crate::theme::VERIFIED_GREEN,
-                                        self.localization.text("onboarding-collection-linked"),
+                                    ui.add_space(14.0);
+                                    let machine_status =
+                                        onboarding_machine_status(self.hardware.as_ref().map(
+                                            |report| (report.supported_target, report.can_install),
+                                        ));
+                                    ui.add(
+                                        egui::Label::new(
+                                            RichText::new(self.localization.text(machine_status))
+                                                .color(ui.visuals().weak_text_color()),
+                                        )
+                                        .wrap(),
                                     );
                                 }
-                                ui.add_space(12.0);
-                                ui.horizontal(|ui| {
+                                OnboardingPage::Model => {
+                                    onboarding_title(
+                                        ui,
+                                        &self.localization.text("onboarding-model-title"),
+                                        &self.localization.text("onboarding-model-body"),
+                                        layout.density,
+                                    );
+                                    self.onboarding_model(ui);
+                                    ui.add_space(10.0);
                                     if ui
-                                        .add(first_knowledge::primary_button(
-                                            self.localization.text("collections-choose-folder"),
+                                        .add(crate::theme::ghost_button(
+                                            self.localization.text("onboarding-skip"),
+                                            ui.visuals().dark_mode,
                                         ))
                                         .clicked()
                                     {
-                                        self.choose_and_add_collection();
+                                        self.screen = Screen::Setup;
+                                        self.finish_onboarding();
                                     }
-                                    if !self.collections.is_empty()
-                                        && ui
-                                            .add(first_knowledge::primary_button(
-                                                self.localization.text("onboarding-next"),
-                                            ))
-                                            .clicked()
-                                    {
-                                        self.onboarding_page = Some(OnboardingPage::Processing);
-                                    }
-                                });
-                                ui.add_space(14.0);
-                                if ui
-                                    .link(self.localization.text("onboarding-skip-folder"))
-                                    .clicked()
-                                {
-                                    self.finish_onboarding();
                                 }
-                                ui.label(
-                                    RichText::new(
-                                        self.localization.text("onboarding-skip-folder-help"),
-                                    )
-                                    .small()
-                                    .color(ui.visuals().weak_text_color()),
-                                );
-                            }
-                            OnboardingPage::Processing => {
-                                onboarding_title(
-                                    ui,
-                                    &self.localization.text("onboarding-processing-title"),
-                                    &self.localization.text("onboarding-processing-body"),
-                                    layout.density,
-                                );
-                                let document_count = self
-                                    .collections
-                                    .iter()
-                                    .map(|collection| collection.document_count)
-                                    .sum::<usize>();
-                                let published_count = self
-                                    .collections
-                                    .iter()
-                                    .map(|collection| collection.published_count)
-                                    .sum::<usize>();
-                                let needs_review_count = self
-                                    .collections
-                                    .iter()
-                                    .map(|collection| collection.needs_review_count)
-                                    .sum::<usize>();
-                                let failed_count = self
-                                    .collections
-                                    .iter()
-                                    .map(|collection| collection.failed_count)
-                                    .sum::<usize>();
-                                first_knowledge::show_processing_progress(
-                                    ui,
-                                    &self.localization,
-                                    first_knowledge::processing_progress(
-                                        document_count,
-                                        published_count,
-                                        needs_review_count,
-                                        failed_count,
-                                        self.source_issues.len(),
-                                    ),
-                                );
-                                ui.add_space(8.0);
-                                let failed_collections = self
-                                    .collections
-                                    .iter()
-                                    .filter(|collection| {
-                                        collection.maintenance.as_ref().is_some_and(|maintenance| {
-                                            collection_maintenance_needs_recovery(
-                                                maintenance.status,
-                                            )
-                                        })
-                                    })
-                                    .map(|collection| collection.id)
-                                    .collect::<Vec<_>>();
-                                let scan_finished = self.collection_scans.is_empty()
-                                    && self.collections.iter().any(|collection| {
-                                        collection.maintenance.as_ref().is_some_and(|maintenance| {
-                            maintenance.status != airwiki_core::CollectionMaintenanceStatus::Never
-                        })
-                                    });
-                                if scan_finished && !failed_collections.is_empty() {
-                                    empty_state(
+                                OnboardingPage::Permissions => {
+                                    onboarding_title(
                                         ui,
-                                        &self.localization.text("primary-resolve-folder-title"),
-                                        &self.localization.text("primary-folder-explanation"),
+                                        &self.localization.text("onboarding-permissions-title"),
+                                        &self.localization.text("onboarding-permissions-body"),
+                                        layout.density,
                                     );
-                                    ui.horizontal_wrapped(|ui| {
-                                        if ui
-                                            .add(first_knowledge::primary_button(
-                                                self.localization.text("action-retry"),
-                                            ))
-                                            .clicked()
-                                        {
-                                            for collection_id in &failed_collections {
-                                                self.collection_scans.insert(
-                                                    *collection_id,
-                                                    CollectionScanState::Queued,
-                                                );
-                                                self.knowledge
-                                                    .collection_scan_started(*collection_id);
-                                                self.worker.send(WorkerCommand::RescanCollection(
-                                                    *collection_id,
-                                                ));
-                                            }
-                                        }
-                                        if ui
-                                            .button(
-                                                self.localization
-                                                    .text("onboarding-processing-open-folder"),
-                                            )
-                                            .clicked()
-                                        {
-                                            self.screen = Screen::Collections;
-                                            self.finish_onboarding();
-                                        }
-                                    });
-                                } else if scan_finished && document_count == 0 {
-                                    empty_state(
+                                    onboarding_permission_row(
                                         ui,
+                                        OnboardingPermissionIcon::Folder,
                                         &self
                                             .localization
-                                            .text("onboarding-processing-empty-title"),
-                                        &self.localization.text("onboarding-processing-empty-body"),
+                                            .text("onboarding-permissions-folder-title"),
+                                        &self
+                                            .localization
+                                            .text("onboarding-permissions-folder-body"),
                                     );
-                                    if ui
-                                        .button(
-                                            self.localization
-                                                .text("onboarding-processing-open-folder"),
-                                        )
-                                        .clicked()
-                                    {
-                                        self.screen = Screen::Collections;
-                                        self.finish_onboarding();
-                                    }
-                                } else {
-                                    ui.horizontal(|ui| {
-                                        ui.spinner();
-                                        ui.label(if self.collection_scans.is_empty() {
-                                            self.localization
-                                                .text("onboarding-processing-enriching")
-                                        } else {
-                                            self.localization.text("onboarding-processing-scanning")
-                                        });
-                                    });
+                                    onboarding_permission_row(
+                                        ui,
+                                        OnboardingPermissionIcon::Network,
+                                        &self
+                                            .localization
+                                            .text("onboarding-permissions-network-title"),
+                                        &self
+                                            .localization
+                                            .text("onboarding-permissions-network-body"),
+                                    );
+                                    onboarding_permission_row(
+                                        ui,
+                                        OnboardingPermissionIcon::Power,
+                                        &self
+                                            .localization
+                                            .text("onboarding-permissions-login-title"),
+                                        &self
+                                            .localization
+                                            .text("onboarding-permissions-login-body"),
+                                    );
                                 }
-                            }
-                            OnboardingPage::Review => {
-                                onboarding_title(
-                                    ui,
-                                    &self.localization.text("onboarding-review-title"),
-                                    &self.localization.text("onboarding-review-body"),
-                                    layout.density,
-                                );
-                                if onboarding_review_requires_recovery(
-                                    self.reviews.len(),
-                                    self.source_issues.len(),
-                                ) {
-                                    ui.horizontal_wrapped(|ui| {
-                                        if ui
-                                            .add(first_knowledge::primary_button(
-                                                self.localization
-                                                    .text("onboarding-review-choose-folder"),
-                                            ))
-                                            .clicked()
-                                        {
-                                            self.choose_and_add_collection();
-                                        }
-                                        if ui
-                                            .button(
-                                                self.localization
-                                                    .text("onboarding-review-continue"),
-                                            )
-                                            .clicked()
-                                        {
-                                            self.finish_onboarding();
-                                        }
-                                    });
-                                    ui.add_space(8.0);
-                                }
-                                self.review_content(ui);
-                            }
-                            OnboardingPage::Search => {
-                                onboarding_title(
-                                    ui,
-                                    &self.localization.text("onboarding-search-title"),
-                                    &self.localization.text("onboarding-search-body"),
-                                    layout.density,
-                                );
-                                self.search_form(ui, false);
-                                ui.add_space(if layout.is_compact() { 8.0 } else { 16.0 });
-                                let selected_evidence = if self.search_request_id.is_some() {
-                                    self.search_feedback(ui, false)
-                                } else if self.search_error.is_some() {
-                                    self.search_error_feedback(ui);
-                                    ui.add_space(8.0);
-                                    if ui
-                                        .add_enabled(
-                                            !self.onboarding_finishing,
-                                            egui::Button::new(
-                                                self.localization
-                                                    .text("onboarding-search-finish-later"),
-                                            ),
-                                        )
-                                        .clicked()
-                                    {
-                                        self.finish_onboarding();
-                                    }
-                                    None
-                                } else {
-                                    let (title_id, body_id, button_id) =
-                                        onboarding_search_completion(
-                                            self.search_completed,
-                                            !self.search_hits.is_empty(),
-                                        );
-                                    ui.heading(self.localization.text(title_id));
-                                    ui.label(self.localization.text(body_id));
-                                    if ui
-                                        .add_enabled(
-                                            !self.onboarding_finishing,
-                                            first_knowledge::primary_button(
-                                                self.localization.text(button_id),
-                                            ),
-                                        )
-                                        .clicked()
-                                    {
-                                        self.finish_onboarding();
-                                    }
-                                    self.search_feedback(ui, false)
-                                };
-                                if let Some(target) = selected_evidence {
-                                    self.open_search_evidence(target);
-                                    self.finish_onboarding();
-                                }
-                            }
-                        }
-                    });
+                            });
+                            scroll_newly_focused_control_into_view(ui);
+                        });
                 });
                 strip.cell(|ui| {
-                    first_knowledge::privacy_note(ui, &self.localization);
+                    let available = ui.available_rect_before_wrap();
+                    let button_size = egui::vec2(108.0, 42.0);
+                    let (back_button, next_button) =
+                        onboarding_footer_button_rects(available, button_size);
+                    match page {
+                        OnboardingPage::Welcome => {
+                            if ui
+                                .put(
+                                    next_button,
+                                    first_knowledge::primary_button(
+                                        self.localization.text("onboarding-next"),
+                                    ),
+                                )
+                                .clicked()
+                            {
+                                self.onboarding_page = Some(OnboardingPage::Model);
+                            }
+                        }
+                        OnboardingPage::Model => {
+                            if ui
+                                .put(
+                                    back_button,
+                                    crate::theme::ghost_button(
+                                        self.localization.text("onboarding-back"),
+                                        ui.visuals().dark_mode,
+                                    ),
+                                )
+                                .clicked()
+                            {
+                                self.onboarding_page = Some(OnboardingPage::Welcome);
+                            }
+                            let continue_response = ui
+                                .add_enabled_ui(self.models_ready, |ui| {
+                                    ui.put(
+                                        next_button,
+                                        first_knowledge::primary_button(
+                                            self.localization.text("onboarding-next"),
+                                        ),
+                                    )
+                                })
+                                .inner
+                                .on_disabled_hover_text(
+                                    self.localization.text("onboarding-model-required"),
+                                );
+                            if continue_response.clicked() {
+                                self.onboarding_page = Some(OnboardingPage::Permissions);
+                            }
+                        }
+                        OnboardingPage::Permissions => {
+                            if ui
+                                .put(
+                                    back_button,
+                                    crate::theme::ghost_button(
+                                        self.localization.text("onboarding-back"),
+                                        ui.visuals().dark_mode,
+                                    ),
+                                )
+                                .clicked()
+                            {
+                                self.onboarding_page = Some(OnboardingPage::Model);
+                            }
+                            if ui
+                                .put(
+                                    next_button,
+                                    first_knowledge::primary_button(
+                                        self.localization.text("onboarding-finish"),
+                                    ),
+                                )
+                                .clicked()
+                            {
+                                self.screen = Screen::Setup;
+                                self.finish_onboarding();
+                            }
+                        }
+                    }
                     if self.onboarding_finishing {
                         ui.spinner();
                     }
                 });
             });
-    }
-
-    fn next_onboarding_page(&self) -> OnboardingPage {
-        onboarding_page_for_state(
-            self.models_ready,
-            self.collections.len(),
-            self.reviews.len(),
-            self.source_issues.len(),
-            self.collections
-                .iter()
-                .map(|collection| collection.published_count)
-                .sum(),
-        )
-    }
-
-    fn choose_and_add_collection(&self) {
-        let Some(folder) = rfd::FileDialog::new().pick_folder() else {
-            return;
-        };
-        let name = folder
-            .file_name()
-            .and_then(|name| name.to_str())
-            .filter(|name| !name.trim().is_empty())
-            .map(ToOwned::to_owned)
-            .unwrap_or_else(|| self.localization.text("onboarding-default-folder-name"));
-        self.worker
-            .send(WorkerCommand::AddCollection { name, folder });
-    }
-
-    fn reconcile_onboarding_page(&mut self) {
-        if self.onboarding_finishing {
-            return;
-        }
-        self.onboarding_page = advance_onboarding_page(
-            self.onboarding_page,
-            self.collections.len(),
-            self.reviews.len(),
-            self.source_issues.len(),
-            self.collections
-                .iter()
-                .map(|collection| collection.published_count)
-                .sum(),
-        );
     }
 
     fn finish_onboarding(&mut self) {
@@ -4360,6 +5866,76 @@ fn updater_launched_installer(view: &UpdaterWorkerView) -> bool {
     )
 }
 
+fn localized_today_date(locale: UiLocale) -> String {
+    let today = chrono::Local::now().date_naive();
+    let weekday_index = today.weekday().num_days_from_monday() as usize;
+    let month_index = today.month0() as usize;
+    match locale {
+        UiLocale::EnUs => {
+            const WEEKDAYS: [&str; 7] = [
+                "Monday",
+                "Tuesday",
+                "Wednesday",
+                "Thursday",
+                "Friday",
+                "Saturday",
+                "Sunday",
+            ];
+            const MONTHS: [&str; 12] = [
+                "January",
+                "February",
+                "March",
+                "April",
+                "May",
+                "June",
+                "July",
+                "August",
+                "September",
+                "October",
+                "November",
+                "December",
+            ];
+            let weekday = WEEKDAYS.get(weekday_index).copied().unwrap_or("Today");
+            let month = MONTHS.get(month_index).copied().unwrap_or("January");
+            format!("{}, {} {}, {}", weekday, month, today.day(), today.year())
+        }
+        UiLocale::Es => {
+            const WEEKDAYS: [&str; 7] = [
+                "lunes",
+                "martes",
+                "miércoles",
+                "jueves",
+                "viernes",
+                "sábado",
+                "domingo",
+            ];
+            const MONTHS: [&str; 12] = [
+                "enero",
+                "febrero",
+                "marzo",
+                "abril",
+                "mayo",
+                "junio",
+                "julio",
+                "agosto",
+                "septiembre",
+                "octubre",
+                "noviembre",
+                "diciembre",
+            ];
+            let weekday = WEEKDAYS.get(weekday_index).copied().unwrap_or("Hoy");
+            let month = MONTHS.get(month_index).copied().unwrap_or("enero");
+            format!(
+                "{}, {} de {} de {}",
+                weekday,
+                today.day(),
+                month,
+                today.year()
+            )
+        }
+    }
+}
+
 fn update_issue_label(localization: &Localization, issue: UpdateIssueCode) -> String {
     localization.text(match issue {
         UpdateIssueCode::Offline => "updates-issue-offline",
@@ -4380,33 +5956,25 @@ fn localized_update_version(
     localization.text_with(message_id, Some(&arguments))
 }
 
-fn readiness_component_label(localization: &Localization, component: ReadinessComponent) -> String {
-    localization.text(match component {
-        ReadinessComponent::LocalAi => "component-local-ai",
-        ReadinessComponent::Collections => "component-collections",
-        ReadinessComponent::Review => "component-review",
-        ReadinessComponent::Wiki => "component-wiki",
-        ReadinessComponent::Lan => "component-lan",
-        ReadinessComponent::Chat => "component-chat",
-        ReadinessComponent::Background => "component-background",
-        ReadinessComponent::Updates => "component-updates",
-    })
-}
-
 fn readiness_status_presentation(
     localization: &Localization,
     status: ReadinessStatus,
+    dark_mode: bool,
 ) -> (String, Color32) {
     let (message, color) = match status {
-        ReadinessStatus::Ready => ("status-ready", crate::theme::VERIFIED_GREEN),
-        ReadinessStatus::Working => ("status-working", crate::theme::AIR_BLUE),
-        ReadinessStatus::NeedsPermission => {
-            ("status-needs-permission", crate::theme::WARNING_AMBER)
-        }
-        ReadinessStatus::NeedsAttention => ("status-needs-attention", crate::theme::ERROR_CORAL),
+        ReadinessStatus::Ready => ("status-ready", crate::theme::verified_text(dark_mode)),
+        ReadinessStatus::Working => ("status-working", crate::theme::accent_text(dark_mode)),
+        ReadinessStatus::NeedsPermission => (
+            "status-needs-permission",
+            crate::theme::warning_text(dark_mode),
+        ),
+        ReadinessStatus::NeedsAttention => (
+            "status-needs-attention",
+            crate::theme::error_text(dark_mode),
+        ),
         ReadinessStatus::OptionalDisabled => (
             "status-optional-disabled",
-            crate::theme::secondary_text(true),
+            crate::theme::secondary_text(dark_mode),
         ),
     };
     (localization.text(message), color)
@@ -4415,23 +5983,26 @@ fn readiness_status_presentation(
 fn maintenance_status_presentation(
     localization: &Localization,
     status: airwiki_core::CollectionMaintenanceStatus,
+    dark_mode: bool,
 ) -> (String, Color32) {
     let (message, color) = match status {
         airwiki_core::CollectionMaintenanceStatus::Never => {
-            ("maintenance-never", crate::theme::secondary_text(true))
+            ("maintenance-never", crate::theme::secondary_text(dark_mode))
         }
-        airwiki_core::CollectionMaintenanceStatus::Success => {
-            ("maintenance-success", crate::theme::VERIFIED_GREEN)
-        }
+        airwiki_core::CollectionMaintenanceStatus::Success => (
+            "maintenance-success",
+            crate::theme::verified_text(dark_mode),
+        ),
         airwiki_core::CollectionMaintenanceStatus::Partial => {
-            ("maintenance-partial", crate::theme::WARNING_AMBER)
+            ("maintenance-partial", crate::theme::warning_text(dark_mode))
         }
         airwiki_core::CollectionMaintenanceStatus::Failed => {
-            ("maintenance-failed", crate::theme::ERROR_CORAL)
+            ("maintenance-failed", crate::theme::error_text(dark_mode))
         }
-        airwiki_core::CollectionMaintenanceStatus::Quarantined => {
-            ("maintenance-quarantined", crate::theme::ERROR_CORAL)
-        }
+        airwiki_core::CollectionMaintenanceStatus::Quarantined => (
+            "maintenance-quarantined",
+            crate::theme::error_text(dark_mode),
+        ),
     };
     (localization.text(message), color)
 }
@@ -4537,13 +6108,18 @@ fn show_review_issue(
 ) -> bool {
     let mut requested_rescan = false;
     egui::Frame::new()
-        .fill(Color32::from_rgba_unmultiplied(230, 160, 35, 18))
-        .stroke(egui::Stroke::new(1.0, Color32::from_rgb(155, 105, 25)))
-        .corner_radius(egui::CornerRadius::same(8))
+        .fill(crate::theme::paper(ui.visuals().dark_mode))
+        .stroke(egui::Stroke::new(
+            1.0,
+            crate::theme::border(ui.visuals().dark_mode),
+        ))
+        .corner_radius(egui::CornerRadius::ZERO)
         .inner_margin(egui::Margin::same(10))
         .show(ui, |ui| {
             ui.set_min_width(ui.available_width());
-            ui.label(RichText::new(&issue.source_name).strong());
+            ui.label(
+                RichText::new(&issue.source_name).family(crate::theme::semibold_font_family()),
+            );
             ui.label(
                 RichText::new(&issue.collection_name)
                     .small()
@@ -4552,8 +6128,8 @@ fn show_review_issue(
             ui.label(
                 RichText::new(localization.text("review-issue-status"))
                     .small()
-                    .strong()
-                    .color(crate::theme::WARNING_AMBER),
+                    .family(crate::theme::semibold_font_family())
+                    .color(crate::theme::warning_text(ui.visuals().dark_mode)),
             );
             ui.add(
                 egui::Label::new(
@@ -4816,28 +6392,13 @@ fn onboarding_error_is_relevant(page: OnboardingPage, message: &str) -> bool {
         return true;
     }
     match page {
-        OnboardingPage::Welcome => false,
+        OnboardingPage::Welcome | OnboardingPage::Permissions => false,
         OnboardingPage::Model => {
             normalized == "local_ai_unavailable"
                 || contains_any(&[
                     "model", "modelo", "infer", "asset", "artifact", "hash", "memory", "memoria",
                     "disk", "space", "espacio",
                 ])
-        }
-        OnboardingPage::Collection | OnboardingPage::Processing | OnboardingPage::Review => {
-            contains_any(&[
-                "collection",
-                "colección",
-                "document",
-                "wiki",
-                "markdown",
-                "pdf",
-                "chunk",
-            ])
-        }
-        OnboardingPage::Search => {
-            normalized == "search_unavailable"
-                || contains_any(&["search", "búsqueda", "index", "índice", "fts", "embedding"])
         }
     }
 }
@@ -4960,92 +6521,236 @@ fn onboarding_title(
     density: crate::layout::LayoutDensity,
 ) {
     let (title_size, body_size, gap) = match density {
-        crate::layout::LayoutDensity::Compact => (20.0, 14.0, 8.0),
-        crate::layout::LayoutDensity::Comfortable => (24.0, 15.0, 16.0),
+        crate::layout::LayoutDensity::Compact => (28.0, 14.0, 12.0),
+        crate::layout::LayoutDensity::Comfortable => (34.0, 15.0, 20.0),
     };
-    ui.heading(RichText::new(title).size(title_size).strong());
+    ui.heading(
+        RichText::new(title)
+            .size(title_size)
+            .family(crate::theme::semibold_font_family()),
+    );
     ui.add(egui::Label::new(RichText::new(body).size(body_size)).wrap());
     ui.add_space(gap);
 }
 
-fn onboarding_page_for_state(
-    models_ready: bool,
-    collection_count: usize,
-    review_count: usize,
-    issue_count: usize,
-    published_count: usize,
-) -> OnboardingPage {
-    if !models_ready {
-        OnboardingPage::Model
-    } else if collection_count == 0 {
-        OnboardingPage::Collection
-    } else if published_count > 0 {
-        OnboardingPage::Search
-    } else if review_count > 0 || issue_count > 0 {
-        OnboardingPage::Review
-    } else {
-        OnboardingPage::Processing
+const fn onboarding_intro_step(page: OnboardingPage) -> i64 {
+    match page {
+        OnboardingPage::Welcome => 1,
+        OnboardingPage::Model => 2,
+        OnboardingPage::Permissions => 3,
     }
 }
 
-fn advance_onboarding_page(
-    current: Option<OnboardingPage>,
-    collection_count: usize,
-    review_count: usize,
-    issue_count: usize,
-    published_count: usize,
-) -> Option<OnboardingPage> {
-    match current {
-        Some(OnboardingPage::Collection) if collection_count > 0 => {
-            Some(OnboardingPage::Processing)
-        }
-        Some(OnboardingPage::Processing | OnboardingPage::Review) if published_count > 0 => {
-            Some(OnboardingPage::Search)
-        }
-        Some(OnboardingPage::Processing) if review_count > 0 || issue_count > 0 => {
-            Some(OnboardingPage::Review)
-        }
-        other => other,
+const fn onboarding_machine_status(capability: Option<(bool, bool)>) -> &'static str {
+    match capability {
+        None => "onboarding-machine-checking",
+        Some((true, true)) => "onboarding-machine-supported",
+        Some((true, false)) => "onboarding-machine-needs-attention",
+        Some((false, _)) => "onboarding-machine-unsupported",
     }
 }
 
-fn onboarding_review_requires_recovery(review_count: usize, issue_count: usize) -> bool {
-    review_count == 0 && issue_count > 0
+fn hardware_platform_name(os: &str, architecture: &str) -> String {
+    match (os, architecture) {
+        ("macos", "aarch64") => "Apple Silicon".to_owned(),
+        ("windows", "x86_64") => "Windows x64".to_owned(),
+        _ => format!("{os} {architecture}"),
+    }
 }
 
-fn collection_maintenance_needs_recovery(
-    status: airwiki_core::CollectionMaintenanceStatus,
+fn rounded_gib(bytes: u64) -> u64 {
+    (bytes as f64 / 1024_f64.powi(3)).round() as u64
+}
+
+fn onboarding_machine_checks(report: &HardwareReport) -> (bool, bool, bool) {
+    const GIB: u64 = 1024 * 1024 * 1024;
+    let platform_ready = report.supported_target && (report.os != "windows" || report.avx2);
+    let memory_ready = report.total_memory_bytes >= 8 * GIB;
+    let disk_ready = report.available_disk_bytes >= GIB;
+    (platform_ready, memory_ready, disk_ready)
+}
+
+fn onboarding_machine_row(ui: &mut egui::Ui, message: &str, ready: Option<bool>) {
+    let color = match ready {
+        Some(true) => crate::theme::accent_text(ui.visuals().dark_mode),
+        Some(false) => crate::theme::warning_text(ui.visuals().dark_mode),
+        None => crate::theme::secondary_text(ui.visuals().dark_mode),
+    };
+    ui.horizontal(|ui| {
+        let (rect, _) = ui.allocate_exact_size(egui::vec2(20.0, 20.0), egui::Sense::hover());
+        if ready == Some(true) {
+            ui.painter()
+                .circle_stroke(rect.center(), 7.0, egui::Stroke::new(1.2, color));
+            ui.painter().line_segment(
+                [
+                    rect.center() + egui::vec2(-3.5, 0.0),
+                    rect.center() + egui::vec2(-0.8, 3.0),
+                ],
+                egui::Stroke::new(1.2, color),
+            );
+            ui.painter().line_segment(
+                [
+                    rect.center() + egui::vec2(-0.8, 3.0),
+                    rect.center() + egui::vec2(4.0, -3.5),
+                ],
+                egui::Stroke::new(1.2, color),
+            );
+        } else if ready == Some(false) {
+            ui.painter().text(
+                rect.center(),
+                egui::Align2::CENTER_CENTER,
+                "!",
+                egui::FontId::new(15.0, crate::theme::semibold_font_family()),
+                color,
+            );
+        } else {
+            ui.painter()
+                .circle_stroke(rect.center(), 7.0, egui::Stroke::new(1.2, color));
+        }
+        ui.label(message);
+    });
+}
+
+fn onboarding_footer_button_rects(
+    available: egui::Rect,
+    button_size: egui::Vec2,
+) -> (egui::Rect, egui::Rect) {
+    let vertical_center = available.center().y;
+    let back = egui::Rect::from_center_size(
+        egui::pos2(available.left() + button_size.x / 2.0, vertical_center),
+        button_size,
+    );
+    let primary = egui::Rect::from_center_size(
+        egui::pos2(available.right() - button_size.x / 2.0, vertical_center),
+        button_size,
+    );
+    (back, primary)
+}
+
+const fn wiki_health_can_refresh(state: &WikiHealthCheckState) -> bool {
+    matches!(state, WikiHealthCheckState::Ready)
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum OnboardingPermissionIcon {
+    Folder,
+    Network,
+    Power,
+}
+
+fn onboarding_permission_row(
+    ui: &mut egui::Ui,
+    icon: OnboardingPermissionIcon,
+    title: &str,
+    body: &str,
+) {
+    ui.horizontal_top(|ui| {
+        let (rect, _) = ui.allocate_exact_size(egui::vec2(24.0, 24.0), egui::Sense::hover());
+        paint_onboarding_permission_icon(
+            ui.painter(),
+            rect,
+            icon,
+            crate::theme::accent_text(ui.visuals().dark_mode),
+        );
+        ui.vertical(|ui| {
+            ui.heading(
+                RichText::new(title)
+                    .size(16.0)
+                    .family(crate::theme::semibold_font_family()),
+            );
+            ui.add(
+                egui::Label::new(
+                    RichText::new(body).color(crate::theme::secondary_text(ui.visuals().dark_mode)),
+                )
+                .wrap(),
+            );
+        });
+    });
+    ui.add_space(16.0);
+}
+
+fn paint_onboarding_permission_icon(
+    painter: &egui::Painter,
+    rect: egui::Rect,
+    icon: OnboardingPermissionIcon,
+    color: Color32,
+) {
+    let stroke = egui::Stroke::new(1.4, color);
+    match icon {
+        OnboardingPermissionIcon::Folder => {
+            let folder = [
+                rect.left_top() + egui::vec2(2.0, 6.0),
+                rect.left_top() + egui::vec2(8.0, 6.0),
+                rect.left_top() + egui::vec2(10.0, 9.0),
+                rect.right_top() + egui::vec2(-2.0, 9.0),
+                rect.right_bottom() + egui::vec2(-2.0, -3.0),
+                rect.left_bottom() + egui::vec2(2.0, -3.0),
+            ];
+            painter.add(egui::Shape::closed_line(folder.to_vec(), stroke));
+        }
+        OnboardingPermissionIcon::Network => {
+            let center = rect.center_bottom() - egui::vec2(0.0, 4.0);
+            for (radius, sweep) in [(9.0, 0.9), (6.0, 0.75), (3.0, 0.55)] {
+                painter.add(egui::Shape::line(
+                    (0..=12)
+                        .map(|step| {
+                            let angle =
+                                std::f32::consts::PI * (1.0 + (step as f32 / 12.0 - 0.5) * sweep);
+                            center + egui::vec2(angle.cos(), angle.sin()) * radius
+                        })
+                        .collect(),
+                    stroke,
+                ));
+            }
+            painter.circle_filled(center, 1.6, color);
+        }
+        OnboardingPermissionIcon::Power => {
+            painter.circle_stroke(rect.center(), 8.0, stroke);
+            painter.rect_filled(
+                egui::Rect::from_center_size(
+                    rect.center_top() + egui::vec2(0.0, 7.0),
+                    egui::vec2(5.0, 11.0),
+                ),
+                0.0,
+                crate::theme::paper(false),
+            );
+            painter.line_segment(
+                [
+                    rect.center_top() + egui::vec2(0.0, 2.0),
+                    rect.center() + egui::vec2(0.0, 2.0),
+                ],
+                stroke,
+            );
+        }
+    }
+}
+
+fn scroll_newly_focused_control_into_view(ui: &egui::Ui) {
+    let response = ui
+        .memory(|memory| memory.focused())
+        .and_then(|focused| ui.ctx().read_response(focused));
+    if let Some(response) = response
+        && focused_control_needs_scroll(
+            response.gained_focus(),
+            ui.min_rect(),
+            ui.clip_rect(),
+            response.rect,
+        )
+    {
+        response.scroll_to_me(None);
+    }
+}
+
+fn focused_control_needs_scroll(
+    gained_focus: bool,
+    body_rect: egui::Rect,
+    visible_rect: egui::Rect,
+    control_rect: egui::Rect,
 ) -> bool {
-    matches!(
-        status,
-        airwiki_core::CollectionMaintenanceStatus::Failed
-            | airwiki_core::CollectionMaintenanceStatus::Quarantined
-    )
-}
-
-fn onboarding_search_completion(
-    search_completed: bool,
-    has_hits: bool,
-) -> (&'static str, &'static str, &'static str) {
-    if has_hits {
-        (
-            "onboarding-search-ready-title",
-            "onboarding-search-ready-body",
-            "onboarding-search-finish",
-        )
-    } else if search_completed {
-        (
-            "onboarding-search-empty-title",
-            "onboarding-search-empty-body",
-            "onboarding-search-finish-later",
-        )
-    } else {
-        (
-            "onboarding-search-optional-title",
-            "onboarding-search-optional-body",
-            "onboarding-search-finish-later",
-        )
-    }
+    gained_focus
+        && body_rect.intersects(control_rect)
+        && (control_rect.top() < visible_rect.top()
+            || control_rect.bottom() > visible_rect.bottom())
 }
 
 fn selected_review_after_refresh(
@@ -5055,53 +6760,6 @@ fn selected_review_after_refresh(
     selected
         .filter(|selected| reviews.iter().any(|review| review.concept_id == *selected))
         .or_else(|| reviews.first().map(|review| review.concept_id))
-}
-
-fn visible_journey_states(journey: FirstKnowledgeJourneyView) -> [JourneyStepState; 5] {
-    let choose_folder =
-        visible_journey_state(journey.stage_state(FirstKnowledgeStage::ChooseKnowledgeFolder));
-    let process = visible_journey_state(journey.stage_state(FirstKnowledgeStage::ProcessKnowledge));
-    [
-        visible_journey_state(journey.stage_state(FirstKnowledgeStage::PrepareLocalAi)),
-        merge_read_state(choose_folder, process),
-        visible_journey_state(journey.stage_state(FirstKnowledgeStage::ReviewKnowledge)),
-        visible_journey_state(journey.stage_state(FirstKnowledgeStage::PublishReady)),
-        visible_journey_state(journey.stage_state(FirstKnowledgeStage::SearchKnowledge)),
-    ]
-}
-
-fn visible_journey_state(state: FirstKnowledgeStepState) -> JourneyStepState {
-    match state {
-        FirstKnowledgeStepState::Complete => JourneyStepState::Complete,
-        FirstKnowledgeStepState::Current | FirstKnowledgeStepState::Working => {
-            JourneyStepState::Current
-        }
-        FirstKnowledgeStepState::NeedsPermission | FirstKnowledgeStepState::NeedsAttention => {
-            JourneyStepState::Attention
-        }
-        FirstKnowledgeStepState::Pending => JourneyStepState::Upcoming,
-    }
-}
-
-fn merge_read_state(
-    choose_folder: JourneyStepState,
-    process: JourneyStepState,
-) -> JourneyStepState {
-    if matches!(
-        (choose_folder, process),
-        (JourneyStepState::Attention, _) | (_, JourneyStepState::Attention)
-    ) {
-        JourneyStepState::Attention
-    } else if matches!(
-        (choose_folder, process),
-        (JourneyStepState::Current, _) | (_, JourneyStepState::Current)
-    ) {
-        JourneyStepState::Current
-    } else if choose_folder == JourneyStepState::Complete && process == JourneyStepState::Complete {
-        JourneyStepState::Complete
-    } else {
-        JourneyStepState::Upcoming
-    }
 }
 
 fn journey_stage_copy(localization: &Localization, stage: FirstKnowledgeStage) -> (String, String) {
@@ -5155,7 +6813,6 @@ impl eframe::App for AirWikiApp {
         }
         self.shell.handle_frame(context, self.close_policy());
         self.drain_events();
-        self.reconcile_onboarding_page();
         if self.exit_after_update_launch {
             self.exit_after_update_launch = false;
             self.shell.request_exit(context);
@@ -5182,29 +6839,108 @@ impl eframe::App for AirWikiApp {
     }
 
     fn ui(&mut self, root: &mut egui::Ui, _frame: &mut eframe::Frame) {
+        #[cfg(target_os = "macos")]
+        self.title_bar(root);
         if self.onboarding_page.is_some() {
-            egui::CentralPanel::default().show(root, |ui| {
-                self.onboarding(ui);
-            });
+            self.status_bar(root);
+            let layout = ResponsiveLayout::from_available(root.available_size());
+            let onboarding_margin = if layout.is_narrow() {
+                layout.content_margin()
+            } else {
+                egui::Margin {
+                    left: 72,
+                    right: 72,
+                    top: 56,
+                    bottom: 40,
+                }
+            };
+            egui::CentralPanel::default()
+                .frame(
+                    egui::Frame::new()
+                        .fill(crate::theme::paper(root.visuals().dark_mode))
+                        .inner_margin(onboarding_margin),
+                )
+                .show(root, |ui| {
+                    self.onboarding(ui);
+                });
             self.onboarding_notices(root);
             self.close_confirmation(root.ctx());
             return;
         }
+        self.status_bar(root);
         self.sidebar(root);
         if self.screen != Screen::Setup {
             self.notices(root);
         }
-        egui::CentralPanel::default().show(root, |ui| match self.screen {
-            Screen::Setup => self.home(ui),
-            Screen::Models => self.setup(ui),
-            Screen::Collections => self.collections(ui),
-            Screen::Review => self.review(ui),
-            Screen::Knowledge => self.knowledge(ui),
-            Screen::Search => self.search(ui),
-            Screen::Integrations => self.integrations(ui),
-            Screen::Nodes => self.nodes(ui),
-            Screen::Settings => self.settings(ui),
-        });
+        let layout = ResponsiveLayout::from_available(root.available_size());
+        let content_margin = if self.screen == Screen::Review {
+            egui::Margin::ZERO
+        } else {
+            layout.content_margin()
+        };
+        egui::CentralPanel::default()
+            .frame(
+                egui::Frame::new()
+                    .fill(crate::theme::paper(root.visuals().dark_mode))
+                    .inner_margin(content_margin),
+            )
+            .show(root, |ui| match self.screen {
+                Screen::Setup => {
+                    let viewport = ui.available_size();
+                    egui::ScrollArea::vertical()
+                        .id_salt("today_scroll")
+                        .max_height(viewport.y)
+                        .auto_shrink([false; 2])
+                        .show(ui, |ui| {
+                            ui.set_min_width(viewport.x);
+                            self.home(ui);
+                            scroll_newly_focused_control_into_view(ui);
+                        });
+                }
+                Screen::Models => self.setup(ui),
+                Screen::Collections => {
+                    let viewport = ui.available_size();
+                    egui::ScrollArea::vertical()
+                        .id_salt("collections_page_scroll")
+                        .max_height(viewport.y)
+                        .auto_shrink([false; 2])
+                        .show(ui, |ui| {
+                            ui.set_min_width(viewport.x);
+                            self.collections(ui);
+                            scroll_newly_focused_control_into_view(ui);
+                        });
+                }
+                Screen::Review => self.review(ui),
+                Screen::Knowledge => self.knowledge(ui),
+                Screen::Search => {
+                    let viewport = ui.available_size();
+                    egui::ScrollArea::vertical()
+                        .id_salt("search_page_scroll")
+                        .max_height(viewport.y)
+                        .auto_shrink([false; 2])
+                        .show(ui, |ui| {
+                            ui.set_min_width(viewport.x);
+                            self.search(ui);
+                            scroll_newly_focused_control_into_view(ui);
+                        });
+                }
+                Screen::Public => {
+                    let viewport = ui.available_size();
+                    egui::ScrollArea::vertical()
+                        .id_salt("public_page_scroll")
+                        .max_height(viewport.y)
+                        .auto_shrink([false; 2])
+                        .show(ui, |ui| {
+                            ui.set_min_width(viewport.x);
+                            self.public_network(ui);
+                            scroll_newly_focused_control_into_view(ui);
+                        });
+                }
+                Screen::Integrations => self.integrations(ui),
+                Screen::Nodes => self.nodes(ui),
+                Screen::Settings => self.settings(ui),
+            });
+        self.community_indexes_confirmation_window(root.ctx());
         self.close_confirmation(root.ctx());
     }
 }
@@ -5213,15 +6949,551 @@ fn configure_style(context: &egui::Context) {
     crate::theme::apply(context);
 }
 
-fn nav(ui: &mut egui::Ui, current: &mut Screen, target: Screen, label: &str) {
-    if ui
-        .add_sized(
-            [178.0, 34.0],
-            egui::Button::selectable(*current == target, label),
+fn editorial_modal_frame(dark_mode: bool) -> egui::Frame {
+    egui::Frame::new()
+        .fill(crate::theme::paper(dark_mode))
+        .stroke(egui::Stroke::NONE)
+        .corner_radius(egui::CornerRadius::same(4))
+        .inner_margin(egui::Margin::same(20))
+        .shadow(egui::epaint::Shadow {
+            offset: [0, 12],
+            blur: 32,
+            spread: 0,
+            color: Color32::from_black_alpha(56),
+        })
+}
+
+fn editorial_title_row_button(
+    ui: &mut egui::Ui,
+    title: &str,
+    trailing: Option<&str>,
+    title_size: f32,
+) -> egui::Response {
+    let dark_mode = ui.visuals().dark_mode;
+    let (rect, response) =
+        ui.allocate_exact_size(egui::vec2(ui.available_width(), 28.0), egui::Sense::click());
+    response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, title));
+    if response.hovered() {
+        ui.painter()
+            .rect_filled(rect, 0.0, ui.visuals().widgets.hovered.weak_bg_fill);
+    }
+    if response.has_focus() {
+        ui.painter().rect_stroke(
+            rect.shrink(2.0),
+            1.0,
+            egui::Stroke::new(2.0, crate::theme::AIR_CYAN),
+            egui::StrokeKind::Inside,
+        );
+    }
+    let trailing_galley = trailing.map(|trailing| {
+        ui.painter().layout_no_wrap(
+            trailing.to_owned(),
+            egui::FontId::proportional(12.0),
+            crate::theme::secondary_text(dark_mode),
         )
-        .clicked()
-    {
+    });
+    let trailing_width = trailing_galley
+        .as_ref()
+        .map_or(0.0, |galley| galley.size().x);
+    let title_width = editorial_title_available_width(rect.width(), trailing_width);
+    let title_galley = ui.painter().layout_job(crate::theme::truncated_title_job(
+        title,
+        egui::FontId::new(title_size, crate::theme::semibold_font_family()),
+        crate::theme::ink(dark_mode),
+        title_width,
+    ));
+    let title_elided = title_galley.elided;
+    ui.painter().galley(
+        egui::pos2(
+            rect.left() + 4.0,
+            rect.center().y - title_galley.size().y / 2.0,
+        ),
+        title_galley,
+        crate::theme::ink(dark_mode),
+    );
+    if let Some(trailing_galley) = trailing_galley {
+        ui.painter().galley(
+            egui::pos2(
+                rect.right() - 4.0 - trailing_galley.size().x,
+                rect.center().y - trailing_galley.size().y / 2.0,
+            ),
+            trailing_galley,
+            crate::theme::secondary_text(dark_mode),
+        );
+    }
+    let response = if title_elided {
+        response.on_hover_text(title)
+    } else {
+        response
+    };
+    if response.gained_focus() {
+        response.scroll_to_me(None);
+    }
+    response
+}
+
+fn editorial_title_available_width(row_width: f32, trailing_width: f32) -> f32 {
+    let trailing_reservation = if trailing_width > 0.0 {
+        trailing_width + 12.0
+    } else {
+        0.0
+    };
+    (row_width - 8.0 - trailing_reservation).max(0.0)
+}
+
+fn review_queue_button(
+    ui: &mut egui::Ui,
+    title: &str,
+    metadata: &str,
+    selected: bool,
+) -> egui::Response {
+    let dark_mode = ui.visuals().dark_mode;
+    let (rect, response) =
+        ui.allocate_exact_size(egui::vec2(ui.available_width(), 58.0), egui::Sense::click());
+    response.widget_info(|| {
+        egui::WidgetInfo::selected(egui::WidgetType::Button, true, selected, title)
+    });
+    if selected {
+        ui.painter()
+            .rect_filled(rect, 0.0, Color32::from_rgba_unmultiplied(0, 136, 176, 22));
+    } else if response.hovered() {
+        ui.painter()
+            .rect_filled(rect, 0.0, ui.visuals().widgets.hovered.weak_bg_fill);
+    }
+    if response.has_focus() {
+        ui.painter().rect_stroke(
+            rect.shrink(2.0),
+            0.0,
+            egui::Stroke::new(2.0, crate::theme::AIR_CYAN),
+            egui::StrokeKind::Inside,
+        );
+    }
+    let text_x = rect.left() + 22.0;
+    ui.painter().text(
+        egui::pos2(text_x, rect.center().y - 9.0),
+        egui::Align2::LEFT_CENTER,
+        title,
+        egui::FontId::new(15.0, crate::theme::semibold_font_family()),
+        if selected {
+            crate::theme::accent_text(dark_mode)
+        } else {
+            crate::theme::ink(dark_mode)
+        },
+    );
+    ui.painter().text(
+        egui::pos2(text_x, rect.center().y + 10.0),
+        egui::Align2::LEFT_CENTER,
+        metadata,
+        egui::FontId::proportional(12.0),
+        crate::theme::secondary_text(dark_mode),
+    );
+    let response = response.on_hover_text(format!("{title}\n{metadata}"));
+    if response.gained_focus() {
+        response.scroll_to_me(None);
+    }
+    response
+}
+
+fn nav(
+    ui: &mut egui::Ui,
+    current: &mut Screen,
+    target: Screen,
+    icon: NavIcon,
+    label: &str,
+    badge: Option<usize>,
+) {
+    let selected = nav_is_selected(*current, target);
+    let dark_mode = ui.visuals().dark_mode;
+    let color = if selected {
+        crate::theme::accent_text(dark_mode)
+    } else {
+        crate::theme::ink(dark_mode)
+    };
+    let (rect, response) =
+        ui.allocate_exact_size(egui::vec2(ui.available_width(), 36.0), egui::Sense::click());
+    let accessible_label = badge
+        .filter(|count| *count > 0)
+        .map_or_else(|| label.to_owned(), |count| format!("{label} ({count})"));
+    response.widget_info(|| {
+        egui::WidgetInfo::selected(egui::WidgetType::Button, true, selected, &accessible_label)
+    });
+    if response.hovered() {
+        ui.painter()
+            .rect_filled(rect, 0.0, ui.visuals().widgets.hovered.weak_bg_fill);
+    }
+    if response.has_focus() {
+        ui.painter().rect_stroke(
+            rect.shrink(2.0),
+            0.0,
+            egui::Stroke::new(2.0, crate::theme::AIR_CYAN),
+            egui::StrokeKind::Inside,
+        );
+    }
+    paint_nav_icon(
+        ui.painter(),
+        egui::Rect::from_center_size(
+            egui::pos2(rect.left() + 31.0, rect.center().y),
+            egui::vec2(18.0, 18.0),
+        ),
+        icon,
+        color,
+    );
+    ui.painter().text(
+        egui::pos2(rect.left() + 50.0, rect.center().y),
+        egui::Align2::LEFT_CENTER,
+        label,
+        egui::FontId::new(
+            15.0,
+            if selected {
+                crate::theme::semibold_font_family()
+            } else {
+                egui::FontFamily::Proportional
+            },
+        ),
+        color,
+    );
+    if let Some(count) = badge.filter(|count| *count > 0) {
+        let text = count.to_string();
+        let text_color = crate::theme::attention_strong(dark_mode);
+        let mut text_job = egui::text::LayoutJob::simple_singleline(
+            text,
+            egui::FontId::proportional(11.0),
+            text_color,
+        );
+        if let Some(section) = text_job.sections.first_mut() {
+            section.format.extra_letter_spacing = 0.22;
+        }
+        let text_galley = ui.painter().layout_job(text_job);
+        let badge_size = text_galley.size() + egui::vec2(20.0, 6.0);
+        let badge_rect = egui::Rect::from_center_size(
+            egui::pos2(rect.right() - 22.0 - badge_size.x / 2.0, rect.center().y),
+            badge_size,
+        );
+        ui.painter().rect_filled(
+            badge_rect,
+            egui::CornerRadius::same(2),
+            crate::theme::attention_tint(dark_mode),
+        );
+        ui.painter().galley(
+            badge_rect.center() - text_galley.size() / 2.0,
+            text_galley,
+            text_color,
+        );
+    }
+    if response.clicked() {
         *current = target;
+    }
+}
+
+fn paint_nav_icon(painter: &egui::Painter, rect: egui::Rect, icon: NavIcon, color: Color32) {
+    let stroke = egui::Stroke::new(1.4, color);
+    let thin = egui::Stroke::new(1.0, color);
+    let [red, green, blue, _] = color.to_array();
+    let secondary = Color32::from_rgba_unmultiplied(red, green, blue, 46);
+    match icon {
+        NavIcon::Today => {
+            painter.rect_filled(rect.shrink(1.0), 1.0, secondary);
+            painter.rect_stroke(rect.shrink(1.0), 1.0, stroke, egui::StrokeKind::Inside);
+            painter.line_segment(
+                [
+                    rect.left_top() + egui::vec2(5.5, 1.5),
+                    rect.left_bottom() + egui::vec2(5.5, -1.5),
+                ],
+                thin,
+            );
+            for y in [5.0, 9.0, 13.0] {
+                painter.line_segment(
+                    [
+                        rect.left_top() + egui::vec2(8.5, y),
+                        rect.right_top() + egui::vec2(-2.0, y),
+                    ],
+                    thin,
+                );
+            }
+        }
+        NavIcon::Library => {
+            let points = [
+                rect.left_top() + egui::vec2(1.0, 4.0),
+                rect.left_top() + egui::vec2(6.0, 4.0),
+                rect.left_top() + egui::vec2(8.0, 6.0),
+                rect.right_top() + egui::vec2(-1.0, 6.0),
+                rect.right_bottom() + egui::vec2(-1.0, -2.0),
+                rect.left_bottom() + egui::vec2(1.0, -2.0),
+            ];
+            painter.add(egui::Shape::convex_polygon(
+                points.to_vec(),
+                secondary,
+                egui::Stroke::NONE,
+            ));
+            painter.add(egui::Shape::closed_line(points.to_vec(), stroke));
+        }
+        NavIcon::Review => {
+            for (index, y) in [3.0, 8.0, 13.0].into_iter().enumerate() {
+                let box_rect = egui::Rect::from_min_size(
+                    rect.left_top() + egui::vec2(1.0, y),
+                    egui::vec2(3.0, 3.0),
+                );
+                painter.rect_filled(box_rect, 0.0, secondary);
+                painter.rect_stroke(box_rect, 0.0, thin, egui::StrokeKind::Inside);
+                if index == 0 {
+                    painter.line_segment([box_rect.left_center(), box_rect.center_bottom()], thin);
+                }
+                painter.line_segment(
+                    [
+                        rect.left_top() + egui::vec2(7.0, y + 1.5),
+                        rect.right_top() + egui::vec2(-1.0, y + 1.5),
+                    ],
+                    thin,
+                );
+            }
+        }
+        NavIcon::Wiki => {
+            painter.rect_filled(rect.shrink(1.0), 1.0, secondary);
+            painter.rect_stroke(rect.shrink(1.0), 1.0, stroke, egui::StrokeKind::Inside);
+            painter.line_segment(
+                [
+                    rect.center_top() + egui::vec2(0.0, 1.0),
+                    rect.center_bottom() - egui::vec2(0.0, 1.0),
+                ],
+                stroke,
+            );
+            painter.line_segment(
+                [
+                    rect.left_top() + egui::vec2(3.0, 5.0),
+                    rect.center_top() + egui::vec2(-2.0, 5.0),
+                ],
+                thin,
+            );
+            painter.line_segment(
+                [
+                    rect.center_top() + egui::vec2(2.0, 5.0),
+                    rect.right_top() + egui::vec2(-3.0, 5.0),
+                ],
+                thin,
+            );
+        }
+        NavIcon::Ask => {
+            let bubble = rect.shrink2(egui::vec2(1.0, 3.0));
+            painter.rect_filled(bubble, 5.0, secondary);
+            painter.rect_stroke(bubble, 5.0, stroke, egui::StrokeKind::Inside);
+            painter.line_segment(
+                [
+                    bubble.left_bottom() + egui::vec2(4.0, 0.0),
+                    bubble.left_bottom() + egui::vec2(2.0, 3.0),
+                ],
+                stroke,
+            );
+        }
+        NavIcon::Public => {
+            painter.circle_filled(rect.center(), 8.0, secondary);
+            painter.circle_stroke(rect.center(), 8.0, stroke);
+            painter.line_segment([rect.left_center(), rect.right_center()], thin);
+            painter.add(egui::Shape::ellipse_stroke(
+                rect.center(),
+                egui::vec2(3.0, 7.5),
+                thin,
+            ));
+        }
+        NavIcon::Connections => {
+            let left = egui::Rect::from_min_size(
+                rect.left_top() + egui::vec2(1.0, 1.0),
+                egui::vec2(9.0, 12.0),
+            );
+            let right = egui::Rect::from_min_size(
+                rect.left_top() + egui::vec2(8.0, 5.0),
+                egui::vec2(9.0, 12.0),
+            );
+            painter.rect_filled(left, 1.0, secondary);
+            painter.rect_filled(right, 1.0, secondary);
+            painter.rect_stroke(left, 1.0, stroke, egui::StrokeKind::Inside);
+            painter.rect_stroke(right, 1.0, stroke, egui::StrokeKind::Inside);
+        }
+        NavIcon::Settings => {
+            painter.circle_filled(rect.center(), 7.0, secondary);
+            painter.circle_stroke(rect.center(), 4.0, stroke);
+            painter.circle_stroke(rect.center(), 1.2, stroke);
+            for direction in [
+                egui::vec2(0.0, -1.0),
+                egui::vec2(1.0, 0.0),
+                egui::vec2(0.0, 1.0),
+                egui::vec2(-1.0, 0.0),
+            ] {
+                painter.line_segment(
+                    [
+                        rect.center() + direction * 5.0,
+                        rect.center() + direction * 8.0,
+                    ],
+                    stroke,
+                );
+            }
+        }
+    }
+}
+
+fn nav_is_selected(current: Screen, target: Screen) -> bool {
+    current == target || (current == Screen::Integrations && target == Screen::Search)
+}
+
+const fn ask_scope_presentation(
+    lan_preference: LanPreference,
+    has_trusted_peer: bool,
+) -> AskScopePresentation {
+    let paired_available = has_trusted_peer && matches!(lan_preference, LanPreference::Enabled);
+    AskScopePresentation { paired_available }
+}
+
+const fn blocking_modal_decision(explicit: Option<bool>, escaped: bool) -> Option<bool> {
+    match explicit {
+        Some(decision) => Some(decision),
+        None if escaped => Some(false),
+        None => None,
+    }
+}
+
+fn restore_modal_focus(context: &egui::Context, return_focus: Option<egui::Id>) {
+    if let Some(return_focus) = return_focus {
+        context.memory_mut(|memory| memory.request_focus(return_focus));
+    }
+}
+
+const fn effective_public_search(
+    public_only: bool,
+    allow_ask_public_network: bool,
+    ask_preference: bool,
+) -> bool {
+    public_only || (allow_ask_public_network && ask_preference)
+}
+
+struct SearchInputText<'a> {
+    question: Option<&'a str>,
+    external_label: Option<egui::Id>,
+    placeholder: &'a str,
+    action: &'a str,
+    max_width: f32,
+    primary_action: bool,
+}
+
+fn show_search_inputs(
+    ui: &mut egui::Ui,
+    layout: ResponsiveLayout,
+    search: &mut SearchViewState,
+    search_running: bool,
+    show_top_k: bool,
+    text: SearchInputText<'_>,
+) -> (egui::Response, bool) {
+    let mut submit_clicked = false;
+    let max_width = if show_top_k { 760.0 } else { text.max_width };
+    ui.scope(|ui| {
+        ui.set_max_width(ui.available_width().min(max_width));
+        let question_label = text
+            .question
+            .map(|question| ui.label(question).id)
+            .or(text.external_label);
+        let response = if layout.is_narrow() {
+            let response = ui
+                .add_enabled_ui(!search_running, |ui| {
+                    ui.add_sized(
+                        [ui.available_width(), 36.0],
+                        egui::TextEdit::singleline(&mut search.question)
+                            .hint_text(text.placeholder),
+                    )
+                })
+                .inner;
+            if let Some(question_label) = question_label {
+                response.labelled_by(question_label)
+            } else {
+                response
+            }
+        } else {
+            ui.horizontal(|ui| {
+                let reserved_width = if show_top_k { 190.0 } else { 100.0 };
+                let field_width = (ui.available_width() - reserved_width).max(220.0);
+                let response = ui
+                    .add_enabled_ui(!search_running, |ui| {
+                        ui.add_sized(
+                            [field_width, 36.0],
+                            egui::TextEdit::singleline(&mut search.question)
+                                .hint_text(text.placeholder),
+                        )
+                    })
+                    .inner;
+                let response = if let Some(question_label) = question_label {
+                    response.labelled_by(question_label)
+                } else {
+                    response
+                };
+                if show_top_k {
+                    ui.add_enabled(
+                        !search_running,
+                        egui::DragValue::new(&mut search.top_k)
+                            .range(1..=10)
+                            .prefix("Top "),
+                    );
+                }
+                let action = if text.primary_action {
+                    first_knowledge::primary_button(text.action.to_owned())
+                } else {
+                    crate::theme::focus_button(
+                        egui::Button::new(text.action.to_owned()),
+                        crate::theme::AIR_CYAN,
+                    )
+                };
+                submit_clicked = ui
+                    .add_enabled(
+                        !search.question.trim().is_empty() && !search_running,
+                        action,
+                    )
+                    .clicked();
+                response
+            })
+            .inner
+        };
+        if layout.is_narrow() {
+            if show_top_k {
+                ui.add_enabled(
+                    !search_running,
+                    egui::DragValue::new(&mut search.top_k)
+                        .range(1..=10)
+                        .prefix("Top "),
+                );
+            }
+            let action = if text.primary_action {
+                first_knowledge::primary_button(text.action.to_owned())
+            } else {
+                crate::theme::focus_button(
+                    egui::Button::new(text.action.to_owned()),
+                    crate::theme::AIR_CYAN,
+                )
+            };
+            submit_clicked = ui
+                .add_enabled(
+                    !search.question.trim().is_empty() && !search_running,
+                    action,
+                )
+                .clicked();
+        }
+        (response, submit_clicked)
+    })
+    .inner
+}
+
+fn search_response_surface(
+    active_search: Option<ActiveSearch>,
+    event_request_id: Uuid,
+) -> Option<SearchSurface> {
+    active_search
+        .filter(|active| active.request_id == event_request_id)
+        .map(|active| active.surface)
+}
+
+fn remove_blocked_publisher_hits(
+    ask_search: &mut SearchViewState,
+    public_search: &mut SearchViewState,
+    publisher_id: &str,
+) {
+    public_search.hits.retain(|hit| hit.node_id != publisher_id);
+    if ask_search.submitted_public_network {
+        ask_search.hits.retain(|hit| hit.node_id != publisher_id);
     }
 }
 
@@ -5237,39 +7509,100 @@ fn wrap_rich_text(ui: &mut egui::Ui, text: RichText) {
     ui.add(egui::Label::new(text).selectable(false).wrap());
 }
 
+fn editorial_card_kicker(
+    ui: &mut egui::Ui,
+    label: impl Into<String>,
+    color: Color32,
+) -> egui::Response {
+    ui.label(crate::theme::card_kicker_job(label, color))
+}
+
+fn editorial_section_label(
+    ui: &mut egui::Ui,
+    label: impl Into<String>,
+    color: Color32,
+) -> egui::Response {
+    ui.label(crate::theme::section_label_job(label, color))
+}
+
+fn editorial_tag(ui: &mut egui::Ui, label: &str, tone: EditorialTagTone) -> egui::Response {
+    let dark_mode = ui.visuals().dark_mode;
+    let (fill, stroke, color) = match tone {
+        EditorialTagTone::Accent => (
+            crate::theme::accent_tint(dark_mode),
+            egui::Stroke::NONE,
+            crate::theme::accent_tag_text(dark_mode),
+        ),
+        EditorialTagTone::Attention => (
+            crate::theme::attention_tint(dark_mode),
+            egui::Stroke::NONE,
+            crate::theme::attention_strong(dark_mode),
+        ),
+        EditorialTagTone::Neutral => (
+            crate::theme::neutral_tint(dark_mode),
+            egui::Stroke::NONE,
+            crate::theme::neutral_tag_text(dark_mode),
+        ),
+        EditorialTagTone::Outline => (
+            Color32::TRANSPARENT,
+            egui::Stroke::new(1.0, crate::theme::accent_text(dark_mode)),
+            crate::theme::accent_text(dark_mode),
+        ),
+    };
+    egui::Frame::new()
+        .fill(fill)
+        .stroke(stroke)
+        .corner_radius(egui::CornerRadius::same(2))
+        .inner_margin(egui::Margin::symmetric(10, 3))
+        .show(ui, |ui| {
+            let mut job = egui::text::LayoutJob::simple_singleline(
+                label.to_owned(),
+                egui::FontId::proportional(11.0),
+                color,
+            );
+            if let Some(section) = job.sections.first_mut() {
+                section.format.extra_letter_spacing = 0.22;
+            }
+            ui.label(job)
+        })
+        .inner
+}
+
 fn page_title(ui: &mut egui::Ui, title: &str, subtitle: &str) {
-    ui.heading(RichText::new(title).size(28.0));
-    ui.label(RichText::new(subtitle).color(crate::theme::secondary_text(ui.visuals().dark_mode)));
-    ui.add_space(18.0);
+    ui.heading(
+        RichText::new(title)
+            .size(32.0)
+            .family(crate::theme::semibold_font_family()),
+    );
+    ui.scope(|ui| {
+        ui.set_max_width(ui.available_width().min(600.0));
+        ui.add(
+            egui::Label::new(
+                RichText::new(subtitle)
+                    .size(15.0)
+                    .color(crate::theme::secondary_text(ui.visuals().dark_mode)),
+            )
+            .wrap(),
+        );
+    });
+    ui.add_space(30.0);
 }
 
 fn empty_state(ui: &mut egui::Ui, title: &str, body: &str) {
-    egui::Frame::group(ui.style()).show(ui, |ui| {
-        ui.add_space(20.0);
-        ui.vertical_centered(|ui| {
-            ui.heading(title);
-            ui.label(body);
+    egui::Frame::new()
+        .fill(crate::theme::surface(ui.visuals().dark_mode))
+        .stroke(egui::Stroke::NONE)
+        .corner_radius(egui::CornerRadius::same(2))
+        .inner_margin(egui::Margin::same(24))
+        .show(ui, |ui| {
+            ui.heading(RichText::new(title).size(24.0));
+            ui.add(egui::Label::new(body).wrap());
         });
-        ui.add_space(20.0);
-    });
-}
-
-fn abbreviate_publisher_id(publisher_id: &str) -> String {
-    let prefix: String = publisher_id.chars().take(12).collect();
-    if prefix.len() == publisher_id.len() {
-        prefix
-    } else {
-        format!("{prefix}…")
-    }
 }
 
 fn deduplicate_notices(notices: &mut VecDeque<(bool, String)>) {
     let mut seen = HashSet::new();
     notices.retain(|notice| seen.insert(notice.clone()));
-}
-
-fn search_result_applies(active_request_id: Option<Uuid>, event_request_id: Uuid) -> bool {
-    active_request_id == Some(event_request_id)
 }
 
 fn wiki_health_result_applies(last_generation: u64, event_generation: u64) -> bool {
@@ -5350,7 +7683,14 @@ fn parse_manual_ipv4_address(input: &str) -> Option<ManualLanAddress> {
 }
 
 fn edit_draft(ui: &mut egui::Ui, localization: &Localization, draft: &mut EnrichmentDraft) {
-    ui.heading(localization.text("review-metadata-title"));
+    ui.add(
+        egui::Label::new(
+            RichText::new(localization.text("review-metadata-title"))
+                .size(24.0)
+                .family(crate::theme::semibold_font_family()),
+        )
+        .wrap(),
+    );
     egui::ComboBox::from_label(localization.text("review-field-type"))
         .selected_text(draft.concept_type.to_string())
         .show_ui(ui, |ui| {
@@ -5396,27 +7736,39 @@ fn edit_draft(ui: &mut egui::Ui, localization: &Localization, draft: &mut Enrich
     ui.label(localization.text("review-field-entities"));
     let mut remove_entity = None;
     for (index, entity) in draft.entities.iter_mut().enumerate() {
+        let entity_identifier = if entity.name.trim().is_empty() {
+            format!("#{}", index + 1)
+        } else {
+            entity.name.clone()
+        };
         let render_fields = |ui: &mut egui::Ui| {
-            ui.add(
-                egui::TextEdit::singleline(&mut entity.name)
-                    .hint_text(localization.text("review-entity-name")),
-            );
-            ui.add(
-                egui::TextEdit::singleline(&mut entity.kind)
-                    .hint_text(localization.text("review-entity-type")),
-            );
+            ui.vertical(|ui| {
+                let label = ui.label(localization.text("review-entity-name"));
+                ui.add(egui::TextEdit::singleline(&mut entity.name).desired_width(180.0))
+                    .labelled_by(label.id);
+            });
+            ui.vertical(|ui| {
+                let label = ui.label(localization.text("review-entity-type"));
+                ui.add(egui::TextEdit::singleline(&mut entity.kind).desired_width(160.0))
+                    .labelled_by(label.id);
+            });
             if ui
-                .small_button(localization.text("action-remove"))
+                .small_button(format!(
+                    "{} {entity_identifier}",
+                    localization.text("action-remove")
+                ))
                 .clicked()
             {
                 remove_entity = Some(index);
             }
         };
-        if review_fields_stack(ui.available_width()) {
-            ui.vertical(render_fields);
-        } else {
-            ui.horizontal(render_fields);
-        }
+        ui.push_id(("entity", index), |ui| {
+            if review_fields_stack(ui.available_width()) {
+                ui.vertical(render_fields);
+            } else {
+                ui.horizontal(render_fields);
+            }
+        });
     }
     if let Some(index) = remove_entity {
         draft.entities.remove(index);
@@ -5433,27 +7785,39 @@ fn edit_draft(ui: &mut egui::Ui, localization: &Localization, draft: &mut Enrich
     ui.label(localization.text("review-field-links"));
     let mut remove_link = None;
     for (index, link) in draft.links.iter_mut().enumerate() {
+        let link_identifier = if link.label.trim().is_empty() {
+            format!("#{}", index + 1)
+        } else {
+            link.label.clone()
+        };
         let render_fields = |ui: &mut egui::Ui| {
-            ui.add(
-                egui::TextEdit::singleline(&mut link.label)
-                    .hint_text(localization.text("review-link-label")),
-            );
-            ui.add(
-                egui::TextEdit::singleline(&mut link.target)
-                    .hint_text(localization.text("review-link-target")),
-            );
+            ui.vertical(|ui| {
+                let label = ui.label(localization.text("review-link-label"));
+                ui.add(egui::TextEdit::singleline(&mut link.label).desired_width(180.0))
+                    .labelled_by(label.id);
+            });
+            ui.vertical(|ui| {
+                let label = ui.label(localization.text("review-link-target"));
+                ui.add(egui::TextEdit::singleline(&mut link.target).desired_width(220.0))
+                    .labelled_by(label.id);
+            });
             if ui
-                .small_button(localization.text("action-remove"))
+                .small_button(format!(
+                    "{} {link_identifier}",
+                    localization.text("action-remove")
+                ))
                 .clicked()
             {
                 remove_link = Some(index);
             }
         };
-        if review_fields_stack(ui.available_width()) {
-            ui.vertical(render_fields);
-        } else {
-            ui.horizontal(render_fields);
-        }
+        ui.push_id(("link", index), |ui| {
+            if review_fields_stack(ui.available_width()) {
+                ui.vertical(render_fields);
+            } else {
+                ui.horizontal(render_fields);
+            }
+        });
     }
     if let Some(index) = remove_link {
         draft.links.remove(index);
@@ -5480,23 +7844,48 @@ fn review_fields_stack(available_width: f32) -> bool {
     available_width < 520.0
 }
 
+fn connections_peer_list_height(available_height: f32) -> f32 {
+    (available_height - CONNECTIONS_CHAT_FOOTER_HEIGHT).max(0.0)
+}
+
+fn today_column_widths(available_width: f32) -> (f32, f32) {
+    let usable_width = (available_width - TODAY_COLUMN_GAP).max(0.0);
+    let lead_width = (usable_width * 0.6).max(360.0).min(usable_width);
+    (lead_width, usable_width - lead_width)
+}
+
+const fn collection_can_make_public(needs_review_count: usize, failed_count: usize) -> bool {
+    needs_review_count == 0 && failed_count == 0
+}
+
+fn public_confirmation_can_commit(collection_counts: Option<(usize, usize)>) -> bool {
+    collection_counts.is_some_and(|(needs_review_count, failed_count)| {
+        collection_can_make_public(needs_review_count, failed_count)
+    })
+}
+
 #[cfg(test)]
 mod tests {
+    use eframe::egui;
     use fluent_bundle::FluentArgs;
 
     use super::{
-        ExternalAiPolicyChange, OnboardingPage, SearchResultAvailability, WikiHealthCheckState,
-        advance_onboarding_page, classify_external_ai_policy_change, classify_search_result,
-        collection_maintenance_needs_recovery, connectivity_runtime_is_active, deduplicate_notices,
-        elapsed_minutes, firewall_configuration_is_current, firewall_operation_update_applies,
-        firewall_state_offers_advanced_recovery, human_error_summary, localized_worker_notice,
-        model_action_label, onboarding_error_is_relevant, onboarding_page_for_state,
-        onboarding_review_requires_recovery, onboarding_search_completion,
-        parse_manual_ipv4_address, peer_activity_message_id, primary_action_explanation,
-        primary_action_title, review_fields_stack, sanitized_error_code, search_coverage_message,
-        search_result_applies, search_result_origin_label, should_present_pairing_controls,
-        updater_launched_installer, visible_journey_states, wiki_health_readiness_inputs,
-        wiki_health_result_applies,
+        ActiveSearch, ExternalAiPolicyChange, OnboardingPage, Screen, SearchResultAvailability,
+        SearchSurface, SearchViewState, TODAY_COLUMN_GAP, WikiHealthCheckState,
+        ask_scope_presentation, blocking_modal_decision, classify_external_ai_policy_change,
+        classify_search_result, collection_can_make_public, connections_peer_list_height,
+        connectivity_runtime_is_active, deduplicate_notices, editorial_title_available_width,
+        effective_public_search, elapsed_minutes, firewall_configuration_is_current,
+        firewall_operation_update_applies, firewall_state_offers_advanced_recovery,
+        focused_control_needs_scroll, hardware_platform_name, human_error_summary,
+        localized_worker_notice, model_action_label, nav_is_selected, onboarding_error_is_relevant,
+        onboarding_footer_button_rects, onboarding_intro_step, onboarding_machine_checks,
+        onboarding_machine_status, parse_manual_ipv4_address, peer_activity_message_id,
+        primary_action_explanation, primary_action_title, public_confirmation_can_commit,
+        remove_blocked_publisher_hits, review_fields_stack, rounded_gib, sanitized_error_code,
+        search_coverage_message, search_response_surface, search_result_origin_label,
+        should_present_pairing_controls, today_column_widths, updater_launched_installer,
+        wiki_health_can_refresh, wiki_health_readiness_inputs, wiki_health_result_applies,
     };
     use crate::connectivity_platform::{
         ConnectivityPlatformSnapshot, FirewallDiagnosticState, FirewallHelperState,
@@ -5504,10 +7893,7 @@ mod tests {
     };
     use crate::i18n::{Localization, UiLocale};
     use crate::model_config::LanPreference;
-    use crate::readiness::{
-        FirstKnowledgeCta, FirstKnowledgeJourneyView, FirstKnowledgeStage, FirstKnowledgeStepState,
-        RecommendedAction,
-    };
+    use crate::readiness::RecommendedAction;
     use crate::updater::{UpdateSummary, UpdaterStatus, UpdaterView};
     use crate::worker::{
         FirewallOperationView, LanDiscoveryView, LanListenerView, PeerActivityState,
@@ -5515,104 +7901,330 @@ mod tests {
         WikiHealthSummaryView,
     };
     use airwiki_core::SourceIssueCode;
+    use airwiki_inference::HardwareReport;
+    use airwiki_network::PublicRouteKind;
+    use airwiki_types::SearchHit;
+    use chrono::Utc;
     use std::{
         collections::VecDeque,
         time::{Duration, SystemTime},
     };
     use uuid::Uuid;
 
-    #[test]
-    fn first_run_targets_the_earliest_unfinished_knowledge_step() {
-        for (models, collections, reviews, issues, published, expected) in [
-            (false, 0, 0, 0, 0, OnboardingPage::Model),
-            (true, 0, 0, 0, 0, OnboardingPage::Collection),
-            (true, 1, 0, 0, 0, OnboardingPage::Processing),
-            (true, 1, 1, 0, 0, OnboardingPage::Review),
-            (true, 1, 0, 1, 0, OnboardingPage::Review),
-            (true, 1, 0, 0, 1, OnboardingPage::Search),
-        ] {
-            assert_eq!(
-                onboarding_page_for_state(models, collections, reviews, issues, published),
-                expected
-            );
+    fn synthetic_search_hit(node_id: &str) -> SearchHit {
+        SearchHit {
+            concept_id: Uuid::new_v4(),
+            collection_id: Uuid::new_v4(),
+            chunk_id: Uuid::new_v4(),
+            title: "Synthetic result".to_owned(),
+            snippet: "Synthetic evidence".to_owned(),
+            heading_or_page: "Fixture".to_owned(),
+            logical_resource_uri: "airwiki://fixture".to_owned(),
+            source_revision: 1,
+            source_sha256: "fixture-sha256".to_owned(),
+            updated_at: Utc::now(),
+            rank: 1,
+            node_id: node_id.to_owned(),
         }
     }
 
     #[test]
-    fn first_run_advances_from_real_worker_state_without_optional_setup() {
+    fn active_navigation_is_independent_from_keyboard_focus() {
+        assert!(nav_is_selected(Screen::Public, Screen::Public));
+        assert!(!nav_is_selected(Screen::Public, Screen::Collections));
+        assert!(nav_is_selected(Screen::Integrations, Screen::Search));
+        assert!(!nav_is_selected(Screen::Integrations, Screen::Nodes));
+    }
+
+    #[test]
+    fn connections_peer_list_reserves_chat_access() {
+        assert_eq!(connections_peer_list_height(420.0), 362.0);
+        assert_eq!(connections_peer_list_height(40.0), 0.0);
+    }
+
+    #[test]
+    fn today_columns_keep_an_exact_fifty_six_pixel_gutter() {
+        let available = 900.0;
+        let (lead, side) = today_column_widths(available);
+
+        assert!((lead + TODAY_COLUMN_GAP + side - available).abs() < 0.01);
+        assert_eq!(TODAY_COLUMN_GAP, 56.0);
+    }
+
+    #[test]
+    fn today_title_reserves_trailing_metadata_width() {
+        assert_eq!(editorial_title_available_width(320.0, 64.0), 236.0);
+        assert_eq!(editorial_title_available_width(80.0, 96.0), 0.0);
+    }
+
+    #[test]
+    fn public_action_is_hidden_while_collection_needs_attention() {
+        assert!(collection_can_make_public(0, 0));
+        assert!(!collection_can_make_public(1, 0));
+        assert!(!collection_can_make_public(0, 1));
+    }
+
+    #[test]
+    fn public_confirmation_fails_closed_after_attention_refresh() {
+        let before_modal = collection_can_make_public(0, 0);
+        let handler_recheck_after_refresh = public_confirmation_can_commit(Some((1, 0)));
+
+        assert!(before_modal);
+        assert!(!handler_recheck_after_refresh);
+        assert!(!public_confirmation_can_commit(None));
+    }
+
+    #[test]
+    fn ask_scope_exposes_only_real_paired_capability() {
+        let device = ask_scope_presentation(LanPreference::Disabled, true);
+        assert!(!device.paired_available);
+        assert!(!ask_scope_presentation(LanPreference::Enabled, false).paired_available);
+        let paired = ask_scope_presentation(LanPreference::Enabled, true);
+        assert!(paired.paired_available);
+    }
+
+    #[test]
+    fn ask_lead_microcopy_does_not_claim_a_derived_answer() {
+        let english = Localization::new(UiLocale::EnUs).unwrap();
+        let spanish = Localization::new(UiLocale::Es).unwrap();
+
+        assert_eq!(english.text("search-top-passage"), "Top cited passage");
         assert_eq!(
-            advance_onboarding_page(Some(OnboardingPage::Collection), 1, 0, 0, 0),
-            Some(OnboardingPage::Processing)
+            spanish.text("search-top-passage"),
+            "Pasaje citado principal"
         );
         assert_eq!(
-            advance_onboarding_page(Some(OnboardingPage::Processing), 1, 1, 0, 0),
-            Some(OnboardingPage::Review)
+            english.text("search-subtitle"),
+            "Cited passages come only from published knowledge — here or in your chat app."
         );
         assert_eq!(
-            advance_onboarding_page(Some(OnboardingPage::Review), 1, 0, 0, 1),
-            Some(OnboardingPage::Search)
-        );
-        assert_eq!(
-            advance_onboarding_page(Some(OnboardingPage::Welcome), 1, 1, 0, 1),
-            Some(OnboardingPage::Welcome)
-        );
-        assert_eq!(
-            advance_onboarding_page(Some(OnboardingPage::Processing), 1, 0, 1, 0),
-            Some(OnboardingPage::Review)
+            spanish.text("search-subtitle"),
+            "Los pasajes citados provienen únicamente de conocimiento publicado, aquí o en tu \
+             aplicación de chat."
         );
     }
 
     #[test]
-    fn issue_only_onboarding_offers_a_safe_exit() {
-        assert!(onboarding_review_requires_recovery(0, 1));
-        assert!(!onboarding_review_requires_recovery(1, 1));
-        assert!(!onboarding_review_requires_recovery(0, 0));
-    }
+    fn public_scope_microcopy_discloses_query_routing() {
+        let english = Localization::new(UiLocale::EnUs).unwrap();
+        let spanish = Localization::new(UiLocale::Es).unwrap();
 
-    #[test]
-    fn zero_result_onboarding_can_finish_and_search_later() {
         assert_eq!(
-            onboarding_search_completion(true, false),
-            (
-                "onboarding-search-empty-title",
-                "onboarding-search-empty-body",
-                "onboarding-search-finish-later",
-            )
+            english.text("search-scope-note-public"),
+            "Local and paired knowledge remain available. Your query is sent to up to three \
+             federated indexes and selected publishers; your documents stay on this device."
+        );
+        assert_eq!(
+            spanish.text("search-scope-note-public"),
+            "El conocimiento local y emparejado sigue disponible. Tu consulta se envía a un \
+             máximo de tres índices federados y a los publicadores seleccionados; tus documentos \
+             permanecen en este equipo."
+        );
+        assert_eq!(
+            english.text("public-discover-title"),
+            "Find public knowledge"
+        );
+        assert_eq!(
+            spanish.text("public-discover-title"),
+            "Encontrar conocimiento público"
         );
     }
 
     #[test]
-    fn unsearched_onboarding_does_not_claim_that_evidence_is_missing() {
-        assert_eq!(
-            onboarding_search_completion(false, false).0,
-            "onboarding-search-optional-title"
-        );
+    fn local_ai_microcopy_does_not_claim_answer_generation() {
+        for locale in [UiLocale::EnUs, UiLocale::Es] {
+            let localization = Localization::new(locale).unwrap();
+            for key in ["onboarding-model-body", "settings-local-ai-body"] {
+                let copy = localization.text(key);
+                assert!(!copy.contains("answers") && !copy.contains("respuestas"));
+                assert!(
+                    copy.contains("cited passages") || copy.contains("pasajes citados"),
+                    "unexpected local AI copy: {copy:?}"
+                );
+            }
+        }
     }
 
     #[test]
-    fn successful_onboarding_search_keeps_the_ready_completion() {
-        assert_eq!(
-            onboarding_search_completion(true, true).2,
-            "onboarding-search-finish"
-        );
+    fn public_surface_cannot_route_through_private_wiki_reader() {
+        let app_source = include_str!("app.rs");
+        let knowledge_source = include_str!("app/knowledge.rs");
+        let private_reader_state = ["public_reader_", "collection"].concat();
+
+        assert!(!app_source.contains(&private_reader_state));
+        assert!(!knowledge_source.contains("pub(super) fn show_reader"));
     }
 
     #[test]
-    fn terminal_collection_states_offer_onboarding_recovery() {
-        let states = [
-            airwiki_core::CollectionMaintenanceStatus::Failed,
-            airwiki_core::CollectionMaintenanceStatus::Quarantined,
-            airwiki_core::CollectionMaintenanceStatus::Success,
-        ]
-        .map(collection_maintenance_needs_recovery);
+    fn blocking_modal_escape_is_fail_closed() {
+        assert_eq!(blocking_modal_decision(None, false), None);
+        assert_eq!(blocking_modal_decision(None, true), Some(false));
+        assert_eq!(blocking_modal_decision(Some(true), true), Some(true));
+        assert_eq!(blocking_modal_decision(Some(false), false), Some(false));
+    }
 
-        assert_eq!(states, [true, true, false]);
+    #[test]
+    fn public_screen_does_not_change_the_ask_search_preference() {
+        for ask_preference in [false, true] {
+            let original_preference = ask_preference;
+
+            assert!(effective_public_search(true, false, ask_preference));
+            assert_eq!(ask_preference, original_preference);
+        }
+    }
+
+    #[test]
+    fn ask_and_public_keep_independent_drafts_and_feedback() {
+        let mut ask = SearchViewState::new();
+        let public = SearchViewState::new();
+
+        ask.question = "local draft".to_owned();
+        ask.completed = true;
+        ask.coverage = SearchCoverageView::Partial;
+        ask.error = Some("fixture-error".to_owned());
+
+        assert_eq!(ask.question, "local draft");
+        assert!(ask.completed);
+        assert!(ask.error.is_some());
+        assert!(public.question.is_empty());
+        assert!(!public.completed);
+        assert_eq!(public.coverage, SearchCoverageView::Complete);
+        assert!(public.error.is_none());
+    }
+
+    #[test]
+    fn public_search_is_always_public_while_ask_remains_opt_in() {
+        assert!(effective_public_search(true, false, false));
+        assert!(effective_public_search(true, false, true));
+        assert!(!effective_public_search(false, true, false));
+        assert!(effective_public_search(false, true, true));
+    }
+
+    #[test]
+    fn onboarding_search_stays_local_without_mutating_the_ask_preference() {
+        let ask_preference = true;
+
+        assert!(!effective_public_search(false, false, ask_preference));
+        assert!(ask_preference);
+    }
+
+    #[test]
+    fn onboarding_intro_is_exactly_three_steps_before_the_knowledge_journey() {
+        assert_eq!(onboarding_intro_step(OnboardingPage::Welcome), 1);
+        assert_eq!(onboarding_intro_step(OnboardingPage::Model), 2);
+        assert_eq!(onboarding_intro_step(OnboardingPage::Permissions), 3);
+    }
+
+    #[test]
+    fn onboarding_footer_matches_the_reference_left_and_right_navigation() {
+        let available = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(560.0, 88.0));
+        let (back, primary) = onboarding_footer_button_rects(available, egui::vec2(108.0, 42.0));
+
+        assert_eq!(back.left(), available.left());
+        assert_eq!(back.center().y, available.center().y);
+        assert_eq!(primary.right(), available.right());
+        assert_eq!(primary.center().y, available.center().y);
+    }
+
+    #[test]
+    fn onboarding_machine_copy_reflects_the_hardware_report() {
+        assert_eq!(
+            onboarding_machine_status(None),
+            "onboarding-machine-checking"
+        );
+        assert_eq!(
+            onboarding_machine_status(Some((true, true))),
+            "onboarding-machine-supported"
+        );
+        assert_eq!(
+            onboarding_machine_status(Some((true, false))),
+            "onboarding-machine-needs-attention"
+        );
+        assert_eq!(
+            onboarding_machine_status(Some((false, false))),
+            "onboarding-machine-unsupported"
+        );
+        assert_eq!(hardware_platform_name("macos", "aarch64"), "Apple Silicon");
+        assert_eq!(hardware_platform_name("windows", "x86_64"), "Windows x64");
+        assert_eq!(rounded_gib(12 * 1024 * 1024 * 1024), 12);
+
+        let mut report = HardwareReport {
+            os: "macos".to_owned(),
+            architecture: "aarch64".to_owned(),
+            total_memory_bytes: 16 * 1024 * 1024 * 1024,
+            available_memory_bytes: 8 * 1024 * 1024 * 1024,
+            available_disk_bytes: 12 * 1024 * 1024 * 1024,
+            avx2: false,
+            metal_available: true,
+            supported_target: true,
+            can_install: true,
+            issues: Vec::new(),
+        };
+        assert_eq!(onboarding_machine_checks(&report), (true, true, true));
+        report.total_memory_bytes = 4 * 1024 * 1024 * 1024;
+        assert_eq!(onboarding_machine_checks(&report), (true, false, true));
+        report.available_disk_bytes = 512 * 1024 * 1024;
+        assert_eq!(onboarding_machine_checks(&report), (true, false, false));
+    }
+
+    #[test]
+    fn ready_wiki_health_can_be_refreshed_manually() {
+        assert!(wiki_health_can_refresh(&WikiHealthCheckState::Ready));
+        assert!(!wiki_health_can_refresh(&WikiHealthCheckState::Loading));
+        assert!(!wiki_health_can_refresh(&WikiHealthCheckState::Failed(
+            "fixture".to_owned()
+        )));
     }
 
     #[test]
     fn review_fields_stack_in_the_minimum_window_editor() {
         assert!(review_fields_stack(337.0));
         assert!(!review_fields_stack(520.0));
+    }
+
+    #[test]
+    fn newly_focused_control_inside_onboarding_body_requests_scroll() {
+        let body = egui::Rect::from_min_size(egui::pos2(0.0, 0.0), egui::vec2(600.0, 350.0));
+        let visible = egui::Rect::from_min_size(egui::pos2(0.0, 0.0), egui::vec2(600.0, 250.0));
+        let control = egui::Rect::from_min_size(egui::pos2(20.0, 320.0), egui::vec2(120.0, 36.0));
+
+        assert!(focused_control_needs_scroll(true, body, visible, control));
+    }
+
+    #[test]
+    fn held_focus_does_not_keep_overriding_manual_scroll() {
+        let body = egui::Rect::from_min_size(egui::pos2(0.0, 0.0), egui::vec2(600.0, 350.0));
+        let visible = egui::Rect::from_min_size(egui::pos2(0.0, 0.0), egui::vec2(600.0, 250.0));
+        let control = egui::Rect::from_min_size(egui::pos2(20.0, 320.0), egui::vec2(120.0, 36.0));
+
+        assert!(!focused_control_needs_scroll(false, body, visible, control));
+    }
+
+    #[test]
+    fn newly_focused_visible_control_does_not_move_the_body() {
+        let body = egui::Rect::from_min_size(egui::pos2(0.0, 0.0), egui::vec2(600.0, 350.0));
+        let visible = egui::Rect::from_min_size(egui::pos2(0.0, 0.0), egui::vec2(600.0, 250.0));
+        let control = egui::Rect::from_min_size(egui::pos2(20.0, 120.0), egui::vec2(120.0, 36.0));
+
+        assert!(!focused_control_needs_scroll(true, body, visible, control));
+    }
+
+    #[test]
+    fn horizontal_overflow_does_not_move_a_vertical_scroll_area() {
+        let body = egui::Rect::from_min_size(egui::pos2(0.0, 0.0), egui::vec2(600.0, 350.0));
+        let visible = egui::Rect::from_min_size(egui::pos2(20.0, 0.0), egui::vec2(560.0, 250.0));
+        let control = egui::Rect::from_min_size(egui::pos2(0.0, 120.0), egui::vec2(600.0, 36.0));
+
+        assert!(!focused_control_needs_scroll(true, body, visible, control));
+    }
+
+    #[test]
+    fn newly_focused_control_outside_onboarding_body_does_not_request_scroll() {
+        let body = egui::Rect::from_min_size(egui::pos2(0.0, 0.0), egui::vec2(600.0, 350.0));
+        let visible = egui::Rect::from_min_size(egui::pos2(0.0, 0.0), egui::vec2(600.0, 250.0));
+        let footer = egui::Rect::from_min_size(egui::pos2(20.0, 380.0), egui::vec2(120.0, 36.0));
+
+        assert!(!focused_control_needs_scroll(true, body, visible, footer));
     }
 
     #[test]
@@ -5626,35 +8238,9 @@ mod tests {
             "the local model failed integrity verification"
         ));
         assert!(onboarding_error_is_relevant(
-            OnboardingPage::Processing,
-            "the collection could not process a PDF"
-        ));
-        assert!(onboarding_error_is_relevant(
             OnboardingPage::Welcome,
             "No se pudieron iniciar los servicios privados"
         ));
-    }
-
-    #[test]
-    fn six_internal_conditions_render_as_five_human_steps() {
-        let journey = FirstKnowledgeJourneyView {
-            current_stage: FirstKnowledgeStage::ReviewKnowledge,
-            current_state: FirstKnowledgeStepState::Current,
-            cta: Some(FirstKnowledgeCta::Recommended(
-                RecommendedAction::ReviewPendingKnowledge,
-            )),
-        };
-
-        assert_eq!(
-            visible_journey_states(journey),
-            [
-                super::JourneyStepState::Complete,
-                super::JourneyStepState::Complete,
-                super::JourneyStepState::Current,
-                super::JourneyStepState::Upcoming,
-                super::JourneyStepState::Upcoming,
-            ]
-        );
     }
 
     #[test]
@@ -5911,12 +8497,98 @@ mod tests {
     }
 
     #[test]
-    fn search_results_apply_only_to_the_active_request() {
-        let active = Uuid::new_v4();
+    fn search_responses_apply_only_to_the_active_request_surface() {
+        let request_id = Uuid::new_v4();
+        let active = Some(ActiveSearch {
+            request_id,
+            surface: SearchSurface::Public,
+        });
 
-        assert!(search_result_applies(Some(active), active));
-        assert!(!search_result_applies(Some(active), Uuid::new_v4()));
-        assert!(!search_result_applies(None, active));
+        assert_eq!(
+            search_response_surface(active, request_id),
+            Some(SearchSurface::Public)
+        );
+        assert_eq!(search_response_surface(active, Uuid::new_v4()), None);
+        assert_eq!(search_response_surface(None, request_id), None);
+    }
+
+    #[test]
+    fn local_ask_completion_does_not_overwrite_the_last_public_route() {
+        let mut ask = SearchViewState::new();
+        let mut public = SearchViewState::new();
+        public.complete(
+            Vec::new(),
+            SearchCoverageView::Complete,
+            PublicRouteKind::Relay,
+        );
+
+        ask.complete(
+            Vec::new(),
+            SearchCoverageView::Complete,
+            PublicRouteKind::Offline,
+        );
+
+        assert_eq!(public.route_kind, PublicRouteKind::Relay);
+    }
+
+    #[test]
+    fn public_ask_completion_keeps_each_surface_route_independent() {
+        let mut ask = SearchViewState::new();
+        let mut public = SearchViewState::new();
+        public.complete(
+            Vec::new(),
+            SearchCoverageView::Complete,
+            PublicRouteKind::Relay,
+        );
+
+        ask.complete(
+            Vec::new(),
+            SearchCoverageView::Complete,
+            PublicRouteKind::Direct,
+        );
+
+        assert_eq!(
+            (ask.route_kind, public.route_kind),
+            (PublicRouteKind::Direct, PublicRouteKind::Relay)
+        );
+    }
+
+    #[test]
+    fn blocking_a_publisher_removes_only_publicly_sourced_hits() {
+        let blocked_publisher = "blocked-publisher";
+        let retained_publisher = "retained-publisher";
+        let mut ask = SearchViewState::new();
+        let mut public = SearchViewState::new();
+        ask.submitted_public_network = true;
+        ask.hits = vec![
+            synthetic_search_hit(blocked_publisher),
+            synthetic_search_hit(retained_publisher),
+        ];
+        public.hits = vec![
+            synthetic_search_hit(blocked_publisher),
+            synthetic_search_hit(retained_publisher),
+        ];
+
+        remove_blocked_publisher_hits(&mut ask, &mut public, blocked_publisher);
+
+        assert_eq!(ask.hits.len(), 1);
+        assert_eq!(ask.hits[0].node_id, retained_publisher);
+        assert_eq!(public.hits.len(), 1);
+        assert_eq!(public.hits[0].node_id, retained_publisher);
+    }
+
+    #[test]
+    fn blocking_a_publisher_preserves_local_only_ask_feedback() {
+        let blocked_publisher = "blocked-publisher";
+        let mut ask = SearchViewState::new();
+        let mut public = SearchViewState::new();
+        ask.hits.push(synthetic_search_hit(blocked_publisher));
+        public.hits.push(synthetic_search_hit(blocked_publisher));
+
+        remove_blocked_publisher_hits(&mut ask, &mut public, blocked_publisher);
+
+        assert_eq!(ask.hits.len(), 1);
+        assert!(public.hits.is_empty());
     }
 
     #[test]

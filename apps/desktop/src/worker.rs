@@ -423,12 +423,8 @@ pub enum WorkerCommand {
         purpose: SearchPurpose,
         public_network: bool,
     },
-    AddFederationIndex {
-        peer_id: String,
-        address: String,
-    },
-    RemoveFederationIndex {
-        peer_id: String,
+    DisableCommunityFederationIndexes {
+        request_id: Uuid,
     },
     UpdatePublicCollectionProfile {
         collection_id: Uuid,
@@ -479,6 +475,7 @@ pub enum WorkerEvent {
         reviews: Vec<ReviewItemView>,
         source_issues: Vec<SourceIssueView>,
         blocked_public_publishers: Vec<String>,
+        enabled_community_federation_index_count: usize,
     },
     Hardware(HardwareReport),
     ModelState(ModelStateView),
@@ -572,6 +569,10 @@ pub enum WorkerEvent {
     PublicBrowseFinished {
         request_id: Uuid,
         result: Result<PublicBrowseResult, String>,
+    },
+    CommunityFederationIndexesDisabled {
+        request_id: Uuid,
+        result: Result<usize, String>,
     },
     ChatIntegrationsUpdated {
         request_id: Uuid,
@@ -733,6 +734,10 @@ enum BackgroundCompletion {
     PublicBrowse {
         request_id: Uuid,
         result: Result<PublicBrowseResult, String>,
+    },
+    DisableCommunityFederationIndexes {
+        request_id: Uuid,
+        result: Result<usize, String>,
     },
     ChatIntegrations {
         request_id: Uuid,
@@ -1014,6 +1019,7 @@ async fn run_worker(
             reviews: Vec::new(),
             source_issues: Vec::new(),
             blocked_public_publishers: Vec::new(),
+            enabled_community_federation_index_count: 0,
         },
     );
 
@@ -1969,26 +1975,18 @@ async fn run_worker(
                             },
                         );
                     }
-                    WorkerCommand::AddFederationIndex { peer_id, address } => {
-                        match services.add_federation_index(&peer_id, &address) {
-                            Ok(()) => match services.restart_public_network().await {
-                                Ok(()) => match services.sync_all_public_collections().await {
-                                    Ok(()) => send(&events, WorkerEvent::Notice("Índice comunitario agregado".into())),
-                                    Err(error) => send(&events, WorkerEvent::Error(format!("El índice se agregó, pero no se pudieron sincronizar los anuncios: {error:#}"))),
-                                },
-                                Err(error) => send(&events, WorkerEvent::Error(format!("El índice se agregó, pero no se pudo reiniciar la red pública: {error:#}"))),
-                            },
-                            Err(error) => send(&events, WorkerEvent::Error(format!("No se pudo agregar el índice: {error:#}"))),
-                        }
-                    }
-                    WorkerCommand::RemoveFederationIndex { peer_id } => {
-                        match services.remove_federation_index(&peer_id) {
-                            Ok(()) => match services.restart_public_network().await {
-                                Ok(()) => send(&events, WorkerEvent::Notice("Índice comunitario desactivado".into())),
-                                Err(error) => send(&events, WorkerEvent::Error(format!("El índice se desactivó, pero no se pudo reiniciar la red pública: {error:#}"))),
-                            },
-                            Err(error) => send(&events, WorkerEvent::Error(format!("No se pudo desactivar el índice: {error:#}"))),
-                        }
+                    WorkerCommand::DisableCommunityFederationIndexes { request_id } => {
+                        let services = Arc::clone(&services);
+                        background.spawn(async move {
+                            let result = services
+                                .disable_community_federation_indexes()
+                                .await
+                                .map_err(|error| error.to_string());
+                            BackgroundCompletion::DisableCommunityFederationIndexes {
+                                request_id,
+                                result,
+                            }
+                        });
                     }
                     WorkerCommand::UpdatePublicCollectionProfile { collection_id, description, languages } => {
                         match services.update_public_collection_profile(collection_id, &description, &languages) {
@@ -2797,6 +2795,19 @@ async fn run_worker(
                             .map_err(|error| format!("Falló la navegación pública: {error}"));
                         send(&events, WorkerEvent::PublicBrowseFinished { request_id, result });
                     }
+                    Some(Ok(BackgroundCompletion::DisableCommunityFederationIndexes {
+                        request_id,
+                        result,
+                    })) => {
+                        send(
+                            &events,
+                            WorkerEvent::CommunityFederationIndexesDisabled {
+                                request_id,
+                                result,
+                            },
+                        );
+                        send_ready(&services, &events);
+                    }
                     Some(Ok(BackgroundCompletion::ChatIntegrations {
                         request_id,
                         action,
@@ -3465,8 +3476,15 @@ fn send_ready(services: &DesktopServices, events: &Sender<WorkerEvent>) {
         services.review_views(),
         services.source_issue_views(),
         services.blocked_public_publishers(),
+        services.enabled_community_federation_index_count(),
     ) {
-        (Ok(collections), Ok(reviews), Ok(source_issues), Ok(blocked_public_publishers)) => send(
+        (
+            Ok(collections),
+            Ok(reviews),
+            Ok(source_issues),
+            Ok(blocked_public_publishers),
+            Ok(enabled_community_federation_index_count),
+        ) => send(
             events,
             WorkerEvent::Ready {
                 node_id: services.node_id().to_owned(),
@@ -3475,12 +3493,14 @@ fn send_ready(services: &DesktopServices, events: &Sender<WorkerEvent>) {
                 reviews,
                 source_issues,
                 blocked_public_publishers,
+                enabled_community_federation_index_count,
             },
         ),
-        (Err(error), _, _, _)
-        | (_, Err(error), _, _)
-        | (_, _, Err(error), _)
-        | (_, _, _, Err(error)) => send(
+        (Err(error), _, _, _, _)
+        | (_, Err(error), _, _, _)
+        | (_, _, Err(error), _, _)
+        | (_, _, _, Err(error), _)
+        | (_, _, _, _, Err(error)) => send(
             events,
             WorkerEvent::Error(format!("No se pudo cargar el estado local: {error:#}")),
         ),

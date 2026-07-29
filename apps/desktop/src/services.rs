@@ -8,6 +8,7 @@
 
 use std::{
     collections::{HashMap, HashSet, VecDeque},
+    future::Future,
     path::{Path, PathBuf},
     str::FromStr,
     sync::{
@@ -891,6 +892,7 @@ pub struct DesktopServices {
     public_network: Mutex<Option<PublicNetworkRuntime>>,
     public_reader: Arc<PublicReader>,
     public_announcements: Arc<RwLock<HashMap<Uuid, PublicAnnouncementState>>>,
+    public_topology: AsyncMutex<()>,
     search_topology: AsyncMutex<()>,
     network_generation: Arc<AtomicU64>,
     network_events: broadcast::Sender<SequencedNetworkEvent>,
@@ -972,6 +974,14 @@ fn record_public_announcement_failure(
             expires_at: now,
         },
     );
+}
+
+async fn serialize_public_topology_operation<T>(
+    topology: &AsyncMutex<()>,
+    operation: impl Future<Output = T>,
+) -> T {
+    let _topology = topology.lock().await;
+    operation.await
 }
 
 impl DesktopServices {
@@ -1085,6 +1095,7 @@ impl DesktopServices {
             public_network: Mutex::new(None),
             public_reader,
             public_announcements: Arc::new(RwLock::new(HashMap::new())),
+            public_topology: AsyncMutex::new(()),
             search_topology: AsyncMutex::new(()),
             network_generation,
             network_events,
@@ -1478,6 +1489,14 @@ impl DesktopServices {
     }
 
     pub async fn reconcile_public_network(&self) -> Result<()> {
+        serialize_public_topology_operation(
+            &self.public_topology,
+            self.reconcile_public_network_serialized(),
+        )
+        .await
+    }
+
+    async fn reconcile_public_network_serialized(&self) -> Result<()> {
         let should_run = self
             .database
             .list_collections()?
@@ -1536,17 +1555,15 @@ impl DesktopServices {
         Ok(())
     }
 
-    pub async fn restart_public_network(&self) -> Result<()> {
-        let runtime = mutex_lock(&self.public_network, "public network runtime")?.take();
-        if let Some(runtime) = runtime {
-            runtime.cancellation.cancel();
-            let _ = runtime.source_task.await;
-            let _ = runtime.renewal_task.await;
-        }
-        self.reconcile_public_network().await
+    pub async fn sync_public_collection(&self, collection_id: Uuid) -> Result<()> {
+        serialize_public_topology_operation(
+            &self.public_topology,
+            self.sync_public_collection_serialized(collection_id),
+        )
+        .await
     }
 
-    pub async fn sync_public_collection(&self, collection_id: Uuid) -> Result<()> {
+    async fn sync_public_collection_serialized(&self, collection_id: Uuid) -> Result<()> {
         let database = self.database.clone();
         let identity = self.public_identity.clone();
         let prepared = tokio::task::spawn_blocking(move || {
@@ -1603,6 +1620,14 @@ impl DesktopServices {
     }
 
     pub async fn sync_all_public_collections(&self) -> Result<()> {
+        serialize_public_topology_operation(
+            &self.public_topology,
+            self.sync_all_public_collections_serialized(),
+        )
+        .await
+    }
+
+    async fn sync_all_public_collections_serialized(&self) -> Result<()> {
         let database = self.database.clone();
         let collection_ids = tokio::task::spawn_blocking(move || {
             database.list_collections().map(|collections| {
@@ -1616,7 +1641,8 @@ impl DesktopServices {
         .await
         .context("se detuvo el worker de colecciones públicas")??;
         for collection_id in collection_ids {
-            self.sync_public_collection(collection_id).await?;
+            self.sync_public_collection_serialized(collection_id)
+                .await?;
         }
         Ok(())
     }
@@ -1780,33 +1806,33 @@ impl DesktopServices {
         self.public_reader.route_kind()
     }
 
-    pub fn add_federation_index(&self, peer_id: &str, address: &str) -> Result<()> {
-        let peer = PeerId::from_str(peer_id).context("la identidad del índice no es válida")?;
-        let address =
-            Multiaddr::from_str(address).context("la dirección del índice no es válida")?;
-        self.database.upsert_community_federation_index(
-            &peer.to_string(),
-            &address.to_string(),
-            true,
-        )?;
-        self.audit(
-            "federation_index_added",
-            "federation_index",
-            None,
-            serde_json::json!({"source": "community"}),
-        )
+    pub fn enabled_community_federation_index_count(&self) -> Result<usize> {
+        self.database.enabled_community_federation_index_count()
     }
 
-    pub fn remove_federation_index(&self, peer_id: &str) -> Result<()> {
-        let peer = PeerId::from_str(peer_id).context("la identidad del índice no es válida")?;
-        self.database
-            .set_community_federation_index_enabled(&peer.to_string(), false)?;
-        self.audit(
-            "federation_index_disabled",
-            "federation_index",
-            None,
-            serde_json::json!({"source": "community"}),
-        )
+    pub async fn disable_community_federation_indexes(&self) -> Result<usize> {
+        serialize_public_topology_operation(&self.public_topology, async {
+            if self.enabled_community_federation_index_count()? == 0 {
+                return Ok(0);
+            }
+            let runtime = mutex_lock(&self.public_network, "public network runtime")?.take();
+            if let Some(runtime) = runtime {
+                runtime.cancellation.cancel();
+                let _ = runtime.source_task.await;
+                let _ = runtime.renewal_task.await;
+            }
+            let disabled = self.database.disable_community_federation_indexes()?;
+            self.reconcile_public_network_serialized().await?;
+            self.sync_all_public_collections_serialized().await?;
+            self.audit(
+                "community_federation_indexes_disabled",
+                "federation_index",
+                None,
+                serde_json::json!({"disabled_count": disabled}),
+            )?;
+            Ok(disabled)
+        })
+        .await
     }
 
     pub async fn set_public_publisher_blocked(
@@ -3438,7 +3464,10 @@ fn write_lock<'a, T>(
 
 #[cfg(test)]
 mod tests {
+    use std::sync::atomic::AtomicBool;
+
     use airwiki_network::MemorySecretStore;
+    use tokio::sync::Notify;
 
     use super::*;
 
@@ -3770,6 +3799,52 @@ mod tests {
         let forwarded = presentation_receiver.recv().await.unwrap();
         assert_eq!(forwarded.generation, generation);
         assert!(matches!(forwarded.event, NetworkEvent::ListenerUnavailable));
+    }
+
+    #[tokio::test]
+    async fn public_topology_operations_cannot_interleave() {
+        let topology = Arc::new(AsyncMutex::new(()));
+        let first_entered = Arc::new(Notify::new());
+        let release_first = Arc::new(Notify::new());
+        let second_started = Arc::new(Notify::new());
+        let first_active = Arc::new(AtomicBool::new(false));
+
+        let first = tokio::spawn({
+            let topology = Arc::clone(&topology);
+            let first_entered = Arc::clone(&first_entered);
+            let release_first = Arc::clone(&release_first);
+            let first_active = Arc::clone(&first_active);
+            async move {
+                serialize_public_topology_operation(topology.as_ref(), async move {
+                    first_active.store(true, Ordering::SeqCst);
+                    first_entered.notify_one();
+                    release_first.notified().await;
+                    first_active.store(false, Ordering::SeqCst);
+                })
+                .await;
+            }
+        });
+        first_entered.notified().await;
+
+        let second = tokio::spawn({
+            let topology = Arc::clone(&topology);
+            let second_started = Arc::clone(&second_started);
+            let first_active = Arc::clone(&first_active);
+            async move {
+                second_started.notify_one();
+                serialize_public_topology_operation(topology.as_ref(), async move {
+                    assert!(!first_active.load(Ordering::SeqCst));
+                })
+                .await;
+            }
+        });
+        second_started.notified().await;
+        tokio::task::yield_now().await;
+        assert!(!second.is_finished());
+
+        release_first.notify_one();
+        first.await.unwrap();
+        second.await.unwrap();
     }
 
     #[test]

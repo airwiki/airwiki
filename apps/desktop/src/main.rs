@@ -38,13 +38,20 @@ fn main() -> Result<()> {
     let _logging_guard = init_logging(&paths)?;
     tracing::info!(version = env!("CARGO_PKG_VERSION"), "starting AirWiki");
 
+    let viewport = egui::ViewportBuilder::default()
+        .with_title("AirWiki")
+        .with_icon(branding::window_icon())
+        .with_inner_size(INITIAL_WINDOW_SIZE)
+        .with_min_inner_size(MINIMUM_WINDOW_SIZE)
+        .with_visible(launch_mode == LaunchMode::Foreground);
+    #[cfg(target_os = "macos")]
+    let viewport = viewport
+        .with_fullsize_content_view(true)
+        .with_titlebar_shown(false)
+        .with_title_shown(false)
+        .with_titlebar_buttons_shown(true);
     let options = eframe::NativeOptions {
-        viewport: egui::ViewportBuilder::default()
-            .with_title("AirWiki")
-            .with_icon(branding::window_icon())
-            .with_inner_size(INITIAL_WINDOW_SIZE)
-            .with_min_inner_size(MINIMUM_WINDOW_SIZE)
-            .with_visible(launch_mode == LaunchMode::Foreground),
+        viewport,
         ..Default::default()
     };
     eframe::run_native(

@@ -1317,6 +1317,28 @@ impl Database {
         Ok(())
     }
 
+    pub fn enabled_community_federation_index_count(&self) -> Result<usize> {
+        let count: i64 = self.connection()?.query_row(
+            "SELECT COUNT(*) FROM federation_indexes
+             WHERE source='community' AND enabled<>0",
+            [],
+            |row| row.get(0),
+        )?;
+        usize::try_from(count).context("community federation index count is invalid")
+    }
+
+    /// Disables every enabled user-configured federation index while retaining
+    /// its row for audit and recovery. Bundled bootstrap entries are untouched.
+    pub fn disable_community_federation_indexes(&self) -> Result<usize> {
+        self.connection()?
+            .execute(
+                "UPDATE federation_indexes SET enabled=0,updated_at=?1
+                 WHERE source='community' AND enabled<>0",
+                [Utc::now().to_rfc3339()],
+            )
+            .map_err(Into::into)
+    }
+
     pub fn set_public_publisher_blocked(&self, publisher_id: &str, blocked: bool) -> Result<()> {
         let publisher_id = publisher_id.trim();
         if publisher_id.is_empty()
@@ -4937,6 +4959,40 @@ mod tests {
         assert!(
             db.replace_bootstrap_federation_indexes(1, &old_registry)
                 .is_err()
+        );
+    }
+
+    #[test]
+    fn disabling_community_indexes_preserves_bootstrap_entries() {
+        let (_temp, db, _collection) = setup();
+        let bootstrap = [BootstrapFederationIndexEntry {
+            peer_id: "12D3KooWBootstrapRecovery".to_owned(),
+            multiaddr: "/ip4/203.0.113.80/udp/42042/quic-v1".to_owned(),
+            expires_at: Utc::now() + chrono::Duration::days(1),
+        }];
+        db.replace_bootstrap_federation_indexes(1, &bootstrap)
+            .unwrap();
+        db.upsert_community_federation_index(
+            "12D3KooWCommunityRecovery",
+            "/ip4/203.0.113.81/tcp/42044",
+            true,
+        )
+        .unwrap();
+
+        assert_eq!(db.enabled_community_federation_index_count().unwrap(), 1);
+        assert_eq!(db.disable_community_federation_indexes().unwrap(), 1);
+        assert_eq!(db.enabled_community_federation_index_count().unwrap(), 0);
+        assert_eq!(db.disable_community_federation_indexes().unwrap(), 0);
+        let indexes = db.list_federation_indexes().unwrap();
+        assert!(
+            indexes
+                .iter()
+                .any(|index| index.source == "bootstrap" && index.enabled)
+        );
+        assert!(
+            indexes
+                .iter()
+                .any(|index| index.source == "community" && !index.enabled)
         );
     }
 

@@ -1,36 +1,33 @@
 use std::{
-    collections::{BTreeMap, BTreeSet, HashMap, HashSet},
+    collections::{BTreeSet, HashMap, HashSet},
     sync::Arc,
     time::{Duration, Instant},
 };
 
 use airwiki_core::{
-    GuidedRepairChange, GuidedRepairPreview, GuidedRepairResult, HealthRecovery, HealthSeverity,
-    KnowledgeBundleState, KnowledgeBundleView, KnowledgeConceptView, KnowledgeLinkDisposition,
-    KnowledgePageId, KnowledgePageView, RepairAuthority,
+    BundleHealthReport, GuidedRepairChange, GuidedRepairPreview, GuidedRepairResult,
+    HealthRecovery, HealthSeverity, KnowledgeBundleState, KnowledgeBundleView,
+    KnowledgeConceptView, KnowledgeLinkDisposition, KnowledgePageId, KnowledgePageView,
+    RepairAuthority,
 };
 use airwiki_types::SearchHit;
 use eframe::egui::{self, Color32, RichText};
 use egui_commonmark::{CommonMarkCache, CommonMarkViewer};
-use egui_extras::{Size, StripBuilder};
-use egui_graphs::{
-    Graph, GraphView, LayoutHierarchical, LayoutStateHierarchical, SettingsInteraction,
-    SettingsNavigation, SettingsStyle, reset_metadata, set_layout_state,
-};
+use egui_graphs::Graph;
 use uuid::Uuid;
 
-use super::{first_knowledge::AIR_BLUE, wrap_monospace};
+use super::wrap_monospace;
 use crate::{i18n::Localization, layout::ResponsiveLayout};
 
 const MAX_GRAPH_CONCEPTS: usize = 500;
+const MAX_EDITORIAL_GRAPH_NODES: usize = 12;
+const INDEX_FILTER_THRESHOLD: usize = 12;
 // Keep a margin for the persisted egui_graphs layout state around our own step.
 const GRAPH_LAYOUT_WORK_BUDGET: Duration = Duration::from_millis(3);
 const MAX_LAYOUT_NODES_PER_FRAME: usize = 64;
 const UPDATING_RETRY_DELAY: Duration = Duration::from_millis(750);
-const TREE_WIDTH: f32 = 270.0;
-const NARROW_TREE_WIDTH: f32 = 220.0;
-const DETAILS_WIDTH: f32 = 310.0;
 const NARROW_WIKI_THRESHOLD: f32 = 760.0;
+const WIKI_INDEX_COLUMN_GAP: f32 = 56.0;
 
 #[derive(Debug, Clone)]
 pub(super) enum KnowledgeAction {
@@ -64,6 +61,16 @@ pub(super) struct SearchEvidenceTarget {
     source_sha256: String,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(super) struct RecentConceptView {
+    pub(super) id: Uuid,
+    pub(super) title: String,
+    pub(super) summary: String,
+    pub(super) concept_type: String,
+    pub(super) collection_name: String,
+    pub(super) reviewed_at: String,
+}
+
 impl From<&SearchHit> for SearchEvidenceTarget {
     fn from(hit: &SearchHit) -> Self {
         Self {
@@ -91,9 +98,23 @@ enum KnowledgeTab {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum NarrowWikiPane {
-    Page,
-    Details,
+enum ConceptHealthTone {
+    Healthy,
+    Attention,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum WikiLayoutMode {
+    Compact,
+    Wide,
+}
+
+const fn wiki_layout_mode(available_width: f32) -> WikiLayoutMode {
+    if available_width < NARROW_WIKI_THRESHOLD {
+        WikiLayoutMode::Compact
+    } else {
+        WikiLayoutMode::Wide
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -123,7 +144,6 @@ type KnowledgeGraph = Graph<KnowledgeGraphNode, ()>;
 #[derive(Debug, Clone)]
 struct KnowledgeGraphCache {
     key: String,
-    widget_id: String,
     graph: KnowledgeGraph,
     layout: IncrementalGraphLayout,
 }
@@ -179,7 +199,6 @@ impl IncrementalGraphLayout {
 
 pub(super) struct KnowledgeUi {
     tab: KnowledgeTab,
-    narrow_wiki_pane: NarrowWikiPane,
     collection_id: Option<Uuid>,
     bundle: Option<Arc<KnowledgeBundleView>>,
     bundle_pending: Option<PendingBundle>,
@@ -211,7 +230,6 @@ impl Default for KnowledgeUi {
     fn default() -> Self {
         Self {
             tab: KnowledgeTab::Wiki,
-            narrow_wiki_pane: NarrowWikiPane::Page,
             collection_id: None,
             bundle: None,
             bundle_pending: None,
@@ -242,13 +260,59 @@ impl Default for KnowledgeUi {
 }
 
 impl KnowledgeUi {
+    pub(super) fn prepare_recent_concepts(
+        &mut self,
+        collections: &[(Uuid, String)],
+        active_scans: &HashSet<Uuid>,
+    ) -> Vec<KnowledgeAction> {
+        let mut actions = Vec::new();
+        self.ensure_collection(collections, active_scans, &mut actions);
+        actions
+    }
+
+    pub(super) fn recent_concepts(&self) -> Vec<RecentConceptView> {
+        let Some(bundle) = self.bundle.as_ref() else {
+            return Vec::new();
+        };
+        let mut concepts = bundle.concepts.iter().collect::<Vec<_>>();
+        concepts.sort_by(|left, right| {
+            right
+                .reviewed_at
+                .as_ref()
+                .or(right.timestamp.as_ref())
+                .cmp(&left.reviewed_at.as_ref().or(left.timestamp.as_ref()))
+                .then_with(|| left.title.cmp(&right.title))
+        });
+        concepts
+            .into_iter()
+            .take(4)
+            .map(|concept| RecentConceptView {
+                id: concept.id,
+                title: concept.title.clone(),
+                summary: concept.description.clone(),
+                concept_type: concept.concept_type.clone(),
+                collection_name: bundle.collection_name.clone(),
+                reviewed_at: concept
+                    .reviewed_at
+                    .as_ref()
+                    .or(concept.timestamp.as_ref())
+                    .map(|date| date.format("%Y-%m-%d").to_string())
+                    .unwrap_or_default(),
+            })
+            .collect()
+    }
+
+    pub(super) fn open_recent_concept(&mut self, concept_id: Uuid) -> Option<KnowledgeAction> {
+        self.tab = KnowledgeTab::Wiki;
+        self.request_page(KnowledgePageId::Concept(concept_id))
+    }
+
     pub(super) fn open_search_evidence(
         &mut self,
         target: SearchEvidenceTarget,
         scan_active: bool,
     ) -> Option<KnowledgeAction> {
         self.tab = KnowledgeTab::Wiki;
-        self.narrow_wiki_pane = NarrowWikiPane::Page;
         self.query_filter.clear();
         self.type_filter = None;
         self.tag_filter = None;
@@ -620,7 +684,19 @@ impl KnowledgeUi {
 
         let requested_page = match self.tab {
             KnowledgeTab::Wiki => self.show_wiki(ui, localization, &bundle),
-            KnowledgeTab::Graph => self.show_graph(ui, localization, &bundle),
+            KnowledgeTab::Graph => {
+                let mut requested_page = None;
+                let graph_height = ui.available_height().max(0.0);
+                egui::ScrollArea::vertical()
+                    .id_salt("knowledge_editorial_graph")
+                    .max_height(graph_height)
+                    .auto_shrink([false; 2])
+                    .show(ui, |ui| {
+                        requested_page = self.show_graph(ui, localization, &bundle);
+                        scroll_newly_focused_control_into_view(ui);
+                    });
+                requested_page
+            }
             KnowledgeTab::Health => {
                 let (page, action) = self.show_health(ui, localization, &bundle);
                 if let Some(action) = action {
@@ -632,7 +708,6 @@ impl KnowledgeUi {
         if let Some(page_id) = requested_page
             && let Some(action) = self.request_page(page_id)
         {
-            self.narrow_wiki_pane = NarrowWikiPane::Page;
             actions.push(action);
         }
 
@@ -700,7 +775,7 @@ impl KnowledgeUi {
         let title = |ui: &mut egui::Ui| {
             ui.heading(
                 RichText::new(localization.text("knowledge-title"))
-                    .size(34.0)
+                    .size(32.0)
                     .family(crate::theme::semibold_font_family()),
             );
             ui.add(
@@ -809,157 +884,294 @@ impl KnowledgeUi {
         bundle: &KnowledgeBundleView,
     ) -> Option<KnowledgePageId> {
         let mut requested_page = None;
-        if ui.available_width() < NARROW_WIKI_THRESHOLD {
-            StripBuilder::new(ui)
-                .size(Size::exact(NARROW_TREE_WIDTH))
-                .size(Size::remainder().at_least(260.0))
-                .clip(true)
-                .horizontal(|mut strip| {
-                    strip.cell(|ui| {
-                        requested_page =
-                            requested_page.or(self.wiki_tree(ui, localization, bundle));
-                    });
-                    strip.cell(|ui| {
-                        ui.horizontal(|ui| {
-                            ui.selectable_value(
-                                &mut self.narrow_wiki_pane,
-                                NarrowWikiPane::Page,
-                                localization.text("knowledge-tab-wiki"),
-                            );
-                            ui.selectable_value(
-                                &mut self.narrow_wiki_pane,
-                                NarrowWikiPane::Details,
-                                localization.text("action-details"),
-                            );
-                        });
-                        ui.separator();
-                        requested_page = requested_page.or(match self.narrow_wiki_pane {
-                            NarrowWikiPane::Page => self.wiki_page(ui, localization, bundle),
-                            NarrowWikiPane::Details => self.wiki_details(ui, localization, bundle),
-                        });
-                    });
+        if wiki_layout_mode(ui.available_width()) == WikiLayoutMode::Compact {
+            let current_label = self
+                .selected_page
+                .map(|page| page_label(localization, bundle, page))
+                .unwrap_or_else(|| localization.text("knowledge-all-concepts"));
+            egui::ComboBox::from_id_salt("knowledge_compact_concept")
+                .selected_text(current_label)
+                .width(ui.available_width())
+                .show_ui(ui, |ui| {
+                    if ui
+                        .selectable_label(
+                            !wiki_reader_page_selected(self.selected_page),
+                            localization.text("knowledge-all-concepts"),
+                        )
+                        .clicked()
+                    {
+                        requested_page = Some(KnowledgePageId::Index);
+                    }
+                    if page_fingerprint(bundle, KnowledgePageId::Log).is_some()
+                        && ui
+                            .selectable_label(
+                                self.selected_page == Some(KnowledgePageId::Log),
+                                localization.text("knowledge-open-bundle-log"),
+                            )
+                            .clicked()
+                    {
+                        requested_page = Some(KnowledgePageId::Log);
+                    }
+                    for concept in &bundle.concepts {
+                        let page_id = KnowledgePageId::Concept(concept.id);
+                        if ui
+                            .selectable_label(self.selected_page == Some(page_id), &concept.title)
+                            .clicked()
+                        {
+                            requested_page = Some(page_id);
+                        }
+                    }
                 });
-        } else {
-            StripBuilder::new(ui)
-                .size(Size::exact(TREE_WIDTH))
-                .size(Size::remainder().at_least(260.0))
-                .size(Size::exact(DETAILS_WIDTH))
-                .clip(true)
-                .horizontal(|mut strip| {
-                    strip.cell(|ui| {
-                        requested_page =
-                            requested_page.or(self.wiki_tree(ui, localization, bundle));
-                    });
-                    strip.cell(|ui| {
+            ui.add_space(10.0);
+            if wiki_reader_page_selected(self.selected_page) {
+                let detail_height = ui.available_height().max(0.0);
+                egui::ScrollArea::vertical()
+                    .id_salt("knowledge_compact_detail")
+                    .max_height(detail_height)
+                    .auto_shrink([false; 2])
+                    .show(ui, |ui| {
                         requested_page =
                             requested_page.or(self.wiki_page(ui, localization, bundle));
-                    });
-                    strip.cell(|ui| {
+                        ui.add_space(20.0);
                         requested_page =
                             requested_page.or(self.wiki_details(ui, localization, bundle));
+                        scroll_newly_focused_control_into_view(ui);
                     });
+            } else {
+                let (types, tags) = filter_values(bundle);
+                normalize_filter(&mut self.type_filter, &types);
+                normalize_filter(&mut self.tag_filter, &tags);
+                ui.add(
+                    egui::TextEdit::singleline(&mut self.query_filter)
+                        .desired_width(ui.available_width())
+                        .hint_text(localization.text("knowledge-filter-pages")),
+                );
+                ui.horizontal_wrapped(|ui| {
+                    filter_combo(
+                        ui,
+                        localization,
+                        "knowledge-filter-type",
+                        &mut self.type_filter,
+                        &types,
+                    );
+                    filter_combo(
+                        ui,
+                        localization,
+                        "knowledge-filter-tag",
+                        &mut self.tag_filter,
+                        &tags,
+                    );
                 });
-        }
-        requested_page
-    }
-
-    fn wiki_tree(
-        &mut self,
-        ui: &mut egui::Ui,
-        localization: &Localization,
-        bundle: &KnowledgeBundleView,
-    ) -> Option<KnowledgePageId> {
-        let mut requested = None;
-        crate::theme::surface_frame(ui.visuals().dark_mode).show(ui, |ui| {
-            ui.set_min_height(ui.available_height());
-            ui.heading(localization.text("knowledge-pages"));
-            ui.add(
-                egui::TextEdit::singleline(&mut self.query_filter)
-                    .hint_text(localization.text("knowledge-filter-pages")),
-            );
-
-            let (types, tags) = filter_values(bundle);
-            normalize_filter(&mut self.type_filter, &types);
-            normalize_filter(&mut self.tag_filter, &tags);
-            ui.horizontal(|ui| {
-                filter_combo(
-                    ui,
-                    localization,
-                    "knowledge-filter-type",
-                    &mut self.type_filter,
-                    &types,
-                );
-                filter_combo(
-                    ui,
-                    localization,
-                    "knowledge-filter-tag",
-                    &mut self.tag_filter,
-                    &tags,
-                );
-            });
-            ui.separator();
-
+                ui.add_space(8.0);
+                let list_height = ui.available_height().max(0.0);
+                egui::ScrollArea::vertical()
+                    .id_salt("knowledge_compact_index")
+                    .max_height(list_height)
+                    .auto_shrink([false; 2])
+                    .show(ui, |ui| {
+                        for concept in filtered_concepts(
+                            bundle,
+                            &self.query_filter,
+                            self.type_filter.as_deref(),
+                            self.tag_filter.as_deref(),
+                        ) {
+                            ui.separator();
+                            let page_id = KnowledgePageId::Concept(concept.id);
+                            let (health, tone) = match concept_health_tone(&bundle.health, page_id)
+                            {
+                                ConceptHealthTone::Healthy => (
+                                    localization.text("knowledge-concept-healthy"),
+                                    KnowledgePillTone::Accent,
+                                ),
+                                ConceptHealthTone::Attention => (
+                                    localization.text("knowledge-concept-attention"),
+                                    KnowledgePillTone::Attention,
+                                ),
+                            };
+                            let reviewed = concept
+                                .reviewed_at
+                                .as_ref()
+                                .or(concept.timestamp.as_ref())
+                                .map(|date| date.format("%Y-%m-%d").to_string());
+                            let mut metadata = vec![bundle.collection_name.clone()];
+                            if !concept.tags.is_empty() {
+                                metadata.push(concept.tags.join(" · "));
+                            }
+                            if let Some(reviewed) = reviewed {
+                                metadata.push(reviewed);
+                            }
+                            let metadata = metadata.join("  ·  ");
+                            if knowledge_index_entry(
+                                ui,
+                                KnowledgeIndexEntry {
+                                    id: concept.id,
+                                    title: &concept.title,
+                                    title_size: 19.0,
+                                    concept_type: &concept.concept_type,
+                                    health_label: &health,
+                                    health_tone: tone,
+                                    description: &concept.description,
+                                    metadata: &metadata,
+                                },
+                            )
+                            .clicked()
+                            {
+                                requested_page = Some(page_id);
+                            }
+                            ui.add_space(12.0);
+                        }
+                        if bundle_log_summary(ui, localization, bundle) {
+                            requested_page = Some(KnowledgePageId::Log);
+                        }
+                        scroll_newly_focused_control_into_view(ui);
+                    });
+            }
+        } else if wiki_reader_page_selected(self.selected_page) {
+            ui.set_max_width(720.0);
+            if ui
+                .add(crate::theme::ghost_button(
+                    format!("← {}", localization.text("knowledge-all-concepts")),
+                    ui.visuals().dark_mode,
+                ))
+                .clicked()
+            {
+                self.selected_page = Some(KnowledgePageId::Index);
+                self.page = None;
+            } else {
+                ui.add_space(8.0);
+                let detail_height = ui.available_height().max(0.0);
+                egui::ScrollArea::vertical()
+                    .id_salt("knowledge_editorial_detail")
+                    .max_height(detail_height)
+                    .auto_shrink([false; 2])
+                    .show(ui, |ui| {
+                        ui.set_max_width(620.0);
+                        requested_page =
+                            requested_page.or(self.wiki_page(ui, localization, bundle));
+                        ui.add_space(24.0);
+                        requested_page =
+                            requested_page.or(self.wiki_details(ui, localization, bundle));
+                        scroll_newly_focused_control_into_view(ui);
+                    });
+            }
+        } else {
+            let index_height = ui.available_height().max(0.0);
             egui::ScrollArea::vertical()
-                .id_salt("knowledge_tree")
+                .id_salt("knowledge_wide_index")
+                .max_height(index_height)
                 .auto_shrink([false; 2])
                 .show(ui, |ui| {
-                    if page_button(
-                        ui,
-                        localization,
-                        bundle.index_fingerprint.is_some(),
-                        self.selected_page == Some(KnowledgePageId::Index),
-                        "⌂  index.md",
-                    ) {
-                        requested = Some(KnowledgePageId::Index);
+                    ui.set_max_width(860.0);
+                    let (types, tags) = filter_values(bundle);
+                    normalize_filter(&mut self.type_filter, &types);
+                    normalize_filter(&mut self.tag_filter, &tags);
+                    let filter_controls_visible = bundle.concepts.len() > INDEX_FILTER_THRESHOLD
+                        || !self.query_filter.trim().is_empty()
+                        || self.type_filter.is_some()
+                        || self.tag_filter.is_some();
+                    if filter_controls_visible {
+                        ui.horizontal_wrapped(|ui| {
+                            ui.label(crate::theme::card_kicker_job(
+                                localization.text("knowledge-index-kicker"),
+                                crate::theme::accent_text(ui.visuals().dark_mode),
+                            ));
+                            ui.with_layout(
+                                egui::Layout::right_to_left(egui::Align::Center),
+                                |ui| {
+                                    filter_combo(
+                                        ui,
+                                        localization,
+                                        "knowledge-filter-tag",
+                                        &mut self.tag_filter,
+                                        &tags,
+                                    );
+                                    filter_combo(
+                                        ui,
+                                        localization,
+                                        "knowledge-filter-type",
+                                        &mut self.type_filter,
+                                        &types,
+                                    );
+                                    ui.add(
+                                        egui::TextEdit::singleline(&mut self.query_filter)
+                                            .desired_width(220.0)
+                                            .hint_text(localization.text("knowledge-filter-pages")),
+                                    );
+                                },
+                            );
+                        });
+                        ui.add_space(12.0);
                     }
-                    if page_button(
-                        ui,
-                        localization,
-                        bundle.log_fingerprint.is_some(),
-                        self.selected_page == Some(KnowledgePageId::Log),
-                        "≡  log.md",
-                    ) {
-                        requested = Some(KnowledgePageId::Log);
-                    }
-                    ui.add_space(6.0);
-
                     let filtered = filtered_concepts(
                         bundle,
                         &self.query_filter,
                         self.type_filter.as_deref(),
                         self.tag_filter.as_deref(),
                     );
-                    let mut grouped = BTreeMap::<String, Vec<&KnowledgeConceptView>>::new();
-                    for concept in filtered {
-                        grouped
-                            .entry(concept.concept_type.to_string())
-                            .or_default()
-                            .push(concept);
-                    }
-                    for (concept_type, concepts) in grouped {
-                        egui::CollapsingHeader::new(format!(
-                            "{concept_type}  ({})",
-                            concepts.len()
-                        ))
-                        .default_open(true)
-                        .show(ui, |ui| {
-                            for concept in concepts {
-                                let page_id = KnowledgePageId::Concept(concept.id);
-                                if page_button(
-                                    ui,
-                                    localization,
-                                    true,
-                                    self.selected_page == Some(page_id),
-                                    &concept.title,
-                                ) {
-                                    requested = Some(page_id);
-                                }
+                    ui.scope(|ui| {
+                        ui.spacing_mut().item_spacing.x = WIKI_INDEX_COLUMN_GAP;
+                        ui.columns(2, |columns| {
+                            for (index, concept) in filtered.into_iter().enumerate() {
+                                let column = &mut columns[index % 2];
+                                column.push_id(concept.id, |ui| {
+                                    ui.separator();
+                                    ui.add_space(8.0);
+                                    let health_tone = concept_health_tone(
+                                        &bundle.health,
+                                        KnowledgePageId::Concept(concept.id),
+                                    );
+                                    let (health_label, health_tone) = match health_tone {
+                                        ConceptHealthTone::Healthy => (
+                                            localization.text("knowledge-concept-healthy"),
+                                            KnowledgePillTone::Accent,
+                                        ),
+                                        ConceptHealthTone::Attention => (
+                                            localization.text("knowledge-concept-attention"),
+                                            KnowledgePillTone::Attention,
+                                        ),
+                                    };
+                                    let reviewed = concept
+                                        .reviewed_at
+                                        .as_ref()
+                                        .or(concept.timestamp.as_ref())
+                                        .map(|date| date.format("%Y-%m-%d").to_string());
+                                    let mut metadata = vec![bundle.collection_name.clone()];
+                                    if !concept.tags.is_empty() {
+                                        metadata.push(concept.tags.join(" · "));
+                                    }
+                                    if let Some(reviewed) = reviewed {
+                                        metadata.push(reviewed);
+                                    }
+                                    let metadata = metadata.join("  ·  ");
+                                    if knowledge_index_entry(
+                                        ui,
+                                        KnowledgeIndexEntry {
+                                            id: concept.id,
+                                            title: &concept.title,
+                                            title_size: 18.0,
+                                            concept_type: &concept.concept_type,
+                                            health_label: &health_label,
+                                            health_tone,
+                                            description: &concept.description,
+                                            metadata: &metadata,
+                                        },
+                                    )
+                                    .clicked()
+                                    {
+                                        requested_page = Some(KnowledgePageId::Concept(concept.id));
+                                    }
+                                    ui.add_space(14.0);
+                                });
                             }
                         });
+                    });
+                    if bundle_log_summary(ui, localization, bundle) {
+                        requested_page = Some(KnowledgePageId::Log);
                     }
+                    scroll_newly_focused_control_into_view(ui);
                 });
-        });
-        requested
+        }
+        requested_page
     }
 
     fn wiki_page(
@@ -969,8 +1181,7 @@ impl KnowledgeUi {
         bundle: &KnowledgeBundleView,
     ) -> Option<KnowledgePageId> {
         let mut requested = None;
-        crate::theme::surface_frame(ui.visuals().dark_mode).show(ui, |ui| {
-            ui.set_min_height(ui.available_height());
+        ui.scope(|ui| {
             if self.page_pending.is_some() {
                 ui.centered_and_justified(|ui| {
                     ui.horizontal(|ui| {
@@ -1006,24 +1217,63 @@ impl KnowledgeUi {
                 ui.add_space(8.0);
             }
 
-            ui.horizontal(|ui| {
-                ui.heading(&page.title);
-                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    ui.label(
-                        RichText::new(short_fingerprint(&page.fingerprint))
-                            .monospace()
-                            .small()
-                            .color(ui.visuals().weak_text_color()),
-                    );
+            let concept = match page.page_id {
+                KnowledgePageId::Concept(concept_id) => bundle
+                    .concepts
+                    .iter()
+                    .find(|concept| concept.id == concept_id),
+                KnowledgePageId::Index | KnowledgePageId::Log => None,
+            };
+            if let Some(concept) = concept {
+                let tone = concept_health_tone(&bundle.health, page.page_id);
+                let (health, pill_tone) = match tone {
+                    ConceptHealthTone::Healthy => (
+                        localization.text("knowledge-concept-healthy"),
+                        KnowledgePillTone::Accent,
+                    ),
+                    ConceptHealthTone::Attention => (
+                        localization.text("knowledge-concept-attention"),
+                        KnowledgePillTone::Attention,
+                    ),
+                };
+                ui.horizontal_wrapped(|ui| {
+                    knowledge_pill(ui, &concept.concept_type, KnowledgePillTone::Neutral);
+                    knowledge_pill(ui, &health, pill_tone);
                 });
-            });
+            }
+            ui.heading(
+                RichText::new(&page.title)
+                    .size(32.0)
+                    .family(crate::theme::semibold_font_family()),
+            );
+            if let Some(concept) = concept {
+                let reviewed = concept
+                    .reviewed_at
+                    .as_ref()
+                    .or(concept.timestamp.as_ref())
+                    .map(|date| date.format("%Y-%m-%d").to_string());
+                let mut metadata = vec![bundle.collection_name.clone()];
+                if let Some(reviewed) = reviewed {
+                    metadata.push(reviewed);
+                }
+                if !concept.tags.is_empty() {
+                    metadata.push(concept.tags.join(" · "));
+                }
+                ui.label(
+                    RichText::new(metadata.join("  ·  "))
+                        .small()
+                        .color(ui.visuals().weak_text_color()),
+                );
+            }
             if page.truncated {
                 ui.colored_label(
                     crate::theme::warning_text(ui.visuals().dark_mode),
                     localization.text("knowledge-page-truncated"),
                 );
             }
+            ui.add_space(10.0);
             ui.separator();
+            ui.add_space(8.0);
 
             let command_start = ui.ctx().output(|output| output.commands.len());
             let source_id = format!(
@@ -1051,67 +1301,126 @@ impl KnowledgeUi {
         bundle: &KnowledgeBundleView,
     ) -> Option<KnowledgePageId> {
         let mut requested = None;
-        crate::theme::surface_frame(ui.visuals().dark_mode).show(ui, |ui| {
-            ui.set_min_height(ui.available_height());
+        ui.scope(|ui| {
             let Some(page) = self.page.clone() else {
                 ui.label(localization.text("knowledge-details-placeholder"));
                 return;
             };
-            egui::ScrollArea::vertical()
-                .id_salt("knowledge_details")
-                .auto_shrink([false; 2])
-                .show(ui, |ui| {
-                    ui.heading(localization.text("knowledge-metadata"));
-                    for (key, value) in &page.metadata {
+            ui.label(crate::theme::section_label_job(
+                localization.text("knowledge-metadata").to_uppercase(),
+                crate::theme::secondary_text(ui.visuals().dark_mode),
+            ));
+            let concept = match page.page_id {
+                KnowledgePageId::Concept(concept_id) => bundle
+                    .concepts
+                    .iter()
+                    .find(|concept| concept.id == concept_id),
+                KnowledgePageId::Index | KnowledgePageId::Log => None,
+            };
+            if let Some(revision) = concept.and_then(|concept| concept.revision) {
+                let mut arguments = fluent_bundle::FluentArgs::new();
+                arguments.set("revision", i64::from(revision));
+                ui.add(
+                    egui::Label::new(
+                        RichText::new(
+                            localization.text_with("knowledge-source-revision", Some(&arguments)),
+                        )
+                        .small()
+                        .color(ui.visuals().weak_text_color()),
+                    )
+                    .wrap(),
+                );
+            } else {
+                ui.label(
+                    RichText::new(localization.text("knowledge-source-metadata-unavailable"))
+                        .color(ui.visuals().weak_text_color()),
+                );
+            }
+            let additional_metadata = page
+                .metadata
+                .iter()
+                .filter(|(key, _)| editorial_metadata_key(key))
+                .collect::<Vec<_>>();
+            if !additional_metadata.is_empty() {
+                ui.collapsing(localization.text("knowledge-additional-metadata"), |ui| {
+                    for (key, value) in additional_metadata {
                         ui.label(
                             RichText::new(key)
                                 .small()
                                 .family(crate::theme::semibold_font_family()),
                         );
                         ui.add(
-                            egui::Label::new(RichText::new(value).monospace().small())
+                            egui::Label::new(RichText::new(value).small())
                                 .selectable(true)
                                 .wrap(),
                         );
-                        ui.add_space(5.0);
                     }
+                });
+            }
 
-                    ui.separator();
-                    let mut backlink_arguments = fluent_bundle::FluentArgs::new();
-                    backlink_arguments.set("count", page.backlinks.len());
-                    ui.heading(
-                        localization.text_with("knowledge-backlinks", Some(&backlink_arguments)),
-                    );
-                    if page.backlinks.is_empty() {
-                        ui.label(
-                            RichText::new(localization.text("knowledge-no-backlinks"))
-                                .color(ui.visuals().weak_text_color()),
-                        );
-                    }
-                    for backlink in &page.backlinks {
-                        let label = page_label(localization, bundle, *backlink);
+            ui.add_space(16.0);
+            ui.separator();
+            ui.add_space(10.0);
+            let mut link_arguments = fluent_bundle::FluentArgs::new();
+            link_arguments.set("count", page.outgoing_links.len());
+            ui.label(crate::theme::section_label_job(
+                localization
+                    .text_with("knowledge-links", Some(&link_arguments))
+                    .to_uppercase(),
+                crate::theme::secondary_text(ui.visuals().dark_mode),
+            ));
+            if page.outgoing_links.is_empty() {
+                ui.label(
+                    RichText::new(localization.text("knowledge-no-linked-concepts"))
+                        .color(ui.visuals().weak_text_color()),
+                );
+            }
+            for link in &page.outgoing_links {
+                let label = if link.label.is_empty() {
+                    &link.raw_target
+                } else {
+                    &link.label
+                };
+                match &link.disposition {
+                    KnowledgeLinkDisposition::Internal(target) => {
                         if ui.link(label).clicked() {
-                            requested = Some(*backlink);
+                            requested = Some(*target);
                         }
                     }
-
-                    ui.separator();
-                    let mut link_arguments = fluent_bundle::FluentArgs::new();
-                    link_arguments.set("count", page.outgoing_links.len());
-                    ui.heading(localization.text_with("knowledge-links", Some(&link_arguments)));
-                    for link in &page.outgoing_links {
+                    _ => {
                         let (status, color) =
                             link_status(localization, &link.disposition, ui.visuals().dark_mode);
                         ui.horizontal_wrapped(|ui| {
                             ui.colored_label(color, status);
-                            ui.label(if link.label.is_empty() {
-                                &link.raw_target
-                            } else {
-                                &link.label
-                            });
+                            ui.label(label);
                         });
                     }
-                });
+                }
+            }
+
+            ui.add_space(16.0);
+            ui.separator();
+            ui.add_space(10.0);
+            let mut backlink_arguments = fluent_bundle::FluentArgs::new();
+            backlink_arguments.set("count", page.backlinks.len());
+            ui.label(crate::theme::section_label_job(
+                localization
+                    .text_with("knowledge-backlinks", Some(&backlink_arguments))
+                    .to_uppercase(),
+                crate::theme::secondary_text(ui.visuals().dark_mode),
+            ));
+            if page.backlinks.is_empty() {
+                ui.label(
+                    RichText::new(localization.text("knowledge-no-backlinks"))
+                        .color(ui.visuals().weak_text_color()),
+                );
+            }
+            for backlink in &page.backlinks {
+                let label = page_label(localization, bundle, *backlink);
+                if ui.link(label).clicked() {
+                    requested = Some(*backlink);
+                }
+            }
         });
         requested
     }
@@ -1125,27 +1434,34 @@ impl KnowledgeUi {
         let (types, tags) = filter_values(bundle);
         normalize_filter(&mut self.type_filter, &types);
         normalize_filter(&mut self.tag_filter, &tags);
-        graph_filter_controls(
-            ui,
-            localization,
-            &mut self.query_filter,
-            &mut self.type_filter,
-            &mut self.tag_filter,
-            &types,
-            &tags,
-        );
+        let filter_controls_visible = graph_requires_filter(bundle.concepts.len())
+            || !self.query_filter.trim().is_empty()
+            || self.type_filter.is_some()
+            || self.tag_filter.is_some();
+        if filter_controls_visible {
+            ui.collapsing(localization.text("knowledge-graph-filter-title"), |ui| {
+                graph_filter_controls(
+                    ui,
+                    localization,
+                    &mut self.query_filter,
+                    &mut self.type_filter,
+                    &mut self.tag_filter,
+                    &types,
+                    &tags,
+                );
+            });
+        }
 
-        let filtered_count = filtered_concepts(
+        let filtered = filtered_concepts(
             bundle,
             &self.query_filter,
             self.type_filter.as_deref(),
             self.tag_filter.as_deref(),
-        )
-        .len();
-        if graph_requires_filter(filtered_count) {
+        );
+        if graph_requires_filter(filtered.len()) {
             self.graph = None;
             let mut arguments = fluent_bundle::FluentArgs::new();
-            arguments.set("count", filtered_count);
+            arguments.set("count", filtered.len());
             arguments.set("limit", MAX_GRAPH_CONCEPTS);
             empty_state(
                 ui,
@@ -1157,81 +1473,119 @@ impl KnowledgeUi {
 
         self.ensure_graph(localization, bundle);
         let cache = self.graph.as_mut()?;
-        let mut layout_advanced = cache.layout.advance(&mut cache.graph) > 0;
-
-        ui.horizontal_wrapped(|ui| {
-            let mut graph_arguments = fluent_bundle::FluentArgs::new();
-            graph_arguments.set("nodes", cache.graph.node_count());
-            graph_arguments.set("links", cache.graph.edge_count());
-            ui.label(localization.text_with("knowledge-graph-counts", Some(&graph_arguments)));
-            if !cache.layout.stable {
-                ui.spinner();
-                ui.label(localization.text("knowledge-graph-organizing"));
-            }
-            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                if ui
-                    .button(localization.text("knowledge-graph-reset"))
-                    .clicked()
-                {
-                    reset_metadata(ui, Some(cache.widget_id.clone()));
-                    cache.layout = IncrementalGraphLayout::default();
-                    layout_advanced = true;
-                }
-            });
-        });
-        ui.separator();
-
-        let interactions = SettingsInteraction::default()
-            .with_dragging_enabled(true)
-            .with_node_selection_enabled(true);
-        let navigation = SettingsNavigation::default()
-            .with_fit_to_screen_enabled(layout_advanced)
-            .with_zoom_and_pan_enabled(true)
-            .with_fit_to_screen_padding(0.08);
-        let style = SettingsStyle::default()
-            .with_labels_always(cache.graph.node_count() <= 120)
-            .with_node_stroke_hook(|selected, _, color, mut stroke, _| {
-                if let Some(color) = color {
-                    stroke.color = color;
-                }
-                if selected {
-                    stroke.width = 3.0;
-                }
-                stroke
-            });
-        let graph_response = {
-            // Node positions are computed incrementally above. Keep egui_graphs' built-in
-            // hierarchical pass disabled so it cannot replace them with one monolithic step.
-            set_layout_state(
-                ui,
-                LayoutStateHierarchical {
-                    triggered: true,
-                    ..LayoutStateHierarchical::default()
-                },
-                Some(cache.widget_id.clone()),
-            );
-            let mut graph_view =
-                GraphView::<_, _, _, _, _, _, LayoutStateHierarchical, LayoutHierarchical>::new(
-                    &mut cache.graph,
-                )
-                .with_id(Some(cache.widget_id.clone()))
-                .with_interactions(&interactions)
-                .with_navigations(&navigation)
-                .with_styles(&style);
-            ui.add(&mut graph_view)
-        };
-        if let Some(payload) = cache
+        let _ = cache.layout.advance(&mut cache.graph);
+        let canvas_width = ui.available_width().min(720.0);
+        let visible_node_limit = editorial_graph_node_limit(canvas_width);
+        let graph_nodes = cache
             .graph
-            .hovered_node()
-            .and_then(|index| cache.graph.node(index))
-            .map(|node| node.payload().clone())
-        {
-            graph_response.on_hover_ui(|ui| {
-                ui.label(RichText::new(payload.title).family(crate::theme::semibold_font_family()));
-                ui.label(payload.concept_type);
-                if !payload.tags.is_empty() {
+            .nodes_iter()
+            .filter_map(|(_, node)| {
+                let payload = node.payload();
+                (payload.page_id != KnowledgePageId::Index).then(|| {
+                    (
+                        payload.page_id,
+                        payload.title.clone(),
+                        payload.concept_type.clone(),
+                        payload.tags.clone(),
+                        node.color().unwrap_or(crate::theme::AIR_CYAN),
+                    )
+                })
+            })
+            .take(visible_node_limit)
+            .collect::<Vec<_>>();
+        let shown_node_count = graph_nodes.len();
+        let graph_edges = cache
+            .graph
+            .edges_iter()
+            .filter_map(|(edge_index, _)| {
+                let (source, target) = cache.graph.edge_endpoints(edge_index)?;
+                let source = cache.graph.node(source)?.payload().page_id;
+                let target = cache.graph.node(target)?.payload().page_id;
+                (source != KnowledgePageId::Index && target != KnowledgePageId::Index)
+                    .then_some((source, target))
+            })
+            .collect::<Vec<_>>();
+
+        let canvas_height = if canvas_width < 620.0 { 340.0 } else { 400.0 };
+        let (canvas, _) = ui.allocate_exact_size(
+            egui::vec2(canvas_width, canvas_height),
+            egui::Sense::hover(),
+        );
+        let positions = graph_nodes
+            .iter()
+            .enumerate()
+            .map(|(ordinal, (page_id, ..))| {
+                (
+                    *page_id,
+                    editorial_graph_position(canvas, ordinal, graph_nodes.len()),
+                )
+            })
+            .collect::<HashMap<_, _>>();
+
+        for (source, target) in graph_edges {
+            let (Some(source), Some(target)) = (positions.get(&source), positions.get(&target))
+            else {
+                continue;
+            };
+            ui.painter().line_segment(
+                [*source, *target],
+                egui::Stroke::new(1.0, crate::theme::border(ui.visuals().dark_mode)),
+            );
+        }
+
+        let mut graph_page = None;
+        for (page_id, title, concept_type, tags, color) in graph_nodes {
+            let Some(position) = positions.get(&page_id).copied() else {
+                continue;
+            };
+            let hit_rect = egui::Rect::from_center_size(
+                position + egui::vec2(0.0, 20.0),
+                egui::vec2(150.0, 62.0),
+            );
+            let response = ui.interact(
+                hit_rect,
+                ui.id().with(("graph_node", page_id)),
+                egui::Sense::click(),
+            );
+            response.widget_info(|| {
+                egui::WidgetInfo::labeled(
+                    egui::WidgetType::Button,
+                    true,
+                    format!("{title}, {concept_type}"),
+                )
+            });
+            if response.clicked() {
+                graph_page = Some(page_id);
+            }
+            if response.has_focus() {
+                ui.painter().rect_stroke(
+                    hit_rect,
+                    1.0,
+                    egui::Stroke::new(2.0, crate::theme::AIR_CYAN),
+                    egui::StrokeKind::Inside,
+                );
+            }
+            ui.painter().circle_filled(position, 8.0, color);
+            ui.painter().text(
+                position + egui::vec2(0.0, 14.0),
+                egui::Align2::CENTER_TOP,
+                truncate_chars(&title, 28),
+                egui::FontId::new(13.0, crate::theme::semibold_font_family()),
+                crate::theme::ink(ui.visuals().dark_mode),
+            );
+            ui.painter().text(
+                position + egui::vec2(0.0, 31.0),
+                egui::Align2::CENTER_TOP,
+                truncate_chars(&concept_type, 24),
+                egui::FontId::proportional(12.0),
+                crate::theme::secondary_text(ui.visuals().dark_mode),
+            );
+            response.on_hover_ui(|ui| {
+                ui.label(RichText::new(&title).family(crate::theme::semibold_font_family()));
+                ui.label(&concept_type);
+                if !tags.is_empty() {
                     ui.label(
-                        RichText::new(payload.tags.join(", "))
+                        RichText::new(tags.join(", "))
                             .small()
                             .color(ui.visuals().weak_text_color()),
                     );
@@ -1239,12 +1593,39 @@ impl KnowledgeUi {
             });
         }
 
-        let selected = cache.graph.selected_nodes().last().copied();
-        let page_id =
-            selected.and_then(|index| cache.graph.node(index).map(|node| node.payload().page_id));
-        if page_id.is_some() {
-            cache.graph.set_selected_nodes(Vec::new());
+        ui.add_space(8.0);
+        ui.label(
+            RichText::new(localization.text("knowledge-graph-caption"))
+                .small()
+                .color(ui.visuals().weak_text_color()),
+        );
+        if filtered.len() > shown_node_count {
+            let mut arguments = fluent_bundle::FluentArgs::new();
+            arguments.set("shown", shown_node_count);
+            arguments.set("total", filtered.len());
+            ui.label(
+                RichText::new(
+                    localization.text_with("knowledge-graph-visible-limit", Some(&arguments)),
+                )
+                .small()
+                .color(ui.visuals().weak_text_color()),
+            );
         }
+        let mut keyboard_page = None;
+        ui.collapsing(localization.text("knowledge-graph-node-list"), |ui| {
+            for concept in filtered_concepts(
+                bundle,
+                &self.query_filter,
+                self.type_filter.as_deref(),
+                self.tag_filter.as_deref(),
+            ) {
+                if ui.link(&concept.title).clicked() {
+                    keyboard_page = Some(KnowledgePageId::Concept(concept.id));
+                }
+            }
+        });
+
+        let page_id = keyboard_page.or(graph_page);
         let page_id = page_id.filter(|page_id| page_fingerprint(bundle, *page_id).is_some());
         if page_id.is_some() {
             self.tab = KnowledgeTab::Wiki;
@@ -1842,7 +2223,7 @@ fn build_graph(
     graph
         .node_mut(index)
         .expect("new graph node exists")
-        .set_color(Color32::from_rgb(70, 150, 215));
+        .set_color(crate::theme::AIR_CYAN);
     nodes.insert(KnowledgePageId::Index, index);
 
     let filtered = filtered_concepts(bundle, query, concept_type, tag);
@@ -1861,7 +2242,7 @@ fn build_graph(
         graph
             .node_mut(node)
             .expect("new graph node exists")
-            .set_color(concept_color(&concept.concept_type.to_string()));
+            .set_color(concept_graph_color(bundle, page_id));
         nodes.insert(page_id, node);
     }
 
@@ -1877,12 +2258,46 @@ fn build_graph(
         graph.add_edge_with_label(*source_node, *target_node, (), label);
     }
 
-    let widget_id = format!("knowledge-graph-{key}");
     KnowledgeGraphCache {
         key,
-        widget_id,
         graph,
         layout: IncrementalGraphLayout::default(),
+    }
+}
+
+fn editorial_graph_position(canvas: egui::Rect, ordinal: usize, node_count: usize) -> egui::Pos2 {
+    const REFERENCE_POSITIONS: [(f32, f32); 5] = [
+        (0.44, 0.20),
+        (0.20, 0.58),
+        (0.72, 0.52),
+        (0.83, 0.18),
+        (0.46, 0.82),
+    ];
+    let normalized = if canvas.width() >= 620.0 && node_count <= REFERENCE_POSITIONS.len() {
+        REFERENCE_POSITIONS[ordinal]
+    } else {
+        let columns = (node_count as f32).sqrt().ceil() as usize;
+        let row = ordinal / columns;
+        let column = ordinal % columns;
+        let row_count = node_count.div_ceil(columns);
+        (
+            (column as f32 + 0.5) / columns as f32,
+            (row as f32 + 0.5) / row_count as f32,
+        )
+    };
+    egui::pos2(
+        egui::lerp(canvas.x_range(), normalized.0)
+            .clamp(canvas.left() + 75.0, canvas.right() - 75.0),
+        egui::lerp(canvas.y_range(), normalized.1)
+            .clamp(canvas.top() + 20.0, canvas.bottom() - 60.0),
+    )
+}
+
+fn editorial_graph_node_limit(canvas_width: f32) -> usize {
+    if canvas_width < 620.0 {
+        4
+    } else {
+        MAX_EDITORIAL_GRAPH_NODES
     }
 }
 
@@ -1902,6 +2317,18 @@ fn deterministic_graph_position(ordinal: usize, total_nodes: usize) -> egui::Pos
 
 fn graph_requires_filter(filtered_concepts: usize) -> bool {
     filtered_concepts > MAX_GRAPH_CONCEPTS
+}
+
+fn scroll_newly_focused_control_into_view(ui: &egui::Ui) {
+    let response = ui
+        .memory(|memory| memory.focused())
+        .and_then(|focused| ui.ctx().read_response(focused));
+    if let Some(response) = response
+        && response.gained_focus()
+        && !ui.clip_rect().contains_rect(response.rect)
+    {
+        response.scroll_to_me(None);
+    }
 }
 
 fn filtered_concepts<'a>(
@@ -1966,6 +2393,13 @@ fn normalize_filter(selected: &mut Option<String>, values: &BTreeSet<String>) {
 
 fn page_fingerprint(bundle: &KnowledgeBundleView, page_id: KnowledgePageId) -> Option<&str> {
     bundle.page_fingerprint(page_id)
+}
+
+const fn wiki_reader_page_selected(page_id: Option<KnowledgePageId>) -> bool {
+    matches!(
+        page_id,
+        Some(KnowledgePageId::Concept(_) | KnowledgePageId::Log)
+    )
 }
 
 fn default_page(bundle: &KnowledgeBundleView) -> Option<KnowledgePageId> {
@@ -2047,9 +2481,9 @@ fn search_evidence_trace(
     request_focus: bool,
 ) {
     egui::Frame::new()
-        .fill(AIR_BLUE.gamma_multiply(0.08))
-        .stroke(egui::Stroke::new(1.0, AIR_BLUE.gamma_multiply(0.75)))
-        .corner_radius(egui::CornerRadius::same(8))
+        .fill(crate::theme::accent_tint(ui.visuals().dark_mode))
+        .stroke(egui::Stroke::new(1.0, crate::theme::AIR_BLUE))
+        .corner_radius(egui::CornerRadius::same(2))
         .inner_margin(egui::Margin::symmetric(12, 10))
         .show(ui, |ui| {
             let title = ui.add(
@@ -2190,37 +2624,191 @@ fn truncate_chars(value: &str, max_chars: usize) -> String {
     }
 }
 
-fn short_fingerprint(value: &str) -> String {
-    value.chars().take(12).collect()
-}
-
 fn tab_button(ui: &mut egui::Ui, selected: &mut KnowledgeTab, value: KnowledgeTab, label: &str) {
-    if ui
-        .add_sized(
-            [96.0, 30.0],
-            egui::Button::selectable(*selected == value, label),
-        )
-        .clicked()
-    {
+    let is_selected = *selected == value;
+    let width = ((label.chars().count() as f32 * 8.0) + 24.0).max(64.0);
+    let (rect, response) = ui.allocate_exact_size(egui::vec2(width, 34.0), egui::Sense::click());
+    response.widget_info(|| {
+        egui::WidgetInfo::selected(egui::WidgetType::Button, true, is_selected, label)
+    });
+    if response.hovered() {
+        ui.painter()
+            .rect_filled(rect, 0.0, ui.visuals().widgets.hovered.weak_bg_fill);
+    }
+    if is_selected {
+        ui.painter().hline(
+            rect.x_range(),
+            rect.bottom() - 1.0,
+            egui::Stroke::new(2.0, crate::theme::accent_text(ui.visuals().dark_mode)),
+        );
+    }
+    if response.has_focus() {
+        ui.painter().rect_stroke(
+            rect.shrink(2.0),
+            1.0,
+            egui::Stroke::new(2.0, crate::theme::AIR_CYAN),
+            egui::StrokeKind::Inside,
+        );
+    }
+    ui.painter().text(
+        rect.center(),
+        egui::Align2::CENTER_CENTER,
+        label,
+        egui::FontId::new(13.0, crate::theme::semibold_font_family()),
+        if is_selected {
+            crate::theme::accent_text(ui.visuals().dark_mode)
+        } else {
+            crate::theme::secondary_text(ui.visuals().dark_mode)
+        },
+    );
+    if response.gained_focus() {
+        response.scroll_to_me(None);
+    }
+    if response.clicked() {
         *selected = value;
     }
 }
 
-fn page_button(
+fn bundle_log_summary(
     ui: &mut egui::Ui,
     localization: &Localization,
-    enabled: bool,
-    selected: bool,
-    label: &str,
+    bundle: &KnowledgeBundleView,
 ) -> bool {
-    ui.add_enabled(
-        enabled,
-        egui::Button::selectable(selected, truncate_chars(label, 44))
-            .min_size(egui::vec2(ui.available_width(), 27.0)),
-    )
-    .on_disabled_hover_text(localization.text("knowledge-page-missing"))
-    .on_hover_text(label)
-    .clicked()
+    ui.add_space(28.0);
+    ui.separator();
+    ui.add_space(12.0);
+    ui.label(crate::theme::section_label_job(
+        localization.text("knowledge-last-checked").to_uppercase(),
+        crate::theme::secondary_text(ui.visuals().dark_mode),
+    ));
+    ui.label(
+        RichText::new(format!(
+            "{} · {}",
+            bundle.collection_name,
+            bundle.health.checked_at.format("%Y-%m-%d %H:%M")
+        ))
+        .small()
+        .color(ui.visuals().weak_text_color()),
+    );
+    page_fingerprint(bundle, KnowledgePageId::Log).is_some()
+        && ui
+            .button(localization.text("knowledge-open-bundle-log"))
+            .clicked()
+}
+
+struct KnowledgeIndexEntry<'a> {
+    id: Uuid,
+    title: &'a str,
+    title_size: f32,
+    concept_type: &'a str,
+    health_label: &'a str,
+    health_tone: KnowledgePillTone,
+    description: &'a str,
+    metadata: &'a str,
+}
+
+fn knowledge_index_entry(ui: &mut egui::Ui, entry: KnowledgeIndexEntry<'_>) -> egui::Response {
+    let dark_mode = ui.visuals().dark_mode;
+    let content = egui::Frame::new()
+        .inner_margin(egui::Margin::symmetric(4, 7))
+        .show(ui, |ui| {
+            ui.set_min_width(ui.available_width());
+            ui.horizontal(|ui| {
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    knowledge_pill(ui, entry.health_label, entry.health_tone);
+                    knowledge_pill(ui, entry.concept_type, KnowledgePillTone::Neutral);
+                    ui.add_sized(
+                        [ui.available_width().max(0.0), 28.0],
+                        egui::Label::new(
+                            RichText::new(entry.title)
+                                .size(entry.title_size)
+                                .family(crate::theme::semibold_font_family()),
+                        )
+                        .truncate()
+                        .halign(egui::Align::LEFT)
+                        .selectable(false),
+                    );
+                });
+            });
+            if !entry.description.is_empty() {
+                ui.add(egui::Label::new(entry.description).wrap().selectable(false));
+            }
+            ui.label(
+                RichText::new(entry.metadata)
+                    .small()
+                    .color(ui.visuals().weak_text_color()),
+            );
+        });
+    let rect = content.response.rect;
+    let response = ui
+        .interact(
+            rect,
+            ui.id().with(("knowledge_index_entry", entry.id)),
+            egui::Sense::click(),
+        )
+        .on_hover_cursor(egui::CursorIcon::PointingHand);
+    response.widget_info(|| {
+        egui::WidgetInfo::labeled(
+            egui::WidgetType::Button,
+            true,
+            format!(
+                "{}, {}, {}",
+                entry.title, entry.concept_type, entry.health_label
+            ),
+        )
+    });
+    if response.hovered() {
+        ui.painter().rect_stroke(
+            rect,
+            1.0,
+            egui::Stroke::new(1.0, crate::theme::border(dark_mode)),
+            egui::StrokeKind::Inside,
+        );
+    }
+    if response.has_focus() {
+        ui.painter().rect_stroke(
+            rect.shrink(2.0),
+            1.0,
+            egui::Stroke::new(2.0, crate::theme::AIR_CYAN),
+            egui::StrokeKind::Inside,
+        );
+    }
+    if response.gained_focus() {
+        response.scroll_to_me(None);
+    }
+    response
+}
+
+#[derive(Debug, Clone, Copy)]
+enum KnowledgePillTone {
+    Neutral,
+    Accent,
+    Attention,
+}
+
+fn knowledge_pill(ui: &mut egui::Ui, label: &str, tone: KnowledgePillTone) {
+    let dark_mode = ui.visuals().dark_mode;
+    let (fill, color) = match tone {
+        KnowledgePillTone::Neutral => (
+            crate::theme::neutral_tint(dark_mode),
+            crate::theme::secondary_text(dark_mode),
+        ),
+        KnowledgePillTone::Accent => (
+            crate::theme::accent_tint(dark_mode),
+            crate::theme::accent_text(dark_mode),
+        ),
+        KnowledgePillTone::Attention => (
+            crate::theme::attention_tint(dark_mode),
+            crate::theme::attention(dark_mode),
+        ),
+    };
+    egui::Frame::new()
+        .fill(fill)
+        .corner_radius(egui::CornerRadius::same(2))
+        .inner_margin(egui::Margin::symmetric(10, 3))
+        .show(ui, |ui| {
+            ui.label(RichText::new(label).size(11.0).color(color));
+        });
 }
 
 fn graph_filter_controls(
@@ -2385,15 +2973,40 @@ fn severity_visual(
     (localization.text(message), color)
 }
 
-fn concept_color(concept_type: &str) -> Color32 {
-    match concept_type {
-        "Policy" => Color32::from_rgb(190, 105, 95),
-        "Procedure" => Color32::from_rgb(75, 165, 130),
-        "Runbook" => Color32::from_rgb(220, 145, 65),
-        "Reference" => Color32::from_rgb(115, 135, 205),
-        "Report" => Color32::from_rgb(155, 105, 190),
-        _ => Color32::from_rgb(100, 145, 175),
+fn concept_health_tone(report: &BundleHealthReport, page_id: KnowledgePageId) -> ConceptHealthTone {
+    let needs_attention = report.issues.iter().any(|issue| {
+        issue.page == Some(page_id)
+            && matches!(
+                issue.severity,
+                HealthSeverity::Warning | HealthSeverity::Error
+            )
+    });
+    if needs_attention {
+        ConceptHealthTone::Attention
+    } else {
+        ConceptHealthTone::Healthy
     }
+}
+
+fn concept_graph_color(bundle: &KnowledgeBundleView, page_id: KnowledgePageId) -> Color32 {
+    match concept_health_tone(&bundle.health, page_id) {
+        ConceptHealthTone::Healthy => crate::theme::AIR_CYAN,
+        ConceptHealthTone::Attention => crate::theme::attention(false),
+    }
+}
+
+fn editorial_metadata_key(key: &str) -> bool {
+    let key = key.to_ascii_lowercase();
+    !key.contains("uuid")
+        && !key.contains("fingerprint")
+        && !key.contains("sha256")
+        && !key.contains("peer")
+        && !key.contains("address")
+        && !key.contains("port")
+        && key != "resource"
+        && key != "id"
+        && !key.ends_with(".id")
+        && !key.ends_with("_id")
 }
 
 fn health_card(ui: &mut egui::Ui, label: &str, value: usize, color: Color32) {
@@ -2472,20 +3085,145 @@ mod tests {
         KnowledgePageId, KnowledgePageView, RepairAuthority, RepairPlanId,
     };
     use airwiki_types::CollectionPolicy;
+    use chrono::Utc;
     use uuid::Uuid;
 
     use crate::i18n::{Localization, UiLocale};
 
     use super::{
-        GRAPH_LAYOUT_WORK_BUDGET, KnowledgeAction, KnowledgeTab, KnowledgeUi, NarrowWikiPane,
-        SearchEvidenceTarget, build_graph, bundle_state_visual, deterministic_graph_position,
-        empty_bundle_has_health_findings, graph_requires_filter, health_has_guided_content_repair,
-        health_has_manual_intervention, health_issue_page_available, health_recovery_message_id,
-        link_status, normalized_http_url, severity_visual, short_fingerprint, truncate_chars,
+        ConceptHealthTone, GRAPH_LAYOUT_WORK_BUDGET, KnowledgeAction, KnowledgeTab, KnowledgeUi,
+        SearchEvidenceTarget, WikiLayoutMode, build_graph, bundle_state_visual,
+        concept_health_tone, deterministic_graph_position, editorial_graph_node_limit,
+        editorial_graph_position, editorial_metadata_key, empty_bundle_has_health_findings,
+        graph_requires_filter, health_has_guided_content_repair, health_has_manual_intervention,
+        health_issue_page_available, health_recovery_message_id, link_status, normalized_http_url,
+        severity_visual, truncate_chars, wiki_layout_mode, wiki_reader_page_selected,
     };
 
     fn localization() -> Localization {
         Localization::new(UiLocale::EnUs).unwrap()
+    }
+
+    #[test]
+    fn compact_wiki_switches_to_one_column_before_760_pixels() {
+        assert_eq!(wiki_layout_mode(759.0), WikiLayoutMode::Compact);
+        assert_eq!(wiki_layout_mode(760.0), WikiLayoutMode::Wide);
+    }
+
+    #[test]
+    fn bundle_log_uses_the_existing_page_reader_contract() {
+        assert!(wiki_reader_page_selected(Some(KnowledgePageId::Log)));
+        assert!(wiki_reader_page_selected(Some(KnowledgePageId::Concept(
+            Uuid::new_v4()
+        ))));
+        assert!(!wiki_reader_page_selected(Some(KnowledgePageId::Index)));
+        assert!(!wiki_reader_page_selected(None));
+    }
+
+    #[test]
+    fn editorial_graph_uses_the_reference_five_node_composition() {
+        let canvas = eframe::egui::Rect::from_min_max(
+            eframe::egui::pos2(0.0, 0.0),
+            eframe::egui::pos2(720.0, 400.0),
+        );
+
+        let lead = editorial_graph_position(canvas, 0, 5);
+        let final_node = editorial_graph_position(canvas, 4, 5);
+
+        assert!((lead.x - 316.8).abs() < 0.01);
+        assert!((lead.y - 80.0).abs() < 0.01);
+        assert!((final_node.x - 331.2).abs() < 0.01);
+        assert!((final_node.y - 328.0).abs() < 0.01);
+    }
+
+    #[test]
+    fn compact_graph_keeps_every_interactive_node_inside_the_canvas() {
+        let canvas = eframe::egui::Rect::from_min_size(
+            eframe::egui::Pos2::ZERO,
+            eframe::egui::vec2(340.0, 340.0),
+        );
+        let nodes = (0..4)
+            .map(|ordinal| editorial_graph_position(canvas, ordinal, 4))
+            .collect::<Vec<_>>();
+
+        for node in &nodes {
+            assert!(node.x >= canvas.left() + 75.0);
+            assert!(node.x <= canvas.right() - 75.0);
+            assert!(node.y >= canvas.top() + 20.0);
+            assert!(node.y <= canvas.bottom() - 60.0);
+        }
+        for (index, node) in nodes.iter().enumerate() {
+            let hit_rect = eframe::egui::Rect::from_center_size(
+                *node + eframe::egui::vec2(0.0, 20.0),
+                eframe::egui::vec2(150.0, 62.0),
+            );
+            for other in nodes.iter().skip(index + 1) {
+                let other_rect = eframe::egui::Rect::from_center_size(
+                    *other + eframe::egui::vec2(0.0, 20.0),
+                    eframe::egui::vec2(150.0, 62.0),
+                );
+                assert!(!hit_rect.intersects(other_rect));
+            }
+        }
+    }
+
+    #[test]
+    fn editorial_graph_caps_hit_targets_for_wide_and_compact_canvases() {
+        assert_eq!(editorial_graph_node_limit(720.0), 12);
+        assert_eq!(editorial_graph_node_limit(619.0), 4);
+        assert_eq!(editorial_graph_node_limit(340.0), 4);
+    }
+
+    #[test]
+    fn concept_health_uses_only_page_warning_or_error_findings() {
+        let page_id = KnowledgePageId::Concept(Uuid::new_v4());
+        let other_page = KnowledgePageId::Concept(Uuid::new_v4());
+        let mut report = BundleHealthReport {
+            checked_at: Utc::now(),
+            total_concepts: 2,
+            error_count: 0,
+            warning_count: 0,
+            issues: vec![
+                HealthIssue {
+                    severity: HealthSeverity::Info,
+                    code: "info".to_owned(),
+                    page: Some(page_id),
+                    message: "Informational".to_owned(),
+                },
+                HealthIssue {
+                    severity: HealthSeverity::Warning,
+                    code: "warning".to_owned(),
+                    page: Some(other_page),
+                    message: "Other page".to_owned(),
+                },
+            ],
+        };
+        assert_eq!(
+            concept_health_tone(&report, page_id),
+            ConceptHealthTone::Healthy
+        );
+        report.issues.push(HealthIssue {
+            severity: HealthSeverity::Error,
+            code: "error".to_owned(),
+            page: Some(page_id),
+            message: "This page".to_owned(),
+        });
+        assert_eq!(
+            concept_health_tone(&report, page_id),
+            ConceptHealthTone::Attention
+        );
+    }
+
+    #[test]
+    fn editorial_metadata_hides_technical_identifiers() {
+        assert!(editorial_metadata_key("language"));
+        assert!(!editorial_metadata_key("resource"));
+        assert!(!editorial_metadata_key("airwiki.id"));
+        assert!(!editorial_metadata_key("airwiki.collection_id"));
+        assert!(!editorial_metadata_key("source_document_id"));
+        assert!(!editorial_metadata_key("source_sha256"));
+        assert!(!editorial_metadata_key("publisher peer id"));
+        assert!(!editorial_metadata_key("listen address"));
     }
 
     #[test]
@@ -2534,16 +3272,10 @@ mod tests {
     }
 
     #[test]
-    fn fingerprint_preview_is_unicode_safe() {
-        assert_eq!(short_fingerprint("áβ猫0123456789abc"), "áβ猫012345678");
-    }
-
-    #[test]
     fn matching_search_evidence_opens_the_exact_published_concept() {
         let target = search_target(Uuid::new_v4(), Uuid::new_v4());
         let mut ui = ui_with_bundle(bundle_with_target(&target));
         ui.tab = KnowledgeTab::Health;
-        ui.narrow_wiki_pane = NarrowWikiPane::Details;
         ui.query_filter = "hidden".to_owned();
 
         let action = ui
@@ -2560,7 +3292,6 @@ mod tests {
             } if collection_id == target.collection_id && concept_id == target.concept_id
         ));
         assert_eq!(ui.tab, KnowledgeTab::Wiki);
-        assert_eq!(ui.narrow_wiki_pane, NarrowWikiPane::Page);
         assert!(ui.query_filter.is_empty());
         assert_eq!(ui.search_evidence, Some(target.clone()));
 

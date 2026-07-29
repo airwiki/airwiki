@@ -45,6 +45,9 @@ All notable user-visible changes to AirWiki will be documented here. The project
 
 ### Fixed
 
+- Made the installed Windows smoke fail immediately with a closed, durable
+  model-installation stage when asset preparation fails before activation,
+  instead of hiding the failure behind the general model-readiness timeout.
 - Preserved the full bounded owner-response budget after a cross-region public
   catalog query instead of aborting an accepted relay circuit early, and
   applied the complete one-second index budget to catalog updates.

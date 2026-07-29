@@ -35,7 +35,27 @@ $ModelActivationErrorKinds = @(
     "generation_unavailable",
     "generation_protocol",
     "generation_invalid",
-    "activation_internal"
+    "activation_internal",
+    "install_network",
+    "install_integrity",
+    "install_storage",
+    "install_promotion",
+    "install_runtime_verification",
+    "install_capacity",
+    "install_configuration",
+    "install_cancelled",
+    "install_internal"
+)
+$ModelInstallErrorKinds = @(
+    "install_network",
+    "install_integrity",
+    "install_storage",
+    "install_promotion",
+    "install_runtime_verification",
+    "install_capacity",
+    "install_configuration",
+    "install_cancelled",
+    "install_internal"
 )
 $ModelActivationElapsedBuckets = @(
     "under_5s",
@@ -68,6 +88,7 @@ $InstallerSmokeStages = @(
 )
 $InstallerSmokeFailureClasses = @(
     "model_activation_failed",
+    "model_install_failed",
     "desktop_exited_before_ready",
     "runtime_exited_before_ready",
     "models_timeout",
@@ -105,11 +126,19 @@ function Set-StructuredInstallerSmokeFailure(
         $ModelActivationExitClasses -cnotcontains $SafeExitClass) {
         $SafeClass = "powershell_runtime"
         $SafeExitClass = "failure"
-    } elseif ($SafeClass -eq "model_activation_failed") {
+    } elseif ($SafeClass -eq "model_activation_failed" -or
+        $SafeClass -eq "model_install_failed") {
         if ($ModelActivationErrorKinds -ccontains $ErrorKind -and
             $ModelActivationElapsedBuckets -ccontains $ElapsedBucket) {
             $SafeErrorKind = $ErrorKind
             $SafeElapsedBucket = $ElapsedBucket
+            $IsInstallKind = $ModelInstallErrorKinds -ccontains $ErrorKind
+            if (($SafeClass -eq "model_install_failed") -ne $IsInstallKind) {
+                $SafeClass = "powershell_runtime"
+                $SafeErrorKind = $null
+                $SafeElapsedBucket = $null
+                $SafeExitClass = "failure"
+            }
         } else {
             $SafeClass = "powershell_runtime"
             $SafeExitClass = "failure"
@@ -485,8 +514,13 @@ function Get-SanitizedModelActivationFailure($Cursor) {
 }
 
 function Throw-SanitizedModelActivationFailure($Failure) {
+    $FailureClass = if ($ModelInstallErrorKinds -ccontains $Failure.ErrorKind) {
+        "model_install_failed"
+    } else {
+        "model_activation_failed"
+    }
     Set-StructuredInstallerSmokeFailure `
-        "model_activation_failed" `
+        $FailureClass `
         $Failure.ErrorKind `
         $Failure.ElapsedBucket `
         $Failure.ExitClass
@@ -786,7 +820,8 @@ function Get-SanitizedInstallerSmokeFailure([string] $CurrentCleanupStatus) {
             $ExitClass = $CandidateExitClass
         }
 
-        if ($FailureClass -eq "model_activation_failed") {
+        if ($FailureClass -eq "model_activation_failed" -or
+            $FailureClass -eq "model_install_failed") {
             $CandidateErrorKind = [string] $script:StructuredFailure.ErrorKind
             $CandidateElapsedBucket = `
                 [string] $script:StructuredFailure.ElapsedBucket
@@ -795,6 +830,15 @@ function Get-SanitizedInstallerSmokeFailure([string] $CurrentCleanupStatus) {
                     $CandidateElapsedBucket) {
                 $ErrorKind = $CandidateErrorKind
                 $ElapsedBucket = $CandidateElapsedBucket
+                $IsInstallKind = `
+                    $ModelInstallErrorKinds -ccontains $CandidateErrorKind
+                if (($FailureClass -eq "model_install_failed") -ne
+                    $IsInstallKind) {
+                    $FailureClass = "powershell_runtime"
+                    $ErrorKind = $null
+                    $ElapsedBucket = $null
+                    $ExitClass = "failure"
+                }
             } else {
                 $FailureClass = "powershell_runtime"
                 $ExitClass = "failure"

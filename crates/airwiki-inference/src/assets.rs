@@ -64,6 +64,35 @@ pub fn install_failure_is_transient(error: &anyhow::Error) -> bool {
     })
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
+pub enum InstallFailureKind {
+    #[error("model installation network transfer failed")]
+    Network,
+    #[error("model installation integrity verification failed")]
+    Integrity,
+    #[error("model installation storage operation failed")]
+    Storage,
+    #[error("model installation promotion failed")]
+    Promotion,
+    #[error("bundled model runtime verification failed")]
+    RuntimeVerification,
+    #[error("model installation capacity check failed")]
+    Capacity,
+    #[error("model installation configuration is invalid")]
+    Configuration,
+    #[error("model installation was cancelled")]
+    Cancelled,
+    #[error("model installation failed internally")]
+    Internal,
+}
+
+pub fn classify_install_failure(error: &anyhow::Error) -> InstallFailureKind {
+    error
+        .downcast_ref::<InstallFailureKind>()
+        .copied()
+        .unwrap_or(InstallFailureKind::Internal)
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ArtifactKind {
@@ -445,7 +474,8 @@ impl AssetManager {
             }
         }
 
-        let relevance_artifacts = platform_relevance_artifacts()?;
+        let relevance_artifacts =
+            platform_relevance_artifacts().context(InstallFailureKind::Configuration)?;
         let relevance_snapshot = self.relevance_snapshot_path();
         if !relevance_snapshot_is_verified(&relevance_snapshot, &relevance_artifacts)? {
             for artifact in relevance_artifacts {
@@ -455,21 +485,19 @@ impl AssetManager {
         }
 
         if let Some(path) = &self.bundled_runtime {
-            verify_runtime_binary(path).with_context(|| {
-                format!(
-                    "bundled llama.cpp runtime failed verification at {}",
-                    path.display()
-                )
-            })?;
+            verify_runtime_binary(path).context(InstallFailureKind::RuntimeVerification)?;
         } else {
-            let runtime = platform_runtime().context(
-                "no downloadable llama.cpp runtime is available; use a distribution with the reviewed runtime bundled",
-            )?;
+            let runtime = platform_runtime()
+                .context(
+                    "no downloadable llama.cpp runtime is available; use a distribution with the reviewed runtime bundled",
+                )
+                .context(InstallFailureKind::Configuration)?;
             let runtime_dir = self
                 .root
                 .join("runtimes")
                 .join(format!("llama-{LLAMA_CPP_BUILD}"));
-            let installed = installed_runtime_path(&runtime_dir)?;
+            let installed =
+                installed_runtime_path(&runtime_dir).context(InstallFailureKind::Configuration)?;
             if verify_runtime_binary(&installed).is_err() {
                 let archive = self
                     .root
@@ -484,7 +512,8 @@ impl AssetManager {
         }
 
         let required_free_bytes = download_bytes.saturating_add(INSTALL_HEADROOM_BYTES);
-        let available_disk = available_space_for(&self.root)?;
+        let available_disk =
+            available_space_for(&self.root).context(InstallFailureKind::Storage)?;
         Ok(InstallPlan {
             selection: selection.clone(),
             artifact_ids,
@@ -504,7 +533,7 @@ impl AssetManager {
         let selection = selection.clone();
         tokio::task::spawn_blocking(move || manager.build_install_plan(&selection))
             .await
-            .context("model install planning task failed")?
+            .context(InstallFailureKind::Internal)?
     }
 
     /// Verifies all required installed assets without downloading, deleting, renaming or writing
@@ -569,10 +598,11 @@ impl AssetManager {
     {
         let current = self.build_install_plan_async(selection).await?;
         if !current.fits_available_disk {
-            bail!(
+            return Err(anyhow!(
                 "model installation requires {:.1} GiB free including headroom",
                 current.required_free_bytes as f64 / (1024_f64.powi(3))
-            );
+            ))
+            .context(InstallFailureKind::Capacity);
         }
         self.install_selection(selection, cancel, on_event).await
     }
@@ -592,9 +622,15 @@ impl AssetManager {
             .root
             .join("runtimes")
             .join(format!("llama-{LLAMA_CPP_BUILD}"));
-        fs::create_dir_all(&model_dir).await?;
-        fs::create_dir_all(&cache_dir).await?;
-        fs::create_dir_all(self.root.join("runtimes")).await?;
+        fs::create_dir_all(&model_dir)
+            .await
+            .context(InstallFailureKind::Storage)?;
+        fs::create_dir_all(&cache_dir)
+            .await
+            .context(InstallFailureKind::Storage)?;
+        fs::create_dir_all(self.root.join("runtimes"))
+            .await
+            .context(InstallFailureKind::Storage)?;
 
         let model_path = self.model_path(selection);
         self.download_verified(
@@ -612,7 +648,9 @@ impl AssetManager {
             .await?;
 
         let llama_server_path = if let Some(path) = &self.bundled_runtime {
-            verify_runtime_binary_async(path).await?;
+            verify_runtime_binary_async(path)
+                .await
+                .context(InstallFailureKind::RuntimeVerification)?;
             path.clone()
         } else {
             self.install_runtime_into(&cache_dir, &runtime_dir, &cancel, &mut on_event)
@@ -654,25 +692,44 @@ impl AssetManager {
         F: FnMut(InstallEvent) + Send,
     {
         let final_path = self.embedding_snapshot_path();
-        if snapshot_is_verified_async(&final_path).await? {
+        if snapshot_is_verified_async(&final_path)
+            .await
+            .context(InstallFailureKind::Integrity)?
+        {
             return Ok(final_path);
         }
         let parent = final_path
             .parent()
-            .context("embedding snapshot path has no parent")?;
-        fs::create_dir_all(parent).await?;
+            .context("embedding snapshot path has no parent")
+            .context(InstallFailureKind::Configuration)?;
+        fs::create_dir_all(parent)
+            .await
+            .context(InstallFailureKind::Storage)?;
         let staging = parent.join(format!("{E5_REVISION}.installing"));
-        fs::create_dir_all(&staging).await?;
+        fs::create_dir_all(&staging)
+            .await
+            .context(InstallFailureKind::Storage)?;
         for artifact in &E5_FILES {
             self.download_verified(artifact, &staging.join(artifact.filename), cancel, on_event)
                 .await?;
         }
-        write_revision_marker(&staging, E5_REVISION).await?;
-        verify_embedding_snapshot_async(&staging).await?;
-        if fs::try_exists(&final_path).await? {
-            fs::remove_dir_all(&final_path).await?;
+        write_revision_marker(&staging, E5_REVISION)
+            .await
+            .context(InstallFailureKind::Storage)?;
+        verify_embedding_snapshot_async(&staging)
+            .await
+            .context(InstallFailureKind::Integrity)?;
+        if fs::try_exists(&final_path)
+            .await
+            .context(InstallFailureKind::Promotion)?
+        {
+            fs::remove_dir_all(&final_path)
+                .await
+                .context(InstallFailureKind::Promotion)?;
         }
-        fs::rename(&staging, &final_path).await?;
+        fs::rename(&staging, &final_path)
+            .await
+            .context(InstallFailureKind::Promotion)?;
         Ok(final_path)
     }
 
@@ -684,27 +741,47 @@ impl AssetManager {
     where
         F: FnMut(InstallEvent) + Send,
     {
-        let artifacts = platform_relevance_artifacts()?;
+        let artifacts =
+            platform_relevance_artifacts().context(InstallFailureKind::Configuration)?;
         let final_path = self.relevance_snapshot_path();
-        if relevance_snapshot_is_verified_async(&final_path, &artifacts).await? {
+        if relevance_snapshot_is_verified_async(&final_path, &artifacts)
+            .await
+            .context(InstallFailureKind::Integrity)?
+        {
             return Ok(final_path);
         }
         let parent = final_path
             .parent()
-            .context("relevance snapshot path has no parent")?;
-        fs::create_dir_all(parent).await?;
+            .context("relevance snapshot path has no parent")
+            .context(InstallFailureKind::Configuration)?;
+        fs::create_dir_all(parent)
+            .await
+            .context(InstallFailureKind::Storage)?;
         let staging = parent.join(format!("{MMARCO_REVISION}.installing"));
-        fs::create_dir_all(&staging).await?;
+        fs::create_dir_all(&staging)
+            .await
+            .context(InstallFailureKind::Storage)?;
         for artifact in &artifacts {
             self.download_verified(artifact, &staging.join(artifact.filename), cancel, on_event)
                 .await?;
         }
-        write_revision_marker(&staging, MMARCO_REVISION).await?;
-        verify_relevance_snapshot_async(&staging, &artifacts).await?;
-        if fs::try_exists(&final_path).await? {
-            fs::remove_dir_all(&final_path).await?;
+        write_revision_marker(&staging, MMARCO_REVISION)
+            .await
+            .context(InstallFailureKind::Storage)?;
+        verify_relevance_snapshot_async(&staging, &artifacts)
+            .await
+            .context(InstallFailureKind::Integrity)?;
+        if fs::try_exists(&final_path)
+            .await
+            .context(InstallFailureKind::Promotion)?
+        {
+            fs::remove_dir_all(&final_path)
+                .await
+                .context(InstallFailureKind::Promotion)?;
         }
-        fs::rename(&staging, &final_path).await?;
+        fs::rename(&staging, &final_path)
+            .await
+            .context(InstallFailureKind::Promotion)?;
         Ok(final_path)
     }
 
@@ -772,20 +849,31 @@ impl AssetManager {
     where
         F: FnMut(InstallEvent) + Send,
     {
-        let destination_exists = fs::try_exists(destination).await?;
-        if destination_exists && verify_sha256_async(destination, artifact.sha256).await? {
+        let destination_exists = fs::try_exists(destination)
+            .await
+            .context(InstallFailureKind::Storage)?;
+        if destination_exists
+            && verify_sha256_async(destination, artifact.sha256)
+                .await
+                .context(InstallFailureKind::Integrity)?
+        {
             on_event(InstallEvent::Complete {
                 artifact: artifact.id.to_owned(),
             });
             return Ok(());
         }
         if destination_exists {
-            fs::remove_file(destination).await?;
+            fs::remove_file(destination)
+                .await
+                .context(InstallFailureKind::Storage)?;
         }
         let parent = destination
             .parent()
-            .context("artifact destination has no parent")?;
-        fs::create_dir_all(parent).await?;
+            .context("artifact destination has no parent")
+            .context(InstallFailureKind::Configuration)?;
+        fs::create_dir_all(parent)
+            .await
+            .context(InstallFailureKind::Storage)?;
         let part = destination.with_extension(format!(
             "{}part",
             destination
@@ -794,13 +882,17 @@ impl AssetManager {
                 .map(|v| format!("{v}."))
                 .unwrap_or_default()
         ));
-        let existing = fs::metadata(&part).await.map(|m| m.len()).unwrap_or(0);
+        let existing = match fs::metadata(&part).await {
+            Ok(metadata) => metadata.len(),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => 0,
+            Err(error) => return Err(error).context(InstallFailureKind::Storage),
+        };
 
         let mut request = self.client.get(artifact.url);
         if existing > 0 {
             request = request.header(header::RANGE, format!("bytes={existing}-"));
         }
-        let response = request.send().await?;
+        let response = request.send().await.context(InstallFailureKind::Network)?;
         let (response, restarted_from_zero) =
             if existing > 0 && response.status() == StatusCode::RANGE_NOT_SATISFIABLE {
                 // A complete-length but corrupt partial file receives HTTP 416 from
@@ -811,12 +903,19 @@ impl AssetManager {
                     self.client
                         .get(artifact.url)
                         .send()
-                        .await?
-                        .error_for_status()?,
+                        .await
+                        .context(InstallFailureKind::Network)?
+                        .error_for_status()
+                        .context(InstallFailureKind::Network)?,
                     true,
                 )
             } else {
-                (response.error_for_status()?, false)
+                (
+                    response
+                        .error_for_status()
+                        .context(InstallFailureKind::Network)?,
+                    false,
+                )
             };
         let resumed = !restarted_from_zero
             && existing > 0
@@ -838,15 +937,20 @@ impl AssetManager {
         } else {
             options.truncate(true);
         }
-        let mut file = options.open(&part).await?;
+        let mut file = options
+            .open(&part)
+            .await
+            .context(InstallFailureKind::Storage)?;
         let mut downloaded = downloaded_start;
         let mut stream = response.bytes_stream();
         while let Some(chunk) = tokio::select! {
-            _ = cancel.cancelled() => bail!("artifact installation was cancelled"),
+            _ = cancel.cancelled() => return Err(anyhow!(InstallFailureKind::Cancelled)),
             chunk = stream.next() => chunk,
         } {
-            let chunk = chunk?;
-            file.write_all(&chunk).await?;
+            let chunk = chunk.context(InstallFailureKind::Network)?;
+            file.write_all(&chunk)
+                .await
+                .context(InstallFailureKind::Storage)?;
             downloaded += chunk.len() as u64;
             on_event(InstallEvent::Progress {
                 artifact: artifact.id.to_owned(),
@@ -854,19 +958,24 @@ impl AssetManager {
                 total_bytes: total,
             });
         }
-        file.flush().await?;
-        file.sync_all().await?;
+        file.flush().await.context(InstallFailureKind::Storage)?;
+        file.sync_all().await.context(InstallFailureKind::Storage)?;
         drop(file);
 
         on_event(InstallEvent::Verifying {
             artifact: artifact.id.to_owned(),
         });
-        let valid = verify_sha256_async(&part, artifact.sha256).await?;
+        let valid = verify_sha256_async(&part, artifact.sha256)
+            .await
+            .context(InstallFailureKind::Integrity)?;
         if !valid {
             fs::remove_file(&part).await.ok();
-            bail!("SHA-256 mismatch for {}", artifact.id);
+            return Err(anyhow!("downloaded artifact failed integrity verification"))
+                .context(InstallFailureKind::Integrity);
         }
-        fs::rename(&part, destination).await?;
+        fs::rename(&part, destination)
+            .await
+            .context(InstallFailureKind::Promotion)?;
         info!(
             artifact = artifact.id,
             "installed verified inference artifact"
@@ -1218,10 +1327,34 @@ mod tests {
             std::io::ErrorKind::PermissionDenied,
             "synthetic permission failure",
         ));
+        let classified_temporary = anyhow::Error::new(std::io::Error::new(
+            std::io::ErrorKind::TimedOut,
+            "synthetic timeout",
+        ))
+        .context(InstallFailureKind::Network);
 
         assert!(install_failure_is_transient(&temporary));
+        assert!(install_failure_is_transient(&classified_temporary));
         assert!(!install_failure_is_transient(&action_required));
         assert!(!install_failure_is_transient(&anyhow!("hash mismatch")));
+    }
+
+    #[test]
+    fn install_failure_classifier_preserves_the_closed_stage() {
+        let error = anyhow!("synthetic detail").context(InstallFailureKind::Promotion);
+
+        assert_eq!(
+            classify_install_failure(&error),
+            InstallFailureKind::Promotion
+        );
+    }
+
+    #[test]
+    fn install_failure_classifier_fails_closed_for_untyped_errors() {
+        assert_eq!(
+            classify_install_failure(&anyhow!("synthetic detail")),
+            InstallFailureKind::Internal
+        );
     }
 
     #[test]
@@ -1422,6 +1555,29 @@ mod tests {
             plan.download_bytes + INSTALL_HEADROOM_BYTES
         );
         assert!(!plan.artifact_ids.contains(&crate::GEMMA_4_E2B_MMPROJ.id));
+    }
+
+    #[tokio::test]
+    async fn bundled_runtime_plan_failure_keeps_its_verification_class() {
+        let Some(runtime) = platform_runtime_binary() else {
+            return;
+        };
+        let dir = tempfile::tempdir().unwrap();
+        let runtime_path = dir.path().join(runtime.filename);
+        std::fs::write(&runtime_path, b"synthetic invalid runtime").unwrap();
+        let manager = AssetManager::new(dir.path())
+            .unwrap()
+            .with_bundled_runtime(Some(runtime_path));
+
+        let error = manager
+            .build_install_plan_async(&ModelSelection::legacy_qwen())
+            .await
+            .unwrap_err();
+
+        assert_eq!(
+            classify_install_failure(&error),
+            InstallFailureKind::RuntimeVerification
+        );
     }
 
     #[test]

@@ -107,12 +107,18 @@ interactive user session, opens the application, verifies local MCP/model
 operation, and uninstalls. It is an internal acceptance test, not public-release
 evidence.
 
-Model activation writes a bounded, schema-versioned status record atomically
-under the local logs directory. The record contains only activation state, a
-closed error class, an elapsed-time bucket and a process-exit class. The smoke
-ignores a stale record, validates every field against closed allowlists and
-uses the sanitized log fallback only until it observes a durable status from
-the current activation. A disappearing runtime is only an observation: the
+The complete model-readiness pipeline writes a bounded, schema-versioned status
+record atomically under the local logs directory. Installation starts the
+record before transfer; a pre-activation failure records only one closed stage
+class for network, integrity, storage, promotion, bundled-runtime verification,
+capacity, configuration or internal failure. Activation then replaces the same
+record with its existing starting, ready or failed state. Explicit cancellation
+is a closed installation terminal rather than an inferred token state. The record contains
+only state, a closed error class, an elapsed-time bucket and a process-exit
+class. The smoke ignores a stale record, validates every field against closed
+allowlists, reports installation and activation failures separately, and uses
+the sanitized log fallback only until it observes a durable status from the
+current readiness attempt. A disappearing runtime is only an observation: the
 smoke waits a bounded interval for the product's terminal status and otherwise
 reports an unknown exit class. Desktop exit is a separate failure class.
 Neither path emits the status file, raw logs, local paths, model output or user

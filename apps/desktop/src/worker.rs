@@ -16,10 +16,10 @@ use airwiki_core::{
     KnowledgeBundleView, KnowledgePageId, KnowledgePageView, ReviewVersionToken, WikiRepairError,
 };
 use airwiki_inference::{
-    AssetManager, E5_FILES, E5_REVISION, HardwareReport, InstallEvent, InstallOutcome, InstallPlan,
-    LLAMA_CPP_BUILD, MMARCO_COMMON_FILES, MMARCO_REVISION, ModelDecision, ModelProfile,
-    ModelSelection, diagnose_hardware, install_failure_is_transient, select_model,
-    selection_for_model,
+    AssetManager, E5_FILES, E5_REVISION, HardwareReport, InstallEvent, InstallFailureKind,
+    InstallOutcome, InstallPlan, LLAMA_CPP_BUILD, MMARCO_COMMON_FILES, MMARCO_REVISION,
+    ModelDecision, ModelProfile, ModelSelection, classify_install_failure, diagnose_hardware,
+    install_failure_is_transient, select_model, selection_for_model,
 };
 use airwiki_mcp::{McpClientActivity, McpClientKind};
 use airwiki_network::{NetworkEvent, PublicBrowseResult, PublicRouteKind};
@@ -689,7 +689,7 @@ enum InternalEvent {
         model_id: String,
         result: Result<InstallOutcome, String>,
     },
-    InstallFinished(Result<InstallOutcome, String>),
+    InstallFinished(Result<InstallOutcome, InstallFailureKind>),
 }
 
 enum BackgroundCompletion {
@@ -1417,6 +1417,7 @@ async fn run_worker(
                                     &events,
                                     &internal_tx,
                                     &mut install_cancel,
+                                    paths.logs.join(MODEL_ACTIVATION_STATUS_FILE),
                                 );
                                 model_lifecycle = ModelLifecycle::Installing;
                             }
@@ -2148,6 +2149,7 @@ async fn run_worker(
                                         &events,
                                         &internal_tx,
                                         &mut install_cancel,
+                                        paths.logs.join(MODEL_ACTIVATION_STATUS_FILE),
                                     );
                                     model_lifecycle = ModelLifecycle::Installing;
                                 } else {
@@ -2229,9 +2231,6 @@ async fn run_worker(
                     Some(InternalEvent::InstallFinished(result))
                         if model_lifecycle == ModelLifecycle::Installing =>
                     {
-                        let was_cancelled = install_cancel
-                            .as_ref()
-                            .is_some_and(CancellationToken::is_cancelled);
                         install_cancel = None;
                         send(&events, WorkerEvent::InstallStopped);
                         match result {
@@ -2243,6 +2242,11 @@ async fn run_worker(
                                     outcome.selection.model_id,
                                 );
                                 if has_different_active {
+                                    persist_activation_status(
+                                        &paths.logs.join(MODEL_ACTIVATION_STATUS_FILE),
+                                        ModelActivationStatus::ready(),
+                                    )
+                                    .await;
                                     let previous_pending =
                                         desktop_config.pending_selection.clone();
                                     desktop_config.pending_selection =
@@ -2287,7 +2291,7 @@ async fn run_worker(
                                     );
                                 }
                             }
-                            Err(_) if was_cancelled => {
+                            Err(InstallFailureKind::Cancelled) => {
                                 model_lifecycle = settled_model_lifecycle(&services);
                                 send(
                                     &events,
@@ -2309,11 +2313,16 @@ async fn run_worker(
                             }
                             Err(error) => {
                                 model_lifecycle = settled_model_lifecycle(&services);
-                                let message = match error.as_str() {
-                                    "model_install_network_unavailable" => {
+                                let message = match error {
+                                    InstallFailureKind::Network => {
                                         "La conexión sigue sin estar disponible. La descarga parcial quedó guardada para reintentar."
                                     }
-                                    "model_install_action_required" => {
+                                    InstallFailureKind::Integrity
+                                    | InstallFailureKind::Storage
+                                    | InstallFailureKind::Promotion
+                                    | InstallFailureKind::RuntimeVerification
+                                    | InstallFailureKind::Capacity
+                                    | InstallFailureKind::Configuration => {
                                         "No se pudo preparar la IA local. Revisa el espacio, la memoria y la compatibilidad antes de reintentar."
                                     }
                                     _ => {
@@ -3271,6 +3280,7 @@ async fn run_worker(
                                             &events,
                                             &internal_tx,
                                             &mut install_cancel,
+                                            paths.logs.join(MODEL_ACTIVATION_STATUS_FILE),
                                         );
                                         model_lifecycle = ModelLifecycle::Installing;
                                     } else {
@@ -4179,6 +4189,7 @@ fn start_install(
     events: &Sender<WorkerEvent>,
     completion_tx: &UnboundedSender<InternalEvent>,
     install_cancel: &mut Option<CancellationToken>,
+    status_path: PathBuf,
 ) {
     const MAX_TRANSIENT_RETRIES: u32 = 2;
     debug_assert!(install_cancel.is_none());
@@ -4188,6 +4199,8 @@ fn start_install(
     let progress_tx = events.clone();
     let completion_tx = completion_tx.clone();
     lifecycle.spawn(async move {
+        let started = Instant::now();
+        persist_activation_status(&status_path, ModelActivationStatus::starting()).await;
         let mut transient_retries = 0_u32;
         let result = loop {
             let attempt_progress = progress_tx.clone();
@@ -4216,24 +4229,49 @@ fn start_install(
                     let retry_delay = Duration::from_secs(5 * u64::from(transient_retries));
                     tokio::select! {
                         () = cancel.cancelled() => {
-                            break Err("model_install_cancelled".to_owned());
+                            break Err(InstallFailureKind::Cancelled);
                         }
                         () = tokio::time::sleep(retry_delay) => {}
                     }
                 }
                 Ok(Err(error)) => {
-                    let code = if install_failure_is_transient(&error) {
-                        "model_install_network_unavailable"
-                    } else {
-                        "model_install_action_required"
-                    };
-                    break Err(code.to_owned());
+                    break Err(classify_install_failure(&error));
                 }
-                Err(_) => break Err("model_install_internal_failure".to_owned()),
+                Err(_) => break Err(InstallFailureKind::Internal),
             }
         };
+        if let Err(kind) = result {
+            persist_activation_status(
+                &status_path,
+                ModelActivationStatus::failed(
+                    model_install_failure_view(kind),
+                    model_activation_elapsed_bucket(started.elapsed()),
+                ),
+            )
+            .await;
+        }
         let _ = completion_tx.send(InternalEvent::InstallFinished(result));
     });
+}
+
+fn model_install_failure_view(kind: InstallFailureKind) -> ModelActivationFailureView {
+    let error_kind = match kind {
+        InstallFailureKind::Network => ModelActivationErrorKind::InstallNetwork,
+        InstallFailureKind::Integrity => ModelActivationErrorKind::InstallIntegrity,
+        InstallFailureKind::Storage => ModelActivationErrorKind::InstallStorage,
+        InstallFailureKind::Promotion => ModelActivationErrorKind::InstallPromotion,
+        InstallFailureKind::RuntimeVerification => {
+            ModelActivationErrorKind::InstallRuntimeVerification
+        }
+        InstallFailureKind::Capacity => ModelActivationErrorKind::InstallCapacity,
+        InstallFailureKind::Configuration => ModelActivationErrorKind::InstallConfiguration,
+        InstallFailureKind::Cancelled => ModelActivationErrorKind::InstallCancelled,
+        InstallFailureKind::Internal => ModelActivationErrorKind::InstallInternal,
+    };
+    ModelActivationFailureView {
+        error_kind,
+        exit_class: ModelActivationExitClass::None,
+    }
 }
 
 fn should_retry_transient_install(
@@ -5956,5 +5994,56 @@ mod tests {
         assert!(!should_retry_transient_install(true, 2, 2, false));
         assert!(!should_retry_transient_install(false, 0, 2, false));
         assert!(!should_retry_transient_install(true, 0, 2, true));
+    }
+
+    #[test]
+    fn install_failures_map_to_closed_durable_classes() {
+        let mappings = [
+            (
+                InstallFailureKind::Network,
+                ModelActivationErrorKind::InstallNetwork,
+            ),
+            (
+                InstallFailureKind::Integrity,
+                ModelActivationErrorKind::InstallIntegrity,
+            ),
+            (
+                InstallFailureKind::Storage,
+                ModelActivationErrorKind::InstallStorage,
+            ),
+            (
+                InstallFailureKind::Promotion,
+                ModelActivationErrorKind::InstallPromotion,
+            ),
+            (
+                InstallFailureKind::RuntimeVerification,
+                ModelActivationErrorKind::InstallRuntimeVerification,
+            ),
+            (
+                InstallFailureKind::Capacity,
+                ModelActivationErrorKind::InstallCapacity,
+            ),
+            (
+                InstallFailureKind::Configuration,
+                ModelActivationErrorKind::InstallConfiguration,
+            ),
+            (
+                InstallFailureKind::Internal,
+                ModelActivationErrorKind::InstallInternal,
+            ),
+        ];
+
+        let actual = mappings.map(|(failure, _)| model_install_failure_view(failure).error_kind);
+        let expected = mappings.map(|(_, expected)| expected);
+
+        assert_eq!(actual, expected);
+    }
+
+    #[test]
+    fn cancelled_install_has_a_closed_terminal_failure() {
+        assert_eq!(
+            model_install_failure_view(InstallFailureKind::Cancelled).error_kind,
+            ModelActivationErrorKind::InstallCancelled
+        );
     }
 }

@@ -3050,6 +3050,7 @@ fn verify_validated_installer_smoke_sources(smoke: &str) -> Result<()> {
     );
     let failure_class_allowlist = r#"$InstallerSmokeFailureClasses = @(
     "model_activation_failed",
+    "model_install_failed",
     "desktop_exited_before_ready",
     "runtime_exited_before_ready",
     "models_timeout",
@@ -3062,6 +3063,25 @@ fn verify_validated_installer_smoke_sources(smoke: &str) -> Result<()> {
             "$InstallerSmokeFailureClasses =",
         ),
         "validated installer smoke must retain the executable closed failure class allowlist"
+    );
+    let install_error_allowlist = r#"$ModelInstallErrorKinds = @(
+    "install_network",
+    "install_integrity",
+    "install_storage",
+    "install_promotion",
+    "install_runtime_verification",
+    "install_capacity",
+    "install_configuration",
+    "install_cancelled",
+    "install_internal"
+)"#;
+    ensure!(
+        powershell_executable_exact(
+            &source,
+            install_error_allowlist,
+            "$ModelInstallErrorKinds =",
+        ),
+        "validated installer smoke must retain the executable closed install error allowlist"
     );
     let activation_state_allowlist = r#"$ModelActivationStates = @(
     "starting",
@@ -3101,6 +3121,8 @@ fn verify_validated_installer_smoke_sources(smoke: &str) -> Result<()> {
             && structured_code.contains("$ModelActivationExitClasses -cnotcontains $SafeExitClass")
             && structured_code.contains("$ModelActivationErrorKinds -ccontains $ErrorKind")
             && structured_code.contains("$ModelActivationElapsedBuckets -ccontains $ElapsedBucket")
+            && structured_code.contains("$ModelInstallErrorKinds -ccontains $ErrorKind")
+            && structured_code.contains("-ne $IsInstallKind)")
             && structured_code.contains("$script:StructuredFailure = [PSCustomObject]@{"),
         "validated installer smoke must create typed failures through closed executable allowlists"
     );
@@ -3232,6 +3254,9 @@ fn verify_validated_installer_smoke_sources(smoke: &str) -> Result<()> {
                 .contains("$ModelActivationExitClasses -ccontains $CandidateExitClass")
             && sanitized_code
                 .contains("$ModelActivationErrorKinds -ccontains $CandidateErrorKind")
+            && sanitized_code
+                .contains("$ModelInstallErrorKinds -ccontains $CandidateErrorKind")
+            && sanitized_code.contains("-ne\n                    $IsInstallKind)")
             && sanitized_code.contains(
                 "$ModelActivationElapsedBuckets -ccontains\n                    $CandidateElapsedBucket",
             )
@@ -3330,7 +3355,7 @@ fn verify_validated_installer_smoke_sources(smoke: &str) -> Result<()> {
         powershell_executable_exact_in_function(
             &source,
             "Throw-SanitizedModelActivationFailure",
-            "    Set-StructuredInstallerSmokeFailure `\n        \"model_activation_failed\" `\n        $Failure.ErrorKind `\n        $Failure.ElapsedBucket `\n        $Failure.ExitClass",
+            "    $FailureClass = if ($ModelInstallErrorKinds -ccontains $Failure.ErrorKind) {\n        \"model_install_failed\"\n    } else {\n        \"model_activation_failed\"\n    }\n    Set-StructuredInstallerSmokeFailure `\n        $FailureClass `\n        $Failure.ErrorKind `\n        $Failure.ElapsedBucket `\n        $Failure.ExitClass",
             "Set-StructuredInstallerSmokeFailure",
         )? && powershell_executable_exact_in_function(
             &source,

@@ -25,6 +25,15 @@ pub(crate) enum ModelActivationErrorKind {
     GenerationProtocol,
     GenerationInvalid,
     ActivationInternal,
+    InstallNetwork,
+    InstallIntegrity,
+    InstallStorage,
+    InstallPromotion,
+    InstallRuntimeVerification,
+    InstallCapacity,
+    InstallConfiguration,
+    InstallCancelled,
+    InstallInternal,
 }
 
 impl ModelActivationErrorKind {
@@ -43,6 +52,15 @@ impl ModelActivationErrorKind {
             Self::GenerationProtocol => "generation_protocol",
             Self::GenerationInvalid => "generation_invalid",
             Self::ActivationInternal => "activation_internal",
+            Self::InstallNetwork => "install_network",
+            Self::InstallIntegrity => "install_integrity",
+            Self::InstallStorage => "install_storage",
+            Self::InstallPromotion => "install_promotion",
+            Self::InstallRuntimeVerification => "install_runtime_verification",
+            Self::InstallCapacity => "install_capacity",
+            Self::InstallConfiguration => "install_configuration",
+            Self::InstallCancelled => "install_cancelled",
+            Self::InstallInternal => "install_internal",
         }
     }
 }
@@ -297,6 +315,15 @@ mod tests {
             ModelActivationErrorKind::GenerationProtocol,
             ModelActivationErrorKind::GenerationInvalid,
             ModelActivationErrorKind::ActivationInternal,
+            ModelActivationErrorKind::InstallNetwork,
+            ModelActivationErrorKind::InstallIntegrity,
+            ModelActivationErrorKind::InstallStorage,
+            ModelActivationErrorKind::InstallPromotion,
+            ModelActivationErrorKind::InstallRuntimeVerification,
+            ModelActivationErrorKind::InstallCapacity,
+            ModelActivationErrorKind::InstallConfiguration,
+            ModelActivationErrorKind::InstallCancelled,
+            ModelActivationErrorKind::InstallInternal,
         ] {
             assert_eq!(
                 serde_json::to_value(error_kind).unwrap(),

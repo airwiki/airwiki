@@ -2,7 +2,7 @@ use std::{
     fmt,
     net::{IpAddr, Ipv4Addr, SocketAddr, TcpListener},
     path::PathBuf,
-    process::Stdio,
+    process::{ExitStatus, Stdio},
     sync::Arc,
     time::{Duration, Instant},
 };
@@ -465,7 +465,7 @@ async fn wait_until_healthy(
     timeout: Duration,
 ) -> Result<()> {
     let started = Instant::now();
-    while started.elapsed() < timeout {
+    loop {
         let status = server.child.try_wait().map_err(|error| {
             anyhow::Error::new(error).context(LlamaSupervisorFailure::new(
                 LlamaSupervisorFailureKind::RuntimeState,
@@ -473,27 +473,67 @@ async fn wait_until_healthy(
             ))
         })?;
         if let Some(status) = status {
-            let exit_class = if status.success() {
-                RuntimeExitClass::Success
-            } else {
-                RuntimeExitClass::Failure
-            };
-            return Err(LlamaSupervisorFailure::new(
-                LlamaSupervisorFailureKind::RuntimeExitedBeforeHealth,
-                exit_class,
-            )
-            .into());
+            return runtime_exited_before_health(status);
         }
-        let response = client
+        let Some(remaining) = timeout.checked_sub(started.elapsed()) else {
+            return runtime_health_timeout();
+        };
+        let request = client
             .get(format!("{}/health", server.endpoint.base_url))
             .bearer_auth(server.endpoint.bearer_token())
-            .send()
-            .await;
+            .send();
+        let response = tokio::select! {
+            biased;
+            status = server.child.wait() => {
+                return runtime_exited_before_health(status.map_err(|error| {
+                    anyhow::Error::new(error).context(LlamaSupervisorFailure::new(
+                        LlamaSupervisorFailureKind::RuntimeState,
+                        RuntimeExitClass::Unknown,
+                    ))
+                })?);
+            }
+            response = tokio::time::timeout(remaining, request) => {
+                match response {
+                    Ok(response) => response,
+                    Err(_) => return runtime_health_timeout(),
+                }
+            }
+        };
         if response.is_ok_and(|response| response.status().is_success()) {
             return Ok(());
         }
-        tokio::time::sleep(Duration::from_millis(250)).await;
+        let Some(remaining) = timeout.checked_sub(started.elapsed()) else {
+            return runtime_health_timeout();
+        };
+        tokio::select! {
+            biased;
+            status = server.child.wait() => {
+                return runtime_exited_before_health(status.map_err(|error| {
+                    anyhow::Error::new(error).context(LlamaSupervisorFailure::new(
+                        LlamaSupervisorFailureKind::RuntimeState,
+                        RuntimeExitClass::Unknown,
+                    ))
+                })?);
+            }
+            () = tokio::time::sleep(Duration::from_millis(250).min(remaining)) => {}
+        }
     }
+}
+
+fn runtime_exited_before_health(status: ExitStatus) -> Result<()> {
+    let exit_class = if status.success() {
+        RuntimeExitClass::Success
+    } else {
+        RuntimeExitClass::Failure
+    };
+    Err(LlamaSupervisorFailure::new(
+        LlamaSupervisorFailureKind::RuntimeExitedBeforeHealth,
+        exit_class,
+    )
+    .into())
+}
+
+fn runtime_health_timeout() -> Result<()> {
     Err(LlamaSupervisorFailure::new(
         LlamaSupervisorFailureKind::RuntimeHealthTimeout,
         RuntimeExitClass::None,
@@ -506,34 +546,58 @@ mod tests {
     use super::*;
 
     #[cfg(target_os = "windows")]
-    fn delayed_failure_command() -> Command {
+    fn gated_failure_command() -> Command {
         let mut command = Command::new("powershell.exe");
         command
             .arg("-NoProfile")
             .arg("-Command")
-            .arg("Start-Sleep -Milliseconds 500; exit 7");
+            .arg("$null = [Console]::In.ReadLine(); exit 7");
         command
     }
 
     #[cfg(not(target_os = "windows"))]
-    fn delayed_failure_command() -> Command {
+    fn gated_failure_command() -> Command {
         let mut command = Command::new("sh");
-        command.arg("-c").arg("sleep 0.1; exit 7");
+        command.arg("-c").arg("read -r _ || true; exit 7");
         command
     }
 
     #[tokio::test]
     async fn health_probe_reports_early_runtime_exit_without_waiting_for_timeout() {
-        let mut command = delayed_failure_command();
+        let mut command = gated_failure_command();
         command
+            .stdin(Stdio::piped())
             .stdout(Stdio::null())
             .stderr(Stdio::null())
             .kill_on_drop(true);
-        let child = command.spawn().expect("synthetic child should start");
+        let mut child = command.spawn().expect("synthetic child should start");
+        let child_stdin = child
+            .stdin
+            .take()
+            .expect("synthetic child stdin should be piped");
         let process_guard =
             ChildProcessGuard::attach(&child).expect("synthetic child should be guarded");
-        let port = reserve_loopback_port().expect("synthetic endpoint should reserve loopback");
-        let mut server = SpawnedServer {
+        let listener = tokio::net::TcpListener::bind((Ipv4Addr::LOCALHOST, 0))
+            .await
+            .expect("synthetic health listener should bind loopback");
+        let port = listener
+            .local_addr()
+            .expect("synthetic health listener should expose its address")
+            .port();
+        let (accepted_sender, accepted_receiver) = tokio::sync::oneshot::channel();
+        let (release_sender, release_receiver) = tokio::sync::oneshot::channel();
+        let listener_task = tokio::spawn(async move {
+            let (socket, _) = listener
+                .accept()
+                .await
+                .expect("synthetic health request should connect");
+            accepted_sender
+                .send(())
+                .expect("health probe should await the synthetic listener");
+            let _ = release_receiver.await;
+            drop(socket);
+        });
+        let server = SpawnedServer {
             child,
             process_guard,
             endpoint: LlamaEndpoint {
@@ -541,15 +605,27 @@ mod tests {
                 token: Arc::from("redacted-test-token"),
             },
         };
-        let started = Instant::now();
-
-        let error = wait_until_healthy(
-            &reqwest::Client::new(),
-            &mut server,
-            Duration::from_secs(10),
-        )
-        .await
-        .expect_err("exited child must fail the health probe");
+        let probe_task = tokio::spawn(async move {
+            let mut server = server;
+            let started = Instant::now();
+            let result = wait_until_healthy(
+                &reqwest::Client::new(),
+                &mut server,
+                Duration::from_secs(10),
+            )
+            .await;
+            (result, started.elapsed())
+        });
+        tokio::time::timeout(Duration::from_secs(2), accepted_receiver)
+            .await
+            .expect("health request should reach the synthetic listener")
+            .expect("synthetic listener should report the accepted request");
+        drop(child_stdin);
+        let (result, elapsed) = tokio::time::timeout(Duration::from_secs(5), probe_task)
+            .await
+            .expect("exited child should interrupt the pending health request")
+            .expect("synthetic probe task should finish");
+        let error = result.expect_err("exited child must fail the health probe");
         let failure = error
             .downcast_ref::<LlamaSupervisorFailure>()
             .expect("supervisor failure class must be preserved");
@@ -560,9 +636,14 @@ mod tests {
         );
         assert_eq!(failure.exit_class(), RuntimeExitClass::Failure);
         assert!(
-            started.elapsed() < Duration::from_secs(5),
+            elapsed < Duration::from_secs(5),
             "health probe waited for its full timeout after child exit"
         );
+        let _ = release_sender.send(());
+        tokio::time::timeout(Duration::from_secs(2), listener_task)
+            .await
+            .expect("synthetic health listener should stop")
+            .expect("synthetic health listener task should finish");
     }
 
     #[test]

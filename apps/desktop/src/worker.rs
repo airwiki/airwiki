@@ -1133,6 +1133,8 @@ async fn run_worker(
             return;
         }
     };
+    let mut public_announcement_updates = services.subscribe_public_announcement_updates();
+    let mut public_announcement_updates_open = true;
     let (integration_manager, integration_manager_error) =
         match ChatIntegrationManager::new(paths.clone()) {
             Ok(manager) => (Some(manager), None),
@@ -1332,6 +1334,13 @@ async fn run_worker(
 
     'running: loop {
         tokio::select! {
+            changed = public_announcement_updates.changed(), if public_announcement_updates_open => {
+                if changed.is_ok() {
+                    refresh_collection_views(&services, &events);
+                } else {
+                    public_announcement_updates_open = false;
+                }
+            }
             command = commands.recv() => {
                 let Some(command) = command else { break 'running };
                 match command {
@@ -4049,15 +4058,7 @@ fn matching_known_install_plan(
 }
 
 fn refresh_content_views(services: &DesktopServices, events: &Sender<WorkerEvent>) {
-    match services.collection_views() {
-        Ok(collections) => send(events, WorkerEvent::Collections(collections)),
-        Err(error) => send(
-            events,
-            WorkerEvent::Error(format!(
-                "No se pudieron refrescar las colecciones: {error:#}"
-            )),
-        ),
-    }
+    refresh_collection_views(services, events);
     match services.review_views() {
         Ok(reviews) => send(events, WorkerEvent::Reviews(reviews)),
         Err(error) => send(
@@ -4071,6 +4072,18 @@ fn refresh_content_views(services: &DesktopServices, events: &Sender<WorkerEvent
             events,
             WorkerEvent::Error(format!(
                 "No se pudieron refrescar los archivos pendientes: {error:#}"
+            )),
+        ),
+    }
+}
+
+fn refresh_collection_views(services: &DesktopServices, events: &Sender<WorkerEvent>) {
+    match services.collection_views() {
+        Ok(collections) => send(events, WorkerEvent::Collections(collections)),
+        Err(error) => send(
+            events,
+            WorkerEvent::Error(format!(
+                "No se pudieron refrescar las colecciones: {error:#}"
             )),
         ),
     }

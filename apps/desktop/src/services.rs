@@ -1080,6 +1080,7 @@ pub struct DesktopServices {
     public_reader: Arc<PublicReader>,
     public_announcements: Arc<RwLock<HashMap<Uuid, PublicAnnouncementState>>>,
     public_announcement_sync: Arc<AsyncMutex<()>>,
+    public_announcement_updates: watch::Sender<u64>,
     search_topology: AsyncMutex<()>,
     network_generation: Arc<AtomicU64>,
     network_events: broadcast::Sender<SequencedNetworkEvent>,
@@ -1237,6 +1238,7 @@ impl DesktopServices {
             public_identity.peer_id().to_string(),
         ));
         let (network_events, _) = broadcast::channel(128);
+        let (public_announcement_updates, _) = watch::channel(0_u64);
         let network_generation = Arc::new(AtomicU64::new(1));
         let network = if lan_enabled {
             Some(spawn_network_runtime(
@@ -1290,6 +1292,7 @@ impl DesktopServices {
             public_reader,
             public_announcements: Arc::new(RwLock::new(HashMap::new())),
             public_announcement_sync: Arc::new(AsyncMutex::new(())),
+            public_announcement_updates,
             search_topology: AsyncMutex::new(()),
             network_generation,
             network_events,
@@ -1311,6 +1314,10 @@ impl DesktopServices {
         // `mcp` remains present throughout normal operation. Returning the
         // canonical endpoint keeps this accessor usable during teardown tests.
         "http://127.0.0.1:43123/mcp"
+    }
+
+    pub(crate) fn subscribe_public_announcement_updates(&self) -> watch::Receiver<u64> {
+        self.public_announcement_updates.subscribe()
     }
 
     pub fn advertised_lan_addresses(&self, listener: &Multiaddr) -> Result<Vec<String>> {
@@ -1740,13 +1747,16 @@ impl DesktopServices {
                     }
                 });
                 let renewal_task = tokio::spawn(run_public_manifest_renewal(
-                    self.database.clone(),
-                    self.public_identity.clone(),
-                    Arc::clone(&self.public_reader),
-                    Arc::clone(&self.public_announcements),
-                    Arc::clone(&self.public_announcement_sync),
+                    PublicManifestRenewalContext {
+                        database: self.database.clone(),
+                        identity: self.public_identity.clone(),
+                        reader: Arc::clone(&self.public_reader),
+                        announcements: Arc::clone(&self.public_announcements),
+                        announcement_sync: Arc::clone(&self.public_announcement_sync),
+                        updates: self.public_announcement_updates.clone(),
+                        cancellation: cancellation.clone(),
+                    },
                     relay_readiness.clone(),
-                    cancellation.clone(),
                 ));
                 *guard = Some(PublicNetworkRuntime {
                     cancellation,
@@ -1805,6 +1815,7 @@ impl DesktopServices {
                 collection_id,
                 completed_public_announcement_state(sequence, None, 0, now),
             );
+            notify_public_announcement_update(&self.public_announcement_updates);
             self.audit(
                 "public_collection_not_announced",
                 "collection",
@@ -1833,6 +1844,7 @@ impl DesktopServices {
             collection_id,
             completed_public_announcement_state(sequence, expires_at, accepted, now),
         );
+        notify_public_announcement_update(&self.public_announcement_updates);
         self.audit(
             "public_collection_catalog_updated",
             "collection",
@@ -3329,14 +3341,20 @@ fn ready_public_routes(
         .collect()
 }
 
-async fn run_public_manifest_renewal(
+#[derive(Clone)]
+struct PublicManifestRenewalContext {
     database: Database,
     identity: NodeIdentity,
     reader: Arc<PublicReader>,
-    public_announcements: Arc<RwLock<HashMap<Uuid, PublicAnnouncementState>>>,
-    public_announcement_sync: Arc<AsyncMutex<()>>,
-    mut relay_readiness: watch::Receiver<PublicRelayReadiness>,
+    announcements: Arc<RwLock<HashMap<Uuid, PublicAnnouncementState>>>,
+    announcement_sync: Arc<AsyncMutex<()>>,
+    updates: watch::Sender<u64>,
     cancellation: CancellationToken,
+}
+
+async fn run_public_manifest_renewal(
+    context: PublicManifestRenewalContext,
+    mut relay_readiness: watch::Receiver<PublicRelayReadiness>,
 ) {
     let mut current_relay_readiness = relay_readiness.borrow_and_update().clone();
     let mut readiness_open = true;
@@ -3344,23 +3362,14 @@ async fn run_public_manifest_renewal(
     let mut renewal_interval =
         tokio::time::interval_at(first_renewal, PUBLIC_MANIFEST_RENEWAL_INTERVAL);
     renewal_interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
-    if cancellation.is_cancelled() {
+    if context.cancellation.is_cancelled() {
         return;
     }
-    renew_public_manifests_for_readiness(
-        database.clone(),
-        identity.clone(),
-        Arc::clone(&reader),
-        Arc::clone(&public_announcements),
-        Arc::clone(&public_announcement_sync),
-        current_relay_readiness.clone(),
-        cancellation.clone(),
-    )
-    .await;
+    renew_public_manifests_for_readiness(&context, current_relay_readiness.clone()).await;
     loop {
         let should_renew = tokio::select! {
             biased;
-            () = cancellation.cancelled() => return,
+            () = context.cancellation.cancelled() => return,
             changed = relay_readiness.changed(), if readiness_open => {
                 match changed {
                     Ok(()) => {
@@ -3385,30 +3394,18 @@ async fn run_public_manifest_renewal(
         if !should_renew {
             continue;
         }
-        renew_public_manifests_for_readiness(
-            database.clone(),
-            identity.clone(),
-            Arc::clone(&reader),
-            Arc::clone(&public_announcements),
-            Arc::clone(&public_announcement_sync),
-            current_relay_readiness.clone(),
-            cancellation.clone(),
-        )
-        .await;
+        renew_public_manifests_for_readiness(&context, current_relay_readiness.clone()).await;
     }
 }
 
 async fn renew_public_manifests_for_readiness(
-    database: Database,
-    identity: NodeIdentity,
-    reader: Arc<PublicReader>,
-    public_announcements: Arc<RwLock<HashMap<Uuid, PublicAnnouncementState>>>,
-    public_announcement_sync: Arc<AsyncMutex<()>>,
+    context: &PublicManifestRenewalContext,
     relay_readiness: PublicRelayReadiness,
-    cancellation: CancellationToken,
 ) {
+    let database = context.database.clone();
+    let identity = context.identity.clone();
     let prepared = {
-        let _announcement_sync = public_announcement_sync.lock().await;
+        let _announcement_sync = context.announcement_sync.lock().await;
         tokio::task::spawn_blocking(move || {
             let mut updates = Vec::new();
             for collection in database.list_collections()? {
@@ -3428,26 +3425,28 @@ async fn renew_public_manifests_for_readiness(
         .await
     };
     let Ok(Ok(updates)) = prepared else {
+        notify_public_announcement_update(&context.updates);
         tracing::warn!(
             error_kind = "public_manifest_preparation_failed",
             "public manifest renewal failed"
         );
         return;
     };
-    if cancellation.is_cancelled() {
+    let has_updates = !updates.is_empty();
+    if context.cancellation.is_cancelled() {
         return;
     }
     let mut accepted = 0_usize;
     let mut failed = 0_usize;
     for (collection_id, endpoints, update) in updates {
-        if cancellation.is_cancelled() {
+        if context.cancellation.is_cancelled() {
             return;
         }
         let sequence = public_announcement_sequence(&update);
         if endpoints.is_empty() {
             let now = Utc::now();
             update_public_announcement_state(
-                &public_announcements,
+                &context.announcements,
                 collection_id,
                 completed_public_announcement_state(sequence, None, 0, now),
             );
@@ -3456,14 +3455,14 @@ async fn renew_public_manifests_for_readiness(
         let expires_at = public_announcement_expiry(&update);
         let result = tokio::select! {
             biased;
-            () = cancellation.cancelled() => return,
+            () = context.cancellation.cancelled() => return,
             result = async {
                 match update {
                     PreparedPublicAnnouncement::Manifest(manifest) => {
-                        Some(reader.register_manifest(&endpoints, manifest).await)
+                        Some(context.reader.register_manifest(&endpoints, manifest).await)
                     }
                     PreparedPublicAnnouncement::Tombstone(tombstone) => {
-                        Some(reader.withdraw_manifest(&endpoints, tombstone).await)
+                        Some(context.reader.withdraw_manifest(&endpoints, tombstone).await)
                     }
                     PreparedPublicAnnouncement::Missing => None,
                 }
@@ -3476,7 +3475,7 @@ async fn renew_public_manifests_for_readiness(
             Ok(count) => {
                 accepted = accepted.saturating_add(count);
                 update_public_announcement_state(
-                    &public_announcements,
+                    &context.announcements,
                     collection_id,
                     completed_public_announcement_state(sequence, expires_at, count, Utc::now()),
                 );
@@ -3485,7 +3484,7 @@ async fn renew_public_manifests_for_readiness(
                 failed = failed.saturating_add(1);
                 if let Some(sequence) = sequence {
                     record_public_announcement_failure(
-                        &public_announcements,
+                        &context.announcements,
                         collection_id,
                         sequence,
                         Utc::now(),
@@ -3494,7 +3493,14 @@ async fn renew_public_manifests_for_readiness(
             }
         }
     }
+    if has_updates {
+        notify_public_announcement_update(&context.updates);
+    }
     tracing::info!(accepted, failed, "public manifests renewed");
+}
+
+fn notify_public_announcement_update(updates: &watch::Sender<u64>) {
+    updates.send_modify(|generation| *generation = generation.wrapping_add(1));
 }
 
 fn source_issue_reason(message: &str, code: SourceIssueCode) -> Option<String> {
@@ -4181,16 +4187,20 @@ mod tests {
         wait_for_public_catalog_listener(port).await;
 
         let (_readiness_sender, relay_readiness) = watch::channel(PublicRelayReadiness::default());
+        let (announcement_updates, mut announcement_update_events) = watch::channel(0_u64);
         let renewal_cancellation = CancellationToken::new();
         let announcements = Arc::new(RwLock::new(HashMap::new()));
         let renewal_task = tokio::spawn(run_public_manifest_renewal(
-            database,
-            NodeIdentity::load_or_create(&MemorySecretStore::default()).unwrap(),
-            Arc::new(PublicReader::new()),
-            Arc::clone(&announcements),
-            Arc::new(AsyncMutex::new(())),
+            PublicManifestRenewalContext {
+                database,
+                identity: NodeIdentity::load_or_create(&MemorySecretStore::default()).unwrap(),
+                reader: Arc::new(PublicReader::new()),
+                announcements: Arc::clone(&announcements),
+                announcement_sync: Arc::new(AsyncMutex::new(())),
+                updates: announcement_updates,
+                cancellation: renewal_cancellation.clone(),
+            },
             relay_readiness,
-            renewal_cancellation.clone(),
         ));
 
         let sequence = tokio::time::timeout(Duration::from_secs(2), recorded_withdrawals.recv())
@@ -4198,6 +4208,11 @@ mod tests {
             .unwrap()
             .unwrap();
         assert!(sequence > 1);
+        tokio::time::timeout(Duration::from_secs(2), announcement_update_events.changed())
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(*announcement_update_events.borrow_and_update(), 1);
         assert_eq!(
             public_announcement_view(
                 read_lock(&announcements, "test announcements")
@@ -4273,15 +4288,19 @@ mod tests {
         wait_for_public_catalog_listener(port).await;
 
         let (_readiness_sender, relay_readiness) = watch::channel(PublicRelayReadiness::default());
+        let (announcement_updates, _announcement_update_events) = watch::channel(0_u64);
         let renewal_cancellation = CancellationToken::new();
         let renewal_task = tokio::spawn(run_public_manifest_renewal(
-            database,
-            NodeIdentity::load_or_create(&MemorySecretStore::default()).unwrap(),
-            Arc::new(PublicReader::new()),
-            Arc::new(RwLock::new(HashMap::new())),
-            Arc::new(AsyncMutex::new(())),
+            PublicManifestRenewalContext {
+                database,
+                identity: NodeIdentity::load_or_create(&MemorySecretStore::default()).unwrap(),
+                reader: Arc::new(PublicReader::new()),
+                announcements: Arc::new(RwLock::new(HashMap::new())),
+                announcement_sync: Arc::new(AsyncMutex::new(())),
+                updates: announcement_updates,
+                cancellation: renewal_cancellation.clone(),
+            },
             relay_readiness,
-            renewal_cancellation.clone(),
         ));
         tokio::time::timeout(Duration::from_secs(2), withdrawal_started)
             .await

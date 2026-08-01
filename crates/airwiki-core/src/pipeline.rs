@@ -18,13 +18,13 @@ use crate::ingest::{
 use crate::publication::OkfPublicationMaterializer;
 use crate::storage::{
     AuditEvent, CollectionMaintenanceCounts, CollectionMaintenanceResult,
-    CollectionMaintenanceStatus, CollectionRecord, ConceptRecord, Database, ReviewVersionToken,
-    SourceDocumentRecord, SourceRegistration, StoredChunk,
+    CollectionMaintenanceStatus, CollectionRecord, ConceptRecord, Database, IngestClaim,
+    ReviewVersionToken, SourceDocumentRecord, SourceRegistration, StoredChunk,
 };
 
 const EMBEDDING_BATCH_SIZE: usize = 32;
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 struct RegisteredCandidate {
     candidate: FileCandidate,
     registration: SourceRegistration,
@@ -543,38 +543,86 @@ impl IngestPipeline {
             | SourceRegistration::Replaced { .. } => {}
         }
 
-        let job = self
-            .database
-            .create_job(Some(source_document_id), "ingest")?;
-        self.database.set_job_state(job.id, "running", None)?;
-        let result = self
-            .process_registered_source(&registered.source, &registered.candidate)
-            .await;
+        let Some(job) = self.database.claim_ingest_job(
+            source_document_id,
+            &registered.source.source_sha256,
+            registered.source.revision,
+        )?
+        else {
+            return Ok(IngestOutcome::Unchanged { source_document_id });
+        };
+        let supervisor_pipeline = self.clone();
+        let supervisor_candidate = registered.clone();
+        let supervisor_claim = job.clone();
+        let supervisor = tokio::spawn(async move {
+            supervisor_pipeline
+                .supervise_claimed_candidate(supervisor_candidate, supervisor_claim)
+                .await
+        });
+        match supervisor.await {
+            Ok(outcome) => outcome,
+            Err(_) => self.finish_ingest_job(
+                &registered,
+                &job,
+                Err(anyhow!("ingest supervisor stopped unexpectedly")),
+            ),
+        }
+    }
+
+    async fn supervise_claimed_candidate(
+        &self,
+        registered: RegisteredCandidate,
+        claim: IngestClaim,
+    ) -> Result<IngestOutcome> {
+        let worker_pipeline = self.clone();
+        let worker_source = registered.source.clone();
+        let worker_candidate = registered.candidate.clone();
+        let worker_claim = claim.clone();
+        let worker = tokio::spawn(async move {
+            worker_pipeline
+                .process_registered_source(&worker_source, &worker_candidate, &worker_claim)
+                .await
+        });
+        let result = match worker.await {
+            Ok(result) => result,
+            Err(_) => Err(anyhow!("document processing worker stopped unexpectedly")),
+        };
+        self.finish_ingest_job(&registered, &claim, result)
+    }
+
+    fn finish_ingest_job(
+        &self,
+        registered: &RegisteredCandidate,
+        claim: &IngestClaim,
+        result: Result<IngestOutcome>,
+    ) -> Result<IngestOutcome> {
+        let source_document_id = registered.registration.id();
         match result {
             Ok(outcome) => {
-                self.database.set_job_state(job.id, "completed", None)?;
-                Ok(outcome)
+                if self.database.complete_ingest_job_if_running(claim)? {
+                    Ok(outcome)
+                } else {
+                    Ok(IngestOutcome::Failed {
+                        source_document_id: Some(source_document_id),
+                        path: registered.candidate.path.clone(),
+                        code: SourceIssueCode::Superseded,
+                        error: "source processing claim was superseded".into(),
+                    })
+                }
             }
             Err(error) => {
                 let message = error.to_string();
-                let code = if error.downcast_ref::<SupersededProcessing>().is_some() {
+                let superseded = error.downcast_ref::<SupersededProcessing>().is_some();
+                let code = if superseded {
                     SourceIssueCode::Superseded
                 } else {
                     SourceIssueCode::from_error(&message)
                 };
-                if error.downcast_ref::<SupersededProcessing>().is_none() {
-                    self.database.mark_source_failed_if_current(
-                        source_document_id,
-                        &registered.source.source_sha256,
-                        registered.source.revision,
-                        &message,
-                    )?;
-                }
                 self.database
-                    .set_job_state(job.id, "failed", Some(&message))?;
+                    .fail_ingest_job_if_current(claim, &message, !superseded)?;
                 Ok(IngestOutcome::Failed {
                     source_document_id: Some(source_document_id),
-                    path: registered.candidate.path,
+                    path: registered.candidate.path.clone(),
                     code,
                     error: message,
                 })
@@ -586,6 +634,7 @@ impl IngestPipeline {
         &self,
         registered: &SourceDocumentRecord,
         candidate: &FileCandidate,
+        claim: &IngestClaim,
     ) -> Result<IngestOutcome> {
         let source_document_id = registered.id;
         let path = candidate.path.clone();
@@ -609,9 +658,7 @@ impl IngestPipeline {
         )
         .await?;
         if !self.database.mark_extracted_if_current(
-            source_document_id,
-            &registered.source_sha256,
-            registered.revision,
+            claim,
             prepared.page_count,
             prepared.character_count,
         )? {
@@ -629,17 +676,11 @@ impl IngestPipeline {
                 ),
             },
         };
-        if !self.database.mark_enriched_if_current(
-            source_document_id,
-            &registered.source_sha256,
-            registered.revision,
-        )? {
+        if !self.database.mark_enriched_if_current(claim)? {
             return Err(SupersededProcessing.into());
         }
         let Some(concept) = self.database.save_enrichment_if_current(
-            source_document_id,
-            &registered.source_sha256,
-            registered.revision,
+            claim,
             draft,
             &self.node_id,
             self.generation.model_id(),
@@ -653,6 +694,7 @@ impl IngestPipeline {
         let database = self.database.clone();
         let source_sha256 = registered.source_sha256.clone();
         let source_revision = registered.revision;
+        let chunk_claim = claim.clone();
         let concept_id = concept.id;
         let collection_id = concept.collection_id;
         let replaced = run_blocking("search index writer stopped unexpectedly", move || {
@@ -665,7 +707,7 @@ impl IngestPipeline {
                 &source_sha256,
                 source_revision,
             )?;
-            database.replace_chunks_if_current(concept_id, &source_sha256, source_revision, &stored)
+            database.replace_chunks_if_current(concept_id, &chunk_claim, &stored)
         })
         .await?;
         if !replaced {
@@ -1094,6 +1136,24 @@ mod tests {
             if self.block_next.swap(false, Ordering::SeqCst) {
                 self.entered.notify_one();
                 self.release.notified().await;
+            }
+            DeterministicGenerationProvider.enrich(document_text).await
+        }
+    }
+
+    struct PanicOnceGeneration {
+        panic_next: AtomicBool,
+    }
+
+    #[async_trait]
+    impl GenerationProvider for PanicOnceGeneration {
+        fn model_id(&self) -> &str {
+            "panic-once-test"
+        }
+
+        async fn enrich(&self, document_text: &str) -> Result<EnrichmentDraft> {
+            if self.panic_next.swap(false, Ordering::SeqCst) {
+                panic!("synthetic generation panic");
             }
             DeterministicGenerationProvider.enrich(document_text).await
         }
@@ -2022,6 +2082,247 @@ mod tests {
                 .join(format!("wiki/concepts/{concept_id}.md"))
                 .exists()
         );
+    }
+
+    #[tokio::test]
+    async fn restored_tombstone_is_not_reset_by_concurrent_preflight() {
+        let generator = Arc::new(BlockNextGeneration::new());
+        let (temp, db, collection_id, pipeline) = setup(generator.clone());
+        let path = temp.path().join("source/restore.md");
+        let contents = "# Restaurar\ncontenido sintético";
+        std::fs::write(&path, contents).unwrap();
+        let initial = pipeline.ingest_path(collection_id, &path).await.unwrap();
+        let (source_id, concept_id) = match initial {
+            IngestOutcome::NeedsReview {
+                source_document_id,
+                concept_id,
+                ..
+            } => (source_document_id, concept_id),
+            other => panic!("unexpected {other:?}"),
+        };
+        let draft = db.concept(concept_id).unwrap().unwrap().draft;
+        approve_current(&pipeline, &db, concept_id, draft).unwrap();
+
+        std::fs::remove_file(&path).unwrap();
+        assert!(matches!(
+            pipeline.scan_collection(collection_id).await.unwrap().as_slice(),
+            [IngestOutcome::Deleted { source_document_id }] if *source_document_id == source_id
+        ));
+        std::fs::write(&path, contents).unwrap();
+
+        let first_preflight = pipeline.preflight_collection(collection_id).unwrap();
+        assert_eq!(first_preflight.pending_count(), 1);
+        let concurrent_preflight = pipeline.preflight_collection(collection_id).unwrap();
+        assert_eq!(concurrent_preflight.pending_count(), 1);
+
+        generator.arm();
+        let scan_pipeline = pipeline.clone();
+        let scan =
+            tokio::spawn(async move { scan_pipeline.process_preflight(first_preflight).await });
+        tokio::time::timeout(
+            std::time::Duration::from_secs(2),
+            generator.entered.notified(),
+        )
+        .await
+        .expect("restored source should enter inference");
+
+        let concurrent = pipeline
+            .process_preflight(concurrent_preflight)
+            .await
+            .unwrap();
+        assert!(matches!(
+            concurrent.as_slice(),
+            [IngestOutcome::Unchanged { source_document_id }]
+                if *source_document_id == source_id
+        ));
+        let active = db.source_document(source_id).unwrap().unwrap();
+        assert_eq!(active.status, DocumentStatus::Extracted);
+        assert_eq!(active.revision, 2);
+
+        generator.release.notify_one();
+        let outcomes = scan.await.unwrap().unwrap();
+        assert!(matches!(
+            outcomes.as_slice(),
+            [IngestOutcome::NeedsReview {
+                source_document_id,
+                concept_id: restored_concept_id,
+                ..
+            }] if *source_document_id == source_id && *restored_concept_id == concept_id
+        ));
+        let restored = db.source_document(source_id).unwrap().unwrap();
+        assert_eq!(restored.status, DocumentStatus::NeedsReview);
+        assert_eq!(restored.revision, 2);
+        assert_eq!(generator.calls.load(Ordering::SeqCst), 2);
+        assert!(matches!(
+            pipeline.scan_collection(collection_id).await.unwrap().as_slice(),
+            [IngestOutcome::Unchanged { source_document_id }]
+                if *source_document_id == source_id
+        ));
+        assert_eq!(
+            db.collection_maintenance(collection_id)
+                .unwrap()
+                .unwrap()
+                .status,
+            CollectionMaintenanceStatus::Success
+        );
+    }
+
+    #[tokio::test]
+    async fn cancelled_caller_does_not_abandon_claimed_ingest() {
+        let generator = Arc::new(BlockNextGeneration::new());
+        let (temp, db, collection_id, pipeline) = setup(generator.clone());
+        let path = temp.path().join("source/cancelled.md");
+        std::fs::write(&path, "# Cancelación\ncontenido sintético").unwrap();
+
+        generator.arm();
+        let ingest_pipeline = pipeline.clone();
+        let ingest_path = path.clone();
+        let caller = tokio::spawn(async move {
+            ingest_pipeline
+                .ingest_path(collection_id, ingest_path)
+                .await
+        });
+        tokio::time::timeout(
+            std::time::Duration::from_secs(2),
+            generator.entered.notified(),
+        )
+        .await
+        .expect("claimed source should enter inference");
+        caller.abort();
+        assert!(caller.await.unwrap_err().is_cancelled());
+
+        generator.release.notify_one();
+        tokio::time::timeout(std::time::Duration::from_secs(2), async {
+            loop {
+                let sources = db.list_sources(collection_id).unwrap();
+                if matches!(
+                    sources.as_slice(),
+                    [source] if source.status == DocumentStatus::NeedsReview
+                ) {
+                    break;
+                }
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .expect("detached supervisor should finish the claimed ingest");
+
+        assert!(matches!(
+            pipeline.ingest_path(collection_id, path).await.unwrap(),
+            IngestOutcome::Unchanged { .. }
+        ));
+        assert_eq!(generator.calls.load(Ordering::SeqCst), 1);
+    }
+
+    #[tokio::test]
+    async fn panicked_worker_releases_ingest_for_same_session_retry() {
+        let generator = Arc::new(PanicOnceGeneration {
+            panic_next: AtomicBool::new(true),
+        });
+        let (temp, db, collection_id, pipeline) = setup(generator);
+        let path = temp.path().join("source/panic.md");
+        std::fs::write(&path, "# Pánico\ncontenido sintético").unwrap();
+
+        let failed = pipeline.ingest_path(collection_id, &path).await.unwrap();
+        assert!(matches!(failed, IngestOutcome::Failed { .. }));
+        assert!(matches!(
+            db.list_sources(collection_id).unwrap().as_slice(),
+            [source] if source.status == DocumentStatus::Failed
+        ));
+
+        let retry = pipeline.ingest_path(collection_id, path).await.unwrap();
+        assert!(matches!(retry, IngestOutcome::NeedsReview { .. }));
+    }
+
+    #[tokio::test]
+    async fn rename_during_inference_revokes_the_old_same_revision_job() {
+        let generator = Arc::new(BlockNextGeneration::new());
+        let (temp, db, collection_id, pipeline) = setup(generator.clone());
+        let old_path = temp.path().join("source/old.md");
+        let new_path = temp.path().join("source/new.md");
+        std::fs::write(&old_path, "# Renombrar\ncontenido sintético").unwrap();
+
+        generator.arm();
+        let old_pipeline = pipeline.clone();
+        let old_ingest_path = old_path.clone();
+        let old = tokio::spawn(async move {
+            old_pipeline
+                .ingest_path(collection_id, old_ingest_path)
+                .await
+        });
+        tokio::time::timeout(
+            std::time::Duration::from_secs(2),
+            generator.entered.notified(),
+        )
+        .await
+        .expect("old path should enter inference");
+
+        std::fs::rename(old_path, &new_path).unwrap();
+        assert!(matches!(
+            pipeline
+                .ingest_path(collection_id, &new_path)
+                .await
+                .unwrap(),
+            IngestOutcome::NeedsReview { .. }
+        ));
+        generator.release.notify_one();
+        assert!(matches!(
+            old.await.unwrap().unwrap(),
+            IngestOutcome::Failed {
+                code: SourceIssueCode::Superseded,
+                ..
+            }
+        ));
+
+        let source = db.list_sources(collection_id).unwrap().pop().unwrap();
+        assert_eq!(source.status, DocumentStatus::NeedsReview);
+        assert_eq!(source.revision, 1);
+        assert_eq!(source.source_path, new_path);
+        assert_eq!(generator.calls.load(Ordering::SeqCst), 2);
+    }
+
+    #[tokio::test]
+    async fn quarantine_during_inference_revokes_the_old_same_revision_job() {
+        let generator = Arc::new(BlockNextGeneration::new());
+        let (temp, db, collection_id, pipeline) = setup(generator.clone());
+        let path = temp.path().join("source/quarantine.md");
+        std::fs::write(&path, "# Cuarentena\ncontenido sintético").unwrap();
+
+        generator.arm();
+        let old_pipeline = pipeline.clone();
+        let old_path = path.clone();
+        let old =
+            tokio::spawn(async move { old_pipeline.ingest_path(collection_id, old_path).await });
+        tokio::time::timeout(
+            std::time::Duration::from_secs(2),
+            generator.entered.notified(),
+        )
+        .await
+        .expect("source should enter inference");
+        let source_id = db.list_sources(collection_id).unwrap()[0].id;
+        assert!(
+            db.quarantine_source(source_id, "synthetic quarantine")
+                .unwrap()
+                .is_none()
+        );
+
+        assert!(matches!(
+            pipeline.ingest_path(collection_id, &path).await.unwrap(),
+            IngestOutcome::NeedsReview { .. }
+        ));
+        generator.release.notify_one();
+        assert!(matches!(
+            old.await.unwrap().unwrap(),
+            IngestOutcome::Failed {
+                code: SourceIssueCode::Superseded,
+                ..
+            }
+        ));
+
+        let source = db.source_document(source_id).unwrap().unwrap();
+        assert_eq!(source.status, DocumentStatus::NeedsReview);
+        assert_eq!(source.revision, 1);
+        assert_eq!(generator.calls.load(Ordering::SeqCst), 2);
     }
 
     #[tokio::test]

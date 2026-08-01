@@ -227,6 +227,14 @@ pub struct JobRecord {
     pub updated_at: DateTime<Utc>,
 }
 
+#[derive(Debug, Clone)]
+pub(crate) struct IngestClaim {
+    pub job_id: Uuid,
+    pub source_document_id: Uuid,
+    pub source_sha256: String,
+    pub revision: u32,
+}
+
 /// Immutable identity captured while a pending review is exclusively claimed
 /// for another enrichment attempt. The claim keeps the existing draft and
 /// chunks intact, but makes the concept temporarily non-approvable.
@@ -1422,10 +1430,17 @@ impl Database {
                     tx.commit()?;
                     return Ok(SourceRegistration::Unchanged(id));
                 }
+                if matches!(status.as_str(), "detected" | "extracted" | "enriched")
+                    && source_has_active_ingest_job(&tx, id)?
+                {
+                    tx.commit()?;
+                    return Ok(SourceRegistration::Unchanged(id));
+                }
                 if status != "deleted" {
                     // A crash or processing failure must be retryable even when
                     // the file bytes did not change. Preserve the source revision
                     // while resetting any partial index state.
+                    supersede_active_ingest_jobs(&tx, id, &now)?;
                     withdraw_source(&tx, id)?;
                     tx.execute(
                         "UPDATE source_documents SET source_path=?2,source_format=?3,byte_size=?4,
@@ -1444,6 +1459,7 @@ impl Database {
                 }
             }
             let hash_changed = old_hash != sha256;
+            supersede_active_ingest_jobs(&tx, id, &now)?;
             withdraw_source(&tx, id)?;
             tx.execute(
                 "UPDATE source_documents SET source_path=?2,source_sha256=?3,source_format=?4,
@@ -1497,6 +1513,7 @@ impl Database {
             let needs_processing =
                 !matches!(status.as_str(), "needs_review" | "publishing" | "published");
             if needs_processing {
+                supersede_active_ingest_jobs(&tx, id, &now)?;
                 withdraw_source(&tx, id)?;
                 tx.execute(
                     "UPDATE source_documents SET source_path=?2,source_format=?3,byte_size=?4,
@@ -1582,44 +1599,47 @@ impl Database {
     /// Claims the extraction transition only for the exact registered revision.
     /// The status predicate also prevents duplicate workers from moving a
     /// completed revision backwards through the pipeline.
-    pub fn mark_extracted_if_current(
+    pub(crate) fn mark_extracted_if_current(
         &self,
-        id: Uuid,
-        source_sha256: &str,
-        revision: u32,
+        claim: &IngestClaim,
         pages: u32,
         characters: u64,
     ) -> Result<bool> {
         let changed = self.connection()?.execute(
             "UPDATE source_documents SET status='extracted',page_count=?4,character_count=?5,
-             last_error=NULL,updated_at=?6
-             WHERE id=?1 AND source_sha256=?2 AND revision=?3 AND status='detected'",
+             last_error=NULL,updated_at=?7
+             WHERE id=?1 AND source_sha256=?2 AND revision=?3 AND status='detected'
+               AND EXISTS (
+                 SELECT 1 FROM jobs
+                 WHERE id=?6 AND source_document_id=?1 AND kind='ingest' AND state='running'
+               )",
             params![
-                id.to_string(),
-                source_sha256,
-                revision,
+                claim.source_document_id.to_string(),
+                claim.source_sha256.as_str(),
+                claim.revision,
                 pages,
                 characters,
+                claim.job_id.to_string(),
                 Utc::now().to_rfc3339()
             ],
         )?;
         Ok(changed == 1)
     }
 
-    pub fn mark_enriched_if_current(
-        &self,
-        id: Uuid,
-        source_sha256: &str,
-        revision: u32,
-    ) -> Result<bool> {
+    pub(crate) fn mark_enriched_if_current(&self, claim: &IngestClaim) -> Result<bool> {
         let changed = self.connection()?.execute(
             "UPDATE source_documents SET status='enriched',last_error=NULL,updated_at=?4
-             WHERE id=?1 AND source_sha256=?2 AND revision=?3 AND status='extracted'",
+             WHERE id=?1 AND source_sha256=?2 AND revision=?3 AND status='extracted'
+               AND EXISTS (
+                 SELECT 1 FROM jobs
+                 WHERE id=?5 AND source_document_id=?1 AND kind='ingest' AND state='running'
+               )",
             params![
-                id.to_string(),
-                source_sha256,
-                revision,
-                Utc::now().to_rfc3339()
+                claim.source_document_id.to_string(),
+                claim.source_sha256.as_str(),
+                claim.revision,
+                Utc::now().to_rfc3339(),
+                claim.job_id.to_string()
             ],
         )?;
         Ok(changed == 1)
@@ -1656,33 +1676,52 @@ impl Database {
         Ok(())
     }
 
-    /// Marks a processing failure only if the source still points at the
-    /// revision owned by that worker. A stale task therefore cannot overwrite a
-    /// newer preflight's detected/review state.
-    pub fn mark_source_failed_if_current(
+    /// Terminalizes a claimed ingestion failure and updates the source only
+    /// while that exact job still owns the current revision.
+    pub(crate) fn fail_ingest_job_if_current(
         &self,
-        id: Uuid,
-        source_sha256: &str,
-        revision: u32,
+        claim: &IngestClaim,
         error: impl AsRef<str>,
+        mark_source_failed: bool,
     ) -> Result<bool> {
         let error: String = error.as_ref().chars().take(2_000).collect();
         let now = Utc::now().to_rfc3339();
         let mut connection = self.connection()?;
         let tx = connection.transaction()?;
+        let claimed = tx.execute(
+            "UPDATE jobs SET state='failed',last_error=?2,updated_at=?3
+             WHERE id=?1 AND source_document_id=?4 AND kind='ingest' AND state='running'",
+            params![
+                claim.job_id.to_string(),
+                error,
+                now,
+                claim.source_document_id.to_string()
+            ],
+        )?;
+        if claimed == 0 || !mark_source_failed {
+            tx.commit()?;
+            return Ok(claimed == 1);
+        }
         let changed = tx.execute(
             "UPDATE source_documents SET status='failed',last_error=?4,updated_at=?5
              WHERE id=?1 AND source_sha256=?2 AND revision=?3
              AND status NOT IN ('published','deleted')",
-            params![id.to_string(), source_sha256, revision, error, now],
+            params![
+                claim.source_document_id.to_string(),
+                claim.source_sha256.as_str(),
+                claim.revision,
+                error,
+                now
+            ],
         )?;
         if changed == 0 {
-            return Ok(false);
+            tx.commit()?;
+            return Ok(true);
         }
         tx.execute(
             "UPDATE concepts SET status='failed',reviewed_at=NULL,updated_at=?2
              WHERE source_document_id=?1",
-            params![id.to_string(), now],
+            params![claim.source_document_id.to_string(), now],
         )?;
         tx.commit()?;
         Ok(true)
@@ -1771,11 +1810,9 @@ impl Database {
 
     /// Atomically saves metadata only while the exact source revision remains
     /// in the `Enriched` stage claimed by the caller.
-    pub fn save_enrichment_if_current(
+    pub(crate) fn save_enrichment_if_current(
         &self,
-        source_document_id: Uuid,
-        source_sha256: &str,
-        revision: u32,
+        claim: &IngestClaim,
         mut draft: EnrichmentDraft,
         node_id: &str,
         generator_model: &str,
@@ -1788,8 +1825,17 @@ impl Database {
         let source = tx
             .query_row(
                 "SELECT collection_id,concept_id FROM source_documents
-                 WHERE id=?1 AND source_sha256=?2 AND revision=?3 AND status='enriched'",
-                params![source_document_id.to_string(), source_sha256, revision],
+                 WHERE id=?1 AND source_sha256=?2 AND revision=?3 AND status='enriched'
+                   AND EXISTS (
+                     SELECT 1 FROM jobs
+                     WHERE id=?4 AND source_document_id=?1 AND kind='ingest' AND state='running'
+                   )",
+                params![
+                    claim.source_document_id.to_string(),
+                    claim.source_sha256.as_str(),
+                    claim.revision,
+                    claim.job_id.to_string()
+                ],
                 |row| Ok((row.get::<_, String>(0)?, row.get::<_, Option<String>>(1)?)),
             )
             .optional()?;
@@ -1818,7 +1864,7 @@ impl Database {
               status='needs_review',reviewed_at=NULL,updated_at=excluded.updated_at",
             params![
                 id.to_string(),
-                source_document_id.to_string(),
+                claim.source_document_id.to_string(),
                 collection_id.to_string(),
                 draft.concept_type.to_string(),
                 draft.title,
@@ -1837,13 +1883,18 @@ impl Database {
         )?;
         let changed = tx.execute(
             "UPDATE source_documents SET concept_id=?4,status='needs_review',updated_at=?5
-             WHERE id=?1 AND source_sha256=?2 AND revision=?3 AND status='enriched'",
+             WHERE id=?1 AND source_sha256=?2 AND revision=?3 AND status='enriched'
+               AND EXISTS (
+                 SELECT 1 FROM jobs
+                 WHERE id=?6 AND source_document_id=?1 AND kind='ingest' AND state='running'
+               )",
             params![
-                source_document_id.to_string(),
-                source_sha256,
-                revision,
+                claim.source_document_id.to_string(),
+                claim.source_sha256.as_str(),
+                claim.revision,
                 id.to_string(),
-                now.to_rfc3339()
+                now.to_rfc3339(),
+                claim.job_id.to_string()
             ],
         )?;
         if changed != 1 {
@@ -2427,21 +2478,20 @@ impl Database {
         Ok(())
     }
 
-    pub fn replace_chunks_if_current(
+    pub(crate) fn replace_chunks_if_current(
         &self,
         concept_id: Uuid,
-        source_sha256: &str,
-        revision: u32,
+        claim: &IngestClaim,
         chunks: &[StoredChunk],
     ) -> Result<bool> {
-        self.replace_chunks_inner(concept_id, chunks, Some((source_sha256, revision)))
+        self.replace_chunks_inner(concept_id, chunks, Some(claim))
     }
 
     fn replace_chunks_inner(
         &self,
         concept_id: Uuid,
         chunks: &[StoredChunk],
-        expected_source: Option<(&str, u32)>,
+        expected_source: Option<&IngestClaim>,
     ) -> Result<bool> {
         if chunks
             .iter()
@@ -2454,16 +2504,22 @@ impl Database {
             .ok_or_else(|| anyhow!("concept {concept_id} does not exist"))?;
         let mut connection = self.connection()?;
         let tx = connection.transaction()?;
-        if let Some((source_sha256, revision)) = expected_source {
+        if let Some(claim) = expected_source {
             let current = tx.query_row(
                 "SELECT EXISTS(
                    SELECT 1 FROM source_documents
                    WHERE id=?1 AND source_sha256=?2 AND revision=?3 AND status='needs_review'
+                     AND EXISTS (
+                       SELECT 1 FROM jobs
+                       WHERE id=?4 AND source_document_id=?1
+                         AND kind='ingest' AND state='running'
+                     )
                  )",
                 params![
                     concept.source_document_id.to_string(),
-                    source_sha256,
-                    revision
+                    claim.source_sha256.as_str(),
+                    claim.revision,
+                    claim.job_id.to_string()
                 ],
                 |row| row.get::<_, bool>(0),
             )?;
@@ -3115,10 +3171,11 @@ impl Database {
     }
 
     pub fn mark_deleted(&self, source_document_id: Uuid) -> Result<()> {
+        let now = Utc::now().to_rfc3339();
         let mut connection = self.connection()?;
         let tx = connection.transaction()?;
+        supersede_active_ingest_jobs(&tx, source_document_id, &now)?;
         withdraw_source(&tx, source_document_id)?;
-        let now = Utc::now().to_rfc3339();
         let count = tx.execute(
             "UPDATE source_documents SET status='deleted',deleted_at=?2,updated_at=?2 WHERE id=?1",
             params![source_document_id.to_string(), now],
@@ -3158,6 +3215,7 @@ impl Database {
         if status == "deleted" {
             return Ok(None);
         }
+        supersede_active_ingest_jobs(&tx, source_document_id, &now)?;
         withdraw_source(&tx, source_document_id)?;
         tx.execute(
             "UPDATE source_documents SET status='failed',last_error=?2,updated_at=?3
@@ -3213,6 +3271,7 @@ impl Database {
         let mut published_artifacts = Vec::new();
         for (source_id, concept_id, source_sha256, status) in rows {
             let source_id = parse_uuid(&source_id)?;
+            supersede_active_ingest_jobs(&tx, source_id, &now)?;
             withdraw_source(&tx, source_id)?;
             tx.execute(
                 "UPDATE source_documents SET status='failed',last_error=?2,updated_at=?3
@@ -3260,6 +3319,52 @@ impl Database {
         Ok(job)
     }
 
+    pub(crate) fn claim_ingest_job(
+        &self,
+        source_document_id: Uuid,
+        expected_sha256: &str,
+        expected_revision: u32,
+    ) -> Result<Option<IngestClaim>> {
+        let now = Utc::now();
+        let now_text = now.to_rfc3339();
+        let mut connection = self.connection()?;
+        let tx = connection.transaction()?;
+        let is_current: bool = tx.query_row(
+            "SELECT EXISTS(
+               SELECT 1 FROM source_documents
+               WHERE id=?1 AND source_sha256=?2 AND revision=?3 AND status='detected'
+             )",
+            params![
+                source_document_id.to_string(),
+                expected_sha256,
+                expected_revision
+            ],
+            |row| row.get(0),
+        )?;
+        if !is_current || source_has_active_ingest_job(&tx, source_document_id)? {
+            tx.commit()?;
+            return Ok(None);
+        }
+
+        let claim = IngestClaim {
+            job_id: Uuid::new_v4(),
+            source_document_id,
+            source_sha256: expected_sha256.to_owned(),
+            revision: expected_revision,
+        };
+        tx.execute(
+            "INSERT INTO jobs(id,source_document_id,kind,state,attempts,created_at,updated_at)
+             VALUES (?1,?2,'ingest','running',1,?3,?3)",
+            params![
+                claim.job_id.to_string(),
+                source_document_id.to_string(),
+                now_text
+            ],
+        )?;
+        tx.commit()?;
+        Ok(Some(claim))
+    }
+
     pub fn set_job_state(&self, id: Uuid, state: &str, error: Option<&str>) -> Result<()> {
         let attempts_increment = u8::from(state == "running");
         let count = self.connection()?.execute(
@@ -3273,6 +3378,19 @@ impl Database {
             ],
         )?;
         ensure_changed(count, "job", id)
+    }
+
+    pub(crate) fn complete_ingest_job_if_running(&self, claim: &IngestClaim) -> Result<bool> {
+        let changed = self.connection()?.execute(
+            "UPDATE jobs SET state='completed',last_error=NULL,updated_at=?2
+             WHERE id=?1 AND source_document_id=?3 AND kind='ingest' AND state='running'",
+            params![
+                claim.job_id.to_string(),
+                Utc::now().to_rfc3339(),
+                claim.source_document_id.to_string()
+            ],
+        )?;
+        Ok(changed == 1)
     }
 
     pub fn upsert_peer(&self, peer: &PeerRecord) -> Result<()> {
@@ -4094,6 +4212,33 @@ fn source_registration_by_path(
         bail!("multiple source records resolve to the same filesystem path");
     }
     Ok(matched)
+}
+
+fn source_has_active_ingest_job(tx: &Transaction<'_>, source_document_id: Uuid) -> Result<bool> {
+    tx.query_row(
+        "SELECT EXISTS(
+           SELECT 1 FROM jobs
+           WHERE source_document_id=?1 AND kind='ingest'
+             AND state IN ('queued','running')
+         )",
+        [source_document_id.to_string()],
+        |row| row.get(0),
+    )
+    .map_err(Into::into)
+}
+
+fn supersede_active_ingest_jobs(
+    tx: &Transaction<'_>,
+    source_document_id: Uuid,
+    now: &str,
+) -> Result<()> {
+    tx.execute(
+        "UPDATE jobs SET state='failed',last_error='superseded by source reconciliation',
+         updated_at=?2
+         WHERE source_document_id=?1 AND kind='ingest' AND state IN ('queued','running')",
+        params![source_document_id.to_string(), now],
+    )?;
+    Ok(())
 }
 
 fn absolute_path(path: &Path) -> Result<PathBuf> {
@@ -5466,6 +5611,73 @@ mod tests {
         assert_eq!(source.status, DocumentStatus::Detected);
         assert_eq!(source.revision, 1);
         assert!(source.last_error.is_none());
+    }
+
+    #[test]
+    fn active_ingest_registration_preserves_same_hash_progress() {
+        let (temp, db, collection) = setup();
+        let path = temp.path().join("source/active.md");
+        std::fs::write(&path, "hello").unwrap();
+        let source = db
+            .register_source(collection.id, &path, "aaa", "markdown", 5)
+            .unwrap();
+        let job = db.claim_ingest_job(source.id(), "aaa", 1).unwrap().unwrap();
+        db.mark_extracted(source.id(), 1, 5).unwrap();
+
+        assert!(
+            db.claim_ingest_job(source.id(), "aaa", 1)
+                .unwrap()
+                .is_none()
+        );
+
+        let concurrent = db
+            .register_source(collection.id, &path, "aaa", "markdown", 5)
+            .unwrap();
+        assert!(matches!(
+            concurrent,
+            SourceRegistration::Unchanged(id) if id == source.id()
+        ));
+        let active = db.source_document(source.id()).unwrap().unwrap();
+        assert_eq!(active.status, DocumentStatus::Extracted);
+        assert_eq!(active.revision, 1);
+
+        db.set_job_state(job.job_id, "failed", Some("worker stopped"))
+            .unwrap();
+        let retry = db
+            .register_source(collection.id, &path, "aaa", "markdown", 5)
+            .unwrap();
+        assert!(matches!(
+            retry,
+            SourceRegistration::Changed(id) if id == source.id()
+        ));
+        let reset = db.source_document(source.id()).unwrap().unwrap();
+        assert_eq!(reset.status, DocumentStatus::Detected);
+        assert_eq!(reset.revision, 1);
+    }
+
+    #[test]
+    fn superseded_ingest_job_cannot_complete_or_block_new_revision() {
+        let (temp, db, collection) = setup();
+        let path = temp.path().join("source/superseded.md");
+        std::fs::write(&path, "hello").unwrap();
+        let source = db
+            .register_source(collection.id, &path, "aaa", "markdown", 5)
+            .unwrap();
+        let old_job = db.claim_ingest_job(source.id(), "aaa", 1).unwrap().unwrap();
+
+        let changed = db
+            .register_source(collection.id, &path, "bbb", "markdown", 5)
+            .unwrap();
+        assert!(matches!(
+            changed,
+            SourceRegistration::Replaced { id, .. } if id == source.id()
+        ));
+        assert!(!db.complete_ingest_job_if_running(&old_job).unwrap());
+        assert!(
+            db.claim_ingest_job(source.id(), "bbb", 2)
+                .unwrap()
+                .is_some()
+        );
     }
 
     #[test]

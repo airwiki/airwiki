@@ -45,6 +45,9 @@ All notable user-visible changes to AirWiki will be documented here. The project
 
 ### Fixed
 
+- Prevented a concurrent filesystem preflight from restarting an active
+  same-content ingestion, so restoring a withdrawn source completes in one
+  enrichment pass while interrupted jobs remain retryable after restart.
 - Replaced the installed-model activation enrichment with a bounded strict-JSON
   health probe, while retaining the full production enrichment budget and its
   installed-candidate acceptance journey.

@@ -26,6 +26,7 @@ use uuid::Uuid;
 struct PublicFixtureBackend {
     gate: DisclosureGate,
     publisher_id: String,
+    manifest_sequence: u64,
 }
 
 #[async_trait]
@@ -82,7 +83,7 @@ impl PublicSourceBackend for PublicFixtureBackend {
             PublicBrowsePage {
                 protocol_version: PUBLIC_BROWSE_PROTOCOL.to_owned(),
                 request_id: request.request_id,
-                manifest_sequence: 1,
+                manifest_sequence: self.manifest_sequence,
                 concepts: vec![airwiki_types::PublicConceptSummary {
                     publisher_id: self.publisher_id.clone(),
                     collection_id: request.collection_id,
@@ -187,6 +188,7 @@ async fn public_search_round_trip_needs_no_lan_pairing_or_grant() {
         Arc::new(PublicFixtureBackend {
             gate: DisclosureGate::default(),
             publisher_id: source_identity.peer_id().to_string(),
+            manifest_sequence: 1,
         }),
         source_cancellation.clone(),
     ));
@@ -279,6 +281,7 @@ async fn public_search_preserves_owner_stage_after_slow_catalog() {
             inner: Arc::new(PublicFixtureBackend {
                 gate: DisclosureGate::default(),
                 publisher_id: source_identity.peer_id().to_string(),
+                manifest_sequence: 1,
             }),
             delay: Duration::from_millis(700),
         }),
@@ -373,6 +376,7 @@ async fn concurrent_public_routes_do_not_cross_between_success_and_timeout() {
         Arc::new(PublicFixtureBackend {
             gate: DisclosureGate::default(),
             publisher_id: fast_source_identity.peer_id().to_string(),
+            manifest_sequence: 1,
         }),
         fast_source_cancellation.clone(),
     ));
@@ -383,6 +387,7 @@ async fn concurrent_public_routes_do_not_cross_between_success_and_timeout() {
             inner: Arc::new(PublicFixtureBackend {
                 gate: DisclosureGate::default(),
                 publisher_id: slow_source_identity.peer_id().to_string(),
+                manifest_sequence: 1,
             }),
             delay: Duration::from_millis(900),
         }),
@@ -517,6 +522,7 @@ async fn public_search_and_browse_use_outbound_relay_reservation() {
     let source_backend = Arc::new(PublicFixtureBackend {
         gate: DisclosureGate::default(),
         publisher_id: source_identity.peer_id().to_string(),
+        manifest_sequence: 1,
     });
     let delayed_source_backend = Arc::new(DelayedPublicSourceBackend {
         inner: Arc::clone(&source_backend),
@@ -642,6 +648,232 @@ async fn public_search_and_browse_use_outbound_relay_reservation() {
 }
 
 #[tokio::test]
+async fn public_search_and_browse_fail_over_to_second_outbound_relay_reservation() {
+    let (first_index_port, second_index_port) = available_tcp_ports();
+    let source_port = UdpSocket::bind((Ipv4Addr::LOCALHOST, 0))
+        .unwrap()
+        .local_addr()
+        .unwrap()
+        .port();
+    let first_index_identity = identity();
+    let second_index_identity = identity();
+    let source_identity = identity();
+    let collection_id = Uuid::new_v4();
+    let first_index_address: Multiaddr = format!("/ip4/127.0.0.1/tcp/{first_index_port}")
+        .parse()
+        .unwrap();
+    let second_index_address: Multiaddr = format!("/ip4/127.0.0.1/tcp/{second_index_port}")
+        .parse()
+        .unwrap();
+    let source_address: Multiaddr = format!("/ip4/127.0.0.1/udp/{source_port}/quic-v1")
+        .parse()
+        .unwrap();
+    let first_catalog_cancellation = CancellationToken::new();
+    let second_catalog_cancellation = CancellationToken::new();
+    let source_cancellation = CancellationToken::new();
+    let first_catalog_task = tokio::spawn(run_public_catalog_server(
+        first_index_identity.clone(),
+        airwiki_network::PublicCatalogServerConfig::new(vec![first_index_address.clone()])
+            .with_external_addresses(vec![
+                format!("/dns4/relay.invalid/tcp/{first_index_port}")
+                    .parse()
+                    .unwrap(),
+            ]),
+        Arc::new(CatalogBackend::new(Arc::new(
+            CatalogStore::in_memory().unwrap(),
+        ))),
+        first_catalog_cancellation.clone(),
+    ));
+    let second_catalog_task = tokio::spawn(run_public_catalog_server(
+        second_index_identity.clone(),
+        airwiki_network::PublicCatalogServerConfig::new(vec![second_index_address.clone()])
+            .with_external_addresses(vec![
+                format!("/dns4/relay.invalid/tcp/{second_index_port}")
+                    .parse()
+                    .unwrap(),
+            ]),
+        Arc::new(CatalogBackend::new(Arc::new(
+            CatalogStore::in_memory().unwrap(),
+        ))),
+        second_catalog_cancellation.clone(),
+    ));
+    tokio::time::sleep(Duration::from_millis(100)).await;
+    let (readiness_sender, mut relay_readiness) = tokio::sync::watch::channel(Default::default());
+    let mut source_config = PublicSourceServerConfig::new(vec![source_address]);
+    source_config.relay_addresses = vec![
+        relay_circuit_address(first_index_address.clone(), first_index_identity.peer_id()),
+        relay_circuit_address(
+            second_index_address.clone(),
+            second_index_identity.peer_id(),
+        ),
+    ];
+    source_config.relay_readiness = Some(readiness_sender);
+    let source_task = tokio::spawn(run_public_source_server(
+        source_identity.clone(),
+        source_config,
+        Arc::new(PublicFixtureBackend {
+            gate: DisclosureGate::default(),
+            publisher_id: source_identity.peer_id().to_string(),
+            manifest_sequence: 2,
+        }),
+        source_cancellation.clone(),
+    ));
+    let readiness_result = tokio::time::timeout(Duration::from_secs(5), async {
+        loop {
+            if relay_readiness.borrow_and_update().ready_relay_count() == 2 {
+                break;
+            }
+            relay_readiness.changed().await.unwrap();
+        }
+    })
+    .await;
+    assert!(
+        readiness_result.is_ok(),
+        "both outbound relay reservations should become ready; ready count was {}",
+        relay_readiness.borrow().ready_relay_count()
+    );
+    let first_endpoint = PublicIndexEndpoint {
+        peer_id: first_index_identity.peer_id(),
+        address: first_index_address.clone(),
+    };
+    let second_endpoint = PublicIndexEndpoint {
+        peer_id: second_index_identity.peer_id(),
+        address: second_index_address.clone(),
+    };
+    let endpoints = [first_endpoint, second_endpoint];
+    let first_relayed_route = relayed_peer_address(
+        first_index_address,
+        first_index_identity.peer_id(),
+        source_identity.peer_id(),
+    );
+    let second_relayed_route = relayed_peer_address(
+        second_index_address.clone(),
+        second_index_identity.peer_id(),
+        source_identity.peer_id(),
+    );
+    let now = Utc::now();
+    let initial_manifest = sign_manifest(
+        source_identity.keypair(),
+        PublicCollectionManifest {
+            protocol_version: PUBLIC_CATALOG_PROTOCOL.to_owned(),
+            publisher_id: source_identity.peer_id().to_string(),
+            collection_id,
+            sequence: 1,
+            publication_fingerprint: "a".repeat(64),
+            name: "Atlas public runbooks".to_owned(),
+            description: "Synthetic public collection".to_owned(),
+            languages: vec!["en".to_owned()],
+            concept_count: 1,
+            routing_terms: vec!["atlas".to_owned(), "recovery".to_owned()],
+            routes: vec![
+                first_relayed_route.to_string(),
+                second_relayed_route.to_string(),
+            ],
+            updated_at: now,
+            expires_at: now + ChronoDuration::minutes(15),
+        },
+    )
+    .unwrap();
+    let reader = PublicReader::new();
+    assert_eq!(
+        reader
+            .register_manifest(&endpoints, initial_manifest)
+            .await
+            .unwrap(),
+        2
+    );
+
+    first_catalog_cancellation.cancel();
+    tokio::time::timeout(Duration::from_secs(2), first_catalog_task)
+        .await
+        .unwrap()
+        .unwrap()
+        .unwrap();
+    tokio::time::timeout(Duration::from_secs(5), async {
+        loop {
+            let readiness = relay_readiness.borrow_and_update().clone();
+            if readiness.ready_relay_count() == 1 {
+                break;
+            }
+            relay_readiness.changed().await.unwrap();
+        }
+    })
+    .await
+    .expect("the surviving outbound relay reservation should remain ready");
+    assert_eq!(
+        relay_readiness.borrow().ready_relay_addresses(),
+        [relay_circuit_address(
+            second_index_address.clone(),
+            second_index_identity.peer_id(),
+        )]
+    );
+    let surviving_manifest = sign_manifest(
+        source_identity.keypair(),
+        PublicCollectionManifest {
+            protocol_version: PUBLIC_CATALOG_PROTOCOL.to_owned(),
+            publisher_id: source_identity.peer_id().to_string(),
+            collection_id,
+            sequence: 2,
+            publication_fingerprint: "a".repeat(64),
+            name: "Atlas public runbooks".to_owned(),
+            description: "Synthetic public collection".to_owned(),
+            languages: vec!["en".to_owned()],
+            concept_count: 1,
+            routing_terms: vec!["atlas".to_owned(), "recovery".to_owned()],
+            routes: vec![second_relayed_route.to_string()],
+            updated_at: now,
+            expires_at: now + ChronoDuration::minutes(15),
+        },
+    )
+    .unwrap();
+    assert_eq!(
+        reader
+            .register_manifest(&endpoints, surviving_manifest)
+            .await
+            .unwrap(),
+        1
+    );
+
+    let result = reader
+        .search_with_route(
+            &endpoints,
+            SearchRequest::new("atlas recovery", SearchPurpose::LocalAssistant, 5),
+        )
+        .await
+        .unwrap();
+    assert_eq!(result.response.hits.len(), 1);
+    assert!(result.response.partial);
+    assert_eq!(result.route_kind, PublicRouteKind::Relay);
+    let browsed = reader
+        .browse_collection(
+            &source_identity.peer_id().to_string(),
+            collection_id,
+            None,
+            50,
+        )
+        .await
+        .unwrap();
+    assert_eq!(
+        browsed.availability,
+        airwiki_network::PublicCollectionAvailability::Available(PublicRouteKind::Relay)
+    );
+    assert_eq!(browsed.page.unwrap().concepts.len(), 1);
+
+    source_cancellation.cancel();
+    tokio::time::timeout(Duration::from_secs(2), source_task)
+        .await
+        .unwrap()
+        .unwrap()
+        .unwrap();
+    second_catalog_cancellation.cancel();
+    tokio::time::timeout(Duration::from_secs(2), second_catalog_task)
+        .await
+        .unwrap()
+        .unwrap()
+        .unwrap();
+}
+
+#[tokio::test]
 async fn public_source_retries_relay_reservation_when_relay_starts_late() {
     let (index_port, source_port) = available_udp_ports();
     let index_identity = identity();
@@ -665,6 +897,7 @@ async fn public_source_retries_relay_reservation_when_relay_starts_late() {
         Arc::new(PublicFixtureBackend {
             gate: DisclosureGate::default(),
             publisher_id: source_identity.peer_id().to_string(),
+            manifest_sequence: 1,
         }),
         source_cancellation.clone(),
     ));
@@ -771,6 +1004,15 @@ fn available_port() -> u16 {
         .local_addr()
         .unwrap()
         .port()
+}
+
+fn available_tcp_ports() -> (u16, u16) {
+    let first = TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).unwrap();
+    let second = TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).unwrap();
+    (
+        first.local_addr().unwrap().port(),
+        second.local_addr().unwrap().port(),
+    )
 }
 
 fn available_udp_ports() -> (u16, u16) {

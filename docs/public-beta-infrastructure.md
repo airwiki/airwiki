@@ -17,9 +17,10 @@ network-security group, Standard static IPv4 address, B1s Linux VM, E4 Standard
 SSD OS disk, SQLite database and Ed25519 identity. The two nodes share no disk,
 database, identity, process, availability zone or resource group.
 
-The reviewed deployment uses East US and West US 2. The regions are far enough
-apart to avoid a single regional failure while retaining the same low-cost VM
-class. Each host runs exactly one index/relay process as the unprivileged
+The reviewed deployment uses East US and North Central US. They remain separate
+Azure regions while keeping both installed NAT clients inside the fixed 800 ms
+owner-response budget observed during beta acceptance and retaining the same
+low-cost VM class. Each host runs exactly one index/relay process as the unprivileged
 `airwiki` user. The service accepts only the existing public TCP and QUIC
 transports. SSH accepts only one maintainer IPv4 `/32`; password authentication
 is disabled. All other inbound traffic is denied by the Standard public-IP and
@@ -43,7 +44,7 @@ Run the live retail-price calculation before every deployment:
 packaging/federation-index/azure-beta-cost.sh --check
 ```
 
-The checked estimate on 2026-07-25 is:
+The checked estimate on 2026-08-01 is:
 
 | Component | Monthly USD |
 | --- | ---: |

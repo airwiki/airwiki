@@ -43,7 +43,7 @@ east_vm_price="$(
         single_price '.Items[] | select(.productName | endswith("Windows") | not) | .retailPrice'
 )"
 west_vm_price="$(
-    retail_prices "serviceName eq 'Virtual Machines' and armRegionName eq 'westus2' and armSkuName eq 'Standard_B1s' and priceType eq 'Consumption'" |
+    retail_prices "serviceName eq 'Virtual Machines' and armRegionName eq 'northcentralus' and armSkuName eq 'Standard_B1s' and priceType eq 'Consumption'" |
         single_price '.Items[] | select(.productName | endswith("Windows") | not) | .retailPrice'
 )"
 east_disk_price="$(
@@ -51,7 +51,7 @@ east_disk_price="$(
         single_price '.Items[] | select(.skuName == "E4 LRS" and .meterName == "E4 LRS Disk") | .retailPrice'
 )"
 west_disk_price="$(
-    retail_prices "serviceName eq 'Storage' and armRegionName eq 'westus2' and productName eq 'Standard SSD Managed Disks'" |
+    retail_prices "serviceName eq 'Storage' and armRegionName eq 'northcentralus' and productName eq 'Standard SSD Managed Disks'" |
         single_price '.Items[] | select(.skuName == "E4 LRS" and .meterName == "E4 LRS Disk") | .retailPrice'
 )"
 east_ip_price="$(
@@ -59,7 +59,7 @@ east_ip_price="$(
         single_price '.Items[] | select(.productName == "IP Addresses" and .skuName == "Standard" and .meterName == "Standard IPv4 Static Public IP") | .retailPrice'
 )"
 west_ip_price="$(
-    retail_prices "serviceName eq 'Virtual Network' and armRegionName eq 'westus2'" |
+    retail_prices "serviceName eq 'Virtual Network' and armRegionName eq 'northcentralus'" |
         single_price '.Items[] | select(.productName == "IP Addresses" and .skuName == "Standard" and .meterName == "Standard IPv4 Static Public IP") | .retailPrice'
 )"
 egress_price="$(

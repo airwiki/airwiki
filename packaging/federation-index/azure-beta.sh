@@ -222,9 +222,27 @@ create_budget() {
     email="$2"
     subscription_id="$3"
     body_file="$4"
-    start_date="$(date -u +%Y-%m-01T00:00:00Z)"
     scope="/subscriptions/${subscription_id}/resourceGroups/${group}"
     budget_uri="https://management.azure.com${scope}/providers/Microsoft.Consumption/budgets/${budget_name}?api-version=${budget_api_version}"
+    existing_budget="$(
+        az rest \
+            --method get \
+            --uri "${budget_uri}" \
+            -o json \
+            --only-show-errors 2>/dev/null || true
+    )"
+    if [ -n "${existing_budget}" ]; then
+        start_date="$(
+            printf '%s\n' "${existing_budget}" |
+                jq -er '
+                    .properties.timePeriod.startDate as $value |
+                    ($value | fromdateiso8601) |
+                    $value
+                '
+        )"
+    else
+        start_date="$(date -u +%Y-%m-01T00:00:00Z)"
+    fi
 
     jq -n \
         --arg email "${email}" \
@@ -539,22 +557,22 @@ deploy() {
 
 replace_node() {
     [ "$#" -eq 1 ] || usage
-    side="$1"
-    values="$(node_values "${side}")"
-    group="$(printf '%s\n' "${values}" | sed -n '1p')"
-    region="$(printf '%s\n' "${values}" | sed -n '2p')"
-    node="$(printf '%s\n' "${values}" | sed -n '3p')"
+    replacement_side="$1"
+    replacement_values="$(node_values "${replacement_side}")"
+    replacement_group="$(printf '%s\n' "${replacement_values}" | sed -n '1p')"
+    replacement_region="$(printf '%s\n' "${replacement_values}" | sed -n '2p')"
+    replacement_node="$(printf '%s\n' "${replacement_values}" | sed -n '3p')"
     require_azure_session
     require_command jq
     require_command git
     load_approved_deployment_inputs
-    if [ "${AIRWIKI_BETA_REPLACE_CONFIRM:-}" != "replace-${side}-beta-node" ]; then
+    if [ "${AIRWIKI_BETA_REPLACE_CONFIRM:-}" != "replace-${replacement_side}-beta-node" ]; then
         echo "explicit confirmation for the selected beta-node replacement is required" >&2
         exit 1
     fi
     east_state="$(group_state "${east_group}")"
     west_state="$(group_state "${west_group}")"
-    case "${side}" in
+    case "${replacement_side}" in
         east)
             target_state="${east_state}"
             healthy_state="${west_state}"
@@ -581,12 +599,12 @@ replace_node() {
     "${cost_script}" --check
     if [ "${target_state}" = "beta" ]; then
         az group delete \
-            --name "${group}" \
+            --name "${replacement_group}" \
             --yes \
             --output none \
             --only-show-errors
     fi
-    if [ "$(group_state "${group}")" != "absent" ]; then
+    if [ "$(group_state "${replacement_group}")" != "absent" ]; then
         echo "the selected old beta-node resource group was not removed" >&2
         exit 1
     fi
@@ -596,19 +614,20 @@ replace_node() {
     deploy_succeeded=0
     rollback_east=0
     rollback_west=0
-    case "${side}" in
+    case "${replacement_side}" in
         east) rollback_east=1 ;;
         west) rollback_west=1 ;;
     esac
     trap cleanup_failed_deploy 0
     trap 'exit 1' HUP INT TERM
-    provision_node_group "${group}" "${region}" "${node}"
+    provision_node_group \
+        "${replacement_group}" "${replacement_region}" "${replacement_node}"
     deploy_succeeded=1
     trap - 0 HUP INT TERM
     rm -f -- "${budget_body}"
     budget_body=
     printf '%s\n' \
-        "${side} beta node replaced with a fresh persistent disk and identity slot" \
+        "${replacement_side} beta node replaced with a fresh persistent disk and identity slot" \
         "install the approved candidate on this node, then build a higher bootstrap registry"
 }
 

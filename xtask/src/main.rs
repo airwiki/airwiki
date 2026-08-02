@@ -7271,6 +7271,49 @@ mod tests {
     }
 
     #[test]
+    fn azure_beta_replacement_keeps_its_target_across_helper_calls() {
+        let script =
+            fs::read_to_string(workspace_root().join("packaging/federation-index/azure-beta.sh"))
+                .unwrap();
+        let replacement = script
+            .split_once("replace_node() {")
+            .unwrap()
+            .1
+            .split_once("\nrequire_private_key() {")
+            .unwrap()
+            .0;
+
+        assert!(replacement.contains("replacement_group="));
+        assert!(replacement.contains("replacement_region="));
+        assert!(replacement.contains("replacement_node="));
+        assert!(replacement.contains("--name \"${replacement_group}\""));
+        assert!(replacement.contains(
+            "\"${replacement_group}\" \"${replacement_region}\" \"${replacement_node}\""
+        ));
+        assert!(!replacement.contains("--name \"${group}\""));
+        assert!(!replacement.contains("provision_node_group \"${group}\""));
+    }
+
+    #[test]
+    fn azure_beta_budget_preserves_an_existing_immutable_start_date() {
+        let script =
+            fs::read_to_string(workspace_root().join("packaging/federation-index/azure-beta.sh"))
+                .unwrap();
+        let budget = script
+            .split_once("create_budget() {")
+            .unwrap()
+            .1
+            .split_once("\nrollback_new_groups() {")
+            .unwrap()
+            .0;
+
+        assert!(budget.contains("existing_budget="));
+        assert!(budget.contains(".properties.timePeriod.startDate"));
+        assert!(budget.contains("fromdateiso8601"));
+        assert!(budget.contains("--arg start_date \"${start_date}\""));
+    }
+
+    #[test]
     fn macos_package_matches_fresh_build_by_uuid_and_architecture() {
         let script =
             fs::read_to_string(workspace_root().join("packaging/package-macos.sh")).unwrap();

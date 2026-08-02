@@ -277,7 +277,7 @@ impl PublicReader {
             );
         }
         let owner_deadlines = public_owner_deadlines(Instant::now());
-        let mut route_tracker = OwnerRouteTracker::new(owner_peers, owner_deadlines.connect);
+        let mut route_tracker = OwnerRouteTracker::new(owner_peers, owner_deadlines);
         let mut accepted_routes = HashMap::new();
         let mut sources = Vec::new();
         let mut partial = catalog_partial;
@@ -412,7 +412,7 @@ impl PublicReader {
             .send_request(&peer, request.clone());
         let deadlines = public_owner_deadlines(Instant::now());
         let owner_peers = HashSet::from([peer]);
-        let mut route_tracker = OwnerRouteTracker::new(owner_peers.clone(), deadlines.connect);
+        let mut route_tracker = OwnerRouteTracker::new(owner_peers.clone(), deadlines);
         loop {
             let event = timeout_at(
                 deadlines.finish,
@@ -647,6 +647,7 @@ struct RoutedPublicBrowsePage {
 struct OwnerRouteTracker {
     expected_peers: HashSet<PeerId>,
     connect_deadline: Instant,
+    finish_deadline: Instant,
     routes: HashMap<ConnectionId, OwnerConnectionRoute>,
 }
 
@@ -654,14 +655,14 @@ struct OwnerRouteTracker {
 struct OwnerConnectionRoute {
     peer: PeerId,
     route_kind: PublicRouteKind,
-    response_deadline: Instant,
 }
 
 impl OwnerRouteTracker {
-    fn new(expected_peers: HashSet<PeerId>, connect_deadline: Instant) -> Self {
+    fn new(expected_peers: HashSet<PeerId>, deadlines: OwnerDeadlines) -> Self {
         Self {
             expected_peers,
-            connect_deadline,
+            connect_deadline: deadlines.connect,
+            finish_deadline: deadlines.finish,
             routes: HashMap::new(),
         }
     }
@@ -700,14 +701,8 @@ impl OwnerRouteTracker {
         observed_at: Instant,
     ) {
         if self.expected_peers.contains(&peer) && observed_at <= self.connect_deadline {
-            self.routes.insert(
-                connection_id,
-                OwnerConnectionRoute {
-                    peer,
-                    route_kind,
-                    response_deadline: observed_at + OWNER_RESPONSE_BUDGET,
-                },
-            );
+            self.routes
+                .insert(connection_id, OwnerConnectionRoute { peer, route_kind });
         }
     }
 
@@ -726,7 +721,10 @@ impl OwnerRouteTracker {
             .get(&connection_id)
             .filter(|route| route.peer == peer)
             .ok_or("public_owner_route_unavailable")?;
-        if observed_at > route.response_deadline {
+        // libp2p enforces OWNER_RESPONSE_BUDGET after the request substream is
+        // negotiated. Only enforce the composed owner-stage ceiling here so
+        // cold relay substream negotiation is not counted twice.
+        if observed_at > self.finish_deadline {
             return Err("public_owner_response_timeout");
         }
         Ok(route.route_kind)
@@ -1459,7 +1457,7 @@ mod tests {
         let owner = PeerId::random();
         let owners = HashSet::from([owner]);
         let started = Instant::now();
-        let mut tracker = OwnerRouteTracker::new(owners.clone(), started + OWNER_CONNECT_BUDGET);
+        let mut tracker = OwnerRouteTracker::new(owners.clone(), public_owner_deadlines(started));
 
         tracker.record_connection(
             PeerId::random(),
@@ -1472,31 +1470,31 @@ mod tests {
     }
 
     #[test]
-    fn owner_route_tracker_enforces_connection_and_response_budgets() {
+    fn owner_route_tracker_attributes_response_after_cold_relay_negotiation() {
         let owner = PeerId::random();
         let connection = ConnectionId::new_unchecked(1);
         let started = Instant::now();
-        let mut tracker =
-            OwnerRouteTracker::new(HashSet::from([owner]), started + OWNER_CONNECT_BUDGET);
+        let deadlines = public_owner_deadlines(started);
+        let mut tracker = OwnerRouteTracker::new(HashSet::from([owner]), deadlines);
         tracker.record_connection(owner, connection, PublicRouteKind::Relay, started);
 
         assert_eq!(
             tracker.route_for_response(
                 owner,
                 connection,
-                started + OWNER_RESPONSE_BUDGET - Duration::from_millis(1),
+                started + OWNER_RESPONSE_BUDGET + Duration::from_millis(1),
             ),
             Ok(PublicRouteKind::Relay)
         );
         assert_eq!(
-            tracker.route_for_response(owner, connection, started + OWNER_RESPONSE_BUDGET),
-            Ok(PublicRouteKind::Relay)
+            tracker.route_for_response(owner, connection, deadlines.finish),
+            Ok(PublicRouteKind::Relay),
         );
         assert_eq!(
             tracker.route_for_response(
                 owner,
                 connection,
-                started + OWNER_RESPONSE_BUDGET + Duration::from_millis(1),
+                deadlines.finish + Duration::from_millis(1),
             ),
             Err("public_owner_response_timeout")
         );
@@ -1516,7 +1514,7 @@ mod tests {
         let owners = HashSet::from([owner]);
         let started = Instant::now();
         let deadline = started + OWNER_CONNECT_BUDGET;
-        let mut tracker = OwnerRouteTracker::new(owners.clone(), deadline);
+        let mut tracker = OwnerRouteTracker::new(owners.clone(), public_owner_deadlines(started));
         let active = ConnectionId::new_unchecked(1);
         tracker.record_connection(owner, active, PublicRouteKind::Relay, started);
         assert_eq!(tracker.connected_owner_count(&owners), 1);
@@ -1548,7 +1546,7 @@ mod tests {
         let all_owners = HashSet::from([answered, pending]);
         let started = Instant::now();
         let mut tracker =
-            OwnerRouteTracker::new(all_owners.clone(), started + OWNER_CONNECT_BUDGET);
+            OwnerRouteTracker::new(all_owners.clone(), public_owner_deadlines(started));
         tracker.record_connection(
             answered,
             ConnectionId::new_unchecked(1),

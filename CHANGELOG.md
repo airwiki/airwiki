@@ -55,8 +55,9 @@ All notable user-visible changes to AirWiki will be documented here. The project
   model-installation stage when asset preparation fails before activation,
   instead of hiding the failure behind the general model-readiness timeout.
 - Preserved the full bounded owner-response budget after a cross-region public
-  catalog query instead of aborting an accepted relay circuit early, and
-  applied the complete one-second index budget to catalog updates.
+  catalog query and cold relay substream negotiation instead of aborting an
+  accepted relay circuit early, and applied the complete one-second index
+  budget to catalog updates.
 - Separated the cold public-owner connection budget from its response budget,
   and made Direct/Relay evidence request-scoped so only a protocol-valid owner
   response on the matching connection can establish the reported route. This

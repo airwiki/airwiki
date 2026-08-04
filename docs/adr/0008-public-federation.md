@@ -28,7 +28,9 @@ an update timestamp may be at most five minutes ahead of receipt. Each index
 admits at most 100,000 total manifest or tombstone rows and 1,000 rows per
 publisher. Compact tombstone rows retain the sequence high-water mark for the
 node lifetime, so a future-dated or newly replayed older manifest cannot revive
-a withdrawn collection. They count against both admission ceilings.
+a withdrawn collection. Expiry removes the manifest payload and FTS row but
+retains the same compact high-water mark. These rows count against both
+admission ceilings.
 The in-memory peer rate limiter tracks at most 1,024 active identities per
 window and rejects new identities while that bounded window is full.
 

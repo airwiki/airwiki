@@ -175,4 +175,6 @@ The 100,000-row corpus also exercises the beta catalog admission ceiling.
 Manifests with more than 24 hours of remaining or signed lifetime are rejected,
 as are update timestamps more than five minutes in the future. Compact signed
 tombstones retain their sequence high-water mark for the node lifetime and
-count against the global and per-publisher ceilings.
+count against the global and per-publisher ceilings. Expiry similarly removes
+the manifest payload and FTS row while retaining a compact sequence high-water
+mark.

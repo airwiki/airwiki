@@ -400,7 +400,12 @@ fn purge_catalog_entries(
     drop(statement);
     for manifest_id in &expired {
         connection.execute("DELETE FROM catalog_fts WHERE rowid=?1", [manifest_id])?;
-        connection.execute("DELETE FROM manifests WHERE manifest_id=?1", [manifest_id])?;
+        connection.execute(
+            "UPDATE manifests
+             SET signed_cbor=NULL,expires_at=NULL,withdrawn=1
+             WHERE manifest_id=?1",
+            [manifest_id],
+        )?;
     }
     Ok(expired.len())
 }
@@ -789,15 +794,15 @@ mod tests {
         .unwrap();
         let keypair = Keypair::generate_ed25519();
         let collection_id = Uuid::new_v4();
-        let now = Utc::now();
-        let expiry = manifest_expiry_limit(now);
-        let replay_time = expiry + Duration::seconds(1);
+        let replay_time = Utc::now();
+        let withdrawal_time =
+            replay_time - Duration::seconds(MAX_PUBLIC_MANIFEST_LIFETIME_SECONDS + 1);
         let delayed_replay = signed_manifest_with_expiry(
             &keypair,
             collection_id,
             3,
-            expiry,
-            expiry + Duration::minutes(15),
+            replay_time,
+            replay_time + Duration::minutes(15),
         );
         let tombstone = sign_tombstone(
             &keypair,
@@ -806,12 +811,12 @@ mod tests {
                 publisher_id: keypair.public().to_peer_id().to_string(),
                 collection_id,
                 sequence: 4,
-                withdrawn_at: now,
+                withdrawn_at: withdrawal_time,
             },
         )
         .unwrap();
 
-        store.withdraw_at(&tombstone, now).unwrap();
+        store.withdraw_at(&tombstone, withdrawal_time).unwrap();
         assert_eq!(store.purge_expired(replay_time).unwrap(), 0);
         assert!(matches!(
             store.register(&delayed_replay, replay_time),
@@ -820,7 +825,7 @@ mod tests {
     }
 
     #[test]
-    fn registration_purges_expired_rows_before_capacity_rejection() {
+    fn expired_manifest_compacts_payload_and_preserves_capacity() {
         let store = CatalogStore::in_memory_with_limits(CatalogLimits {
             max_entries: 1,
             max_collections_per_publisher: 1,
@@ -829,14 +834,59 @@ mod tests {
         let first = Keypair::generate_ed25519();
         let next = Keypair::generate_ed25519();
         let now = Utc::now();
+        let collection_id = Uuid::new_v4();
         store
-            .register(&signed_manifest(&first, Uuid::new_v4(), 1, now), now)
+            .register(
+                &signed_manifest_with_expiry(
+                    &first,
+                    collection_id,
+                    1,
+                    now,
+                    now + Duration::minutes(1),
+                ),
+                now,
+            )
             .unwrap();
 
-        let later = now + Duration::minutes(16);
-        store
-            .register(&signed_manifest(&next, Uuid::new_v4(), 1, later), later)
+        let later = now + Duration::seconds(61);
+        assert_eq!(store.purge_expired(later).unwrap(), 1);
+        let compacted = store
+            .connection()
+            .unwrap()
+            .query_row("SELECT signed_cbor,withdrawn FROM manifests", [], |row| {
+                Ok((row.get::<_, Option<Vec<u8>>>(0)?, row.get::<_, u8>(1)?))
+            })
             .unwrap();
+        assert_eq!(compacted, (None, 1));
+        assert!(matches!(
+            store.register(&signed_manifest(&next, Uuid::new_v4(), 1, now), later),
+            Err(CatalogStoreError::CapacityLimit)
+        ));
+    }
+
+    #[test]
+    fn expired_manifest_high_water_rejects_older_live_sequence() {
+        let store = CatalogStore::in_memory().unwrap();
+        let keypair = Keypair::generate_ed25519();
+        let collection_id = Uuid::new_v4();
+        let now = Utc::now();
+        let older = signed_manifest(&keypair, collection_id, 1, now);
+        let latest = signed_manifest_with_expiry(
+            &keypair,
+            collection_id,
+            2,
+            now,
+            now + Duration::minutes(1),
+        );
+        store.register(&older, now).unwrap();
+        store.register(&latest, now).unwrap();
+
+        let later = now + Duration::seconds(61);
+        assert_eq!(store.purge_expired(later).unwrap(), 1);
+        assert!(matches!(
+            store.register(&older, later),
+            Err(CatalogStoreError::StaleSequence)
+        ));
         assert_eq!(
             store
                 .connection()

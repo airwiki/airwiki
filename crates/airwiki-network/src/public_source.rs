@@ -713,21 +713,42 @@ where
 
 fn send_completion(behaviour: &mut SourceBehaviour, completion: Completion) {
     match completion {
-        Completion::Search { channel, result } => {
-            let response = match result {
-                Ok(delivery) => PublicSearchWireResponse::Success(delivery.response),
-                Err(error) => PublicSearchWireResponse::Rejected(error.rejection()),
-            };
-            let _ = behaviour.search.send_response(channel, response);
-        }
-        Completion::Browse { channel, result } => {
-            let response = match result {
-                Ok(delivery) => PublicBrowseWireResponse::Success(delivery.page),
-                Err(error) => PublicBrowseWireResponse::Rejected(error.rejection()),
-            };
-            let _ = behaviour.browse.send_response(channel, response);
-        }
+        Completion::Search { channel, result } => match result {
+            Ok(PublicSearchDelivery { response, _lease }) => {
+                handoff_public_payload(response, _lease, |response| {
+                    let _ = behaviour
+                        .search
+                        .send_response(channel, PublicSearchWireResponse::Success(response));
+                });
+            }
+            Err(error) => {
+                let _ = behaviour.search.send_response(
+                    channel,
+                    PublicSearchWireResponse::Rejected(error.rejection()),
+                );
+            }
+        },
+        Completion::Browse { channel, result } => match result {
+            Ok(PublicBrowseDelivery { page, _lease }) => {
+                handoff_public_payload(page, _lease, |page| {
+                    let _ = behaviour
+                        .browse
+                        .send_response(channel, PublicBrowseWireResponse::Success(page));
+                });
+            }
+            Err(error) => {
+                let _ = behaviour.browse.send_response(
+                    channel,
+                    PublicBrowseWireResponse::Rejected(error.rejection()),
+                );
+            }
+        },
     }
+}
+
+fn handoff_public_payload<T>(payload: T, lease: DisclosureLease, handoff: impl FnOnce(T)) {
+    handoff(payload);
+    drop(lease);
 }
 
 fn duration_millis(duration: Duration) -> u64 {
@@ -737,6 +758,7 @@ fn duration_millis(duration: Duration) -> u64 {
 #[cfg(test)]
 mod tests {
     use std::net::{Ipv4Addr, SocketAddrV4, TcpListener, UdpSocket};
+    use std::sync::mpsc;
 
     use airwiki_types::{PublicBrowseRequest, PublicSearchRequest};
 
@@ -760,6 +782,28 @@ mod tests {
         ) -> Result<PublicBrowseDelivery, PublicSourceBackendError> {
             Err(PublicSourceBackendError::Unavailable)
         }
+    }
+
+    #[test]
+    fn disclosure_lease_is_held_through_public_transport_handoff() {
+        let gate = DisclosureGate::default();
+        let lease = gate.acquire_disclosure();
+        let (mutation_started_tx, mutation_started_rx) = mpsc::channel();
+        let (mutation_finished_tx, mutation_finished_rx) = mpsc::channel();
+        let mutating_gate = gate.clone();
+        let mutation = std::thread::spawn(move || {
+            mutation_started_tx.send(()).ok();
+            let _guard = mutating_gate.acquire_mutation();
+            mutation_finished_tx.send(()).ok();
+        });
+        mutation_started_rx.recv().unwrap();
+
+        handoff_public_payload((), lease, |()| {
+            assert!(mutation_finished_rx.try_recv().is_err());
+        });
+
+        mutation_finished_rx.recv().unwrap();
+        mutation.join().unwrap();
     }
 
     #[test]

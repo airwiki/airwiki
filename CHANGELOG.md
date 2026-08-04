@@ -29,6 +29,9 @@ All notable user-visible changes to AirWiki will be documented here. The project
 
 ### Changed
 
+- Hardened public federation handoff and admission so withdrawal remains
+  linearized through transport delivery, remote identity churn is memory-bound,
+  and index manifests/tombstones have bounded lifetime and global capacity.
 - Clarified privacy boundaries and separated internal development packages from future public distribution.
 - Consolidated durable project guidance and documentation ownership.
 - Improved the public project summary and contributor entry points.

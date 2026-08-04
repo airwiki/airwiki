@@ -194,7 +194,8 @@ For each node it emits only:
 
 - VM power state and Azure availability metric;
 - month-to-date budget spend;
-- systemd service state, restart count and current memory;
+- systemd service state, restart count, current memory, aggregate SQLite bytes
+  and state-disk percentage;
 - counts grouped by fixed, sanitized error class for the last 24 hours;
 - 15-minute relay outcome counts grouped by a fixed `relay_class` allowlist.
 
@@ -205,7 +206,9 @@ Relay lifecycle output is aggregated, omits normal reader circuit
 acceptance/closure, has no per-event timestamp and flushes once during graceful
 shutdown. Circuit I/O failures expose only a fixed operating-system error-kind
 bucket, never the underlying error text or endpoint.
-Azure's platform availability metric and action-group email require no guest
+The database measurement aggregates only the fixed SQLite database, WAL and SHM
+files and emits no path or row content. Azure's platform availability metric
+and action-group email require no guest
 telemetry agent or Log Analytics workspace. CPU, disk and network consumption
 remain available as standard Azure platform metrics for incident diagnosis.
 Do not enable guest log shipping for this beta.

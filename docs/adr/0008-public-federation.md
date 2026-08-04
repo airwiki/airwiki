@@ -23,6 +23,13 @@ fingerprint and direct or relay routes. Federated indexes store only these
 manifests and signed tombstones. They never receive documents, chunks,
 embeddings, source paths or complete local indexes.
 
+Manifest expiry is at most 24 hours from index receipt. Each index admits at
+most 100,000 total manifest or tombstone rows and 1,000 rows per publisher.
+Tombstones are retained for the full maximum manifest lifetime, so a still-live
+older manifest cannot be replayed, and are then purged with expired manifests.
+The in-memory peer rate limiter tracks at most 1,024 active identities per
+window and rejects new identities while that bounded window is full.
+
 The wire protocols are separate:
 
 - `/airwiki/public-catalog/1.0.0`

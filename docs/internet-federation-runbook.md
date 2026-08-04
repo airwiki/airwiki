@@ -171,3 +171,7 @@ cargo run --release --locked -p airwiki-federation-index --bin federation-benchm
 The corpus represents 10,000 publishers and 100,000 collections. The command
 fails if catalog query p95 is at least 1.5 seconds. Investigate regressions with
 SQLite query plans before changing indexes or concurrency budgets.
+The 100,000-row corpus also exercises the beta catalog admission ceiling.
+Manifests with more than 24 hours of remaining lifetime are rejected; signed
+tombstones retain their sequence for that full replay window and are then
+purged with expired manifests.

@@ -924,6 +924,30 @@ unit=airwiki-federation-index-1.service
 state="$(systemctl is-active "${unit}" 2>/dev/null || true)"
 restarts="$(systemctl show "${unit}" --property=NRestarts --value 2>/dev/null || true)"
 memory="$(systemctl show "${unit}" --property=MemoryCurrent --value 2>/dev/null || true)"
+database_bytes=0
+for database_file in \
+    /var/lib/airwiki-federation/index-1/index.db \
+    /var/lib/airwiki-federation/index-1/index.db-wal \
+    /var/lib/airwiki-federation/index-1/index.db-shm; do
+    if [ -L "${database_file}" ]; then
+        database_bytes=unknown
+        break
+    fi
+    if [ -f "${database_file}" ]; then
+        database_component_bytes="$(stat -c %s -- "${database_file}" 2>/dev/null || true)"
+        case "${database_component_bytes}" in
+            "" | *[!0-9]*)
+                database_bytes=unknown
+                break
+                ;;
+            *) database_bytes=$((database_bytes + database_component_bytes)) ;;
+        esac
+    fi
+done
+disk_used_percent="$(
+    df -P /var/lib/airwiki-federation 2>/dev/null |
+        awk "NR == 2 { value=\$5; sub(/%$/, \"\", value); if (value ~ /^[0-9]+$/) print value }"
+)"
 case "${state}" in
     active | inactive | failed | activating | deactivating) ;;
     *) state=unknown ;;
@@ -934,7 +958,11 @@ esac
 case "${memory}" in
     "" | *[!0-9]*) memory=unknown ;;
 esac
-printf "service_state=%s\nrestart_count=%s\nmemory_current_bytes=%s\n" "${state}" "${restarts}" "${memory}"
+case "${disk_used_percent}" in
+    "" | *[!0-9]*) disk_used_percent=unknown ;;
+esac
+printf "service_state=%s\nrestart_count=%s\nmemory_current_bytes=%s\ndatabase_bytes=%s\ndisk_used_percent=%s\n" \
+    "${state}" "${restarts}" "${memory}" "${database_bytes}" "${disk_used_percent}"
 journalctl --unit "${unit}" --since "-24 hours" --output cat --no-pager 2>/dev/null |
     sed -n "s/.*error_kind=\"\{0,1\}\([a-z0-9_-]\{1,64\}\).*/error_class=\1/p" |
     sort |
@@ -1014,6 +1042,16 @@ journalctl --unit "${unit}" --since "-24 hours" --output cat --no-pager 2>/dev/n
                 if (memory_current_bytes == 1) print
                 next
             }
+            /^database_bytes=([0-9]+|unknown)$/ {
+                database_bytes += 1
+                if (database_bytes == 1) print
+                next
+            }
+            /^disk_used_percent=([0-9]+|unknown)$/ {
+                disk_used_percent += 1
+                if (disk_used_percent == 1) print
+                next
+            }
             /^error_class=[a-z0-9_-]+ count=[0-9]+$/ {
                 print
                 next
@@ -1030,7 +1068,8 @@ journalctl --unit "${unit}" --since "-24 hours" --output cat --no-pager 2>/dev/n
             }
             END {
                 if (service_state != 1 || restart_count != 1 ||
-                    memory_current_bytes != 1) {
+                    memory_current_bytes != 1 || database_bytes != 1 ||
+                    disk_used_percent != 1) {
                     exit 1
                 }
             }
@@ -1130,7 +1169,9 @@ status_node() {
         printf '%s\n' \
             "service_state=unknown" \
             "restart_count=unknown" \
-            "memory_current_bytes=unknown"
+            "memory_current_bytes=unknown" \
+            "database_bytes=unknown" \
+            "disk_used_percent=unknown"
     fi
 }
 

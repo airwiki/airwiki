@@ -6,13 +6,20 @@ use parking_lot::Mutex;
 
 pub const SEARCHES_PER_MINUTE: usize = 30;
 const MAX_TRACKED_PEERS: usize = 1_024;
+const MAX_EXPIRATIONS_PER_CHECK: usize = 1_024;
+
+#[derive(Debug, Default)]
+struct RateLimitState {
+    attempts: HashMap<PeerId, VecDeque<Instant>>,
+    expirations: VecDeque<(Instant, PeerId)>,
+}
 
 #[derive(Debug)]
 pub struct PeerRateLimiter {
     limit: usize,
     window: Duration,
     max_tracked_peers: usize,
-    attempts: Mutex<HashMap<PeerId, VecDeque<Instant>>>,
+    state: Mutex<RateLimitState>,
 }
 
 impl Default for PeerRateLimiter {
@@ -31,7 +38,7 @@ impl PeerRateLimiter {
             limit,
             window,
             max_tracked_peers,
-            attempts: Mutex::new(HashMap::new()),
+            state: Mutex::new(RateLimitState::default()),
         }
     }
 
@@ -40,24 +47,36 @@ impl PeerRateLimiter {
     }
 
     fn check_at(&self, peer: PeerId, now: Instant) -> bool {
-        let mut attempts = self.attempts.lock();
-        attempts.retain(|_, entries| {
-            while entries
-                .front()
-                .is_some_and(|attempt| now.duration_since(*attempt) >= self.window)
-            {
-                entries.pop_front();
+        let mut state = self.state.lock();
+        for _ in 0..MAX_EXPIRATIONS_PER_CHECK {
+            let Some((attempt, expired_peer)) = state.expirations.front().copied() else {
+                break;
+            };
+            if now.duration_since(attempt) < self.window {
+                break;
             }
-            !entries.is_empty()
-        });
-        if !attempts.contains_key(&peer) && attempts.len() >= self.max_tracked_peers {
+            state.expirations.pop_front();
+            if let std::collections::hash_map::Entry::Occupied(mut entry) =
+                state.attempts.entry(expired_peer)
+            {
+                let entries = entry.get_mut();
+                if entries.front() == Some(&attempt) {
+                    entries.pop_front();
+                }
+                if entries.is_empty() {
+                    entry.remove_entry();
+                }
+            }
+        }
+        if !state.attempts.contains_key(&peer) && state.attempts.len() >= self.max_tracked_peers {
             return false;
         }
-        let entries = attempts.entry(peer).or_default();
+        let entries = state.attempts.entry(peer).or_default();
         if entries.len() >= self.limit {
             return false;
         }
         entries.push_back(now);
+        state.expirations.push_back((now, peer));
         true
     }
 }
@@ -90,9 +109,9 @@ mod tests {
         assert!(limiter.check_at(first, start));
         assert!(limiter.check_at(second, start));
         assert!(!limiter.check_at(next, start));
-        assert_eq!(limiter.attempts.lock().len(), 2);
+        assert_eq!(limiter.state.lock().attempts.len(), 2);
 
         assert!(limiter.check_at(next, start + Duration::from_secs(60)));
-        assert_eq!(limiter.attempts.lock().len(), 1);
+        assert_eq!(limiter.state.lock().attempts.len(), 1);
     }
 }

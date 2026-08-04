@@ -172,6 +172,7 @@ The corpus represents 10,000 publishers and 100,000 collections. The command
 fails if catalog query p95 is at least 1.5 seconds. Investigate regressions with
 SQLite query plans before changing indexes or concurrency budgets.
 The 100,000-row corpus also exercises the beta catalog admission ceiling.
-Manifests with more than 24 hours of remaining lifetime are rejected; signed
-tombstones retain their sequence for that full replay window and are then
-purged with expired manifests.
+Manifests with more than 24 hours of remaining or signed lifetime are rejected,
+as are update timestamps more than five minutes in the future. Compact signed
+tombstones retain their sequence high-water mark for the node lifetime and
+count against the global and per-publisher ceilings.

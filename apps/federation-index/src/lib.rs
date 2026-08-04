@@ -182,11 +182,6 @@ impl CatalogStore {
              );
              CREATE INDEX IF NOT EXISTS manifests_expiry_idx ON manifests(expires_at);",
         )?;
-        let legacy_tombstone_expiry = manifest_expiry_limit(Utc::now()).to_rfc3339();
-        connection.execute(
-            "UPDATE manifests SET expires_at=?1 WHERE withdrawn=1 AND expires_at IS NULL",
-            [legacy_tombstone_expiry],
-        )?;
         Ok(Self {
             connection: Mutex::new(connection),
             limits,
@@ -212,14 +207,11 @@ impl CatalogStore {
             )
             .optional()?;
         if known_id.is_none() {
-            let publisher_count = tx.query_row(
-                "SELECT count(*) FROM manifests WHERE publisher_id=?1",
-                [manifest.publisher_id.as_str()],
-                |row| row.get::<_, u32>(0),
+            ensure_publisher_capacity(
+                &tx,
+                &manifest.publisher_id,
+                self.limits.max_collections_per_publisher,
             )?;
-            if publisher_count >= self.limits.max_collections_per_publisher {
-                return Err(CatalogStoreError::PublisherLimit);
-            }
             ensure_catalog_capacity(&tx, self.limits.max_entries)?;
         }
         reject_stale(
@@ -301,24 +293,27 @@ impl CatalogStore {
                 |row| row.get::<_, i64>(0),
             )
             .optional()?;
-        let retention_expiry = manifest_expiry_limit(now).to_rfc3339();
         if let Some(manifest_id) = known_id {
             tx.execute(
-                "UPDATE manifests SET sequence=?2,signed_cbor=NULL,expires_at=?3,withdrawn=1
+                "UPDATE manifests SET sequence=?2,signed_cbor=NULL,expires_at=NULL,withdrawn=1
                  WHERE manifest_id=?1",
-                params![manifest_id, tombstone.sequence, retention_expiry],
+                params![manifest_id, tombstone.sequence],
             )?;
             tx.execute("DELETE FROM catalog_fts WHERE rowid=?1", [manifest_id])?;
         } else {
+            ensure_publisher_capacity(
+                &tx,
+                &tombstone.publisher_id,
+                self.limits.max_collections_per_publisher,
+            )?;
             ensure_catalog_capacity(&tx, self.limits.max_entries)?;
             tx.execute(
                 "INSERT INTO manifests(publisher_id,collection_id,sequence,signed_cbor,expires_at,withdrawn)
-                 VALUES (?1,?2,?3,NULL,?4,1)",
+                 VALUES (?1,?2,?3,NULL,NULL,1)",
                 params![
                     tombstone.publisher_id,
                     tombstone.collection_id.to_string(),
                     tombstone.sequence,
-                    retention_expiry,
                 ],
             )?;
         }
@@ -393,8 +388,8 @@ fn purge_catalog_entries(
 ) -> Result<usize, CatalogStoreError> {
     let mut statement = connection.prepare(
         "SELECT manifest_id FROM manifests
-         WHERE expires_at IS NOT NULL
-           AND (expires_at<=?1 OR (withdrawn=0 AND expires_at>?2))",
+         WHERE withdrawn=0 AND expires_at IS NOT NULL
+           AND (expires_at<=?1 OR expires_at>?2)",
     )?;
     let expired = statement
         .query_map(
@@ -419,6 +414,22 @@ fn ensure_catalog_capacity(
     })?;
     if entry_count >= max_entries {
         return Err(CatalogStoreError::CapacityLimit);
+    }
+    Ok(())
+}
+
+fn ensure_publisher_capacity(
+    connection: &Connection,
+    publisher_id: &str,
+    max_collections: u32,
+) -> Result<(), CatalogStoreError> {
+    let publisher_count = connection.query_row(
+        "SELECT count(*) FROM manifests WHERE publisher_id=?1",
+        [publisher_id],
+        |row| row.get::<_, u32>(0),
+    )?;
+    if publisher_count >= max_collections {
+        return Err(CatalogStoreError::PublisherLimit);
     }
     Ok(())
 }
@@ -740,7 +751,37 @@ mod tests {
     }
 
     #[test]
-    fn tombstone_retention_blocks_live_replay_then_releases_capacity() {
+    fn publisher_capacity_also_bounds_tombstones_without_manifests() {
+        let store = CatalogStore::in_memory_with_limits(CatalogLimits {
+            max_entries: 2,
+            max_collections_per_publisher: 1,
+        })
+        .unwrap();
+        let now = Utc::now();
+        let keypair = Keypair::generate_ed25519();
+        let tombstone = |collection_id| {
+            sign_tombstone(
+                &keypair,
+                PublicCollectionTombstone {
+                    protocol_version: PUBLIC_CATALOG_PROTOCOL.to_owned(),
+                    publisher_id: keypair.public().to_peer_id().to_string(),
+                    collection_id,
+                    sequence: 1,
+                    withdrawn_at: now,
+                },
+            )
+            .unwrap()
+        };
+
+        store.withdraw_at(&tombstone(Uuid::new_v4()), now).unwrap();
+        assert!(matches!(
+            store.withdraw_at(&tombstone(Uuid::new_v4()), now),
+            Err(CatalogStoreError::PublisherLimit)
+        ));
+    }
+
+    #[test]
+    fn tombstone_high_water_survives_manifest_lifetime() {
         let store = CatalogStore::in_memory_with_limits(CatalogLimits {
             max_entries: 1,
             max_collections_per_publisher: 1,
@@ -750,7 +791,14 @@ mod tests {
         let collection_id = Uuid::new_v4();
         let now = Utc::now();
         let expiry = manifest_expiry_limit(now);
-        let live_replay = signed_manifest_with_expiry(&keypair, collection_id, 3, now, expiry);
+        let replay_time = expiry + Duration::seconds(1);
+        let delayed_replay = signed_manifest_with_expiry(
+            &keypair,
+            collection_id,
+            3,
+            expiry,
+            expiry + Duration::minutes(15),
+        );
         let tombstone = sign_tombstone(
             &keypair,
             PublicCollectionTombstone {
@@ -764,17 +812,11 @@ mod tests {
         .unwrap();
 
         store.withdraw_at(&tombstone, now).unwrap();
-        let before_expiry = expiry - Duration::seconds(1);
-        assert_eq!(store.purge_expired(before_expiry).unwrap(), 0);
+        assert_eq!(store.purge_expired(replay_time).unwrap(), 0);
         assert!(matches!(
-            store.register(&live_replay, before_expiry),
+            store.register(&delayed_replay, replay_time),
             Err(CatalogStoreError::StaleSequence)
         ));
-
-        assert_eq!(store.purge_expired(expiry).unwrap(), 1);
-        let replacement_time = expiry + Duration::seconds(1);
-        let replacement = signed_manifest(&keypair, collection_id, 1, replacement_time);
-        store.register(&replacement, replacement_time).unwrap();
     }
 
     #[test]

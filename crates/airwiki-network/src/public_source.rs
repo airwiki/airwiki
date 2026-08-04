@@ -746,7 +746,7 @@ fn send_completion(behaviour: &mut SourceBehaviour, completion: Completion) {
     }
 }
 
-fn handoff_public_payload<T>(payload: T, lease: DisclosureLease, handoff: impl FnOnce(T)) {
+fn handoff_public_payload<T, Lease>(payload: T, lease: Lease, handoff: impl FnOnce(T)) {
     handoff(payload);
     drop(lease);
 }
@@ -758,7 +758,8 @@ fn duration_millis(duration: Duration) -> u64 {
 #[cfg(test)]
 mod tests {
     use std::net::{Ipv4Addr, SocketAddrV4, TcpListener, UdpSocket};
-    use std::sync::mpsc;
+    use std::sync::Arc;
+    use std::sync::atomic::{AtomicBool, Ordering};
 
     use airwiki_types::{PublicBrowseRequest, PublicSearchRequest};
 
@@ -786,24 +787,19 @@ mod tests {
 
     #[test]
     fn disclosure_lease_is_held_through_public_transport_handoff() {
-        let gate = DisclosureGate::default();
-        let lease = gate.acquire_disclosure();
-        let (mutation_started_tx, mutation_started_rx) = mpsc::channel();
-        let (mutation_finished_tx, mutation_finished_rx) = mpsc::channel();
-        let mutating_gate = gate.clone();
-        let mutation = std::thread::spawn(move || {
-            mutation_started_tx.send(()).ok();
-            let _guard = mutating_gate.acquire_mutation();
-            mutation_finished_tx.send(()).ok();
-        });
-        mutation_started_rx.recv().unwrap();
+        struct DropProbe(Arc<AtomicBool>);
 
-        handoff_public_payload((), lease, |()| {
-            assert!(mutation_finished_rx.try_recv().is_err());
-        });
+        impl Drop for DropProbe {
+            fn drop(&mut self) {
+                self.0.store(true, Ordering::SeqCst);
+            }
+        }
 
-        mutation_finished_rx.recv().unwrap();
-        mutation.join().unwrap();
+        let dropped = Arc::new(AtomicBool::new(false));
+        handoff_public_payload((), DropProbe(Arc::clone(&dropped)), |()| {
+            assert!(!dropped.load(Ordering::SeqCst));
+        });
+        assert!(dropped.load(Ordering::SeqCst));
     }
 
     #[test]

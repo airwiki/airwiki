@@ -50,10 +50,7 @@ impl PeerRateLimiter {
             return false;
         }
         let mut state = self.state.lock();
-        loop {
-            let Some((last_attempt, expired_peer)) = state.last_attempts.first().copied() else {
-                break;
-            };
+        while let Some((last_attempt, expired_peer)) = state.last_attempts.first().copied() {
             if now.duration_since(last_attempt) < self.window {
                 break;
             }

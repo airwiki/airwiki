@@ -1,7 +1,7 @@
 <script lang="ts">
   import { BookOpen, CheckCircle2, Search, Settings2, Sparkles } from '@lucide/svelte';
   import { onMount } from 'svelte';
-  import { connect, type AppSnapshot } from './api';
+  import { addCollection, connect, pickCollectionFolder, rescanCollection, searchKnowledge, type AppSnapshot, type FolderSelection } from './api';
 
   type Destination = 'library' | 'review' | 'search' | 'system';
 
@@ -15,10 +15,17 @@
   let destination: Destination = 'library';
   let runtimeLabel = 'Preparando servicios privados';
   let snapshot: AppSnapshot | null = null;
+  let folderSelection: FolderSelection | null = null;
+  let collectionName = '';
+  let question = '';
+  let includePublic = false;
+  let actionMessage = '';
+  let actionBusy = false;
 
   onMount(() => {
     connect((event) => {
       snapshot = event.snapshot;
+      if (event.snapshot.search?.status !== 'searching') actionBusy = false;
       runtimeLabel = event.snapshot.phase === 'ready' ? 'Servicios privados listos' : 'Preparando servicios privados';
     }).then((initial) => {
       snapshot = initial;
@@ -29,6 +36,42 @@
   function select(next: Destination) {
     destination = next;
     window.location.hash = next;
+  }
+
+  async function chooseFolder() {
+    actionMessage = '';
+    try {
+      folderSelection = await pickCollectionFolder();
+    } catch {
+      actionMessage = 'No se pudo abrir el selector. Inténtalo de nuevo.';
+    }
+  }
+
+  async function createCollection() {
+    if (!folderSelection) return;
+    actionBusy = true;
+    try {
+      await addCollection(collectionName, folderSelection.token);
+      collectionName = '';
+      folderSelection = null;
+      actionMessage = 'Colección añadida. El análisis comenzó en segundo plano.';
+    } catch {
+      actionMessage = 'No se pudo añadir la colección. Vuelve a elegir la carpeta e inténtalo de nuevo.';
+      folderSelection = null;
+    } finally {
+      actionBusy = false;
+    }
+  }
+
+  async function submitSearch() {
+    actionBusy = true;
+    try {
+      await searchKnowledge(question, includePublic);
+      actionMessage = 'Buscando evidencia autorizada…';
+    } catch {
+      actionMessage = 'La búsqueda no pudo comenzar. Comprueba que AirWiki esté listo.';
+      actionBusy = false;
+    }
   }
 </script>
 
@@ -73,9 +116,17 @@
         {#if destination === 'library' && snapshot?.collections.length}
           <div class="records" aria-label="Colecciones">
             {#each snapshot.collections as collection}
-              <article><div><strong>{collection.name}</strong><small>{collection.documentCount} documentos · {collection.publishedCount} publicados</small></div><span>{collection.needsReviewCount} por revisar</span></article>
+              <article><div><strong>{collection.name}</strong><small>{collection.documentCount} documentos · {collection.publishedCount} publicados</small></div><button class="text-action" onclick={() => rescanCollection(collection.id)}>Analizar cambios</button></article>
             {/each}
           </div>
+        {/if}
+
+        {#if destination === 'library'}
+          <form class="action-panel" onsubmit={(event) => { event.preventDefault(); createCollection(); }}>
+            <label><span>Nombre de la colección</span><input bind:value={collectionName} maxlength="120" placeholder="Ej. Manuales del taller" required /></label>
+            <div><button type="button" class="secondary" onclick={chooseFolder}>Elegir carpeta</button><small>{folderSelection?.displayPath ?? 'AirWiki solo leerá la carpeta que elijas.'}</small></div>
+            <button class="primary" disabled={actionBusy || !folderSelection || !collectionName.trim()}>Añadir a Biblioteca</button>
+          </form>
         {/if}
 
         {#if destination === 'review' && snapshot}
@@ -89,6 +140,28 @@
         {#if destination === 'system' && snapshot}
           <div class="records"><article><div><strong>{snapshot.model?.displayName ?? 'IA local'}</strong><small>{snapshot.model?.active ? 'Modelo activo' : 'Requiere preparación'}</small></div><span>{snapshot.peers.length} equipos</span></article></div>
         {/if}
+
+        {#if destination === 'search'}
+          <form class="search-panel" onsubmit={(event) => { event.preventDefault(); submitSearch(); }}>
+            <label for="knowledge-question">Pregunta a tu conocimiento</label>
+            <textarea id="knowledge-question" bind:value={question} maxlength="4096" rows="4" placeholder="¿Qué evidencia tenemos sobre…?" required></textarea>
+            <label class="check"><input type="checkbox" bind:checked={includePublic} /> Incluir colecciones públicas disponibles</label>
+            <button class="primary" disabled={actionBusy}>Buscar evidencia</button>
+          </form>
+          {#if snapshot?.search}
+            <div class="search-results" aria-live="polite">
+              <p class="section-label">{snapshot.search.status === 'searching' ? 'Resultados parciales' : 'Evidencia encontrada'}</p>
+              {#each snapshot.search.hits as hit}
+                <article><small>{hit.headingOrPage}</small><h3>{hit.title}</h3><p>{hit.snippet}</p><code>{hit.logicalResourceUri}</code></article>
+              {:else}
+                {#if snapshot.search.status === 'complete'}
+                  <p class="empty">No encontramos evidencia que responda claramente. Prueba una pregunta más específica.</p>
+                {/if}
+              {/each}
+            </div>
+          {/if}
+        {/if}
+        {#if actionMessage}<p class="action-message" aria-live="polite">{actionMessage}</p>{/if}
       </div>
     </section>
   </main>

@@ -1,5 +1,6 @@
 [package]
 name = "airwiki-desktop"
+default-run = "airwiki-tauri"
 description = "Local-first desktop application for human-reviewed knowledge"
 version.workspace = true
 edition.workspace = true

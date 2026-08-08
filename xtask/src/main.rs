@@ -7375,20 +7375,20 @@ mod tests {
     #[test]
     fn macos_packaging_supports_adhoc_development_and_release_signing() {
         let root = workspace_root();
-        let config = fs::read_to_string(root.join("packaging/macos/Packager.toml")).unwrap();
+        let config =
+            fs::read_to_string(root.join("packaging/macos/tauri.bundle.conf.json")).unwrap();
         let script = fs::read_to_string(root.join("packaging/package-macos.sh")).unwrap();
 
         assert!(
-            !config.contains("signingIdentity")
-                && config.contains("./packaging/sign-macos-bridge.sh")
+            config.contains("\"targets\": [\"app\", \"dmg\"]")
+                && !config.contains("signingIdentity")
                 && script.contains("SIGNING_IDENTITY=${AIRWIKI_SIGNING_IDENTITY:--}")
                 && script.contains("SIGNING_PURPOSE=${AIRWIKI_SIGNING_PURPOSE:-}")
                 && script.contains("SIGNING_PURPOSE=adhoc")
                 && script.contains("SIGNING_PURPOSE=release")
                 && script.contains("development | release)")
-                && script.contains(
-                    "codesign --force --sign \"$SIGNING_IDENTITY\" --options runtime --timestamp"
-                )
+                && script.contains("export APPLE_SIGNING_IDENTITY=\"$SIGNING_IDENTITY\"")
+                && script.contains("./ui/node_modules/.bin/tauri build")
                 && script.contains("Contents/_CodeSignature/CodeResources")
                 && script.contains("codesign --verify --deep --strict")
                 && script.contains("Signature=adhoc")
@@ -7423,31 +7423,34 @@ mod tests {
             fs::read_to_string(workspace_root().join("packaging/package-macos.sh")).unwrap();
         assert!(
             script.contains("PACKAGED_RUNTIME_DIR")
+                && script.contains("STAGED_RUNTIME_DIR")
                 && script.contains("diff -qr")
                 && script.contains("find \"$PACKAGED_RUNTIME_DIR\" -type l")
+                && script.contains("hdiutil udifderez")
+                && script.contains("<key>LPic</key>")
         );
+        let signing = script.find("export APPLE_SIGNING_IDENTITY").unwrap();
+        let bundling = script.find("./ui/node_modules/.bin/tauri build").unwrap();
         let runtime_check = script.find("if ! runtime_bytes_match").unwrap();
-        let signing = script
-            .find("codesign --force --sign \"$SIGNING_IDENTITY\"")
-            .unwrap();
-        let post_sign_runtime_check = script.rfind("if ! runtime_bytes_match").unwrap();
         let app_verification = script.find("codesign --verify --deep --strict").unwrap();
-        let dmg_creation = script.find("\"$CREATE_DMG\" \\").unwrap();
         let dmg_verification = script.find("hdiutil verify").unwrap();
+        let eula_verification = script.find("hdiutil udifderez").unwrap();
 
         assert!(
-            runtime_check < signing
-                && signing < post_sign_runtime_check
-                && post_sign_runtime_check < app_verification
-                && app_verification < dmg_creation
-                && dmg_creation < dmg_verification
+            signing < bundling
+                && bundling < runtime_check
+                && runtime_check < app_verification
+                && app_verification < dmg_verification
+                && dmg_verification < eula_verification
         );
     }
 
     #[test]
     fn packaging_includes_platform_bridge_and_validated_mcpb() {
         let root = workspace_root();
-        let macos = fs::read_to_string(root.join("packaging/macos/Packager.toml")).unwrap();
+        let macos =
+            fs::read_to_string(root.join("packaging/macos/tauri.bundle.conf.json")).unwrap();
+        let macos_wrapper = fs::read_to_string(root.join("packaging/package-macos.sh")).unwrap();
         let windows = fs::read_to_string(root.join("packaging/windows/Packager.toml")).unwrap();
         let windows_wrapper =
             fs::read_to_string(root.join("packaging/package-windows.ps1")).unwrap();
@@ -7457,7 +7460,8 @@ mod tests {
             assert!(config.contains("resources/licenses"));
         }
         assert!(windows.contains("airwiki-windows-firewall-helper.exe"));
-        assert!(macos.contains("mcpb build"));
+        assert!(macos_wrapper.contains("mcpb build"));
+        assert!(macos_wrapper.contains("./ui/node_modules/.bin/tauri build"));
         assert!(!windows.contains("beforePackagingCommand"));
         assert!(windows_wrapper.contains("licenses check"));
         assert!(windows_wrapper.contains("fetch-llama-windows.ps1"));

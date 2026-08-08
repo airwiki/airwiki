@@ -3,9 +3,12 @@ set -eu
 
 ROOT=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 cd "$ROOT"
-APP="$ROOT/target/packages/macos/AirWiki.app"
 OUT_DIR="$ROOT/target/packages/macos"
 OUT_NAME="AirWiki_0.2.0_aarch64.dmg"
+TAURI_BUNDLE_DIR="$ROOT/target/aarch64-apple-darwin/release/bundle"
+APP="$TAURI_BUNDLE_DIR/macos/AirWiki.app"
+TAURI_DMG="$TAURI_BUNDLE_DIR/dmg/$OUT_NAME"
+FINAL_APP="$OUT_DIR/AirWiki.app"
 RELEASE_BINARY="$ROOT/target/aarch64-apple-darwin/release/airwiki"
 PACKAGED_BINARY="$APP/Contents/MacOS/airwiki"
 RELEASE_BRIDGE="$ROOT/target/aarch64-apple-darwin/release/airwiki-mcp-bridge"
@@ -16,6 +19,7 @@ SOURCE_ICON="$ROOT/resources/branding/airwiki.icns"
 PACKAGED_ICON="$APP/Contents/Resources/airwiki.icns"
 READY_STAMP="$ROOT/target/packaging-macos-ready.stamp"
 SOURCE_RUNTIME_DIR="$ROOT/resources/llama/macos-aarch64"
+STAGED_RUNTIME_DIR="$ROOT/target/packaging-resources/macos/llama"
 PACKAGED_RUNTIME_DIR="$APP/Contents/Resources/llama"
 LAUNCH_AGENT_SOURCE="$ROOT/packaging/macos/io.github.airwiki.AirWiki.background.plist"
 LAUNCH_AGENT_DIR="$APP/Contents/Library/LaunchAgents"
@@ -49,19 +53,44 @@ case "$SIGNING_PURPOSE" in
     ;;
 esac
 
-# A failed build must never cause the fallback to package an older bundle.
-rm -rf -- "$APP"
-rm -f -- "$OUT_DIR/$OUT_NAME" "$OUT_DIR/rw.$OUT_NAME"
+# A failed build must never cause an older bundle or staged payload to survive.
+rm -rf -- "$APP" "$FINAL_APP" "$STAGED_RUNTIME_DIR"
+rm -f -- "$TAURI_DMG" "$OUT_DIR/$OUT_NAME" "$OUT_DIR/rw.$OUT_NAME"
 rm -f -- "$SOURCE_MCPB" "$READY_STAMP"
 
-cargo packager --config packaging/macos/Packager.toml || true
+cargo run --locked -p xtask -- licenses check
+./packaging/fetch-llama-macos.sh
+mkdir -p -- "$STAGED_RUNTIME_DIR"
+cp -RL -- "$SOURCE_RUNTIME_DIR/." "$STAGED_RUNTIME_DIR/"
+if [ -n "$(find "$STAGED_RUNTIME_DIR" -type l -print -quit)" ] ||
+  ! diff -qr "$SOURCE_RUNTIME_DIR" "$STAGED_RUNTIME_DIR" >/dev/null; then
+  echo "staged llama.cpp runtime differs from the verified source payload" >&2
+  exit 1
+fi
+cargo build --locked --release --target aarch64-apple-darwin -p airwiki-mcp-bridge
+./packaging/sign-macos-bridge.sh
+cargo run --locked -p xtask -- mcpb build \
+  --target aarch64-apple-darwin \
+  --bridge "$RELEASE_BRIDGE" \
+  --output "$SOURCE_MCPB"
+touch "$READY_STAMP"
+
+(
+  cd "$ROOT/apps/desktop"
+  export APPLE_SIGNING_IDENTITY="$SIGNING_IDENTITY"
+  ./ui/node_modules/.bin/tauri build \
+    --ci \
+    --config ../../packaging/macos/tauri.bundle.conf.json \
+    --target aarch64-apple-darwin \
+    --bundles app,dmg
+)
 
 if [ ! -f "$READY_STAMP" ]; then
-  echo "cargo-packager did not complete its build and validation hook" >&2
+  echo "Tauri packaging preparation did not complete" >&2
   exit 1
 fi
 if [ ! -d "$APP" ]; then
-  echo "cargo-packager failed before producing AirWiki.app" >&2
+  echo "Tauri bundler failed before producing AirWiki.app" >&2
   exit 1
 fi
 if [ ! -x "$RELEASE_BINARY" ] || [ ! -x "$PACKAGED_BINARY" ] ||
@@ -87,11 +116,6 @@ if ! cmp -s "$SOURCE_ICON" "$PACKAGED_ICON"; then
   exit 1
 fi
 
-# SMAppService only accepts launch-agent definitions sealed inside the app
-# bundle. This build-time copy never writes to the user's LaunchAgents folder.
-mkdir -p -- "$LAUNCH_AGENT_DIR"
-cp -- "$LAUNCH_AGENT_SOURCE" "$LAUNCH_AGENT"
-chmod 0644 "$LAUNCH_AGENT"
 if ! cmp -s "$LAUNCH_AGENT_SOURCE" "$LAUNCH_AGENT"; then
   echo "packaged launch agent differs from its source" >&2
   exit 1
@@ -175,19 +199,11 @@ runtime_bytes_match() {
     diff -qr "$SOURCE_RUNTIME_DIR" "$PACKAGED_RUNTIME_DIR" >/dev/null
 }
 
-# AssetManager verifies the pinned upstream hashes at runtime. Signing nested
-# llama.cpp Mach-O files would mutate those trusted bytes, so seal them as
-# resources and sign only the outer application bundle.
+# AssetManager verifies the pinned upstream hashes at runtime. Tauri signs only
+# owned binaries and the outer application; the llama.cpp tree remains a
+# resource whose exact upstream bytes must survive bundling.
 if ! runtime_bytes_match; then
   echo "packaged llama.cpp runtime differs from the verified source payload" >&2
-  exit 1
-fi
-if ! codesign --force --sign "$SIGNING_IDENTITY" --options runtime --timestamp "$APP"; then
-  echo "could not sign the application bundle" >&2
-  exit 1
-fi
-if ! runtime_bytes_match; then
-  echo "application signing changed the verified llama.cpp runtime" >&2
   exit 1
 fi
 
@@ -237,37 +253,28 @@ case "$SIGNING_PURPOSE" in
     ;;
 esac
 
-# cargo-packager creates the .app before invoking Finder for DMG cosmetics. Its
-# DMG may therefore be missing on headless runs and, when present, predates the
-# outer-bundle signature above. Always rebuild it from the verified .app using
-# the helper's supported non-interactive path.
-CREATE_DMG=$(find "$HOME/Library/Caches/.cargo-packager" -type f -path '*/script/create-dmg' -print -quit 2>/dev/null || true)
-if [ -z "$CREATE_DMG" ]; then
-  echo "cargo-packager did not install its create-dmg helper" >&2
+if [ ! -f "$TAURI_DMG" ]; then
+  echo "Tauri bundler did not produce the expected DMG" >&2
   exit 1
 fi
-rm -f -- "$OUT_DIR/$OUT_NAME" "$OUT_DIR/rw.$OUT_NAME"
-
-cd "$OUT_DIR"
-"$CREATE_DMG" \
-  --skip-jenkins \
-  --volname "AirWiki" \
-  --app-drop-link 480 210 \
-  --window-size 660 420 \
-  --hide-extension "AirWiki.app" \
-  --eula "$ROOT/LICENSE" \
-  "$OUT_NAME" \
-  "AirWiki.app"
-
-if [ ! -f "$OUT_DIR/$OUT_NAME" ]; then
-  echo "packaging did not produce the expected DMG" >&2
+mkdir -p -- "$OUT_DIR"
+cp -R -- "$APP" "$FINAL_APP"
+cp -- "$TAURI_DMG" "$OUT_DIR/$OUT_NAME"
+if ! codesign --verify --deep --strict --verbose=2 "$FINAL_APP"; then
+  echo "copied application failed strict code-signature verification" >&2
   exit 1
 fi
 if [ "$SIGNING_IDENTITY" != "-" ]; then
-  codesign --force --sign "$SIGNING_IDENTITY" --timestamp "$OUT_DIR/$OUT_NAME"
   codesign --verify --strict --verbose=2 "$OUT_DIR/$OUT_NAME"
 fi
 if ! hdiutil verify "$OUT_DIR/$OUT_NAME"; then
   echo "packaged DMG failed integrity verification" >&2
+  exit 1
+fi
+if ! DMG_RESOURCES=$(hdiutil udifderez -xml "$OUT_DIR/$OUT_NAME" 2>/dev/null) ||
+  ! printf '%s' "$DMG_RESOURCES" | grep -q '<key>LPic</key>' ||
+  ! printf '%s' "$DMG_RESOURCES" | grep -q '<key>STR#</key>' ||
+  ! printf '%s' "$DMG_RESOURCES" | grep -q '<key>TEXT</key>'; then
+  echo "packaged DMG does not contain the required license agreement" >&2
   exit 1
 fi

@@ -11,6 +11,10 @@ export type EnrichmentDraft = { type: ConceptType, title: string, description: s
 
 export type CollectionSummary = { id: string, name: string, documentCount: number, needsReviewCount: number, publishedCount: number, failedCount: number, localOnly: boolean, peerShareable: boolean, allowExternalAi: boolean, internetPublic: boolean, };
 
+export type CollectionScanStatus = "queued" | "scanning";
+
+export type CollectionScanSummary = { collectionId: string, state: CollectionScanStatus, };
+
 export type ReviewSummary = { conceptId: string, sourceRevision: number, sourceName: string, collectionName: string, draft: EnrichmentDraft, };
 
 export type ReviewExcerptSummary = { ordinal: number, headingOrPage: string, text: string, truncated: boolean, };
@@ -45,7 +49,7 @@ export type PeerSummary = { peerId: string, deviceName: string | null, trust: Pe
 
 export type ModelSummary = { displayName: string | null, active: boolean, installed: boolean, degraded: boolean, downloadBytes: number, requiredFreeBytes: number, fitsAvailableDisk: boolean, licenseAccepted: boolean, license: string | null, licenseUrl: string | null, revision: string | null, };
 
-export type ModelInstallStatus = "downloading" | "verifying" | "extracting" | "activating";
+export type ModelInstallStatus = "queued" | "downloading" | "verifying" | "extracting" | "activating";
 
 export type ModelInstallSummary = { status: ModelInstallStatus, downloaded: number, totalBytes: number, };
 
@@ -73,7 +77,7 @@ export type PreferencesInput = { locale: LocalePreference, lanPreference: LanPre
 
 export type AppPhase = "starting" | "ready";
 
-export type AppSnapshot = { schemaVersion: number, sequence: number, phase: AppPhase, collections: Array<CollectionSummary>, reviews: Array<ReviewSummary>, sourceIssues: Array<SourceIssueSummary>, peers: Array<PeerSummary>, model: ModelSummary | null, modelInstall: ModelInstallSummary | null, search: SearchSummary | null, reviewEvidence: ReviewEvidenceSummary | null, knowledge: KnowledgeBundleSummary | null, knowledgePage: KnowledgePageSummary | null, preferences: PreferencesSummary | null, notice: NoticeSummary | null, };
+export type AppSnapshot = { schemaVersion: number, sequence: number, phase: AppPhase, collections: Array<CollectionSummary>, collectionScans: Array<CollectionScanSummary>, reviews: Array<ReviewSummary>, reanalyzingReviewIds: Array<string>, sourceIssues: Array<SourceIssueSummary>, peers: Array<PeerSummary>, model: ModelSummary | null, modelInstall: ModelInstallSummary | null, search: SearchSummary | null, reviewEvidence: ReviewEvidenceSummary | null, knowledge: KnowledgeBundleSummary | null, knowledgePage: KnowledgePageSummary | null, preferences: PreferencesSummary | null, notice: NoticeSummary | null, };
 
 export type UiEventKind = "stateChanged";
 

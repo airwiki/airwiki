@@ -96,7 +96,9 @@ struct AppSnapshot {
     sequence: u64,
     phase: AppPhase,
     collections: Vec<CollectionSummary>,
+    collection_scans: Vec<CollectionScanSummary>,
     reviews: Vec<ReviewSummary>,
+    reanalyzing_review_ids: Vec<String>,
     source_issues: Vec<SourceIssueSummary>,
     peers: Vec<PeerSummary>,
     model: Option<ModelSummary>,
@@ -130,6 +132,21 @@ struct CollectionSummary {
     peer_shareable: bool,
     allow_external_ai: bool,
     internet_public: bool,
+}
+
+#[derive(Clone, Debug, Serialize, PartialEq, Eq, TS)]
+#[serde(rename_all = "camelCase")]
+struct CollectionScanSummary {
+    collection_id: String,
+    state: CollectionScanStatus,
+}
+
+#[derive(Clone, Copy, Debug, Serialize, PartialEq, Eq, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(rename_all = "camelCase")]
+enum CollectionScanStatus {
+    Queued,
+    Scanning,
 }
 
 #[derive(Clone, Debug, Serialize, TS)]
@@ -497,6 +514,7 @@ struct ModelInstallSummary {
 #[serde(rename_all = "camelCase")]
 #[ts(rename_all = "camelCase")]
 enum ModelInstallStatus {
+    Queued,
     Downloading,
     Verifying,
     Extracting,
@@ -1200,7 +1218,9 @@ impl AppSnapshot {
             sequence: 0,
             phase: AppPhase::Starting,
             collections: Vec::new(),
+            collection_scans: Vec::new(),
             reviews: Vec::new(),
+            reanalyzing_review_ids: Vec::new(),
             source_issues: Vec::new(),
             peers: Vec::new(),
             model: None,
@@ -1250,10 +1270,18 @@ impl AppSnapshot {
                     .map(CollectionSummary::from)
                     .collect();
             }
+            WorkerEvent::CollectionScan {
+                collection_id,
+                state,
+            } => update_collection_scan(&mut self.collection_scans, collection_id, state),
             WorkerEvent::Reviews(reviews) => {
                 self.reviews = reviews.into_iter().map(ReviewSummary::from).collect();
                 retain_pending_review_versions(review_versions, &self.reviews);
             }
+            WorkerEvent::ReviewReanalysis {
+                concept_id,
+                running,
+            } => update_running_review(&mut self.reanalyzing_review_ids, concept_id, running),
             WorkerEvent::SourceIssues(issues) => {
                 self.source_issues = issues.into_iter().map(SourceIssueSummary::from).collect();
             }
@@ -1517,6 +1545,19 @@ impl AppSnapshot {
                     message,
                 });
             }
+            WorkerEvent::InstallQueued(_) => {
+                self.model_install = Some(ModelInstallSummary {
+                    status: ModelInstallStatus::Queued,
+                    downloaded: 0,
+                    total_bytes: 0,
+                });
+            }
+            WorkerEvent::RestartRequired(_) => {
+                self.notice = Some(NoticeSummary {
+                    level: NoticeLevel::Warning,
+                    message: "model-restart-required".to_owned(),
+                });
+            }
             WorkerEvent::Error(_) => {
                 self.notice = Some(NoticeSummary {
                     level: NoticeLevel::Error,
@@ -1525,6 +1566,32 @@ impl AppSnapshot {
             }
             _ => {}
         }
+    }
+}
+
+fn update_collection_scan(
+    scans: &mut Vec<CollectionScanSummary>,
+    collection_id: Uuid,
+    state: Option<worker::CollectionScanState>,
+) {
+    let collection_id = collection_id.to_string();
+    scans.retain(|scan| scan.collection_id != collection_id);
+    if let Some(state) = state {
+        scans.push(CollectionScanSummary {
+            collection_id,
+            state: match state {
+                worker::CollectionScanState::Queued => CollectionScanStatus::Queued,
+                worker::CollectionScanState::Scanning => CollectionScanStatus::Scanning,
+            },
+        });
+    }
+}
+
+fn update_running_review(review_ids: &mut Vec<String>, concept_id: Uuid, running: bool) {
+    let concept_id = concept_id.to_string();
+    review_ids.retain(|current| current != &concept_id);
+    if running {
+        review_ids.push(concept_id);
     }
 }
 
@@ -1837,6 +1904,8 @@ fn ui_bindings_source() -> String {
         exported_declaration::<SuggestedLinkDto>(&config),
         exported_declaration::<EnrichmentDraftDto>(&config),
         exported_declaration::<CollectionSummary>(&config),
+        exported_declaration::<CollectionScanStatus>(&config),
+        exported_declaration::<CollectionScanSummary>(&config),
         exported_declaration::<ReviewSummary>(&config),
         exported_declaration::<ReviewExcerptSummary>(&config),
         exported_declaration::<ReviewEvidenceStatus>(&config),
@@ -2194,6 +2263,41 @@ mod tests {
                 label: "Verified concept".to_owned(),
             }]
         );
+    }
+
+    #[test]
+    fn transient_operation_states_replace_and_clear_by_identifier() {
+        let collection_id = Uuid::new_v4();
+        let concept_id = Uuid::new_v4();
+        let mut scans = Vec::new();
+        let mut reviews = Vec::new();
+
+        update_collection_scan(
+            &mut scans,
+            collection_id,
+            Some(worker::CollectionScanState::Queued),
+        );
+        update_collection_scan(
+            &mut scans,
+            collection_id,
+            Some(worker::CollectionScanState::Scanning),
+        );
+        update_running_review(&mut reviews, concept_id, true);
+
+        assert_eq!(
+            scans,
+            vec![CollectionScanSummary {
+                collection_id: collection_id.to_string(),
+                state: CollectionScanStatus::Scanning,
+            }]
+        );
+        assert_eq!(reviews, vec![concept_id.to_string()]);
+
+        update_collection_scan(&mut scans, collection_id, None);
+        update_running_review(&mut reviews, concept_id, false);
+
+        assert!(scans.is_empty());
+        assert!(reviews.is_empty());
     }
 
     #[test]

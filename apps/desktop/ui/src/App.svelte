@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { BookOpen, CheckCircle2, FileText, History, Network, RefreshCw, Search, Settings2, Sparkles } from '@lucide/svelte';
+  import { AlertTriangle, BookOpen, CheckCircle2, FileText, History, Network, RefreshCw, Search, Settings2, Sparkles } from '@lucide/svelte';
   import { listen } from '@tauri-apps/api/event';
   import { onMount } from 'svelte';
   import { addCollection, approveReview, cancelModelInstall, connect, hideToTray, installModels, loadKnowledgeBundle, loadKnowledgePage, loadReviewEvidence, pickCollectionFolder, quitCompletely, reanalyzeReview, rejectReview, rescanCollection, searchKnowledge, updatePreferences, type AppSnapshot, type CloseBehavior, type EnrichmentDraft, type FolderSelection, type KnowledgePageInput, type LanPreference, type LocalePreference, type ReviewSummary } from './api';
@@ -112,6 +112,28 @@
     } finally {
       actionBusy = false;
     }
+  }
+
+  function collectionScanState(collectionId: string) {
+    return snapshot?.collectionScans.find((scan) => scan.collectionId === collectionId)?.state ?? null;
+  }
+
+  async function scanCollection(collectionId: string) {
+    try {
+      await rescanCollection(collectionId);
+      actionMessage = 'Análisis añadido a la cola.';
+    } catch {
+      actionMessage = 'No se pudo iniciar el análisis de cambios.';
+    }
+  }
+
+  function modelInstallLabel(): string {
+    const status = snapshot?.modelInstall?.status;
+    if (status === 'queued') return 'Esperando turno';
+    if (status === 'downloading') return 'Descargando archivos verificados';
+    if (status === 'verifying') return 'Verificando integridad';
+    if (status === 'extracting') return 'Preparando runtime local';
+    return 'Activando el modelo';
   }
 
   async function submitSearch() {
@@ -286,9 +308,18 @@
         {#if destination === 'library' && snapshot?.collections.length}
           <div class="records" aria-label="Colecciones">
             {#each snapshot.collections as collection}
-              <article><div><strong>{collection.name}</strong><small>{collection.documentCount} documentos · {collection.publishedCount} publicados</small></div><div class="row-actions"><button class="text-action" onclick={() => openKnowledge(collection.id)}>Abrir conocimiento</button><button class="text-action" onclick={() => rescanCollection(collection.id)}>Analizar cambios</button></div></article>
+              <article><div><strong>{collection.name}</strong><small>{collection.documentCount} documentos · {collection.publishedCount} publicados{#if collectionScanState(collection.id)} · {collectionScanState(collection.id) === 'queued' ? 'en cola' : 'analizando'}{/if}</small></div><div class="row-actions"><button class="text-action" onclick={() => openKnowledge(collection.id)}>Abrir conocimiento</button><button class="text-action" onclick={() => scanCollection(collection.id)} disabled={collectionScanState(collection.id) !== null}>{collectionScanState(collection.id) ? 'Procesando…' : 'Analizar cambios'}</button></div></article>
             {/each}
           </div>
+        {/if}
+
+        {#if destination === 'library' && snapshot?.sourceIssues.length}
+          <section class="source-issues" aria-labelledby="source-issues-title">
+            <div><AlertTriangle size={18} aria-hidden="true" /><div><h3 id="source-issues-title">Fuentes que necesitan atención</h3><p>AirWiki conserva el último estado seguro y no publica contenido incierto.</p></div></div>
+            {#each snapshot.sourceIssues as issue}
+              <article><strong>{issue.sourceName}</strong><span>{issue.collectionName}</span><code>{issue.code}</code></article>
+            {/each}
+          </section>
         {/if}
 
         {#if destination === 'library' && snapshot?.knowledge?.collectionId === selectedCollectionId}
@@ -377,7 +408,7 @@
                   <p>Aprobar publica la propuesta validada. Rechazar conserva la fuente y descarta solo este borrador.</p>
                   <div class="decision-actions">
                     <button class="primary" onclick={() => decideReview('approve')} disabled={actionBusy || !evidenceIsCurrent()}>Aprobar con evidencia</button>
-                    <button class="secondary" onclick={() => decideReview('reanalyze')} disabled={actionBusy || !snapshot.model?.active}>Volver a analizar</button>
+                    <button class="secondary" onclick={() => decideReview('reanalyze')} disabled={actionBusy || !snapshot.model?.active || snapshot.reanalyzingReviewIds.includes(selectedReview.conceptId)}>{snapshot.reanalyzingReviewIds.includes(selectedReview.conceptId) ? 'Analizando…' : 'Volver a analizar'}</button>
                     <button class="danger" onclick={() => decideReview('reject')} disabled={actionBusy}>Rechazar propuesta</button>
                   </div>
                   {#if !evidenceIsCurrent()}<small class="guardrail">Carga evidencia vigente para habilitar la aprobación.</small>{/if}
@@ -391,7 +422,7 @@
 
         {#if destination === 'system' && snapshot}
           <div class="system-layout">
-            <section><p class="section-label">IA local</p><h3>{snapshot.model?.displayName ?? 'Modelo recomendado'}</h3><p>{snapshot.model?.active ? 'El modelo está activo y listo para proponer metadatos.' : 'El modelo requiere preparación antes de analizar documentos.'}</p>{#if snapshot.modelInstall}<progress max={snapshot.modelInstall.totalBytes || 1} value={snapshot.modelInstall.downloaded}></progress><small>{snapshot.modelInstall.status}</small><button class="secondary" onclick={cancelModelInstall}>Cancelar descarga</button>{:else if snapshot.model && !snapshot.model.active}<label class="check license-check"><input type="checkbox" bind:checked={modelLicensesConfirmed} /> Acepto {snapshot.model.license ?? 'las licencias del modelo y sus componentes'}</label><button class="secondary" onclick={prepareLocalModel} disabled={!modelLicensesConfirmed && !snapshot.model.licenseAccepted}>Preparar modelo local</button>{/if}</section>
+            <section><p class="section-label">IA local</p><h3>{snapshot.model?.displayName ?? 'Modelo recomendado'}</h3><p>{snapshot.model?.active ? 'El modelo está activo y listo para proponer metadatos.' : 'El modelo requiere preparación antes de analizar documentos.'}</p>{#if snapshot.modelInstall}<progress max={snapshot.modelInstall.totalBytes || 1} value={snapshot.modelInstall.downloaded}></progress><small>{modelInstallLabel()}</small><button class="secondary" onclick={cancelModelInstall}>Cancelar preparación</button>{:else if snapshot.model && !snapshot.model.active}<label class="check license-check"><input type="checkbox" bind:checked={modelLicensesConfirmed} /> Acepto {snapshot.model.license ?? 'las licencias del modelo y sus componentes'}</label><button class="secondary" onclick={prepareLocalModel} disabled={!modelLicensesConfirmed && !snapshot.model.licenseAccepted}>Preparar modelo local</button>{/if}</section>
             <section class="settings-form"><p class="section-label">Preferencias del dispositivo</p><label><span>Idioma</span><select bind:value={locale}><option value="system">Sistema</option><option value="es">Español</option><option value="en">English</option></select></label><label><span>Red local</span><select bind:value={lanPreference}><option value="disabled">Desactivada</option><option value="enabled">Activada</option></select></label><label><span>Al cerrar</span><select bind:value={closeBehavior}><option value="ask">Preguntar</option><option value="hide_to_tray">Ocultar en bandeja</option><option value="quit">Salir completamente</option></select></label><label class="check"><input type="checkbox" bind:checked={automaticUpdateChecks} /> Buscar actualizaciones automáticamente</label><button class="primary" onclick={() => savePreferences(false)} disabled={actionBusy}>Guardar preferencias</button></section>
             <section><p class="section-label">Conectividad</p><h3>{snapshot.peers.length} equipos conocidos</h3><p>Las colecciones solo salen de este dispositivo con permisos explícitos.</p></section>
           </div>

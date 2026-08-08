@@ -90,6 +90,7 @@ struct RequestTracker {
     autostart: Option<Uuid>,
     wiki_health: Option<Uuid>,
     connectivity: Option<Uuid>,
+    integrations: Option<Uuid>,
 }
 
 struct PendingFolderSelection {
@@ -122,6 +123,7 @@ struct AppSnapshot {
     connectivity: Option<ConnectivitySummary>,
     lan_runtime: Option<LanRuntimeSummary>,
     firewall_operation: Option<FirewallOperationStatus>,
+    integrations: Option<IntegrationsSummary>,
     notice: Option<NoticeSummary>,
 }
 
@@ -769,6 +771,67 @@ enum FirewallOperationStatus {
     TakingLonger,
 }
 
+#[derive(Clone, Debug, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+struct IntegrationsSummary {
+    integrations: Vec<IntegrationSummary>,
+    external_ai_collection_count: usize,
+}
+
+#[derive(Clone, Debug, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+struct IntegrationSummary {
+    client: IntegrationClientDto,
+    status: IntegrationStatusDto,
+    detected_version: Option<String>,
+    activity_recent: bool,
+    restart_required: bool,
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(rename = "IntegrationClient", rename_all = "camelCase")]
+enum IntegrationClientDto {
+    ChatGptDesktop,
+    ClaudeDesktop,
+    GeminiCli,
+}
+
+#[derive(Clone, Copy, Debug, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(rename = "IntegrationStatus", rename_all = "camelCase")]
+enum IntegrationStatusDto {
+    NotInstalled,
+    Available,
+    Configuring,
+    AwaitingClientApproval,
+    Configured,
+    UpdateAvailable,
+    Conflict,
+    Unsupported,
+    Error,
+}
+
+impl From<IntegrationClientDto> for integrations::ChatClientKind {
+    fn from(value: IntegrationClientDto) -> Self {
+        match value {
+            IntegrationClientDto::ChatGptDesktop => Self::ChatGptDesktop,
+            IntegrationClientDto::ClaudeDesktop => Self::ClaudeDesktop,
+            IntegrationClientDto::GeminiCli => Self::GeminiCli,
+        }
+    }
+}
+
+impl From<integrations::ChatClientKind> for IntegrationClientDto {
+    fn from(value: integrations::ChatClientKind) -> Self {
+        match value {
+            integrations::ChatClientKind::ChatGptDesktop => Self::ChatGptDesktop,
+            integrations::ChatClientKind::ClaudeDesktop => Self::ClaudeDesktop,
+            integrations::ChatClientKind::GeminiCli => Self::GeminiCli,
+        }
+    }
+}
+
 impl From<autostart::AutostartStatus> for AutostartStatusDto {
     fn from(value: autostart::AutostartStatus) -> Self {
         match value {
@@ -892,6 +955,49 @@ impl From<worker::FirewallOperationView> for FirewallOperationStatus {
         match value {
             worker::FirewallOperationView::AwaitingWindows => Self::AwaitingWindows,
             worker::FirewallOperationView::TakingLonger => Self::TakingLonger,
+        }
+    }
+}
+
+impl From<integrations::ChatIntegrationsSnapshot> for IntegrationsSummary {
+    fn from(value: integrations::ChatIntegrationsSnapshot) -> Self {
+        Self {
+            integrations: value
+                .integrations
+                .into_iter()
+                .map(|integration| IntegrationSummary {
+                    client: integration.client.into(),
+                    status: match integration.status {
+                        integrations::IntegrationStatus::NotInstalled => {
+                            IntegrationStatusDto::NotInstalled
+                        }
+                        integrations::IntegrationStatus::Available => {
+                            IntegrationStatusDto::Available
+                        }
+                        integrations::IntegrationStatus::Configuring => {
+                            IntegrationStatusDto::Configuring
+                        }
+                        integrations::IntegrationStatus::AwaitingClientApproval => {
+                            IntegrationStatusDto::AwaitingClientApproval
+                        }
+                        integrations::IntegrationStatus::Configured => {
+                            IntegrationStatusDto::Configured
+                        }
+                        integrations::IntegrationStatus::UpdateAvailable => {
+                            IntegrationStatusDto::UpdateAvailable
+                        }
+                        integrations::IntegrationStatus::Conflict => IntegrationStatusDto::Conflict,
+                        integrations::IntegrationStatus::Unsupported => {
+                            IntegrationStatusDto::Unsupported
+                        }
+                        integrations::IntegrationStatus::Error => IntegrationStatusDto::Error,
+                    },
+                    detected_version: integration.detected_version,
+                    activity_recent: integration.activity_recent,
+                    restart_required: integration.restart_required,
+                })
+                .collect(),
+            external_ai_collection_count: value.external_ai_collection_count,
         }
     }
 }
@@ -1187,6 +1293,57 @@ fn set_collection_grant(
             granted,
         },
     )
+}
+
+#[derive(Debug, Deserialize, TS)]
+#[serde(tag = "kind", rename_all = "camelCase", deny_unknown_fields)]
+enum IntegrationActionInput {
+    Refresh,
+    Connect { client: IntegrationClientDto },
+    Disconnect { client: IntegrationClientDto },
+    ConfirmClaudeInstalled,
+    OpenClaudeSettings,
+}
+
+#[tauri::command]
+fn manage_integration(
+    runtime: tauri::State<'_, AppRuntime>,
+    request_id: String,
+    action: IntegrationActionInput,
+) -> Result<(), UiError> {
+    let request_id = parse_uuid(&request_id)?;
+    runtime
+        .requests
+        .lock()
+        .map_err(|_| UiError::internal())?
+        .integrations = Some(request_id);
+    let action = match action {
+        IntegrationActionInput::Refresh => integrations::IntegrationAction::Refresh,
+        IntegrationActionInput::Connect { client } => {
+            integrations::IntegrationAction::Connect(client.into())
+        }
+        IntegrationActionInput::Disconnect { client } => {
+            integrations::IntegrationAction::Disconnect(client.into())
+        }
+        IntegrationActionInput::ConfirmClaudeInstalled => {
+            integrations::IntegrationAction::ConfirmClaudeInstalled
+        }
+        IntegrationActionInput::OpenClaudeSettings => {
+            integrations::IntegrationAction::OpenClaudeSettings
+        }
+    };
+    if let Err(error) = send_command(
+        &runtime,
+        WorkerCommand::ManageChatIntegration { request_id, action },
+    ) {
+        if let Ok(mut requests) = runtime.requests.lock()
+            && requests.integrations == Some(request_id)
+        {
+            requests.integrations = None;
+        }
+        return Err(error);
+    }
+    Ok(())
 }
 
 #[tauri::command]
@@ -1689,6 +1846,7 @@ impl AppSnapshot {
             connectivity: None,
             lan_runtime: None,
             firewall_operation: None,
+            integrations: None,
             notice: None,
         }
     }
@@ -1866,6 +2024,15 @@ impl AppSnapshot {
                     address_count: local_addresses.len(),
                 });
             }
+            WorkerEvent::ChatIntegrationsUpdated { result, .. } => match result {
+                Ok(integrations) => self.integrations = Some(integrations.into()),
+                Err(_) => {
+                    self.notice = Some(NoticeSummary {
+                        level: NoticeLevel::Error,
+                        message: "integration-operation-failed".to_owned(),
+                    });
+                }
+            },
             WorkerEvent::ReviewEvidenceLoaded {
                 request_id,
                 concept_id,
@@ -2219,6 +2386,14 @@ fn request_is_current(event: &WorkerEvent, requests: &Mutex<RequestTracker>) -> 
         WorkerEvent::FirewallOperationUpdated { request_id, .. } => {
             requests.connectivity == Some(*request_id)
         }
+        WorkerEvent::ChatIntegrationsUpdated { request_id, .. } => {
+            if requests.integrations == Some(*request_id) {
+                requests.integrations = None;
+                true
+            } else {
+                false
+            }
+        }
         _ => true,
     }
 }
@@ -2532,6 +2707,11 @@ fn ui_bindings_source() -> String {
         exported_declaration::<LanDiscoveryStatus>(&config),
         exported_declaration::<LanRuntimeSummary>(&config),
         exported_declaration::<FirewallOperationStatus>(&config),
+        exported_declaration::<IntegrationClientDto>(&config),
+        exported_declaration::<IntegrationStatusDto>(&config),
+        exported_declaration::<IntegrationSummary>(&config),
+        exported_declaration::<IntegrationsSummary>(&config),
+        exported_declaration::<IntegrationActionInput>(&config),
         exported_declaration::<PreferencesSummary>(&config),
         exported_declaration::<PreferencesInput>(&config),
         exported_declaration::<AppPhase>(&config),
@@ -2761,6 +2941,7 @@ fn main() -> Result<()> {
             confirm_pairing,
             revoke_peer,
             set_collection_grant,
+            manage_integration,
             search,
             load_review_evidence,
             approve_review,
@@ -3127,6 +3308,35 @@ mod tests {
             ),
             (true, true, true)
         );
+    }
+
+    #[test]
+    fn integration_contract_excludes_paths_and_diagnostic_detail() -> Result<()> {
+        let summary = IntegrationsSummary::from(integrations::ChatIntegrationsSnapshot {
+            integrations: vec![integrations::IntegrationView {
+                client: integrations::ChatClientKind::ClaudeDesktop,
+                status: integrations::IntegrationStatus::Error,
+                detected_version: Some("synthetic".to_owned()),
+                detail: "sensitive diagnostic".to_owned(),
+                planned_path: Some(PathBuf::from("/synthetic/private/config")),
+                activity_recent: false,
+                restart_required: false,
+            }],
+            external_ai_collection_count: 0,
+        });
+        let serialized = serde_json::to_value(summary)?;
+        let integration = serialized
+            .pointer("/integrations/0")
+            .context("integration DTO missing from serialized fixture")?;
+
+        assert_eq!(
+            (
+                integration.get("detail").is_none(),
+                integration.get("plannedPath").is_none(),
+            ),
+            (true, true)
+        );
+        Ok(())
     }
 
     #[test]

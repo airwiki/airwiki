@@ -1737,6 +1737,7 @@ fn validate_windows_llama_runtime_supply_chain(root: &Path) -> Result<()> {
         "-DGGML_OPENMP=OFF",
         "-DGGML_NATIVE=OFF",
         "-DGGML_AVX2=ON",
+        "-DGGML_BMI2=OFF",
         "-DGGML_LTO=OFF",
         "-DLLAMA_OPENSSL=OFF",
         "-DLLAMA_LLGUIDANCE=OFF",
@@ -2759,10 +2760,14 @@ fn verify_windows_uninstaller() -> Result<()> {
         .context("reading the managed Windows NSIS template")?;
     let smoke = fs::read_to_string(root.join("packaging/smoke-install-windows.ps1"))
         .context("reading the Windows built-installer smoke matrix")?;
+    let validated_smoke =
+        fs::read_to_string(root.join("packaging/smoke-validated-windows-installer.ps1"))
+            .context("reading the validated Windows installer smoke")?;
     let updater = fs::read_to_string(root.join("apps/desktop/src/updater.rs"))
         .context("reading the Windows updater implementation")?;
     verify_windows_installer_preflight_sources(&template)?;
     verify_windows_installer_smoke_sources(&smoke)?;
+    verify_validated_installer_smoke_sources(&validated_smoke)?;
     verify_windows_uninstaller_sources(&config, &template)?;
     verify_windows_update_handoff_sources(&template, &updater)
 }
@@ -2787,6 +2792,16 @@ fn powershell_function<'a>(source: &'a str, name: &str) -> Result<&'a str> {
     source
         .get(range)
         .with_context(|| format!("PowerShell {name} function offsets are invalid"))
+}
+
+fn powershell_executable_fingerprint(code: &str) -> String {
+    let canonical = code
+        .lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty())
+        .collect::<Vec<_>>()
+        .join("\n");
+    hex::encode(Sha256::digest(canonical.as_bytes()))
 }
 
 struct PowerShellSourceViews {
@@ -2957,19 +2972,600 @@ fn powershell_executable_exact_slices(
     exact: &str,
     executable_marker: &str,
 ) -> bool {
-    let Some(marker_offset) = exact.find(executable_marker) else {
-        return false;
-    };
-    normalized.match_indices(exact).any(|(offset, _)| {
+    powershell_executable_exact_offset_slices(normalized, code, exact, executable_marker).is_some()
+}
+
+fn powershell_executable_exact_offset_slices(
+    normalized: &str,
+    code: &str,
+    exact: &str,
+    executable_marker: &str,
+) -> Option<usize> {
+    let marker_offset = exact.find(executable_marker)?;
+    normalized.match_indices(exact).find_map(|(offset, _)| {
         code.get(offset + marker_offset..)
             .is_some_and(|candidate| candidate.starts_with(executable_marker))
+            .then_some(offset)
     })
+}
+
+fn verify_validated_installer_smoke_sources(smoke: &str) -> Result<()> {
+    let source = powershell_source_views(smoke)?;
+    ensure!(
+        powershell_executable_exact(
+            &source,
+            "$ModelReadyWaitMilliseconds = 1800000",
+            "$ModelReadyWaitMilliseconds =",
+        ),
+        "validated installer smoke must allow a bounded cold model download and verification window"
+    );
+    ensure!(
+        powershell_executable_exact(
+            &source,
+            "$InstallDir = Join-Path (Join-Path $env:LOCALAPPDATA \"Programs\") \"AirWiki\"",
+            "$InstallDir = Join-Path (",
+        ),
+        "validated installer smoke must keep installed binaries outside the AirWiki data root"
+    );
+    let ordered_stages = [
+        "preflight",
+        "installer",
+        "registration",
+        "desktop_correlation",
+        "payload_validation",
+        "models",
+        "uninstall_cleanup",
+        "complete",
+    ];
+    let mut previous_stage_offset = None;
+    for stage in ordered_stages {
+        let assignment = format!("$script:TerminalStage = \"{stage}\"");
+        let offset = powershell_executable_exact_offset_slices(
+            source.normalized.as_str(),
+            source.code.as_str(),
+            assignment.as_str(),
+            "$script:TerminalStage =",
+        )
+        .with_context(|| format!("validated installer smoke has no `{stage}` stage"))?;
+        ensure!(
+            previous_stage_offset.is_none_or(|previous| previous < offset),
+            "validated installer smoke must retain terminal stage ordering"
+        );
+        previous_stage_offset = Some(offset);
+    }
+    let stage_allowlist = r#"$InstallerSmokeStages = @(
+    "preflight",
+    "installer",
+    "registration",
+    "desktop_correlation",
+    "payload_validation",
+    "models",
+    "uninstall_cleanup",
+    "complete",
+    "unknown"
+)"#;
+    ensure!(
+        powershell_executable_exact(&source, stage_allowlist, "$InstallerSmokeStages =",),
+        "validated installer smoke must retain the executable closed stage allowlist"
+    );
+    let failure_class_allowlist = r#"$InstallerSmokeFailureClasses = @(
+    "model_activation_failed",
+    "model_install_failed",
+    "desktop_exited_before_ready",
+    "runtime_exited_before_ready",
+    "models_timeout",
+    "powershell_runtime"
+)"#;
+    ensure!(
+        powershell_executable_exact(
+            &source,
+            failure_class_allowlist,
+            "$InstallerSmokeFailureClasses =",
+        ),
+        "validated installer smoke must retain the executable closed failure class allowlist"
+    );
+    let install_error_allowlist = r#"$ModelInstallErrorKinds = @(
+    "install_network",
+    "install_integrity",
+    "install_storage",
+    "install_promotion",
+    "install_runtime_verification",
+    "install_capacity",
+    "install_configuration",
+    "install_cancelled",
+    "install_internal"
+)"#;
+    ensure!(
+        powershell_executable_exact(
+            &source,
+            install_error_allowlist,
+            "$ModelInstallErrorKinds =",
+        ),
+        "validated installer smoke must retain the executable closed install error allowlist"
+    );
+    let activation_state_allowlist = r#"$ModelActivationStates = @(
+    "starting",
+    "ready",
+    "failed"
+)"#;
+    ensure!(
+        powershell_executable_exact(
+            &source,
+            activation_state_allowlist,
+            "$ModelActivationStates =",
+        ),
+        "validated installer smoke must retain the executable closed activation state allowlist"
+    );
+    let cleanup_status_allowlist = r#"$InstallerSmokeCleanupStatuses = @(
+    "not_needed",
+    "pass",
+    "failed",
+    "unknown"
+)"#;
+    ensure!(
+        powershell_executable_exact(
+            &source,
+            cleanup_status_allowlist,
+            "$InstallerSmokeCleanupStatuses =",
+        ),
+        "validated installer smoke must retain the executable closed cleanup status allowlist"
+    );
+    let structured_range =
+        powershell_function_range(source.code.as_str(), "Set-StructuredInstallerSmokeFailure")?;
+    let structured_code = source
+        .code
+        .get(structured_range)
+        .context("structured installer smoke failure function offsets are invalid")?;
+    ensure!(
+        structured_code.contains("$InstallerSmokeFailureClasses -cnotcontains $SafeClass")
+            && structured_code.contains("$ModelActivationExitClasses -cnotcontains $SafeExitClass")
+            && structured_code.contains("$ModelActivationErrorKinds -ccontains $ErrorKind")
+            && structured_code.contains("$ModelActivationElapsedBuckets -ccontains $ElapsedBucket")
+            && structured_code.contains("$ModelInstallErrorKinds -ccontains $ErrorKind")
+            && structured_code.contains("-ne $IsInstallKind)")
+            && structured_code.contains("$script:StructuredFailure = [PSCustomObject]@{"),
+        "validated installer smoke must create typed failures through closed executable allowlists"
+    );
+    let activation_status_range =
+        powershell_function_range(source.code.as_str(), "Get-SanitizedModelActivationStatus")?;
+    let activation_status_code = source
+        .code
+        .get(activation_status_range.clone())
+        .context("sanitized model activation status function offsets are invalid")?;
+    let activation_status_normalized = source
+        .normalized
+        .get(activation_status_range)
+        .context("normalized model activation status function offsets are invalid")?;
+    let activation_status_fingerprint =
+        powershell_executable_fingerprint(activation_status_normalized);
+    let stale_gate = activation_status_code
+        .find("if (-not $Changed -and -not $Cursor.ObservedStarting) {")
+        .context("validated installer smoke must ignore unchanged activation status")?;
+    let status_open = activation_status_code
+        .find("$Stream = [IO.File]::Open(")
+        .context("validated installer smoke must open changed activation status")?;
+    let activation_status_returns = activation_status_code
+        .lines()
+        .map(str::trim)
+        .filter(|line| line.starts_with("return"))
+        .collect::<Vec<_>>();
+    let activation_status_lower = activation_status_code.to_ascii_lowercase();
+    ensure!(
+        stale_gate < status_open
+            && activation_status_code
+                .contains("Get-RegularActivationStatusItem ([string] $Cursor.Path)")
+            && activation_status_code
+                .contains("$Stream.Length -gt $ActivationStatusReadLimitBytes",)
+            && activation_status_code.contains("$Record.PSObject.Properties.Name | Sort-Object")
+            && activation_status_code.contains("$ModelActivationStates -cnotcontains $State")
+            && activation_status_code
+                .contains("$ModelActivationErrorKinds -cnotcontains $ErrorKind")
+            && activation_status_code
+                .contains("$ModelActivationElapsedBuckets -cnotcontains $ElapsedBucket")
+            && activation_status_code
+                .contains("$ModelActivationExitClasses -cnotcontains $ExitClass")
+            && activation_status_code.contains("$Cursor.ObservedStarting = $true")
+            && !activation_status_lower.contains("[console]::")
+            && !activation_status_lower.contains("$host")
+            && !activation_status_lower.contains("write-")
+            && !activation_status_lower.contains("out-host")
+            && !activation_status_lower.contains("out-default")
+            && !activation_status_lower.contains("out-file")
+            && !activation_status_lower.contains("tee-object")
+            && !activation_status_code.contains(".Exception"),
+        "validated installer smoke must parse only the bounded durable activation status schema"
+    );
+    ensure!(
+        activation_status_returns.len() == 5
+            && activation_status_returns[..3] == ["return $null"; 3]
+            && activation_status_returns[3..]
+                .iter()
+                .all(|line| line.starts_with("return [PSCustomObject]@{")),
+        "validated installer smoke durable activation status reader must retain fixed control-flow exits"
+    );
+    ensure!(
+        activation_status_fingerprint
+            == "729da59e518132e0476bdcfd6198b538d8be1c17a1b9d64dddfc1782fcd321a0",
+        "validated installer smoke durable activation status executable fingerprint changed: {activation_status_fingerprint}"
+    );
+    let activation_failure_range =
+        powershell_function_range(source.code.as_str(), "Throw-IfModelActivationFailed")?;
+    let activation_failure_reader = source
+        .code
+        .get(activation_failure_range.clone())
+        .context("durable activation failure reader offsets are invalid")?;
+    let activation_failure_normalized = source
+        .normalized
+        .get(activation_failure_range)
+        .context("normalized durable activation failure reader offsets are invalid")?;
+    let activation_failure_fingerprint =
+        powershell_executable_fingerprint(activation_failure_normalized);
+    ensure!(
+        !activation_failure_reader
+            .lines()
+            .map(str::trim)
+            .filter_map(|line| line.split_whitespace().next())
+            .any(|command| ["return", "exit", "throw"]
+                .iter()
+                .any(|blocked| command.eq_ignore_ascii_case(blocked))
+                || command.to_ascii_lowercase().starts_with("write-")
+                || command.to_ascii_lowercase().starts_with("out-")
+                || command.eq_ignore_ascii_case("tee-object")),
+        "validated installer smoke must not bypass or emit from the durable activation failure reader"
+    );
+    let status_read = activation_failure_reader
+        .find("$Status = Get-SanitizedModelActivationStatus $ActivationStatusCursor")
+        .context("validated installer smoke must consult durable activation status")?;
+    let fallback_gate = activation_failure_reader
+        .find(
+            "if (-not $ActivationStatusCursor.ObservedStarting -and\n        $null -eq $Status) {",
+        )
+        .context(
+            "validated installer smoke must disable the legacy log fallback after observing current durable activation status",
+        )?;
+    let log_read = activation_failure_reader
+        .find("Update-ActivationLogCursor $ActivationLogCursor")
+        .context("validated installer smoke must retain the sanitized log fallback")?;
+    ensure!(
+        status_read < fallback_gate && fallback_gate < log_read,
+        "validated installer smoke must gate the legacy log fallback after consulting durable activation status"
+    );
+    ensure!(
+        activation_failure_fingerprint
+            == "8c785e4ae041883ae613138a34beb8677a9adf862a96e27fa9b1a3a83f50dcd4",
+        "validated installer smoke durable activation failure executable fingerprint changed: {activation_failure_fingerprint}"
+    );
+    let sanitized_range =
+        powershell_function_range(source.code.as_str(), "Get-SanitizedInstallerSmokeFailure")?;
+    let sanitized_code = source
+        .code
+        .get(sanitized_range)
+        .context("sanitized installer smoke failure function offsets are invalid")?;
+    ensure!(
+        sanitized_code.contains("$InstallerSmokeStages -cnotcontains $Stage")
+            && sanitized_code
+                .contains("$AvailableMemoryBuckets -cnotcontains $MemoryBucket")
+            && sanitized_code.contains(
+                "$InstallerSmokeCleanupStatuses -cnotcontains $CurrentCleanupStatus",
+            )
+            && sanitized_code
+                .contains("$InstallerSmokeFailureClasses -ccontains $CandidateClass")
+            && sanitized_code
+                .contains("$ModelActivationExitClasses -ccontains $CandidateExitClass")
+            && sanitized_code
+                .contains("$ModelActivationErrorKinds -ccontains $CandidateErrorKind")
+            && sanitized_code
+                .contains("$ModelInstallErrorKinds -ccontains $CandidateErrorKind")
+            && sanitized_code.contains("-ne\n                    $IsInstallKind)")
+            && sanitized_code.contains(
+                "$ModelActivationElapsedBuckets -ccontains\n                    $CandidateElapsedBucket",
+            )
+            && !sanitized_code.contains("[regex]")
+            && !sanitized_code.contains(".Exception")
+            && !sanitized_code.contains("[Console]::")
+            && !sanitized_code.contains("Write-Output"),
+        "validated installer smoke must reduce only structured failures without writing raw errors"
+    );
+    let writer_record = r#"$Line = (
+        "WINDOWS_VALIDATED_INSTALLER_SMOKE_FAIL " +
+        "failure_class=$($Record.FailureClass) " +
+        "stage=$($Record.Stage) " +
+        "exit_class=$($Record.ExitClass) " +
+        "available_memory_bucket=$($Record.AvailableMemoryBucket) " +
+        "cleanup_status=$($Record.CleanupStatus)"
+    )"#;
+    ensure!(
+        powershell_executable_exact_in_function(
+            &source,
+            "Write-SanitizedInstallerSmokeFailure",
+            writer_record,
+            "$Line = (",
+        )? && powershell_executable_exact_in_function(
+            &source,
+            "Write-SanitizedInstallerSmokeFailure",
+            "    [Console]::Out.WriteLine($Line)",
+            "[Console]::Out.WriteLine($Line)",
+        )?,
+        "validated installer smoke terminal writer must emit only sanitized record fields"
+    );
+    let writer_range =
+        powershell_function_range(source.code.as_str(), "Write-SanitizedInstallerSmokeFailure")?;
+    let writer_code = source
+        .code
+        .get(writer_range)
+        .context("sanitized installer smoke writer offsets are invalid")?;
+    ensure!(
+        !writer_code.contains("$Failure")
+            && !writer_code.contains(".Exception")
+            && !writer_code.contains("ErrorOutput"),
+        "validated installer smoke terminal writer must not access raw failure data"
+    );
+    let captured_imports = r#"try {
+    . (Join-Path $PSScriptRoot "windows-runtime.ps1")
+    . (Join-Path $PSScriptRoot "windows-payload.ps1")"#;
+    ensure!(
+        powershell_executable_exact(&source, captured_imports, ". (Join-Path"),
+        "validated installer smoke must import helpers inside the sanitized failure boundary"
+    );
+    let captured_hash = r#"$script:TerminalStage = "complete"
+    $InstallerHash = (
+        Get-FileHash -LiteralPath $Installer -Algorithm SHA256
+    ).Hash.ToLowerInvariant()
+} catch {
+    $PrimaryFailed = $true"#;
+    ensure!(
+        powershell_executable_exact(&source, captured_hash, "Get-FileHash"),
+        "validated installer smoke must hash evidence inside the sanitized failure boundary"
+    );
+    let guarded_cleanup = r#"if ($InstalledByThisRun) {
+        $CleanupRequired = $false
+        try {
+            $CleanupRequired = $script:ProcessTerminationUnconfirmed -or
+                (Test-AnyManagedInstallState) -or
+                (@(Get-DesktopProcesses)).Count -ne 0
+        } catch {
+            $PrimaryFailed = $true
+            $CleanupStatus = "failed"
+        }"#;
+    ensure!(
+        powershell_executable_exact(&source, guarded_cleanup, "$CleanupRequired ="),
+        "validated installer smoke must guard cleanup-state evaluation inside finally"
+    );
+    let terminal_boundary = r#"if ($PrimaryFailed -or $CleanupStatus -eq "failed") {
+    try {
+        $SanitizedFailure = Get-SanitizedInstallerSmokeFailure $CleanupStatus
+        Write-SanitizedInstallerSmokeFailure $SanitizedFailure
+    } catch {
+        [Console]::Out.WriteLine(
+            "WINDOWS_VALIDATED_INSTALLER_SMOKE_FAIL failure_class=powershell_runtime stage=unknown exit_class=failure available_memory_bucket=unknown cleanup_status=unknown"
+        )
+    }
+    exit 1
+}"#;
+    ensure!(
+        powershell_executable_exact(
+            &source,
+            terminal_boundary,
+            "Write-SanitizedInstallerSmokeFailure",
+        ) && !source.code.contains(".Exception")
+            && !source.code.contains("ErrorOutput"),
+        "validated installer smoke must terminate only through the sanitized failure boundary"
+    );
+    ensure!(
+        powershell_executable_exact_in_function(
+            &source,
+            "Throw-SanitizedModelActivationFailure",
+            "    $FailureClass = if ($ModelInstallErrorKinds -ccontains $Failure.ErrorKind) {\n        \"model_install_failed\"\n    } else {\n        \"model_activation_failed\"\n    }\n    Set-StructuredInstallerSmokeFailure `\n        $FailureClass `\n        $Failure.ErrorKind `\n        $Failure.ElapsedBucket `\n        $Failure.ExitClass",
+            "Set-StructuredInstallerSmokeFailure",
+        )? && powershell_executable_exact_in_function(
+            &source,
+            "Throw-ModelRuntimeExitedBeforeReady",
+            "    Set-StructuredInstallerSmokeFailure `\n        \"runtime_exited_before_ready\" `\n        $null `\n        $null `\n        \"unknown\"",
+            "Set-StructuredInstallerSmokeFailure",
+        )? && powershell_executable_exact_in_function(
+            &source,
+            "Throw-IfDesktopExitedBeforeReady",
+            "    Set-StructuredInstallerSmokeFailure `\n        \"desktop_exited_before_ready\" `\n        $null `\n        $null `\n        $ExitClass",
+            "Set-StructuredInstallerSmokeFailure",
+        )? && powershell_executable_exact_in_function(
+            &source,
+            "Wait-ForModelsReady",
+            "    Set-StructuredInstallerSmokeFailure `\n        \"models_timeout\" `\n        $null `\n        $null `\n        \"failure\"",
+            "Set-StructuredInstallerSmokeFailure",
+        )?,
+        "validated installer smoke must preserve typed model failure classes structurally"
+    );
+    ensure!(
+        powershell_executable_exact(
+            &source,
+            "$ActivationStatusPath = Join-Path $ActivationLogDirectory \"model-activation-status.json\"\n    $ActivationStatusCursor = New-ActivationStatusCursor $ActivationStatusPath",
+            "$ActivationStatusPath =",
+        ),
+        "validated installer smoke must establish the durable activation status cursor before launch"
+    );
+    let model_readiness_stdin = r#"$ResponseLines = @($Body | & $Curl `
+            --silent `
+            --show-error `
+            --noproxy "*" `
+            --connect-timeout 2 `
+            --max-time $McpRequestTimeoutSeconds `
+            --header "Connection: close" `
+            --header "Content-Type: application/json" `
+            --header "Accept: application/json, text/event-stream" `
+            --data-binary "@-" `"#;
+    ensure!(
+        powershell_executable_exact_in_function(
+            &source,
+            "Wait-ForModelsReady",
+            model_readiness_stdin,
+            "$ResponseLines = @($Body | & $Curl `",
+        )?,
+        "validated installer smoke must send MCP JSON through stdin for Windows PowerShell 5"
+    );
+    let model_readiness_code = powershell_function(source.code.as_str(), "Wait-ForModelsReady")?;
+    ensure!(
+        model_readiness_code.matches("& $Curl").count() == 1
+            && model_readiness_code.matches("$Body").count() == 2
+            && !model_readiness_code.contains("--data-binary $Body"),
+        "validated installer smoke must not pass MCP JSON as a native argument"
+    );
+    let invoke = powershell_function(source.code.as_str(), "Invoke-Process")?;
+    let exact_start = "$Process = Start-Process -FilePath $Path -ArgumentList $Arguments -PassThru";
+    let bounded_wait = "$Process.WaitForExit($ProcessWaitMilliseconds)";
+    let mark_unconfirmed = "$script:ProcessTerminationUnconfirmed = $true";
+    let kill = "$Process.Kill()";
+    let cleanup_wait = "$Process.WaitForExit($ProcessCleanupWaitMilliseconds)";
+    let cleanup_timeout_throw = "throw ";
+    let mark_confirmed = "$script:ProcessTerminationUnconfirmed = $false";
+    let exit_code = "$ExitCode = $Process.ExitCode";
+    let dispose = "$Process.Dispose()";
+
+    let ordered_invoke_markers = [
+        exact_start,
+        bounded_wait,
+        mark_unconfirmed,
+        kill,
+        cleanup_wait,
+        cleanup_timeout_throw,
+        mark_confirmed,
+        exit_code,
+        dispose,
+    ];
+    let mut previous_offset = None;
+    for marker in ordered_invoke_markers {
+        let offset = invoke
+            .find(marker)
+            .with_context(|| format!("validated installer smoke must execute {marker}"))?;
+        ensure!(
+            previous_offset.is_none_or(|previous| previous < offset),
+            "validated installer smoke must retain exact-process recovery ordering"
+        );
+        previous_offset = Some(offset);
+    }
+    ensure!(
+        !invoke.contains("-Wait"),
+        "validated installer smoke must not wait for the installer child tree"
+    );
+
+    let stop_desktop = powershell_function(source.code.as_str(), "Stop-ExactDesktopProcess")?;
+    let stop_markers = [
+        "Assert-NoForeignDesktopProcess $ExpectedExecutable",
+        "$Process = [Diagnostics.Process]::GetProcessById([int] $Matches[0].ProcessId)",
+        "$SafeHandle = $Process.SafeHandle",
+        "Test-SamePath ([string] $Process.MainModule.FileName) $ExpectedExecutable",
+        "$Process.Kill()",
+        "$Process.WaitForExit($ProcessCleanupWaitMilliseconds)",
+        "$Process.Dispose()",
+        "(@(Get-DesktopProcesses)).Count -ne 0",
+    ];
+    let mut previous_stop_offset = None;
+    for marker in stop_markers {
+        let offset = stop_desktop.find(marker).with_context(|| {
+            format!("validated installer smoke must supervise exact desktop stop with {marker}")
+        })?;
+        ensure!(
+            previous_stop_offset.is_none_or(|previous| previous < offset),
+            "validated installer smoke must retain exact desktop stop ordering"
+        );
+        previous_stop_offset = Some(offset);
+    }
+    let remove_install =
+        powershell_function(source.code.as_str(), "Remove-ExactRegisteredInstall")?;
+    let remove_install_source =
+        powershell_function(source.normalized.as_str(), "Remove-ExactRegisteredInstall")?;
+    let get_uninstaller = remove_install
+        .find("$Uninstaller = Get-ExactRegisteredUninstaller")
+        .context("validated installer cleanup must revalidate the registered uninstaller")?;
+    let stop_exact = remove_install
+        .find("Stop-ExactDesktopProcess $DesktopExecutable")
+        .context("validated installer cleanup must stop only its exact desktop process")?;
+    let invoke_uninstaller = remove_install_source
+        .find("Invoke-Process $Uninstaller @(\"/S\") \"uninstaller\"")
+        .context("validated installer cleanup must invoke its validated uninstaller")?;
+    ensure!(
+        get_uninstaller < stop_exact && stop_exact < invoke_uninstaller,
+        "validated installer cleanup must validate, stop the exact process, then uninstall"
+    );
+
+    let cleanup = powershell_function(source.code.as_str(), "Invoke-AutomaticCleanup")?;
+    let recovery_gate = "if ($script:ProcessTerminationUnconfirmed) {";
+    let manual_recovery = "throw ";
+    let remove_install = "Remove-ExactRegisteredInstall";
+    let gate_offset = cleanup.find(recovery_gate).context(
+        "validated installer smoke must gate automatic cleanup on confirmed termination",
+    )?;
+    let manual_offset = cleanup.find(manual_recovery).context(
+        "validated installer smoke must require manual recovery when termination is unconfirmed",
+    )?;
+    let remove_offset = cleanup
+        .find(remove_install)
+        .context("validated installer smoke must retain exact automatic cleanup")?;
+    ensure!(
+        gate_offset < manual_offset && manual_offset < remove_offset,
+        "validated installer smoke must fail closed before automatic cleanup"
+    );
+    ensure!(
+        powershell_executable_exact(
+            &source,
+            "            $CleanupRequired = $script:ProcessTerminationUnconfirmed -or",
+            "$script:ProcessTerminationUnconfirmed",
+        ),
+        "validated installer smoke must enter recovery when termination is unconfirmed"
+    );
+    ensure!(
+        powershell_executable_exact(
+            &source,
+            "            Invoke-AutomaticCleanup",
+            "Invoke-AutomaticCleanup",
+        ),
+        "validated installer smoke must route recovery through the termination gate"
+    );
+    ensure!(
+        powershell_executable_exact(
+            &source,
+            "    $script:TerminalStage = \"models\"\n    Wait-ForModelsReady\n\n    $script:TerminalStage = \"uninstall_cleanup\"\n    Remove-ExactRegisteredInstall\n    $InstalledByThisRun = $false",
+            "Remove-ExactRegisteredInstall",
+        ),
+        "validated installer smoke must stop the exact desktop process before its successful uninstall"
+    );
+
+    let materialization =
+        powershell_function(source.code.as_str(), "Wait-ForExactRegisteredUninstaller")?;
+    let materialization_markers = [
+        "$Deadline = [DateTime]::UtcNow.AddMilliseconds($StateWaitMilliseconds)",
+        "return (Get-ExactRegisteredUninstaller)",
+        "Start-Sleep -Milliseconds 250",
+        "} while ([DateTime]::UtcNow -lt $Deadline)",
+        "throw ",
+    ];
+    let mut previous_materialization_offset = None;
+    for marker in materialization_markers {
+        let offset = materialization.find(marker).with_context(|| {
+            format!("validated installer smoke must execute bounded materialization step {marker}")
+        })?;
+        ensure!(
+            previous_materialization_offset.is_none_or(|previous| previous < offset),
+            "validated installer smoke must retain bounded materialization ordering"
+        );
+        previous_materialization_offset = Some(offset);
+    }
+    ensure!(
+        powershell_executable_exact(
+            &source,
+            "    $RegisteredUninstaller = Wait-ForExactRegisteredUninstaller",
+            "Wait-ForExactRegisteredUninstaller",
+        ),
+        "validated installer smoke must wait for the exact registered installation"
+    );
+    Ok(())
 }
 
 fn verify_powershell_mutation_process_guards(code: &str) -> Result<()> {
     let mutation_starts = [
         "Start-Process ",
         "[IO.File]::WriteAllText(",
+        "Copy-Item ",
+        "Move-Item ",
         "New-Item ",
         "New-ItemProperty ",
         "Remove-Item ",
@@ -3092,9 +3688,21 @@ fn verify_windows_installer_smoke_sources(smoke: &str) -> Result<()> {
             )
             && code
                 .contains("$ProgramDataRoot = (Resolve-Path -LiteralPath $env:ProgramData).Path")
+            && code
+                .contains("$LocalAppDataRoot = (Resolve-Path -LiteralPath $env:LOCALAPPDATA).Path")
+            && source
+                .normalized
+                .contains("$ProgramsRoot = Join-Path $LocalAppDataRoot \"Programs\"")
+            && source
+                .normalized
+                .contains("$InstallDir = Join-Path $ProgramsRoot \"AirWiki\"")
+            && source.normalized.contains(
+                "$OwnerMarker = Join-Path $ProgramDataRoot \"airwiki-installer-gate-$RunSuffix.owner\""
+            )
+            && code.contains("-AllowedRoot $ProgramsRoot")
             && code.contains("[IO.Path]::IsPathRooted($InstallDir)")
             && code.contains("$InstallDir -match"),
-        "Windows built-installer smoke matrix must gate the host before any owned state under resolved ProgramData"
+        "Windows built-installer smoke matrix must gate the host, use the fixed binary path, and keep separate ProgramData deletion authority"
     );
     ensure!(
         powershell_executable_exact(
@@ -3509,6 +4117,81 @@ fn verify_windows_installer_smoke_sources(smoke: &str) -> Result<()> {
         "Windows built-installer smoke matrix must check the restart precondition, supervise the exact updater handoff, and recover without broad process ownership"
     );
 
+    let invoke_uninstaller = powershell_function(code, "Invoke-UninstallerCase")?;
+    ensure!(
+        invoke_uninstaller.contains("Assert-MutationProcessPrecondition $CaseId")
+            && invoke_uninstaller.contains("$Process = Start-Process `")
+            && invoke_uninstaller.contains("$Process.WaitForExit($InstallerWaitMilliseconds)")
+            && invoke_uninstaller.contains("$Process.WaitForExit($ProcessCleanupWaitMilliseconds)")
+            && invoke_uninstaller.contains("$Process.Kill()")
+            && invoke_uninstaller.contains("$Process.Dispose()")
+            && invoke_uninstaller.contains("$ExitCode -ne $ExpectedExit")
+            && !invoke_uninstaller.contains("-Wait"),
+        "Windows uninstaller authority cases must use a retained bounded process and exact exit code"
+    );
+    let start_lock = powershell_function(code, "Start-DeleteLockProcess")?;
+    let start_lock_source = powershell_function(smoke, "Start-DeleteLockProcess")?;
+    let stop_fixture = powershell_function(code, "Stop-OwnedFixtureProcess")?;
+    ensure!(
+        start_lock.contains("Assert-MutationProcessPrecondition $CaseId")
+            && start_lock.contains("$Process = Start-Process `")
+            && start_lock.contains("-FilePath $PowerShellExecutable")
+            && start_lock_source.contains("\"-File\"")
+            && start_lock_source.contains("\"`\"$DeleteLockHelper`\"\"")
+            && start_lock_source.contains("\"`\"$ReadyMarker`\"\"")
+            && start_lock_source.contains("[string] $HoldMilliseconds")
+            && start_lock.contains("$Process.HasExited")
+            && start_lock.contains("Stop-OwnedFixtureProcess $Process")
+            && stop_fixture.contains("if (-not $Process.HasExited)")
+            && stop_fixture.contains("$Process.Kill()")
+            && stop_fixture.contains("$Process.WaitForExit($ProcessCleanupWaitMilliseconds)")
+            && stop_fixture.contains("$Process.Dispose()"),
+        "Windows uninstaller lock fixtures must retain and bound only their exact helper processes"
+    );
+    ensure!(
+        powershell_executable_exact(
+            &source,
+            "Invoke-UninstallerCase `\n            $CopiedUninstaller `\n            @(\"/S\", \"_?=$CopiedUninstallerRoot\") `\n            2 `\n            $CurrentCase",
+            "Invoke-UninstallerCase",
+        ) && powershell_executable_exact(
+            &source,
+            "Invoke-UninstallerCase `\n            $InstalledUninstaller `\n            @(\"/S\", \"_?=$OverrideUninstallerRoot\") `\n            2 `\n            $CurrentCase",
+            "Invoke-UninstallerCase",
+        ) && powershell_executable_exact(
+            &source,
+            "New-Item -ItemType Junction -Path $InstalledLlamaRoot -Target $ReparseTarget `\n                -ErrorAction Stop | Out-Null\n            Invoke-UninstallerCase `\n                $InstalledUninstaller `\n                @(\"/S\", \"_?=$InstallDir\") `\n                2 `\n                $CurrentCase",
+            "New-Item -ItemType Junction",
+        ) && powershell_executable_exact(
+            &source,
+            "$OwnedDeleteLockProcess = Start-DeleteLockProcess `\n                $DesktopExecutable `\n                $SustainedLockReady `\n                30000 `\n                $CurrentCase\n            Invoke-UninstallerCase `\n                $InstalledUninstaller `\n                @(\"/S\", \"_?=$InstallDir\") `\n                2 `\n                $CurrentCase",
+            "$OwnedDeleteLockProcess = Start-DeleteLockProcess",
+        ) && powershell_executable_exact(
+            &source,
+            "$OwnedDeleteLockProcess = Start-DeleteLockProcess `\n            $DesktopExecutable `\n            $ReleasedLockReady `\n            5000 `\n            $CurrentCase\n        Invoke-UninstallerCase $InstalledUninstaller @(\"/S\") 0 $CurrentCase",
+            "$OwnedDeleteLockProcess = Start-DeleteLockProcess",
+        ) && powershell_executable_exact(
+            &source,
+            "if ($OwnedForeignProcess.HasExited) {\n            throw \"uninstaller terminated a foreign homonym process\"\n        }",
+            "if ($OwnedForeignProcess.HasExited)",
+        ) && code
+            .matches("Assert-DataRootPresence $DataRootPresence")
+            .count()
+            == 5,
+        "Windows uninstaller smoke must reject copied, overridden, reparse, and sustained-lock cases, then pass released-lock cleanup without killing a foreign homonym"
+    );
+    ensure!(
+        powershell_executable_exact(
+            &source,
+            "Invoke-CleanupStep \"uninstaller-fixture-processes\" {\n            Stop-OwnedFixtureProcess $OwnedDeleteLockProcess \"delete-lock fixture\"\n            $script:OwnedDeleteLockProcess = $null\n            Stop-OwnedFixtureProcess $OwnedForeignProcess \"foreign homonym fixture\"\n            $script:OwnedForeignProcess = $null\n        }",
+            "Invoke-CleanupStep",
+        ) && powershell_executable_exact(
+            &source,
+            "Invoke-CleanupStep \"uninstaller-authority-fixture\" {\n                Assert-OwnedUninstallerAuthorityFixture\n                Assert-MutationProcessPrecondition $CurrentCase\n                Remove-AirWikiWindowsStagingPath `",
+            "Invoke-CleanupStep",
+        ),
+        "Windows uninstaller fixture processes and owned staging must recover independently"
+    );
+
     ensure!(
         powershell_executable_exact(
             &source,
@@ -3649,6 +4332,18 @@ fn verify_windows_installer_preflight_sources(template: &str) -> Result<()> {
         ),
         "NSIS classifier must reject WiX and NSIS coexistence"
     );
+    ensure!(
+        classify.contains("ReadRegStr $7 SHCTX \"${MANUPRODUCTKEY}\" \"\"")
+            && classify.contains(
+                "    ${If} $NsisMetadataState == \"${NSIS_METADATA_ABSENT}\"\n      ${If} $7 != \"\"\n        Goto classify_reject"
+            )
+            && classify.contains("StrCpy $8 \"$\\\"$7$\\\"\"")
+            && classify.contains("StrCmp $4 $8 0 classify_reject")
+            && classify.contains("StrCpy $8 \"$\\\"$7\\uninstall.exe$\\\"\"")
+            && classify.contains("StrCmp $5 $8 0 classify_reject")
+            && classify.contains("StrCpy $ExistingNsisInstallLocation $7"),
+        "NSIS classifier must reject orphaned or incoherent product install locations"
+    );
 
     let init = nsis_function(template, ".onInit")?;
     let first_action = init
@@ -3680,14 +4375,25 @@ fn verify_windows_installer_preflight_sources(template: &str) -> Result<()> {
     let restore = init
         .find("Call RestorePreviousInstallLocation")
         .context("NSIS install-location restoration marker is missing")?;
+    let validate_location = init
+        .find("Call ValidateInstallLocation")
+        .context("NSIS must validate the effective install location from .onInit")?;
     ensure!(
         platform_call < option_parse
             && option_parse < context
             && context < classify_call
             && classify_call < policy_call
-            && policy_call < language
-            && policy_call < restore,
-        "NSIS platform and version policy must run before the language selector and every write"
+            && policy_call < restore
+            && restore < validate_location
+            && validate_location < language,
+        "NSIS platform, version, and install-location policy must run before every page and write"
+    );
+    let restore_function = nsis_function(template, "RestorePreviousInstallLocation")?;
+    ensure!(
+        restore_function.contains(
+            "  ${If} $ExistingInstallKind == \"nsis\"\n    StrCpy $INSTDIR $ExistingNsisInstallLocation\n  ${EndIf}"
+        ) && !restore_function.contains("ReadRegStr"),
+        "NSIS may restore only the coherent install location accepted by its classifier"
     );
     ensure!(
         !nsis_function(template, "PageReinstall")?.contains("nsis_tauri_utils::SemverCompare"),
@@ -3902,6 +4608,64 @@ fn verify_windows_uninstaller_sources(config: &str, template: &str) -> Result<()
         template.contains("cargo-packager 0.11.8's default NSIS template"),
         "the managed NSIS template must record its pinned upstream base"
     );
+    ensure!(
+        template.contains("StrCpy $INSTDIR \"$LOCALAPPDATA\\Programs\\${PRODUCTNAME}\"")
+            && !template
+                .lines()
+                .map(str::trim)
+                .any(|line| line == "StrCpy $INSTDIR \"$LOCALAPPDATA\\${PRODUCTNAME}\""),
+        "Windows per-user binaries must not overlap the case-insensitive AirWiki data root"
+    );
+    let reject_location = nsis_function(template, "RejectUnsafeInstallLocation")?;
+    ensure!(
+        reject_location.contains("IfSilent unsafe_install_location_abort")
+            && reject_location
+                .contains("MessageBox MB_OK|MB_ICONSTOP \"$(UnsafeInstallLocation)\"")
+            && reject_location.contains("SetErrorLevel 2")
+            && reject_location.contains("Abort"),
+        "Windows installer must reject an unsafe location without writing or exposing raw paths"
+    );
+    let location_guard = nsis_function(template, "ValidateInstallLocation")?;
+    ensure!(
+        location_guard.contains("GetFullPathName $0 \"$LOCALAPPDATA\"")
+            && location_guard.contains("StrCpy $0 \"$0\\Programs\\${PRODUCTNAME}\"")
+            && location_guard.contains("StrCpy $1 \"$INSTDIR\"")
+            && location_guard.matches("${StrCase} $0 $0 \"L\"").count() == 1
+            && location_guard.matches("${StrCase} $1 $1 \"L\"").count() == 1
+            && location_guard
+                .contains("StrCmp $0 $1 install_location_valid unsafe_install_location")
+            && location_guard.contains(
+                "System::Call 'kernel32::GetFileAttributesW(w \"$LOCALAPPDATA\\Programs\")i .r2'"
+            )
+            && location_guard.contains(
+                "System::Call 'kernel32::GetFileAttributesW(w \"$LOCALAPPDATA\\Programs\\${PRODUCTNAME}\")i .r2'"
+            )
+            && location_guard.matches("IntOp $3 $2 & 0x0400").count() == 2
+            && location_guard.contains("Call RejectUnsafeInstallLocation"),
+        "Windows installer must accept only the exact fixed binary path and reject existing reparse components"
+    );
+    ensure!(
+        !template.contains("!insertmacro MUI_PAGE_DIRECTORY"),
+        "Windows installer must not offer a directory page that can bypass the fixed binary path"
+    );
+    let install_start = template
+        .find("Section Install")
+        .context("NSIS template has no install section")?;
+    let install_end = template[install_start..]
+        .find("SectionEnd")
+        .map(|offset| install_start + offset)
+        .context("NSIS install section is not terminated")?;
+    let install = &template[install_start..install_end];
+    let final_location_guard = install
+        .find("Call ValidateInstallLocation")
+        .context("NSIS install section must revalidate the final directory selection")?;
+    let first_install_write = install
+        .find("SetOutPath $INSTDIR")
+        .context("NSIS install section has no output path")?;
+    ensure!(
+        final_location_guard < first_install_write,
+        "Windows installer must validate the final effective path before its first write"
+    );
 
     let uninstall_start = template
         .find("Section Uninstall")
@@ -3911,6 +4675,60 @@ fn verify_windows_uninstaller_sources(config: &str, template: &str) -> Result<()
         .map(|offset| uninstall_start + offset)
         .context("NSIS uninstall section is not terminated")?;
     let uninstall = &template[uninstall_start..uninstall_end];
+
+    let uninstall_init = nsis_function(template, "un.onInit")?;
+    let language_init = uninstall_init
+        .find("!insertmacro MUI_UNGETLANGUAGE")
+        .context("uninstaller must initialize its language before a localized rejection")?;
+    let authority_call = uninstall_init
+        .find("Call un.ValidateUninstallAuthority")
+        .context("uninstaller must validate its fixed-path authority before cleanup")?;
+    let tree_call = uninstall_init
+        .find("Call un.ValidateManagedPayloadTree")
+        .context("uninstaller must validate its managed payload tree before cleanup")?;
+    ensure!(
+        language_init < authority_call && authority_call < tree_call,
+        "uninstaller authority and payload-tree validation must precede cleanup"
+    );
+    let uninstall_authority = nsis_function(template, "un.ValidateUninstallAuthority")?;
+    ensure!(
+        uninstall_authority.contains("GetFullPathName $0 \"$LOCALAPPDATA\"")
+            && uninstall_authority.contains("StrCpy $0 \"$0\\Programs\\${PRODUCTNAME}\"")
+            && uninstall_authority.contains("GetFullPathName $1 \"$INSTDIR\"")
+            && uninstall_authority.contains("kernel32::lstrcmpiW(w r0, w r1)")
+            && uninstall_authority
+                .contains("kernel32::GetFileAttributesW(w \"$LOCALAPPDATA\\Programs\")")
+            && uninstall_authority.contains("kernel32::GetFileAttributesW(w \"$INSTDIR\")")
+            && uninstall_authority
+                .contains("kernel32::GetFileAttributesW(w \"$INSTDIR\\uninstall.exe\")")
+            && uninstall_authority.matches("IntOp $3 $2 & 0x0400").count() == 3
+            && uninstall_authority.contains(
+                "IntOp $3 $2 & 0x0010\n  StrCmp $3 0 uninstall_binary_reparse untrusted_uninstall_state\n  uninstall_binary_reparse:\n  IntOp $3 $2 & 0x0400\n  StrCmp $3 0 uninstall_registry_authority untrusted_uninstall_state"
+            )
+            && uninstall_authority.contains("ReadRegStr $0 SHCTX \"${UNINSTKEY}\" \"DisplayName\"")
+            && uninstall_authority.contains("ReadRegStr $0 SHCTX \"${UNINSTKEY}\" \"Publisher\"")
+            && uninstall_authority
+                .contains("ReadRegStr $0 SHCTX \"${UNINSTKEY}\" \"DisplayVersion\"")
+            && uninstall_authority
+                .contains("ReadRegStr $0 SHCTX \"${UNINSTKEY}\" \"InstallLocation\"")
+            && uninstall_authority
+                .contains("ReadRegStr $0 SHCTX \"${UNINSTKEY}\" \"UninstallString\"")
+            && uninstall_authority.contains("ReadRegStr $0 SHCTX \"${MANUPRODUCTKEY}\" \"\"")
+            && uninstall_authority.contains("Call un.RejectUntrustedUninstallState"),
+        "uninstaller must bind authority to the fixed non-reparse path and coherent registry"
+    );
+    let payload_tree = nsis_function(template, "un.ValidateManagedPayloadTree")?;
+    ensure!(
+        payload_tree
+            .contains("Push \"$INSTDIR\\${MAINBINARYNAME}.exe\"\n  Call un.ValidateManagedPath")
+            && payload_tree
+                .contains("Push \"$INSTDIR\\uninstall.exe\"\n  Call un.ValidateManagedPath")
+            && payload_tree
+                .contains("Push \"$INSTDIR\\\\{{this}}\"\n    Call un.ValidateManagedPath")
+            && payload_tree
+                .contains("Push \"$INSTDIR\\integrations\"\n  Call un.ValidateManagedPath"),
+        "uninstaller must reject descendant reparses before its first cleanup mutation"
+    );
 
     let autostart_read = uninstall
         .find("ReadRegStr $R0 HKCU \"${AUTOSTARTKEY}\" \"${AUTOSTARTVALUENAME}\"")
@@ -3976,6 +4794,61 @@ fn verify_windows_uninstaller_sources(config: &str, template: &str) -> Result<()
         !template.contains("SendMessage $RemoveFirewallCheckbox ${BM_SETCHECK}")
             && !template.contains("SendMessage $DeleteAppDataCheckbox ${BM_SETCHECK}"),
         "firewall and data deletion choices must remain unchecked by default"
+    );
+
+    let remove_file = nsis_function(template, "un.RemoveManagedFile")?;
+    ensure!(
+        remove_file.contains("Push \"$ManagedPayloadPath\"\n    Call un.ValidateManagedPath")
+            && remove_file.contains("Delete \"$ManagedPayloadPath\"")
+            && remove_file
+                .contains("IfFileExists \"$ManagedPayloadPath\" 0 managed_file_remove_done")
+            && remove_file.contains("${If} $ManagedPayloadAttempts >= ${PAYLOAD_REMOVAL_ATTEMPTS}")
+            && remove_file.contains("Sleep ${PAYLOAD_REMOVAL_DELAY_MS}")
+            && remove_file.contains("SetErrorLevel 2")
+            && remove_file.contains("Abort \"$(installedPayloadRemovalFailed)\""),
+        "Windows uninstaller must retry exact managed file removal and fail closed"
+    );
+    let remove_directory = nsis_function(template, "un.RemoveManagedDirectory")?;
+    ensure!(
+        remove_directory.contains("Push \"$ManagedPayloadPath\"\n    Call un.ValidateManagedPath")
+            && remove_directory.contains("RMDir \"$ManagedPayloadPath\"")
+            && remove_directory.contains(
+                "IfFileExists \"$ManagedPayloadPath\\*.*\" 0 managed_directory_remove_done"
+            )
+            && remove_directory
+                .contains("${If} $ManagedPayloadAttempts >= ${PAYLOAD_REMOVAL_ATTEMPTS}")
+            && remove_directory.contains("Sleep ${PAYLOAD_REMOVAL_DELAY_MS}")
+            && remove_directory.contains("SetErrorLevel 2")
+            && remove_directory.contains("Abort \"$(installedPayloadRemovalFailed)\""),
+        "Windows uninstaller must retry exact managed directory removal and fail closed"
+    );
+    let managed_path = nsis_function(template, "un.ValidateManagedPath")?;
+    ensure!(
+        managed_path.contains("kernel32::GetFileAttributesW(w \"$ManagedValidationPath\")")
+            && managed_path.contains("IntOp $3 $2 & 0x0400")
+            && managed_path
+                .contains("kernel32::lstrcmpiW(w \"$ManagedValidationPath\", w \"$INSTDIR\")")
+            && managed_path
+                .contains("${GetParent} \"$ManagedValidationPath\" $ManagedValidationParent")
+            && managed_path.contains("Call un.RejectUntrustedUninstallState"),
+        "managed payload removal must reject reparses in every descendant path component"
+    );
+    ensure!(
+        !uninstall.contains("!insertmacro CheckIfAppIsRunning")
+            && !uninstall.contains("nsis_tauri_utils::KillProcess"),
+        "uninstaller must not find or terminate processes by executable name"
+    );
+    ensure!(
+        uninstall.contains("Push \"$INSTDIR\\${MAINBINARYNAME}.exe\"\n  Call un.RemoveManagedFile")
+            && uninstall.contains("Push \"$INSTDIR\\\\{{this}}\"\n    Call un.RemoveManagedFile")
+            && uninstall.contains("Push \"$INSTDIR\\uninstall.exe\"\n  Call un.RemoveManagedFile")
+            && uninstall.contains(
+                "{{#each resources_dirs}}\n  Push \"$INSTDIR\\\\{{this}}\"\n  {{/each}}\n  ; Pop the sorted directory list in reverse so children are removed first.\n  {{#each resources_dirs}}\n  Call un.RemoveManagedDirectory\n  {{/each}}"
+            )
+            && uninstall
+                .contains("Push \"$INSTDIR\\integrations\"\n  Call un.RemoveManagedDirectory")
+            && uninstall.contains("Push \"$INSTDIR\"\n  Call un.RemoveManagedDirectory"),
+        "Windows uninstaller must route every managed payload class through bounded removal"
     );
 
     let data_cleanup = uninstall
@@ -4128,6 +5001,110 @@ mod tests {
         let (config, template) = windows_uninstaller_sources();
 
         verify_windows_uninstaller_sources(&config, &template).unwrap();
+    }
+
+    #[test]
+    fn windows_uninstaller_rejects_unbounded_managed_file_removal() {
+        let (config, template) = windows_uninstaller_sources();
+        let unsafe_template = template.replacen(
+            "    Sleep ${PAYLOAD_REMOVAL_DELAY_MS}\n    Goto managed_file_remove_retry",
+            "    Goto managed_file_remove_retry",
+            1,
+        );
+        assert_ne!(
+            unsafe_template, template,
+            "managed file removal retry fixture did not match"
+        );
+
+        let error = verify_windows_uninstaller_sources(&config, &unsafe_template).unwrap_err();
+
+        assert!(error.to_string().contains("managed file removal"));
+    }
+
+    #[test]
+    fn windows_uninstaller_rejects_direct_payload_deletion() {
+        let (config, template) = windows_uninstaller_sources();
+        let unsafe_template = template.replacen(
+            "  Push \"$INSTDIR\\${MAINBINARYNAME}.exe\"\n  Call un.RemoveManagedFile",
+            "  Delete \"$INSTDIR\\${MAINBINARYNAME}.exe\"",
+            1,
+        );
+        assert_ne!(
+            unsafe_template, template,
+            "managed payload routing fixture did not match"
+        );
+
+        let error = verify_windows_uninstaller_sources(&config, &unsafe_template).unwrap_err();
+
+        assert!(error.to_string().contains("every managed payload class"));
+    }
+
+    #[test]
+    fn windows_uninstaller_rejects_missing_fixed_path_authority() {
+        let (config, template) = windows_uninstaller_sources();
+        let unsafe_template = template.replacen("  Call un.ValidateUninstallAuthority\n", "", 1);
+        assert_ne!(
+            unsafe_template, template,
+            "uninstall authority fixture did not match"
+        );
+
+        let error = verify_windows_uninstaller_sources(&config, &unsafe_template).unwrap_err();
+
+        assert!(error.to_string().contains("fixed-path authority"));
+    }
+
+    #[test]
+    fn windows_uninstaller_rejects_a_reparse_bypass_in_binary_authority() {
+        let (config, template) = windows_uninstaller_sources();
+        let unsafe_template = template.replacen(
+            "  StrCmp $3 0 uninstall_binary_reparse untrusted_uninstall_state\n  uninstall_binary_reparse:\n",
+            "  StrCmp $3 0 +2 untrusted_uninstall_state\n  uninstall_binary_reparse:\n",
+            1,
+        );
+        assert_ne!(
+            unsafe_template, template,
+            "uninstaller binary reparse control-flow fixture did not match"
+        );
+
+        let error = verify_windows_uninstaller_sources(&config, &unsafe_template).unwrap_err();
+
+        assert!(error.to_string().contains("fixed non-reparse path"));
+    }
+
+    #[test]
+    fn windows_uninstaller_rejects_missing_descendant_reparse_validation() {
+        let (config, template) = windows_uninstaller_sources();
+        let unsafe_template = template.replacen(
+            "    ${GetParent} \"$ManagedValidationPath\" $ManagedValidationParent\n",
+            "",
+            1,
+        );
+        assert_ne!(
+            unsafe_template, template,
+            "descendant reparse validation fixture did not match"
+        );
+
+        let error = verify_windows_uninstaller_sources(&config, &unsafe_template).unwrap_err();
+
+        assert!(error.to_string().contains("descendant path component"));
+    }
+
+    #[test]
+    fn windows_uninstaller_rejects_name_based_process_termination() {
+        let (config, template) = windows_uninstaller_sources();
+        let unsafe_template = template.replacen(
+            "Section Uninstall\n",
+            "Section Uninstall\n  !insertmacro CheckIfAppIsRunning\n",
+            1,
+        );
+        assert_ne!(
+            unsafe_template, template,
+            "name-based process termination fixture did not match"
+        );
+
+        let error = verify_windows_uninstaller_sources(&config, &unsafe_template).unwrap_err();
+
+        assert!(error.to_string().contains("executable name"));
     }
 
     #[test]
@@ -4663,8 +5640,8 @@ mod tests {
     fn windows_installer_preflight_smoke_guards_uninstaller_invocations_immediately() {
         let smoke = windows_installer_smoke_source();
         verify_windows_installer_smoke_sources(&smoke).unwrap();
-        let sink = "        $UninstallProcess = Start-Process `";
-        let unsafe_smoke = smoke.replacen(sink, &format!("        $null = Get-Date\n{sink}"), 1);
+        let sink = "    $Process = Start-Process `\n        -FilePath $Executable `";
+        let unsafe_smoke = smoke.replacen(sink, &format!("    $null = Get-Date\n{sink}"), 1);
         assert_ne!(
             unsafe_smoke, smoke,
             "uninstaller precondition fixture did not match"
@@ -5577,18 +6554,18 @@ mod tests {
     fn windows_installer_preflight_precedes_the_first_runtime_write() {
         let (template, _) = windows_update_handoff_sources();
         let unsafe_template = template.replacen(
-            "  Call EnforceInstallPolicy\n\n  !if \"${DISPLAYLANGUAGESELECTOR}\" == \"true\"\n    !insertmacro MUI_LANGDLL_DISPLAY\n  !endif",
-            "  !if \"${DISPLAYLANGUAGESELECTOR}\" == \"true\"\n    !insertmacro MUI_LANGDLL_DISPLAY\n  !endif\n\n  Call EnforceInstallPolicy",
+            "  Call ValidateInstallLocation\n\n  !if \"${DISPLAYLANGUAGESELECTOR}\" == \"true\"\n    !insertmacro MUI_LANGDLL_DISPLAY\n  !endif",
+            "  !if \"${DISPLAYLANGUAGESELECTOR}\" == \"true\"\n    !insertmacro MUI_LANGDLL_DISPLAY\n  !endif\n\n  Call ValidateInstallLocation",
             1,
+        );
+        assert_ne!(
+            unsafe_template, template,
+            "pre-page install-location fixture did not match"
         );
 
         let error = verify_windows_installer_preflight_sources(&unsafe_template).unwrap_err();
 
-        assert!(
-            error
-                .to_string()
-                .contains("before the language selector and every write")
-        );
+        assert!(error.to_string().contains("before every page and write"));
     }
 
     #[test]
@@ -5933,6 +6910,87 @@ mod tests {
     }
 
     #[test]
+    fn windows_installer_rejects_a_per_user_path_that_overlaps_appdata() {
+        let (config, template) = windows_uninstaller_sources();
+        let unsafe_template = template.replace(
+            "StrCpy $INSTDIR \"$LOCALAPPDATA\\Programs\\${PRODUCTNAME}\"",
+            "StrCpy $INSTDIR \"$LOCALAPPDATA\\${PRODUCTNAME}\"",
+        );
+        assert_ne!(
+            unsafe_template, template,
+            "per-user install path fixture did not match"
+        );
+
+        let error = verify_windows_uninstaller_sources(&config, &unsafe_template).unwrap_err();
+
+        assert!(error.to_string().contains("must not overlap"));
+    }
+
+    #[test]
+    fn windows_installer_rejects_restoring_an_unclassified_product_path() {
+        let template =
+            fs::read_to_string(workspace_root().join("packaging/windows/installer.nsi")).unwrap();
+        let unsafe_template = template.replace(
+            "  ${If} $ExistingInstallKind == \"nsis\"\n    StrCpy $INSTDIR $ExistingNsisInstallLocation\n  ${EndIf}",
+            "  ReadRegStr $4 SHCTX \"${MANUPRODUCTKEY}\" \"\"\n  StrCpy $INSTDIR $4",
+        );
+        assert_ne!(
+            unsafe_template, template,
+            "classified restore fixture did not match"
+        );
+
+        let error = verify_windows_installer_preflight_sources(&unsafe_template).unwrap_err();
+
+        assert!(error.to_string().contains("restore only the coherent"));
+    }
+
+    #[test]
+    fn windows_installer_rejects_a_missing_final_runtime_overlap_guard() {
+        let (config, template) = windows_uninstaller_sources();
+        let unsafe_template = template.replacen(
+            "Section Install\n  ; Revalidate the effective command-line/default path before every write.\n  Call ValidateInstallLocation",
+            "Section Install",
+            1,
+        );
+        assert_ne!(
+            unsafe_template, template,
+            "final install-location guard fixture did not match"
+        );
+
+        let error = verify_windows_uninstaller_sources(&config, &unsafe_template).unwrap_err();
+
+        assert!(error.to_string().contains("revalidate the final"));
+    }
+
+    #[test]
+    fn windows_installer_rejects_case_sensitive_overlap_validation() {
+        let (config, template) = windows_uninstaller_sources();
+        let unsafe_template = template.replacen("  ${StrCase} $0 $0 \"L\"", "  StrCpy $0 $0", 1);
+        assert_ne!(
+            unsafe_template, template,
+            "case-insensitive install-location fixture did not match"
+        );
+
+        let error = verify_windows_uninstaller_sources(&config, &unsafe_template).unwrap_err();
+
+        assert!(error.to_string().contains("exact fixed binary path"));
+    }
+
+    #[test]
+    fn windows_installer_rejects_a_missing_reparse_component_guard() {
+        let (config, template) = windows_uninstaller_sources();
+        let unsafe_template = template.replacen("  IntOp $3 $2 & 0x0400\n", "", 1);
+        assert_ne!(
+            unsafe_template, template,
+            "reparse-component fixture did not match"
+        );
+
+        let error = verify_windows_uninstaller_sources(&config, &unsafe_template).unwrap_err();
+
+        assert!(error.to_string().contains("reparse components"));
+    }
+
+    #[test]
     fn windows_uninstaller_rejects_a_second_autostart_mutation() {
         let (config, template) = windows_uninstaller_sources();
         let unsafe_template = template.replacen(
@@ -6213,6 +7271,49 @@ mod tests {
     }
 
     #[test]
+    fn azure_beta_replacement_keeps_its_target_across_helper_calls() {
+        let script =
+            fs::read_to_string(workspace_root().join("packaging/federation-index/azure-beta.sh"))
+                .unwrap();
+        let replacement = script
+            .split_once("replace_node() {")
+            .unwrap()
+            .1
+            .split_once("\nrequire_private_key() {")
+            .unwrap()
+            .0;
+
+        assert!(replacement.contains("replacement_group="));
+        assert!(replacement.contains("replacement_region="));
+        assert!(replacement.contains("replacement_node="));
+        assert!(replacement.contains("--name \"${replacement_group}\""));
+        assert!(replacement.contains(
+            "\"${replacement_group}\" \"${replacement_region}\" \"${replacement_node}\""
+        ));
+        assert!(!replacement.contains("--name \"${group}\""));
+        assert!(!replacement.contains("provision_node_group \"${group}\""));
+    }
+
+    #[test]
+    fn azure_beta_budget_preserves_an_existing_immutable_start_date() {
+        let script =
+            fs::read_to_string(workspace_root().join("packaging/federation-index/azure-beta.sh"))
+                .unwrap();
+        let budget = script
+            .split_once("create_budget() {")
+            .unwrap()
+            .1
+            .split_once("\nrollback_new_groups() {")
+            .unwrap()
+            .0;
+
+        assert!(budget.contains("existing_budget="));
+        assert!(budget.contains(".properties.timePeriod.startDate"));
+        assert!(budget.contains("fromdateiso8601"));
+        assert!(budget.contains("--arg start_date \"${start_date}\""));
+    }
+
+    #[test]
     fn macos_package_matches_fresh_build_by_uuid_and_architecture() {
         let script =
             fs::read_to_string(workspace_root().join("packaging/package-macos.sh")).unwrap();
@@ -6238,7 +7339,7 @@ mod tests {
     }
 
     #[test]
-    fn macos_packaging_supports_development_and_release_signing() {
+    fn macos_packaging_supports_adhoc_development_and_release_signing() {
         let root = workspace_root();
         let config = fs::read_to_string(root.join("packaging/macos/Packager.toml")).unwrap();
         let script = fs::read_to_string(root.join("packaging/package-macos.sh")).unwrap();
@@ -6247,17 +7348,39 @@ mod tests {
             !config.contains("signingIdentity")
                 && config.contains("./packaging/sign-macos-bridge.sh")
                 && script.contains("SIGNING_IDENTITY=${AIRWIKI_SIGNING_IDENTITY:--}")
+                && script.contains("SIGNING_PURPOSE=${AIRWIKI_SIGNING_PURPOSE:-}")
+                && script.contains("SIGNING_PURPOSE=adhoc")
+                && script.contains("SIGNING_PURPOSE=release")
+                && script.contains("development | release)")
                 && script.contains(
                     "codesign --force --sign \"$SIGNING_IDENTITY\" --options runtime --timestamp"
                 )
                 && script.contains("Contents/_CodeSignature/CodeResources")
                 && script.contains("codesign --verify --deep --strict")
                 && script.contains("Signature=adhoc")
+                && script.contains("Authority=Apple Development:")
                 && script.contains("Authority=Developer ID Application:")
                 && script.contains("Runtime Version=")
                 && script.contains("Sealed Resources version=")
                 && !script.contains("codesign --force --deep")
         );
+    }
+
+    #[test]
+    fn macos_packaging_validates_signing_purpose_before_mutating_staging() {
+        let script =
+            fs::read_to_string(workspace_root().join("packaging/package-macos.sh")).unwrap();
+        let purpose_validation = script
+            .find("case \"$SIGNING_PURPOSE\" in")
+            .expect("signing-purpose validation must exist");
+        let staging_cleanup = script
+            .find("rm -rf -- \"$APP\"")
+            .expect("staging cleanup must exist");
+
+        assert!(purpose_validation < staging_cleanup);
+        assert!(script.contains("ad-hoc packaging must use the ad-hoc signing identity"));
+        assert!(script.contains("identified packaging requires a non-ad-hoc signing identity"));
+        assert!(script.contains("AIRWIKI_SIGNING_PURPOSE must be adhoc, development or release"));
     }
 
     #[test]
@@ -7302,5 +8425,423 @@ mod tests {
                 && signed.contains("AIRWIKI_USE_PREBUILT_MCPB")
                 && signed.contains("Get-VerifiedWindowsRegularFile $Mcpb")
         );
+    }
+
+    #[test]
+    fn validated_installer_smoke_waits_for_the_exact_installer_process() {
+        let smoke = fs::read_to_string(
+            workspace_root().join("packaging/smoke-validated-windows-installer.ps1"),
+        )
+        .unwrap();
+
+        verify_validated_installer_smoke_sources(&smoke).unwrap();
+    }
+
+    #[test]
+    fn validated_installer_smoke_rejects_commented_process_termination() {
+        let smoke = fs::read_to_string(
+            workspace_root().join("packaging/smoke-validated-windows-installer.ps1"),
+        )
+        .unwrap();
+        let unsafe_smoke = smoke.replacen(
+            "            $Process.Kill()",
+            "            # $Process.Kill()",
+            1,
+        );
+        assert_ne!(
+            unsafe_smoke, smoke,
+            "process termination fixture did not match"
+        );
+
+        let error = verify_validated_installer_smoke_sources(&unsafe_smoke).unwrap_err();
+
+        assert!(error.to_string().contains("$Process.Kill()"));
+    }
+
+    #[test]
+    fn validated_installer_smoke_rejects_a_short_cold_model_window() {
+        let smoke = fs::read_to_string(
+            workspace_root().join("packaging/smoke-validated-windows-installer.ps1"),
+        )
+        .unwrap();
+        let unsafe_smoke = smoke.replacen(
+            "$ModelReadyWaitMilliseconds = 1800000",
+            "$ModelReadyWaitMilliseconds = 900000",
+            1,
+        );
+        assert_ne!(
+            unsafe_smoke, smoke,
+            "cold model readiness window fixture did not match"
+        );
+
+        let error = verify_validated_installer_smoke_sources(&unsafe_smoke).unwrap_err();
+
+        assert!(error.to_string().contains("cold model download"));
+    }
+
+    #[test]
+    fn validated_installer_smoke_rejects_a_native_json_argument() {
+        let smoke = fs::read_to_string(
+            workspace_root().join("packaging/smoke-validated-windows-installer.ps1"),
+        )
+        .unwrap();
+        let unsafe_smoke = smoke
+            .replacen(
+                "$ResponseLines = @($Body | & $Curl `",
+                "$ResponseLines = @(& $Curl `",
+                1,
+            )
+            .replacen("--data-binary \"@-\" `", "--data-binary $Body `", 1);
+        assert_ne!(
+            unsafe_smoke, smoke,
+            "validated installer JSON transport fixture did not match"
+        );
+
+        let error = verify_validated_installer_smoke_sources(&unsafe_smoke).unwrap_err();
+
+        assert!(error.to_string().contains("JSON through stdin"));
+    }
+
+    #[test]
+    fn validated_installer_smoke_rejects_commented_stdin_with_data_raw() {
+        let smoke = fs::read_to_string(
+            workspace_root().join("packaging/smoke-validated-windows-installer.ps1"),
+        )
+        .unwrap();
+        let unsafe_smoke = smoke
+            .replacen(
+                "$ResponseLines = @($Body | & $Curl `",
+                "# $ResponseLines = @($Body | & $Curl `\n        $ResponseLines = @(& $Curl `",
+                1,
+            )
+            .replacen(
+                "--data-binary \"@-\" `",
+                "# --data-binary \"@-\" `\n            --data-raw $Body `",
+                1,
+            );
+        assert_ne!(
+            unsafe_smoke, smoke,
+            "commented stdin JSON transport fixture did not match"
+        );
+
+        let error = verify_validated_installer_smoke_sources(&unsafe_smoke).unwrap_err();
+
+        assert!(error.to_string().contains("JSON through stdin"));
+    }
+
+    #[test]
+    fn validated_installer_smoke_rejects_inert_exact_process_cleanup() {
+        let smoke = fs::read_to_string(
+            workspace_root().join("packaging/smoke-validated-windows-installer.ps1"),
+        )
+        .unwrap();
+        let unsafe_smoke = smoke.replacen(
+            "    Stop-ExactDesktopProcess $DesktopExecutable",
+            "    'Stop-ExactDesktopProcess $DesktopExecutable'",
+            1,
+        );
+        assert_ne!(
+            unsafe_smoke, smoke,
+            "exact desktop cleanup fixture did not match"
+        );
+
+        let error = verify_validated_installer_smoke_sources(&unsafe_smoke).unwrap_err();
+
+        assert!(error.to_string().contains("exact desktop process"));
+    }
+
+    #[test]
+    fn validated_installer_smoke_rejects_inert_unconfirmed_state() {
+        let smoke = fs::read_to_string(
+            workspace_root().join("packaging/smoke-validated-windows-installer.ps1"),
+        )
+        .unwrap();
+        let unsafe_smoke = smoke.replacen(
+            "            $script:ProcessTerminationUnconfirmed = $true",
+            "            '$script:ProcessTerminationUnconfirmed = $true'",
+            1,
+        );
+        assert_ne!(
+            unsafe_smoke, smoke,
+            "unconfirmed-termination fixture did not match"
+        );
+
+        let error = verify_validated_installer_smoke_sources(&unsafe_smoke).unwrap_err();
+
+        assert!(
+            error
+                .to_string()
+                .contains("$script:ProcessTerminationUnconfirmed = $true")
+        );
+    }
+
+    #[test]
+    fn validated_installer_smoke_rejects_inert_unconfirmed_termination_throw() {
+        let smoke = fs::read_to_string(
+            workspace_root().join("packaging/smoke-validated-windows-installer.ps1"),
+        )
+        .unwrap();
+        let unsafe_smoke = smoke.replacen(
+            "                throw \"$Label termination was not confirmed after timeout cleanup\"",
+            "                'throw $Label termination was not confirmed after timeout cleanup'",
+            1,
+        );
+        assert_ne!(
+            unsafe_smoke, smoke,
+            "unconfirmed-termination throw fixture did not match"
+        );
+
+        let error = verify_validated_installer_smoke_sources(&unsafe_smoke).unwrap_err();
+
+        assert!(
+            error
+                .to_string()
+                .contains("exact-process recovery ordering")
+        );
+    }
+
+    #[test]
+    fn validated_installer_smoke_rejects_inert_automatic_cleanup_gate() {
+        let smoke = fs::read_to_string(
+            workspace_root().join("packaging/smoke-validated-windows-installer.ps1"),
+        )
+        .unwrap();
+        let unsafe_smoke = smoke.replacen(
+            "    if ($script:ProcessTerminationUnconfirmed) {",
+            "    if ($false) {\n        '$script:ProcessTerminationUnconfirmed'",
+            1,
+        );
+        assert_ne!(
+            unsafe_smoke, smoke,
+            "automatic cleanup fixture did not match"
+        );
+
+        let error = verify_validated_installer_smoke_sources(&unsafe_smoke).unwrap_err();
+
+        assert!(
+            error
+                .to_string()
+                .contains("gate automatic cleanup on confirmed termination")
+        );
+    }
+
+    #[test]
+    fn validated_installer_smoke_rejects_a_success_uninstall_without_exact_process_stop() {
+        let smoke = fs::read_to_string(
+            workspace_root().join("packaging/smoke-validated-windows-installer.ps1"),
+        )
+        .unwrap();
+        let unsafe_smoke = smoke.replacen(
+            "    $script:TerminalStage = \"models\"\n    Wait-ForModelsReady\n\n    $script:TerminalStage = \"uninstall_cleanup\"\n    Remove-ExactRegisteredInstall\n    $InstalledByThisRun = $false",
+            "    $script:TerminalStage = \"models\"\n    Wait-ForModelsReady\n\n    $script:TerminalStage = \"uninstall_cleanup\"\n    Invoke-Process $RegisteredUninstaller @(\"/S\") \"uninstaller\"\n    $InstalledByThisRun = $false",
+            1,
+        );
+        assert_ne!(
+            unsafe_smoke, smoke,
+            "successful exact desktop stop fixture did not match"
+        );
+
+        let error = verify_validated_installer_smoke_sources(&unsafe_smoke).unwrap_err();
+
+        assert!(error.to_string().contains("successful uninstall"));
+    }
+
+    #[test]
+    fn validated_installer_smoke_rejects_inert_registration_materialization_wait() {
+        let smoke = fs::read_to_string(
+            workspace_root().join("packaging/smoke-validated-windows-installer.ps1"),
+        )
+        .unwrap();
+        let unsafe_smoke = smoke.replacen(
+            "    $RegisteredUninstaller = Wait-ForExactRegisteredUninstaller",
+            "    '$RegisteredUninstaller = Wait-ForExactRegisteredUninstaller'",
+            1,
+        );
+        assert_ne!(
+            unsafe_smoke, smoke,
+            "registration materialization fixture did not match"
+        );
+
+        let error = verify_validated_installer_smoke_sources(&unsafe_smoke).unwrap_err();
+
+        assert!(
+            error
+                .to_string()
+                .contains("wait for the exact registered installation")
+        );
+    }
+
+    #[test]
+    fn validated_installer_smoke_rejects_an_appdata_overlapping_install_path() {
+        let smoke = fs::read_to_string(
+            workspace_root().join("packaging/smoke-validated-windows-installer.ps1"),
+        )
+        .unwrap();
+        let unsafe_smoke = smoke.replace(
+            "$InstallDir = Join-Path (Join-Path $env:LOCALAPPDATA \"Programs\") \"AirWiki\"",
+            "$InstallDir = Join-Path $env:LOCALAPPDATA \"AirWiki\"",
+        );
+        assert_ne!(
+            unsafe_smoke, smoke,
+            "validated installer path fixture did not match"
+        );
+
+        let error = verify_validated_installer_smoke_sources(&unsafe_smoke).unwrap_err();
+
+        assert!(error.to_string().contains("outside the AirWiki data root"));
+    }
+
+    #[test]
+    fn validated_installer_smoke_rejects_inert_or_leaky_failure_boundaries() {
+        let smoke = fs::read_to_string(
+            workspace_root().join("packaging/smoke-validated-windows-installer.ps1"),
+        )
+        .unwrap();
+        let cases = [
+            (
+                "missing stage",
+                "    $script:TerminalStage = \"registration\"\n",
+                "",
+                "registration",
+            ),
+            (
+                "inert stage",
+                "    $script:TerminalStage = \"registration\"\n",
+                "    # $script:TerminalStage = \"registration\"\n    '$script:TerminalStage = \"registration\"'\n",
+                "registration",
+            ),
+            (
+                "commented allowlist",
+                "$InstallerSmokeFailureClasses = @(",
+                "# $InstallerSmokeFailureClasses = @(",
+                "closed failure class",
+            ),
+            (
+                "raw terminal error",
+                "    [Console]::Out.WriteLine($Line)",
+                "    [Console]::Out.WriteLine($Failure.Exception.Message)",
+                "sanitized record fields",
+            ),
+            (
+                "uncaptured imports",
+                "try {\n    . (Join-Path $PSScriptRoot \"windows-runtime.ps1\")\n    . (Join-Path $PSScriptRoot \"windows-payload.ps1\")",
+                ". (Join-Path $PSScriptRoot \"windows-runtime.ps1\")\n. (Join-Path $PSScriptRoot \"windows-payload.ps1\")\n\ntry {",
+                "import helpers",
+            ),
+            (
+                "uncaptured hash",
+                "        Get-FileHash -LiteralPath $Installer -Algorithm SHA256",
+                "        # Get-FileHash -LiteralPath $Installer -Algorithm SHA256",
+                "hash evidence",
+            ),
+            (
+                "inert cleanup guard",
+                "        try {\n            $CleanupRequired = $script:ProcessTerminationUnconfirmed -or",
+                "        try {\n            '$CleanupRequired = $script:ProcessTerminationUnconfirmed -or'",
+                "cleanup-state evaluation",
+            ),
+            (
+                "missing runtime fallback",
+                "    \"powershell_runtime\"\n",
+                "",
+                "closed failure class",
+            ),
+            (
+                "missing durable activation status",
+                "    $Status = Get-SanitizedModelActivationStatus $ActivationStatusCursor\n",
+                "    '$Status = Get-SanitizedModelActivationStatus $ActivationStatusCursor'\n",
+                "durable activation status",
+            ),
+            (
+                "raw durable status output",
+                "    $Item = Get-RegularActivationStatusItem ([string] $Cursor.Path)\n",
+                "    Write-Output $Cursor.Path\n    $Item = Get-RegularActivationStatusItem ([string] $Cursor.Path)\n",
+                "bounded durable activation status",
+            ),
+            (
+                "host leak from durable status",
+                "    $Item = Get-RegularActivationStatusItem ([string] $Cursor.Path)\n",
+                "    Write-Host $Cursor.Path\n    $Item = Get-RegularActivationStatusItem ([string] $Cursor.Path)\n",
+                "bounded durable activation status",
+            ),
+            (
+                "implicit pipeline leak from durable status",
+                "    $Item = Get-RegularActivationStatusItem ([string] $Cursor.Path)\n",
+                "    $Cursor.Path\n    $Item = Get-RegularActivationStatusItem ([string] $Cursor.Path)\n",
+                "executable fingerprint changed",
+            ),
+            (
+                "terminal durable status literal mutation",
+                "        State = \"failed\"\n",
+                "        State = \"readyx\"\n",
+                "executable fingerprint changed",
+            ),
+            (
+                "early return from durable status",
+                "function Get-SanitizedModelActivationStatus($Cursor) {\n",
+                "function Get-SanitizedModelActivationStatus($Cursor) {\n    return $null\n",
+                "fixed control-flow exits",
+            ),
+            (
+                "early return from activation failure reader",
+                "function Throw-IfModelActivationFailed {\n",
+                "function Throw-IfModelActivationFailed {\n    return\n",
+                "must not bypass",
+            ),
+            (
+                "ungated legacy activation log fallback",
+                "    if (-not $ActivationStatusCursor.ObservedStarting -and\n        $null -eq $Status) {\n",
+                "    if ($true) {\n",
+                "disable the legacy log fallback",
+            ),
+            (
+                "inert stale activation status gate",
+                "    if (-not $Changed -and -not $Cursor.ObservedStarting) {\n",
+                "    if ($false) { '$Cursor.ObservedStarting'\n",
+                "ignore unchanged activation status",
+            ),
+            (
+                "invented runtime exit class",
+                "        \"unknown\"\n    throw \"the installed model runtime exited before models became ready\"",
+                "        \"failure\"\n    throw \"the installed model runtime exited before models became ready\"",
+                "typed model failure classes",
+            ),
+        ];
+        for (label, original, replacement, expected_error) in cases {
+            let unsafe_smoke = smoke.replacen(original, replacement, 1);
+            assert_ne!(unsafe_smoke, smoke, "{label} fixture did not match");
+            let error = verify_validated_installer_smoke_sources(&unsafe_smoke).unwrap_err();
+            assert!(
+                error.to_string().contains(expected_error),
+                "{label} failed through an unexpected gate: {error:#}"
+            );
+        }
+    }
+
+    #[test]
+    fn validated_installer_smoke_rejects_an_inert_durable_status_wrapper() {
+        let smoke = fs::read_to_string(
+            workspace_root().join("packaging/smoke-validated-windows-installer.ps1"),
+        )
+        .unwrap();
+        let unsafe_smoke = smoke
+            .replacen(
+                "function Get-SanitizedModelActivationStatus($Cursor) {\n",
+                "function Get-SanitizedModelActivationStatus($Cursor) {\n    if ($false) {\n",
+                1,
+            )
+            .replacen(
+                "\n}\n\nfunction Assert-RegularActivationLogDirectory",
+                "\n    }\n}\n\nfunction Assert-RegularActivationLogDirectory",
+                1,
+            );
+        assert_ne!(
+            unsafe_smoke, smoke,
+            "durable status wrapper fixture did not match"
+        );
+
+        let error = verify_validated_installer_smoke_sources(&unsafe_smoke).unwrap_err();
+
+        assert!(error.to_string().contains("executable fingerprint changed"));
     }
 }

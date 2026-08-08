@@ -1,4 +1,5 @@
 use std::collections::HashSet;
+use std::fmt;
 use std::future;
 use std::sync::Arc;
 use std::time::Duration;
@@ -14,6 +15,7 @@ use libp2p::swarm::{NetworkBehaviour, SwarmEvent};
 use libp2p::{Multiaddr, StreamProtocol, SwarmBuilder};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
+use tokio::sync::watch;
 use tokio::task::JoinSet;
 use tokio::time::Instant as TokioInstant;
 use tokio_util::sync::CancellationToken;
@@ -119,6 +121,7 @@ pub struct PublicSourceServerConfig {
     pub listen_addresses: Vec<Multiaddr>,
     pub relay_addresses: Vec<Multiaddr>,
     pub request_timeout: Duration,
+    pub relay_readiness: Option<watch::Sender<PublicRelayReadiness>>,
 }
 
 impl PublicSourceServerConfig {
@@ -127,7 +130,48 @@ impl PublicSourceServerConfig {
             listen_addresses,
             relay_addresses: Vec::new(),
             request_timeout: Duration::from_millis(800),
+            relay_readiness: None,
         }
+    }
+}
+
+/// Current relay reservations that have produced a usable circuit-listen
+/// address.
+///
+/// The addresses stay process-local and must not be written to normal logs.
+#[derive(Clone, Default, PartialEq, Eq)]
+pub struct PublicRelayReadiness {
+    ready_addresses: Vec<Multiaddr>,
+}
+
+impl PublicRelayReadiness {
+    /// Returns the number of distinct relay reservations that are ready.
+    pub fn ready_relay_count(&self) -> usize {
+        self.ready_addresses.len()
+    }
+
+    /// Returns the ready circuit-listen addresses in configured order.
+    pub fn ready_relay_addresses(&self) -> &[Multiaddr] {
+        &self.ready_addresses
+    }
+
+    fn from_listeners(relay_listeners: &[RelayListener]) -> Self {
+        let mut ready_addresses = Vec::with_capacity(relay_listeners.len());
+        for listener in relay_listeners.iter().filter(|listener| listener.ready) {
+            if !ready_addresses.contains(&listener.address) {
+                ready_addresses.push(listener.address.clone());
+            }
+        }
+        Self { ready_addresses }
+    }
+}
+
+impl fmt::Debug for PublicRelayReadiness {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("PublicRelayReadiness")
+            .field("ready_relay_count", &self.ready_relay_count())
+            .finish()
     }
 }
 
@@ -187,19 +231,69 @@ impl RelayListener {
     }
 }
 
+struct RelayReadinessPublisher {
+    sender: Option<watch::Sender<PublicRelayReadiness>>,
+}
+
+impl RelayReadinessPublisher {
+    fn new(sender: Option<watch::Sender<PublicRelayReadiness>>) -> Self {
+        let publisher = Self { sender };
+        publisher.clear();
+        publisher
+    }
+
+    fn publish(&self, relay_listeners: &[RelayListener]) {
+        let next = PublicRelayReadiness::from_listeners(relay_listeners);
+        if let Some(sender) = &self.sender {
+            sender.send_if_modified(|current| {
+                if *current == next {
+                    false
+                } else {
+                    *current = next;
+                    true
+                }
+            });
+        }
+    }
+
+    fn clear(&self) {
+        if let Some(sender) = &self.sender {
+            sender.send_if_modified(|current| {
+                if current.ready_addresses.is_empty() {
+                    false
+                } else {
+                    current.ready_addresses.clear();
+                    true
+                }
+            });
+        }
+    }
+}
+
+impl Drop for RelayReadinessPublisher {
+    fn drop(&mut self) {
+        self.clear();
+    }
+}
+
 pub async fn run_public_source_server(
     identity: NodeIdentity,
     config: PublicSourceServerConfig,
     backend: Arc<dyn PublicSourceBackend>,
     cancellation: CancellationToken,
 ) -> Result<(), NetworkError> {
-    if config.listen_addresses.is_empty() {
+    let PublicSourceServerConfig {
+        listen_addresses,
+        relay_addresses,
+        request_timeout,
+        relay_readiness,
+    } = config;
+    let readiness_publisher = RelayReadinessPublisher::new(relay_readiness);
+    if listen_addresses.is_empty() {
         return Err(NetworkError::Listen(
             "no public source listen address".to_owned(),
         ));
     }
-    let request_timeout = config.request_timeout;
-    let listen_addresses = config.listen_addresses;
     let mut retry_count = 0_u32;
     let (mut swarm, mut direct_listeners) = loop {
         let mut swarm = public_source_swarm(&identity, request_timeout)?;
@@ -237,11 +331,11 @@ pub async fn run_public_source_server(
             () = tokio::time::sleep(PUBLIC_LISTEN_RETRY) => {}
         }
     };
-    let mut relay_listeners = config
-        .relay_addresses
+    let mut relay_listeners = relay_addresses
         .into_iter()
         .map(RelayListener::new)
         .collect::<Vec<_>>();
+    readiness_publisher.publish(&relay_listeners);
     let limiter = PeerRateLimiter::new(60, Duration::from_secs(60));
     let mut tasks = JoinSet::new();
     if let Err(error) = retry_due_relay_listeners(&mut swarm, &mut relay_listeners) {
@@ -344,6 +438,7 @@ pub async fn run_public_source_server(
                             .find(|listener| listener.listener_id == Some(listener_id))
                         {
                             listener.mark_ready();
+                            readiness_publisher.publish(&relay_listeners);
                             tracing::info!(
                                 ready_relay_count = ready_relay_count(&relay_listeners),
                                 configured_relay_count = relay_listeners.len(),
@@ -374,6 +469,7 @@ pub async fn run_public_source_server(
                             .position(|listener| listener.listener_id == Some(listener_id))
                         {
                             let delay = relay_listeners[index].schedule_retry();
+                            readiness_publisher.publish(&relay_listeners);
                             tracing::warn!(
                                 error_kind = if reason.is_err() {
                                     "public_source_relay_reservation_failed"
@@ -617,21 +713,42 @@ where
 
 fn send_completion(behaviour: &mut SourceBehaviour, completion: Completion) {
     match completion {
-        Completion::Search { channel, result } => {
-            let response = match result {
-                Ok(delivery) => PublicSearchWireResponse::Success(delivery.response),
-                Err(error) => PublicSearchWireResponse::Rejected(error.rejection()),
-            };
-            let _ = behaviour.search.send_response(channel, response);
-        }
-        Completion::Browse { channel, result } => {
-            let response = match result {
-                Ok(delivery) => PublicBrowseWireResponse::Success(delivery.page),
-                Err(error) => PublicBrowseWireResponse::Rejected(error.rejection()),
-            };
-            let _ = behaviour.browse.send_response(channel, response);
-        }
+        Completion::Search { channel, result } => match result {
+            Ok(PublicSearchDelivery { response, _lease }) => {
+                handoff_public_payload(response, _lease, |response| {
+                    let _ = behaviour
+                        .search
+                        .send_response(channel, PublicSearchWireResponse::Success(response));
+                });
+            }
+            Err(error) => {
+                let _ = behaviour.search.send_response(
+                    channel,
+                    PublicSearchWireResponse::Rejected(error.rejection()),
+                );
+            }
+        },
+        Completion::Browse { channel, result } => match result {
+            Ok(PublicBrowseDelivery { page, _lease }) => {
+                handoff_public_payload(page, _lease, |page| {
+                    let _ = behaviour
+                        .browse
+                        .send_response(channel, PublicBrowseWireResponse::Success(page));
+                });
+            }
+            Err(error) => {
+                let _ = behaviour.browse.send_response(
+                    channel,
+                    PublicBrowseWireResponse::Rejected(error.rejection()),
+                );
+            }
+        },
     }
+}
+
+fn handoff_public_payload<T, Lease>(payload: T, lease: Lease, handoff: impl FnOnce(T)) {
+    handoff(payload);
+    drop(lease);
 }
 
 fn duration_millis(duration: Duration) -> u64 {
@@ -641,6 +758,8 @@ fn duration_millis(duration: Duration) -> u64 {
 #[cfg(test)]
 mod tests {
     use std::net::{Ipv4Addr, SocketAddrV4, TcpListener, UdpSocket};
+    use std::sync::Arc;
+    use std::sync::atomic::{AtomicBool, Ordering};
 
     use airwiki_types::{PublicBrowseRequest, PublicSearchRequest};
 
@@ -667,6 +786,23 @@ mod tests {
     }
 
     #[test]
+    fn disclosure_lease_is_held_through_public_transport_handoff() {
+        struct DropProbe(Arc<AtomicBool>);
+
+        impl Drop for DropProbe {
+            fn drop(&mut self) {
+                self.0.store(true, Ordering::SeqCst);
+            }
+        }
+
+        let dropped = Arc::new(AtomicBool::new(false));
+        handoff_public_payload((), DropProbe(Arc::clone(&dropped)), |()| {
+            assert!(!dropped.load(Ordering::SeqCst));
+        });
+        assert!(dropped.load(Ordering::SeqCst));
+    }
+
+    #[test]
     fn relay_retry_backoff_starts_at_250_ms_and_caps_at_10_seconds() {
         let expected = [
             Duration::from_millis(250),
@@ -683,6 +819,73 @@ mod tests {
             assert_eq!(relay_retry_delay(retry_count), expected_delay);
         }
         assert_eq!(relay_retry_delay(u32::MAX), Duration::from_secs(10));
+    }
+
+    #[test]
+    fn relay_readiness_publishes_zero_to_one_to_two_ready_reservations() {
+        let (sender, mut receiver) = watch::channel(PublicRelayReadiness::default());
+        let publisher = RelayReadinessPublisher::new(Some(sender));
+        let mut listeners = vec![
+            RelayListener::new("/memory/1".parse().expect("parse first relay address")),
+            RelayListener::new("/memory/2".parse().expect("parse second relay address")),
+        ];
+
+        assert_eq!(receiver.borrow().ready_relay_count(), 0);
+
+        listeners[0].mark_ready();
+        publisher.publish(&listeners);
+        assert!(receiver.has_changed().expect("read readiness channel"));
+        assert_eq!(receiver.borrow_and_update().ready_relay_count(), 1);
+
+        listeners[1].mark_ready();
+        publisher.publish(&listeners);
+        assert!(receiver.has_changed().expect("read readiness channel"));
+        assert_eq!(receiver.borrow_and_update().ready_relay_count(), 2);
+    }
+
+    #[test]
+    fn relay_readiness_publishes_two_to_one_to_zero_ready_reservations() {
+        let (sender, mut receiver) = watch::channel(PublicRelayReadiness::default());
+        let publisher = RelayReadinessPublisher::new(Some(sender));
+        let mut listeners = vec![
+            RelayListener::new("/memory/1".parse().expect("parse first relay address")),
+            RelayListener::new("/memory/2".parse().expect("parse second relay address")),
+        ];
+        listeners.iter_mut().for_each(RelayListener::mark_ready);
+        publisher.publish(&listeners);
+        receiver.borrow_and_update();
+
+        listeners[0].schedule_retry();
+        publisher.publish(&listeners);
+        assert!(receiver.has_changed().expect("read readiness channel"));
+        assert_eq!(receiver.borrow_and_update().ready_relay_count(), 1);
+
+        listeners[1].schedule_retry();
+        publisher.publish(&listeners);
+        assert!(receiver.has_changed().expect("read readiness channel"));
+        assert_eq!(receiver.borrow_and_update().ready_relay_count(), 0);
+    }
+
+    #[test]
+    fn dropping_relay_readiness_publisher_clears_the_ready_snapshot() {
+        let (sender, mut receiver) = watch::channel(PublicRelayReadiness::default());
+        let mut listeners = vec![RelayListener::new(
+            "/memory/1".parse().expect("parse relay address"),
+        )];
+        listeners[0].mark_ready();
+        {
+            let publisher = RelayReadinessPublisher::new(Some(sender));
+            publisher.publish(&listeners);
+            receiver.borrow_and_update();
+        }
+
+        assert_eq!(
+            (
+                receiver.has_changed().is_err(),
+                receiver.borrow().ready_relay_count(),
+            ),
+            (true, 0)
+        );
     }
 
     #[tokio::test]

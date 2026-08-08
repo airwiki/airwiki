@@ -16,6 +16,15 @@ AirWiki candidates on different NATs. Use synthetic documents only.
 4. Confirm index logs contain only bounded counts, duration and error classes;
    they must not contain PeerIds, IPs, queries, snippets or routes.
 
+### Public beta infrastructure
+
+The operable two-region beta, cost gate, private bootstrap lifecycle,
+observability, failover and retirement procedures are defined in
+[Public federation beta v1 infrastructure](public-beta-infrastructure.md).
+Use that deployment for beta candidate acceptance. The single-host Azure and
+Windows procedures below remain temporary validation options and do not satisfy
+the independent-node beta closure criterion.
+
 ### Azure validation relay
 
 For temporary Azure acceptance, use one Ubuntu 24.04 x64 VM with a Standard
@@ -84,7 +93,9 @@ and ignores each entry after its absolute expiry. An identity already configured
 as a community index is a user-owned override: its bundled address and expiry
 do not form part of the effective bootstrap set and are ignored. Installing a
 higher version atomically retires only older bootstrap entries; community
-indexes are never replaced or removed by the bundled registry.
+indexes are never replaced or removed by the bundled registry. Reinstalling a
+candidate with a lower bundled version leaves the persisted higher registry
+unchanged and does not prevent local, LAN or MCP startup.
 
 Obtain each identity explicitly, outside normal logs:
 
@@ -124,14 +135,22 @@ later candidate as usable without community indexes.
 - Disabling exposure immediately makes search and browse fail at the owner;
   after the tombstone reaches the index the catalog entry disappears.
 - Restarting the publisher renews the signed manifest with a higher sequence.
+- A manifest lists only relays with a ready outbound reservation. Losing one
+  reservation advances the sequence and removes that route; losing the final
+  reservation withdraws the manifest until a route is ready again.
 - A stale fingerprint, replayed sequence, invalid signature and expired
   manifest are rejected.
 - On Windows, no AirWiki firewall rule is enabled for the Public profile. Relay
   use remains an outbound connection.
-- Blocking a publisher removes its results and prevents browse or a new
+- Blocking a publisher removes completed and in-flight results, partial
+  updates, route evidence and cached browse access, and prevents a new
   connection until that identity is explicitly unblocked locally.
-- The UI reports whether the successful content route was direct or relayed,
-  plus accepted-index count and announcement expiry without exposing addresses.
+- The UI reports direct or relayed only after a protocol-valid owner response on
+  that request's matching connection. An index connection, owner timeout or
+  concurrent search must remain offline. For a multi-owner result, Relay means
+  at least one accepted response used a relay; Direct means every accepted owner
+  response was direct. It also reports accepted-index count and announcement
+  expiry without exposing addresses.
 
 Record the commit, package hashes, OS/build versions, direct-versus-relay
 outcome, timings for first partial and complete results, and sanitized failure
@@ -152,3 +171,10 @@ cargo run --release --locked -p airwiki-federation-index --bin federation-benchm
 The corpus represents 10,000 publishers and 100,000 collections. The command
 fails if catalog query p95 is at least 1.5 seconds. Investigate regressions with
 SQLite query plans before changing indexes or concurrency budgets.
+The 100,000-row corpus also exercises the beta catalog admission ceiling.
+Manifests with more than 24 hours of remaining or signed lifetime are rejected,
+as are update timestamps more than five minutes in the future. Compact signed
+tombstones retain their sequence high-water mark for the node lifetime and
+count against the global and per-publisher ceilings. Expiry similarly removes
+the manifest payload and FTS row while retaining a compact sequence high-water
+mark.

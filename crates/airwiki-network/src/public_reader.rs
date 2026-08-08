@@ -1,6 +1,5 @@
 use std::collections::{HashMap, HashSet};
 use std::str::FromStr;
-use std::sync::atomic::{AtomicU8, Ordering};
 use std::time::Duration;
 
 use airwiki_types::{
@@ -11,7 +10,7 @@ use airwiki_types::{
 };
 use libp2p::identity::Keypair;
 use libp2p::request_response::{self, OutboundRequestId, ProtocolSupport};
-use libp2p::swarm::{NetworkBehaviour, SwarmEvent};
+use libp2p::swarm::{ConnectionId, NetworkBehaviour, SwarmEvent};
 use libp2p::{Multiaddr, PeerId, StreamProtocol, Swarm, SwarmBuilder};
 use tokio::sync::{Semaphore, mpsc};
 use tokio::time::{Instant, timeout_at};
@@ -21,9 +20,9 @@ use crate::{
     PublicSearchWireResponse, PublicSourceRejection, verify_manifest,
 };
 
-const INDEX_DEADLINE: Duration = Duration::from_millis(300);
-const PEER_DEADLINE: Duration = Duration::from_millis(800);
-const GLOBAL_DEADLINE: Duration = Duration::from_millis(1_500);
+const INDEX_DEADLINE: Duration = Duration::from_millis(1_000);
+const OWNER_CONNECT_BUDGET: Duration = Duration::from_secs(3);
+const OWNER_RESPONSE_BUDGET: Duration = Duration::from_millis(800);
 const MAX_INDEXES: usize = 3;
 const MAX_PUBLIC_PEERS: usize = 12;
 const RRF_K: f64 = 60.0;
@@ -40,18 +39,31 @@ pub struct PublicReader {
     searches: Semaphore,
     manifests: tokio::sync::RwLock<HashMap<(String, uuid::Uuid), SignedPublicCollectionManifest>>,
     blocked_publishers: tokio::sync::RwLock<HashSet<String>>,
-    route_kind: AtomicU8,
 }
 
 /// Reachability observed for the owner of a public collection.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PublicRouteKind {
-    /// No successful public route has been observed in this reader session.
+    /// No successful public route has been observed for the current request.
     Offline,
     /// The owner answered through a circuit relay.
     Relay,
     /// The owner answered over a direct transport.
     Direct,
+}
+
+/// Public search response and the route used by an owner that returned a
+/// protocol-valid response.
+#[derive(Debug, Clone)]
+pub struct PublicSearchResult {
+    pub response: SearchResponse,
+    pub route_kind: PublicRouteKind,
+}
+
+#[derive(Debug, Clone, Copy)]
+struct OwnerDeadlines {
+    connect: Instant,
+    finish: Instant,
 }
 
 /// Current availability of a federated public collection.
@@ -89,15 +101,6 @@ impl PublicReader {
             searches: Semaphore::new(2),
             manifests: tokio::sync::RwLock::new(HashMap::new()),
             blocked_publishers: tokio::sync::RwLock::new(HashSet::new()),
-            route_kind: AtomicU8::new(0),
-        }
-    }
-
-    pub fn route_kind(&self) -> PublicRouteKind {
-        match self.route_kind.load(Ordering::Acquire) {
-            1 => PublicRouteKind::Relay,
-            2 => PublicRouteKind::Direct,
-            _ => PublicRouteKind::Offline,
         }
     }
 
@@ -115,6 +118,14 @@ impl PublicReader {
         indexes: &[PublicIndexEndpoint],
         request: SearchRequest,
     ) -> Result<SearchResponse, SearchContractError> {
+        Ok(self.search_inner(indexes, request, None).await?.response)
+    }
+
+    pub async fn search_with_route(
+        &self,
+        indexes: &[PublicIndexEndpoint],
+        request: SearchRequest,
+    ) -> Result<PublicSearchResult, SearchContractError> {
         self.search_inner(indexes, request, None).await
     }
 
@@ -124,6 +135,18 @@ impl PublicReader {
         request: SearchRequest,
         partials: mpsc::Sender<SearchResponse>,
     ) -> Result<SearchResponse, SearchContractError> {
+        Ok(self
+            .search_inner(indexes, request, Some(&partials))
+            .await?
+            .response)
+    }
+
+    pub async fn search_with_route_and_partials(
+        &self,
+        indexes: &[PublicIndexEndpoint],
+        request: SearchRequest,
+        partials: mpsc::Sender<SearchResponse>,
+    ) -> Result<PublicSearchResult, SearchContractError> {
         self.search_inner(indexes, request, Some(&partials)).await
     }
 
@@ -132,9 +155,8 @@ impl PublicReader {
         indexes: &[PublicIndexEndpoint],
         request: SearchRequest,
         partials: Option<&mpsc::Sender<SearchResponse>>,
-    ) -> Result<SearchResponse, SearchContractError> {
+    ) -> Result<PublicSearchResult, SearchContractError> {
         request.validate()?;
-        self.route_kind.store(0, Ordering::Release);
         let _permit = self.searches.acquire().await.map_err(|_| {
             SearchContractError::Unavailable("public reader is shutting down".to_owned())
         })?;
@@ -191,11 +213,10 @@ impl PublicReader {
                 .collect::<Vec<_>>()
         };
         if candidates.is_empty() {
-            return Ok(public_search_response(
-                request.request_id,
-                Vec::new(),
-                catalog_partial,
-            ));
+            return Ok(PublicSearchResult {
+                response: public_search_response(request.request_id, Vec::new(), catalog_partial),
+                route_kind: PublicRouteKind::Offline,
+            });
         }
         {
             let mut cache = self.manifests.write().await;
@@ -211,9 +232,16 @@ impl PublicReader {
             cache.retain(|_, manifest| manifest.manifest.expires_at > chrono::Utc::now());
         }
         let groups = group_candidates_by_peer(candidates);
-        let mut pending_search =
-            HashMap::<OutboundRequestId, Vec<SignedPublicCollectionManifest>>::new();
+        let owner_peers = groups.iter().map(|(peer, _)| *peer).collect::<HashSet<_>>();
+        let mut pending_search = HashMap::<OutboundRequestId, PendingOwnerSearch>::new();
         for (peer, collections) in groups {
+            let blocked = self.blocked_publishers.read().await;
+            if collections
+                .first()
+                .is_some_and(|manifest| blocked.contains(&manifest.manifest.publisher_id))
+            {
+                continue;
+            }
             for manifest in &collections {
                 for route in &manifest.manifest.routes {
                     if let Ok(address) = Multiaddr::from_str(route) {
@@ -240,37 +268,64 @@ impl PublicReader {
                 .behaviour_mut()
                 .search
                 .send_request(&peer, public_request);
-            pending_search.insert(request_id, collections);
+            pending_search.insert(
+                request_id,
+                PendingOwnerSearch {
+                    peer,
+                    manifests: collections,
+                },
+            );
         }
+        let owner_deadlines = public_owner_deadlines(Instant::now());
+        let mut route_tracker = OwnerRouteTracker::new(owner_peers, owner_deadlines);
+        let mut accepted_routes = HashMap::new();
         let mut sources = Vec::new();
         let mut partial = catalog_partial;
         while !pending_search.is_empty() {
-            let peer_deadline = public_peer_deadline(started, Instant::now());
             let event = match timeout_at(
-                peer_deadline,
+                owner_deadlines.finish,
                 futures::StreamExt::select_next_some(&mut swarm),
             )
             .await
             {
                 Ok(event) => event,
                 Err(_) => {
+                    let pending_peers = pending_owner_peers(&pending_search);
+                    tracing::warn!(
+                        error_kind = route_tracker.timeout_error_kind(&pending_peers),
+                        pending_owner_count = pending_search.len(),
+                        connected_owner_count = route_tracker.connected_owner_count(&pending_peers),
+                        "public owner stage timed out"
+                    );
                     partial = true;
                     break;
                 }
             };
-            let previous_source_count = sources.len();
-            self.record_route(&event);
-            collect_search_event(
-                event,
-                request.request_id,
-                request.top_k,
+            let observed_at = Instant::now();
+            route_tracker.observe_swarm_event(&event, observed_at);
+            let blocked = self.blocked_publishers.read().await;
+            let accepted_route = collect_search_event(
+                ObservedReaderEvent {
+                    event,
+                    at: observed_at,
+                },
+                ExpectedSearchResponse {
+                    request_id: request.request_id,
+                    top_k: request.top_k,
+                },
                 &mut pending_search,
                 &mut sources,
                 &mut partial,
+                &route_tracker,
+                &blocked,
             );
-            if sources.len() > previous_source_count
-                && let Some(partials) = partials
-            {
+            let accepted_source = accepted_route.is_some();
+            retain_unblocked_sources(&mut sources, &blocked);
+            accepted_routes.retain(|publisher_id, _| !blocked.contains(publisher_id));
+            if let Some(accepted_route) = accepted_route {
+                accepted_routes.insert(accepted_route.publisher_id, accepted_route.route_kind);
+            }
+            if accepted_source && let Some(partials) = partials {
                 emit_partial(partials, request.request_id, request.top_k, &sources);
             }
             if !pending_search.is_empty()
@@ -285,12 +340,21 @@ impl PublicReader {
             }
         }
         partial |= !pending_search.is_empty();
+        let blocked = self.blocked_publishers.read().await;
+        retain_unblocked_sources(&mut sources, &blocked);
+        accepted_routes.retain(|publisher_id, _| !blocked.contains(publisher_id));
+        let route_kind = accepted_routes
+            .into_values()
+            .fold(PublicRouteKind::Offline, merge_route_kind);
         let mut hits = fuse_rankings(sources);
         hits.truncate(usize::from(request.top_k));
         for (position, hit) in hits.iter_mut().enumerate() {
             hit.rank = u32::try_from(position + 1).unwrap_or(u32::MAX);
         }
-        Ok(public_search_response(request.request_id, hits, partial))
+        Ok(PublicSearchResult {
+            response: public_search_response(request.request_id, hits, partial),
+            route_kind,
+        })
     }
 
     pub async fn browse(
@@ -299,7 +363,20 @@ impl PublicReader {
         cursor: Option<String>,
         limit: u8,
     ) -> Result<PublicBrowsePage, SearchContractError> {
-        self.route_kind.store(0, Ordering::Release);
+        let result = self.browse_with_route(manifest, cursor, limit).await?;
+        let blocked = self.blocked_publishers.read().await;
+        if blocked.contains(&manifest.manifest.publisher_id) {
+            return Err(SearchContractError::Unauthorized);
+        }
+        Ok(result.page)
+    }
+
+    async fn browse_with_route(
+        &self,
+        manifest: &SignedPublicCollectionManifest,
+        cursor: Option<String>,
+        limit: u8,
+    ) -> Result<RoutedPublicBrowsePage, SearchContractError> {
         if self
             .blocked_publishers
             .read()
@@ -333,42 +410,91 @@ impl PublicReader {
             .behaviour_mut()
             .browse
             .send_request(&peer, request.clone());
-        let deadline = Instant::now() + GLOBAL_DEADLINE;
+        let deadlines = public_owner_deadlines(Instant::now());
+        let owner_peers = HashSet::from([peer]);
+        let mut route_tracker = OwnerRouteTracker::new(owner_peers.clone(), deadlines);
         loop {
-            let event = timeout_at(deadline, futures::StreamExt::select_next_some(&mut swarm))
-                .await
-                .map_err(|_| {
-                    SearchContractError::Unavailable("public browse timed out".to_owned())
-                })?;
-            self.record_route(&event);
-            if let SwarmEvent::Behaviour(ReaderBehaviourEvent::Browse(
-                request_response::Event::Message { message, .. },
-            )) = event
-                && let request_response::Message::Response {
-                    request_id,
-                    response,
-                } = message
-                && request_id == outbound
-            {
-                return match response {
-                    PublicBrowseWireResponse::Success(page)
-                        if page.manifest_sequence >= manifest.manifest.sequence
-                            && page
-                                .validate_for(&request, &manifest.manifest.publisher_id)
-                                .is_ok() =>
-                    {
-                        Ok(page)
-                    }
-                    PublicBrowseWireResponse::Success(_) => Err(SearchContractError::Unauthorized),
-                    PublicBrowseWireResponse::Rejected(
-                        PublicSourceRejection::Invalid | PublicSourceRejection::NotPublic,
-                    ) => Err(SearchContractError::Unauthorized),
-                    PublicBrowseWireResponse::Rejected(
-                        PublicSourceRejection::Busy | PublicSourceRejection::Unavailable,
-                    ) => Err(SearchContractError::Unavailable(
+            let event = timeout_at(
+                deadlines.finish,
+                futures::StreamExt::select_next_some(&mut swarm),
+            )
+            .await
+            .map_err(|_| {
+                tracing::warn!(
+                    error_kind = route_tracker.timeout_error_kind(&owner_peers),
+                    connected_owner_count = route_tracker.connected_owner_count(&owner_peers),
+                    "public owner browse stage timed out"
+                );
+                SearchContractError::Unavailable("public browse timed out".to_owned())
+            })?;
+            let observed_at = Instant::now();
+            route_tracker.observe_swarm_event(&event, observed_at);
+            match event {
+                SwarmEvent::Behaviour(ReaderBehaviourEvent::Browse(
+                    request_response::Event::Message {
+                        peer: response_peer,
+                        connection_id,
+                        message:
+                            request_response::Message::Response {
+                                request_id,
+                                response,
+                            },
+                        ..
+                    },
+                )) if request_id == outbound => {
+                    return match response {
+                        PublicBrowseWireResponse::Success(page) => {
+                            let blocked = self.blocked_publishers.read().await;
+                            if blocked.contains(&manifest.manifest.publisher_id) {
+                                return Err(SearchContractError::Unauthorized);
+                            }
+                            if page.manifest_sequence < manifest.manifest.sequence
+                                || page
+                                    .validate_for(&request, &manifest.manifest.publisher_id)
+                                    .is_err()
+                                || response_peer != peer
+                            {
+                                return Err(SearchContractError::Unauthorized);
+                            }
+                            let route_kind = match route_tracker.route_for_response(
+                                response_peer,
+                                connection_id,
+                                observed_at,
+                            ) {
+                                Ok(route_kind) => route_kind,
+                                Err(error_kind) => {
+                                    tracing::warn!(
+                                        error_kind,
+                                        "public owner response could not be tied to its connection"
+                                    );
+                                    return Err(SearchContractError::Unavailable(
+                                        "public browse route is unavailable".to_owned(),
+                                    ));
+                                }
+                            };
+                            Ok(RoutedPublicBrowsePage { page, route_kind })
+                        }
+                        PublicBrowseWireResponse::Rejected(
+                            PublicSourceRejection::Invalid | PublicSourceRejection::NotPublic,
+                        ) => Err(SearchContractError::Unauthorized),
+                        PublicBrowseWireResponse::Rejected(
+                            PublicSourceRejection::Busy | PublicSourceRejection::Unavailable,
+                        ) => Err(SearchContractError::Unavailable(
+                            "public browse source is unavailable".to_owned(),
+                        )),
+                    };
+                }
+                SwarmEvent::Behaviour(ReaderBehaviourEvent::Browse(
+                    request_response::Event::OutboundFailure {
+                        request_id, error, ..
+                    },
+                )) if request_id == outbound => {
+                    log_public_owner_outbound_failure(&error);
+                    return Err(SearchContractError::Unavailable(
                         "public browse source is unavailable".to_owned(),
-                    )),
-                };
+                    ));
+                }
+                _ => {}
             }
         }
     }
@@ -401,17 +527,26 @@ impl PublicReader {
         }
         let summary = manifest.manifest.summary();
         if manifest.manifest.expires_at <= chrono::Utc::now() {
+            let blocked = self.blocked_publishers.read().await;
+            if blocked.contains(&manifest.manifest.publisher_id) {
+                return Err(SearchContractError::Unauthorized);
+            }
             return Ok(PublicBrowseResult {
                 summary,
                 page: None,
                 availability: PublicCollectionAvailability::Expired,
             });
         }
-        match self.browse(&manifest, cursor, limit).await {
-            Ok(page) => Ok(PublicBrowseResult {
+        let result = self.browse_with_route(&manifest, cursor, limit).await;
+        let blocked = self.blocked_publishers.read().await;
+        if blocked.contains(&manifest.manifest.publisher_id) {
+            return Err(SearchContractError::Unauthorized);
+        }
+        match result {
+            Ok(result) => Ok(PublicBrowseResult {
                 summary,
-                page: Some(page),
-                availability: PublicCollectionAvailability::Available(self.route_kind()),
+                page: Some(result.page),
+                availability: PublicCollectionAvailability::Available(result.route_kind),
             }),
             Err(SearchContractError::Unavailable(_)) => Ok(PublicBrowseResult {
                 summary,
@@ -462,7 +597,7 @@ impl PublicReader {
                 "no public federation index is configured".to_owned(),
             ));
         }
-        let deadline = Instant::now() + PEER_DEADLINE;
+        let deadline = Instant::now() + INDEX_DEADLINE;
         let mut accepted = 0_usize;
         while !pending.is_empty() {
             let event = match timeout_at(deadline, futures::StreamExt::select_next_some(&mut swarm))
@@ -502,11 +637,113 @@ impl PublicReader {
         }
         Ok(accepted)
     }
+}
 
-    fn record_route(&self, event: &SwarmEvent<ReaderBehaviourEvent>) {
-        if let SwarmEvent::ConnectionEstablished { endpoint, .. } = event {
-            self.route_kind
-                .store(if endpoint.is_relayed() { 1 } else { 2 }, Ordering::Release);
+struct RoutedPublicBrowsePage {
+    page: PublicBrowsePage,
+    route_kind: PublicRouteKind,
+}
+
+struct OwnerRouteTracker {
+    expected_peers: HashSet<PeerId>,
+    connect_deadline: Instant,
+    finish_deadline: Instant,
+    routes: HashMap<ConnectionId, OwnerConnectionRoute>,
+}
+
+#[derive(Debug, Clone, Copy)]
+struct OwnerConnectionRoute {
+    peer: PeerId,
+    route_kind: PublicRouteKind,
+}
+
+impl OwnerRouteTracker {
+    fn new(expected_peers: HashSet<PeerId>, deadlines: OwnerDeadlines) -> Self {
+        Self {
+            expected_peers,
+            connect_deadline: deadlines.connect,
+            finish_deadline: deadlines.finish,
+            routes: HashMap::new(),
+        }
+    }
+
+    fn observe_swarm_event(
+        &mut self,
+        event: &SwarmEvent<ReaderBehaviourEvent>,
+        observed_at: Instant,
+    ) {
+        match event {
+            SwarmEvent::ConnectionEstablished {
+                peer_id,
+                connection_id,
+                endpoint,
+                ..
+            } if self.expected_peers.contains(peer_id) => {
+                let route_kind = if endpoint.is_relayed() {
+                    PublicRouteKind::Relay
+                } else {
+                    PublicRouteKind::Direct
+                };
+                self.record_connection(*peer_id, *connection_id, route_kind, observed_at);
+            }
+            SwarmEvent::ConnectionClosed { connection_id, .. } => {
+                self.remove_connection(*connection_id);
+            }
+            _ => {}
+        }
+    }
+
+    fn record_connection(
+        &mut self,
+        peer: PeerId,
+        connection_id: ConnectionId,
+        route_kind: PublicRouteKind,
+        observed_at: Instant,
+    ) {
+        if self.expected_peers.contains(&peer) && observed_at <= self.connect_deadline {
+            self.routes
+                .insert(connection_id, OwnerConnectionRoute { peer, route_kind });
+        }
+    }
+
+    fn remove_connection(&mut self, connection_id: ConnectionId) {
+        self.routes.remove(&connection_id);
+    }
+
+    fn route_for_response(
+        &self,
+        peer: PeerId,
+        connection_id: ConnectionId,
+        observed_at: Instant,
+    ) -> Result<PublicRouteKind, &'static str> {
+        let route = self
+            .routes
+            .get(&connection_id)
+            .filter(|route| route.peer == peer)
+            .ok_or("public_owner_route_unavailable")?;
+        // libp2p enforces OWNER_RESPONSE_BUDGET after the request substream is
+        // negotiated. Only enforce the composed owner-stage ceiling here so
+        // cold relay substream negotiation is not counted twice.
+        if observed_at > self.finish_deadline {
+            return Err("public_owner_response_timeout");
+        }
+        Ok(route.route_kind)
+    }
+
+    fn connected_owner_count(&self, peers: &HashSet<PeerId>) -> usize {
+        self.routes
+            .values()
+            .filter(|route| peers.contains(&route.peer))
+            .map(|route| route.peer)
+            .collect::<HashSet<_>>()
+            .len()
+    }
+
+    fn timeout_error_kind(&self, peers: &HashSet<PeerId>) -> &'static str {
+        match self.connected_owner_count(peers) {
+            0 => "public_owner_connect_timeout",
+            connected if connected < peers.len() => "public_owner_mixed_timeout",
+            _ => "public_owner_response_timeout",
         }
     }
 }
@@ -523,9 +760,24 @@ struct ReaderBehaviour {
 
 fn reader_swarm(identity: Keypair) -> Result<Swarm<ReaderBehaviour>, NetworkError> {
     let local_peer = identity.public().to_peer_id();
-    let catalog = outbound_behaviour(PUBLIC_CATALOG_PROTOCOL, 128 * 1024, 512 * 1024)?;
-    let search = outbound_behaviour(PUBLIC_SEARCH_PROTOCOL, 16 * 1024, 256 * 1024)?;
-    let browse = outbound_behaviour(PUBLIC_BROWSE_PROTOCOL, 16 * 1024, 256 * 1024)?;
+    let catalog = outbound_behaviour(
+        PUBLIC_CATALOG_PROTOCOL,
+        128 * 1024,
+        512 * 1024,
+        INDEX_DEADLINE,
+    )?;
+    let search = outbound_behaviour(
+        PUBLIC_SEARCH_PROTOCOL,
+        16 * 1024,
+        256 * 1024,
+        OWNER_RESPONSE_BUDGET,
+    )?;
+    let browse = outbound_behaviour(
+        PUBLIC_BROWSE_PROTOCOL,
+        16 * 1024,
+        256 * 1024,
+        OWNER_RESPONSE_BUDGET,
+    )?;
     SwarmBuilder::with_existing_identity(identity)
         .with_tokio()
         .with_tcp(
@@ -561,6 +813,7 @@ fn outbound_behaviour<Request, Response>(
     protocol: &'static str,
     request_bytes: u64,
     response_bytes: u64,
+    request_timeout: Duration,
 ) -> Result<request_response::cbor::Behaviour<Request, Response>, NetworkError>
 where
     Request: serde::Serialize + serde::de::DeserializeOwned + Send + 'static,
@@ -575,7 +828,7 @@ where
         codec,
         [(protocol, ProtocolSupport::Outbound)],
         request_response::Config::default()
-            .with_request_timeout(PEER_DEADLINE)
+            .with_request_timeout(request_timeout)
             .with_max_concurrent_streams(32),
     ))
 }
@@ -661,56 +914,140 @@ fn public_search_response(
     }
 }
 
-fn collect_search_event(
+struct ObservedReaderEvent {
     event: SwarmEvent<ReaderBehaviourEvent>,
-    expected_request_id: uuid::Uuid,
+    at: Instant,
+}
+
+#[derive(Clone, Copy)]
+struct ExpectedSearchResponse {
+    request_id: uuid::Uuid,
     top_k: u8,
-    pending: &mut HashMap<OutboundRequestId, Vec<SignedPublicCollectionManifest>>,
+}
+
+struct PendingOwnerSearch {
+    peer: PeerId,
+    manifests: Vec<SignedPublicCollectionManifest>,
+}
+
+struct AcceptedOwnerRoute {
+    publisher_id: String,
+    route_kind: PublicRouteKind,
+}
+
+fn pending_owner_peers(
+    pending: &HashMap<OutboundRequestId, PendingOwnerSearch>,
+) -> HashSet<PeerId> {
+    pending.values().map(|owner| owner.peer).collect()
+}
+
+fn collect_search_event(
+    observed: ObservedReaderEvent,
+    expected: ExpectedSearchResponse,
+    pending: &mut HashMap<OutboundRequestId, PendingOwnerSearch>,
     sources: &mut Vec<Vec<SearchHit>>,
     partial: &mut bool,
-) {
-    match event {
+    route_tracker: &OwnerRouteTracker,
+    blocked_publishers: &HashSet<String>,
+) -> Option<AcceptedOwnerRoute> {
+    match observed.event {
         SwarmEvent::Behaviour(ReaderBehaviourEvent::Search(request_response::Event::Message {
+            peer,
+            connection_id,
             message,
-            ..
         })) => {
             if let request_response::Message::Response {
                 request_id,
                 response,
             } = message
-                && let Some(manifests) = pending.remove(&request_id)
+                && let Some(pending_owner) = pending.remove(&request_id)
             {
+                let manifests = pending_owner.manifests;
                 match response {
                     PublicSearchWireResponse::Success(mut response)
                         if response.protocol_version == PUBLIC_SEARCH_PROTOCOL
-                            && response.response.request_id == expected_request_id
+                            && response.response.request_id == expected.request_id
+                            && peer == pending_owner.peer
                             && revisions_are_current(&response.manifest_sequences, &manifests)
                             && public_search_hits_are_valid(
                                 &response.response.hits,
                                 &manifests,
-                                top_k,
+                                expected.top_k,
                             ) =>
                     {
-                        if let Some(publisher_id) = manifests
+                        let Some(publisher_id) = manifests
                             .first()
-                            .map(|manifest| &manifest.manifest.publisher_id)
-                        {
-                            for hit in &mut response.response.hits {
-                                hit.node_id.clone_from(publisher_id);
+                            .map(|manifest| manifest.manifest.publisher_id.clone())
+                        else {
+                            *partial = true;
+                            return None;
+                        };
+                        if publisher_id != peer.to_string() {
+                            *partial = true;
+                            return None;
+                        }
+                        if blocked_publishers.contains(&publisher_id) {
+                            return None;
+                        }
+                        let route_kind = match route_tracker.route_for_response(
+                            peer,
+                            connection_id,
+                            observed.at,
+                        ) {
+                            Ok(route_kind) => route_kind,
+                            Err(error_kind) => {
+                                tracing::warn!(
+                                    error_kind,
+                                    "public owner response could not be tied to its connection"
+                                );
+                                *partial = true;
+                                return None;
                             }
+                        };
+                        for hit in &mut response.response.hits {
+                            hit.node_id.clone_from(&publisher_id);
                         }
                         sources.push(response.response.hits);
+                        return Some(AcceptedOwnerRoute {
+                            publisher_id,
+                            route_kind,
+                        });
                     }
                     _ => *partial = true,
                 }
             }
         }
         SwarmEvent::Behaviour(ReaderBehaviourEvent::Search(
-            request_response::Event::OutboundFailure { request_id, .. },
+            request_response::Event::OutboundFailure {
+                request_id, error, ..
+            },
         )) if pending.remove(&request_id).is_some() => {
+            log_public_owner_outbound_failure(&error);
             *partial = true;
         }
         _ => {}
+    }
+    None
+}
+
+fn log_public_owner_outbound_failure(error: &request_response::OutboundFailure) {
+    let error_kind = match error {
+        request_response::OutboundFailure::DialFailure => "public_owner_dial_failed",
+        request_response::OutboundFailure::Timeout => "public_owner_response_timeout",
+        request_response::OutboundFailure::ConnectionClosed => "public_owner_connection_closed",
+        request_response::OutboundFailure::UnsupportedProtocols => {
+            "public_owner_protocol_unsupported"
+        }
+        request_response::OutboundFailure::Io(_) => "public_owner_io_failed",
+    };
+    tracing::warn!(error_kind, "public owner request failed");
+}
+
+fn merge_route_kind(current: PublicRouteKind, observed: PublicRouteKind) -> PublicRouteKind {
+    match (current, observed) {
+        (PublicRouteKind::Relay, _) | (_, PublicRouteKind::Relay) => PublicRouteKind::Relay,
+        (PublicRouteKind::Direct, _) | (_, PublicRouteKind::Direct) => PublicRouteKind::Direct,
+        _ => PublicRouteKind::Offline,
     }
 }
 
@@ -801,6 +1138,16 @@ fn group_candidates_by_peer(
     groups
 }
 
+fn retain_unblocked_sources(
+    sources: &mut Vec<Vec<SearchHit>>,
+    blocked_publishers: &HashSet<String>,
+) {
+    sources.retain(|hits| {
+        hits.first()
+            .is_none_or(|hit| !blocked_publishers.contains(&hit.node_id))
+    });
+}
+
 fn fuse_rankings(sources: Vec<Vec<SearchHit>>) -> Vec<SearchHit> {
     let mut fused = HashMap::<(String, uuid::Uuid), (SearchHit, f64)>::new();
     for hits in sources {
@@ -853,12 +1200,12 @@ fn public_index_deadline(started: Instant) -> Instant {
     started + INDEX_DEADLINE
 }
 
-fn public_global_deadline(started: Instant) -> Instant {
-    started + GLOBAL_DEADLINE
-}
-
-fn public_peer_deadline(started: Instant, now: Instant) -> Instant {
-    (now + PEER_DEADLINE).min(public_global_deadline(started))
+fn public_owner_deadlines(started: Instant) -> OwnerDeadlines {
+    let connect = started + OWNER_CONNECT_BUDGET;
+    OwnerDeadlines {
+        connect,
+        finish: connect + OWNER_RESPONSE_BUDGET,
+    }
 }
 
 fn pending_cannot_change_top_k(
@@ -1103,7 +1450,127 @@ mod tests {
             reader.browse(&manifest, None, 1).await,
             Err(SearchContractError::Unauthorized)
         ));
-        assert_eq!(reader.route_kind(), PublicRouteKind::Offline);
+    }
+
+    #[test]
+    fn owner_route_tracker_ignores_connections_to_other_peers() {
+        let owner = PeerId::random();
+        let owners = HashSet::from([owner]);
+        let started = Instant::now();
+        let mut tracker = OwnerRouteTracker::new(owners.clone(), public_owner_deadlines(started));
+
+        tracker.record_connection(
+            PeerId::random(),
+            ConnectionId::new_unchecked(1),
+            PublicRouteKind::Direct,
+            started,
+        );
+
+        assert_eq!(tracker.connected_owner_count(&owners), 0);
+    }
+
+    #[test]
+    fn owner_route_tracker_attributes_response_after_cold_relay_negotiation() {
+        let owner = PeerId::random();
+        let connection = ConnectionId::new_unchecked(1);
+        let started = Instant::now();
+        let deadlines = public_owner_deadlines(started);
+        let mut tracker = OwnerRouteTracker::new(HashSet::from([owner]), deadlines);
+        tracker.record_connection(owner, connection, PublicRouteKind::Relay, started);
+
+        assert_eq!(
+            tracker.route_for_response(
+                owner,
+                connection,
+                started + OWNER_RESPONSE_BUDGET + Duration::from_millis(1),
+            ),
+            Ok(PublicRouteKind::Relay)
+        );
+        assert_eq!(
+            tracker.route_for_response(owner, connection, deadlines.finish),
+            Ok(PublicRouteKind::Relay),
+        );
+        assert_eq!(
+            tracker.route_for_response(
+                owner,
+                connection,
+                deadlines.finish + Duration::from_millis(1),
+            ),
+            Err("public_owner_response_timeout")
+        );
+        assert_eq!(
+            tracker.route_for_response(owner, ConnectionId::new_unchecked(2), started,),
+            Err("public_owner_route_unavailable")
+        );
+        assert_eq!(
+            tracker.route_for_response(PeerId::random(), connection, started),
+            Err("public_owner_route_unavailable")
+        );
+    }
+
+    #[test]
+    fn owner_route_tracker_rejects_late_connections_and_removes_closed_ones() {
+        let owner = PeerId::random();
+        let owners = HashSet::from([owner]);
+        let started = Instant::now();
+        let deadline = started + OWNER_CONNECT_BUDGET;
+        let mut tracker = OwnerRouteTracker::new(owners.clone(), public_owner_deadlines(started));
+        let active = ConnectionId::new_unchecked(1);
+        tracker.record_connection(owner, active, PublicRouteKind::Relay, started);
+        assert_eq!(tracker.connected_owner_count(&owners), 1);
+
+        tracker.remove_connection(active);
+        assert_eq!(tracker.connected_owner_count(&owners), 0);
+        assert_eq!(
+            tracker.timeout_error_kind(&owners),
+            "public_owner_connect_timeout"
+        );
+
+        let late = ConnectionId::new_unchecked(2);
+        tracker.record_connection(
+            owner,
+            late,
+            PublicRouteKind::Direct,
+            deadline + Duration::from_millis(1),
+        );
+        assert_eq!(
+            tracker.route_for_response(owner, late, deadline),
+            Err("public_owner_route_unavailable")
+        );
+    }
+
+    #[test]
+    fn timeout_classification_considers_only_pending_owners() {
+        let answered = PeerId::random();
+        let pending = PeerId::random();
+        let all_owners = HashSet::from([answered, pending]);
+        let started = Instant::now();
+        let mut tracker =
+            OwnerRouteTracker::new(all_owners.clone(), public_owner_deadlines(started));
+        tracker.record_connection(
+            answered,
+            ConnectionId::new_unchecked(1),
+            PublicRouteKind::Relay,
+            started,
+        );
+
+        assert_eq!(
+            tracker.timeout_error_kind(&all_owners),
+            "public_owner_mixed_timeout"
+        );
+        assert_eq!(
+            tracker.timeout_error_kind(&HashSet::from([pending])),
+            "public_owner_connect_timeout"
+        );
+        assert_eq!(tracker.connected_owner_count(&HashSet::from([pending])), 0);
+    }
+
+    #[test]
+    fn route_merge_preserves_successful_relay_evidence() {
+        assert_eq!(
+            merge_route_kind(PublicRouteKind::Relay, PublicRouteKind::Direct),
+            PublicRouteKind::Relay
+        );
     }
 
     #[tokio::test]
@@ -1125,26 +1592,40 @@ mod tests {
     }
 
     #[tokio::test(start_paused = true)]
-    async fn public_deadlines_are_bounded_at_300_800_and_1500_milliseconds() {
+    async fn public_deadlines_compose_catalog_owner_connect_and_owner_response_budgets() {
         let started = Instant::now();
         assert_eq!(
             public_index_deadline(started).duration_since(started),
             INDEX_DEADLINE
         );
-        assert_eq!(
-            public_peer_deadline(started, started).duration_since(started),
-            PEER_DEADLINE
-        );
+        tokio::time::timeout_at(
+            public_index_deadline(started),
+            tokio::time::sleep(Duration::from_millis(900)),
+        )
+        .await
+        .expect("slow cross-region catalog stays within its bounded stage");
 
-        tokio::time::advance(Duration::from_millis(1_000)).await;
-
+        let owner_started = Instant::now();
+        let owner_deadlines = public_owner_deadlines(owner_started);
         assert_eq!(
-            public_peer_deadline(started, Instant::now()),
-            public_global_deadline(started)
+            owner_deadlines.connect.duration_since(owner_started),
+            OWNER_CONNECT_BUDGET
         );
         assert_eq!(
-            public_global_deadline(started).duration_since(started),
-            GLOBAL_DEADLINE
+            owner_deadlines
+                .finish
+                .duration_since(owner_deadlines.connect),
+            OWNER_RESPONSE_BUDGET
+        );
+        tokio::time::timeout_at(
+            owner_deadlines.finish,
+            tokio::time::sleep(OWNER_CONNECT_BUDGET + Duration::from_millis(700)),
+        )
+        .await
+        .expect("owner receives separate connection and response budgets after catalog");
+        assert_eq!(
+            Instant::now().duration_since(started),
+            Duration::from_millis(4_600)
         );
     }
 }

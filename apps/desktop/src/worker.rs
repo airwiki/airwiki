@@ -1,7 +1,7 @@
 use std::{
     collections::{HashMap, HashSet, VecDeque},
     panic::AssertUnwindSafe,
-    path::PathBuf,
+    path::{Path, PathBuf},
     sync::{
         Arc, Mutex,
         atomic::{AtomicU64, Ordering},
@@ -16,10 +16,10 @@ use airwiki_core::{
     KnowledgeBundleView, KnowledgePageId, KnowledgePageView, ReviewVersionToken, WikiRepairError,
 };
 use airwiki_inference::{
-    AssetManager, E5_FILES, E5_REVISION, HardwareReport, InstallEvent, InstallOutcome, InstallPlan,
-    LLAMA_CPP_BUILD, MMARCO_COMMON_FILES, MMARCO_REVISION, ModelDecision, ModelProfile,
-    ModelSelection, diagnose_hardware, install_failure_is_transient, select_model,
-    selection_for_model,
+    AssetManager, E5_FILES, E5_REVISION, HardwareReport, InstallEvent, InstallFailureKind,
+    InstallOutcome, InstallPlan, LLAMA_CPP_BUILD, MMARCO_COMMON_FILES, MMARCO_REVISION,
+    ModelDecision, ModelProfile, ModelSelection, classify_install_failure, diagnose_hardware,
+    install_failure_is_transient, select_model, selection_for_model,
 };
 use airwiki_mcp::{McpClientActivity, McpClientKind};
 use airwiki_network::{NetworkEvent, PublicBrowseResult, PublicRouteKind};
@@ -42,13 +42,18 @@ use crate::{
         ChatClientKind, ChatIntegrationManager, ChatIntegrationsSnapshot, IntegrationAction,
         IntegrationStatus, IntegrationView,
     },
+    model_activation_status::{
+        MODEL_ACTIVATION_STATUS_FILE, ModelActivationErrorKind, ModelActivationExitClass,
+        ModelActivationFailureView, ModelActivationStatus, persist_model_activation_status,
+    },
     model_config::{
         CloseBehavior, DesktopConfig, LanPreference, LocalePreference, ONBOARDING_VERSION,
     },
     paths::AppPaths,
     services::{
         CollectionWatchEvent, CollectionWatcherHandle, DesktopServices, ModelRuntimePaths,
-        PUBLIC_NETWORK_OFFLINE_WARNING, WikiHealthRollup,
+        PUBLIC_NETWORK_OFFLINE_WARNING, WikiHealthRollup, classify_model_activation_failure,
+        model_activation_elapsed_bucket,
     },
     updater::{
         PackagerUpdateBackend, UpdateSchedule, UpdaterBuildConfig, UpdaterDisabledReason,
@@ -684,7 +689,7 @@ enum InternalEvent {
         model_id: String,
         result: Result<InstallOutcome, String>,
     },
-    InstallFinished(Result<InstallOutcome, String>),
+    InstallFinished(Result<InstallOutcome, InstallFailureKind>),
 }
 
 enum BackgroundCompletion {
@@ -1128,6 +1133,8 @@ async fn run_worker(
             return;
         }
     };
+    let mut public_announcement_updates = services.subscribe_public_announcement_updates();
+    let mut public_announcement_updates_open = true;
     let (integration_manager, integration_manager_error) =
         match ChatIntegrationManager::new(paths.clone()) {
             Ok(manager) => (Some(manager), None),
@@ -1327,6 +1334,13 @@ async fn run_worker(
 
     'running: loop {
         tokio::select! {
+            changed = public_announcement_updates.changed(), if public_announcement_updates_open => {
+                if changed.is_ok() {
+                    refresh_collection_views(&services, &events);
+                } else {
+                    public_announcement_updates_open = false;
+                }
+            }
             command = commands.recv() => {
                 let Some(command) = command else { break 'running };
                 match command {
@@ -1412,6 +1426,7 @@ async fn run_worker(
                                     &events,
                                     &internal_tx,
                                     &mut install_cancel,
+                                    paths.logs.join(MODEL_ACTIVATION_STATUS_FILE),
                                 );
                                 model_lifecycle = ModelLifecycle::Installing;
                             }
@@ -2113,6 +2128,7 @@ async fn run_worker(
                                     &services,
                                     &mut background,
                                     ModelRuntimePaths::from_install(&outcome),
+                                    paths.logs.join(MODEL_ACTIVATION_STATUS_FILE),
                                 );
                             }
                             Err(_error) if queued_install => {
@@ -2142,6 +2158,7 @@ async fn run_worker(
                                         &events,
                                         &internal_tx,
                                         &mut install_cancel,
+                                        paths.logs.join(MODEL_ACTIVATION_STATUS_FILE),
                                     );
                                     model_lifecycle = ModelLifecycle::Installing;
                                 } else {
@@ -2223,9 +2240,6 @@ async fn run_worker(
                     Some(InternalEvent::InstallFinished(result))
                         if model_lifecycle == ModelLifecycle::Installing =>
                     {
-                        let was_cancelled = install_cancel
-                            .as_ref()
-                            .is_some_and(CancellationToken::is_cancelled);
                         install_cancel = None;
                         send(&events, WorkerEvent::InstallStopped);
                         match result {
@@ -2237,6 +2251,11 @@ async fn run_worker(
                                     outcome.selection.model_id,
                                 );
                                 if has_different_active {
+                                    persist_activation_status(
+                                        &paths.logs.join(MODEL_ACTIVATION_STATUS_FILE),
+                                        ModelActivationStatus::ready(),
+                                    )
+                                    .await;
                                     let previous_pending =
                                         desktop_config.pending_selection.clone();
                                     desktop_config.pending_selection =
@@ -2277,10 +2296,11 @@ async fn run_worker(
                                         &services,
                                         &mut background,
                                         ModelRuntimePaths::from_install(&outcome),
+                                        paths.logs.join(MODEL_ACTIVATION_STATUS_FILE),
                                     );
                                 }
                             }
-                            Err(_) if was_cancelled => {
+                            Err(InstallFailureKind::Cancelled) => {
                                 model_lifecycle = settled_model_lifecycle(&services);
                                 send(
                                     &events,
@@ -2302,11 +2322,16 @@ async fn run_worker(
                             }
                             Err(error) => {
                                 model_lifecycle = settled_model_lifecycle(&services);
-                                let message = match error.as_str() {
-                                    "model_install_network_unavailable" => {
+                                let message = match error {
+                                    InstallFailureKind::Network => {
                                         "La conexión sigue sin estar disponible. La descarga parcial quedó guardada para reintentar."
                                     }
-                                    "model_install_action_required" => {
+                                    InstallFailureKind::Integrity
+                                    | InstallFailureKind::Storage
+                                    | InstallFailureKind::Promotion
+                                    | InstallFailureKind::RuntimeVerification
+                                    | InstallFailureKind::Capacity
+                                    | InstallFailureKind::Configuration => {
                                         "No se pudo preparar la IA local. Revisa el espacio, la memoria y la compatibilidad antes de reintentar."
                                     }
                                     _ => {
@@ -3264,6 +3289,7 @@ async fn run_worker(
                                             &events,
                                             &internal_tx,
                                             &mut install_cancel,
+                                            paths.logs.join(MODEL_ACTIVATION_STATUS_FILE),
                                         );
                                         model_lifecycle = ModelLifecycle::Installing;
                                     } else {
@@ -4032,15 +4058,7 @@ fn matching_known_install_plan(
 }
 
 fn refresh_content_views(services: &DesktopServices, events: &Sender<WorkerEvent>) {
-    match services.collection_views() {
-        Ok(collections) => send(events, WorkerEvent::Collections(collections)),
-        Err(error) => send(
-            events,
-            WorkerEvent::Error(format!(
-                "No se pudieron refrescar las colecciones: {error:#}"
-            )),
-        ),
-    }
+    refresh_collection_views(services, events);
     match services.review_views() {
         Ok(reviews) => send(events, WorkerEvent::Reviews(reviews)),
         Err(error) => send(
@@ -4054,6 +4072,18 @@ fn refresh_content_views(services: &DesktopServices, events: &Sender<WorkerEvent
             events,
             WorkerEvent::Error(format!(
                 "No se pudieron refrescar los archivos pendientes: {error:#}"
+            )),
+        ),
+    }
+}
+
+fn refresh_collection_views(services: &DesktopServices, events: &Sender<WorkerEvent>) {
+    match services.collection_views() {
+        Ok(collections) => send(events, WorkerEvent::Collections(collections)),
+        Err(error) => send(
+            events,
+            WorkerEvent::Error(format!(
+                "No se pudieron refrescar las colecciones: {error:#}"
             )),
         ),
     }
@@ -4172,6 +4202,7 @@ fn start_install(
     events: &Sender<WorkerEvent>,
     completion_tx: &UnboundedSender<InternalEvent>,
     install_cancel: &mut Option<CancellationToken>,
+    status_path: PathBuf,
 ) {
     const MAX_TRANSIENT_RETRIES: u32 = 2;
     debug_assert!(install_cancel.is_none());
@@ -4181,6 +4212,8 @@ fn start_install(
     let progress_tx = events.clone();
     let completion_tx = completion_tx.clone();
     lifecycle.spawn(async move {
+        let started = Instant::now();
+        persist_activation_status(&status_path, ModelActivationStatus::starting()).await;
         let mut transient_retries = 0_u32;
         let result = loop {
             let attempt_progress = progress_tx.clone();
@@ -4209,24 +4242,49 @@ fn start_install(
                     let retry_delay = Duration::from_secs(5 * u64::from(transient_retries));
                     tokio::select! {
                         () = cancel.cancelled() => {
-                            break Err("model_install_cancelled".to_owned());
+                            break Err(InstallFailureKind::Cancelled);
                         }
                         () = tokio::time::sleep(retry_delay) => {}
                     }
                 }
                 Ok(Err(error)) => {
-                    let code = if install_failure_is_transient(&error) {
-                        "model_install_network_unavailable"
-                    } else {
-                        "model_install_action_required"
-                    };
-                    break Err(code.to_owned());
+                    break Err(classify_install_failure(&error));
                 }
-                Err(_) => break Err("model_install_internal_failure".to_owned()),
+                Err(_) => break Err(InstallFailureKind::Internal),
             }
         };
+        if let Err(kind) = result {
+            persist_activation_status(
+                &status_path,
+                ModelActivationStatus::failed(
+                    model_install_failure_view(kind),
+                    model_activation_elapsed_bucket(started.elapsed()),
+                ),
+            )
+            .await;
+        }
         let _ = completion_tx.send(InternalEvent::InstallFinished(result));
     });
+}
+
+fn model_install_failure_view(kind: InstallFailureKind) -> ModelActivationFailureView {
+    let error_kind = match kind {
+        InstallFailureKind::Network => ModelActivationErrorKind::InstallNetwork,
+        InstallFailureKind::Integrity => ModelActivationErrorKind::InstallIntegrity,
+        InstallFailureKind::Storage => ModelActivationErrorKind::InstallStorage,
+        InstallFailureKind::Promotion => ModelActivationErrorKind::InstallPromotion,
+        InstallFailureKind::RuntimeVerification => {
+            ModelActivationErrorKind::InstallRuntimeVerification
+        }
+        InstallFailureKind::Capacity => ModelActivationErrorKind::InstallCapacity,
+        InstallFailureKind::Configuration => ModelActivationErrorKind::InstallConfiguration,
+        InstallFailureKind::Cancelled => ModelActivationErrorKind::InstallCancelled,
+        InstallFailureKind::Internal => ModelActivationErrorKind::InstallInternal,
+    };
+    ModelActivationFailureView {
+        error_kind,
+        exit_class: ModelActivationExitClass::None,
+    }
 }
 
 fn should_retry_transient_install(
@@ -4242,17 +4300,71 @@ fn spawn_model_enable(
     services: &Arc<DesktopServices>,
     background: &mut JoinSet<BackgroundCompletion>,
     paths: ModelRuntimePaths,
+    status_path: PathBuf,
 ) {
     let services = Arc::clone(services);
     let model_id = paths.selection.model_id.to_owned();
     background.spawn(async move {
-        let result = AssertUnwindSafe(services.enable_models(paths))
+        let started = Instant::now();
+        persist_activation_status(&status_path, ModelActivationStatus::starting()).await;
+        let result = match AssertUnwindSafe(services.enable_models(paths))
             .catch_unwind()
             .await
-            .map_err(panic_message)
-            .and_then(|result| result.map_err(|error| format!("{error:#}")));
+        {
+            Ok(Ok(())) => {
+                persist_activation_status(&status_path, ModelActivationStatus::ready()).await;
+                Ok(())
+            }
+            Ok(Err(error)) => {
+                let failure = classify_model_activation_failure(&error);
+                let elapsed_bucket = model_activation_elapsed_bucket(started.elapsed());
+                persist_activation_status(
+                    &status_path,
+                    ModelActivationStatus::failed(failure, elapsed_bucket),
+                )
+                .await;
+                tracing::warn!(
+                    event = "model_activation_failed",
+                    error_kind = failure.error_kind.as_str(),
+                    elapsed_bucket = elapsed_bucket.as_str(),
+                    exit_class = failure.exit_class.as_str(),
+                    "model activation failed"
+                );
+                Err(format!("{error:#}"))
+            }
+            Err(payload) => {
+                let failure = ModelActivationFailureView {
+                    error_kind: ModelActivationErrorKind::ActivationInternal,
+                    exit_class: ModelActivationExitClass::Unknown,
+                };
+                let elapsed_bucket = model_activation_elapsed_bucket(started.elapsed());
+                persist_activation_status(
+                    &status_path,
+                    ModelActivationStatus::failed(failure, elapsed_bucket),
+                )
+                .await;
+                tracing::warn!(
+                    event = "model_activation_failed",
+                    error_kind = failure.error_kind.as_str(),
+                    elapsed_bucket = elapsed_bucket.as_str(),
+                    exit_class = failure.exit_class.as_str(),
+                    "model activation failed"
+                );
+                Err(panic_message(payload))
+            }
+        };
         BackgroundCompletion::ModelsEnabled { model_id, result }
     });
+}
+
+async fn persist_activation_status(path: &Path, status: ModelActivationStatus) {
+    if let Err(error) = persist_model_activation_status(path.to_path_buf(), status).await {
+        tracing::warn!(
+            event = "model_activation_status_write_failed",
+            error_kind = error.error_kind(),
+            "model activation status write failed"
+        );
+    }
 }
 
 fn settled_model_lifecycle(services: &DesktopServices) -> ModelLifecycle {
@@ -4712,18 +4824,30 @@ fn spawn_search(
                     }
                 }
             } else {
-                services.search(question, top_k, purpose).await
+                services
+                    .search(question, top_k, purpose)
+                    .await
+                    .map(|response| (response, PublicRouteKind::Offline))
             }
         };
         let result = AssertUnwindSafe(search)
             .catch_unwind()
             .await
             .map_err(panic_message)
-            .and_then(|result| result.map_err(|error| error.to_string()));
-        let route_kind = if public_network {
-            services.public_route_kind()
-        } else {
-            PublicRouteKind::Offline
+            .and_then(|result| result.map_err(|error| error.to_string()))
+            .map(|(response, route_kind)| {
+                (
+                    response,
+                    if public_network {
+                        route_kind
+                    } else {
+                        PublicRouteKind::Offline
+                    },
+                )
+            });
+        let (result, route_kind) = match result {
+            Ok((response, route_kind)) => (Ok(response), route_kind),
+            Err(error) => (Err(error), PublicRouteKind::Offline),
         };
         BackgroundCompletion::Search {
             request_id,
@@ -5895,5 +6019,56 @@ mod tests {
         assert!(!should_retry_transient_install(true, 2, 2, false));
         assert!(!should_retry_transient_install(false, 0, 2, false));
         assert!(!should_retry_transient_install(true, 0, 2, true));
+    }
+
+    #[test]
+    fn install_failures_map_to_closed_durable_classes() {
+        let mappings = [
+            (
+                InstallFailureKind::Network,
+                ModelActivationErrorKind::InstallNetwork,
+            ),
+            (
+                InstallFailureKind::Integrity,
+                ModelActivationErrorKind::InstallIntegrity,
+            ),
+            (
+                InstallFailureKind::Storage,
+                ModelActivationErrorKind::InstallStorage,
+            ),
+            (
+                InstallFailureKind::Promotion,
+                ModelActivationErrorKind::InstallPromotion,
+            ),
+            (
+                InstallFailureKind::RuntimeVerification,
+                ModelActivationErrorKind::InstallRuntimeVerification,
+            ),
+            (
+                InstallFailureKind::Capacity,
+                ModelActivationErrorKind::InstallCapacity,
+            ),
+            (
+                InstallFailureKind::Configuration,
+                ModelActivationErrorKind::InstallConfiguration,
+            ),
+            (
+                InstallFailureKind::Internal,
+                ModelActivationErrorKind::InstallInternal,
+            ),
+        ];
+
+        let actual = mappings.map(|(failure, _)| model_install_failure_view(failure).error_kind);
+        let expected = mappings.map(|(_, expected)| expected);
+
+        assert_eq!(actual, expected);
+    }
+
+    #[test]
+    fn cancelled_install_has_a_closed_terminal_failure() {
+        assert_eq!(
+            model_install_failure_view(InstallFailureKind::Cancelled).error_kind,
+            ModelActivationErrorKind::InstallCancelled
+        );
     }
 }

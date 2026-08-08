@@ -43,12 +43,12 @@ pub use public_manifest::{
 };
 pub use public_reader::{
     PublicBrowseResult, PublicCollectionAvailability, PublicIndexEndpoint, PublicReader,
-    PublicRouteKind,
+    PublicRouteKind, PublicSearchResult,
 };
 pub use public_source::{
-    PublicBrowseDelivery, PublicBrowseWireResponse, PublicSearchDelivery, PublicSearchWireResponse,
-    PublicSourceBackend, PublicSourceBackendError, PublicSourceRejection, PublicSourceServerConfig,
-    run_public_source_server,
+    PublicBrowseDelivery, PublicBrowseWireResponse, PublicRelayReadiness, PublicSearchDelivery,
+    PublicSearchWireResponse, PublicSourceBackend, PublicSourceBackendError, PublicSourceRejection,
+    PublicSourceServerConfig, run_public_source_server,
 };
 pub use rate_limit::PeerRateLimiter;
 pub use runtime::{

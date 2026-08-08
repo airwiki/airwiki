@@ -23,6 +23,17 @@ fingerprint and direct or relay routes. Federated indexes store only these
 manifests and signed tombstones. They never receive documents, chunks,
 embeddings, source paths or complete local indexes.
 
+Manifest expiry and its signed update-to-expiry interval are at most 24 hours;
+an update timestamp may be at most five minutes ahead of receipt. Each index
+admits at most 100,000 total manifest or tombstone rows and 1,000 rows per
+publisher. Compact tombstone rows retain the sequence high-water mark for the
+node lifetime, so a future-dated or newly replayed older manifest cannot revive
+a withdrawn collection. Expiry removes the manifest payload and FTS row but
+retains the same compact high-water mark. These rows count against both
+admission ceilings.
+The in-memory peer rate limiter tracks at most 1,024 active identities per
+window and rejects new identities while that bounded window is full.
+
 The wire protocols are separate:
 
 - `/airwiki/public-catalog/1.0.0`
@@ -31,14 +42,24 @@ The wire protocols are separate:
 
 Indexes select at most 64 collections. A reader contacts at most three indexes
 and twelve publisher peers, with two collections per peer, bounded concurrency,
-deadlines and cancellation. Publishers revalidate public policy, reviewed
-publication, manifest sequence and publication fingerprint under a disclosure
-lease immediately before returning content. Disabling public exposure changes
-durable policy first, stops serving content, and emits a signed tombstone.
+deadlines and cancellation. A cold owner connection has a separate bounded
+budget from the owner response, and route classification is scoped to one
+request and accepted only with a protocol-valid response on that owner's
+observed connection. A multi-owner search reports Relay when any accepted
+response used a relay and reports Direct only when every accepted response was
+direct, so relay evidence is not hidden by another direct response. Publishers
+revalidate public policy, reviewed publication, manifest sequence and
+publication fingerprint under a disclosure lease immediately before returning
+content. Disabling public exposure changes durable policy first, stops serving
+content, and emits a signed tombstone.
 
 QUIC/Noise is preferred. AutoNAT, Circuit Relay and DCUtR support publishers
 behind NAT; relay connections are outbound and no Windows Public-profile
-firewall rule is installed. ADR 0005 and LAN grants remain unchanged.
+firewall rule is installed. A publisher includes a relay route only after the
+matching outbound reservation produces a usable circuit-listen address.
+Readiness changes advance the manifest sequence and immediately reannounce the
+remaining routes or emit a tombstone when none remain. ADR 0005 and LAN grants
+remain unchanged.
 
 ## Consequences
 

@@ -57,8 +57,14 @@ Controls are not considered effective end to end until the
 | Unauthorized LAN peer queries data | Noise, SAS pairing, trust state, per-collection grants, rate limits | Excessive grants still disclose data; test full grant and revocation matrix |
 | Private or stale content reaches a public reader | Separate opt-in, reviewed-publication checks, signed sequence and fingerprint, final disclosure lease, immediate owner-side revocation | A third party can retain previously returned metadata or snippets |
 | Malicious index redirects or ranks content | Expected index PeerId is pinned; owner manifests are independently signed; index rank selects routes but never final ranking | An index can omit publishers, delay tombstones, or degrade availability until replaced |
-| Public queries exhaust an owner | Three-index, 64-candidate, 12-peer and two-collection caps; bounded payloads, semaphores, rate limits, 800 ms peer and 1.5 s global deadlines | Distributed abuse can still consume bounded relay and inference capacity |
+| Public queries exhaust an owner | Three-index, 64-candidate, 12-peer and two-collection caps; bounded payloads, semaphores, per-peer rate limits with a 1,024-identity window cap, a 1 s index stage, a 3 s cold owner-connection budget and a separate 800 ms owner-response budget | Bounded connection setup, local verification and ranking add work after catalog selection; distributed abuse can still consume bounded relay and inference capacity |
+| Public registrations exhaust an index | Manifest remaining and signed lifetimes are at most 24 hours with bounded future skew; each SQLite catalog admits at most 100,000 total rows and 1,000 per publisher; expiry removes payload/FTS data but retains a compact sequence high-water mark, as do tombstones; compact rows remain for the node lifetime and count against both ceilings | An attacker can consume the bounded shared capacity and deny new registrations; operators monitor sanitized database and disk consumption and may replace or retire the index |
+| Public route evidence is misattributed | Route state is request-scoped and accepted only when a protocol-valid owner response arrives within the separate connection and response budgets on the matching observed connection; an index connection, timeout or concurrent search remains offline; Relay takes precedence for mixed successful search routes | Direct and relay observations describe transports used by accepted responses, not future reachability |
+| Publisher advertises an unavailable relay | Only relay listeners with a live outbound reservation enter signed manifests; readiness changes advance the sequence and immediately reannounce remaining routes or tombstone the collection; local status rejects late lower-sequence completions | Listener events can still race a network outage, but the owner remains fail-closed and the stale route can only degrade bounded availability |
+| A blocked publisher completes an in-flight response | The local publisher block is rechecked before owner requests, while accepting and emitting search results, at final fusion and immediately before accepting browse content; a completed block excludes cached and in-flight disclosure | A user who explicitly unblocks the same identity restores future access |
 | Public identity correlates readers | Readers use one ephemeral identity per application session; LAN and publisher identities are separate | Network observers and relays can still correlate IP and timing |
+| Public beta infrastructure exceeds its operating budget | Two minimal independent nodes, live retail-price preflight, per-node monthly budgets, forecast/actual alerts, platform consumption review and whole-group retirement | Azure budgets alert but do not hard-cap spend; notification and cost data can lag |
+| Public beta host or identity is replaced | Pinned image and binary hash, Azure-attested SSH host key, one persistent identity/database per node, compiled expiring registry and higher-version rotation | Older candidates can use only their unchanged or unexpired pinned entries |
 | Pairing impersonation | Six-word SAS derived from identities and nonces, two-minute expiry | A user who skips comparison defeats the control |
 | Private collection reaches cloud chat | `allow_external_ai` defaults off and is rechecked at the source | Human authorization can be wrong; use synthetic fixtures and audit |
 | Ranking returns the least-wrong absent fact | Source node applies the pinned local answerability classifier to the bounded outgoing snippet; failures and timeouts close the path | The classifier is probabilistic; reassess both platforms when model, corpus, or policy changes |
@@ -119,6 +125,7 @@ Controls are not considered effective end to end until the
 - The firewall helper never opens MCP, Public profile, Internet, file sharing, or
   global network discovery.
 - Public publishers reserve relays through outbound connections; public
+  manifests contain only routes backed by a live reservation, and public
   federation never installs a Windows Public-profile rule.
 - Updates require valid signatures and confirmation and are never silent.
 
@@ -139,8 +146,13 @@ Controls are not considered effective end to end until the
 - Bootstrap entries are versioned and expire. Community indexes remain
   replaceable, and an expired validation endpoint is ignored rather than being
   treated as an authority.
-- Local publisher blocks are checked before dialing or browsing and contain
-  only the stable public publisher identity; they do not notify the publisher.
+- The public beta uses two independent Azure nodes without guest telemetry or
+  remote configuration. Budget alerts are operational signals, not a hard
+  spending cap; the documented emergency control is bootstrap revocation and
+  deletion of both dedicated resource groups.
+- Local publisher blocks are checked through the final result-delivery boundary
+  and contain only the stable public publisher identity; they do not notify the
+  publisher.
 
 ## Temporary dependency-audit exceptions
 

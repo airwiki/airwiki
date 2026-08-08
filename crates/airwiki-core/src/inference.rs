@@ -1,4 +1,4 @@
-use std::{collections::HashMap, time::Duration};
+use std::{collections::HashMap, fmt, time::Duration};
 
 use airwiki_types::{ConceptType, EnrichmentDraft};
 use anyhow::{Context, Result, anyhow, bail};
@@ -15,6 +15,7 @@ pub const MAX_GENERATION_INPUT_TOKENS: usize = 2_800;
 /// hardware, allowing 1,024 generated tokens can consume the entire HTTP
 /// deadline even though the useful JSON normally fits comfortably below 384.
 pub const MAX_GENERATION_OUTPUT_TOKENS: usize = 384;
+const ACTIVATION_SMOKE_OUTPUT_TOKENS: usize = 64;
 pub const E5_MODEL_REPOSITORY: &str = "intfloat/multilingual-e5-small";
 pub const E5_MODEL_REVISION: &str = "614241f622f53c4eeff9890bdc4f31cfecc418b3";
 
@@ -35,6 +36,10 @@ const MIN_GENERATION_REQUEST_TIMEOUT: Duration = Duration::from_secs(180);
 const MAX_GENERATION_REQUEST_TIMEOUT: Duration = Duration::from_secs(600);
 const GENERATION_REQUEST_BASE_TIMEOUT: Duration = Duration::from_secs(120);
 
+const ACTIVATION_SMOKE_SYSTEM_PROMPT: &str =
+    "Verify local structured generation. Return only the required compact JSON object.";
+const ACTIVATION_SMOKE_INPUT: &str = "Report the required local readiness status.";
+const ACTIVATION_SMOKE_STATUS: &str = "ready";
 const SUMMARY_SYSTEM_PROMPT: &str = "Resume fielmente el texto empresarial en un máximo de 70 palabras. No inventes datos ni incluyas razonamiento. Devuelve solamente un objeto JSON compacto.";
 const ENRICHMENT_SYSTEM_PROMPT: &str = "Analiza el documento sin inventar. Propón metadatos, nunca permisos, colección ni publicación. Usa un título de hasta 10 palabras, descripción de hasta 20 palabras, resumen de hasta 45 palabras y explicación de hasta 12 palabras. Propón entre 3 y 5 tags breves; incluye como máximo 3 entidades y 2 enlaces, solo si aparecen explícitamente. Omite términos genéricos. Devuelve solamente un objeto JSON compacto, sin Markdown ni razonamiento.";
 
@@ -53,6 +58,12 @@ pub trait EmbeddingProvider: Send + Sync {
     async fn embed(&self, texts: &[String]) -> Result<Vec<Vec<f32>>>;
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum GenerationExecutionClass {
+    Accelerated,
+    CpuOnly,
+}
+
 /// OpenAI-compatible client for a llama.cpp sidecar bound to loopback.
 #[derive(Debug, Clone, PartialEq)]
 pub struct GenerationRuntimeConfig {
@@ -61,10 +72,11 @@ pub struct GenerationRuntimeConfig {
     pub max_input_tokens: usize,
     pub max_output_tokens: usize,
     pub thinking_directive: Option<String>,
+    pub execution_class: GenerationExecutionClass,
 }
 
 impl GenerationRuntimeConfig {
-    /// Safe defaults for a model that does not use Qwen-specific directives.
+    /// Conservative defaults for a CPU-only model without Qwen-specific directives.
     pub fn for_model(model_id: impl Into<String>) -> Self {
         Self {
             model_id: model_id.into(),
@@ -72,6 +84,7 @@ impl GenerationRuntimeConfig {
             max_input_tokens: MAX_GENERATION_INPUT_TOKENS,
             max_output_tokens: MAX_GENERATION_OUTPUT_TOKENS,
             thinking_directive: None,
+            execution_class: GenerationExecutionClass::CpuOnly,
         }
     }
 
@@ -81,6 +94,17 @@ impl GenerationRuntimeConfig {
             thinking_directive: Some("/no_think".to_owned()),
             ..Self::for_model("qwen3-1.7b-q8")
         }
+    }
+
+    /// Returns a bounded configuration for the installed-model health probe.
+    ///
+    /// The probe verifies the selected model, local transport and strict JSON
+    /// output without turning activation into a full enrichment benchmark.
+    /// Production enrichment keeps the original input and output budgets.
+    fn for_activation_smoke(mut self) -> Self {
+        self.temperature = 0.0;
+        self.max_output_tokens = ACTIVATION_SMOKE_OUTPUT_TOKENS;
+        self
     }
 
     fn validate(&self) -> Result<()> {
@@ -133,6 +157,41 @@ pub struct LlamaServerProvider {
     request_timeout: Duration,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum GenerationFailureKind {
+    Timeout,
+    Unavailable,
+    Protocol,
+    Invalid,
+}
+
+impl GenerationFailureKind {
+    pub const fn error_kind(self) -> &'static str {
+        match self {
+            Self::Timeout => "generation_timeout",
+            Self::Unavailable => "generation_unavailable",
+            Self::Protocol => "generation_protocol",
+            Self::Invalid => "generation_invalid",
+        }
+    }
+}
+
+#[derive(Debug, thiserror::Error)]
+#[error("local generation failed")]
+pub struct GenerationFailure {
+    kind: GenerationFailureKind,
+}
+
+impl GenerationFailure {
+    const fn new(kind: GenerationFailureKind) -> Self {
+        Self { kind }
+    }
+
+    pub const fn kind(&self) -> GenerationFailureKind {
+        self.kind
+    }
+}
+
 impl LlamaServerProvider {
     pub fn new(endpoint: impl Into<String>, bearer_token: &str) -> Result<Self> {
         Self::with_config(endpoint, bearer_token, GenerationRuntimeConfig::default())
@@ -145,6 +204,15 @@ impl LlamaServerProvider {
     ) -> Result<Self> {
         let request_timeout = recommended_request_timeout(&config);
         Self::with_config_and_timeout(endpoint, bearer_token, config, request_timeout)
+    }
+
+    /// Builds the bounded provider used by the installed-model health probe.
+    pub fn for_activation_smoke(
+        endpoint: impl Into<String>,
+        bearer_token: &str,
+        config: GenerationRuntimeConfig,
+    ) -> Result<Self> {
+        Self::with_config(endpoint, bearer_token, config.for_activation_smoke())
     }
 
     /// Builds a provider with an explicit per-request deadline. Production
@@ -219,25 +287,75 @@ impl LlamaServerProvider {
             .await
             .map_err(|error| self.request_error("request", error))?
             .error_for_status()
-            .context("llama-server rejected the request")?;
+            .map_err(|error| {
+                self.classified_error(
+                    GenerationFailureKind::Protocol,
+                    "llama-server rejected the request",
+                    error,
+                )
+            })?;
         let value: Value = response
             .json()
             .await
             .map_err(|error| self.request_error("response body", error))?;
         parse_completion_response(&value, self.config.max_output_tokens)
+            .map_err(|error| error.context(GenerationFailure::new(GenerationFailureKind::Invalid)))
+    }
+
+    /// Verifies one minimal strict-JSON response from the selected local model.
+    ///
+    /// Callers should construct the provider with
+    /// [`Self::for_activation_smoke`] so this health check remains bounded
+    /// independently of production enrichment.
+    pub async fn verify_activation_smoke(&self) -> Result<()> {
+        if self.config.max_output_tokens > ACTIVATION_SMOKE_OUTPUT_TOKENS {
+            bail!("activation smoke output budget exceeds {ACTIVATION_SMOKE_OUTPUT_TOKENS} tokens");
+        }
+        let content = self
+            .completion(
+                ACTIVATION_SMOKE_SYSTEM_PROMPT,
+                ACTIVATION_SMOKE_INPUT,
+                activation_smoke_schema(),
+            )
+            .await?;
+        parse_activation_smoke(&content)
     }
 
     fn request_error(&self, stage: &str, error: reqwest::Error) -> anyhow::Error {
         let model_id = &self.config.model_id;
         if error.is_timeout() {
-            anyhow::Error::new(error).context(format!(
-                "llama-server {stage} for model {model_id} timed out after {}",
-                format_duration(self.request_timeout)
-            ))
+            self.classified_error(
+                GenerationFailureKind::Timeout,
+                format!(
+                    "llama-server {stage} for model {model_id} timed out after {}",
+                    format_duration(self.request_timeout)
+                ),
+                error,
+            )
+        } else if error.is_connect() {
+            self.classified_error(
+                GenerationFailureKind::Unavailable,
+                format!("llama-server {stage} failed for model {model_id}"),
+                error,
+            )
         } else {
-            anyhow::Error::new(error)
-                .context(format!("llama-server {stage} failed for model {model_id}"))
+            self.classified_error(
+                GenerationFailureKind::Protocol,
+                format!("llama-server {stage} failed for model {model_id}"),
+                error,
+            )
         }
+    }
+
+    fn classified_error(
+        &self,
+        kind: GenerationFailureKind,
+        context: impl fmt::Display + Send + Sync + 'static,
+        error: reqwest::Error,
+    ) -> anyhow::Error {
+        anyhow::Error::new(error)
+            .context(GenerationFailure::new(kind))
+            .context(context)
     }
 
     async fn summarize_piece(&self, text: &str) -> Result<String> {
@@ -292,17 +410,18 @@ impl LlamaServerProvider {
 
 fn recommended_request_timeout(config: &GenerationRuntimeConfig) -> Duration {
     // This is a deadline rather than an expected latency. Routed models can
-    // emit structured JSON materially more slowly under memory pressure,
-    // especially on an 8 GiB Windows node. Scale the allowance with the maximum
-    // permitted output while retaining finite lower and upper bounds.
+    // emit structured JSON materially more slowly under memory pressure on
+    // CPU-only nodes. Scale the allowance with the maximum permitted output
+    // while retaining finite lower and upper bounds.
     let model_id = config.model_id.to_ascii_lowercase();
-    let millis_per_output_token = if model_id.contains("e4b") {
-        750_u64
-    } else if model_id.contains("e2b") || model_id.contains("gemma") {
-        500
-    } else {
-        250
-    };
+    let slow_model =
+        model_id.contains("e4b") || model_id.contains("e2b") || model_id.contains("gemma");
+    let millis_per_output_token =
+        if config.execution_class == GenerationExecutionClass::CpuOnly || slow_model {
+            1_250_u64
+        } else {
+            250
+        };
     let output_allowance = Duration::from_millis(
         u64::try_from(config.max_output_tokens)
             .unwrap_or(u64::MAX)
@@ -382,7 +501,12 @@ impl GenerationProvider for LlamaServerProvider {
         let content = self
             .completion(ENRICHMENT_SYSTEM_PROMPT, &bounded, enrichment_schema())
             .await?;
-        let mut draft: EnrichmentDraft = serde_json::from_value(parse_json_content(&content)?)
+        let value = parse_json_content(&content).map_err(|error| {
+            error.context(GenerationFailure::new(GenerationFailureKind::Invalid))
+        })?;
+        let mut draft: EnrichmentDraft = serde_json::from_value(value)
+            .map_err(anyhow::Error::new)
+            .map_err(|error| error.context(GenerationFailure::new(GenerationFailureKind::Invalid)))
             .context("LLM enrichment did not match the required schema")?;
         draft.sanitize();
         draft.tags.truncate(MAX_TAGS);
@@ -411,6 +535,35 @@ fn enrichment_schema() -> Value {
         "required": ["type", "title", "description", "language", "tags", "entities", "links", "summary", "classification_confidence", "classification_explanation"],
         "additionalProperties": false
     })
+}
+
+fn activation_smoke_schema() -> Value {
+    json!({
+        "type": "object",
+        "properties": {
+            "status": {
+                "type": "string",
+                "enum": [ACTIVATION_SMOKE_STATUS]
+            }
+        },
+        "required": ["status"],
+        "additionalProperties": false
+    })
+}
+
+fn parse_activation_smoke(content: &str) -> Result<()> {
+    let value: Value = serde_json::from_str(content.trim())
+        .context("activation smoke returned invalid strict JSON")
+        .map_err(|error| error.context(GenerationFailure::new(GenerationFailureKind::Invalid)))?;
+    let is_exact_ready_status = value.as_object().is_some_and(|object| {
+        object.len() == 1
+            && object.get("status").and_then(Value::as_str) == Some(ACTIVATION_SMOKE_STATUS)
+    });
+    if !is_exact_ready_status {
+        return Err(anyhow!("activation smoke returned an unexpected status")
+            .context(GenerationFailure::new(GenerationFailureKind::Invalid)));
+    }
+    Ok(())
 }
 
 fn parse_completion_response(value: &Value, max_output_tokens: usize) -> Result<String> {
@@ -1092,21 +1245,122 @@ mod tests {
     }
 
     #[test]
-    fn request_deadline_scales_with_model_and_output_budget() {
+    fn activation_smoke_is_strict_and_bounded_without_changing_production() {
+        let production = GenerationRuntimeConfig::legacy_qwen();
+        let smoke = production.clone().for_activation_smoke();
+        let provider = LlamaServerProvider::for_activation_smoke(
+            "http://127.0.0.1:8080",
+            "secret",
+            production.clone(),
+        )
+        .unwrap();
+        let body = provider.completion_body(
+            ACTIVATION_SMOKE_SYSTEM_PROMPT,
+            ACTIVATION_SMOKE_INPUT,
+            activation_smoke_schema(),
+        );
+
+        assert_eq!(production.max_output_tokens, MAX_GENERATION_OUTPUT_TOKENS);
+        assert_eq!(smoke.max_output_tokens, ACTIVATION_SMOKE_OUTPUT_TOKENS);
+        assert_eq!(smoke.model_id, production.model_id);
+        assert_eq!(smoke.thinking_directive, production.thinking_directive);
+        assert_eq!(smoke.execution_class, production.execution_class);
+        assert_eq!(smoke.temperature, 0.0);
+        assert_eq!(body["max_tokens"], ACTIVATION_SMOKE_OUTPUT_TOKENS);
+        assert_eq!(body["response_format"]["type"], "json_schema");
+        assert_eq!(
+            body["response_format"]["json_schema"]["strict"],
+            Value::Bool(true)
+        );
+        assert_eq!(
+            body["response_format"]["json_schema"]["schema"]["additionalProperties"],
+            Value::Bool(false)
+        );
+        assert_eq!(
+            body["response_format"]["json_schema"]["schema"]["properties"]["status"]["enum"][0],
+            ACTIVATION_SMOKE_STATUS
+        );
+        assert_eq!(
+            body["messages"][1]["content"],
+            format!("/no_think\n{ACTIVATION_SMOKE_INPUT}")
+        );
+        assert_eq!(
+            recommended_request_timeout(&smoke),
+            Duration::from_secs(200)
+        );
+        assert_eq!(provider.request_timeout, Duration::from_secs(200));
+    }
+
+    #[tokio::test]
+    async fn activation_smoke_rejects_a_production_budget_before_transport() {
+        let provider = LlamaServerProvider::with_config(
+            "http://127.0.0.1:9",
+            "secret",
+            GenerationRuntimeConfig::legacy_qwen(),
+        )
+        .unwrap();
+
+        let error = provider.verify_activation_smoke().await.unwrap_err();
+        assert!(
+            error
+                .to_string()
+                .contains("activation smoke output budget exceeds")
+        );
+    }
+
+    #[test]
+    fn activation_smoke_requires_the_schema_status() {
+        parse_activation_smoke(r#"{"status":"ready"}"#).unwrap();
+
+        for invalid in [
+            r#"{"status":"not-ready"}"#,
+            r#"{"status":"ready","detail":"unexpected"}"#,
+            r#"{"status":true}"#,
+            r#"{}"#,
+            "```json\n{\"status\":\"ready\"}\n```",
+            "<think>ready</think>{\"status\":\"ready\"}",
+        ] {
+            let error = parse_activation_smoke(invalid).unwrap_err();
+            assert_eq!(
+                error
+                    .downcast_ref::<GenerationFailure>()
+                    .map(GenerationFailure::kind),
+                Some(GenerationFailureKind::Invalid)
+            );
+        }
+    }
+
+    #[test]
+    fn request_deadline_scales_with_execution_class_model_and_output_budget() {
         let mut e4b = GenerationRuntimeConfig::for_model("gemma-4-e4b-q4");
         e4b.max_output_tokens = 384;
         let mut e2b = GenerationRuntimeConfig::for_model("gemma-4-e2b-q4");
         e2b.max_output_tokens = 384;
-        let mut qwen = GenerationRuntimeConfig::for_model("qwen3-1.7b-q8");
-        qwen.max_output_tokens = 384;
+        let mut cpu_qwen = GenerationRuntimeConfig::for_model("qwen3-1.7b-q8");
+        cpu_qwen.max_output_tokens = 384;
+        let mut accelerated_qwen = cpu_qwen.clone();
+        accelerated_qwen.execution_class = GenerationExecutionClass::Accelerated;
 
-        assert_eq!(recommended_request_timeout(&e4b), Duration::from_secs(408));
-        assert_eq!(recommended_request_timeout(&e2b), Duration::from_secs(312));
-        assert_eq!(recommended_request_timeout(&qwen), Duration::from_secs(216));
-
-        qwen.max_output_tokens = 1;
         assert_eq!(
-            recommended_request_timeout(&qwen),
+            recommended_request_timeout(&e4b),
+            MAX_GENERATION_REQUEST_TIMEOUT
+        );
+        assert_eq!(
+            recommended_request_timeout(&e2b),
+            MAX_GENERATION_REQUEST_TIMEOUT
+        );
+        assert_eq!(
+            recommended_request_timeout(&cpu_qwen),
+            MAX_GENERATION_REQUEST_TIMEOUT
+        );
+        assert_eq!(
+            recommended_request_timeout(&accelerated_qwen),
+            Duration::from_secs(216)
+        );
+
+        cpu_qwen.max_output_tokens = 1;
+        assert_eq!(
+            recommended_request_timeout(&cpu_qwen),
             MIN_GENERATION_REQUEST_TIMEOUT
         );
     }
@@ -1134,6 +1388,12 @@ mod tests {
         let detailed = format!("{error:#}");
 
         assert!(detailed.contains("request for model gemma-4-e4b-q4 timed out after 25 ms"));
+        assert_eq!(
+            error
+                .downcast_ref::<GenerationFailure>()
+                .map(GenerationFailure::kind),
+            Some(GenerationFailureKind::Timeout)
+        );
         assert!(
             error.chain().count() > 1,
             "missing reqwest cause: {detailed}"

@@ -45,6 +45,14 @@ candidate.
 The server starts on demand and stops after idle time; its absence while no
 inference job exists is normal.
 
+Model activation uses one bounded strict-JSON health probe. It verifies the
+selected local model, supervised loopback transport, and structured output; it
+does not prove the full production enrichment journey. Installed-candidate
+acceptance must still process a synthetic document with the unchanged
+production budget, complete human review and publication, and expose the
+published result through MCP. Do not increase activation deadlines or replace
+that journey with the health probe solely to obtain a passing result.
+
 ## MCP is unavailable
 
 - The endpoint is `http://127.0.0.1:43123/mcp`; check whether another process owns

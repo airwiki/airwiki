@@ -17,6 +17,7 @@ use std::{
     time::{Duration, Instant},
 };
 
+use airwiki_core::inference::{GenerationExecutionClass, GenerationFailure, GenerationFailureKind};
 use airwiki_core::{
     AppPaths as CoreAppPaths, AuditEvent, BootstrapFederationIndexEntry, CollectionRecord,
     Database, E5Tokenizer, EmbeddingProvider, EvidenceDecision, EvidenceRelevanceProvider,
@@ -28,8 +29,9 @@ use airwiki_core::{
     ReviewVersionToken, SourceIssueCode, Tokenizer, WikiRepairExecutor, WikiRepairPlanner,
 };
 use airwiki_inference::{
-    GenerationSettings, InstallOutcome, LlamaSupervisor, ModelSelection, SupervisorConfig,
-    ThinkingControl,
+    GenerationSettings, InstallOutcome, LlamaSupervisor, LlamaSupervisorFailure,
+    LlamaSupervisorFailureKind, ModelSelection, RuntimeExitClass, SupervisorConfig,
+    ThinkingControl, bundled_runtime_is_accelerated,
 };
 use airwiki_mcp::{McpClientActivitySnapshot, McpServerConfig, McpServerHandle, start_mcp_server};
 use airwiki_network::{
@@ -37,9 +39,10 @@ use airwiki_network::{
     KeyringSecretStore, MAX_MDNS_ADDRESSES_PER_PEER, MAX_VOLATILE_LAN_PEERS, ManualLanAddress,
     Multiaddr, NetworkConfig, NetworkEvent, NetworkHandle, NetworkWarningKind, NodeIdentity,
     PairingFailureReason, PeerAccess, PeerId, PublicBrowseDelivery, PublicBrowseResult,
-    PublicIndexEndpoint, PublicReader, PublicRouteKind, PublicSearchDelivery, PublicSourceBackend,
-    PublicSourceBackendError, PublicSourceServerConfig, SecretStore, relay_circuit_address,
-    relayed_peer_address, run_public_source_server, sign_manifest, sign_tombstone, spawn_network,
+    PublicIndexEndpoint, PublicReader, PublicRelayReadiness, PublicRouteKind, PublicSearchDelivery,
+    PublicSearchResult, PublicSourceBackend, PublicSourceBackendError, PublicSourceServerConfig,
+    SecretStore, relay_circuit_address, relayed_peer_address, run_public_source_server,
+    sign_manifest, sign_tombstone, spawn_network,
 };
 use airwiki_types::{
     CollectionPolicy, DisclosureLease, DocumentStatus, EnrichmentDraft, FederatedSearch,
@@ -52,7 +55,7 @@ use anyhow::{Context, Result, anyhow, bail};
 use async_trait::async_trait;
 use chrono::{DateTime, Duration as ChronoDuration, Utc};
 use tokio::{
-    sync::{Mutex as AsyncMutex, broadcast, mpsc},
+    sync::{Mutex as AsyncMutex, broadcast, mpsc, watch},
     task::JoinHandle,
 };
 use tokio_util::sync::CancellationToken;
@@ -60,6 +63,10 @@ use uuid::Uuid;
 
 use crate::{
     manual_lan_route,
+    model_activation_status::{
+        ModelActivationElapsedBucket, ModelActivationErrorKind, ModelActivationExitClass,
+        ModelActivationFailureView,
+    },
     paths::AppPaths,
     worker::{
         CollectionView, PeerActivityState, PeerTrustState, PeerView, PublicAnnouncementStatusView,
@@ -77,6 +84,15 @@ const RELEVANCE_SMOKE_TEST_PASSAGES: [&str; 2] = [
     "Procedimiento de recuperación de Atlas: restaurar el snapshot y validar el servicio.",
     "El presupuesto del evento comunitario se revisará el próximo trimestre.",
 ];
+
+const fn bundled_generation_execution_class() -> GenerationExecutionClass {
+    if bundled_runtime_is_accelerated() {
+        GenerationExecutionClass::Accelerated
+    } else {
+        GenerationExecutionClass::CpuOnly
+    }
+}
+
 const KNOWLEDGE_READ_ATTEMPTS: usize = 3;
 const KNOWLEDGE_READ_RETRY_DELAY: Duration = Duration::from_millis(100);
 const KNOWLEDGE_PAGE_MAX_BYTES: usize = 1024 * 1024;
@@ -84,8 +100,108 @@ const REVIEW_EVIDENCE_PAGE_SIZE: usize = 20;
 const REVIEW_EVIDENCE_EXCERPT_MAX_BYTES: usize = 4 * 1024;
 const LAN_LISTENER_START_GRACE: Duration = Duration::from_secs(10);
 const STARTUP_COLLECTION_DISCOVERY_TIMEOUT: Duration = Duration::from_secs(5);
+const PUBLIC_MANIFEST_RENEWAL_INTERVAL: Duration = Duration::from_secs(5 * 60);
 const BUNDLED_BOOTSTRAP_FEDERATION_INDEXES: Option<&str> =
     option_env!("AIRWIKI_BOOTSTRAP_FEDERATION_INDEXES");
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ModelActivationStage {
+    Configuration,
+    OnnxInit,
+    EmbeddingSmoke,
+    RerankerSmoke,
+}
+
+impl ModelActivationStage {
+    const fn error_kind(self) -> ModelActivationErrorKind {
+        match self {
+            Self::Configuration => ModelActivationErrorKind::Configuration,
+            Self::OnnxInit => ModelActivationErrorKind::OnnxInit,
+            Self::EmbeddingSmoke => ModelActivationErrorKind::EmbeddingSmoke,
+            Self::RerankerSmoke => ModelActivationErrorKind::RerankerSmoke,
+        }
+    }
+}
+
+#[derive(Debug, thiserror::Error)]
+#[error("model activation stage failed")]
+struct ModelActivationStageFailure {
+    stage: ModelActivationStage,
+}
+
+impl ModelActivationStageFailure {
+    const fn new(stage: ModelActivationStage) -> Self {
+        Self { stage }
+    }
+}
+
+pub(crate) fn classify_model_activation_failure(
+    error: &anyhow::Error,
+) -> ModelActivationFailureView {
+    if let Some(failure) = error.downcast_ref::<GenerationFailure>() {
+        return ModelActivationFailureView {
+            error_kind: match failure.kind() {
+                GenerationFailureKind::Timeout => ModelActivationErrorKind::GenerationTimeout,
+                GenerationFailureKind::Unavailable => {
+                    ModelActivationErrorKind::GenerationUnavailable
+                }
+                GenerationFailureKind::Protocol => ModelActivationErrorKind::GenerationProtocol,
+                GenerationFailureKind::Invalid => ModelActivationErrorKind::GenerationInvalid,
+            },
+            exit_class: ModelActivationExitClass::None,
+        };
+    }
+    if let Some(failure) = error.downcast_ref::<LlamaSupervisorFailure>() {
+        return ModelActivationFailureView {
+            error_kind: match failure.kind() {
+                LlamaSupervisorFailureKind::RuntimeSpawn => ModelActivationErrorKind::RuntimeSpawn,
+                LlamaSupervisorFailureKind::RuntimeExitedBeforeHealth => {
+                    ModelActivationErrorKind::RuntimeExitBeforeHealth
+                }
+                LlamaSupervisorFailureKind::RuntimeHealthTimeout => {
+                    ModelActivationErrorKind::RuntimeHealthTimeout
+                }
+                LlamaSupervisorFailureKind::RuntimeState => ModelActivationErrorKind::RuntimeState,
+            },
+            exit_class: match failure.exit_class() {
+                RuntimeExitClass::None => ModelActivationExitClass::None,
+                RuntimeExitClass::Success => ModelActivationExitClass::Success,
+                RuntimeExitClass::Failure => ModelActivationExitClass::Failure,
+                RuntimeExitClass::Unknown => ModelActivationExitClass::Unknown,
+            },
+        };
+    }
+    if let Some(failure) = error.downcast_ref::<ModelActivationStageFailure>() {
+        return ModelActivationFailureView {
+            error_kind: failure.stage.error_kind(),
+            exit_class: ModelActivationExitClass::None,
+        };
+    }
+    ModelActivationFailureView {
+        error_kind: ModelActivationErrorKind::ActivationInternal,
+        exit_class: ModelActivationExitClass::Unknown,
+    }
+}
+
+pub(crate) const fn model_activation_elapsed_bucket(
+    elapsed: Duration,
+) -> ModelActivationElapsedBucket {
+    if elapsed.as_secs() < 5 {
+        ModelActivationElapsedBucket::Under5s
+    } else if elapsed.as_secs() < 30 {
+        ModelActivationElapsedBucket::From5sTo30s
+    } else if elapsed.as_secs() < 120 {
+        ModelActivationElapsedBucket::From30sTo120s
+    } else if elapsed.as_secs() < 300 {
+        ModelActivationElapsedBucket::From120sTo300s
+    } else {
+        ModelActivationElapsedBucket::Over300s
+    }
+}
+
+fn activation_stage<T>(result: Result<T>, stage: ModelActivationStage) -> Result<T> {
+    result.map_err(|error| error.context(ModelActivationStageFailure::new(stage)))
+}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct BundledBootstrapFederationIndex {
@@ -153,6 +269,16 @@ fn install_bundled_bootstrap_federation_indexes(
     let Some(registry_version) = indexes.first().map(|index| index.registry_version) else {
         return Ok(());
     };
+    if database
+        .bootstrap_federation_registry_version()?
+        .is_some_and(|persisted| persisted > registry_version)
+    {
+        tracing::warn!(
+            error_kind = "bundled_bootstrap_registry_older_than_persisted",
+            "ignored an older bundled bootstrap registry"
+        );
+        return Ok(());
+    }
     let entries = indexes
         .into_iter()
         .map(|index| BootstrapFederationIndexEntry {
@@ -782,6 +908,23 @@ struct SupervisedGenerationProvider {
     runtime_config: GenerationRuntimeConfig,
 }
 
+impl SupervisedGenerationProvider {
+    async fn verify_activation_smoke(&self) -> Result<()> {
+        let endpoint = self.supervisor.ensure_running().await?;
+        let provider = activation_stage(
+            LlamaServerProvider::for_activation_smoke(
+                &endpoint.base_url,
+                endpoint.bearer_token(),
+                self.runtime_config.clone(),
+            ),
+            ModelActivationStage::Configuration,
+        )?;
+        let result = provider.verify_activation_smoke().await;
+        self.supervisor.mark_activity().await;
+        result
+    }
+}
+
 #[async_trait]
 impl GenerationProvider for SupervisedGenerationProvider {
     fn model_id(&self) -> &str {
@@ -790,10 +933,13 @@ impl GenerationProvider for SupervisedGenerationProvider {
 
     async fn enrich(&self, document_text: &str) -> Result<EnrichmentDraft> {
         let endpoint = self.supervisor.ensure_running().await?;
-        let provider = LlamaServerProvider::with_config(
-            &endpoint.base_url,
-            endpoint.bearer_token(),
-            self.runtime_config.clone(),
+        let provider = activation_stage(
+            LlamaServerProvider::with_config(
+                &endpoint.base_url,
+                endpoint.bearer_token(),
+                self.runtime_config.clone(),
+            ),
+            ModelActivationStage::Configuration,
         )?;
         // Hierarchical enrichment can span several individually bounded HTTP
         // calls. Keep the sidecar leased for the whole operation so its idle
@@ -836,12 +982,54 @@ struct PublicNetworkRuntime {
     cancellation: CancellationToken,
     source_task: JoinHandle<()>,
     renewal_task: JoinHandle<()>,
+    relay_readiness: watch::Receiver<PublicRelayReadiness>,
 }
 
 enum PreparedPublicAnnouncement {
     Manifest(airwiki_types::SignedPublicCollectionManifest),
     Tombstone(airwiki_types::SignedPublicCollectionTombstone),
     Missing,
+}
+
+fn public_announcement_expiry(
+    announcement: &PreparedPublicAnnouncement,
+) -> Option<chrono::DateTime<Utc>> {
+    match announcement {
+        PreparedPublicAnnouncement::Manifest(manifest) => Some(manifest.manifest.expires_at),
+        PreparedPublicAnnouncement::Tombstone(_) | PreparedPublicAnnouncement::Missing => None,
+    }
+}
+
+fn public_announcement_sequence(announcement: &PreparedPublicAnnouncement) -> Option<u64> {
+    match announcement {
+        PreparedPublicAnnouncement::Manifest(manifest) => Some(manifest.manifest.sequence),
+        PreparedPublicAnnouncement::Tombstone(tombstone) => Some(tombstone.tombstone.sequence),
+        PreparedPublicAnnouncement::Missing => None,
+    }
+}
+
+fn completed_public_announcement_state(
+    sequence: Option<u64>,
+    expires_at: Option<chrono::DateTime<Utc>>,
+    accepted_indexes: usize,
+    now: chrono::DateTime<Utc>,
+) -> Option<PublicAnnouncementState> {
+    sequence.map(|sequence| {
+        expires_at.map_or(
+            PublicAnnouncementState {
+                sequence,
+                accepted_indexes: 0,
+                last_announced_at: now,
+                expires_at: now,
+            },
+            |expires_at| PublicAnnouncementState {
+                sequence,
+                accepted_indexes,
+                last_announced_at: now,
+                expires_at,
+            },
+        )
+    })
 }
 
 /// Keeps the runtime generation attached until the worker consumes the event.
@@ -891,6 +1079,8 @@ pub struct DesktopServices {
     public_network: Mutex<Option<PublicNetworkRuntime>>,
     public_reader: Arc<PublicReader>,
     public_announcements: Arc<RwLock<HashMap<Uuid, PublicAnnouncementState>>>,
+    public_announcement_sync: Arc<AsyncMutex<()>>,
+    public_announcement_updates: watch::Sender<u64>,
     search_topology: AsyncMutex<()>,
     network_generation: Arc<AtomicU64>,
     network_events: broadcast::Sender<SequencedNetworkEvent>,
@@ -903,6 +1093,7 @@ pub struct DesktopServices {
 
 #[derive(Debug, Clone, Copy)]
 struct PublicAnnouncementState {
+    sequence: u64,
     accepted_indexes: usize,
     last_announced_at: chrono::DateTime<Utc>,
     expires_at: chrono::DateTime<Utc>,
@@ -940,6 +1131,12 @@ fn update_public_announcement_state(
         return;
     };
     if let Some(state) = state {
+        if announcements
+            .get(&collection_id)
+            .is_some_and(|known| known.sequence > state.sequence)
+        {
+            return;
+        }
         announcements.insert(collection_id, state);
     } else {
         announcements.remove(&collection_id);
@@ -949,6 +1146,7 @@ fn update_public_announcement_state(
 fn record_public_announcement_failure(
     announcements: &RwLock<HashMap<Uuid, PublicAnnouncementState>>,
     collection_id: Uuid,
+    sequence: u64,
     now: chrono::DateTime<Utc>,
 ) {
     let Ok(mut announcements) = write_lock(announcements, "public announcement state") else {
@@ -960,6 +1158,12 @@ fn record_public_announcement_failure(
     };
     if announcements
         .get(&collection_id)
+        .is_some_and(|state| state.sequence > sequence)
+    {
+        return;
+    }
+    if announcements
+        .get(&collection_id)
         .is_some_and(|state| state.accepted_indexes > 0 && state.expires_at > now)
     {
         return;
@@ -967,6 +1171,7 @@ fn record_public_announcement_failure(
     announcements.insert(
         collection_id,
         PublicAnnouncementState {
+            sequence,
             accepted_indexes: 0,
             last_announced_at: now,
             expires_at: now,
@@ -1033,6 +1238,7 @@ impl DesktopServices {
             public_identity.peer_id().to_string(),
         ));
         let (network_events, _) = broadcast::channel(128);
+        let (public_announcement_updates, _) = watch::channel(0_u64);
         let network_generation = Arc::new(AtomicU64::new(1));
         let network = if lan_enabled {
             Some(spawn_network_runtime(
@@ -1085,6 +1291,8 @@ impl DesktopServices {
             public_network: Mutex::new(None),
             public_reader,
             public_announcements: Arc::new(RwLock::new(HashMap::new())),
+            public_announcement_sync: Arc::new(AsyncMutex::new(())),
+            public_announcement_updates,
             search_topology: AsyncMutex::new(()),
             network_generation,
             network_events,
@@ -1106,6 +1314,10 @@ impl DesktopServices {
         // `mcp` remains present throughout normal operation. Returning the
         // canonical endpoint keeps this accessor usable during teardown tests.
         "http://127.0.0.1:43123/mcp"
+    }
+
+    pub(crate) fn subscribe_public_announcement_updates(&self) -> watch::Receiver<u64> {
+        self.public_announcement_updates.subscribe()
     }
 
     pub fn advertised_lan_addresses(&self, listener: &Multiaddr) -> Result<Vec<String>> {
@@ -1155,7 +1367,7 @@ impl DesktopServices {
     /// Initializes ONNX/tokenizer state off the async executor's worker threads,
     /// then atomically enables local, LAN and MCP search.
     pub async fn enable_models(&self, paths: ModelRuntimePaths) -> Result<()> {
-        paths.validate()?;
+        activation_stage(paths.validate(), ModelActivationStage::Configuration)?;
         let selection = paths.selection.clone();
         let generation_settings = paths.generation_settings;
         let mut supervisor_config = SupervisorConfig::bundled(paths.llama_server, paths.model);
@@ -1168,7 +1380,7 @@ impl DesktopServices {
             .map(usize::from)
             .unwrap_or(2)
             .clamp(1, 4);
-        let (embeddings, tokenizer, relevance) = tokio::task::spawn_blocking(move || {
+        let loaded = tokio::task::spawn_blocking(move || {
             let snapshot = PinnedE5Snapshot::open(e5_snapshot_path)?;
             let embeddings: Arc<dyn EmbeddingProvider> =
                 Arc::new(FastEmbedE5Small::from_snapshot(&snapshot, threads)?);
@@ -1180,16 +1392,28 @@ impl DesktopServices {
             Ok::<_, anyhow::Error>((embeddings, tokenizer, relevance))
         })
         .await
-        .context("falló el worker de inicialización de los modelos de búsqueda")??;
+        .map_err(anyhow::Error::new);
+        let loaded = activation_stage(loaded, ModelActivationStage::OnnxInit)
+            .context("falló el worker de inicialización de los modelos de búsqueda")?;
+        let (embeddings, tokenizer, relevance) =
+            activation_stage(loaded, ModelActivationStage::OnnxInit)?;
 
-        let smoke_embeddings = embeddings
-            .embed(&[format!("query: {MODEL_SMOKE_TEST_DOCUMENT}")])
-            .await
-            .context("falló el smoke test de multilingual-e5-small")?;
+        let smoke_embeddings = activation_stage(
+            embeddings
+                .embed(&[format!("query: {MODEL_SMOKE_TEST_DOCUMENT}")])
+                .await,
+            ModelActivationStage::EmbeddingSmoke,
+        )
+        .context("falló el smoke test de multilingual-e5-small")?;
         if smoke_embeddings.len() != 1
             || smoke_embeddings[0].len() != airwiki_core::EMBEDDING_DIMENSIONS
         {
-            bail!("el smoke test de embeddings devolvió una forma inesperada");
+            return activation_stage(
+                Err(anyhow!(
+                    "el smoke test de embeddings devolvió una forma inesperada"
+                )),
+                ModelActivationStage::EmbeddingSmoke,
+            );
         }
 
         let relevance_inputs = RELEVANCE_SMOKE_TEST_PASSAGES
@@ -1200,12 +1424,21 @@ impl DesktopServices {
                 text: text.to_owned(),
             })
             .collect::<Vec<_>>();
-        let relevance_decisions = relevance
-            .classify(RELEVANCE_SMOKE_TEST_QUESTION, &relevance_inputs)
-            .await
-            .context("falló el smoke test del clasificador de relevancia")?;
+        let relevance_decisions = activation_stage(
+            relevance
+                .classify(RELEVANCE_SMOKE_TEST_QUESTION, &relevance_inputs)
+                .await
+                .map_err(anyhow::Error::new),
+            ModelActivationStage::RerankerSmoke,
+        )
+        .context("falló el smoke test del clasificador de relevancia")?;
         if relevance_decisions != [EvidenceDecision::Relevant, EvidenceDecision::Irrelevant] {
-            bail!("el smoke test de relevancia devolvió decisiones inesperadas");
+            return activation_stage(
+                Err(anyhow!(
+                    "el smoke test de relevancia devolvió decisiones inesperadas"
+                )),
+                ModelActivationStage::RerankerSmoke,
+            );
         }
 
         let generation_provider = SupervisedGenerationProvider {
@@ -1220,9 +1453,10 @@ impl DesktopServices {
                     ThinkingControl::None => None,
                     ThinkingControl::NoThinkDirective => Some("/no_think".to_owned()),
                 },
+                execution_class: bundled_generation_execution_class(),
             },
         };
-        if let Err(error) = generation_provider.enrich(MODEL_SMOKE_TEST_DOCUMENT).await {
+        if let Err(error) = generation_provider.verify_activation_smoke().await {
             let _ = supervisor.stop().await;
             return Err(error).with_context(|| {
                 format!(
@@ -1498,6 +1732,9 @@ impl DesktopServices {
                 let backend: Arc<dyn PublicSourceBackend> = self.public_source_proxy.clone();
                 let mut server_config = PublicSourceServerConfig::new(listen_addresses);
                 server_config.relay_addresses = relay_addresses;
+                let (readiness_sender, relay_readiness) =
+                    watch::channel(PublicRelayReadiness::default());
+                server_config.relay_readiness = Some(readiness_sender);
                 let source_task = tokio::spawn(async move {
                     if run_public_source_server(identity, server_config, backend, task_cancellation)
                         .await
@@ -1510,16 +1747,22 @@ impl DesktopServices {
                     }
                 });
                 let renewal_task = tokio::spawn(run_public_manifest_renewal(
-                    self.database.clone(),
-                    self.public_identity.clone(),
-                    Arc::clone(&self.public_reader),
-                    Arc::clone(&self.public_announcements),
-                    cancellation.clone(),
+                    PublicManifestRenewalContext {
+                        database: self.database.clone(),
+                        identity: self.public_identity.clone(),
+                        reader: Arc::clone(&self.public_reader),
+                        announcements: Arc::clone(&self.public_announcements),
+                        announcement_sync: Arc::clone(&self.public_announcement_sync),
+                        updates: self.public_announcement_updates.clone(),
+                        cancellation: cancellation.clone(),
+                    },
+                    relay_readiness.clone(),
                 ));
                 *guard = Some(PublicNetworkRuntime {
                     cancellation,
                     source_task,
                     renewal_task,
+                    relay_readiness,
                 });
                 None
             } else if !should_run {
@@ -1547,23 +1790,32 @@ impl DesktopServices {
     }
 
     pub async fn sync_public_collection(&self, collection_id: Uuid) -> Result<()> {
-        let database = self.database.clone();
-        let identity = self.public_identity.clone();
-        let prepared = tokio::task::spawn_blocking(move || {
-            prepare_public_announcement(&database, &identity, collection_id)
-        })
-        .await
-        .context("se detuvo el worker del anuncio público")??;
+        let prepared = {
+            let _announcement_sync = self.public_announcement_sync.lock().await;
+            let database = self.database.clone();
+            let identity = self.public_identity.clone();
+            let relay_readiness = self.current_public_relay_readiness()?;
+            tokio::task::spawn_blocking(move || {
+                prepare_next_public_announcement(
+                    &database,
+                    &identity,
+                    collection_id,
+                    relay_readiness.ready_relay_addresses(),
+                )
+            })
+            .await
+            .context("se detuvo el worker del anuncio público")??
+        };
         let (endpoints, announcement) = prepared;
+        let sequence = public_announcement_sequence(&announcement);
         if endpoints.is_empty() {
-            write_lock(&self.public_announcements, "public announcement state")?.insert(
+            let now = Utc::now();
+            update_public_announcement_state(
+                &self.public_announcements,
                 collection_id,
-                PublicAnnouncementState {
-                    accepted_indexes: 0,
-                    last_announced_at: Utc::now(),
-                    expires_at: Utc::now(),
-                },
+                completed_public_announcement_state(sequence, None, 0, now),
             );
+            notify_public_announcement_update(&self.public_announcement_updates);
             self.audit(
                 "public_collection_not_announced",
                 "collection",
@@ -1572,6 +1824,7 @@ impl DesktopServices {
             )?;
             return Ok(());
         }
+        let expires_at = public_announcement_expiry(&announcement);
         let accepted = match announcement {
             PreparedPublicAnnouncement::Manifest(manifest) => self
                 .public_reader
@@ -1586,14 +1839,12 @@ impl DesktopServices {
             PreparedPublicAnnouncement::Missing => return Ok(()),
         };
         let now = Utc::now();
-        write_lock(&self.public_announcements, "public announcement state")?.insert(
+        update_public_announcement_state(
+            &self.public_announcements,
             collection_id,
-            PublicAnnouncementState {
-                accepted_indexes: accepted,
-                last_announced_at: now,
-                expires_at: now + ChronoDuration::minutes(15),
-            },
+            completed_public_announcement_state(sequence, expires_at, accepted, now),
         );
+        notify_public_announcement_update(&self.public_announcement_updates);
         self.audit(
             "public_collection_catalog_updated",
             "collection",
@@ -1622,17 +1873,6 @@ impl DesktopServices {
     }
 
     pub async fn renew_public_manifests(&self) -> Result<()> {
-        let database = self.database.clone();
-        tokio::task::spawn_blocking(move || {
-            for collection in database.list_collections()? {
-                if collection.policy.internet_public {
-                    let _ = database.bump_public_manifest_sequence(collection.id)?;
-                }
-            }
-            Result::<()>::Ok(())
-        })
-        .await
-        .context("se detuvo el worker de renovación pública")??;
         self.sync_all_public_collections().await
     }
 
@@ -1647,6 +1887,14 @@ impl DesktopServices {
                 Ok(relay_circuit_address(address, peer))
             })
             .collect()
+    }
+
+    fn current_public_relay_readiness(&self) -> Result<PublicRelayReadiness> {
+        let runtime = mutex_lock(&self.public_network, "public network runtime")?;
+        Ok(runtime
+            .as_ref()
+            .map(|runtime| runtime.relay_readiness.borrow().clone())
+            .unwrap_or_default())
     }
 
     fn public_index_endpoints(&self) -> Result<Vec<PublicIndexEndpoint>> {
@@ -1742,7 +1990,7 @@ impl DesktopServices {
         top_k: u8,
         purpose: SearchPurpose,
         partials: mpsc::Sender<SearchResponse>,
-    ) -> std::result::Result<SearchResponse, SearchContractError> {
+    ) -> std::result::Result<(SearchResponse, PublicRouteKind), SearchContractError> {
         let endpoints = self
             .public_index_endpoints()
             .map_err(|error| SearchContractError::Backend(error.to_string()))?;
@@ -1750,34 +1998,41 @@ impl DesktopServices {
         let (trusted, public) = tokio::join!(
             self.federated_proxy.search(request.clone()),
             self.public_reader
-                .search_with_partials(&endpoints, request, partials),
+                .search_with_route_and_partials(&endpoints, request, partials),
         );
         match (trusted, public) {
-            (Ok(trusted), Ok(public)) => Ok(merge_public_search_responses(
-                trusted,
-                public,
-                usize::from(top_k),
+            (
+                Ok(trusted),
+                Ok(PublicSearchResult {
+                    response,
+                    route_kind,
+                }),
+            ) => Ok((
+                merge_public_search_responses(trusted, response, usize::from(top_k)),
+                route_kind,
             )),
             (Ok(mut trusted), Err(_)) => {
                 trusted.partial = true;
                 trusted
                     .warnings
                     .push(PUBLIC_NETWORK_OFFLINE_WARNING.to_owned());
-                Ok(trusted)
+                Ok((trusted, PublicRouteKind::Offline))
             }
-            (Err(_), Ok(mut public)) => {
-                public.partial = true;
-                public
+            (
+                Err(_),
+                Ok(PublicSearchResult {
+                    mut response,
+                    route_kind,
+                }),
+            ) => {
+                response.partial = true;
+                response
                     .warnings
                     .push("local or LAN search is unavailable".to_owned());
-                Ok(public)
+                Ok((response, route_kind))
             }
             (Err(error), Err(_)) => Err(error),
         }
-    }
-
-    pub fn public_route_kind(&self) -> PublicRouteKind {
-        self.public_reader.route_kind()
     }
 
     pub fn add_federation_index(&self, peer_id: &str, address: &str) -> Result<()> {
@@ -2972,10 +3227,21 @@ fn federation_index_endpoints(database: &Database) -> Result<Vec<PublicIndexEndp
         .collect()
 }
 
+fn prepare_next_public_announcement(
+    database: &Database,
+    identity: &NodeIdentity,
+    collection_id: Uuid,
+    ready_relay_addresses: &[Multiaddr],
+) -> Result<(Vec<PublicIndexEndpoint>, PreparedPublicAnnouncement)> {
+    let _ = database.bump_public_manifest_sequence(collection_id)?;
+    prepare_public_announcement(database, identity, collection_id, ready_relay_addresses)
+}
+
 fn prepare_public_announcement(
     database: &Database,
     identity: &NodeIdentity,
     collection_id: Uuid,
+    ready_relay_addresses: &[Multiaddr],
 ) -> Result<(Vec<PublicIndexEndpoint>, PreparedPublicAnnouncement)> {
     let endpoints = federation_index_endpoints(database)?;
     let Some(collection) = database.collection(collection_id)? else {
@@ -2986,44 +3252,35 @@ fn prepare_public_announcement(
     };
     let publisher_id = identity.peer_id().to_string();
     if !collection.policy.internet_public {
-        let tombstone = sign_tombstone(
-            identity.keypair(),
-            PublicCollectionTombstone {
-                protocol_version: PUBLIC_CATALOG_PROTOCOL.to_owned(),
-                publisher_id,
-                collection_id,
-                sequence: profile.manifest_sequence,
-                withdrawn_at: Utc::now(),
-            },
+        let tombstone = prepare_public_tombstone(
+            identity,
+            &publisher_id,
+            collection_id,
+            profile.manifest_sequence,
         )?;
         return Ok((endpoints, PreparedPublicAnnouncement::Tombstone(tombstone)));
     }
     let material = database.public_manifest_material(collection_id)?;
     if material.concept_count == 0 {
-        let tombstone = sign_tombstone(
-            identity.keypair(),
-            PublicCollectionTombstone {
-                protocol_version: PUBLIC_CATALOG_PROTOCOL.to_owned(),
-                publisher_id,
-                collection_id,
-                sequence: profile.manifest_sequence,
-                withdrawn_at: Utc::now(),
-            },
+        let tombstone = prepare_public_tombstone(
+            identity,
+            &publisher_id,
+            collection_id,
+            profile.manifest_sequence,
+        )?;
+        return Ok((endpoints, PreparedPublicAnnouncement::Tombstone(tombstone)));
+    }
+    let routes = ready_public_routes(&endpoints, identity.peer_id(), ready_relay_addresses);
+    if routes.is_empty() {
+        let tombstone = prepare_public_tombstone(
+            identity,
+            &publisher_id,
+            collection_id,
+            profile.manifest_sequence,
         )?;
         return Ok((endpoints, PreparedPublicAnnouncement::Tombstone(tombstone)));
     }
     let fingerprint = database.public_collection_fingerprint(collection_id)?;
-    let routes = endpoints
-        .iter()
-        .map(|endpoint| {
-            relayed_peer_address(
-                endpoint.address.clone(),
-                endpoint.peer_id,
-                identity.peer_id(),
-            )
-            .to_string()
-        })
-        .collect();
     let now = Utc::now();
     let manifest = sign_manifest(
         identity.keypair(),
@@ -3046,100 +3303,204 @@ fn prepare_public_announcement(
     Ok((endpoints, PreparedPublicAnnouncement::Manifest(manifest)))
 }
 
-async fn run_public_manifest_renewal(
+fn prepare_public_tombstone(
+    identity: &NodeIdentity,
+    publisher_id: &str,
+    collection_id: Uuid,
+    sequence: u64,
+) -> Result<airwiki_types::SignedPublicCollectionTombstone> {
+    Ok(sign_tombstone(
+        identity.keypair(),
+        PublicCollectionTombstone {
+            protocol_version: PUBLIC_CATALOG_PROTOCOL.to_owned(),
+            publisher_id: publisher_id.to_owned(),
+            collection_id,
+            sequence,
+            withdrawn_at: Utc::now(),
+        },
+    )?)
+}
+
+fn ready_public_routes(
+    endpoints: &[PublicIndexEndpoint],
+    publisher_peer: PeerId,
+    ready_relay_addresses: &[Multiaddr],
+) -> Vec<String> {
+    endpoints
+        .iter()
+        .filter(|endpoint| {
+            ready_relay_addresses.contains(&relay_circuit_address(
+                endpoint.address.clone(),
+                endpoint.peer_id,
+            ))
+        })
+        .map(|endpoint| {
+            relayed_peer_address(endpoint.address.clone(), endpoint.peer_id, publisher_peer)
+                .to_string()
+        })
+        .collect()
+}
+
+#[derive(Clone)]
+struct PublicManifestRenewalContext {
     database: Database,
     identity: NodeIdentity,
     reader: Arc<PublicReader>,
-    public_announcements: Arc<RwLock<HashMap<Uuid, PublicAnnouncementState>>>,
+    announcements: Arc<RwLock<HashMap<Uuid, PublicAnnouncementState>>>,
+    announcement_sync: Arc<AsyncMutex<()>>,
+    updates: watch::Sender<u64>,
     cancellation: CancellationToken,
+}
+
+async fn run_public_manifest_renewal(
+    context: PublicManifestRenewalContext,
+    mut relay_readiness: watch::Receiver<PublicRelayReadiness>,
 ) {
+    let mut current_relay_readiness = relay_readiness.borrow_and_update().clone();
+    let mut readiness_open = true;
+    let first_renewal = tokio::time::Instant::now() + PUBLIC_MANIFEST_RENEWAL_INTERVAL;
+    let mut renewal_interval =
+        tokio::time::interval_at(first_renewal, PUBLIC_MANIFEST_RENEWAL_INTERVAL);
+    renewal_interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+    if context.cancellation.is_cancelled() {
+        return;
+    }
+    renew_public_manifests_for_readiness(&context, current_relay_readiness.clone()).await;
     loop {
-        tokio::select! {
+        let should_renew = tokio::select! {
             biased;
-            () = cancellation.cancelled() => return,
-            () = tokio::time::sleep(Duration::from_secs(5 * 60)) => {}
+            () = context.cancellation.cancelled() => return,
+            changed = relay_readiness.changed(), if readiness_open => {
+                match changed {
+                    Ok(()) => {
+                        let next = relay_readiness.borrow_and_update().clone();
+                        if next == current_relay_readiness {
+                            false
+                        } else {
+                            current_relay_readiness = next;
+                            true
+                        }
+                    }
+                    Err(_) => {
+                        readiness_open = false;
+                        let changed = current_relay_readiness.ready_relay_count() > 0;
+                        current_relay_readiness = PublicRelayReadiness::default();
+                        changed
+                    }
+                }
+            }
+            _ = renewal_interval.tick() => true,
+        };
+        if !should_renew {
+            continue;
         }
-        let database = database.clone();
-        let identity = identity.clone();
-        let prepared = tokio::task::spawn_blocking(move || {
+        renew_public_manifests_for_readiness(&context, current_relay_readiness.clone()).await;
+    }
+}
+
+async fn renew_public_manifests_for_readiness(
+    context: &PublicManifestRenewalContext,
+    relay_readiness: PublicRelayReadiness,
+) {
+    let database = context.database.clone();
+    let identity = context.identity.clone();
+    let prepared = {
+        let _announcement_sync = context.announcement_sync.lock().await;
+        tokio::task::spawn_blocking(move || {
             let mut updates = Vec::new();
             for collection in database.list_collections()? {
                 if !collection.policy.internet_public {
                     continue;
                 }
-                let _ = database.bump_public_manifest_sequence(collection.id)?;
-                let (endpoints, update) =
-                    prepare_public_announcement(&database, &identity, collection.id)?;
+                let (endpoints, update) = prepare_next_public_announcement(
+                    &database,
+                    &identity,
+                    collection.id,
+                    relay_readiness.ready_relay_addresses(),
+                )?;
                 updates.push((collection.id, endpoints, update));
             }
             Result::<Vec<_>>::Ok(updates)
         })
-        .await;
-        let Ok(Ok(updates)) = prepared else {
-            tracing::warn!(
-                error_kind = "public_manifest_preparation_failed",
-                "public manifest renewal failed"
+        .await
+    };
+    let Ok(Ok(updates)) = prepared else {
+        notify_public_announcement_update(&context.updates);
+        tracing::warn!(
+            error_kind = "public_manifest_preparation_failed",
+            "public manifest renewal failed"
+        );
+        return;
+    };
+    let has_updates = !updates.is_empty();
+    if context.cancellation.is_cancelled() {
+        return;
+    }
+    let mut accepted = 0_usize;
+    let mut failed = 0_usize;
+    for (collection_id, endpoints, update) in updates {
+        if context.cancellation.is_cancelled() {
+            return;
+        }
+        let sequence = public_announcement_sequence(&update);
+        if endpoints.is_empty() {
+            let now = Utc::now();
+            update_public_announcement_state(
+                &context.announcements,
+                collection_id,
+                completed_public_announcement_state(sequence, None, 0, now),
             );
             continue;
+        }
+        let expires_at = public_announcement_expiry(&update);
+        let result = tokio::select! {
+            biased;
+            () = context.cancellation.cancelled() => return,
+            result = async {
+                match update {
+                    PreparedPublicAnnouncement::Manifest(manifest) => {
+                        Some(context.reader.register_manifest(&endpoints, manifest).await)
+                    }
+                    PreparedPublicAnnouncement::Tombstone(tombstone) => {
+                        Some(context.reader.withdraw_manifest(&endpoints, tombstone).await)
+                    }
+                    PreparedPublicAnnouncement::Missing => None,
+                }
+            } => result,
         };
-        let mut accepted = 0_usize;
-        let mut failed = 0_usize;
-        for (collection_id, endpoints, update) in updates {
-            if endpoints.is_empty() {
-                let now = Utc::now();
+        let Some(result) = result else {
+            continue;
+        };
+        match result {
+            Ok(count) => {
+                accepted = accepted.saturating_add(count);
                 update_public_announcement_state(
-                    &public_announcements,
+                    &context.announcements,
                     collection_id,
-                    Some(PublicAnnouncementState {
-                        accepted_indexes: 0,
-                        last_announced_at: now,
-                        expires_at: now,
-                    }),
+                    completed_public_announcement_state(sequence, expires_at, count, Utc::now()),
                 );
-                continue;
             }
-            let expires_at = match &update {
-                PreparedPublicAnnouncement::Manifest(manifest) => {
-                    Some(manifest.manifest.expires_at)
-                }
-                PreparedPublicAnnouncement::Tombstone(_) | PreparedPublicAnnouncement::Missing => {
-                    None
-                }
-            };
-            let result = match update {
-                PreparedPublicAnnouncement::Manifest(manifest) => {
-                    reader.register_manifest(&endpoints, manifest).await
-                }
-                PreparedPublicAnnouncement::Tombstone(tombstone) => {
-                    reader.withdraw_manifest(&endpoints, tombstone).await
-                }
-                PreparedPublicAnnouncement::Missing => continue,
-            };
-            match result {
-                Ok(count) => {
-                    accepted = accepted.saturating_add(count);
-                    update_public_announcement_state(
-                        &public_announcements,
-                        collection_id,
-                        expires_at.map(|expires_at| PublicAnnouncementState {
-                            accepted_indexes: count,
-                            last_announced_at: Utc::now(),
-                            expires_at,
-                        }),
-                    );
-                }
-                Err(_) => {
-                    failed = failed.saturating_add(1);
+            Err(_) => {
+                failed = failed.saturating_add(1);
+                if let Some(sequence) = sequence {
                     record_public_announcement_failure(
-                        &public_announcements,
+                        &context.announcements,
                         collection_id,
+                        sequence,
                         Utc::now(),
                     );
                 }
             }
         }
-        tracing::info!(accepted, failed, "public manifests renewed");
     }
+    if has_updates {
+        notify_public_announcement_update(&context.updates);
+    }
+    tracing::info!(accepted, failed, "public manifests renewed");
+}
+
+fn notify_public_announcement_update(updates: &watch::Sender<u64>) {
+    updates.send_modify(|generation| *generation = generation.wrapping_add(1));
 }
 
 fn source_issue_reason(message: &str, code: SourceIssueCode) -> Option<String> {
@@ -3438,17 +3799,158 @@ fn write_lock<'a, T>(
 
 #[cfg(test)]
 mod tests {
-    use airwiki_network::MemorySecretStore;
+    use std::net::TcpListener;
+
+    use airwiki_network::{
+        MemorySecretStore, PublicCatalogBackend, PublicCatalogBackendError,
+        PublicCatalogServerConfig, run_public_catalog_server,
+    };
+    use async_trait::async_trait;
+    use tokio::net::TcpStream;
+    use tokio::sync::{Notify, oneshot};
 
     use super::*;
 
     struct EmptyFederatedSearch;
+
+    struct RecordingCatalogBackend {
+        withdrawals: mpsc::UnboundedSender<u64>,
+        gate: Option<Arc<CatalogWithdrawalGate>>,
+    }
+
+    struct CatalogWithdrawalGate {
+        started: AsyncMutex<Option<oneshot::Sender<()>>>,
+        release: Notify,
+    }
+
+    impl CatalogWithdrawalGate {
+        fn new() -> (Arc<Self>, oneshot::Receiver<()>) {
+            let (started, receiver) = oneshot::channel();
+            (
+                Arc::new(Self {
+                    started: AsyncMutex::new(Some(started)),
+                    release: Notify::new(),
+                }),
+                receiver,
+            )
+        }
+
+        async fn wait(&self) {
+            if let Some(started) = self.started.lock().await.take() {
+                let _ = started.send(());
+            }
+            self.release.notified().await;
+        }
+
+        fn release(&self) {
+            self.release.notify_one();
+        }
+    }
+
+    #[async_trait]
+    impl PublicCatalogBackend for RecordingCatalogBackend {
+        async fn register(
+            &self,
+            _manifest: airwiki_types::SignedPublicCollectionManifest,
+        ) -> std::result::Result<(), PublicCatalogBackendError> {
+            Ok(())
+        }
+
+        async fn withdraw(
+            &self,
+            tombstone: airwiki_types::SignedPublicCollectionTombstone,
+        ) -> std::result::Result<(), PublicCatalogBackendError> {
+            if let Some(gate) = &self.gate {
+                gate.wait().await;
+            }
+            let _ = self.withdrawals.send(tombstone.tombstone.sequence);
+            Ok(())
+        }
+
+        async fn query(
+            &self,
+            _query: airwiki_types::PublicCatalogQuery,
+        ) -> std::result::Result<
+            Vec<airwiki_types::SignedPublicCollectionManifest>,
+            PublicCatalogBackendError,
+        > {
+            Ok(Vec::new())
+        }
+    }
 
     fn test_public_peer_id() -> String {
         NodeIdentity::load_or_create(&MemorySecretStore::default())
             .unwrap()
             .peer_id()
             .to_string()
+    }
+
+    fn available_public_catalog_address() -> (u16, Multiaddr) {
+        let listener = TcpListener::bind(("127.0.0.1", 0)).unwrap();
+        let port = listener.local_addr().unwrap().port();
+        drop(listener);
+        (port, format!("/ip4/127.0.0.1/tcp/{port}").parse().unwrap())
+    }
+
+    async fn wait_for_public_catalog_listener(port: u16) {
+        tokio::time::timeout(Duration::from_secs(2), async move {
+            loop {
+                if TcpStream::connect(("127.0.0.1", port)).await.is_ok() {
+                    return;
+                }
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .unwrap();
+    }
+
+    #[test]
+    fn model_activation_stage_is_preserved_as_a_sanitized_class() {
+        let error = activation_stage::<()>(
+            Err(anyhow!("synthetic activation detail")),
+            ModelActivationStage::OnnxInit,
+        )
+        .unwrap_err();
+
+        assert_eq!(
+            classify_model_activation_failure(&error),
+            ModelActivationFailureView {
+                error_kind: ModelActivationErrorKind::OnnxInit,
+                exit_class: ModelActivationExitClass::None,
+            }
+        );
+    }
+
+    #[test]
+    fn model_activation_elapsed_buckets_have_stable_boundaries() {
+        for (seconds, expected) in [
+            (0, ModelActivationElapsedBucket::Under5s),
+            (4, ModelActivationElapsedBucket::Under5s),
+            (5, ModelActivationElapsedBucket::From5sTo30s),
+            (29, ModelActivationElapsedBucket::From5sTo30s),
+            (30, ModelActivationElapsedBucket::From30sTo120s),
+            (119, ModelActivationElapsedBucket::From30sTo120s),
+            (120, ModelActivationElapsedBucket::From120sTo300s),
+            (299, ModelActivationElapsedBucket::From120sTo300s),
+            (300, ModelActivationElapsedBucket::Over300s),
+        ] {
+            assert_eq!(
+                model_activation_elapsed_bucket(Duration::from_secs(seconds)),
+                expected
+            );
+        }
+    }
+
+    #[test]
+    fn bundled_generation_execution_class_matches_platform_acceleration() {
+        let expected = if bundled_runtime_is_accelerated() {
+            GenerationExecutionClass::Accelerated
+        } else {
+            GenerationExecutionClass::CpuOnly
+        };
+
+        assert_eq!(bundled_generation_execution_class(), expected);
     }
 
     #[test]
@@ -3533,9 +4035,83 @@ mod tests {
     }
 
     #[test]
+    fn older_bundled_bootstrap_preserves_a_newer_active_registry() {
+        let database = Database::in_memory().unwrap();
+        let active_peer = test_public_peer_id();
+        let active = parse_bundled_bootstrap_federation_indexes(Some(&format!(
+            "2|2099-01-01T00:00:00Z|{active_peer}|/ip6/2001:db8::20/tcp/42042"
+        )))
+        .unwrap();
+        install_bundled_bootstrap_federation_indexes(&database, active).unwrap();
+
+        let older_peer = test_public_peer_id();
+        let older = parse_bundled_bootstrap_federation_indexes(Some(&format!(
+            "1|2099-01-01T00:00:00Z|{older_peer}|/ip6/2001:db8::10/tcp/42042"
+        )))
+        .unwrap();
+        install_bundled_bootstrap_federation_indexes(&database, older).unwrap();
+
+        let active_indexes = database.list_federation_indexes().unwrap();
+        assert_eq!(
+            database.bootstrap_federation_registry_version().unwrap(),
+            Some(2)
+        );
+        assert_eq!(active_indexes.len(), 1);
+        assert_eq!(active_indexes[0].peer_id, active_peer);
+        assert_eq!(active_indexes[0].registry_version, 2);
+    }
+
+    #[test]
+    fn older_bundled_bootstrap_preserves_a_newer_expired_registry() {
+        let database = Database::in_memory().unwrap();
+        let expired_peer = test_public_peer_id();
+        let expired = parse_bundled_bootstrap_federation_indexes(Some(&format!(
+            "3|2020-01-01T00:00:00Z|{expired_peer}|/ip6/2001:db8::30/tcp/42042"
+        )))
+        .unwrap();
+        install_bundled_bootstrap_federation_indexes(&database, expired).unwrap();
+        let older_peer = test_public_peer_id();
+        let older = parse_bundled_bootstrap_federation_indexes(Some(&format!(
+            "1|2099-01-01T00:00:00Z|{older_peer}|/ip6/2001:db8::10/tcp/42042"
+        )))
+        .unwrap();
+        install_bundled_bootstrap_federation_indexes(&database, older).unwrap();
+
+        assert_eq!(
+            database.bootstrap_federation_registry_version().unwrap(),
+            Some(3)
+        );
+        assert!(
+            database
+                .list_federation_indexes()
+                .unwrap()
+                .iter()
+                .all(|index| index.source != "bootstrap")
+        );
+    }
+
+    #[test]
+    fn bundled_bootstrap_same_version_mutation_still_fails_closed() {
+        let database = Database::in_memory().unwrap();
+        let peer = test_public_peer_id();
+        let original = parse_bundled_bootstrap_federation_indexes(Some(&format!(
+            "2|2099-01-01T00:00:00Z|{peer}|/ip6/2001:db8::20/tcp/42042"
+        )))
+        .unwrap();
+        install_bundled_bootstrap_federation_indexes(&database, original).unwrap();
+        let mutation = parse_bundled_bootstrap_federation_indexes(Some(&format!(
+            "2|2099-01-01T00:00:00Z|{peer}|/ip6/2001:db8::21/tcp/42042"
+        )))
+        .unwrap();
+
+        assert!(install_bundled_bootstrap_federation_indexes(&database, mutation).is_err());
+    }
+
+    #[test]
     fn public_announcement_status_distinguishes_advertised_expired_and_offline() {
         let now = Utc::now();
         let advertised = PublicAnnouncementState {
+            sequence: 1,
             accepted_indexes: 2,
             last_announced_at: now,
             expires_at: now + ChronoDuration::minutes(15),
@@ -3561,8 +4137,351 @@ mod tests {
         );
     }
 
+    #[tokio::test]
+    async fn public_manifest_runner_withdraws_immediately_from_initial_zero_readiness() {
+        let temporary = tempfile::tempdir().unwrap();
+        let database = Database::in_memory().unwrap();
+        let source_directory = temporary.path().join("source");
+        let wiki_directory = temporary.path().join("wiki");
+        std::fs::create_dir_all(&source_directory).unwrap();
+        std::fs::create_dir_all(&wiki_directory).unwrap();
+        let collection = database
+            .create_collection(
+                "Synthetic initial readiness",
+                source_directory,
+                wiki_directory,
+                CollectionPolicy::local_only(),
+            )
+            .unwrap();
+        database
+            .update_collection_policy(
+                collection.id,
+                CollectionPolicy {
+                    local_only: false,
+                    peer_shareable: false,
+                    allow_external_ai: false,
+                    internet_public: true,
+                },
+            )
+            .unwrap();
+        let (port, address) = available_public_catalog_address();
+        let index_identity = NodeIdentity::load_or_create(&MemorySecretStore::default()).unwrap();
+        database
+            .upsert_community_federation_index(
+                &index_identity.peer_id().to_string(),
+                &address.to_string(),
+                true,
+            )
+            .unwrap();
+        let (withdrawals, mut recorded_withdrawals) = mpsc::unbounded_channel();
+        let catalog_cancellation = CancellationToken::new();
+        let catalog_task = tokio::spawn(run_public_catalog_server(
+            index_identity,
+            PublicCatalogServerConfig::new(vec![address]),
+            Arc::new(RecordingCatalogBackend {
+                withdrawals,
+                gate: None,
+            }),
+            catalog_cancellation.clone(),
+        ));
+        wait_for_public_catalog_listener(port).await;
+
+        let (_readiness_sender, relay_readiness) = watch::channel(PublicRelayReadiness::default());
+        let (announcement_updates, mut announcement_update_events) = watch::channel(0_u64);
+        let renewal_cancellation = CancellationToken::new();
+        let announcements = Arc::new(RwLock::new(HashMap::new()));
+        let renewal_task = tokio::spawn(run_public_manifest_renewal(
+            PublicManifestRenewalContext {
+                database,
+                identity: NodeIdentity::load_or_create(&MemorySecretStore::default()).unwrap(),
+                reader: Arc::new(PublicReader::new()),
+                announcements: Arc::clone(&announcements),
+                announcement_sync: Arc::new(AsyncMutex::new(())),
+                updates: announcement_updates,
+                cancellation: renewal_cancellation.clone(),
+            },
+            relay_readiness,
+        ));
+
+        let sequence = tokio::time::timeout(Duration::from_secs(2), recorded_withdrawals.recv())
+            .await
+            .unwrap()
+            .unwrap();
+        assert!(sequence > 1);
+        tokio::time::timeout(Duration::from_secs(2), announcement_update_events.changed())
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(*announcement_update_events.borrow_and_update(), 1);
+        assert_eq!(
+            public_announcement_view(
+                read_lock(&announcements, "test announcements")
+                    .unwrap()
+                    .get(&collection.id)
+                    .copied(),
+                Utc::now(),
+            ),
+            PublicAnnouncementStatusView::Offline
+        );
+
+        renewal_cancellation.cancel();
+        catalog_cancellation.cancel();
+        tokio::time::timeout(Duration::from_secs(2), renewal_task)
+            .await
+            .unwrap()
+            .unwrap();
+        tokio::time::timeout(Duration::from_secs(2), catalog_task)
+            .await
+            .unwrap()
+            .unwrap()
+            .unwrap();
+    }
+
+    #[tokio::test]
+    async fn public_manifest_runner_cancels_an_in_flight_catalog_update() {
+        let temporary = tempfile::tempdir().unwrap();
+        let source_directory = temporary.path().join("source");
+        let wiki_directory = temporary.path().join("wiki");
+        std::fs::create_dir_all(&source_directory).unwrap();
+        std::fs::create_dir_all(&wiki_directory).unwrap();
+        let database = Database::in_memory().unwrap();
+        let collection = database
+            .create_collection(
+                "Synthetic cancellation",
+                source_directory,
+                wiki_directory,
+                CollectionPolicy::local_only(),
+            )
+            .unwrap();
+        database
+            .update_collection_policy(
+                collection.id,
+                CollectionPolicy {
+                    local_only: false,
+                    peer_shareable: false,
+                    allow_external_ai: false,
+                    internet_public: true,
+                },
+            )
+            .unwrap();
+        let (port, address) = available_public_catalog_address();
+        let index_identity = NodeIdentity::load_or_create(&MemorySecretStore::default()).unwrap();
+        database
+            .upsert_community_federation_index(
+                &index_identity.peer_id().to_string(),
+                &address.to_string(),
+                true,
+            )
+            .unwrap();
+        let (withdrawals, _recorded_withdrawals) = mpsc::unbounded_channel();
+        let (gate, withdrawal_started) = CatalogWithdrawalGate::new();
+        let catalog_cancellation = CancellationToken::new();
+        let catalog_task = tokio::spawn(run_public_catalog_server(
+            index_identity,
+            PublicCatalogServerConfig::new(vec![address]),
+            Arc::new(RecordingCatalogBackend {
+                withdrawals,
+                gate: Some(Arc::clone(&gate)),
+            }),
+            catalog_cancellation.clone(),
+        ));
+        wait_for_public_catalog_listener(port).await;
+
+        let (_readiness_sender, relay_readiness) = watch::channel(PublicRelayReadiness::default());
+        let (announcement_updates, _announcement_update_events) = watch::channel(0_u64);
+        let renewal_cancellation = CancellationToken::new();
+        let renewal_task = tokio::spawn(run_public_manifest_renewal(
+            PublicManifestRenewalContext {
+                database,
+                identity: NodeIdentity::load_or_create(&MemorySecretStore::default()).unwrap(),
+                reader: Arc::new(PublicReader::new()),
+                announcements: Arc::new(RwLock::new(HashMap::new())),
+                announcement_sync: Arc::new(AsyncMutex::new(())),
+                updates: announcement_updates,
+                cancellation: renewal_cancellation.clone(),
+            },
+            relay_readiness,
+        ));
+        tokio::time::timeout(Duration::from_secs(2), withdrawal_started)
+            .await
+            .unwrap()
+            .unwrap();
+
+        renewal_cancellation.cancel();
+        tokio::time::timeout(Duration::from_millis(750), renewal_task)
+            .await
+            .unwrap()
+            .unwrap();
+
+        gate.release();
+        catalog_cancellation.cancel();
+        tokio::time::timeout(Duration::from_secs(2), catalog_task)
+            .await
+            .unwrap()
+            .unwrap()
+            .unwrap();
+    }
+
     #[test]
-    fn successful_renewal_replaces_the_visible_announcement_expiry() {
+    fn public_manifest_routes_include_only_ready_relay_reservations() {
+        let first_relay = NodeIdentity::load_or_create(&MemorySecretStore::default()).unwrap();
+        let second_relay = NodeIdentity::load_or_create(&MemorySecretStore::default()).unwrap();
+        let publisher = NodeIdentity::load_or_create(&MemorySecretStore::default()).unwrap();
+        let endpoints = vec![
+            PublicIndexEndpoint {
+                peer_id: first_relay.peer_id(),
+                address: "/ip4/192.0.2.10/tcp/42042".parse().unwrap(),
+            },
+            PublicIndexEndpoint {
+                peer_id: second_relay.peer_id(),
+                address: "/ip4/192.0.2.20/tcp/42044".parse().unwrap(),
+            },
+        ];
+        let ready_relay_addresses = vec![relay_circuit_address(
+            endpoints[1].address.clone(),
+            endpoints[1].peer_id,
+        )];
+
+        let routes = ready_public_routes(&endpoints, publisher.peer_id(), &ready_relay_addresses);
+
+        assert_eq!(
+            routes,
+            vec![
+                relayed_peer_address(
+                    endpoints[1].address.clone(),
+                    endpoints[1].peer_id,
+                    publisher.peer_id(),
+                )
+                .to_string()
+            ]
+        );
+    }
+
+    #[test]
+    fn public_announcement_readiness_changes_advance_sequence_and_close_offline() {
+        let temporary = tempfile::tempdir().unwrap();
+        let database = Database::in_memory().unwrap();
+        let source_directory = temporary.path().join("source");
+        let wiki_directory = temporary.path().join("wiki");
+        std::fs::create_dir_all(&source_directory).unwrap();
+        std::fs::create_dir_all(&wiki_directory).unwrap();
+        let collection = database
+            .create_collection(
+                "Synthetic public collection",
+                &source_directory,
+                &wiki_directory,
+                CollectionPolicy::local_only(),
+            )
+            .unwrap();
+        database
+            .update_collection_policy(
+                collection.id,
+                CollectionPolicy {
+                    local_only: false,
+                    peer_shareable: false,
+                    allow_external_ai: false,
+                    internet_public: true,
+                },
+            )
+            .unwrap();
+        let relay = NodeIdentity::load_or_create(&MemorySecretStore::default()).unwrap();
+        let relay_address: Multiaddr = "/ip4/192.0.2.10/tcp/42042".parse().unwrap();
+        database
+            .upsert_community_federation_index(
+                &relay.peer_id().to_string(),
+                &relay_address.to_string(),
+                true,
+            )
+            .unwrap();
+        let source_path = source_directory.join("fixture.md");
+        let source_text = "Synthetic relay readiness evidence.";
+        std::fs::write(&source_path, source_text).unwrap();
+        let source_hash = airwiki_core::sha256_file(&source_path).unwrap();
+        let source = database
+            .register_source(
+                collection.id,
+                &source_path,
+                &source_hash,
+                "markdown",
+                u64::try_from(source_text.len()).unwrap(),
+            )
+            .unwrap();
+        database
+            .mark_extracted(source.id(), 0, u64::try_from(source_text.len()).unwrap())
+            .unwrap();
+        let source_record = database.source_document(source.id()).unwrap().unwrap();
+        let draft = EnrichmentDraft {
+            concept_type: airwiki_types::ConceptType::Document,
+            title: "Synthetic relay readiness".into(),
+            description: "Synthetic public announcement fixture".into(),
+            language: "en".into(),
+            tags: Vec::new(),
+            entities: Vec::new(),
+            links: Vec::new(),
+            summary: "Synthetic evidence".into(),
+            classification_confidence: 1.0,
+            classification_explanation: "fixture".into(),
+        };
+        let concept = database
+            .save_enrichment(source.id(), draft.clone(), "test-node", "test-model")
+            .unwrap();
+        database
+            .replace_chunks(
+                concept.id,
+                &[airwiki_core::StoredChunk {
+                    id: Uuid::new_v4(),
+                    concept_id: concept.id,
+                    source_document_id: source.id(),
+                    collection_id: collection.id,
+                    ordinal: 0,
+                    heading_or_page: "Fixture".into(),
+                    text: source_text.into(),
+                    text_sha256: "synthetic-chunk-hash".into(),
+                    embedding: vec![0.0; airwiki_core::EMBEDDING_DIMENSIONS],
+                    source_revision: source_record.revision,
+                }],
+            )
+            .unwrap();
+        let review_version = database
+            .review_evidence_page(concept.id, source_record.revision, None, None, 1)
+            .unwrap()
+            .unwrap()
+            .review_version;
+        OkfPublicationMaterializer::new(database.clone())
+            .approve(concept.id, draft, &review_version)
+            .unwrap();
+        let publisher = NodeIdentity::load_or_create(&MemorySecretStore::default()).unwrap();
+        let ready_relay_addresses = vec![relay_circuit_address(relay_address, relay.peer_id())];
+
+        let (_, ready) = prepare_next_public_announcement(
+            &database,
+            &publisher,
+            collection.id,
+            &ready_relay_addresses,
+        )
+        .unwrap();
+        let ready_sequence = match ready {
+            PreparedPublicAnnouncement::Manifest(manifest) => manifest.manifest.sequence,
+            _ => panic!("a ready relay must produce a manifest"),
+        };
+        let (_, offline) =
+            prepare_next_public_announcement(&database, &publisher, collection.id, &[]).unwrap();
+        let offline_sequence = match &offline {
+            PreparedPublicAnnouncement::Tombstone(tombstone) => tombstone.tombstone.sequence,
+            _ => panic!("zero ready relays must produce a tombstone"),
+        };
+
+        assert_eq!(
+            (
+                offline_sequence > ready_sequence,
+                public_announcement_expiry(&offline).is_none(),
+            ),
+            (true, true)
+        );
+    }
+
+    #[test]
+    fn newer_announcement_state_rejects_late_completion_and_expires() {
         let now = Utc::now();
         let announcements = RwLock::new(HashMap::new());
         let collection_id = Uuid::new_v4();
@@ -3570,6 +4489,7 @@ mod tests {
             &announcements,
             collection_id,
             Some(PublicAnnouncementState {
+                sequence: 1,
                 accepted_indexes: 1,
                 last_announced_at: now,
                 expires_at: now + ChronoDuration::minutes(15),
@@ -3581,14 +4501,26 @@ mod tests {
             &announcements,
             collection_id,
             Some(PublicAnnouncementState {
+                sequence: 3,
                 accepted_indexes: 3,
                 last_announced_at: renewed_at,
                 expires_at: renewed_expiry,
             }),
         );
+        update_public_announcement_state(
+            &announcements,
+            collection_id,
+            Some(PublicAnnouncementState {
+                sequence: 2,
+                accepted_indexes: 0,
+                last_announced_at: renewed_at,
+                expires_at: renewed_at,
+            }),
+        );
         record_public_announcement_failure(
             &announcements,
             collection_id,
+            2,
             renewed_at + ChronoDuration::minutes(5),
         );
 
@@ -3598,6 +4530,7 @@ mod tests {
             .copied()
             .unwrap();
         assert_eq!(state.accepted_indexes, 3);
+        assert_eq!(state.sequence, 3);
         assert_eq!(state.last_announced_at, renewed_at);
         assert_eq!(state.expires_at, renewed_expiry);
         assert!(matches!(
@@ -3609,7 +4542,7 @@ mod tests {
         ));
 
         let after_expiry = renewed_expiry + ChronoDuration::seconds(1);
-        record_public_announcement_failure(&announcements, collection_id, after_expiry);
+        record_public_announcement_failure(&announcements, collection_id, 4, after_expiry);
         let failed = read_lock(&announcements, "test announcements")
             .unwrap()
             .get(&collection_id)
@@ -3619,6 +4552,7 @@ mod tests {
             public_announcement_view(Some(failed), after_expiry),
             PublicAnnouncementStatusView::Offline
         );
+        assert_eq!(failed.sequence, 4);
     }
 
     #[test]

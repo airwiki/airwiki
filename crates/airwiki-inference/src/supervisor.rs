@@ -2,7 +2,7 @@ use std::{
     fmt,
     net::{IpAddr, Ipv4Addr, SocketAddr, TcpListener},
     path::PathBuf,
-    process::Stdio,
+    process::{ExitStatus, Stdio},
     sync::Arc,
     time::{Duration, Instant},
 };
@@ -97,6 +97,65 @@ mod child_process_guard {
 }
 
 use child_process_guard::ChildProcessGuard;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RuntimeExitClass {
+    None,
+    Success,
+    Failure,
+    Unknown,
+}
+
+impl RuntimeExitClass {
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::None => "none",
+            Self::Success => "success",
+            Self::Failure => "failure",
+            Self::Unknown => "unknown",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LlamaSupervisorFailureKind {
+    RuntimeSpawn,
+    RuntimeExitedBeforeHealth,
+    RuntimeHealthTimeout,
+    RuntimeState,
+}
+
+impl LlamaSupervisorFailureKind {
+    pub const fn error_kind(self) -> &'static str {
+        match self {
+            Self::RuntimeSpawn => "runtime_spawn",
+            Self::RuntimeExitedBeforeHealth => "runtime_exit_before_health",
+            Self::RuntimeHealthTimeout => "runtime_health_timeout",
+            Self::RuntimeState => "runtime_state",
+        }
+    }
+}
+
+#[derive(Debug, thiserror::Error)]
+#[error("local model runtime failed")]
+pub struct LlamaSupervisorFailure {
+    kind: LlamaSupervisorFailureKind,
+    exit_class: RuntimeExitClass,
+}
+
+impl LlamaSupervisorFailure {
+    const fn new(kind: LlamaSupervisorFailureKind, exit_class: RuntimeExitClass) -> Self {
+        Self { kind, exit_class }
+    }
+
+    pub const fn kind(&self) -> LlamaSupervisorFailureKind {
+        self.kind
+    }
+
+    pub const fn exit_class(&self) -> RuntimeExitClass {
+        self.exit_class
+    }
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ServerReasoningMode {
@@ -209,17 +268,28 @@ impl LlamaSupervisor {
     pub async fn ensure_running(&self) -> Result<LlamaEndpoint> {
         let mut state = self.inner.state.lock().await;
         if let Some(server) = state.as_mut() {
-            if server.child.try_wait()?.is_none() {
+            let status = server.child.try_wait().map_err(|error| {
+                anyhow::Error::new(error).context(LlamaSupervisorFailure::new(
+                    LlamaSupervisorFailureKind::RuntimeState,
+                    RuntimeExitClass::Unknown,
+                ))
+            })?;
+            if status.is_none() {
                 server.last_used = Instant::now();
                 return Ok(server.endpoint.clone());
             }
             *state = None;
         }
 
-        let spawned = spawn_server(&self.inner.config).await?;
+        let mut spawned = spawn_server(&self.inner.config).await.map_err(|error| {
+            error.context(LlamaSupervisorFailure::new(
+                LlamaSupervisorFailureKind::RuntimeSpawn,
+                RuntimeExitClass::None,
+            ))
+        })?;
         wait_until_healthy(
             &self.inner.http,
-            &spawned,
+            &mut spawned,
             self.inner.config.startup_timeout,
         )
         .await?;
@@ -371,12 +441,17 @@ fn server_command(config: &SupervisorConfig, address: SocketAddr, token: &str) -
     if let Some(mmproj) = &config.mmproj_path {
         command.arg("--mmproj").arg(mmproj);
     }
-    if cfg!(target_os = "macos") {
+    if bundled_runtime_is_accelerated() {
         command.arg("--n-gpu-layers").arg("99");
     } else {
         command.arg("--n-gpu-layers").arg("0");
     }
     command
+}
+
+/// Whether the bundled runtime enables GPU layers on this platform.
+pub const fn bundled_runtime_is_accelerated() -> bool {
+    cfg!(target_os = "macos")
 }
 
 fn reserve_loopback_port() -> Result<u16> {
@@ -386,28 +461,190 @@ fn reserve_loopback_port() -> Result<u16> {
 
 async fn wait_until_healthy(
     client: &reqwest::Client,
-    server: &SpawnedServer,
+    server: &mut SpawnedServer,
     timeout: Duration,
 ) -> Result<()> {
-    let endpoint = &server.endpoint;
     let started = Instant::now();
-    while started.elapsed() < timeout {
-        let response = client
-            .get(format!("{}/health", endpoint.base_url))
-            .bearer_auth(endpoint.bearer_token())
-            .send()
-            .await;
+    loop {
+        let status = server.child.try_wait().map_err(|error| {
+            anyhow::Error::new(error).context(LlamaSupervisorFailure::new(
+                LlamaSupervisorFailureKind::RuntimeState,
+                RuntimeExitClass::Unknown,
+            ))
+        })?;
+        if let Some(status) = status {
+            return runtime_exited_before_health(status);
+        }
+        let Some(remaining) = timeout.checked_sub(started.elapsed()) else {
+            return runtime_health_timeout();
+        };
+        let request = client
+            .get(format!("{}/health", server.endpoint.base_url))
+            .bearer_auth(server.endpoint.bearer_token())
+            .send();
+        let response = tokio::select! {
+            biased;
+            status = server.child.wait() => {
+                return runtime_exited_before_health(status.map_err(|error| {
+                    anyhow::Error::new(error).context(LlamaSupervisorFailure::new(
+                        LlamaSupervisorFailureKind::RuntimeState,
+                        RuntimeExitClass::Unknown,
+                    ))
+                })?);
+            }
+            response = tokio::time::timeout(remaining, request) => {
+                match response {
+                    Ok(response) => response,
+                    Err(_) => return runtime_health_timeout(),
+                }
+            }
+        };
         if response.is_ok_and(|response| response.status().is_success()) {
             return Ok(());
         }
-        tokio::time::sleep(Duration::from_millis(250)).await;
+        let Some(remaining) = timeout.checked_sub(started.elapsed()) else {
+            return runtime_health_timeout();
+        };
+        tokio::select! {
+            biased;
+            status = server.child.wait() => {
+                return runtime_exited_before_health(status.map_err(|error| {
+                    anyhow::Error::new(error).context(LlamaSupervisorFailure::new(
+                        LlamaSupervisorFailureKind::RuntimeState,
+                        RuntimeExitClass::Unknown,
+                    ))
+                })?);
+            }
+            () = tokio::time::sleep(Duration::from_millis(250).min(remaining)) => {}
+        }
     }
-    bail!("llama-server did not become healthy within {timeout:?}")
+}
+
+fn runtime_exited_before_health(status: ExitStatus) -> Result<()> {
+    let exit_class = if status.success() {
+        RuntimeExitClass::Success
+    } else {
+        RuntimeExitClass::Failure
+    };
+    Err(LlamaSupervisorFailure::new(
+        LlamaSupervisorFailureKind::RuntimeExitedBeforeHealth,
+        exit_class,
+    )
+    .into())
+}
+
+fn runtime_health_timeout() -> Result<()> {
+    Err(LlamaSupervisorFailure::new(
+        LlamaSupervisorFailureKind::RuntimeHealthTimeout,
+        RuntimeExitClass::None,
+    )
+    .into())
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[cfg(target_os = "windows")]
+    fn gated_failure_command() -> Command {
+        let mut command = Command::new("powershell.exe");
+        command
+            .arg("-NoProfile")
+            .arg("-Command")
+            .arg("$null = [Console]::In.ReadLine(); exit 7");
+        command
+    }
+
+    #[cfg(not(target_os = "windows"))]
+    fn gated_failure_command() -> Command {
+        let mut command = Command::new("sh");
+        command.arg("-c").arg("read -r _ || true; exit 7");
+        command
+    }
+
+    #[tokio::test]
+    async fn health_probe_reports_early_runtime_exit_without_waiting_for_timeout() {
+        let mut command = gated_failure_command();
+        command
+            .stdin(Stdio::piped())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .kill_on_drop(true);
+        let mut child = command.spawn().expect("synthetic child should start");
+        let child_stdin = child
+            .stdin
+            .take()
+            .expect("synthetic child stdin should be piped");
+        let process_guard =
+            ChildProcessGuard::attach(&child).expect("synthetic child should be guarded");
+        let listener = tokio::net::TcpListener::bind((Ipv4Addr::LOCALHOST, 0))
+            .await
+            .expect("synthetic health listener should bind loopback");
+        let port = listener
+            .local_addr()
+            .expect("synthetic health listener should expose its address")
+            .port();
+        let (accepted_sender, accepted_receiver) = tokio::sync::oneshot::channel();
+        let (release_sender, release_receiver) = tokio::sync::oneshot::channel();
+        let listener_task = tokio::spawn(async move {
+            let (socket, _) = listener
+                .accept()
+                .await
+                .expect("synthetic health request should connect");
+            accepted_sender
+                .send(())
+                .expect("health probe should await the synthetic listener");
+            let _ = release_receiver.await;
+            drop(socket);
+        });
+        let server = SpawnedServer {
+            child,
+            process_guard,
+            endpoint: LlamaEndpoint {
+                base_url: format!("http://{}:{port}", Ipv4Addr::LOCALHOST),
+                token: Arc::from("redacted-test-token"),
+            },
+        };
+        let probe_task = tokio::spawn(async move {
+            let mut server = server;
+            let started = Instant::now();
+            let result = wait_until_healthy(
+                &reqwest::Client::new(),
+                &mut server,
+                Duration::from_secs(10),
+            )
+            .await;
+            (result, started.elapsed())
+        });
+        tokio::time::timeout(Duration::from_secs(2), accepted_receiver)
+            .await
+            .expect("health request should reach the synthetic listener")
+            .expect("synthetic listener should report the accepted request");
+        drop(child_stdin);
+        let (result, elapsed) = tokio::time::timeout(Duration::from_secs(5), probe_task)
+            .await
+            .expect("exited child should interrupt the pending health request")
+            .expect("synthetic probe task should finish");
+        let error = result.expect_err("exited child must fail the health probe");
+        let failure = error
+            .downcast_ref::<LlamaSupervisorFailure>()
+            .expect("supervisor failure class must be preserved");
+
+        assert_eq!(
+            failure.kind(),
+            LlamaSupervisorFailureKind::RuntimeExitedBeforeHealth
+        );
+        assert_eq!(failure.exit_class(), RuntimeExitClass::Failure);
+        assert!(
+            elapsed < Duration::from_secs(5),
+            "health probe waited for its full timeout after child exit"
+        );
+        let _ = release_sender.send(());
+        tokio::time::timeout(Duration::from_secs(2), listener_task)
+            .await
+            .expect("synthetic health listener should stop")
+            .expect("synthetic health listener task should finish");
+    }
 
     #[test]
     fn structured_sidecar_disables_reasoning_explicitly() {
@@ -433,6 +670,16 @@ mod tests {
             .find(|pair| pair[0] == "--reasoning-budget")
             .expect("reasoning budget must be present when reasoning is off");
         assert_eq!(budget[1], "0");
+        let gpu_layers = args
+            .windows(2)
+            .find(|pair| pair[0] == "--n-gpu-layers")
+            .expect("GPU layer configuration must be present");
+        let expected_gpu_layers = if bundled_runtime_is_accelerated() {
+            "99"
+        } else {
+            "0"
+        };
+        assert_eq!(gpu_layers[1], expected_gpu_layers);
     }
 
     #[cfg(target_os = "windows")]

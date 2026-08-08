@@ -53,15 +53,22 @@ if ! command -v file >/dev/null 2>&1 || ! command -v sha256sum >/dev/null 2>&1; 
     echo "file and sha256sum are required to verify the release binary" >&2
     exit 1
 fi
-readonly staged_binary="$(mktemp /usr/local/bin/.airwiki-federation-index.XXXXXX)"
+staged_binary="$(mktemp /usr/local/bin/.airwiki-federation-index.XXXXXX)"
+if [ -z "${staged_binary}" ]; then
+    echo "could not create the staged federation-index binary" >&2
+    exit 1
+fi
+readonly staged_binary
 trap 'rm -f -- "${staged_binary}"' EXIT HUP INT TERM
 install -m 0755 -o root -g root "${release_binary}" "${staged_binary}"
-readonly staged_sha256="$(sha256sum -- "${staged_binary}" | awk '{print $1}')"
+staged_sha256="$(sha256sum -- "${staged_binary}" | awk '{print $1}')"
+readonly staged_sha256
 if [ "${staged_sha256}" != "${expected_sha256}" ]; then
     echo "release binary checksum does not match the approved candidate" >&2
     exit 1
 fi
-readonly binary_description="$(LC_ALL=C file -b -- "${staged_binary}")"
+binary_description="$(LC_ALL=C file -b -- "${staged_binary}")"
+readonly binary_description
 case "${binary_description}" in
     "ELF 64-bit LSB executable, x86-64,"* | "ELF 64-bit LSB pie executable, x86-64,"*) ;;
     *)
@@ -109,6 +116,124 @@ fi
 
 install -d -m 0750 -o "${service_user}" -g "${service_user}" "${state_directory}"
 
+install_rollback_directory="$(mktemp -d /var/tmp/airwiki-federation-install.XXXXXX)"
+if [ -z "${install_rollback_directory}" ]; then
+    echo "could not create the federation-index rollback directory" >&2
+    exit 1
+fi
+readonly install_rollback_directory
+mutation_started=0
+install_succeeded=0
+
+restore_previous_install() {
+    restore_failed=0
+    for restore_service in \
+        airwiki-federation-index-1.service \
+        airwiki-federation-index-2.service \
+        airwiki-federation-index-3.service \
+        airwiki-federation-index.service; do
+        if [ -e "/etc/systemd/system/${restore_service}" ] &&
+            ! systemctl disable --now "${restore_service}" >/dev/null 2>&1; then
+            restore_failed=1
+        fi
+        rm -f "/etc/systemd/system/${restore_service}" || restore_failed=1
+    done
+    if [ -f "${install_rollback_directory}/installed-binary" ]; then
+        install -m 0755 -o root -g root \
+            "${install_rollback_directory}/installed-binary" \
+            "${installed_binary}" || restore_failed=1
+    else
+        rm -f "${installed_binary}" || restore_failed=1
+    fi
+    for restore_service in \
+        airwiki-federation-index-1.service \
+        airwiki-federation-index-2.service \
+        airwiki-federation-index-3.service \
+        airwiki-federation-index.service; do
+        if [ -f "${install_rollback_directory}/${restore_service}" ]; then
+            install -m 0644 -o root -g root \
+                "${install_rollback_directory}/${restore_service}" \
+                "/etc/systemd/system/${restore_service}" || restore_failed=1
+        fi
+    done
+    systemctl daemon-reload || restore_failed=1
+    for restore_service in \
+        airwiki-federation-index-1.service \
+        airwiki-federation-index-2.service \
+        airwiki-federation-index-3.service \
+        airwiki-federation-index.service; do
+        if [ -f "${install_rollback_directory}/${restore_service}.enabled" ] &&
+            ! systemctl enable "${restore_service}" >/dev/null 2>&1; then
+            restore_failed=1
+        fi
+        if [ -f "${install_rollback_directory}/${restore_service}.active" ] &&
+            ! systemctl start "${restore_service}"; then
+            restore_failed=1
+        fi
+    done
+    if [ "${restore_failed}" -ne 0 ]; then
+        echo "INSTALL ROLLBACK INCOMPLETE: inspect the selected beta node before reuse" >&2
+        return 1
+    fi
+    echo "failed candidate removed and previous federation-index install restored" >&2
+}
+
+cleanup_install() {
+    install_exit_code="$?"
+    trap - 0 HUP INT TERM
+    if [ "${mutation_started}" -eq 1 ] && [ "${install_succeeded}" -eq 0 ]; then
+        if ! restore_previous_install; then
+            install_exit_code=1
+        fi
+    fi
+    rm -f -- "${staged_binary}" || install_exit_code=1
+    rm -rf -- "${install_rollback_directory}" || install_exit_code=1
+    exit "${install_exit_code}"
+}
+trap cleanup_install 0
+trap 'exit 1' HUP INT TERM
+
+if [ -L "${installed_binary}" ]; then
+    echo "refusing to replace a symlinked federation-index binary" >&2
+    exit 1
+fi
+if [ -e "${installed_binary}" ] && [ ! -f "${installed_binary}" ]; then
+    echo "refusing to replace an unexpected federation-index binary path" >&2
+    exit 1
+fi
+if [ -f "${installed_binary}" ]; then
+    install -m 0755 -o root -g root \
+        "${installed_binary}" \
+        "${install_rollback_directory}/installed-binary"
+fi
+for backup_service in \
+    airwiki-federation-index-1.service \
+    airwiki-federation-index-2.service \
+    airwiki-federation-index-3.service \
+    airwiki-federation-index.service; do
+    backup_unit="/etc/systemd/system/${backup_service}"
+    if [ -L "${backup_unit}" ]; then
+        echo "refusing to replace a symlinked federation-index unit" >&2
+        exit 1
+    fi
+    if [ -e "${backup_unit}" ] && [ ! -f "${backup_unit}" ]; then
+        echo "refusing to replace an unexpected federation-index unit path" >&2
+        exit 1
+    fi
+    if [ -f "${backup_unit}" ]; then
+        install -m 0644 -o root -g root \
+            "${backup_unit}" \
+            "${install_rollback_directory}/${backup_service}"
+        if systemctl is-enabled --quiet "${backup_service}"; then
+            : >"${install_rollback_directory}/${backup_service}.enabled"
+        fi
+        if systemctl is-active --quiet "${backup_service}"; then
+            : >"${install_rollback_directory}/${backup_service}.active"
+        fi
+    fi
+done
+mutation_started=1
+
 for stale_instance in 1 2 3; do
     stale_service="airwiki-federation-index-${stale_instance}.service"
     stop_managed_service "${stale_service}"
@@ -135,6 +260,8 @@ while [ "${instance}" -le "${instance_count}" ]; do
 Description=AirWiki experimental public federation index and relay ${instance}
 After=network-online.target
 Wants=network-online.target
+StartLimitIntervalSec=60s
+StartLimitBurst=5
 
 [Service]
 Type=simple
@@ -145,19 +272,38 @@ Restart=on-failure
 RestartSec=5s
 TimeoutStopSec=20s
 Environment=RUST_LOG=warn,airwiki_federation_index=info,airwiki_network=info,libp2p=off,libp2p_swarm=off
+AmbientCapabilities=
+CapabilityBoundingSet=
+DevicePolicy=closed
+LimitNOFILE=4096
+LockPersonality=true
+MemoryDenyWriteExecute=true
+MemoryMax=768M
 NoNewPrivileges=true
 PrivateDevices=true
 PrivateTmp=true
+ProcSubset=pid
 ProtectControlGroups=true
+ProtectClock=true
 ProtectHome=true
+ProtectHostname=true
 ProtectKernelLogs=true
 ProtectKernelModules=true
 ProtectKernelTunables=true
+ProtectProc=invisible
 ProtectSystem=strict
 ReadWritePaths=${instance_directory}
+RemoveIPC=true
 RestrictAddressFamilies=AF_INET AF_INET6 AF_NETLINK AF_UNIX
+RestrictNamespaces=true
 RestrictRealtime=true
+RestrictSUIDSGID=true
+StandardError=journal
+StandardOutput=journal
 SystemCallArchitectures=native
+SystemCallErrorNumber=EPERM
+SystemCallFilter=@system-service
+TasksMax=128
 UMask=0027
 
 [Install]
@@ -169,6 +315,12 @@ done
 systemctl daemon-reload
 instance=1
 while [ "${instance}" -le "${instance_count}" ]; do
-    systemctl enable --now "airwiki-federation-index-${instance}.service"
+    service_name="airwiki-federation-index-${instance}.service"
+    systemctl enable --now "${service_name}"
+    if ! systemctl is-active --quiet "${service_name}"; then
+        echo "${service_name} did not become active" >&2
+        exit 1
+    fi
     instance=$((instance + 1))
 done
+install_succeeded=1

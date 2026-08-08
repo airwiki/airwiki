@@ -12,6 +12,8 @@ pub const MAX_PUBLIC_PAGE_SIZE: u8 = 50;
 pub const MAX_PUBLIC_CANDIDATES: u8 = 64;
 pub const MAX_PUBLIC_ROUTING_TERMS: usize = 256;
 pub const MAX_PUBLIC_ROUTES: usize = 8;
+pub const MAX_PUBLIC_MANIFEST_LIFETIME_SECONDS: i64 = 24 * 60 * 60;
+const MAX_PUBLIC_MANIFEST_FUTURE_SKEW_SECONDS: i64 = 5 * 60;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct PublicCollectionManifest {
@@ -63,6 +65,16 @@ impl PublicCollectionManifest {
         }
         if self.updated_at > self.expires_at || self.expires_at <= now {
             return Err(PublicContractError::Expired);
+        }
+        if self.expires_at > now + chrono::Duration::seconds(MAX_PUBLIC_MANIFEST_LIFETIME_SECONDS) {
+            return Err(PublicContractError::InvalidExpiry);
+        }
+        if self.updated_at
+            > now + chrono::Duration::seconds(MAX_PUBLIC_MANIFEST_FUTURE_SKEW_SECONDS)
+            || self.expires_at.signed_duration_since(self.updated_at)
+                > chrono::Duration::seconds(MAX_PUBLIC_MANIFEST_LIFETIME_SECONDS)
+        {
+            return Err(PublicContractError::InvalidExpiry);
         }
         Ok(())
     }
@@ -310,6 +322,8 @@ pub enum PublicContractError {
     InvalidFingerprint,
     #[error("public manifest is expired")]
     Expired,
+    #[error("public manifest expiry is invalid")]
+    InvalidExpiry,
 }
 
 fn validate_text(value: &str, max_bytes: usize) -> Result<(), PublicContractError> {
@@ -363,6 +377,28 @@ mod tests {
             .map(|ordinal| format!("term-{ordinal}"))
             .collect();
         assert!(oversized_routing.validate(now).is_err());
+    }
+
+    #[test]
+    fn public_manifest_rejects_unbounded_lifetime() {
+        let now = Utc::now();
+        let mut unbounded = manifest();
+        unbounded.updated_at = now;
+        unbounded.expires_at = now + Duration::seconds(MAX_PUBLIC_MANIFEST_LIFETIME_SECONDS + 1);
+
+        assert_eq!(
+            unbounded.validate(now),
+            Err(PublicContractError::InvalidExpiry)
+        );
+
+        let mut future_dated = manifest();
+        future_dated.updated_at =
+            now + Duration::seconds(MAX_PUBLIC_MANIFEST_FUTURE_SKEW_SECONDS + 1);
+        future_dated.expires_at = future_dated.updated_at + Duration::minutes(15);
+        assert_eq!(
+            future_dated.validate(now),
+            Err(PublicContractError::InvalidExpiry)
+        );
     }
 
     #[test]

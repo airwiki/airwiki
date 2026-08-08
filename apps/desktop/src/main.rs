@@ -10,6 +10,7 @@ mod i18n;
 mod integrations;
 mod layout;
 mod manual_lan_route;
+mod model_activation_status;
 mod model_config;
 mod paths;
 mod readiness;

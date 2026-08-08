@@ -4,14 +4,15 @@ use std::sync::{Mutex, MutexGuard};
 use airwiki_network::{PublicCatalogBackend, PublicCatalogBackendError};
 use airwiki_network::{verify_manifest, verify_tombstone};
 use airwiki_types::{
-    MAX_PUBLIC_CANDIDATES, PublicCatalogQuery, SignedPublicCollectionManifest,
-    SignedPublicCollectionTombstone,
+    MAX_PUBLIC_CANDIDATES, MAX_PUBLIC_MANIFEST_LIFETIME_SECONDS, PublicCatalogQuery,
+    SignedPublicCollectionManifest, SignedPublicCollectionTombstone,
 };
 use chrono::{DateTime, Utc};
 use rusqlite::{Connection, OptionalExtension, params};
 use thiserror::Error;
 
 const MAX_COLLECTIONS_PER_PUBLISHER: u32 = 1_000;
+const MAX_CATALOG_ENTRIES: u32 = 100_000;
 
 #[derive(Debug, Error)]
 pub enum CatalogStoreError {
@@ -27,6 +28,8 @@ pub enum CatalogStoreError {
     InvalidQuery,
     #[error("public catalog publisher registration limit reached")]
     PublisherLimit,
+    #[error("public catalog capacity limit reached")]
+    CapacityLimit,
     #[error("public catalog lock is unavailable")]
     Lock,
 }
@@ -34,6 +37,22 @@ pub enum CatalogStoreError {
 #[derive(Debug)]
 pub struct CatalogStore {
     connection: Mutex<Connection>,
+    limits: CatalogLimits,
+}
+
+#[derive(Debug, Clone, Copy)]
+struct CatalogLimits {
+    max_entries: u32,
+    max_collections_per_publisher: u32,
+}
+
+impl Default for CatalogLimits {
+    fn default() -> Self {
+        Self {
+            max_entries: MAX_CATALOG_ENTRIES,
+            max_collections_per_publisher: MAX_COLLECTIONS_PER_PUBLISHER,
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -56,7 +75,7 @@ impl PublicCatalogBackend for CatalogBackend {
         let store = std::sync::Arc::clone(&self.store);
         tokio::task::spawn_blocking(move || store.register(&manifest, Utc::now()))
             .await
-            .map_err(|_| PublicCatalogBackendError::Internal)?
+            .map_err(map_catalog_join_error)?
             .map_err(map_backend_error)
     }
 
@@ -67,7 +86,7 @@ impl PublicCatalogBackend for CatalogBackend {
         let store = std::sync::Arc::clone(&self.store);
         tokio::task::spawn_blocking(move || store.withdraw(&tombstone))
             .await
-            .map_err(|_| PublicCatalogBackendError::Internal)?
+            .map_err(map_catalog_join_error)?
             .map_err(map_backend_error)
     }
 
@@ -82,16 +101,41 @@ impl PublicCatalogBackend for CatalogBackend {
             store.query(&query, now)
         })
         .await
-        .map_err(|_| PublicCatalogBackendError::Internal)?
+        .map_err(map_catalog_join_error)?
         .map_err(map_backend_error)
     }
 }
 
+fn map_catalog_join_error(_: tokio::task::JoinError) -> PublicCatalogBackendError {
+    tracing::error!(
+        error_kind = "catalog_worker_failed",
+        "public catalog blocking worker failed"
+    );
+    PublicCatalogBackendError::Internal
+}
+
+fn catalog_error_kind(error: &CatalogStoreError) -> &'static str {
+    match error {
+        CatalogStoreError::Persistence(_) => "catalog_persistence_failed",
+        CatalogStoreError::Encoding => "catalog_encoding_failed",
+        CatalogStoreError::Verification => "catalog_verification_rejected",
+        CatalogStoreError::StaleSequence => "catalog_stale_rejected",
+        CatalogStoreError::InvalidQuery => "catalog_query_rejected",
+        CatalogStoreError::PublisherLimit | CatalogStoreError::CapacityLimit => {
+            "catalog_capacity_rejected"
+        }
+        CatalogStoreError::Lock => "catalog_busy",
+    }
+}
+
 fn map_backend_error(error: CatalogStoreError) -> PublicCatalogBackendError {
+    let error_kind = catalog_error_kind(&error);
+    tracing::warn!(error_kind, "public catalog operation failed");
     match error {
         CatalogStoreError::Verification
         | CatalogStoreError::InvalidQuery
-        | CatalogStoreError::PublisherLimit => PublicCatalogBackendError::Invalid,
+        | CatalogStoreError::PublisherLimit
+        | CatalogStoreError::CapacityLimit => PublicCatalogBackendError::Invalid,
         CatalogStoreError::StaleSequence => PublicCatalogBackendError::Stale,
         CatalogStoreError::Lock => PublicCatalogBackendError::Busy,
         CatalogStoreError::Persistence(_) | CatalogStoreError::Encoding => {
@@ -105,14 +149,22 @@ impl CatalogStore {
         let connection = Connection::open(path)?;
         connection.pragma_update(None, "journal_mode", "WAL")?;
         connection.pragma_update(None, "synchronous", "NORMAL")?;
-        Self::initialize(connection)
+        Self::initialize(connection, CatalogLimits::default())
     }
 
     pub fn in_memory() -> Result<Self, CatalogStoreError> {
-        Self::initialize(Connection::open_in_memory()?)
+        Self::initialize(Connection::open_in_memory()?, CatalogLimits::default())
     }
 
-    fn initialize(connection: Connection) -> Result<Self, CatalogStoreError> {
+    #[cfg(test)]
+    fn in_memory_with_limits(limits: CatalogLimits) -> Result<Self, CatalogStoreError> {
+        Self::initialize(Connection::open_in_memory()?, limits)
+    }
+
+    fn initialize(
+        connection: Connection,
+        limits: CatalogLimits,
+    ) -> Result<Self, CatalogStoreError> {
         connection.execute_batch(
             "CREATE TABLE IF NOT EXISTS manifests(
                 manifest_id INTEGER PRIMARY KEY,
@@ -127,10 +179,12 @@ impl CatalogStore {
              CREATE VIRTUAL TABLE IF NOT EXISTS catalog_fts USING fts5(
                 publisher_id UNINDEXED,collection_id UNINDEXED,name,description,routing_terms,
                 tokenize='unicode61 remove_diacritics 2'
-             );",
+             );
+             CREATE INDEX IF NOT EXISTS manifests_expiry_idx ON manifests(expires_at);",
         )?;
         Ok(Self {
             connection: Mutex::new(connection),
+            limits,
         })
     }
 
@@ -144,6 +198,7 @@ impl CatalogStore {
         let encoded = encode(signed)?;
         let mut connection = self.connection()?;
         let tx = connection.transaction()?;
+        purge_catalog_entries(&tx, now)?;
         let known_id = tx
             .query_row(
                 "SELECT manifest_id FROM manifests WHERE publisher_id=?1 AND collection_id=?2",
@@ -152,14 +207,12 @@ impl CatalogStore {
             )
             .optional()?;
         if known_id.is_none() {
-            let publisher_count = tx.query_row(
-                "SELECT count(*) FROM manifests WHERE publisher_id=?1",
-                [manifest.publisher_id.as_str()],
-                |row| row.get::<_, u32>(0),
+            ensure_publisher_capacity(
+                &tx,
+                &manifest.publisher_id,
+                self.limits.max_collections_per_publisher,
             )?;
-            if publisher_count >= MAX_COLLECTIONS_PER_PUBLISHER {
-                return Err(CatalogStoreError::PublisherLimit);
-            }
+            ensure_catalog_capacity(&tx, self.limits.max_entries)?;
         }
         reject_stale(
             &tx,
@@ -214,10 +267,19 @@ impl CatalogStore {
         &self,
         signed: &SignedPublicCollectionTombstone,
     ) -> Result<(), CatalogStoreError> {
+        self.withdraw_at(signed, Utc::now())
+    }
+
+    fn withdraw_at(
+        &self,
+        signed: &SignedPublicCollectionTombstone,
+        now: DateTime<Utc>,
+    ) -> Result<(), CatalogStoreError> {
         verify_tombstone(signed).map_err(|_| CatalogStoreError::Verification)?;
         let tombstone = &signed.tombstone;
         let mut connection = self.connection()?;
         let tx = connection.transaction()?;
+        purge_catalog_entries(&tx, now)?;
         reject_stale(
             &tx,
             &tombstone.publisher_id,
@@ -239,6 +301,12 @@ impl CatalogStore {
             )?;
             tx.execute("DELETE FROM catalog_fts WHERE rowid=?1", [manifest_id])?;
         } else {
+            ensure_publisher_capacity(
+                &tx,
+                &tombstone.publisher_id,
+                self.limits.max_collections_per_publisher,
+            )?;
+            ensure_catalog_capacity(&tx, self.limits.max_entries)?;
             tx.execute(
                 "INSERT INTO manifests(publisher_id,collection_id,sequence,signed_cbor,expires_at,withdrawn)
                  VALUES (?1,?2,?3,NULL,NULL,1)",
@@ -300,25 +368,75 @@ impl CatalogStore {
     pub fn purge_expired(&self, now: DateTime<Utc>) -> Result<usize, CatalogStoreError> {
         let mut connection = self.connection()?;
         let tx = connection.transaction()?;
-        let mut statement = tx.prepare(
-            "SELECT manifest_id FROM manifests
-             WHERE withdrawn=0 AND expires_at<=?1",
-        )?;
-        let expired = statement
-            .query_map([now.to_rfc3339()], |row| row.get::<_, i64>(0))?
-            .collect::<rusqlite::Result<Vec<_>>>()?;
-        drop(statement);
-        for manifest_id in &expired {
-            tx.execute("DELETE FROM catalog_fts WHERE rowid=?1", [manifest_id])?;
-            tx.execute("DELETE FROM manifests WHERE manifest_id=?1", [manifest_id])?;
-        }
+        let expired = purge_catalog_entries(&tx, now)?;
         tx.commit()?;
-        Ok(expired.len())
+        Ok(expired)
     }
 
     fn connection(&self) -> Result<MutexGuard<'_, Connection>, CatalogStoreError> {
         self.connection.lock().map_err(|_| CatalogStoreError::Lock)
     }
+}
+
+fn manifest_expiry_limit(now: DateTime<Utc>) -> DateTime<Utc> {
+    now + chrono::Duration::seconds(MAX_PUBLIC_MANIFEST_LIFETIME_SECONDS)
+}
+
+fn purge_catalog_entries(
+    connection: &Connection,
+    now: DateTime<Utc>,
+) -> Result<usize, CatalogStoreError> {
+    let mut statement = connection.prepare(
+        "SELECT manifest_id FROM manifests
+         WHERE withdrawn=0 AND expires_at IS NOT NULL
+           AND (expires_at<=?1 OR expires_at>?2)",
+    )?;
+    let expired = statement
+        .query_map(
+            params![now.to_rfc3339(), manifest_expiry_limit(now).to_rfc3339()],
+            |row| row.get::<_, i64>(0),
+        )?
+        .collect::<rusqlite::Result<Vec<_>>>()?;
+    drop(statement);
+    for manifest_id in &expired {
+        connection.execute("DELETE FROM catalog_fts WHERE rowid=?1", [manifest_id])?;
+        connection.execute(
+            "UPDATE manifests
+             SET signed_cbor=NULL,expires_at=NULL,withdrawn=1
+             WHERE manifest_id=?1",
+            [manifest_id],
+        )?;
+    }
+    Ok(expired.len())
+}
+
+fn ensure_catalog_capacity(
+    connection: &Connection,
+    max_entries: u32,
+) -> Result<(), CatalogStoreError> {
+    let entry_count = connection.query_row("SELECT count(*) FROM manifests", [], |row| {
+        row.get::<_, u32>(0)
+    })?;
+    if entry_count >= max_entries {
+        return Err(CatalogStoreError::CapacityLimit);
+    }
+    Ok(())
+}
+
+fn ensure_publisher_capacity(
+    connection: &Connection,
+    publisher_id: &str,
+    max_collections: u32,
+) -> Result<(), CatalogStoreError> {
+    let publisher_count = connection.query_row(
+        "SELECT count(*) FROM manifests WHERE publisher_id=?1",
+        [publisher_id],
+        |row| row.get::<_, u32>(0),
+    )?;
+    if publisher_count >= max_collections {
+        return Err(CatalogStoreError::PublisherLimit);
+    }
+    Ok(())
 }
 
 fn reject_stale(
@@ -378,6 +496,22 @@ mod tests {
         sequence: u64,
         now: DateTime<Utc>,
     ) -> SignedPublicCollectionManifest {
+        signed_manifest_with_expiry(
+            keypair,
+            collection_id,
+            sequence,
+            now,
+            now + Duration::minutes(15),
+        )
+    }
+
+    fn signed_manifest_with_expiry(
+        keypair: &Keypair,
+        collection_id: Uuid,
+        sequence: u64,
+        updated_at: DateTime<Utc>,
+        expires_at: DateTime<Utc>,
+    ) -> SignedPublicCollectionManifest {
         sign_manifest(
             keypair,
             PublicCollectionManifest {
@@ -392,8 +526,8 @@ mod tests {
                 concept_count: 3,
                 routing_terms: vec!["atlas".to_owned(), "recovery".to_owned()],
                 routes: vec!["/ip4/127.0.0.1/tcp/42043".to_owned()],
-                updated_at: now,
-                expires_at: now + Duration::minutes(15),
+                updated_at,
+                expires_at,
             },
         )
         .unwrap()
@@ -545,5 +679,252 @@ mod tests {
             ),
             Err(CatalogStoreError::PublisherLimit)
         ));
+    }
+
+    #[test]
+    fn global_capacity_bounds_distinct_publisher_identities() {
+        let store = CatalogStore::in_memory_with_limits(CatalogLimits {
+            max_entries: 2,
+            max_collections_per_publisher: 2,
+        })
+        .unwrap();
+        let first = Keypair::generate_ed25519();
+        let second = Keypair::generate_ed25519();
+        let next = Keypair::generate_ed25519();
+        let now = Utc::now();
+
+        store
+            .register(&signed_manifest(&first, Uuid::new_v4(), 1, now), now)
+            .unwrap();
+        store
+            .register(&signed_manifest(&second, Uuid::new_v4(), 1, now), now)
+            .unwrap();
+
+        assert!(matches!(
+            store.register(&signed_manifest(&next, Uuid::new_v4(), 1, now), now),
+            Err(CatalogStoreError::CapacityLimit)
+        ));
+        assert_eq!(
+            store
+                .connection()
+                .unwrap()
+                .query_row("SELECT count(*) FROM manifests", [], |row| row
+                    .get::<_, u32>(0))
+                .unwrap(),
+            2
+        );
+    }
+
+    #[test]
+    fn global_capacity_also_bounds_tombstones_without_manifests() {
+        let store = CatalogStore::in_memory_with_limits(CatalogLimits {
+            max_entries: 1,
+            max_collections_per_publisher: 1,
+        })
+        .unwrap();
+        let now = Utc::now();
+        let first = Keypair::generate_ed25519();
+        let next = Keypair::generate_ed25519();
+        let tombstone = |keypair: &Keypair| {
+            sign_tombstone(
+                keypair,
+                PublicCollectionTombstone {
+                    protocol_version: PUBLIC_CATALOG_PROTOCOL.to_owned(),
+                    publisher_id: keypair.public().to_peer_id().to_string(),
+                    collection_id: Uuid::new_v4(),
+                    sequence: 1,
+                    withdrawn_at: now,
+                },
+            )
+            .unwrap()
+        };
+
+        store.withdraw_at(&tombstone(&first), now).unwrap();
+        assert!(matches!(
+            store.withdraw_at(&tombstone(&next), now),
+            Err(CatalogStoreError::CapacityLimit)
+        ));
+        assert_eq!(
+            store
+                .connection()
+                .unwrap()
+                .query_row("SELECT count(*) FROM manifests", [], |row| row
+                    .get::<_, u32>(0))
+                .unwrap(),
+            1
+        );
+    }
+
+    #[test]
+    fn publisher_capacity_also_bounds_tombstones_without_manifests() {
+        let store = CatalogStore::in_memory_with_limits(CatalogLimits {
+            max_entries: 2,
+            max_collections_per_publisher: 1,
+        })
+        .unwrap();
+        let now = Utc::now();
+        let keypair = Keypair::generate_ed25519();
+        let tombstone = |collection_id| {
+            sign_tombstone(
+                &keypair,
+                PublicCollectionTombstone {
+                    protocol_version: PUBLIC_CATALOG_PROTOCOL.to_owned(),
+                    publisher_id: keypair.public().to_peer_id().to_string(),
+                    collection_id,
+                    sequence: 1,
+                    withdrawn_at: now,
+                },
+            )
+            .unwrap()
+        };
+
+        store.withdraw_at(&tombstone(Uuid::new_v4()), now).unwrap();
+        assert!(matches!(
+            store.withdraw_at(&tombstone(Uuid::new_v4()), now),
+            Err(CatalogStoreError::PublisherLimit)
+        ));
+    }
+
+    #[test]
+    fn tombstone_high_water_survives_manifest_lifetime() {
+        let store = CatalogStore::in_memory_with_limits(CatalogLimits {
+            max_entries: 1,
+            max_collections_per_publisher: 1,
+        })
+        .unwrap();
+        let keypair = Keypair::generate_ed25519();
+        let collection_id = Uuid::new_v4();
+        let replay_time = Utc::now();
+        let withdrawal_time =
+            replay_time - Duration::seconds(MAX_PUBLIC_MANIFEST_LIFETIME_SECONDS + 1);
+        let delayed_replay = signed_manifest_with_expiry(
+            &keypair,
+            collection_id,
+            3,
+            replay_time,
+            replay_time + Duration::minutes(15),
+        );
+        let tombstone = sign_tombstone(
+            &keypair,
+            PublicCollectionTombstone {
+                protocol_version: PUBLIC_CATALOG_PROTOCOL.to_owned(),
+                publisher_id: keypair.public().to_peer_id().to_string(),
+                collection_id,
+                sequence: 4,
+                withdrawn_at: withdrawal_time,
+            },
+        )
+        .unwrap();
+
+        store.withdraw_at(&tombstone, withdrawal_time).unwrap();
+        assert_eq!(store.purge_expired(replay_time).unwrap(), 0);
+        assert!(matches!(
+            store.register(&delayed_replay, replay_time),
+            Err(CatalogStoreError::StaleSequence)
+        ));
+    }
+
+    #[test]
+    fn expired_manifest_compacts_payload_and_preserves_capacity() {
+        let store = CatalogStore::in_memory_with_limits(CatalogLimits {
+            max_entries: 1,
+            max_collections_per_publisher: 1,
+        })
+        .unwrap();
+        let first = Keypair::generate_ed25519();
+        let next = Keypair::generate_ed25519();
+        let now = Utc::now();
+        let collection_id = Uuid::new_v4();
+        store
+            .register(
+                &signed_manifest_with_expiry(
+                    &first,
+                    collection_id,
+                    1,
+                    now,
+                    now + Duration::minutes(1),
+                ),
+                now,
+            )
+            .unwrap();
+
+        let later = now + Duration::seconds(61);
+        assert_eq!(store.purge_expired(later).unwrap(), 1);
+        let compacted = store
+            .connection()
+            .unwrap()
+            .query_row("SELECT signed_cbor,withdrawn FROM manifests", [], |row| {
+                Ok((row.get::<_, Option<Vec<u8>>>(0)?, row.get::<_, u8>(1)?))
+            })
+            .unwrap();
+        assert_eq!(compacted, (None, 1));
+        assert!(matches!(
+            store.register(&signed_manifest(&next, Uuid::new_v4(), 1, now), later),
+            Err(CatalogStoreError::CapacityLimit)
+        ));
+    }
+
+    #[test]
+    fn expired_manifest_high_water_rejects_older_live_sequence() {
+        let store = CatalogStore::in_memory().unwrap();
+        let keypair = Keypair::generate_ed25519();
+        let collection_id = Uuid::new_v4();
+        let now = Utc::now();
+        let older = signed_manifest(&keypair, collection_id, 1, now);
+        let latest = signed_manifest_with_expiry(
+            &keypair,
+            collection_id,
+            2,
+            now,
+            now + Duration::minutes(1),
+        );
+        store.register(&older, now).unwrap();
+        store.register(&latest, now).unwrap();
+
+        let later = now + Duration::seconds(61);
+        assert_eq!(store.purge_expired(later).unwrap(), 1);
+        assert!(matches!(
+            store.register(&older, later),
+            Err(CatalogStoreError::StaleSequence)
+        ));
+        assert_eq!(
+            store
+                .connection()
+                .unwrap()
+                .query_row("SELECT count(*) FROM manifests", [], |row| row
+                    .get::<_, u32>(0))
+                .unwrap(),
+            1
+        );
+    }
+
+    #[test]
+    fn operational_error_classes_are_fixed_and_sanitized() {
+        let cases = [
+            (
+                CatalogStoreError::Persistence(rusqlite::Error::InvalidQuery),
+                "catalog_persistence_failed",
+            ),
+            (CatalogStoreError::Encoding, "catalog_encoding_failed"),
+            (
+                CatalogStoreError::Verification,
+                "catalog_verification_rejected",
+            ),
+            (CatalogStoreError::StaleSequence, "catalog_stale_rejected"),
+            (CatalogStoreError::InvalidQuery, "catalog_query_rejected"),
+            (
+                CatalogStoreError::PublisherLimit,
+                "catalog_capacity_rejected",
+            ),
+            (
+                CatalogStoreError::CapacityLimit,
+                "catalog_capacity_rejected",
+            ),
+            (CatalogStoreError::Lock, "catalog_busy"),
+        ];
+
+        for (error, expected) in cases {
+            assert_eq!(catalog_error_kind(&error), expected);
+        }
     }
 }

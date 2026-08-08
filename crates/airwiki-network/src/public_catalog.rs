@@ -1,5 +1,4 @@
-use std::sync::Arc;
-use std::time::Duration;
+use std::{collections::BTreeMap, sync::Arc, time::Duration};
 
 use airwiki_types::{
     PUBLIC_CATALOG_PROTOCOL, PublicCatalogQuery, SignedPublicCollectionManifest,
@@ -19,6 +18,7 @@ use crate::{NetworkError, NodeIdentity, PeerRateLimiter};
 const CATALOG_REQUEST_BYTES: u64 = 128 * 1024;
 const CATALOG_RESPONSE_BYTES: u64 = 512 * 1024;
 const CATALOG_CONCURRENT_STREAMS: usize = 64;
+const PUBLIC_RELAY_SUMMARY_INTERVAL: Duration = Duration::from_secs(15 * 60);
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum CatalogWireRequest {
@@ -105,6 +105,78 @@ struct CatalogCompletion {
     response: CatalogWireResponse,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+enum PublicRelayClass {
+    ReservationAccepted,
+    ReservationRenewed,
+    ReservationAcceptFailed,
+    ReservationDenied,
+    ReservationDenyFailed,
+    ReservationClosed,
+    ReservationTimedOut,
+    CircuitDenied,
+    CircuitDenyFailed,
+    CircuitOutboundConnectFailed,
+    CircuitAcceptFailed,
+    CircuitConnectionRefused,
+    CircuitConnectionAborted,
+    CircuitConnectionReset,
+    CircuitNotConnected,
+    CircuitBrokenPipe,
+    CircuitTimedOut,
+    CircuitWriteZero,
+    CircuitUnexpectedEof,
+    CircuitPermissionDenied,
+    CircuitFailed,
+}
+
+impl PublicRelayClass {
+    const fn name(self) -> &'static str {
+        match self {
+            Self::ReservationAccepted => "public_relay_reservation_accepted",
+            Self::ReservationRenewed => "public_relay_reservation_renewed",
+            Self::ReservationAcceptFailed => "public_relay_reservation_accept_failed",
+            Self::ReservationDenied => "public_relay_reservation_denied",
+            Self::ReservationDenyFailed => "public_relay_reservation_deny_failed",
+            Self::ReservationClosed => "public_relay_reservation_closed",
+            Self::ReservationTimedOut => "public_relay_reservation_timed_out",
+            Self::CircuitDenied => "public_relay_circuit_denied",
+            Self::CircuitDenyFailed => "public_relay_circuit_deny_failed",
+            Self::CircuitOutboundConnectFailed => "public_relay_circuit_outbound_connect_failed",
+            Self::CircuitAcceptFailed => "public_relay_circuit_accept_failed",
+            Self::CircuitConnectionRefused => "public_relay_circuit_connection_refused",
+            Self::CircuitConnectionAborted => "public_relay_circuit_connection_aborted",
+            Self::CircuitConnectionReset => "public_relay_circuit_connection_reset",
+            Self::CircuitNotConnected => "public_relay_circuit_not_connected",
+            Self::CircuitBrokenPipe => "public_relay_circuit_broken_pipe",
+            Self::CircuitTimedOut => "public_relay_circuit_timed_out",
+            Self::CircuitWriteZero => "public_relay_circuit_write_zero",
+            Self::CircuitUnexpectedEof => "public_relay_circuit_unexpected_eof",
+            Self::CircuitPermissionDenied => "public_relay_circuit_permission_denied",
+            Self::CircuitFailed => "public_relay_circuit_failed",
+        }
+    }
+}
+
+#[derive(Default)]
+struct PublicRelayCounters {
+    counts: BTreeMap<PublicRelayClass, u64>,
+}
+
+impl PublicRelayCounters {
+    fn record(&mut self, event: &libp2p::relay::Event) {
+        let Some(class) = classify_public_relay_event(event) else {
+            return;
+        };
+        let count = self.counts.entry(class).or_default();
+        *count = count.saturating_add(1);
+    }
+
+    fn take_snapshot(&mut self) -> BTreeMap<PublicRelayClass, u64> {
+        std::mem::take(&mut self.counts)
+    }
+}
+
 impl PublicCatalogServerConfig {
     pub fn new(listen_addresses: Vec<Multiaddr>) -> Self {
         Self {
@@ -182,13 +254,23 @@ pub async fn run_public_catalog_server(
     }
     let limiter = PeerRateLimiter::new(120, Duration::from_secs(60));
     let mut tasks = JoinSet::<CatalogCompletion>::new();
+    let mut relay_counters = PublicRelayCounters::default();
+    let mut relay_summary = tokio::time::interval_at(
+        tokio::time::Instant::now() + PUBLIC_RELAY_SUMMARY_INTERVAL,
+        PUBLIC_RELAY_SUMMARY_INTERVAL,
+    );
+    relay_summary.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
     loop {
         tokio::select! {
             biased;
             () = cancellation.cancelled() => {
                 tasks.abort_all();
                 while tasks.join_next().await.is_some() {}
+                emit_public_relay_summary(relay_counters.take_snapshot());
                 return Ok(());
+            },
+            _ = relay_summary.tick() => {
+                emit_public_relay_summary(relay_counters.take_snapshot());
             },
             completion = tasks.join_next(), if !tasks.is_empty() => {
                 if let Some(Ok(completion)) = completion
@@ -202,28 +284,109 @@ pub async fn run_public_catalog_server(
                 }
             }
             event = futures::StreamExt::select_next_some(&mut swarm) => {
-                if let SwarmEvent::Behaviour(CatalogBehaviourEvent::Catalog(
-                    request_response::Event::Message { peer, message, .. }
-                )) = event
-                    && let request_response::Message::Request { request, channel, .. } = message
-                {
-                    if limiter.check(peer) && tasks.len() < CATALOG_CONCURRENT_STREAMS {
-                        let backend = Arc::clone(&backend);
-                        tasks.spawn(async move {
-                            CatalogCompletion {
+                match event {
+                    SwarmEvent::Behaviour(CatalogBehaviourEvent::Catalog(
+                        request_response::Event::Message {
+                            peer,
+                            message:
+                                request_response::Message::Request {
+                                    request, channel, ..
+                                },
+                            ..
+                        }
+                    )) => {
+                        if limiter.check(peer) && tasks.len() < CATALOG_CONCURRENT_STREAMS {
+                            let backend = Arc::clone(&backend);
+                            tasks.spawn(async move {
+                                CatalogCompletion {
+                                    channel,
+                                    response: handle_request(backend.as_ref(), request).await,
+                                }
+                            });
+                        } else {
+                            let _ = swarm.behaviour_mut().catalog.send_response(
                                 channel,
-                                response: handle_request(backend.as_ref(), request).await,
-                            }
-                        });
-                    } else {
-                        let _ = swarm.behaviour_mut().catalog.send_response(
-                            channel,
-                            CatalogWireResponse::Rejected(CatalogRejection::Busy),
-                        );
+                                CatalogWireResponse::Rejected(CatalogRejection::Busy),
+                            );
+                        }
                     }
+                    SwarmEvent::Behaviour(CatalogBehaviourEvent::Relay(event)) => {
+                        relay_counters.record(&event);
+                    }
+                    _ => {}
                 }
             }
         }
+    }
+}
+
+#[expect(
+    deprecated,
+    reason = "the pinned relay exposes failure events required for sanitized diagnosis"
+)]
+fn classify_public_relay_event(event: &libp2p::relay::Event) -> Option<PublicRelayClass> {
+    match event {
+        libp2p::relay::Event::ReservationReqAccepted { renewed: false, .. } => {
+            Some(PublicRelayClass::ReservationAccepted)
+        }
+        libp2p::relay::Event::ReservationReqAccepted { renewed: true, .. } => {
+            Some(PublicRelayClass::ReservationRenewed)
+        }
+        libp2p::relay::Event::ReservationReqAcceptFailed { .. } => {
+            Some(PublicRelayClass::ReservationAcceptFailed)
+        }
+        libp2p::relay::Event::ReservationReqDenied { .. } => {
+            Some(PublicRelayClass::ReservationDenied)
+        }
+        libp2p::relay::Event::ReservationReqDenyFailed { .. } => {
+            Some(PublicRelayClass::ReservationDenyFailed)
+        }
+        libp2p::relay::Event::ReservationClosed { .. } => Some(PublicRelayClass::ReservationClosed),
+        libp2p::relay::Event::ReservationTimedOut { .. } => {
+            Some(PublicRelayClass::ReservationTimedOut)
+        }
+        libp2p::relay::Event::CircuitReqDenied { .. } => Some(PublicRelayClass::CircuitDenied),
+        libp2p::relay::Event::CircuitReqDenyFailed { .. } => {
+            Some(PublicRelayClass::CircuitDenyFailed)
+        }
+        libp2p::relay::Event::CircuitReqAccepted { .. } => None,
+        libp2p::relay::Event::CircuitReqOutboundConnectFailed { .. } => {
+            Some(PublicRelayClass::CircuitOutboundConnectFailed)
+        }
+        libp2p::relay::Event::CircuitReqAcceptFailed { .. } => {
+            Some(PublicRelayClass::CircuitAcceptFailed)
+        }
+        libp2p::relay::Event::CircuitClosed { error: None, .. } => None,
+        libp2p::relay::Event::CircuitClosed {
+            error: Some(error), ..
+        } => Some(classify_public_relay_io_error(error)),
+    }
+}
+
+fn classify_public_relay_io_error(error: &std::io::Error) -> PublicRelayClass {
+    match error.kind() {
+        std::io::ErrorKind::ConnectionRefused => PublicRelayClass::CircuitConnectionRefused,
+        std::io::ErrorKind::ConnectionAborted => PublicRelayClass::CircuitConnectionAborted,
+        std::io::ErrorKind::ConnectionReset => PublicRelayClass::CircuitConnectionReset,
+        std::io::ErrorKind::NotConnected => PublicRelayClass::CircuitNotConnected,
+        std::io::ErrorKind::BrokenPipe => PublicRelayClass::CircuitBrokenPipe,
+        std::io::ErrorKind::TimedOut => PublicRelayClass::CircuitTimedOut,
+        std::io::ErrorKind::WriteZero => PublicRelayClass::CircuitWriteZero,
+        std::io::ErrorKind::UnexpectedEof => PublicRelayClass::CircuitUnexpectedEof,
+        std::io::ErrorKind::PermissionDenied => PublicRelayClass::CircuitPermissionDenied,
+        _ => PublicRelayClass::CircuitFailed,
+    }
+}
+
+fn emit_public_relay_summary(snapshot: BTreeMap<PublicRelayClass, u64>) {
+    for (class, count) in snapshot {
+        tracing::info!(
+            relay_class = class.name(),
+            count,
+            "public_relay_summary relay_class={} count={}",
+            class.name(),
+            count
+        );
     }
 }
 
@@ -307,6 +470,150 @@ async fn handle_request(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn relay_lifecycle_snapshot_is_bounded_saturating_and_reset() {
+        let source = libp2p::PeerId::random();
+        let mut counters = PublicRelayCounters::default();
+        counters
+            .counts
+            .insert(PublicRelayClass::ReservationAccepted, u64::MAX);
+        for event in [
+            libp2p::relay::Event::ReservationReqAccepted {
+                src_peer_id: source,
+                renewed: false,
+            },
+            libp2p::relay::Event::ReservationReqDenied {
+                src_peer_id: source,
+                status: libp2p::relay::StatusCode::ReservationRefused,
+            },
+            libp2p::relay::Event::ReservationClosed {
+                src_peer_id: source,
+            },
+        ] {
+            counters.record(&event);
+        }
+        let snapshot = counters.take_snapshot();
+        let second_snapshot = counters.take_snapshot();
+
+        assert_eq!(
+            (
+                snapshot
+                    .get(&PublicRelayClass::ReservationAccepted)
+                    .copied(),
+                snapshot.get(&PublicRelayClass::ReservationDenied).copied(),
+                snapshot.get(&PublicRelayClass::ReservationClosed).copied(),
+                second_snapshot.is_empty(),
+            ),
+            (Some(u64::MAX), Some(1), Some(1), true)
+        );
+    }
+
+    #[test]
+    fn relay_classes_are_fixed_and_do_not_include_reader_success_activity() {
+        let source = libp2p::PeerId::random();
+        let destination = libp2p::PeerId::random();
+        assert_eq!(
+            classify_public_relay_event(&libp2p::relay::Event::CircuitReqAccepted {
+                src_peer_id: source,
+                dst_peer_id: destination,
+            }),
+            None
+        );
+        assert_eq!(
+            classify_public_relay_event(&libp2p::relay::Event::CircuitClosed {
+                src_peer_id: source,
+                dst_peer_id: destination,
+                error: None,
+            }),
+            None
+        );
+
+        let names = [
+            PublicRelayClass::ReservationAccepted,
+            PublicRelayClass::ReservationRenewed,
+            PublicRelayClass::ReservationAcceptFailed,
+            PublicRelayClass::ReservationDenied,
+            PublicRelayClass::ReservationDenyFailed,
+            PublicRelayClass::ReservationClosed,
+            PublicRelayClass::ReservationTimedOut,
+            PublicRelayClass::CircuitDenied,
+            PublicRelayClass::CircuitDenyFailed,
+            PublicRelayClass::CircuitOutboundConnectFailed,
+            PublicRelayClass::CircuitAcceptFailed,
+            PublicRelayClass::CircuitConnectionRefused,
+            PublicRelayClass::CircuitConnectionAborted,
+            PublicRelayClass::CircuitConnectionReset,
+            PublicRelayClass::CircuitNotConnected,
+            PublicRelayClass::CircuitBrokenPipe,
+            PublicRelayClass::CircuitTimedOut,
+            PublicRelayClass::CircuitWriteZero,
+            PublicRelayClass::CircuitUnexpectedEof,
+            PublicRelayClass::CircuitPermissionDenied,
+            PublicRelayClass::CircuitFailed,
+        ]
+        .map(PublicRelayClass::name);
+
+        assert_eq!(
+            names,
+            [
+                "public_relay_reservation_accepted",
+                "public_relay_reservation_renewed",
+                "public_relay_reservation_accept_failed",
+                "public_relay_reservation_denied",
+                "public_relay_reservation_deny_failed",
+                "public_relay_reservation_closed",
+                "public_relay_reservation_timed_out",
+                "public_relay_circuit_denied",
+                "public_relay_circuit_deny_failed",
+                "public_relay_circuit_outbound_connect_failed",
+                "public_relay_circuit_accept_failed",
+                "public_relay_circuit_connection_refused",
+                "public_relay_circuit_connection_aborted",
+                "public_relay_circuit_connection_reset",
+                "public_relay_circuit_not_connected",
+                "public_relay_circuit_broken_pipe",
+                "public_relay_circuit_timed_out",
+                "public_relay_circuit_write_zero",
+                "public_relay_circuit_unexpected_eof",
+                "public_relay_circuit_permission_denied",
+                "public_relay_circuit_failed",
+            ]
+        );
+    }
+
+    #[test]
+    fn relay_circuit_io_failures_use_fixed_sanitized_classes() {
+        let classes = [
+            std::io::ErrorKind::ConnectionRefused,
+            std::io::ErrorKind::ConnectionAborted,
+            std::io::ErrorKind::ConnectionReset,
+            std::io::ErrorKind::NotConnected,
+            std::io::ErrorKind::BrokenPipe,
+            std::io::ErrorKind::TimedOut,
+            std::io::ErrorKind::WriteZero,
+            std::io::ErrorKind::UnexpectedEof,
+            std::io::ErrorKind::PermissionDenied,
+            std::io::ErrorKind::InvalidData,
+        ]
+        .map(|kind| classify_public_relay_io_error(&std::io::Error::from(kind)));
+
+        assert_eq!(
+            classes,
+            [
+                PublicRelayClass::CircuitConnectionRefused,
+                PublicRelayClass::CircuitConnectionAborted,
+                PublicRelayClass::CircuitConnectionReset,
+                PublicRelayClass::CircuitNotConnected,
+                PublicRelayClass::CircuitBrokenPipe,
+                PublicRelayClass::CircuitTimedOut,
+                PublicRelayClass::CircuitWriteZero,
+                PublicRelayClass::CircuitUnexpectedEof,
+                PublicRelayClass::CircuitPermissionDenied,
+                PublicRelayClass::CircuitFailed,
+            ]
+        );
+    }
 
     #[test]
     fn relay_external_address_rejects_non_public_hosts() {

@@ -110,6 +110,15 @@ enum SearchResultAvailability {
     Remote { device_name: Option<String> },
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum PublicRouteTransition {
+    PublicModeChanged,
+    QueryChanged,
+    Submitted,
+    Failed,
+    Succeeded(PublicRouteKind),
+}
+
 pub struct AirWikiApp {
     instance: PrimaryInstance,
     shell: DesktopShell,
@@ -628,11 +637,18 @@ impl AirWikiApp {
                             self.search_completed = true;
                             self.search_hits = hits;
                             self.search_coverage = coverage;
-                            self.public_route_kind = route_kind;
+                            apply_public_route_transition(
+                                &mut self.public_route_kind,
+                                PublicRouteTransition::Succeeded(route_kind),
+                            );
                             self.search_error = None;
                         }
                         Err(error) => {
                             self.search_completed = false;
+                            apply_public_route_transition(
+                                &mut self.public_route_kind,
+                                PublicRouteTransition::Failed,
+                            );
                             self.search_error = Some(sanitized_error_code(&error).to_owned());
                         }
                     }
@@ -2207,10 +2223,18 @@ impl AirWikiApp {
         let search_running = self.search_request_id.is_some();
         let enabled = !self.search_question.trim().is_empty() && !search_running;
         let mut submit_clicked = false;
-        ui.checkbox(
-            &mut self.search_public_network,
-            self.localization.text("search-public-network"),
-        );
+        let public_network_changed = ui
+            .checkbox(
+                &mut self.search_public_network,
+                self.localization.text("search-public-network"),
+            )
+            .changed();
+        if public_network_changed {
+            apply_public_route_transition(
+                &mut self.public_route_kind,
+                PublicRouteTransition::PublicModeChanged,
+            );
+        }
         if self.search_public_network {
             let status = match self.public_route_kind {
                 PublicRouteKind::Offline => "search-public-route-offline",
@@ -2344,12 +2368,20 @@ impl AirWikiApp {
         if response.changed() {
             self.search_completed = false;
             self.search_hits.clear();
+            apply_public_route_transition(
+                &mut self.public_route_kind,
+                PublicRouteTransition::QueryChanged,
+            );
             self.search_error = None;
         }
         if submit {
             let request_id = Uuid::new_v4();
             self.search_request_id = Some(request_id);
             self.search_completed = false;
+            apply_public_route_transition(
+                &mut self.public_route_kind,
+                PublicRouteTransition::Submitted,
+            );
             self.search_error = None;
             self.search_hits.clear();
             self.search_coverage = SearchCoverageView::Complete;
@@ -5272,6 +5304,19 @@ fn search_result_applies(active_request_id: Option<Uuid>, event_request_id: Uuid
     active_request_id == Some(event_request_id)
 }
 
+fn apply_public_route_transition(
+    route_kind: &mut PublicRouteKind,
+    transition: PublicRouteTransition,
+) {
+    *route_kind = match transition {
+        PublicRouteTransition::Succeeded(route_kind) => route_kind,
+        PublicRouteTransition::PublicModeChanged
+        | PublicRouteTransition::QueryChanged
+        | PublicRouteTransition::Submitted
+        | PublicRouteTransition::Failed => PublicRouteKind::Offline,
+    };
+}
+
 fn wiki_health_result_applies(last_generation: u64, event_generation: u64) -> bool {
     event_generation > last_generation
 }
@@ -5485,8 +5530,9 @@ mod tests {
     use fluent_bundle::FluentArgs;
 
     use super::{
-        ExternalAiPolicyChange, OnboardingPage, SearchResultAvailability, WikiHealthCheckState,
-        advance_onboarding_page, classify_external_ai_policy_change, classify_search_result,
+        ExternalAiPolicyChange, OnboardingPage, PublicRouteTransition, SearchResultAvailability,
+        WikiHealthCheckState, advance_onboarding_page, apply_public_route_transition,
+        classify_external_ai_policy_change, classify_search_result,
         collection_maintenance_needs_recovery, connectivity_runtime_is_active, deduplicate_notices,
         elapsed_minutes, firewall_configuration_is_current, firewall_operation_update_applies,
         firewall_state_offers_advanced_recovery, human_error_summary, localized_worker_notice,
@@ -5515,6 +5561,7 @@ mod tests {
         WikiHealthSummaryView,
     };
     use airwiki_core::SourceIssueCode;
+    use airwiki_network::PublicRouteKind;
     use std::{
         collections::VecDeque,
         time::{Duration, SystemTime},
@@ -5917,6 +5964,26 @@ mod tests {
         assert!(search_result_applies(Some(active), active));
         assert!(!search_result_applies(Some(active), Uuid::new_v4()));
         assert!(!search_result_applies(None, active));
+    }
+
+    #[test]
+    fn every_new_or_failed_search_transition_resets_a_successful_route() {
+        for transition in [
+            PublicRouteTransition::PublicModeChanged,
+            PublicRouteTransition::QueryChanged,
+            PublicRouteTransition::Submitted,
+            PublicRouteTransition::Failed,
+        ] {
+            let mut route_kind = PublicRouteKind::Offline;
+            apply_public_route_transition(
+                &mut route_kind,
+                PublicRouteTransition::Succeeded(PublicRouteKind::Relay),
+            );
+            assert_eq!(route_kind, PublicRouteKind::Relay);
+
+            apply_public_route_transition(&mut route_kind, transition);
+            assert_eq!(route_kind, PublicRouteKind::Offline);
+        }
     }
 
     #[test]

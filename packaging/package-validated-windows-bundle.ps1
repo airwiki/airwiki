@@ -15,16 +15,19 @@ if ([Environment]::OSVersion.Platform -ne [PlatformID]::Win32NT) {
 }
 
 $Root = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
-$Config = Join-Path $Root "packaging\windows\ValidatedBundle.Packager.toml"
+$Config = Join-Path $Root "packaging\windows\tauri.validated.bundle.conf.json"
 $LlamaPolicy = Join-Path $Root "packaging\llama-windows-build-policy.json"
 $TargetRoot = Join-Path $Root "target"
 $WorkRoot = Join-Path $TargetRoot "validated-windows-bundle"
 $StageRoot = Join-Path $WorkRoot "staging"
 $ExtractRoot = Join-Path $WorkRoot "extracted"
+$BundleTargetRoot = Join-Path $WorkRoot "tauri-target"
+$BundleReleaseRoot = Join-Path $BundleTargetRoot "x86_64-pc-windows-msvc\release"
+$TauriInstallerDir = Join-Path $BundleReleaseRoot "bundle\nsis"
 $OutDir = Join-Path $TargetRoot "packages\windows-validated"
-$NsisRoot = Join-Path `
-    ([Environment]::GetFolderPath("LocalApplicationData")) `
-    ".cargo-packager\NSIS"
+$NsisToolCacheRoot = Join-Path $BundleTargetRoot ".tauri"
+$NsisRoot = Join-Path $NsisToolCacheRoot "NSIS"
+$Tauri = Join-Path $Root "apps\desktop\ui\node_modules\.bin\tauri.cmd"
 
 . (Join-Path $PSScriptRoot "windows-runtime.ps1")
 . (Join-Path $PSScriptRoot "windows-payload.ps1")
@@ -180,19 +183,15 @@ function Assert-PreparedNsisCache([string] $CacheRoot) {
         "Bin\makensis.exe",
         "Stubs\lzma-x86-unicode",
         "Stubs\lzma_solid-x86-unicode",
-        "Plugins\x86-unicode\ApplicationID.dll",
-        "Plugins\x86-unicode\nsis_tauri_utils.dll",
-        "Include\MUI2.nsh"
+        "Plugins\x86-unicode\additional\nsis_tauri_utils.dll",
+        "Include\MUI2.nsh",
+        "Include\Win\COM.nsh",
+        "Include\Win\Propkey.nsh",
+        "Include\Win\RestartManager.nsh"
     )) {
         $null = Get-VerifiedWindowsRegularFile `
             (Join-Path $CacheRoot $Relative) `
             "prepared NSIS cache entry"
-    }
-    $ApplicationIdSentinel = Get-Item -LiteralPath `
-        (Join-Path $CacheRoot "Plugins\x86-unicode\ApplicationID.dll") `
-        -Force
-    if ($ApplicationIdSentinel.Length -ne 0) {
-        throw "Prepared NSIS cache has an unexpected ApplicationID compatibility file"
     }
 }
 
@@ -256,13 +255,14 @@ Assert-WindowsDesktopEmbedsLlamaRuntimeHash `
 Assert-WindowsFirewallHelperManifest $BundleHelper "validated bundle firewall helper"
 
 $SevenZip = Resolve-SevenZip $SevenZipPath
-Assert-PreparedNsisCache $NsisRoot
-$CargoPackager = (Get-Command cargo-packager.exe -CommandType Application `
-    -ErrorAction Stop).Source
-$CargoPackagerVersion = (& $CargoPackager --version 2>&1 | Out-String).Trim()
-if ($LASTEXITCODE -ne 0 -or $CargoPackagerVersion -ne "cargo-packager 0.11.8") {
-    throw "cargo-packager 0.11.8 is required"
+$Tauri = Get-VerifiedWindowsRegularFile $Tauri "pinned Tauri CLI"
+$TauriVersion = (& $Tauri --version 2>&1 | Out-String).Trim()
+if ($LASTEXITCODE -ne 0 -or $TauriVersion -ne "tauri-cli 2.11.4") {
+    throw "Tauri CLI 2.11.4 is required"
 }
+& (Join-Path $PSScriptRoot "prepare-verified-nsis-toolchain.ps1") `
+    -ToolCacheRoot $NsisToolCacheRoot | Out-Null
+Assert-PreparedNsisCache $NsisRoot
 
 Push-Location $Root
 try {
@@ -291,21 +291,38 @@ try {
         $StagedTree `
         "staged validated bundle"
 
+    New-Item -ItemType Directory -Path $BundleReleaseRoot -Force | Out-Null
+    Copy-Item -LiteralPath $BundleDesktop -Destination (Join-Path $BundleReleaseRoot "airwiki.exe")
+
     Remove-AirWikiWindowsStagingPath `
         -Path $OutDir `
         -AllowedRoot $TargetRoot `
         -Label "validated Windows package output"
     New-Item -ItemType Directory -Path $OutDir -Force | Out-Null
     $Started = [DateTime]::UtcNow
-    & $CargoPackager --config $Config
-    if ($LASTEXITCODE -ne 0) {
-        throw "cargo-packager failed"
+    $PreviousCargoTargetDir = $env:CARGO_TARGET_DIR
+    $env:CARGO_TARGET_DIR = $BundleTargetRoot
+    Push-Location (Join-Path $Root "apps\desktop")
+    try {
+        & $Tauri bundle `
+            --ci `
+            --config $Config `
+            --target x86_64-pc-windows-msvc `
+            --bundles nsis
+        if ($LASTEXITCODE -ne 0) {
+            throw "Tauri validated NSIS packaging failed"
+        }
+    } finally {
+        Pop-Location
+        $env:CARGO_TARGET_DIR = $PreviousCargoTargetDir
     }
 
-    $Installers = @(Get-ChildItem -LiteralPath $OutDir -File -Filter *.exe)
-    if ($Installers.Count -ne 1) {
-        throw "Expected exactly one fresh NSIS installer"
+    $TauriInstallers = @(Get-ChildItem -LiteralPath $TauriInstallerDir -File -Filter *.exe)
+    if ($TauriInstallers.Count -ne 1) {
+        throw "Expected exactly one Tauri NSIS installer"
     }
+    Copy-Item -LiteralPath $TauriInstallers[0].FullName -Destination $OutDir
+    $Installers = @(Get-ChildItem -LiteralPath $OutDir -File -Filter *.exe)
     if ($Installers[0].LastWriteTimeUtc -lt $Started) {
         throw "NSIS installer predates this packaging run"
     }

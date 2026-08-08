@@ -8301,7 +8301,7 @@ mod tests {
                 && signer.contains("$ExpectedMachineHigh = 0x86")
                 && signer.contains("$ExpectedMachineLow = 0x4c")
                 && signer.contains("$ExpectedMachineHigh = 0x01")
-                && signer.contains("NSIS 3.09 I386 executable")
+                && signer.contains("NSIS 3.11 I386 executable")
         );
         assert!(
             signer.contains("airwiki_0.2.0_x64-setup.exe") && signer.contains("$IsFinalInstaller")
@@ -8312,7 +8312,8 @@ mod tests {
                     "main executable must already have the expected Authenticode signature"
                 )
         );
-        assert!(package.contains("signCommand ="));
+        assert!(package.contains("Add-Member -NotePropertyName signCommand"));
+        assert!(package.contains("& $Tauri bundle"));
         assert!(package.contains("sign-windows-artifact.ps1"));
         assert!(package.contains("$env:TEMP = $SigningTemp"));
         assert!(verify.contains("target\\windows-uninstaller\\airwiki-uninstall.exe"));

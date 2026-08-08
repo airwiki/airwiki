@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Create the stable cargo-packager updater manifest from final artifacts."""
+"""Create the stable Tauri v2 updater manifest from final artifacts."""
 
 from __future__ import annotations
 
@@ -63,12 +63,10 @@ def main() -> None:
             "macos-aarch64": {
                 "signature": signature(args.macos_signature),
                 "url": artifact_url(args.base_url, args.macos),
-                "format": "app",
             },
             "windows-x86_64": {
                 "signature": signature(args.windows_signature),
                 "url": artifact_url(args.base_url, args.windows),
-                "format": "nsis",
             },
         },
     }

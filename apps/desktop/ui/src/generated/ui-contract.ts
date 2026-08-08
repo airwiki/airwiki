@@ -95,13 +95,23 @@ export type LanRuntimeSummary = { listener: LanListenerStatus, discovery: LanDis
 
 export type FirewallOperationStatus = "awaitingWindows" | "takingLonger";
 
+export type IntegrationClient = "chatGptDesktop" | "claudeDesktop" | "geminiCli";
+
+export type IntegrationStatus = "notInstalled" | "available" | "configuring" | "awaitingClientApproval" | "configured" | "updateAvailable" | "conflict" | "unsupported" | "error";
+
+export type IntegrationSummary = { client: IntegrationClient, status: IntegrationStatus, detectedVersion: string | null, activityRecent: boolean, restartRequired: boolean, };
+
+export type IntegrationsSummary = { integrations: Array<IntegrationSummary>, externalAiCollectionCount: number, };
+
+export type IntegrationActionInput = { "kind": "refresh" } | { "kind": "connect", client: IntegrationClient, } | { "kind": "disconnect", client: IntegrationClient, } | { "kind": "confirmClaudeInstalled" } | { "kind": "openClaudeSettings" };
+
 export type PreferencesSummary = { completedOnboardingVersion: number | null, locale: LocalePreference, lanPreference: LanPreference, closeBehavior: CloseBehavior, automaticUpdateChecks: boolean, };
 
 export type PreferencesInput = { locale: LocalePreference, lanPreference: LanPreference, closeBehavior: CloseBehavior, automaticUpdateChecks: boolean, completeOnboarding: boolean, };
 
 export type AppPhase = "starting" | "ready";
 
-export type AppSnapshot = { schemaVersion: number, sequence: number, phase: AppPhase, collections: Array<CollectionSummary>, collectionScans: Array<CollectionScanSummary>, reviews: Array<ReviewSummary>, reanalyzingReviewIds: Array<string>, sourceIssues: Array<SourceIssueSummary>, peers: Array<PeerSummary>, model: ModelSummary | null, modelInstall: ModelInstallSummary | null, search: SearchSummary | null, reviewEvidence: ReviewEvidenceSummary | null, knowledge: KnowledgeBundleSummary | null, knowledgePage: KnowledgePageSummary | null, preferences: PreferencesSummary | null, autostart: AutostartStatus | null, wikiHealth: WikiHealthSummary | null, connectivity: ConnectivitySummary | null, lanRuntime: LanRuntimeSummary | null, firewallOperation: FirewallOperationStatus | null, notice: NoticeSummary | null, };
+export type AppSnapshot = { schemaVersion: number, sequence: number, phase: AppPhase, collections: Array<CollectionSummary>, collectionScans: Array<CollectionScanSummary>, reviews: Array<ReviewSummary>, reanalyzingReviewIds: Array<string>, sourceIssues: Array<SourceIssueSummary>, peers: Array<PeerSummary>, model: ModelSummary | null, modelInstall: ModelInstallSummary | null, search: SearchSummary | null, reviewEvidence: ReviewEvidenceSummary | null, knowledge: KnowledgeBundleSummary | null, knowledgePage: KnowledgePageSummary | null, preferences: PreferencesSummary | null, autostart: AutostartStatus | null, wikiHealth: WikiHealthSummary | null, connectivity: ConnectivitySummary | null, lanRuntime: LanRuntimeSummary | null, firewallOperation: FirewallOperationStatus | null, integrations: IntegrationsSummary | null, notice: NoticeSummary | null, };
 
 export type UiEventKind = "stateChanged";
 

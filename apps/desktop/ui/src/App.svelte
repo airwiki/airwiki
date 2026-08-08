@@ -2,7 +2,7 @@
   import { AlertTriangle, BookOpen, CheckCircle2, FileText, History, Network, RefreshCw, Search, Settings2, Sparkles } from '@lucide/svelte';
   import { listen } from '@tauri-apps/api/event';
   import { onMount } from 'svelte';
-  import { addCollection, approveReview, cancelModelInstall, configureFirewall, confirmPairing, connect, hideToTray, installModels, loadKnowledgeBundle, loadKnowledgePage, loadReviewEvidence, openAdvancedFirewall, pairPeer, pickCollectionFolder, quitCompletely, reanalyzeReview, refreshAutostart, refreshConnectivity, refreshWikiHealth, rejectReview, relinkCollection, rescanCollection, revokePeer, searchKnowledge, setAutostart, setCollectionGrant, updateCollectionPolicy, updatePreferences, type AppSnapshot, type CloseBehavior, type CollectionPolicyInput, type CollectionSummary, type EnrichmentDraft, type FolderSelection, type KnowledgePageInput, type LanPreference, type LocalePreference, type ReviewSummary } from './api';
+  import { addCollection, approveReview, cancelModelInstall, configureFirewall, confirmPairing, connect, hideToTray, installModels, loadKnowledgeBundle, loadKnowledgePage, loadReviewEvidence, manageIntegration, openAdvancedFirewall, pairPeer, pickCollectionFolder, quitCompletely, reanalyzeReview, refreshAutostart, refreshConnectivity, refreshWikiHealth, rejectReview, relinkCollection, rescanCollection, revokePeer, searchKnowledge, setAutostart, setCollectionGrant, updateCollectionPolicy, updatePreferences, type AppSnapshot, type CloseBehavior, type CollectionPolicyInput, type CollectionSummary, type EnrichmentDraft, type FolderSelection, type IntegrationActionInput, type IntegrationClient, type KnowledgePageInput, type LanPreference, type LocalePreference, type ReviewSummary } from './api';
   import KnowledgeGraph from './KnowledgeGraph.svelte';
 
   type Destination = 'library' | 'review' | 'search' | 'system';
@@ -41,6 +41,7 @@
   let wikiHealthRequestId: string | null = null;
   let connectivityRequestId: string | null = null;
   let peerActionId: string | null = null;
+  let integrationRequestId: string | null = null;
 
   onMount(() => {
     const unlistenClose = '__TAURI_INTERNALS__' in window
@@ -69,6 +70,7 @@
       }
       if (event.requestId && event.requestId === wikiHealthRequestId) wikiHealthRequestId = null;
       if (event.requestId && event.requestId === connectivityRequestId) connectivityRequestId = null;
+      if (event.requestId && event.requestId === integrationRequestId) integrationRequestId = null;
       runtimeLabel = event.snapshot.phase === 'ready' ? 'Servicios privados listos' : 'Preparando servicios privados';
     }).then((initial) => {
       snapshot = initial;
@@ -90,8 +92,36 @@
     if (next === 'system') {
       void refreshAutostartState();
       void runConnectivityAction('refresh');
+      void runIntegrationAction({ kind: 'refresh' });
     }
     if (next === 'library') void refreshHealth();
+  }
+
+  function integrationName(client: IntegrationClient): string {
+    if (client === 'chatGptDesktop') return 'ChatGPT Desktop / Work';
+    if (client === 'claudeDesktop') return 'Claude Desktop';
+    return 'Gemini CLI';
+  }
+
+  function integrationState(status: string): string {
+    const labels: Record<string, string> = {
+      notInstalled: 'No detectado', available: 'Disponible', configuring: 'Configurando',
+      awaitingClientApproval: 'Esperando aprobación', configured: 'Conectado',
+      updateAvailable: 'Requiere actualización', conflict: 'Conflicto',
+      unsupported: 'No compatible', error: 'Necesita reparación'
+    };
+    return labels[status] ?? status;
+  }
+
+  async function runIntegrationAction(action: IntegrationActionInput) {
+    const requestId = crypto.randomUUID();
+    integrationRequestId = requestId;
+    try {
+      await manageIntegration(requestId, action);
+    } catch {
+      integrationRequestId = null;
+      actionMessage = 'La integración no pudo modificarse.';
+    }
   }
 
   function connectivityLabel(): string {
@@ -633,6 +663,7 @@
             <section><p class="section-label">Inicio de sesión</p><h3>Inicio automático</h3><p>{autostartLabel()}</p><div class="row-actions">{#if snapshot.autostart === 'enabled'}<button class="secondary" onclick={() => changeAutostart(false)} disabled={autostartBusy}>Desactivar</button>{:else if snapshot.autostart !== 'unsupported' && snapshot.autostart !== 'conflict'}<button class="secondary" onclick={() => changeAutostart(true)} disabled={autostartBusy}>{autostartBusy ? 'Comprobando…' : 'Activar'}</button>{/if}<button class="text-action" onclick={refreshAutostartState} disabled={autostartBusy}>Actualizar estado</button></div></section>
             <section class="connectivity-section"><p class="section-label">Conectividad</p><h3>{snapshot.peers.length} equipos conocidos</h3><p>{connectivityLabel()}</p>{#if snapshot.lanRuntime}<dl><div><dt>Listener</dt><dd>{lanStateLabel(snapshot.lanRuntime.listener)}</dd></div><div><dt>Descubrimiento</dt><dd>{lanStateLabel(snapshot.lanRuntime.discovery)}</dd></div><div><dt>Interfaces</dt><dd>{snapshot.lanRuntime.addressCount}</dd></div></dl>{/if}<div class="row-actions"><button class="secondary" onclick={() => runConnectivityAction('refresh')} disabled={connectivityRequestId !== null}>{connectivityRequestId ? 'Comprobando…' : 'Comprobar'}</button>{#if snapshot.connectivity?.firewallHelper === 'verified' && snapshot.connectivity.firewall !== 'ready' && snapshot.connectivity.firewall !== 'notApplicable'}<button class="secondary" onclick={() => runConnectivityAction('install')} disabled={connectivityRequestId !== null || lanPreference !== 'enabled'}>Configurar firewall</button>{/if}{#if snapshot.connectivity?.firewall === 'ready'}<button class="text-action" onclick={() => runConnectivityAction('remove')} disabled={connectivityRequestId !== null}>Quitar reglas</button>{/if}{#if snapshot.connectivity?.firewall === 'conflict' || snapshot.connectivity?.firewall === 'legacyExposure'}<button class="text-action" onclick={() => runConnectivityAction('advanced')} disabled={connectivityRequestId !== null}>Abrir configuración avanzada</button>{/if}</div><small>Compartir sigue requiriendo pairing y grants por colección.</small></section>
             <section class="peer-trust"><p class="section-label">Equipos y permisos</p><h3>Confianza explícita</h3><p>Cada equipo se verifica con seis palabras. Después eliges qué colecciones puede consultar.</p><div class="peer-list">{#each snapshot.peers as peer}<article><div class="peer-heading"><div><strong>{peer.deviceName ?? 'Equipo cercano'}</strong><code title={peer.peerId}>{shortPeerId(peer.peerId)}</code></div><span class:verified={peer.trust === 'trusted'}>{peer.trust === 'trusted' ? 'Verificado' : peer.trust === 'blocked' ? 'Revocado' : peer.activity === 'pairing' ? 'Verificando' : 'Sin verificar'}</span></div>{#if peer.sasWords}<div class="sas" aria-label="Código de verificación"><small>Comprueba estas palabras en ambos equipos</small><strong>{peer.sasWords.join(' · ')}</strong><div><button class="primary" onclick={() => runPeerAction(peer.peerId, 'accept')} disabled={peerActionId === peer.peerId}>Coinciden</button><button class="danger" onclick={() => runPeerAction(peer.peerId, 'reject')} disabled={peerActionId === peer.peerId}>No coinciden</button></div></div>{:else if peer.trust === 'unpaired'}<button class="secondary" onclick={() => runPeerAction(peer.peerId, 'pair')} disabled={peerActionId === peer.peerId || peer.activity === 'notObserved'}>Verificar equipo</button>{:else if peer.trust === 'trusted'}<div class="grant-list">{#each snapshot.collections.filter((collection) => collection.peerShareable) as collection}<label class="check"><input type="checkbox" checked={peer.grantedCollectionIds.includes(collection.id)} onchange={(event) => changeGrant(peer.peerId, collection.id, event.currentTarget.checked)} disabled={peerActionId === peer.peerId} /> {collection.name}</label>{:else}<small>Activa “grants LAN” en una colección para poder compartirla.</small>{/each}</div><button class="danger" onclick={() => runPeerAction(peer.peerId, 'revoke')} disabled={peerActionId === peer.peerId}>Revocar confianza</button>{/if}</article>{:else}<p class="empty">No hay equipos descubiertos. AirWiki no comparte nada hasta que verifiques uno.</p>{/each}</div></section>
+            <section class="integrations-section"><div class="settings-heading"><div><p class="section-label">Integraciones</p><h3>Clientes de IA</h3></div><button class="text-action" onclick={() => runIntegrationAction({ kind: 'refresh' })} disabled={integrationRequestId !== null}>Actualizar</button></div><p>AirWiki instala un puente de solo lectura hacia el endpoint MCP local.</p>{#if snapshot.integrations?.externalAiCollectionCount}<p class="evidence-warning">{snapshot.integrations.externalAiCollectionCount} colecciones permiten IA externa. Cada búsqueda seguirá revalidando la política.</p>{/if}<div class="integration-list">{#each snapshot.integrations?.integrations ?? [] as integration}<article><div><strong>{integrationName(integration.client)}</strong><small>{integrationState(integration.status)}{#if integration.detectedVersion} · {integration.detectedVersion}{/if}{#if integration.restartRequired} · reinicio requerido{/if}</small></div><div class="row-actions">{#if integration.status === 'available' || integration.status === 'updateAvailable'}<button class="secondary" onclick={() => runIntegrationAction({ kind: 'connect', client: integration.client })} disabled={integrationRequestId !== null}>{integration.status === 'updateAvailable' ? 'Actualizar puente' : 'Conectar'}</button>{:else if integration.status === 'configured'}<button class="danger" onclick={() => runIntegrationAction({ kind: 'disconnect', client: integration.client })} disabled={integrationRequestId !== null}>Desconectar</button>{:else if integration.status === 'awaitingClientApproval' && integration.client === 'claudeDesktop'}<button class="secondary" onclick={() => runIntegrationAction({ kind: 'openClaudeSettings' })} disabled={integrationRequestId !== null}>Abrir Claude</button><button class="text-action" onclick={() => runIntegrationAction({ kind: 'confirmClaudeInstalled' })} disabled={integrationRequestId !== null}>Ya lo aprobé</button>{/if}</div></article>{:else}<p class="empty">Comprueba el sistema para detectar clientes compatibles.</p>{/each}</div></section>
           </div>
         {/if}
 

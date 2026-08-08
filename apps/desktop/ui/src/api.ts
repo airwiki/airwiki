@@ -4,6 +4,7 @@ import type {
   CollectionPolicyInput,
   EnrichmentDraft,
   FolderSelection,
+  IntegrationActionInput,
   KnowledgePageInput,
   PreferencesInput,
   ReviewSummary,
@@ -56,6 +57,10 @@ export async function revokePeer(peerId: string): Promise<void> {
 
 export async function setCollectionGrant(peerId: string, collectionId: string, granted: boolean): Promise<void> {
   return invoke('set_collection_grant', { peerId, collectionId, granted });
+}
+
+export async function manageIntegration(requestId: string, action: IntegrationActionInput): Promise<void> {
+  return invoke('manage_integration', { requestId, action });
 }
 
 export async function rescanCollection(collectionId: string): Promise<void> {

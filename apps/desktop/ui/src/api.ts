@@ -151,6 +151,10 @@ export async function openSystemDestination(requestId: string, destination: Syst
   return invoke('open_system_destination', { requestId, destination });
 }
 
+export async function openExternalLink(url: string, confirmed: boolean): Promise<void> {
+  return invoke('open_external_link', { url, confirmed });
+}
+
 export async function hideToTray(): Promise<void> {
   return invoke('hide_to_tray');
 }

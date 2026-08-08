@@ -6,6 +6,7 @@
 
 mod autostart;
 mod connectivity_platform;
+mod external_navigation;
 mod integrations;
 mod manual_lan_route;
 mod model_activation_status;
@@ -1850,6 +1851,25 @@ fn send_autostart_command(
 }
 
 #[tauri::command]
+async fn open_external_link(url: String, confirmed: bool) -> Result<(), UiError> {
+    if !confirmed {
+        return Err(UiError::invalid("externalLinkConfirmationRequired"));
+    }
+    let url = external_navigation::validate_external_url(&url)
+        .map_err(|_| UiError::invalid("invalidExternalLink"))?;
+    tokio::task::spawn_blocking(move || external_navigation::open_external_url(&url))
+        .await
+        .map_err(|_| UiError::internal())?
+        .map_err(|error| match error {
+            external_navigation::ExternalNavigationError::InvalidUrl => {
+                UiError::invalid("invalidExternalLink")
+            }
+            external_navigation::ExternalNavigationError::Unsupported
+            | external_navigation::ExternalNavigationError::OpenFailed => UiError::internal(),
+        })
+}
+
+#[tauri::command]
 fn hide_to_tray(app: AppHandle, runtime: tauri::State<'_, AppRuntime>) -> Result<(), UiError> {
     if !runtime.tray_operational.load(Ordering::Acquire) {
         return Err(UiError::invalid("trayUnavailable"));
@@ -3167,6 +3187,7 @@ fn main() -> Result<()> {
             refresh_connectivity,
             configure_firewall,
             open_system_destination,
+            open_external_link,
             hide_to_tray,
             quit_completely
         ])

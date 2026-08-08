@@ -1,7 +1,7 @@
 COPYRIGHT
 ---------
 
-Copyright (C) 1999-2023 Contributors
+Copyright (C) 1999-2025 Contributors
 
 More detailed copyright information can be found in the individual source code files.
 
@@ -142,4 +142,3 @@ SPECIAL EXCEPTION FOR LZMA COMPRESSION MODULE
 ---------------------------------------------
 
 Igor Pavlov and Amir Szekely, the authors of the LZMA compression module for NSIS, expressly permit you to statically or dynamically link your code (or bind by name) to the files from the LZMA compression module for NSIS without subjecting your linked code to the terms of the Common Public license version 1.0. Any modifications or additions to files from the LZMA compression module for NSIS, however, are subject to the terms of the Common Public License version 1.0.
-

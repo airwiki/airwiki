@@ -55,19 +55,18 @@ The catalog records these projectors so a later multimodal pipeline can remain r
 
 ## Windows installer components
 
-The Windows package is produced with the NSIS 3.09 toolchain pinned by
-`cargo-packager 0.11.8` and uses its LZMA solid Unicode stub. NSIS core components are licensed
+The Windows package is produced with the NSIS 3.11 toolchain pinned by Tauri bundler 2.9.4 and
+uses its LZMA solid Unicode stub. NSIS core components are licensed
 under zlib/libpng; the embedded LZMA module is under Common Public License 1.0 with the special
-NSIS linking exception. The installer also embeds `nsis-tauri-utils 0.2.1`, licensed under
+NSIS linking exception. The installer also embeds `nsis-tauri-utils 0.5.3`, licensed under
 MIT OR Apache-2.0.
 
 The complete artifact provenance, SHA-256 values and verified upstream texts are installed under
 `licenses/NON_CARGO_COMPONENTS.md` and `licenses/non-cargo/`. In the source tree they live under
 `resources/licenses/`.
 
-`NSIS-ApplicationID 1.1` has no verifiable redistribution license in its upstream tag or release.
-AirWiki does not invoke or embed that optional plug-in. The release gate fails closed if it
-is referenced again without a verified license.
+AirWiki does not download, invoke, or embed the optional unlicensed `NSIS-ApplicationID` plug-in;
+the release gate fails closed if it is referenced or staged.
 
 The package verifier uses the official 7-Zip 26.02 x64 MSI as a build-time inspection tool. The
 MSI and its selected `7z.exe`/`7z.dll` files are pinned by SHA-256, staged through an
@@ -100,7 +99,7 @@ Selected primary components:
 | fastembed | 5.17.2 | Apache-2.0 | [Anush008/fastembed-rs](https://github.com/Anush008/fastembed-rs) |
 | rusqlite | 0.37.0 | MIT | [rusqlite/rusqlite](https://github.com/rusqlite/rusqlite) |
 | lopdf | 0.44.0 | MIT | [J-F-Liu/lopdf](https://github.com/J-F-Liu/lopdf) |
-| cargo-packager | 0.11.8, build-time | MIT OR Apache-2.0 | [crabnebula-dev/cargo-packager](https://github.com/crabnebula-dev/cargo-packager) |
+| Tauri bundler | 2.9.4, build-time | MIT OR Apache-2.0 | [tauri-apps/tauri](https://github.com/tauri-apps/tauri) |
 
 SQLite itself is bundled through `libsqlite3-sys` and is dedicated to the public domain by its authors; see [sqlite.org/copyright.html](https://www.sqlite.org/copyright.html).
 

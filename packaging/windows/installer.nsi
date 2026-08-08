@@ -1,44 +1,63 @@
-; Based on cargo-packager 0.11.8's default NSIS template. Keep changes narrow:
-; exact autostart cleanup and opt-in firewall cleanup during uninstall.
-; Set the compression algorithm.
-!if "{{compression}}" == ""
-  SetCompressor /SOLID lzma
+; Based on Tauri bundler 2.9.4's NSIS template, with AirWiki's fixed-path,
+; update, autostart, payload and opt-in cleanup policy kept in this file.
+Unicode true
+ManifestDPIAware true
+ManifestDPIAwareness PerMonitorV2
+
+!if "{{compression}}" == "none"
+  SetCompress off
 !else
   SetCompressor /SOLID "{{compression}}"
 !endif
 
-Unicode true
+{{#if signed_plugins_path}}
+!addplugindir "{{signed_plugins_path}}"
+{{/if}}
 
 !include MUI2.nsh
 !include FileFunc.nsh
 !include x64.nsh
 !include WinVer.nsh
 !include WordFunc.nsh
+!include "utils.nsh"
 !include "FileAssociation.nsh"
-!include "StrFunc.nsh"
+!include "Win\COM.nsh"
+!include "Win\Propkey.nsh"
 !include "StrFunc.nsh"
 ${StrCase}
 ${StrLoc}
 
+{{#if installer_hooks}}
+!include "{{installer_hooks}}"
+{{/if}}
+
+!define WEBVIEW2APPGUID "{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}"
 !define MANUFACTURER "{{manufacturer}}"
 !define PRODUCTNAME "{{product_name}}"
 !define VERSION "{{version}}"
 !define VERSIONWITHBUILD "{{version_with_build}}"
-!define SHORTDESCRIPTION "{{short_description}}"
+!define HOMEPAGE "{{homepage}}"
 !define INSTALLMODE "{{install_mode}}"
 !define LICENSE "{{license}}"
 !define INSTALLERICON "{{installer_icon}}"
 !define SIDEBARIMAGE "{{sidebar_image}}"
 !define HEADERIMAGE "{{header_image}}"
+!define UNINSTALLERICON "{{uninstaller_icon}}"
+!define UNINSTALLERHEADERIMAGE "{{uninstaller_header_image}}"
 !define MAINBINARYNAME "{{main_binary_name}}"
 !define MAINBINARYSRCPATH "{{main_binary_path}}"
-!define IDENTIFIER "{{identifier}}"
+!define BUNDLEID "{{bundle_id}}"
 !define COPYRIGHT "{{copyright}}"
 !define OUTFILE "{{out_file}}"
 !define ARCH "{{arch}}"
-!define PLUGINSPATH "{{additional_plugins_path}}"
+!define ADDITIONALPLUGINSPATH "{{additional_plugins_path}}"
 !define ALLOWDOWNGRADES "{{allow_downgrades}}"
 !define DISPLAYLANGUAGESELECTOR "{{display_language_selector}}"
+!define INSTALLWEBVIEW2MODE "{{install_webview2_mode}}"
+!define WEBVIEW2INSTALLERARGS "{{webview2_installer_args}}"
+!define WEBVIEW2BOOTSTRAPPERPATH "{{webview2_bootstrapper_path}}"
+!define WEBVIEW2INSTALLERPATH "{{webview2_installer_path}}"
+!define MINIMUMWEBVIEW2VERSION "{{minimum_webview2_version}}"
 !define UNINSTKEY "Software\Microsoft\Windows\CurrentVersion\Uninstall\${PRODUCTNAME}"
 !define MANUPRODUCTKEY "Software\${MANUFACTURER}\${PRODUCTNAME}"
 !define UNINSTALLERSIGNCOMMAND "{{uninstaller_sign_cmd}}"
@@ -71,15 +90,12 @@ OutFile "${OUTFILE}"
 
 VIProductVersion "${VERSIONWITHBUILD}"
 VIAddVersionKey "ProductName" "${PRODUCTNAME}"
-VIAddVersionKey "FileDescription" "${SHORTDESCRIPTION}"
+VIAddVersionKey "FileDescription" "${PRODUCTNAME}"
 VIAddVersionKey "LegalCopyright" "${COPYRIGHT}"
 VIAddVersionKey "FileVersion" "${VERSION}"
 VIAddVersionKey "ProductVersion" "${VERSION}"
 
-; Plugins path, currently exists for linux only
-!if "${PLUGINSPATH}" != ""
-    !addplugindir "${PLUGINSPATH}"
-!endif
+!addplugindir "${ADDITIONALPLUGINSPATH}"
 
 !if "${UNINSTALLERSIGNCOMMAND}" != ""
   !uninstfinalize '${UNINSTALLERSIGNCOMMAND}'
@@ -305,41 +321,29 @@ Var AppStartMenuFolder
 ; uninstall therefore keeps user data and firewall rules.
 Var RemoveFirewallCheckbox
 Var RemoveFirewallCheckboxState
-{{#if appdata_paths}}
 Var DeleteAppDataCheckbox
 Var DeleteAppDataCheckboxState
-{{/if}}
 !define /ifndef WS_EX_LAYOUTRTL         0x00400000
 !define MUI_PAGE_CUSTOMFUNCTION_SHOW un.ConfirmShow
 Function un.ConfirmShow
     FindWindow $1 "#32770" "" $HWNDPARENT ; Find inner dialog
     ${If} $(^RTL) == 1
       System::Call 'USER32::CreateWindowEx(i${__NSD_CheckBox_EXSTYLE}|${WS_EX_LAYOUTRTL},t"${__NSD_CheckBox_CLASS}",t "$(removeFirewallRules)",i${__NSD_CheckBox_STYLE},i 50,i 75,i 400, i 25,i$1,i0,i0,i0)i.s'
-      {{#if appdata_paths}}
       System::Call 'USER32::CreateWindowEx(i${__NSD_CheckBox_EXSTYLE}|${WS_EX_LAYOUTRTL},t"${__NSD_CheckBox_CLASS}",t "$(deleteAppData)",i${__NSD_CheckBox_STYLE},i 50,i 100,i 400, i 25,i$1,i0,i0,i0)i.s'
-      {{/if}}
     ${Else}
       System::Call 'USER32::CreateWindowEx(i${__NSD_CheckBox_EXSTYLE},t"${__NSD_CheckBox_CLASS}",t "$(removeFirewallRules)",i${__NSD_CheckBox_STYLE},i 0,i 75,i 400, i 25,i$1,i0,i0,i0)i.s'
-      {{#if appdata_paths}}
       System::Call 'USER32::CreateWindowEx(i${__NSD_CheckBox_EXSTYLE},t"${__NSD_CheckBox_CLASS}",t "$(deleteAppData)",i${__NSD_CheckBox_STYLE},i 0,i 100,i 400, i 25,i$1,i0,i0,i0)i.s'
-      {{/if}}
     ${EndIf}
-    {{#if appdata_paths}}
     Pop $DeleteAppDataCheckbox
-    {{/if}}
     Pop $RemoveFirewallCheckbox
     SendMessage $HWNDPARENT ${WM_GETFONT} 0 0 $1
     SendMessage $RemoveFirewallCheckbox ${WM_SETFONT} $1 1
-    {{#if appdata_paths}}
     SendMessage $DeleteAppDataCheckbox ${WM_SETFONT} $1 1
-    {{/if}}
 FunctionEnd
 !define MUI_PAGE_CUSTOMFUNCTION_LEAVE un.ConfirmLeave
 Function un.ConfirmLeave
     SendMessage $RemoveFirewallCheckbox ${BM_GETCHECK} 0 0 $RemoveFirewallCheckboxState
-    {{#if appdata_paths}}
     SendMessage $DeleteAppDataCheckbox ${BM_GETCHECK} 0 0 $DeleteAppDataCheckboxState
-    {{/if}}
 FunctionEnd
 !insertmacro MUI_UNPAGE_CONFIRM
 
@@ -672,10 +676,6 @@ Function .onInit
 FunctionEnd
 
 
-{{#if preinstall_section}}
-{{unescape_newlines preinstall_section}}
-{{/if}}
-
 !macro CheckIfAppIsRunning
   nsis_tauri_utils::FindProcess "${MAINBINARYNAME}.exe"
   Pop $R0
@@ -729,6 +729,92 @@ Function WaitForAirWikiUpdateShutdown
   update_shutdown_done:
 FunctionEnd
 
+Section WebView2
+  ${If} ${RunningX64}
+    ReadRegStr $4 HKLM "SOFTWARE\WOW6432Node\Microsoft\EdgeUpdate\Clients\${WEBVIEW2APPGUID}" "pv"
+  ${Else}
+    ReadRegStr $4 HKLM "SOFTWARE\Microsoft\EdgeUpdate\Clients\${WEBVIEW2APPGUID}" "pv"
+  ${EndIf}
+  ${If} $4 == ""
+    ReadRegStr $4 HKCU "SOFTWARE\Microsoft\EdgeUpdate\Clients\${WEBVIEW2APPGUID}" "pv"
+  ${EndIf}
+
+  ${If} $4 == ""
+    ; An update never needs to bootstrap WebView2: the installed Tauri app
+    ; already proved that the runtime exists. A fresh install communicates a
+    ; network failure and remains on this page so the user can retry.
+    ${If} $UpdaterMode != 1
+      !if "${INSTALLWEBVIEW2MODE}" == "downloadBootstrapper"
+        Delete "$TEMP\MicrosoftEdgeWebview2Setup.exe"
+        DetailPrint "$(webview2Downloading)"
+        NSISdl::download "https://go.microsoft.com/fwlink/p/?LinkId=2124703" "$TEMP\MicrosoftEdgeWebview2Setup.exe"
+        Pop $0
+        ${If} $0 == "success"
+          DetailPrint "$(webview2DownloadSuccess)"
+        ${Else}
+          DetailPrint "$(webview2DownloadError)"
+          Abort "$(webview2AbortError)"
+        ${EndIf}
+        StrCpy $6 "$TEMP\MicrosoftEdgeWebview2Setup.exe"
+        Goto install_webview2
+      !endif
+
+      !if "${INSTALLWEBVIEW2MODE}" == "embedBootstrapper"
+        Delete "$TEMP\MicrosoftEdgeWebview2Setup.exe"
+        File "/oname=$TEMP\MicrosoftEdgeWebview2Setup.exe" "${WEBVIEW2BOOTSTRAPPERPATH}"
+        StrCpy $6 "$TEMP\MicrosoftEdgeWebview2Setup.exe"
+        Goto install_webview2
+      !endif
+
+      !if "${INSTALLWEBVIEW2MODE}" == "offlineInstaller"
+        Delete "$TEMP\MicrosoftEdgeWebView2RuntimeInstaller.exe"
+        File "/oname=$TEMP\MicrosoftEdgeWebView2RuntimeInstaller.exe" "${WEBVIEW2INSTALLERPATH}"
+        StrCpy $6 "$TEMP\MicrosoftEdgeWebView2RuntimeInstaller.exe"
+        Goto install_webview2
+      !endif
+
+      Goto webview2_done
+
+      install_webview2:
+        DetailPrint "$(installingWebview2)"
+        ExecWait "$6 ${WEBVIEW2INSTALLERARGS} /install" $1
+        ${If} $1 = 0
+          DetailPrint "$(webview2InstallSuccess)"
+        ${Else}
+          DetailPrint "$(webview2InstallError)"
+          Abort "$(webview2AbortError)"
+        ${EndIf}
+      webview2_done:
+    ${EndIf}
+  ${Else}
+    !if "${MINIMUMWEBVIEW2VERSION}" != ""
+      ${VersionCompare} "${MINIMUMWEBVIEW2VERSION}" "$4" $R0
+      ${If} $R0 = 1
+        update_webview:
+          DetailPrint "$(installingWebview2)"
+          ${If} ${RunningX64}
+            ReadRegStr $R1 HKLM "SOFTWARE\WOW6432Node\Microsoft\EdgeUpdate" "path"
+          ${Else}
+            ReadRegStr $R1 HKLM "SOFTWARE\Microsoft\EdgeUpdate" "path"
+          ${EndIf}
+          ${If} $R1 == ""
+            ReadRegStr $R1 HKCU "SOFTWARE\Microsoft\EdgeUpdate" "path"
+          ${EndIf}
+          ${If} $R1 != ""
+            ExecWait `"$R1" /install appguid=${WEBVIEW2APPGUID}&needsadmin=true` $1
+            ${If} $1 = 0
+              DetailPrint "$(webview2InstallSuccess)"
+            ${Else}
+              MessageBox MB_ICONEXCLAMATION|MB_ABORTRETRYIGNORE "$(webview2InstallError)" IDIGNORE ignore IDRETRY update_webview
+              Quit
+              ignore:
+            ${EndIf}
+          ${EndIf}
+      ${EndIf}
+    !endif
+  ${EndIf}
+SectionEnd
+
 Section Install
   ; Revalidate the effective command-line/default path before every write.
   Call ValidateInstallLocation
@@ -747,17 +833,17 @@ Section Install
 
   ; Copy resources
   {{#each resources}}
-    File /a "/oname={{this}}" "{{@key}}"
+    File /a "/oname={{this.[1]}}" "{{no-escape @key}}"
   {{/each}}
 
   ; Copy external binaries
   {{#each binaries}}
-    File /a "/oname={{this}}" "{{@key}}"
+    File /a "/oname={{this}}" "{{no-escape @key}}"
   {{/each}}
 
   ; Create file associations
   {{#each file_associations as |association| ~}}
-    {{#each association.extensions as |ext| ~}}
+    {{#each association.ext as |ext| ~}}
        !insertmacro APP_ASSOCIATE "{{ext}}" "{{or association.name ext}}" "{{association-description association.description ext}}" "$INSTDIR\${MAINBINARYNAME}.exe,0" "Open with ${PRODUCTNAME}" "$INSTDIR\${MAINBINARYNAME}.exe $\"%1$\""
     {{/each}}
   {{/each}}
@@ -895,7 +981,7 @@ Function un.ValidateManagedPayloadTree
   Push "$INSTDIR\uninstall.exe"
   Call un.ValidateManagedPath
   {{#each resources}}
-    Push "$INSTDIR\\{{this}}"
+    Push "$INSTDIR\\{{this.[1]}}"
     Call un.ValidateManagedPath
   {{/each}}
   {{#each binaries}}
@@ -1009,7 +1095,7 @@ Section Uninstall
 
   ; Delete resources
   {{#each resources}}
-    Push "$INSTDIR\\{{this}}"
+    Push "$INSTDIR\\{{this.[1]}}"
     Call un.RemoveManagedFile
   {{/each}}
 
@@ -1045,8 +1131,8 @@ Section Uninstall
   {{#each resources_dirs}}
   Call un.RemoveManagedDirectory
   {{/each}}
-  ; A resource targeted at integrations/bridge makes cargo-packager emit only
-  ; the leaf directory. Remove the empty app-owned parent as well.
+  ; The bridge resource contributes only its leaf directory. Remove the empty
+  ; app-owned parent as well.
   Push "$INSTDIR\integrations"
   Call un.RemoveManagedDirectory
   Push "$INSTDIR"
@@ -1075,15 +1161,12 @@ Section Uninstall
     DeleteRegKey /ifempty SHCTX "${MANUPRODUCTKEY}"
   product_registry_cleanup_done:
 
-  ; Delete app data
-  {{#if appdata_paths}}
+  ; Delete only AirWiki's two documented mutable roots when explicitly chosen.
   ${If} $DeleteAppDataCheckboxState == 1
-      SetShellVarContext current
-      {{#each appdata_paths}}
-      RmDir /r "{{unescape_dollar_sign this}}"
-      {{/each}}
+    SetShellVarContext current
+    RmDir /r "$LOCALAPPDATA\airwiki\AirWiki"
+    RmDir /r "$APPDATA\airwiki\AirWiki"
   ${EndIf}
-  {{/if}}
 
   ${GetOptions} $CMDLINE "/P" $R0
   IfErrors +2 0

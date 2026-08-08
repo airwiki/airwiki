@@ -8,6 +8,11 @@ use thiserror::Error;
 
 #[cfg(any(target_os = "windows", test))]
 const ADVANCED_FIREWALL_CONSOLE: &str = "wf.msc";
+#[cfg(any(target_os = "windows", test))]
+const WINDOWS_NETWORK_SETTINGS: &str = "ms-settings:network-status";
+#[cfg(any(target_os = "macos", test))]
+const MACOS_LOCAL_NETWORK_SETTINGS: &str =
+    "x-help-action://openPrefPane?bundleId=com.apple.settings.PrivacySecurity.extension";
 
 /// State of the operating system's local-network permission.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -224,6 +229,17 @@ pub(crate) enum FirewallActionError {
     Internal,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[allow(
+    dead_code,
+    reason = "all destinations are used by the Tauri runner during migration"
+)]
+pub(crate) enum SystemDestination {
+    NetworkSettings,
+    AdvancedFirewall,
+    LocalNetworkPrivacy,
+}
+
 /// Performs a read-only platform diagnostic.
 ///
 /// This function is blocking on Windows because it initializes COM and reads
@@ -248,8 +264,10 @@ pub(crate) fn remove_firewall_rules() -> Result<(), FirewallActionError> {
 /// Opens the fixed Windows advanced firewall console.
 ///
 /// Callers must invoke this through the worker's blocking boundary.
-pub(crate) fn open_advanced_firewall_rules() -> Result<(), FirewallActionError> {
-    platform::open_advanced_firewall_rules()
+pub(crate) fn open_system_destination(
+    destination: SystemDestination,
+) -> Result<(), FirewallActionError> {
+    platform::open_system_destination(destination)
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -308,7 +326,7 @@ mod platform {
     use super::{
         ADVANCED_FIREWALL_CONSOLE, ConnectivityPlatformSnapshot, FirewallActionError,
         FirewallDiagnosticState, FirewallHelperState, FirewallOperation, NetworkProfileState,
-        SystemPermissionState,
+        SystemDestination, SystemPermissionState, WINDOWS_NETWORK_SETTINGS,
     };
 
     const HELPER_BASENAME: &str = "airwiki-windows-firewall-helper.exe";
@@ -331,16 +349,23 @@ mod platform {
         VerifiedElevationTarget::prepare()?.run(operation)
     }
 
-    pub(super) fn open_advanced_firewall_rules() -> Result<(), FirewallActionError> {
+    pub(super) fn open_system_destination(
+        destination: SystemDestination,
+    ) -> Result<(), FirewallActionError> {
+        let target = match destination {
+            SystemDestination::NetworkSettings => WINDOWS_NETWORK_SETTINGS,
+            SystemDestination::AdvancedFirewall => ADVANCED_FIREWALL_CONSOLE,
+            SystemDestination::LocalNetworkPrivacy => return Err(FirewallActionError::Unsupported),
+        };
         let _apartment = ComApartment::initialize_shell_action()?;
         let verb = wide_null("open");
-        let console = wide_null(ADVANCED_FIREWALL_CONSOLE);
+        let target = wide_null(target);
         let mut execute = SHELLEXECUTEINFOW {
             cbSize: u32::try_from(size_of::<SHELLEXECUTEINFOW>())
                 .map_err(|_| FirewallActionError::Internal)?,
             hwnd: HWND(null_mut()),
             lpVerb: PCWSTR(verb.as_ptr()),
-            lpFile: PCWSTR(console.as_ptr()),
+            lpFile: PCWSTR(target.as_ptr()),
             nShow: SW_SHOWNORMAL.0,
             ..Default::default()
         };
@@ -905,7 +930,8 @@ mod platform {
 mod platform {
     use super::{
         ConnectivityPlatformSnapshot, FirewallActionError, FirewallDiagnosticState,
-        FirewallHelperState, FirewallOperation, NetworkProfileState, SystemPermissionState,
+        FirewallHelperState, FirewallOperation, NetworkProfileState, SystemDestination,
+        SystemPermissionState,
     };
 
     pub(super) fn diagnose() -> ConnectivityPlatformSnapshot {
@@ -935,8 +961,29 @@ mod platform {
         Err(FirewallActionError::Unsupported)
     }
 
-    pub(super) fn open_advanced_firewall_rules() -> Result<(), FirewallActionError> {
-        Err(FirewallActionError::Unsupported)
+    pub(super) fn open_system_destination(
+        destination: SystemDestination,
+    ) -> Result<(), FirewallActionError> {
+        #[cfg(target_os = "macos")]
+        {
+            if destination != SystemDestination::LocalNetworkPrivacy {
+                return Err(FirewallActionError::Unsupported);
+            }
+            let status = std::process::Command::new("/usr/bin/open")
+                .arg("--")
+                .arg(super::MACOS_LOCAL_NETWORK_SETTINGS)
+                .status()
+                .map_err(|_| FirewallActionError::Internal)?;
+            status
+                .success()
+                .then_some(())
+                .ok_or(FirewallActionError::Internal)
+        }
+        #[cfg(not(target_os = "macos"))]
+        {
+            let _ = destination;
+            Err(FirewallActionError::Unsupported)
+        }
     }
 }
 
@@ -947,6 +994,8 @@ mod tests {
     #[test]
     fn advanced_firewall_action_is_fixed_and_platform_scoped() {
         assert_eq!(ADVANCED_FIREWALL_CONSOLE, "wf.msc");
+        assert_eq!(WINDOWS_NETWORK_SETTINGS, "ms-settings:network-status");
+        assert!(MACOS_LOCAL_NETWORK_SETTINGS.starts_with("x-help-action://"));
     }
 
     fn windows_snapshot(

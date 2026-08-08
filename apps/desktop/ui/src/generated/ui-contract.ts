@@ -95,6 +95,8 @@ export type LanRuntimeSummary = { listener: LanListenerStatus, discovery: LanDis
 
 export type FirewallOperationStatus = "awaitingWindows" | "takingLonger";
 
+export type SystemDestination = "networkSettings" | "advancedFirewall" | "localNetworkPrivacy";
+
 export type IntegrationClient = "chatGptDesktop" | "claudeDesktop" | "geminiCli";
 
 export type IntegrationStatus = "notInstalled" | "available" | "configuring" | "awaitingClientApproval" | "configured" | "updateAvailable" | "conflict" | "unsupported" | "error";

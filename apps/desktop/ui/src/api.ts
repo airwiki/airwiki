@@ -8,6 +8,7 @@ import type {
   KnowledgePageInput,
   PreferencesInput,
   ReviewSummary,
+  SystemDestination,
   UiEventEnvelope
 } from './generated/ui-contract';
 
@@ -146,8 +147,8 @@ export async function configureFirewall(requestId: string, install: boolean): Pr
   return invoke('configure_firewall', { requestId, install });
 }
 
-export async function openAdvancedFirewall(requestId: string): Promise<void> {
-  return invoke('open_advanced_firewall', { requestId });
+export async function openSystemDestination(requestId: string, destination: SystemDestination): Promise<void> {
+  return invoke('open_system_destination', { requestId, destination });
 }
 
 export async function hideToTray(): Promise<void> {

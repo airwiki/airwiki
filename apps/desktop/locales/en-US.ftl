@@ -2,11 +2,17 @@ app-title = AirWiki
 nav-home = Home
 nav-collections = Knowledge folders
 nav-review = Review
+nav-review-count = Review · { $count }
 nav-wiki = Wiki
 nav-search = Search
 nav-integrations = Chats
 nav-devices = Other devices
 nav-settings = Settings
+nav-group-knowledge = Knowledge
+nav-group-connections = Connections
+nav-group-system = System
+nav-local-first = Local · reviewed
+nav-device-status = On this device
 
 status-ready = Ready
 status-working = Working
@@ -17,6 +23,7 @@ status-optional-disabled = Optional · Off
 dashboard-title = Your knowledge
 dashboard-subtitle = AirWiki keeps local knowledge organized and shows only the next action that needs you.
 dashboard-all-ready = Everything is ready
+dashboard-eyebrow = Knowledge on this device
 
 first-knowledge-eyebrow = Private by default
 first-knowledge-title = Turn a folder into knowledge you can verify
@@ -102,12 +109,21 @@ primary-button-view-diagnostics = View diagnostics
 collections-title = Knowledge folders
 collections-subtitle = Each knowledge folder watches one local folder and maintains an independent OKF bundle.
 collections-monitoring = Automatic monitoring runs while the app is open, with a full reconciliation every { $minutes } minutes when local AI is ready.
+collections-intake-eyebrow = ADD A LOCAL SOURCE
 collections-new = New knowledge folder
 collections-name = Name
 collections-choose-folder = Choose folder…
+collections-folder-unselected = No folder selected
 collections-create-scan = Create and scan
 collections-empty-title = No knowledge folders yet
 collections-empty-body = Create one to import Markdown or text-based PDF files.
+collections-library-title = KNOWLEDGE LIBRARY
+collections-library-count = { $count } { $count ->
+    [one] folder
+   *[other] folders
+}
+collections-source-status = SOURCE STATUS
+collections-access-title = REACH AND PERMISSIONS
 collections-linked = Folder linked and monitored
 collections-counts = { $documents } documents · { $published } published
 collections-last-scan = Last scan: { $time }
@@ -530,10 +546,27 @@ diagnostics-configuration = Configuration
 tray-start-failed = AirWiki could not start the system tray.
 technical-details = Technical details
 
-review-title = Review queue
-review-subtitle = Nothing is published or shared without explicit human approval.
+review-title = Review desk
+review-subtitle = Verify the source, refine the proposed knowledge, then decide what becomes part of your Wiki.
+review-empty-eyebrow = INBOX CLEAR
 review-empty-title = No documents are waiting
-review-empty-body = New versions appear here after local enrichment.
+review-empty-body = New versions appear here after local preparation. Add or rescan a knowledge folder to continue.
+review-empty-action = Open knowledge folders
+review-ready-summary = { $count ->
+    [one] 1 ready
+   *[other] { $count } ready
+}
+review-issue-summary = { $count ->
+    [one] 1 needs attention
+   *[other] { $count } need attention
+}
+review-inbox-title = REVIEW INBOX
+review-current-document = CURRENT DOCUMENT
+review-evidence-step = 01 · SOURCE EVIDENCE
+review-draft-step = 02 · PROPOSED KNOWLEDGE
+review-decision-title = DECISION
+review-focus-evidence = Evidence
+review-focus-draft = Proposed knowledge
 review-ready-group = Ready for review ({ $count })
 review-issues-group = Needs attention ({ $count })
 review-issues-more = and { $count } more

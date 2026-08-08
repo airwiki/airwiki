@@ -19,7 +19,10 @@ mod worker;
 use std::{
     collections::HashMap,
     path::PathBuf,
-    sync::{Arc, Mutex},
+    sync::{
+        Arc, Mutex,
+        atomic::{AtomicBool, Ordering},
+    },
     time::{Duration, Instant},
 };
 
@@ -29,8 +32,13 @@ use airwiki_types::{EnrichmentDraft, SearchPurpose};
 use anyhow::{Context, Result};
 use pulldown_cmark::{CodeBlockKind, Event as MarkdownEvent, HeadingLevel, Parser, Tag, TagEnd};
 use serde::{Deserialize, Serialize};
-use tauri::{Manager, ipc::Channel};
-use tokio::sync::{broadcast, mpsc, watch};
+use tauri::{
+    AppHandle, Emitter, Manager, WindowEvent,
+    ipc::Channel,
+    menu::{Menu, MenuItem},
+    tray::{TrayIconBuilder, TrayIconEvent},
+};
+use tokio::sync::{broadcast, mpsc, oneshot, watch};
 use uuid::Uuid;
 
 use crate::{
@@ -51,6 +59,9 @@ struct AppRuntime {
     review_versions: Arc<Mutex<HashMap<Uuid, CachedReviewVersion>>>,
     knowledge_fingerprints: Arc<Mutex<HashMap<(Uuid, KnowledgePageId), String>>>,
     requests: Arc<Mutex<RequestTracker>>,
+    tray_operational: AtomicBool,
+    exiting: AtomicBool,
+    worker_finished: Mutex<Option<oneshot::Receiver<()>>>,
 }
 
 #[derive(Clone)]
@@ -675,6 +686,95 @@ fn update_preferences(
             },
         },
     )
+}
+
+#[tauri::command]
+fn hide_to_tray(app: AppHandle, runtime: tauri::State<'_, AppRuntime>) -> Result<(), UiError> {
+    if !runtime.tray_operational.load(Ordering::Acquire) {
+        return Err(UiError::invalid("trayUnavailable"));
+    }
+    app.get_webview_window("main")
+        .ok_or_else(UiError::internal)?
+        .hide()
+        .map_err(|_| UiError::internal())
+}
+
+#[tauri::command]
+fn quit_completely(app: AppHandle) {
+    begin_shutdown(app);
+}
+
+fn begin_shutdown(app: AppHandle) {
+    let runtime = app.state::<AppRuntime>();
+    if runtime.exiting.swap(true, Ordering::AcqRel) {
+        return;
+    }
+    let commands = runtime.commands.clone();
+    let finished = runtime
+        .worker_finished
+        .lock()
+        .ok()
+        .and_then(|mut receiver| receiver.take());
+    tauri::async_runtime::spawn(async move {
+        let shutdown = async {
+            let _ = commands.send(WorkerCommand::Shutdown).await;
+            if let Some(finished) = finished {
+                let _ = finished.await;
+            }
+        };
+        if tokio::time::timeout(Duration::from_secs(2), shutdown)
+            .await
+            .is_err()
+        {
+            tracing::warn!(error_kind = "shutdown_timeout", "shutdown deadline elapsed");
+        }
+        app.exit(0);
+    });
+}
+
+fn show_main_window(app: &AppHandle) {
+    if let Some(window) = app.get_webview_window("main") {
+        let _ = window.show();
+        let _ = window.unminimize();
+        let _ = window.set_focus();
+    }
+}
+
+fn install_tray(app: &tauri::App) -> tauri::Result<()> {
+    let open = MenuItem::with_id(app, "open", "Abrir AirWiki", true, None::<&str>)?;
+    let quit = MenuItem::with_id(app, "quit", "Salir completamente", true, None::<&str>)?;
+    let menu = Menu::with_items(app, &[&open, &quit])?;
+    TrayIconBuilder::new()
+        .menu(&menu)
+        .on_menu_event(|app, event| match event.id().as_ref() {
+            "open" => show_main_window(app),
+            "quit" => begin_shutdown(app.clone()),
+            _ => {}
+        })
+        .on_tray_icon_event(|tray, event| {
+            if matches!(event, TrayIconEvent::Click { .. }) {
+                show_main_window(tray.app_handle());
+            }
+        })
+        .build(app)?;
+    Ok(())
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum CloseAction {
+    Hide,
+    Prompt,
+    Quit,
+}
+
+const fn close_action(preference: CloseBehavior, tray_operational: bool) -> CloseAction {
+    match (preference, tray_operational) {
+        (CloseBehavior::HideToTray, true) => CloseAction::Hide,
+        (CloseBehavior::Ask, true) => CloseAction::Prompt,
+        (CloseBehavior::HideToTray | CloseBehavior::Ask | CloseBehavior::Quit, _) => {
+            CloseAction::Quit
+        }
+    }
 }
 
 fn consume_folder_selection(runtime: &AppRuntime, token: &str) -> Result<PathBuf, UiError> {
@@ -1363,14 +1463,11 @@ fn main() -> Result<()> {
     let presentation_knowledge_fingerprints = Arc::clone(&knowledge_fingerprints);
     let requests = Arc::new(Mutex::new(RequestTracker::default()));
     let presentation_requests = Arc::clone(&requests);
+    let (worker_finished_sender, worker_finished) = oneshot::channel();
 
     tauri::Builder::default()
         .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
-            if let Some(window) = app.get_webview_window("main") {
-                let _ = window.show();
-                let _ = window.unminimize();
-                let _ = window.set_focus();
-            }
+            show_main_window(app);
         }))
         .manage(AppRuntime {
             commands,
@@ -1379,8 +1476,21 @@ fn main() -> Result<()> {
             review_versions,
             knowledge_fingerprints,
             requests,
+            tray_operational: AtomicBool::new(false),
+            exiting: AtomicBool::new(false),
+            worker_finished: Mutex::new(Some(worker_finished)),
         })
-        .setup(move |_app| {
+        .setup(move |app| {
+            if install_tray(app).is_ok() {
+                app.state::<AppRuntime>()
+                    .tray_operational
+                    .store(true, Ordering::Release);
+            } else {
+                tracing::warn!(
+                    error_kind = "tray_unavailable",
+                    "tray initialization failed"
+                );
+            }
             tauri::async_runtime::spawn(async move {
                 let mut snapshot = AppSnapshot::starting();
                 loop {
@@ -1412,8 +1522,41 @@ fn main() -> Result<()> {
                     }
                 }
             });
-            tauri::async_runtime::spawn(run_worker(paths, command_receiver, worker_events));
+            tauri::async_runtime::spawn(async move {
+                run_worker(paths, command_receiver, worker_events).await;
+                let _ = worker_finished_sender.send(());
+            });
             Ok(())
+        })
+        .on_window_event(|window, event| {
+            if let WindowEvent::CloseRequested { api, .. } = event {
+                let app = window.app_handle();
+                let runtime = app.state::<AppRuntime>();
+                if runtime.exiting.load(Ordering::Acquire) {
+                    return;
+                }
+                api.prevent_close();
+                let close_behavior = runtime
+                    .snapshot
+                    .lock()
+                    .ok()
+                    .and_then(|snapshot| snapshot.borrow().preferences)
+                    .map_or(CloseBehavior::Ask, |preferences| preferences.close_behavior);
+                match close_action(
+                    close_behavior,
+                    runtime.tray_operational.load(Ordering::Acquire),
+                ) {
+                    CloseAction::Hide => {
+                        let _ = window.hide();
+                    }
+                    CloseAction::Prompt => {
+                        let _ = window.emit("close-choice-required", ());
+                    }
+                    CloseAction::Quit => {
+                        begin_shutdown(app.clone());
+                    }
+                }
+            }
         })
         .invoke_handler(tauri::generate_handler![
             connect,
@@ -1432,7 +1575,9 @@ fn main() -> Result<()> {
             reanalyze_review,
             load_knowledge_bundle,
             load_knowledge_page,
-            update_preferences
+            update_preferences,
+            hide_to_tray,
+            quit_completely
         ])
         .run(tauri::generate_context!())
         .map_err(|error| anyhow::anyhow!(error.to_string()))
@@ -1445,6 +1590,7 @@ mod tests {
     fn runtime_with_selection(token: Uuid, path: PathBuf, expires_at: Instant) -> AppRuntime {
         let (commands, _receiver) = mpsc::channel(COMMAND_CAPACITY);
         let (_snapshot_sender, snapshot) = watch::channel(AppSnapshot::starting());
+        let (_worker_finished_sender, worker_finished) = oneshot::channel();
         AppRuntime {
             commands,
             snapshot: Mutex::new(snapshot),
@@ -1455,6 +1601,9 @@ mod tests {
             review_versions: Arc::new(Mutex::new(HashMap::new())),
             knowledge_fingerprints: Arc::new(Mutex::new(HashMap::new())),
             requests: Arc::new(Mutex::new(RequestTracker::default())),
+            tray_operational: AtomicBool::new(false),
+            exiting: AtomicBool::new(false),
+            worker_finished: Mutex::new(Some(worker_finished)),
         }
     }
 
@@ -1586,5 +1735,18 @@ mod tests {
             },
             &requests,
         ));
+    }
+
+    #[test]
+    fn tray_failure_never_leaves_an_inaccessible_process() {
+        assert_eq!(
+            close_action(CloseBehavior::HideToTray, false),
+            CloseAction::Quit
+        );
+        assert_eq!(close_action(CloseBehavior::Ask, false), CloseAction::Quit);
+        assert_eq!(
+            close_action(CloseBehavior::HideToTray, true),
+            CloseAction::Hide
+        );
     }
 }

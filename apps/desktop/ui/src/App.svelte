@@ -1,7 +1,8 @@
 <script lang="ts">
   import { BookOpen, CheckCircle2, FileText, History, RefreshCw, Search, Settings2, Sparkles } from '@lucide/svelte';
+  import { listen } from '@tauri-apps/api/event';
   import { onMount } from 'svelte';
-  import { addCollection, approveReview, connect, loadKnowledgeBundle, loadKnowledgePage, loadReviewEvidence, pickCollectionFolder, reanalyzeReview, rejectReview, rescanCollection, searchKnowledge, updatePreferences, type AppSnapshot, type CloseBehavior, type EnrichmentDraft, type FolderSelection, type KnowledgePageInput, type LanPreference, type LocalePreference, type ReviewSummary } from './api';
+  import { addCollection, approveReview, connect, hideToTray, loadKnowledgeBundle, loadKnowledgePage, loadReviewEvidence, pickCollectionFolder, quitCompletely, reanalyzeReview, rejectReview, rescanCollection, searchKnowledge, updatePreferences, type AppSnapshot, type CloseBehavior, type EnrichmentDraft, type FolderSelection, type KnowledgePageInput, type LanPreference, type LocalePreference, type ReviewSummary } from './api';
 
   type Destination = 'library' | 'review' | 'search' | 'system';
 
@@ -28,8 +29,10 @@
   let lanPreference: LanPreference = 'undecided';
   let closeBehavior: CloseBehavior = 'ask';
   let automaticUpdateChecks = false;
+  let closeChoiceRequired = false;
 
   onMount(() => {
+    const unlistenClose = listen('close-choice-required', () => { closeChoiceRequired = true; });
     connect((event) => {
       snapshot = event.snapshot;
       if (event.snapshot.preferences) {
@@ -57,6 +60,7 @@
       }
       runtimeLabel = initial.phase === 'ready' ? 'Servicios privados listos' : runtimeLabel;
     }).catch(() => { runtimeLabel = 'Vista previa sin runtime nativo'; });
+    return () => { void unlistenClose.then((unlisten) => unlisten()); };
   });
 
   function select(next: Destination) {
@@ -177,6 +181,12 @@
       actionMessage = 'No se pudieron guardar las preferencias.';
       actionBusy = false;
     }
+  }
+
+  async function applyCloseChoice(choice: 'hide' | 'quit' | 'cancel') {
+    closeChoiceRequired = false;
+    if (choice === 'hide') await hideToTray();
+    if (choice === 'quit') await quitCompletely();
   }
 </script>
 
@@ -367,4 +377,13 @@
     </section>
   </main>
 </div>
+{/if}
+{#if closeChoiceRequired}
+  <div class="modal-backdrop" role="presentation">
+    <div class="close-dialog" role="dialog" aria-modal="true" aria-labelledby="close-title">
+      <p class="section-label">Al cerrar AirWiki</p><h2 id="close-title">¿Mantener los servicios activos?</h2>
+      <p>Ocultar conserva watchers, MCP, red local e inferencia. Salir los detiene de forma coordinada.</p>
+      <div><button class="primary" onclick={() => applyCloseChoice('hide')}>Ocultar en bandeja</button><button class="danger" onclick={() => applyCloseChoice('quit')}>Salir completamente</button><button class="secondary" onclick={() => applyCloseChoice('cancel')}>Cancelar</button></div>
+    </div>
+  </div>
 {/if}

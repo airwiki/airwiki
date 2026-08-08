@@ -139,3 +139,11 @@ export async function updatePreferences(preferences: PreferencesInput): Promise<
   await invoke('update_preferences', { requestId, preferences });
   return requestId;
 }
+
+export async function hideToTray(): Promise<void> {
+  return invoke('hide_to_tray');
+}
+
+export async function quitCompletely(): Promise<void> {
+  return invoke('quit_completely');
+}

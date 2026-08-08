@@ -49,6 +49,7 @@ tauri-plugin-single-instance = "2.4.3"
 tracing.workspace = true
 tracing-appender = "0.2.3"
 tracing-subscriber.workspace = true
+ts-rs = { version = "=12.0.1", features = ["no-serde-warnings", "uuid-impl"] }
 unic-langid = "0.9.6"
 uuid.workspace = true
 

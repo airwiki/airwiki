@@ -1,8 +1,9 @@
 <script lang="ts">
-  import { BookOpen, CheckCircle2, FileText, History, RefreshCw, Search, Settings2, Sparkles } from '@lucide/svelte';
+  import { BookOpen, CheckCircle2, FileText, History, Network, RefreshCw, Search, Settings2, Sparkles } from '@lucide/svelte';
   import { listen } from '@tauri-apps/api/event';
   import { onMount } from 'svelte';
   import { addCollection, approveReview, cancelModelInstall, connect, hideToTray, installModels, loadKnowledgeBundle, loadKnowledgePage, loadReviewEvidence, pickCollectionFolder, quitCompletely, reanalyzeReview, rejectReview, rescanCollection, searchKnowledge, updatePreferences, type AppSnapshot, type CloseBehavior, type EnrichmentDraft, type FolderSelection, type KnowledgePageInput, type LanPreference, type LocalePreference, type ReviewSummary } from './api';
+  import KnowledgeGraph from './KnowledgeGraph.svelte';
 
   type Destination = 'library' | 'review' | 'search' | 'system';
 
@@ -25,6 +26,7 @@
   let selectedReview: ReviewSummary | null = null;
   let editDraft: EnrichmentDraft | null = null;
   let selectedCollectionId: string | null = null;
+  let knowledgeMode: 'document' | 'graph' = 'document';
   let locale: LocalePreference = 'system';
   let lanPreference: LanPreference = 'undecided';
   let closeBehavior: CloseBehavior = 'ask';
@@ -170,6 +172,7 @@
 
   async function openKnowledge(collectionId: string) {
     selectedCollectionId = collectionId;
+    knowledgeMode = 'document';
     actionBusy = true;
     actionMessage = 'Inspeccionando el conocimiento publicado…';
     try {
@@ -189,6 +192,11 @@
       actionMessage = 'La página cambió mientras la abrías. Actualiza la colección e inténtalo otra vez.';
       actionBusy = false;
     }
+  }
+
+  async function selectGraphPage(page: KnowledgePageInput) {
+    knowledgeMode = 'document';
+    await openKnowledgePage(page);
   }
 
   async function savePreferences(completeOnboarding = false) {
@@ -289,12 +297,17 @@
               <div><strong>{snapshot.knowledge.collectionName}</strong><small>{snapshot.knowledge.concepts.length} conceptos publicados</small></div>
               <button onclick={() => openKnowledgePage({ kind: 'index' })}><BookOpen size={15} />Índice</button>
               <button onclick={() => openKnowledgePage({ kind: 'log' })}><History size={15} />Historial</button>
+              <button class:active={knowledgeMode === 'graph'} onclick={() => { knowledgeMode = 'graph'; }}><Network size={15} />Mapa de relaciones</button>
               {#each snapshot.knowledge.concepts as concept}
                 <button onclick={() => openKnowledgePage(concept.page)} title={concept.description}><FileText size={15} /><span>{concept.title}</span></button>
               {/each}
             </aside>
             <section class="knowledge-document" aria-live="polite">
-              {#if snapshot.knowledge.status === 'updating'}
+              {#if knowledgeMode === 'graph' && snapshot.knowledge.status === 'ready'}
+                {#key `${snapshot.knowledge.collectionId}:${snapshot.knowledge.version}`}
+                  <KnowledgeGraph bundle={snapshot.knowledge} onselect={selectGraphPage} />
+                {/key}
+              {:else if snapshot.knowledge.status === 'updating'}
                 <p class="loading"><RefreshCw size={16} /> El índice se está actualizando…</p>
               {:else if snapshot.knowledgePage?.collectionId === selectedCollectionId && snapshot.knowledgePage.status === 'ready'}
                 <div class="document-heading"><p class="section-label">Página OKF verificada</p><h3>{snapshot.knowledgePage.title}</h3></div>

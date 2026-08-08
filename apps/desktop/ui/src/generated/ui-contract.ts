@@ -25,9 +25,11 @@ export type KnowledgeBlock = { "kind": "heading", level: number, text: string, }
 
 export type KnowledgeConceptSummary = { page: KnowledgePageInput, title: string, description: string, conceptType: string, tags: Array<string>, };
 
+export type KnowledgeGraphLinkSummary = { source: KnowledgePageInput, target: KnowledgePageInput, label: string, };
+
 export type KnowledgeBundleStatus = "empty" | "ready" | "updating" | "failed";
 
-export type KnowledgeBundleSummary = { collectionId: string, collectionName: string, status: KnowledgeBundleStatus, concepts: Array<KnowledgeConceptSummary>, errorCount: number, warningCount: number, };
+export type KnowledgeBundleSummary = { collectionId: string, collectionName: string, version: string, status: KnowledgeBundleStatus, concepts: Array<KnowledgeConceptSummary>, links: Array<KnowledgeGraphLinkSummary>, errorCount: number, warningCount: number, };
 
 export type KnowledgePageStatus = "ready" | "failed";
 

@@ -26,7 +26,10 @@ use std::{
     time::{Duration, Instant},
 };
 
-use airwiki_core::{KnowledgeBundleState, KnowledgePageId, KnowledgePageView, ReviewVersionToken};
+use airwiki_core::{
+    KnowledgeBundleState, KnowledgeLinkDisposition, KnowledgeLinkView, KnowledgePageId,
+    KnowledgePageView, ReviewVersionToken,
+};
 use airwiki_inference::ModelProfile;
 use airwiki_types::{ConceptType, EnrichmentDraft, SearchPurpose, SuggestedEntity, SuggestedLink};
 use anyhow::{Context, Result};
@@ -316,10 +319,20 @@ struct ReviewExcerptSummary {
 struct KnowledgeBundleSummary {
     collection_id: String,
     collection_name: String,
+    version: String,
     status: KnowledgeBundleStatus,
     concepts: Vec<KnowledgeConceptSummary>,
+    links: Vec<KnowledgeGraphLinkSummary>,
     error_count: usize,
     warning_count: usize,
+}
+
+#[derive(Clone, Debug, Serialize, PartialEq, Eq, TS)]
+#[serde(rename_all = "camelCase")]
+struct KnowledgeGraphLinkSummary {
+    source: KnowledgePageInput,
+    target: KnowledgePageInput,
+    label: String,
 }
 
 #[derive(Clone, Copy, Debug, Serialize, TS)]
@@ -363,7 +376,7 @@ enum KnowledgePageStatus {
     Failed,
 }
 
-#[derive(Clone, Copy, Debug, Deserialize, Serialize, TS)]
+#[derive(Clone, Copy, Debug, Deserialize, Serialize, PartialEq, Eq, TS)]
 #[serde(tag = "kind", rename_all = "camelCase", deny_unknown_fields)]
 enum KnowledgePageInput {
     Index,
@@ -1377,6 +1390,7 @@ impl AppSnapshot {
                 ..
             } => match result {
                 Ok(bundle) if bundle.collection_id == collection_id => {
+                    let graph_links = knowledge_graph_links(&bundle.links);
                     if let Ok(mut fingerprints) = knowledge_fingerprints.lock() {
                         fingerprints.retain(|(cached_collection, _), _| {
                             *cached_collection != collection_id
@@ -1401,6 +1415,7 @@ impl AppSnapshot {
                     self.knowledge = Some(KnowledgeBundleSummary {
                         collection_id: collection_id.to_string(),
                         collection_name: bundle.collection_name,
+                        version: bundle.fingerprint,
                         status: match bundle.state {
                             KnowledgeBundleState::Empty => KnowledgeBundleStatus::Empty,
                             KnowledgeBundleState::Ready => KnowledgeBundleStatus::Ready,
@@ -1417,6 +1432,7 @@ impl AppSnapshot {
                                 tags: concept.tags,
                             })
                             .collect(),
+                        links: graph_links,
                         error_count: bundle.health.error_count,
                         warning_count: bundle.health.warning_count,
                     });
@@ -1431,8 +1447,10 @@ impl AppSnapshot {
                     self.knowledge = Some(KnowledgeBundleSummary {
                         collection_id: collection_id.to_string(),
                         collection_name: String::new(),
+                        version: String::new(),
                         status: KnowledgeBundleStatus::Failed,
                         concepts: Vec::new(),
+                        links: Vec::new(),
                         error_count: 1,
                         warning_count: 0,
                     });
@@ -1632,6 +1650,22 @@ fn failed_knowledge_page(collection_id: Uuid, page_id: KnowledgePageId) -> Knowl
     }
 }
 
+fn knowledge_graph_links(links: &[KnowledgeLinkView]) -> Vec<KnowledgeGraphLinkSummary> {
+    links
+        .iter()
+        .filter_map(|link| {
+            let KnowledgeLinkDisposition::Internal(target) = link.disposition else {
+                return None;
+            };
+            Some(KnowledgeGraphLinkSummary {
+                source: link.source.into(),
+                target: target.into(),
+                label: link.label.clone(),
+            })
+        })
+        .collect()
+}
+
 fn knowledge_page_summary(page: KnowledgePageView) -> KnowledgePageSummary {
     KnowledgePageSummary {
         collection_id: page.collection_id.to_string(),
@@ -1810,6 +1844,7 @@ fn ui_bindings_source() -> String {
         exported_declaration::<KnowledgePageInput>(&config),
         exported_declaration::<KnowledgeBlock>(&config),
         exported_declaration::<KnowledgeConceptSummary>(&config),
+        exported_declaration::<KnowledgeGraphLinkSummary>(&config),
         exported_declaration::<KnowledgeBundleStatus>(&config),
         exported_declaration::<KnowledgeBundleSummary>(&config),
         exported_declaration::<KnowledgePageStatus>(&config),
@@ -2123,6 +2158,42 @@ mod tests {
             serde_json::to_value(draft)?
         );
         Ok(())
+    }
+
+    #[test]
+    fn graph_contract_exposes_only_internal_knowledge_links() {
+        let concept_id = Uuid::new_v4();
+        let links = vec![
+            KnowledgeLinkView {
+                source: KnowledgePageId::Index,
+                label: "Verified concept".to_owned(),
+                raw_target: format!("concepts/{concept_id}.md"),
+                disposition: KnowledgeLinkDisposition::Internal(KnowledgePageId::Concept(
+                    concept_id,
+                )),
+            },
+            KnowledgeLinkView {
+                source: KnowledgePageId::Index,
+                label: "External site".to_owned(),
+                raw_target: "https://example.com".to_owned(),
+                disposition: KnowledgeLinkDisposition::External,
+            },
+            KnowledgeLinkView {
+                source: KnowledgePageId::Index,
+                label: "Unsafe target".to_owned(),
+                raw_target: "file:///private/data".to_owned(),
+                disposition: KnowledgeLinkDisposition::Unsafe,
+            },
+        ];
+
+        assert_eq!(
+            knowledge_graph_links(&links),
+            vec![KnowledgeGraphLinkSummary {
+                source: KnowledgePageInput::Index,
+                target: KnowledgePageInput::Concept { id: concept_id },
+                label: "Verified concept".to_owned(),
+            }]
+        );
     }
 
     #[test]

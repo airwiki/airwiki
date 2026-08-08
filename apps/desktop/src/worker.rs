@@ -3,7 +3,7 @@ use std::{
     panic::AssertUnwindSafe,
     path::{Path, PathBuf},
     sync::{
-        Arc, Mutex,
+        Arc,
         atomic::{AtomicU64, Ordering},
         mpsc::{self, Receiver as StdReceiver},
     },
@@ -58,8 +58,8 @@ use crate::{
         model_activation_elapsed_bucket,
     },
     updater::{
-        PackagerUpdateBackend, UpdateSchedule, UpdaterBuildConfig, UpdaterDisabledReason,
-        UpdaterService, UpdaterView, schedule_jitter,
+        PackagerUpdateBackend, UpdateBackend, UpdateSchedule, UpdaterBuildConfig,
+        UpdaterDisabledReason, UpdaterService, UpdaterView, schedule_jitter,
     },
 };
 
@@ -604,12 +604,15 @@ impl WorkerHandle {
         let thread = thread::Builder::new()
             .name("airwiki-runtime".to_owned())
             .spawn(move || {
+                let updater_backend = UpdaterBuildConfig::from_compile_time()
+                    .and_then(PackagerUpdateBackend::new)
+                    .map(|backend| Box::new(backend) as Box<dyn UpdateBackend>);
                 let runtime = tokio::runtime::Builder::new_multi_thread()
                     .enable_all()
                     .thread_name("airwiki-worker")
                     .build()
                     .expect("Tokio runtime must start");
-                runtime.block_on(run_worker(paths, commands_rx, events_tx));
+                runtime.block_on(run_worker(paths, commands_rx, events_tx, updater_backend));
                 drop(runtime);
                 let _ = finished_tx.send(());
             })
@@ -778,6 +781,7 @@ enum BackgroundCompletion {
     },
     Updater {
         request_id: Uuid,
+        service: UpdaterService,
         result: Result<UpdaterView, String>,
     },
     WikiMaintenance {
@@ -1033,6 +1037,7 @@ pub(crate) async fn run_worker(
     paths: AppPaths,
     mut commands: AsyncReceiver<WorkerCommand>,
     events: Sender<WorkerEvent>,
+    updater_backend: Result<Box<dyn UpdateBackend>, UpdaterDisabledReason>,
 ) {
     send(
         &events,
@@ -1082,14 +1087,10 @@ pub(crate) async fn run_worker(
             result: Ok(DesktopPreferencesView::from(&desktop_config)),
         },
     );
-    let (updater, updater_disabled_reason) =
-        match UpdaterBuildConfig::from_compile_time().and_then(PackagerUpdateBackend::new) {
-            Ok(backend) => (
-                Some(Arc::new(Mutex::new(UpdaterService::new(backend)))),
-                None,
-            ),
-            Err(reason) => (None, Some(reason)),
-        };
+    let (mut updater, updater_disabled_reason) = match updater_backend {
+        Ok(backend) => (Some(UpdaterService::from_boxed(backend)), None),
+        Err(reason) => (None, Some(reason)),
+    };
     if let Some(reason) = updater_disabled_reason {
         send(
             &events,
@@ -1098,9 +1099,7 @@ pub(crate) async fn run_worker(
                 result: Ok(UpdaterWorkerView::Disabled(reason)),
             },
         );
-    } else if let Some(service) = updater.as_ref()
-        && let Ok(service) = service.lock()
-    {
+    } else if let Some(service) = updater.as_ref() {
         send(
             &events,
             WorkerEvent::UpdaterUpdated {
@@ -1619,7 +1618,7 @@ pub(crate) async fn run_worker(
                         queue_updater_operation(
                             &mut background,
                             &events,
-                            updater.as_ref(),
+                            &mut updater,
                             updater_disabled_reason,
                             &mut active_updater_request,
                             request_id,
@@ -1630,7 +1629,7 @@ pub(crate) async fn run_worker(
                         queue_updater_operation(
                             &mut background,
                             &events,
-                            updater.as_ref(),
+                            &mut updater,
                             updater_disabled_reason,
                             &mut active_updater_request,
                             request_id,
@@ -1653,7 +1652,7 @@ pub(crate) async fn run_worker(
                             queue_updater_operation(
                                 &mut background,
                                 &events,
-                                updater.as_ref(),
+                                &mut updater,
                                 updater_disabled_reason,
                                 &mut active_updater_request,
                                 request_id,
@@ -2568,7 +2567,7 @@ pub(crate) async fn run_worker(
                     queue_updater_operation(
                         &mut background,
                         &events,
-                        updater.as_ref(),
+                        &mut updater,
                         updater_disabled_reason,
                         &mut active_updater_request,
                         Uuid::new_v4(),
@@ -2901,10 +2900,15 @@ pub(crate) async fn run_worker(
                             WorkerEvent::AutostartUpdated { request_id, result },
                         );
                     }
-                    Some(Ok(BackgroundCompletion::Updater { request_id, result })) => {
+                    Some(Ok(BackgroundCompletion::Updater {
+                        request_id,
+                        service,
+                        result,
+                    })) => {
                         if active_updater_request == Some(request_id) {
                             active_updater_request = None;
                         }
+                        updater = Some(service);
                         send(
                             &events,
                             WorkerEvent::UpdaterUpdated {
@@ -3901,7 +3905,7 @@ fn guided_repair_error_code(error: &anyhow::Error) -> String {
 fn queue_updater_operation(
     background: &mut JoinSet<BackgroundCompletion>,
     events: &Sender<WorkerEvent>,
-    updater: Option<&Arc<Mutex<UpdaterService<PackagerUpdateBackend>>>>,
+    updater: &mut Option<UpdaterService>,
     disabled_reason: Option<UpdaterDisabledReason>,
     active_request: &mut Option<Uuid>,
     request_id: Uuid,
@@ -3917,7 +3921,7 @@ fn queue_updater_operation(
         );
         return;
     }
-    let Some(updater) = updater.cloned() else {
+    let Some(mut updater) = updater.take() else {
         send(
             events,
             WorkerEvent::UpdaterUpdated {
@@ -3930,34 +3934,49 @@ fn queue_updater_operation(
         return;
     };
     *active_request = Some(request_id);
-    background.spawn_blocking(move || {
-        let result = updater
-            .lock()
-            .map_err(|_| "El estado del actualizador no está disponible".to_owned())
-            .and_then(|mut updater| {
-                match operation {
-                    UpdaterOperation::Check => updater.check_blocking(),
-                    UpdaterOperation::Download => {
-                        let confirmation = updater
-                            .confirm_download()
-                            .map_err(|error| error.to_string())?;
-                        updater
-                            .download_blocking(confirmation)
-                            .map_err(|error| error.to_string())?;
-                    }
-                    UpdaterOperation::Install => {
-                        let confirmation = updater
-                            .confirm_install()
-                            .map_err(|error| error.to_string())?;
-                        updater
-                            .install_blocking(confirmation)
-                            .map_err(|error| error.to_string())?;
-                    }
-                }
-                Ok(updater.view().clone())
-            });
-        BackgroundCompletion::Updater { request_id, result }
+    background.spawn(async move {
+        let result = AssertUnwindSafe(run_updater_operation(&mut updater, operation))
+            .catch_unwind()
+            .await
+            .map_err(|_| "La operación de actualización terminó inesperadamente".to_owned())
+            .and_then(|result| result)
+            .map(|()| updater.view().clone());
+        BackgroundCompletion::Updater {
+            request_id,
+            service: updater,
+            result,
+        }
     });
+}
+
+async fn run_updater_operation(
+    updater: &mut UpdaterService,
+    operation: UpdaterOperation,
+) -> Result<(), String> {
+    match operation {
+        UpdaterOperation::Check => {
+            updater.check().await;
+            Ok(())
+        }
+        UpdaterOperation::Download => {
+            let confirmation = updater
+                .confirm_download()
+                .map_err(|error| error.to_string())?;
+            updater
+                .download(confirmation)
+                .await
+                .map_err(|error| error.to_string())
+        }
+        UpdaterOperation::Install => {
+            let confirmation = updater
+                .confirm_install()
+                .map_err(|error| error.to_string())?;
+            updater
+                .install(confirmation)
+                .await
+                .map_err(|error| error.to_string())
+        }
+    }
 }
 
 #[must_use]

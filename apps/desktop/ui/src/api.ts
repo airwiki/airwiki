@@ -122,6 +122,18 @@ export async function setAutostart(requestId: string, enabled: boolean): Promise
   return invoke('set_autostart', { requestId, enabled });
 }
 
+export async function checkUpdates(requestId: string): Promise<void> {
+  return invoke('check_updates', { requestId });
+}
+
+export async function downloadUpdate(requestId: string): Promise<void> {
+  return invoke('download_update', { requestId });
+}
+
+export async function installUpdate(requestId: string): Promise<void> {
+  return invoke('install_update', { requestId });
+}
+
 export async function refreshWikiHealth(requestId: string): Promise<void> {
   return invoke('refresh_wiki_health', { requestId });
 }

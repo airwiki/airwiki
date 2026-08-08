@@ -46,6 +46,7 @@ tokio = { workspace = true, features = ["fs", "io-util", "process"] }
 tokio-util = "0.7.16"
 tauri = { version = "2.11.5", default-features = false, features = ["tray-icon", "wry"] }
 tauri-plugin-single-instance = "2.4.3"
+tauri-plugin-updater = "=2.10.1"
 tracing.workspace = true
 tracing-appender = "0.2.3"
 tracing-subscriber.workspace = true

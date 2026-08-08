@@ -48,6 +48,10 @@ use uuid::Uuid;
 use crate::{
     model_config::{CloseBehavior, LanPreference, LocalePreference},
     paths::AppPaths,
+    updater::{
+        TauriUpdateBackend, UpdateBackend, UpdateIssueCode, UpdateSummary, UpdaterBuildConfig,
+        UpdaterDisabledReason, UpdaterStatus, UpdaterView,
+    },
     worker::{DesktopPreferencesUpdate, WorkerCommand, WorkerEvent, run_worker},
 };
 
@@ -91,6 +95,7 @@ struct RequestTracker {
     wiki_health: Option<Uuid>,
     connectivity: Option<Uuid>,
     integrations: Option<Uuid>,
+    updater: Option<Uuid>,
 }
 
 struct PendingFolderSelection {
@@ -124,6 +129,7 @@ struct AppSnapshot {
     lan_runtime: Option<LanRuntimeSummary>,
     firewall_operation: Option<FirewallOperationStatus>,
     integrations: Option<IntegrationsSummary>,
+    updater: Option<UpdaterSummary>,
     notice: Option<NoticeSummary>,
 }
 
@@ -780,6 +786,44 @@ struct IntegrationsSummary {
 
 #[derive(Clone, Debug, Serialize, TS)]
 #[serde(rename_all = "camelCase")]
+struct UpdaterSummary {
+    status: UpdaterStatusDto,
+    version: Option<String>,
+    release_notes: Option<String>,
+    issue: Option<UpdaterIssueDto>,
+    retryable: bool,
+}
+
+#[derive(Clone, Copy, Debug, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(rename = "UpdaterStatus", rename_all = "camelCase")]
+enum UpdaterStatusDto {
+    Disabled,
+    Idle,
+    Checking,
+    UpToDate,
+    Available,
+    Downloading,
+    ReadyToInstall,
+    Installing,
+    Installed,
+}
+
+#[derive(Clone, Copy, Debug, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(rename = "UpdaterIssue", rename_all = "camelCase")]
+enum UpdaterIssueDto {
+    NotConfigured,
+    InvalidConfiguration,
+    Unsupported,
+    Offline,
+    InvalidManifest,
+    InvalidSignature,
+    Internal,
+}
+
+#[derive(Clone, Debug, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
 struct IntegrationSummary {
     client: IntegrationClientDto,
     status: IntegrationStatusDto,
@@ -998,6 +1042,63 @@ impl From<integrations::ChatIntegrationsSnapshot> for IntegrationsSummary {
                 })
                 .collect(),
             external_ai_collection_count: value.external_ai_collection_count,
+        }
+    }
+}
+
+impl From<worker::UpdaterWorkerView> for UpdaterSummary {
+    fn from(value: worker::UpdaterWorkerView) -> Self {
+        match value {
+            worker::UpdaterWorkerView::Disabled(reason) => Self {
+                status: UpdaterStatusDto::Disabled,
+                version: None,
+                release_notes: None,
+                issue: Some(match reason {
+                    UpdaterDisabledReason::NotConfigured => UpdaterIssueDto::NotConfigured,
+                    UpdaterDisabledReason::UnsupportedPlatform => UpdaterIssueDto::Unsupported,
+                    UpdaterDisabledReason::InvalidEndpoint
+                    | UpdaterDisabledReason::InvalidPublicKey
+                    | UpdaterDisabledReason::InvalidCurrentVersion => {
+                        UpdaterIssueDto::InvalidConfiguration
+                    }
+                }),
+                retryable: false,
+            },
+            worker::UpdaterWorkerView::Ready(view) => Self::from(view),
+        }
+    }
+}
+
+impl From<UpdaterView> for UpdaterSummary {
+    fn from(view: UpdaterView) -> Self {
+        let (status, update) = match view.status {
+            UpdaterStatus::Idle => (UpdaterStatusDto::Idle, None),
+            UpdaterStatus::Checking => (UpdaterStatusDto::Checking, None),
+            UpdaterStatus::UpToDate => (UpdaterStatusDto::UpToDate, None),
+            UpdaterStatus::Available(update) => (UpdaterStatusDto::Available, Some(update)),
+            UpdaterStatus::Downloading(update) => (UpdaterStatusDto::Downloading, Some(update)),
+            UpdaterStatus::ReadyToInstall(update) => {
+                (UpdaterStatusDto::ReadyToInstall, Some(update))
+            }
+            UpdaterStatus::Installing(update) => (UpdaterStatusDto::Installing, Some(update)),
+            UpdaterStatus::Installed(update) => (UpdaterStatusDto::Installed, Some(update)),
+        };
+        let (version, release_notes) = update.map_or((None, None), |update: UpdateSummary| {
+            (Some(update.version), update.release_notes)
+        });
+        let issue = view.last_issue.map(|issue| match issue.code {
+            UpdateIssueCode::Offline => UpdaterIssueDto::Offline,
+            UpdateIssueCode::InvalidManifest => UpdaterIssueDto::InvalidManifest,
+            UpdateIssueCode::InvalidSignature => UpdaterIssueDto::InvalidSignature,
+            UpdateIssueCode::Unsupported => UpdaterIssueDto::Unsupported,
+            UpdateIssueCode::Internal => UpdaterIssueDto::Internal,
+        });
+        Self {
+            status,
+            version,
+            release_notes,
+            issue,
+            retryable: view.last_issue.is_some_and(|issue| issue.retryable),
         }
     }
 }
@@ -1576,6 +1677,55 @@ fn set_autostart(
 }
 
 #[tauri::command]
+fn check_updates(runtime: tauri::State<'_, AppRuntime>, request_id: String) -> Result<(), UiError> {
+    send_updater_command(&runtime, request_id, |request_id| {
+        WorkerCommand::CheckUpdates { request_id }
+    })
+}
+
+#[tauri::command]
+fn download_update(
+    runtime: tauri::State<'_, AppRuntime>,
+    request_id: String,
+) -> Result<(), UiError> {
+    send_updater_command(&runtime, request_id, |request_id| {
+        WorkerCommand::DownloadUpdate { request_id }
+    })
+}
+
+#[tauri::command]
+fn install_update(
+    runtime: tauri::State<'_, AppRuntime>,
+    request_id: String,
+) -> Result<(), UiError> {
+    send_updater_command(&runtime, request_id, |request_id| {
+        WorkerCommand::InstallUpdate { request_id }
+    })
+}
+
+fn send_updater_command(
+    runtime: &AppRuntime,
+    request_id: String,
+    command: impl FnOnce(Uuid) -> WorkerCommand,
+) -> Result<(), UiError> {
+    let request_id = parse_uuid(&request_id)?;
+    runtime
+        .requests
+        .lock()
+        .map_err(|_| UiError::internal())?
+        .updater = Some(request_id);
+    if let Err(error) = send_command(runtime, command(request_id)) {
+        if let Ok(mut requests) = runtime.requests.lock()
+            && requests.updater == Some(request_id)
+        {
+            requests.updater = None;
+        }
+        return Err(error);
+    }
+    Ok(())
+}
+
+#[tauri::command]
 fn refresh_wiki_health(
     runtime: tauri::State<'_, AppRuntime>,
     request_id: String,
@@ -1847,6 +1997,7 @@ impl AppSnapshot {
             lan_runtime: None,
             firewall_operation: None,
             integrations: None,
+            updater: None,
             notice: None,
         }
     }
@@ -2030,6 +2181,15 @@ impl AppSnapshot {
                     self.notice = Some(NoticeSummary {
                         level: NoticeLevel::Error,
                         message: "integration-operation-failed".to_owned(),
+                    });
+                }
+            },
+            WorkerEvent::UpdaterUpdated { result, .. } => match result {
+                Ok(updater) => self.updater = Some(updater.into()),
+                Err(_) => {
+                    self.notice = Some(NoticeSummary {
+                        level: NoticeLevel::Error,
+                        message: "updater-operation-failed".to_owned(),
                     });
                 }
             },
@@ -2362,6 +2522,15 @@ fn request_is_current(event: &WorkerEvent, requests: &Mutex<RequestTracker>) -> 
                 false
             }
         }
+        WorkerEvent::UpdaterUpdated { request_id, .. } if request_id.is_nil() => true,
+        WorkerEvent::UpdaterUpdated { request_id, .. } => match requests.updater {
+            Some(current) if current == *request_id => {
+                requests.updater = None;
+                true
+            }
+            Some(_) => false,
+            None => true,
+        },
         WorkerEvent::WikiHealthUpdated { request_id, .. } if request_id.is_nil() => true,
         WorkerEvent::WikiHealthUpdated { request_id, .. } => {
             if requests.wiki_health == Some(*request_id) {
@@ -2712,6 +2881,9 @@ fn ui_bindings_source() -> String {
         exported_declaration::<IntegrationSummary>(&config),
         exported_declaration::<IntegrationsSummary>(&config),
         exported_declaration::<IntegrationActionInput>(&config),
+        exported_declaration::<UpdaterStatusDto>(&config),
+        exported_declaration::<UpdaterIssueDto>(&config),
+        exported_declaration::<UpdaterSummary>(&config),
         exported_declaration::<PreferencesSummary>(&config),
         exported_declaration::<PreferencesInput>(&config),
         exported_declaration::<AppPhase>(&config),
@@ -2823,6 +2995,7 @@ fn main() -> Result<()> {
         .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
             show_main_window(app);
         }))
+        .plugin(tauri_plugin_updater::Builder::new().build())
         .manage(AppRuntime {
             commands,
             snapshot: Mutex::new(snapshot_receiver),
@@ -2835,6 +3008,10 @@ fn main() -> Result<()> {
             worker_finished: Mutex::new(Some(worker_finished)),
         })
         .setup(move |app| {
+            let updater_backend = UpdaterBuildConfig::from_compile_time()
+                .and_then(|config| TauriUpdateBackend::new(app.handle().clone(), config))
+                .map(|backend| Box::new(backend) as Box<dyn UpdateBackend>);
+            let presentation_app = app.handle().clone();
             if install_tray(app).is_ok() {
                 app.state::<AppRuntime>()
                     .tray_operational
@@ -2868,6 +3045,12 @@ fn main() -> Result<()> {
                             {
                                 break;
                             }
+                            if snapshot.updater.as_ref().is_some_and(|updater| {
+                                matches!(updater.status, UpdaterStatusDto::Installed)
+                            }) {
+                                begin_shutdown(presentation_app.clone());
+                                break;
+                            }
                         }
                         Err(broadcast::error::RecvError::Lagged(_)) => {
                             snapshot.notice = Some(NoticeSummary {
@@ -2890,7 +3073,7 @@ fn main() -> Result<()> {
                 }
             });
             tauri::async_runtime::spawn(async move {
-                run_worker(paths, command_receiver, worker_events).await;
+                run_worker(paths, command_receiver, worker_events, updater_backend).await;
                 let _ = worker_finished_sender.send(());
             });
             Ok(())
@@ -2952,6 +3135,9 @@ fn main() -> Result<()> {
             update_preferences,
             refresh_autostart,
             set_autostart,
+            check_updates,
+            download_update,
+            install_update,
             refresh_wiki_health,
             refresh_connectivity,
             configure_firewall,
@@ -3227,6 +3413,46 @@ mod tests {
             },
             &requests,
         ));
+    }
+
+    #[test]
+    fn stale_updater_events_are_discarded() {
+        let current = Uuid::new_v4();
+        let stale = Uuid::new_v4();
+        let requests = Mutex::new(RequestTracker {
+            updater: Some(current),
+            ..RequestTracker::default()
+        });
+        let event = |request_id| WorkerEvent::UpdaterUpdated {
+            request_id,
+            result: Ok(worker::UpdaterWorkerView::Ready(UpdaterView {
+                status: UpdaterStatus::UpToDate,
+                last_issue: None,
+            })),
+        };
+
+        assert!(!request_is_current(&event(stale), &requests));
+        assert!(request_is_current(&event(current), &requests));
+        assert!(request_is_current(&event(Uuid::new_v4()), &requests));
+    }
+
+    #[test]
+    fn updater_contract_exposes_only_sanitized_issue_codes() {
+        let summary = UpdaterSummary::from(UpdaterView {
+            status: UpdaterStatus::Idle,
+            last_issue: Some(crate::updater::UpdateIssue {
+                code: UpdateIssueCode::InvalidSignature,
+                retryable: false,
+            }),
+        });
+
+        assert!(matches!(
+            summary.issue,
+            Some(UpdaterIssueDto::InvalidSignature)
+        ));
+        assert!(!summary.retryable);
+        assert!(summary.version.is_none());
+        assert!(summary.release_notes.is_none());
     }
 
     #[test]

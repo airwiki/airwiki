@@ -101,6 +101,10 @@ export async function setAutostart(requestId: string, enabled: boolean): Promise
   return invoke('set_autostart', { requestId, enabled });
 }
 
+export async function refreshWikiHealth(requestId: string): Promise<void> {
+  return invoke('refresh_wiki_health', { requestId });
+}
+
 export async function hideToTray(): Promise<void> {
   return invoke('hide_to_tray');
 }

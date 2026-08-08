@@ -2,7 +2,7 @@
   import { AlertTriangle, BookOpen, CheckCircle2, FileText, History, Network, RefreshCw, Search, Settings2, Sparkles } from '@lucide/svelte';
   import { listen } from '@tauri-apps/api/event';
   import { onMount } from 'svelte';
-  import { addCollection, approveReview, cancelModelInstall, connect, hideToTray, installModels, loadKnowledgeBundle, loadKnowledgePage, loadReviewEvidence, pickCollectionFolder, quitCompletely, reanalyzeReview, refreshAutostart, rejectReview, relinkCollection, rescanCollection, searchKnowledge, setAutostart, updateCollectionPolicy, updatePreferences, type AppSnapshot, type CloseBehavior, type CollectionPolicyInput, type CollectionSummary, type EnrichmentDraft, type FolderSelection, type KnowledgePageInput, type LanPreference, type LocalePreference, type ReviewSummary } from './api';
+  import { addCollection, approveReview, cancelModelInstall, connect, hideToTray, installModels, loadKnowledgeBundle, loadKnowledgePage, loadReviewEvidence, pickCollectionFolder, quitCompletely, reanalyzeReview, refreshAutostart, refreshWikiHealth, rejectReview, relinkCollection, rescanCollection, searchKnowledge, setAutostart, updateCollectionPolicy, updatePreferences, type AppSnapshot, type CloseBehavior, type CollectionPolicyInput, type CollectionSummary, type EnrichmentDraft, type FolderSelection, type KnowledgePageInput, type LanPreference, type LocalePreference, type ReviewSummary } from './api';
   import KnowledgeGraph from './KnowledgeGraph.svelte';
 
   type Destination = 'library' | 'review' | 'search' | 'system';
@@ -38,6 +38,7 @@
   let modelLicensesConfirmed = false;
   let autostartBusy = false;
   let autostartRequestId: string | null = null;
+  let wikiHealthRequestId: string | null = null;
 
   onMount(() => {
     const unlistenClose = '__TAURI_INTERNALS__' in window
@@ -64,6 +65,7 @@
         autostartBusy = false;
         autostartRequestId = null;
       }
+      if (event.requestId && event.requestId === wikiHealthRequestId) wikiHealthRequestId = null;
       runtimeLabel = event.snapshot.phase === 'ready' ? 'Servicios privados listos' : 'Preparando servicios privados';
     }).then((initial) => {
       snapshot = initial;
@@ -83,6 +85,23 @@
     destination = next;
     window.location.hash = next;
     if (next === 'system') void refreshAutostartState();
+    if (next === 'library') void refreshHealth();
+  }
+
+  async function refreshHealth() {
+    const requestId = crypto.randomUUID();
+    wikiHealthRequestId = requestId;
+    try {
+      await refreshWikiHealth(requestId);
+    } catch {
+      wikiHealthRequestId = null;
+      actionMessage = 'No se pudo comprobar la salud de la biblioteca.';
+    }
+  }
+
+  async function openAttentionCollection() {
+    const collectionId = snapshot?.wikiHealth?.attentionCollectionId;
+    if (collectionId) await openKnowledge(collectionId);
   }
 
   function autostartLabel(): string {
@@ -402,6 +421,13 @@
           <article><span>Preparación</span><strong>{snapshot?.collections.reduce((total, item) => total + item.documentCount, 0) ?? 0} documentos locales</strong><p>La IA propone; nunca publica ni concede acceso.</p></article>
           <article><span>Decisión</span><strong>{snapshot?.reviews.length ?? 0} revisiones pendientes</strong><p>Comprueba la evidencia antes de hacerla visible.</p></article>
         </div>
+
+        {#if destination === 'library' && snapshot?.wikiHealth}
+          <section class:attention={snapshot.wikiHealth.errorCount > 0} class="health-strip" aria-labelledby="health-title">
+            <div><span class="health-signal" aria-hidden="true"></span><div><p class="section-label">Integridad publicada</p><h3 id="health-title">{snapshot.wikiHealth.status === 'failed' ? 'No se pudo completar la comprobación' : snapshot.wikiHealth.errorCount ? `${snapshot.wikiHealth.errorCount} errores requieren decisión` : snapshot.wikiHealth.warningCount ? `${snapshot.wikiHealth.warningCount} advertencias para revisar` : 'El conocimiento publicado es coherente'}</h3><small>{snapshot.wikiHealth.updatingCount ? `${snapshot.wikiHealth.updatingCount} colecciones todavía se están actualizando.` : 'SQLite y los artefactos OKF fueron comparados sin elegir silenciosamente un lado.'}</small></div></div>
+            <div class="row-actions">{#if snapshot.wikiHealth.attentionCollectionId}<button class="secondary" onclick={openAttentionCollection}>Examinar colección</button>{/if}<button class="text-action" onclick={refreshHealth} disabled={wikiHealthRequestId !== null}>{wikiHealthRequestId ? 'Comprobando…' : 'Comprobar ahora'}</button></div>
+          </section>
+        {/if}
 
         {#if destination === 'library' && snapshot?.collections.length}
           <div class="records" aria-label="Colecciones">

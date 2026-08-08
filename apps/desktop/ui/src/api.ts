@@ -1,6 +1,7 @@
 import { Channel, invoke } from '@tauri-apps/api/core';
 import type {
   AppSnapshot,
+  CollectionPolicyInput,
   EnrichmentDraft,
   FolderSelection,
   KnowledgePageInput,
@@ -31,6 +32,14 @@ export async function pickCollectionFolder(): Promise<FolderSelection | null> {
 
 export async function addCollection(name: string, folderToken: string): Promise<void> {
   return invoke('add_collection', { name, folderToken });
+}
+
+export async function relinkCollection(collectionId: string, folderToken: string): Promise<void> {
+  return invoke('relink_collection', { collectionId, folderToken });
+}
+
+export async function updateCollectionPolicy(collectionId: string, policy: CollectionPolicyInput): Promise<void> {
+  return invoke('update_collection_policy', { collectionId, policy });
 }
 
 export async function rescanCollection(collectionId: string): Promise<void> {

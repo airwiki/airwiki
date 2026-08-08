@@ -849,9 +849,9 @@ try {
     }
     Assert-NoDesktopProcess "input-preflight"
 
-    $PackagerPolicy = [IO.File]::ReadAllText((Join-Path $Root "packaging\windows\Packager.toml"))
-    if (@($PackagerPolicy -split "`r?`n" |
-        Where-Object { $_ -ceq 'publisher = "AirWiki"' }).Count -ne 1) {
+    $TauriPolicy = [IO.File]::ReadAllText((Join-Path $Root "apps\desktop\tauri.conf.json")) |
+        ConvertFrom-Json
+    if ($TauriPolicy.bundle.publisher -cne "AirWiki") {
         throw "the fixture publisher does not match package policy"
     }
     $Installers = @(Get-ChildItem -LiteralPath $OutDir -File -Filter *.exe)

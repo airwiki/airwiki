@@ -70,11 +70,11 @@ if ($IsPreSignedMainBinary) {
     $ExpectedMachineHigh = 0x86
     $ExpectedMachineLabel = "Windows x64 desktop"
 } else {
-    # cargo-packager 0.11.8 pins NSIS 3.09, whose Unicode installer and
+# Tauri bundler 2.9.4 pins NSIS 3.11, whose Unicode installer and
     # uninstaller stubs are PE32 I386 even when they carry an x64 payload.
     $ExpectedMachineLow = 0x4c
     $ExpectedMachineHigh = 0x01
-    $ExpectedMachineLabel = "NSIS 3.09 I386 executable"
+$ExpectedMachineLabel = "NSIS 3.11 I386 executable"
 }
 
 $Stream = [IO.File]::OpenRead($ResolvedPath)
@@ -108,7 +108,7 @@ if ($Existing.Status -eq [System.Management.Automation.SignatureStatus]::Valid) 
     exit 0
 }
 if ($IsPreSignedMainBinary) {
-    throw "cargo-packager main executable must already have the expected Authenticode signature"
+    throw "Tauri main executable must already have the expected Authenticode signature"
 }
 if ($Existing.Status -ne [System.Management.Automation.SignatureStatus]::NotSigned) {
     throw "refusing to replace a non-valid existing Authenticode signature: $($Existing.Status)"

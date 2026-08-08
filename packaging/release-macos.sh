@@ -18,7 +18,7 @@ trap cleanup EXIT HUP INT TERM
 : "${APPLE_API_KEY_PATH:?path to the temporary App Store Connect API key is required}"
 : "${APPLE_API_KEY_ID:?App Store Connect API key id is required}"
 : "${APPLE_API_ISSUER_ID:?App Store Connect API issuer id is required}"
-: "${CARGO_PACKAGER_SIGN_PRIVATE_KEY:?updater private key is required}"
+: "${TAURI_SIGNING_PRIVATE_KEY:?Tauri updater private key is required}"
 : "${AIRWIKI_UPDATE_ENDPOINT:?compiled updater endpoint is required}"
 : "${AIRWIKI_UPDATER_PUBLIC_KEY:?compiled updater public key is required}"
 
@@ -72,9 +72,9 @@ xcrun stapler validate -v "$DMG"
 hdiutil verify "$DMG"
 spctl --assess --type open --context context:primary-signature --verbose=4 "$DMG"
 
-# Match cargo-packager's app updater shape: the archive contains the .app root.
+# Tauri's macOS updater artifact contains the final stapled .app root.
 tar -czf "$UPDATE_ARCHIVE" -C "$(dirname "$APP")" "$(basename "$APP")"
-cargo packager signer sign "$UPDATE_ARCHIVE"
+pnpm --dir apps/desktop/ui exec tauri signer sign "$UPDATE_ARCHIVE"
 test -s "$UPDATE_ARCHIVE.sig"
 
 shasum -a 256 "$DMG" "$UPDATE_ARCHIVE" "$UPDATE_ARCHIVE.sig"

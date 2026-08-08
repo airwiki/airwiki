@@ -27,11 +27,7 @@ const ADR_REQUIRED_SECTIONS: [&str; 4] = [
     "## Rejected alternatives",
 ];
 const ACTIVE_WORKFLOWS: [&str; 3] = ["ci.yml", "dco.yml", "package-pilot.yml"];
-const ARCHIVED_WORKFLOWS: [&str; 3] = [
-    "README.md",
-    "promote-stable.yml.disabled",
-    "release-candidate.yml.disabled",
-];
+const ARCHIVED_WORKFLOWS: [&str; 2] = ["README.md", "promote-stable.yml.disabled"];
 const STALE_CARGO_DENY_COMMAND: &str = "cargo deny check --locked";
 
 pub(crate) fn check(repository_root: &Path) -> Result<()> {

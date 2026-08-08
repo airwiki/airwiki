@@ -126,6 +126,9 @@ fn should_skip_directory(repository_root: &Path, directory: &Path) -> bool {
         first.as_os_str().to_str(),
         Some(".agents" | ".claude" | ".git" | ".superpowers" | "target")
     ) || relative == Path::new("docs/superpowers")
+        || relative
+            .components()
+            .any(|component| component.as_os_str() == "node_modules")
 }
 
 fn check_markdown_files(
@@ -664,6 +667,17 @@ mod tests {
         fixture.write(
             "README.md",
             "[External](https://example.com/docs) [Section](#section)\n",
+        );
+
+        assert!(check(fixture.root()).is_ok());
+    }
+
+    #[test]
+    fn check_ignores_nested_node_modules_documentation() {
+        let fixture = Fixture::valid();
+        fixture.write(
+            "apps/desktop/ui/node_modules/synthetic/README.md",
+            "[Missing third-party file](CHANGELOG.md)\n",
         );
 
         assert!(check(fixture.root()).is_ok());

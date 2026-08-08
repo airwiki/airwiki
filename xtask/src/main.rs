@@ -210,6 +210,12 @@ async fn main() -> Result<()> {
             Some(other) => bail!("unknown licenses command: {other}"),
             None => bail!("missing licenses command; expected `generate` or `check`"),
         },
+        "ui-bindings" => match arguments.next().as_deref() {
+            Some("generate") => run_ui_bindings_test("tests::generate_ui_bindings", true),
+            Some("check") => run_ui_bindings_test("tests::ui_bindings_match_committed_file", false),
+            Some(other) => bail!("unknown ui-bindings command: {other}"),
+            None => bail!("missing ui-bindings command; expected `generate` or `check`"),
+        },
         "docs" => match arguments.next().as_deref() {
             Some("check") => {
                 ensure!(
@@ -260,6 +266,8 @@ async fn main() -> Result<()> {
             println!("cargo run --locked -p xtask -- selector-corpus validate");
             println!("cargo run --locked -p xtask -- licenses generate");
             println!("cargo run --locked -p xtask -- licenses check");
+            println!("cargo run --locked -p xtask -- ui-bindings generate");
+            println!("cargo run --locked -p xtask -- ui-bindings check");
             println!("cargo run --locked -p xtask -- docs check");
             println!("cargo run --locked -p xtask -- packaging verify-windows-uninstaller");
             println!(
@@ -275,6 +283,32 @@ async fn main() -> Result<()> {
         }
         unknown => bail!("unknown xtask command: {unknown}"),
     }
+}
+
+fn run_ui_bindings_test(test_name: &str, ignored: bool) -> Result<()> {
+    let repository_root = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .context("xtask manifest directory has no repository parent")?;
+    let mut command = Command::new("cargo");
+    command.current_dir(repository_root).args([
+        "test",
+        "--locked",
+        "-p",
+        "airwiki-desktop",
+        "--bin",
+        "airwiki-tauri",
+        test_name,
+        "--",
+        "--exact",
+    ]);
+    if ignored {
+        command.arg("--ignored");
+    }
+    let status = command
+        .status()
+        .context("failed to run the desktop UI binding test")?;
+    ensure!(status.success(), "desktop UI binding test failed");
+    Ok(())
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

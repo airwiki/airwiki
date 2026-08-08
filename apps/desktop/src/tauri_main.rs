@@ -28,7 +28,7 @@ use std::{
 
 use airwiki_core::{KnowledgeBundleState, KnowledgePageId, KnowledgePageView, ReviewVersionToken};
 use airwiki_inference::ModelProfile;
-use airwiki_types::{EnrichmentDraft, SearchPurpose};
+use airwiki_types::{ConceptType, EnrichmentDraft, SearchPurpose, SuggestedEntity, SuggestedLink};
 use anyhow::{Context, Result};
 use pulldown_cmark::{CodeBlockKind, Event as MarkdownEvent, HeadingLevel, Parser, Tag, TagEnd};
 use serde::{Deserialize, Serialize};
@@ -39,6 +39,7 @@ use tauri::{
     tray::{TrayIconBuilder, TrayIconEvent},
 };
 use tokio::sync::{broadcast, mpsc, oneshot, watch};
+use ts_rs::TS;
 use uuid::Uuid;
 
 use crate::{
@@ -84,12 +85,13 @@ struct PendingFolderSelection {
     expires_at: Instant,
 }
 
-#[derive(Clone, Debug, Serialize)]
+#[derive(Clone, Debug, Serialize, TS)]
 #[serde(rename_all = "camelCase")]
 struct AppSnapshot {
     schema_version: u16,
+    #[ts(type = "number")]
     sequence: u64,
-    phase: &'static str,
+    phase: AppPhase,
     collections: Vec<CollectionSummary>,
     reviews: Vec<ReviewSummary>,
     source_issues: Vec<SourceIssueSummary>,
@@ -104,7 +106,15 @@ struct AppSnapshot {
     notice: Option<NoticeSummary>,
 }
 
-#[derive(Clone, Debug, Serialize)]
+#[derive(Clone, Copy, Debug, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(rename_all = "camelCase")]
+enum AppPhase {
+    Starting,
+    Ready,
+}
+
+#[derive(Clone, Debug, Serialize, TS)]
 #[serde(rename_all = "camelCase")]
 struct CollectionSummary {
     id: String,
@@ -119,29 +129,180 @@ struct CollectionSummary {
     internet_public: bool,
 }
 
-#[derive(Clone, Debug, Serialize)]
+#[derive(Clone, Debug, Serialize, TS)]
 #[serde(rename_all = "camelCase")]
 struct ReviewSummary {
     concept_id: String,
     source_revision: u32,
     source_name: String,
     collection_name: String,
-    draft: EnrichmentDraft,
+    draft: EnrichmentDraftDto,
 }
 
-#[derive(Clone, Debug, Serialize)]
+#[derive(Clone, Debug, Deserialize, Serialize, TS)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+#[ts(rename = "EnrichmentDraft", rename_all = "camelCase")]
+struct EnrichmentDraftDto {
+    #[serde(rename = "type")]
+    #[ts(rename = "type")]
+    concept_type: ConceptTypeDto,
+    title: String,
+    description: String,
+    language: String,
+    tags: Vec<String>,
+    entities: Vec<SuggestedEntityDto>,
+    links: Vec<SuggestedLinkDto>,
+    summary: String,
+    classification_confidence: f32,
+    classification_explanation: String,
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, Serialize, TS)]
+#[ts(rename = "ConceptType")]
+enum ConceptTypeDto {
+    Document,
+    Policy,
+    Procedure,
+    Runbook,
+    Reference,
+    Report,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, TS)]
+#[serde(deny_unknown_fields)]
+#[ts(rename = "SuggestedEntity")]
+struct SuggestedEntityDto {
+    name: String,
+    kind: String,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, TS)]
+#[serde(deny_unknown_fields)]
+#[ts(rename = "SuggestedLink")]
+struct SuggestedLinkDto {
+    label: String,
+    target: String,
+}
+
+impl From<EnrichmentDraft> for EnrichmentDraftDto {
+    fn from(value: EnrichmentDraft) -> Self {
+        Self {
+            concept_type: value.concept_type.into(),
+            title: value.title,
+            description: value.description,
+            language: value.language,
+            tags: value.tags,
+            entities: value.entities.into_iter().map(Into::into).collect(),
+            links: value.links.into_iter().map(Into::into).collect(),
+            summary: value.summary,
+            classification_confidence: value.classification_confidence,
+            classification_explanation: value.classification_explanation,
+        }
+    }
+}
+
+impl From<EnrichmentDraftDto> for EnrichmentDraft {
+    fn from(value: EnrichmentDraftDto) -> Self {
+        Self {
+            concept_type: value.concept_type.into(),
+            title: value.title,
+            description: value.description,
+            language: value.language,
+            tags: value.tags,
+            entities: value.entities.into_iter().map(Into::into).collect(),
+            links: value.links.into_iter().map(Into::into).collect(),
+            summary: value.summary,
+            classification_confidence: value.classification_confidence,
+            classification_explanation: value.classification_explanation,
+        }
+    }
+}
+
+impl From<ConceptType> for ConceptTypeDto {
+    fn from(value: ConceptType) -> Self {
+        match value {
+            ConceptType::Document => Self::Document,
+            ConceptType::Policy => Self::Policy,
+            ConceptType::Procedure => Self::Procedure,
+            ConceptType::Runbook => Self::Runbook,
+            ConceptType::Reference => Self::Reference,
+            ConceptType::Report => Self::Report,
+        }
+    }
+}
+
+impl From<ConceptTypeDto> for ConceptType {
+    fn from(value: ConceptTypeDto) -> Self {
+        match value {
+            ConceptTypeDto::Document => Self::Document,
+            ConceptTypeDto::Policy => Self::Policy,
+            ConceptTypeDto::Procedure => Self::Procedure,
+            ConceptTypeDto::Runbook => Self::Runbook,
+            ConceptTypeDto::Reference => Self::Reference,
+            ConceptTypeDto::Report => Self::Report,
+        }
+    }
+}
+
+impl From<SuggestedEntity> for SuggestedEntityDto {
+    fn from(value: SuggestedEntity) -> Self {
+        Self {
+            name: value.name,
+            kind: value.kind,
+        }
+    }
+}
+
+impl From<SuggestedEntityDto> for SuggestedEntity {
+    fn from(value: SuggestedEntityDto) -> Self {
+        Self {
+            name: value.name,
+            kind: value.kind,
+        }
+    }
+}
+
+impl From<SuggestedLink> for SuggestedLinkDto {
+    fn from(value: SuggestedLink) -> Self {
+        Self {
+            label: value.label,
+            target: value.target,
+        }
+    }
+}
+
+impl From<SuggestedLinkDto> for SuggestedLink {
+    fn from(value: SuggestedLinkDto) -> Self {
+        Self {
+            label: value.label,
+            target: value.target,
+        }
+    }
+}
+
+#[derive(Clone, Debug, Serialize, TS)]
 #[serde(rename_all = "camelCase")]
 struct ReviewEvidenceSummary {
     request_id: String,
     concept_id: String,
     source_revision: u32,
-    status: &'static str,
+    status: ReviewEvidenceStatus,
     excerpts: Vec<ReviewExcerptSummary>,
     total_chunks: usize,
     next_ordinal: Option<u32>,
 }
 
-#[derive(Clone, Debug, Serialize)]
+#[derive(Clone, Copy, Debug, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(rename_all = "camelCase")]
+enum ReviewEvidenceStatus {
+    Ready,
+    Stale,
+    Missing,
+    Failed,
+}
+
+#[derive(Clone, Debug, Serialize, TS)]
 #[serde(rename_all = "camelCase")]
 struct ReviewExcerptSummary {
     ordinal: u32,
@@ -150,18 +311,28 @@ struct ReviewExcerptSummary {
     truncated: bool,
 }
 
-#[derive(Clone, Debug, Serialize)]
+#[derive(Clone, Debug, Serialize, TS)]
 #[serde(rename_all = "camelCase")]
 struct KnowledgeBundleSummary {
     collection_id: String,
     collection_name: String,
-    status: &'static str,
+    status: KnowledgeBundleStatus,
     concepts: Vec<KnowledgeConceptSummary>,
     error_count: usize,
     warning_count: usize,
 }
 
-#[derive(Clone, Debug, Serialize)]
+#[derive(Clone, Copy, Debug, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(rename_all = "camelCase")]
+enum KnowledgeBundleStatus {
+    Empty,
+    Ready,
+    Updating,
+    Failed,
+}
+
+#[derive(Clone, Debug, Serialize, TS)]
 #[serde(rename_all = "camelCase")]
 struct KnowledgeConceptSummary {
     page: KnowledgePageInput,
@@ -171,20 +342,28 @@ struct KnowledgeConceptSummary {
     tags: Vec<String>,
 }
 
-#[derive(Clone, Debug, Serialize)]
+#[derive(Clone, Debug, Serialize, TS)]
 #[serde(rename_all = "camelCase")]
 struct KnowledgePageSummary {
     collection_id: String,
     page: KnowledgePageInput,
     title: String,
-    status: &'static str,
+    status: KnowledgePageStatus,
     blocks: Vec<KnowledgeBlock>,
     metadata: Vec<(String, String)>,
     backlinks: Vec<KnowledgePageInput>,
     truncated: bool,
 }
 
-#[derive(Clone, Copy, Debug, Deserialize, Serialize)]
+#[derive(Clone, Copy, Debug, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(rename_all = "camelCase")]
+enum KnowledgePageStatus {
+    Ready,
+    Failed,
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, Serialize, TS)]
 #[serde(tag = "kind", rename_all = "camelCase", deny_unknown_fields)]
 enum KnowledgePageInput {
     Index,
@@ -212,7 +391,7 @@ impl From<KnowledgePageInput> for KnowledgePageId {
     }
 }
 
-#[derive(Clone, Debug, Serialize, PartialEq, Eq)]
+#[derive(Clone, Debug, Serialize, PartialEq, Eq, TS)]
 #[serde(tag = "kind", rename_all = "camelCase")]
 enum KnowledgeBlock {
     Heading {
@@ -236,7 +415,7 @@ enum KnowledgeBlock {
     Rule,
 }
 
-#[derive(Clone, Debug, Serialize)]
+#[derive(Clone, Debug, Serialize, TS)]
 #[serde(rename_all = "camelCase")]
 struct SourceIssueSummary {
     collection_id: String,
@@ -245,23 +424,44 @@ struct SourceIssueSummary {
     code: String,
 }
 
-#[derive(Clone, Debug, Serialize)]
+#[derive(Clone, Debug, Serialize, TS)]
 #[serde(rename_all = "camelCase")]
 struct PeerSummary {
     peer_id: String,
     device_name: Option<String>,
-    trust: &'static str,
-    activity: &'static str,
+    trust: PeerTrust,
+    activity: PeerActivity,
 }
 
-#[derive(Clone, Debug, Serialize)]
+#[derive(Clone, Copy, Debug, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(rename_all = "camelCase")]
+enum PeerTrust {
+    Unpaired,
+    Trusted,
+    Blocked,
+}
+
+#[derive(Clone, Copy, Debug, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(rename_all = "camelCase")]
+enum PeerActivity {
+    NotObserved,
+    Discovered,
+    Pairing,
+    Connected,
+}
+
+#[derive(Clone, Debug, Serialize, TS)]
 #[serde(rename_all = "camelCase")]
 struct ModelSummary {
     display_name: Option<String>,
     active: bool,
     installed: bool,
     degraded: bool,
+    #[ts(type = "number")]
     download_bytes: u64,
+    #[ts(type = "number")]
     required_free_bytes: u64,
     fits_available_disk: bool,
     license_accepted: bool,
@@ -270,24 +470,56 @@ struct ModelSummary {
     revision: Option<String>,
 }
 
-#[derive(Clone, Debug, Serialize)]
+#[derive(Clone, Debug, Serialize, TS)]
 #[serde(rename_all = "camelCase")]
 struct ModelInstallSummary {
-    status: &'static str,
+    status: ModelInstallStatus,
+    #[ts(type = "number")]
     downloaded: u64,
+    #[ts(type = "number")]
     total_bytes: u64,
 }
 
-#[derive(Clone, Debug, Serialize)]
+#[derive(Clone, Copy, Debug, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(rename_all = "camelCase")]
+enum ModelInstallStatus {
+    Downloading,
+    Verifying,
+    Extracting,
+    Activating,
+}
+
+#[derive(Clone, Debug, Serialize, TS)]
 #[serde(rename_all = "camelCase")]
 struct SearchSummary {
     request_id: String,
-    status: &'static str,
+    status: SearchStatus,
     hits: Vec<SearchHitSummary>,
-    coverage: &'static str,
+    coverage: SearchCoverage,
 }
 
-#[derive(Clone, Debug, Serialize)]
+#[derive(Clone, Copy, Debug, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(rename_all = "camelCase")]
+enum SearchStatus {
+    Searching,
+    Complete,
+    Failed,
+}
+
+#[derive(Clone, Copy, Debug, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(rename_all = "camelCase")]
+enum SearchCoverage {
+    Complete,
+    FederationDisabled,
+    OfflineDevices,
+    PublicNetworkOffline,
+    Partial,
+}
+
+#[derive(Clone, Debug, Serialize, TS)]
 #[serde(rename_all = "camelCase")]
 struct SearchHitSummary {
     title: String,
@@ -297,43 +529,149 @@ struct SearchHitSummary {
     rank: u32,
 }
 
-#[derive(Clone, Debug, Serialize)]
+#[derive(Clone, Debug, Serialize, TS)]
 #[serde(rename_all = "camelCase")]
 struct NoticeSummary {
-    level: &'static str,
+    level: NoticeLevel,
     message: String,
 }
 
-#[derive(Clone, Copy, Debug, Serialize)]
+#[derive(Clone, Copy, Debug, Serialize, TS)]
 #[serde(rename_all = "camelCase")]
+#[ts(rename_all = "camelCase")]
+enum NoticeLevel {
+    Notice,
+    Warning,
+    Error,
+}
+
+#[derive(Clone, Copy, Debug, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(rename_all = "camelCase")]
 struct PreferencesSummary {
     completed_onboarding_version: Option<u32>,
-    locale: LocalePreference,
-    lan_preference: LanPreference,
-    close_behavior: CloseBehavior,
+    locale: LocalePreferenceDto,
+    lan_preference: LanPreferenceDto,
+    close_behavior: CloseBehaviorDto,
     automatic_update_checks: bool,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, TS)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
+#[ts(rename_all = "camelCase")]
 struct PreferencesInput {
-    locale: LocalePreference,
-    lan_preference: LanPreference,
-    close_behavior: CloseBehavior,
+    locale: LocalePreferenceDto,
+    lan_preference: LanPreferenceDto,
+    close_behavior: CloseBehaviorDto,
     automatic_update_checks: bool,
     complete_onboarding: bool,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Clone, Copy, Debug, Deserialize, Serialize, TS)]
+#[serde(rename_all = "snake_case")]
+#[ts(rename = "LocalePreference", rename_all = "snake_case")]
+enum LocalePreferenceDto {
+    System,
+    Es,
+    En,
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, Serialize, TS)]
+#[serde(rename_all = "snake_case")]
+#[ts(rename = "LanPreference", rename_all = "snake_case")]
+enum LanPreferenceDto {
+    Undecided,
+    Disabled,
+    Enabled,
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, Serialize, TS)]
+#[serde(rename_all = "snake_case")]
+#[ts(rename = "CloseBehavior", rename_all = "snake_case")]
+enum CloseBehaviorDto {
+    Ask,
+    HideToTray,
+    Quit,
+}
+
+impl From<LocalePreference> for LocalePreferenceDto {
+    fn from(value: LocalePreference) -> Self {
+        match value {
+            LocalePreference::System => Self::System,
+            LocalePreference::Es => Self::Es,
+            LocalePreference::En => Self::En,
+        }
+    }
+}
+
+impl From<LocalePreferenceDto> for LocalePreference {
+    fn from(value: LocalePreferenceDto) -> Self {
+        match value {
+            LocalePreferenceDto::System => Self::System,
+            LocalePreferenceDto::Es => Self::Es,
+            LocalePreferenceDto::En => Self::En,
+        }
+    }
+}
+
+impl From<LanPreference> for LanPreferenceDto {
+    fn from(value: LanPreference) -> Self {
+        match value {
+            LanPreference::Undecided => Self::Undecided,
+            LanPreference::Disabled => Self::Disabled,
+            LanPreference::Enabled => Self::Enabled,
+        }
+    }
+}
+
+impl From<LanPreferenceDto> for LanPreference {
+    fn from(value: LanPreferenceDto) -> Self {
+        match value {
+            LanPreferenceDto::Undecided => Self::Undecided,
+            LanPreferenceDto::Disabled => Self::Disabled,
+            LanPreferenceDto::Enabled => Self::Enabled,
+        }
+    }
+}
+
+impl From<CloseBehavior> for CloseBehaviorDto {
+    fn from(value: CloseBehavior) -> Self {
+        match value {
+            CloseBehavior::Ask => Self::Ask,
+            CloseBehavior::HideToTray => Self::HideToTray,
+            CloseBehavior::Quit => Self::Quit,
+        }
+    }
+}
+
+impl From<CloseBehaviorDto> for CloseBehavior {
+    fn from(value: CloseBehaviorDto) -> Self {
+        match value {
+            CloseBehaviorDto::Ask => Self::Ask,
+            CloseBehaviorDto::HideToTray => Self::HideToTray,
+            CloseBehaviorDto::Quit => Self::Quit,
+        }
+    }
+}
+
+#[derive(Debug, Serialize, TS)]
 #[serde(rename_all = "camelCase")]
 struct UiEventEnvelope {
     schema_version: u16,
+    #[ts(type = "number")]
     sequence: u64,
-    kind: &'static str,
+    kind: UiEventKind,
     snapshot: AppSnapshot,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(rename_all = "camelCase")]
+enum UiEventKind {
+    StateChanged,
+}
+
+#[derive(Debug, Serialize, TS)]
 #[serde(rename_all = "camelCase")]
 struct UiError {
     code: &'static str,
@@ -341,14 +679,14 @@ struct UiError {
     retryable: bool,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, TS)]
 #[serde(rename_all = "camelCase")]
 struct FolderSelection {
     token: String,
     display_path: String,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, TS)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct CollectionPolicyInput {
     local_only: bool,
@@ -372,7 +710,7 @@ fn connect(runtime: tauri::State<'_, AppRuntime>, events: Channel<UiEventEnvelop
                 .send(UiEventEnvelope {
                     schema_version: CONTRACT_VERSION,
                     sequence: snapshot.sequence,
-                    kind: "stateChanged",
+                    kind: UiEventKind::StateChanged,
                     snapshot,
                 })
                 .is_err()
@@ -570,7 +908,7 @@ fn approve_review(
     runtime: tauri::State<'_, AppRuntime>,
     concept_id: String,
     source_revision: u32,
-    draft: EnrichmentDraft,
+    draft: EnrichmentDraftDto,
 ) -> Result<(), UiError> {
     let concept_id = parse_uuid(&concept_id)?;
     let expected_review_version = approval_version(&runtime, concept_id, source_revision)?;
@@ -579,7 +917,7 @@ fn approve_review(
         WorkerCommand::Approve {
             concept_id,
             expected_review_version,
-            draft,
+            draft: draft.into(),
         },
     )
 }
@@ -696,9 +1034,9 @@ fn update_preferences(
         WorkerCommand::UpdateDesktopPreferences {
             request_id,
             update: DesktopPreferencesUpdate {
-                locale: preferences.locale,
-                lan_preference: preferences.lan_preference,
-                close_behavior: preferences.close_behavior,
+                locale: preferences.locale.into(),
+                lan_preference: preferences.lan_preference.into(),
+                close_behavior: preferences.close_behavior.into(),
                 automatic_update_checks: preferences.automatic_update_checks,
                 complete_onboarding: preferences.complete_onboarding,
             },
@@ -847,7 +1185,7 @@ impl AppSnapshot {
         Self {
             schema_version: CONTRACT_VERSION,
             sequence: 0,
-            phase: "starting",
+            phase: AppPhase::Starting,
             collections: Vec::new(),
             reviews: Vec::new(),
             source_issues: Vec::new(),
@@ -881,7 +1219,7 @@ impl AppSnapshot {
                 source_issues,
                 ..
             } => {
-                self.phase = "ready";
+                self.phase = AppPhase::Ready;
                 self.collections = collections
                     .into_iter()
                     .map(CollectionSummary::from)
@@ -914,7 +1252,7 @@ impl AppSnapshot {
                 self.model_install = Some(match progress {
                     airwiki_inference::InstallEvent::Started { total_bytes, .. } => {
                         ModelInstallSummary {
-                            status: "downloading",
+                            status: ModelInstallStatus::Downloading,
                             downloaded: 0,
                             total_bytes,
                         }
@@ -924,22 +1262,22 @@ impl AppSnapshot {
                         total_bytes,
                         ..
                     } => ModelInstallSummary {
-                        status: "downloading",
+                        status: ModelInstallStatus::Downloading,
                         downloaded,
                         total_bytes,
                     },
                     airwiki_inference::InstallEvent::Verifying { .. } => ModelInstallSummary {
-                        status: "verifying",
+                        status: ModelInstallStatus::Verifying,
                         downloaded: 0,
                         total_bytes: 0,
                     },
                     airwiki_inference::InstallEvent::Extracting { .. } => ModelInstallSummary {
-                        status: "extracting",
+                        status: ModelInstallStatus::Extracting,
                         downloaded: 0,
                         total_bytes: 0,
                     },
                     airwiki_inference::InstallEvent::Complete { .. } => ModelInstallSummary {
-                        status: "activating",
+                        status: ModelInstallStatus::Activating,
                         downloaded: 0,
                         total_bytes: 0,
                     },
@@ -950,15 +1288,15 @@ impl AppSnapshot {
                 Ok(preferences) => {
                     self.preferences = Some(PreferencesSummary {
                         completed_onboarding_version: preferences.completed_onboarding_version,
-                        locale: preferences.locale,
-                        lan_preference: preferences.lan_preference,
-                        close_behavior: preferences.close_behavior,
+                        locale: preferences.locale.into(),
+                        lan_preference: preferences.lan_preference.into(),
+                        close_behavior: preferences.close_behavior.into(),
                         automatic_update_checks: preferences.automatic_update_checks,
                     });
                 }
                 Err(_) => {
                     self.notice = Some(NoticeSummary {
-                        level: "error",
+                        level: NoticeLevel::Error,
                         message: "preferences-update-failed".to_owned(),
                     });
                 }
@@ -984,7 +1322,7 @@ impl AppSnapshot {
                             request_id: request_id.to_string(),
                             concept_id: concept_id.to_string(),
                             source_revision: page.source_revision,
-                            status: "ready",
+                            status: ReviewEvidenceStatus::Ready,
                             excerpts: page
                                 .excerpts
                                 .into_iter()
@@ -1016,9 +1354,15 @@ impl AppSnapshot {
                             concept_id: concept_id.to_string(),
                             source_revision: expected_source_revision,
                             status: match error {
-                                worker::ReviewEvidenceErrorView::NoLongerPending => "stale",
-                                worker::ReviewEvidenceErrorView::MissingEvidence => "missing",
-                                worker::ReviewEvidenceErrorView::Unavailable => "failed",
+                                worker::ReviewEvidenceErrorView::NoLongerPending => {
+                                    ReviewEvidenceStatus::Stale
+                                }
+                                worker::ReviewEvidenceErrorView::MissingEvidence => {
+                                    ReviewEvidenceStatus::Missing
+                                }
+                                worker::ReviewEvidenceErrorView::Unavailable => {
+                                    ReviewEvidenceStatus::Failed
+                                }
                             },
                             excerpts: Vec::new(),
                             total_chunks: 0,
@@ -1058,9 +1402,9 @@ impl AppSnapshot {
                         collection_id: collection_id.to_string(),
                         collection_name: bundle.collection_name,
                         status: match bundle.state {
-                            KnowledgeBundleState::Empty => "empty",
-                            KnowledgeBundleState::Ready => "ready",
-                            KnowledgeBundleState::Updating => "updating",
+                            KnowledgeBundleState::Empty => KnowledgeBundleStatus::Empty,
+                            KnowledgeBundleState::Ready => KnowledgeBundleStatus::Ready,
+                            KnowledgeBundleState::Updating => KnowledgeBundleStatus::Updating,
                         },
                         concepts: bundle
                             .concepts
@@ -1087,7 +1431,7 @@ impl AppSnapshot {
                     self.knowledge = Some(KnowledgeBundleSummary {
                         collection_id: collection_id.to_string(),
                         collection_name: String::new(),
-                        status: "failed",
+                        status: KnowledgeBundleStatus::Failed,
                         concepts: Vec::new(),
                         error_count: 1,
                         warning_count: 0,
@@ -1116,44 +1460,48 @@ impl AppSnapshot {
             WorkerEvent::SearchPartial { request_id, hits } => {
                 self.search = Some(SearchSummary {
                     request_id: request_id.to_string(),
-                    status: "searching",
+                    status: SearchStatus::Searching,
                     hits: hits.into_iter().map(SearchHitSummary::from).collect(),
-                    coverage: "partial",
+                    coverage: SearchCoverage::Partial,
                 });
             }
             WorkerEvent::SearchFinished { request_id, result } => {
                 self.search = Some(match result {
                     Ok((hits, coverage, _route)) => SearchSummary {
                         request_id: request_id.to_string(),
-                        status: "complete",
+                        status: SearchStatus::Complete,
                         hits: hits.into_iter().map(SearchHitSummary::from).collect(),
                         coverage: match coverage {
-                            worker::SearchCoverageView::Complete => "complete",
-                            worker::SearchCoverageView::FederationDisabled => "federationDisabled",
-                            worker::SearchCoverageView::OfflineDevices { .. } => "offlineDevices",
-                            worker::SearchCoverageView::PublicNetworkOffline => {
-                                "publicNetworkOffline"
+                            worker::SearchCoverageView::Complete => SearchCoverage::Complete,
+                            worker::SearchCoverageView::FederationDisabled => {
+                                SearchCoverage::FederationDisabled
                             }
-                            worker::SearchCoverageView::Partial => "partial",
+                            worker::SearchCoverageView::OfflineDevices { .. } => {
+                                SearchCoverage::OfflineDevices
+                            }
+                            worker::SearchCoverageView::PublicNetworkOffline => {
+                                SearchCoverage::PublicNetworkOffline
+                            }
+                            worker::SearchCoverageView::Partial => SearchCoverage::Partial,
                         },
                     },
                     Err(_) => SearchSummary {
                         request_id: request_id.to_string(),
-                        status: "failed",
+                        status: SearchStatus::Failed,
                         hits: Vec::new(),
-                        coverage: "partial",
+                        coverage: SearchCoverage::Partial,
                     },
                 });
             }
             WorkerEvent::Notice(message) => {
                 self.notice = Some(NoticeSummary {
-                    level: "notice",
+                    level: NoticeLevel::Notice,
                     message,
                 });
             }
             WorkerEvent::Error(_) => {
                 self.notice = Some(NoticeSummary {
-                    level: "error",
+                    level: NoticeLevel::Error,
                     message: "runtime-operation-failed".to_owned(),
                 });
             }
@@ -1241,7 +1589,7 @@ impl From<worker::ReviewItemView> for ReviewSummary {
             source_revision: value.source_revision,
             source_name: value.source_name,
             collection_name: value.collection_name,
-            draft: value.draft,
+            draft: value.draft.into(),
         }
     }
 }
@@ -1276,7 +1624,7 @@ fn failed_knowledge_page(collection_id: Uuid, page_id: KnowledgePageId) -> Knowl
         collection_id: collection_id.to_string(),
         page: page_id.into(),
         title: String::new(),
-        status: "failed",
+        status: KnowledgePageStatus::Failed,
         blocks: Vec::new(),
         metadata: Vec::new(),
         backlinks: Vec::new(),
@@ -1289,7 +1637,7 @@ fn knowledge_page_summary(page: KnowledgePageView) -> KnowledgePageSummary {
         collection_id: page.collection_id.to_string(),
         page: page.page_id.into(),
         title: page.title,
-        status: "ready",
+        status: KnowledgePageStatus::Ready,
         blocks: parse_knowledge_blocks(&page.body_markdown),
         metadata: page.metadata,
         backlinks: page.backlinks.into_iter().map(Into::into).collect(),
@@ -1447,6 +1795,61 @@ const fn heading_level(level: HeadingLevel) -> u8 {
     }
 }
 
+fn ui_bindings_source() -> String {
+    let config = ts_rs::Config::default();
+    let declarations = [
+        exported_declaration::<ConceptTypeDto>(&config),
+        exported_declaration::<SuggestedEntityDto>(&config),
+        exported_declaration::<SuggestedLinkDto>(&config),
+        exported_declaration::<EnrichmentDraftDto>(&config),
+        exported_declaration::<CollectionSummary>(&config),
+        exported_declaration::<ReviewSummary>(&config),
+        exported_declaration::<ReviewExcerptSummary>(&config),
+        exported_declaration::<ReviewEvidenceStatus>(&config),
+        exported_declaration::<ReviewEvidenceSummary>(&config),
+        exported_declaration::<KnowledgePageInput>(&config),
+        exported_declaration::<KnowledgeBlock>(&config),
+        exported_declaration::<KnowledgeConceptSummary>(&config),
+        exported_declaration::<KnowledgeBundleStatus>(&config),
+        exported_declaration::<KnowledgeBundleSummary>(&config),
+        exported_declaration::<KnowledgePageStatus>(&config),
+        exported_declaration::<KnowledgePageSummary>(&config),
+        exported_declaration::<SourceIssueSummary>(&config),
+        exported_declaration::<PeerTrust>(&config),
+        exported_declaration::<PeerActivity>(&config),
+        exported_declaration::<PeerSummary>(&config),
+        exported_declaration::<ModelSummary>(&config),
+        exported_declaration::<ModelInstallStatus>(&config),
+        exported_declaration::<ModelInstallSummary>(&config),
+        exported_declaration::<SearchHitSummary>(&config),
+        exported_declaration::<SearchStatus>(&config),
+        exported_declaration::<SearchCoverage>(&config),
+        exported_declaration::<SearchSummary>(&config),
+        exported_declaration::<NoticeLevel>(&config),
+        exported_declaration::<NoticeSummary>(&config),
+        exported_declaration::<LocalePreferenceDto>(&config),
+        exported_declaration::<LanPreferenceDto>(&config),
+        exported_declaration::<CloseBehaviorDto>(&config),
+        exported_declaration::<PreferencesSummary>(&config),
+        exported_declaration::<PreferencesInput>(&config),
+        exported_declaration::<AppPhase>(&config),
+        exported_declaration::<AppSnapshot>(&config),
+        exported_declaration::<UiEventKind>(&config),
+        exported_declaration::<UiEventEnvelope>(&config),
+        exported_declaration::<UiError>(&config),
+        exported_declaration::<FolderSelection>(&config),
+        exported_declaration::<CollectionPolicyInput>(&config),
+    ]
+    .join("\n\n");
+    format!(
+        "// Generated by `cargo run --locked -p xtask -- ui-bindings generate`.\n// Do not edit by hand.\n\n{declarations}\n"
+    )
+}
+
+fn exported_declaration<T: TS>(config: &ts_rs::Config) -> String {
+    format!("export {}", T::decl(config))
+}
+
 impl From<worker::SourceIssueView> for SourceIssueSummary {
     fn from(value: worker::SourceIssueView) -> Self {
         Self {
@@ -1464,15 +1867,15 @@ impl From<worker::PeerView> for PeerSummary {
             peer_id: value.peer_id,
             device_name: value.device_name,
             trust: match value.trust {
-                worker::PeerTrustState::Unpaired => "unpaired",
-                worker::PeerTrustState::Trusted => "trusted",
-                worker::PeerTrustState::Blocked => "blocked",
+                worker::PeerTrustState::Unpaired => PeerTrust::Unpaired,
+                worker::PeerTrustState::Trusted => PeerTrust::Trusted,
+                worker::PeerTrustState::Blocked => PeerTrust::Blocked,
             },
             activity: match value.activity {
-                worker::PeerActivityState::NotObserved => "notObserved",
-                worker::PeerActivityState::Discovered => "discovered",
-                worker::PeerActivityState::Pairing => "pairing",
-                worker::PeerActivityState::Connected => "connected",
+                worker::PeerActivityState::NotObserved => PeerActivity::NotObserved,
+                worker::PeerActivityState::Discovered => PeerActivity::Discovered,
+                worker::PeerActivityState::Pairing => PeerActivity::Pairing,
+                worker::PeerActivityState::Connected => PeerActivity::Connected,
             },
         }
     }
@@ -1568,7 +1971,7 @@ fn main() -> Result<()> {
                         }
                         Err(broadcast::error::RecvError::Lagged(_)) => {
                             snapshot.notice = Some(NoticeSummary {
-                                level: "warning",
+                                level: NoticeLevel::Warning,
                                 message: "runtime-snapshot-required".to_owned(),
                             });
                             snapshot.sequence = snapshot.sequence.saturating_add(1);
@@ -1599,7 +2002,9 @@ fn main() -> Result<()> {
                     .lock()
                     .ok()
                     .and_then(|snapshot| snapshot.borrow().preferences)
-                    .map_or(CloseBehavior::Ask, |preferences| preferences.close_behavior);
+                    .map_or(CloseBehavior::Ask, |preferences| {
+                        preferences.close_behavior.into()
+                    });
                 match close_action(
                     close_behavior,
                     runtime.tray_operational.load(Ordering::Acquire),
@@ -1645,6 +2050,11 @@ fn main() -> Result<()> {
 mod tests {
     use super::*;
 
+    const UI_BINDINGS_PATH: &str = concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/ui/src/generated/ui-contract.ts"
+    );
+
     fn runtime_with_selection(token: Uuid, path: PathBuf, expires_at: Instant) -> AppRuntime {
         let (commands, _receiver) = mpsc::channel(COMMAND_CAPACITY);
         let (_snapshot_sender, snapshot) = watch::channel(AppSnapshot::starting());
@@ -1680,6 +2090,39 @@ mod tests {
             Some(expected)
         );
         assert!(consume_folder_selection(&runtime, &token.to_string()).is_err());
+    }
+
+    #[test]
+    fn enrichment_draft_dto_round_trips_without_contract_drift() -> Result<()> {
+        let draft = EnrichmentDraft {
+            concept_type: ConceptType::Runbook,
+            title: "Synthetic recovery".to_owned(),
+            description: "A synthetic review fixture".to_owned(),
+            language: "en".to_owned(),
+            tags: vec!["recovery".to_owned()],
+            entities: vec![SuggestedEntity {
+                name: "AirWiki".to_owned(),
+                kind: "application".to_owned(),
+            }],
+            links: vec![SuggestedLink {
+                label: "Evidence".to_owned(),
+                target: "okf://synthetic/evidence".to_owned(),
+            }],
+            summary: "Synthetic summary".to_owned(),
+            classification_confidence: 0.9,
+            classification_explanation: "Synthetic fixture".to_owned(),
+        };
+
+        let dto = EnrichmentDraftDto::from(draft.clone());
+        let serialized = serde_json::to_value(&dto)?;
+        anyhow::ensure!(serialized.get("classificationConfidence").is_some());
+        let round_trip = EnrichmentDraft::from(dto);
+
+        assert_eq!(
+            serde_json::to_value(round_trip)?,
+            serde_json::to_value(draft)?
+        );
+        Ok(())
     }
 
     #[test]
@@ -1806,5 +2249,25 @@ mod tests {
             close_action(CloseBehavior::HideToTray, true),
             CloseAction::Hide
         );
+    }
+
+    #[test]
+    fn ui_bindings_match_committed_file() -> Result<()> {
+        let committed = std::fs::read_to_string(UI_BINDINGS_PATH)
+            .context("committed UI bindings are missing")?;
+        anyhow::ensure!(
+            committed == ui_bindings_source(),
+            "UI bindings are stale; run `cargo run --locked -p xtask -- ui-bindings generate`"
+        );
+        Ok(())
+    }
+
+    #[test]
+    #[ignore = "writes the committed TypeScript contract"]
+    fn generate_ui_bindings() -> Result<()> {
+        let path = PathBuf::from(UI_BINDINGS_PATH);
+        let parent = path.parent().context("UI bindings path has no parent")?;
+        std::fs::create_dir_all(parent).context("failed to create UI bindings directory")?;
+        std::fs::write(path, ui_bindings_source()).context("failed to write UI bindings")
     }
 }

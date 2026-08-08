@@ -105,6 +105,18 @@ export async function refreshWikiHealth(requestId: string): Promise<void> {
   return invoke('refresh_wiki_health', { requestId });
 }
 
+export async function refreshConnectivity(requestId: string): Promise<void> {
+  return invoke('refresh_connectivity', { requestId });
+}
+
+export async function configureFirewall(requestId: string, install: boolean): Promise<void> {
+  return invoke('configure_firewall', { requestId, install });
+}
+
+export async function openAdvancedFirewall(requestId: string): Promise<void> {
+  return invoke('open_advanced_firewall', { requestId });
+}
+
 export async function hideToTray(): Promise<void> {
   return invoke('hide_to_tray');
 }

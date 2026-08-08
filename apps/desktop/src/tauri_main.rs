@@ -89,6 +89,7 @@ struct RequestTracker {
     preferences: Option<Uuid>,
     autostart: Option<Uuid>,
     wiki_health: Option<Uuid>,
+    connectivity: Option<Uuid>,
 }
 
 struct PendingFolderSelection {
@@ -118,6 +119,9 @@ struct AppSnapshot {
     preferences: Option<PreferencesSummary>,
     autostart: Option<AutostartStatusDto>,
     wiki_health: Option<WikiHealthSummary>,
+    connectivity: Option<ConnectivitySummary>,
+    lan_runtime: Option<LanRuntimeSummary>,
+    firewall_operation: Option<FirewallOperationStatus>,
     notice: Option<NoticeSummary>,
 }
 
@@ -667,6 +671,102 @@ enum WikiHealthStatus {
     Failed,
 }
 
+#[derive(Clone, Copy, Debug, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+struct ConnectivitySummary {
+    system_permission: SystemPermissionStatus,
+    network_profile: NetworkProfileStatus,
+    firewall: FirewallStatus,
+    firewall_helper: FirewallHelperStatus,
+}
+
+#[derive(Clone, Copy, Debug, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(rename_all = "camelCase")]
+enum SystemPermissionStatus {
+    NotApplicable,
+    Unknown,
+    Granted,
+    Denied,
+}
+
+#[derive(Clone, Copy, Debug, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(rename_all = "camelCase")]
+enum NetworkProfileStatus {
+    NotApplicable,
+    Unknown,
+    Private,
+    Domain,
+    Public,
+}
+
+#[derive(Clone, Copy, Debug, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(rename_all = "camelCase")]
+enum FirewallStatus {
+    NotApplicable,
+    Unknown,
+    Ready,
+    FirewallDisabled,
+    BlockAllInbound,
+    RulesMissing,
+    Conflict,
+    LegacyExposure,
+    ManagedPolicy,
+    Unsupported,
+    Error,
+}
+
+#[derive(Clone, Copy, Debug, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(rename_all = "camelCase")]
+enum FirewallHelperStatus {
+    NotApplicable,
+    Verified,
+    Missing,
+    Untrusted,
+    PublisherMismatch,
+    Unsupported,
+    Error,
+}
+
+#[derive(Clone, Copy, Debug, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+struct LanRuntimeSummary {
+    listener: LanListenerStatus,
+    discovery: LanDiscoveryStatus,
+    address_count: usize,
+}
+
+#[derive(Clone, Copy, Debug, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(rename_all = "camelCase")]
+enum LanListenerStatus {
+    Stopped,
+    Starting,
+    Listening,
+    Failed,
+}
+
+#[derive(Clone, Copy, Debug, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(rename_all = "camelCase")]
+enum LanDiscoveryStatus {
+    Disabled,
+    Starting,
+    Active,
+    Failed,
+}
+
+#[derive(Clone, Copy, Debug, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(rename_all = "camelCase")]
+enum FirewallOperationStatus {
+    AwaitingWindows,
+    TakingLonger,
+}
+
 impl From<autostart::AutostartStatus> for AutostartStatusDto {
     fn from(value: autostart::AutostartStatus) -> Self {
         match value {
@@ -675,6 +775,121 @@ impl From<autostart::AutostartStatus> for AutostartStatusDto {
             autostart::AutostartStatus::RequiresApproval => Self::RequiresApproval,
             autostart::AutostartStatus::Conflict => Self::Conflict,
             autostart::AutostartStatus::Unsupported => Self::Unsupported,
+        }
+    }
+}
+
+impl From<connectivity_platform::ConnectivityPlatformSnapshot> for ConnectivitySummary {
+    fn from(value: connectivity_platform::ConnectivityPlatformSnapshot) -> Self {
+        Self {
+            system_permission: match value.system_permission {
+                connectivity_platform::SystemPermissionState::NotApplicable => {
+                    SystemPermissionStatus::NotApplicable
+                }
+                connectivity_platform::SystemPermissionState::Unknown => {
+                    SystemPermissionStatus::Unknown
+                }
+                connectivity_platform::SystemPermissionState::Granted => {
+                    SystemPermissionStatus::Granted
+                }
+                connectivity_platform::SystemPermissionState::Denied => {
+                    SystemPermissionStatus::Denied
+                }
+            },
+            network_profile: match value.network_profile {
+                connectivity_platform::NetworkProfileState::NotApplicable => {
+                    NetworkProfileStatus::NotApplicable
+                }
+                connectivity_platform::NetworkProfileState::Unknown => {
+                    NetworkProfileStatus::Unknown
+                }
+                connectivity_platform::NetworkProfileState::Private => {
+                    NetworkProfileStatus::Private
+                }
+                connectivity_platform::NetworkProfileState::Domain => NetworkProfileStatus::Domain,
+                connectivity_platform::NetworkProfileState::Public => NetworkProfileStatus::Public,
+            },
+            firewall: match value.firewall {
+                connectivity_platform::FirewallDiagnosticState::NotApplicable => {
+                    FirewallStatus::NotApplicable
+                }
+                connectivity_platform::FirewallDiagnosticState::Unknown => FirewallStatus::Unknown,
+                connectivity_platform::FirewallDiagnosticState::Ready => FirewallStatus::Ready,
+                connectivity_platform::FirewallDiagnosticState::FirewallDisabled => {
+                    FirewallStatus::FirewallDisabled
+                }
+                connectivity_platform::FirewallDiagnosticState::BlockAllInbound => {
+                    FirewallStatus::BlockAllInbound
+                }
+                connectivity_platform::FirewallDiagnosticState::RulesMissing => {
+                    FirewallStatus::RulesMissing
+                }
+                connectivity_platform::FirewallDiagnosticState::Conflict => {
+                    FirewallStatus::Conflict
+                }
+                connectivity_platform::FirewallDiagnosticState::LegacyExposure => {
+                    FirewallStatus::LegacyExposure
+                }
+                connectivity_platform::FirewallDiagnosticState::ManagedPolicy => {
+                    FirewallStatus::ManagedPolicy
+                }
+                connectivity_platform::FirewallDiagnosticState::Unsupported => {
+                    FirewallStatus::Unsupported
+                }
+                connectivity_platform::FirewallDiagnosticState::Error => FirewallStatus::Error,
+            },
+            firewall_helper: match value.firewall_helper {
+                connectivity_platform::FirewallHelperState::NotApplicable => {
+                    FirewallHelperStatus::NotApplicable
+                }
+                connectivity_platform::FirewallHelperState::Verified => {
+                    FirewallHelperStatus::Verified
+                }
+                connectivity_platform::FirewallHelperState::Missing => {
+                    FirewallHelperStatus::Missing
+                }
+                connectivity_platform::FirewallHelperState::Untrusted => {
+                    FirewallHelperStatus::Untrusted
+                }
+                connectivity_platform::FirewallHelperState::PublisherMismatch => {
+                    FirewallHelperStatus::PublisherMismatch
+                }
+                connectivity_platform::FirewallHelperState::Unsupported => {
+                    FirewallHelperStatus::Unsupported
+                }
+                connectivity_platform::FirewallHelperState::Error => FirewallHelperStatus::Error,
+            },
+        }
+    }
+}
+
+impl From<worker::LanListenerView> for LanListenerStatus {
+    fn from(value: worker::LanListenerView) -> Self {
+        match value {
+            worker::LanListenerView::Stopped => Self::Stopped,
+            worker::LanListenerView::Starting => Self::Starting,
+            worker::LanListenerView::Listening => Self::Listening,
+            worker::LanListenerView::Failed => Self::Failed,
+        }
+    }
+}
+
+impl From<worker::LanDiscoveryView> for LanDiscoveryStatus {
+    fn from(value: worker::LanDiscoveryView) -> Self {
+        match value {
+            worker::LanDiscoveryView::Disabled => Self::Disabled,
+            worker::LanDiscoveryView::Starting => Self::Starting,
+            worker::LanDiscoveryView::Active => Self::Active,
+            worker::LanDiscoveryView::Failed => Self::Failed,
+        }
+    }
+}
+
+impl From<worker::FirewallOperationView> for FirewallOperationStatus {
+    fn from(value: worker::FirewallOperationView) -> Self {
+        match value {
+            worker::FirewallOperationView::AwaitingWindows => Self::AwaitingWindows,
+            worker::FirewallOperationView::TakingLonger => Self::TakingLonger,
         }
     }
 }
@@ -1179,6 +1394,62 @@ fn refresh_wiki_health(
     Ok(())
 }
 
+#[tauri::command]
+fn refresh_connectivity(
+    runtime: tauri::State<'_, AppRuntime>,
+    request_id: String,
+) -> Result<(), UiError> {
+    send_connectivity_command(&runtime, request_id, |request_id| {
+        WorkerCommand::RefreshConnectivity { request_id }
+    })
+}
+
+#[tauri::command]
+fn configure_firewall(
+    runtime: tauri::State<'_, AppRuntime>,
+    request_id: String,
+    install: bool,
+) -> Result<(), UiError> {
+    send_connectivity_command(&runtime, request_id, |request_id| {
+        WorkerCommand::ConfigureFirewall {
+            request_id,
+            install,
+        }
+    })
+}
+
+#[tauri::command]
+fn open_advanced_firewall(
+    runtime: tauri::State<'_, AppRuntime>,
+    request_id: String,
+) -> Result<(), UiError> {
+    send_connectivity_command(&runtime, request_id, |request_id| {
+        WorkerCommand::OpenAdvancedFirewall { request_id }
+    })
+}
+
+fn send_connectivity_command(
+    runtime: &AppRuntime,
+    request_id: String,
+    command: impl FnOnce(Uuid) -> WorkerCommand,
+) -> Result<(), UiError> {
+    let request_id = parse_uuid(&request_id)?;
+    runtime
+        .requests
+        .lock()
+        .map_err(|_| UiError::internal())?
+        .connectivity = Some(request_id);
+    if let Err(error) = send_command(runtime, command(request_id)) {
+        if let Ok(mut requests) = runtime.requests.lock()
+            && requests.connectivity == Some(request_id)
+        {
+            requests.connectivity = None;
+        }
+        return Err(error);
+    }
+    Ok(())
+}
+
 fn send_autostart_command(
     runtime: &AppRuntime,
     request_id: String,
@@ -1358,6 +1629,9 @@ impl AppSnapshot {
             preferences: None,
             autostart: None,
             wiki_health: None,
+            connectivity: None,
+            lan_runtime: None,
+            firewall_operation: None,
             notice: None,
         }
     }
@@ -1509,6 +1783,30 @@ impl AppSnapshot {
                         attention_collection_id: None,
                         checked: false,
                     },
+                });
+            }
+            WorkerEvent::ConnectivityPlatformUpdated { result, .. } => match result {
+                Ok(connectivity) => self.connectivity = Some(connectivity.into()),
+                Err(_) => {
+                    self.notice = Some(NoticeSummary {
+                        level: NoticeLevel::Error,
+                        message: "connectivity-check-failed".to_owned(),
+                    });
+                }
+            },
+            WorkerEvent::FirewallOperationUpdated { state, .. } => {
+                self.firewall_operation = state.map(Into::into);
+            }
+            WorkerEvent::LanRuntimeUpdated {
+                listener,
+                discovery,
+                local_addresses,
+                ..
+            } => {
+                self.lan_runtime = Some(LanRuntimeSummary {
+                    listener: listener.into(),
+                    discovery: discovery.into(),
+                    address_count: local_addresses.len(),
                 });
             }
             WorkerEvent::ReviewEvidenceLoaded {
@@ -1849,6 +2147,21 @@ fn request_is_current(event: &WorkerEvent, requests: &Mutex<RequestTracker>) -> 
                 false
             }
         }
+        WorkerEvent::ConnectivityPlatformUpdated { request_id, .. } if request_id.is_nil() => true,
+        WorkerEvent::ConnectivityPlatformUpdated { request_id, .. } => {
+            match requests.connectivity {
+                Some(current) if current == *request_id => {
+                    requests.connectivity = None;
+                    true
+                }
+                Some(_) => false,
+                None => true,
+            }
+        }
+        WorkerEvent::FirewallOperationUpdated { request_id, .. } if request_id.is_nil() => true,
+        WorkerEvent::FirewallOperationUpdated { request_id, .. } => {
+            requests.connectivity == Some(*request_id)
+        }
         _ => true,
     }
 }
@@ -2153,6 +2466,15 @@ fn ui_bindings_source() -> String {
         exported_declaration::<AutostartStatusDto>(&config),
         exported_declaration::<WikiHealthStatus>(&config),
         exported_declaration::<WikiHealthSummary>(&config),
+        exported_declaration::<SystemPermissionStatus>(&config),
+        exported_declaration::<NetworkProfileStatus>(&config),
+        exported_declaration::<FirewallStatus>(&config),
+        exported_declaration::<FirewallHelperStatus>(&config),
+        exported_declaration::<ConnectivitySummary>(&config),
+        exported_declaration::<LanListenerStatus>(&config),
+        exported_declaration::<LanDiscoveryStatus>(&config),
+        exported_declaration::<LanRuntimeSummary>(&config),
+        exported_declaration::<FirewallOperationStatus>(&config),
         exported_declaration::<PreferencesSummary>(&config),
         exported_declaration::<PreferencesInput>(&config),
         exported_declaration::<AppPhase>(&config),
@@ -2381,6 +2703,9 @@ fn main() -> Result<()> {
             refresh_autostart,
             set_autostart,
             refresh_wiki_health,
+            refresh_connectivity,
+            configure_firewall,
+            open_advanced_firewall,
             hide_to_tray,
             quit_completely
         ])
@@ -2695,6 +3020,32 @@ mod tests {
             ),
             (true, false)
         );
+    }
+
+    #[test]
+    fn connectivity_request_rejects_stale_completion_while_pending() {
+        let current = Uuid::new_v4();
+        let stale = Uuid::new_v4();
+        let requests = Mutex::new(RequestTracker {
+            connectivity: Some(current),
+            ..RequestTracker::default()
+        });
+        let stale_applies = request_is_current(
+            &WorkerEvent::ConnectivityPlatformUpdated {
+                request_id: stale,
+                result: Err(worker::ConnectivityIssueCode::Busy),
+            },
+            &requests,
+        );
+        let current_applies = request_is_current(
+            &WorkerEvent::ConnectivityPlatformUpdated {
+                request_id: current,
+                result: Err(worker::ConnectivityIssueCode::Busy),
+            },
+            &requests,
+        );
+
+        assert_eq!((stale_applies, current_applies), (false, true));
     }
 
     #[test]

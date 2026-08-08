@@ -21,10 +21,13 @@ use std::{
 use airwiki_windows_firewall::{
     PublisherTrustError, verify_open_artifact_publisher_matches_current_executable,
 };
+use async_trait::async_trait;
 use cargo_packager_updater::{
     Config as PackagerConfig, Error as PackagerError, Update as PackagerUpdate, UpdaterBuilder,
     semver::Version, url::Url,
 };
+use tauri::AppHandle;
+use tauri_plugin_updater::{Error as TauriUpdaterError, Update as TauriUpdate, UpdaterExt};
 use thiserror::Error;
 #[cfg(target_os = "windows")]
 use windows::Win32::{
@@ -234,10 +237,11 @@ pub(crate) struct UpdaterView {
     pub(crate) last_issue: Option<UpdateIssue>,
 }
 
-pub(crate) trait UpdateBackend {
-    fn check(&mut self) -> Result<Option<UpdateSummary>, UpdateIssue>;
-    fn download(&mut self, expected_version: &str) -> Result<(), UpdateIssue>;
-    fn install(&mut self, expected_version: &str) -> Result<(), UpdateIssue>;
+#[async_trait]
+pub(crate) trait UpdateBackend: Send {
+    async fn check(&mut self) -> Result<Option<UpdateSummary>, UpdateIssue>;
+    async fn download(&mut self, expected_version: &str) -> Result<(), UpdateIssue>;
+    async fn install(&mut self, expected_version: &str) -> Result<(), UpdateIssue>;
 }
 
 #[cfg(any(target_os = "windows", test))]
@@ -882,18 +886,40 @@ fn push_quoted_windows_argument(
 }
 
 #[cfg(target_os = "windows")]
-fn install_platform_update(update: PackagerUpdate, package: Vec<u8>) -> Result<(), UpdateIssue> {
-    let expected_version =
-        expected_windows_update_version(&update.version, env!("CARGO_PKG_VERSION"))
-            .map_err(windows_version_issue)?;
+fn install_windows_platform_update(version: &str, package: Vec<u8>) -> Result<(), UpdateIssue> {
+    let expected_version = expected_windows_update_version(version, env!("CARGO_PKG_VERSION"))
+        .map_err(windows_version_issue)?;
     let package = LockedWindowsUpdatePackage::stage(&package)?;
     let verifier = NativeWindowsUpdateVerifier { expected_version };
     verify_and_launch_package(package, &verifier, &DirectWindowsUpdateLauncher)
 }
 
 #[cfg(not(target_os = "windows"))]
-fn install_platform_update(update: PackagerUpdate, package: Vec<u8>) -> Result<(), UpdateIssue> {
+fn install_packager_platform_update(
+    update: PackagerUpdate,
+    package: Vec<u8>,
+) -> Result<(), UpdateIssue> {
     update.install(package).map_err(packager_issue)
+}
+
+#[cfg(target_os = "windows")]
+fn install_packager_platform_update(
+    update: PackagerUpdate,
+    package: Vec<u8>,
+) -> Result<(), UpdateIssue> {
+    install_windows_platform_update(&update.version, package)
+}
+
+#[cfg(not(target_os = "windows"))]
+#[allow(dead_code, reason = "used by the Tauri runner during migration")]
+fn install_tauri_platform_update(update: TauriUpdate, package: Vec<u8>) -> Result<(), UpdateIssue> {
+    update.install(package).map_err(tauri_updater_issue)
+}
+
+#[cfg(target_os = "windows")]
+#[allow(dead_code, reason = "used by the Tauri runner during migration")]
+fn install_tauri_platform_update(update: TauriUpdate, package: Vec<u8>) -> Result<(), UpdateIssue> {
+    install_windows_platform_update(&update.version, package)
 }
 
 #[cfg(target_os = "windows")]
@@ -928,14 +954,19 @@ pub(crate) struct InstallConfirmation {
     version: String,
 }
 
-pub(crate) struct UpdaterService<B> {
-    backend: B,
+pub(crate) struct UpdaterService {
+    backend: Box<dyn UpdateBackend>,
     generation: u64,
     view: UpdaterView,
 }
 
-impl<B: UpdateBackend> UpdaterService<B> {
-    pub(crate) fn new(backend: B) -> Self {
+impl UpdaterService {
+    #[cfg(test)]
+    pub(crate) fn new(backend: impl UpdateBackend + 'static) -> Self {
+        Self::from_boxed(Box::new(backend))
+    }
+
+    pub(crate) fn from_boxed(backend: Box<dyn UpdateBackend>) -> Self {
         Self {
             backend,
             generation: 0,
@@ -950,12 +981,12 @@ impl<B: UpdateBackend> UpdaterService<B> {
         &self.view
     }
 
-    pub(crate) fn check_blocking(&mut self) {
+    pub(crate) async fn check(&mut self) {
         self.generation = self.generation.wrapping_add(1);
         self.view.status = UpdaterStatus::Checking;
         self.view.last_issue = None;
 
-        match self.backend.check() {
+        match self.backend.check().await {
             Ok(Some(update)) => self.view.status = UpdaterStatus::Available(update),
             Ok(None) => self.view.status = UpdaterStatus::UpToDate,
             Err(issue) => {
@@ -975,7 +1006,7 @@ impl<B: UpdateBackend> UpdaterService<B> {
         })
     }
 
-    pub(crate) fn download_blocking(
+    pub(crate) async fn download(
         &mut self,
         confirmation: DownloadConfirmation,
     ) -> Result<(), UpdateActionError> {
@@ -984,7 +1015,7 @@ impl<B: UpdateBackend> UpdaterService<B> {
         self.view.status = UpdaterStatus::Downloading(update.clone());
         self.view.last_issue = None;
 
-        match self.backend.download(&update.version) {
+        match self.backend.download(&update.version).await {
             Ok(()) => self.view.status = UpdaterStatus::ReadyToInstall(update),
             Err(issue) => {
                 self.view.status = UpdaterStatus::Available(update);
@@ -1004,7 +1035,7 @@ impl<B: UpdateBackend> UpdaterService<B> {
         })
     }
 
-    pub(crate) fn install_blocking(
+    pub(crate) async fn install(
         &mut self,
         confirmation: InstallConfirmation,
     ) -> Result<(), UpdateActionError> {
@@ -1012,7 +1043,7 @@ impl<B: UpdateBackend> UpdaterService<B> {
         self.view.status = UpdaterStatus::Installing(update.clone());
         self.view.last_issue = None;
 
-        match self.backend.install(&update.version) {
+        match self.backend.install(&update.version).await {
             Ok(()) => self.view.status = UpdaterStatus::Installed(update),
             Err(issue) => {
                 self.view.status = UpdaterStatus::Available(update);
@@ -1088,19 +1119,26 @@ impl PackagerUpdateBackend {
     }
 }
 
+#[async_trait]
 impl UpdateBackend for PackagerUpdateBackend {
-    fn check(&mut self) -> Result<Option<UpdateSummary>, UpdateIssue> {
+    async fn check(&mut self) -> Result<Option<UpdateSummary>, UpdateIssue> {
         self.checked_update = None;
         self.downloaded_package = None;
 
-        let updater = UpdaterBuilder::new(self.current_version.clone(), self.config.clone())
-            .version_comparator(|current, release| {
-                release.version.pre.is_empty() && release.version > current
-            })
-            .timeout(NETWORK_TIMEOUT)
-            .build()
-            .map_err(packager_issue)?;
-        let update = updater.check().map_err(packager_issue)?;
+        let current_version = self.current_version.clone();
+        let config = self.config.clone();
+        let update = tokio::task::spawn_blocking(move || {
+            let updater = UpdaterBuilder::new(current_version, config)
+                .version_comparator(|current, release| {
+                    release.version.pre.is_empty() && release.version > current
+                })
+                .timeout(NETWORK_TIMEOUT)
+                .build()
+                .map_err(packager_issue)?;
+            updater.check().map_err(packager_issue)
+        })
+        .await
+        .map_err(|_| UpdateIssue::new(UpdateIssueCode::Internal))??;
         let Some(update) = update else {
             return Ok(None);
         };
@@ -1113,22 +1151,110 @@ impl UpdateBackend for PackagerUpdateBackend {
         Ok(Some(summary))
     }
 
-    fn download(&mut self, expected_version: &str) -> Result<(), UpdateIssue> {
-        let package = self
-            .checked_update(expected_version)?
-            .download()
-            .map_err(packager_issue)?;
+    async fn download(&mut self, expected_version: &str) -> Result<(), UpdateIssue> {
+        let update = self.checked_update(expected_version)?.clone();
+        let package =
+            tokio::task::spawn_blocking(move || update.download().map_err(packager_issue))
+                .await
+                .map_err(|_| UpdateIssue::new(UpdateIssueCode::Internal))??;
         self.downloaded_package = Some(package);
         Ok(())
     }
 
-    fn install(&mut self, expected_version: &str) -> Result<(), UpdateIssue> {
+    async fn install(&mut self, expected_version: &str) -> Result<(), UpdateIssue> {
         let update = self.checked_update(expected_version)?.clone();
         let package = self
             .downloaded_package
             .take()
             .ok_or_else(|| UpdateIssue::new(UpdateIssueCode::Internal))?;
-        install_platform_update(update, package)
+        tokio::task::spawn_blocking(move || install_packager_platform_update(update, package))
+            .await
+            .map_err(|_| UpdateIssue::new(UpdateIssueCode::Internal))?
+    }
+}
+
+#[allow(dead_code, reason = "used by the Tauri runner during migration")]
+pub(crate) struct TauriUpdateBackend {
+    app: AppHandle,
+    config: UpdaterBuildConfig,
+    checked_update: Option<TauriUpdate>,
+    downloaded_package: Option<Vec<u8>>,
+}
+
+#[allow(dead_code, reason = "used by the Tauri runner during migration")]
+impl TauriUpdateBackend {
+    pub(crate) fn new(
+        app: AppHandle,
+        config: UpdaterBuildConfig,
+    ) -> Result<Self, UpdaterDisabledReason> {
+        Version::parse(env!("CARGO_PKG_VERSION"))
+            .map_err(|_| UpdaterDisabledReason::InvalidCurrentVersion)?;
+        Ok(Self {
+            app,
+            config,
+            checked_update: None,
+            downloaded_package: None,
+        })
+    }
+
+    fn checked_update(&self, expected_version: &str) -> Result<&TauriUpdate, UpdateIssue> {
+        self.checked_update
+            .as_ref()
+            .filter(|update| update.version == expected_version)
+            .ok_or_else(|| UpdateIssue::new(UpdateIssueCode::Internal))
+    }
+}
+
+#[async_trait]
+#[allow(dead_code, reason = "used by the Tauri runner during migration")]
+impl UpdateBackend for TauriUpdateBackend {
+    async fn check(&mut self) -> Result<Option<UpdateSummary>, UpdateIssue> {
+        self.checked_update = None;
+        self.downloaded_package = None;
+
+        let updater = self
+            .app
+            .updater_builder()
+            .endpoints(vec![self.config.endpoint.clone()])
+            .map_err(tauri_updater_issue)?
+            .pubkey(self.config.public_key.clone())
+            .version_comparator(|current, release| {
+                release.version.pre.is_empty() && release.version > current
+            })
+            .timeout(NETWORK_TIMEOUT)
+            .build()
+            .map_err(tauri_updater_issue)?;
+        let update = updater.check().await.map_err(tauri_updater_issue)?;
+        let Some(update) = update else {
+            return Ok(None);
+        };
+        let summary = UpdateSummary {
+            version: update.version.clone(),
+            release_notes: update.body.as_deref().map(truncate_release_notes),
+        };
+        self.checked_update = Some(update);
+        Ok(Some(summary))
+    }
+
+    async fn download(&mut self, expected_version: &str) -> Result<(), UpdateIssue> {
+        let package = self
+            .checked_update(expected_version)?
+            .download(|_, _| {}, || {})
+            .await
+            .map_err(tauri_updater_issue)?;
+        self.downloaded_package = Some(package);
+        Ok(())
+    }
+
+    async fn install(&mut self, expected_version: &str) -> Result<(), UpdateIssue> {
+        let update = self.checked_update(expected_version)?.clone();
+        let package = self
+            .downloaded_package
+            .take()
+            .ok_or_else(|| UpdateIssue::new(UpdateIssueCode::Internal))?;
+        tokio::task::spawn_blocking(move || install_tauri_platform_update(update, package))
+            .await
+            .map_err(|_| UpdateIssue::new(UpdateIssueCode::Internal))?
     }
 }
 
@@ -1158,6 +1284,32 @@ fn packager_issue(error: PackagerError) -> UpdateIssue {
         PackagerError::UnsupportedArch
         | PackagerError::UnsupportedOs
         | PackagerError::UnsupportedUpdateFormat => UpdateIssueCode::Unsupported,
+        _ => UpdateIssueCode::Internal,
+    };
+    UpdateIssue::new(code)
+}
+
+#[allow(dead_code, reason = "used by the Tauri runner during migration")]
+fn tauri_updater_issue(error: TauriUpdaterError) -> UpdateIssue {
+    let code = match error {
+        TauriUpdaterError::Reqwest(error) if error.is_decode() => UpdateIssueCode::InvalidManifest,
+        TauriUpdaterError::Reqwest(error) if error.is_connect() || error.is_timeout() => {
+            UpdateIssueCode::Offline
+        }
+        TauriUpdaterError::Reqwest(_) | TauriUpdaterError::Network(_) => UpdateIssueCode::Offline,
+        TauriUpdaterError::Serialization(_)
+        | TauriUpdaterError::ReleaseNotFound
+        | TauriUpdaterError::Semver(_)
+        | TauriUpdaterError::TargetNotFound(_)
+        | TauriUpdaterError::TargetsNotFound(_)
+        | TauriUpdaterError::UrlParse(_)
+        | TauriUpdaterError::EmptyEndpoints => UpdateIssueCode::InvalidManifest,
+        TauriUpdaterError::Minisign(_)
+        | TauriUpdaterError::Base64(_)
+        | TauriUpdaterError::SignatureUtf8(_) => UpdateIssueCode::InvalidSignature,
+        TauriUpdaterError::UnsupportedArch | TauriUpdaterError::UnsupportedOs => {
+            UpdateIssueCode::Unsupported
+        }
         _ => UpdateIssueCode::Internal,
     };
     UpdateIssue::new(code)
@@ -1220,8 +1372,9 @@ mod tests {
         installs: usize,
     }
 
+    #[async_trait]
     impl UpdateBackend for FakeBackend {
-        fn check(&mut self) -> Result<Option<UpdateSummary>, UpdateIssue> {
+        async fn check(&mut self) -> Result<Option<UpdateSummary>, UpdateIssue> {
             self.checks += 1;
             if let Some(issue) = self.check_issue {
                 return Err(issue);
@@ -1229,12 +1382,12 @@ mod tests {
             Ok(self.available.clone())
         }
 
-        fn download(&mut self, _expected_version: &str) -> Result<(), UpdateIssue> {
+        async fn download(&mut self, _expected_version: &str) -> Result<(), UpdateIssue> {
             self.downloads += 1;
             self.download_issue.map_or(Ok(()), Err)
         }
 
-        fn install(&mut self, _expected_version: &str) -> Result<(), UpdateIssue> {
+        async fn install(&mut self, _expected_version: &str) -> Result<(), UpdateIssue> {
             self.installs += 1;
             self.install_issue.map_or(Ok(()), Err)
         }
@@ -1548,36 +1701,36 @@ mod tests {
         assert_eq!(result, Err(UpdaterDisabledReason::NotConfigured));
     }
 
-    #[test]
-    fn update_should_require_separate_download_and_install_confirmations() {
+    #[tokio::test]
+    async fn update_should_require_separate_download_and_install_confirmations() {
         let backend = FakeBackend {
             available: Some(available_update()),
             ..FakeBackend::default()
         };
         let mut service = UpdaterService::new(backend);
 
-        service.check_blocking();
+        service.check().await;
         let download_confirmation = service.confirm_download().unwrap();
-        service.download_blocking(download_confirmation).unwrap();
+        service.download(download_confirmation).await.unwrap();
         assert!(matches!(
             service.view().status,
             UpdaterStatus::ReadyToInstall(_)
         ));
 
         let install_confirmation = service.confirm_install().unwrap();
-        service.install_blocking(install_confirmation).unwrap();
+        service.install(install_confirmation).await.unwrap();
         assert!(matches!(service.view().status, UpdaterStatus::Installed(_)));
     }
 
-    #[test]
-    fn offline_check_should_be_recoverable_and_non_blocking() {
+    #[tokio::test]
+    async fn offline_check_should_be_recoverable_and_non_blocking() {
         let backend = FakeBackend {
             check_issue: Some(UpdateIssue::new(UpdateIssueCode::Offline)),
             ..FakeBackend::default()
         };
         let mut service = UpdaterService::new(backend);
 
-        service.check_blocking();
+        service.check().await;
 
         assert_eq!(service.view().status, UpdaterStatus::Idle);
         assert_eq!(
@@ -1589,26 +1742,26 @@ mod tests {
         );
     }
 
-    #[test]
-    fn stale_confirmation_should_not_download_a_different_update() {
+    #[tokio::test]
+    async fn stale_confirmation_should_not_download_a_different_update() {
         let backend = FakeBackend {
             available: Some(available_update()),
             ..FakeBackend::default()
         };
         let mut service = UpdaterService::new(backend);
 
-        service.check_blocking();
+        service.check().await;
         let confirmation = service.confirm_download().unwrap();
-        service.check_blocking();
+        service.check().await;
 
         assert_eq!(
-            service.download_blocking(confirmation),
+            service.download(confirmation).await,
             Err(UpdateActionError::StaleConfirmation)
         );
     }
 
-    #[test]
-    fn download_failure_should_keep_update_available_for_retry() {
+    #[tokio::test]
+    async fn download_failure_should_keep_update_available_for_retry() {
         let backend = FakeBackend {
             available: Some(available_update()),
             download_issue: Some(UpdateIssue::new(UpdateIssueCode::Offline)),
@@ -1616,9 +1769,9 @@ mod tests {
         };
         let mut service = UpdaterService::new(backend);
 
-        service.check_blocking();
+        service.check().await;
         let confirmation = service.confirm_download().unwrap();
-        service.download_blocking(confirmation).unwrap();
+        service.download(confirmation).await.unwrap();
 
         assert!(matches!(service.view().status, UpdaterStatus::Available(_)));
         assert_eq!(

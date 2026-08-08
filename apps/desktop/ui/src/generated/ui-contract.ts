@@ -105,13 +105,19 @@ export type IntegrationsSummary = { integrations: Array<IntegrationSummary>, ext
 
 export type IntegrationActionInput = { "kind": "refresh" } | { "kind": "connect", client: IntegrationClient, } | { "kind": "disconnect", client: IntegrationClient, } | { "kind": "confirmClaudeInstalled" } | { "kind": "openClaudeSettings" };
 
+export type UpdaterStatus = "disabled" | "idle" | "checking" | "upToDate" | "available" | "downloading" | "readyToInstall" | "installing" | "installed";
+
+export type UpdaterIssue = "notConfigured" | "invalidConfiguration" | "unsupported" | "offline" | "invalidManifest" | "invalidSignature" | "internal";
+
+export type UpdaterSummary = { status: UpdaterStatus, version: string | null, releaseNotes: string | null, issue: UpdaterIssue | null, retryable: boolean, };
+
 export type PreferencesSummary = { completedOnboardingVersion: number | null, locale: LocalePreference, lanPreference: LanPreference, closeBehavior: CloseBehavior, automaticUpdateChecks: boolean, };
 
 export type PreferencesInput = { locale: LocalePreference, lanPreference: LanPreference, closeBehavior: CloseBehavior, automaticUpdateChecks: boolean, completeOnboarding: boolean, };
 
 export type AppPhase = "starting" | "ready";
 
-export type AppSnapshot = { schemaVersion: number, sequence: number, phase: AppPhase, collections: Array<CollectionSummary>, collectionScans: Array<CollectionScanSummary>, reviews: Array<ReviewSummary>, reanalyzingReviewIds: Array<string>, sourceIssues: Array<SourceIssueSummary>, peers: Array<PeerSummary>, model: ModelSummary | null, modelInstall: ModelInstallSummary | null, search: SearchSummary | null, reviewEvidence: ReviewEvidenceSummary | null, knowledge: KnowledgeBundleSummary | null, knowledgePage: KnowledgePageSummary | null, preferences: PreferencesSummary | null, autostart: AutostartStatus | null, wikiHealth: WikiHealthSummary | null, connectivity: ConnectivitySummary | null, lanRuntime: LanRuntimeSummary | null, firewallOperation: FirewallOperationStatus | null, integrations: IntegrationsSummary | null, notice: NoticeSummary | null, };
+export type AppSnapshot = { schemaVersion: number, sequence: number, phase: AppPhase, collections: Array<CollectionSummary>, collectionScans: Array<CollectionScanSummary>, reviews: Array<ReviewSummary>, reanalyzingReviewIds: Array<string>, sourceIssues: Array<SourceIssueSummary>, peers: Array<PeerSummary>, model: ModelSummary | null, modelInstall: ModelInstallSummary | null, search: SearchSummary | null, reviewEvidence: ReviewEvidenceSummary | null, knowledge: KnowledgeBundleSummary | null, knowledgePage: KnowledgePageSummary | null, preferences: PreferencesSummary | null, autostart: AutostartStatus | null, wikiHealth: WikiHealthSummary | null, connectivity: ConnectivitySummary | null, lanRuntime: LanRuntimeSummary | null, firewallOperation: FirewallOperationStatus | null, integrations: IntegrationsSummary | null, updater: UpdaterSummary | null, notice: NoticeSummary | null, };
 
 export type UiEventKind = "stateChanged";
 

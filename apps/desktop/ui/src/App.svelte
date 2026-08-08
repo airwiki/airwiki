@@ -2,7 +2,7 @@
   import { AlertTriangle, BookOpen, CheckCircle2, FileText, History, Network, RefreshCw, Search, Settings2, Sparkles } from '@lucide/svelte';
   import { listen } from '@tauri-apps/api/event';
   import { onMount } from 'svelte';
-  import { addCollection, approveReview, cancelModelInstall, configureFirewall, confirmPairing, connect, hideToTray, installModels, loadKnowledgeBundle, loadKnowledgePage, loadReviewEvidence, manageIntegration, openAdvancedFirewall, pairPeer, pickCollectionFolder, quitCompletely, reanalyzeReview, refreshAutostart, refreshConnectivity, refreshWikiHealth, rejectReview, relinkCollection, rescanCollection, revokePeer, searchKnowledge, setAutostart, setCollectionGrant, updateCollectionPolicy, updatePreferences, type AppSnapshot, type CloseBehavior, type CollectionPolicyInput, type CollectionSummary, type EnrichmentDraft, type FolderSelection, type IntegrationActionInput, type IntegrationClient, type KnowledgePageInput, type LanPreference, type LocalePreference, type ReviewSummary } from './api';
+  import { addCollection, approveReview, cancelModelInstall, checkUpdates, configureFirewall, confirmPairing, connect, downloadUpdate, hideToTray, installModels, installUpdate, loadKnowledgeBundle, loadKnowledgePage, loadReviewEvidence, manageIntegration, openAdvancedFirewall, pairPeer, pickCollectionFolder, quitCompletely, reanalyzeReview, refreshAutostart, refreshConnectivity, refreshWikiHealth, rejectReview, relinkCollection, rescanCollection, revokePeer, searchKnowledge, setAutostart, setCollectionGrant, updateCollectionPolicy, updatePreferences, type AppSnapshot, type CloseBehavior, type CollectionPolicyInput, type CollectionSummary, type EnrichmentDraft, type FolderSelection, type IntegrationActionInput, type IntegrationClient, type KnowledgePageInput, type LanPreference, type LocalePreference, type ReviewSummary } from './api';
   import KnowledgeGraph from './KnowledgeGraph.svelte';
 
   type Destination = 'library' | 'review' | 'search' | 'system';
@@ -42,6 +42,8 @@
   let connectivityRequestId: string | null = null;
   let peerActionId: string | null = null;
   let integrationRequestId: string | null = null;
+  let updaterRequestId: string | null = null;
+  let confirmUpdateInstall = false;
 
   onMount(() => {
     const unlistenClose = '__TAURI_INTERNALS__' in window
@@ -71,6 +73,7 @@
       if (event.requestId && event.requestId === wikiHealthRequestId) wikiHealthRequestId = null;
       if (event.requestId && event.requestId === connectivityRequestId) connectivityRequestId = null;
       if (event.requestId && event.requestId === integrationRequestId) integrationRequestId = null;
+      if (event.requestId && event.requestId === updaterRequestId) updaterRequestId = null;
       runtimeLabel = event.snapshot.phase === 'ready' ? 'Servicios privados listos' : 'Preparando servicios privados';
     }).then((initial) => {
       snapshot = initial;
@@ -121,6 +124,40 @@
     } catch {
       integrationRequestId = null;
       actionMessage = 'La integración no pudo modificarse.';
+    }
+  }
+
+  function updaterLabel(): string {
+    const updater = snapshot?.updater;
+    if (!updater) return 'Preparando el servicio de actualizaciones…';
+    const labels: Record<string, string> = {
+      disabled: updater.issue === 'notConfigured' ? 'Las actualizaciones internas no están configuradas en este build.' : 'El actualizador no está disponible en este build.',
+      idle: 'Listo para comprobar el canal estable.',
+      checking: 'Comprobando el manifiesto firmado…',
+      upToDate: 'AirWiki está actualizado.',
+      available: `AirWiki ${updater.version ?? ''} está disponible.`,
+      downloading: `Descargando y verificando AirWiki ${updater.version ?? ''}…`,
+      readyToInstall: `AirWiki ${updater.version ?? ''} está verificado y listo para instalar.`,
+      installing: 'Instalando la actualización confirmada…',
+      installed: 'Actualización instalada. AirWiki se cerrará de forma coordinada.'
+    };
+    if (updater.issue === 'offline') return 'No se pudo contactar al canal estable. AirWiki continúa funcionando normalmente.';
+    if (updater.issue === 'invalidSignature') return 'La firma del paquete no es válida. La instalación fue bloqueada.';
+    if (updater.issue === 'invalidManifest') return 'El manifiesto de actualización no es válido.';
+    return labels[updater.status] ?? 'Estado de actualización desconocido.';
+  }
+
+  async function runUpdaterAction(action: 'check' | 'download' | 'install') {
+    const requestId = crypto.randomUUID();
+    updaterRequestId = requestId;
+    confirmUpdateInstall = false;
+    try {
+      if (action === 'check') await checkUpdates(requestId);
+      else if (action === 'download') await downloadUpdate(requestId);
+      else await installUpdate(requestId);
+    } catch {
+      updaterRequestId = null;
+      actionMessage = 'La operación de actualización no pudo iniciarse.';
     }
   }
 
@@ -660,6 +697,7 @@
           <div class="system-layout">
             <section><p class="section-label">IA local</p><h3>{snapshot.model?.displayName ?? 'Modelo recomendado'}</h3><p>{snapshot.model?.active ? 'El modelo está activo y listo para proponer metadatos.' : 'El modelo requiere preparación antes de analizar documentos.'}</p>{#if snapshot.modelInstall}<progress max={snapshot.modelInstall.totalBytes || 1} value={snapshot.modelInstall.downloaded}></progress><small>{modelInstallLabel()}</small><button class="secondary" onclick={cancelModelInstall}>Cancelar preparación</button>{:else if snapshot.model && !snapshot.model.active}<label class="check license-check"><input type="checkbox" bind:checked={modelLicensesConfirmed} /> Acepto {snapshot.model.license ?? 'las licencias del modelo y sus componentes'}</label><button class="secondary" onclick={prepareLocalModel} disabled={!modelLicensesConfirmed && !snapshot.model.licenseAccepted}>Preparar modelo local</button>{/if}</section>
             <section class="settings-form"><p class="section-label">Preferencias del dispositivo</p><label><span>Idioma</span><select bind:value={locale}><option value="system">Sistema</option><option value="es">Español</option><option value="en">English</option></select></label><label><span>Red local</span><select bind:value={lanPreference}><option value="disabled">Desactivada</option><option value="enabled">Activada</option></select></label><label><span>Al cerrar</span><select bind:value={closeBehavior}><option value="ask">Preguntar</option><option value="hide_to_tray">Ocultar en bandeja</option><option value="quit">Salir completamente</option></select></label><label class="check"><input type="checkbox" bind:checked={automaticUpdateChecks} /> Buscar actualizaciones automáticamente</label><button class="primary" onclick={() => savePreferences(false)} disabled={actionBusy}>Guardar preferencias</button></section>
+            <section class="updater-section" aria-live="polite"><div class="settings-heading"><div><p class="section-label">Actualizaciones</p><h3>Canal estable firmado</h3></div>{#if snapshot.updater?.status !== 'disabled'}<button class="text-action" onclick={() => runUpdaterAction('check')} disabled={updaterRequestId !== null || snapshot.updater?.status === 'checking' || snapshot.updater?.status === 'downloading' || snapshot.updater?.status === 'installing'}>Comprobar</button>{/if}</div><p>{updaterLabel()}</p>{#if snapshot.updater?.releaseNotes}<div class="release-notes"><small>Novedades verificadas</small><p>{snapshot.updater.releaseNotes}</p></div>{/if}<div class="row-actions">{#if snapshot.updater?.status === 'available'}<button class="secondary" onclick={() => runUpdaterAction('download')} disabled={updaterRequestId !== null}>Descargar y verificar</button>{:else if snapshot.updater?.status === 'readyToInstall' && !confirmUpdateInstall}<button class="primary" onclick={() => { confirmUpdateInstall = true; }}>Instalar actualización</button>{:else if snapshot.updater?.status === 'readyToInstall' && confirmUpdateInstall}<div class="install-confirmation" role="alert"><p>AirWiki cerrará los servicios locales y aplicará la versión {snapshot.updater.version}. Tus datos y modelos permanecen en sus ubicaciones actuales.</p><button class="primary" onclick={() => runUpdaterAction('install')} disabled={updaterRequestId !== null}>Confirmar e instalar</button><button class="secondary" onclick={() => { confirmUpdateInstall = false; }} disabled={updaterRequestId !== null}>Cancelar</button></div>{:else if snapshot.updater?.retryable}<button class="secondary" onclick={() => runUpdaterAction('check')} disabled={updaterRequestId !== null}>Reintentar</button>{/if}</div><small>No se envían identificadores del dispositivo y un fallo de red no bloquea el uso normal.</small></section>
             <section><p class="section-label">Inicio de sesión</p><h3>Inicio automático</h3><p>{autostartLabel()}</p><div class="row-actions">{#if snapshot.autostart === 'enabled'}<button class="secondary" onclick={() => changeAutostart(false)} disabled={autostartBusy}>Desactivar</button>{:else if snapshot.autostart !== 'unsupported' && snapshot.autostart !== 'conflict'}<button class="secondary" onclick={() => changeAutostart(true)} disabled={autostartBusy}>{autostartBusy ? 'Comprobando…' : 'Activar'}</button>{/if}<button class="text-action" onclick={refreshAutostartState} disabled={autostartBusy}>Actualizar estado</button></div></section>
             <section class="connectivity-section"><p class="section-label">Conectividad</p><h3>{snapshot.peers.length} equipos conocidos</h3><p>{connectivityLabel()}</p>{#if snapshot.lanRuntime}<dl><div><dt>Listener</dt><dd>{lanStateLabel(snapshot.lanRuntime.listener)}</dd></div><div><dt>Descubrimiento</dt><dd>{lanStateLabel(snapshot.lanRuntime.discovery)}</dd></div><div><dt>Interfaces</dt><dd>{snapshot.lanRuntime.addressCount}</dd></div></dl>{/if}<div class="row-actions"><button class="secondary" onclick={() => runConnectivityAction('refresh')} disabled={connectivityRequestId !== null}>{connectivityRequestId ? 'Comprobando…' : 'Comprobar'}</button>{#if snapshot.connectivity?.firewallHelper === 'verified' && snapshot.connectivity.firewall !== 'ready' && snapshot.connectivity.firewall !== 'notApplicable'}<button class="secondary" onclick={() => runConnectivityAction('install')} disabled={connectivityRequestId !== null || lanPreference !== 'enabled'}>Configurar firewall</button>{/if}{#if snapshot.connectivity?.firewall === 'ready'}<button class="text-action" onclick={() => runConnectivityAction('remove')} disabled={connectivityRequestId !== null}>Quitar reglas</button>{/if}{#if snapshot.connectivity?.firewall === 'conflict' || snapshot.connectivity?.firewall === 'legacyExposure'}<button class="text-action" onclick={() => runConnectivityAction('advanced')} disabled={connectivityRequestId !== null}>Abrir configuración avanzada</button>{/if}</div><small>Compartir sigue requiriendo pairing y grants por colección.</small></section>
             <section class="peer-trust"><p class="section-label">Equipos y permisos</p><h3>Confianza explícita</h3><p>Cada equipo se verifica con seis palabras. Después eliges qué colecciones puede consultar.</p><div class="peer-list">{#each snapshot.peers as peer}<article><div class="peer-heading"><div><strong>{peer.deviceName ?? 'Equipo cercano'}</strong><code title={peer.peerId}>{shortPeerId(peer.peerId)}</code></div><span class:verified={peer.trust === 'trusted'}>{peer.trust === 'trusted' ? 'Verificado' : peer.trust === 'blocked' ? 'Revocado' : peer.activity === 'pairing' ? 'Verificando' : 'Sin verificar'}</span></div>{#if peer.sasWords}<div class="sas" aria-label="Código de verificación"><small>Comprueba estas palabras en ambos equipos</small><strong>{peer.sasWords.join(' · ')}</strong><div><button class="primary" onclick={() => runPeerAction(peer.peerId, 'accept')} disabled={peerActionId === peer.peerId}>Coinciden</button><button class="danger" onclick={() => runPeerAction(peer.peerId, 'reject')} disabled={peerActionId === peer.peerId}>No coinciden</button></div></div>{:else if peer.trust === 'unpaired'}<button class="secondary" onclick={() => runPeerAction(peer.peerId, 'pair')} disabled={peerActionId === peer.peerId || peer.activity === 'notObserved'}>Verificar equipo</button>{:else if peer.trust === 'trusted'}<div class="grant-list">{#each snapshot.collections.filter((collection) => collection.peerShareable) as collection}<label class="check"><input type="checkbox" checked={peer.grantedCollectionIds.includes(collection.id)} onchange={(event) => changeGrant(peer.peerId, collection.id, event.currentTarget.checked)} disabled={peerActionId === peer.peerId} /> {collection.name}</label>{:else}<small>Activa “grants LAN” en una colección para poder compartirla.</small>{/each}</div><button class="danger" onclick={() => runPeerAction(peer.peerId, 'revoke')} disabled={peerActionId === peer.peerId}>Revocar confianza</button>{/if}</article>{:else}<p class="empty">No hay equipos descubiertos. AirWiki no comparte nada hasta que verifiques uno.</p>{/each}</div></section>

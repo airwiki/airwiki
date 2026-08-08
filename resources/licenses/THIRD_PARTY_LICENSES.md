@@ -6,7 +6,7 @@ Scope: the union of the transitive dependency closures of `airwiki-desktop`, `ai
 
 If a crate declares an SPDX expression but does not include a separate legal file, the inventory assigns the standard MIT/Apache text bundled by the project or an identical text found in another crate with the same expression. Each text lists its origin explicitly.
 
-Third-party packages: **735**. Unique legal texts: **416**.
+Third-party packages: **742**. Unique legal texts: **419**.
 
 ## Packages
 
@@ -401,6 +401,7 @@ Third-party packages: **735**. Unique legal texts: **416**.
 | objc2-io-kit | 0.3.2 | Zlib OR Apache-2.0 OR MIT | [upstream](https://github.com/madsmtm/objc2) | [508a77d2e7b5](#sha256-508a77d2e7b51d98adeed32648ad124b7b30241a8e70b2e72c99f92d8e5874d1) |
 | objc2-io-surface | 0.3.2 | Zlib OR Apache-2.0 OR MIT | [upstream](https://github.com/madsmtm/objc2) | [508a77d2e7b5](#sha256-508a77d2e7b51d98adeed32648ad124b7b30241a8e70b2e72c99f92d8e5874d1) |
 | objc2-metal | 0.2.2 | MIT | [upstream](https://github.com/madsmtm/objc2) | [508a77d2e7b5](#sha256-508a77d2e7b51d98adeed32648ad124b7b30241a8e70b2e72c99f92d8e5874d1) |
+| objc2-osa-kit | 0.3.2 | Zlib OR Apache-2.0 OR MIT | [upstream](https://github.com/madsmtm/objc2) | [508a77d2e7b5](#sha256-508a77d2e7b51d98adeed32648ad124b7b30241a8e70b2e72c99f92d8e5874d1) |
 | objc2-quartz-core | 0.2.2 | MIT | [upstream](https://github.com/madsmtm/objc2) | [508a77d2e7b5](#sha256-508a77d2e7b51d98adeed32648ad124b7b30241a8e70b2e72c99f92d8e5874d1) |
 | objc2-security | 0.3.2 | Zlib OR Apache-2.0 OR MIT | [upstream](https://github.com/madsmtm/objc2) | [508a77d2e7b5](#sha256-508a77d2e7b51d98adeed32648ad124b7b30241a8e70b2e72c99f92d8e5874d1) |
 | objc2-service-management | 0.3.2 | Zlib OR Apache-2.0 OR MIT | [upstream](https://github.com/madsmtm/objc2) | [508a77d2e7b5](#sha256-508a77d2e7b51d98adeed32648ad124b7b30241a8e70b2e72c99f92d8e5874d1) |
@@ -413,6 +414,7 @@ Third-party packages: **735**. Unique legal texts: **416**.
 | option-ext | 0.2.0 | MPL-2.0 | [upstream](https://github.com/soc/option-ext.git) | [66a3107d5ad6](#sha256-66a3107d5ad6a058aab753eaac2047ccb2ed0e39465dd0fe5844da3e300d5172) |
 | ort | 2.0.0-rc.12 | MIT OR Apache-2.0 | [upstream](https://github.com/pykeio/ort) | [6bba08de4628](#sha256-6bba08de46289c40986a2e6b310e2da61fcea33b3c112c8320f6093f8f9cb71b), [cfc7749b96f6](#sha256-cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30) |
 | ort-sys | 2.0.0-rc.12 | MIT OR Apache-2.0 | [upstream](https://github.com/pykeio/ort) | [6bba08de4628](#sha256-6bba08de46289c40986a2e6b310e2da61fcea33b3c112c8320f6093f8f9cb71b), [cfc7749b96f6](#sha256-cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30) |
+| osakit | 0.3.1 | MIT OR Apache-2.0 | [upstream](https://github.com/mdevils/rust-osakit) | [5fb3573f6e71](#sha256-5fb3573f6e7198ff6c203dbbd58d1da4bec9e8c5a828edefd9e98587d0443471), [62c7a1e35f56](#sha256-62c7a1e35f56406896d7aa7ca52d0cc0d272ac022b5d2796e7d6905db8a3636a) |
 | parking_lot | 0.12.5 | MIT OR Apache-2.0 | [upstream](https://github.com/Amanieu/parking_lot) | [a60eea817514](#sha256-a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2), [c9a75f18b9ab](#sha256-c9a75f18b9ab2927829a208fc6aa2cf4e63b8420887ba29cdb265d6619ae82d5) |
 | parking_lot_core | 0.9.12 | MIT OR Apache-2.0 | [upstream](https://github.com/Amanieu/parking_lot) | [a60eea817514](#sha256-a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2), [c9a75f18b9ab](#sha256-c9a75f18b9ab2927829a208fc6aa2cf4e63b8420887ba29cdb265d6619ae82d5) |
 | paste | 1.0.15 | MIT OR Apache-2.0 | [upstream](https://github.com/dtolnay/paste) | [23f18e03dc49](#sha256-23f18e03dc49df91622fe2a76176497404e46ced8a715d9d2b67a7446571cca3), [62c7a1e35f56](#sha256-62c7a1e35f56406896d7aa7ca52d0cc0d272ac022b5d2796e7d6905db8a3636a) |
@@ -487,6 +489,7 @@ Third-party packages: **735**. Unique legal texts: **416**.
 | regex-automata | 0.4.15 | MIT OR Apache-2.0 | [upstream](https://github.com/rust-lang/regex) | [6485b8ed310d](#sha256-6485b8ed310d3f0340bf1ad1f47645069ce4069dcc6bb46c7d5c6faf41de1fdb), [a60eea817514](#sha256-a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2) |
 | regex-syntax | 0.8.11 | MIT OR Apache-2.0 | [upstream](https://github.com/rust-lang/regex) | [6485b8ed310d](#sha256-6485b8ed310d3f0340bf1ad1f47645069ce4069dcc6bb46c7d5c6faf41de1fdb), [74db5baf44a4](#sha256-74db5baf44a41b1000312c673544b3374e4198af5605c7f9080a402cec42cfa3), [a60eea817514](#sha256-a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2) |
 | reqwest | 0.12.28 | MIT OR Apache-2.0 | [upstream](https://github.com/seanmonstar/reqwest) | [34f17d906738](#sha256-34f17d90673854314276164d17a4861400d4528066eb458a003fdb15ef98fbbe), [751963a8b88c](#sha256-751963a8b88c0e3a9f27e98933079fbcf09b9998b2c13ac49c2e4d58444520d6) |
+| reqwest | 0.13.4 | MIT OR Apache-2.0 | [upstream](https://github.com/seanmonstar/reqwest) | [751963a8b88c](#sha256-751963a8b88c0e3a9f27e98933079fbcf09b9998b2c13ac49c2e4d58444520d6), [917c0fe02296](#sha256-917c0fe02296eec634820b2758519e39278716bb0104f055cfee771bd7a4c534) |
 | resolv-conf | 0.7.6 | MIT OR Apache-2.0 | [upstream](https://github.com/hickory-dns/resolv-conf) | [b40930bbcf80](#sha256-b40930bbcf80744c86c46a12bc9da056641d722716c378f5659b9e555ef833e1), [c303b44873ac](#sha256-c303b44873acb399b27d3d3983937073246f1ab083f32990ea6015ea31d976b2) |
 | rfd | 0.15.4 | MIT | [upstream](https://github.com/PolyMeilex/rfd) | [65fc947f4bac](#sha256-65fc947f4bac882a2cd104ef73c246b1b037059df9f2b3a58b7f77f0b9e56071) |
 | ring | 0.17.14 | Apache-2.0 AND ISC | [upstream](https://github.com/briansmith/ring) | [005fc765ddc5](#sha256-005fc765ddc5115da796cca915baa9557abae13ff35e0a47c47affc56f6c414d), [6ee2ed6c7771](#sha256-6ee2ed6c77710de911761acd5fc1ad1da00f476beb1a7ef27e78c2d1858deafc), [9eacbcb81be6](#sha256-9eacbcb81be660840c714a560a9d65ba07913db98dd4baf969f78dd499fdd60f), [a60eea817514](#sha256-a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2), [b3d734001a94](#sha256-b3d734001a94efff3579978d953391aa7115f877657d25eb54037a43875d078a), [f025ccfb7dfb](#sha256-f025ccfb7dfb6bdfedc75ca0f67acc69e6fb4998143d834f7c2f38a29989680f) |
@@ -501,6 +504,7 @@ Third-party packages: **735**. Unique legal texts: **416**.
 | rustls | 0.23.41 | Apache-2.0 OR ISC OR MIT | [upstream](https://github.com/rustls/rustls) | [709e3175b421](#sha256-709e3175b4212f7b13aa93971c9f62ff8c69ec45ad8c6532a7e0c41d7a7d6f8c), [7cfafc877ecc](#sha256-7cfafc877eccc46c0e346ccbaa5c51bb6b894d2b818e617d970211e232785ad4), [a60eea817514](#sha256-a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2) |
 | rustls-native-certs | 0.8.4 | Apache-2.0 OR ISC OR MIT | [upstream](https://github.com/rustls/rustls-native-certs) | [2775d45acac7](#sha256-2775d45acac79b1b67278e018e38e925ed1b17f2ab5729f0ef062418fd954a60), [709e3175b421](#sha256-709e3175b4212f7b13aa93971c9f62ff8c69ec45ad8c6532a7e0c41d7a7d6f8c), [7cfafc877ecc](#sha256-7cfafc877eccc46c0e346ccbaa5c51bb6b894d2b818e617d970211e232785ad4), [a60eea817514](#sha256-a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2) |
 | rustls-pki-types | 1.15.0 | MIT OR Apache-2.0 | [upstream](https://github.com/rustls/pki-types) | [45fd05c4865e](#sha256-45fd05c4865e7c350b98ad7ac50e1b15462d49af4a91e9b0c9dd933dc9a69742), [9117d922e667](#sha256-9117d922e667125508dde62b02c1f57ed22f5ad21eb536aa2e2d99e1c796e639) |
+| rustls-platform-verifier | 0.7.0 | MIT OR Apache-2.0 | [upstream](https://github.com/rustls/rustls-platform-verifier) | [1c7cf76689c8](#sha256-1c7cf76689c837a68ed8d704994e52a0f2940c087958f860d17f3186afbdcc0c), [c71d239df917](#sha256-c71d239df91726fc519c6eb72d318ec65820627232b2f796219e87dcf35d0ab4) |
 | rustls-webpki | 0.103.13 | ISC | [upstream](https://github.com/rustls/webpki) | [5b698ca13897](#sha256-5b698ca13897be3afdb7174256fa1574f8c6892b8bea1a66dd6469d3fe27885a) |
 | rustversion | 1.0.23 | MIT OR Apache-2.0 | [upstream](https://github.com/dtolnay/rustversion) | [23f18e03dc49](#sha256-23f18e03dc49df91622fe2a76176497404e46ced8a715d9d2b67a7446571cca3), [62c7a1e35f56](#sha256-62c7a1e35f56406896d7aa7ca52d0cc0d272ac022b5d2796e7d6905db8a3636a) |
 | rw-stream-sink | 0.4.0 | MIT | [upstream](https://github.com/libp2p/rust-libp2p) | [508a77d2e7b5](#sha256-508a77d2e7b51d98adeed32648ad124b7b30241a8e70b2e72c99f92d8e5874d1) |
@@ -580,7 +584,9 @@ Third-party packages: **735**. Unique legal texts: **416**.
 | tauri-build | 2.6.3 | Apache-2.0 OR MIT | [upstream](https://github.com/tauri-apps/tauri) | [0d542e0c8804](#sha256-0d542e0c8804e39aa7f37eb00da5a762149dc682d7829451287e11b938e94594), [9dd42ea92cff](#sha256-9dd42ea92cff2ede5cd477cbfcce051b2d0115c0ac7f368ee88cb545055dff1d) |
 | tauri-codegen | 2.6.3 | Apache-2.0 OR MIT | [upstream](https://github.com/tauri-apps/tauri) | [0d542e0c8804](#sha256-0d542e0c8804e39aa7f37eb00da5a762149dc682d7829451287e11b938e94594), [9dd42ea92cff](#sha256-9dd42ea92cff2ede5cd477cbfcce051b2d0115c0ac7f368ee88cb545055dff1d) |
 | tauri-macros | 2.6.3 | Apache-2.0 OR MIT | [upstream](https://github.com/tauri-apps/tauri) | [0d542e0c8804](#sha256-0d542e0c8804e39aa7f37eb00da5a762149dc682d7829451287e11b938e94594), [9dd42ea92cff](#sha256-9dd42ea92cff2ede5cd477cbfcce051b2d0115c0ac7f368ee88cb545055dff1d) |
+| tauri-plugin | 2.6.3 | Apache-2.0 OR MIT | [upstream](https://github.com/tauri-apps/tauri) | [508a77d2e7b5](#sha256-508a77d2e7b51d98adeed32648ad124b7b30241a8e70b2e72c99f92d8e5874d1) |
 | tauri-plugin-single-instance | 2.4.3 | Apache-2.0 OR MIT | [upstream](https://github.com/tauri-apps/plugins-workspace) | [0d542e0c8804](#sha256-0d542e0c8804e39aa7f37eb00da5a762149dc682d7829451287e11b938e94594), [9c1db6b7e7eb](#sha256-9c1db6b7e7eb83e1cb2af973b5df2bdc63651ede0f38506ab98dfa0940487759), [af76c60594af](#sha256-af76c60594af325c4efdcbcd27f5d34ff441c11f09b46b627b378d04d5aa1f1d) |
+| tauri-plugin-updater | 2.10.1 | Apache-2.0 OR MIT | [upstream](https://github.com/tauri-apps/plugins-workspace) | [0d542e0c8804](#sha256-0d542e0c8804e39aa7f37eb00da5a762149dc682d7829451287e11b938e94594), [9c1db6b7e7eb](#sha256-9c1db6b7e7eb83e1cb2af973b5df2bdc63651ede0f38506ab98dfa0940487759), [9dd42ea92cff](#sha256-9dd42ea92cff2ede5cd477cbfcce051b2d0115c0ac7f368ee88cb545055dff1d) |
 | tauri-runtime | 2.11.3 | Apache-2.0 OR MIT | [upstream](https://github.com/tauri-apps/tauri) | [0d542e0c8804](#sha256-0d542e0c8804e39aa7f37eb00da5a762149dc682d7829451287e11b938e94594), [9dd42ea92cff](#sha256-9dd42ea92cff2ede5cd477cbfcce051b2d0115c0ac7f368ee88cb545055dff1d) |
 | tauri-runtime-wry | 2.11.4 | Apache-2.0 OR MIT | [upstream](https://github.com/tauri-apps/tauri) | [0d542e0c8804](#sha256-0d542e0c8804e39aa7f37eb00da5a762149dc682d7829451287e11b938e94594), [9dd42ea92cff](#sha256-9dd42ea92cff2ede5cd477cbfcce051b2d0115c0ac7f368ee88cb545055dff1d) |
 | tauri-utils | 2.9.3 | Apache-2.0 OR MIT | [upstream](https://github.com/tauri-apps/tauri) | [0d542e0c8804](#sha256-0d542e0c8804e39aa7f37eb00da5a762149dc682d7829451287e11b938e94594), [9dd42ea92cff](#sha256-9dd42ea92cff2ede5cd477cbfcce051b2d0115c0ac7f368ee88cb545055dff1d) |
@@ -741,6 +747,7 @@ Third-party packages: **735**. Unique legal texts: **416**.
 | zerotrie | 0.2.4 | Unicode-3.0 | [upstream](https://github.com/unicode-org/icu4x) | [f367c1b8e1aa](#sha256-f367c1b8e1aa262435251e442901da4607b4650e0e63a026f5044473ecfb90f2) |
 | zerovec | 0.11.6 | Unicode-3.0 | [upstream](https://github.com/unicode-org/icu4x) | [f367c1b8e1aa](#sha256-f367c1b8e1aa262435251e442901da4607b4650e0e63a026f5044473ecfb90f2) |
 | zerovec-derive | 0.11.3 | Unicode-3.0 | [upstream](https://github.com/unicode-org/icu4x) | [f367c1b8e1aa](#sha256-f367c1b8e1aa262435251e442901da4607b4650e0e63a026f5044473ecfb90f2) |
+| zip | 4.6.1 | MIT | [upstream](https://github.com/zip-rs/zip2.git) | [13f16f8435b4](#sha256-13f16f8435b4242f494f038d761bd99c5af70395aa39274bd287d22c4d35c3b7) |
 | zip | 6.0.0 | MIT | [upstream](https://github.com/zip-rs/zip2.git) | [13f16f8435b4](#sha256-13f16f8435b4242f494f038d761bd99c5af70395aa39274bd287d22c4d35c3b7) |
 | zlib-rs | 0.6.6 | Zlib | [upstream](https://github.com/trifectatechfoundation/zlib-rs) | [e72111c52b7d](#sha256-e72111c52b7d96ebe25348dee19f0744f444d3c95ae6b1ecb6ccaecc5bce05ba) |
 | zmij | 1.0.21 | MIT | [upstream](https://github.com/dtolnay/zmij) | [23f18e03dc49](#sha256-23f18e03dc49df91622fe2a76176497404e46ced8a715d9d2b67a7446571cca3) |
@@ -2452,6 +2459,7 @@ Used by:
 - `tauri-codegen 2.6.3 / LICENSE_APACHE-2.0`
 - `tauri-macros 2.6.3 / LICENSE_APACHE-2.0`
 - `tauri-plugin-single-instance 2.4.3 / LICENSE_APACHE-2.0`
+- `tauri-plugin-updater 2.10.1 / LICENSE_APACHE-2.0`
 - `tauri-runtime 2.11.3 / LICENSE_APACHE-2.0`
 - `tauri-runtime-wry 2.11.4 / LICENSE_APACHE-2.0`
 - `tauri-utils 2.9.3 / LICENSE_APACHE-2.0`
@@ -2945,6 +2953,7 @@ Creator: Person: Daniel Thompson-Yvetot
 
 Used by:
 
+- `zip 4.6.1 / LICENSE`
 - `zip 6.0.0 / LICENSE`
 
 ```text
@@ -3898,6 +3907,36 @@ Used by:
    WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
    See the License for the specific language governing permissions and
    limitations under the License.
+```
+
+### sha256-1c7cf76689c837a68ed8d704994e52a0f2940c087958f860d17f3186afbdcc0c
+
+Used by:
+
+- `rustls-platform-verifier 0.7.0 / LICENSE-MIT`
+
+```text
+MIT License
+
+Copyright (c) 2022 1Password
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
 ```
 
 ### sha256-1cdc81fa44119bd4ea2c08ae5c635df952bafacd0e5e4dba002c62d1c4c6fb1b
@@ -9631,6 +9670,7 @@ Used by:
 - `objc2-io-kit 0.3.2 / standard text for Zlib OR Apache-2.0 OR MIT (the crate includes no separate file)`
 - `objc2-io-surface 0.3.2 / standard text for Zlib OR Apache-2.0 OR MIT (the crate includes no separate file)`
 - `objc2-metal 0.2.2 / standard text for MIT (the crate includes no separate file)`
+- `objc2-osa-kit 0.3.2 / standard text for Zlib OR Apache-2.0 OR MIT (the crate includes no separate file)`
 - `objc2-quartz-core 0.2.2 / standard text for MIT (the crate includes no separate file)`
 - `objc2-security 0.3.2 / standard text for Zlib OR Apache-2.0 OR MIT (the crate includes no separate file)`
 - `objc2-service-management 0.3.2 / standard text for Zlib OR Apache-2.0 OR MIT (the crate includes no separate file)`
@@ -9642,6 +9682,7 @@ Used by:
 - `rw-stream-sink 0.4.0 / standard text for MIT (the crate includes no separate file)`
 - `single-instance 0.3.3 / standard text for MIT (the crate includes no separate file)`
 - `sse-stream 0.2.4 / standard text for MIT OR Apache-2.0 (the crate includes no separate file)`
+- `tauri-plugin 2.6.3 / standard text for Apache-2.0 OR MIT (the crate includes no separate file)`
 - `ts-rs 12.0.1 / standard text for MIT (the crate includes no separate file)`
 - `ts-rs-macros 12.0.1 / standard text for MIT (the crate includes no separate file)`
 - `unic-char-property 0.9.0 / standard text for MIT/Apache-2.0 (the crate includes no separate file)`
@@ -10830,6 +10871,40 @@ Used by:
    limitations under the License.
 ```
 
+### sha256-5fb3573f6e7198ff6c203dbbd58d1da4bec9e8c5a828edefd9e98587d0443471
+
+Used by:
+
+- `osakit 0.3.1 / LICENSE-MIT`
+
+```text
+Copyright (c) 2024 Marat Dulin
+
+Permission is hereby granted, free of charge, to any
+person obtaining a copy of this software and associated
+documentation files (the "Software"), to deal in the
+Software without restriction, including without
+limitation the rights to use, copy, modify, merge,
+publish, distribute, sublicense, and/or sell copies of
+the Software, and to permit persons to whom the Software
+is furnished to do so, subject to the following
+conditions:
+
+The above copyright notice and this permission notice
+shall be included in all copies or substantial portions
+of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF
+ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED
+TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A
+PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT
+SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY
+CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION
+OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR
+IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
+DEALINGS IN THE SOFTWARE.
+```
+
 ### sha256-603fb27ef3266ea516872eefd9ae587746b8c34614a35c0fb24e4e9e0c17e137
 
 Used by:
@@ -11072,6 +11147,7 @@ Used by:
 - `litrs 1.0.0 / LICENSE-APACHE`
 - `monostate 0.1.18 / LICENSE-APACHE`
 - `monostate-impl 0.1.18 / LICENSE-APACHE`
+- `osakit 0.3.1 / LICENSE-APACHE`
 - `paste 1.0.15 / LICENSE-APACHE`
 - `pastey 0.2.3 / LICENSE-APACHE`
 - `proc-macro2 1.0.106 / LICENSE-APACHE`
@@ -13576,6 +13652,7 @@ SOFTWARE.
 Used by:
 
 - `reqwest 0.12.28 / LICENSE-APACHE`
+- `reqwest 0.13.4 / LICENSE-APACHE`
 
 ```text
                               Apache License
@@ -17391,6 +17468,34 @@ IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 DEALINGS IN THE SOFTWARE.
 ```
 
+### sha256-917c0fe02296eec634820b2758519e39278716bb0104f055cfee771bd7a4c534
+
+Used by:
+
+- `reqwest 0.13.4 / LICENSE-MIT`
+
+```text
+Copyright (c) 2016-2026 Sean McArthur
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in
+all copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+THE SOFTWARE.
+```
+
 ### sha256-91e934255ba3b2f21103d68c5581c23ef34aa95c4628e4405b8c901935e11c69
 
 Used by:
@@ -17894,6 +17999,7 @@ limitations under the License.
 Used by:
 
 - `tauri-plugin-single-instance 2.4.3 / LICENSE.spdx`
+- `tauri-plugin-updater 2.10.1 / LICENSE.spdx`
 
 ```text
 SPDXVersion: SPDX-2.1
@@ -17991,6 +18097,7 @@ Used by:
 - `tauri-build 2.6.3 / LICENSE_MIT`
 - `tauri-codegen 2.6.3 / LICENSE_MIT`
 - `tauri-macros 2.6.3 / LICENSE_MIT`
+- `tauri-plugin-updater 2.10.1 / LICENSE_MIT`
 - `tauri-runtime 2.11.3 / LICENSE_MIT`
 - `tauri-runtime-wry 2.11.4 / LICENSE_MIT`
 - `tauri-utils 2.9.3 / LICENSE_MIT`
@@ -23282,6 +23389,7 @@ Used by:
 - `quinn-udp 0.5.15 / LICENSE-APACHE`
 - `rmcp 2.2.0 / standard text for Apache-2.0 (the crate includes no separate file)`
 - `rmcp-macros 2.2.0 / standard text for Apache-2.0 (the crate includes no separate file)`
+- `rustls-platform-verifier 0.7.0 / LICENSE-APACHE`
 - `safetensors 0.8.0 / LICENSE`
 - `self_cell 1.2.2 / LICENSE-APACHE`
 - `serialize-to-javascript 0.1.2 / LICENSE-APACHE`

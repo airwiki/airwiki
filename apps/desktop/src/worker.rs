@@ -5,7 +5,7 @@ use std::{
     sync::{
         Arc, Mutex,
         atomic::{AtomicU64, Ordering},
-        mpsc::{self, Receiver, Sender},
+        mpsc::{self, Receiver as StdReceiver},
     },
     thread,
     time::{Duration, Instant, SystemTime},
@@ -25,10 +25,12 @@ use airwiki_mcp::{McpClientActivity, McpClientKind};
 use airwiki_network::{NetworkEvent, PublicBrowseResult, PublicRouteKind};
 use airwiki_types::{CollectionPolicy, EnrichmentDraft, SearchHit, SearchPurpose, SearchResponse};
 use futures::FutureExt;
-use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
+use tokio::sync::mpsc::{Receiver as AsyncReceiver, Sender as AsyncSender};
 use tokio::task::JoinSet;
 use tokio_util::sync::CancellationToken;
 use uuid::Uuid;
+
+type Sender<T> = tokio::sync::broadcast::Sender<T>;
 
 use crate::{
     autostart::{AutostartManager, AutostartStatus},
@@ -588,16 +590,17 @@ pub enum WorkerEvent {
 }
 
 pub struct WorkerHandle {
-    commands: UnboundedSender<WorkerCommand>,
-    events: Receiver<WorkerEvent>,
+    commands: AsyncSender<WorkerCommand>,
+    events: tokio::sync::broadcast::Receiver<WorkerEvent>,
     thread: Option<thread::JoinHandle<()>>,
-    finished: Receiver<()>,
+    finished: StdReceiver<()>,
 }
 
 impl WorkerHandle {
     pub fn spawn(paths: AppPaths) -> Self {
-        let (commands_tx, commands_rx) = tokio::sync::mpsc::unbounded_channel();
-        let (events_tx, events_rx) = mpsc::channel();
+        let (commands_tx, commands_rx) = tokio::sync::mpsc::channel(WORKER_COMMAND_CAPACITY);
+        let (events_tx, events_rx) =
+            tokio::sync::broadcast::channel(WORKER_PRESENTATION_CAPACITY);
         let (finished_tx, finished_rx) = mpsc::channel();
         let thread = thread::Builder::new()
             .name("airwiki-runtime".to_owned())
@@ -621,16 +624,33 @@ impl WorkerHandle {
     }
 
     pub fn send(&self, command: WorkerCommand) {
-        if self.commands.send(command).is_err() {
-            tracing::error!("background runtime stopped unexpectedly");
+        if let Err(error) = self.commands.try_send(command) {
+            match error {
+                tokio::sync::mpsc::error::TrySendError::Full(_) => {
+                    tracing::warn!(error_kind = "worker_busy", "background command queue is full");
+                }
+                tokio::sync::mpsc::error::TrySendError::Closed(_) => {
+                    tracing::error!("background runtime stopped unexpectedly");
+                }
+            }
         }
     }
 
-    pub fn try_events(&self) -> impl Iterator<Item = WorkerEvent> + '_ {
-        self.events.try_iter()
+    pub fn try_events(&mut self) -> impl Iterator<Item = WorkerEvent> + '_ {
+        std::iter::from_fn(move || loop {
+            match self.events.try_recv() {
+                Ok(event) => return Some(event),
+                Err(tokio::sync::broadcast::error::TryRecvError::Lagged(_)) => continue,
+                Err(tokio::sync::broadcast::error::TryRecvError::Empty)
+                | Err(tokio::sync::broadcast::error::TryRecvError::Closed) => return None,
+            }
+        })
     }
 }
 
+const WORKER_COMMAND_CAPACITY: usize = 64;
+const WORKER_EVENT_CAPACITY: usize = 256;
+const WORKER_PRESENTATION_CAPACITY: usize = 128;
 const WORKER_SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(2);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -642,7 +662,7 @@ enum WorkerJoinOutcome {
 
 fn join_worker_with_timeout(
     thread: thread::JoinHandle<()>,
-    finished: &Receiver<()>,
+    finished: &StdReceiver<()>,
     timeout: Duration,
 ) -> WorkerJoinOutcome {
     match finished.recv_timeout(timeout) {
@@ -664,7 +684,7 @@ fn join_worker_with_timeout(
 
 impl Drop for WorkerHandle {
     fn drop(&mut self) {
-        let _ = self.commands.send(WorkerCommand::Shutdown);
+        let _ = self.commands.try_send(WorkerCommand::Shutdown);
         let Some(thread) = self.thread.take() else {
             return;
         };
@@ -1005,9 +1025,9 @@ impl ScanScheduler {
     }
 }
 
-async fn run_worker(
+pub(crate) async fn run_worker(
     paths: AppPaths,
-    mut commands: UnboundedReceiver<WorkerCommand>,
+    mut commands: AsyncReceiver<WorkerCommand>,
     events: Sender<WorkerEvent>,
 ) {
     send(
@@ -1164,7 +1184,8 @@ async fn run_worker(
     send_ready(&services, &events);
     refresh_peers(&services, &events);
 
-    let (watch_tx, mut watch_rx) = tokio::sync::mpsc::unbounded_channel();
+    let (watch_tx, mut watch_rx) =
+        tokio::sync::mpsc::channel::<CollectionWatchEvent>(WORKER_EVENT_CAPACITY);
     let mut watchers = HashMap::new();
     let mut background = JoinSet::<BackgroundCompletion>::new();
     let mut wiki_health_generation = 0_u64;
@@ -1243,7 +1264,8 @@ async fn run_worker(
         initial_jitter_millis = periodic_jitter.as_millis(),
         "periodic collection reconciliation scheduled"
     );
-    let (internal_tx, mut internal_rx) = tokio::sync::mpsc::unbounded_channel();
+    let (internal_tx, mut internal_rx) =
+        tokio::sync::mpsc::channel::<InternalEvent>(WORKER_EVENT_CAPACITY);
     let mut install_cancel: Option<CancellationToken> = None;
     let mut model_lifecycle = ModelLifecycle::Verifying;
     let mut queued_install = false;
@@ -4102,7 +4124,7 @@ fn refresh_peers(services: &DesktopServices, events: &Sender<WorkerEvent>) {
 fn ensure_watchers(
     services: &DesktopServices,
     watchers: &mut HashMap<Uuid, CollectionWatcherHandle>,
-    watch_tx: &UnboundedSender<CollectionWatchEvent>,
+    watch_tx: &AsyncSender<CollectionWatchEvent>,
 ) -> anyhow::Result<WatcherSetup> {
     let mut started = Vec::new();
     let mut failures = Vec::new();
@@ -4166,7 +4188,7 @@ fn spawn_verification(
     lifecycle: &mut JoinSet<()>,
     manager: AssetManager,
     selection: ModelSelection,
-    completion_tx: UnboundedSender<InternalEvent>,
+    completion_tx: AsyncSender<InternalEvent>,
 ) {
     lifecycle.spawn(async move {
         let result = AssertUnwindSafe(manager.verify_selection(&selection))
@@ -4174,7 +4196,9 @@ fn spawn_verification(
             .await
             .map_err(panic_message)
             .and_then(|result| result.map_err(|error| format!("{error:#}")));
-        let _ = completion_tx.send(InternalEvent::VerificationFinished(result));
+        let _ = completion_tx
+            .send(InternalEvent::VerificationFinished(result))
+            .await;
     });
 }
 
@@ -4182,7 +4206,7 @@ fn spawn_profile_activation_probe(
     lifecycle: &mut JoinSet<()>,
     manager: AssetManager,
     selection: ModelSelection,
-    completion_tx: UnboundedSender<InternalEvent>,
+    completion_tx: AsyncSender<InternalEvent>,
 ) {
     lifecycle.spawn(async move {
         let model_id = selection.model_id.to_owned();
@@ -4191,7 +4215,9 @@ fn spawn_profile_activation_probe(
             .await
             .map_err(panic_message)
             .and_then(|result| result.map_err(|error| format!("{error:#}")));
-        let _ = completion_tx.send(InternalEvent::ProfileActivationProbed { model_id, result });
+        let _ = completion_tx
+            .send(InternalEvent::ProfileActivationProbed { model_id, result })
+            .await;
     });
 }
 
@@ -4200,7 +4226,7 @@ fn start_install(
     manager: &AssetManager,
     selection: ModelSelection,
     events: &Sender<WorkerEvent>,
-    completion_tx: &UnboundedSender<InternalEvent>,
+    completion_tx: &AsyncSender<InternalEvent>,
     install_cancel: &mut Option<CancellationToken>,
     status_path: PathBuf,
 ) {
@@ -4263,7 +4289,9 @@ fn start_install(
             )
             .await;
         }
-        let _ = completion_tx.send(InternalEvent::InstallFinished(result));
+        let _ = completion_tx
+            .send(InternalEvent::InstallFinished(result))
+            .await;
     });
 }
 
@@ -5293,7 +5321,8 @@ mod tests {
 
     #[test]
     fn lan_runtime_dto_preserves_only_explicit_advanced_fallback_addresses() {
-        let (events, receiver) = mpsc::channel();
+        let (events, mut receiver) =
+            tokio::sync::broadcast::channel(WORKER_PRESENTATION_CAPACITY);
         let address = "/ip4/192.168.1.25/tcp/61743/p2p/test".to_owned();
 
         send_lan_runtime(
@@ -5303,7 +5332,7 @@ mod tests {
             std::slice::from_ref(&address),
         );
 
-        match receiver.recv().unwrap() {
+        match receiver.try_recv().unwrap() {
             WorkerEvent::LanRuntimeUpdated {
                 listener,
                 discovery,
@@ -5634,7 +5663,8 @@ mod tests {
             code: airwiki_core::SourceIssueCode::InvalidPdf,
             error: "parser failed on customer secret".into(),
         }];
-        let (sender, receiver) = std::sync::mpsc::channel();
+        let (sender, mut receiver) =
+            tokio::sync::broadcast::channel(WORKER_PRESENTATION_CAPACITY);
 
         report_ingest_outcomes(&outcomes, &sender);
 
@@ -5953,7 +5983,8 @@ mod tests {
             required_free_bytes: airwiki_inference::INSTALL_HEADROOM_BYTES,
             fits_available_disk: true,
         };
-        let (events, receiver) = mpsc::channel();
+        let (events, mut receiver) =
+            tokio::sync::broadcast::channel(WORKER_PRESENTATION_CAPACITY);
         let mut lifecycle = JoinSet::new();
 
         send_model_state_with_known_plan(
@@ -5965,11 +5996,10 @@ mod tests {
             Some(plan),
         );
 
-        let event = tokio::task::spawn_blocking(move || {
-            receiver.recv_timeout(Duration::from_secs(2)).unwrap()
-        })
-        .await
-        .unwrap();
+        let event = tokio::time::timeout(Duration::from_secs(2), receiver.recv())
+            .await
+            .unwrap()
+            .unwrap();
         let WorkerEvent::ModelState(state) = event else {
             panic!("expected a model-state event");
         };

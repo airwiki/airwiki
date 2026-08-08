@@ -2,7 +2,7 @@
   import { AlertTriangle, BookOpen, CheckCircle2, FileText, History, Network, RefreshCw, Search, Settings2, Sparkles } from '@lucide/svelte';
   import { listen } from '@tauri-apps/api/event';
   import { onMount } from 'svelte';
-  import { addCollection, approveReview, cancelModelInstall, connect, hideToTray, installModels, loadKnowledgeBundle, loadKnowledgePage, loadReviewEvidence, pickCollectionFolder, quitCompletely, reanalyzeReview, rejectReview, rescanCollection, searchKnowledge, updatePreferences, type AppSnapshot, type CloseBehavior, type EnrichmentDraft, type FolderSelection, type KnowledgePageInput, type LanPreference, type LocalePreference, type ReviewSummary } from './api';
+  import { addCollection, approveReview, cancelModelInstall, connect, hideToTray, installModels, loadKnowledgeBundle, loadKnowledgePage, loadReviewEvidence, pickCollectionFolder, quitCompletely, reanalyzeReview, rejectReview, relinkCollection, rescanCollection, searchKnowledge, updateCollectionPolicy, updatePreferences, type AppSnapshot, type CloseBehavior, type CollectionPolicyInput, type CollectionSummary, type EnrichmentDraft, type FolderSelection, type KnowledgePageInput, type LanPreference, type LocalePreference, type ReviewSummary } from './api';
   import KnowledgeGraph from './KnowledgeGraph.svelte';
 
   type Destination = 'library' | 'review' | 'search' | 'system';
@@ -18,7 +18,10 @@
   let runtimeLabel = 'Preparando servicios privados';
   let snapshot: AppSnapshot | null = null;
   let folderSelection: FolderSelection | null = null;
+  let relinkSelection: FolderSelection | null = null;
   let collectionName = '';
+  let editingCollectionId: string | null = null;
+  let collectionPolicy: CollectionPolicyInput = { localOnly: true, peerShareable: false, allowExternalAi: false, internetPublic: false };
   let question = '';
   let includePublic = false;
   let actionMessage = '';
@@ -124,6 +127,58 @@
       actionMessage = 'Análisis añadido a la cola.';
     } catch {
       actionMessage = 'No se pudo iniciar el análisis de cambios.';
+    }
+  }
+
+  function editCollection(collection: CollectionSummary) {
+    editingCollectionId = collection.id;
+    relinkSelection = null;
+    collectionPolicy = {
+      localOnly: collection.localOnly,
+      peerShareable: collection.peerShareable,
+      allowExternalAi: collection.allowExternalAi,
+      internetPublic: collection.internetPublic
+    };
+  }
+
+  async function chooseRelinkFolder() {
+    try {
+      relinkSelection = await pickCollectionFolder();
+    } catch {
+      actionMessage = 'No se pudo abrir el selector de carpetas.';
+    }
+  }
+
+  async function applyRelink() {
+    if (!editingCollectionId || !relinkSelection) return;
+    actionBusy = true;
+    try {
+      await relinkCollection(editingCollectionId, relinkSelection.token);
+      relinkSelection = null;
+      actionMessage = 'La colección quedó vinculada a la carpeta elegida y se volverá a comprobar.';
+    } catch {
+      relinkSelection = null;
+      actionMessage = 'No se pudo volver a vincular la colección. El estado anterior permanece intacto.';
+    } finally {
+      actionBusy = false;
+    }
+  }
+
+  async function saveCollectionPolicy() {
+    if (!editingCollectionId) return;
+    actionBusy = true;
+    try {
+      const policy = {
+        ...collectionPolicy,
+        localOnly: !collectionPolicy.peerShareable && !collectionPolicy.allowExternalAi && !collectionPolicy.internetPublic
+      };
+      await updateCollectionPolicy(editingCollectionId, policy);
+      collectionPolicy = policy;
+      actionMessage = 'Política de colección actualizada.';
+    } catch {
+      actionMessage = 'La política no se aplicó. Revisa que la combinación sea válida.';
+    } finally {
+      actionBusy = false;
     }
   }
 
@@ -308,9 +363,23 @@
         {#if destination === 'library' && snapshot?.collections.length}
           <div class="records" aria-label="Colecciones">
             {#each snapshot.collections as collection}
-              <article><div><strong>{collection.name}</strong><small>{collection.documentCount} documentos · {collection.publishedCount} publicados{#if collectionScanState(collection.id)} · {collectionScanState(collection.id) === 'queued' ? 'en cola' : 'analizando'}{/if}</small></div><div class="row-actions"><button class="text-action" onclick={() => openKnowledge(collection.id)}>Abrir conocimiento</button><button class="text-action" onclick={() => scanCollection(collection.id)} disabled={collectionScanState(collection.id) !== null}>{collectionScanState(collection.id) ? 'Procesando…' : 'Analizar cambios'}</button></div></article>
+              <article><div><strong>{collection.name}</strong><small>{collection.documentCount} documentos · {collection.publishedCount} publicados{#if collectionScanState(collection.id)} · {collectionScanState(collection.id) === 'queued' ? 'en cola' : 'analizando'}{/if}</small></div><div class="row-actions"><button class="text-action" onclick={() => openKnowledge(collection.id)}>Abrir conocimiento</button><button class="text-action" onclick={() => editCollection(collection)}>Configurar</button><button class="text-action" onclick={() => scanCollection(collection.id)} disabled={collectionScanState(collection.id) !== null}>{collectionScanState(collection.id) ? 'Procesando…' : 'Analizar cambios'}</button></div></article>
             {/each}
           </div>
+        {/if}
+
+        {#if destination === 'library' && editingCollectionId}
+          <section class="collection-settings" aria-labelledby="collection-settings-title">
+            <div class="settings-heading"><div><p class="section-label">Política de colección</p><h3 id="collection-settings-title">{snapshot?.collections.find((collection) => collection.id === editingCollectionId)?.name}</h3></div><button class="text-action" onclick={() => { editingCollectionId = null; relinkSelection = null; }}>Cerrar</button></div>
+            <div class="policy-state"><strong>{!collectionPolicy.peerShareable && !collectionPolicy.allowExternalAi && !collectionPolicy.internetPublic ? 'Solo local' : 'Tiene salidas habilitadas'}</strong><span>“Solo local” se deriva automáticamente de los tres permisos de salida.</span></div>
+            <div class="policy-grid">
+              <label class="check"><input type="checkbox" bind:checked={collectionPolicy.peerShareable} /> Disponible para grants LAN explícitos</label>
+              <label class="check"><input type="checkbox" bind:checked={collectionPolicy.allowExternalAi} /> Permitir IA externa autorizada</label>
+              <label class="check"><input type="checkbox" bind:checked={collectionPolicy.internetPublic} /> Publicar en índices públicos configurados</label>
+            </div>
+            <p class="guardrail">AirWiki validará la combinación y fallará cerrado si una opción contradice otra.</p>
+            <div class="collection-settings-actions"><button class="primary" onclick={saveCollectionPolicy} disabled={actionBusy}>Guardar política</button><button class="secondary" onclick={chooseRelinkFolder}>Elegir nueva carpeta</button>{#if relinkSelection}<span>{relinkSelection.displayPath}</span><button class="secondary" onclick={applyRelink} disabled={actionBusy}>Confirmar vínculo</button>{/if}</div>
+          </section>
         {/if}
 
         {#if destination === 'library' && snapshot?.sourceIssues.length}

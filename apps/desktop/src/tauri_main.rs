@@ -58,7 +58,7 @@ const FOLDER_SELECTION_TTL: Duration = Duration::from_secs(5 * 60);
 
 struct AppRuntime {
     commands: mpsc::Sender<WorkerCommand>,
-    snapshot: Mutex<watch::Receiver<AppSnapshot>>,
+    snapshot: Mutex<watch::Receiver<PublishedSnapshot>>,
     folder_selections: Mutex<HashMap<Uuid, PendingFolderSelection>>,
     review_versions: Arc<Mutex<HashMap<Uuid, CachedReviewVersion>>>,
     knowledge_fingerprints: Arc<Mutex<HashMap<(Uuid, KnowledgePageId), String>>>,
@@ -66,6 +66,12 @@ struct AppRuntime {
     tray_operational: AtomicBool,
     exiting: AtomicBool,
     worker_finished: Mutex<Option<oneshot::Receiver<()>>>,
+}
+
+#[derive(Clone)]
+struct PublishedSnapshot {
+    snapshot: AppSnapshot,
+    request_id: Option<Uuid>,
 }
 
 #[derive(Clone)]
@@ -81,6 +87,7 @@ struct RequestTracker {
     knowledge_bundle: HashMap<Uuid, Uuid>,
     knowledge_page: HashMap<Uuid, Uuid>,
     preferences: Option<Uuid>,
+    autostart: Option<Uuid>,
 }
 
 struct PendingFolderSelection {
@@ -108,6 +115,7 @@ struct AppSnapshot {
     knowledge: Option<KnowledgeBundleSummary>,
     knowledge_page: Option<KnowledgePageSummary>,
     preferences: Option<PreferencesSummary>,
+    autostart: Option<AutostartStatusDto>,
     notice: Option<NoticeSummary>,
 }
 
@@ -625,6 +633,29 @@ enum CloseBehaviorDto {
     Quit,
 }
 
+#[derive(Clone, Copy, Debug, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(rename = "AutostartStatus", rename_all = "camelCase")]
+enum AutostartStatusDto {
+    Disabled,
+    Enabled,
+    RequiresApproval,
+    Conflict,
+    Unsupported,
+}
+
+impl From<autostart::AutostartStatus> for AutostartStatusDto {
+    fn from(value: autostart::AutostartStatus) -> Self {
+        match value {
+            autostart::AutostartStatus::Disabled => Self::Disabled,
+            autostart::AutostartStatus::Enabled => Self::Enabled,
+            autostart::AutostartStatus::RequiresApproval => Self::RequiresApproval,
+            autostart::AutostartStatus::Conflict => Self::Conflict,
+            autostart::AutostartStatus::Unsupported => Self::Unsupported,
+        }
+    }
+}
+
 impl From<LocalePreference> for LocalePreferenceDto {
     fn from(value: LocalePreference) -> Self {
         match value {
@@ -691,6 +722,7 @@ struct UiEventEnvelope {
     schema_version: u16,
     #[ts(type = "number")]
     sequence: u64,
+    request_id: Option<String>,
     kind: UiEventKind,
     snapshot: AppSnapshot,
 }
@@ -732,17 +764,20 @@ fn connect(runtime: tauri::State<'_, AppRuntime>, events: Channel<UiEventEnvelop
         return AppSnapshot::starting();
     };
     let mut receiver = snapshot_receiver.clone();
-    let snapshot = receiver.borrow().clone();
+    let snapshot = receiver.borrow().snapshot.clone();
     drop(snapshot_receiver);
     tauri::async_runtime::spawn(async move {
         while receiver.changed().await.is_ok() {
-            let snapshot = receiver.borrow_and_update().clone();
+            let published = receiver.borrow_and_update().clone();
             if events
                 .send(UiEventEnvelope {
                     schema_version: CONTRACT_VERSION,
-                    sequence: snapshot.sequence,
+                    sequence: published.snapshot.sequence,
+                    request_id: published
+                        .request_id
+                        .map(|request_id| request_id.to_string()),
                     kind: UiEventKind::StateChanged,
-                    snapshot,
+                    snapshot: published.snapshot,
                 })
                 .is_err()
             {
@@ -1076,6 +1111,52 @@ fn update_preferences(
 }
 
 #[tauri::command]
+fn refresh_autostart(
+    runtime: tauri::State<'_, AppRuntime>,
+    request_id: String,
+) -> Result<(), UiError> {
+    send_autostart_command(&runtime, request_id, |request_id| {
+        WorkerCommand::RefreshAutostart { request_id }
+    })
+}
+
+#[tauri::command]
+fn set_autostart(
+    runtime: tauri::State<'_, AppRuntime>,
+    request_id: String,
+    enabled: bool,
+) -> Result<(), UiError> {
+    send_autostart_command(&runtime, request_id, |request_id| {
+        WorkerCommand::SetAutostart {
+            request_id,
+            enabled,
+        }
+    })
+}
+
+fn send_autostart_command(
+    runtime: &AppRuntime,
+    request_id: String,
+    command: impl FnOnce(Uuid) -> WorkerCommand,
+) -> Result<(), UiError> {
+    let request_id = parse_uuid(&request_id)?;
+    runtime
+        .requests
+        .lock()
+        .map_err(|_| UiError::internal())?
+        .autostart = Some(request_id);
+    if let Err(error) = send_command(runtime, command(request_id)) {
+        if let Ok(mut requests) = runtime.requests.lock()
+            && requests.autostart == Some(request_id)
+        {
+            requests.autostart = None;
+        }
+        return Err(error);
+    }
+    Ok(())
+}
+
+#[tauri::command]
 fn hide_to_tray(app: AppHandle, runtime: tauri::State<'_, AppRuntime>) -> Result<(), UiError> {
     if !runtime.tray_operational.load(Ordering::Acquire) {
         return Err(UiError::invalid("trayUnavailable"));
@@ -1230,6 +1311,7 @@ impl AppSnapshot {
             knowledge: None,
             knowledge_page: None,
             preferences: None,
+            autostart: None,
             notice: None,
         }
     }
@@ -1339,6 +1421,15 @@ impl AppSnapshot {
                     self.notice = Some(NoticeSummary {
                         level: NoticeLevel::Error,
                         message: "preferences-update-failed".to_owned(),
+                    });
+                }
+            },
+            WorkerEvent::AutostartUpdated { result, .. } => match result {
+                Ok(status) => self.autostart = Some(status.into()),
+                Err(_) => {
+                    self.notice = Some(NoticeSummary {
+                        level: NoticeLevel::Error,
+                        message: "autostart-update-failed".to_owned(),
                     });
                 }
             },
@@ -1595,6 +1686,28 @@ fn update_running_review(review_ids: &mut Vec<String>, concept_id: Uuid, running
     }
 }
 
+const fn worker_event_request_id(event: &WorkerEvent) -> Option<Uuid> {
+    match event {
+        WorkerEvent::DesktopPreferencesUpdated { request_id, .. }
+        | WorkerEvent::AutostartUpdated { request_id, .. }
+        | WorkerEvent::UpdaterUpdated { request_id, .. }
+        | WorkerEvent::ConnectivityPlatformUpdated { request_id, .. }
+        | WorkerEvent::FirewallOperationUpdated { request_id, .. }
+        | WorkerEvent::LanRuntimeUpdated { request_id, .. }
+        | WorkerEvent::WikiHealthUpdated { request_id, .. }
+        | WorkerEvent::GuidedWikiRepairPrepared { request_id, .. }
+        | WorkerEvent::GuidedWikiRepairFinished { request_id, .. }
+        | WorkerEvent::ReviewEvidenceLoaded { request_id, .. }
+        | WorkerEvent::KnowledgeBundleLoaded { request_id, .. }
+        | WorkerEvent::KnowledgePageLoaded { request_id, .. }
+        | WorkerEvent::SearchFinished { request_id, .. }
+        | WorkerEvent::SearchPartial { request_id, .. }
+        | WorkerEvent::PublicBrowseFinished { request_id, .. }
+        | WorkerEvent::ChatIntegrationsUpdated { request_id, .. } => Some(*request_id),
+        _ => None,
+    }
+}
+
 fn request_is_current(event: &WorkerEvent, requests: &Mutex<RequestTracker>) -> bool {
     let Ok(mut requests) = requests.lock() else {
         return false;
@@ -1628,6 +1741,15 @@ fn request_is_current(event: &WorkerEvent, requests: &Mutex<RequestTracker>) -> 
         WorkerEvent::DesktopPreferencesUpdated { request_id, .. } => {
             if requests.preferences == Some(*request_id) {
                 requests.preferences = None;
+                true
+            } else {
+                false
+            }
+        }
+        WorkerEvent::AutostartUpdated { request_id, .. } if request_id.is_nil() => true,
+        WorkerEvent::AutostartUpdated { request_id, .. } => {
+            if requests.autostart == Some(*request_id) {
+                requests.autostart = None;
                 true
             } else {
                 false
@@ -1934,6 +2056,7 @@ fn ui_bindings_source() -> String {
         exported_declaration::<LocalePreferenceDto>(&config),
         exported_declaration::<LanPreferenceDto>(&config),
         exported_declaration::<CloseBehaviorDto>(&config),
+        exported_declaration::<AutostartStatusDto>(&config),
         exported_declaration::<PreferencesSummary>(&config),
         exported_declaration::<PreferencesInput>(&config),
         exported_declaration::<AppPhase>(&config),
@@ -2020,7 +2143,10 @@ fn main() -> Result<()> {
     let (commands, command_receiver) = mpsc::channel(COMMAND_CAPACITY);
     let (events, _) = broadcast::channel(PRESENTATION_CAPACITY);
     let worker_events = events.clone();
-    let (snapshot_sender, snapshot_receiver) = watch::channel(AppSnapshot::starting());
+    let (snapshot_sender, snapshot_receiver) = watch::channel(PublishedSnapshot {
+        snapshot: AppSnapshot::starting(),
+        request_id: None,
+    });
     let mut presentation_events = events.subscribe();
     let review_versions = Arc::new(Mutex::new(HashMap::new()));
     let presentation_review_versions = Arc::clone(&review_versions);
@@ -2061,6 +2187,7 @@ fn main() -> Result<()> {
                 loop {
                     match presentation_events.recv().await {
                         Ok(event) => {
+                            let request_id = worker_event_request_id(&event);
                             snapshot
                                 .apply(
                                     event,
@@ -2069,7 +2196,13 @@ fn main() -> Result<()> {
                                     &presentation_requests,
                                 )
                                 .await;
-                            if snapshot_sender.send(snapshot.clone()).is_err() {
+                            if snapshot_sender
+                                .send(PublishedSnapshot {
+                                    snapshot: snapshot.clone(),
+                                    request_id,
+                                })
+                                .is_err()
+                            {
                                 break;
                             }
                         }
@@ -2079,7 +2212,13 @@ fn main() -> Result<()> {
                                 message: "runtime-snapshot-required".to_owned(),
                             });
                             snapshot.sequence = snapshot.sequence.saturating_add(1);
-                            if snapshot_sender.send(snapshot.clone()).is_err() {
+                            if snapshot_sender
+                                .send(PublishedSnapshot {
+                                    snapshot: snapshot.clone(),
+                                    request_id: None,
+                                })
+                                .is_err()
+                            {
                                 break;
                             }
                         }
@@ -2105,7 +2244,7 @@ fn main() -> Result<()> {
                     .snapshot
                     .lock()
                     .ok()
-                    .and_then(|snapshot| snapshot.borrow().preferences)
+                    .and_then(|snapshot| snapshot.borrow().snapshot.preferences)
                     .map_or(CloseBehavior::Ask, |preferences| {
                         preferences.close_behavior.into()
                     });
@@ -2143,6 +2282,8 @@ fn main() -> Result<()> {
             load_knowledge_bundle,
             load_knowledge_page,
             update_preferences,
+            refresh_autostart,
+            set_autostart,
             hide_to_tray,
             quit_completely
         ])
@@ -2161,7 +2302,10 @@ mod tests {
 
     fn runtime_with_selection(token: Uuid, path: PathBuf, expires_at: Instant) -> AppRuntime {
         let (commands, _receiver) = mpsc::channel(COMMAND_CAPACITY);
-        let (_snapshot_sender, snapshot) = watch::channel(AppSnapshot::starting());
+        let (_snapshot_sender, snapshot) = watch::channel(PublishedSnapshot {
+            snapshot: AppSnapshot::starting(),
+            request_id: None,
+        });
         let (_worker_finished_sender, worker_finished) = oneshot::channel();
         AppRuntime {
             commands,
@@ -2408,6 +2552,38 @@ mod tests {
             &WorkerEvent::SearchPartial {
                 request_id: current,
                 hits: Vec::new(),
+            },
+            &requests,
+        ));
+    }
+
+    #[test]
+    fn stale_autostart_response_cannot_replace_current_request() {
+        let current = Uuid::new_v4();
+        let stale = Uuid::new_v4();
+        let requests = Mutex::new(RequestTracker {
+            autostart: Some(current),
+            ..RequestTracker::default()
+        });
+
+        assert!(!request_is_current(
+            &WorkerEvent::AutostartUpdated {
+                request_id: stale,
+                result: Ok(autostart::AutostartStatus::Disabled),
+            },
+            &requests,
+        ));
+        assert!(request_is_current(
+            &WorkerEvent::AutostartUpdated {
+                request_id: current,
+                result: Ok(autostart::AutostartStatus::Enabled),
+            },
+            &requests,
+        ));
+        assert!(!request_is_current(
+            &WorkerEvent::AutostartUpdated {
+                request_id: current,
+                result: Ok(autostart::AutostartStatus::Enabled),
             },
             &requests,
         ));

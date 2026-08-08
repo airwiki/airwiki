@@ -2,7 +2,7 @@
   import { AlertTriangle, BookOpen, CheckCircle2, FileText, History, Network, RefreshCw, Search, Settings2, Sparkles } from '@lucide/svelte';
   import { listen } from '@tauri-apps/api/event';
   import { onMount } from 'svelte';
-  import { addCollection, approveReview, cancelModelInstall, connect, hideToTray, installModels, loadKnowledgeBundle, loadKnowledgePage, loadReviewEvidence, pickCollectionFolder, quitCompletely, reanalyzeReview, rejectReview, relinkCollection, rescanCollection, searchKnowledge, updateCollectionPolicy, updatePreferences, type AppSnapshot, type CloseBehavior, type CollectionPolicyInput, type CollectionSummary, type EnrichmentDraft, type FolderSelection, type KnowledgePageInput, type LanPreference, type LocalePreference, type ReviewSummary } from './api';
+  import { addCollection, approveReview, cancelModelInstall, connect, hideToTray, installModels, loadKnowledgeBundle, loadKnowledgePage, loadReviewEvidence, pickCollectionFolder, quitCompletely, reanalyzeReview, refreshAutostart, rejectReview, relinkCollection, rescanCollection, searchKnowledge, setAutostart, updateCollectionPolicy, updatePreferences, type AppSnapshot, type CloseBehavior, type CollectionPolicyInput, type CollectionSummary, type EnrichmentDraft, type FolderSelection, type KnowledgePageInput, type LanPreference, type LocalePreference, type ReviewSummary } from './api';
   import KnowledgeGraph from './KnowledgeGraph.svelte';
 
   type Destination = 'library' | 'review' | 'search' | 'system';
@@ -36,6 +36,8 @@
   let automaticUpdateChecks = false;
   let closeChoiceRequired = false;
   let modelLicensesConfirmed = false;
+  let autostartBusy = false;
+  let autostartRequestId: string | null = null;
 
   onMount(() => {
     const unlistenClose = '__TAURI_INTERNALS__' in window
@@ -58,6 +60,10 @@
         }
       }
       if (event.snapshot.search?.status !== 'searching') actionBusy = false;
+      if (event.requestId && event.requestId === autostartRequestId) {
+        autostartBusy = false;
+        autostartRequestId = null;
+      }
       runtimeLabel = event.snapshot.phase === 'ready' ? 'Servicios privados listos' : 'Preparando servicios privados';
     }).then((initial) => {
       snapshot = initial;
@@ -76,6 +82,43 @@
   function select(next: Destination) {
     destination = next;
     window.location.hash = next;
+    if (next === 'system') void refreshAutostartState();
+  }
+
+  function autostartLabel(): string {
+    if (snapshot?.autostart === 'enabled') return 'AirWiki se inicia al entrar en tu sesión.';
+    if (snapshot?.autostart === 'disabled') return 'El inicio automático está desactivado.';
+    if (snapshot?.autostart === 'requiresApproval') return 'El sistema necesita tu aprobación para activar el inicio automático.';
+    if (snapshot?.autostart === 'conflict') return 'Existe otra entrada de inicio para AirWiki. No se modificará automáticamente.';
+    if (snapshot?.autostart === 'unsupported') return 'Esta instalación no admite inicio automático.';
+    return 'Comprobando el estado del sistema…';
+  }
+
+  async function refreshAutostartState() {
+    autostartBusy = true;
+    const requestId = crypto.randomUUID();
+    autostartRequestId = requestId;
+    try {
+      await refreshAutostart(requestId);
+    } catch {
+      actionMessage = 'No se pudo comprobar el inicio automático.';
+      autostartBusy = false;
+      autostartRequestId = null;
+    }
+  }
+
+  async function changeAutostart(enabled: boolean) {
+    autostartBusy = true;
+    const requestId = crypto.randomUUID();
+    autostartRequestId = requestId;
+    try {
+      await setAutostart(requestId, enabled);
+      actionMessage = enabled ? 'Solicitud de inicio automático enviada.' : 'Solicitud para desactivar el inicio automático enviada.';
+    } catch {
+      actionMessage = 'No se pudo cambiar el inicio automático.';
+      autostartBusy = false;
+      autostartRequestId = null;
+    }
   }
 
   function nextActionLabel(): string {
@@ -493,6 +536,7 @@
           <div class="system-layout">
             <section><p class="section-label">IA local</p><h3>{snapshot.model?.displayName ?? 'Modelo recomendado'}</h3><p>{snapshot.model?.active ? 'El modelo está activo y listo para proponer metadatos.' : 'El modelo requiere preparación antes de analizar documentos.'}</p>{#if snapshot.modelInstall}<progress max={snapshot.modelInstall.totalBytes || 1} value={snapshot.modelInstall.downloaded}></progress><small>{modelInstallLabel()}</small><button class="secondary" onclick={cancelModelInstall}>Cancelar preparación</button>{:else if snapshot.model && !snapshot.model.active}<label class="check license-check"><input type="checkbox" bind:checked={modelLicensesConfirmed} /> Acepto {snapshot.model.license ?? 'las licencias del modelo y sus componentes'}</label><button class="secondary" onclick={prepareLocalModel} disabled={!modelLicensesConfirmed && !snapshot.model.licenseAccepted}>Preparar modelo local</button>{/if}</section>
             <section class="settings-form"><p class="section-label">Preferencias del dispositivo</p><label><span>Idioma</span><select bind:value={locale}><option value="system">Sistema</option><option value="es">Español</option><option value="en">English</option></select></label><label><span>Red local</span><select bind:value={lanPreference}><option value="disabled">Desactivada</option><option value="enabled">Activada</option></select></label><label><span>Al cerrar</span><select bind:value={closeBehavior}><option value="ask">Preguntar</option><option value="hide_to_tray">Ocultar en bandeja</option><option value="quit">Salir completamente</option></select></label><label class="check"><input type="checkbox" bind:checked={automaticUpdateChecks} /> Buscar actualizaciones automáticamente</label><button class="primary" onclick={() => savePreferences(false)} disabled={actionBusy}>Guardar preferencias</button></section>
+            <section><p class="section-label">Inicio de sesión</p><h3>Inicio automático</h3><p>{autostartLabel()}</p><div class="row-actions">{#if snapshot.autostart === 'enabled'}<button class="secondary" onclick={() => changeAutostart(false)} disabled={autostartBusy}>Desactivar</button>{:else if snapshot.autostart !== 'unsupported' && snapshot.autostart !== 'conflict'}<button class="secondary" onclick={() => changeAutostart(true)} disabled={autostartBusy}>{autostartBusy ? 'Comprobando…' : 'Activar'}</button>{/if}<button class="text-action" onclick={refreshAutostartState} disabled={autostartBusy}>Actualizar estado</button></div></section>
             <section><p class="section-label">Conectividad</p><h3>{snapshot.peers.length} equipos conocidos</h3><p>Las colecciones solo salen de este dispositivo con permisos explícitos.</p></section>
           </div>
         {/if}

@@ -1,31 +1,35 @@
 use eframe::egui::{self, Color32};
 
-pub(crate) const AIR_BLUE: Color32 = Color32::from_rgb(34, 151, 245);
-pub(crate) const EVIDENCE_CYAN: Color32 = Color32::from_rgb(22, 199, 215);
-pub(crate) const VERIFIED_GREEN: Color32 = Color32::from_rgb(87, 200, 137);
-pub(crate) const WARNING_AMBER: Color32 = Color32::from_rgb(230, 162, 60);
-pub(crate) const ERROR_CORAL: Color32 = Color32::from_rgb(255, 123, 117);
+pub(crate) const AIR_BLUE: Color32 = Color32::from_rgb(35, 125, 148);
+pub(crate) const EVIDENCE_CYAN: Color32 = Color32::from_rgb(112, 196, 210);
+pub(crate) const VERIFIED_GREEN: Color32 = Color32::from_rgb(103, 184, 146);
+pub(crate) const WARNING_AMBER: Color32 = Color32::from_rgb(213, 163, 84);
+pub(crate) const ERROR_CORAL: Color32 = Color32::from_rgb(231, 113, 104);
 
-const INK_DARK: Color32 = Color32::from_rgb(18, 28, 42);
-const SURFACE_DARK: Color32 = Color32::from_rgb(24, 37, 54);
-const BORDER_DARK: Color32 = Color32::from_rgb(58, 80, 105);
-const TEXT_DARK: Color32 = Color32::from_rgb(238, 244, 250);
-const SECONDARY_DARK: Color32 = Color32::from_rgb(184, 199, 217);
+const INK_DARK: Color32 = Color32::from_rgb(16, 34, 52);
+const SURFACE_DARK: Color32 = Color32::from_rgb(24, 52, 74);
+const BORDER_DARK: Color32 = Color32::from_rgb(52, 83, 101);
+const TEXT_DARK: Color32 = Color32::from_rgb(240, 245, 243);
+const SECONDARY_DARK: Color32 = Color32::from_rgb(170, 192, 200);
+const NAVIGATION_DARK: Color32 = Color32::from_rgb(12, 27, 42);
+const NAVIGATION_ACTIVE_DARK: Color32 = Color32::from_rgb(27, 58, 80);
 
-const INK_LIGHT: Color32 = Color32::from_rgb(247, 250, 252);
+const INK_LIGHT: Color32 = Color32::from_rgb(234, 241, 242);
 const SURFACE_LIGHT: Color32 = Color32::WHITE;
-const BORDER_LIGHT: Color32 = Color32::from_rgb(204, 218, 232);
-const TEXT_LIGHT: Color32 = Color32::from_rgb(24, 42, 61);
-const SECONDARY_LIGHT: Color32 = Color32::from_rgb(73, 97, 120);
+const BORDER_LIGHT: Color32 = Color32::from_rgb(188, 208, 213);
+const TEXT_LIGHT: Color32 = Color32::from_rgb(23, 50, 69);
+const SECONDARY_LIGHT: Color32 = Color32::from_rgb(82, 111, 121);
+const NAVIGATION_LIGHT: Color32 = Color32::from_rgb(220, 232, 234);
+const NAVIGATION_ACTIVE_LIGHT: Color32 = Color32::from_rgb(200, 226, 231);
 
 pub(crate) fn apply(context: &egui::Context) {
     let mut style = (*context.global_style()).clone();
-    style.spacing.item_spacing = egui::vec2(10.0, 8.0);
+    style.spacing.item_spacing = egui::vec2(10.0, 9.0);
     style.spacing.button_padding = egui::vec2(14.0, 8.0);
     style.spacing.interact_size.y = 36.0;
     style
         .text_styles
-        .insert(egui::TextStyle::Heading, egui::FontId::proportional(28.0));
+        .insert(egui::TextStyle::Heading, egui::FontId::proportional(27.0));
     style
         .text_styles
         .insert(egui::TextStyle::Body, egui::FontId::proportional(15.0));
@@ -79,6 +83,22 @@ pub(crate) fn secondary_text(dark_mode: bool) -> Color32 {
     }
 }
 
+pub(crate) fn navigation(dark_mode: bool) -> Color32 {
+    if dark_mode {
+        NAVIGATION_DARK
+    } else {
+        NAVIGATION_LIGHT
+    }
+}
+
+pub(crate) fn navigation_active(dark_mode: bool) -> Color32 {
+    if dark_mode {
+        NAVIGATION_ACTIVE_DARK
+    } else {
+        NAVIGATION_ACTIVE_LIGHT
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -88,8 +108,13 @@ mod tests {
         for (foreground, background) in [
             (TEXT_DARK, INK_DARK),
             (SECONDARY_DARK, INK_DARK),
+            (TEXT_DARK, NAVIGATION_DARK),
+            (TEXT_DARK, NAVIGATION_ACTIVE_DARK),
             (TEXT_LIGHT, INK_LIGHT),
             (SECONDARY_LIGHT, INK_LIGHT),
+            (TEXT_LIGHT, NAVIGATION_LIGHT),
+            (TEXT_LIGHT, NAVIGATION_ACTIVE_LIGHT),
+            (Color32::WHITE, AIR_BLUE),
             (ERROR_CORAL, INK_DARK),
             (VERIFIED_GREEN, INK_DARK),
             (WARNING_AMBER, INK_DARK),

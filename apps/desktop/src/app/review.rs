@@ -9,10 +9,11 @@ use crate::i18n::Localization;
 use crate::worker::{ReviewEvidenceErrorView, ReviewEvidencePageView};
 
 const NARROW_REVIEW_THRESHOLD: f32 = 850.0;
+const FOCUSED_COMPARISON_THRESHOLD: f32 = 720.0;
 pub(super) const REVIEW_QUEUE_WIDTH: f32 = 230.0;
 pub(super) const REVIEW_PANEL_GAP: f32 = 12.0;
 pub(super) const REVIEW_EVIDENCE_RATIO: f32 = 0.42;
-pub(super) const REVIEW_ACTION_BAR_HEIGHT: f32 = 92.0;
+pub(super) const REVIEW_ACTION_BAR_HEIGHT: f32 = 118.0;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) enum ReviewLayoutMode {
@@ -20,11 +21,32 @@ pub(super) enum ReviewLayoutMode {
     QueueCompare,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum ReviewComparisonMode {
+    Focused,
+    SideBySide,
+}
+
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+pub(super) enum ReviewWorkspacePane {
+    #[default]
+    Evidence,
+    Draft,
+}
+
 pub(super) const fn review_layout_mode(available_width: f32) -> ReviewLayoutMode {
     if available_width < NARROW_REVIEW_THRESHOLD {
         ReviewLayoutMode::CompactCompare
     } else {
         ReviewLayoutMode::QueueCompare
+    }
+}
+
+pub(super) const fn review_comparison_mode(available_width: f32) -> ReviewComparisonMode {
+    if available_width < FOCUSED_COMPARISON_THRESHOLD {
+        ReviewComparisonMode::Focused
+    } else {
+        ReviewComparisonMode::SideBySide
     }
 }
 
@@ -539,6 +561,19 @@ mod tests {
     #[test]
     fn threshold_width_keeps_the_queue_visible() {
         assert_eq!(review_layout_mode(850.0), ReviewLayoutMode::QueueCompare);
+    }
+
+    #[test]
+    fn narrow_comparison_uses_one_focused_panel() {
+        assert_eq!(review_comparison_mode(719.0), ReviewComparisonMode::Focused);
+    }
+
+    #[test]
+    fn wide_comparison_keeps_source_and_draft_visible() {
+        assert_eq!(
+            review_comparison_mode(720.0),
+            ReviewComparisonMode::SideBySide
+        );
     }
 
     #[test]

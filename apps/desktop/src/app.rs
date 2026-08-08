@@ -26,9 +26,10 @@ use self::first_knowledge::JourneyStepState;
 use self::integrations::{ChatIntegrationsUi, IntegrationsUiAction};
 use self::knowledge::{KnowledgeAction, KnowledgeUi, SearchEvidenceTarget};
 use self::review::{
-    REVIEW_ACTION_BAR_HEIGHT, REVIEW_PANEL_GAP, REVIEW_QUEUE_WIDTH, ReviewEvidenceAction,
-    ReviewEvidencePanelIntent, ReviewEvidenceUi, ReviewLayoutMode, review_comparison_widths,
-    review_layout_mode, show_review_evidence_panel,
+    REVIEW_ACTION_BAR_HEIGHT, REVIEW_PANEL_GAP, REVIEW_QUEUE_WIDTH, ReviewComparisonMode,
+    ReviewEvidenceAction, ReviewEvidencePanelIntent, ReviewEvidenceUi, ReviewLayoutMode,
+    ReviewWorkspacePane, review_comparison_mode, review_comparison_widths, review_layout_mode,
+    show_review_evidence_panel,
 };
 
 use crate::{
@@ -194,6 +195,7 @@ pub struct AirWikiApp {
     selected_review: Option<Uuid>,
     reanalyzing_reviews: HashSet<Uuid>,
     review_evidence: ReviewEvidenceUi,
+    review_workspace_pane: ReviewWorkspacePane,
     integrations: ChatIntegrationsUi,
     knowledge: KnowledgeUi,
 }
@@ -281,6 +283,7 @@ impl AirWikiApp {
             selected_review: None,
             reanalyzing_reviews: HashSet::new(),
             review_evidence: ReviewEvidenceUi::default(),
+            review_workspace_pane: ReviewWorkspacePane::default(),
             integrations: ChatIntegrationsUi::default(),
             knowledge: KnowledgeUi::default(),
         })
@@ -745,11 +748,14 @@ impl AirWikiApp {
     fn sidebar(&mut self, root: &mut egui::Ui) {
         let home = self.localization.text("nav-home");
         let collections = self.localization.text("nav-collections");
-        let review = format!(
-            "{}  ({})",
-            self.localization.text("nav-review"),
-            self.reviews.len().saturating_add(self.source_issues.len())
+        let mut review_arguments = FluentArgs::new();
+        review_arguments.set(
+            "count",
+            self.reviews.len().saturating_add(self.source_issues.len()),
         );
+        let review = self
+            .localization
+            .text_with("nav-review-count", Some(&review_arguments));
         let wiki = self.localization.text("nav-wiki");
         let search = self.localization.text("nav-search");
         let integrations = self.localization.text("nav-integrations");
@@ -761,26 +767,65 @@ impl AirWikiApp {
             format!("○ {}", self.localization.text("models-pending"))
         };
         egui::Panel::left("navigation")
-            .exact_size(205.0)
+            .exact_size(224.0)
+            .frame(
+                egui::Frame::new()
+                    .fill(crate::theme::navigation(root.visuals().dark_mode))
+                    .inner_margin(egui::Margin::symmetric(14, 0)),
+            )
             .show(root, |ui| {
-                ui.add_space(18.0);
-                ui.heading(RichText::new("AirWiki").size(22.0));
-                ui.add_space(22.0);
+                ui.add_space(20.0);
+                ui.heading(RichText::new("AirWiki").size(24.0).strong());
+                ui.label(
+                    RichText::new(self.localization.text("nav-local-first"))
+                        .small()
+                        .monospace()
+                        .color(ui.visuals().weak_text_color()),
+                );
+                ui.add_space(24.0);
+                nav_group_label(ui, &self.localization.text("nav-group-knowledge"));
                 nav(ui, &mut self.screen, Screen::Setup, &home);
                 nav(ui, &mut self.screen, Screen::Collections, &collections);
                 nav(ui, &mut self.screen, Screen::Review, &review);
                 nav(ui, &mut self.screen, Screen::Knowledge, &wiki);
                 nav(ui, &mut self.screen, Screen::Search, &search);
+                ui.add_space(16.0);
+                nav_group_label(ui, &self.localization.text("nav-group-connections"));
                 nav(ui, &mut self.screen, Screen::Integrations, &integrations);
                 nav(ui, &mut self.screen, Screen::Nodes, &devices);
+                ui.add_space(16.0);
+                nav_group_label(ui, &self.localization.text("nav-group-system"));
                 nav(ui, &mut self.screen, Screen::Settings, &settings);
                 ui.with_layout(egui::Layout::bottom_up(egui::Align::LEFT), |ui| {
                     ui.label(
                         RichText::new(format!("v{}", env!("CARGO_PKG_VERSION")))
                             .small()
+                            .monospace()
                             .color(ui.visuals().weak_text_color()),
                     );
-                    ui.label(model_status);
+                    egui::Frame::new()
+                        .fill(crate::theme::surface(ui.visuals().dark_mode))
+                        .stroke(egui::Stroke::new(
+                            1.0,
+                            crate::theme::border(ui.visuals().dark_mode),
+                        ))
+                        .corner_radius(egui::CornerRadius::same(8))
+                        .inner_margin(egui::Margin::same(10))
+                        .show(ui, |ui| {
+                            ui.allocate_ui_with_layout(
+                                egui::vec2(ui.available_width(), 42.0),
+                                egui::Layout::top_down(egui::Align::LEFT),
+                                |ui| {
+                                    ui.label(
+                                        RichText::new(self.localization.text("nav-device-status"))
+                                            .small()
+                                            .monospace()
+                                            .color(ui.visuals().weak_text_color()),
+                                    );
+                                    ui.label(model_status);
+                                },
+                            );
+                        });
                 });
             });
     }
@@ -1052,81 +1097,45 @@ impl AirWikiApp {
             .sum::<usize>();
         let journey = derive_first_knowledge_journey(&readiness, published_count);
 
-        first_knowledge::show_journey_header(
-            ui,
-            &self.localization,
-            visible_journey_states(journey),
-            layout.density,
-        );
-        ui.add_space(if layout.is_compact() { 10.0 } else { 18.0 });
-        first_knowledge::work_surface(ui, layout.density, |ui| {
-            if self.home_wiki_incident(ui) {
-                ui.add_space(10.0);
-            }
-            ui.label(
-                RichText::new(self.localization.text("home-next-step"))
-                    .small()
-                    .strong()
-                    .color(ui.visuals().weak_text_color()),
+        first_knowledge::show_dashboard_header(ui, &self.localization, layout.density);
+        ui.add_space(if layout.is_compact() { 12.0 } else { 20.0 });
+        let journey_states = visible_journey_states(journey);
+        if layout.is_narrow() {
+            self.home_primary_action(ui, layout.density, journey, document_count);
+            ui.add_space(12.0);
+            first_knowledge::show_journey_surface(
+                ui,
+                &self.localization,
+                journey_states,
+                layout.density,
             );
-            match journey.cta {
-                Some(FirstKnowledgeCta::Recommended(action)) => {
-                    ui.heading(primary_action_title(&self.localization, action));
-                    ui.label(primary_action_explanation(&self.localization, action));
-                    ui.add_space(10.0);
-                    if ui
-                        .add(first_knowledge::primary_button(primary_action_button(
+        } else {
+            let gap = 16.0;
+            let trail_width = 238.0;
+            let action_width = (ui.available_width() - trail_width - gap).max(320.0);
+            ui.horizontal_top(|ui| {
+                ui.allocate_ui_with_layout(
+                    egui::vec2(action_width, 0.0),
+                    egui::Layout::top_down(egui::Align::Min),
+                    |ui| {
+                        self.home_primary_action(ui, layout.density, journey, document_count);
+                    },
+                );
+                ui.add_space(gap);
+                ui.allocate_ui_with_layout(
+                    egui::vec2(trail_width, 0.0),
+                    egui::Layout::top_down(egui::Align::Min),
+                    |ui| {
+                        first_knowledge::show_journey_surface(
+                            ui,
                             &self.localization,
-                            action,
-                        )))
-                        .clicked()
-                    {
-                        self.open_readiness_action(action);
-                    }
-                }
-                Some(FirstKnowledgeCta::SearchKnowledge) => {
-                    ui.heading(self.localization.text("onboarding-search-title"));
-                    ui.label(self.localization.text("onboarding-search-body"));
-                    ui.add_space(10.0);
-                    if ui
-                        .add(first_knowledge::primary_button(
-                            self.localization.text("search-action"),
-                        ))
-                        .clicked()
-                    {
-                        self.screen = Screen::Search;
-                    }
-                }
-                None => {
-                    let (title, body) =
-                        journey_stage_copy(&self.localization, journey.current_stage);
-                    ui.heading(title);
-                    ui.label(body);
-                    ui.add_space(10.0);
-                    if journey.current_stage == FirstKnowledgeStage::ProcessKnowledge
-                        && document_count == 0
-                    {
-                        if ui
-                            .button(self.localization.text("onboarding-processing-open-folder"))
-                            .clicked()
-                        {
-                            self.screen = Screen::Collections;
-                        }
-                    } else {
-                        ui.horizontal(|ui| {
-                            ui.spinner();
-                            ui.label(
-                                readiness_status_presentation(
-                                    &self.localization,
-                                    first_knowledge_readiness_status(journey.current_state),
-                                )
-                                .0,
-                            );
-                        });
-                    }
-                }
-            }
-        });
+                            journey_states,
+                            layout.density,
+                        );
+                    },
+                );
+            });
+        }
 
         ui.add_space(if layout.is_compact() { 8.0 } else { 16.0 });
         first_knowledge::privacy_note(ui, &self.localization);
@@ -1206,6 +1215,84 @@ impl AirWikiApp {
                 self.wiki_health_error_dismissed = false;
                 self.worker
                     .send(WorkerCommand::RefreshWikiHealth { request_id });
+            }
+        });
+    }
+
+    fn home_primary_action(
+        &mut self,
+        ui: &mut egui::Ui,
+        density: crate::layout::LayoutDensity,
+        journey: FirstKnowledgeJourneyView,
+        document_count: usize,
+    ) {
+        first_knowledge::action_surface(ui, density, |ui| {
+            if self.home_wiki_incident(ui) {
+                ui.add_space(10.0);
+            }
+            ui.label(
+                RichText::new(self.localization.text("home-next-step"))
+                    .size(11.0)
+                    .monospace()
+                    .strong()
+                    .color(ui.visuals().weak_text_color()),
+            );
+            match journey.cta {
+                Some(FirstKnowledgeCta::Recommended(action)) => {
+                    ui.heading(primary_action_title(&self.localization, action));
+                    ui.label(primary_action_explanation(&self.localization, action));
+                    ui.add_space(10.0);
+                    if ui
+                        .add(first_knowledge::primary_button(primary_action_button(
+                            &self.localization,
+                            action,
+                        )))
+                        .clicked()
+                    {
+                        self.open_readiness_action(action);
+                    }
+                }
+                Some(FirstKnowledgeCta::SearchKnowledge) => {
+                    ui.heading(self.localization.text("onboarding-search-title"));
+                    ui.label(self.localization.text("onboarding-search-body"));
+                    ui.add_space(10.0);
+                    if ui
+                        .add(first_knowledge::primary_button(
+                            self.localization.text("search-action"),
+                        ))
+                        .clicked()
+                    {
+                        self.screen = Screen::Search;
+                    }
+                }
+                None => {
+                    let (title, body) =
+                        journey_stage_copy(&self.localization, journey.current_stage);
+                    ui.heading(title);
+                    ui.label(body);
+                    ui.add_space(10.0);
+                    if journey.current_stage == FirstKnowledgeStage::ProcessKnowledge
+                        && document_count == 0
+                    {
+                        if ui
+                            .button(self.localization.text("onboarding-processing-open-folder"))
+                            .clicked()
+                        {
+                            self.screen = Screen::Collections;
+                        }
+                    } else {
+                        ui.horizontal(|ui| {
+                            ui.spinner();
+                            ui.label(
+                                readiness_status_presentation(
+                                    &self.localization,
+                                    first_knowledge_readiness_status(journey.current_state),
+                                )
+                                .0,
+                            );
+                        });
+                    }
+                }
             }
         });
     }
@@ -1393,6 +1480,7 @@ impl AirWikiApp {
     }
 
     fn collections(&mut self, ui: &mut egui::Ui) {
+        let layout = ResponsiveLayout::from_available(ui.available_size());
         page_title(
             ui,
             &self.localization.text("collections-title"),
@@ -1400,37 +1488,56 @@ impl AirWikiApp {
         );
         let mut monitoring_arguments = FluentArgs::new();
         monitoring_arguments.set("minutes", PERIODIC_RECONCILE_INTERVAL.as_secs() / 60);
-        ui.label(
-            RichText::new(
-                self.localization
-                    .text_with("collections-monitoring", Some(&monitoring_arguments)),
-            )
-            .small()
-            .color(ui.visuals().weak_text_color()),
-        );
-        ui.add_space(8.0);
-        egui::Frame::group(ui.style()).show(ui, |ui| {
+        first_knowledge::action_surface(ui, layout.density, |ui| {
+            ui.label(
+                RichText::new(self.localization.text("collections-intake-eyebrow"))
+                    .size(11.0)
+                    .monospace()
+                    .strong()
+                    .color(ui.visuals().weak_text_color()),
+            );
             ui.heading(self.localization.text("collections-new"));
-            ui.horizontal(|ui| {
-                let name_label = ui.label(self.localization.text("collections-name"));
-                ui.text_edit_singleline(&mut self.new_collection_name)
-                    .labelled_by(name_label.id);
+            wrap_rich_text(
+                ui,
+                RichText::new(self.localization.text("collections-empty-body"))
+                    .color(crate::theme::secondary_text(ui.visuals().dark_mode)),
+            );
+            ui.add_space(8.0);
+            let name_label = ui.label(
+                RichText::new(self.localization.text("collections-name"))
+                    .small()
+                    .strong(),
+            );
+            ui.add_sized(
+                [ui.available_width(), ui.spacing().interact_size.y],
+                egui::TextEdit::singleline(&mut self.new_collection_name),
+            )
+            .labelled_by(name_label.id);
+            ui.horizontal_wrapped(|ui| {
                 if ui
                     .button(self.localization.text("collections-choose-folder"))
                     .clicked()
                 {
                     self.new_collection_folder = rfd::FileDialog::new().pick_folder();
                 }
+                if let Some(path) = &self.new_collection_folder {
+                    wrap_monospace(ui, path.display().to_string());
+                } else {
+                    ui.label(
+                        RichText::new(self.localization.text("collections-folder-unselected"))
+                            .small()
+                            .color(ui.visuals().weak_text_color()),
+                    );
+                }
             });
-            if let Some(path) = &self.new_collection_folder {
-                wrap_monospace(ui, path.display().to_string());
-            }
             let enabled =
                 !self.new_collection_name.trim().is_empty() && self.new_collection_folder.is_some();
             if ui
                 .add_enabled(
                     enabled,
-                    egui::Button::new(self.localization.text("collections-create-scan")),
+                    first_knowledge::primary_button(
+                        self.localization.text("collections-create-scan"),
+                    ),
                 )
                 .clicked()
                 && let Some(folder) = self.new_collection_folder.take()
@@ -1441,15 +1548,47 @@ impl AirWikiApp {
                 });
                 self.new_collection_name.clear();
             }
-        });
-        ui.add_space(12.0);
-        if self.collections.is_empty() {
-            empty_state(
+            ui.add_space(4.0);
+            wrap_rich_text(
                 ui,
-                &self.localization.text("collections-empty-title"),
-                &self.localization.text("collections-empty-body"),
+                RichText::new(
+                    self.localization
+                        .text_with("collections-monitoring", Some(&monitoring_arguments)),
+                )
+                .small()
+                .color(ui.visuals().weak_text_color()),
             );
+        });
+        ui.add_space(18.0);
+        ui.horizontal(|ui| {
+            ui.label(
+                RichText::new(self.localization.text("collections-library-title"))
+                    .size(11.0)
+                    .monospace()
+                    .strong()
+                    .color(ui.visuals().weak_text_color()),
+            );
+            if !self.collections.is_empty() {
+                let mut arguments = FluentArgs::new();
+                arguments.set("count", self.collections.len() as i64);
+                ui.label(
+                    RichText::new(
+                        self.localization
+                            .text_with("collections-library-count", Some(&arguments)),
+                    )
+                    .small()
+                    .color(ui.visuals().weak_text_color()),
+                );
+            }
+        });
+        if self.collections.is_empty() {
+            ui.label(
+                RichText::new(self.localization.text("collections-empty-title"))
+                    .color(ui.visuals().weak_text_color()),
+            );
+            return;
         }
+        ui.add_space(6.0);
         let technical_details = self.localization.text("action-details");
         let linked = self.localization.text("collections-linked");
         let queued = self.localization.text("collections-scan-queued");
@@ -1481,9 +1620,18 @@ impl AirWikiApp {
                     let counts = self
                         .localization
                         .text_with("collections-counts", Some(&counts_arguments));
-                    egui::Frame::group(ui.style()).show(ui, |ui| {
+                    first_knowledge::work_surface(ui, layout.density, |ui| {
                         ui.horizontal(|ui| {
                             ui.vertical(|ui| {
+                                ui.label(
+                                    RichText::new(
+                                        self.localization.text("collections-source-status"),
+                                    )
+                                    .size(11.0)
+                                    .monospace()
+                                    .strong()
+                                    .color(ui.visuals().weak_text_color()),
+                                );
                                 ui.heading(&collection.name);
                                 ui.label(&linked);
                                 ui.collapsing(&technical_details, |ui| {
@@ -1605,6 +1753,13 @@ impl AirWikiApp {
                             });
                         });
                         ui.separator();
+                        ui.label(
+                            RichText::new(self.localization.text("collections-access-title"))
+                                .size(11.0)
+                                .monospace()
+                                .strong()
+                                .color(ui.visuals().weak_text_color()),
+                        );
                         let external_ai_before = collection.allow_external_ai;
                         let peer_changed = ui
                             .checkbox(&mut collection.peer_shareable, &share_peers)
@@ -1886,17 +2041,65 @@ impl AirWikiApp {
             &self.localization.text("review-title"),
             &self.localization.text("review-subtitle"),
         );
+        if !self.reviews.is_empty() || !self.source_issues.is_empty() {
+            ui.horizontal_wrapped(|ui| {
+                let mut ready_arguments = FluentArgs::new();
+                ready_arguments.set("count", self.reviews.len() as i64);
+                ui.label(
+                    RichText::new(
+                        self.localization
+                            .text_with("review-ready-summary", Some(&ready_arguments)),
+                    )
+                    .strong()
+                    .color(crate::theme::VERIFIED_GREEN),
+                );
+                if !self.source_issues.is_empty() {
+                    ui.label("·");
+                    let mut issue_arguments = FluentArgs::new();
+                    issue_arguments.set("count", self.source_issues.len() as i64);
+                    ui.label(
+                        RichText::new(
+                            self.localization
+                                .text_with("review-issue-summary", Some(&issue_arguments)),
+                        )
+                        .strong()
+                        .color(crate::theme::WARNING_AMBER),
+                    );
+                }
+            });
+            ui.add_space(12.0);
+        }
         self.review_content(ui);
     }
 
     fn review_content(&mut self, ui: &mut egui::Ui) {
         if self.reviews.is_empty() && self.source_issues.is_empty() {
             self.review_evidence.sync_selection(None, false);
-            empty_state(
-                ui,
-                &self.localization.text("review-empty-title"),
-                &self.localization.text("review-empty-body"),
-            );
+            let layout = ResponsiveLayout::from_available(ui.available_size());
+            first_knowledge::action_surface(ui, layout.density, |ui| {
+                ui.label(
+                    RichText::new(self.localization.text("review-empty-eyebrow"))
+                        .size(11.0)
+                        .monospace()
+                        .strong()
+                        .color(ui.visuals().weak_text_color()),
+                );
+                ui.heading(self.localization.text("review-empty-title"));
+                wrap_rich_text(
+                    ui,
+                    RichText::new(self.localization.text("review-empty-body"))
+                        .color(crate::theme::secondary_text(ui.visuals().dark_mode)),
+                );
+                ui.add_space(12.0);
+                if ui
+                    .add(first_knowledge::primary_button(
+                        self.localization.text("review-empty-action"),
+                    ))
+                    .clicked()
+                {
+                    self.screen = Screen::Collections;
+                }
+            });
             return;
         }
         let issues = self.source_issues.clone();
@@ -1939,6 +2142,7 @@ impl AirWikiApp {
     ) {
         ui.horizontal_wrapped(|ui| {
             ui.label(RichText::new(self.localization.text("review-document-selector")).strong());
+            let selected_before = self.selected_review;
             let selected_text = self
                 .selected_review
                 .and_then(|id| self.reviews.iter().find(|item| item.concept_id == id))
@@ -1956,6 +2160,9 @@ impl AirWikiApp {
                         );
                     }
                 });
+            if selected_before != self.selected_review {
+                self.review_workspace_pane = ReviewWorkspacePane::Evidence;
+            }
             if !issues.is_empty() {
                 let mut arguments = FluentArgs::new();
                 arguments.set("count", issues.len() as i64);
@@ -1988,60 +2195,73 @@ impl AirWikiApp {
         issues: &[SourceIssueView],
         requested_rescan: &mut Option<Uuid>,
     ) {
-        let queue_height = ui.available_height().max(0.0);
-        egui::ScrollArea::vertical()
-            .id_salt("review_queue")
-            .max_height(queue_height)
-            .auto_shrink([false; 2])
-            .show(ui, |ui| {
-                if !self.reviews.is_empty() {
-                    let mut arguments = FluentArgs::new();
-                    arguments.set("count", self.reviews.len() as i64);
-                    ui.label(
-                        RichText::new(
-                            self.localization
-                                .text_with("review-ready-group", Some(&arguments)),
-                        )
-                        .strong(),
-                    );
-                    ui.add_space(4.0);
-                    for item in &self.reviews {
-                        let selected = self.selected_review == Some(item.concept_id);
-                        if ui
-                            .selectable_label(
+        first_knowledge::work_surface(ui, crate::layout::LayoutDensity::Compact, |ui| {
+            ui.label(
+                RichText::new(self.localization.text("review-inbox-title"))
+                    .size(11.0)
+                    .monospace()
+                    .strong()
+                    .color(ui.visuals().weak_text_color()),
+            );
+            ui.add_space(4.0);
+            let queue_height = ui.available_height().max(0.0);
+            egui::ScrollArea::vertical()
+                .id_salt("review_queue")
+                .max_height(queue_height)
+                .auto_shrink([false; 2])
+                .show(ui, |ui| {
+                    if !self.reviews.is_empty() {
+                        let mut arguments = FluentArgs::new();
+                        arguments.set("count", self.reviews.len() as i64);
+                        ui.label(
+                            RichText::new(
+                                self.localization
+                                    .text_with("review-ready-group", Some(&arguments)),
+                            )
+                            .strong(),
+                        );
+                        ui.add_space(4.0);
+                        for item in &self.reviews {
+                            let selected = self.selected_review == Some(item.concept_id);
+                            if review_queue_item(
+                                ui,
                                 selected,
-                                format!("{}\n{}", item.source_name, item.collection_name),
+                                &item.source_name,
+                                &item.collection_name,
                             )
                             .clicked()
-                        {
-                            self.selected_review = Some(item.concept_id);
+                            {
+                                self.selected_review = Some(item.concept_id);
+                                self.review_workspace_pane = ReviewWorkspacePane::Evidence;
+                            }
+                            ui.add_space(4.0);
                         }
                     }
-                }
-                if !issues.is_empty() {
-                    if !self.reviews.is_empty() {
-                        ui.add_space(14.0);
-                    }
-                    let mut arguments = FluentArgs::new();
-                    arguments.set("count", issues.len() as i64);
-                    ui.label(
-                        RichText::new(
-                            self.localization
-                                .text_with("review-issues-group", Some(&arguments)),
-                        )
-                        .strong()
-                        .color(crate::theme::WARNING_AMBER),
-                    );
-                    ui.add_space(4.0);
-                    for issue in issues {
-                        let scanning = self.collection_scans.contains_key(&issue.collection_id);
-                        if show_review_issue(ui, &self.localization, issue, scanning) {
-                            *requested_rescan = Some(issue.collection_id);
+                    if !issues.is_empty() {
+                        if !self.reviews.is_empty() {
+                            ui.add_space(14.0);
                         }
-                        ui.add_space(6.0);
+                        let mut arguments = FluentArgs::new();
+                        arguments.set("count", issues.len() as i64);
+                        ui.label(
+                            RichText::new(
+                                self.localization
+                                    .text_with("review-issues-group", Some(&arguments)),
+                            )
+                            .strong()
+                            .color(crate::theme::WARNING_AMBER),
+                        );
+                        ui.add_space(4.0);
+                        for issue in issues {
+                            let scanning = self.collection_scans.contains_key(&issue.collection_id);
+                            if show_review_issue(ui, &self.localization, issue, scanning) {
+                                *requested_rescan = Some(issue.collection_id);
+                            }
+                            ui.add_space(6.0);
+                        }
                     }
-                }
-            });
+                });
+        });
     }
 
     fn review_comparison(&mut self, ui: &mut egui::Ui, issues: &[SourceIssueView]) {
@@ -2079,57 +2299,159 @@ impl AirWikiApp {
         let mut approve = false;
         let mut reject = false;
         let mut reanalyze = false;
-        let (evidence_width, _) = review_comparison_widths(ui.available_width());
+        review_document_header(
+            ui,
+            &self.localization,
+            &self.reviews[selected_index].source_name,
+            &self.reviews[selected_index].collection_name,
+        );
+        ui.add_space(10.0);
+        let comparison_mode = review_comparison_mode(ui.available_width());
+        if comparison_mode == ReviewComparisonMode::Focused {
+            ui.horizontal(|ui| {
+                ui.selectable_value(
+                    &mut self.review_workspace_pane,
+                    ReviewWorkspacePane::Evidence,
+                    self.localization.text("review-focus-evidence"),
+                );
+                ui.selectable_value(
+                    &mut self.review_workspace_pane,
+                    ReviewWorkspacePane::Draft,
+                    self.localization.text("review-focus-draft"),
+                );
+            });
+            ui.add_space(6.0);
+        }
         StripBuilder::new(ui)
             .size(Size::remainder())
             .size(Size::exact(REVIEW_ACTION_BAR_HEIGHT))
             .clip(true)
             .vertical(|mut strip| {
-                strip.cell(|ui| {
-                    StripBuilder::new(ui)
-                        .size(Size::exact(evidence_width))
-                        .size(Size::exact(REVIEW_PANEL_GAP))
-                        .size(Size::remainder())
-                        .clip(true)
-                        .horizontal(|mut strip| {
-                            strip.cell(|ui| {
-                                evidence_intent = show_review_evidence_panel(
-                                    ui,
-                                    &self.localization,
-                                    concept_id,
-                                    source_revision,
-                                    page,
-                                    error,
-                                    loading,
-                                );
-                            });
-                            strip.cell(|_| {});
-                            strip.cell(|ui| {
-                                let editor_height = ui.available_height().max(0.0);
-                                egui::ScrollArea::vertical()
-                                    .id_salt(("review_editor", concept_id, source_revision))
-                                    .max_height(editor_height)
-                                    .auto_shrink([false; 2])
-                                    .show(ui, |ui| {
-                                        edit_draft(
-                                            ui,
-                                            &self.localization,
-                                            &mut self.reviews[selected_index].draft,
+                strip.cell(|ui| match comparison_mode {
+                    ReviewComparisonMode::Focused => {
+                        first_knowledge::work_surface(
+                            ui,
+                            crate::layout::LayoutDensity::Compact,
+                            |ui| match self.review_workspace_pane {
+                                ReviewWorkspacePane::Evidence => {
+                                    review_step_label(
+                                        ui,
+                                        &self.localization.text("review-evidence-step"),
+                                    );
+                                    evidence_intent = show_review_evidence_panel(
+                                        ui,
+                                        &self.localization,
+                                        concept_id,
+                                        source_revision,
+                                        page,
+                                        error,
+                                        loading,
+                                    );
+                                }
+                                ReviewWorkspacePane::Draft => {
+                                    review_step_label(
+                                        ui,
+                                        &self.localization.text("review-draft-step"),
+                                    );
+                                    let editor_height = ui.available_height().max(0.0);
+                                    egui::ScrollArea::vertical()
+                                        .id_salt((
+                                            "review_editor_focused",
+                                            concept_id,
+                                            source_revision,
+                                        ))
+                                        .max_height(editor_height)
+                                        .auto_shrink([false; 2])
+                                        .show(ui, |ui| {
+                                            edit_draft(
+                                                ui,
+                                                &self.localization,
+                                                &mut self.reviews[selected_index].draft,
+                                            );
+                                        });
+                                }
+                            },
+                        );
+                    }
+                    ReviewComparisonMode::SideBySide => {
+                        let (evidence_width, _) = review_comparison_widths(ui.available_width());
+                        StripBuilder::new(ui)
+                            .size(Size::exact(evidence_width))
+                            .size(Size::exact(REVIEW_PANEL_GAP))
+                            .size(Size::remainder())
+                            .clip(true)
+                            .horizontal(|mut strip| {
+                                strip.cell(|ui| {
+                                    first_knowledge::work_surface(
+                                        ui,
+                                        crate::layout::LayoutDensity::Compact,
+                                        |ui| {
+                                            review_step_label(
+                                                ui,
+                                                &self.localization.text("review-evidence-step"),
+                                            );
+                                            evidence_intent = show_review_evidence_panel(
+                                                ui,
+                                                &self.localization,
+                                                concept_id,
+                                                source_revision,
+                                                page,
+                                                error,
+                                                loading,
+                                            );
+                                        },
+                                    );
+                                });
+                                strip.cell(|ui| {
+                                    ui.centered_and_justified(|ui| {
+                                        ui.label(
+                                            RichText::new("→")
+                                                .size(18.0)
+                                                .color(crate::theme::EVIDENCE_CYAN),
                                         );
                                     });
+                                });
+                                strip.cell(|ui| {
+                                    first_knowledge::work_surface(
+                                        ui,
+                                        crate::layout::LayoutDensity::Compact,
+                                        |ui| {
+                                            review_step_label(
+                                                ui,
+                                                &self.localization.text("review-draft-step"),
+                                            );
+                                            let editor_height = ui.available_height().max(0.0);
+                                            egui::ScrollArea::vertical()
+                                                .id_salt((
+                                                    "review_editor",
+                                                    concept_id,
+                                                    source_revision,
+                                                ))
+                                                .max_height(editor_height)
+                                                .auto_shrink([false; 2])
+                                                .show(ui, |ui| {
+                                                    edit_draft(
+                                                        ui,
+                                                        &self.localization,
+                                                        &mut self.reviews[selected_index].draft,
+                                                    );
+                                                });
+                                        },
+                                    );
+                                });
                             });
-                        });
+                    }
                 });
                 strip.cell(|ui| {
-                    ui.separator();
+                    ui.add_space(8.0);
+                    review_step_label(ui, &self.localization.text("review-decision-title"));
                     ui.horizontal_wrapped(|ui| {
-                        approve = ui
+                        reanalyze = ui
                             .add_enabled(
-                                approval_ready,
-                                first_knowledge::primary_button(
-                                    self.localization.text("review-approve"),
-                                ),
+                                self.models_ready && !is_reanalyzing,
+                                egui::Button::new(self.localization.text("review-reanalyze")),
                             )
+                            .on_hover_text(self.localization.text("review-reanalyze-help"))
                             .clicked();
                         reject = ui
                             .add_enabled(
@@ -2137,12 +2459,13 @@ impl AirWikiApp {
                                 egui::Button::new(self.localization.text("review-reject")),
                             )
                             .clicked();
-                        reanalyze = ui
+                        approve = ui
                             .add_enabled(
-                                self.models_ready && !is_reanalyzing,
-                                egui::Button::new(self.localization.text("review-reanalyze")),
+                                approval_ready,
+                                first_knowledge::primary_button(
+                                    self.localization.text("review-approve"),
+                                ),
                             )
-                            .on_hover_text(self.localization.text("review-reanalyze-help"))
                             .clicked();
                     });
                     if is_reanalyzing {
@@ -5246,15 +5569,64 @@ fn configure_style(context: &egui::Context) {
 }
 
 fn nav(ui: &mut egui::Ui, current: &mut Screen, target: Screen, label: &str) {
-    if ui
-        .add_sized(
-            [178.0, 34.0],
-            egui::Button::selectable(*current == target, label),
+    let selected = *current == target;
+    let desired_size = egui::vec2(ui.available_width(), 38.0);
+    let (rect, response) = ui.allocate_exact_size(desired_size, egui::Sense::click());
+    let accessible_label = label.to_owned();
+    response.widget_info(|| {
+        egui::WidgetInfo::selected(
+            egui::WidgetType::Button,
+            ui.is_enabled(),
+            selected,
+            accessible_label.clone(),
         )
-        .clicked()
-    {
+    });
+    let fill = if selected {
+        crate::theme::navigation_active(ui.visuals().dark_mode)
+    } else if response.hovered() {
+        crate::theme::navigation_active(ui.visuals().dark_mode).gamma_multiply(0.55)
+    } else {
+        Color32::TRANSPARENT
+    };
+    ui.painter()
+        .rect_filled(rect, egui::CornerRadius::same(7), fill);
+    if selected {
+        let rail = egui::Rect::from_min_max(
+            rect.left_top() + egui::vec2(0.0, 7.0),
+            rect.left_bottom() + egui::vec2(3.0, -7.0),
+        );
+        ui.painter()
+            .rect_filled(rail, egui::CornerRadius::same(2), crate::theme::AIR_BLUE);
+    }
+    if response.has_focus() {
+        ui.painter().rect_stroke(
+            rect.shrink(1.0),
+            egui::CornerRadius::same(7),
+            egui::Stroke::new(1.5, crate::theme::EVIDENCE_CYAN),
+            egui::StrokeKind::Inside,
+        );
+    }
+    ui.painter().text(
+        rect.left_center() + egui::vec2(14.0, 0.0),
+        egui::Align2::LEFT_CENTER,
+        label,
+        egui::FontId::proportional(14.0),
+        ui.visuals().text_color(),
+    );
+    if response.clicked() {
         *current = target;
     }
+}
+
+fn nav_group_label(ui: &mut egui::Ui, label: &str) {
+    ui.label(
+        RichText::new(label)
+            .size(10.5)
+            .monospace()
+            .strong()
+            .color(ui.visuals().weak_text_color()),
+    );
+    ui.add_space(3.0);
 }
 
 fn wrap_monospace(ui: &mut egui::Ui, value: impl AsRef<str>) {
@@ -5273,6 +5645,105 @@ fn page_title(ui: &mut egui::Ui, title: &str, subtitle: &str) {
     ui.heading(RichText::new(title).size(28.0));
     ui.label(RichText::new(subtitle).color(crate::theme::secondary_text(ui.visuals().dark_mode)));
     ui.add_space(18.0);
+}
+
+fn review_queue_item(
+    ui: &mut egui::Ui,
+    selected: bool,
+    source_name: &str,
+    collection_name: &str,
+) -> egui::Response {
+    let desired_size = egui::vec2(ui.available_width(), 54.0);
+    let (rect, response) = ui.allocate_exact_size(desired_size, egui::Sense::click());
+    let accessible_label = source_name.to_owned();
+    response.widget_info(|| {
+        egui::WidgetInfo::selected(
+            egui::WidgetType::Button,
+            ui.is_enabled(),
+            selected,
+            accessible_label.clone(),
+        )
+    });
+    let fill = if selected {
+        crate::theme::navigation_active(ui.visuals().dark_mode)
+    } else if response.hovered() {
+        crate::theme::navigation_active(ui.visuals().dark_mode).gamma_multiply(0.42)
+    } else {
+        Color32::TRANSPARENT
+    };
+    ui.painter()
+        .rect_filled(rect, egui::CornerRadius::same(8), fill);
+    if selected {
+        let rail = egui::Rect::from_min_max(
+            rect.left_top() + egui::vec2(0.0, 7.0),
+            rect.left_bottom() + egui::vec2(3.0, -7.0),
+        );
+        ui.painter()
+            .rect_filled(rail, 2.0, crate::theme::EVIDENCE_CYAN);
+    }
+    if response.has_focus() {
+        ui.painter().rect_stroke(
+            rect.shrink(1.0),
+            egui::CornerRadius::same(8),
+            egui::Stroke::new(1.5, crate::theme::EVIDENCE_CYAN),
+            egui::StrokeKind::Inside,
+        );
+    }
+    ui.painter().text(
+        rect.left_top() + egui::vec2(12.0, 13.0),
+        egui::Align2::LEFT_TOP,
+        source_name,
+        egui::FontId::proportional(14.0),
+        ui.visuals().text_color(),
+    );
+    ui.painter().text(
+        rect.left_bottom() + egui::vec2(12.0, -10.0),
+        egui::Align2::LEFT_BOTTOM,
+        collection_name,
+        egui::FontId::proportional(12.0),
+        ui.visuals().weak_text_color(),
+    );
+    response
+}
+
+fn review_document_header(
+    ui: &mut egui::Ui,
+    localization: &Localization,
+    source_name: &str,
+    collection_name: &str,
+) {
+    egui::Frame::new()
+        .fill(crate::theme::navigation_active(ui.visuals().dark_mode))
+        .corner_radius(egui::CornerRadius::same(10))
+        .inner_margin(egui::Margin::symmetric(14, 10))
+        .show(ui, |ui| {
+            ui.set_min_width(ui.available_width());
+            ui.label(
+                RichText::new(localization.text("review-current-document"))
+                    .size(10.5)
+                    .monospace()
+                    .strong()
+                    .color(ui.visuals().weak_text_color()),
+            );
+            ui.horizontal_wrapped(|ui| {
+                ui.heading(RichText::new(source_name).size(20.0));
+                ui.label(
+                    RichText::new(format!("· {collection_name}"))
+                        .color(ui.visuals().weak_text_color()),
+                );
+            });
+        });
+}
+
+fn review_step_label(ui: &mut egui::Ui, label: &str) {
+    ui.label(
+        RichText::new(label)
+            .size(10.5)
+            .monospace()
+            .strong()
+            .color(crate::theme::EVIDENCE_CYAN),
+    );
+    ui.add_space(3.0);
 }
 
 fn empty_state(ui: &mut egui::Ui, title: &str, body: &str) {

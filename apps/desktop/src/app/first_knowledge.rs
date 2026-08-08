@@ -6,8 +6,8 @@ use crate::{layout::LayoutDensity, theme};
 
 pub(super) const AIR_BLUE: Color32 = theme::AIR_BLUE;
 const AIR_AQUA: Color32 = theme::EVIDENCE_CYAN;
-const AIR_INK: Color32 = Color32::from_rgb(13, 47, 95);
-const AIR_SLATE: Color32 = Color32::from_rgb(116, 139, 164);
+const AIR_INK: Color32 = Color32::from_rgb(23, 50, 69);
+const AIR_SLATE: Color32 = Color32::from_rgb(111, 139, 151);
 const AIR_AMBER: Color32 = theme::WARNING_AMBER;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -103,6 +103,129 @@ pub(super) fn show_journey_header(
         LayoutDensity::Comfortable => 20.0,
     });
     show_route(ui, localization, states, density);
+}
+
+pub(super) fn show_dashboard_header(
+    ui: &mut egui::Ui,
+    localization: &Localization,
+    density: LayoutDensity,
+) {
+    let (eyebrow_size, title_size, subtitle_size) = match density {
+        LayoutDensity::Compact => (11.0, 27.0, 14.0),
+        LayoutDensity::Comfortable => (12.0, 34.0, 16.0),
+    };
+    ui.label(
+        RichText::new(localization.text("dashboard-eyebrow"))
+            .size(eyebrow_size)
+            .monospace()
+            .strong()
+            .color(AIR_AQUA),
+    );
+    ui.add_space(3.0);
+    ui.heading(
+        RichText::new(localization.text("dashboard-title"))
+            .size(title_size)
+            .strong(),
+    );
+    ui.add(
+        egui::Label::new(
+            RichText::new(localization.text("dashboard-subtitle"))
+                .size(subtitle_size)
+                .color(ui.visuals().weak_text_color()),
+        )
+        .wrap(),
+    );
+}
+
+pub(super) fn show_journey_surface(
+    ui: &mut egui::Ui,
+    localization: &Localization,
+    states: [JourneyStepState; 5],
+    density: LayoutDensity,
+) {
+    let labels = [
+        localization.text("journey-prepare"),
+        localization.text("journey-read"),
+        localization.text("journey-review"),
+        localization.text("journey-publish"),
+        localization.text("journey-ask"),
+    ];
+    let state_labels = states.map(|state| {
+        localization.text(match state {
+            JourneyStepState::Complete => "journey-step-done",
+            JourneyStepState::Current | JourneyStepState::Attention => "journey-step-current",
+            JourneyStepState::Upcoming => "journey-step-next",
+        })
+    });
+    let accessible_summary = labels
+        .iter()
+        .zip(state_labels.iter())
+        .map(|(label, state)| format!("{label}: {state}"))
+        .collect::<Vec<_>>()
+        .join(". ");
+
+    work_surface(ui, density, |ui| {
+        ui.label(
+            RichText::new(localization.text("journey-title"))
+                .size(12.0)
+                .monospace()
+                .strong()
+                .color(ui.visuals().weak_text_color()),
+        );
+        ui.add_space(8.0);
+        let height = match density {
+            LayoutDensity::Compact => 190.0,
+            LayoutDensity::Comfortable => 220.0,
+        };
+        let (rect, response) = ui.allocate_exact_size(
+            egui::vec2(ui.available_width().max(1.0), height),
+            egui::Sense::hover(),
+        );
+        response.widget_info(|| {
+            egui::WidgetInfo::labeled(egui::WidgetType::Other, true, accessible_summary.clone())
+        });
+        let painter = ui.painter_at(rect);
+        let x = rect.left() + 18.0;
+        let top = rect.top() + 12.0;
+        let spacing = (rect.height() - 24.0) / 4.0;
+        let points: [egui::Pos2; 5] =
+            std::array::from_fn(|index| egui::pos2(x, top + spacing * index as f32));
+
+        for index in 0..4 {
+            let complete = matches!(states[index], JourneyStepState::Complete);
+            painter.line_segment(
+                [points[index], points[index + 1]],
+                Stroke::new(3.0, if complete { AIR_BLUE } else { route_muted(ui) }),
+            );
+        }
+        for (((point, state), label), state_label) in points
+            .into_iter()
+            .zip(states)
+            .zip(labels.iter())
+            .zip(state_labels.iter())
+        {
+            paint_node(&painter, point, state);
+            let label_color = if matches!(state, JourneyStepState::Upcoming) {
+                ui.visuals().weak_text_color()
+            } else {
+                ui.visuals().text_color()
+            };
+            painter.text(
+                point + egui::vec2(25.0, -7.0),
+                egui::Align2::LEFT_CENTER,
+                label,
+                egui::FontId::proportional(14.0),
+                label_color,
+            );
+            painter.text(
+                point + egui::vec2(25.0, 9.0),
+                egui::Align2::LEFT_CENTER,
+                state_label,
+                egui::FontId::monospace(10.5),
+                ui.visuals().weak_text_color(),
+            );
+        }
+    });
 }
 
 fn show_header(ui: &mut egui::Ui, localization: &Localization, density: LayoutDensity) {
@@ -253,6 +376,37 @@ pub(super) fn work_surface<R>(
             add_contents(ui)
         })
         .inner
+}
+
+pub(super) fn action_surface<R>(
+    ui: &mut egui::Ui,
+    density: LayoutDensity,
+    add_contents: impl FnOnce(&mut egui::Ui) -> R,
+) -> R {
+    let response = egui::Frame::new()
+        .fill(theme::surface(ui.visuals().dark_mode))
+        .stroke(Stroke::new(1.0, theme::border(ui.visuals().dark_mode)))
+        .corner_radius(egui::CornerRadius::same(14))
+        .inner_margin(egui::Margin {
+            left: surface_margin(density) + 8,
+            right: surface_margin(density),
+            top: surface_margin(density),
+            bottom: surface_margin(density),
+        })
+        .show(ui, |ui| {
+            ui.set_min_width(ui.available_width());
+            ui.set_min_height(match density {
+                LayoutDensity::Compact => 150.0,
+                LayoutDensity::Comfortable => 188.0,
+            });
+            add_contents(ui)
+        });
+    let seam = egui::Rect::from_min_max(
+        response.response.rect.left_top() + egui::vec2(0.0, 14.0),
+        response.response.rect.left_bottom() + egui::vec2(4.0, -14.0),
+    );
+    ui.painter().rect_filled(seam, 2.0, AIR_AQUA);
+    response.inner
 }
 
 pub(super) fn primary_button(label: String) -> egui::Button<'static> {

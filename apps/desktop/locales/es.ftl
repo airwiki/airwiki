@@ -2,11 +2,17 @@ app-title = AirWiki
 nav-home = Inicio
 nav-collections = Carpetas de conocimiento
 nav-review = Revisión
+nav-review-count = Revisión · { $count }
 nav-wiki = Wiki
 nav-search = Buscar
 nav-integrations = Chats
 nav-devices = Otros equipos
 nav-settings = Configuración
+nav-group-knowledge = Conocimiento
+nav-group-connections = Conexiones
+nav-group-system = Sistema
+nav-local-first = Local · revisado
+nav-device-status = En este equipo
 
 status-ready = Listo
 status-working = Trabajando
@@ -17,6 +23,7 @@ status-optional-disabled = Opcional · Desactivado
 dashboard-title = Tu conocimiento
 dashboard-subtitle = AirWiki mantiene el conocimiento local organizado y muestra únicamente la próxima acción que necesita tu atención.
 dashboard-all-ready = Todo está listo
+dashboard-eyebrow = Conocimiento en este equipo
 
 first-knowledge-eyebrow = Privado de forma predeterminada
 first-knowledge-title = Convierte una carpeta en conocimiento que puedas verificar
@@ -102,12 +109,21 @@ primary-button-view-diagnostics = Ver diagnóstico
 collections-title = Carpetas de conocimiento
 collections-subtitle = Cada carpeta de conocimiento observa una carpeta local y mantiene un bundle OKF independiente.
 collections-monitoring = El monitoreo automático funciona mientras la app está abierta y hace una reconciliación completa cada { $minutes } minutos cuando la IA local está lista.
+collections-intake-eyebrow = AGREGAR UNA FUENTE LOCAL
 collections-new = Nueva carpeta de conocimiento
 collections-name = Nombre
 collections-choose-folder = Elegir carpeta…
+collections-folder-unselected = Ninguna carpeta seleccionada
 collections-create-scan = Crear y escanear
 collections-empty-title = Todavía no hay carpetas de conocimiento
 collections-empty-body = Crea una para importar Markdown o PDF con texto.
+collections-library-title = BIBLIOTECA DE CONOCIMIENTO
+collections-library-count = { $count } { $count ->
+    [one] carpeta
+   *[other] carpetas
+}
+collections-source-status = ESTADO DE LA FUENTE
+collections-access-title = ALCANCE Y PERMISOS
 collections-linked = Carpeta vinculada y supervisada
 collections-counts = { $documents } documentos · { $published } publicados
 collections-last-scan = Último escaneo: { $time }
@@ -530,10 +546,27 @@ diagnostics-configuration = Configuración
 tray-start-failed = AirWiki no pudo iniciar la bandeja del sistema.
 technical-details = Detalles técnicos
 
-review-title = Cola de revisión
-review-subtitle = Nada se publica ni se comparte sin una aprobación humana explícita.
+review-title = Mesa de revisión
+review-subtitle = Verifica la fuente, ajusta el conocimiento propuesto y decide qué pasa a formar parte de tu Wiki.
+review-empty-eyebrow = BANDEJA AL DÍA
 review-empty-title = No hay documentos pendientes
-review-empty-body = Las nuevas versiones aparecerán aquí después del enriquecimiento local.
+review-empty-body = Las nuevas versiones aparecerán aquí después de la preparación local. Agrega o vuelve a escanear una carpeta de conocimiento para continuar.
+review-empty-action = Abrir carpetas de conocimiento
+review-ready-summary = { $count ->
+    [one] 1 listo
+   *[other] { $count } listos
+}
+review-issue-summary = { $count ->
+    [one] 1 necesita atención
+   *[other] { $count } necesitan atención
+}
+review-inbox-title = BANDEJA DE REVISIÓN
+review-current-document = DOCUMENTO ACTUAL
+review-evidence-step = 01 · EVIDENCIA DE LA FUENTE
+review-draft-step = 02 · CONOCIMIENTO PROPUESTO
+review-decision-title = DECISIÓN
+review-focus-evidence = Evidencia
+review-focus-draft = Conocimiento propuesto
 review-ready-group = Listos para revisar ({ $count })
 review-issues-group = Necesitan atención ({ $count })
 review-issues-more = y { $count } más

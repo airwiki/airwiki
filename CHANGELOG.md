@@ -29,6 +29,12 @@ All notable user-visible changes to AirWiki will be documented here. The project
 
 ### Changed
 
+- Reframed the desktop as a local knowledge workspace with grouped navigation,
+  a compact on-device status card, a single next action, a vertical evidence
+  trail from preparation through cited search, and clearer source intake and
+  permission hierarchy for knowledge folders. Review now uses a verification
+  desk that keeps source evidence, proposed knowledge, and the publish decision
+  in one explicit sequence, with a focused layout at narrower widths.
 - Hardened public federation handoff and admission so withdrawal remains
   linearized through transport delivery, remote identity churn is memory-bound,
   and index manifests/tombstones have bounded lifetime and global capacity.

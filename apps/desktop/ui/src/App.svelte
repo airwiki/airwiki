@@ -1,7 +1,7 @@
 <script lang="ts">
-  import { BookOpen, CheckCircle2, RefreshCw, Search, Settings2, Sparkles } from '@lucide/svelte';
+  import { BookOpen, CheckCircle2, FileText, History, RefreshCw, Search, Settings2, Sparkles } from '@lucide/svelte';
   import { onMount } from 'svelte';
-  import { addCollection, approveReview, connect, loadReviewEvidence, pickCollectionFolder, reanalyzeReview, rejectReview, rescanCollection, searchKnowledge, type AppSnapshot, type EnrichmentDraft, type FolderSelection, type ReviewSummary } from './api';
+  import { addCollection, approveReview, connect, loadKnowledgeBundle, loadKnowledgePage, loadReviewEvidence, pickCollectionFolder, reanalyzeReview, rejectReview, rescanCollection, searchKnowledge, type AppSnapshot, type EnrichmentDraft, type FolderSelection, type KnowledgePageInput, type ReviewSummary } from './api';
 
   type Destination = 'library' | 'review' | 'search' | 'system';
 
@@ -23,6 +23,7 @@
   let actionBusy = false;
   let selectedReview: ReviewSummary | null = null;
   let editDraft: EnrichmentDraft | null = null;
+  let selectedCollectionId: string | null = null;
 
   onMount(() => {
     connect((event) => {
@@ -127,6 +128,29 @@
       actionBusy = false;
     }
   }
+
+  async function openKnowledge(collectionId: string) {
+    selectedCollectionId = collectionId;
+    actionBusy = true;
+    actionMessage = 'Inspeccionando el conocimiento publicado…';
+    try {
+      await loadKnowledgeBundle(collectionId);
+    } catch {
+      actionMessage = 'No se pudo inspeccionar esta colección.';
+      actionBusy = false;
+    }
+  }
+
+  async function openKnowledgePage(page: KnowledgePageInput) {
+    if (!selectedCollectionId) return;
+    actionBusy = true;
+    try {
+      await loadKnowledgePage(selectedCollectionId, page);
+    } catch {
+      actionMessage = 'La página cambió mientras la abrías. Actualiza la colección e inténtalo otra vez.';
+      actionBusy = false;
+    }
+  }
 </script>
 
 <svelte:head><meta name="theme-color" content="#07131f" /></svelte:head>
@@ -170,8 +194,43 @@
         {#if destination === 'library' && snapshot?.collections.length}
           <div class="records" aria-label="Colecciones">
             {#each snapshot.collections as collection}
-              <article><div><strong>{collection.name}</strong><small>{collection.documentCount} documentos · {collection.publishedCount} publicados</small></div><button class="text-action" onclick={() => rescanCollection(collection.id)}>Analizar cambios</button></article>
+              <article><div><strong>{collection.name}</strong><small>{collection.documentCount} documentos · {collection.publishedCount} publicados</small></div><div class="row-actions"><button class="text-action" onclick={() => openKnowledge(collection.id)}>Abrir conocimiento</button><button class="text-action" onclick={() => rescanCollection(collection.id)}>Analizar cambios</button></div></article>
             {/each}
+          </div>
+        {/if}
+
+        {#if destination === 'library' && snapshot?.knowledge?.collectionId === selectedCollectionId}
+          <div class="knowledge-workspace">
+            <aside class="knowledge-tree" aria-label="Páginas de conocimiento">
+              <div><strong>{snapshot.knowledge.collectionName}</strong><small>{snapshot.knowledge.concepts.length} conceptos publicados</small></div>
+              <button onclick={() => openKnowledgePage({ kind: 'index' })}><BookOpen size={15} />Índice</button>
+              <button onclick={() => openKnowledgePage({ kind: 'log' })}><History size={15} />Historial</button>
+              {#each snapshot.knowledge.concepts as concept}
+                <button onclick={() => openKnowledgePage(concept.page)} title={concept.description}><FileText size={15} /><span>{concept.title}</span></button>
+              {/each}
+            </aside>
+            <section class="knowledge-document" aria-live="polite">
+              {#if snapshot.knowledge.status === 'updating'}
+                <p class="loading"><RefreshCw size={16} /> El índice se está actualizando…</p>
+              {:else if snapshot.knowledgePage?.collectionId === selectedCollectionId && snapshot.knowledgePage.status === 'ready'}
+                <div class="document-heading"><p class="section-label">Página OKF verificada</p><h3>{snapshot.knowledgePage.title}</h3></div>
+                {#if snapshot.knowledgePage.truncated}<p class="evidence-warning">Vista parcial: la página supera el límite seguro de lectura.</p>{/if}
+                <div class="knowledge-blocks">
+                  {#each snapshot.knowledgePage.blocks as block}
+                    {#if block.kind === 'heading'}<h4 class:minor={block.level > 2}>{block.text}</h4>
+                    {:else if block.kind === 'paragraph'}<p>{block.text}</p>
+                    {:else if block.kind === 'listItem'}<div class="safe-list-item"><span>{block.ordered ? '—' : '•'}</span><p>{block.text}</p></div>
+                    {:else if block.kind === 'code'}<pre><code>{block.text}</code></pre>
+                    {:else if block.kind === 'quote'}<blockquote>{block.text}</blockquote>
+                    {:else}<hr />{/if}
+                  {/each}
+                </div>
+              {:else if snapshot.knowledge.status === 'failed'}
+                <p class="evidence-warning">La colección no pudo verificarse. No se mostrará contenido incierto.</p>
+              {:else}
+                <div class="review-placeholder"><BookOpen size={26} /><h3>Elige una página</h3><p>Solo se muestra contenido publicado y verificado contra su fingerprint.</p></div>
+              {/if}
+            </section>
           </div>
         {/if}
 

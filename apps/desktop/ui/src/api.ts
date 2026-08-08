@@ -11,6 +11,8 @@ export interface AppSnapshot {
   model: ModelSummary | null;
   search: SearchSummary | null;
   reviewEvidence: ReviewEvidenceSummary | null;
+  knowledge: KnowledgeBundleSummary | null;
+  knowledgePage: KnowledgePageSummary | null;
   notice: { level: string; message: string } | null;
 }
 
@@ -40,6 +42,17 @@ export interface EnrichmentDraft {
 export interface ReviewSummary { conceptId: string; sourceRevision: number; sourceName: string; collectionName: string; draft: EnrichmentDraft; }
 export interface ReviewExcerptSummary { ordinal: number; headingOrPage: string; text: string; truncated: boolean; }
 export interface ReviewEvidenceSummary { requestId: string; conceptId: string; sourceRevision: number; status: 'ready' | 'stale' | 'missing' | 'failed'; excerpts: ReviewExcerptSummary[]; totalChunks: number; nextOrdinal: number | null; }
+export type KnowledgePageInput = { kind: 'index' } | { kind: 'log' } | { kind: 'concept'; id: string };
+export interface KnowledgeConceptSummary { page: KnowledgePageInput; title: string; description: string; conceptType: string; tags: string[]; }
+export interface KnowledgeBundleSummary { collectionId: string; collectionName: string; status: 'empty' | 'ready' | 'updating' | 'failed'; concepts: KnowledgeConceptSummary[]; errorCount: number; warningCount: number; }
+export type KnowledgeBlock =
+  | { kind: 'heading'; level: number; text: string }
+  | { kind: 'paragraph'; text: string }
+  | { kind: 'listItem'; ordered: boolean; text: string }
+  | { kind: 'code'; language: string | null; text: string }
+  | { kind: 'quote'; text: string }
+  | { kind: 'rule' };
+export interface KnowledgePageSummary { collectionId: string; page: KnowledgePageInput; title: string; status: 'ready' | 'failed'; blocks: KnowledgeBlock[]; metadata: [string, string][]; backlinks: KnowledgePageInput[]; truncated: boolean; }
 export interface SourceIssueSummary { collectionId: string; sourceName: string; collectionName: string; code: string; }
 export interface PeerSummary { peerId: string; deviceName: string | null; trust: string; activity: string; }
 export interface ModelSummary { displayName: string | null; active: boolean; installed: boolean; degraded: boolean; downloadBytes: number; requiredFreeBytes: number; fitsAvailableDisk: boolean; licenseAccepted: boolean; }
@@ -101,4 +114,16 @@ export async function rejectReview(conceptId: string): Promise<void> {
 
 export async function reanalyzeReview(conceptId: string): Promise<void> {
   return invoke('reanalyze_review', { conceptId });
+}
+
+export async function loadKnowledgeBundle(collectionId: string): Promise<string> {
+  const requestId = crypto.randomUUID();
+  await invoke('load_knowledge_bundle', { requestId, collectionId });
+  return requestId;
+}
+
+export async function loadKnowledgePage(collectionId: string, page: KnowledgePageInput): Promise<string> {
+  const requestId = crypto.randomUUID();
+  await invoke('load_knowledge_page', { requestId, collectionId, page });
+  return requestId;
 }

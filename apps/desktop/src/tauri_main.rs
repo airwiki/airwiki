@@ -23,10 +23,11 @@ use std::{
     time::{Duration, Instant},
 };
 
-use airwiki_core::ReviewVersionToken;
+use airwiki_core::{KnowledgeBundleState, KnowledgePageId, KnowledgePageView, ReviewVersionToken};
 use airwiki_inference::ModelProfile;
 use airwiki_types::{EnrichmentDraft, SearchPurpose};
 use anyhow::{Context, Result};
+use pulldown_cmark::{CodeBlockKind, Event as MarkdownEvent, HeadingLevel, Parser, Tag, TagEnd};
 use serde::{Deserialize, Serialize};
 use tauri::{Manager, ipc::Channel};
 use tokio::sync::{broadcast, mpsc, watch};
@@ -47,12 +48,22 @@ struct AppRuntime {
     snapshot: Mutex<watch::Receiver<AppSnapshot>>,
     folder_selections: Mutex<HashMap<Uuid, PendingFolderSelection>>,
     review_versions: Arc<Mutex<HashMap<Uuid, CachedReviewVersion>>>,
+    knowledge_fingerprints: Arc<Mutex<HashMap<(Uuid, KnowledgePageId), String>>>,
+    requests: Arc<Mutex<RequestTracker>>,
 }
 
 #[derive(Clone)]
 struct CachedReviewVersion {
     source_revision: u32,
     token: ReviewVersionToken,
+}
+
+#[derive(Default)]
+struct RequestTracker {
+    search: Option<Uuid>,
+    review_evidence: HashMap<Uuid, Uuid>,
+    knowledge_bundle: HashMap<Uuid, Uuid>,
+    knowledge_page: HashMap<Uuid, Uuid>,
 }
 
 struct PendingFolderSelection {
@@ -73,6 +84,8 @@ struct AppSnapshot {
     model: Option<ModelSummary>,
     search: Option<SearchSummary>,
     review_evidence: Option<ReviewEvidenceSummary>,
+    knowledge: Option<KnowledgeBundleSummary>,
+    knowledge_page: Option<KnowledgePageSummary>,
     notice: Option<NoticeSummary>,
 }
 
@@ -120,6 +133,92 @@ struct ReviewExcerptSummary {
     heading_or_page: String,
     text: String,
     truncated: bool,
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct KnowledgeBundleSummary {
+    collection_id: String,
+    collection_name: String,
+    status: &'static str,
+    concepts: Vec<KnowledgeConceptSummary>,
+    error_count: usize,
+    warning_count: usize,
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct KnowledgeConceptSummary {
+    page: KnowledgePageInput,
+    title: String,
+    description: String,
+    concept_type: String,
+    tags: Vec<String>,
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct KnowledgePageSummary {
+    collection_id: String,
+    page: KnowledgePageInput,
+    title: String,
+    status: &'static str,
+    blocks: Vec<KnowledgeBlock>,
+    metadata: Vec<(String, String)>,
+    backlinks: Vec<KnowledgePageInput>,
+    truncated: bool,
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, Serialize)]
+#[serde(tag = "kind", rename_all = "camelCase", deny_unknown_fields)]
+enum KnowledgePageInput {
+    Index,
+    Log,
+    Concept { id: Uuid },
+}
+
+impl From<KnowledgePageId> for KnowledgePageInput {
+    fn from(value: KnowledgePageId) -> Self {
+        match value {
+            KnowledgePageId::Index => Self::Index,
+            KnowledgePageId::Log => Self::Log,
+            KnowledgePageId::Concept(id) => Self::Concept { id },
+        }
+    }
+}
+
+impl From<KnowledgePageInput> for KnowledgePageId {
+    fn from(value: KnowledgePageInput) -> Self {
+        match value {
+            KnowledgePageInput::Index => Self::Index,
+            KnowledgePageInput::Log => Self::Log,
+            KnowledgePageInput::Concept { id } => Self::Concept(id),
+        }
+    }
+}
+
+#[derive(Clone, Debug, Serialize, PartialEq, Eq)]
+#[serde(tag = "kind", rename_all = "camelCase")]
+enum KnowledgeBlock {
+    Heading {
+        level: u8,
+        text: String,
+    },
+    Paragraph {
+        text: String,
+    },
+    ListItem {
+        ordered: bool,
+        text: String,
+    },
+    Code {
+        language: Option<String>,
+        text: String,
+    },
+    Quote {
+        text: String,
+    },
+    Rule,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -361,10 +460,16 @@ fn search(
     if question.trim().is_empty() || question.len() > 4_096 || !(1..=10).contains(&top_k) {
         return Err(UiError::invalid("invalidSearchRequest"));
     }
+    let request_id = parse_uuid(&request_id)?;
+    runtime
+        .requests
+        .lock()
+        .map_err(|_| UiError::internal())?
+        .search = Some(request_id);
     send_command(
         &runtime,
         WorkerCommand::Search {
-            request_id: parse_uuid(&request_id)?,
+            request_id,
             question,
             top_k,
             purpose: SearchPurpose::LocalAssistant,
@@ -382,6 +487,7 @@ fn load_review_evidence(
     after_ordinal: Option<u32>,
 ) -> Result<(), UiError> {
     let concept_id = parse_uuid(&concept_id)?;
+    let request_id = parse_uuid(&request_id)?;
     let expected_review_version = runtime
         .review_versions
         .lock()
@@ -389,10 +495,16 @@ fn load_review_evidence(
         .get(&concept_id)
         .filter(|cached| cached.source_revision == source_revision)
         .map(|cached| cached.token.clone());
+    runtime
+        .requests
+        .lock()
+        .map_err(|_| UiError::internal())?
+        .review_evidence
+        .insert(concept_id, request_id);
     send_command(
         &runtime,
         WorkerCommand::LoadReviewEvidence {
-            request_id: parse_uuid(&request_id)?,
+            request_id,
             concept_id,
             expected_source_revision: source_revision,
             expected_review_version,
@@ -458,6 +570,63 @@ fn reanalyze_review(
     )
 }
 
+#[tauri::command]
+fn load_knowledge_bundle(
+    runtime: tauri::State<'_, AppRuntime>,
+    request_id: String,
+    collection_id: String,
+) -> Result<(), UiError> {
+    let request_id = parse_uuid(&request_id)?;
+    let collection_id = parse_uuid(&collection_id)?;
+    runtime
+        .requests
+        .lock()
+        .map_err(|_| UiError::internal())?
+        .knowledge_bundle
+        .insert(collection_id, request_id);
+    send_command(
+        &runtime,
+        WorkerCommand::LoadKnowledgeBundle {
+            request_id,
+            collection_id,
+        },
+    )
+}
+
+#[tauri::command]
+fn load_knowledge_page(
+    runtime: tauri::State<'_, AppRuntime>,
+    request_id: String,
+    collection_id: String,
+    page: KnowledgePageInput,
+) -> Result<(), UiError> {
+    let collection_id = parse_uuid(&collection_id)?;
+    let request_id = parse_uuid(&request_id)?;
+    let page_id = KnowledgePageId::from(page);
+    let expected_fingerprint = runtime
+        .knowledge_fingerprints
+        .lock()
+        .map_err(|_| UiError::internal())?
+        .get(&(collection_id, page_id))
+        .cloned()
+        .ok_or_else(|| UiError::invalid("currentKnowledgeSnapshotRequired"))?;
+    runtime
+        .requests
+        .lock()
+        .map_err(|_| UiError::internal())?
+        .knowledge_page
+        .insert(collection_id, request_id);
+    send_command(
+        &runtime,
+        WorkerCommand::LoadKnowledgePage {
+            request_id,
+            collection_id,
+            page_id,
+            expected_fingerprint,
+        },
+    )
+}
+
 fn consume_folder_selection(runtime: &AppRuntime, token: &str) -> Result<PathBuf, UiError> {
     let token = parse_uuid(token)?;
     let selection = runtime
@@ -518,15 +687,22 @@ impl AppSnapshot {
             model: None,
             search: None,
             review_evidence: None,
+            knowledge: None,
+            knowledge_page: None,
             notice: None,
         }
     }
 
-    fn apply(
+    async fn apply(
         &mut self,
         event: WorkerEvent,
         review_versions: &Mutex<HashMap<Uuid, CachedReviewVersion>>,
+        knowledge_fingerprints: &Mutex<HashMap<(Uuid, KnowledgePageId), String>>,
+        requests: &Mutex<RequestTracker>,
     ) {
+        if !request_is_current(&event, requests) {
+            return;
+        }
         self.sequence = self.sequence.saturating_add(1);
         match event {
             WorkerEvent::Ready {
@@ -628,6 +804,92 @@ impl AppSnapshot {
                     }
                 });
             }
+            WorkerEvent::KnowledgeBundleLoaded {
+                collection_id,
+                result,
+                ..
+            } => match result {
+                Ok(bundle) if bundle.collection_id == collection_id => {
+                    if let Ok(mut fingerprints) = knowledge_fingerprints.lock() {
+                        fingerprints.retain(|(cached_collection, _), _| {
+                            *cached_collection != collection_id
+                        });
+                        if let Some(fingerprint) = bundle.index_fingerprint.as_ref() {
+                            fingerprints.insert(
+                                (collection_id, KnowledgePageId::Index),
+                                fingerprint.clone(),
+                            );
+                        }
+                        if let Some(fingerprint) = bundle.log_fingerprint.as_ref() {
+                            fingerprints
+                                .insert((collection_id, KnowledgePageId::Log), fingerprint.clone());
+                        }
+                        for concept in &bundle.concepts {
+                            fingerprints.insert(
+                                (collection_id, KnowledgePageId::Concept(concept.id)),
+                                concept.fingerprint.clone(),
+                            );
+                        }
+                    }
+                    self.knowledge = Some(KnowledgeBundleSummary {
+                        collection_id: collection_id.to_string(),
+                        collection_name: bundle.collection_name,
+                        status: match bundle.state {
+                            KnowledgeBundleState::Empty => "empty",
+                            KnowledgeBundleState::Ready => "ready",
+                            KnowledgeBundleState::Updating => "updating",
+                        },
+                        concepts: bundle
+                            .concepts
+                            .into_iter()
+                            .map(|concept| KnowledgeConceptSummary {
+                                page: KnowledgePageInput::Concept { id: concept.id },
+                                title: concept.title,
+                                description: concept.description,
+                                concept_type: concept.concept_type,
+                                tags: concept.tags,
+                            })
+                            .collect(),
+                        error_count: bundle.health.error_count,
+                        warning_count: bundle.health.warning_count,
+                    });
+                    self.knowledge_page = None;
+                }
+                _ => {
+                    if let Ok(mut fingerprints) = knowledge_fingerprints.lock() {
+                        fingerprints.retain(|(cached_collection, _), _| {
+                            *cached_collection != collection_id
+                        });
+                    }
+                    self.knowledge = Some(KnowledgeBundleSummary {
+                        collection_id: collection_id.to_string(),
+                        collection_name: String::new(),
+                        status: "failed",
+                        concepts: Vec::new(),
+                        error_count: 1,
+                        warning_count: 0,
+                    });
+                    self.knowledge_page = None;
+                }
+            },
+            WorkerEvent::KnowledgePageLoaded {
+                collection_id,
+                page_id,
+                result,
+                ..
+            } => {
+                self.knowledge_page = Some(match result {
+                    Ok(page) if page.collection_id == collection_id && page.page_id == page_id => {
+                        match tokio::task::spawn_blocking(move || knowledge_page_summary(page))
+                            .await
+                        {
+                            Ok(summary) => summary,
+                            Err(_) => failed_knowledge_page(collection_id, page_id),
+                        }
+                    }
+                    _ => failed_knowledge_page(collection_id, page_id),
+                });
+            }
             WorkerEvent::SearchPartial { request_id, hits } => {
                 self.search = Some(SearchSummary {
                     request_id: request_id.to_string(),
@@ -674,6 +936,52 @@ impl AppSnapshot {
             }
             _ => {}
         }
+    }
+}
+
+fn request_is_current(event: &WorkerEvent, requests: &Mutex<RequestTracker>) -> bool {
+    let Ok(mut requests) = requests.lock() else {
+        return false;
+    };
+    match event {
+        WorkerEvent::SearchPartial { request_id, .. } => requests.search == Some(*request_id),
+        WorkerEvent::SearchFinished { request_id, .. } => {
+            if requests.search == Some(*request_id) {
+                requests.search = None;
+                true
+            } else {
+                false
+            }
+        }
+        WorkerEvent::ReviewEvidenceLoaded {
+            request_id,
+            concept_id,
+            ..
+        } => remove_matching_request(&mut requests.review_evidence, concept_id, request_id),
+        WorkerEvent::KnowledgeBundleLoaded {
+            request_id,
+            collection_id,
+            ..
+        } => remove_matching_request(&mut requests.knowledge_bundle, collection_id, request_id),
+        WorkerEvent::KnowledgePageLoaded {
+            request_id,
+            collection_id,
+            ..
+        } => remove_matching_request(&mut requests.knowledge_page, collection_id, request_id),
+        _ => true,
+    }
+}
+
+fn remove_matching_request(
+    requests: &mut HashMap<Uuid, Uuid>,
+    key: &Uuid,
+    request_id: &Uuid,
+) -> bool {
+    if requests.get(key) == Some(request_id) {
+        requests.remove(key);
+        true
+    } else {
+        false
     }
 }
 
@@ -728,6 +1036,182 @@ fn retain_pending_review_versions(
                 review.concept_id == concept_id && review.source_revision == cached.source_revision
             })
         });
+    }
+}
+
+fn failed_knowledge_page(collection_id: Uuid, page_id: KnowledgePageId) -> KnowledgePageSummary {
+    KnowledgePageSummary {
+        collection_id: collection_id.to_string(),
+        page: page_id.into(),
+        title: String::new(),
+        status: "failed",
+        blocks: Vec::new(),
+        metadata: Vec::new(),
+        backlinks: Vec::new(),
+        truncated: false,
+    }
+}
+
+fn knowledge_page_summary(page: KnowledgePageView) -> KnowledgePageSummary {
+    KnowledgePageSummary {
+        collection_id: page.collection_id.to_string(),
+        page: page.page_id.into(),
+        title: page.title,
+        status: "ready",
+        blocks: parse_knowledge_blocks(&page.body_markdown),
+        metadata: page.metadata,
+        backlinks: page.backlinks.into_iter().map(Into::into).collect(),
+        truncated: page.truncated,
+    }
+}
+
+enum BlockBuilder {
+    Heading {
+        level: u8,
+        text: String,
+    },
+    Paragraph(String),
+    ListItem {
+        ordered: bool,
+        text: String,
+    },
+    Code {
+        language: Option<String>,
+        text: String,
+    },
+    Quote(String),
+}
+
+impl BlockBuilder {
+    fn text_mut(&mut self) -> &mut String {
+        match self {
+            Self::Heading { text, .. }
+            | Self::Paragraph(text)
+            | Self::ListItem { text, .. }
+            | Self::Code { text, .. }
+            | Self::Quote(text) => text,
+        }
+    }
+
+    fn finish(self) -> Option<KnowledgeBlock> {
+        let block = match self {
+            Self::Heading { level, text } => KnowledgeBlock::Heading { level, text },
+            Self::Paragraph(text) => KnowledgeBlock::Paragraph { text },
+            Self::ListItem { ordered, text } => KnowledgeBlock::ListItem { ordered, text },
+            Self::Code { language, text } => KnowledgeBlock::Code { language, text },
+            Self::Quote(text) => KnowledgeBlock::Quote { text },
+        };
+        match &block {
+            KnowledgeBlock::Heading { text, .. }
+            | KnowledgeBlock::Paragraph { text }
+            | KnowledgeBlock::ListItem { text, .. }
+            | KnowledgeBlock::Code { text, .. }
+            | KnowledgeBlock::Quote { text }
+                if text.trim().is_empty() =>
+            {
+                None
+            }
+            _ => Some(block),
+        }
+    }
+}
+
+fn parse_knowledge_blocks(markdown: &str) -> Vec<KnowledgeBlock> {
+    let mut blocks = Vec::new();
+    let mut current = None;
+    let mut list_types = Vec::new();
+    let mut image_depth = 0_u16;
+
+    for event in Parser::new(markdown) {
+        match event {
+            MarkdownEvent::Start(Tag::Image { .. }) => {
+                image_depth = image_depth.saturating_add(1);
+            }
+            MarkdownEvent::End(TagEnd::Image) => {
+                image_depth = image_depth.saturating_sub(1);
+            }
+            _ if image_depth > 0 => {}
+            MarkdownEvent::Start(Tag::Heading { level, .. }) => {
+                flush_block(&mut current, &mut blocks);
+                current = Some(BlockBuilder::Heading {
+                    level: heading_level(level),
+                    text: String::new(),
+                });
+            }
+            MarkdownEvent::End(TagEnd::Heading(_)) => flush_block(&mut current, &mut blocks),
+            MarkdownEvent::Start(Tag::Paragraph) => {
+                flush_block(&mut current, &mut blocks);
+                current = Some(BlockBuilder::Paragraph(String::new()));
+            }
+            MarkdownEvent::End(TagEnd::Paragraph) => flush_block(&mut current, &mut blocks),
+            MarkdownEvent::Start(Tag::List(first)) => list_types.push(first.is_some()),
+            MarkdownEvent::End(TagEnd::List(_)) => {
+                list_types.pop();
+            }
+            MarkdownEvent::Start(Tag::Item) => {
+                flush_block(&mut current, &mut blocks);
+                current = Some(BlockBuilder::ListItem {
+                    ordered: list_types.last().copied().unwrap_or(false),
+                    text: String::new(),
+                });
+            }
+            MarkdownEvent::End(TagEnd::Item) => flush_block(&mut current, &mut blocks),
+            MarkdownEvent::Start(Tag::CodeBlock(kind)) => {
+                flush_block(&mut current, &mut blocks);
+                let language = match kind {
+                    CodeBlockKind::Indented => None,
+                    CodeBlockKind::Fenced(language) => {
+                        let language = language.trim();
+                        (!language.is_empty()).then(|| language.to_owned())
+                    }
+                };
+                current = Some(BlockBuilder::Code {
+                    language,
+                    text: String::new(),
+                });
+            }
+            MarkdownEvent::End(TagEnd::CodeBlock) => flush_block(&mut current, &mut blocks),
+            MarkdownEvent::Start(Tag::BlockQuote(_)) => {
+                flush_block(&mut current, &mut blocks);
+                current = Some(BlockBuilder::Quote(String::new()));
+            }
+            MarkdownEvent::End(TagEnd::BlockQuote(_)) => flush_block(&mut current, &mut blocks),
+            MarkdownEvent::Rule => {
+                flush_block(&mut current, &mut blocks);
+                blocks.push(KnowledgeBlock::Rule);
+            }
+            MarkdownEvent::Text(text) | MarkdownEvent::Code(text) => {
+                if let Some(builder) = current.as_mut() {
+                    builder.text_mut().push_str(&text);
+                }
+            }
+            MarkdownEvent::SoftBreak | MarkdownEvent::HardBreak => {
+                if let Some(builder) = current.as_mut() {
+                    builder.text_mut().push('\n');
+                }
+            }
+            MarkdownEvent::Html(_) | MarkdownEvent::InlineHtml(_) => {}
+            _ => {}
+        }
+    }
+    flush_block(&mut current, &mut blocks);
+    blocks
+}
+
+fn flush_block(current: &mut Option<BlockBuilder>, blocks: &mut Vec<KnowledgeBlock>) {
+    if let Some(block) = current.take().and_then(BlockBuilder::finish) {
+        blocks.push(block);
+    }
+}
+
+const fn heading_level(level: HeadingLevel) -> u8 {
+    match level {
+        HeadingLevel::H1 => 1,
+        HeadingLevel::H2 => 2,
+        HeadingLevel::H3 => 3,
+        HeadingLevel::H4 => 4,
+        HeadingLevel::H5 => 5,
+        HeadingLevel::H6 => 6,
     }
 }
 
@@ -798,6 +1282,10 @@ fn main() -> Result<()> {
     let mut presentation_events = events.subscribe();
     let review_versions = Arc::new(Mutex::new(HashMap::new()));
     let presentation_review_versions = Arc::clone(&review_versions);
+    let knowledge_fingerprints = Arc::new(Mutex::new(HashMap::new()));
+    let presentation_knowledge_fingerprints = Arc::clone(&knowledge_fingerprints);
+    let requests = Arc::new(Mutex::new(RequestTracker::default()));
+    let presentation_requests = Arc::clone(&requests);
 
     tauri::Builder::default()
         .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
@@ -812,6 +1300,8 @@ fn main() -> Result<()> {
             snapshot: Mutex::new(snapshot_receiver),
             folder_selections: Mutex::new(HashMap::new()),
             review_versions,
+            knowledge_fingerprints,
+            requests,
         })
         .setup(move |_app| {
             tauri::async_runtime::spawn(async move {
@@ -819,7 +1309,14 @@ fn main() -> Result<()> {
                 loop {
                     match presentation_events.recv().await {
                         Ok(event) => {
-                            snapshot.apply(event, &presentation_review_versions);
+                            snapshot
+                                .apply(
+                                    event,
+                                    &presentation_review_versions,
+                                    &presentation_knowledge_fingerprints,
+                                    &presentation_requests,
+                                )
+                                .await;
                             if snapshot_sender.send(snapshot.clone()).is_err() {
                                 break;
                             }
@@ -855,7 +1352,9 @@ fn main() -> Result<()> {
             load_review_evidence,
             approve_review,
             reject_review,
-            reanalyze_review
+            reanalyze_review,
+            load_knowledge_bundle,
+            load_knowledge_page
         ])
         .run(tauri::generate_context!())
         .map_err(|error| anyhow::anyhow!(error.to_string()))
@@ -876,6 +1375,8 @@ mod tests {
                 PendingFolderSelection { path, expires_at },
             )])),
             review_versions: Arc::new(Mutex::new(HashMap::new())),
+            knowledge_fingerprints: Arc::new(Mutex::new(HashMap::new())),
+            requests: Arc::new(Mutex::new(RequestTracker::default())),
         }
     }
 
@@ -942,5 +1443,70 @@ mod tests {
 
         assert_eq!(error.message_key, "currentEvidenceRequired");
         Ok(())
+    }
+
+    #[test]
+    fn markdown_contract_excludes_html_and_images() {
+        let blocks = parse_knowledge_blocks(
+            "# Visible\n\nHello <script>alert(1)</script> world.\n\n![secret](https://example.test/a.png)",
+        );
+
+        assert_eq!(
+            blocks,
+            vec![
+                KnowledgeBlock::Heading {
+                    level: 1,
+                    text: "Visible".to_owned(),
+                },
+                KnowledgeBlock::Paragraph {
+                    text: "Hello alert(1) world.".to_owned(),
+                },
+            ]
+        );
+    }
+
+    #[test]
+    fn markdown_contract_keeps_code_as_text() {
+        let blocks = parse_knowledge_blocks("```rust\nfn main() {}\n```");
+
+        assert_eq!(
+            blocks,
+            vec![KnowledgeBlock::Code {
+                language: Some("rust".to_owned()),
+                text: "fn main() {}\n".to_owned(),
+            }]
+        );
+    }
+
+    #[test]
+    fn stale_search_events_are_discarded() {
+        let current = Uuid::new_v4();
+        let stale = Uuid::new_v4();
+        let requests = Mutex::new(RequestTracker {
+            search: Some(current),
+            ..RequestTracker::default()
+        });
+
+        assert!(!request_is_current(
+            &WorkerEvent::SearchPartial {
+                request_id: stale,
+                hits: Vec::new(),
+            },
+            &requests,
+        ));
+        assert!(request_is_current(
+            &WorkerEvent::SearchFinished {
+                request_id: current,
+                result: Err("synthetic".to_owned()),
+            },
+            &requests,
+        ));
+        assert!(!request_is_current(
+            &WorkerEvent::SearchPartial {
+                request_id: current,
+                hits: Vec::new(),
+            },
+            &requests,
+        ));
     }
 }

@@ -10,6 +10,7 @@ export interface AppSnapshot {
   peers: PeerSummary[];
   model: ModelSummary | null;
   search: SearchSummary | null;
+  reviewEvidence: ReviewEvidenceSummary | null;
   notice: { level: string; message: string } | null;
 }
 
@@ -21,7 +22,24 @@ export interface UiEventEnvelope {
 }
 
 export interface CollectionSummary { id: string; name: string; documentCount: number; needsReviewCount: number; publishedCount: number; failedCount: number; localOnly: boolean; peerShareable: boolean; allowExternalAi: boolean; internetPublic: boolean; }
-export interface ReviewSummary { conceptId: string; sourceRevision: number; sourceName: string; collectionName: string; }
+export type ConceptType = 'Document' | 'Policy' | 'Procedure' | 'Runbook' | 'Reference' | 'Report';
+export interface SuggestedEntity { name: string; kind: string; }
+export interface SuggestedLink { label: string; target: string; }
+export interface EnrichmentDraft {
+  type: ConceptType;
+  title: string;
+  description: string;
+  language: string;
+  tags: string[];
+  entities: SuggestedEntity[];
+  links: SuggestedLink[];
+  summary: string;
+  classification_confidence: number;
+  classification_explanation: string;
+}
+export interface ReviewSummary { conceptId: string; sourceRevision: number; sourceName: string; collectionName: string; draft: EnrichmentDraft; }
+export interface ReviewExcerptSummary { ordinal: number; headingOrPage: string; text: string; truncated: boolean; }
+export interface ReviewEvidenceSummary { requestId: string; conceptId: string; sourceRevision: number; status: 'ready' | 'stale' | 'missing' | 'failed'; excerpts: ReviewExcerptSummary[]; totalChunks: number; nextOrdinal: number | null; }
 export interface SourceIssueSummary { collectionId: string; sourceName: string; collectionName: string; code: string; }
 export interface PeerSummary { peerId: string; deviceName: string | null; trust: string; activity: string; }
 export interface ModelSummary { displayName: string | null; active: boolean; installed: boolean; degraded: boolean; downloadBytes: number; requiredFreeBytes: number; fitsAvailableDisk: boolean; licenseAccepted: boolean; }
@@ -60,4 +78,27 @@ export async function searchKnowledge(question: string, publicNetwork: boolean):
   const requestId = crypto.randomUUID();
   await invoke('search', { requestId, question, topK: 8, publicNetwork });
   return requestId;
+}
+
+export async function loadReviewEvidence(review: ReviewSummary, afterOrdinal: number | null = null): Promise<string> {
+  const requestId = crypto.randomUUID();
+  await invoke('load_review_evidence', {
+    requestId,
+    conceptId: review.conceptId,
+    sourceRevision: review.sourceRevision,
+    afterOrdinal
+  });
+  return requestId;
+}
+
+export async function approveReview(conceptId: string, sourceRevision: number, draft: EnrichmentDraft): Promise<void> {
+  return invoke('approve_review', { conceptId, sourceRevision, draft });
+}
+
+export async function rejectReview(conceptId: string): Promise<void> {
+  return invoke('reject_review', { conceptId });
+}
+
+export async function reanalyzeReview(conceptId: string): Promise<void> {
+  return invoke('reanalyze_review', { conceptId });
 }

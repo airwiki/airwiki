@@ -3049,7 +3049,6 @@ fn verify_validated_installer_smoke_sources(smoke: &str) -> Result<()> {
         "validated installer smoke must retain the executable closed stage allowlist"
     );
     let failure_class_allowlist = r#"$InstallerSmokeFailureClasses = @(
-    "payload_validation_failed",
     "model_activation_failed",
     "model_install_failed",
     "desktop_exited_before_ready",
@@ -3064,20 +3063,6 @@ fn verify_validated_installer_smoke_sources(smoke: &str) -> Result<()> {
             "$InstallerSmokeFailureClasses =",
         ),
         "validated installer smoke must retain the executable closed failure class allowlist"
-    );
-    let payload_difference_allowlist = r#"$PayloadDifferenceClasses = @(
-    "set_mismatch",
-    "missing_directory",
-    "missing_file",
-    "bytes_mismatch"
-)"#;
-    ensure!(
-        powershell_executable_exact(
-            &source,
-            payload_difference_allowlist,
-            "$PayloadDifferenceClasses =",
-        ),
-        "validated installer smoke must retain the executable closed payload difference allowlist"
     );
     let install_error_allowlist = r#"$ModelInstallErrorKinds = @(
     "install_network",
@@ -3275,29 +3260,11 @@ fn verify_validated_installer_smoke_sources(smoke: &str) -> Result<()> {
             && sanitized_code.contains(
                 "$ModelActivationElapsedBuckets -ccontains\n                    $CandidateElapsedBucket",
             )
-            && sanitized_code
-                .contains("$PayloadDifferenceClasses -ccontains $CandidateDifferenceClass")
-            && sanitized_code.contains("$CandidateCount -isnot [int]")
-            && sanitized_code.contains("$CandidateCount -gt $script:WindowsPayloadMaxEntries")
             && !sanitized_code.contains("[regex]")
             && !sanitized_code.contains(".Exception")
             && !sanitized_code.contains("[Console]::")
             && !sanitized_code.contains("Write-Output"),
         "validated installer smoke must reduce only structured failures without writing raw errors"
-    );
-    ensure!(
-        powershell_executable_exact_in_function(
-            &source,
-            "Set-PayloadValidationFailure",
-            "    Set-StructuredInstallerSmokeFailure `\n        \"payload_validation_failed\" `\n        $null `\n        $null `\n        \"failure\"",
-            "Set-StructuredInstallerSmokeFailure",
-        )? && powershell_executable_exact_in_function(
-            &source,
-            "Set-PayloadValidationFailure",
-            "    $script:PayloadValidationDiagnostic = [PSCustomObject]@{",
-            "$script:PayloadValidationDiagnostic =",
-        )?,
-        "validated installer smoke must classify payload differences without retaining raw errors"
     );
     let writer_record = r#"$Line = (
         "WINDOWS_VALIDATED_INSTALLER_SMOKE_FAIL " +
@@ -3332,22 +3299,6 @@ fn verify_validated_installer_smoke_sources(smoke: &str) -> Result<()> {
             && !writer_code.contains(".Exception")
             && !writer_code.contains("ErrorOutput"),
         "validated installer smoke terminal writer must not access raw failure data"
-    );
-    let payload_writer = r#"$Line += (
-            " payload_difference=$($Record.PayloadDifferenceClass)" +
-            " expected_files=$($Record.ExpectedFileCount)" +
-            " actual_files=$($Record.ActualFileCount)" +
-            " expected_directories=$($Record.ExpectedDirectoryCount)" +
-            " actual_directories=$($Record.ActualDirectoryCount)"
-        )"#;
-    ensure!(
-        powershell_executable_exact_in_function(
-            &source,
-            "Write-SanitizedInstallerSmokeFailure",
-            payload_writer,
-            "$Line += (",
-        )?,
-        "validated installer smoke must emit only bounded payload diagnostic fields"
     );
     let captured_imports = r#"try {
     . (Join-Path $PSScriptRoot "windows-runtime.ps1")

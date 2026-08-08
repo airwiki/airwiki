@@ -88,6 +88,7 @@ struct RequestTracker {
     knowledge_page: HashMap<Uuid, Uuid>,
     preferences: Option<Uuid>,
     autostart: Option<Uuid>,
+    wiki_health: Option<Uuid>,
 }
 
 struct PendingFolderSelection {
@@ -116,6 +117,7 @@ struct AppSnapshot {
     knowledge_page: Option<KnowledgePageSummary>,
     preferences: Option<PreferencesSummary>,
     autostart: Option<AutostartStatusDto>,
+    wiki_health: Option<WikiHealthSummary>,
     notice: Option<NoticeSummary>,
 }
 
@@ -644,6 +646,27 @@ enum AutostartStatusDto {
     Unsupported,
 }
 
+#[derive(Clone, Debug, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+struct WikiHealthSummary {
+    #[ts(type = "number")]
+    generation: u64,
+    status: WikiHealthStatus,
+    error_count: usize,
+    warning_count: usize,
+    updating_count: usize,
+    attention_collection_id: Option<String>,
+    checked: bool,
+}
+
+#[derive(Clone, Copy, Debug, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(rename_all = "camelCase")]
+enum WikiHealthStatus {
+    Ready,
+    Failed,
+}
+
 impl From<autostart::AutostartStatus> for AutostartStatusDto {
     fn from(value: autostart::AutostartStatus) -> Self {
         match value {
@@ -1134,6 +1157,28 @@ fn set_autostart(
     })
 }
 
+#[tauri::command]
+fn refresh_wiki_health(
+    runtime: tauri::State<'_, AppRuntime>,
+    request_id: String,
+) -> Result<(), UiError> {
+    let request_id = parse_uuid(&request_id)?;
+    runtime
+        .requests
+        .lock()
+        .map_err(|_| UiError::internal())?
+        .wiki_health = Some(request_id);
+    if let Err(error) = send_command(&runtime, WorkerCommand::RefreshWikiHealth { request_id }) {
+        if let Ok(mut requests) = runtime.requests.lock()
+            && requests.wiki_health == Some(request_id)
+        {
+            requests.wiki_health = None;
+        }
+        return Err(error);
+    }
+    Ok(())
+}
+
 fn send_autostart_command(
     runtime: &AppRuntime,
     request_id: String,
@@ -1312,6 +1357,7 @@ impl AppSnapshot {
             knowledge_page: None,
             preferences: None,
             autostart: None,
+            wiki_health: None,
             notice: None,
         }
     }
@@ -1433,6 +1479,38 @@ impl AppSnapshot {
                     });
                 }
             },
+            WorkerEvent::WikiHealthUpdated {
+                generation, result, ..
+            } => {
+                if !wiki_health_generation_applies(
+                    self.wiki_health.as_ref().map(|current| current.generation),
+                    generation,
+                ) {
+                    return;
+                }
+                self.wiki_health = Some(match result {
+                    Ok(summary) => WikiHealthSummary {
+                        generation,
+                        status: WikiHealthStatus::Ready,
+                        error_count: summary.error_count,
+                        warning_count: summary.warning_count,
+                        updating_count: summary.updating_count,
+                        attention_collection_id: summary
+                            .attention_collection_id
+                            .map(|collection_id| collection_id.to_string()),
+                        checked: summary.checked_at.is_some(),
+                    },
+                    Err(_) => WikiHealthSummary {
+                        generation,
+                        status: WikiHealthStatus::Failed,
+                        error_count: 0,
+                        warning_count: 0,
+                        updating_count: 0,
+                        attention_collection_id: None,
+                        checked: false,
+                    },
+                });
+            }
             WorkerEvent::ReviewEvidenceLoaded {
                 request_id,
                 concept_id,
@@ -1686,6 +1764,13 @@ fn update_running_review(review_ids: &mut Vec<String>, concept_id: Uuid, running
     }
 }
 
+const fn wiki_health_generation_applies(current: Option<u64>, candidate: u64) -> bool {
+    match current {
+        Some(current) => candidate >= current,
+        None => true,
+    }
+}
+
 const fn worker_event_request_id(event: &WorkerEvent) -> Option<Uuid> {
     match event {
         WorkerEvent::DesktopPreferencesUpdated { request_id, .. }
@@ -1750,6 +1835,15 @@ fn request_is_current(event: &WorkerEvent, requests: &Mutex<RequestTracker>) -> 
         WorkerEvent::AutostartUpdated { request_id, .. } => {
             if requests.autostart == Some(*request_id) {
                 requests.autostart = None;
+                true
+            } else {
+                false
+            }
+        }
+        WorkerEvent::WikiHealthUpdated { request_id, .. } if request_id.is_nil() => true,
+        WorkerEvent::WikiHealthUpdated { request_id, .. } => {
+            if requests.wiki_health == Some(*request_id) {
+                requests.wiki_health = None;
                 true
             } else {
                 false
@@ -2057,6 +2151,8 @@ fn ui_bindings_source() -> String {
         exported_declaration::<LanPreferenceDto>(&config),
         exported_declaration::<CloseBehaviorDto>(&config),
         exported_declaration::<AutostartStatusDto>(&config),
+        exported_declaration::<WikiHealthStatus>(&config),
+        exported_declaration::<WikiHealthSummary>(&config),
         exported_declaration::<PreferencesSummary>(&config),
         exported_declaration::<PreferencesInput>(&config),
         exported_declaration::<AppPhase>(&config),
@@ -2284,6 +2380,7 @@ fn main() -> Result<()> {
             update_preferences,
             refresh_autostart,
             set_autostart,
+            refresh_wiki_health,
             hide_to_tray,
             quit_completely
         ])
@@ -2587,6 +2684,17 @@ mod tests {
             },
             &requests,
         ));
+    }
+
+    #[test]
+    fn wiki_health_generation_never_moves_backwards() {
+        assert_eq!(
+            (
+                wiki_health_generation_applies(Some(8), 8),
+                wiki_health_generation_applies(Some(8), 7),
+            ),
+            (true, false)
+        );
     }
 
     #[test]

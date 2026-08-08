@@ -33,7 +33,9 @@
   let modelLicensesConfirmed = false;
 
   onMount(() => {
-    const unlistenClose = listen('close-choice-required', () => { closeChoiceRequired = true; });
+    const unlistenClose = '__TAURI_INTERNALS__' in window
+      ? listen('close-choice-required', () => { closeChoiceRequired = true; })
+      : Promise.resolve(() => {});
     connect((event) => {
       snapshot = event.snapshot;
       if (event.snapshot.model?.licenseAccepted) modelLicensesConfirmed = true;
@@ -69,6 +71,20 @@
   function select(next: Destination) {
     destination = next;
     window.location.hash = next;
+  }
+
+  function nextActionLabel(): string {
+    if (destination === 'library') return 'Añadir colección';
+    if (destination === 'review') return snapshot?.reviews.length ? 'Revisar siguiente' : 'Sin pendientes';
+    if (destination === 'search') return 'Hacer una pregunta';
+    return 'Guardar cambios';
+  }
+
+  async function runNextAction() {
+    if (destination === 'library') await chooseFolder();
+    if (destination === 'review' && snapshot?.reviews[0]) await openReview(snapshot.reviews[0]);
+    if (destination === 'search') document.querySelector<HTMLTextAreaElement>('#knowledge-question')?.focus();
+    if (destination === 'system') await savePreferences(false);
   }
 
   async function chooseFolder() {
@@ -243,7 +259,7 @@
   <main>
     <header>
       <div><p class="eyebrow">Espacio de conocimiento local</p><h1>Tu evidencia, lista para comprobar.</h1></div>
-      <button class="primary"><Sparkles size={17} />Siguiente acción</button>
+      <button class="primary" onclick={runNextAction} disabled={destination === 'review' && !snapshot?.reviews.length}><Sparkles size={17} />{nextActionLabel()}</button>
     </header>
 
     <section class="workspace" aria-live="polite">

@@ -1,7 +1,7 @@
 <script lang="ts">
   import { BookOpen, CheckCircle2, Search, Settings2, Sparkles } from '@lucide/svelte';
   import { onMount } from 'svelte';
-  import { connect } from './api';
+  import { connect, type AppSnapshot } from './api';
 
   type Destination = 'library' | 'review' | 'search' | 'system';
 
@@ -14,14 +14,16 @@
 
   let destination: Destination = 'library';
   let runtimeLabel = 'Preparando servicios privados';
+  let snapshot: AppSnapshot | null = null;
 
   onMount(() => {
     connect((event) => {
-      if (event.kind === 'ready') runtimeLabel = 'Servicios privados listos';
-      if (event.kind === 'snapshotRequired') runtimeLabel = 'Sincronizando el estado';
-    }).catch(() => {
-      runtimeLabel = 'Vista previa sin runtime nativo';
-    });
+      snapshot = event.snapshot;
+      runtimeLabel = event.snapshot.phase === 'ready' ? 'Servicios privados listos' : 'Preparando servicios privados';
+    }).then((initial) => {
+      snapshot = initial;
+      runtimeLabel = initial.phase === 'ready' ? 'Servicios privados listos' : runtimeLabel;
+    }).catch(() => { runtimeLabel = 'Vista previa sin runtime nativo'; });
   });
 
   function select(next: Destination) {
@@ -63,10 +65,30 @@
         <p class="lede">AirWiki mantiene cada afirmación unida a su fuente, su revisión humana y sus permisos de publicación.</p>
 
         <div class="sequence">
-          <article><span>Fuente</span><strong>Carpetas elegidas por ti</strong><p>Los originales permanecen donde están.</p></article>
-          <article><span>Preparación</span><strong>Análisis local</strong><p>La IA propone; nunca publica ni concede acceso.</p></article>
-          <article><span>Decisión</span><strong>Revisión pendiente</strong><p>Comprueba la evidencia antes de hacerla visible.</p></article>
+          <article><span>Fuente</span><strong>{snapshot?.collections.length ?? 0} carpetas elegidas</strong><p>Los originales permanecen donde están.</p></article>
+          <article><span>Preparación</span><strong>{snapshot?.collections.reduce((total, item) => total + item.documentCount, 0) ?? 0} documentos locales</strong><p>La IA propone; nunca publica ni concede acceso.</p></article>
+          <article><span>Decisión</span><strong>{snapshot?.reviews.length ?? 0} revisiones pendientes</strong><p>Comprueba la evidencia antes de hacerla visible.</p></article>
         </div>
+
+        {#if destination === 'library' && snapshot?.collections.length}
+          <div class="records" aria-label="Colecciones">
+            {#each snapshot.collections as collection}
+              <article><div><strong>{collection.name}</strong><small>{collection.documentCount} documentos · {collection.publishedCount} publicados</small></div><span>{collection.needsReviewCount} por revisar</span></article>
+            {/each}
+          </div>
+        {/if}
+
+        {#if destination === 'review' && snapshot}
+          <div class="records" aria-label="Revisiones pendientes">
+            {#each snapshot.reviews as review}
+              <article><div><strong>{review.sourceName}</strong><small>{review.collectionName} · revisión {review.sourceRevision}</small></div><span>Ver evidencia</span></article>
+            {:else}<p class="empty">No hay propuestas pendientes. Los próximos cambios aparecerán aquí.</p>{/each}
+          </div>
+        {/if}
+
+        {#if destination === 'system' && snapshot}
+          <div class="records"><article><div><strong>{snapshot.model?.displayName ?? 'IA local'}</strong><small>{snapshot.model?.active ? 'Modelo activo' : 'Requiere preparación'}</small></div><span>{snapshot.peers.length} equipos</span></article></div>
+        {/if}
       </div>
     </section>
   </main>

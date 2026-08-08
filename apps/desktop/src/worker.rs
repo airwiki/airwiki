@@ -599,8 +599,7 @@ pub struct WorkerHandle {
 impl WorkerHandle {
     pub fn spawn(paths: AppPaths) -> Self {
         let (commands_tx, commands_rx) = tokio::sync::mpsc::channel(WORKER_COMMAND_CAPACITY);
-        let (events_tx, events_rx) =
-            tokio::sync::broadcast::channel(WORKER_PRESENTATION_CAPACITY);
+        let (events_tx, events_rx) = tokio::sync::broadcast::channel(WORKER_PRESENTATION_CAPACITY);
         let (finished_tx, finished_rx) = mpsc::channel();
         let thread = thread::Builder::new()
             .name("airwiki-runtime".to_owned())
@@ -627,7 +626,10 @@ impl WorkerHandle {
         if let Err(error) = self.commands.try_send(command) {
             match error {
                 tokio::sync::mpsc::error::TrySendError::Full(_) => {
-                    tracing::warn!(error_kind = "worker_busy", "background command queue is full");
+                    tracing::warn!(
+                        error_kind = "worker_busy",
+                        "background command queue is full"
+                    );
                 }
                 tokio::sync::mpsc::error::TrySendError::Closed(_) => {
                     tracing::error!("background runtime stopped unexpectedly");
@@ -637,12 +639,14 @@ impl WorkerHandle {
     }
 
     pub fn try_events(&mut self) -> impl Iterator<Item = WorkerEvent> + '_ {
-        std::iter::from_fn(move || loop {
-            match self.events.try_recv() {
-                Ok(event) => return Some(event),
-                Err(tokio::sync::broadcast::error::TryRecvError::Lagged(_)) => continue,
-                Err(tokio::sync::broadcast::error::TryRecvError::Empty)
-                | Err(tokio::sync::broadcast::error::TryRecvError::Closed) => return None,
+        std::iter::from_fn(move || {
+            loop {
+                match self.events.try_recv() {
+                    Ok(event) => return Some(event),
+                    Err(tokio::sync::broadcast::error::TryRecvError::Lagged(_)) => continue,
+                    Err(tokio::sync::broadcast::error::TryRecvError::Empty)
+                    | Err(tokio::sync::broadcast::error::TryRecvError::Closed) => return None,
+                }
             }
         })
     }
@@ -5321,8 +5325,7 @@ mod tests {
 
     #[test]
     fn lan_runtime_dto_preserves_only_explicit_advanced_fallback_addresses() {
-        let (events, mut receiver) =
-            tokio::sync::broadcast::channel(WORKER_PRESENTATION_CAPACITY);
+        let (events, mut receiver) = tokio::sync::broadcast::channel(WORKER_PRESENTATION_CAPACITY);
         let address = "/ip4/192.168.1.25/tcp/61743/p2p/test".to_owned();
 
         send_lan_runtime(
@@ -5663,8 +5666,7 @@ mod tests {
             code: airwiki_core::SourceIssueCode::InvalidPdf,
             error: "parser failed on customer secret".into(),
         }];
-        let (sender, mut receiver) =
-            tokio::sync::broadcast::channel(WORKER_PRESENTATION_CAPACITY);
+        let (sender, mut receiver) = tokio::sync::broadcast::channel(WORKER_PRESENTATION_CAPACITY);
 
         report_ingest_outcomes(&outcomes, &sender);
 
@@ -5983,8 +5985,7 @@ mod tests {
             required_free_bytes: airwiki_inference::INSTALL_HEADROOM_BYTES,
             fits_available_disk: true,
         };
-        let (events, mut receiver) =
-            tokio::sync::broadcast::channel(WORKER_PRESENTATION_CAPACITY);
+        let (events, mut receiver) = tokio::sync::broadcast::channel(WORKER_PRESENTATION_CAPACITY);
         let mut lifecycle = JoinSet::new();
 
         send_model_state_with_known_plan(

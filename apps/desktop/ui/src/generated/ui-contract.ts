@@ -71,17 +71,19 @@ export type LanPreference = "undecided" | "disabled" | "enabled";
 
 export type CloseBehavior = "ask" | "hide_to_tray" | "quit";
 
+export type AutostartStatus = "disabled" | "enabled" | "requiresApproval" | "conflict" | "unsupported";
+
 export type PreferencesSummary = { completedOnboardingVersion: number | null, locale: LocalePreference, lanPreference: LanPreference, closeBehavior: CloseBehavior, automaticUpdateChecks: boolean, };
 
 export type PreferencesInput = { locale: LocalePreference, lanPreference: LanPreference, closeBehavior: CloseBehavior, automaticUpdateChecks: boolean, completeOnboarding: boolean, };
 
 export type AppPhase = "starting" | "ready";
 
-export type AppSnapshot = { schemaVersion: number, sequence: number, phase: AppPhase, collections: Array<CollectionSummary>, collectionScans: Array<CollectionScanSummary>, reviews: Array<ReviewSummary>, reanalyzingReviewIds: Array<string>, sourceIssues: Array<SourceIssueSummary>, peers: Array<PeerSummary>, model: ModelSummary | null, modelInstall: ModelInstallSummary | null, search: SearchSummary | null, reviewEvidence: ReviewEvidenceSummary | null, knowledge: KnowledgeBundleSummary | null, knowledgePage: KnowledgePageSummary | null, preferences: PreferencesSummary | null, notice: NoticeSummary | null, };
+export type AppSnapshot = { schemaVersion: number, sequence: number, phase: AppPhase, collections: Array<CollectionSummary>, collectionScans: Array<CollectionScanSummary>, reviews: Array<ReviewSummary>, reanalyzingReviewIds: Array<string>, sourceIssues: Array<SourceIssueSummary>, peers: Array<PeerSummary>, model: ModelSummary | null, modelInstall: ModelInstallSummary | null, search: SearchSummary | null, reviewEvidence: ReviewEvidenceSummary | null, knowledge: KnowledgeBundleSummary | null, knowledgePage: KnowledgePageSummary | null, preferences: PreferencesSummary | null, autostart: AutostartStatus | null, notice: NoticeSummary | null, };
 
 export type UiEventKind = "stateChanged";
 
-export type UiEventEnvelope = { schemaVersion: number, sequence: number, kind: UiEventKind, snapshot: AppSnapshot, };
+export type UiEventEnvelope = { schemaVersion: number, sequence: number, requestId: string | null, kind: UiEventKind, snapshot: AppSnapshot, };
 
 export type UiError = { code: string, messageKey: string, retryable: boolean, };
 

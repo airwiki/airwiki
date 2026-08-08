@@ -93,6 +93,14 @@ export async function updatePreferences(preferences: PreferencesInput): Promise<
   return requestId;
 }
 
+export async function refreshAutostart(requestId: string): Promise<void> {
+  return invoke('refresh_autostart', { requestId });
+}
+
+export async function setAutostart(requestId: string, enabled: boolean): Promise<void> {
+  return invoke('set_autostart', { requestId, enabled });
+}
+
 export async function hideToTray(): Promise<void> {
   return invoke('hide_to_tray');
 }

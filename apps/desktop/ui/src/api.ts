@@ -9,6 +9,7 @@ export interface AppSnapshot {
   sourceIssues: SourceIssueSummary[];
   peers: PeerSummary[];
   model: ModelSummary | null;
+  modelInstall: ModelInstallSummary | null;
   search: SearchSummary | null;
   reviewEvidence: ReviewEvidenceSummary | null;
   knowledge: KnowledgeBundleSummary | null;
@@ -61,7 +62,8 @@ export interface PreferencesSummary { completedOnboardingVersion: number | null;
 export interface PreferencesInput { locale: LocalePreference; lanPreference: LanPreference; closeBehavior: CloseBehavior; automaticUpdateChecks: boolean; completeOnboarding: boolean; }
 export interface SourceIssueSummary { collectionId: string; sourceName: string; collectionName: string; code: string; }
 export interface PeerSummary { peerId: string; deviceName: string | null; trust: string; activity: string; }
-export interface ModelSummary { displayName: string | null; active: boolean; installed: boolean; degraded: boolean; downloadBytes: number; requiredFreeBytes: number; fitsAvailableDisk: boolean; licenseAccepted: boolean; }
+export interface ModelSummary { displayName: string | null; active: boolean; installed: boolean; degraded: boolean; downloadBytes: number; requiredFreeBytes: number; fitsAvailableDisk: boolean; licenseAccepted: boolean; license: string | null; licenseUrl: string | null; revision: string | null; }
+export interface ModelInstallSummary { status: 'downloading' | 'verifying' | 'extracting' | 'activating'; downloaded: number; totalBytes: number; }
 export interface SearchSummary { requestId: string; status: 'searching' | 'complete' | 'failed'; hits: SearchHitSummary[]; coverage: string; }
 export interface SearchHitSummary { title: string; snippet: string; headingOrPage: string; logicalResourceUri: string; rank: number; }
 
@@ -71,8 +73,8 @@ export async function connect(onEvent: (event: UiEventEnvelope) => void): Promis
   return invoke<AppSnapshot>('connect', { events });
 }
 
-export async function installModels(): Promise<void> {
-  return invoke('install_models');
+export async function installModels(licensesConfirmed: boolean): Promise<void> {
+  return invoke('install_models', { licensesConfirmed });
 }
 
 export async function cancelModelInstall(): Promise<void> {

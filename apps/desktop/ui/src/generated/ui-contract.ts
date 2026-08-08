@@ -77,13 +77,31 @@ export type WikiHealthStatus = "ready" | "failed";
 
 export type WikiHealthSummary = { generation: number, status: WikiHealthStatus, errorCount: number, warningCount: number, updatingCount: number, attentionCollectionId: string | null, checked: boolean, };
 
+export type SystemPermissionStatus = "notApplicable" | "unknown" | "granted" | "denied";
+
+export type NetworkProfileStatus = "notApplicable" | "unknown" | "private" | "domain" | "public";
+
+export type FirewallStatus = "notApplicable" | "unknown" | "ready" | "firewallDisabled" | "blockAllInbound" | "rulesMissing" | "conflict" | "legacyExposure" | "managedPolicy" | "unsupported" | "error";
+
+export type FirewallHelperStatus = "notApplicable" | "verified" | "missing" | "untrusted" | "publisherMismatch" | "unsupported" | "error";
+
+export type ConnectivitySummary = { systemPermission: SystemPermissionStatus, networkProfile: NetworkProfileStatus, firewall: FirewallStatus, firewallHelper: FirewallHelperStatus, };
+
+export type LanListenerStatus = "stopped" | "starting" | "listening" | "failed";
+
+export type LanDiscoveryStatus = "disabled" | "starting" | "active" | "failed";
+
+export type LanRuntimeSummary = { listener: LanListenerStatus, discovery: LanDiscoveryStatus, addressCount: number, };
+
+export type FirewallOperationStatus = "awaitingWindows" | "takingLonger";
+
 export type PreferencesSummary = { completedOnboardingVersion: number | null, locale: LocalePreference, lanPreference: LanPreference, closeBehavior: CloseBehavior, automaticUpdateChecks: boolean, };
 
 export type PreferencesInput = { locale: LocalePreference, lanPreference: LanPreference, closeBehavior: CloseBehavior, automaticUpdateChecks: boolean, completeOnboarding: boolean, };
 
 export type AppPhase = "starting" | "ready";
 
-export type AppSnapshot = { schemaVersion: number, sequence: number, phase: AppPhase, collections: Array<CollectionSummary>, collectionScans: Array<CollectionScanSummary>, reviews: Array<ReviewSummary>, reanalyzingReviewIds: Array<string>, sourceIssues: Array<SourceIssueSummary>, peers: Array<PeerSummary>, model: ModelSummary | null, modelInstall: ModelInstallSummary | null, search: SearchSummary | null, reviewEvidence: ReviewEvidenceSummary | null, knowledge: KnowledgeBundleSummary | null, knowledgePage: KnowledgePageSummary | null, preferences: PreferencesSummary | null, autostart: AutostartStatus | null, wikiHealth: WikiHealthSummary | null, notice: NoticeSummary | null, };
+export type AppSnapshot = { schemaVersion: number, sequence: number, phase: AppPhase, collections: Array<CollectionSummary>, collectionScans: Array<CollectionScanSummary>, reviews: Array<ReviewSummary>, reanalyzingReviewIds: Array<string>, sourceIssues: Array<SourceIssueSummary>, peers: Array<PeerSummary>, model: ModelSummary | null, modelInstall: ModelInstallSummary | null, search: SearchSummary | null, reviewEvidence: ReviewEvidenceSummary | null, knowledge: KnowledgeBundleSummary | null, knowledgePage: KnowledgePageSummary | null, preferences: PreferencesSummary | null, autostart: AutostartStatus | null, wikiHealth: WikiHealthSummary | null, connectivity: ConnectivitySummary | null, lanRuntime: LanRuntimeSummary | null, firewallOperation: FirewallOperationStatus | null, notice: NoticeSummary | null, };
 
 export type UiEventKind = "stateChanged";
 

@@ -2,7 +2,7 @@
   import { AlertTriangle, BookOpen, CheckCircle2, FileText, History, Network, RefreshCw, Search, Settings2, Sparkles } from '@lucide/svelte';
   import { listen } from '@tauri-apps/api/event';
   import { onMount } from 'svelte';
-  import { addCollection, approveReview, cancelModelInstall, connect, hideToTray, installModels, loadKnowledgeBundle, loadKnowledgePage, loadReviewEvidence, pickCollectionFolder, quitCompletely, reanalyzeReview, refreshAutostart, refreshWikiHealth, rejectReview, relinkCollection, rescanCollection, searchKnowledge, setAutostart, updateCollectionPolicy, updatePreferences, type AppSnapshot, type CloseBehavior, type CollectionPolicyInput, type CollectionSummary, type EnrichmentDraft, type FolderSelection, type KnowledgePageInput, type LanPreference, type LocalePreference, type ReviewSummary } from './api';
+  import { addCollection, approveReview, cancelModelInstall, configureFirewall, connect, hideToTray, installModels, loadKnowledgeBundle, loadKnowledgePage, loadReviewEvidence, openAdvancedFirewall, pickCollectionFolder, quitCompletely, reanalyzeReview, refreshAutostart, refreshConnectivity, refreshWikiHealth, rejectReview, relinkCollection, rescanCollection, searchKnowledge, setAutostart, updateCollectionPolicy, updatePreferences, type AppSnapshot, type CloseBehavior, type CollectionPolicyInput, type CollectionSummary, type EnrichmentDraft, type FolderSelection, type KnowledgePageInput, type LanPreference, type LocalePreference, type ReviewSummary } from './api';
   import KnowledgeGraph from './KnowledgeGraph.svelte';
 
   type Destination = 'library' | 'review' | 'search' | 'system';
@@ -39,6 +39,7 @@
   let autostartBusy = false;
   let autostartRequestId: string | null = null;
   let wikiHealthRequestId: string | null = null;
+  let connectivityRequestId: string | null = null;
 
   onMount(() => {
     const unlistenClose = '__TAURI_INTERNALS__' in window
@@ -66,6 +67,7 @@
         autostartRequestId = null;
       }
       if (event.requestId && event.requestId === wikiHealthRequestId) wikiHealthRequestId = null;
+      if (event.requestId && event.requestId === connectivityRequestId) connectivityRequestId = null;
       runtimeLabel = event.snapshot.phase === 'ready' ? 'Servicios privados listos' : 'Preparando servicios privados';
     }).then((initial) => {
       snapshot = initial;
@@ -84,8 +86,44 @@
   function select(next: Destination) {
     destination = next;
     window.location.hash = next;
-    if (next === 'system') void refreshAutostartState();
+    if (next === 'system') {
+      void refreshAutostartState();
+      void runConnectivityAction('refresh');
+    }
     if (next === 'library') void refreshHealth();
+  }
+
+  function connectivityLabel(): string {
+    if (snapshot?.lanRuntime?.listener === 'listening') return 'AirWiki escucha en la red local autorizada.';
+    if (snapshot?.lanRuntime?.listener === 'starting') return 'La red local se está iniciando.';
+    if (snapshot?.connectivity?.networkProfile === 'public') return 'Windows clasifica la red como pública; AirWiki no abrirá el listener.';
+    if (snapshot?.connectivity?.firewall === 'rulesMissing') return 'Faltan las reglas restringidas de Windows Firewall.';
+    if (snapshot?.connectivity?.firewall === 'conflict' || snapshot?.connectivity?.firewall === 'legacyExposure') return 'La configuración del firewall entra en conflicto con la política segura.';
+    if (snapshot?.lanRuntime?.listener === 'failed') return 'El listener local falló y permanece cerrado.';
+    if (lanPreference === 'disabled') return 'La red local está desactivada por preferencia.';
+    return 'Comprobando permisos, perfil de red y firewall…';
+  }
+
+  function lanStateLabel(state: string): string {
+    const labels: Record<string, string> = {
+      stopped: 'Detenido', starting: 'Iniciando', listening: 'Escuchando', failed: 'Falló',
+      disabled: 'Desactivado', active: 'Activo'
+    };
+    return labels[state] ?? state;
+  }
+
+  async function runConnectivityAction(action: 'refresh' | 'install' | 'remove' | 'advanced') {
+    const requestId = crypto.randomUUID();
+    connectivityRequestId = requestId;
+    try {
+      if (action === 'refresh') await refreshConnectivity(requestId);
+      if (action === 'install') await configureFirewall(requestId, true);
+      if (action === 'remove') await configureFirewall(requestId, false);
+      if (action === 'advanced') await openAdvancedFirewall(requestId);
+    } catch {
+      connectivityRequestId = null;
+      actionMessage = 'La operación de conectividad no pudo comenzar.';
+    }
   }
 
   async function refreshHealth() {
@@ -563,7 +601,7 @@
             <section><p class="section-label">IA local</p><h3>{snapshot.model?.displayName ?? 'Modelo recomendado'}</h3><p>{snapshot.model?.active ? 'El modelo está activo y listo para proponer metadatos.' : 'El modelo requiere preparación antes de analizar documentos.'}</p>{#if snapshot.modelInstall}<progress max={snapshot.modelInstall.totalBytes || 1} value={snapshot.modelInstall.downloaded}></progress><small>{modelInstallLabel()}</small><button class="secondary" onclick={cancelModelInstall}>Cancelar preparación</button>{:else if snapshot.model && !snapshot.model.active}<label class="check license-check"><input type="checkbox" bind:checked={modelLicensesConfirmed} /> Acepto {snapshot.model.license ?? 'las licencias del modelo y sus componentes'}</label><button class="secondary" onclick={prepareLocalModel} disabled={!modelLicensesConfirmed && !snapshot.model.licenseAccepted}>Preparar modelo local</button>{/if}</section>
             <section class="settings-form"><p class="section-label">Preferencias del dispositivo</p><label><span>Idioma</span><select bind:value={locale}><option value="system">Sistema</option><option value="es">Español</option><option value="en">English</option></select></label><label><span>Red local</span><select bind:value={lanPreference}><option value="disabled">Desactivada</option><option value="enabled">Activada</option></select></label><label><span>Al cerrar</span><select bind:value={closeBehavior}><option value="ask">Preguntar</option><option value="hide_to_tray">Ocultar en bandeja</option><option value="quit">Salir completamente</option></select></label><label class="check"><input type="checkbox" bind:checked={automaticUpdateChecks} /> Buscar actualizaciones automáticamente</label><button class="primary" onclick={() => savePreferences(false)} disabled={actionBusy}>Guardar preferencias</button></section>
             <section><p class="section-label">Inicio de sesión</p><h3>Inicio automático</h3><p>{autostartLabel()}</p><div class="row-actions">{#if snapshot.autostart === 'enabled'}<button class="secondary" onclick={() => changeAutostart(false)} disabled={autostartBusy}>Desactivar</button>{:else if snapshot.autostart !== 'unsupported' && snapshot.autostart !== 'conflict'}<button class="secondary" onclick={() => changeAutostart(true)} disabled={autostartBusy}>{autostartBusy ? 'Comprobando…' : 'Activar'}</button>{/if}<button class="text-action" onclick={refreshAutostartState} disabled={autostartBusy}>Actualizar estado</button></div></section>
-            <section><p class="section-label">Conectividad</p><h3>{snapshot.peers.length} equipos conocidos</h3><p>Las colecciones solo salen de este dispositivo con permisos explícitos.</p></section>
+            <section class="connectivity-section"><p class="section-label">Conectividad</p><h3>{snapshot.peers.length} equipos conocidos</h3><p>{connectivityLabel()}</p>{#if snapshot.lanRuntime}<dl><div><dt>Listener</dt><dd>{lanStateLabel(snapshot.lanRuntime.listener)}</dd></div><div><dt>Descubrimiento</dt><dd>{lanStateLabel(snapshot.lanRuntime.discovery)}</dd></div><div><dt>Interfaces</dt><dd>{snapshot.lanRuntime.addressCount}</dd></div></dl>{/if}<div class="row-actions"><button class="secondary" onclick={() => runConnectivityAction('refresh')} disabled={connectivityRequestId !== null}>{connectivityRequestId ? 'Comprobando…' : 'Comprobar'}</button>{#if snapshot.connectivity?.firewallHelper === 'verified' && snapshot.connectivity.firewall !== 'ready' && snapshot.connectivity.firewall !== 'notApplicable'}<button class="secondary" onclick={() => runConnectivityAction('install')} disabled={connectivityRequestId !== null || lanPreference !== 'enabled'}>Configurar firewall</button>{/if}{#if snapshot.connectivity?.firewall === 'ready'}<button class="text-action" onclick={() => runConnectivityAction('remove')} disabled={connectivityRequestId !== null}>Quitar reglas</button>{/if}{#if snapshot.connectivity?.firewall === 'conflict' || snapshot.connectivity?.firewall === 'legacyExposure'}<button class="text-action" onclick={() => runConnectivityAction('advanced')} disabled={connectivityRequestId !== null}>Abrir configuración avanzada</button>{/if}</div><small>Compartir sigue requiriendo pairing y grants por colección.</small></section>
           </div>
         {/if}
 

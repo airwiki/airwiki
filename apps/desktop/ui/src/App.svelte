@@ -1,5 +1,7 @@
 <script lang="ts">
   import { BookOpen, CheckCircle2, Search, Settings2, Sparkles } from '@lucide/svelte';
+  import { onMount } from 'svelte';
+  import { connect } from './api';
 
   type Destination = 'library' | 'review' | 'search' | 'system';
 
@@ -11,6 +13,16 @@
   ] as const;
 
   let destination: Destination = 'library';
+  let runtimeLabel = 'Preparando servicios privados';
+
+  onMount(() => {
+    connect((event) => {
+      if (event.kind === 'ready') runtimeLabel = 'Servicios privados listos';
+      if (event.kind === 'snapshotRequired') runtimeLabel = 'Sincronizando el estado';
+    }).catch(() => {
+      runtimeLabel = 'Vista previa sin runtime nativo';
+    });
+  });
 
   function select(next: Destination) {
     destination = next;
@@ -33,7 +45,7 @@
     </nav>
     <div class="device-state">
       <span class="pulse" aria-hidden="true"></span>
-      <div><strong>En este dispositivo</strong><small>Preparando servicios privados</small></div>
+      <div><strong>En este dispositivo</strong><small>{runtimeLabel}</small></div>
     </div>
   </aside>
 

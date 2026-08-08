@@ -2136,15 +2136,19 @@ impl DesktopServices {
             Arc::clone(&self.network_generation),
             generation,
         )?;
-        let local = match read_lock(&self.models, "model services") {
-            Ok(models) => models.as_ref().map(|models| models.local_search.clone()),
-            Err(error) => {
-                let _ = runtime.handle.shutdown().await;
-                runtime.event_forwarder.abort();
-                runtime.task.abort();
-                return Err(error);
-            }
+        let (local, model_lock_error) = match read_lock(&self.models, "model services") {
+            Ok(models) => (
+                models.as_ref().map(|models| models.local_search.clone()),
+                None,
+            ),
+            Err(error) => (None, Some(error)),
         };
+        if let Some(error) = model_lock_error {
+            let _ = runtime.handle.shutdown().await;
+            runtime.event_forwarder.abort();
+            runtime.task.abort();
+            return Err(error);
+        }
         let search_install = if let Some(local) = local {
             self.authorized_proxy.install(local.clone()).and_then(|()| {
                 let local: Arc<dyn FederatedSearch> = local;
@@ -2966,7 +2970,7 @@ impl CollectionWatcherHandle {
     pub fn spawn(
         collection_id: Uuid,
         folder: impl AsRef<Path>,
-        events: mpsc::UnboundedSender<CollectionWatchEvent>,
+        events: mpsc::Sender<CollectionWatchEvent>,
     ) -> Result<Self> {
         let watcher = FolderWatcher::two_second(folder)?;
         let cancel = CancellationToken::new();
@@ -2976,7 +2980,7 @@ impl CollectionWatcherHandle {
                 match watcher.recv_debounced_timeout(Duration::from_millis(250)) {
                     Ok(Some(paths)) => {
                         if events
-                            .send(CollectionWatchEvent::Changed {
+                            .blocking_send(CollectionWatchEvent::Changed {
                                 collection_id,
                                 paths,
                             })
@@ -2987,7 +2991,7 @@ impl CollectionWatcherHandle {
                     }
                     Ok(None) => continue,
                     Err(error) => {
-                        let _ = events.send(CollectionWatchEvent::Failed {
+                        let _ = events.blocking_send(CollectionWatchEvent::Failed {
                             collection_id,
                             error: error.to_string(),
                         });
@@ -3814,7 +3818,7 @@ mod tests {
     struct EmptyFederatedSearch;
 
     struct RecordingCatalogBackend {
-        withdrawals: mpsc::UnboundedSender<u64>,
+        withdrawals: mpsc::Sender<u64>,
         gate: Option<Arc<CatalogWithdrawalGate>>,
     }
 
@@ -3863,7 +3867,7 @@ mod tests {
             if let Some(gate) = &self.gate {
                 gate.wait().await;
             }
-            let _ = self.withdrawals.send(tombstone.tombstone.sequence);
+            let _ = self.withdrawals.send(tombstone.tombstone.sequence).await;
             Ok(())
         }
 
@@ -4173,7 +4177,7 @@ mod tests {
                 true,
             )
             .unwrap();
-        let (withdrawals, mut recorded_withdrawals) = mpsc::unbounded_channel();
+        let (withdrawals, mut recorded_withdrawals) = mpsc::channel(8);
         let catalog_cancellation = CancellationToken::new();
         let catalog_task = tokio::spawn(run_public_catalog_server(
             index_identity,
@@ -4273,7 +4277,7 @@ mod tests {
                 true,
             )
             .unwrap();
-        let (withdrawals, _recorded_withdrawals) = mpsc::unbounded_channel();
+        let (withdrawals, _recorded_withdrawals) = mpsc::channel(8);
         let (gate, withdrawal_started) = CatalogWithdrawalGate::new();
         let catalog_cancellation = CancellationToken::new();
         let catalog_task = tokio::spawn(run_public_catalog_server(

@@ -95,6 +95,7 @@ struct AppSnapshot {
     source_issues: Vec<SourceIssueSummary>,
     peers: Vec<PeerSummary>,
     model: Option<ModelSummary>,
+    model_install: Option<ModelInstallSummary>,
     search: Option<SearchSummary>,
     review_evidence: Option<ReviewEvidenceSummary>,
     knowledge: Option<KnowledgeBundleSummary>,
@@ -264,6 +265,17 @@ struct ModelSummary {
     required_free_bytes: u64,
     fits_available_disk: bool,
     license_accepted: bool,
+    license: Option<String>,
+    license_url: Option<String>,
+    revision: Option<String>,
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ModelInstallSummary {
+    status: &'static str,
+    downloaded: u64,
+    total_bytes: u64,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -373,7 +385,13 @@ fn connect(runtime: tauri::State<'_, AppRuntime>, events: Channel<UiEventEnvelop
 }
 
 #[tauri::command]
-fn install_models(runtime: tauri::State<'_, AppRuntime>) -> Result<(), UiError> {
+fn install_models(
+    runtime: tauri::State<'_, AppRuntime>,
+    licenses_confirmed: bool,
+) -> Result<(), UiError> {
+    if !licenses_confirmed {
+        return Err(UiError::invalid("modelLicensesMustBeConfirmed"));
+    }
     send_command(&runtime, WorkerCommand::InstallModels)
 }
 
@@ -835,6 +853,7 @@ impl AppSnapshot {
             source_issues: Vec::new(),
             peers: Vec::new(),
             model: None,
+            model_install: None,
             search: None,
             review_evidence: None,
             knowledge: None,
@@ -891,6 +910,42 @@ impl AppSnapshot {
                 self.peers = peers.into_iter().map(PeerSummary::from).collect();
             }
             WorkerEvent::ModelState(model) => self.model = Some(ModelSummary::from(model)),
+            WorkerEvent::InstallProgress(progress) => {
+                self.model_install = Some(match progress {
+                    airwiki_inference::InstallEvent::Started { total_bytes, .. } => {
+                        ModelInstallSummary {
+                            status: "downloading",
+                            downloaded: 0,
+                            total_bytes,
+                        }
+                    }
+                    airwiki_inference::InstallEvent::Progress {
+                        downloaded,
+                        total_bytes,
+                        ..
+                    } => ModelInstallSummary {
+                        status: "downloading",
+                        downloaded,
+                        total_bytes,
+                    },
+                    airwiki_inference::InstallEvent::Verifying { .. } => ModelInstallSummary {
+                        status: "verifying",
+                        downloaded: 0,
+                        total_bytes: 0,
+                    },
+                    airwiki_inference::InstallEvent::Extracting { .. } => ModelInstallSummary {
+                        status: "extracting",
+                        downloaded: 0,
+                        total_bytes: 0,
+                    },
+                    airwiki_inference::InstallEvent::Complete { .. } => ModelInstallSummary {
+                        status: "activating",
+                        downloaded: 0,
+                        total_bytes: 0,
+                    },
+                });
+            }
+            WorkerEvent::InstallStopped | WorkerEvent::ModelsReady => self.model_install = None,
             WorkerEvent::DesktopPreferencesUpdated { result, .. } => match result {
                 Ok(preferences) => {
                     self.preferences = Some(PreferencesSummary {
@@ -1434,6 +1489,9 @@ impl From<worker::ModelStateView> for ModelSummary {
             required_free_bytes: value.required_free_bytes,
             fits_available_disk: value.fits_available_disk,
             license_accepted: value.license_accepted,
+            license: value.license,
+            license_url: value.license_url,
+            revision: value.revision,
         }
     }
 }

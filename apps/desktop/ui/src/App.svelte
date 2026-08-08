@@ -2,7 +2,7 @@
   import { BookOpen, CheckCircle2, FileText, History, RefreshCw, Search, Settings2, Sparkles } from '@lucide/svelte';
   import { listen } from '@tauri-apps/api/event';
   import { onMount } from 'svelte';
-  import { addCollection, approveReview, connect, hideToTray, loadKnowledgeBundle, loadKnowledgePage, loadReviewEvidence, pickCollectionFolder, quitCompletely, reanalyzeReview, rejectReview, rescanCollection, searchKnowledge, updatePreferences, type AppSnapshot, type CloseBehavior, type EnrichmentDraft, type FolderSelection, type KnowledgePageInput, type LanPreference, type LocalePreference, type ReviewSummary } from './api';
+  import { addCollection, approveReview, cancelModelInstall, connect, hideToTray, installModels, loadKnowledgeBundle, loadKnowledgePage, loadReviewEvidence, pickCollectionFolder, quitCompletely, reanalyzeReview, rejectReview, rescanCollection, searchKnowledge, updatePreferences, type AppSnapshot, type CloseBehavior, type EnrichmentDraft, type FolderSelection, type KnowledgePageInput, type LanPreference, type LocalePreference, type ReviewSummary } from './api';
 
   type Destination = 'library' | 'review' | 'search' | 'system';
 
@@ -30,11 +30,13 @@
   let closeBehavior: CloseBehavior = 'ask';
   let automaticUpdateChecks = false;
   let closeChoiceRequired = false;
+  let modelLicensesConfirmed = false;
 
   onMount(() => {
     const unlistenClose = listen('close-choice-required', () => { closeChoiceRequired = true; });
     connect((event) => {
       snapshot = event.snapshot;
+      if (event.snapshot.model?.licenseAccepted) modelLicensesConfirmed = true;
       if (event.snapshot.preferences) {
         locale = event.snapshot.preferences.locale;
         lanPreference = event.snapshot.preferences.lanPreference;
@@ -52,6 +54,7 @@
       runtimeLabel = event.snapshot.phase === 'ready' ? 'Servicios privados listos' : 'Preparando servicios privados';
     }).then((initial) => {
       snapshot = initial;
+      if (initial.model?.licenseAccepted) modelLicensesConfirmed = true;
       if (initial.preferences) {
         locale = initial.preferences.locale;
         lanPreference = initial.preferences.lanPreference;
@@ -188,6 +191,17 @@
     if (choice === 'hide') await hideToTray();
     if (choice === 'quit') await quitCompletely();
   }
+
+  async function prepareLocalModel() {
+    actionBusy = true;
+    try {
+      await installModels(modelLicensesConfirmed || Boolean(snapshot?.model?.licenseAccepted));
+      actionMessage = 'Descarga iniciada. Puedes cancelarla sin perder los archivos ya verificados.';
+    } catch {
+      actionMessage = 'No se pudo iniciar la preparación del modelo.';
+      actionBusy = false;
+    }
+  }
 </script>
 
 <svelte:head><meta name="theme-color" content="#07131f" /></svelte:head>
@@ -202,7 +216,9 @@
       <section><span>01</span><div><h2>Idioma</h2><p>La interfaz puede seguir el idioma del sistema.</p></div><select bind:value={locale}><option value="system">Sistema</option><option value="es">Español</option><option value="en">English</option></select></section>
       <section><span>02</span><div><h2>Red local</h2><p>Permite descubrir equipos cercanos; compartir sigue requiriendo pairing y grants.</p></div><select bind:value={lanPreference}><option value="disabled">Mantener desactivada</option><option value="enabled">Activar red local</option></select></section>
       <section><span>03</span><div><h2>Al cerrar</h2><p>Ocultar mantiene inferencia, watchers, MCP y LAN activos.</p></div><select bind:value={closeBehavior}><option value="ask">Preguntar siempre</option><option value="hide_to_tray">Ocultar en la bandeja</option><option value="quit">Salir completamente</option></select></section>
+      {#if snapshot.model && !snapshot.model.active}<section><span>04</span><div><h2>Modelo local</h2><p>{snapshot.model.displayName ?? 'Modelo recomendado'} · {(snapshot.model.downloadBytes / 1073741824).toFixed(1)} GiB</p></div><label class="check"><input type="checkbox" bind:checked={modelLicensesConfirmed} /> Acepto las licencias indicadas</label></section>{/if}
     </div>
+    {#if snapshot.model && !snapshot.model.active}<button class="secondary onboarding-model" onclick={prepareLocalModel} disabled={actionBusy || (!modelLicensesConfirmed && !snapshot.model.licenseAccepted) || !snapshot.model.fitsAvailableDisk}>Preparar IA local</button>{/if}
     <button class="primary onboarding-action" onclick={() => savePreferences(true)} disabled={actionBusy || lanPreference === 'undecided'}>Entrar a AirWiki</button>
     {#if actionMessage}<p class="action-message" aria-live="polite">{actionMessage}</p>{/if}
   </main>
@@ -346,7 +362,7 @@
 
         {#if destination === 'system' && snapshot}
           <div class="system-layout">
-            <section><p class="section-label">IA local</p><h3>{snapshot.model?.displayName ?? 'Modelo recomendado'}</h3><p>{snapshot.model?.active ? 'El modelo está activo y listo para proponer metadatos.' : 'El modelo requiere preparación antes de analizar documentos.'}</p></section>
+            <section><p class="section-label">IA local</p><h3>{snapshot.model?.displayName ?? 'Modelo recomendado'}</h3><p>{snapshot.model?.active ? 'El modelo está activo y listo para proponer metadatos.' : 'El modelo requiere preparación antes de analizar documentos.'}</p>{#if snapshot.modelInstall}<progress max={snapshot.modelInstall.totalBytes || 1} value={snapshot.modelInstall.downloaded}></progress><small>{snapshot.modelInstall.status}</small><button class="secondary" onclick={cancelModelInstall}>Cancelar descarga</button>{:else if snapshot.model && !snapshot.model.active}<label class="check license-check"><input type="checkbox" bind:checked={modelLicensesConfirmed} /> Acepto {snapshot.model.license ?? 'las licencias del modelo y sus componentes'}</label><button class="secondary" onclick={prepareLocalModel} disabled={!modelLicensesConfirmed && !snapshot.model.licenseAccepted}>Preparar modelo local</button>{/if}</section>
             <section class="settings-form"><p class="section-label">Preferencias del dispositivo</p><label><span>Idioma</span><select bind:value={locale}><option value="system">Sistema</option><option value="es">Español</option><option value="en">English</option></select></label><label><span>Red local</span><select bind:value={lanPreference}><option value="disabled">Desactivada</option><option value="enabled">Activada</option></select></label><label><span>Al cerrar</span><select bind:value={closeBehavior}><option value="ask">Preguntar</option><option value="hide_to_tray">Ocultar en bandeja</option><option value="quit">Salir completamente</option></select></label><label class="check"><input type="checkbox" bind:checked={automaticUpdateChecks} /> Buscar actualizaciones automáticamente</label><button class="primary" onclick={() => savePreferences(false)} disabled={actionBusy}>Guardar preferencias</button></section>
             <section><p class="section-label">Conectividad</p><h3>{snapshot.peers.length} equipos conocidos</h3><p>Las colecciones solo salen de este dispositivo con permisos explícitos.</p></section>
           </div>

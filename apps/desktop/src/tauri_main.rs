@@ -16,12 +16,20 @@ mod services;
 mod updater;
 mod worker;
 
-use std::sync::Mutex;
+use std::{
+    collections::HashMap,
+    path::PathBuf,
+    sync::Mutex,
+    time::{Duration, Instant},
+};
 
+use airwiki_inference::ModelProfile;
+use airwiki_types::SearchPurpose;
 use anyhow::{Context, Result};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use tauri::{Manager, ipc::Channel};
 use tokio::sync::{broadcast, mpsc, watch};
+use uuid::Uuid;
 
 use crate::{
     paths::AppPaths,
@@ -31,10 +39,17 @@ use crate::{
 const COMMAND_CAPACITY: usize = 64;
 const PRESENTATION_CAPACITY: usize = 128;
 const CONTRACT_VERSION: u16 = 1;
+const FOLDER_SELECTION_TTL: Duration = Duration::from_secs(5 * 60);
 
 struct AppRuntime {
     commands: mpsc::Sender<WorkerCommand>,
     snapshot: Mutex<watch::Receiver<AppSnapshot>>,
+    folder_selections: Mutex<HashMap<Uuid, PendingFolderSelection>>,
+}
+
+struct PendingFolderSelection {
+    path: PathBuf,
+    expires_at: Instant,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -48,6 +63,7 @@ struct AppSnapshot {
     source_issues: Vec<SourceIssueSummary>,
     peers: Vec<PeerSummary>,
     model: Option<ModelSummary>,
+    search: Option<SearchSummary>,
     notice: Option<NoticeSummary>,
 }
 
@@ -108,6 +124,25 @@ struct ModelSummary {
 
 #[derive(Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
+struct SearchSummary {
+    request_id: String,
+    status: &'static str,
+    hits: Vec<SearchHitSummary>,
+    coverage: &'static str,
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct SearchHitSummary {
+    title: String,
+    snippet: String,
+    heading_or_page: String,
+    logical_resource_uri: String,
+    rank: u32,
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
 struct NoticeSummary {
     level: &'static str,
     message: String,
@@ -128,6 +163,22 @@ struct UiError {
     code: &'static str,
     message_key: &'static str,
     retryable: bool,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct FolderSelection {
+    token: String,
+    display_path: String,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct CollectionPolicyInput {
+    local_only: bool,
+    peer_shareable: bool,
+    allow_external_ai: bool,
+    internet_public: bool,
 }
 
 #[tauri::command]
@@ -167,6 +218,166 @@ fn cancel_model_install(runtime: tauri::State<'_, AppRuntime>) -> Result<(), UiE
     send_command(&runtime, WorkerCommand::CancelInstall)
 }
 
+#[tauri::command]
+fn set_model_profile(
+    runtime: tauri::State<'_, AppRuntime>,
+    profile: ModelProfile,
+) -> Result<(), UiError> {
+    send_command(&runtime, WorkerCommand::SetModelProfile(profile))
+}
+
+#[tauri::command]
+async fn pick_collection_folder(
+    runtime: tauri::State<'_, AppRuntime>,
+) -> Result<Option<FolderSelection>, UiError> {
+    let Some(folder) = rfd::AsyncFileDialog::new().pick_folder().await else {
+        return Ok(None);
+    };
+    let path = folder.path().to_path_buf();
+    let token = Uuid::new_v4();
+    let mut selections = runtime
+        .folder_selections
+        .lock()
+        .map_err(|_| UiError::internal())?;
+    selections.retain(|_, selection| selection.expires_at > Instant::now());
+    selections.insert(
+        token,
+        PendingFolderSelection {
+            path: path.clone(),
+            expires_at: Instant::now() + FOLDER_SELECTION_TTL,
+        },
+    );
+    Ok(Some(FolderSelection {
+        token: token.to_string(),
+        display_path: path.to_string_lossy().into_owned(),
+    }))
+}
+
+#[tauri::command]
+fn add_collection(
+    runtime: tauri::State<'_, AppRuntime>,
+    name: String,
+    folder_token: String,
+) -> Result<(), UiError> {
+    let name = name.trim();
+    if name.is_empty() || name.chars().count() > 120 {
+        return Err(UiError::invalid("invalidCollectionName"));
+    }
+    let folder = consume_folder_selection(&runtime, &folder_token)?;
+    send_command(
+        &runtime,
+        WorkerCommand::AddCollection {
+            name: name.to_owned(),
+            folder,
+        },
+    )
+}
+
+#[tauri::command]
+fn relink_collection(
+    runtime: tauri::State<'_, AppRuntime>,
+    collection_id: String,
+    folder_token: String,
+) -> Result<(), UiError> {
+    let collection_id = parse_uuid(&collection_id)?;
+    let folder = consume_folder_selection(&runtime, &folder_token)?;
+    send_command(
+        &runtime,
+        WorkerCommand::RelinkCollection {
+            collection_id,
+            folder,
+        },
+    )
+}
+
+#[tauri::command]
+fn rescan_collection(
+    runtime: tauri::State<'_, AppRuntime>,
+    collection_id: String,
+) -> Result<(), UiError> {
+    send_command(
+        &runtime,
+        WorkerCommand::RescanCollection(parse_uuid(&collection_id)?),
+    )
+}
+
+#[tauri::command]
+fn update_collection_policy(
+    runtime: tauri::State<'_, AppRuntime>,
+    collection_id: String,
+    policy: CollectionPolicyInput,
+) -> Result<(), UiError> {
+    send_command(
+        &runtime,
+        WorkerCommand::UpdateCollectionPolicy {
+            collection_id: parse_uuid(&collection_id)?,
+            local_only: policy.local_only,
+            peer_shareable: policy.peer_shareable,
+            allow_external_ai: policy.allow_external_ai,
+            internet_public: policy.internet_public,
+        },
+    )
+}
+
+#[tauri::command]
+fn search(
+    runtime: tauri::State<'_, AppRuntime>,
+    request_id: String,
+    question: String,
+    top_k: u8,
+    public_network: bool,
+) -> Result<(), UiError> {
+    if question.trim().is_empty() || question.len() > 4_096 || !(1..=10).contains(&top_k) {
+        return Err(UiError::invalid("invalidSearchRequest"));
+    }
+    send_command(
+        &runtime,
+        WorkerCommand::Search {
+            request_id: parse_uuid(&request_id)?,
+            question,
+            top_k,
+            purpose: SearchPurpose::LocalAssistant,
+            public_network,
+        },
+    )
+}
+
+fn consume_folder_selection(runtime: &AppRuntime, token: &str) -> Result<PathBuf, UiError> {
+    let token = parse_uuid(token)?;
+    let selection = runtime
+        .folder_selections
+        .lock()
+        .map_err(|_| UiError::internal())?
+        .remove(&token)
+        .ok_or_else(|| UiError::invalid("folderSelectionExpired"))?;
+    if selection.expires_at <= Instant::now() {
+        return Err(UiError::invalid("folderSelectionExpired"));
+    }
+    Ok(selection.path)
+}
+
+fn parse_uuid(value: &str) -> Result<Uuid, UiError> {
+    Uuid::parse_str(value).map_err(|_| UiError::invalid("invalidIdentifier"))
+}
+
+impl UiError {
+    const fn invalid(message_key: &'static str) -> Self {
+        Self {
+            code: "invalidInput",
+            message_key,
+            retryable: false,
+        }
+    }
+
+    const fn internal() -> Self {
+        Self {
+            code: "internal",
+            message_key: "runtimeStateUnavailable",
+            retryable: true,
+        }
+    }
+}
+
 fn send_command(runtime: &AppRuntime, command: WorkerCommand) -> Result<(), UiError> {
     runtime.commands.try_send(command).map_err(|error| UiError {
         code: match error {
@@ -189,6 +400,7 @@ impl AppSnapshot {
             source_issues: Vec::new(),
             peers: Vec::new(),
             model: None,
+            search: None,
             notice: None,
         }
     }
@@ -229,6 +441,38 @@ impl AppSnapshot {
                 self.peers = peers.into_iter().map(PeerSummary::from).collect();
             }
             WorkerEvent::ModelState(model) => self.model = Some(ModelSummary::from(model)),
+            WorkerEvent::SearchPartial { request_id, hits } => {
+                self.search = Some(SearchSummary {
+                    request_id: request_id.to_string(),
+                    status: "searching",
+                    hits: hits.into_iter().map(SearchHitSummary::from).collect(),
+                    coverage: "partial",
+                });
+            }
+            WorkerEvent::SearchFinished { request_id, result } => {
+                self.search = Some(match result {
+                    Ok((hits, coverage, _route)) => SearchSummary {
+                        request_id: request_id.to_string(),
+                        status: "complete",
+                        hits: hits.into_iter().map(SearchHitSummary::from).collect(),
+                        coverage: match coverage {
+                            worker::SearchCoverageView::Complete => "complete",
+                            worker::SearchCoverageView::FederationDisabled => "federationDisabled",
+                            worker::SearchCoverageView::OfflineDevices { .. } => "offlineDevices",
+                            worker::SearchCoverageView::PublicNetworkOffline => {
+                                "publicNetworkOffline"
+                            }
+                            worker::SearchCoverageView::Partial => "partial",
+                        },
+                    },
+                    Err(_) => SearchSummary {
+                        request_id: request_id.to_string(),
+                        status: "failed",
+                        hits: Vec::new(),
+                        coverage: "partial",
+                    },
+                });
+            }
             WorkerEvent::Notice(message) => {
                 self.notice = Some(NoticeSummary {
                     level: "notice",
@@ -320,6 +564,18 @@ impl From<worker::ModelStateView> for ModelSummary {
     }
 }
 
+impl From<airwiki_types::SearchHit> for SearchHitSummary {
+    fn from(value: airwiki_types::SearchHit) -> Self {
+        Self {
+            title: value.title,
+            snippet: value.snippet,
+            heading_or_page: value.heading_or_page,
+            logical_resource_uri: value.logical_resource_uri,
+            rank: value.rank,
+        }
+    }
+}
+
 fn main() -> Result<()> {
     let paths = AppPaths::discover().context("failed to discover application paths")?;
     let (commands, command_receiver) = mpsc::channel(COMMAND_CAPACITY);
@@ -339,6 +595,7 @@ fn main() -> Result<()> {
         .manage(AppRuntime {
             commands,
             snapshot: Mutex::new(snapshot_receiver),
+            folder_selections: Mutex::new(HashMap::new()),
         })
         .setup(move |_app| {
             tauri::async_runtime::spawn(async move {
@@ -371,8 +628,64 @@ fn main() -> Result<()> {
         .invoke_handler(tauri::generate_handler![
             connect,
             install_models,
-            cancel_model_install
+            cancel_model_install,
+            set_model_profile,
+            pick_collection_folder,
+            add_collection,
+            relink_collection,
+            rescan_collection,
+            update_collection_policy,
+            search
         ])
         .run(tauri::generate_context!())
         .map_err(|error| anyhow::anyhow!(error.to_string()))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn runtime_with_selection(token: Uuid, path: PathBuf, expires_at: Instant) -> AppRuntime {
+        let (commands, _receiver) = mpsc::channel(COMMAND_CAPACITY);
+        let (_snapshot_sender, snapshot) = watch::channel(AppSnapshot::starting());
+        AppRuntime {
+            commands,
+            snapshot: Mutex::new(snapshot),
+            folder_selections: Mutex::new(HashMap::from([(
+                token,
+                PendingFolderSelection { path, expires_at },
+            )])),
+        }
+    }
+
+    #[test]
+    fn folder_selection_is_consumed_exactly_once() {
+        let token = Uuid::new_v4();
+        let expected = PathBuf::from("/synthetic/knowledge");
+        let runtime = runtime_with_selection(
+            token,
+            expected.clone(),
+            Instant::now() + Duration::from_secs(30),
+        );
+
+        assert_eq!(
+            consume_folder_selection(&runtime, &token.to_string()).ok(),
+            Some(expected)
+        );
+        assert!(consume_folder_selection(&runtime, &token.to_string()).is_err());
+    }
+
+    #[test]
+    fn expired_folder_selection_fails_closed() {
+        let token = Uuid::new_v4();
+        let runtime = runtime_with_selection(
+            token,
+            PathBuf::from("/synthetic/expired"),
+            Instant::now() - Duration::from_secs(1),
+        );
+
+        let error = consume_folder_selection(&runtime, &token.to_string()).unwrap_err();
+
+        assert_eq!(error.message_key, "folderSelectionExpired");
+    }
 }

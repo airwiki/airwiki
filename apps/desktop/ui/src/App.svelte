@@ -1,7 +1,7 @@
 <script lang="ts">
   import { BookOpen, CheckCircle2, FileText, History, RefreshCw, Search, Settings2, Sparkles } from '@lucide/svelte';
   import { onMount } from 'svelte';
-  import { addCollection, approveReview, connect, loadKnowledgeBundle, loadKnowledgePage, loadReviewEvidence, pickCollectionFolder, reanalyzeReview, rejectReview, rescanCollection, searchKnowledge, type AppSnapshot, type EnrichmentDraft, type FolderSelection, type KnowledgePageInput, type ReviewSummary } from './api';
+  import { addCollection, approveReview, connect, loadKnowledgeBundle, loadKnowledgePage, loadReviewEvidence, pickCollectionFolder, reanalyzeReview, rejectReview, rescanCollection, searchKnowledge, updatePreferences, type AppSnapshot, type CloseBehavior, type EnrichmentDraft, type FolderSelection, type KnowledgePageInput, type LanPreference, type LocalePreference, type ReviewSummary } from './api';
 
   type Destination = 'library' | 'review' | 'search' | 'system';
 
@@ -24,10 +24,20 @@
   let selectedReview: ReviewSummary | null = null;
   let editDraft: EnrichmentDraft | null = null;
   let selectedCollectionId: string | null = null;
+  let locale: LocalePreference = 'system';
+  let lanPreference: LanPreference = 'undecided';
+  let closeBehavior: CloseBehavior = 'ask';
+  let automaticUpdateChecks = false;
 
   onMount(() => {
     connect((event) => {
       snapshot = event.snapshot;
+      if (event.snapshot.preferences) {
+        locale = event.snapshot.preferences.locale;
+        lanPreference = event.snapshot.preferences.lanPreference;
+        closeBehavior = event.snapshot.preferences.closeBehavior;
+        automaticUpdateChecks = event.snapshot.preferences.automaticUpdateChecks;
+      }
       if (selectedReview) {
         const currentReview = event.snapshot.reviews.find((review) => review.conceptId === selectedReview?.conceptId);
         if (!currentReview || currentReview.sourceRevision !== selectedReview.sourceRevision) {
@@ -39,6 +49,12 @@
       runtimeLabel = event.snapshot.phase === 'ready' ? 'Servicios privados listos' : 'Preparando servicios privados';
     }).then((initial) => {
       snapshot = initial;
+      if (initial.preferences) {
+        locale = initial.preferences.locale;
+        lanPreference = initial.preferences.lanPreference;
+        closeBehavior = initial.preferences.closeBehavior;
+        automaticUpdateChecks = initial.preferences.automaticUpdateChecks;
+      }
       runtimeLabel = initial.phase === 'ready' ? 'Servicios privados listos' : runtimeLabel;
     }).catch(() => { runtimeLabel = 'Vista previa sin runtime nativo'; });
   });
@@ -151,10 +167,36 @@
       actionBusy = false;
     }
   }
+
+  async function savePreferences(completeOnboarding = false) {
+    actionBusy = true;
+    try {
+      await updatePreferences({ locale, lanPreference, closeBehavior, automaticUpdateChecks, completeOnboarding });
+      actionMessage = completeOnboarding ? 'Configuración inicial guardada.' : 'Preferencias guardadas en este dispositivo.';
+    } catch {
+      actionMessage = 'No se pudieron guardar las preferencias.';
+      actionBusy = false;
+    }
+  }
 </script>
 
 <svelte:head><meta name="theme-color" content="#07131f" /></svelte:head>
 
+{#if snapshot?.preferences && snapshot.preferences.completedOnboardingVersion == null}
+  <main class="onboarding">
+    <div class="onboarding-mark">A</div>
+    <p class="eyebrow">Primera configuración</p>
+    <h1>Privado primero.<br />Compartido solo cuando tú lo decides.</h1>
+    <p class="lede">Elige cómo funcionará AirWiki en este dispositivo. Puedes cambiar estas opciones más tarde en Sistema.</p>
+    <div class="onboarding-steps">
+      <section><span>01</span><div><h2>Idioma</h2><p>La interfaz puede seguir el idioma del sistema.</p></div><select bind:value={locale}><option value="system">Sistema</option><option value="es">Español</option><option value="en">English</option></select></section>
+      <section><span>02</span><div><h2>Red local</h2><p>Permite descubrir equipos cercanos; compartir sigue requiriendo pairing y grants.</p></div><select bind:value={lanPreference}><option value="disabled">Mantener desactivada</option><option value="enabled">Activar red local</option></select></section>
+      <section><span>03</span><div><h2>Al cerrar</h2><p>Ocultar mantiene inferencia, watchers, MCP y LAN activos.</p></div><select bind:value={closeBehavior}><option value="ask">Preguntar siempre</option><option value="hide_to_tray">Ocultar en la bandeja</option><option value="quit">Salir completamente</option></select></section>
+    </div>
+    <button class="primary onboarding-action" onclick={() => savePreferences(true)} disabled={actionBusy || lanPreference === 'undecided'}>Entrar a AirWiki</button>
+    {#if actionMessage}<p class="action-message" aria-live="polite">{actionMessage}</p>{/if}
+  </main>
+{:else}
 <div class="shell">
   <aside class="rail" aria-label="Navegación principal">
     <div class="brand"><span class="brand-mark">A</span><span>AirWiki</span></div>
@@ -293,7 +335,11 @@
         {/if}
 
         {#if destination === 'system' && snapshot}
-          <div class="records"><article><div><strong>{snapshot.model?.displayName ?? 'IA local'}</strong><small>{snapshot.model?.active ? 'Modelo activo' : 'Requiere preparación'}</small></div><span>{snapshot.peers.length} equipos</span></article></div>
+          <div class="system-layout">
+            <section><p class="section-label">IA local</p><h3>{snapshot.model?.displayName ?? 'Modelo recomendado'}</h3><p>{snapshot.model?.active ? 'El modelo está activo y listo para proponer metadatos.' : 'El modelo requiere preparación antes de analizar documentos.'}</p></section>
+            <section class="settings-form"><p class="section-label">Preferencias del dispositivo</p><label><span>Idioma</span><select bind:value={locale}><option value="system">Sistema</option><option value="es">Español</option><option value="en">English</option></select></label><label><span>Red local</span><select bind:value={lanPreference}><option value="disabled">Desactivada</option><option value="enabled">Activada</option></select></label><label><span>Al cerrar</span><select bind:value={closeBehavior}><option value="ask">Preguntar</option><option value="hide_to_tray">Ocultar en bandeja</option><option value="quit">Salir completamente</option></select></label><label class="check"><input type="checkbox" bind:checked={automaticUpdateChecks} /> Buscar actualizaciones automáticamente</label><button class="primary" onclick={() => savePreferences(false)} disabled={actionBusy}>Guardar preferencias</button></section>
+            <section><p class="section-label">Conectividad</p><h3>{snapshot.peers.length} equipos conocidos</h3><p>Las colecciones solo salen de este dispositivo con permisos explícitos.</p></section>
+          </div>
         {/if}
 
         {#if destination === 'search'}
@@ -321,3 +367,4 @@
     </section>
   </main>
 </div>
+{/if}

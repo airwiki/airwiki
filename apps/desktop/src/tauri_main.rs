@@ -34,8 +34,9 @@ use tokio::sync::{broadcast, mpsc, watch};
 use uuid::Uuid;
 
 use crate::{
+    model_config::{CloseBehavior, LanPreference, LocalePreference},
     paths::AppPaths,
-    worker::{WorkerCommand, WorkerEvent, run_worker},
+    worker::{DesktopPreferencesUpdate, WorkerCommand, WorkerEvent, run_worker},
 };
 
 const COMMAND_CAPACITY: usize = 64;
@@ -64,6 +65,7 @@ struct RequestTracker {
     review_evidence: HashMap<Uuid, Uuid>,
     knowledge_bundle: HashMap<Uuid, Uuid>,
     knowledge_page: HashMap<Uuid, Uuid>,
+    preferences: Option<Uuid>,
 }
 
 struct PendingFolderSelection {
@@ -86,6 +88,7 @@ struct AppSnapshot {
     review_evidence: Option<ReviewEvidenceSummary>,
     knowledge: Option<KnowledgeBundleSummary>,
     knowledge_page: Option<KnowledgePageSummary>,
+    preferences: Option<PreferencesSummary>,
     notice: Option<NoticeSummary>,
 }
 
@@ -276,6 +279,26 @@ struct SearchHitSummary {
 struct NoticeSummary {
     level: &'static str,
     message: String,
+}
+
+#[derive(Clone, Copy, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct PreferencesSummary {
+    completed_onboarding_version: Option<u32>,
+    locale: LocalePreference,
+    lan_preference: LanPreference,
+    close_behavior: CloseBehavior,
+    automatic_update_checks: bool,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct PreferencesInput {
+    locale: LocalePreference,
+    lan_preference: LanPreference,
+    close_behavior: CloseBehavior,
+    automatic_update_checks: bool,
+    complete_onboarding: bool,
 }
 
 #[derive(Debug, Serialize)]
@@ -627,6 +650,33 @@ fn load_knowledge_page(
     )
 }
 
+#[tauri::command]
+fn update_preferences(
+    runtime: tauri::State<'_, AppRuntime>,
+    request_id: String,
+    preferences: PreferencesInput,
+) -> Result<(), UiError> {
+    let request_id = parse_uuid(&request_id)?;
+    runtime
+        .requests
+        .lock()
+        .map_err(|_| UiError::internal())?
+        .preferences = Some(request_id);
+    send_command(
+        &runtime,
+        WorkerCommand::UpdateDesktopPreferences {
+            request_id,
+            update: DesktopPreferencesUpdate {
+                locale: preferences.locale,
+                lan_preference: preferences.lan_preference,
+                close_behavior: preferences.close_behavior,
+                automatic_update_checks: preferences.automatic_update_checks,
+                complete_onboarding: preferences.complete_onboarding,
+            },
+        },
+    )
+}
+
 fn consume_folder_selection(runtime: &AppRuntime, token: &str) -> Result<PathBuf, UiError> {
     let token = parse_uuid(token)?;
     let selection = runtime
@@ -689,6 +739,7 @@ impl AppSnapshot {
             review_evidence: None,
             knowledge: None,
             knowledge_page: None,
+            preferences: None,
             notice: None,
         }
     }
@@ -740,6 +791,23 @@ impl AppSnapshot {
                 self.peers = peers.into_iter().map(PeerSummary::from).collect();
             }
             WorkerEvent::ModelState(model) => self.model = Some(ModelSummary::from(model)),
+            WorkerEvent::DesktopPreferencesUpdated { result, .. } => match result {
+                Ok(preferences) => {
+                    self.preferences = Some(PreferencesSummary {
+                        completed_onboarding_version: preferences.completed_onboarding_version,
+                        locale: preferences.locale,
+                        lan_preference: preferences.lan_preference,
+                        close_behavior: preferences.close_behavior,
+                        automatic_update_checks: preferences.automatic_update_checks,
+                    });
+                }
+                Err(_) => {
+                    self.notice = Some(NoticeSummary {
+                        level: "error",
+                        message: "preferences-update-failed".to_owned(),
+                    });
+                }
+            },
             WorkerEvent::ReviewEvidenceLoaded {
                 request_id,
                 concept_id,
@@ -968,6 +1036,15 @@ fn request_is_current(event: &WorkerEvent, requests: &Mutex<RequestTracker>) -> 
             collection_id,
             ..
         } => remove_matching_request(&mut requests.knowledge_page, collection_id, request_id),
+        WorkerEvent::DesktopPreferencesUpdated { request_id, .. } if request_id.is_nil() => true,
+        WorkerEvent::DesktopPreferencesUpdated { request_id, .. } => {
+            if requests.preferences == Some(*request_id) {
+                requests.preferences = None;
+                true
+            } else {
+                false
+            }
+        }
         _ => true,
     }
 }
@@ -1354,7 +1431,8 @@ fn main() -> Result<()> {
             reject_review,
             reanalyze_review,
             load_knowledge_bundle,
-            load_knowledge_page
+            load_knowledge_page,
+            update_preferences
         ])
         .run(tauri::generate_context!())
         .map_err(|error| anyhow::anyhow!(error.to_string()))

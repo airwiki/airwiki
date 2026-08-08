@@ -32,16 +32,16 @@ const APPLICATION_ID_LICENSE_ERROR: &str =
     "missing_verified_redistribution_license: nsis-applicationid-1.1";
 const VERIFIED_NON_CARGO_LEGAL_TEXTS: [(&str, &str); 21] = [
     (
-        "resources/licenses/non-cargo/NSIS-3.09-COPYING.txt",
-        "1aab7a7da0a0d0f8a7857be09fe403ec807eb55c60c1264f1bbd17144482a222",
+        "resources/licenses/non-cargo/NSIS-3.11-COPYING.txt",
+        "dc0f74a312c08ffc900548a67ae9a3670ed28ad25a3afda1fe0504da16f89361",
     ),
     (
-        "resources/licenses/non-cargo/nsis-tauri-utils-0.2.1-LICENSE_APACHE-2.0.txt",
-        "809fa1ed21450f59827d1e9aec720bbc4b687434fa22283c6cb5dd82a47ab9c0",
+        "resources/licenses/non-cargo/nsis-tauri-utils-0.5.3-LICENSE_APACHE-2.0.txt",
+        "0d542e0c8804e39aa7f37eb00da5a762149dc682d7829451287e11b938e94594",
     ),
     (
-        "resources/licenses/non-cargo/nsis-tauri-utils-0.2.1-LICENSE_MIT.txt",
-        "20ae1ba81c7eddc620dfe2de650f6a453b4979f843c2482abfe8764264a24a49",
+        "resources/licenses/non-cargo/nsis-tauri-utils-0.5.3-LICENSE_MIT.txt",
+        "1c1020fa10a6bf318717e82c911bcc54ebdfb9bb280460ae332bcb2f82f57fbe",
     ),
     (
         "resources/licenses/non-cargo/7-Zip-26.02-License.txt",
@@ -1634,14 +1634,11 @@ fn validate_non_cargo_legal_inventory(root: &Path) -> Result<()> {
     let inventory = String::from_utf8(read_regular_file(&inventory_path, MAX_LEGAL_FILE_BYTES)?)
         .with_context(|| format!("{} is not UTF-8", inventory_path.display()))?;
     for required in [
-        "f5dc52eef1f3884230520199bac6f36b82d643d86b003ce51bd24b05c6ba7c91",
-        "62677d44c9721779c2219571a5d3afdf4fcf4668b5dc475f5f5668d31d3e8ae9",
+        "c7d27f780ddb6cffb4730138cd1591e841f4b7edb155856901cdf5f214394fa1",
+        "a0d065b62d34be5f0aaaf7c162e101a5e25d7cd3eb10a13fdb37f91b02ebfce2",
         "Common Public License 1.0",
-        "0eed48313a7f904d7cc1977b70000ab3f11f18cadc8e6a69b807d288ca71f9db",
+        "5ba143b5db4a87d32d6e7802e033330aae56cbceabe0d1e3ba41948385ad4709",
         "MIT OR Apache-2.0",
-        "1c2772b0edfb0f96a7524734d6c8fac1fc011f26221faf88f3ed2c950f0c06c0",
-        "f6851dcbf0a39edecd8a46564bc455e5273736c3dbcb02b954c201c79ccdf117",
-        "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
         "db407a4f6d4999e5c7bc00ce8a882be94717b56e7fa68140fe3f12605d91643e",
         "83967f1b02b43c4efeda302795722c809e0e81b8307de73558d10484d5676a7d",
         "69fd4df057985c40e510e2fac182881c7f85e90aa13ec703f763a8fdb2ce61f8",
@@ -1662,7 +1659,6 @@ fn validate_non_cargo_legal_inventory(root: &Path) -> Result<()> {
         "8ee059f719506d610d0e11e15a36d5c6fd9a55801931b80215f9d26ed019e0d1",
         "36df9677aa6a2ae37a01c7aaa39c3206fa02a4e06bb5037ebe89e5828b931f31",
         "0bc26379d10e8dc97d4bab5b007391e3ce25454f080fd0f2b12be4afe238e6df",
-        APPLICATION_ID_LICENSE_ERROR,
     ] {
         ensure!(
             inventory.contains(required),
@@ -1675,10 +1671,9 @@ fn validate_non_cargo_legal_inventory(root: &Path) -> Result<()> {
     let notices = String::from_utf8(read_regular_file(&notices_path, MAX_LEGAL_FILE_BYTES)?)
         .with_context(|| format!("{} is not UTF-8", notices_path.display()))?;
     for required in [
-        "NSIS 3.09",
+        "NSIS 3.11",
         "Common Public License 1.0",
-        "nsis-tauri-utils 0.2.1",
-        "NSIS-ApplicationID 1.1",
+        "nsis-tauri-utils 0.5.3",
         "7-Zip 26.02",
         "llama.cpp Windows",
         "OpenMP",
@@ -1699,11 +1694,11 @@ fn validate_non_cargo_legal_inventory(root: &Path) -> Result<()> {
         );
     }
 
-    let packager = fs::read_to_string(root.join("packaging/windows/Packager.toml"))
+    let packager = fs::read_to_string(root.join("packaging/windows/tauri.bundle.conf.json"))
         .context("reading the Windows packager configuration for legal validation")?;
     ensure!(
-        packager.contains("compression = \"lzma\"")
-            && packager.contains("{ src = \"../../resources/licenses\", target = \"licenses\" }"),
+        packager.contains("\"compression\": \"lzma\"")
+            && packager.contains("\"../../resources/licenses/\": \"licenses/\""),
         "Windows packaging must use the inventoried LZMA stub and include the complete license tree"
     );
     let template = fs::read_to_string(root.join("packaging/windows/installer.nsi"))
@@ -1717,7 +1712,7 @@ fn validate_non_cargo_legal_inventory(root: &Path) -> Result<()> {
     validate_windows_llama_runtime_supply_chain(root)?;
     let toolchain = fs::read_to_string(root.join("packaging/prepare-verified-nsis-toolchain.ps1"))
         .context("reading the verified NSIS toolchain preparation")?;
-    validate_application_id_toolchain_is_inert(&toolchain)?;
+    validate_application_id_toolchain_is_absent(&toolchain)?;
     validate_pinned_seven_zip_tool(root)?;
     Ok(())
 }
@@ -2109,40 +2104,32 @@ fn validate_local_windows_package_tools(package: &str) -> Result<()> {
         .find("prepare-verified-7zip.ps1")
         .context("Windows packaging does not prepare the pinned 7-Zip extractor")?;
     let packaging = package
-        .find("& $CargoPackager --config packaging/windows/Packager.toml")
+        .find("& $Tauri build")
         .context("Windows packaging does not invoke the managed packager configuration")?;
     ensure!(
-        package.contains(
-            "$NsisToolCacheRoot = Join-Path ([Environment]::GetFolderPath(\"LocalApplicationData\")) \".cargo-packager\""
-        ) && package.contains("-ToolCacheRoot $NsisToolCacheRoot")
-            && package.contains(
-                "Get-Command cargo-packager.exe -CommandType Application"
-            )
-            && package.contains(
-                "$CargoPackagerVersion -ne \"cargo-packager 0.11.8\""
-            )
+        package.contains("$NsisToolCacheRoot = Join-Path $Root \"target\\.tauri\"")
+            && package.contains("-ToolCacheRoot $NsisToolCacheRoot")
+            && package.contains("$TauriVersion -ne \"tauri-cli 2.11.4\"")
             && package.contains("target\\verified-tools\\7zip-26.02")
             && package.contains("-ToolRoot $SevenZipToolRoot")
             && !package.contains("Get-Command makensis")
             && !package.contains("Get-Command 7z.exe")
-            && !package.contains("cargo packager --config packaging/windows/Packager.toml")
+            && !package.contains("cargo-packager")
+            && package.contains("--config ..\\..\\packaging\\windows\\tauri.bundle.conf.json")
             && nsis_preparation < packaging
             && seven_zip_preparation < packaging,
-        "Windows packaging must verify cargo-packager and prepare the pinned NSIS and 7-Zip tools before packaging"
+        "Windows packaging must verify Tauri and prepare the pinned NSIS and 7-Zip tools before packaging"
     );
     Ok(())
 }
 
-fn validate_application_id_toolchain_is_inert(toolchain: &str) -> Result<()> {
+fn validate_application_id_toolchain_is_absent(toolchain: &str) -> Result<()> {
     ensure!(
         !toolchain.contains("NSIS-ApplicationID.zip")
             && !toolchain.contains("nsis-plugins-v0")
             && !toolchain
                 .contains("1c2772b0edfb0f96a7524734d6c8fac1fc011f26221faf88f3ed2c950f0c06c0")
-            && toolchain.contains("[IO.File]::WriteAllBytes($CompatibilitySentinel")
-            && toolchain.contains("$SentinelItem.Length -ne 0")
-            && toolchain
-                .contains("e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"),
+            && !toolchain.contains("ApplicationID"),
         "{APPLICATION_ID_LICENSE_ERROR}"
     );
     Ok(())
@@ -2788,7 +2775,7 @@ fn read_small_regular_utf8(path: &Path, limit: u64, label: &str) -> Result<Strin
 
 fn verify_windows_uninstaller() -> Result<()> {
     let root = workspace_root();
-    let config = fs::read_to_string(root.join("packaging/windows/Packager.toml"))
+    let config = fs::read_to_string(root.join("packaging/windows/tauri.bundle.conf.json"))
         .context("reading the Windows packager configuration")?;
     let template = fs::read_to_string(root.join("packaging/windows/installer.nsi"))
         .context("reading the managed Windows NSIS template")?;
@@ -4583,9 +4570,9 @@ fn verify_windows_update_handoff_sources(template: &str, updater: &str) -> Resul
         "Windows updater must revalidate exact bytes and publisher on the final non-reparse read-only handle"
     );
     ensure!(
-        updater.contains(
-            "expected_windows_update_version(&update.version, env!(\"CARGO_PKG_VERSION\"))"
-        ) && updater.contains("FILE_VER_GET_NEUTRAL")
+        updater.contains("expected_windows_update_version(version, env!(\"CARGO_PKG_VERSION\"))")
+            && updater.contains("install_windows_platform_update(&update.version, package)")
+            && updater.contains("FILE_VER_GET_NEUTRAL")
             && updater.contains("MAX_WINDOWS_VERSION_INFO_BYTES")
             && updater.contains("read_locked_windows_versions(package)")
             && updater.contains("fixed_info.dwFileVersionMS")
@@ -4602,22 +4589,12 @@ fn verify_windows_update_handoff_sources(template: &str, updater: &str) -> Resul
 }
 
 fn verify_windows_uninstaller_sources(config: &str, template: &str) -> Result<()> {
-    let install_modes = config
-        .lines()
-        .map(str::trim)
-        .filter(|line| line.starts_with("installMode ="))
-        .collect::<Vec<_>>();
     ensure!(
-        install_modes == ["installMode = \"currentUser\""],
+        config.matches("\"installMode\": \"currentUser\"").count() == 1,
         "Windows installer configuration must remain currentUser-only"
     );
-    let downgrade_settings = config
-        .lines()
-        .map(str::trim)
-        .filter(|line| line.starts_with("allowDowngrades ="))
-        .collect::<Vec<_>>();
     ensure!(
-        downgrade_settings == ["allowDowngrades = false"],
+        config.matches("\"allowDowngrades\": false").count() == 1,
         "Windows installer configuration must disable downgrades"
     );
     ensure!(
@@ -4626,20 +4603,22 @@ fn verify_windows_uninstaller_sources(config: &str, template: &str) -> Result<()
         "Windows installer template must consume the verified install mode and downgrade policy"
     );
     ensure!(
-        config.contains("template = \"installer.nsi\""),
+        config.contains("\"template\": \"../../packaging/windows/installer.nsi\""),
         "Windows packaging must select the managed NSIS template"
     );
-    let appdata_paths = toml_string_array(config, "appdataPaths")?;
     ensure!(
-        appdata_paths
-            == [
-                "$LOCALAPPDATA/airwiki/AirWiki".to_owned(),
-                "$APPDATA/airwiki/AirWiki".to_owned(),
-            ],
-        "Windows appdataPaths must contain exactly the two managed data roots"
+        template
+            .matches("RmDir /r \"$LOCALAPPDATA\\airwiki\\AirWiki\"")
+            .count()
+            == 1
+            && template
+                .matches("RmDir /r \"$APPDATA\\airwiki\\AirWiki\"")
+                .count()
+                == 1,
+        "Windows uninstall must contain exactly the two managed data roots"
     );
     ensure!(
-        template.contains("cargo-packager 0.11.8's default NSIS template"),
+        template.contains("Based on Tauri bundler 2.9.4's NSIS template"),
         "the managed NSIS template must record its pinned upstream base"
     );
     ensure!(
@@ -4886,7 +4865,7 @@ fn verify_windows_uninstaller_sources(config: &str, template: &str) -> Result<()
     );
 
     let data_cleanup = uninstall
-        .find("; Delete app data")
+        .find("; Delete only AirWiki's two documented mutable roots when explicitly chosen.")
         .map(|offset| &uninstall[offset..])
         .context("app-data cleanup block is missing")?;
     let data_gate = data_cleanup
@@ -4909,45 +4888,14 @@ fn verify_windows_uninstaller_sources(config: &str, template: &str) -> Result<()
         .filter(|line| line.to_ascii_lowercase().starts_with("rmdir /r "))
         .collect::<Vec<_>>();
     ensure!(
-        recursive_deletes == ["RmDir /r \"{{unescape_dollar_sign this}}\""],
-        "uninstaller must contain no recursive deletion outside managed appdataPaths"
+        recursive_deletes
+            == [
+                "RmDir /r \"$LOCALAPPDATA\\airwiki\\AirWiki\"",
+                "RmDir /r \"$APPDATA\\airwiki\\AirWiki\"",
+            ],
+        "uninstaller must contain only the two managed app-data recursive deletions"
     );
     Ok(())
-}
-
-fn toml_string_array(config: &str, key: &str) -> Result<Vec<String>> {
-    let marker = format!("{key} = [");
-    ensure!(
-        config.lines().filter(|line| line.trim() == marker).count() == 1,
-        "{key} string array must appear exactly once"
-    );
-    let start = config
-        .lines()
-        .position(|line| line.trim() == marker)
-        .with_context(|| format!("missing {key} string array"))?;
-    let mut values = Vec::new();
-    let mut closed = false;
-    for line in config.lines().skip(start + 1) {
-        let line = line.trim();
-        if line == "]" {
-            closed = true;
-            break;
-        }
-        ensure!(!line.is_empty(), "{key} contains an empty array entry");
-        let value = line
-            .strip_suffix(',')
-            .unwrap_or(line)
-            .strip_prefix('"')
-            .and_then(|value| value.strip_suffix('"'))
-            .with_context(|| format!("{key} contains a non-string entry"))?;
-        ensure!(
-            !value.contains('"') && !value.contains('\\'),
-            "{key} contains an escaped or ambiguous path"
-        );
-        values.push(value.to_owned());
-    }
-    ensure!(closed, "{key} string array is not terminated");
-    Ok(values)
 }
 
 #[cfg(test)]
@@ -4964,7 +4912,8 @@ mod tests {
 
     fn windows_uninstaller_sources() -> (String, String) {
         let root = workspace_root();
-        let config = fs::read_to_string(root.join("packaging/windows/Packager.toml")).unwrap();
+        let config =
+            fs::read_to_string(root.join("packaging/windows/tauri.bundle.conf.json")).unwrap();
         let template = fs::read_to_string(root.join("packaging/windows/installer.nsi")).unwrap();
         (config, template)
     }
@@ -6657,13 +6606,13 @@ mod tests {
         let (config, template) = windows_uninstaller_sources();
         for (needle, replacement, message) in [
             (
-                "installMode = \"currentUser\"",
-                "installMode = \"both\"",
+                "\"installMode\": \"currentUser\"",
+                "\"installMode\": \"both\"",
                 "currentUser-only",
             ),
             (
-                "allowDowngrades = false",
-                "allowDowngrades = true",
+                "\"allowDowngrades\": false",
+                "\"allowDowngrades\": true",
                 "disable downgrades",
             ),
         ] {
@@ -6871,7 +6820,7 @@ mod tests {
     fn windows_update_handoff_rejects_an_unbound_manifest_version() {
         let (template, updater) = windows_update_handoff_sources();
         let unsafe_updater = updater.replace(
-            "expected_windows_update_version(&update.version, env!(\"CARGO_PKG_VERSION\"))",
+            "expected_windows_update_version(version, env!(\"CARGO_PKG_VERSION\"))",
             "expected_windows_update_version(\"999.0.0\", env!(\"CARGO_PKG_VERSION\"))",
         );
 
@@ -6933,14 +6882,15 @@ mod tests {
     #[test]
     fn windows_uninstaller_rejects_an_additional_appdata_root() {
         let (config, template) = windows_uninstaller_sources();
-        let unsafe_config = config.replace(
-            "  \"$APPDATA/airwiki/AirWiki\",\n]",
-            "  \"$APPDATA/airwiki/AirWiki\",\n  \"$LOCALAPPDATA\",\n]",
+        let unsafe_template = template.replace(
+            "    RmDir /r \"$APPDATA\\airwiki\\AirWiki\"",
+            "    RmDir /r \"$APPDATA\\airwiki\\AirWiki\"\n    RmDir /r \"$LOCALAPPDATA\"",
         );
+        assert_ne!(unsafe_template, template);
 
-        let error = verify_windows_uninstaller_sources(&unsafe_config, &template).unwrap_err();
+        let error = verify_windows_uninstaller_sources(&config, &unsafe_template).unwrap_err();
 
-        assert!(error.to_string().contains("exactly the two managed"));
+        assert!(error.to_string().contains("only the two managed"));
     }
 
     #[test]
@@ -7042,14 +6992,14 @@ mod tests {
     fn windows_uninstaller_rejects_recursive_deletion_outside_confirmation() {
         let (config, template) = windows_uninstaller_sources();
         let unsafe_template = template.replacen(
-            "  ; Delete app data",
-            "  RmDir /r \"$LOCALAPPDATA\"\n\n  ; Delete app data",
+            "  ; Delete only AirWiki's two documented mutable roots when explicitly chosen.",
+            "  RmDir /r \"$LOCALAPPDATA\"\n\n  ; Delete only AirWiki's two documented mutable roots when explicitly chosen.",
             1,
         );
 
         let error = verify_windows_uninstaller_sources(&config, &unsafe_template).unwrap_err();
 
-        assert!(error.to_string().contains("no recursive deletion"));
+        assert!(error.to_string().contains("only the two managed"));
     }
 
     #[test]
@@ -7218,7 +7168,7 @@ mod tests {
 
     #[test]
     fn application_id_gate_rejects_the_unlicensed_toolchain_download() {
-        let error = validate_application_id_toolchain_is_inert(
+        let error = validate_application_id_toolchain_is_absent(
             "Invoke-WebRequest https://example.invalid/NSIS-ApplicationID.zip",
         )
         .unwrap_err();
@@ -7451,7 +7401,8 @@ mod tests {
         let macos =
             fs::read_to_string(root.join("packaging/macos/tauri.bundle.conf.json")).unwrap();
         let macos_wrapper = fs::read_to_string(root.join("packaging/package-macos.sh")).unwrap();
-        let windows = fs::read_to_string(root.join("packaging/windows/Packager.toml")).unwrap();
+        let windows =
+            fs::read_to_string(root.join("packaging/windows/tauri.bundle.conf.json")).unwrap();
         let windows_wrapper =
             fs::read_to_string(root.join("packaging/package-windows.ps1")).unwrap();
         for config in [&macos, &windows] {
@@ -7468,9 +7419,7 @@ mod tests {
         assert!(windows_wrapper.contains("cargo build --locked --release"));
         assert!(windows_wrapper.contains("mcpb build"));
         let mcpb_build = windows_wrapper.find("mcpb build").unwrap();
-        let packaging = windows_wrapper
-            .find("& $CargoPackager --config packaging/windows/Packager.toml")
-            .unwrap();
+        let packaging = windows_wrapper.find("& $Tauri build").unwrap();
         assert!(mcpb_build < packaging);
     }
 
@@ -7572,15 +7521,21 @@ mod tests {
         let script =
             fs::read_to_string(workspace_root().join("packaging/package-windows.ps1")).unwrap();
         let fetch = script.find("fetch-llama-windows.ps1").unwrap();
-        let cargo_release = script
+        let bridge_release = script
             .find("cargo build --locked --release --target x86_64-pc-windows-msvc")
             .unwrap();
+        let tauri_build = script.find("& $Tauri build").unwrap();
         let receipt = script
             .find("Assert-WindowsDesktopEmbedsLlamaRuntimeHash")
             .unwrap();
         let mcpb_build = script.find("& $Xtask mcpb build").unwrap();
 
-        assert!(fetch < cargo_release && cargo_release < receipt && receipt < mcpb_build);
+        assert!(
+            fetch < bridge_release
+                && bridge_release < mcpb_build
+                && mcpb_build < tauri_build
+                && tauri_build < receipt
+        );
     }
 
     #[cfg(windows)]
@@ -8240,10 +8195,10 @@ mod tests {
         assert!(
             names.contains("licenses/NON_CARGO_COMPONENTS.md")
                 && names.contains("licenses/THIRD_PARTY_LICENSES.md")
-                && names.contains("licenses/non-cargo/NSIS-3.09-COPYING.txt")
+                && names.contains("licenses/non-cargo/NSIS-3.11-COPYING.txt")
                 && names
-                    .contains("licenses/non-cargo/nsis-tauri-utils-0.2.1-LICENSE_APACHE-2.0.txt")
-                && names.contains("licenses/non-cargo/nsis-tauri-utils-0.2.1-LICENSE_MIT.txt")
+                    .contains("licenses/non-cargo/nsis-tauri-utils-0.5.3-LICENSE_APACHE-2.0.txt")
+                && names.contains("licenses/non-cargo/nsis-tauri-utils-0.5.3-LICENSE_MIT.txt")
         );
     }
 
@@ -8387,15 +8342,10 @@ mod tests {
         .unwrap();
 
         assert!(
-            script.contains("f5dc52eef1f3884230520199bac6f36b82d643d86b003ce51bd24b05c6ba7c91")
+            script.contains("c7d27f780ddb6cffb4730138cd1591e841f4b7edb155856901cdf5f214394fa1")
                 && script
-                    .contains("0eed48313a7f904d7cc1977b70000ab3f11f18cadc8e6a69b807d288ca71f9db")
-                && script
-                    .contains("e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855")
+                    .contains("5ba143b5db4a87d32d6e7802e033330aae56cbceabe0d1e3ba41948385ad4709")
                 && script.contains("Get-FileHash -LiteralPath $Destination -Algorithm SHA256")
-                && script.contains("$CompatibilitySentinel")
-                && script.contains("[IO.File]::WriteAllBytes($CompatibilitySentinel")
-                && script.contains("$SentinelItem.Length -ne 0")
                 && script.contains("Assert-RequiredNsisLayout $FinalNsis")
                 && !script.contains("NSIS-ApplicationID.zip")
                 && !script.contains("nsis-plugins-v0")

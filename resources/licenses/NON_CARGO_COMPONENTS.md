@@ -112,61 +112,38 @@ removes the routine and delegates to the licensed Pillow path. The patched sourc
 `7c0cfa47bd61a9202824a9610cdc1168c2edd868e7c2e115f80e9eba70037f0f`; the build policy and
 manifest authenticate both hashes.
 
-## NSIS 3.09
+## NSIS 3.11
 
-- Artifact pinned by `cargo-packager 0.11.8`:
-  `https://github.com/tauri-apps/binary-releases/releases/download/nsis-3.9/nsis-3.09.zip`
-- Origin declared by the mirror:
-  `https://sourceforge.net/projects/nsis/files/NSIS%203/3.09/nsis-3.09.zip/download`
-- Pinned ZIP SHA-256: `f5dc52eef1f3884230520199bac6f36b82d643d86b003ce51bd24b05c6ba7c91`.
-- Licenses declared by `nsis-3.09/COPYING`: zlib/libpng for the core, plug-ins, and documentation
+- Artifact pinned by Tauri bundler 2.9.4:
+  `https://github.com/tauri-apps/binary-releases/releases/download/nsis-3.11/nsis-3.11.zip`
+- Pinned ZIP SHA-256: `c7d27f780ddb6cffb4730138cd1591e841f4b7edb155856901cdf5f214394fa1`.
+- Licenses declared by `nsis-3.11/COPYING`: zlib/libpng for the core, plug-ins, and documentation
   except where otherwise noted; bzip2 for the bzip2 module; Common Public License 1.0 for the LZMA
   module, with the special linking exception included by its authors.
-- Included legal text: `non-cargo/NSIS-3.09-COPYING.txt`, normalized SHA-256
-  `1aab7a7da0a0d0f8a7857be09fe403ec807eb55c60c1264f1bbd17144482a222`.
+- Included legal text: `non-cargo/NSIS-3.11-COPYING.txt`, SHA-256
+  `dc0f74a312c08ffc900548a67ae9a3670ed28ad25a3afda1fe0504da16f89361`.
 
 The installer uses the `Stubs/lzma_solid-x86-unicode` stub from the same ZIP, SHA-256
-`62677d44c9721779c2219571a5d3afdf4fcf4668b5dc475f5f5668d31d3e8ae9`. Therefore the CPL-1.0
+`a0d065b62d34be5f0aaaf7c162e101a5e25d7cd3eb10a13fdb37f91b02ebfce2`. Therefore the CPL-1.0
 text and the LZMA exception are mandatory parts of the distributed notices.
 
-## nsis-tauri-utils 0.2.1
+## nsis-tauri-utils 0.5.3
 
 - Pinned release:
-  `https://github.com/tauri-apps/nsis-tauri-utils/releases/tag/nsis_tauri_utils-v0.2.1`.
-- Tag/commit: `c3a4447060a260c5e4e09d94284948c4f864da02`.
-- DLL pinned by `cargo-packager 0.11.8`: SHA-256
-  `0eed48313a7f904d7cc1977b70000ab3f11f18cadc8e6a69b807d288ca71f9db`.
+  `https://github.com/tauri-apps/nsis-tauri-utils/releases/tag/nsis_tauri_utils-v0.5.3`.
+- Tag/commit: `13d9edd27b69310e108d6fbd49f90992f8a05390`.
+- DLL pinned by Tauri bundler 2.9.4: SHA-256
+  `5ba143b5db4a87d32d6e7802e033330aae56cbceabe0d1e3ba41948385ad4709`.
 - License declared by the workspace at that tag: `MIT OR Apache-2.0`.
 - Legal texts included from that tag:
-  - `non-cargo/nsis-tauri-utils-0.2.1-LICENSE_MIT.txt`, normalized SHA-256
-    `20ae1ba81c7eddc620dfe2de650f6a453b4979f843c2482abfe8764264a24a49`.
-  - `non-cargo/nsis-tauri-utils-0.2.1-LICENSE_APACHE-2.0.txt`, normalized SHA-256
-    `809fa1ed21450f59827d1e9aec720bbc4b687434fa22283c6cb5dd82a47ab9c0`.
+  - `non-cargo/nsis-tauri-utils-0.5.3-LICENSE_MIT.txt`, SHA-256
+    `1c1020fa10a6bf318717e82c911bcc54ebdfb9bb280460ae332bcb2f82f57fbe`.
+  - `non-cargo/nsis-tauri-utils-0.5.3-LICENSE_APACHE-2.0.txt`, SHA-256
+    `0d542e0c8804e39aa7f37eb00da5a762149dc682d7829451287e11b938e94594`.
 
-## NSIS-ApplicationID 1.1: excluded from the artifact
-
-`cargo-packager 0.11.8` would normally download the mirror at
-`https://github.com/tauri-apps/binary-releases/releases/download/nsis-plugins-v0/NSIS-ApplicationID.zip`.
-The mirror release identifies its origin as
-`https://github.com/connectiblutz/NSIS-ApplicationID/releases/tag/1.1`.
-
-- Mirror ZIP SHA-256: `1c2772b0edfb0f96a7524734d6c8fac1fc011f26221faf88f3ed2c950f0c06c0`.
-- Upstream tag/commit: `ad7e5084c69342d8f9fa7c66c6a135ca04e3c284`.
-- DLL selected by the packager: `ReleaseUnicode/ApplicationID.dll`, SHA-256
-  `f6851dcbf0a39edecd8a46564bc455e5273736c3dbcb02b954c201c79ccdf117`.
-
-The tag, repository, release, and both ZIP files contain neither a license nor a verifiable
-redistribution grant. A code copyright does not substitute for a license. Release preparation
-therefore does not download that ZIP. It creates only the path required by the internal
-`cargo-packager 0.11.8` check, as an empty, non-executable sentinel (SHA-256
-`e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855`). The managed template
-does not invoke `ApplicationID::Set`; NSIS does not incorporate that plug-in into the installer.
-Normal shortcut creation continues without an explicit AppUserModelID.
-
-The legal gate fails closed with
-`missing_verified_redistribution_license: nsis-applicationid-1.1` if the template references
-`ApplicationID::` again. Reintroduction would require a verifiable public grant that covers the
-distributed code and a legal text pinned by hash.
+Tauri v2 no longer requires the unlicensed `NSIS-ApplicationID` compatibility plug-in. AirWiki
+does not download, stage, invoke, or distribute it. Both the toolchain and template policy gates
+reject any future reintroduction.
 
 ## 7-Zip 26.02 x64: non-distributed verification tool
 

@@ -9,7 +9,9 @@ $Desktop = Join-Path $ReleaseDir "airwiki.exe"
 $FirewallHelper = Join-Path $ReleaseDir "airwiki-windows-firewall-helper.exe"
 $Mcpb = Join-Path $Root "target\mcpb\x86_64-pc-windows-msvc\airwiki-claude.mcpb"
 $Xtask = Join-Path $Root "target\debug\xtask.exe"
-$NsisToolCacheRoot = Join-Path ([Environment]::GetFolderPath("LocalApplicationData")) ".cargo-packager"
+$NsisToolCacheRoot = Join-Path $Root "target\.tauri"
+$Tauri = Join-Path $Root "apps\desktop\ui\node_modules\.bin\tauri.cmd"
+$TauriInstallerDir = Join-Path $ReleaseDir "bundle\nsis"
 $SevenZipToolRoot = Join-Path $Root "target\verified-tools\7zip-26.02"
 $SevenZip = Join-Path $SevenZipToolRoot "7z.exe"
 $LlamaRuntime = Join-Path $Root "resources\llama\windows-x64"
@@ -55,11 +57,12 @@ function Assert-SameBytes([string] $Expected, [string] $Actual, [string] $Label)
 
 Push-Location $Root
 try {
-    $CargoPackager = (Get-Command cargo-packager.exe -CommandType Application `
-        -ErrorAction Stop).Source
-    $CargoPackagerVersion = (& $CargoPackager --version 2>&1 | Out-String).Trim()
-    if ($LASTEXITCODE -ne 0 -or $CargoPackagerVersion -ne "cargo-packager 0.11.8") {
-        throw "cargo-packager 0.11.8 is required"
+    if (-not (Test-Path -LiteralPath $Tauri -PathType Leaf)) {
+        throw "pinned Tauri CLI dependencies are missing; run pnpm install --frozen-lockfile --ignore-scripts"
+    }
+    $TauriVersion = (& $Tauri --version 2>&1 | Out-String).Trim()
+    if ($LASTEXITCODE -ne 0 -or $TauriVersion -ne "tauri-cli 2.11.4") {
+        throw "Tauri CLI 2.11.4 is required"
     }
     & (Join-Path $PSScriptRoot "prepare-verified-nsis-toolchain.ps1") `
         -ToolCacheRoot $NsisToolCacheRoot | Out-Null
@@ -92,13 +95,11 @@ try {
     $env:AIRWIKI_WINDOWS_LLAMA_SERVER_SHA256 = `
         [string] @($LlamaManifest.runtime.files)[0].sha256
     & cargo build --locked --release --target x86_64-pc-windows-msvc `
-        -p airwiki-desktop `
         -p airwiki-mcp-bridge `
         -p airwiki-windows-firewall-helper
     if ($LASTEXITCODE -ne 0) {
         throw "release build failed"
     }
-    Assert-WindowsDesktopEmbedsLlamaRuntimeHash $Desktop $LlamaRuntime $LlamaPolicy
     & $Xtask mcpb build `
         --target x86_64-pc-windows-msvc `
         --bridge $Bridge `
@@ -106,7 +107,6 @@ try {
     if ($LASTEXITCODE -ne 0) {
         throw "Claude MCPB build failed"
     }
-    Assert-X64Pe $Desktop
     Assert-X64Pe $Bridge
     Assert-X64Pe $FirewallHelper
     Assert-WindowsFirewallHelperManifest `
@@ -120,14 +120,27 @@ try {
         throw "Claude MCPB validation failed"
     }
 
-    # The runtime is built before the desktop so its per-candidate SHA-256 is
-    # embedded in the executable. Revalidate both after every Cargo build.
-    Assert-WindowsDesktopEmbedsLlamaRuntimeHash $Desktop $LlamaRuntime $LlamaPolicy
-    & $CargoPackager --config packaging/windows/Packager.toml
-    if ($LASTEXITCODE -ne 0) {
-        throw "cargo-packager failed"
+    Push-Location (Join-Path $Root "apps\desktop")
+    try {
+        & $Tauri build `
+            --ci `
+            --config ..\..\packaging\windows\tauri.bundle.conf.json `
+            --target x86_64-pc-windows-msvc `
+            --bundles nsis
+        if ($LASTEXITCODE -ne 0) {
+            throw "Tauri NSIS packaging failed"
+        }
+    } finally {
+        Pop-Location
     }
+    Assert-X64Pe $Desktop
+    Assert-WindowsDesktopEmbedsLlamaRuntimeHash $Desktop $LlamaRuntime $LlamaPolicy
 
+    $TauriInstallers = @(Get-ChildItem -LiteralPath $TauriInstallerDir -File -Filter *.exe)
+    if ($TauriInstallers.Count -ne 1) {
+        throw "Expected exactly one Tauri NSIS installer"
+    }
+    Copy-Item -LiteralPath $TauriInstallers[0].FullName -Destination $OutDir
     $Installers = @(Get-ChildItem -LiteralPath $OutDir -File -Filter *.exe)
     if ($Installers.Count -ne 1) {
         throw "Expected exactly one fresh NSIS installer"

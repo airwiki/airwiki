@@ -13,6 +13,7 @@ export interface AppSnapshot {
   reviewEvidence: ReviewEvidenceSummary | null;
   knowledge: KnowledgeBundleSummary | null;
   knowledgePage: KnowledgePageSummary | null;
+  preferences: PreferencesSummary | null;
   notice: { level: string; message: string } | null;
 }
 
@@ -53,6 +54,11 @@ export type KnowledgeBlock =
   | { kind: 'quote'; text: string }
   | { kind: 'rule' };
 export interface KnowledgePageSummary { collectionId: string; page: KnowledgePageInput; title: string; status: 'ready' | 'failed'; blocks: KnowledgeBlock[]; metadata: [string, string][]; backlinks: KnowledgePageInput[]; truncated: boolean; }
+export type LocalePreference = 'system' | 'es' | 'en';
+export type LanPreference = 'undecided' | 'disabled' | 'enabled';
+export type CloseBehavior = 'ask' | 'hide_to_tray' | 'quit';
+export interface PreferencesSummary { completedOnboardingVersion: number | null; locale: LocalePreference; lanPreference: LanPreference; closeBehavior: CloseBehavior; automaticUpdateChecks: boolean; }
+export interface PreferencesInput { locale: LocalePreference; lanPreference: LanPreference; closeBehavior: CloseBehavior; automaticUpdateChecks: boolean; completeOnboarding: boolean; }
 export interface SourceIssueSummary { collectionId: string; sourceName: string; collectionName: string; code: string; }
 export interface PeerSummary { peerId: string; deviceName: string | null; trust: string; activity: string; }
 export interface ModelSummary { displayName: string | null; active: boolean; installed: boolean; degraded: boolean; downloadBytes: number; requiredFreeBytes: number; fitsAvailableDisk: boolean; licenseAccepted: boolean; }
@@ -125,5 +131,11 @@ export async function loadKnowledgeBundle(collectionId: string): Promise<string>
 export async function loadKnowledgePage(collectionId: string, page: KnowledgePageInput): Promise<string> {
   const requestId = crypto.randomUUID();
   await invoke('load_knowledge_page', { requestId, collectionId, page });
+  return requestId;
+}
+
+export async function updatePreferences(preferences: PreferencesInput): Promise<string> {
+  const requestId = crypto.randomUUID();
+  await invoke('update_preferences', { requestId, preferences });
   return requestId;
 }

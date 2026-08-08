@@ -45,7 +45,7 @@ export type PeerTrust = "unpaired" | "trusted" | "blocked";
 
 export type PeerActivity = "notObserved" | "discovered" | "pairing" | "connected";
 
-export type PeerSummary = { peerId: string, deviceName: string | null, trust: PeerTrust, activity: PeerActivity, };
+export type PeerSummary = { peerId: string, deviceName: string | null, trust: PeerTrust, activity: PeerActivity, sasWords: Array<string> | null, grantedCollectionIds: Array<string>, };
 
 export type ModelSummary = { displayName: string | null, active: boolean, installed: boolean, degraded: boolean, downloadBytes: number, requiredFreeBytes: number, fitsAvailableDisk: boolean, licenseAccepted: boolean, license: string | null, licenseUrl: string | null, revision: string | null, };
 

@@ -475,6 +475,8 @@ struct PeerSummary {
     device_name: Option<String>,
     trust: PeerTrust,
     activity: PeerActivity,
+    sas_words: Option<Vec<String>>,
+    granted_collection_ids: Vec<String>,
 }
 
 #[derive(Clone, Copy, Debug, Serialize, TS)]
@@ -1144,6 +1146,50 @@ fn update_collection_policy(
 }
 
 #[tauri::command]
+fn pair_peer(runtime: tauri::State<'_, AppRuntime>, peer_id: String) -> Result<(), UiError> {
+    let peer_id = validate_peer_id(peer_id)?;
+    send_command(&runtime, WorkerCommand::Pair { peer_id })
+}
+
+#[tauri::command]
+fn confirm_pairing(
+    runtime: tauri::State<'_, AppRuntime>,
+    peer_id: String,
+    accepted: bool,
+) -> Result<(), UiError> {
+    let peer_id = validate_peer_id(peer_id)?;
+    send_command(
+        &runtime,
+        WorkerCommand::ConfirmPairing { peer_id, accepted },
+    )
+}
+
+#[tauri::command]
+fn revoke_peer(runtime: tauri::State<'_, AppRuntime>, peer_id: String) -> Result<(), UiError> {
+    let peer_id = validate_peer_id(peer_id)?;
+    send_command(&runtime, WorkerCommand::RevokePeer { peer_id })
+}
+
+#[tauri::command]
+fn set_collection_grant(
+    runtime: tauri::State<'_, AppRuntime>,
+    peer_id: String,
+    collection_id: String,
+    granted: bool,
+) -> Result<(), UiError> {
+    let peer_id = validate_peer_id(peer_id)?;
+    let collection_id = parse_uuid(&collection_id)?;
+    send_command(
+        &runtime,
+        WorkerCommand::GrantCollection {
+            peer_id,
+            collection_id,
+            granted,
+        },
+    )
+}
+
+#[tauri::command]
 fn search(
     runtime: tauri::State<'_, AppRuntime>,
     request_id: String,
@@ -1577,6 +1623,17 @@ fn consume_folder_selection(runtime: &AppRuntime, token: &str) -> Result<PathBuf
 
 fn parse_uuid(value: &str) -> Result<Uuid, UiError> {
     Uuid::parse_str(value).map_err(|_| UiError::invalid("invalidIdentifier"))
+}
+
+fn validate_peer_id(value: String) -> Result<String, UiError> {
+    if value.is_empty()
+        || value.len() > 256
+        || value.trim() != value
+        || value.chars().any(char::is_control)
+    {
+        return Err(UiError::invalid("invalidPeerIdentifier"));
+    }
+    Ok(value)
 }
 
 impl UiError {
@@ -2508,6 +2565,12 @@ impl From<worker::SourceIssueView> for SourceIssueSummary {
 
 impl From<worker::PeerView> for PeerSummary {
     fn from(value: worker::PeerView) -> Self {
+        let mut granted_collection_ids = value
+            .granted_collections
+            .into_iter()
+            .map(|collection_id| collection_id.to_string())
+            .collect::<Vec<_>>();
+        granted_collection_ids.sort();
         Self {
             peer_id: value.peer_id,
             device_name: value.device_name,
@@ -2522,6 +2585,8 @@ impl From<worker::PeerView> for PeerSummary {
                 worker::PeerActivityState::Pairing => PeerActivity::Pairing,
                 worker::PeerActivityState::Connected => PeerActivity::Connected,
             },
+            sas_words: value.sas_words.map(Vec::from),
+            granted_collection_ids,
         }
     }
 }
@@ -2692,6 +2757,10 @@ fn main() -> Result<()> {
             relink_collection,
             rescan_collection,
             update_collection_policy,
+            pair_peer,
+            confirm_pairing,
+            revoke_peer,
+            set_collection_grant,
             search,
             load_review_evidence,
             approve_review,
@@ -3046,6 +3115,18 @@ mod tests {
         );
 
         assert_eq!((stale_applies, current_applies), (false, true));
+    }
+
+    #[test]
+    fn peer_identifier_validation_rejects_ambiguous_input() {
+        assert_eq!(
+            (
+                validate_peer_id("synthetic-peer".to_owned()).is_ok(),
+                validate_peer_id(" synthetic-peer".to_owned()).is_err(),
+                validate_peer_id("synthetic\npeer".to_owned()).is_err(),
+            ),
+            (true, true, true)
+        );
     }
 
     #[test]

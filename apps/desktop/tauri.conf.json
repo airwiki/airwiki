@@ -1,6 +1,7 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
   "productName": "AirWiki",
+  "mainBinaryName": "airwiki",
   "version": "0.2.0",
   "identifier": "io.github.airwiki.AirWiki",
   "build": {
@@ -28,6 +29,15 @@
   },
   "bundle": {
     "active": false,
+    "publisher": "AirWiki",
+    "homepage": "https://github.com/airwiki/airwiki",
+    "copyright": "Copyright 2026 AirWiki contributors",
+    "category": "Productivity",
+    "shortDescription": "Local-first, human-reviewed knowledge desktop",
+    "longDescription": "Curate local documents into reviewed knowledge and optionally search authorized evidence across nearby devices.",
+    "license": "Apache-2.0",
+    "licenseFile": "../../LICENSE",
+    "createUpdaterArtifacts": false,
     "icon": [
       "../../resources/branding/airwiki.icns",
       "../../resources/branding/airwiki.ico"

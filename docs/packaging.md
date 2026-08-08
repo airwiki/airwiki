@@ -1,7 +1,7 @@
 # Internal packaging
 
-AirWiki currently produces internal development candidates with
-`cargo-packager 0.11.8`. Packaging does not create a supported public release.
+AirWiki currently produces internal development candidates with the pinned
+Tauri v2 CLI and bundler. Packaging does not create a supported public release.
 Public signing, notarization, updater promotion, and repository-hosted release
 automation remain deferred until the [public release checklist](release-checklist.md)
 is complete.
@@ -16,7 +16,9 @@ embedded in packages.
 From the repository root:
 
 ```bash
-cargo install cargo-packager --version 0.11.8 --locked
+corepack enable
+corepack prepare pnpm@10.18.3 --activate
+pnpm --dir apps/desktop/ui install --frozen-lockfile --ignore-scripts
 cargo run --locked -p xtask -- licenses check
 ```
 
@@ -45,8 +47,11 @@ The internal wrapper:
 2. materializes the complete runtime under the ignored resource cache;
 3. builds the desktop and MCP bridge for `aarch64-apple-darwin` with the lockfile;
 4. signs the bridge ad hoc for development when no release identity is supplied;
-5. builds a deterministic platform MCPB from those exact bridge bytes; and
-6. creates `.app` and `.dmg` artifacts under `target/packages/macos`.
+5. builds a deterministic platform MCPB from those exact bridge bytes;
+6. builds and signs the Tauri application bundle without altering the
+   hash-pinned runtime resources; and
+7. creates a licensed Tauri DMG and copies the verified `.app` and `.dmg`
+   artifacts under `target/packages/macos`.
 
 The wrapper validates architecture, Mach-O identity, bridge bytes, MCPB layout,
 runtime closure, legal files, and traversal safety. A development ad-hoc seal is

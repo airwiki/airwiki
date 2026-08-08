@@ -2,7 +2,7 @@
   import { AlertTriangle, BookOpen, CheckCircle2, FileText, History, Network, RefreshCw, Search, Settings2, Sparkles } from '@lucide/svelte';
   import { listen } from '@tauri-apps/api/event';
   import { onMount } from 'svelte';
-  import { addCollection, approveReview, cancelModelInstall, configureFirewall, connect, hideToTray, installModels, loadKnowledgeBundle, loadKnowledgePage, loadReviewEvidence, openAdvancedFirewall, pickCollectionFolder, quitCompletely, reanalyzeReview, refreshAutostart, refreshConnectivity, refreshWikiHealth, rejectReview, relinkCollection, rescanCollection, searchKnowledge, setAutostart, updateCollectionPolicy, updatePreferences, type AppSnapshot, type CloseBehavior, type CollectionPolicyInput, type CollectionSummary, type EnrichmentDraft, type FolderSelection, type KnowledgePageInput, type LanPreference, type LocalePreference, type ReviewSummary } from './api';
+  import { addCollection, approveReview, cancelModelInstall, configureFirewall, confirmPairing, connect, hideToTray, installModels, loadKnowledgeBundle, loadKnowledgePage, loadReviewEvidence, openAdvancedFirewall, pairPeer, pickCollectionFolder, quitCompletely, reanalyzeReview, refreshAutostart, refreshConnectivity, refreshWikiHealth, rejectReview, relinkCollection, rescanCollection, revokePeer, searchKnowledge, setAutostart, setCollectionGrant, updateCollectionPolicy, updatePreferences, type AppSnapshot, type CloseBehavior, type CollectionPolicyInput, type CollectionSummary, type EnrichmentDraft, type FolderSelection, type KnowledgePageInput, type LanPreference, type LocalePreference, type ReviewSummary } from './api';
   import KnowledgeGraph from './KnowledgeGraph.svelte';
 
   type Destination = 'library' | 'review' | 'search' | 'system';
@@ -40,6 +40,7 @@
   let autostartRequestId: string | null = null;
   let wikiHealthRequestId: string | null = null;
   let connectivityRequestId: string | null = null;
+  let peerActionId: string | null = null;
 
   onMount(() => {
     const unlistenClose = '__TAURI_INTERNALS__' in window
@@ -123,6 +124,35 @@
     } catch {
       connectivityRequestId = null;
       actionMessage = 'La operación de conectividad no pudo comenzar.';
+    }
+  }
+
+  function shortPeerId(peerId: string): string {
+    return peerId.length > 18 ? `${peerId.slice(0, 9)}…${peerId.slice(-7)}` : peerId;
+  }
+
+  async function runPeerAction(peerId: string, action: 'pair' | 'accept' | 'reject' | 'revoke') {
+    peerActionId = peerId;
+    try {
+      if (action === 'pair') await pairPeer(peerId);
+      if (action === 'accept') await confirmPairing(peerId, true);
+      if (action === 'reject') await confirmPairing(peerId, false);
+      if (action === 'revoke') await revokePeer(peerId);
+    } catch {
+      actionMessage = 'La operación de confianza no se aplicó.';
+    } finally {
+      peerActionId = null;
+    }
+  }
+
+  async function changeGrant(peerId: string, collectionId: string, granted: boolean) {
+    peerActionId = peerId;
+    try {
+      await setCollectionGrant(peerId, collectionId, granted);
+    } catch {
+      actionMessage = 'El permiso de colección no se modificó.';
+    } finally {
+      peerActionId = null;
     }
   }
 
@@ -602,6 +632,7 @@
             <section class="settings-form"><p class="section-label">Preferencias del dispositivo</p><label><span>Idioma</span><select bind:value={locale}><option value="system">Sistema</option><option value="es">Español</option><option value="en">English</option></select></label><label><span>Red local</span><select bind:value={lanPreference}><option value="disabled">Desactivada</option><option value="enabled">Activada</option></select></label><label><span>Al cerrar</span><select bind:value={closeBehavior}><option value="ask">Preguntar</option><option value="hide_to_tray">Ocultar en bandeja</option><option value="quit">Salir completamente</option></select></label><label class="check"><input type="checkbox" bind:checked={automaticUpdateChecks} /> Buscar actualizaciones automáticamente</label><button class="primary" onclick={() => savePreferences(false)} disabled={actionBusy}>Guardar preferencias</button></section>
             <section><p class="section-label">Inicio de sesión</p><h3>Inicio automático</h3><p>{autostartLabel()}</p><div class="row-actions">{#if snapshot.autostart === 'enabled'}<button class="secondary" onclick={() => changeAutostart(false)} disabled={autostartBusy}>Desactivar</button>{:else if snapshot.autostart !== 'unsupported' && snapshot.autostart !== 'conflict'}<button class="secondary" onclick={() => changeAutostart(true)} disabled={autostartBusy}>{autostartBusy ? 'Comprobando…' : 'Activar'}</button>{/if}<button class="text-action" onclick={refreshAutostartState} disabled={autostartBusy}>Actualizar estado</button></div></section>
             <section class="connectivity-section"><p class="section-label">Conectividad</p><h3>{snapshot.peers.length} equipos conocidos</h3><p>{connectivityLabel()}</p>{#if snapshot.lanRuntime}<dl><div><dt>Listener</dt><dd>{lanStateLabel(snapshot.lanRuntime.listener)}</dd></div><div><dt>Descubrimiento</dt><dd>{lanStateLabel(snapshot.lanRuntime.discovery)}</dd></div><div><dt>Interfaces</dt><dd>{snapshot.lanRuntime.addressCount}</dd></div></dl>{/if}<div class="row-actions"><button class="secondary" onclick={() => runConnectivityAction('refresh')} disabled={connectivityRequestId !== null}>{connectivityRequestId ? 'Comprobando…' : 'Comprobar'}</button>{#if snapshot.connectivity?.firewallHelper === 'verified' && snapshot.connectivity.firewall !== 'ready' && snapshot.connectivity.firewall !== 'notApplicable'}<button class="secondary" onclick={() => runConnectivityAction('install')} disabled={connectivityRequestId !== null || lanPreference !== 'enabled'}>Configurar firewall</button>{/if}{#if snapshot.connectivity?.firewall === 'ready'}<button class="text-action" onclick={() => runConnectivityAction('remove')} disabled={connectivityRequestId !== null}>Quitar reglas</button>{/if}{#if snapshot.connectivity?.firewall === 'conflict' || snapshot.connectivity?.firewall === 'legacyExposure'}<button class="text-action" onclick={() => runConnectivityAction('advanced')} disabled={connectivityRequestId !== null}>Abrir configuración avanzada</button>{/if}</div><small>Compartir sigue requiriendo pairing y grants por colección.</small></section>
+            <section class="peer-trust"><p class="section-label">Equipos y permisos</p><h3>Confianza explícita</h3><p>Cada equipo se verifica con seis palabras. Después eliges qué colecciones puede consultar.</p><div class="peer-list">{#each snapshot.peers as peer}<article><div class="peer-heading"><div><strong>{peer.deviceName ?? 'Equipo cercano'}</strong><code title={peer.peerId}>{shortPeerId(peer.peerId)}</code></div><span class:verified={peer.trust === 'trusted'}>{peer.trust === 'trusted' ? 'Verificado' : peer.trust === 'blocked' ? 'Revocado' : peer.activity === 'pairing' ? 'Verificando' : 'Sin verificar'}</span></div>{#if peer.sasWords}<div class="sas" aria-label="Código de verificación"><small>Comprueba estas palabras en ambos equipos</small><strong>{peer.sasWords.join(' · ')}</strong><div><button class="primary" onclick={() => runPeerAction(peer.peerId, 'accept')} disabled={peerActionId === peer.peerId}>Coinciden</button><button class="danger" onclick={() => runPeerAction(peer.peerId, 'reject')} disabled={peerActionId === peer.peerId}>No coinciden</button></div></div>{:else if peer.trust === 'unpaired'}<button class="secondary" onclick={() => runPeerAction(peer.peerId, 'pair')} disabled={peerActionId === peer.peerId || peer.activity === 'notObserved'}>Verificar equipo</button>{:else if peer.trust === 'trusted'}<div class="grant-list">{#each snapshot.collections.filter((collection) => collection.peerShareable) as collection}<label class="check"><input type="checkbox" checked={peer.grantedCollectionIds.includes(collection.id)} onchange={(event) => changeGrant(peer.peerId, collection.id, event.currentTarget.checked)} disabled={peerActionId === peer.peerId} /> {collection.name}</label>{:else}<small>Activa “grants LAN” en una colección para poder compartirla.</small>{/each}</div><button class="danger" onclick={() => runPeerAction(peer.peerId, 'revoke')} disabled={peerActionId === peer.peerId}>Revocar confianza</button>{/if}</article>{:else}<p class="empty">No hay equipos descubiertos. AirWiki no comparte nada hasta que verifiques uno.</p>{/each}</div></section>
           </div>
         {/if}
 

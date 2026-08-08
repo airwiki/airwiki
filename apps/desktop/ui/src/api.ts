@@ -42,6 +42,22 @@ export async function updateCollectionPolicy(collectionId: string, policy: Colle
   return invoke('update_collection_policy', { collectionId, policy });
 }
 
+export async function pairPeer(peerId: string): Promise<void> {
+  return invoke('pair_peer', { peerId });
+}
+
+export async function confirmPairing(peerId: string, accepted: boolean): Promise<void> {
+  return invoke('confirm_pairing', { peerId, accepted });
+}
+
+export async function revokePeer(peerId: string): Promise<void> {
+  return invoke('revoke_peer', { peerId });
+}
+
+export async function setCollectionGrant(peerId: string, collectionId: string, granted: boolean): Promise<void> {
+  return invoke('set_collection_grant', { peerId, collectionId, granted });
+}
+
 export async function rescanCollection(collectionId: string): Promise<void> {
   return invoke('rescan_collection', { collectionId });
 }

@@ -1,7 +1,7 @@
 <script lang="ts">
-  import { BookOpen, CheckCircle2, Search, Settings2, Sparkles } from '@lucide/svelte';
+  import { BookOpen, CheckCircle2, RefreshCw, Search, Settings2, Sparkles } from '@lucide/svelte';
   import { onMount } from 'svelte';
-  import { addCollection, connect, pickCollectionFolder, rescanCollection, searchKnowledge, type AppSnapshot, type FolderSelection } from './api';
+  import { addCollection, approveReview, connect, loadReviewEvidence, pickCollectionFolder, reanalyzeReview, rejectReview, rescanCollection, searchKnowledge, type AppSnapshot, type EnrichmentDraft, type FolderSelection, type ReviewSummary } from './api';
 
   type Destination = 'library' | 'review' | 'search' | 'system';
 
@@ -21,10 +21,19 @@
   let includePublic = false;
   let actionMessage = '';
   let actionBusy = false;
+  let selectedReview: ReviewSummary | null = null;
+  let editDraft: EnrichmentDraft | null = null;
 
   onMount(() => {
     connect((event) => {
       snapshot = event.snapshot;
+      if (selectedReview) {
+        const currentReview = event.snapshot.reviews.find((review) => review.conceptId === selectedReview?.conceptId);
+        if (!currentReview || currentReview.sourceRevision !== selectedReview.sourceRevision) {
+          selectedReview = null;
+          editDraft = null;
+        }
+      }
       if (event.snapshot.search?.status !== 'searching') actionBusy = false;
       runtimeLabel = event.snapshot.phase === 'ready' ? 'Servicios privados listos' : 'Preparando servicios privados';
     }).then((initial) => {
@@ -70,6 +79,51 @@
       actionMessage = 'Buscando evidencia autorizada…';
     } catch {
       actionMessage = 'La búsqueda no pudo comenzar. Comprueba que AirWiki esté listo.';
+      actionBusy = false;
+    }
+  }
+
+  async function openReview(review: ReviewSummary) {
+    selectedReview = review;
+    editDraft = structuredClone(review.draft);
+    actionBusy = true;
+    actionMessage = 'Cargando evidencia desde la fuente local…';
+    try {
+      await loadReviewEvidence(review);
+    } catch {
+      actionMessage = 'No se pudo cargar la evidencia. La aprobación continúa bloqueada.';
+      actionBusy = false;
+    }
+  }
+
+  async function loadMoreEvidence() {
+    if (!selectedReview || snapshot?.reviewEvidence?.nextOrdinal == null) return;
+    actionBusy = true;
+    try {
+      await loadReviewEvidence(selectedReview, snapshot.reviewEvidence.nextOrdinal);
+    } catch {
+      actionMessage = 'No se pudo cargar más evidencia.';
+      actionBusy = false;
+    }
+  }
+
+  function evidenceIsCurrent(): boolean {
+    return snapshot?.reviewEvidence?.status === 'ready'
+      && snapshot.reviewEvidence.conceptId === selectedReview?.conceptId
+      && snapshot.reviewEvidence.sourceRevision === selectedReview.sourceRevision;
+  }
+
+  async function decideReview(decision: 'approve' | 'reject' | 'reanalyze') {
+    if (!selectedReview || (decision === 'approve' && (!editDraft || !evidenceIsCurrent()))) return;
+    actionBusy = true;
+    try {
+      if (decision === 'approve' && editDraft) await approveReview(selectedReview.conceptId, selectedReview.sourceRevision, editDraft);
+      if (decision === 'reject') await rejectReview(selectedReview.conceptId);
+      if (decision === 'reanalyze') await reanalyzeReview(selectedReview.conceptId);
+      actionMessage = decision === 'approve' ? 'Aprobación enviada con la versión de evidencia verificada.' : decision === 'reject' ? 'Propuesta rechazada; la fuente permanece privada.' : 'Nuevo análisis solicitado al modelo local.';
+    } catch {
+      actionMessage = 'La decisión no se aplicó. Actualiza la evidencia antes de reintentar.';
+    } finally {
       actionBusy = false;
     }
   }
@@ -130,10 +184,52 @@
         {/if}
 
         {#if destination === 'review' && snapshot}
-          <div class="records" aria-label="Revisiones pendientes">
-            {#each snapshot.reviews as review}
-              <article><div><strong>{review.sourceName}</strong><small>{review.collectionName} · revisión {review.sourceRevision}</small></div><span>Ver evidencia</span></article>
-            {:else}<p class="empty">No hay propuestas pendientes. Los próximos cambios aparecerán aquí.</p>{/each}
+          <div class="review-workspace">
+            <aside class="review-queue" aria-label="Revisiones pendientes">
+              {#each snapshot.reviews as review}
+                <button class:active={selectedReview?.conceptId === review.conceptId} onclick={() => openReview(review)}>
+                  <strong>{review.sourceName}</strong><small>{review.collectionName} · revisión {review.sourceRevision}</small>
+                </button>
+              {:else}<p class="empty">No hay propuestas pendientes. Los próximos cambios aparecerán aquí.</p>{/each}
+            </aside>
+            {#if selectedReview && editDraft}
+              <div class="review-flow">
+                <section class="review-step evidence-step" aria-labelledby="evidence-title">
+                  <div class="step-heading"><span>01</span><div><p>Evidencia</p><h3 id="evidence-title">Comprueba la fuente</h3></div></div>
+                  {#if snapshot.reviewEvidence?.conceptId === selectedReview.conceptId && snapshot.reviewEvidence.status === 'ready'}
+                    <div class="excerpts">
+                      {#each snapshot.reviewEvidence.excerpts as excerpt}
+                        <article><small>{excerpt.headingOrPage || `Fragmento ${excerpt.ordinal + 1}`}</small><p>{excerpt.text}</p></article>
+                      {/each}
+                    </div>
+                    {#if snapshot.reviewEvidence.nextOrdinal != null}<button class="secondary" onclick={loadMoreEvidence} disabled={actionBusy}>Cargar más evidencia</button>{/if}
+                  {:else if snapshot.reviewEvidence?.conceptId === selectedReview.conceptId}
+                    <p class="evidence-warning">La evidencia no está disponible o quedó obsoleta. La aprobación está bloqueada.</p>
+                  {:else}
+                    <p class="loading"><RefreshCw size={16} /> Verificando la revisión actual…</p>
+                  {/if}
+                </section>
+                <section class="review-step proposal-step" aria-labelledby="proposal-title">
+                  <div class="step-heading"><span>02</span><div><p>Propuesta de IA</p><h3 id="proposal-title">Edita antes de decidir</h3></div></div>
+                  <label><span>Título</span><input bind:value={editDraft.title} maxlength="240" /></label>
+                  <label><span>Descripción</span><textarea bind:value={editDraft.description} maxlength="1000" rows="3"></textarea></label>
+                  <label><span>Resumen</span><textarea bind:value={editDraft.summary} maxlength="4000" rows="6"></textarea></label>
+                  <label><span>Etiquetas</span><input value={editDraft.tags.join(', ')} onchange={(event) => { editDraft!.tags = event.currentTarget.value.split(',').map((tag) => tag.trim()).filter(Boolean); }} /></label>
+                </section>
+                <section class="review-step decision-step" aria-labelledby="decision-title">
+                  <div class="step-heading"><span>03</span><div><p>Decisión humana</p><h3 id="decision-title">Define qué ocurre</h3></div></div>
+                  <p>Aprobar publica la propuesta validada. Rechazar conserva la fuente y descarta solo este borrador.</p>
+                  <div class="decision-actions">
+                    <button class="primary" onclick={() => decideReview('approve')} disabled={actionBusy || !evidenceIsCurrent()}>Aprobar con evidencia</button>
+                    <button class="secondary" onclick={() => decideReview('reanalyze')} disabled={actionBusy || !snapshot.model?.active}>Volver a analizar</button>
+                    <button class="danger" onclick={() => decideReview('reject')} disabled={actionBusy}>Rechazar propuesta</button>
+                  </div>
+                  {#if !evidenceIsCurrent()}<small class="guardrail">Carga evidencia vigente para habilitar la aprobación.</small>{/if}
+                </section>
+              </div>
+            {:else}
+              <div class="review-placeholder"><CheckCircle2 size={26} /><h3>Elige una propuesta</h3><p>La evidencia aparece antes que cualquier acción de publicación.</p></div>
+            {/if}
           </div>
         {/if}
 

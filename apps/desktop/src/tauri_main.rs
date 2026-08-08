@@ -19,12 +19,13 @@ mod worker;
 use std::{
     collections::HashMap,
     path::PathBuf,
-    sync::Mutex,
+    sync::{Arc, Mutex},
     time::{Duration, Instant},
 };
 
+use airwiki_core::ReviewVersionToken;
 use airwiki_inference::ModelProfile;
-use airwiki_types::SearchPurpose;
+use airwiki_types::{EnrichmentDraft, SearchPurpose};
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 use tauri::{Manager, ipc::Channel};
@@ -45,6 +46,13 @@ struct AppRuntime {
     commands: mpsc::Sender<WorkerCommand>,
     snapshot: Mutex<watch::Receiver<AppSnapshot>>,
     folder_selections: Mutex<HashMap<Uuid, PendingFolderSelection>>,
+    review_versions: Arc<Mutex<HashMap<Uuid, CachedReviewVersion>>>,
+}
+
+#[derive(Clone)]
+struct CachedReviewVersion {
+    source_revision: u32,
+    token: ReviewVersionToken,
 }
 
 struct PendingFolderSelection {
@@ -64,6 +72,7 @@ struct AppSnapshot {
     peers: Vec<PeerSummary>,
     model: Option<ModelSummary>,
     search: Option<SearchSummary>,
+    review_evidence: Option<ReviewEvidenceSummary>,
     notice: Option<NoticeSummary>,
 }
 
@@ -89,6 +98,28 @@ struct ReviewSummary {
     source_revision: u32,
     source_name: String,
     collection_name: String,
+    draft: EnrichmentDraft,
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ReviewEvidenceSummary {
+    request_id: String,
+    concept_id: String,
+    source_revision: u32,
+    status: &'static str,
+    excerpts: Vec<ReviewExcerptSummary>,
+    total_chunks: usize,
+    next_ordinal: Option<u32>,
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ReviewExcerptSummary {
+    ordinal: u32,
+    heading_or_page: String,
+    text: String,
+    truncated: bool,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -342,6 +373,91 @@ fn search(
     )
 }
 
+#[tauri::command]
+fn load_review_evidence(
+    runtime: tauri::State<'_, AppRuntime>,
+    request_id: String,
+    concept_id: String,
+    source_revision: u32,
+    after_ordinal: Option<u32>,
+) -> Result<(), UiError> {
+    let concept_id = parse_uuid(&concept_id)?;
+    let expected_review_version = runtime
+        .review_versions
+        .lock()
+        .map_err(|_| UiError::internal())?
+        .get(&concept_id)
+        .filter(|cached| cached.source_revision == source_revision)
+        .map(|cached| cached.token.clone());
+    send_command(
+        &runtime,
+        WorkerCommand::LoadReviewEvidence {
+            request_id: parse_uuid(&request_id)?,
+            concept_id,
+            expected_source_revision: source_revision,
+            expected_review_version,
+            after_ordinal,
+        },
+    )
+}
+
+#[tauri::command]
+fn approve_review(
+    runtime: tauri::State<'_, AppRuntime>,
+    concept_id: String,
+    source_revision: u32,
+    draft: EnrichmentDraft,
+) -> Result<(), UiError> {
+    let concept_id = parse_uuid(&concept_id)?;
+    let expected_review_version = approval_version(&runtime, concept_id, source_revision)?;
+    send_command(
+        &runtime,
+        WorkerCommand::Approve {
+            concept_id,
+            expected_review_version,
+            draft,
+        },
+    )
+}
+
+fn approval_version(
+    runtime: &AppRuntime,
+    concept_id: Uuid,
+    source_revision: u32,
+) -> Result<ReviewVersionToken, UiError> {
+    runtime
+        .review_versions
+        .lock()
+        .map_err(|_| UiError::internal())?
+        .get(&concept_id)
+        .filter(|cached| cached.source_revision == source_revision)
+        .map(|cached| cached.token.clone())
+        .ok_or_else(|| UiError::invalid("currentEvidenceRequired"))
+}
+
+#[tauri::command]
+fn reject_review(runtime: tauri::State<'_, AppRuntime>, concept_id: String) -> Result<(), UiError> {
+    send_command(
+        &runtime,
+        WorkerCommand::Reject {
+            concept_id: parse_uuid(&concept_id)?,
+        },
+    )
+}
+
+#[tauri::command]
+fn reanalyze_review(
+    runtime: tauri::State<'_, AppRuntime>,
+    concept_id: String,
+) -> Result<(), UiError> {
+    send_command(
+        &runtime,
+        WorkerCommand::ReanalyzeReview {
+            concept_id: parse_uuid(&concept_id)?,
+        },
+    )
+}
+
 fn consume_folder_selection(runtime: &AppRuntime, token: &str) -> Result<PathBuf, UiError> {
     let token = parse_uuid(token)?;
     let selection = runtime
@@ -401,11 +517,16 @@ impl AppSnapshot {
             peers: Vec::new(),
             model: None,
             search: None,
+            review_evidence: None,
             notice: None,
         }
     }
 
-    fn apply(&mut self, event: WorkerEvent) {
+    fn apply(
+        &mut self,
+        event: WorkerEvent,
+        review_versions: &Mutex<HashMap<Uuid, CachedReviewVersion>>,
+    ) {
         self.sequence = self.sequence.saturating_add(1);
         match event {
             WorkerEvent::Ready {
@@ -420,6 +541,7 @@ impl AppSnapshot {
                     .map(CollectionSummary::from)
                     .collect();
                 self.reviews = reviews.into_iter().map(ReviewSummary::from).collect();
+                retain_pending_review_versions(review_versions, &self.reviews);
                 self.source_issues = source_issues
                     .into_iter()
                     .map(SourceIssueSummary::from)
@@ -433,6 +555,7 @@ impl AppSnapshot {
             }
             WorkerEvent::Reviews(reviews) => {
                 self.reviews = reviews.into_iter().map(ReviewSummary::from).collect();
+                retain_pending_review_versions(review_versions, &self.reviews);
             }
             WorkerEvent::SourceIssues(issues) => {
                 self.source_issues = issues.into_iter().map(SourceIssueSummary::from).collect();
@@ -441,6 +564,70 @@ impl AppSnapshot {
                 self.peers = peers.into_iter().map(PeerSummary::from).collect();
             }
             WorkerEvent::ModelState(model) => self.model = Some(ModelSummary::from(model)),
+            WorkerEvent::ReviewEvidenceLoaded {
+                request_id,
+                concept_id,
+                expected_source_revision,
+                result,
+            } => {
+                self.review_evidence = Some(match result {
+                    Ok(page) => {
+                        if let Ok(mut versions) = review_versions.lock() {
+                            versions.insert(
+                                concept_id,
+                                CachedReviewVersion {
+                                    source_revision: page.source_revision,
+                                    token: page.review_version,
+                                },
+                            );
+                        }
+                        let mut summary = ReviewEvidenceSummary {
+                            request_id: request_id.to_string(),
+                            concept_id: concept_id.to_string(),
+                            source_revision: page.source_revision,
+                            status: "ready",
+                            excerpts: page
+                                .excerpts
+                                .into_iter()
+                                .map(ReviewExcerptSummary::from)
+                                .collect(),
+                            total_chunks: page.total_chunks,
+                            next_ordinal: page.next_ordinal,
+                        };
+                        if summary
+                            .excerpts
+                            .first()
+                            .is_some_and(|excerpt| excerpt.ordinal > 0)
+                            && let Some(previous) = self.review_evidence.as_ref()
+                            && previous.concept_id == summary.concept_id
+                            && previous.source_revision == summary.source_revision
+                        {
+                            let mut excerpts = previous.excerpts.clone();
+                            excerpts.extend(summary.excerpts);
+                            summary.excerpts = excerpts;
+                        }
+                        summary
+                    }
+                    Err(error) => {
+                        if let Ok(mut versions) = review_versions.lock() {
+                            versions.remove(&concept_id);
+                        }
+                        ReviewEvidenceSummary {
+                            request_id: request_id.to_string(),
+                            concept_id: concept_id.to_string(),
+                            source_revision: expected_source_revision,
+                            status: match error {
+                                worker::ReviewEvidenceErrorView::NoLongerPending => "stale",
+                                worker::ReviewEvidenceErrorView::MissingEvidence => "missing",
+                                worker::ReviewEvidenceErrorView::Unavailable => "failed",
+                            },
+                            excerpts: Vec::new(),
+                            total_chunks: 0,
+                            next_ordinal: None,
+                        }
+                    }
+                });
+            }
             WorkerEvent::SearchPartial { request_id, hits } => {
                 self.search = Some(SearchSummary {
                     request_id: request_id.to_string(),
@@ -514,7 +701,33 @@ impl From<worker::ReviewItemView> for ReviewSummary {
             source_revision: value.source_revision,
             source_name: value.source_name,
             collection_name: value.collection_name,
+            draft: value.draft,
         }
+    }
+}
+
+impl From<worker::ReviewEvidenceExcerptView> for ReviewExcerptSummary {
+    fn from(value: worker::ReviewEvidenceExcerptView) -> Self {
+        Self {
+            ordinal: value.ordinal,
+            heading_or_page: value.heading_or_page,
+            text: value.text,
+            truncated: value.truncated,
+        }
+    }
+}
+
+fn retain_pending_review_versions(
+    review_versions: &Mutex<HashMap<Uuid, CachedReviewVersion>>,
+    reviews: &[ReviewSummary],
+) {
+    if let Ok(mut versions) = review_versions.lock() {
+        versions.retain(|concept_id, cached| {
+            let concept_id = concept_id.to_string();
+            reviews.iter().any(|review| {
+                review.concept_id == concept_id && review.source_revision == cached.source_revision
+            })
+        });
     }
 }
 
@@ -583,6 +796,8 @@ fn main() -> Result<()> {
     let worker_events = events.clone();
     let (snapshot_sender, snapshot_receiver) = watch::channel(AppSnapshot::starting());
     let mut presentation_events = events.subscribe();
+    let review_versions = Arc::new(Mutex::new(HashMap::new()));
+    let presentation_review_versions = Arc::clone(&review_versions);
 
     tauri::Builder::default()
         .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
@@ -596,6 +811,7 @@ fn main() -> Result<()> {
             commands,
             snapshot: Mutex::new(snapshot_receiver),
             folder_selections: Mutex::new(HashMap::new()),
+            review_versions,
         })
         .setup(move |_app| {
             tauri::async_runtime::spawn(async move {
@@ -603,7 +819,7 @@ fn main() -> Result<()> {
                 loop {
                     match presentation_events.recv().await {
                         Ok(event) => {
-                            snapshot.apply(event);
+                            snapshot.apply(event, &presentation_review_versions);
                             if snapshot_sender.send(snapshot.clone()).is_err() {
                                 break;
                             }
@@ -635,7 +851,11 @@ fn main() -> Result<()> {
             relink_collection,
             rescan_collection,
             update_collection_policy,
-            search
+            search,
+            load_review_evidence,
+            approve_review,
+            reject_review,
+            reanalyze_review
         ])
         .run(tauri::generate_context!())
         .map_err(|error| anyhow::anyhow!(error.to_string()))
@@ -655,6 +875,7 @@ mod tests {
                 token,
                 PendingFolderSelection { path, expires_at },
             )])),
+            review_versions: Arc::new(Mutex::new(HashMap::new())),
         }
     }
 
@@ -687,5 +908,39 @@ mod tests {
         let error = consume_folder_selection(&runtime, &token.to_string()).unwrap_err();
 
         assert_eq!(error.message_key, "folderSelectionExpired");
+    }
+
+    #[test]
+    fn approval_without_loaded_evidence_fails_closed() {
+        let token = Uuid::new_v4();
+        let runtime = runtime_with_selection(token, PathBuf::new(), Instant::now());
+        let error = approval_version(&runtime, Uuid::new_v4(), 1).unwrap_err();
+
+        assert_eq!(error.message_key, "currentEvidenceRequired");
+    }
+
+    #[test]
+    fn approval_rejects_evidence_from_an_older_source_revision() -> Result<(), &'static str> {
+        let concept_id = Uuid::new_v4();
+        let token = Uuid::new_v4();
+        let runtime = runtime_with_selection(token, PathBuf::new(), Instant::now());
+        {
+            let mut versions = runtime
+                .review_versions
+                .lock()
+                .map_err(|_| "poisoned lock")?;
+            versions.insert(
+                concept_id,
+                CachedReviewVersion {
+                    source_revision: 4,
+                    token: ReviewVersionToken::from_digest([7; 32]),
+                },
+            );
+        }
+
+        let error = approval_version(&runtime, concept_id, 5).unwrap_err();
+
+        assert_eq!(error.message_key, "currentEvidenceRequired");
+        Ok(())
     }
 }

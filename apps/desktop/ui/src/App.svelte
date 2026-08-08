@@ -2,7 +2,7 @@
   import { AlertTriangle, BookOpen, CheckCircle2, FileText, History, Network, RefreshCw, Search, Settings2, Sparkles } from '@lucide/svelte';
   import { listen } from '@tauri-apps/api/event';
   import { onMount } from 'svelte';
-  import { addCollection, approveReview, cancelModelInstall, checkUpdates, configureFirewall, confirmPairing, connect, downloadUpdate, hideToTray, installModels, installUpdate, loadKnowledgeBundle, loadKnowledgePage, loadReviewEvidence, manageIntegration, openSystemDestination, pairPeer, pickCollectionFolder, quitCompletely, reanalyzeReview, refreshAutostart, refreshConnectivity, refreshWikiHealth, rejectReview, relinkCollection, rescanCollection, revokePeer, searchKnowledge, setAutostart, setCollectionGrant, updateCollectionPolicy, updatePreferences, type AppSnapshot, type CloseBehavior, type CollectionPolicyInput, type CollectionSummary, type EnrichmentDraft, type FolderSelection, type IntegrationActionInput, type IntegrationClient, type KnowledgePageInput, type LanPreference, type LocalePreference, type ReviewSummary, type SystemDestination } from './api';
+  import { addCollection, approveReview, cancelModelInstall, checkUpdates, configureFirewall, confirmPairing, connect, downloadUpdate, hideToTray, installModels, installUpdate, loadKnowledgeBundle, loadKnowledgePage, loadReviewEvidence, manageIntegration, openExternalLink, openSystemDestination, pairPeer, pickCollectionFolder, quitCompletely, reanalyzeReview, refreshAutostart, refreshConnectivity, refreshWikiHealth, rejectReview, relinkCollection, rescanCollection, revokePeer, searchKnowledge, setAutostart, setCollectionGrant, updateCollectionPolicy, updatePreferences, type AppSnapshot, type CloseBehavior, type CollectionPolicyInput, type CollectionSummary, type EnrichmentDraft, type FolderSelection, type IntegrationActionInput, type IntegrationClient, type KnowledgePageInput, type LanPreference, type LocalePreference, type ReviewSummary, type SystemDestination } from './api';
   import KnowledgeGraph from './KnowledgeGraph.svelte';
 
   type Destination = 'library' | 'review' | 'search' | 'system';
@@ -44,6 +44,7 @@
   let integrationRequestId: string | null = null;
   let updaterRequestId: string | null = null;
   let confirmUpdateInstall = false;
+  let pendingExternalUrl: string | null = null;
 
   onMount(() => {
     const unlistenClose = '__TAURI_INTERNALS__' in window
@@ -158,6 +159,17 @@
     } catch {
       updaterRequestId = null;
       actionMessage = 'La operación de actualización no pudo iniciarse.';
+    }
+  }
+
+  async function confirmExternalLink() {
+    if (!pendingExternalUrl) return;
+    const url = pendingExternalUrl;
+    pendingExternalUrl = null;
+    try {
+      await openExternalLink(url, true);
+    } catch {
+      actionMessage = 'El enlace externo no pudo abrirse.';
     }
   }
 
@@ -697,7 +709,7 @@
 
         {#if destination === 'system' && snapshot}
           <div class="system-layout">
-            <section><p class="section-label">IA local</p><h3>{snapshot.model?.displayName ?? 'Modelo recomendado'}</h3><p>{snapshot.model?.active ? 'El modelo está activo y listo para proponer metadatos.' : 'El modelo requiere preparación antes de analizar documentos.'}</p>{#if snapshot.modelInstall}<progress max={snapshot.modelInstall.totalBytes || 1} value={snapshot.modelInstall.downloaded}></progress><small>{modelInstallLabel()}</small><button class="secondary" onclick={cancelModelInstall}>Cancelar preparación</button>{:else if snapshot.model && !snapshot.model.active}<label class="check license-check"><input type="checkbox" bind:checked={modelLicensesConfirmed} /> Acepto {snapshot.model.license ?? 'las licencias del modelo y sus componentes'}</label><button class="secondary" onclick={prepareLocalModel} disabled={!modelLicensesConfirmed && !snapshot.model.licenseAccepted}>Preparar modelo local</button>{/if}</section>
+            <section><p class="section-label">IA local</p><h3>{snapshot.model?.displayName ?? 'Modelo recomendado'}</h3><p>{snapshot.model?.active ? 'El modelo está activo y listo para proponer metadatos.' : 'El modelo requiere preparación antes de analizar documentos.'}</p>{#if snapshot.modelInstall}<progress max={snapshot.modelInstall.totalBytes || 1} value={snapshot.modelInstall.downloaded}></progress><small>{modelInstallLabel()}</small><button class="secondary" onclick={cancelModelInstall}>Cancelar preparación</button>{:else if snapshot.model && !snapshot.model.active}<label class="check license-check"><input type="checkbox" bind:checked={modelLicensesConfirmed} /> Acepto {snapshot.model.license ?? 'las licencias del modelo y sus componentes'}</label><div class="row-actions"><button class="secondary" onclick={prepareLocalModel} disabled={!modelLicensesConfirmed && !snapshot.model.licenseAccepted}>Preparar modelo local</button>{#if snapshot.model.licenseUrl}<button class="text-action" onclick={() => { pendingExternalUrl = snapshot?.model?.licenseUrl ?? null; }}>Ver licencia externa</button>{/if}</div>{/if}</section>
             <section class="settings-form"><p class="section-label">Preferencias del dispositivo</p><label><span>Idioma</span><select bind:value={locale}><option value="system">Sistema</option><option value="es">Español</option><option value="en">English</option></select></label><label><span>Red local</span><select bind:value={lanPreference}><option value="disabled">Desactivada</option><option value="enabled">Activada</option></select></label><label><span>Al cerrar</span><select bind:value={closeBehavior}><option value="ask">Preguntar</option><option value="hide_to_tray">Ocultar en bandeja</option><option value="quit">Salir completamente</option></select></label><label class="check"><input type="checkbox" bind:checked={automaticUpdateChecks} /> Buscar actualizaciones automáticamente</label><button class="primary" onclick={() => savePreferences(false)} disabled={actionBusy}>Guardar preferencias</button></section>
             <section class="updater-section" aria-live="polite"><div class="settings-heading"><div><p class="section-label">Actualizaciones</p><h3>Canal estable firmado</h3></div>{#if snapshot.updater?.status !== 'disabled'}<button class="text-action" onclick={() => runUpdaterAction('check')} disabled={updaterRequestId !== null || snapshot.updater?.status === 'checking' || snapshot.updater?.status === 'downloading' || snapshot.updater?.status === 'installing'}>Comprobar</button>{/if}</div><p>{updaterLabel()}</p>{#if snapshot.updater?.releaseNotes}<div class="release-notes"><small>Novedades verificadas</small><p>{snapshot.updater.releaseNotes}</p></div>{/if}<div class="row-actions">{#if snapshot.updater?.status === 'available'}<button class="secondary" onclick={() => runUpdaterAction('download')} disabled={updaterRequestId !== null}>Descargar y verificar</button>{:else if snapshot.updater?.status === 'readyToInstall' && !confirmUpdateInstall}<button class="primary" onclick={() => { confirmUpdateInstall = true; }}>Instalar actualización</button>{:else if snapshot.updater?.status === 'readyToInstall' && confirmUpdateInstall}<div class="install-confirmation" role="alert"><p>AirWiki cerrará los servicios locales y aplicará la versión {snapshot.updater.version}. Tus datos y modelos permanecen en sus ubicaciones actuales.</p><button class="primary" onclick={() => runUpdaterAction('install')} disabled={updaterRequestId !== null}>Confirmar e instalar</button><button class="secondary" onclick={() => { confirmUpdateInstall = false; }} disabled={updaterRequestId !== null}>Cancelar</button></div>{:else if snapshot.updater?.retryable}<button class="secondary" onclick={() => runUpdaterAction('check')} disabled={updaterRequestId !== null}>Reintentar</button>{/if}</div><small>No se envían identificadores del dispositivo y un fallo de red no bloquea el uso normal.</small></section>
             <section><p class="section-label">Inicio de sesión</p><h3>Inicio automático</h3><p>{autostartLabel()}</p><div class="row-actions">{#if snapshot.autostart === 'enabled'}<button class="secondary" onclick={() => changeAutostart(false)} disabled={autostartBusy}>Desactivar</button>{:else if snapshot.autostart !== 'unsupported' && snapshot.autostart !== 'conflict'}<button class="secondary" onclick={() => changeAutostart(true)} disabled={autostartBusy}>{autostartBusy ? 'Comprobando…' : 'Activar'}</button>{/if}<button class="text-action" onclick={refreshAutostartState} disabled={autostartBusy}>Actualizar estado</button></div></section>
@@ -739,6 +751,16 @@
       <p class="section-label">Al cerrar AirWiki</p><h2 id="close-title">¿Mantener los servicios activos?</h2>
       <p>Ocultar conserva watchers, MCP, red local e inferencia. Salir los detiene de forma coordinada.</p>
       <div><button class="primary" onclick={() => applyCloseChoice('hide')}>Ocultar en bandeja</button><button class="danger" onclick={() => applyCloseChoice('quit')}>Salir completamente</button><button class="secondary" onclick={() => applyCloseChoice('cancel')}>Cancelar</button></div>
+    </div>
+  </div>
+{/if}
+{#if pendingExternalUrl}
+  <div class="modal-backdrop" role="presentation">
+    <div class="close-dialog" role="dialog" aria-modal="true" aria-labelledby="external-link-title">
+      <p class="section-label">Abrir fuera de AirWiki</p><h2 id="external-link-title">¿Continuar en tu navegador?</h2>
+      <p>Vas a salir de la interfaz local para consultar la licencia publicada por el proveedor.</p>
+      <code class="external-destination">{pendingExternalUrl}</code>
+      <div><button class="primary" onclick={confirmExternalLink}>Abrir enlace</button><button class="secondary" onclick={() => { pendingExternalUrl = null; }}>Cancelar</button></div>
     </div>
   </div>
 {/if}

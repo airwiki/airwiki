@@ -6,8 +6,8 @@ A plan records intent and acceptance, not a transcript, command log, or speculat
 
 ## Public infrastructure beta v1 closure
 
-Status: Active
-Last updated: 2026-07-29
+Status: Completed
+Last updated: 2026-08-08
 
 ### User-visible outcome
 
@@ -50,10 +50,10 @@ manual network or community-index configuration.
       publisher-block defects with deterministic regressions.
 - [x] Keep private services available when an older candidate encounters a
       persisted higher bootstrap registry without relaxing downgrade defense.
-- [ ] Rebuild and pass installed smoke on both final v1 candidates.
-- [ ] Pass bidirectional cross-NAT, relay and both failover recoveries.
-- [ ] Pass sequential isolated v1, revoked v2, expired v3 and clean v1 recovery.
-- [ ] Reconfirm cost, observability, firewall, CI and DCO; mark PR ready without
+- [x] Rebuild and pass installed smoke on both final v1 candidates.
+- [x] Pass bidirectional cross-NAT, relay and both failover recoveries.
+- [x] Pass sequential isolated v1, revoked v2, expired v3 and clean v1 recovery.
+- [x] Reconfirm cost, observability, firewall, CI and DCO; mark PR ready without
       merging.
 
 ### Evidence and recovery

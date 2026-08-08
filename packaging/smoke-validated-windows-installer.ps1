@@ -87,12 +87,19 @@ $InstallerSmokeStages = @(
     "unknown"
 )
 $InstallerSmokeFailureClasses = @(
+    "payload_validation_failed",
     "model_activation_failed",
     "model_install_failed",
     "desktop_exited_before_ready",
     "runtime_exited_before_ready",
     "models_timeout",
     "powershell_runtime"
+)
+$PayloadDifferenceClasses = @(
+    "set_mismatch",
+    "missing_directory",
+    "missing_file",
+    "bytes_mismatch"
 )
 $AvailableMemoryBuckets = @(
     "unknown",
@@ -109,6 +116,7 @@ $InstallerSmokeCleanupStatuses = @(
 $script:ProcessTerminationUnconfirmed = $false
 $script:TerminalStage = "preflight"
 $script:StructuredFailure = $null
+$script:PayloadValidationDiagnostic = $null
 $ExpectedDesktopProcess = $null
 
 function Set-StructuredInstallerSmokeFailure(
@@ -150,6 +158,49 @@ function Set-StructuredInstallerSmokeFailure(
         ErrorKind = $SafeErrorKind
         ElapsedBucket = $SafeElapsedBucket
         ExitClass = $SafeExitClass
+    }
+}
+
+function Set-PayloadValidationFailure($Expected, $Actual) {
+    $DifferenceClass = $null
+    if ($Expected.Files.Count -ne $Actual.Files.Count -or
+        $Expected.Directories.Count -ne $Actual.Directories.Count) {
+        $DifferenceClass = "set_mismatch"
+    } else {
+        foreach ($Relative in $Expected.Directories.Keys) {
+            if (-not $Actual.Directories.ContainsKey($Relative)) {
+                $DifferenceClass = "missing_directory"
+                break
+            }
+        }
+        if ($null -eq $DifferenceClass) {
+            foreach ($Relative in $Expected.Files.Keys) {
+                if (-not $Actual.Files.ContainsKey($Relative)) {
+                    $DifferenceClass = "missing_file"
+                    break
+                }
+                if ($Expected.Files[$Relative].Length -ne $Actual.Files[$Relative].Length -or
+                    $Expected.Files[$Relative].Sha256 -ne $Actual.Files[$Relative].Sha256) {
+                    $DifferenceClass = "bytes_mismatch"
+                    break
+                }
+            }
+        }
+    }
+    if ($null -eq $DifferenceClass) {
+        return
+    }
+    Set-StructuredInstallerSmokeFailure `
+        "payload_validation_failed" `
+        $null `
+        $null `
+        "failure"
+    $script:PayloadValidationDiagnostic = [PSCustomObject]@{
+        DifferenceClass = $DifferenceClass
+        ExpectedFiles = [int] $Expected.Files.Count
+        ActualFiles = [int] $Actual.Files.Count
+        ExpectedDirectories = [int] $Expected.Directories.Count
+        ActualDirectories = [int] $Actual.Directories.Count
     }
 }
 
@@ -810,6 +861,11 @@ function Get-SanitizedInstallerSmokeFailure([string] $CurrentCleanupStatus) {
     $ErrorKind = $null
     $ElapsedBucket = $null
     $ExitClass = "failure"
+    $PayloadDifferenceClass = $null
+    $ExpectedFileCount = $null
+    $ActualFileCount = $null
+    $ExpectedDirectoryCount = $null
+    $ActualDirectoryCount = $null
 
     if ($null -ne $script:StructuredFailure) {
         $CandidateClass = [string] $script:StructuredFailure.FailureClass
@@ -846,6 +902,38 @@ function Get-SanitizedInstallerSmokeFailure([string] $CurrentCleanupStatus) {
         }
     }
 
+    if ($FailureClass -eq "payload_validation_failed" -and
+        $null -ne $script:PayloadValidationDiagnostic) {
+        $CandidateDifferenceClass = `
+            [string] $script:PayloadValidationDiagnostic.DifferenceClass
+        $CandidateCounts = @(
+            $script:PayloadValidationDiagnostic.ExpectedFiles,
+            $script:PayloadValidationDiagnostic.ActualFiles,
+            $script:PayloadValidationDiagnostic.ExpectedDirectories,
+            $script:PayloadValidationDiagnostic.ActualDirectories
+        )
+        $CountsAreSafe = $true
+        foreach ($CandidateCount in $CandidateCounts) {
+            if ($CandidateCount -isnot [int] -or
+                $CandidateCount -lt 0 -or
+                $CandidateCount -gt $script:WindowsPayloadMaxEntries) {
+                $CountsAreSafe = $false
+                break
+            }
+        }
+        if ($PayloadDifferenceClasses -ccontains $CandidateDifferenceClass -and
+            $CountsAreSafe) {
+            $PayloadDifferenceClass = $CandidateDifferenceClass
+            $ExpectedFileCount = [int] $CandidateCounts[0]
+            $ActualFileCount = [int] $CandidateCounts[1]
+            $ExpectedDirectoryCount = [int] $CandidateCounts[2]
+            $ActualDirectoryCount = [int] $CandidateCounts[3]
+        } else {
+            $FailureClass = "powershell_runtime"
+            $ExitClass = "failure"
+        }
+    }
+
     return [PSCustomObject]@{
         FailureClass = $FailureClass
         Stage = $Stage
@@ -854,6 +942,11 @@ function Get-SanitizedInstallerSmokeFailure([string] $CurrentCleanupStatus) {
         ExitClass = $ExitClass
         AvailableMemoryBucket = $MemoryBucket
         CleanupStatus = $CurrentCleanupStatus
+        PayloadDifferenceClass = $PayloadDifferenceClass
+        ExpectedFileCount = $ExpectedFileCount
+        ActualFileCount = $ActualFileCount
+        ExpectedDirectoryCount = $ExpectedDirectoryCount
+        ActualDirectoryCount = $ActualDirectoryCount
     }
 }
 
@@ -871,6 +964,15 @@ function Write-SanitizedInstallerSmokeFailure($Record) {
     }
     if ($null -ne $Record.ElapsedBucket) {
         $Line += " elapsed_bucket=$($Record.ElapsedBucket)"
+    }
+    if ($null -ne $Record.PayloadDifferenceClass) {
+        $Line += (
+            " payload_difference=$($Record.PayloadDifferenceClass)" +
+            " expected_files=$($Record.ExpectedFileCount)" +
+            " actual_files=$($Record.ActualFileCount)" +
+            " expected_directories=$($Record.ExpectedDirectoryCount)" +
+            " actual_directories=$($Record.ActualDirectoryCount)"
+        )
     }
     [Console]::Out.WriteLine($Line)
 }
@@ -998,6 +1100,7 @@ try {
     $ActualInstalled = Get-ActualWindowsPayloadManifest `
         $InstallDir `
         "installed application payload"
+    Set-PayloadValidationFailure $ExpectedInstalled $ActualInstalled
     Assert-WindowsPayloadManifestsEqual `
         $ExpectedInstalled `
         $ActualInstalled `

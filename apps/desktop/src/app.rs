@@ -37,7 +37,7 @@ use crate::{
     autostart::AutostartStatus,
     connectivity_platform::{
         ConnectivityPlatformSnapshot, FirewallDiagnosticState, NetworkProfileState,
-        SystemPermissionState,
+        SystemDestination, SystemPermissionState,
     },
     desktop_shell::{ClosePolicy, DesktopShell},
     i18n::{Localization, LocalizationError, UiLocale},
@@ -3401,7 +3401,10 @@ impl AirWikiApp {
                                 let request_id = Uuid::new_v4();
                                 self.connectivity_request_id = Some(request_id);
                                 self.worker
-                                    .send(WorkerCommand::OpenAdvancedFirewall { request_id });
+                                    .send(WorkerCommand::OpenSystemDestination {
+                                        request_id,
+                                        destination: SystemDestination::AdvancedFirewall,
+                                    });
                             }
                         }
                         Some(snapshot)

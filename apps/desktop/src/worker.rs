@@ -36,9 +36,9 @@ use crate::{
     autostart::{AutostartManager, AutostartStatus},
     connectivity_platform::{
         ConnectivityPlatformSnapshot, FirewallActionError, FirewallDiagnosticState,
-        FirewallHelperState, LanRuntimePolicy, NetworkProfileState,
+        FirewallHelperState, LanRuntimePolicy, NetworkProfileState, SystemDestination,
         diagnose as diagnose_connectivity, install_firewall_rules, lan_runtime_policy,
-        open_advanced_firewall_rules, remove_firewall_rules,
+        open_system_destination, remove_firewall_rules,
     },
     integrations::{
         ChatClientKind, ChatIntegrationManager, ChatIntegrationsSnapshot, IntegrationAction,
@@ -365,8 +365,9 @@ pub enum WorkerCommand {
         request_id: Uuid,
         install: bool,
     },
-    OpenAdvancedFirewall {
+    OpenSystemDestination {
         request_id: Uuid,
+        destination: SystemDestination,
     },
     RefreshWikiHealth {
         request_id: Uuid,
@@ -1718,7 +1719,10 @@ pub(crate) async fn run_worker(
                             spawn_firewall_configuration(&mut background, request_id, install);
                         }
                     }
-                    WorkerCommand::OpenAdvancedFirewall { request_id } => {
+                    WorkerCommand::OpenSystemDestination {
+                        request_id,
+                        destination,
+                    } => {
                         if firewall_request_is_busy(
                             active_connectivity_request,
                             firewall_operation,
@@ -1732,7 +1736,7 @@ pub(crate) async fn run_worker(
                             );
                         } else {
                             active_connectivity_request = Some(request_id);
-                            spawn_advanced_firewall_rules(&mut background, request_id);
+                            spawn_system_destination(&mut background, request_id, destination);
                         }
                     }
                     WorkerCommand::RefreshWikiHealth { request_id } => {
@@ -3676,10 +3680,14 @@ fn spawn_connectivity_diagnostic(background: &mut JoinSet<BackgroundCompletion>,
     });
 }
 
-fn spawn_advanced_firewall_rules(background: &mut JoinSet<BackgroundCompletion>, request_id: Uuid) {
+fn spawn_system_destination(
+    background: &mut JoinSet<BackgroundCompletion>,
+    request_id: Uuid,
+    destination: SystemDestination,
+) {
     background.spawn_blocking(move || BackgroundCompletion::ConnectivityDiagnosed {
         request_id,
-        result: open_advanced_firewall_rules()
+        result: open_system_destination(destination)
             .map(|()| diagnose_connectivity())
             .map_err(ConnectivityIssueCode::from),
     });

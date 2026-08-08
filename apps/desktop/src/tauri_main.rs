@@ -46,6 +46,7 @@ use ts_rs::TS;
 use uuid::Uuid;
 
 use crate::{
+    connectivity_platform::SystemDestination,
     model_config::{CloseBehavior, LanPreference, LocalePreference},
     paths::AppPaths,
     updater::{
@@ -775,6 +776,25 @@ enum LanDiscoveryStatus {
 enum FirewallOperationStatus {
     AwaitingWindows,
     TakingLonger,
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(rename = "SystemDestination", rename_all = "camelCase")]
+enum SystemDestinationInput {
+    NetworkSettings,
+    AdvancedFirewall,
+    LocalNetworkPrivacy,
+}
+
+impl From<SystemDestinationInput> for SystemDestination {
+    fn from(value: SystemDestinationInput) -> Self {
+        match value {
+            SystemDestinationInput::NetworkSettings => Self::NetworkSettings,
+            SystemDestinationInput::AdvancedFirewall => Self::AdvancedFirewall,
+            SystemDestinationInput::LocalNetworkPrivacy => Self::LocalNetworkPrivacy,
+        }
+    }
 }
 
 #[derive(Clone, Debug, Serialize, TS)]
@@ -1772,12 +1792,16 @@ fn configure_firewall(
 }
 
 #[tauri::command]
-fn open_advanced_firewall(
+fn open_system_destination(
     runtime: tauri::State<'_, AppRuntime>,
     request_id: String,
+    destination: SystemDestinationInput,
 ) -> Result<(), UiError> {
     send_connectivity_command(&runtime, request_id, |request_id| {
-        WorkerCommand::OpenAdvancedFirewall { request_id }
+        WorkerCommand::OpenSystemDestination {
+            request_id,
+            destination: destination.into(),
+        }
     })
 }
 
@@ -2876,6 +2900,7 @@ fn ui_bindings_source() -> String {
         exported_declaration::<LanDiscoveryStatus>(&config),
         exported_declaration::<LanRuntimeSummary>(&config),
         exported_declaration::<FirewallOperationStatus>(&config),
+        exported_declaration::<SystemDestinationInput>(&config),
         exported_declaration::<IntegrationClientDto>(&config),
         exported_declaration::<IntegrationStatusDto>(&config),
         exported_declaration::<IntegrationSummary>(&config),
@@ -3141,7 +3166,7 @@ fn main() -> Result<()> {
             refresh_wiki_health,
             refresh_connectivity,
             configure_firewall,
-            open_advanced_firewall,
+            open_system_destination,
             hide_to_tray,
             quit_completely
         ])

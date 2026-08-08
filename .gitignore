@@ -25,6 +25,9 @@ Thumbs.db
 __pycache__/
 *.pyc
 /dist/
+/apps/desktop/gen/
+/apps/desktop/ui/dist/
+/apps/desktop/ui/node_modules/
 /bundle/
 /vendor/models/
 /vendor/llama.cpp/

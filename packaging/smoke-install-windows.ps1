@@ -698,8 +698,10 @@ function Assert-InstalledRelease([string] $CaseId) {
         throw "silent or passive installer ignored /NS"
     }
 
-    Assert-SameFile (Join-Path $ReleaseDir "airwiki.exe") `
-        $DesktopExecutable "desktop executable"
+    Assert-WindowsNsisBundleTypePatch `
+        (Join-Path $ReleaseDir "airwiki.exe") `
+        $DesktopExecutable `
+        "installed desktop executable"
     Assert-SameFile (Join-Path $ReleaseDir "airwiki-mcp-bridge.exe") `
         (Join-Path $InstallDir "integrations\bridge\airwiki-mcp-bridge.exe") "MCP bridge"
     Assert-SameFile (Join-Path $ReleaseDir "airwiki-windows-firewall-helper.exe") `
@@ -726,7 +728,7 @@ function Assert-InstalledRelease([string] $CaseId) {
 
     $ExpectedPayload = New-WindowsPayloadManifest
     Add-WindowsPayloadFile $ExpectedPayload "airwiki.exe" `
-        (Join-Path $ReleaseDir "airwiki.exe") "desktop executable"
+        $DesktopExecutable "verified installed desktop executable"
     Add-WindowsPayloadFile $ExpectedPayload `
         "airwiki-windows-firewall-helper.exe" `
         (Join-Path $ReleaseDir "airwiki-windows-firewall-helper.exe") `

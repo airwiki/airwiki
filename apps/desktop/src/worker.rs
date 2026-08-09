@@ -23,7 +23,10 @@ use airwiki_mcp::{McpClientActivity, McpClientKind};
 use airwiki_network::{NetworkEvent, PublicBrowseResult, PublicRouteKind};
 use airwiki_types::{CollectionPolicy, EnrichmentDraft, SearchHit, SearchPurpose, SearchResponse};
 use futures::FutureExt;
-use tokio::sync::mpsc::{Receiver as AsyncReceiver, Sender as AsyncSender};
+use tokio::sync::{
+    mpsc::{Receiver as AsyncReceiver, Sender as AsyncSender},
+    oneshot,
+};
 use tokio::task::JoinSet;
 use tokio_util::sync::CancellationToken;
 use uuid::Uuid;
@@ -480,7 +483,12 @@ pub enum WorkerCommand {
         collection_id: Uuid,
         granted: bool,
     },
-    Shutdown,
+}
+
+#[derive(Debug)]
+pub(crate) struct WorkerIntent {
+    pub(crate) command: WorkerCommand,
+    pub(crate) accepted: oneshot::Sender<()>,
 }
 
 #[derive(Debug, Clone)]
@@ -924,7 +932,7 @@ impl ScanScheduler {
 
 pub(crate) async fn run_worker(
     paths: AppPaths,
-    mut commands: AsyncReceiver<WorkerCommand>,
+    mut commands: AsyncReceiver<WorkerIntent>,
     events: Sender<WorkerEvent>,
     progress_events: ProgressSender<WorkerEvent>,
     cancellation: CancellationToken,
@@ -1273,8 +1281,10 @@ pub(crate) async fn run_worker(
                     public_announcement_updates_open = false;
                 }
             }
-            command = commands.recv() => {
-                let Some(command) = command else { break 'running };
+            intent = commands.recv() => {
+                let Some(intent) = intent else { break 'running };
+                let WorkerIntent { command, accepted } = intent;
+                let _ = accepted.send(());
                 match command {
                     WorkerCommand::InstallModels => {
                         let Some(selection) = recommendation.selection.clone() else {
@@ -2050,7 +2060,6 @@ pub(crate) async fn run_worker(
                         }
                         refresh_peers(&services, &events).await;
                     }
-                    WorkerCommand::Shutdown => break 'running,
                 }
             }
             internal = internal_rx.recv() => {

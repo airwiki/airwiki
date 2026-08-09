@@ -8436,6 +8436,12 @@ mod tests {
         assert!(package.contains("& $Tauri bundle"));
         assert!(package.contains("sign-windows-artifact.ps1"));
         assert!(package.contains("$env:TEMP = $SigningTemp"));
+        assert!(
+            package.contains("$env:TAURI_SIGNING_PRIVATE_KEY")
+                && package.contains("& $Tauri signer sign $FinalInstaller")
+                && package.contains("packaging verify-updater-signature")
+                && package.contains("Tauri updater signature verification failed")
+        );
         assert!(verify.contains("target\\windows-uninstaller\\airwiki-uninstall.exe"));
         assert!(
             verify.contains("airwiki_${ExpectedVersion}_x64-setup.exe")
@@ -8452,6 +8458,19 @@ mod tests {
         assert!(
             verify.contains("\"packaging\", \"verify-updater-signature\"")
                 && verify.contains("updater signature failed cryptographic verification")
+        );
+    }
+
+    #[test]
+    fn macos_release_verifies_the_generated_updater_signature() {
+        let release =
+            fs::read_to_string(workspace_root().join("packaging/release-macos.sh")).unwrap();
+
+        assert!(release.contains("tauri signer sign \"$UPDATE_ARCHIVE\""));
+        assert!(
+            release.contains("packaging verify-updater-signature")
+                && release.contains("--artifact \"$UPDATE_ARCHIVE\"")
+                && release.contains("--signature \"$UPDATE_ARCHIVE.sig\"")
         );
     }
 

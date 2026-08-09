@@ -21,6 +21,13 @@ $Tauri = Join-Path $Root "apps\desktop\ui\node_modules\.bin\tauri.cmd"
 . (Join-Path $PSScriptRoot "windows-runtime.ps1")
 . (Join-Path $PSScriptRoot "windows-safe-staging.ps1")
 
+if ([string]::IsNullOrWhiteSpace($env:TAURI_SIGNING_PRIVATE_KEY)) {
+    throw "Tauri updater private key is required"
+}
+if ([string]::IsNullOrWhiteSpace($env:AIRWIKI_UPDATER_PUBLIC_KEY)) {
+    throw "updater public key is required for post-signing verification"
+}
+
 $UsePrebuiltMcpb = $env:AIRWIKI_USE_PREBUILT_MCPB -eq "true"
 if (-not [string]::IsNullOrWhiteSpace($env:AIRWIKI_USE_PREBUILT_MCPB) -and
     $env:AIRWIKI_USE_PREBUILT_MCPB -ne "true" -and
@@ -137,9 +144,20 @@ try {
     $Installers = @(Get-ChildItem -LiteralPath $TauriInstallerDir -File -Filter *.exe)
     if ($Installers.Count -ne 1) { throw "Expected exactly one signed Tauri NSIS installer" }
     New-Item -ItemType Directory -Path $OutDir -Force | Out-Null
-    Copy-Item -LiteralPath $Installers[0].FullName -Destination $OutDir
+    $FinalInstaller = Join-Path $OutDir $Installers[0].Name
+    Copy-Item -LiteralPath $Installers[0].FullName -Destination $FinalInstaller
     $UninstallerSigner = Assert-ExpectedWindowsSigner $UninstallerReceipt
     Assert-SameWindowsSigner $DesktopSigner $UninstallerSigner "generated uninstaller"
+
+    & $Tauri signer sign $FinalInstaller
+    if ($LASTEXITCODE -ne 0) { throw "Tauri updater signing failed" }
+    $UpdaterSignature = Get-VerifiedWindowsRegularFile `
+        "$FinalInstaller.sig" `
+        "Tauri updater signature"
+    & cargo run --locked -p xtask -- packaging verify-updater-signature `
+        --artifact $FinalInstaller `
+        --signature $UpdaterSignature
+    if ($LASTEXITCODE -ne 0) { throw "Tauri updater signature verification failed" }
 } finally {
     $env:TEMP = $PreviousTemp
     $env:TMP = $PreviousTmp

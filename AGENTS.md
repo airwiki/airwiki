@@ -32,7 +32,7 @@ The source is Apache-2.0 and the official repository is [airwiki/airwiki](https:
 - `airwiki-inference`: model catalog, assets, inference clients, and runtime supervision.
 - `airwiki-network`: authenticated LAN transport, pairing, grants, and peer protocol.
 - `airwiki-mcp`: canonical read-only MCP contracts and search adapter.
-- `apps/desktop`: composition root, worker orchestration, OS integration, and egui UI.
+- `apps/desktop`: Tauri composition root, worker orchestration, OS integration, IPC contracts, and Svelte UI.
 - `apps/mcp-bridge`: per-user stdio bridge to the fixed loopback MCP endpoint.
 - `apps/windows-firewall-helper`: narrow elevated Windows firewall boundary.
 - `xtask`: reproducible repository checks and packaging support.
@@ -51,7 +51,7 @@ SQLite is the source of operational state and local paths. Published OKF files a
 - Use the pinned stable toolchain and safe, idiomatic Rust. Keep public APIs small; prefer enums and newtypes for domain states and typed errors at reusable boundaries.
 - When Codex skills are available, use `rust-best-practices` for Rust implementation and review, and `rust-async-patterns` for Tokio or concurrency work. Skills guide the work; versioned code, tests, ADRs, and documentation remain authoritative, and contributor workflows must not depend on a local skill installation.
 - Avoid `unwrap`, `expect`, `panic!`, unchecked indexing, unnecessary cloning, unnecessary locks or trait objects, and `unsafe` in production paths. Any unavoidable invariant must be documented and tested locally.
-- Never block egui or a Tokio runtime worker with filesystem traversal, parsing, hashing, heavy SQLite work, inference, or network I/O. Use the existing worker boundary and `spawn_blocking` where appropriate.
+- Never block a Tauri command or Tokio runtime worker with filesystem traversal, parsing, hashing, heavy SQLite work, inference, or network I/O. Use the existing worker boundary and `spawn_blocking` where appropriate.
 - Logs are structured and sanitized. Never log document content, queries, snippets, tokens, secrets, embeddings, source paths, PeerIds, IPs, ports, or multiaddresses by default.
 - Released migrations are append-only. Persisted schema, OKF profile, wire protocol, and public API changes require compatibility tests and documentation.
 

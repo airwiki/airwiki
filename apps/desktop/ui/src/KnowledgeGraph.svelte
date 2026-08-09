@@ -90,7 +90,7 @@
   <div class="graph-index" aria-label="Páginas del mapa">
     <button onclick={() => onselect({ kind: 'index' })}>Índice</button>
     <button onclick={() => onselect({ kind: 'log' })}>Historial</button>
-    {#each bundle.concepts as concept}
+    {#each bundle.concepts as concept (concept.title)}
       <button onclick={() => onselect(concept.page)}>{concept.title}</button>
     {/each}
   </div>

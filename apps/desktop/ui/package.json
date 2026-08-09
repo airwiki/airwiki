@@ -7,7 +7,9 @@
   "scripts": {
     "dev": "vite --host 127.0.0.1 --port 1420 --strictPort",
     "build": "svelte-check --tsconfig ./tsconfig.json && vite build",
-    "check": "svelte-check --tsconfig ./tsconfig.json"
+    "check": "svelte-check --tsconfig ./tsconfig.json",
+    "lint": "eslint .",
+    "test": "vitest run"
   },
   "dependencies": {
     "@fluent/bundle": "0.19.1",
@@ -17,10 +19,20 @@
     "svelte": "5.56.8"
   },
   "devDependencies": {
+    "@eslint/js": "10.0.1",
     "@sveltejs/vite-plugin-svelte": "7.3.0",
     "@tauri-apps/cli": "2.11.4",
+    "@testing-library/jest-dom": "7.0.0",
+    "@testing-library/svelte": "5.4.2",
+    "axe-core": "4.13.0",
+    "eslint": "10.8.1",
+    "eslint-plugin-svelte": "3.22.0",
+    "globals": "17.9.0",
+    "jsdom": "30.0.1",
     "svelte-check": "4.3.4",
     "typescript": "5.9.3",
-    "vite": "8.2.1"
+    "typescript-eslint": "8.66.0",
+    "vite": "8.2.1",
+    "vitest": "4.1.10"
   }
 }

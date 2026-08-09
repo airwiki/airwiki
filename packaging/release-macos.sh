@@ -76,5 +76,8 @@ spctl --assess --type open --context context:primary-signature --verbose=4 "$DMG
 tar -czf "$UPDATE_ARCHIVE" -C "$(dirname "$APP")" "$(basename "$APP")"
 pnpm --dir apps/desktop/ui exec tauri signer sign "$UPDATE_ARCHIVE"
 test -s "$UPDATE_ARCHIVE.sig"
+cargo run --locked -p xtask -- packaging verify-updater-signature \
+  --artifact "$UPDATE_ARCHIVE" \
+  --signature "$UPDATE_ARCHIVE.sig"
 
 shasum -a 256 "$DMG" "$UPDATE_ARCHIVE" "$UPDATE_ARCHIVE.sig"

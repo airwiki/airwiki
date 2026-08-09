@@ -212,3 +212,8 @@ internal packaging run.
 No active workflow in this baseline signs or promotes a public release. Restoring
 such automation is a separate goal and requires reviewing the archived design
 against current platform contracts rather than copying it back unchanged.
+The guarded release scripts nevertheless produce signable Tauri updater
+artifacts: a final stapled macOS app archive and the final Authenticode-signed
+Windows NSIS installer. Each script creates the adjacent Tauri `.sig` only when
+the updater private key is present and verifies it with the compiled public key
+before the stable manifest can be generated.

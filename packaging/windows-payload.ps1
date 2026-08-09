@@ -28,6 +28,53 @@ function Assert-WindowsPeMachine(
     }
 }
 
+function Get-WindowsByteArraySha256([byte[]] $Bytes) {
+    $Hasher = [Security.Cryptography.SHA256]::Create()
+    try {
+        return [BitConverter]::ToString($Hasher.ComputeHash($Bytes)).Replace("-", "")
+    } finally {
+        $Hasher.Dispose()
+    }
+}
+
+function Assert-WindowsNsisBundleTypePatch(
+    [string] $UnpatchedPath,
+    [string] $PackagedPath,
+    [string] $Label
+) {
+    $Unpatched = [IO.File]::ReadAllBytes(
+        (Get-VerifiedWindowsRegularFile $UnpatchedPath "$Label unpatched executable")
+    )
+    $Packaged = [IO.File]::ReadAllBytes(
+        (Get-VerifiedWindowsRegularFile $PackagedPath "$Label packaged executable")
+    )
+    if ($Unpatched.Length -ne $Packaged.Length) {
+        throw "$Label packaged executable has an unexpected length"
+    }
+
+    $UnknownToken = "__TAURI_BUNDLE_TYPE_VAR_UNK"
+    $NsisToken = "__TAURI_BUNDLE_TYPE_VAR_NSS"
+    $UnpatchedText = [Text.Encoding]::ASCII.GetString($Unpatched)
+    $TokenOffset = $UnpatchedText.IndexOf($UnknownToken, [StringComparison]::Ordinal)
+    if ($TokenOffset -lt 0 -or
+        $TokenOffset -ne $UnpatchedText.LastIndexOf($UnknownToken, [StringComparison]::Ordinal)) {
+        throw "$Label unpatched executable must contain exactly one Tauri bundle marker"
+    }
+
+    $UnknownBytes = [Text.Encoding]::ASCII.GetBytes($UnknownToken)
+    $NsisBytes = [Text.Encoding]::ASCII.GetBytes($NsisToken)
+    for ($Index = 0; $Index -lt $NsisBytes.Length; $Index++) {
+        if ($Packaged[$TokenOffset + $Index] -ne $NsisBytes[$Index]) {
+            throw "$Label packaged executable has an invalid Tauri NSIS bundle marker"
+        }
+        $Packaged[$TokenOffset + $Index] = $UnknownBytes[$Index]
+    }
+    if ((Get-WindowsByteArraySha256 $Unpatched) -ne
+        (Get-WindowsByteArraySha256 $Packaged)) {
+        throw "$Label packaged executable differs beyond the required Tauri NSIS bundle marker"
+    }
+}
+
 function New-WindowsPayloadManifest {
     return [PSCustomObject]@{
         Files = [Collections.Generic.SortedDictionary[string, object]]::new(

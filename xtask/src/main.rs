@@ -7548,6 +7548,12 @@ mod tests {
         assert!(script.contains("target\\verified-tools\\7zip-26.02"));
         assert!(!script.contains("Get-Command 7z.exe"));
         assert!(script.contains("Get-FileHash -LiteralPath"));
+        assert!(script.contains("Assert-WindowsNsisBundleTypePatch"));
+        let payload =
+            fs::read_to_string(workspace_root().join("packaging/windows-payload.ps1")).unwrap();
+        assert!(payload.contains("__TAURI_BUNDLE_TYPE_VAR_UNK"));
+        assert!(payload.contains("__TAURI_BUNDLE_TYPE_VAR_NSS"));
+        assert!(payload.contains("differs beyond the required Tauri NSIS bundle marker"));
         assert!(
             script.contains(
                 "(Join-Path $PayloadRoot \"integrations\\bridge\\airwiki-mcp-bridge.exe\")"

@@ -189,7 +189,10 @@ try {
         Assert-WindowsFirewallHelperManifest `
             $PackagedFirewallHelper `
             "packaged Windows firewall helper"
-        Assert-SameBytes $Desktop $PackagedDesktop "Desktop executable"
+        Assert-WindowsNsisBundleTypePatch `
+            $Desktop `
+            $PackagedDesktop `
+            "Desktop executable"
         Assert-SameBytes $Bridge $PackagedBridge "MCP bridge"
         Assert-SameBytes $FirewallHelper $PackagedFirewallHelper "Windows Firewall helper"
         Assert-SameBytes $Mcpb $PackagedMcpb "Claude MCPB"

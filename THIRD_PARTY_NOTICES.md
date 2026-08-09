@@ -96,9 +96,8 @@ Selected primary components:
 
 | Component | Version in current lockfile | License expression | Source |
 | --- | --- | --- | --- |
-| eframe / egui | 0.35.0 | MIT OR Apache-2.0 | [emilk/egui](https://github.com/emilk/egui) |
-| egui_commonmark | 0.24.0 | MIT OR Apache-2.0 | [lampsitter/egui_commonmark](https://github.com/lampsitter/egui_commonmark) |
-| egui_graphs | 0.31.0 | MIT | [blitzarx1/egui_graphs](https://github.com/blitzarx1/egui_graphs) |
+| Tauri | 2.11.5 | MIT OR Apache-2.0 | [tauri-apps/tauri](https://github.com/tauri-apps/tauri) |
+| Tauri updater plugin | 2.10.1 | MIT OR Apache-2.0 | [tauri-apps/plugins-workspace](https://github.com/tauri-apps/plugins-workspace) |
 | pulldown-cmark | 0.13.4 | MIT | [pulldown-cmark/pulldown-cmark](https://github.com/pulldown-cmark/pulldown-cmark) |
 | rust-libp2p | 0.56.0 | MIT | [libp2p/rust-libp2p](https://github.com/libp2p/rust-libp2p) |
 | rmcp | 2.2.0 | Apache-2.0 | [modelcontextprotocol/rust-sdk](https://github.com/modelcontextprotocol/rust-sdk) |
@@ -109,12 +108,27 @@ Selected primary components:
 
 SQLite itself is bundled through `libsqlite3-sys` and is dedicated to the public domain by its authors; see [sqlite.org/copyright.html](https://www.sqlite.org/copyright.html).
 
+## npm dependencies
+
+The Svelte WebView and Tauri frontend toolchain use exact direct versions and a frozen pnpm
+lockfile. Platform-specific generated inventories cover the complete installed production and
+development closures, preserve declared license metadata, and deduplicate every legal text found
+in the published packages by SHA-256:
+
+- `licenses/NPM_LICENSES_MACOS_ARM64.md`;
+- `licenses/NPM_LICENSES_WINDOWS_X64.md`.
+
+The runtime interface includes Svelte 5.56.8, Fluent Bundle 0.19.1, Lucide Svelte 1.30.0,
+Tauri API 2.11.1 and Cytoscape 3.34.0. Build and test dependencies are inventoried as well but are
+not shipped in the WebView assets. Installation uses pnpm 10.18.3 with a frozen lockfile,
+`--ignore-scripts`, and an explicit complete dependency graph.
+
 `Cargo.lock` pins versions but is not the legal inventory. The generated
 artifact uses `cargo metadata --locked` and the files present in each package
 source. CI verifies that it is current and checks advisories, sources, and SPDX
 expressions with `cargo-audit` and `cargo-deny`. An allowlist does not relicense
 any component.
 
-Installers include the generated inventory, copies of the common MIT and Apache
+Installers include the generated Rust and platform npm inventories, copies of the common MIT and Apache
 License 2.0 texts, pinned non-Cargo license texts, and this notice. When a
 runtime is updated or restaged, its upstream legal files must remain with it.

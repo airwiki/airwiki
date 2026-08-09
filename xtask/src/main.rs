@@ -28,6 +28,17 @@ mod selector_corpus;
 
 const LICENSE_REPORT: &str = "resources/licenses/THIRD_PARTY_LICENSES.md";
 const NON_CARGO_LICENSE_INVENTORY: &str = "resources/licenses/NON_CARGO_COMPONENTS.md";
+const NPM_LOCKFILE: &str = "apps/desktop/ui/pnpm-lock.yaml";
+const NPM_LICENSE_INVENTORIES: [(&str, &str); 2] = [
+    (
+        "macos-arm64",
+        "resources/licenses/NPM_LICENSES_MACOS_ARM64.md",
+    ),
+    (
+        "windows-x64",
+        "resources/licenses/NPM_LICENSES_WINDOWS_X64.md",
+    ),
+];
 const APPLICATION_ID_LICENSE_ERROR: &str =
     "missing_verified_redistribution_license: nsis-applicationid-1.1";
 const VERIFIED_NON_CARGO_LEGAL_TEXTS: [(&str, &str); 23] = [
@@ -1434,6 +1445,7 @@ fn generate_licenses(check_only: bool) -> Result<()> {
     let root = workspace_root();
     validate_workflow_action_references(&root)?;
     validate_non_cargo_legal_inventory(&root)?;
+    validate_npm_license_inventories(&root)?;
     let report = build_license_report(&root)?;
     let destination = root.join(LICENSE_REPORT);
 
@@ -1461,6 +1473,37 @@ fn generate_licenses(check_only: bool) -> Result<()> {
     fs::write(&temporary, report).with_context(|| format!("writing {}", temporary.display()))?;
     replace_file(&temporary, &destination)?;
     println!("generated {}", destination.display());
+    Ok(())
+}
+
+fn validate_npm_license_inventories(root: &Path) -> Result<()> {
+    let lockfile = read_regular_file(&root.join(NPM_LOCKFILE), 16 * 1024 * 1024)?;
+    let lock_hash = hex::encode(Sha256::digest(&lockfile));
+    for (platform, relative_path) in NPM_LICENSE_INVENTORIES {
+        let path = root.join(relative_path);
+        let inventory = String::from_utf8(read_regular_file(&path, MAX_LEGAL_FILE_BYTES)?)
+            .with_context(|| format!("{} is not UTF-8", path.display()))?;
+        for required in [
+            "# Complete npm License Inventory",
+            platform,
+            lock_hash.as_str(),
+            "pnpm@10.18.3",
+            "## Packages",
+            "## Packages without a published legal file",
+            "## Deduplicated legal texts",
+            "@fluent/bundle",
+            "@lucide/svelte",
+            "@tauri-apps/api",
+            "cytoscape",
+            "svelte",
+        ] {
+            ensure!(
+                inventory.contains(required),
+                "{} is missing npm inventory marker `{required}`",
+                path.display()
+            );
+        }
+    }
     Ok(())
 }
 
@@ -7469,9 +7512,13 @@ mod tests {
         let docs = fs::read_to_string(root.join("docs/packaging.md"))?;
         let macos = fs::read_to_string(root.join("packaging/package-macos.sh"))?;
         let windows = fs::read_to_string(root.join("packaging/package-windows.ps1"))?;
+        let npmrc = fs::read_to_string(root.join("apps/desktop/ui/.npmrc"))?;
 
         assert_eq!(workflow.matches("--ignore-scripts --prod=false").count(), 2);
+        assert!(workflow.contains("licenses:check macos-arm64"));
+        assert!(workflow.contains("licenses:check windows-x64"));
         assert!(docs.contains("--ignore-scripts --prod=false"));
+        assert_eq!(npmrc.trim(), "ignore-scripts=true");
         for tool in ["tauri", "svelte-check", "vite"] {
             assert!(macos.contains(tool));
             assert!(windows.contains(tool));

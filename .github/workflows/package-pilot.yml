@@ -48,6 +48,7 @@ jobs:
           corepack enable
           corepack prepare pnpm@10.18.3 --activate
           pnpm --dir apps/desktop/ui install --frozen-lockfile --ignore-scripts --prod=false
+          pnpm --dir apps/desktop/ui run licenses:check macos-arm64
       - name: Package unsigned pilot
         run: ./packaging/package-macos.sh
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
@@ -73,6 +74,7 @@ jobs:
           corepack enable
           corepack prepare pnpm@10.18.3 --activate
           pnpm.cmd --dir apps/desktop/ui install --frozen-lockfile --ignore-scripts --prod=false
+          pnpm.cmd --dir apps/desktop/ui run licenses:check windows-x64
       - name: Package unsigned pilot
         shell: powershell
         run: ./packaging/package-windows.ps1

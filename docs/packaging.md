@@ -19,12 +19,16 @@ From the repository root:
 corepack enable
 corepack prepare pnpm@10.18.3 --activate
 pnpm --dir apps/desktop/ui install --frozen-lockfile --ignore-scripts --prod=false
+pnpm --dir apps/desktop/ui run licenses:check macos-arm64 # use windows-x64 on Windows
 cargo run --locked -p xtask -- licenses check
 ```
 
 `--prod=false` is mandatory so an inherited `NODE_ENV=production` cannot omit
 the pinned Tauri, Svelte validation, and Vite build tools. Package wrappers fail
 before runtime preparation when any of those tools is absent.
+The platform npm inventory must also match the installed frozen graph; generate
+it only on the corresponding verified platform and review all metadata and legal
+text changes.
 
 If the generated legal inventory is stale, regenerate it and review the complete
 diff before packaging:

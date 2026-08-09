@@ -34,10 +34,14 @@ use airwiki_inference::{
     ThinkingControl, bundled_runtime_is_accelerated,
 };
 use airwiki_mcp::{McpClientActivitySnapshot, McpServerConfig, McpServerHandle, start_mcp_server};
+#[cfg(feature = "e2e")]
+use airwiki_network::FileSecretStore;
+#[cfg(not(feature = "e2e"))]
+use airwiki_network::KeyringSecretStore;
 use airwiki_network::{
     AccessControl, AuthorizedSearchBackend, AuthorizedSearchResult, FederatedCoordinator,
-    KeyringSecretStore, MAX_MDNS_ADDRESSES_PER_PEER, MAX_VOLATILE_LAN_PEERS, ManualLanAddress,
-    Multiaddr, NetworkConfig, NetworkEvent, NetworkHandle, NetworkWarningKind, NodeIdentity,
+    MAX_MDNS_ADDRESSES_PER_PEER, MAX_VOLATILE_LAN_PEERS, ManualLanAddress, Multiaddr,
+    NetworkConfig, NetworkEvent, NetworkHandle, NetworkWarningKind, NodeIdentity,
     PairingFailureReason, PeerAccess, PeerId, PublicBrowseDelivery, PublicBrowseResult,
     PublicIndexEndpoint, PublicReader, PublicRelayReadiness, PublicRouteKind, PublicSearchDelivery,
     PublicSearchResult, PublicSourceBackend, PublicSourceBackendError, PublicSourceServerConfig,
@@ -78,7 +82,9 @@ use crate::{
     },
 };
 
+#[cfg(not(feature = "e2e"))]
 const KEYRING_SERVICE: &str = "io.github.airwiki.AirWiki";
+#[cfg(not(feature = "e2e"))]
 const KEYRING_ACCOUNT: &str = "device-identity";
 pub(crate) const PUBLIC_NETWORK_OFFLINE_WARNING: &str = "public_network_offline";
 const MODEL_SMOKE_TEST_DOCUMENT: &str = "Documento sintético de diagnóstico local. Título: Prueba de AirWiki. Contenido: verificar que el enriquecimiento estructurado funciona sin utilizar información de la empresa.";
@@ -1186,6 +1192,10 @@ impl DesktopServices {
     /// Starts storage, persistent Ed25519 identity, LAN and loopback MCP. Models
     /// are intentionally optional at this stage.
     pub async fn start(paths: &AppPaths, lan_enabled: bool) -> Result<Self> {
+        #[cfg(feature = "e2e")]
+        let store: Arc<dyn SecretStore> =
+            Arc::new(FileSecretStore::new(paths.data.join("e2e-secrets")));
+        #[cfg(not(feature = "e2e"))]
         let store: Arc<dyn SecretStore> =
             Arc::new(KeyringSecretStore::new(KEYRING_SERVICE, KEYRING_ACCOUNT));
         Self::start_with_secret_store_and_lan(paths, store, lan_enabled).await

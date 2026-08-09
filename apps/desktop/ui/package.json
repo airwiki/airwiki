@@ -9,7 +9,9 @@
     "build": "svelte-check --tsconfig ./tsconfig.json && vite build",
     "check": "svelte-check --tsconfig ./tsconfig.json",
     "lint": "eslint .",
-    "test": "vitest run"
+    "test": "vitest run",
+    "licenses:check": "node scripts/license-inventory.mjs --check",
+    "licenses:generate": "node scripts/license-inventory.mjs --generate"
   },
   "dependencies": {
     "@fluent/bundle": "0.19.1",

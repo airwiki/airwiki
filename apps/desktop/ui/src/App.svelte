@@ -705,7 +705,14 @@
 
 <svelte:head><meta name="theme-color" content="#07131f" /></svelte:head>
 
-{#if snapshot?.preferences && snapshot.preferences.completedOnboardingVersion == null}
+{#if !snapshot || snapshot.phase !== 'ready' || !snapshot.preferences}
+  <main class="onboarding startup" aria-busy="true">
+    <div class="onboarding-mark">A</div>
+    <p class="eyebrow">AirWiki</p>
+    <h1>{t('status-working')}</h1>
+    <p class="lede" aria-live="polite">{t(runtimeMessageId)}</p>
+  </main>
+{:else if snapshot.preferences.completedOnboardingVersion == null}
   <main class="onboarding">
     <div class="onboarding-mark">A</div>
     <p class="eyebrow">{t('onboarding-welcome-title')}</p>

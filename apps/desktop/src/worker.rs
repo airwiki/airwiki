@@ -942,19 +942,6 @@ pub(crate) async fn run_worker(
     cancellation: CancellationToken,
     updater_backend: Result<Box<dyn UpdateBackend>, UpdaterDisabledReason>,
 ) {
-    send(
-        &events,
-        WorkerEvent::Ready {
-            node_id: "—".to_owned(),
-            mcp_url: "http://127.0.0.1:43123/mcp".to_owned(),
-            collections: Vec::new(),
-            reviews: Vec::new(),
-            source_issues: Vec::new(),
-            blocked_public_publishers: Vec::new(),
-        },
-    )
-    .await;
-
     let hardware = match diagnose_hardware(&paths.data) {
         Ok(report) => {
             send(&events, WorkerEvent::Hardware(report.clone())).await;
@@ -986,14 +973,6 @@ pub(crate) async fn run_worker(
         send(&events, WorkerEvent::Error(warning)).await;
     }
     let mut desktop_config = loaded_config.config;
-    send(
-        &events,
-        WorkerEvent::DesktopPreferencesUpdated {
-            request_id: Uuid::nil(),
-            result: Ok(DesktopPreferencesView::from(&desktop_config)),
-        },
-    )
-    .await;
     let (mut updater, updater_disabled_reason) = match updater_backend {
         Ok(backend) => (Some(UpdaterService::from_boxed(backend)), None),
         Err(reason) => (None, Some(reason)),
@@ -1095,7 +1074,6 @@ pub(crate) async fn run_worker(
     let mut lan_local_addresses = Vec::new();
     let mut current_lan_listener = None;
     send_lan_runtime(&events, lan_listener, lan_discovery, &lan_local_addresses).await;
-    send_ready(&services, &events).await;
     refresh_peers(&services, &events).await;
 
     let (watch_tx, mut watch_rx) =
@@ -1273,6 +1251,16 @@ pub(crate) async fn run_worker(
             );
         }
     }
+
+    send(
+        &events,
+        WorkerEvent::DesktopPreferencesUpdated {
+            request_id: Uuid::nil(),
+            result: Ok(DesktopPreferencesView::from(&desktop_config)),
+        },
+    )
+    .await;
+    send_ready(&services, &events).await;
 
     'running: loop {
         tokio::select! {

@@ -2,7 +2,7 @@
 
 This file is generated. Do not edit it manually. Regenerate it with the pinned pnpm installation and `pnpm run licenses:generate`.
 
-Platform: `macos-arm64`. Lockfile SHA-256: `269c436dd264cf8c9638b8064ba212f9f5374cb838864d07598b01c5a24abc3e`. Package manager: `pnpm@10.18.3`.
+Platform: `macos-arm64`. Lockfile SHA-256: `72410137c6b5ce853802b5a4e5ef8f4d32379225d74e7f7d29ed2c34aba09ee3`. Package manager: `pnpm@10.18.3`.
 
 The inventory covers the installed production and development dependency closure. Local paths and machine-specific state are excluded. Identical legal texts are stored once by normalized SHA-256. Packages whose published tarball omits a legal file remain listed with their declared license and are called out explicitly.
 
@@ -16,6 +16,7 @@ The inventory covers the installed production and development dependency closure
 | @babel/code-frame | 7.29.7 | MIT | [source](https://babel.dev/docs/en/next/babel-code-frame) | `117da2af0d4ce0fe1c8e19b5cff9dcd806adf973d328d27b11d4448c4ff24f76` |
 | @babel/helper-validator-identifier | 7.29.7 | MIT | [source](https://github.com/babel/babel#readme) | `117da2af0d4ce0fe1c8e19b5cff9dcd806adf973d328d27b11d4448c4ff24f76` |
 | @babel/runtime | 7.29.7 | MIT | [source](https://babel.dev/docs/en/next/babel-runtime) | `117da2af0d4ce0fe1c8e19b5cff9dcd806adf973d328d27b11d4448c4ff24f76` |
+| @borewit/text-codec | 0.2.2 | MIT | [source](https://github.com/Borewit/text-codec#readme) | `d55209d49c97d162829baf379dfcf841e47c98528d2d50baeb922ac2983a1e47` |
 | @bramus/specificity | 2.4.2 | MIT | [source](https://github.com/bramus/specificity#readme) | `ae842a63dd9bc829c95a2ec22dda25a08e422a368b71dbca67a45cde7c4a4b81` |
 | @csstools/color-helpers | 6.1.0 | MIT-0 | [source](https://github.com/csstools/postcss-plugins/tree/main/packages/color-helpers#readme) | `947e32047a166cd05f04e45938d172b412c07cbee0b9735afd14bae30e02c2f6` |
 | @csstools/css-calc | 3.3.0 | MIT | [source](https://github.com/csstools/postcss-plugins/tree/main/packages/css-calc#readme) | `d00d032f517721b45c56c70c46bf904ebb71ad313df4d4db7722266b38069665` |
@@ -62,6 +63,34 @@ The inventory covers the installed production and development dependency closure
 | @jest/pattern | 30.4.0 | MIT | [source](https://github.com/jestjs/jest#readme) | `9d5211db733ccdd26f9170bec24cdca84093f60415da6b769ee9cdf23d04e19f` |
 | @jest/schemas | 30.4.1 | MIT | [source](https://github.com/jestjs/jest#readme) | `9d5211db733ccdd26f9170bec24cdca84093f60415da6b769ee9cdf23d04e19f` |
 | @jest/types | 30.4.1 | MIT | [source](https://github.com/jestjs/jest#readme) | `9d5211db733ccdd26f9170bec24cdca84093f60415da6b769ee9cdf23d04e19f` |
+| @jimp/core | 1.6.1 | MIT | [source](https://github.com/jimp-dev/jimp#readme) | `942eab097945c835cf41abcbf1b9a6659c5d0c3493e60c56796d2e045c219278` |
+| @jimp/diff | 1.6.1 | MIT | [source](https://github.com/jimp-dev/jimp#readme) | `942eab097945c835cf41abcbf1b9a6659c5d0c3493e60c56796d2e045c219278` |
+| @jimp/file-ops | 1.6.1 | MIT | [source](https://github.com/jimp-dev/jimp#readme) | `942eab097945c835cf41abcbf1b9a6659c5d0c3493e60c56796d2e045c219278` |
+| @jimp/js-bmp | 1.6.1 | MIT | [source](https://github.com/jimp-dev/jimp#readme) | `942eab097945c835cf41abcbf1b9a6659c5d0c3493e60c56796d2e045c219278` |
+| @jimp/js-gif | 1.6.1 | MIT | [source](https://github.com/jimp-dev/jimp#readme) | `942eab097945c835cf41abcbf1b9a6659c5d0c3493e60c56796d2e045c219278` |
+| @jimp/js-jpeg | 1.6.1 | MIT | [source](https://github.com/jimp-dev/jimp#readme) | `942eab097945c835cf41abcbf1b9a6659c5d0c3493e60c56796d2e045c219278` |
+| @jimp/js-png | 1.6.1 | MIT | [source](https://github.com/jimp-dev/jimp#readme) | `942eab097945c835cf41abcbf1b9a6659c5d0c3493e60c56796d2e045c219278` |
+| @jimp/js-tiff | 1.6.1 | MIT | [source](https://github.com/jimp-dev/jimp#readme) | `942eab097945c835cf41abcbf1b9a6659c5d0c3493e60c56796d2e045c219278` |
+| @jimp/plugin-blit | 1.6.1 | MIT | [source](https://github.com/jimp-dev/jimp#readme) | `942eab097945c835cf41abcbf1b9a6659c5d0c3493e60c56796d2e045c219278` |
+| @jimp/plugin-blur | 1.6.1 | MIT | [source](https://github.com/jimp-dev/jimp#readme) | `942eab097945c835cf41abcbf1b9a6659c5d0c3493e60c56796d2e045c219278` |
+| @jimp/plugin-circle | 1.6.1 | MIT | [source](https://github.com/jimp-dev/jimp#readme) | `942eab097945c835cf41abcbf1b9a6659c5d0c3493e60c56796d2e045c219278` |
+| @jimp/plugin-color | 1.6.1 | MIT | [source](https://github.com/jimp-dev/jimp#readme) | `942eab097945c835cf41abcbf1b9a6659c5d0c3493e60c56796d2e045c219278` |
+| @jimp/plugin-contain | 1.6.1 | MIT | [source](https://github.com/jimp-dev/jimp#readme) | `942eab097945c835cf41abcbf1b9a6659c5d0c3493e60c56796d2e045c219278` |
+| @jimp/plugin-cover | 1.6.1 | MIT | [source](https://github.com/jimp-dev/jimp#readme) | `942eab097945c835cf41abcbf1b9a6659c5d0c3493e60c56796d2e045c219278` |
+| @jimp/plugin-crop | 1.6.1 | MIT | [source](https://github.com/jimp-dev/jimp#readme) | `942eab097945c835cf41abcbf1b9a6659c5d0c3493e60c56796d2e045c219278` |
+| @jimp/plugin-displace | 1.6.1 | MIT | [source](https://github.com/jimp-dev/jimp#readme) | `942eab097945c835cf41abcbf1b9a6659c5d0c3493e60c56796d2e045c219278` |
+| @jimp/plugin-dither | 1.6.1 | MIT | [source](https://github.com/jimp-dev/jimp#readme) | `942eab097945c835cf41abcbf1b9a6659c5d0c3493e60c56796d2e045c219278` |
+| @jimp/plugin-fisheye | 1.6.1 | MIT | [source](https://github.com/jimp-dev/jimp#readme) | `942eab097945c835cf41abcbf1b9a6659c5d0c3493e60c56796d2e045c219278` |
+| @jimp/plugin-flip | 1.6.1 | MIT | [source](https://github.com/jimp-dev/jimp#readme) | `942eab097945c835cf41abcbf1b9a6659c5d0c3493e60c56796d2e045c219278` |
+| @jimp/plugin-hash | 1.6.1 | MIT | [source](https://github.com/jimp-dev/jimp#readme) | `942eab097945c835cf41abcbf1b9a6659c5d0c3493e60c56796d2e045c219278` |
+| @jimp/plugin-mask | 1.6.1 | MIT | [source](https://github.com/jimp-dev/jimp#readme) | `942eab097945c835cf41abcbf1b9a6659c5d0c3493e60c56796d2e045c219278` |
+| @jimp/plugin-print | 1.6.1 | MIT | [source](https://github.com/jimp-dev/jimp#readme) | `942eab097945c835cf41abcbf1b9a6659c5d0c3493e60c56796d2e045c219278` |
+| @jimp/plugin-quantize | 1.6.1 | MIT | [source](https://github.com/jimp-dev/jimp#readme) | `942eab097945c835cf41abcbf1b9a6659c5d0c3493e60c56796d2e045c219278` |
+| @jimp/plugin-resize | 1.6.1 | MIT | [source](https://github.com/jimp-dev/jimp#readme) | `942eab097945c835cf41abcbf1b9a6659c5d0c3493e60c56796d2e045c219278` |
+| @jimp/plugin-rotate | 1.6.1 | MIT | [source](https://github.com/jimp-dev/jimp#readme) | `942eab097945c835cf41abcbf1b9a6659c5d0c3493e60c56796d2e045c219278` |
+| @jimp/plugin-threshold | 1.6.1 | MIT | [source](https://github.com/jimp-dev/jimp#readme) | `942eab097945c835cf41abcbf1b9a6659c5d0c3493e60c56796d2e045c219278` |
+| @jimp/types | 1.6.1 | MIT | [source](https://github.com/jimp-dev/jimp#readme) | `942eab097945c835cf41abcbf1b9a6659c5d0c3493e60c56796d2e045c219278` |
+| @jimp/utils | 1.6.1 | MIT | [source](https://github.com/jimp-dev/jimp#readme) | `942eab097945c835cf41abcbf1b9a6659c5d0c3493e60c56796d2e045c219278` |
 | @jridgewell/gen-mapping | 0.3.13 | MIT | [source](https://github.com/jridgewell/sourcemaps/tree/main/packages/gen-mapping) | `769d154fbde32a915af110b1123650bc79f4cbe675acc66e005265bf069c6c6c` |
 | @jridgewell/remapping | 2.3.5 | MIT | [source](https://github.com/jridgewell/sourcemaps/tree/main/packages/remapping) | `769d154fbde32a915af110b1123650bc79f4cbe675acc66e005265bf069c6c6c` |
 | @jridgewell/resolve-uri | 3.1.2 | MIT | [source](https://github.com/jridgewell/resolve-uri#readme) | `1ad100697b2b3320d602f7606be8ea5025f6c2f833879f14d77b7421dfa72cd0` |
@@ -88,6 +117,8 @@ The inventory covers the installed production and development dependency closure
 | @testing-library/jest-dom | 7.0.0 | MIT | [source](https://github.com/testing-library/jest-dom#readme) | `bf8fd38056b7606deccfcadb4d8ca1c210082d8ef5513426d2650daedc30bed3` |
 | @testing-library/svelte | 5.4.2 | MIT | [source](https://github.com/testing-library/svelte-testing-library#readme) | `17a59e7c4f234754711bebc71b415cd95cf15d97353df7963ec34c6f7af9f685` |
 | @testing-library/svelte-core | 1.1.3 | MIT | [source](https://github.com/testing-library/svelte-testing-library#readme) | `17a59e7c4f234754711bebc71b415cd95cf15d97353df7963ec34c6f7af9f685` |
+| @tokenizer/inflate | 0.4.1 | MIT | [source](https://github.com/Borewit/tokenizer-inflate#readme) | `014e6ca48061890284500ac8366fad874ae5005be740706d467246b0033509db` |
+| @tokenizer/token | 0.3.0 | MIT | [source](https://github.com/Borewit/tokenizer-token#readme) | declared metadata only |
 | @tootallnate/quickjs-emscripten | 0.23.0 | MIT | [source](https://github.com/justjake/quickjs-emscripten#readme) | `cc8e9104738f96dadb50ee4ac9754fe46a7123af52609fbf60470ce7d2868c38` |
 | @types/aria-query | 5.0.4 | MIT | [source](https://github.com/DefinitelyTyped/DefinitelyTyped/tree/master/types/aria-query) | `c2cfccb812fe482101a8f04597dfc5a9991a6b2748266c47ac91b6a5aae15383` |
 | @types/chai | 5.2.3 | MIT | [source](https://github.com/DefinitelyTyped/DefinitelyTyped/tree/master/types/chai) | `c2cfccb812fe482101a8f04597dfc5a9991a6b2748266c47ac91b6a5aae15383` |
@@ -99,7 +130,7 @@ The inventory covers the installed production and development dependency closure
 | @types/istanbul-reports | 3.0.4 | MIT | [source](https://github.com/DefinitelyTyped/DefinitelyTyped/tree/master/types/istanbul-reports) | `c2cfccb812fe482101a8f04597dfc5a9991a6b2748266c47ac91b6a5aae15383` |
 | @types/json-schema | 7.0.15 | MIT | [source](https://github.com/DefinitelyTyped/DefinitelyTyped/tree/master/types/json-schema) | `c2cfccb812fe482101a8f04597dfc5a9991a6b2748266c47ac91b6a5aae15383` |
 | @types/mocha | 10.0.10 | MIT | [source](https://github.com/DefinitelyTyped/DefinitelyTyped/tree/master/types/mocha) | `c2cfccb812fe482101a8f04597dfc5a9991a6b2748266c47ac91b6a5aae15383` |
-| @types/node | 20.19.43, 26.2.0 | MIT | [source](https://github.com/DefinitelyTyped/DefinitelyTyped/tree/master/types/node) | `c2cfccb812fe482101a8f04597dfc5a9991a6b2748266c47ac91b6a5aae15383` |
+| @types/node | 16.9.1, 20.19.43, 26.2.0 | MIT | [source](https://github.com/DefinitelyTyped/DefinitelyTyped/tree/master/types/node) | `c2cfccb812fe482101a8f04597dfc5a9991a6b2748266c47ac91b6a5aae15383` |
 | @types/normalize-package-data | 2.4.4 | MIT | [source](https://github.com/DefinitelyTyped/DefinitelyTyped/tree/master/types/normalize-package-data) | `c2cfccb812fe482101a8f04597dfc5a9991a6b2748266c47ac91b6a5aae15383` |
 | @types/sinonjs__fake-timers | 8.1.5 | MIT | [source](https://github.com/DefinitelyTyped/DefinitelyTyped/tree/master/types/sinonjs__fake-timers) | `c2cfccb812fe482101a8f04597dfc5a9991a6b2748266c47ac91b6a5aae15383` |
 | @types/stack-utils | 2.0.3 | MIT | [source](https://github.com/DefinitelyTyped/DefinitelyTyped/tree/master/types/stack-utils) | `c2cfccb812fe482101a8f04597dfc5a9991a6b2748266c47ac91b6a5aae15383` |
@@ -130,6 +161,7 @@ The inventory covers the installed production and development dependency closure
 | @wdio/config | 9.30.1 | MIT | [source](https://github.com/webdriverio/webdriverio/tree/main/packages/wdio-config) | `6d4087d81607eef3c2d976c7311e8c1b250ee346e28c2669166e78cb7fe86fbd` |
 | @wdio/dot-reporter | 9.30.1 | MIT | [source](https://github.com/webdriverio/webdriverio/tree/main/packages/wdio-dot-reporter) | `6d4087d81607eef3c2d976c7311e8c1b250ee346e28c2669166e78cb7fe86fbd` |
 | @wdio/globals | 9.29.1 | MIT | [source](https://github.com/webdriverio/webdriverio/tree/main/packages/wdio-globals) | `6d4087d81607eef3c2d976c7311e8c1b250ee346e28c2669166e78cb7fe86fbd` |
+| @wdio/image-comparison-core | 1.3.0 | MIT | [source](https://webdriver.io/docs/visual-testing) | `f4ada6a68d65cae19744156fb78ece10b2eeaac576f405aa67668db181757e23` |
 | @wdio/local-runner | 9.30.1 | MIT | [source](https://github.com/webdriverio/webdriverio/tree/main/packages/wdio-local-runner) | `6d4087d81607eef3c2d976c7311e8c1b250ee346e28c2669166e78cb7fe86fbd` |
 | @wdio/logger | 9.29.1 | MIT | [source](https://github.com/webdriverio/webdriverio/tree/main/packages/wdio-logger) | `6d4087d81607eef3c2d976c7311e8c1b250ee346e28c2669166e78cb7fe86fbd` |
 | @wdio/mocha-framework | 9.30.1 | MIT | [source](https://github.com/webdriverio/webdriverio/tree/main/packages/wdio-mocha-framework) | `6d4087d81607eef3c2d976c7311e8c1b250ee346e28c2669166e78cb7fe86fbd` |
@@ -140,6 +172,7 @@ The inventory covers the installed production and development dependency closure
 | @wdio/spec-reporter | 9.30.1 | MIT | [source](https://github.com/webdriverio/webdriverio/tree/main/packages/wdio-spec-reporter) | `6d4087d81607eef3c2d976c7311e8c1b250ee346e28c2669166e78cb7fe86fbd` |
 | @wdio/types | 9.30.1 | MIT | [source](https://github.com/webdriverio/webdriverio/tree/main/packages/wdio-types) | `6d4087d81607eef3c2d976c7311e8c1b250ee346e28c2669166e78cb7fe86fbd` |
 | @wdio/utils | 9.30.1 | MIT | [source](https://github.com/webdriverio/webdriverio/tree/main/packages/wdio-utils) | `6d4087d81607eef3c2d976c7311e8c1b250ee346e28c2669166e78cb7fe86fbd` |
+| @wdio/visual-service | 9.3.0 | MIT | [source](https://webdriver.io/docs/visual-testing) | `f4ada6a68d65cae19744156fb78ece10b2eeaac576f405aa67668db181757e23` |
 | @wdio/xvfb | 9.30.1 | MIT | [source](https://github.com/webdriverio/webdriverio/tree/main/packages/wdio-xvfb) | `528f289ec1e9c22f3708ce765aa25279b442fa18582e332f6aeffdf4ed21bf71` |
 | @zip.js/zip.js | 2.8.36 | BSD-3-Clause | [source](https://gildas-lormeau.github.io/zip.js) | `1b7ebc8d7889ed25491484ab2b102370742ca6c0b26650a0c62cc2269b579b84` |
 | abort-controller | 3.0.0 | MIT | [source](https://github.com/mysticatea/abort-controller#readme) | `dbbf03317f0101fed5643cd87ca80fb769e358fa4f428445bf2315deeb23a154` |
@@ -150,6 +183,7 @@ The inventory covers the installed production and development dependency closure
 | ansi-colors | 4.1.3 | MIT | [source](https://github.com/doowb/ansi-colors) | `94e1923e52409cfd50e97988d9772c0de15f65700097e3227fec367a39e82b94` |
 | ansi-regex | 5.0.1, 6.2.2 | MIT | [source](https://github.com/chalk/ansi-regex#readme) | `48da2f39e100d4085767e94966b43f4fa95ff6a0698fba57ed460914e35f94a0`<br>`5c932d88256b4ab958f64a856fa48e8bd1f55bc1d96b8149c65689e0c61789d3` |
 | ansi-styles | 4.3.0, 5.2.0, 6.2.3 | MIT | [source](https://github.com/chalk/ansi-styles#readme) | `48da2f39e100d4085767e94966b43f4fa95ff6a0698fba57ed460914e35f94a0`<br>`5c932d88256b4ab958f64a856fa48e8bd1f55bc1d96b8149c65689e0c61789d3` |
+| any-base | 1.1.0 | MIT | [source](https://github.com/HarasimowiczKamil/any-base#readme) | `7e18f531f7d7018d9ce069655d01dbed0c3b3af079c75531debe35a605a9f7fb` |
 | anymatch | 3.1.3 | ISC | [source](https://github.com/micromatch/anymatch) | `5a3b0007c4203f10fe11b3fe8747253eb994f135e10b73e1f88ada941af09c6e` |
 | anynum | 1.0.1 | MIT | [source](https://github.com/NaturalIntelligence/anynum#readme) | `8e75fc0e776c62ccadb8178ece8d3daa9ba7601fb0a49b2dfb0ea9a7a5c0aa07` |
 | archiver | 7.0.1 | MIT | [source](https://github.com/archiverjs/node-archiver) | `fdd6128c826bf37fe0ca3894f22cf5e0b8df1e5652aa14b12b0656218db61eb0` |
@@ -160,6 +194,7 @@ The inventory covers the installed production and development dependency closure
 | ast-types | 0.13.4 | MIT | [source](http://github.com/benjamn/ast-types) | `a374b737c41b30b1ec04c5fcc17d1b853f008f217cc43a9dbea441abd9afde70` |
 | async | 3.2.6 | MIT | [source](https://caolan.github.io/async/) | `d9fed24f132985934fca621c4dc1dfb53e03377a24d0568d424383d7eaa9c0ac` |
 | async-exit-hook | 2.0.1 | MIT | [source](https://github.com/tapppi/async-exit-hook#readme) | `6fb9754611c20f6649f68805e8c990e83261f29316e29de9e6cedae607b8634c` |
+| await-to-js | 3.0.0 | MIT | [source](https://github.com/scopsy/await-to-js#readme) | `e5909d19273f75386213370789163e2cc09089883e3f9d780cb3b2bcbe8023d2` |
 | axe-core | 4.13.0 | MPL-2.0 | [source](https://www.deque.com/axe/) | `4f8563870d0fca38bbc3e00b6f670cb7fa9f380ba9f26a7f7d1184a6b18b1653`<br>`af175b9d96ee93c21a036152e1b905b0b95304d4ae8c2c921c7609100ba8df7e` |
 | axobject-query | 4.1.0 | Apache-2.0 | [source](https://github.com/A11yance/axobject-query#readme) | `c8df456c7ccba74b959087dff494d4ac2a12dfb0400c08b46b2494a08a000567` |
 | b4a | 1.8.1 | Apache-2.0 | [source](https://github.com/holepunchto/b4a#readme) | `c71d239df91726fc519c6eb72d318ec65820627232b2f796219e87dcf35d0ab4` |
@@ -173,6 +208,7 @@ The inventory covers the installed production and development dependency closure
 | basic-ftp | 5.3.1 | MIT | [source](https://github.com/patrickjuchli/basic-ftp#readme) | `5abeca78b582cb73907891ec8dbd9b239855a95d1f6b0d281165a1a6cea4618d` |
 | bidi-js | 1.0.3 | MIT | [source](https://github.com/lojjic/bidi-js#readme) | `49d4d143fed599deb502a0fe6e02f49832f87e9a3a4cd0502e469596d50faa6d` |
 | binary-extensions | 2.3.0 | MIT | [source](https://github.com/sindresorhus/binary-extensions#readme) | `96f0820026bd6dadc4af99c6dba7111d2e0190c092c376a746c13863e151d072` |
+| bmp-ts | 1.0.9 | MIT | [source](https://github.com/hipstersmoothie/bmp-ts#readme) | `8bfcf12013c5d0707794813d1f2787917eada9b8643bf47bfe0306fe018624c8` |
 | boolbase | 1.0.0 | ISC | [source](https://github.com/fb55/boolbase) | declared metadata only |
 | brace-expansion | 1.1.18, 2.1.4, 5.0.9 | MIT | [source](https://github.com/juliangruber/brace-expansion#readme) | `68f12f6e2c33688699249c01d8f9623c534da20aa71989c57b061b7bc1676d14`<br>`9c63a23124d68cd30cd316a94a1a0bca34f032786df6df69fc4b5f136bac8d2e` |
 | braces | 3.0.3 | MIT | [source](https://github.com/micromatch/braces) | `35bdd8a44339719441900fb50fbefc5e2dca1ca662cbaed7a687de842c8b70f2` |
@@ -263,6 +299,7 @@ The inventory covers the installed production and development dependency closure
 | events | 3.3.0 | MIT | [source](https://github.com/Gozala/events#readme) | `631987b7616a325a5b97566c232418481ddf7dbb5ecadefb991e791876cc2599` |
 | events-universal | 1.0.1 | Apache-2.0 | [source](https://github.com/holepunchto/events-universal#readme) | `c71d239df91726fc519c6eb72d318ec65820627232b2f796219e87dcf35d0ab4` |
 | execa | 9.6.1 | MIT | [source](https://github.com/sindresorhus/execa#readme) | `5c932d88256b4ab958f64a856fa48e8bd1f55bc1d96b8149c65689e0c61789d3` |
+| exif-parser | 0.1.12 | MIT | [source](https://github.com/bwindels/exif-parser#readme) | `723380e934ca86384b4d1fa21237e0b7248957e08f874b8804df66906917c0ed` |
 | exit-hook | 4.0.0 | MIT | [source](https://github.com/sindresorhus/exit-hook#readme) | `5c932d88256b4ab958f64a856fa48e8bd1f55bc1d96b8149c65689e0c61789d3` |
 | expect | 30.4.1 | MIT | [source](https://github.com/jestjs/jest#readme) | `9d5211db733ccdd26f9170bec24cdca84093f60415da6b769ee9cdf23d04e19f` |
 | expect-type | 1.4.0 | Apache-2.0 | [source](https://github.com/mmkal/expect-type#readme) | `7c6cc83c84eaa249a85bf12fe3eedd831bb50c696e8890b5248223ae68c7b408` |
@@ -278,6 +315,7 @@ The inventory covers the installed production and development dependency closure
 | fdir | 6.5.0 | MIT | [source](https://github.com/thecodrr/fdir#readme) | `9a39f2aadab11a3697edd668ff2d8ad885b649737b7ab4d3bf12b34e5ada0c86` |
 | figures | 6.1.0 | MIT | [source](https://github.com/sindresorhus/figures#readme) | `5c932d88256b4ab958f64a856fa48e8bd1f55bc1d96b8149c65689e0c61789d3` |
 | file-entry-cache | 8.0.0 | MIT | [source](https://github.com/jaredwray/file-entry-cache#readme) | `750315e157c49f551560b05004c439ad6a3b41caf03847dfec9aad8c81d2501f` |
+| file-type | 21.3.4 | MIT | [source](https://github.com/sindresorhus/file-type#readme) | `5c932d88256b4ab958f64a856fa48e8bd1f55bc1d96b8149c65689e0c61789d3` |
 | filelist | 1.0.6 | Apache-2.0 | [source](https://github.com/mde/filelist) | declared metadata only |
 | fill-range | 7.1.1 | MIT | [source](https://github.com/jonschlinkert/fill-range) | `35bdd8a44339719441900fb50fbefc5e2dca1ca662cbaed7a687de842c8b70f2` |
 | find-up | 5.0.0, 6.3.0 | MIT | [source](https://github.com/sindresorhus/find-up#readme) | `5c932d88256b4ab958f64a856fa48e8bd1f55bc1d96b8149c65689e0c61789d3` |
@@ -292,6 +330,7 @@ The inventory covers the installed production and development dependency closure
 | get-port | 7.2.0 | MIT | [source](https://github.com/sindresorhus/get-port#readme) | `5c932d88256b4ab958f64a856fa48e8bd1f55bc1d96b8149c65689e0c61789d3` |
 | get-stream | 5.2.0, 9.0.1 | MIT | [source](https://github.com/sindresorhus/get-stream#readme) | `5c932d88256b4ab958f64a856fa48e8bd1f55bc1d96b8149c65689e0c61789d3` |
 | get-uri | 6.0.5 | MIT | [source](https://github.com/TooTallNate/proxy-agents#readme) | `819021ebdb731965692b2f38206ed1c96a956469827173dc668a1c6ba3e97097` |
+| gifwrap | 0.10.1 | MIT | [source](https://github.com/jtlapp/gifwrap#readme) | `c28a483580454d61210a1c7cc0899d75b68fa875cc7940ebafde3c49ca762439` |
 | glob | 10.5.0, 8.1.0 | ISC | [source](https://github.com/isaacs/node-glob#readme) | `cdbc258d13806538e727964c2436a8806e6e2496ccd616224aace6f7bf98dbc1`<br>`dedc5ba48845093da9bbe6f2bb0b3cc87d9829c7d49d55c2dfe661671364d821` |
 | glob-parent | 5.1.2, 6.0.2 | ISC | [source](https://github.com/gulpjs/glob-parent#readme) | `2c46f1325bd3822a33c1e2c1e49c18d13127ac00f9c8b3b79196c7a126f73cd9`<br>`fc68eb8f1c8e1d6b8be50f3c177927e24791cae7dc251e6253a012f37926a30c` |
 | globals | 16.5.0, 17.9.0 | MIT | [source](https://github.com/sindresorhus/globals#readme) | `5c932d88256b4ab958f64a856fa48e8bd1f55bc1d96b8149c65689e0c61789d3` |
@@ -309,6 +348,7 @@ The inventory covers the installed production and development dependency closure
 | iconv-lite | 0.6.3, 0.7.3 | MIT | [source](https://github.com/pillarjs/iconv-lite) | `f9c6da891840e8951696e472b3c7d6f6d3ab2c7325f1dd30c0813244c15b288c` |
 | ieee754 | 1.2.1 | BSD-3-Clause | [source](https://github.com/feross/ieee754#readme) | `18d45466ba3253deae04667e267a91ea8de8548f18c1125264d1c9db28194cc1` |
 | ignore | 5.3.2, 7.0.6 | MIT | [source](https://github.com/kaelzhang/node-ignore#readme) | `542e7521fab287d3d2ea83e0145692c7d82ea81b28f141be6686364929d33079` |
+| image-q | 4.0.0 | MIT | [source](https://github.com/ibezkrovnyi/image-quantization/tree/main/packages/image-q) | `74773cfa34cf18a6652f84f4f1912ceb88f35e90f15d27a2f8d0cde278c46ce9` |
 | immediate | 3.0.6 | MIT | [source](https://github.com/calvinmetcalf/immediate#readme) | `809e66de579fb7d92503848bbe6d1f348f4f6521a71e5d294fe7cc0c87a3b4ff` |
 | import-meta-resolve | 4.2.0 | MIT | [source](https://github.com/wooorm/import-meta-resolve#readme) | `8770a1a4b69ee722636643e81340ce4a8f0b8415b1c568487edc9062338bfcc7` |
 | imurmurhash | 0.1.4 | MIT | [source](https://github.com/jensyt/imurmurhash-js) | declared metadata only |
@@ -340,7 +380,9 @@ The inventory covers the installed production and development dependency closure
 | jest-mock | 30.4.1 | MIT | [source](https://github.com/jestjs/jest#readme) | `9d5211db733ccdd26f9170bec24cdca84093f60415da6b769ee9cdf23d04e19f` |
 | jest-regex-util | 30.4.0 | MIT | [source](https://github.com/jestjs/jest#readme) | `9d5211db733ccdd26f9170bec24cdca84093f60415da6b769ee9cdf23d04e19f` |
 | jest-util | 30.4.1 | MIT | [source](https://github.com/jestjs/jest#readme) | `9d5211db733ccdd26f9170bec24cdca84093f60415da6b769ee9cdf23d04e19f` |
+| jimp | 1.6.1 | MIT | [source](https://github.com/jimp-dev/jimp#readme) | `942eab097945c835cf41abcbf1b9a6659c5d0c3493e60c56796d2e045c219278` |
 | jiti | 2.7.0 | MIT | [source](https://github.com/unjs/jiti#readme) | `46231df5a7733c3f52f11b71f3df61813007745b62b09031acfb45fb42d75082` |
+| jpeg-js | 0.4.4 | BSD-3-Clause | [source](https://github.com/eugeneware/jpeg-js#readme) | `c0a8512eabe960492fefd4f287523eb3b5ca1518ca37ef0ec83344cd7f089cb8` |
 | js-tokens | 4.0.0 | MIT | [source](https://github.com/lydell/js-tokens#readme) | `2213d91c606205c71eb051a199478cdc2adde945893404d7f1421436dd6d5cc1` |
 | js-yaml | 4.3.1 | MIT | [source](https://github.com/nodeca/js-yaml#readme) | `a07bc24468b9654ce76a547d47a2db282d07733b715db4c73a98bd63961f9550` |
 | jsdom | 30.0.1 | MIT | [source](https://github.com/jsdom/jsdom#readme) | `242d37e7cab25cbafc36cc973ee88f9345fddf066afe4f72b7ac3d9ad4e24cce` |
@@ -375,6 +417,7 @@ The inventory covers the installed production and development dependency closure
 | lz-string | 1.5.0 | MIT | [source](http://pieroxy.net/blog/pages/lz-string/index.html) | `433fc9dfe659dbfb1e91eed8351f13651e97bfa3ac6d03394c3d63f61d4bbc80` |
 | magic-string | 0.30.21, 1.1.0 | MIT | [source](https://github.com/Rich-Harris/magic-string#readme) | `1cbe51b907662f6cb1492b16c359384a595180bf0e4d101603ed525e75c4e484` |
 | mdn-data | 2.27.1 | CC0-1.0 | [source](https://developer.mozilla.org) | `36ffd9dc085d529a7e60e1276d73ae5a030b020313e6c5408593a6ae2af39673` |
+| mime | 3.0.0 | MIT | [source](https://github.com/broofa/mime#readme) | `8f2658c03422c408b2b2ce4d151decc3b1a6fd3d86e5ca9433777bccdcdf75a2` |
 | min-indent | 1.0.1 | MIT | [source](https://github.com/thejameskyle/min-indent#readme) | `9638fa87f845af6cecc56fab498c1f74f4a98522d3b53377bedcbdb44b5a8dcc` |
 | minimatch | 10.2.6 | BlueOak-1.0.0 | [source](https://github.com/isaacs/minimatch#readme) | `2c7c5d22ed5a8ee968c64757710979afcd77438c48b4a265b94e615babd8a901` |
 | minimatch | 3.1.5, 5.1.9, 9.0.9 | ISC | [source](https://github.com/isaacs/minimatch#readme) | `4ec3d4c66cd87f5c8d8ad911b10f99bf27cb00cdfcff82621956e379186b016b`<br>`d11323827fa4edeaafc437cc5b91b6971b335f0127efeeb42bf5122fe8657e8f` |
@@ -394,6 +437,7 @@ The inventory covers the installed production and development dependency closure
 | nth-check | 2.1.1 | BSD-2-Clause | [source](https://github.com/fb55/nth-check) | `cb992345949ccd6e8394b2cd6c465f7b897c864f845937dbf64e8997f389e164` |
 | object-inspect | 1.13.4 | MIT | [source](https://github.com/inspect-js/object-inspect) | `bd40cc437e28a3ad7bef2ad34e6b72e757b182e67bda1acadbab4ef0476f8232` |
 | obug | 2.1.4 | MIT | [source](https://github.com/sxzz/obug#readme) | `ee48679d379ca6b4493d5e231094d85f818dd9be40b1a4f234fb7ff657ee35d9` |
+| omggif | 1.0.10 | MIT | [source](https://github.com/deanm/omggif#readme) | declared metadata only |
 | once | 1.4.0 | ISC | [source](https://github.com/isaacs/once#readme) | `4ec3d4c66cd87f5c8d8ad911b10f99bf27cb00cdfcff82621956e379186b016b` |
 | optionator | 0.9.4 | MIT | [source](https://github.com/gkz/optionator) | `b9eb082c39fe245e38793699074c394c43a722c51fce031c3c165cb92a31035c` |
 | p-limit | 3.1.0, 4.0.0 | MIT | [source](https://github.com/sindresorhus/p-limit#readme) | `5c932d88256b4ab958f64a856fa48e8bd1f55bc1d96b8149c65689e0c61789d3` |
@@ -402,6 +446,9 @@ The inventory covers the installed production and development dependency closure
 | pac-resolver | 7.0.1 | MIT | [source](https://github.com/TooTallNate/proxy-agents#readme) | `71368fd0f5b4129191e9afcd1e1ef2dc89a9090d3e4d80bbab92dafd032b3bef` |
 | package-json-from-dist | 1.0.1 | BlueOak-1.0.0 | [source](https://github.com/isaacs/package-json-from-dist#readme) | `a49c9ba464796f65b59fca3f1e6ca40912df1e859f575383223f7ec6c5baae09` |
 | pako | 1.0.11 | (MIT AND Zlib) | [source](https://github.com/nodeca/pako) | `a04665b3b2de56c66730c1f720f528175739e4104f79073614aa611da1e85539` |
+| parse-bmfont-ascii | 1.0.6 | MIT | [source](https://github.com/mattdesl/parse-bmfont-ascii) | declared metadata only |
+| parse-bmfont-binary | 1.0.6 | MIT | [source](https://github.com/Jam3/parse-bmfont-binary) | `e9c4a56c64b047f28f7e691306d48fadce1bd269c9e1b0e206bb8925e43b7964` |
+| parse-bmfont-xml | 1.1.6 | MIT | [source](https://github.com/mattdesl/parse-bmfont-xml) | `ae831d3b498ec271172062a63086ec0001b9ab99493418f2c7c75dcb95924884` |
 | parse-json | 7.1.1 | MIT | [source](https://github.com/sindresorhus/parse-json#readme) | `5c932d88256b4ab958f64a856fa48e8bd1f55bc1d96b8149c65689e0c61789d3` |
 | parse-ms | 4.0.0 | MIT | [source](https://github.com/sindresorhus/parse-ms#readme) | `5c932d88256b4ab958f64a856fa48e8bd1f55bc1d96b8149c65689e0c61789d3` |
 | parse5 | 7.3.0, 8.0.1 | MIT | [source](https://parse5.js.org) | `8c535800331e1e4439835555b3f9edc7fe9dee2fab0d8bbbd5a982e8b8343d4d` |
@@ -415,6 +462,8 @@ The inventory covers the installed production and development dependency closure
 | pend | 1.2.0 | MIT | [source](https://github.com/andrewrk/node-pend#readme) | `7e64acffcb0d20d33f5a86949ffd4a99ae045b10c7332a9c3a58635876c16880` |
 | picocolors | 1.1.1 | ISC | [source](https://github.com/alexeyraspopov/picocolors#readme) | `6582629e2979466878f6014313dcc2f3756c9616148682227ce3063dde310750` |
 | picomatch | 2.3.2, 4.0.5 | MIT | [source](https://github.com/micromatch/picomatch) | `d0cd141b0c322fded5dfad1d4645bb2fedfc05b7321fe1009469638190d59ef9` |
+| pixelmatch | 5.3.0 | ISC | [source](https://github.com/mapbox/pixelmatch#readme) | `c6a01684eb9061a00589d483e9cf9ea5a82b3e8270f9992501ceb79f32753fb5` |
+| pngjs | 6.0.0, 7.0.0 | MIT | [source](https://github.com/lukeapage/pngjs) | `176b07a18c0bb3836aaeb61088fd0bf11a38f66e6f15e3fbda85faa225250d6e`<br>`be75ef59c5cf59715588a17a82dff7dd3e83c4dba3c458676bb9311e05fbedc5` |
 | postcss | 8.5.26 | MIT | [source](https://postcss.org/) | `5be1f3465bba68a626777f984878814aaf35e7ef8e9fd314d469bcf887050fb8` |
 | postcss-load-config | 3.1.4 | MIT | [source](https://github.com/postcss/postcss-load-config#readme) | `21ffeb3616fb8bbcd873831077579bfaa9ff1ee4d4823e0cec6aec3f255a856f` |
 | postcss-safe-parser | 7.0.1 | MIT | [source](https://github.com/postcss/postcss-safe-parser#readme) | `c4630ac8b89cb317ac5bdd60ac5e4e185eab9bd5151a0c7b3afa41aa83d7ec9b` |
@@ -453,6 +502,7 @@ The inventory covers the installed production and development dependency closure
 | safe-buffer | 5.1.2, 5.2.1 | MIT | [source](https://github.com/feross/safe-buffer) | `c7cc929b57080f4b9d0c6cf57669f0463fc5b39906344dfc8d3bc43426b30eac` |
 | safe-regex2 | 5.1.1 | MIT | [source](https://github.com/fastify/safe-regex2) | `3871c31d0cc373951d836b8bb97275a2227f8af7464df7c51bc3f98769b87653` |
 | safer-buffer | 2.1.2 | MIT | [source](https://github.com/ChALkeR/safer-buffer#readme) | `4bc935e71be198c67ddf3c2b5fddb195f6edc182bfc155a96a6db61b44b494b9` |
+| sax | 1.6.1 | BlueOak-1.0.0 | [source](https://github.com/isaacs/sax-js#readme) | `8a1af140fdfbf5afd3df27f7e662f989c5b963a300020dfafce42033cae9e004` |
 | saxes | 6.0.0 | ISC | [source](https://github.com/lddubeau/saxes#readme) | declared metadata only |
 | semver | 7.8.5 | ISC | [source](https://github.com/npm/node-semver#readme) | `4ec3d4c66cd87f5c8d8ad911b10f99bf27cb00cdfcff82621956e379186b016b` |
 | serialize-error | 12.0.0 | MIT | [source](https://github.com/sindresorhus/serialize-error#readme) | `5c932d88256b4ab958f64a856fa48e8bd1f55bc1d96b8149c65689e0c61789d3` |
@@ -462,6 +512,7 @@ The inventory covers the installed production and development dependency closure
 | shebang-regex | 3.0.0 | MIT | [source](https://github.com/sindresorhus/shebang-regex#readme) | `48da2f39e100d4085767e94966b43f4fa95ff6a0698fba57ed460914e35f94a0` |
 | siginfo | 2.0.0 | ISC | [source](https://github.com/emilbayes/siginfo#readme) | `3bdddf0b9b08aaa2fe4365b803fc958ed32c0597ca0bd727be8d9fcb8b248d18` |
 | signal-exit | 4.1.0 | ISC | [source](https://github.com/tapjs/signal-exit#readme) | `b173e19b9a78df305577ace0e52ef45a4bcc915ea28b47b256dc3b68dcb1f7e7` |
+| simple-xml-to-json | 1.2.7 | MIT | [source](https://github.com/nirgit/simple-xml-to-json) | `2a26ecc6ad02d385a1233195b397847f50106cf275cd72592e801cda0733f8e2` |
 | slash | 3.0.0 | MIT | [source](https://github.com/sindresorhus/slash#readme) | `48da2f39e100d4085767e94966b43f4fa95ff6a0698fba57ed460914e35f94a0` |
 | smart-buffer | 4.2.0 | MIT | [source](https://github.com/JoshGlazebrook/smart-buffer/) | `c46e2c333e1c9e6fcfd130cf91b8e54bf67b60fabbc04996f7e199b990353ff3` |
 | socks | 2.8.9 | MIT | [source](https://github.com/JoshGlazebrook/socks/) | `4f4f28866154c8d758241a64296e8790d45d7d912ff7b029930778c06d8f2a72` |
@@ -486,6 +537,7 @@ The inventory covers the installed production and development dependency closure
 | strip-indent | 3.0.0 | MIT | [source](https://github.com/sindresorhus/strip-indent#readme) | `48da2f39e100d4085767e94966b43f4fa95ff6a0698fba57ed460914e35f94a0` |
 | strip-json-comments | 3.1.1 | MIT | [source](https://github.com/sindresorhus/strip-json-comments#readme) | `5c932d88256b4ab958f64a856fa48e8bd1f55bc1d96b8149c65689e0c61789d3` |
 | strnum | 2.4.1 | MIT | [source](https://github.com/NaturalIntelligence/strnum#readme) | `2aa16be0f4fad003a352a955a43314e9d1d8deef7034060a82ac9c49f32b81e2` |
+| strtok3 | 10.3.5 | MIT | [source](https://github.com/Borewit/strtok3#readme) | `c33959fabde25a1b6161d8e0fdc6fdcea1fc48095fe0bd51043247bfd214287f` |
 | supports-color | 7.2.0, 8.1.1 | MIT | [source](https://github.com/chalk/supports-color#readme) | `48da2f39e100d4085767e94966b43f4fa95ff6a0698fba57ed460914e35f94a0`<br>`5c932d88256b4ab958f64a856fa48e8bd1f55bc1d96b8149c65689e0c61789d3` |
 | svelte | 5.56.8 | MIT | [source](https://svelte.dev) | `06257f4847b13a49a039efb17b944c141e71b12fd8d231b362d86919067d77a3` |
 | svelte-check | 4.3.4 | MIT | [source](https://github.com/sveltejs/language-tools#readme) | `ada595bb2ec8d71616dde1b956edb8fbad63eadab32b8d9ab9310a1aef08e5c5` |
@@ -496,12 +548,14 @@ The inventory covers the installed production and development dependency closure
 | teex | 1.0.1 | MIT | [source](https://github.com/mafintosh/teex) | `69b1ce578ad0aa97ce5302c7cb8d507c2fbe5a670712b02f0b4a2b95cae3184a` |
 | text-decoder | 1.2.7 | Apache-2.0 | [source](https://github.com/holepunchto/text-decoder#readme) | `c71d239df91726fc519c6eb72d318ec65820627232b2f796219e87dcf35d0ab4` |
 | tinybench | 2.9.0 | MIT | [source](https://github.com/tinylibs/tinybench#readme) | `cebc084d54e6dd99e53292ddb4bc1cdb63d9bfcd9ce438fe3aa6eb106d79e2ea` |
+| tinycolor2 | 1.6.0 | MIT | [source](https://github.com/bgrins/TinyColor#readme) | `bcd7e82c06802eecb0f0792ffd591bd82da3be813bcb8f55bcdf969334dab1d2` |
 | tinyexec | 1.3.0 | MIT | [source](https://github.com/tinylibs/tinyexec#readme) | `f95f668fe64081ddb4153b322e34fdd719b991285ed08177d5ad7133b7988d92` |
 | tinyglobby | 0.2.17 | MIT | [source](https://superchupu.dev/tinyglobby) | `22c68811e174cbbfb3813d4135918df4f540959c14d872e601d9abe83d3cde8f` |
 | tinyrainbow | 1.2.0, 3.1.1 | MIT | [source](https://github.com/tinylibs/tinyrainbow#readme) | `cebc084d54e6dd99e53292ddb4bc1cdb63d9bfcd9ce438fe3aa6eb106d79e2ea` |
 | tldts | 7.4.10 | MIT | [source](https://github.com/remusao/tldts#readme) | `c64182d48160db948b6aa97a984f1a32974ce4d2053900361264cd33853796cb` |
 | tldts-core | 7.4.10 | MIT | [source](https://github.com/remusao/tldts#readme) | `c64182d48160db948b6aa97a984f1a32974ce4d2053900361264cd33853796cb` |
 | to-regex-range | 5.0.1 | MIT | [source](https://github.com/micromatch/to-regex-range) | `e7d1fee7347ffddccc5fd03327ffdb50f8c112be0d5016d62388a92c4ae6e7a9` |
+| token-types | 6.1.2 | MIT | [source](https://github.com/Borewit/token-types#readme) | `ab27d7574bc6d292302b0b49c2e1ad6f0d88031822dce486257c085c7d83133c` |
 | tough-cookie | 6.0.2 | BSD-3-Clause | [source](https://github.com/salesforce/tough-cookie) | `22ec6791c91ba42c0516a05f4cbdde019aae4687f8a38c5ca7e8a69ee68f851d` |
 | tr46 | 6.0.0 | MIT | [source](https://github.com/jsdom/tr46#readme) | `499d6d466d064e0460427967a344e2a32fcb86ea8c6cd1a285ec4f1fa03fba67` |
 | ts-api-utils | 2.5.0 | MIT | [source](https://github.com/JoshuaKGoldberg/ts-api-utils#readme) | `76c9d5f5ea942054715c026f33f8717c9e24603196a3737b8899afa216bcbdab` |
@@ -511,12 +565,14 @@ The inventory covers the installed production and development dependency closure
 | type-fest | 3.13.1, 4.26.0, 4.41.0 | (MIT OR CC0-1.0) | [source](https://github.com/sindresorhus/type-fest#readme) | `5c932d88256b4ab958f64a856fa48e8bd1f55bc1d96b8149c65689e0c61789d3`<br>`a2010f343487d3f7618affe54f789f5487602331c0a8d03f49e9a7c547cf0499` |
 | typescript | 5.9.3 | Apache-2.0 | [source](https://www.typescriptlang.org/) | `a5e9f9b1575301c7a7a03508fdaa2e05a918cc17fd21c6e898096a96d6a34f61` |
 | typescript-eslint | 8.66.0 | MIT | [source](https://typescript-eslint.io/packages/typescript-eslint) | `2eb5c7a0bba9deb77a98c81bf6b9d3fb1c67118eebf968b6b1a787b3f8928ee0` |
+| uint8array-extras | 1.5.0 | MIT | [source](https://github.com/sindresorhus/uint8array-extras#readme) | `5c932d88256b4ab958f64a856fa48e8bd1f55bc1d96b8149c65689e0c61789d3` |
 | undici | 6.28.0, 7.29.0, 8.10.0 | MIT | [source](https://undici.nodejs.org) | `a6db8096b2707bc0102d256917d4d33f298ba36d8c3f25de067a2b5bb379db27` |
 | undici-types | 6.21.0, 8.3.0 | MIT | [source](https://undici.nodejs.org) | `a6db8096b2707bc0102d256917d4d33f298ba36d8c3f25de067a2b5bb379db27` |
 | unicorn-magic | 0.3.0 | MIT | [source](https://github.com/sindresorhus/unicorn-magic#readme) | `5c932d88256b4ab958f64a856fa48e8bd1f55bc1d96b8149c65689e0c61789d3` |
 | uri-js | 4.4.1 | BSD-2-Clause | [source](https://github.com/garycourt/uri-js) | `0af366eff4c01ec147c9c61ea9e8ffad64a4294754c9d79355f3fd1b97cb2fb9` |
 | urlpattern-polyfill | 10.1.0 | MIT | [source](https://github.com/kenchris/urlpattern-polyfill#readme) | `6686d33d2949f415d96ab0c29a3f7189f98275ccd1d914cbba3b4a4841cf5307` |
 | userhome | 1.0.1 | MIT | [source](https://github.com/shama/userhome) | `9dc8fc666c64eab8694a5dd3d6a56ee1635047c64ee429bbfc22b92856434f41` |
+| utif2 | 4.1.0 | MIT | [source](https://github.com/photopea/UTIF.js) | `c1fb8861eca211bf5aea574358aba7039396c0c1824c2a1477cc126d398efd89` |
 | util-deprecate | 1.0.2 | MIT | [source](https://github.com/TooTallNate/util-deprecate) | `0154425673db15cdfa80ecba2c9b1f1a867f7197a006764712849bfc3a93cbb7` |
 | validate-npm-package-license | 3.0.4 | Apache-2.0 | [source](https://github.com/kemitchell/validate-npm-package-license.js#readme) | `cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30` |
 | vite | 8.2.1 | MIT | [source](https://vite.dev) | `387dd7baa307083401a27c58c362c30832f5ba1dba84f10cc22c33401523f45c` |
@@ -540,6 +596,9 @@ The inventory covers the installed production and development dependency closure
 | ws | 8.21.3 | MIT | [source](https://github.com/websockets/ws) | `2b29dcfe0d6471f7e8c92c5fb38c9f93edee10330937055440192f1832b1ecef` |
 | xml-name-validator | 5.0.0 | Apache-2.0 | [source](https://github.com/jsdom/xml-name-validator#readme) | `a6cba85bc92e0cff7a450b1d873c0eaa2e9fc96bf472df0247a26bec77bf3ff9` |
 | xml-naming | 0.3.0 | MIT | [source](https://github.com/NaturalIntelligence/xml-naming#readme) | `8e75fc0e776c62ccadb8178ece8d3daa9ba7601fb0a49b2dfb0ea9a7a5c0aa07` |
+| xml-parse-from-string | 1.0.1 | MIT | [source](https://github.com/Jam3/xml-parse-from-string) | `e9c4a56c64b047f28f7e691306d48fadce1bd269c9e1b0e206bb8925e43b7964` |
+| xml2js | 0.5.0 | MIT | [source](https://github.com/Leonidas-from-XIV/node-xml2js) | `c51452ef1dfd5606c9fe266930fa6bf7e8a534d52973b6475df5bf212cad5b0a` |
+| xmlbuilder | 11.0.1 | MIT | [source](http://github.com/oozcitak/xmlbuilder-js) | `8ad16994acb18814fcd2ff6d0b559906b842047b995baf33fd0c55e4d24cbac8` |
 | xmlchars | 2.2.0 | MIT | [source](https://github.com/lddubeau/xmlchars#readme) | `45d196313c2647d313cc65ca9b093d2d6974b64d35ee7346f2c60c9d518dff2c` |
 | y18n | 5.0.8 | ISC | [source](https://github.com/yargs/y18n) | `2034cce3b6fafcddd642c4175e01d3ddfc332a53b9f20fdc46b1466dc89ac469` |
 | yaml | 1.10.3, 2.9.0 | ISC | [source](https://eemeli.org/yaml/) | `0f10bab9eedc5d50183a6dbce9f76e8db974103bfd32d64674406dfeb7654ee7`<br>`5bba27375d93e9119f76c1015f7672cf9ad5f70952296e0842fb2243d6376869` |
@@ -552,6 +611,7 @@ The inventory covers the installed production and development dependency closure
 | yoctocolors-cjs | 2.1.3 | MIT | [source](https://github.com/sindresorhus/yoctocolors#readme) | `5c932d88256b4ab958f64a856fa48e8bd1f55bc1d96b8149c65689e0c61789d3` |
 | zimmerframe | 1.1.4 | MIT | [source](https://github.com/sveltejs/zimmerframe#readme) | `5fde0201805ca0ffc8884fac6a3447b7f2918a6c22efb68b94019298d16bad9e` |
 | zip-stream | 6.0.1 | MIT | [source](https://github.com/archiverjs/node-zip-stream) | `5511d2884f82e71ad1a2efb0c7d78616568ea3b985746e26ad7013df774aca44` |
+| zod | 3.25.76 | MIT | [source](https://zod.dev) | `3f1189b28e3866e0d979968d466b78f813f76827cfdca1fbb124cc0a5c8841f8` |
 
 ## Packages without a published legal file
 
@@ -563,6 +623,7 @@ The inventory covers the installed production and development dependency closure
 - `@puppeteer/browsers@2.13.2`
 - `@rolldown/binding-darwin-arm64@1.2.3`
 - `@tauri-apps/cli-darwin-arm64@2.11.4`
+- `@tokenizer/token@0.3.0`
 - `boolbase@1.0.0`
 - `degenerator@5.0.1`
 - `eastasianwidth@0.2.0`
@@ -576,12 +637,36 @@ The inventory covers the installed production and development dependency closure
 - `keyv@4.5.4`
 - `locate-character@3.0.0`
 - `natural-compare@1.4.0`
+- `omggif@1.0.10`
+- `parse-bmfont-ascii@1.0.6`
 - `saxes@6.0.0`
 - `spdx-exceptions@2.5.0`
 - `spdx-license-ids@3.0.23`
 - `stackback@0.0.2`
 
 ## Deduplicated legal texts
+
+### 014e6ca48061890284500ac8366fad874ae5005be740706d467246b0033509db
+
+Origins: `@tokenizer/inflate@0.4.1`. Upstream filename: `LICENSE`.
+
+~~~~text
+Copyright (c) 2024, Borewit
+All rights reserved.
+
+Permission is hereby granted, free of charge, to any person obtaining a copy of this software and associated
+documentation files (the "Software"), to deal in the Software without restriction, including without limitation the
+rights to use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of the Software, and to permit
+persons to whom the Software is furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all copies or substantial portions of the
+Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE
+WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR
+COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR
+OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+~~~~
 
 ### 0154425673db15cdfa80ecba2c9b1f1a867f7197a006764712849bfc3a93cbb7
 
@@ -1514,6 +1599,33 @@ Origins: `rxjs@7.8.2`. Upstream filename: `LICENSE.txt`.
  limitations under the License.
 ~~~~
 
+### 176b07a18c0bb3836aaeb61088fd0bf11a38f66e6f15e3fbda85faa225250d6e
+
+Origins: `pngjs@6.0.0, 7.0.0`. Upstream filename: `LICENSE`.
+
+~~~~text
+pngjs2 original work Copyright (c) 2015 Luke Page & Original Contributors
+pngjs derived work Copyright (c) 2012 Kuba Niegowski
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in
+all copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+THE SOFTWARE.
+~~~~
+
 ### 176d95320d565cb034d8323797b6cd6160238f625453687f98aad2085c46c3b3
 
 Origins: `fd-slicer@1.1.0`. Upstream filename: `LICENSE`.
@@ -2378,6 +2490,34 @@ HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY,
 WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
 FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR
 OTHER DEALINGS IN THE SOFTWARE.
+~~~~
+
+### 2a26ecc6ad02d385a1233195b397847f50106cf275cd72592e801cda0733f8e2
+
+Origins: `simple-xml-to-json@1.2.7`. Upstream filename: `license`.
+
+~~~~text
+MIT License
+
+Copyright (c) 2022 Nir Moav
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
 ~~~~
 
 ### 2a8a5d6197bb97a018b8a190dd3ed853d750ca87c8e80c17aad41d6c6ff448e1
@@ -5585,6 +5725,34 @@ ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF
 OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
 ~~~~
 
+### 3f1189b28e3866e0d979968d466b78f813f76827cfdca1fbb124cc0a5c8841f8
+
+Origins: `zod@3.25.76`. Upstream filename: `LICENSE`.
+
+~~~~text
+MIT License
+
+Copyright (c) 2025 Colin McDonnell
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+~~~~
+
 ### 3fb0857ef0133928cf72c88dfc464e931486e88778961eedec25585e2321507f
 
 Origins: `clone@1.0.4`. Upstream filename: `LICENSE`.
@@ -7337,7 +7505,7 @@ The above copyright notice and this permission notice shall be included in all c
 
 ### 5c932d88256b4ab958f64a856fa48e8bd1f55bc1d96b8149c65689e0c61789d3
 
-Origins: `@sindresorhus/merge-streams@4.0.0`, `ansi-regex@5.0.1, 6.2.2`, `ansi-styles@4.3.0, 5.2.0, 6.2.3`, `camelcase@6.3.0`, `chalk@4.1.2, 5.6.2`, `decamelize@4.0.0, 6.0.1`, `escape-string-regexp@2.0.0, 4.0.0`, `execa@9.6.1`, `exit-hook@4.0.0`, `figures@6.1.0`, `find-up@5.0.0, 6.3.0`, `get-port@7.2.0`, `get-stream@5.2.0, 9.0.1`, `globals@16.5.0, 17.9.0`, `is-plain-obj@2.1.0, 4.1.0`, `is-stream@2.0.1, 4.0.1`, `is-unicode-supported@0.1.0, 2.1.0`, `locate-path@6.0.0, 7.2.0`, `log-symbols@4.1.0`, `npm-run-path@6.0.0`, `p-limit@3.1.0, 4.0.0`, `p-locate@5.0.0, 6.0.0`, `parse-json@7.1.1`, `parse-ms@4.0.0`, `path-exists@4.0.0, 5.0.0`, `path-key@3.1.1, 4.0.0`, `pretty-ms@9.3.0`, `read-pkg-up@10.1.0`, `read-pkg@8.1.0`, `serialize-error@12.0.0`, `string-width@4.2.3, 5.1.2`, `strip-ansi@6.0.1, 7.2.0`, `strip-final-newline@4.0.0`, `strip-json-comments@3.1.1`, `supports-color@7.2.0, 8.1.1`, `type-fest@3.13.1, 4.26.0, 4.41.0`, `unicorn-magic@0.3.0`, `wrap-ansi@6.2.0, 7.0.0, 8.1.0`, `yocto-queue@0.1.0, 1.2.2`, `yoctocolors-cjs@2.1.3`, `yoctocolors@2.2.0`. Upstream filename: `license`.
+Origins: `@sindresorhus/merge-streams@4.0.0`, `ansi-regex@5.0.1, 6.2.2`, `ansi-styles@4.3.0, 5.2.0, 6.2.3`, `camelcase@6.3.0`, `chalk@4.1.2, 5.6.2`, `decamelize@4.0.0, 6.0.1`, `escape-string-regexp@2.0.0, 4.0.0`, `execa@9.6.1`, `exit-hook@4.0.0`, `figures@6.1.0`, `file-type@21.3.4`, `find-up@5.0.0, 6.3.0`, `get-port@7.2.0`, `get-stream@5.2.0, 9.0.1`, `globals@16.5.0, 17.9.0`, `is-plain-obj@2.1.0, 4.1.0`, `is-stream@2.0.1, 4.0.1`, `is-unicode-supported@0.1.0, 2.1.0`, `locate-path@6.0.0, 7.2.0`, `log-symbols@4.1.0`, `npm-run-path@6.0.0`, `p-limit@3.1.0, 4.0.0`, `p-locate@5.0.0, 6.0.0`, `parse-json@7.1.1`, `parse-ms@4.0.0`, `path-exists@4.0.0, 5.0.0`, `path-key@3.1.1, 4.0.0`, `pretty-ms@9.3.0`, `read-pkg-up@10.1.0`, `read-pkg@8.1.0`, `serialize-error@12.0.0`, `string-width@4.2.3, 5.1.2`, `strip-ansi@6.0.1, 7.2.0`, `strip-final-newline@4.0.0`, `strip-json-comments@3.1.1`, `supports-color@7.2.0, 8.1.1`, `type-fest@3.13.1, 4.26.0, 4.41.0`, `uint8array-extras@1.5.0`, `unicorn-magic@0.3.0`, `wrap-ansi@6.2.0, 7.0.0, 8.1.0`, `yocto-queue@0.1.0, 1.2.2`, `yoctocolors-cjs@2.1.3`, `yoctocolors@2.2.0`. Upstream filename: `license`.
 
 ~~~~text
 MIT License
@@ -8315,6 +8483,36 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 THE SOFTWARE.
 ~~~~
 
+### 723380e934ca86384b4d1fa21237e0b7248957e08f874b8804df66906917c0ed
+
+Origins: `exif-parser@0.1.12`. Upstream filename: `LICENSE.md`.
+
+~~~~text
+The MIT License
+===============
+
+Copyright (c) 2010 Bruno Windels <bruno.windels@gmail.com>, Daniel Leinich <leinich@gmx.net>.
+
+Permission is hereby granted, free of charge, to any person obtaining
+a copy of this software and associated documentation files (the
+'Software'), to deal in the Software without restriction, including
+without limitation the rights to use, copy, modify, merge, publish,
+distribute, sublicense, and/or sell copies of the Software, and to
+permit persons to whom the Software is furnished to do so, subject to
+the following conditions:
+
+The above copyright notice and this permission notice shall be
+included in all copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED 'AS IS', WITHOUT WARRANTY OF ANY KIND,
+EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
+MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.
+IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY
+CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT,
+TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE
+SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+~~~~
+
 ### 734d8fd2baff4a5b7450a5b8242d4a960bc4ade3b0ade5e6cad642965d1d496d
 
 Origins: `deepmerge-ts@7.1.5`. Upstream filename: `LICENSE`.
@@ -8377,6 +8575,62 @@ AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 THE SOFTWARE.
+~~~~
+
+### 74773cfa34cf18a6652f84f4f1912ceb88f35e90f15d27a2f8d0cde278c46ce9
+
+Origins: `image-q@4.0.0`. Upstream filename: `LICENSE`.
+
+~~~~text
+# image-quantization (https://github.com/igor-bezkrovny/image-quantization)
+
+The MIT License (MIT)
+
+Copyright (c) 2015 Igor Bezkrovny
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in
+all copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+THE SOFTWARE.
+
+# http://members.ozemail.com.au/~dekker/NEUQUANT.HTML
+
+NeuQuant Neural-Net Quantization Algorithm
+------------------------------------------
+
+Copyright (c) 1994 Anthony Dekker
+
+NEUQUANT Neural-Net quantization algorithm by Anthony Dekker, 1994. See
+"Kohonen neural networks for optimal colour quantization" in "Network:
+Computation in Neural Systems" Vol. 5 (1994) pp 351-367. for a discussion of
+the algorithm.
+
+Any party obtaining a copy of these files from the author, directly or
+indirectly, is granted, free of charge, a full and unrestricted irrevocable,
+world-wide, paid up, royalty-free, nonexclusive right and license to deal in
+this software and documentation files (the "Software"), including without
+limitation the rights to use, copy, modify, merge, publish, distribute,
+sublicense, and/or sell copies of the Software, and to permit persons who
+receive copies from any such party to do so, with the only requirement being
+that this copyright notice remain intact.
+
+# https://github.com/leeoniya/RgbQuant.js
+
+Copyright (c) 2015, Leon Sorokin
+All rights reserved. (MIT Licensed)
 ~~~~
 
 ### 74b629b24865e1e83c5277ee84590b7937644d6fd959d0c7bdce758676cd2ced
@@ -8887,6 +9141,34 @@ ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR
 OTHER DEALINGS IN THE SOFTWARE.
 
 For more information, please refer to <http://unlicense.org/>
+~~~~
+
+### 7e18f531f7d7018d9ce069655d01dbed0c3b3af079c75531debe35a605a9f7fb
+
+Origins: `any-base@1.1.0`. Upstream filename: `LICENSE`.
+
+~~~~text
+The MIT License (MIT)
+
+Copyright (c) 2015 Kamil Harasimowicz and contributors
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
 ~~~~
 
 ### 7e32638e170fa7342000a703a8ed950e05095b2f73fc689992a82776a3c3bd3c
@@ -10092,7 +10374,7 @@ SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
 ### 8a1af140fdfbf5afd3df27f7e662f989c5b963a300020dfafce42033cae9e004
 
-Origins: `isexe@4.0.0`, `lru-cache@11.5.2`, `minipass@7.1.3`, `path-scurry@1.11.1`. Upstream filename: `LICENSE.md`.
+Origins: `isexe@4.0.0`, `lru-cache@11.5.2`, `minipass@7.1.3`, `path-scurry@1.11.1`, `sax@1.6.1`. Upstream filename: `LICENSE.md`.
 
 ~~~~text
 # Blue Oak Model License
@@ -10167,6 +10449,62 @@ Permission is hereby granted, free of charge, to any person obtaining a copy of 
 The above copyright notice and this permission notice shall be included in all copies or substantial portions of the Software.
 
 THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+~~~~
+
+### 8ad16994acb18814fcd2ff6d0b559906b842047b995baf33fd0c55e4d24cbac8
+
+Origins: `xmlbuilder@11.0.1`. Upstream filename: `LICENSE`.
+
+~~~~text
+The MIT License (MIT)
+
+Copyright (c) 2013 Ozgur Ozcitak
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in
+all copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+THE SOFTWARE.
+~~~~
+
+### 8bfcf12013c5d0707794813d1f2787917eada9b8643bf47bfe0306fe018624c8
+
+Origins: `bmp-ts@1.0.9`. Upstream filename: `LICENSE`.
+
+~~~~text
+The MIT License (MIT)
+
+Copyright (c) 2019 Andrew Lisowski
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
 ~~~~
 
 ### 8c535800331e1e4439835555b3f9edc7fe9dee2fab0d8bbbd5a982e8b8343d4d
@@ -10460,6 +10798,34 @@ Origins: `readdir-glob@1.1.3`. Upstream filename: `LICENSE`.
    limitations under the License.
 ~~~~
 
+### 8f2658c03422c408b2b2ce4d151decc3b1a6fd3d86e5ca9433777bccdcdf75a2
+
+Origins: `mime@3.0.0`. Upstream filename: `LICENSE`.
+
+~~~~text
+The MIT License (MIT)
+
+Copyright (c) 2010 Benjamin Thomas, Robert Kieffer
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in
+all copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+THE SOFTWARE.
+~~~~
+
 ### 8f8f0696ab4041a885d28bddf82e2ad673a6522cb644d6f972237f4f6e172a1d
 
 Origins: `esrap@2.3.2`. Upstream filename: `LICENSE`.
@@ -10550,6 +10916,34 @@ ANY SPECIAL, DIRECT, INDIRECT, OR CONSEQUENTIAL DAMAGES OR ANY DAMAGES
 WHATSOEVER RESULTING FROM LOSS OF USE, DATA OR PROFITS, WHETHER IN AN
 ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF OR
 IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
+~~~~
+
+### 942eab097945c835cf41abcbf1b9a6659c5d0c3493e60c56796d2e045c219278
+
+Origins: `@jimp/core@1.6.1`, `@jimp/diff@1.6.1`, `@jimp/file-ops@1.6.1`, `@jimp/js-bmp@1.6.1`, `@jimp/js-gif@1.6.1`, `@jimp/js-jpeg@1.6.1`, `@jimp/js-png@1.6.1`, `@jimp/js-tiff@1.6.1`, `@jimp/plugin-blit@1.6.1`, `@jimp/plugin-blur@1.6.1`, `@jimp/plugin-circle@1.6.1`, `@jimp/plugin-color@1.6.1`, `@jimp/plugin-contain@1.6.1`, `@jimp/plugin-cover@1.6.1`, `@jimp/plugin-crop@1.6.1`, `@jimp/plugin-displace@1.6.1`, `@jimp/plugin-dither@1.6.1`, `@jimp/plugin-fisheye@1.6.1`, `@jimp/plugin-flip@1.6.1`, `@jimp/plugin-hash@1.6.1`, `@jimp/plugin-mask@1.6.1`, `@jimp/plugin-print@1.6.1`, `@jimp/plugin-quantize@1.6.1`, `@jimp/plugin-resize@1.6.1`, `@jimp/plugin-rotate@1.6.1`, `@jimp/plugin-threshold@1.6.1`, `@jimp/types@1.6.1`, `@jimp/utils@1.6.1`, `jimp@1.6.1`. Upstream filename: `LICENSE`.
+
+~~~~text
+MIT License
+
+Copyright (c) 2018 Oliver Moran
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
 ~~~~
 
 ### 947e32047a166cd05f04e45938d172b412c07cbee0b9735afd14bae30e02c2f6
@@ -11715,6 +12109,22 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 THE SOFTWARE.
 ~~~~
 
+### ab27d7574bc6d292302b0b49c2e1ad6f0d88031822dce486257c085c7d83133c
+
+Origins: `token-types@6.1.2`. Upstream filename: `LICENSE.txt`.
+
+~~~~text
+The MIT License (MIT)
+
+Copyright © 2026 Borewit
+
+Permission is hereby granted, free of charge, to any person obtaining a copy of this software and associated documentation files (the "Software"), to deal in the Software without restriction, including without limitation the rights to use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of the Software, and to permit persons to whom the Software is furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+~~~~
+
 ### ab654de803cdaa9e2819ab2e934bdf7f757e308649ec231d78e80e92425cdc34
 
 Origins: `w3c-xmlserializer@5.0.0`. Upstream filename: `LICENSE.md`.
@@ -11790,6 +12200,33 @@ Permission is hereby granted, free of charge, to any person obtaining a copy of 
 The above copyright notice and this permission notice shall be included in all copies or substantial portions of the Software.
 
 THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+~~~~
+
+### ae831d3b498ec271172062a63086ec0001b9ab99493418f2c7c75dcb95924884
+
+Origins: `parse-bmfont-xml@1.1.6`. Upstream filename: `LICENSE.md`.
+
+~~~~text
+The MIT License (MIT)
+Copyright (c) 2015 Matt DesLauriers
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,
+EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
+MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.
+IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM,
+DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR
+OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE
+OR OTHER DEALINGS IN THE SOFTWARE.
 ~~~~
 
 ### ae842a63dd9bc829c95a2ec22dda25a08e422a368b71dbca67a45cde7c4a4b81
@@ -12638,6 +13075,33 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 THE SOFTWARE.
 ~~~~
 
+### bcd7e82c06802eecb0f0792ffd591bd82da3be813bcb8f55bcdf969334dab1d2
+
+Origins: `tinycolor2@1.6.0`. Upstream filename: `LICENSE`.
+
+~~~~text
+Copyright (c), Brian Grinstead, http://briangrinstead.com
+
+Permission is hereby granted, free of charge, to any person obtaining
+a copy of this software and associated documentation files (the
+"Software"), to deal in the Software without restriction, including
+without limitation the rights to use, copy, modify, merge, publish,
+distribute, sublicense, and/or sell copies of the Software, and to
+permit persons to whom the Software is furnished to do so, subject to
+the following conditions:
+
+The above copyright notice and this permission notice shall be
+included in all copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,
+EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
+MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND
+NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE
+LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION
+OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION
+WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+~~~~
+
 ### bd40cc437e28a3ad7bef2ad34e6b72e757b182e67bda1acadbab4ef0476f8232
 
 Origins: `object-inspect@1.13.4`. Upstream filename: `LICENSE`.
@@ -12686,6 +13150,33 @@ The above copyright notice and this permission notice shall be included in
 all copies or substantial portions of the Software.
 
 THE SOFTWARE IS PROVIDED “AS IS”, WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+THE SOFTWARE.
+~~~~
+
+### be75ef59c5cf59715588a17a82dff7dd3e83c4dba3c458676bb9311e05fbedc5
+
+Origins: `pngjs@6.0.0, 7.0.0`. Upstream filename: `LICENSE`.
+
+~~~~text
+pngjs original work Copyright (c) 2015 Luke Page & Original Contributors
+pngjs derived work Copyright (c) 2012 Kuba Niegowski
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in
+all copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
 IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
 FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
 AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
@@ -12749,6 +13240,38 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 THE SOFTWARE.
 ~~~~
 
+### c0a8512eabe960492fefd4f287523eb3b5ca1518ca37ef0ec83344cd7f089cb8
+
+Origins: `jpeg-js@0.4.4`. Upstream filename: `LICENSE`.
+
+~~~~text
+Copyright (c) 2014, Eugene Ware
+All rights reserved.
+  
+Redistribution and use in source and binary forms, with or without
+modification, are permitted provided that the following conditions are met:  
+
+1. Redistributions of source code must retain the above copyright
+   notice, this list of conditions and the following disclaimer.  
+2. Redistributions in binary form must reproduce the above copyright
+   notice, this list of conditions and the following disclaimer in the
+   documentation and/or other materials provided with the distribution.  
+3. Neither the name of Eugene Ware nor the names of its contributors
+   may be used to endorse or promote products derived from this software
+   without specific prior written permission.  
+  
+THIS SOFTWARE IS PROVIDED BY EUGENE WARE ''AS IS'' AND ANY
+EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED
+WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
+DISCLAIMED. IN NO EVENT SHALL EUGENE WARE BE LIABLE FOR ANY
+DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES
+(INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES;
+LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND
+ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
+(INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
+SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+~~~~
+
 ### c1476ec53119cd4c8370f91f5152ac76312a29b4fae2d49b5e0e0970fe0fa5ee
 
 Origins: `hosted-git-info@7.0.2, 8.1.0`. Upstream filename: `LICENSE`.
@@ -12769,9 +13292,65 @@ OTHER TORTIOUS ACTION, ARISING OUT OF OR IN CONNECTION WITH THE USE OR
 PERFORMANCE OF THIS SOFTWARE.
 ~~~~
 
+### c1fb8861eca211bf5aea574358aba7039396c0c1824c2a1477cc126d398efd89
+
+Origins: `utif2@4.1.0`. Upstream filename: `LICENSE`.
+
+~~~~text
+MIT License
+
+Copyright (c) 2017 Photopea
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+~~~~
+
+### c28a483580454d61210a1c7cc0899d75b68fa875cc7940ebafde3c49ca762439
+
+Origins: `gifwrap@0.10.1`. Upstream filename: `LICENSE`.
+
+~~~~text
+MIT License
+
+Copyright © 2017 Joseph T. Lapp
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+~~~~
+
 ### c2cfccb812fe482101a8f04597dfc5a9991a6b2748266c47ac91b6a5aae15383
 
-Origins: `@types/aria-query@5.0.4`, `@types/chai@5.2.3`, `@types/deep-eql@4.0.2`, `@types/esrecurse@4.3.1`, `@types/estree@1.0.9`, `@types/istanbul-lib-coverage@2.0.6`, `@types/istanbul-lib-report@3.0.3`, `@types/istanbul-reports@3.0.4`, `@types/json-schema@7.0.15`, `@types/mocha@10.0.10`, `@types/node@20.19.43, 26.2.0`, `@types/normalize-package-data@2.4.4`, `@types/sinonjs__fake-timers@8.1.5`, `@types/stack-utils@2.0.3`, `@types/trusted-types@2.0.7`, `@types/which@2.0.2`, `@types/ws@8.18.1`, `@types/yargs-parser@21.0.3`, `@types/yargs@17.0.35`, `@types/yauzl@2.10.3`. Upstream filename: `LICENSE`.
+Origins: `@types/aria-query@5.0.4`, `@types/chai@5.2.3`, `@types/deep-eql@4.0.2`, `@types/esrecurse@4.3.1`, `@types/estree@1.0.9`, `@types/istanbul-lib-coverage@2.0.6`, `@types/istanbul-lib-report@3.0.3`, `@types/istanbul-reports@3.0.4`, `@types/json-schema@7.0.15`, `@types/mocha@10.0.10`, `@types/node@16.9.1, 20.19.43, 26.2.0`, `@types/normalize-package-data@2.4.4`, `@types/sinonjs__fake-timers@8.1.5`, `@types/stack-utils@2.0.3`, `@types/trusted-types@2.0.7`, `@types/which@2.0.2`, `@types/ws@8.18.1`, `@types/yargs-parser@21.0.3`, `@types/yargs@17.0.35`, `@types/yauzl@2.10.3`. Upstream filename: `LICENSE`.
 
 ~~~~text
     MIT License
@@ -12805,6 +13384,34 @@ Origins: `@asamuzakjp/dom-selector@8.3.2`. Upstream filename: `LICENSE`.
 MIT License
 
 Copyright (c) 2023 asamuzaK (Kazz)
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+~~~~
+
+### c33959fabde25a1b6161d8e0fdc6fdcea1fc48095fe0bd51043247bfd214287f
+
+Origins: `strtok3@10.3.5`. Upstream filename: `LICENSE.txt`.
+
+~~~~text
+MIT License
+
+Copyright © 2026 Borewit
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
@@ -12952,6 +13559,32 @@ NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE
 LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION
 OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION
 WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+~~~~
+
+### c51452ef1dfd5606c9fe266930fa6bf7e8a534d52973b6475df5bf212cad5b0a
+
+Origins: `xml2js@0.5.0`. Upstream filename: `LICENSE`.
+
+~~~~text
+Copyright 2010, 2011, 2012, 2013. All rights reserved.
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to
+deal in the Software without restriction, including without limitation the
+rights to use, copy, modify, merge, publish, distribute, sublicense, and/or
+sell copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in
+all copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
+FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS
+IN THE SOFTWARE.
 ~~~~
 
 ### c542ba7851b5d39a5face477e47a27cb7c00a9759e321b66824e79718bffe1ac
@@ -13180,6 +13813,28 @@ The above copyright notice and this permission notice shall be included in all c
 THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
 FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY,
  WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+~~~~
+
+### c6a01684eb9061a00589d483e9cf9ea5a82b3e8270f9992501ceb79f32753fb5
+
+Origins: `pixelmatch@5.3.0`. Upstream filename: `LICENSE`.
+
+~~~~text
+ISC License
+
+Copyright (c) 2019, Mapbox
+
+Permission to use, copy, modify, and/or distribute this software for any purpose
+with or without fee is hereby granted, provided that the above copyright notice
+and this permission notice appear in all copies.
+
+THE SOFTWARE IS PROVIDED "AS IS" AND THE AUTHOR DISCLAIMS ALL WARRANTIES WITH
+REGARD TO THIS SOFTWARE INCLUDING ALL IMPLIED WARRANTIES OF MERCHANTABILITY AND
+FITNESS. IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR ANY SPECIAL, DIRECT,
+INDIRECT, OR CONSEQUENTIAL DAMAGES OR ANY DAMAGES WHATSOEVER RESULTING FROM LOSS
+OF USE, DATA OR PROFITS, WHETHER IN AN ACTION OF CONTRACT, NEGLIGENCE OR OTHER
+TORTIOUS ACTION, ARISING OUT OF OR IN CONNECTION WITH THE USE OR PERFORMANCE OF
+THIS SOFTWARE.
 ~~~~
 
 ### c71d239df91726fc519c6eb72d318ec65820627232b2f796219e87dcf35d0ab4
@@ -14204,6 +14859,22 @@ AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
+~~~~
+
+### d55209d49c97d162829baf379dfcf841e47c98528d2d50baeb922ac2983a1e47
+
+Origins: `@borewit/text-codec@0.2.2`. Upstream filename: `LICENSE.txt`.
+
+~~~~text
+The MIT License (MIT)
+
+Copyright © 2025 Borewit
+
+Permission is hereby granted, free of charge, to any person obtaining a copy of this software and associated documentation files (the "Software"), to deal in the Software without restriction, including without limitation the rights to use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of the Software, and to permit persons to whom the Software is furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 ~~~~
 
 ### d5d62471a28a9920416c7d37d387a3bf55f32cb768590f605f84990b76aee5de
@@ -15291,6 +15962,20 @@ The above copyright notice and this permission notice shall be included in all c
 THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 ~~~~
 
+### e5909d19273f75386213370789163e2cc09089883e3f9d780cb3b2bcbe8023d2
+
+Origins: `await-to-js@3.0.0`. Upstream filename: `LICENSE`.
+
+~~~~text
+Copyright 2017 Dima Grossman <dima@grossman.io>
+
+Permission is hereby granted, free of charge, to any person obtaining a copy of this software and associated documentation files (the "Software"), to deal in the Software without restriction, including without limitation the rights to use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of the Software, and to permit persons to whom the Software is furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+~~~~
+
 ### e5aee0714b6ecc416454b968d1017570ef609f20d8722ab84b07acd550b78198
 
 Origins: `deep-eql@5.0.2`. Upstream filename: `LICENSE`.
@@ -15424,6 +16109,33 @@ AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
 FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS
 IN THE SOFTWARE.
+~~~~
+
+### e9c4a56c64b047f28f7e691306d48fadce1bd269c9e1b0e206bb8925e43b7964
+
+Origins: `parse-bmfont-binary@1.0.6`, `xml-parse-from-string@1.0.1`. Upstream filename: `LICENSE.md`.
+
+~~~~text
+The MIT License (MIT)
+Copyright (c) 2015 Jam3
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,
+EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
+MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.
+IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM,
+DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR
+OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE
+OR OTHER DEALINGS IN THE SOFTWARE.
 ~~~~
 
 ### eb43bf7ab35c34fbfd52f1aff29e0ee8cad8d27f89cdd5a35bc20b415eef7146
@@ -15715,7 +16427,7 @@ SOFTWARE.
 
 ### f4ada6a68d65cae19744156fb78ece10b2eeaac576f405aa67668db181757e23
 
-Origins: `edgedriver@6.3.0`, `safaridriver@1.0.1`. Upstream filename: `LICENSE`.
+Origins: `@wdio/image-comparison-core@1.3.0`, `@wdio/visual-service@9.3.0`, `edgedriver@6.3.0`, `safaridriver@1.0.1`. Upstream filename: `LICENSE`.
 
 ~~~~text
 MIT License

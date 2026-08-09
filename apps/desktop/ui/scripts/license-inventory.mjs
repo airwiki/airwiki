@@ -10,6 +10,10 @@ const targets = {
   'macos-arm64': { platform: 'darwin', arch: 'arm64', output: 'NPM_LICENSES_MACOS_ARM64.md' },
   'windows-x64': { platform: 'win32', arch: 'x64', output: 'NPM_LICENSES_WINDOWS_X64.md' }
 };
+const allowedLicenses = new Set([
+  'Apache-2.0', 'Apache-2.0 OR MIT', 'BSD-2-Clause', 'BSD-3-Clause',
+  'BlueOak-1.0.0', 'CC0-1.0', 'ISC', 'MIT', 'MIT-0', 'MPL-2.0'
+]);
 const [mode, targetName] = process.argv.slice(2);
 const target = targets[targetName];
 
@@ -25,12 +29,16 @@ if (packageManifest.packageManager !== 'pnpm@10.18.3') {
   throw new Error('license inventory requires pnpm@10.18.3');
 }
 
-const command = process.platform === 'win32' ? 'pnpm.cmd' : 'pnpm';
-const result = spawnSync(command, ['licenses', 'list', '--json', '--long'], {
+const command = process.platform === 'win32'
+  ? join(process.env.SystemRoot ?? 'C:\\Windows', 'System32', 'cmd.exe')
+  : 'pnpm';
+const commandArguments = process.platform === 'win32'
+  ? ['/d', '/s', '/c', 'pnpm.cmd licenses list --json --long']
+  : ['licenses', 'list', '--json', '--long'];
+const result = spawnSync(command, commandArguments, {
   cwd: uiRoot,
   encoding: 'utf8',
-  maxBuffer: 16 * 1024 * 1024,
-  shell: process.platform === 'win32'
+  maxBuffer: 16 * 1024 * 1024
 });
 if (result.status !== 0) {
   throw new Error(`pnpm license inspection failed: ${result.stderr.trim()}`);
@@ -41,6 +49,9 @@ const packages = [];
 const legalTexts = new Map();
 const missingLegalTexts = [];
 for (const [license, entries] of Object.entries(report)) {
+  if (!allowedLicenses.has(license)) {
+    throw new Error(`unreviewed npm license expression: ${license}`);
+  }
   for (const entry of entries) {
     const hashes = new Set();
     for (const packagePath of entry.paths) {
@@ -72,7 +83,7 @@ for (const [license, entries] of Object.entries(report)) {
     });
   }
 }
-packages.sort((left, right) => left.name.localeCompare(right.name) || left.versions.join().localeCompare(right.versions.join()));
+packages.sort((left, right) => compareText(left.name, right.name) || compareText(left.versions.join(), right.versions.join()));
 
 const lockHash = sha256(readFileSync(join(uiRoot, 'pnpm-lock.yaml')));
 const markdown = renderMarkdown(targetName, lockHash, packages, legalTexts, missingLegalTexts);
@@ -122,7 +133,7 @@ function renderMarkdown(targetName, lockHash, entries, texts, metadataOnly) {
   }
   output += `\n## Packages without a published legal file\n\n${metadataOnly.sort().map((entry) => `- \`${entry}\``).join('\n')}\n`;
   output += '\n## Deduplicated legal texts\n';
-  for (const [hash, text] of [...texts.entries()].sort(([left], [right]) => left.localeCompare(right))) {
+  for (const [hash, text] of [...texts.entries()].sort(([left], [right]) => compareText(left, right))) {
     output += `\n### ${hash}\n\nOrigins: ${[...text.origins].sort().map((origin) => `\`${origin}\``).join(', ')}. Upstream filename: \`${text.filename}\`.\n\n~~~~text\n${text.content}~~~~\n`;
   }
   return output;
@@ -130,4 +141,8 @@ function renderMarkdown(targetName, lockHash, entries, texts, metadataOnly) {
 
 function escapeCell(value) {
   return String(value).replaceAll('|', '\\|').replaceAll('\n', ' ');
+}
+
+function compareText(left, right) {
+  return left < right ? -1 : left > right ? 1 : 0;
 }

@@ -64,6 +64,11 @@ The internal wrapper:
 The wrapper validates architecture, Mach-O identity, bridge bytes, MCPB layout,
 runtime closure, legal files, and traversal safety. A development ad-hoc seal is
 not Developer ID signing and must never be presented as public trust.
+Because each ad-hoc build has no stable Developer ID identity, macOS can require
+the interactive user to reauthorize access to an existing AirWiki Keychain item
+after an internal upgrade. The candidate must preserve that item, wait without
+blocking the async runtime, and fail closed if access is denied; deleting or
+silently replacing the device identity is never an acceptance shortcut.
 
 Expected package content includes:
 

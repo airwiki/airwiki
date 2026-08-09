@@ -25,10 +25,14 @@ or runtime verification.
 1. Open the DMG and move **AirWiki** to Applications.
 2. For an internal candidate, compare its hash through the agreed channel. A
    future public release must pass Developer ID signing and notarization.
-3. The onboarding wizard explains local-network collaboration before requesting
+3. When replacing one ad-hoc internal candidate with another, macOS can ask
+   whether the new build may access AirWiki's existing device identity in the
+   login Keychain. Authorize that access only after verifying the candidate
+   hash. Cancelling fails closed and never creates a replacement identity.
+4. The onboarding wizard explains local-network collaboration before requesting
    permission. Grant it only when LAN search is desired.
-4. Review the hardware recommendation, licenses, and remaining download size.
-5. Allow the application to prepare only the selected local model assets.
+5. Review the hardware recommendation, licenses, and remaining download size.
+6. Allow the application to prepare only the selected local model assets.
 
 No daemon, system service, or Internet-facing port is installed. Optional
 per-user autostart uses `SMAppService` only after consent.

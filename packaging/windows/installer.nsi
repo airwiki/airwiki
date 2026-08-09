@@ -678,37 +678,6 @@ Function .onInit
 FunctionEnd
 
 
-!macro CheckIfAppIsRunning
-  nsis_tauri_utils::FindProcess "${MAINBINARYNAME}.exe"
-  Pop $R0
-  ${If} $R0 = 0
-      IfSilent kill 0
-      ${IfThen} $PassiveMode != 1 ${|} MessageBox MB_OKCANCEL "$(appRunningOkKill)" IDOK kill IDCANCEL cancel ${|}
-      kill:
-        nsis_tauri_utils::KillProcess "${MAINBINARYNAME}.exe"
-        Pop $R0
-        Sleep 500
-        ${If} $R0 = 0
-          Goto app_check_done
-        ${Else}
-          IfSilent silent ui
-          silent:
-            System::Call 'kernel32::AttachConsole(i -1)i.r0'
-            ${If} $0 != 0
-              System::Call 'kernel32::GetStdHandle(i -11)i.r0'
-              System::call 'kernel32::SetConsoleTextAttribute(i r0, i 0x0004)' ; set red color
-              FileWrite $0 "$(appRunning)$\n"
-            ${EndIf}
-            Abort
-          ui:
-            Abort "$(failedToKillApp)"
-        ${EndIf}
-      cancel:
-        Abort "$(appRunning)"
-  ${EndIf}
-  app_check_done:
-!macroend
-
 ; The in-app updater launches this installer before asking the Tauri process
 ; to exit cleanly. Give MCP, LAN, watchers and the local model a bounded window
 ; to stop before the existing recovery path terminates a stuck process.
@@ -823,7 +792,7 @@ Section Install
   SetOutPath $INSTDIR
 
   Call WaitForAirWikiUpdateShutdown
-  !insertmacro CheckIfAppIsRunning
+  !insertmacro CheckIfAppIsRunning "${MAINBINARYNAME}.exe" "${PRODUCTNAME}"
 
   ; Copy main executable
   File "${MAINBINARYSRCPATH}"

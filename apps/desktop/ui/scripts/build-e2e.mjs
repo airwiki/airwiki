@@ -5,7 +5,7 @@ import { dirname, resolve } from 'node:path';
 const uiRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const desktopRoot = resolve(uiRoot, '..');
 const tauriCli = fileURLToPath(import.meta.resolve('@tauri-apps/cli'));
-const result = spawnSync(process.execPath, [
+const arguments_ = [
   tauriCli,
   'build',
   '--ci',
@@ -15,7 +15,11 @@ const result = spawnSync(process.execPath, [
   'e2e',
   '--config',
   'tauri.e2e.conf.json'
-], { cwd: desktopRoot, stdio: 'inherit' });
+];
+if (process.platform === 'win32') {
+  arguments_.push('--target', 'x86_64-pc-windows-msvc');
+}
+const result = spawnSync(process.execPath, arguments_, { cwd: desktopRoot, stdio: 'inherit' });
 
 if (result.error) throw result.error;
 if (result.status !== 0) process.exitCode = result.status ?? 1;

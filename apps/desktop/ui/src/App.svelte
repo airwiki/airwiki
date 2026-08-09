@@ -683,6 +683,7 @@
       destination = 'library';
       window.location.hash = 'library';
       selectedCollectionId = hit.collectionId;
+      knowledgeMode = 'document';
       await loadKnowledgeBundle(hit.collectionId);
       await loadKnowledgePage(hit.collectionId, { kind: 'concept', id: hit.conceptId });
       return;

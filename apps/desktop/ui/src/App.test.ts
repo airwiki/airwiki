@@ -2,7 +2,7 @@ import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/sv
 import axe from 'axe-core';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import App from './App.svelte';
-import { loadKnowledgeBundle } from './api';
+import { loadKnowledgeBundle, loadKnowledgePage } from './api';
 import { readySnapshot } from './test/fixtures';
 
 let snapshot = readySnapshot();
@@ -22,7 +22,8 @@ vi.mock('./api', async (importOriginal) => {
     refreshConnectivity: vi.fn(async () => undefined),
     refreshWikiHealth: vi.fn(async () => undefined),
     manageIntegration: vi.fn(async () => undefined),
-    loadKnowledgeBundle: vi.fn(async () => undefined)
+    loadKnowledgeBundle: vi.fn(async () => undefined),
+    loadKnowledgePage: vi.fn(async () => undefined)
   };
 });
 
@@ -60,6 +61,65 @@ describe('AirWiki desktop shell', () => {
 
     expect(loadKnowledgeBundle).toHaveBeenCalledOnce();
     expect(screen.queryByText(/Comprobando la salud/)).not.toBeInTheDocument();
+  });
+
+  it('opens a local search hit as a document even when the graph was selected', async () => {
+    const collection = snapshot.collections.at(0);
+    expect(collection).toBeDefined();
+    if (!collection || !snapshot.nodeId) return;
+    const conceptId = 'concept-atlas';
+    snapshot.knowledge = {
+      collectionId: collection.id,
+      collectionName: collection.name,
+      version: 'fixture-v1',
+      status: 'ready',
+      concepts: [{
+        page: { kind: 'concept', id: conceptId },
+        title: 'Evidencia Atlas',
+        description: 'Evidencia sintética',
+        conceptType: 'Document',
+        tags: []
+      }],
+      links: [{ source: { kind: 'index' }, target: { kind: 'concept', id: conceptId }, label: 'contains' }],
+      errorCount: 0,
+      warningCount: 0
+    };
+    snapshot.knowledgePage = {
+      collectionId: collection.id,
+      page: { kind: 'concept', id: conceptId },
+      title: 'Evidencia Atlas',
+      status: 'ready',
+      blocks: [{ kind: 'paragraph', text: 'Contenido verificado.' }],
+      metadata: [],
+      backlinks: [],
+      truncated: false
+    };
+    snapshot.search = {
+      requestId: 'search-fixture',
+      status: 'complete',
+      coverage: 'complete',
+      hits: [{
+        conceptId,
+        collectionId: collection.id,
+        title: 'Evidencia Atlas',
+        snippet: 'Contenido verificado.',
+        headingOrPage: 'Atlas',
+        logicalResourceUri: 'urn:airwiki:fixture',
+        sourceRevision: 1,
+        sourceSha256: '0123456789abcdef',
+        rank: 1,
+        nodeId: snapshot.nodeId
+      }]
+    };
+    render(App);
+
+    await fireEvent.click(await screen.findByRole('button', { name: 'Abrir' }));
+    await fireEvent.click(screen.getByRole('button', { name: 'Grafo' }));
+    await fireEvent.click(screen.getByRole('button', { name: 'Buscar' }));
+    await fireEvent.click(screen.getByRole('button', { name: 'Abrir evidencia local' }));
+
+    expect(loadKnowledgePage).toHaveBeenCalledWith(collection.id, { kind: 'concept', id: conceptId });
+    expect(await screen.findByText('Contenido verificado.')).toBeInTheDocument();
   });
 
   it('keeps system actions reachable from keyboard navigation', async () => {

@@ -2,13 +2,18 @@
   import { onMount } from 'svelte';
   import type { Core, ElementDefinition } from 'cytoscape';
   import type { KnowledgeBundleSummary, KnowledgePageInput } from './api';
+  import { message } from './i18n';
+  import type { LocalePreference } from './generated/ui-contract';
 
   export let bundle: KnowledgeBundleSummary;
   export let onselect: (page: KnowledgePageInput) => void;
+  export let locale: LocalePreference;
 
   let container: HTMLDivElement;
   let graph: Core | null = null;
   let loadFailed = false;
+
+  const t = (id: string, args?: Record<string, string | number>) => message(locale, id, args);
 
   function pageKey(page: KnowledgePageInput): string {
     if (page.kind === 'concept') return `concept:${page.id}`;
@@ -16,9 +21,9 @@
   }
 
   function pageTitle(page: KnowledgePageInput): string {
-    if (page.kind === 'index') return 'Índice';
-    if (page.kind === 'log') return 'Historial';
-    return bundle.concepts.find((concept) => concept.page.kind === 'concept' && concept.page.id === page.id)?.title ?? 'Concepto';
+    if (page.kind === 'index') return t('knowledge-index-title');
+    if (page.kind === 'log') return t('knowledge-recovery-history');
+    return bundle.concepts.find((concept) => concept.page.kind === 'concept' && concept.page.id === page.id)?.title ?? t('knowledge-concept-fallback');
   }
 
   function graphElements(): ElementDefinition[] {
@@ -79,17 +84,17 @@
 
 <div class="graph-shell">
   <div class="graph-heading">
-    <div><p>Relaciones verificadas</p><h3>{bundle.collectionName}</h3></div>
-    <small>{bundle.concepts.length + 2} páginas · {bundle.links.length} enlaces internos</small>
+    <div><p>{t('desktop-graph-verified')}</p><h3>{bundle.collectionName}</h3></div>
+    <small>{t('knowledge-graph-counts', { nodes: bundle.concepts.length + 2, links: bundle.links.length })}</small>
   </div>
   {#if loadFailed}
-    <p class="graph-error" role="status">El mapa no pudo cargarse. La navegación por páginas sigue disponible.</p>
+    <p class="graph-error" role="status">{t('desktop-graph-error')}</p>
   {:else}
-    <div class="graph-canvas" bind:this={container} role="img" aria-label={`Mapa de relaciones de ${bundle.collectionName}`}></div>
+    <div class="graph-canvas" bind:this={container} role="img" aria-label={t('desktop-graph-map-label', { collection: bundle.collectionName })}></div>
   {/if}
-  <div class="graph-index" aria-label="Páginas del mapa">
-    <button onclick={() => onselect({ kind: 'index' })}>Índice</button>
-    <button onclick={() => onselect({ kind: 'log' })}>Historial</button>
+  <div class="graph-index" aria-label={t('desktop-graph-pages-label')}>
+    <button onclick={() => onselect({ kind: 'index' })}>{t('knowledge-index-title')}</button>
+    <button onclick={() => onselect({ kind: 'log' })}>{t('knowledge-recovery-history')}</button>
     {#each bundle.concepts as concept (concept.title)}
       <button onclick={() => onselect(concept.page)}>{concept.title}</button>
     {/each}

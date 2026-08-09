@@ -2,6 +2,7 @@
 mod autostart;
 mod connectivity_platform;
 mod external_navigation;
+mod i18n;
 mod integrations;
 mod manual_lan_route;
 mod model_activation_status;
@@ -42,6 +43,7 @@ use uuid::Uuid;
 
 use crate::{
     connectivity_platform::SystemDestination,
+    i18n::{Localization, UiLocale},
     model_config::{CloseBehavior, LanPreference, LocalePreference},
     paths::AppPaths,
     updater::{
@@ -2241,8 +2243,23 @@ fn show_main_window(app: &AppHandle) {
 }
 
 fn install_tray(app: &tauri::App) -> tauri::Result<()> {
-    let open = MenuItem::with_id(app, "open", "Abrir AirWiki", true, None::<&str>)?;
-    let quit = MenuItem::with_id(app, "quit", "Salir completamente", true, None::<&str>)?;
+    let labels = Localization::new(UiLocale::from_system()).ok();
+    let open_label = match labels
+        .as_ref()
+        .and_then(|localization| localization.text("tray-open"))
+    {
+        Some(label) => label,
+        None => "Open AirWiki".to_owned(),
+    };
+    let quit_label = match labels
+        .as_ref()
+        .and_then(|localization| localization.text("tray-quit"))
+    {
+        Some(label) => label,
+        None => "Quit completely".to_owned(),
+    };
+    let open = MenuItem::with_id(app, "open", open_label, true, None::<&str>)?;
+    let quit = MenuItem::with_id(app, "quit", quit_label, true, None::<&str>)?;
     let menu = Menu::with_items(app, &[&open, &quit])?;
     TrayIconBuilder::new()
         .menu(&menu)

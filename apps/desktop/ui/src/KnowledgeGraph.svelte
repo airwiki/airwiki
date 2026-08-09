@@ -121,8 +121,8 @@
   .graph-heading h3 { font: 500 22px 'Space Grotesk', sans-serif; }
   .graph-heading small { color: var(--muted); }
   .graph-canvas { min-height: 340px; background: var(--graph-canvas); border-bottom: 1px solid var(--line); }
-  .graph-index { display: flex; gap: 7px; padding-top: 14px; overflow-x: auto; }
-  .graph-index button { flex: 0 0 auto; padding: 7px 10px; color: var(--muted); background: transparent; border: 1px solid var(--line); border-radius: 999px; cursor: pointer; }
+  .graph-index { display: flex; flex-wrap: wrap; gap: 7px; padding-top: 14px; }
+  .graph-index button { flex: 1 1 220px; min-width: 0; padding: 7px 10px; overflow-wrap: anywhere; color: var(--muted); background: transparent; border: 1px solid var(--line); border-radius: 8px; text-align: left; cursor: pointer; }
   .graph-index button:hover, .graph-index button:focus-visible { color: inherit; border-color: var(--cyan); }
   .graph-error { padding: 20px; color: var(--amber); border-left: 2px solid var(--amber); }
 </style>

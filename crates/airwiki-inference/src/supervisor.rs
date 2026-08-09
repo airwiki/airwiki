@@ -16,6 +16,9 @@ use tokio::{
 use tracing::{info, warn};
 
 #[cfg(target_os = "windows")]
+use windows::Win32::System::Threading::CREATE_NO_WINDOW;
+
+#[cfg(target_os = "windows")]
 mod child_process_guard {
     use std::{
         ffi::c_void,
@@ -411,6 +414,8 @@ async fn spawn_server(config: &SupervisorConfig) -> Result<SpawnedServer> {
 
 fn server_command(config: &SupervisorConfig, address: SocketAddr, token: &str) -> Command {
     let mut command = Command::new(&config.server_binary);
+    #[cfg(target_os = "windows")]
+    command.creation_flags(CREATE_NO_WINDOW.0);
     command
         .arg("--model")
         .arg(&config.model_path)

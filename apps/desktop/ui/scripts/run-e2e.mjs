@@ -42,6 +42,49 @@ async function stopApp(child) {
   if (child.exitCode === null) child.kill('SIGKILL');
 }
 
+async function createWebDriverSession() {
+  const response = await fetch('http://127.0.0.1:4445/session', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ capabilities: { alwaysMatch: {}, firstMatch: [{}] } })
+  });
+  if (!response.ok) {
+    throw new Error(`could not create shutdown WebDriver session (${response.status})`);
+  }
+  const payload = await response.json();
+  const sessionId = payload?.value?.sessionId;
+  if (typeof sessionId !== 'string' || sessionId.length === 0) {
+    throw new Error('shutdown WebDriver session returned no session ID');
+  }
+  return sessionId;
+}
+
+async function requestGracefulShutdown(child) {
+  const sessionId = await createWebDriverSession();
+  try {
+    await fetch(`http://127.0.0.1:4445/session/${sessionId}/execute/sync`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        script: "return window.__TAURI_INTERNALS__.invoke('quit_completely')",
+        args: []
+      })
+    });
+  } catch {
+    // The local server may close before returning the command response.
+  }
+
+  if (child.exitCode !== null) return;
+  const exitCode = await Promise.race([
+    new Promise((resolveExit) => child.once('exit', resolveExit)),
+    new Promise((_, rejectTimeout) => setTimeout(
+      () => rejectTimeout(new Error('AirWiki did not complete graceful shutdown within 5 seconds')),
+      5_000
+    ))
+  ]);
+  if (exitCode !== 0) throw new Error(`AirWiki graceful shutdown returned ${exitCode}`);
+}
+
 const app = spawn(appBinaryPath, [], {
   env: {
     ...process.env,
@@ -61,7 +104,11 @@ try {
     stdio: 'inherit'
   });
   if (result.error) throw result.error;
-  if (result.status !== 0) process.exitCode = result.status ?? 1;
+  if (result.status !== 0) {
+    process.exitCode = result.status ?? 1;
+  } else {
+    await requestGracefulShutdown(app);
+  }
 } finally {
   await stopApp(app);
   rmSync(testRoot, { recursive: true, force: true });

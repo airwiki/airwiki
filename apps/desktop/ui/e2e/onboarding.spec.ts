@@ -18,15 +18,6 @@ async function selectValue(selector: string, index: number, value: string): Prom
 }
 
 describe('AirWiki real IPC journey', () => {
-  after(async () => {
-    await browser.execute(() => {
-      const tauriWindow = window as typeof window & {
-        __TAURI_INTERNALS__: { invoke(command: string): Promise<unknown> };
-      };
-      return tauriWindow.__TAURI_INTERNALS__.invoke('quit_completely');
-    });
-  });
-
   it('persists onboarding and explicit appearance preferences', async () => {
     await browser.waitUntil(
       () => browser.execute(() => Boolean(document.querySelector('main.onboarding:not(.startup)'))),

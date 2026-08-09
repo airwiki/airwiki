@@ -6,7 +6,7 @@ Scope: the union of the transitive dependency closures of `airwiki-desktop`, `ai
 
 If a crate declares an SPDX expression but does not include a separate legal file, the inventory assigns the standard MIT/Apache text bundled by the project or an identical text found in another crate with the same expression. Each text lists its origin explicitly.
 
-Third-party packages: **638**. Unique legal texts: **376**.
+Third-party packages: **650**. Unique legal texts: **379**.
 
 ## Packages
 
@@ -19,6 +19,8 @@ Third-party packages: **638**. Unique legal texts: **376**.
 | aes-gcm | 0.10.3 | Apache-2.0 OR MIT | [upstream](https://github.com/RustCrypto/AEADs) | [3c0dfa33fd2e](#sha256-3c0dfa33fd2e6976038555b52095699452653b1fcabe113074f14e0848a6b11e), [a9040321c371](#sha256-a9040321c3712d8fd0b09cf52b17445de04a23a10165049ae187cd39e5c86be5) |
 | ahash | 0.8.12 | MIT OR Apache-2.0 | [upstream](https://github.com/tkaitchuck/ahash) | [0444c6991eea](#sha256-0444c6991eead6822f7b9102e654448d51624431119546492e8b231db42c48bb), [a60eea817514](#sha256-a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2) |
 | aho-corasick | 1.1.4 | Unlicense OR MIT | [upstream](https://github.com/BurntSushi/aho-corasick) | [01c266bced4a](#sha256-01c266bced4a434da0051174d6bee16a4c82cf634e2679b6155d40d75012390f), [0f96a83840e1](#sha256-0f96a83840e146e43c0ec96a22ec1f392e0680e6c1226e6f3ba87e0740af850f), [7e12e5df4bae](#sha256-7e12e5df4bae12cb21581ba157ced20e1986a0508dd10d0e8a4ab9a4cf94e85c) |
+| alloc-no-stdlib | 2.0.4 | BSD-3-Clause | [upstream](https://github.com/dropbox/rust-alloc-no-stdlib) | [c0c56f26d9c0](#sha256-c0c56f26d9c051cac4d200c34c84e7ae9aaa853e01a982a1df08b09931e518ae) |
+| alloc-stdlib | 0.2.4 | BSD-3-Clause | [upstream](https://github.com/dropbox/rust-alloc-no-stdlib) | [6fe6d6a54d01](#sha256-6fe6d6a54d0190972a733d1292ac9a8679fc76e6899cbe871b85ce38c2f887f4) |
 | allocator-api2 | 0.2.21 | MIT OR Apache-2.0 | [upstream](https://github.com/zakarumych/allocator-api2) | [23f18e03dc49](#sha256-23f18e03dc49df91622fe2a76176497404e46ced8a715d9d2b67a7446571cca3), [62c7a1e35f56](#sha256-62c7a1e35f56406896d7aa7ca52d0cc0d272ac022b5d2796e7d6905db8a3636a) |
 | anyhow | 1.0.103 | MIT OR Apache-2.0 | [upstream](https://github.com/dtolnay/anyhow) | [23f18e03dc49](#sha256-23f18e03dc49df91622fe2a76176497404e46ced8a715d9d2b67a7446571cca3), [62c7a1e35f56](#sha256-62c7a1e35f56406896d7aa7ca52d0cc0d272ac022b5d2796e7d6905db8a3636a) |
 | arrayref | 0.3.9 | BSD-2-Clause | [upstream](https://github.com/droundy/arrayref) | [1bc7e6f475b3](#sha256-1bc7e6f475b3ec99b7e2643411950ae2368c250dd4c5c325f80f9811362a94a1) |
@@ -51,6 +53,8 @@ Third-party packages: **638**. Unique legal texts: **376**.
 | block-buffer | 0.12.1 | MIT OR Apache-2.0 | [upstream](https://github.com/RustCrypto/utils) | [98181e7249d0](#sha256-98181e7249d0c01737645ec982499ce99a0f07eb8f7d625b8840d799d10dbc01), [a9040321c371](#sha256-a9040321c3712d8fd0b09cf52b17445de04a23a10165049ae187cd39e5c86be5) |
 | block-padding | 0.4.2 | MIT OR Apache-2.0 | [upstream](https://github.com/RustCrypto/utils) | [98181e7249d0](#sha256-98181e7249d0c01737645ec982499ce99a0f07eb8f7d625b8840d799d10dbc01), [a9040321c371](#sha256-a9040321c3712d8fd0b09cf52b17445de04a23a10165049ae187cd39e5c86be5) |
 | block2 | 0.6.2 | MIT | [upstream](https://github.com/madsmtm/objc2) | [508a77d2e7b5](#sha256-508a77d2e7b51d98adeed32648ad124b7b30241a8e70b2e72c99f92d8e5874d1) |
+| brotli | 8.0.4 | BSD-3-Clause AND MIT | [upstream](https://github.com/dropbox/rust-brotli) | [3d180008e369](#sha256-3d180008e36922a4e8daec11c34c7af264fed5962d07924aea928c38e8663c94), [c0c56f26d9c0](#sha256-c0c56f26d9c051cac4d200c34c84e7ae9aaa853e01a982a1df08b09931e518ae) |
+| brotli-decompressor | 5.0.3 | BSD-3-Clause/MIT | [upstream](https://github.com/dropbox/rust-brotli-decompressor) | [c0c56f26d9c0](#sha256-c0c56f26d9c051cac4d200c34c84e7ae9aaa853e01a982a1df08b09931e518ae) |
 | bs58 | 0.5.1 | MIT/Apache-2.0 | [upstream](https://github.com/Nullus157/bs58-rs) | [42d3bf7e7d4d](#sha256-42d3bf7e7d4d49d72c0555d14ed99c3ee7ce9ce3cbffbc38bbafe8c103f50969), [a60eea817514](#sha256-a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2) |
 | bumpalo | 3.20.3 | MIT OR Apache-2.0 | [upstream](https://github.com/fitzgen/bumpalo) | [65f94e99ddaf](#sha256-65f94e99ddaf4f5d1782a6dae23f35d4293a9a01444a13135a6887017d353cee), [a60eea817514](#sha256-a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2) |
 | byteorder | 1.5.0 | Unlicense OR MIT | [upstream](https://github.com/BurntSushi/byteorder) | [01c266bced4a](#sha256-01c266bced4a434da0051174d6bee16a4c82cf634e2679b6155d40d75012390f), [0f96a83840e1](#sha256-0f96a83840e146e43c0ec96a22ec1f392e0680e6c1226e6f3ba87e0740af850f), [7e12e5df4bae](#sha256-7e12e5df4bae12cb21581ba157ced20e1986a0508dd10d0e8a4ab9a4cf94e85c) |
@@ -320,14 +324,21 @@ Third-party packages: **638**. Unique legal texts: **376**.
 | num-traits | 0.2.19 | MIT OR Apache-2.0 | [upstream](https://github.com/rust-num/num-traits) | [6485b8ed310d](#sha256-6485b8ed310d3f0340bf1ad1f47645069ce4069dcc6bb46c7d5c6faf41de1fdb), [a60eea817514](#sha256-a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2) |
 | objc2 | 0.6.4 | MIT | [upstream](https://github.com/madsmtm/objc2) | [508a77d2e7b5](#sha256-508a77d2e7b51d98adeed32648ad124b7b30241a8e70b2e72c99f92d8e5874d1) |
 | objc2-app-kit | 0.3.2 | Zlib OR Apache-2.0 OR MIT | [upstream](https://github.com/madsmtm/objc2) | [508a77d2e7b5](#sha256-508a77d2e7b51d98adeed32648ad124b7b30241a8e70b2e72c99f92d8e5874d1) |
+| objc2-cloud-kit | 0.3.2 | Zlib OR Apache-2.0 OR MIT | [upstream](https://github.com/madsmtm/objc2) | [508a77d2e7b5](#sha256-508a77d2e7b51d98adeed32648ad124b7b30241a8e70b2e72c99f92d8e5874d1) |
+| objc2-core-data | 0.3.2 | Zlib OR Apache-2.0 OR MIT | [upstream](https://github.com/madsmtm/objc2) | [508a77d2e7b5](#sha256-508a77d2e7b51d98adeed32648ad124b7b30241a8e70b2e72c99f92d8e5874d1) |
 | objc2-core-foundation | 0.3.2 | Zlib OR Apache-2.0 OR MIT | [upstream](https://github.com/madsmtm/objc2) | [508a77d2e7b5](#sha256-508a77d2e7b51d98adeed32648ad124b7b30241a8e70b2e72c99f92d8e5874d1) |
 | objc2-core-graphics | 0.3.2 | Zlib OR Apache-2.0 OR MIT | [upstream](https://github.com/madsmtm/objc2) | [508a77d2e7b5](#sha256-508a77d2e7b51d98adeed32648ad124b7b30241a8e70b2e72c99f92d8e5874d1) |
+| objc2-core-image | 0.3.2 | Zlib OR Apache-2.0 OR MIT | [upstream](https://github.com/madsmtm/objc2) | [508a77d2e7b5](#sha256-508a77d2e7b51d98adeed32648ad124b7b30241a8e70b2e72c99f92d8e5874d1) |
+| objc2-core-text | 0.3.2 | Zlib OR Apache-2.0 OR MIT | [upstream](https://github.com/madsmtm/objc2) | [508a77d2e7b5](#sha256-508a77d2e7b51d98adeed32648ad124b7b30241a8e70b2e72c99f92d8e5874d1) |
+| objc2-core-video | 0.3.2 | Zlib OR Apache-2.0 OR MIT | [upstream](https://github.com/madsmtm/objc2) | [508a77d2e7b5](#sha256-508a77d2e7b51d98adeed32648ad124b7b30241a8e70b2e72c99f92d8e5874d1) |
 | objc2-encode | 4.1.0 | MIT | [upstream](https://github.com/madsmtm/objc2) | [508a77d2e7b5](#sha256-508a77d2e7b51d98adeed32648ad124b7b30241a8e70b2e72c99f92d8e5874d1) |
 | objc2-exception-helper | 0.1.1 | Zlib OR Apache-2.0 OR MIT | [upstream](https://github.com/madsmtm/objc2) | [508a77d2e7b5](#sha256-508a77d2e7b51d98adeed32648ad124b7b30241a8e70b2e72c99f92d8e5874d1) |
 | objc2-foundation | 0.3.2 | MIT | [upstream](https://github.com/madsmtm/objc2) | [508a77d2e7b5](#sha256-508a77d2e7b51d98adeed32648ad124b7b30241a8e70b2e72c99f92d8e5874d1) |
 | objc2-io-kit | 0.3.2 | Zlib OR Apache-2.0 OR MIT | [upstream](https://github.com/madsmtm/objc2) | [508a77d2e7b5](#sha256-508a77d2e7b51d98adeed32648ad124b7b30241a8e70b2e72c99f92d8e5874d1) |
 | objc2-io-surface | 0.3.2 | Zlib OR Apache-2.0 OR MIT | [upstream](https://github.com/madsmtm/objc2) | [508a77d2e7b5](#sha256-508a77d2e7b51d98adeed32648ad124b7b30241a8e70b2e72c99f92d8e5874d1) |
+| objc2-javascript-core | 0.3.2 | Zlib OR Apache-2.0 OR MIT | [upstream](https://github.com/madsmtm/objc2) | [508a77d2e7b5](#sha256-508a77d2e7b51d98adeed32648ad124b7b30241a8e70b2e72c99f92d8e5874d1) |
 | objc2-osa-kit | 0.3.2 | Zlib OR Apache-2.0 OR MIT | [upstream](https://github.com/madsmtm/objc2) | [508a77d2e7b5](#sha256-508a77d2e7b51d98adeed32648ad124b7b30241a8e70b2e72c99f92d8e5874d1) |
+| objc2-quartz-core | 0.3.2 | Zlib OR Apache-2.0 OR MIT | [upstream](https://github.com/madsmtm/objc2) | [508a77d2e7b5](#sha256-508a77d2e7b51d98adeed32648ad124b7b30241a8e70b2e72c99f92d8e5874d1) |
 | objc2-security | 0.3.2 | Zlib OR Apache-2.0 OR MIT | [upstream](https://github.com/madsmtm/objc2) | [508a77d2e7b5](#sha256-508a77d2e7b51d98adeed32648ad124b7b30241a8e70b2e72c99f92d8e5874d1) |
 | objc2-service-management | 0.3.2 | Zlib OR Apache-2.0 OR MIT | [upstream](https://github.com/madsmtm/objc2) | [508a77d2e7b5](#sha256-508a77d2e7b51d98adeed32648ad124b7b30241a8e70b2e72c99f92d8e5874d1) |
 | objc2-web-kit | 0.3.2 | Zlib OR Apache-2.0 OR MIT | [upstream](https://github.com/madsmtm/objc2) | [508a77d2e7b5](#sha256-508a77d2e7b51d98adeed32648ad124b7b30241a8e70b2e72c99f92d8e5874d1) |
@@ -496,6 +507,7 @@ Third-party packages: **638**. Unique legal texts: **376**.
 | tauri-plugin | 2.6.3 | Apache-2.0 OR MIT | [upstream](https://github.com/tauri-apps/tauri) | [508a77d2e7b5](#sha256-508a77d2e7b51d98adeed32648ad124b7b30241a8e70b2e72c99f92d8e5874d1) |
 | tauri-plugin-single-instance | 2.4.3 | Apache-2.0 OR MIT | [upstream](https://github.com/tauri-apps/plugins-workspace) | [0d542e0c8804](#sha256-0d542e0c8804e39aa7f37eb00da5a762149dc682d7829451287e11b938e94594), [9c1db6b7e7eb](#sha256-9c1db6b7e7eb83e1cb2af973b5df2bdc63651ede0f38506ab98dfa0940487759), [af76c60594af](#sha256-af76c60594af325c4efdcbcd27f5d34ff441c11f09b46b627b378d04d5aa1f1d) |
 | tauri-plugin-updater | 2.10.1 | Apache-2.0 OR MIT | [upstream](https://github.com/tauri-apps/plugins-workspace) | [0d542e0c8804](#sha256-0d542e0c8804e39aa7f37eb00da5a762149dc682d7829451287e11b938e94594), [9c1db6b7e7eb](#sha256-9c1db6b7e7eb83e1cb2af973b5df2bdc63651ede0f38506ab98dfa0940487759), [9dd42ea92cff](#sha256-9dd42ea92cff2ede5cd477cbfcce051b2d0115c0ac7f368ee88cb545055dff1d) |
+| tauri-plugin-wdio-webdriver | 1.3.0 | MIT | [upstream](https://github.com/webdriverio/desktop-mobile) | [20c84663dbfa](#sha256-20c84663dbfa685b230f362509fdbaea7819f5da166afea9857c4d96dcc7e0bc) |
 | tauri-runtime | 2.11.3 | Apache-2.0 OR MIT | [upstream](https://github.com/tauri-apps/tauri) | [0d542e0c8804](#sha256-0d542e0c8804e39aa7f37eb00da5a762149dc682d7829451287e11b938e94594), [9dd42ea92cff](#sha256-9dd42ea92cff2ede5cd477cbfcce051b2d0115c0ac7f368ee88cb545055dff1d) |
 | tauri-runtime-wry | 2.11.4 | Apache-2.0 OR MIT | [upstream](https://github.com/tauri-apps/tauri) | [0d542e0c8804](#sha256-0d542e0c8804e39aa7f37eb00da5a762149dc682d7829451287e11b938e94594), [9dd42ea92cff](#sha256-9dd42ea92cff2ede5cd477cbfcce051b2d0115c0ac7f368ee88cb545055dff1d) |
 | tauri-utils | 2.9.3 | Apache-2.0 OR MIT | [upstream](https://github.com/tauri-apps/tauri) | [0d542e0c8804](#sha256-0d542e0c8804e39aa7f37eb00da5a762149dc682d7829451287e11b938e94594), [9dd42ea92cff](#sha256-9dd42ea92cff2ede5cd477cbfcce051b2d0115c0ac7f368ee88cb545055dff1d) |
@@ -4516,6 +4528,36 @@ IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 DEALINGS IN THE SOFTWARE.
 ```
 
+### sha256-20c84663dbfa685b230f362509fdbaea7819f5da166afea9857c4d96dcc7e0bc
+
+Used by:
+
+- `tauri-plugin-wdio-webdriver 1.3.0 / LICENSE`
+
+```text
+MIT License
+
+Copyright (c) 2024 WebdriverIO Community
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+```
+
 ### sha256-219920e865eee70b7dcfc948a86b099e7f4fe2de01bcca2ca9a20c0a033f2b59
 
 Used by:
@@ -7809,6 +7851,34 @@ See the License for the specific language governing permissions and
 limitations under the License.
 ```
 
+### sha256-3d180008e36922a4e8daec11c34c7af264fed5962d07924aea928c38e8663c94
+
+Used by:
+
+- `brotli 8.0.4 / LICENSE.MIT`
+
+```text
+Copyright (c) 2009, 2010, 2013-2016 by the Brotli Authors.
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in
+all copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+THE SOFTWARE.
+```
+
 ### sha256-3f09ca77e208780d4b2c1b6e8e3404cb747c540b766a5292d7cbe8a196d3f844
 
 Used by:
@@ -9024,14 +9094,21 @@ Used by:
 - `multistream-select 0.13.0 / standard text for MIT (the crate includes no separate file)`
 - `objc2 0.6.4 / standard text for MIT (the crate includes no separate file)`
 - `objc2-app-kit 0.3.2 / standard text for Zlib OR Apache-2.0 OR MIT (the crate includes no separate file)`
+- `objc2-cloud-kit 0.3.2 / standard text for Zlib OR Apache-2.0 OR MIT (the crate includes no separate file)`
+- `objc2-core-data 0.3.2 / standard text for Zlib OR Apache-2.0 OR MIT (the crate includes no separate file)`
 - `objc2-core-foundation 0.3.2 / standard text for Zlib OR Apache-2.0 OR MIT (the crate includes no separate file)`
 - `objc2-core-graphics 0.3.2 / standard text for Zlib OR Apache-2.0 OR MIT (the crate includes no separate file)`
+- `objc2-core-image 0.3.2 / standard text for Zlib OR Apache-2.0 OR MIT (the crate includes no separate file)`
+- `objc2-core-text 0.3.2 / standard text for Zlib OR Apache-2.0 OR MIT (the crate includes no separate file)`
+- `objc2-core-video 0.3.2 / standard text for Zlib OR Apache-2.0 OR MIT (the crate includes no separate file)`
 - `objc2-encode 4.1.0 / standard text for MIT (the crate includes no separate file)`
 - `objc2-exception-helper 0.1.1 / standard text for Zlib OR Apache-2.0 OR MIT (the crate includes no separate file)`
 - `objc2-foundation 0.3.2 / standard text for MIT (the crate includes no separate file)`
 - `objc2-io-kit 0.3.2 / standard text for Zlib OR Apache-2.0 OR MIT (the crate includes no separate file)`
 - `objc2-io-surface 0.3.2 / standard text for Zlib OR Apache-2.0 OR MIT (the crate includes no separate file)`
+- `objc2-javascript-core 0.3.2 / standard text for Zlib OR Apache-2.0 OR MIT (the crate includes no separate file)`
 - `objc2-osa-kit 0.3.2 / standard text for Zlib OR Apache-2.0 OR MIT (the crate includes no separate file)`
+- `objc2-quartz-core 0.3.2 / standard text for Zlib OR Apache-2.0 OR MIT (the crate includes no separate file)`
 - `objc2-security 0.3.2 / standard text for Zlib OR Apache-2.0 OR MIT (the crate includes no separate file)`
 - `objc2-service-management 0.3.2 / standard text for Zlib OR Apache-2.0 OR MIT (the crate includes no separate file)`
 - `objc2-web-kit 0.3.2 / standard text for Zlib OR Apache-2.0 OR MIT (the crate includes no separate file)`
@@ -12486,6 +12563,7 @@ SOFTWARE.
 
 Used by:
 
+- `alloc-stdlib 0.2.4 / standard text for BSD-3-Clause (the crate includes no separate file)`
 - `x25519-dalek 2.0.1 / LICENSE`
 
 ```text
@@ -20919,6 +20997,29 @@ CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION
 OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR
 IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 DEALINGS IN THE SOFTWARE.
+```
+
+### sha256-c0c56f26d9c051cac4d200c34c84e7ae9aaa853e01a982a1df08b09931e518ae
+
+Used by:
+
+- `alloc-no-stdlib 2.0.4 / LICENSE`
+- `brotli 8.0.4 / LICENSE.BSD-3-Clause`
+- `brotli-decompressor 5.0.3 / LICENSE`
+
+```text
+Copyright (c) 2016 Dropbox, Inc.
+All rights reserved.
+
+Redistribution and use in source and binary forms, with or without modification, are permitted provided that the following conditions are met:
+
+1. Redistributions of source code must retain the above copyright notice, this list of conditions and the following disclaimer.
+
+2. Redistributions in binary form must reproduce the above copyright notice, this list of conditions and the following disclaimer in the documentation and/or other materials provided with the distribution.
+
+3. Neither the name of the copyright holder nor the names of its contributors may be used to endorse or promote products derived from this software without specific prior written permission.
+
+THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 ```
 
 ### sha256-c0d9430a95a7361e240f58e840a5bb3949483bb2c58075320f30cb94eb593d0d

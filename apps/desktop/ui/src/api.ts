@@ -44,6 +44,40 @@ export async function updateCollectionPolicy(collectionId: string, policy: Colle
   return invoke('update_collection_policy', { collectionId, policy });
 }
 
+export async function updatePublicCollectionProfile(
+  collectionId: string,
+  description: string,
+  languages: string[]
+): Promise<void> {
+  return invoke('update_public_collection_profile', { collectionId, description, languages });
+}
+
+export async function addFederationIndex(peerId: string, address: string): Promise<void> {
+  return invoke('add_federation_index', { peerId, address });
+}
+
+export async function removeFederationIndex(peerId: string): Promise<void> {
+  return invoke('remove_federation_index', { peerId });
+}
+
+export async function browsePublicCollection(
+  publisherId: string,
+  collectionId: string,
+  cursor: string | null = null
+): Promise<string> {
+  const requestId = crypto.randomUUID();
+  await invoke('browse_public_collection', { requestId, publisherId, collectionId, cursor });
+  return requestId;
+}
+
+export async function setPublicPublisherBlocked(publisherId: string, blocked: boolean): Promise<void> {
+  return invoke('set_public_publisher_blocked', { publisherId, blocked });
+}
+
+export async function dialPeer(address: string): Promise<void> {
+  return invoke('dial_peer', { address });
+}
+
 export async function pairPeer(peerId: string): Promise<void> {
   return invoke('pair_peer', { peerId });
 }
@@ -137,6 +171,18 @@ export async function installUpdate(requestId: string): Promise<void> {
 
 export async function refreshWikiHealth(requestId: string): Promise<void> {
   return invoke('refresh_wiki_health', { requestId });
+}
+
+export async function prepareGuidedWikiRepair(collectionId: string): Promise<string> {
+  const requestId = crypto.randomUUID();
+  await invoke('prepare_guided_wiki_repair', { requestId, collectionId });
+  return requestId;
+}
+
+export async function executeGuidedWikiRepair(collectionId: string, confirmed: boolean): Promise<string> {
+  const requestId = crypto.randomUUID();
+  await invoke('execute_guided_wiki_repair', { requestId, collectionId, confirmed });
+  return requestId;
 }
 
 export async function refreshConnectivity(requestId: string): Promise<void> {

@@ -12,6 +12,7 @@ const MAX_EXTERNAL_URL_BYTES: usize = 2_048;
 pub(crate) enum ExternalNavigationError {
     #[error("the external URL is not allowed")]
     InvalidUrl,
+    #[cfg(not(any(target_os = "macos", target_os = "windows")))]
     #[error("external navigation is unsupported")]
     Unsupported,
     #[error("the external destination could not be opened")]

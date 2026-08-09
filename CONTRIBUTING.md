@@ -55,7 +55,7 @@ Manual evidence attached to a pull request must be sanitized according to [docs/
 
 - Prefer safe, idiomatic Rust, typed errors, small modules, and explicit state machines.
 - Keep domain rules out of widgets and transport crates. Respect the ownership boundaries in `AGENTS.md`.
-- Do not block egui or a Tokio runtime worker with filesystem, parsing, hashing, database-heavy, inference, network, or blocking operating-system work.
+- Do not block a Tauri command or Tokio runtime worker with filesystem, parsing, hashing, database-heavy, inference, network, or blocking operating-system work.
 - Logs must not contain document content, queries, snippets, credentials, embeddings, local paths, or network identities.
 - Released migrations are append-only.
 - Automation may prepare knowledge but may never publish, grant access, enable external AI, or make ambiguous repairs without explicit human confirmation.

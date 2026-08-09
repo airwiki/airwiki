@@ -2,7 +2,7 @@
   import { AlertTriangle, BookOpen, CheckCircle2, FileText, History, Network, RefreshCw, Search, Settings2, Sparkles } from '@lucide/svelte';
   import { listen } from '@tauri-apps/api/event';
   import { onMount } from 'svelte';
-  import { addCollection, approveReview, cancelModelInstall, checkUpdates, configureFirewall, confirmPairing, connect, downloadUpdate, hideToTray, installModels, installUpdate, loadKnowledgeBundle, loadKnowledgePage, loadReviewEvidence, manageIntegration, openExternalLink, openSystemDestination, pairPeer, pickCollectionFolder, quitCompletely, reanalyzeReview, refreshAutostart, refreshConnectivity, refreshWikiHealth, rejectReview, relinkCollection, rescanCollection, revokePeer, searchKnowledge, setAutostart, setCollectionGrant, updateCollectionPolicy, updatePreferences, type AppSnapshot, type CloseBehavior, type CollectionPolicyInput, type CollectionSummary, type EnrichmentDraft, type FolderSelection, type IntegrationActionInput, type IntegrationClient, type KnowledgePageInput, type LanPreference, type LocalePreference, type ReviewSummary, type SystemDestination } from './api';
+  import { addCollection, addFederationIndex, approveReview, browsePublicCollection, cancelModelInstall, checkUpdates, configureFirewall, confirmPairing, connect, dialPeer, downloadUpdate, executeGuidedWikiRepair, hideToTray, installModels, installUpdate, loadKnowledgeBundle, loadKnowledgePage, loadReviewEvidence, manageIntegration, openExternalLink, openSystemDestination, pairPeer, pickCollectionFolder, prepareGuidedWikiRepair, quitCompletely, reanalyzeReview, refreshAutostart, refreshConnectivity, refreshWikiHealth, rejectReview, relinkCollection, removeFederationIndex, rescanCollection, revokePeer, searchKnowledge, setAutostart, setCollectionGrant, setPublicPublisherBlocked, updateCollectionPolicy, updatePreferences, updatePublicCollectionProfile, type AppSnapshot, type CloseBehavior, type CollectionPolicyInput, type CollectionSummary, type EnrichmentDraft, type FolderSelection, type IntegrationActionInput, type IntegrationClient, type KnowledgePageInput, type LanPreference, type LocalePreference, type ReviewSummary, type SearchHitSummary, type SystemDestination } from './api';
   import KnowledgeGraph from './KnowledgeGraph.svelte';
 
   type Destination = 'library' | 'review' | 'search' | 'system';
@@ -22,6 +22,8 @@
   let collectionName = '';
   let editingCollectionId: string | null = null;
   let collectionPolicy: CollectionPolicyInput = { localOnly: true, peerShareable: false, allowExternalAi: false, internetPublic: false };
+  let publicDescription = '';
+  let publicLanguages = '';
   let question = '';
   let includePublic = false;
   let actionMessage = '';
@@ -45,6 +47,12 @@
   let updaterRequestId: string | null = null;
   let confirmUpdateInstall = false;
   let pendingExternalUrl: string | null = null;
+  let federationPeerId = '';
+  let federationAddress = '';
+  let manualPeerAddress = '';
+  let publicBrowseRequestId: string | null = null;
+  let guidedRepairRequestId: string | null = null;
+  let guidedRepairConfirmed = false;
 
   onMount(() => {
     const unlistenClose = '__TAURI_INTERNALS__' in window
@@ -75,6 +83,8 @@
       if (event.requestId && event.requestId === connectivityRequestId) connectivityRequestId = null;
       if (event.requestId && event.requestId === integrationRequestId) integrationRequestId = null;
       if (event.requestId && event.requestId === updaterRequestId) updaterRequestId = null;
+      if (event.requestId && event.requestId === publicBrowseRequestId) publicBrowseRequestId = null;
+      if (event.requestId && event.requestId === guidedRepairRequestId) guidedRepairRequestId = null;
       runtimeLabel = event.snapshot.phase === 'ready' ? 'Servicios privados listos' : 'Preparando servicios privados';
     }).then((initial) => {
       snapshot = initial;
@@ -350,6 +360,8 @@
       allowExternalAi: collection.allowExternalAi,
       internetPublic: collection.internetPublic
     };
+    publicDescription = collection.publicDescription;
+    publicLanguages = collection.publicLanguages;
   }
 
   async function chooseRelinkFolder() {
@@ -393,6 +405,43 @@
     }
   }
 
+  async function savePublicProfile() {
+    if (!editingCollectionId) return;
+    actionBusy = true;
+    const languages = publicLanguages.split(',').map((language) => language.trim()).filter(Boolean);
+    try {
+      await updatePublicCollectionProfile(editingCollectionId, publicDescription.trim(), languages);
+      actionMessage = 'Perfil público actualizado. La publicación sigue sujeta a la política de la colección.';
+    } catch {
+      actionMessage = 'El perfil público no se actualizó. Revisa la descripción y los idiomas.';
+    } finally {
+      actionBusy = false;
+    }
+  }
+
+  async function prepareRepair(collectionId: string) {
+    guidedRepairConfirmed = false;
+    try {
+      guidedRepairRequestId = await prepareGuidedWikiRepair(collectionId);
+      actionMessage = 'Preparando una vista previa sin modificar el conocimiento publicado…';
+    } catch {
+      guidedRepairRequestId = null;
+      actionMessage = 'No se pudo preparar la reparación guiada.';
+    }
+  }
+
+  async function executeRepair(collectionId: string) {
+    if (!guidedRepairConfirmed) return;
+    try {
+      guidedRepairRequestId = await executeGuidedWikiRepair(collectionId, true);
+      guidedRepairConfirmed = false;
+      actionMessage = 'Reparación confirmada. AirWiki está reconciliando los artefactos afectados.';
+    } catch {
+      guidedRepairRequestId = null;
+      actionMessage = 'La reparación no se ejecutó; el estado anterior permanece intacto.';
+    }
+  }
+
   function modelInstallLabel(): string {
     const status = snapshot?.modelInstall?.status;
     if (status === 'queued') return 'Esperando turno';
@@ -411,6 +460,73 @@
       actionMessage = 'La búsqueda no pudo comenzar. Comprueba que AirWiki esté listo.';
       actionBusy = false;
     }
+  }
+
+  async function openSearchHit(hit: SearchHitSummary) {
+    const localCollection = snapshot?.collections.some((collection) => collection.id === hit.collectionId);
+    if (localCollection && hit.nodeId === snapshot?.nodeId) {
+      destination = 'library';
+      window.location.hash = 'library';
+      selectedCollectionId = hit.collectionId;
+      await loadKnowledgeBundle(hit.collectionId);
+      await loadKnowledgePage(hit.collectionId, { kind: 'concept', id: hit.conceptId });
+      return;
+    }
+    try {
+      publicBrowseRequestId = await browsePublicCollection(hit.nodeId, hit.collectionId);
+      actionMessage = 'Consultando el perfil público y su procedencia…';
+    } catch {
+      publicBrowseRequestId = null;
+      actionMessage = 'La colección remota no está disponible por una ruta autorizada.';
+    }
+  }
+
+  async function loadMorePublicConcepts() {
+    const browse = snapshot?.publicBrowse;
+    if (!browse?.publisherId || !browse.collectionId || !browse.nextCursor) return;
+    try {
+      publicBrowseRequestId = await browsePublicCollection(browse.publisherId, browse.collectionId, browse.nextCursor);
+    } catch {
+      publicBrowseRequestId = null;
+      actionMessage = 'No se pudo cargar la siguiente página pública.';
+    }
+  }
+
+  async function changePublisherBlock(publisherId: string, blocked: boolean) {
+    try {
+      await setPublicPublisherBlocked(publisherId, blocked);
+      actionMessage = blocked ? 'Publisher bloqueado en este dispositivo.' : 'Publisher desbloqueado.';
+    } catch {
+      actionMessage = 'No se pudo cambiar el bloqueo del publisher.';
+    }
+  }
+
+  async function saveFederationIndex(remove = false) {
+    try {
+      if (remove) await removeFederationIndex(federationPeerId.trim());
+      else await addFederationIndex(federationPeerId.trim(), federationAddress.trim());
+      actionMessage = remove ? 'Índice federado eliminado.' : 'Índice federado añadido.';
+      if (!remove) {
+        federationPeerId = '';
+        federationAddress = '';
+      }
+    } catch {
+      actionMessage = 'La configuración del índice no es válida o no pudo aplicarse.';
+    }
+  }
+
+  async function connectManualPeer() {
+    try {
+      await dialPeer(manualPeerAddress.trim());
+      actionMessage = 'Conexión manual iniciada; aún debes verificar el equipo antes de compartir.';
+      manualPeerAddress = '';
+    } catch {
+      actionMessage = 'La dirección no es válida o la red local no está disponible.';
+    }
+  }
+
+  function formatBytes(bytes: number): string {
+    return `${(bytes / 1073741824).toFixed(1)} GiB`;
   }
 
   async function openReview(review: ReviewSummary) {
@@ -578,6 +694,27 @@
           </section>
         {/if}
 
+        {#if destination === 'library' && snapshot?.wikiHealth?.attentionCollectionId}
+          <section class="repair-panel" aria-labelledby="repair-title">
+            <div class="settings-heading"><div><p class="section-label">Recuperación controlada</p><h3 id="repair-title">Reparar sin elegir silenciosamente una fuente de verdad</h3></div><button class="secondary" onclick={() => prepareRepair(snapshot!.wikiHealth!.attentionCollectionId!)} disabled={guidedRepairRequestId !== null}>{guidedRepairRequestId ? 'Preparando…' : 'Preparar vista previa'}</button></div>
+            <p>AirWiki compara SQLite y OKF, explica cada cambio y espera tu confirmación antes de modificar artefactos publicados.</p>
+            {#if snapshot.guidedRepair?.collectionId === snapshot.wikiHealth.attentionCollectionId}
+              {#if snapshot.guidedRepair.status === 'prepared'}
+                <div class="repair-preview">
+                  <strong>{snapshot.guidedRepair.files.length} archivos afectados · {snapshot.guidedRepair.conceptsReturnedToReview} conceptos volverán a revisión</strong>
+                  <ul>{#each snapshot.guidedRepair.files as file}<li><code>{file.page.kind}</code><span>{file.change.replaceAll('_', ' ')}</span></li>{/each}</ul>
+                  <label class="check"><input type="checkbox" bind:checked={guidedRepairConfirmed} /> Revisé el impacto y autorizo esta reparación</label>
+                  <button class="danger" onclick={() => executeRepair(snapshot!.guidedRepair!.collectionId)} disabled={!guidedRepairConfirmed || guidedRepairRequestId !== null}>Ejecutar reparación confirmada</button>
+                </div>
+              {:else if snapshot.guidedRepair.status === 'completed'}
+                <p class="verified-copy">Reparación completada. La biblioteca volverá a comprobarse.</p>
+              {:else}
+                <p class="evidence-warning">La vista previa ya no es válida o la reparación falló. Prepara una nueva antes de continuar.</p>
+              {/if}
+            {/if}
+          </section>
+        {/if}
+
         {#if destination === 'library' && snapshot?.collections.length}
           <div class="records" aria-label="Colecciones">
             {#each snapshot.collections as collection}
@@ -587,8 +724,9 @@
         {/if}
 
         {#if destination === 'library' && editingCollectionId}
+          {@const activeCollection = snapshot?.collections.find((collection) => collection.id === editingCollectionId)}
           <section class="collection-settings" aria-labelledby="collection-settings-title">
-            <div class="settings-heading"><div><p class="section-label">Política de colección</p><h3 id="collection-settings-title">{snapshot?.collections.find((collection) => collection.id === editingCollectionId)?.name}</h3></div><button class="text-action" onclick={() => { editingCollectionId = null; relinkSelection = null; }}>Cerrar</button></div>
+            <div class="settings-heading"><div><p class="section-label">Política de colección</p><h3 id="collection-settings-title">{activeCollection?.name}</h3></div><button class="text-action" onclick={() => { editingCollectionId = null; relinkSelection = null; }}>Cerrar</button></div>
             <div class="policy-state"><strong>{!collectionPolicy.peerShareable && !collectionPolicy.allowExternalAi && !collectionPolicy.internetPublic ? 'Solo local' : 'Tiene salidas habilitadas'}</strong><span>“Solo local” se deriva automáticamente de los tres permisos de salida.</span></div>
             <div class="policy-grid">
               <label class="check"><input type="checkbox" bind:checked={collectionPolicy.peerShareable} /> Disponible para grants LAN explícitos</label>
@@ -597,6 +735,14 @@
             </div>
             <p class="guardrail">AirWiki validará la combinación y fallará cerrado si una opción contradice otra.</p>
             <div class="collection-settings-actions"><button class="primary" onclick={saveCollectionPolicy} disabled={actionBusy}>Guardar política</button><button class="secondary" onclick={chooseRelinkFolder}>Elegir nueva carpeta</button>{#if relinkSelection}<span>{relinkSelection.displayPath}</span><button class="secondary" onclick={applyRelink} disabled={actionBusy}>Confirmar vínculo</button>{/if}</div>
+            {#if collectionPolicy.internetPublic}
+              <div class="public-profile">
+                <div><p class="section-label">Perfil público</p><p>Solo se anuncia contenido ya publicado y aprobado. La descripción no puede contener rutas ni datos privados.</p></div>
+                <label><span>Descripción</span><textarea bind:value={publicDescription} maxlength="2048" rows="3"></textarea></label>
+                <label><span>Idiomas</span><input bind:value={publicLanguages} maxlength="300" placeholder="es, en" /></label>
+                <div class="row-actions"><button class="secondary" onclick={savePublicProfile} disabled={actionBusy}>Guardar perfil público</button>{#if activeCollection?.publicAnnouncement.status === 'advertised'}<span class="verified-copy">Anunciada en {activeCollection.publicAnnouncement.acceptedIndexes} índices</span>{/if}</div>
+              </div>
+            {/if}
           </section>
         {/if}
 
@@ -714,7 +860,10 @@
             <section class="updater-section" aria-live="polite"><div class="settings-heading"><div><p class="section-label">Actualizaciones</p><h3>Canal estable firmado</h3></div>{#if snapshot.updater?.status !== 'disabled'}<button class="text-action" onclick={() => runUpdaterAction('check')} disabled={updaterRequestId !== null || snapshot.updater?.status === 'checking' || snapshot.updater?.status === 'downloading' || snapshot.updater?.status === 'installing'}>Comprobar</button>{/if}</div><p>{updaterLabel()}</p>{#if snapshot.updater?.releaseNotes}<div class="release-notes"><small>Novedades verificadas</small><p>{snapshot.updater.releaseNotes}</p></div>{/if}<div class="row-actions">{#if snapshot.updater?.status === 'available'}<button class="secondary" onclick={() => runUpdaterAction('download')} disabled={updaterRequestId !== null}>Descargar y verificar</button>{:else if snapshot.updater?.status === 'readyToInstall' && !confirmUpdateInstall}<button class="primary" onclick={() => { confirmUpdateInstall = true; }}>Instalar actualización</button>{:else if snapshot.updater?.status === 'readyToInstall' && confirmUpdateInstall}<div class="install-confirmation" role="alert"><p>AirWiki cerrará los servicios locales y aplicará la versión {snapshot.updater.version}. Tus datos y modelos permanecen en sus ubicaciones actuales.</p><button class="primary" onclick={() => runUpdaterAction('install')} disabled={updaterRequestId !== null}>Confirmar e instalar</button><button class="secondary" onclick={() => { confirmUpdateInstall = false; }} disabled={updaterRequestId !== null}>Cancelar</button></div>{:else if snapshot.updater?.retryable}<button class="secondary" onclick={() => runUpdaterAction('check')} disabled={updaterRequestId !== null}>Reintentar</button>{/if}</div><small>No se envían identificadores del dispositivo y un fallo de red no bloquea el uso normal.</small></section>
             <section><p class="section-label">Inicio de sesión</p><h3>Inicio automático</h3><p>{autostartLabel()}</p><div class="row-actions">{#if snapshot.autostart === 'enabled'}<button class="secondary" onclick={() => changeAutostart(false)} disabled={autostartBusy}>Desactivar</button>{:else if snapshot.autostart !== 'unsupported' && snapshot.autostart !== 'conflict'}<button class="secondary" onclick={() => changeAutostart(true)} disabled={autostartBusy}>{autostartBusy ? 'Comprobando…' : 'Activar'}</button>{/if}<button class="text-action" onclick={refreshAutostartState} disabled={autostartBusy}>Actualizar estado</button></div></section>
             <section class="connectivity-section"><p class="section-label">Conectividad</p><h3>{snapshot.peers.length} equipos conocidos</h3><p>{connectivityLabel()}</p>{#if snapshot.lanRuntime}<dl><div><dt>Listener</dt><dd>{lanStateLabel(snapshot.lanRuntime.listener)}</dd></div><div><dt>Descubrimiento</dt><dd>{lanStateLabel(snapshot.lanRuntime.discovery)}</dd></div><div><dt>Interfaces</dt><dd>{snapshot.lanRuntime.addressCount}</dd></div></dl>{/if}<div class="row-actions"><button class="secondary" onclick={() => runConnectivityAction('refresh')} disabled={connectivityRequestId !== null}>{connectivityRequestId ? 'Comprobando…' : 'Comprobar'}</button>{#if snapshot.connectivity?.networkProfile === 'public'}<button class="text-action" onclick={() => runConnectivityAction('networkSettings')} disabled={connectivityRequestId !== null}>Abrir ajustes de red</button>{/if}{#if snapshot.connectivity?.systemPermission === 'denied'}<button class="text-action" onclick={() => runConnectivityAction('localNetworkPrivacy')} disabled={connectivityRequestId !== null}>Revisar permiso de red local</button>{/if}{#if snapshot.connectivity?.firewallHelper === 'verified' && snapshot.connectivity.firewall !== 'ready' && snapshot.connectivity.firewall !== 'notApplicable'}<button class="secondary" onclick={() => runConnectivityAction('install')} disabled={connectivityRequestId !== null || lanPreference !== 'enabled'}>Configurar firewall</button>{/if}{#if snapshot.connectivity?.firewall === 'ready'}<button class="text-action" onclick={() => runConnectivityAction('remove')} disabled={connectivityRequestId !== null}>Quitar reglas</button>{/if}{#if snapshot.connectivity?.firewall === 'conflict' || snapshot.connectivity?.firewall === 'legacyExposure'}<button class="text-action" onclick={() => runConnectivityAction('advancedFirewall')} disabled={connectivityRequestId !== null}>Abrir configuración avanzada</button>{/if}</div><small>Compartir sigue requiriendo pairing y grants por colección.</small></section>
-            <section class="peer-trust"><p class="section-label">Equipos y permisos</p><h3>Confianza explícita</h3><p>Cada equipo se verifica con seis palabras. Después eliges qué colecciones puede consultar.</p><div class="peer-list">{#each snapshot.peers as peer}<article><div class="peer-heading"><div><strong>{peer.deviceName ?? 'Equipo cercano'}</strong><code title={peer.peerId}>{shortPeerId(peer.peerId)}</code></div><span class:verified={peer.trust === 'trusted'}>{peer.trust === 'trusted' ? 'Verificado' : peer.trust === 'blocked' ? 'Revocado' : peer.activity === 'pairing' ? 'Verificando' : 'Sin verificar'}</span></div>{#if peer.sasWords}<div class="sas" aria-label="Código de verificación"><small>Comprueba estas palabras en ambos equipos</small><strong>{peer.sasWords.join(' · ')}</strong><div><button class="primary" onclick={() => runPeerAction(peer.peerId, 'accept')} disabled={peerActionId === peer.peerId}>Coinciden</button><button class="danger" onclick={() => runPeerAction(peer.peerId, 'reject')} disabled={peerActionId === peer.peerId}>No coinciden</button></div></div>{:else if peer.trust === 'unpaired'}<button class="secondary" onclick={() => runPeerAction(peer.peerId, 'pair')} disabled={peerActionId === peer.peerId || peer.activity === 'notObserved'}>Verificar equipo</button>{:else if peer.trust === 'trusted'}<div class="grant-list">{#each snapshot.collections.filter((collection) => collection.peerShareable) as collection}<label class="check"><input type="checkbox" checked={peer.grantedCollectionIds.includes(collection.id)} onchange={(event) => changeGrant(peer.peerId, collection.id, event.currentTarget.checked)} disabled={peerActionId === peer.peerId} /> {collection.name}</label>{:else}<small>Activa “grants LAN” en una colección para poder compartirla.</small>{/each}</div><button class="danger" onclick={() => runPeerAction(peer.peerId, 'revoke')} disabled={peerActionId === peer.peerId}>Revocar confianza</button>{/if}</article>{:else}<p class="empty">No hay equipos descubiertos. AirWiki no comparte nada hasta que verifiques uno.</p>{/each}</div></section>
+            <section class="device-details"><p class="section-label">Este dispositivo</p><h3>Identidad y capacidad local</h3><dl>{#if snapshot.nodeId}<div><dt>Identidad de red</dt><dd><code>{shortPeerId(snapshot.nodeId)}</code></dd></div>{/if}{#if snapshot.mcpUrl}<div><dt>Endpoint MCP</dt><dd><code>{snapshot.mcpUrl}</code></dd></div>{/if}{#if snapshot.hardware}<div><dt>Memoria disponible</dt><dd>{formatBytes(snapshot.hardware.availableMemoryBytes)}</dd></div><div><dt>Disco disponible</dt><dd>{formatBytes(snapshot.hardware.availableDiskBytes)}</dd></div><div><dt>Aceleración</dt><dd>{snapshot.hardware.metalAvailable ? 'Metal' : snapshot.hardware.avx2 ? 'AVX2' : 'CPU compatible básica'}</dd></div>{/if}</dl>{#if snapshot.hardware?.issues.length}<p class="evidence-warning">{snapshot.hardware.issues.join(' · ')}</p>{/if}</section>
+            <section class="network-advanced"><p class="section-label">Conexión manual</p><h3>Conectar un equipo conocido</h3><p>Usa una multiaddress compartida por la otra persona. La conexión no concede confianza ni acceso.</p><label><span>Dirección</span><input bind:value={manualPeerAddress} maxlength="500" placeholder="/ip4/192.168.1.20/tcp/12345/p2p/12D3Koo…" /></label><button class="secondary" onclick={connectManualPeer} disabled={lanPreference !== 'enabled' || !manualPeerAddress.trim()}>Conectar</button></section>
+            <section class="peer-trust"><p class="section-label">Equipos y permisos</p><h3>Confianza explícita</h3><p>Cada equipo se verifica con seis palabras. Después eliges qué colecciones puede consultar.</p><div class="peer-list">{#each snapshot.peers as peer}<article><div class="peer-heading"><div><strong>{peer.deviceName ?? 'Equipo cercano'}</strong><code title={peer.peerId}>{shortPeerId(peer.peerId)}</code><small>{peer.address}</small></div><span class:verified={peer.trust === 'trusted'}>{peer.trust === 'trusted' ? 'Verificado' : peer.trust === 'blocked' ? 'Revocado' : peer.activity === 'pairing' ? 'Verificando' : 'Sin verificar'}</span></div>{#if peer.sasWords}<div class="sas" aria-label="Código de verificación"><small>Comprueba estas palabras en ambos equipos</small><strong>{peer.sasWords.join(' · ')}</strong><div><button class="primary" onclick={() => runPeerAction(peer.peerId, 'accept')} disabled={peerActionId === peer.peerId}>Coinciden</button><button class="danger" onclick={() => runPeerAction(peer.peerId, 'reject')} disabled={peerActionId === peer.peerId}>No coinciden</button></div></div>{:else if peer.trust === 'unpaired'}<button class="secondary" onclick={() => runPeerAction(peer.peerId, 'pair')} disabled={peerActionId === peer.peerId || peer.activity === 'notObserved'}>Verificar equipo</button>{:else if peer.trust === 'trusted'}<div class="grant-list">{#each snapshot.collections.filter((collection) => collection.peerShareable) as collection}<label class="check"><input type="checkbox" checked={peer.grantedCollectionIds.includes(collection.id)} onchange={(event) => changeGrant(peer.peerId, collection.id, event.currentTarget.checked)} disabled={peerActionId === peer.peerId} /> {collection.name}</label>{:else}<small>Activa “grants LAN” en una colección para poder compartirla.</small>{/each}</div><button class="danger" onclick={() => runPeerAction(peer.peerId, 'revoke')} disabled={peerActionId === peer.peerId}>Revocar confianza</button>{/if}</article>{:else}<p class="empty">No hay equipos descubiertos. AirWiki no comparte nada hasta que verifiques uno.</p>{/each}</div></section>
+            <section class="network-advanced"><p class="section-label">Federación pública avanzada</p><h3>Índices comunitarios</h3><p>Añade únicamente índices cuya identidad y multiaddress hayas verificado por un canal independiente.</p><div class="network-fields"><label><span>Peer ID</span><input bind:value={federationPeerId} maxlength="200" /></label><label><span>Multiaddress</span><input bind:value={federationAddress} maxlength="500" /></label></div><div class="row-actions"><button class="secondary" onclick={() => saveFederationIndex(false)} disabled={!federationPeerId.trim() || !federationAddress.trim()}>Añadir índice</button><button class="text-action" onclick={() => saveFederationIndex(true)} disabled={!federationPeerId.trim()}>Eliminar por Peer ID</button></div>{#if snapshot.blockedPublicPublishers.length}<div class="blocked-publishers"><small>Publishers bloqueados</small>{#each snapshot.blockedPublicPublishers as publisherId}<div><code>{shortPeerId(publisherId)}</code><button class="text-action" onclick={() => changePublisherBlock(publisherId, false)}>Desbloquear</button></div>{/each}</div>{/if}</section>
             <section class="integrations-section"><div class="settings-heading"><div><p class="section-label">Integraciones</p><h3>Clientes de IA</h3></div><button class="text-action" onclick={() => runIntegrationAction({ kind: 'refresh' })} disabled={integrationRequestId !== null}>Actualizar</button></div><p>AirWiki instala un puente de solo lectura hacia el endpoint MCP local.</p>{#if snapshot.integrations?.externalAiCollectionCount}<p class="evidence-warning">{snapshot.integrations.externalAiCollectionCount} colecciones permiten IA externa. Cada búsqueda seguirá revalidando la política.</p>{/if}<div class="integration-list">{#each snapshot.integrations?.integrations ?? [] as integration}<article><div><strong>{integrationName(integration.client)}</strong><small>{integrationState(integration.status)}{#if integration.detectedVersion} · {integration.detectedVersion}{/if}{#if integration.restartRequired} · reinicio requerido{/if}</small></div><div class="row-actions">{#if integration.status === 'available' || integration.status === 'updateAvailable'}<button class="secondary" onclick={() => runIntegrationAction({ kind: 'connect', client: integration.client })} disabled={integrationRequestId !== null}>{integration.status === 'updateAvailable' ? 'Actualizar puente' : 'Conectar'}</button>{:else if integration.status === 'configured'}<button class="danger" onclick={() => runIntegrationAction({ kind: 'disconnect', client: integration.client })} disabled={integrationRequestId !== null}>Desconectar</button>{:else if integration.status === 'awaitingClientApproval' && integration.client === 'claudeDesktop'}<button class="secondary" onclick={() => runIntegrationAction({ kind: 'openClaudeSettings' })} disabled={integrationRequestId !== null}>Abrir Claude</button><button class="text-action" onclick={() => runIntegrationAction({ kind: 'confirmClaudeInstalled' })} disabled={integrationRequestId !== null}>Ya lo aprobé</button>{/if}</div></article>{:else}<p class="empty">Comprueba el sistema para detectar clientes compatibles.</p>{/each}</div></section>
           </div>
         {/if}
@@ -730,13 +879,23 @@
             <div class="search-results" aria-live="polite">
               <p class="section-label">{snapshot.search.status === 'searching' ? 'Resultados parciales' : 'Evidencia encontrada'}</p>
               {#each snapshot.search.hits as hit}
-                <article><small>{hit.headingOrPage}</small><h3>{hit.title}</h3><p>{hit.snippet}</p><code>{hit.logicalResourceUri}</code></article>
+                <article><small>{hit.headingOrPage}</small><h3>{hit.title}</h3><p>{hit.snippet}</p><div class="citation-row"><code>{hit.logicalResourceUri}</code><span>rev. {hit.sourceRevision} · {hit.sourceSha256.slice(0, 12)}…</span></div><button class="text-action" onclick={() => openSearchHit(hit)} disabled={publicBrowseRequestId !== null}>{hit.nodeId === snapshot.nodeId ? 'Abrir evidencia local' : 'Explorar colección de origen'}</button></article>
               {:else}
                 {#if snapshot.search.status === 'complete'}
                   <p class="empty">No encontramos evidencia que responda claramente. Prueba una pregunta más específica.</p>
                 {/if}
               {/each}
             </div>
+          {/if}
+          {#if snapshot?.publicBrowse}
+            <section class="public-browser" aria-live="polite" aria-labelledby="public-browser-title">
+              <div class="settings-heading"><div><p class="section-label">Colección pública</p><h3 id="public-browser-title">{snapshot.publicBrowse.collectionName ?? 'Origen no disponible'}</h3></div>{#if snapshot.publicBrowse.publisherId}<button class="danger" onclick={() => changePublisherBlock(snapshot!.publicBrowse!.publisherId!, true)}>Bloquear publisher</button>{/if}</div>
+              <p class:warning-copy={snapshot.publicBrowse.status === 'offline' || snapshot.publicBrowse.status === 'expired' || snapshot.publicBrowse.status === 'failed'}>{snapshot.publicBrowse.status === 'direct' ? 'Conexión directa autenticada' : snapshot.publicBrowse.status === 'relay' ? 'Conexión autenticada mediante relay' : snapshot.publicBrowse.status === 'expired' ? 'El anuncio público expiró' : snapshot.publicBrowse.status === 'offline' ? 'El publisher no está disponible' : 'No se pudo validar esta colección'}</p>
+              {#if snapshot.publicBrowse.description}<p>{snapshot.publicBrowse.description}</p>{/if}
+              {#if snapshot.publicBrowse.languages.length}<small>{snapshot.publicBrowse.languages.join(' · ')}</small>{/if}
+              <div class="public-concepts">{#each snapshot.publicBrowse.concepts as concept}<article><small>{concept.conceptType} · {concept.language} · rev. {concept.sourceRevision}</small><h4>{concept.title}</h4><p>{concept.summary}</p>{#if concept.tags.length}<span>{concept.tags.join(' · ')}</span>{/if}</article>{:else}<p class="empty">{snapshot.publicBrowse.status === 'failed' ? 'No se pudo validar contenido público.' : 'Esta página pública no contiene conceptos visibles.'}</p>{/each}</div>
+              {#if snapshot.publicBrowse.nextCursor}<button class="secondary" onclick={loadMorePublicConcepts} disabled={publicBrowseRequestId !== null}>{publicBrowseRequestId ? 'Cargando…' : 'Cargar más'}</button>{/if}
+            </section>
           {/if}
         {/if}
         {#if actionMessage}<p class="action-message" aria-live="polite">{actionMessage}</p>{/if}

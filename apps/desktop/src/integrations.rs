@@ -42,14 +42,6 @@ pub(crate) enum ChatClientKind {
 impl ChatClientKind {
     pub(crate) const ALL: [Self; 3] = [Self::ChatGptDesktop, Self::ClaudeDesktop, Self::GeminiCli];
 
-    pub(crate) const fn display_name(self) -> &'static str {
-        match self {
-            Self::ChatGptDesktop => "ChatGPT Desktop / Work",
-            Self::ClaudeDesktop => "Claude Desktop",
-            Self::GeminiCli => "Gemini CLI",
-        }
-    }
-
     const fn bridge_id(self) -> &'static str {
         match self {
             Self::ChatGptDesktop => "chatgpt-desktop",
@@ -63,7 +55,6 @@ impl ChatClientKind {
 pub(crate) enum IntegrationStatus {
     NotInstalled,
     Available,
-    Configuring,
     AwaitingClientApproval,
     Configured,
     UpdateAvailable,
@@ -1803,7 +1794,6 @@ mod tests {
             paths: AppPaths {
                 data: root.join("data"),
                 database: root.join("data/airwiki.sqlite3"),
-                vaults: root.join("data/vaults"),
                 logs: root.join("data/logs"),
                 config: root.join("config/config.json"),
             },
@@ -2057,7 +2047,6 @@ mod tests {
             paths: AppPaths {
                 data: temp.path().join("data"),
                 database: temp.path().join("database"),
-                vaults: temp.path().join("vaults"),
                 logs: temp.path().join("logs"),
                 config: temp.path().join("config"),
             },

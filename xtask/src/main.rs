@@ -296,7 +296,7 @@ fn run_ui_bindings_test(test_name: &str, ignored: bool) -> Result<()> {
         "-p",
         "airwiki-desktop",
         "--bin",
-        "airwiki-tauri",
+        "airwiki",
         test_name,
         "--",
         "--exact",

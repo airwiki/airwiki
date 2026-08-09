@@ -27,8 +27,10 @@ Controls are not considered effective end to end until the
 ## Trust boundaries
 
 1. **Watched folder → local node.** Every document is untrusted input.
-2. **UI → worker.** UI requests actions; parsing, inference, storage, blocking OS
-   calls, and network work run outside egui.
+2. **Local WebView → Tauri IPC → worker.** The WebView has a strict CSP and no
+   direct filesystem, shell, HTTP, SQL, updater or process capability. Commands
+   are explicit and validated; parsing, inference, storage, blocking OS calls,
+   and network work remain in Rust.
 3. **Node → `llama-server`.** Loopback only, random token, one concurrent
    inference.
 4. **Node → LAN.** Noise authenticates the PeerId and encrypts transport; grants
@@ -83,6 +85,9 @@ Controls are not considered effective end to end until the
 | Crash splits approved DB and bundle state | Durable publication intent resumes idempotently before exposure | Altered sources or bundle return to human intervention |
 | Peer forges citation node | Receiver replaces `node_id` with the Noise-authenticated PeerId | A compromised source controls content under its own identity |
 | Prompt injection in evidence | Local LLM only proposes metadata; remote diagnostics are discarded; MCP instructions label evidence as untrusted data | A chat model may still follow hostile snippets; validate the golden prompt set |
+| Compromised WebView invokes ambient native authority | One local WebView, strict CSP, no remote scripts or navigation, no direct native plugins, explicit closed Tauri commands, bounded validated DTOs | A flaw in an exposed command or WebView runtime can still cross the boundary; test hostile and unknown payloads and keep commands narrow |
+| Web content reads or supplies arbitrary local paths | Native folder picker returns an opaque one-use token that expires after five minutes; Rust consumes it for add/relink and never accepts a JavaScript path | The selected folder remains a deliberate user grant; relinking still requires a fresh selection |
+| Out-of-order IPC state enables a stale decision | Snapshot/event schema versions, monotonic sequences, request IDs, review versions and fingerprints; lagged consumers request a full snapshot | A compromised local process is outside the model; saturation, reconnect and stale-approval tests remain mandatory |
 | Stale or mismatched evidence is shown during review | Worker requests bind request, concept, revision and an opaque review version; storage revalidates pending state, draft and all chunk evidence in the publication transaction; approval stays disabled without current evidence | A compromised local database remains outside the threat model |
 | Published Markdown loads hostile resources | Viewer disables images, files, network, SVG, and embeds; external HTTP links require confirmation | User can still choose to open a URL |
 | Bundle is modified outside the app | Bounded tolerant inspector, normalized in-root paths, no symlinks, DB/filesystem health report, confirmed snapshot repair | A local writer already controls data; ambiguous history remains blocked |
@@ -163,12 +168,11 @@ must not be copied to another product.
 | --- | --- | --- | --- |
 | `RUSTSEC-2026-0118` | `libp2p-mdns → hickory-proto 0.25.2` | Only the `mdns` feature is built; the affected DNSSEC validator is absent | Compatible libp2p/hickory update or feature change |
 | `RUSTSEC-2026-0119` | `libp2p-mdns → hickory-proto 0.25.2` | Outbound encoding is limited to application-owned service records | libp2p adopts `hickory-proto >=0.26.1` or attacker input reaches the encoder |
-| `RUSTSEC-2026-0194`, `RUSTSEC-2026-0195` | `eframe → egui-winit → smithay-clipboard → wayland-scanner → quick-xml 0.39.4` | Linux-only dependency retained in the lockfile; Linux is not built or distributed | Update before adding Linux support |
 | `RUSTSEC-2024-0436` (unmaintained) | `tokenizers → macro_rules_attribute → paste 1.0.15` | Maintenance warning, not a reported vulnerability; remains visible | Upstream removes or replaces `paste` |
 
-`cargo-audit` cannot filter all findings by target, so CI passes the four scoped
-vulnerability exceptions explicitly. `cargo-deny` evaluates the two tested
-targets and needs only the hickory exceptions. Any new advisory fails CI.
+`cargo-audit` passes only the two scoped hickory exceptions explicitly.
+`cargo-deny` evaluates the two tested targets under the same constraint. Any
+new advisory fails CI.
 
 ## Disclosure response
 

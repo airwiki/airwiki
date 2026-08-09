@@ -77,6 +77,25 @@ ${StrLoc}
 !define PAYLOAD_REMOVAL_DELAY_MS 100
 !define UNINSTROOT "Software\Microsoft\Windows\CurrentVersion\Uninstall"
 
+; Declare state before page callbacks are compiled. LogicLib otherwise treats
+; forward variable references as constants and silently weakens the checks.
+Var ExistingInstallKind
+Var ExistingUninstallKey
+Var InstalledVersion
+Var InstallVersionRelation
+Var WixMetadataCount
+Var WixCandidateKey
+Var NsisMetadataState
+Var SilentMode
+Var PlatformRejectionMessage
+Var PassiveMode
+Var UpdaterMode
+Var ExistingNsisInstallLocation
+Var ManagedPayloadPath
+Var ManagedPayloadAttempts
+Var ManagedValidationPath
+Var ManagedValidationParent
+
 !if "${INSTALLMODE}" != "currentUser"
   !error "AirWiki 0.2.0 supports only currentUser Windows installs."
 !endif
@@ -375,7 +394,7 @@ LangString installedPayloadRemovalFailed ${LANG_SPANISH} "Windows no pudo quitar
 LangString untrustedUninstallState ${LANG_ENGLISH} "AirWiki could not verify this uninstaller against the fixed per-user installation. No application files or local data were removed."
 LangString untrustedUninstallState ${LANG_SPANISH} "AirWiki no pudo verificar este desinstalador contra la instalación fija del usuario. No se quitaron archivos de la aplicación ni datos locales."
 
-!macro SetContext
+!macro AirWikiSetContext
   !if "${INSTALLMODE}" == "currentUser"
     SetShellVarContext current
   !else if "${INSTALLMODE}" == "perMachine"
@@ -392,23 +411,6 @@ LangString untrustedUninstallState ${LANG_SPANISH} "AirWiki no pudo verificar es
     !endif
   ${EndIf}
 !macroend
-
-Var ExistingInstallKind
-Var ExistingUninstallKey
-Var InstalledVersion
-Var InstallVersionRelation
-Var WixMetadataCount
-Var WixCandidateKey
-Var NsisMetadataState
-Var SilentMode
-Var PlatformRejectionMessage
-Var PassiveMode
-Var UpdaterMode
-Var ExistingNsisInstallLocation
-Var ManagedPayloadPath
-Var ManagedPayloadAttempts
-Var ManagedValidationPath
-Var ManagedValidationParent
 
 Function RejectUnsupportedPlatform
   IfSilent platform_reject_abort
@@ -637,7 +639,7 @@ Function .onInit
   IfErrors +2 0
     StrCpy $UpdaterMode 1
 
-  !insertmacro SetContext
+!insertmacro AirWikiSetContext
   Call ClassifyExistingInstallation
   Call EnforceInstallPolicy
 
@@ -707,7 +709,7 @@ FunctionEnd
   app_check_done:
 !macroend
 
-; The in-app updater launches this installer before asking the eframe process
+; The in-app updater launches this installer before asking the Tauri process
 ; to exit cleanly. Give MCP, LAN, watchers and the local model a bounded window
 ; to stop before the existing recovery path terminates a stuck process.
 Function WaitForAirWikiUpdateShutdown
@@ -997,7 +999,7 @@ Function un.ValidateManagedPayloadTree
 FunctionEnd
 
 Function un.onInit
-  !insertmacro SetContext
+!insertmacro AirWikiSetContext
 
   !if "${INSTALLMODE}" == "both"
     !insertmacro MULTIUSER_UNINIT

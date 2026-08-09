@@ -31,8 +31,8 @@ xtask ──────────────┬──> airwiki-core
 - `airwiki-network` owns authenticated LAN discovery, pairing and transport.
 - `airwiki-mcp` owns the read-only MCP contract, loopback gateway and stdio bridge
   implementation.
-- `apps/desktop` is the composition root. It owns background orchestration and
-  renders egui.
+- `apps/desktop` is the composition root. It owns Tauri lifecycle and IPC,
+  background orchestration, and the local Svelte WebView.
 - `apps/mcp-bridge` is a thin executable over `airwiki-mcp`. At runtime it exposes
   stdio to a local chat client and forwards only to the desktop's fixed loopback
   MCP endpoint.
@@ -95,17 +95,25 @@ durable SQLite/OKF authority boundary.
 
 ## Execution model
 
-egui renders completed view models and sends intent to the desktop worker.
-Filesystem traversal, parsing, hashing, SQLite-heavy operations, inference and
-network I/O never run on the egui thread. Async work runs on the Tokio runtime;
-blocking filesystem, parser, database and CPU work uses a blocking pool. UI
-requests and worker responses carry request identifiers so stale results can be
-discarded.
+One local Tauri WebView renders completed, serde-defined snapshots and sends
+only explicit capability-specific commands. `ts-rs` generates the committed
+TypeScript contract; CI rejects stale bindings. JavaScript receives no direct
+filesystem, shell, HTTP, SQL, updater, autostart or process capability.
 
-Operating-system calls that may block or launch external work also cross the
-worker boundary. Immediate window and tray integration may run on the eframe
-thread when the platform API requires it, but handlers must remain bounded and
-must not perform filesystem traversal, network I/O or business logic.
+`AppRuntime` and the domain services run on Tauri's Tokio runtime. UI intents
+use a bounded `mpsc` channel, consolidated state uses `watch`, transient
+progress uses bounded `broadcast`, and request-scoped responses use identifiers
+that discard stale results. Filesystem traversal, parsing, hashing,
+SQLite-heavy operations, inference, process work and blocking operating-system
+calls use the worker boundary and `spawn_blocking`; no lock is held across an
+await.
+
+The WebView loads only bundled assets under a strict CSP. Markdown becomes a
+typed safe AST in Rust; it never reaches `innerHTML`, and images, SVG, embeds,
+files and remote resources are excluded. Folder selection returns an opaque,
+single-use, expiring token, so JavaScript cannot submit arbitrary paths.
+Window, tray and lifecycle callbacks remain bounded and contain no business
+logic.
 
 The process has one instance per user session. Hiding the window preserves the
 worker, watchers, MCP and LAN. **Exit completely** performs a bounded shutdown.

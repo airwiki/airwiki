@@ -7,7 +7,6 @@ use directories::ProjectDirs;
 pub struct AppPaths {
     pub data: PathBuf,
     pub database: PathBuf,
-    pub vaults: PathBuf,
     pub logs: PathBuf,
     pub config: PathBuf,
 }
@@ -22,7 +21,6 @@ impl AppPaths {
         std::fs::create_dir_all(config_dir)?;
         Ok(Self {
             database: data.join("airwiki.sqlite3"),
-            vaults: data.join("vaults"),
             logs: data.join("logs"),
             config: config_dir.join("config.json"),
             data,

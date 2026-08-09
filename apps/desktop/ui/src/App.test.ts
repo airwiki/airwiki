@@ -53,6 +53,19 @@ describe('AirWiki desktop shell', () => {
     expect(screen.getByRole('button', { name: 'Guardar preferencias' })).toBeEnabled();
   });
 
+  it('shows stable installed memory when the operating system cannot estimate availability', async () => {
+    const hardware = snapshot.hardware;
+    expect(hardware).not.toBeNull();
+    if (hardware) hardware.availableMemoryBytes = 0;
+    render(App);
+
+    await fireEvent.click(await screen.findByRole('button', { name: 'Sistema' }));
+
+    expect(await screen.findByText('Memoria instalada')).toBeInTheDocument();
+    expect(screen.getByText('16.0 GiB')).toBeInTheDocument();
+    expect(screen.queryByText('0.0 GiB')).not.toBeInTheDocument();
+  });
+
   it('renders the same primary navigation in English', async () => {
     const preferences = snapshot.preferences;
     expect(preferences).not.toBeNull();

@@ -803,7 +803,7 @@
     selectedCollectionId = collectionId;
     knowledgeMode = 'document';
     actionBusy = true;
-    actionMessage = t('home-wiki-checking');
+    actionMessage = '';
     try {
       await loadKnowledgeBundle(collectionId);
     } catch {

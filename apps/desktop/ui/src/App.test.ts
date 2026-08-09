@@ -2,6 +2,7 @@ import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/sv
 import axe from 'axe-core';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import App from './App.svelte';
+import { loadKnowledgeBundle } from './api';
 import { readySnapshot } from './test/fixtures';
 
 let snapshot = readySnapshot();
@@ -20,7 +21,8 @@ vi.mock('./api', async (importOriginal) => {
     refreshAutostart: vi.fn(async () => undefined),
     refreshConnectivity: vi.fn(async () => undefined),
     refreshWikiHealth: vi.fn(async () => undefined),
-    manageIntegration: vi.fn(async () => undefined)
+    manageIntegration: vi.fn(async () => undefined),
+    loadKnowledgeBundle: vi.fn(async () => undefined)
   };
 });
 
@@ -49,6 +51,15 @@ describe('AirWiki desktop shell', () => {
       expect(screen.getByRole('button', { name: destination })).toBeInTheDocument();
     }
     expect(screen.getByRole('button', { name: 'Agregar carpeta' })).toBeInTheDocument();
+  });
+
+  it('keeps collection loading feedback contextual instead of leaving a stale global message', async () => {
+    render(App);
+
+    await fireEvent.click(await screen.findByRole('button', { name: 'Abrir' }));
+
+    expect(loadKnowledgeBundle).toHaveBeenCalledOnce();
+    expect(screen.queryByText(/Comprobando la salud/)).not.toBeInTheDocument();
   });
 
   it('keeps system actions reachable from keyboard navigation', async () => {

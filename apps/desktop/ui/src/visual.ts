@@ -14,6 +14,7 @@ const snapshot = readySnapshot();
 if (snapshot.preferences) {
   snapshot.preferences.locale = locale;
   snapshot.preferences.theme = theme;
+  if (parameters.get('onboarding') === '1') snapshot.preferences.completedOnboardingVersion = null;
 }
 if (destination === 'review') {
   const review = {

@@ -6,23 +6,25 @@
   import History from '@lucide/svelte/icons/history';
   import Network from '@lucide/svelte/icons/network';
   import RefreshCw from '@lucide/svelte/icons/refresh-cw';
-  import Search from '@lucide/svelte/icons/search';
-  import Settings2 from '@lucide/svelte/icons/settings-2';
   import Sparkles from '@lucide/svelte/icons/sparkles';
   import { listen } from '@tauri-apps/api/event';
   import { onMount } from 'svelte';
   import { addCollection, addFederationIndex, approveReview, browsePublicCollection, cancelModelInstall, checkUpdates, configureFirewall, confirmPairing, connect, dialPeer, downloadUpdate, executeGuidedWikiRepair, hideToTray, installModels, installUpdate, loadKnowledgeBundle, loadKnowledgePage, loadReviewEvidence, manageIntegration, openExternalLink, openSystemDestination, pairPeer, pickCollectionFolder, prepareGuidedWikiRepair, quitCompletely, reanalyzeReview, refreshAutostart, refreshConnectivity, refreshWikiHealth, rejectReview, relinkCollection, removeFederationIndex, rescanCollection, revokePeer, searchKnowledge, setAutostart, setCollectionGrant, setPublicPublisherBlocked, updateCollectionPolicy, updatePreferences, updatePublicCollectionProfile, type AppSnapshot, type CloseBehavior, type CollectionPolicyInput, type CollectionSummary, type EnrichmentDraft, type FolderSelection, type IntegrationActionInput, type IntegrationClient, type KnowledgePageInput, type LanPreference, type LocalePreference, type ReviewSummary, type SearchHitSummary, type SystemDestination, type ThemePreference } from './api';
   import KnowledgeGraph from './KnowledgeGraph.svelte';
+  import ContextAtlas from './ContextAtlas.svelte';
+  import NavigationRail from './NavigationRail.svelte';
+  import OnboardingFlow from './OnboardingFlow.svelte';
+  import type { AtlasModel } from './atlas';
   import { message, resolveLocale, type MessageArgs } from './i18n';
 
   type Destination = 'library' | 'review' | 'search' | 'system';
   type SystemSection = 'models' | 'preferences' | 'updates' | 'connectivity' | 'devices' | 'integrations';
 
   const destinations = [
-    { id: 'library', labelId: 'desktop-nav-library', icon: BookOpen },
-    { id: 'review', labelId: 'nav-review', icon: CheckCircle2 },
-    { id: 'search', labelId: 'nav-search', icon: Search },
-    { id: 'system', labelId: 'desktop-nav-system', icon: Settings2 }
+    { id: 'library', labelId: 'desktop-nav-library' },
+    { id: 'review', labelId: 'nav-review' },
+    { id: 'search', labelId: 'nav-search' },
+    { id: 'system', labelId: 'desktop-nav-system' }
   ] as const;
   const systemSections = [
     { id: 'models', labelId: 'settings-local-ai' },
@@ -74,11 +76,13 @@
   let guidedRepairRequestId: string | null = null;
   let guidedRepairConfirmed = false;
   let mainScrollRegion: HTMLElement | null = null;
+  let currentAtlas: AtlasModel;
+  let currentPageTitleId: string;
+  let currentPageDescriptionId: string;
+  let currentNextActionLabel: string;
 
   function scrollMainTo(top: number) {
-    requestAnimationFrame(() => {
-      mainScrollRegion?.scrollTo({ top: Math.max(0, top), left: 0, behavior: 'auto' });
-    });
+    mainScrollRegion?.scrollTo({ top: Math.max(0, top), left: 0, behavior: 'auto' });
   }
 
   function pushHash(hash: string) {
@@ -103,10 +107,15 @@
 
   let t = translate;
   $: t = translatorFor(locale);
+  $: currentPageTitleId = destination === 'library' ? 'desktop-page-library-title' : destination === 'review' ? 'desktop-page-review-title' : destination === 'search' ? 'desktop-page-search-title' : systemSections.find((section) => section.id === systemSection)?.labelId ?? 'desktop-page-system-title';
+  $: currentPageDescriptionId = destination === 'library' ? 'desktop-page-library-body' : destination === 'review' ? 'desktop-page-review-body' : destination === 'search' ? 'desktop-page-search-body' : 'desktop-page-system-body';
+  $: currentNextActionLabel = nextActionLabel(locale, destination, snapshot?.reviews.length ?? 0);
+  $: currentAtlas = atlasModel(destination, systemSection, snapshot, selectedReview, selectedCollectionId, question, includePublic);
 
   $: if (typeof document !== 'undefined') {
     document.documentElement.lang = resolveLocale(locale);
     document.documentElement.dataset.theme = theme;
+    if (snapshot) document.documentElement.dataset.platform = snapshot.platform;
     document.documentElement.style.colorScheme = theme === 'system' ? 'light dark' : theme;
   }
 
@@ -130,6 +139,27 @@
     syncRoute();
     window.addEventListener('hashchange', syncRoute);
     window.addEventListener('popstate', syncRoute);
+    const handleShortcut = (event: KeyboardEvent) => {
+      const command = event.metaKey || event.ctrlKey;
+      if (command && ['1', '2', '3', '4'].includes(event.key)) {
+        event.preventDefault();
+        const target = destinations[Number(event.key) - 1];
+        if (target) select(target.id);
+      } else if (command && event.key.toLowerCase() === 'k') {
+        event.preventDefault();
+        select('search');
+        requestAnimationFrame(() => document.querySelector<HTMLTextAreaElement>('#knowledge-question')?.focus());
+      } else if (command && event.key === ',') {
+        event.preventDefault();
+        select('system');
+      } else if (event.key === 'Escape') {
+        confirmUpdateInstall = false;
+        editingCollectionId = null;
+        relinkSelection = null;
+        if (closeChoiceRequired) closeChoiceRequired = false;
+      }
+    };
+    window.addEventListener('keydown', handleShortcut);
     const unlistenClose = '__TAURI_INTERNALS__' in window
       ? listen('close-choice-required', () => { closeChoiceRequired = true; })
       : Promise.resolve(() => {});
@@ -183,6 +213,7 @@
     return () => {
       window.removeEventListener('hashchange', syncRoute);
       window.removeEventListener('popstate', syncRoute);
+      window.removeEventListener('keydown', handleShortcut);
       void unlistenClose.then((unlisten) => unlisten());
     };
   });
@@ -382,11 +413,109 @@
     }
   }
 
-  function nextActionLabel(currentLocale: LocalePreference): string {
-    if (destination === 'library') return message(currentLocale, 'primary-button-add-folder');
-    if (destination === 'review') return message(currentLocale, snapshot?.reviews.length ? 'action-review' : 'review-empty-title');
-    if (destination === 'search') return message(currentLocale, 'search-question');
+  function nextActionLabel(currentLocale: LocalePreference, currentDestination: Destination, reviewCount: number): string {
+    if (currentDestination === 'library') return message(currentLocale, 'primary-button-add-folder');
+    if (currentDestination === 'review') return message(currentLocale, reviewCount ? 'action-review' : 'review-empty-title');
+    if (currentDestination === 'search') return message(currentLocale, 'search-question');
     return message(currentLocale, 'action-confirm');
+  }
+
+  function pageKey(page: KnowledgePageInput): string {
+    return page.kind === 'concept' ? `concept:${page.id}` : page.kind;
+  }
+
+  function pageTitle(page: KnowledgePageInput): string {
+    if (page.kind === 'index') return t('knowledge-index-title');
+    if (page.kind === 'log') return t('knowledge-recovery-history');
+    return snapshot?.knowledge?.concepts.find((concept) => concept.page.kind === 'concept' && concept.page.id === page.id)?.title ?? t('knowledge-concept-fallback');
+  }
+
+  function atlasModel(
+    currentDestination: Destination,
+    currentSystemSection: SystemSection,
+    currentSnapshot: AppSnapshot | null,
+    currentReview: ReviewSummary | null,
+    currentCollectionId: string | null,
+    currentQuestion: string,
+    currentIncludePublic: boolean
+  ): AtlasModel {
+    void currentDestination;
+    void currentSystemSection;
+    void currentSnapshot;
+    void currentReview;
+    void currentCollectionId;
+    void currentQuestion;
+    void currentIncludePublic;
+    if (destination === 'library' && snapshot?.knowledge?.collectionId === selectedCollectionId && snapshot.knowledge.status === 'ready') {
+      const pages: KnowledgePageInput[] = [{ kind: 'index' }, { kind: 'log' }, ...snapshot.knowledge.concepts.map((concept) => concept.page)];
+      const ids = new Set(pages.map(pageKey));
+      return {
+        title: snapshot.knowledge.collectionName,
+        description: t('desktop-atlas-library-body'),
+        nodes: pages.map((page) => ({ id: pageKey(page), label: pageTitle(page), tone: page.kind === 'log' ? 'ai' : page.kind === 'index' ? 'active' : 'verified' })),
+        edges: snapshot.knowledge.links.filter((link) => ids.has(pageKey(link.source)) && ids.has(pageKey(link.target))).map((link) => ({ source: pageKey(link.source), target: pageKey(link.target), label: link.label })),
+        selectedId: snapshot.knowledgePage?.collectionId === selectedCollectionId ? pageKey(snapshot.knowledgePage.page) : 'index'
+      };
+    }
+    if (destination === 'library') {
+      return {
+        title: t('desktop-atlas-library-title'),
+        description: t('desktop-atlas-library-body'),
+        nodes: [
+          { id: 'sources', label: t('journey-read'), detail: `${snapshot?.collections.length ?? 0} · ${t('component-collections')}`, tone: snapshot?.collections.length ? 'active' : 'neutral' },
+          { id: 'prepare', label: t('journey-prepare'), detail: t('collections-counts', { documents: snapshot?.collections.reduce((total, item) => total + item.documentCount, 0) ?? 0, published: snapshot?.collections.reduce((total, item) => total + item.publishedCount, 0) ?? 0 }), tone: snapshot?.model?.active ? 'ai' : 'attention' },
+          { id: 'review', label: t('journey-review'), detail: t('review-ready-summary', { count: snapshot?.reviews.length ?? 0 }), tone: snapshot?.reviews.length ? 'attention' : 'verified' }
+        ],
+        edges: [{ source: 'sources', target: 'prepare' }, { source: 'prepare', target: 'review' }]
+      };
+    }
+    if (destination === 'review') {
+      const evidenceReady = evidenceIsCurrent();
+      return {
+        title: selectedReview?.sourceName ?? t('desktop-review-select-title'),
+        description: t('desktop-atlas-review-body'),
+        nodes: [
+          { id: 'evidence', label: t('review-focus-evidence'), tone: evidenceReady ? 'verified' : selectedReview ? 'attention' : 'neutral' },
+          { id: 'proposal', label: t('desktop-review-ai-proposal'), tone: selectedReview ? 'ai' : 'neutral' },
+          { id: 'decision', label: t('desktop-review-human-decision'), tone: evidenceReady ? 'active' : 'neutral' }
+        ],
+        edges: [{ source: 'evidence', target: 'proposal' }, { source: 'proposal', target: 'decision' }],
+        selectedId: evidenceReady ? 'decision' : selectedReview ? 'evidence' : undefined
+      };
+    }
+    if (destination === 'search') {
+      const hits = snapshot?.search?.hits ?? [];
+      const localCount = hits.filter((hit) => hit.nodeId === snapshot?.nodeId).length;
+      const publicCount = hits.length - localCount;
+      return {
+        title: t('desktop-atlas-search-title'),
+        description: t('desktop-atlas-search-body'),
+        nodes: [
+          { id: 'query', label: t('nav-search'), detail: question.trim() || t('desktop-search-placeholder'), tone: snapshot?.search?.status === 'searching' ? 'active' : 'neutral' },
+          { id: 'local', label: t('desktop-atlas-local'), detail: String(localCount), tone: localCount ? 'verified' : 'neutral' },
+          ...(includePublic ? [{ id: 'public', label: t('desktop-atlas-public'), detail: String(publicCount), tone: publicCount ? 'active' : 'neutral' } as const] : [])
+        ],
+        edges: [{ source: 'query', target: 'local' }, ...(includePublic ? [{ source: 'query', target: 'public' }] : [])]
+      };
+    }
+    return {
+      title: t(systemSections.find((section) => section.id === systemSection)?.labelId ?? 'desktop-nav-system'),
+      description: t('desktop-atlas-system-body'),
+      nodes: [
+        { id: 'device', label: t('desktop-this-device'), tone: 'active' },
+        { id: 'model', label: t('settings-local-ai'), detail: snapshot?.model?.active ? t('models-ready') : t('models-pending'), tone: snapshot?.model?.active ? 'verified' : 'attention' },
+        { id: 'network', label: t('desktop-connectivity'), detail: connectivityLabel(locale), tone: snapshot?.lanRuntime?.listener === 'listening' ? 'verified' : lanPreference === 'disabled' ? 'neutral' : 'attention' },
+        { id: 'integrations', label: t('integrations-title'), detail: String(snapshot?.integrations?.integrations.length ?? 0), tone: snapshot?.integrations?.integrations.some((integration) => integration.status === 'configured') ? 'verified' : 'neutral' }
+      ],
+      edges: [{ source: 'device', target: 'model' }, { source: 'device', target: 'network' }, { source: 'device', target: 'integrations' }],
+      selectedId: systemSection === 'models' ? 'model' : systemSection === 'connectivity' || systemSection === 'devices' ? 'network' : systemSection === 'integrations' ? 'integrations' : 'device'
+    };
+  }
+
+  async function selectAtlasNode(id: string) {
+    if (destination !== 'library' || !snapshot?.knowledge) return;
+    if (id === 'index' || id === 'log') await openKnowledgePage({ kind: id });
+    else if (id.startsWith('concept:')) await openKnowledgePage({ kind: 'concept', id: id.slice('concept:'.length) });
   }
 
   async function runNextAction() {
@@ -727,7 +856,7 @@
   }
 </script>
 
-<svelte:head><meta name="theme-color" content="#07131f" /></svelte:head>
+<svelte:head><meta name="theme-color" content="#0b1118" /></svelte:head>
 
 {#if !snapshot || snapshot.phase !== 'ready' || !snapshot.preferences}
   <main class="onboarding startup" aria-busy="true">
@@ -737,57 +866,22 @@
     <p class="lede" aria-live="polite">{t(runtimeMessageId)}</p>
   </main>
 {:else if snapshot.preferences.completedOnboardingVersion == null}
-  <main class="onboarding">
-    <div class="onboarding-mark">A</div>
-    <p class="eyebrow">{t('onboarding-welcome-title')}</p>
-    <h1>{t('first-knowledge-eyebrow')}<br />{t('onboarding-privacy-title')}</h1>
-    <p class="lede">{t('onboarding-welcome-body')}</p>
-    <div class="onboarding-steps">
-      <section><span>01</span><div><h2>{t('settings-language')}</h2><p>{t('settings-subtitle')}</p></div><select bind:value={locale}><option value="system">{t('language-system')}</option><option value="es">{t('language-spanish')}</option><option value="en">{t('language-english')}</option></select></section>
-      <section><span>02</span><div><h2>{t('onboarding-lan-title')}</h2><p>{t('onboarding-lan-body')}</p></div><select bind:value={lanPreference}><option value="disabled">{t('onboarding-lan-disable')}</option><option value="enabled">{t('onboarding-lan-enable')}</option></select></section>
-      <section><span>03</span><div><h2>{t('onboarding-background-title')}</h2><p>{t('onboarding-background-body')}</p></div><select bind:value={closeBehavior}><option value="ask">{t('close-dialog-title')}</option><option value="hide_to_tray">{t('close-dialog-background')}</option><option value="quit">{t('tray-quit')}</option></select></section>
-      {#if snapshot.model && !snapshot.model.active}<section><span>04</span><div><h2>{t('onboarding-model-title')}</h2><p>{snapshot.model.displayName ?? t('onboarding-model-recommended')} · {(snapshot.model.downloadBytes / 1073741824).toFixed(1)} GiB</p></div><label class="check"><input type="checkbox" bind:checked={modelLicensesConfirmed} /> {t('models-accept-licenses')}</label></section>{/if}
-    </div>
-    {#if snapshot.model && !snapshot.model.active}<button class="secondary onboarding-model" onclick={prepareLocalModel} disabled={actionBusy || (!modelLicensesConfirmed && !snapshot.model.licenseAccepted) || !snapshot.model.fitsAvailableDisk}>{t('primary-button-prepare')}</button>{/if}
-    <button class="primary onboarding-action" onclick={() => savePreferences(true)} disabled={actionBusy || lanPreference === 'undecided'}>{t('onboarding-finish')}</button>
-    {#if actionMessage}<p class="action-message" aria-live="polite">{actionMessage}</p>{/if}
-  </main>
+  <OnboardingFlow {snapshot} bind:locale bind:lanPreference bind:closeBehavior bind:modelLicensesConfirmed {actionBusy} {actionMessage} onprepare={prepareLocalModel} onfinish={() => savePreferences(true)} />
 {:else}
 <div class="shell">
-  <aside class="rail" aria-label={t('nav-group-knowledge')}>
-    <div class="brand"><span class="brand-mark">A</span><span>AirWiki</span></div>
-    <nav>
-      {#each destinations as item (item.id)}
-        <button class:active={destination === item.id} onclick={() => select(item.id)}>
-          <item.icon size={18} strokeWidth={1.8} aria-hidden="true" />
-          <span>{t(item.labelId)}</span>
-        </button>
-      {/each}
-    </nav>
-    <div class="device-state">
-      <span class="pulse" aria-hidden="true"></span>
-      <div><strong>{t('nav-device-status')}</strong><small>{t(runtimeMessageId)}</small></div>
-    </div>
-  </aside>
+  <NavigationRail {destination} status={t(runtimeMessageId)} platform={snapshot.platform} {t} onselect={select} />
 
   <main bind:this={mainScrollRegion}>
-    <header>
-      <div><p class="eyebrow">{t('dashboard-eyebrow')}</p><h1>{t('dashboard-title')}</h1></div>
-      <button class="primary" onclick={runNextAction} disabled={destination === 'review' && !snapshot?.reviews.length}><Sparkles size={17} />{nextActionLabel(locale)}</button>
+    <header class="command-bar">
+      <div><p class="eyebrow">{t(destinations.find((item) => item.id === destination)?.labelId ?? 'app-title')}</p><h1>{t(currentPageTitleId)}</h1><p>{t(currentPageDescriptionId)}</p></div>
+      {#if destination !== 'system'}<button class="primary command-action" onclick={runNextAction} disabled={destination === 'review' && !snapshot.reviews.length}><Sparkles size={17} />{currentNextActionLabel}</button>{/if}
     </header>
 
-    <section class="workspace" aria-live="polite">
-      <div class="evidence-rail" aria-hidden="true"><i></i><i></i><i></i></div>
-      <div class="content">
-        <p class="section-label">{t(destinations.find((item) => item.id === destination)?.labelId ?? 'app-title')}</p>
-        <h2>{destination === 'library' ? t('first-knowledge-title') : t(destinations.find((item) => item.id === destination)?.labelId ?? 'app-title')}</h2>
-        <p class="lede">{t('dashboard-subtitle')}</p>
-
-        <div class="sequence">
-          <article><span>{t('journey-read')}</span><strong>{snapshot?.collections.length ?? 0} · {t('component-collections')}</strong><p>{t('onboarding-privacy-local')}</p></article>
-          <article><span>{t('journey-prepare')}</span><strong>{snapshot?.collections.reduce((total, item) => total + item.documentCount, 0) ?? 0} · {t('collections-counts', { documents: snapshot?.collections.reduce((total, item) => total + item.documentCount, 0) ?? 0, published: snapshot?.collections.reduce((total, item) => total + item.publishedCount, 0) ?? 0 })}</strong><p>{t('primary-ai-explanation')}</p></article>
-          <article><span>{t('journey-review')}</span><strong>{t('review-ready-summary', { count: snapshot?.reviews.length ?? 0 })}</strong><p>{t('primary-review-explanation')}</p></article>
-        </div>
+    <div class="page-grid">
+      <section class="workspace" aria-live="polite">
+        <div class="content">
+          {#key `${destination}:${destination === 'system' ? systemSection : ''}`}
+          <div class="route-page" data-route={destination}>
 
         {#if destination === 'library' && snapshot?.wikiHealth}
           <section class:attention={snapshot.wikiHealth.errorCount > 0} class="health-strip" aria-labelledby="health-title">
@@ -978,7 +1072,7 @@
             <section id="system-connectivity" class="connectivity-section"><p class="section-label">{t('desktop-connectivity')}</p><h3>{t('desktop-known-devices', { count: snapshot.peers.length })}</h3><p>{connectivityLabel(locale)}</p>{#if snapshot.lanRuntime}<dl><div><dt>{t('desktop-listener')}</dt><dd>{lanStateLabel(snapshot.lanRuntime.listener)}</dd></div><div><dt>{t('desktop-discovery')}</dt><dd>{lanStateLabel(snapshot.lanRuntime.discovery)}</dd></div><div><dt>{t('desktop-interfaces')}</dt><dd>{snapshot.lanRuntime.addressCount}</dd></div></dl>{/if}<div class="row-actions"><button class="secondary" onclick={() => runConnectivityAction('refresh')} disabled={connectivityRequestId !== null}>{connectivityRequestId ? t('updates-checking') : t('desktop-check')}</button>{#if snapshot.connectivity?.networkProfile === 'public'}<button class="text-action" onclick={() => runConnectivityAction('networkSettings')} disabled={connectivityRequestId !== null}>{t('desktop-network-settings')}</button>{/if}{#if snapshot.connectivity?.systemPermission === 'denied'}<button class="text-action" onclick={() => runConnectivityAction('localNetworkPrivacy')} disabled={connectivityRequestId !== null}>{t('desktop-local-network-permission')}</button>{/if}{#if snapshot.connectivity?.firewallHelper === 'verified' && snapshot.connectivity.firewall !== 'ready' && snapshot.connectivity.firewall !== 'notApplicable'}<button class="secondary" onclick={() => runConnectivityAction('install')} disabled={connectivityRequestId !== null || lanPreference !== 'enabled'}>{t('connectivity-configure-firewall')}</button>{/if}{#if snapshot.connectivity?.firewall === 'ready'}<button class="text-action" onclick={() => runConnectivityAction('remove')} disabled={connectivityRequestId !== null}>{t('desktop-firewall-remove')}</button>{/if}{#if snapshot.connectivity?.firewall === 'conflict' || snapshot.connectivity?.firewall === 'legacyExposure'}<button class="text-action" onclick={() => runConnectivityAction('advancedFirewall')} disabled={connectivityRequestId !== null}>{t('connectivity-open-advanced-firewall')}</button>{/if}</div><small>{t('desktop-sharing-guardrail')}</small></section>
             {/if}
             {#if systemSection === 'devices'}
-            <section class="device-details"><p class="section-label">{t('desktop-this-device')}</p><h3>{t('desktop-identity-capacity')}</h3><dl>{#if snapshot.nodeId}<div><dt>{t('desktop-network-identity')}</dt><dd><code>{shortPeerId(snapshot.nodeId)}</code></dd></div>{/if}{#if snapshot.mcpUrl}<div><dt>{t('diagnostics-local-mcp')}</dt><dd><code>{snapshot.mcpUrl}</code></dd></div>{/if}{#if snapshot.hardware}<div><dt>{t('desktop-memory-installed')}</dt><dd>{formatBytes(snapshot.hardware.totalMemoryBytes)}</dd></div><div><dt>{t('desktop-disk-available')}</dt><dd>{formatBytes(snapshot.hardware.availableDiskBytes)}</dd></div><div><dt>{t('models-acceleration')}</dt><dd>{snapshot.hardware.metalAvailable ? 'Metal' : snapshot.hardware.avx2 ? 'AVX2' : t('desktop-basic-cpu')}</dd></div>{/if}</dl>{#if snapshot.hardware?.issues.length}<p class="evidence-warning">{snapshot.hardware.issues.join(' · ')}</p>{/if}</section>
+            <section class="device-details"><p class="section-label">{t('desktop-this-device')}</p><h3>{t('desktop-identity-capacity')}</h3><details class="advanced-disclosure"><summary>{t('desktop-advanced-details')}</summary><dl>{#if snapshot.nodeId}<div><dt>{t('desktop-network-identity')}</dt><dd><code>{shortPeerId(snapshot.nodeId)}</code></dd></div>{/if}{#if snapshot.mcpUrl}<div><dt>{t('diagnostics-local-mcp')}</dt><dd><code>{snapshot.mcpUrl}</code></dd></div>{/if}{#if snapshot.hardware}<div><dt>{t('desktop-memory-installed')}</dt><dd>{formatBytes(snapshot.hardware.totalMemoryBytes)}</dd></div><div><dt>{t('desktop-disk-available')}</dt><dd>{formatBytes(snapshot.hardware.availableDiskBytes)}</dd></div><div><dt>{t('models-acceleration')}</dt><dd>{snapshot.hardware.metalAvailable ? 'Metal' : snapshot.hardware.avx2 ? 'AVX2' : t('desktop-basic-cpu')}</dd></div>{/if}</dl>{#if snapshot.hardware?.issues.length}<p class="evidence-warning">{snapshot.hardware.issues.join(' · ')}</p>{/if}</details></section>
             {/if}
             {#if systemSection === 'connectivity'}
             <section class="network-advanced"><p class="section-label">{t('devices-manual-advanced')}</p><h3>{t('desktop-manual-connect')}</h3><p>{t('desktop-manual-connect-body')}</p><label><span>{t('desktop-address')}</span><input bind:value={manualPeerAddress} maxlength="500" placeholder="/ip4/192.168.1.20/tcp/12345/p2p/12D3Koo…" /></label><button class="secondary" onclick={connectManualPeer} disabled={lanPreference !== 'enabled' || !manualPeerAddress.trim()}>{t('action-connect')}</button></section>
@@ -1026,8 +1120,12 @@
           {/if}
         {/if}
         {#if actionMessage}<p class="action-message" aria-live="polite">{actionMessage}</p>{/if}
-      </div>
-    </section>
+          </div>
+          {/key}
+        </div>
+      </section>
+      <ContextAtlas model={currentAtlas} label={t('desktop-atlas-label')} emptyLabel={t('desktop-atlas-empty')} onselect={destination === 'library' && snapshot.knowledge?.status === 'ready' ? selectAtlasNode : undefined} />
+    </div>
   </main>
 </div>
 {/if}

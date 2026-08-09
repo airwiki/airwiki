@@ -7,7 +7,7 @@
     "skipLibCheck": true,
     "strict": true,
     "target": "ES2022",
-    "types": ["node", "mocha", "@wdio/globals/types"]
+    "types": ["node", "mocha", "@wdio/globals/types", "@wdio/visual-service"]
   },
   "include": ["../wdio.conf.ts", "./**/*.ts"]
 }

@@ -4,6 +4,7 @@ export function readySnapshot(): AppSnapshot {
   return {
     schemaVersion: 1,
     sequence: 7,
+    platform: 'macOs',
     phase: 'ready',
     nodeId: '12D3KooSyntheticLocalNode',
     mcpUrl: 'http://127.0.0.1:43123/mcp',

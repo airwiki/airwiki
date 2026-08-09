@@ -226,6 +226,7 @@ struct AppSnapshot {
     schema_version: u16,
     #[ts(type = "number")]
     sequence: u64,
+    platform: HostPlatform,
     phase: AppPhase,
     node_id: Option<String>,
     mcp_url: Option<String>,
@@ -254,6 +255,26 @@ struct AppSnapshot {
     integrations: Option<IntegrationsSummary>,
     updater: Option<UpdaterSummary>,
     notice: Option<NoticeSummary>,
+}
+
+#[derive(Clone, Copy, Debug, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(rename_all = "camelCase")]
+#[expect(
+    dead_code,
+    reason = "both supported platform tags must remain in the shared UI contract"
+)]
+enum HostPlatform {
+    MacOs,
+    Windows,
+}
+
+impl HostPlatform {
+    #[cfg(target_os = "macos")]
+    const CURRENT: Self = Self::MacOs;
+
+    #[cfg(target_os = "windows")]
+    const CURRENT: Self = Self::Windows;
 }
 
 #[derive(Clone, Copy, Debug, Serialize, TS)]
@@ -2612,6 +2633,7 @@ impl AppSnapshot {
         Self {
             schema_version: CONTRACT_VERSION,
             sequence: 0,
+            platform: HostPlatform::CURRENT,
             phase: AppPhase::Starting,
             node_id: None,
             mcp_url: None,
@@ -3795,6 +3817,7 @@ fn ui_bindings_source() -> String {
         exported_declaration::<UpdaterSummary>(&config),
         exported_declaration::<PreferencesSummary>(&config),
         exported_declaration::<PreferencesInput>(&config),
+        exported_declaration::<HostPlatform>(&config),
         exported_declaration::<AppPhase>(&config),
         exported_declaration::<AppSnapshot>(&config),
         exported_declaration::<UiEventKind>(&config),
@@ -4662,6 +4685,16 @@ mod tests {
         assert_eq!(published.snapshot.sequence, 1);
         assert!(published.request_id.is_none());
         assert!(matches!(published.snapshot.phase, AppPhase::Starting));
+    }
+
+    #[test]
+    fn snapshot_reports_the_compile_target_platform() -> Result<()> {
+        let serialized = serde_json::to_value(HostPlatform::CURRENT)?;
+        #[cfg(target_os = "macos")]
+        assert_eq!(serialized, serde_json::Value::String("macOs".to_owned()));
+        #[cfg(target_os = "windows")]
+        assert_eq!(serialized, serde_json::Value::String("windows".to_owned()));
+        Ok(())
     }
 
     #[test]

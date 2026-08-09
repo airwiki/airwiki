@@ -32,6 +32,7 @@ describe('AirWiki desktop shell', () => {
   afterEach(() => {
     cleanup();
     delete document.documentElement.dataset.theme;
+    delete document.documentElement.dataset.platform;
     document.documentElement.style.colorScheme = '';
   });
 
@@ -91,14 +92,14 @@ describe('AirWiki desktop shell', () => {
     await waitFor(() => expect(scrollTo).toHaveBeenLastCalledWith({
       top: 0, left: 0, behavior: 'auto'
     }));
-    expect(await screen.findByText('Convierte una carpeta en conocimiento que puedas verificar')).toBeInTheDocument();
+    expect(await screen.findByRole('heading', { name: 'Tu conocimiento, en este equipo' })).toBeInTheDocument();
 
     window.history.pushState(null, '', '#search');
     window.dispatchEvent(new PopStateEvent('popstate'));
     await waitFor(() => expect(scrollTo).toHaveBeenLastCalledWith({
       top: 0, left: 0, behavior: 'auto'
     }));
-    expect(await screen.findByRole('heading', { name: 'Buscar' })).toBeInTheDocument();
+    expect(await screen.findByRole('heading', { name: 'Buscar evidencia' })).toBeInTheDocument();
   });
 
   it('shows stable installed memory when the operating system cannot estimate availability', async () => {
@@ -137,6 +138,25 @@ describe('AirWiki desktop shell', () => {
     await screen.findByText('Atlas');
     expect(document.documentElement.dataset.theme).toBe('light');
     expect(document.documentElement.style.colorScheme).toBe('light');
+  });
+
+  it('applies the typed host platform and renders the contextual atlas', async () => {
+    snapshot.platform = 'windows';
+    render(App);
+
+    expect(await screen.findByText('Atlas')).toBeInTheDocument();
+    expect(document.documentElement.dataset.platform).toBe('windows');
+    expect(screen.getByRole('complementary', { name: 'Flujo de conocimiento' })).toBeInTheDocument();
+  });
+
+  it('supports local desktop navigation shortcuts', async () => {
+    render(App);
+    await screen.findByRole('button', { name: 'Biblioteca' });
+
+    await fireEvent.keyDown(window, { key: '3', metaKey: true });
+    expect(await screen.findByRole('heading', { name: 'Buscar evidencia' })).toBeInTheDocument();
+    await fireEvent.keyDown(window, { key: ',', metaKey: true });
+    expect(await screen.findByRole('link', { name: 'Preferencias del dispositivo' })).toHaveAttribute('aria-current', 'page');
   });
 
   it('opens a stable System subsection from its hash route', async () => {

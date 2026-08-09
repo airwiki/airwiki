@@ -52,6 +52,64 @@ async function measureNavigationPaintP95(): Promise<number> {
   return required(ordered[Math.ceil(ordered.length * 0.95) - 1], 'navigation p95');
 }
 
+async function setCssViewport(width: number, height: number): Promise<void> {
+  const ratio = await browser.execute(() => window.devicePixelRatio || 1);
+  let physicalWidth = Math.ceil(width * ratio);
+  const physicalHeight = Math.ceil(height * ratio);
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    await browser.setWindowSize(physicalWidth, physicalHeight);
+    const clientWidth = await browser.execute(() => document.documentElement.clientWidth);
+    if (clientWidth >= width) return;
+    physicalWidth += Math.ceil((width - clientWidth) * ratio);
+  }
+  throw new Error(`could not reach the ${width}x${height} CSS viewport`);
+}
+
+async function navigateToDestination(index: number): Promise<void> {
+  const navigation = await $$('.rail nav button');
+  await required(navigation[index], `destination ${index}`).click();
+  const expected = ['library', 'review', 'search', 'system'][index];
+  await browser.waitUntil(
+    () => browser.execute((route) => document.querySelector('.route-page')?.getAttribute('data-route') === route, expected),
+    { timeout: 10_000, timeoutMsg: `destination ${expected} did not become interactive` }
+  );
+}
+
+async function configureVisualPreferences(locale: 'en' | 'es', theme: 'light' | 'dark'): Promise<void> {
+  await navigateToDestination(3);
+  await $('#system-preferences').waitForDisplayed();
+  await selectValue('#system-preferences select', 0, locale);
+  await selectValue('#system-preferences select', 1, theme);
+  await $('#system-preferences button.primary').click();
+  await browser.waitUntil(async () => (
+    await $('html').getAttribute('lang') === (locale === 'es' ? 'es' : 'en-US')
+    && await $('html').getAttribute('data-theme') === theme
+  ), { timeout: 10_000, timeoutMsg: `visual preferences ${locale}/${theme} were not applied` });
+}
+
+async function assertVisualMatrix(): Promise<void> {
+  const viewports = [
+    { width: 1020, height: 640 },
+    { width: 1180, height: 760 },
+    { width: 1440, height: 900 }
+  ];
+  const routes = ['library', 'review', 'search', 'system'] as const;
+  for (const locale of ['en', 'es'] as const) {
+    for (const theme of ['light', 'dark'] as const) {
+      await configureVisualPreferences(locale, theme);
+      for (const viewport of viewports) {
+        await setCssViewport(viewport.width, viewport.height);
+        for (let index = 0; index < routes.length; index += 1) {
+          await navigateToDestination(index);
+          const result = await browser.checkScreen(`${locale}-${theme}-${routes[index]}`);
+          const mismatch = typeof result === 'number' ? result : result.misMatchPercentage;
+          expect(mismatch).toBeLessThanOrEqual(0.1);
+        }
+      }
+    }
+  }
+}
+
 describe('AirWiki real IPC journey', () => {
   it('persists onboarding and explicit appearance preferences', async () => {
     await browser.waitUntil(
@@ -61,16 +119,21 @@ describe('AirWiki real IPC journey', () => {
     const onboarding = await $('main.onboarding:not(.startup)');
     await expect(onboarding).toBeDisplayed();
 
-    const onboardingSelects = await $$('main.onboarding:not(.startup) select');
-    const language = required(onboardingSelects[0], 'language preference');
-    const localNetwork = required(onboardingSelects[1], 'local network preference');
-    const closeBehavior = required(onboardingSelects[2], 'close behavior preference');
     await selectValue('main.onboarding:not(.startup) select', 0, 'en');
-    await selectValue('main.onboarding:not(.startup) select', 1, 'disabled');
-    await selectValue('main.onboarding:not(.startup) select', 2, 'ask');
+    const language = required((await $$('main.onboarding:not(.startup) select'))[0], 'language preference');
     await expect(language).toHaveValue('en');
+    await $('button.onboarding-next').click();
+
+    const localNetwork = required((await $$('main.onboarding:not(.startup) select'))[0], 'local network preference');
+    await selectValue('main.onboarding:not(.startup) select', 0, 'disabled');
     await expect(localNetwork).toHaveValue('disabled');
+    await $('button.onboarding-next').click();
+
+    const closeBehavior = required((await $$('main.onboarding:not(.startup) select'))[0], 'close behavior preference');
+    await selectValue('main.onboarding:not(.startup) select', 0, 'ask');
     await expect(closeBehavior).toHaveValue('ask');
+    await $('button.onboarding-next').click();
+    while (await $('button.onboarding-next').isExisting()) await $('button.onboarding-next').click();
     const finishOnboarding = await $('main.onboarding:not(.startup) button.onboarding-action');
     await expect(finishOnboarding).toBeEnabled();
     await finishOnboarding.click();
@@ -153,5 +216,7 @@ describe('AirWiki real IPC journey', () => {
       scrollWidth: document.documentElement.scrollWidth
     }));
     expect(layout.scrollWidth).toBeLessThanOrEqual(layout.clientWidth);
+
+    await assertVisualMatrix();
   });
 });

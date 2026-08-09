@@ -17,6 +17,41 @@ async function selectValue(selector: string, index: number, value: string): Prom
   expect(changed).toBe(true);
 }
 
+async function measureNavigationPaintP95(): Promise<number> {
+  const result = await browser.executeAsync((done) => {
+    const buttons = Array.from(document.querySelectorAll<HTMLButtonElement>('nav button'));
+    if (buttons.length !== 4) {
+      done([]);
+      return;
+    }
+    const durations: number[] = [];
+    let sample = 0;
+    const measure = () => {
+      const button = buttons[sample % buttons.length];
+      if (!button) {
+        done([]);
+        return;
+      }
+      const started = performance.now();
+      button.click();
+      requestAnimationFrame(() => requestAnimationFrame(() => {
+        durations.push(performance.now() - started);
+        sample += 1;
+        if (sample === 20) done(durations);
+        else measure();
+      }));
+    };
+    measure();
+  });
+  if (!Array.isArray(result) || !result.every((sample) => typeof sample === 'number')) {
+    throw new Error('navigation paint measurement returned an invalid sample set');
+  }
+  const samples: number[] = result;
+  expect(samples).toHaveLength(20);
+  const ordered = [...samples].sort((left, right) => left - right);
+  return required(ordered[Math.ceil(ordered.length * 0.95) - 1], 'navigation p95');
+}
+
 describe('AirWiki real IPC journey', () => {
   it('persists onboarding and explicit appearance preferences', async () => {
     await browser.waitUntil(
@@ -50,6 +85,24 @@ describe('AirWiki real IPC journey', () => {
     }
     for (const destination of ['Library', 'Review', 'Search', 'System']) {
       await expect($(`button*=${destination}`)).toBeDisplayed();
+    }
+    expect(await measureNavigationPaintP95()).toBeLessThanOrEqual(100);
+
+    const devicePixelRatio = await browser.execute(() => window.devicePixelRatio || 1);
+    for (const viewport of [
+      { width: 1020, height: 640 },
+      { width: 1180, height: 760 },
+      { width: 1440, height: 900 }
+    ]) {
+      await browser.setWindowSize(
+        Math.ceil(viewport.width * devicePixelRatio),
+        Math.ceil(viewport.height * devicePixelRatio)
+      );
+      const dimensions = await browser.execute(() => ({
+        clientWidth: document.documentElement.clientWidth,
+        scrollWidth: document.documentElement.scrollWidth
+      }));
+      expect(dimensions.scrollWidth).toBeLessThanOrEqual(dimensions.clientWidth);
     }
 
     await $('button*=System').click();

@@ -232,7 +232,7 @@ pub(crate) enum FirewallActionError {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[allow(
     dead_code,
-    reason = "all destinations are used by the Tauri runner during migration"
+    reason = "destination variants are selected only on their supported operating system"
 )]
 pub(crate) enum SystemDestination {
     NetworkSettings,

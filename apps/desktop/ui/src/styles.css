@@ -193,7 +193,7 @@ button:active:not(:disabled) { transform: scale(.985); }
 .section-label, .eyebrow { font-size: 10px; letter-spacing: .11em; }
 
 .context-atlas { position: sticky; top: 140px; display: grid; grid-template-rows: auto auto 190px minmax(0, 1fr); align-self: start; min-width: 0; max-height: calc(100vh - 168px); overflow: hidden; background: var(--slate); border: 1px solid var(--line); border-radius: var(--panel-radius); box-shadow: 0 8px 30px #00000014; }
-.context-atlas > header { display: flex; align-items: center; gap: 8px; padding: 12px 14px; color: var(--cyan); border-bottom: 1px solid var(--line); font-size: 11px; font-weight: 650; letter-spacing: .08em; text-transform: uppercase; }
+.context-atlas > header { display: flex; align-items: center; justify-content: flex-start; gap: 8px; padding: 12px 14px; color: var(--cyan); border-bottom: 1px solid var(--line); font-size: 11px; font-weight: 650; letter-spacing: .08em; text-transform: uppercase; }
 .atlas-copy { padding: 16px 16px 10px; }
 .atlas-copy h2 { font-size: 19px; letter-spacing: -.02em; }
 .atlas-copy p { margin: 7px 0 0; color: var(--muted); font-size: 12px; line-height: 1.4; }

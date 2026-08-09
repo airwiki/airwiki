@@ -160,10 +160,14 @@ describe('AirWiki desktop shell', () => {
   });
 
   it('opens a stable System subsection from its hash route', async () => {
+    const scrollTo = vi.spyOn(HTMLElement.prototype, 'scrollTo');
     window.location.hash = '#system/updates';
     render(App);
 
     const updates = await screen.findByRole('link', { name: 'Actualizaciones' });
+    await waitFor(() => expect(scrollTo).toHaveBeenCalledWith({
+      top: 0, left: 0, behavior: 'auto'
+    }));
     expect(updates).toHaveAttribute('aria-current', 'page');
     expect(screen.getByRole('button', { name: 'Sistema' })).toHaveClass('active');
     expect(document.getElementById('system-updates')).toBeInTheDocument();

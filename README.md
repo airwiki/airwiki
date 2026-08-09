@@ -29,10 +29,15 @@ AirWiki is early-stage and welcomes contributors interested in Rust, local AI, p
 
 ## Quick start for development
 
-Install the native build tools for your platform and the Rust version pinned in `rust-toolchain.toml`, then run:
+Install the native build tools for your platform, the Rust version pinned in
+`rust-toolchain.toml`, Node.js 24, and Corepack. Install the exact frontend graph
+without package lifecycle scripts, then start the Tauri development runner:
 
 ```bash
-cargo run --locked -p airwiki-desktop
+cd apps/desktop/ui
+corepack pnpm install --frozen-lockfile --ignore-scripts --prod=false
+cd ..
+./ui/node_modules/.bin/tauri dev
 ```
 
 The first-run flow checks the machine, proposes a local model profile, and explains every permission before applying it. Model downloads require disk space and network access on first use; curation and search work offline after the required assets have been verified.

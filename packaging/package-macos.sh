@@ -27,6 +27,13 @@ LAUNCH_AGENT="$LAUNCH_AGENT_DIR/io.github.airwiki.AirWiki.background.plist"
 SIGNING_IDENTITY=${AIRWIKI_SIGNING_IDENTITY:--}
 SIGNING_PURPOSE=${AIRWIKI_SIGNING_PURPOSE:-}
 
+for FRONTEND_TOOL in tauri svelte-check vite; do
+  if [ ! -x "$ROOT/apps/desktop/ui/node_modules/.bin/$FRONTEND_TOOL" ]; then
+    echo "pinned frontend build dependencies are missing; run pnpm install --frozen-lockfile --ignore-scripts --prod=false" >&2
+    exit 1
+  fi
+done
+
 if [ -z "$SIGNING_PURPOSE" ]; then
   if [ "$SIGNING_IDENTITY" = "-" ]; then
     SIGNING_PURPOSE=adhoc

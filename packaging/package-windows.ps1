@@ -11,6 +11,8 @@ $Mcpb = Join-Path $Root "target\mcpb\x86_64-pc-windows-msvc\airwiki-claude.mcpb"
 $Xtask = Join-Path $Root "target\debug\xtask.exe"
 $NsisToolCacheRoot = Join-Path $Root "target\.tauri"
 $Tauri = Join-Path $Root "apps\desktop\ui\node_modules\.bin\tauri.cmd"
+$SvelteCheck = Join-Path $Root "apps\desktop\ui\node_modules\.bin\svelte-check.cmd"
+$Vite = Join-Path $Root "apps\desktop\ui\node_modules\.bin\vite.cmd"
 $TauriInstallerDir = Join-Path $ReleaseDir "bundle\nsis"
 $SevenZipToolRoot = Join-Path $Root "target\verified-tools\7zip-26.02"
 $SevenZip = Join-Path $SevenZipToolRoot "7z.exe"
@@ -57,8 +59,10 @@ function Assert-SameBytes([string] $Expected, [string] $Actual, [string] $Label)
 
 Push-Location $Root
 try {
-    if (-not (Test-Path -LiteralPath $Tauri -PathType Leaf)) {
-        throw "pinned Tauri CLI dependencies are missing; run pnpm install --frozen-lockfile --ignore-scripts"
+    foreach ($FrontendTool in @($Tauri, $SvelteCheck, $Vite)) {
+        if (-not (Test-Path -LiteralPath $FrontendTool -PathType Leaf)) {
+            throw "pinned frontend build dependencies are missing; run pnpm install --frozen-lockfile --ignore-scripts --prod=false"
+        }
     }
     $TauriVersion = (& $Tauri --version 2>&1 | Out-String).Trim()
     if ($LASTEXITCODE -ne 0 -or $TauriVersion -ne "tauri-cli 2.11.4") {

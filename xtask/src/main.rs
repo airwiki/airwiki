@@ -7463,6 +7463,25 @@ mod tests {
     }
 
     #[test]
+    fn packaging_requires_complete_pinned_frontend_tooling() -> Result<()> {
+        let root = workspace_root();
+        let workflow = fs::read_to_string(root.join(".github/workflows/package-pilot.yml"))?;
+        let docs = fs::read_to_string(root.join("docs/packaging.md"))?;
+        let macos = fs::read_to_string(root.join("packaging/package-macos.sh"))?;
+        let windows = fs::read_to_string(root.join("packaging/package-windows.ps1"))?;
+
+        assert_eq!(workflow.matches("--ignore-scripts --prod=false").count(), 2);
+        assert!(docs.contains("--ignore-scripts --prod=false"));
+        for tool in ["tauri", "svelte-check", "vite"] {
+            assert!(macos.contains(tool));
+            assert!(windows.contains(tool));
+        }
+        assert!(macos.contains("pinned frontend build dependencies are missing"));
+        assert!(windows.contains("pinned frontend build dependencies are missing"));
+        Ok(())
+    }
+
+    #[test]
     fn windows_wrapper_rejects_stale_or_non_x64_payloads() {
         let script =
             fs::read_to_string(workspace_root().join("packaging/package-windows.ps1")).unwrap();

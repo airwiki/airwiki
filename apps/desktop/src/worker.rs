@@ -5,9 +5,7 @@ use std::{
     sync::{
         Arc,
         atomic::{AtomicU64, Ordering},
-        mpsc::{self, Receiver as StdReceiver},
     },
-    thread,
     time::{Duration, Instant, SystemTime},
 };
 
@@ -36,7 +34,7 @@ use crate::{
     autostart::{AutostartManager, AutostartStatus},
     connectivity_platform::{
         ConnectivityPlatformSnapshot, FirewallActionError, FirewallDiagnosticState,
-        FirewallHelperState, LanRuntimePolicy, NetworkProfileState, SystemDestination,
+        LanRuntimePolicy, NetworkProfileState, SystemDestination,
         diagnose as diagnose_connectivity, install_firewall_rules, lan_runtime_policy,
         open_system_destination, remove_firewall_rules,
     },
@@ -58,8 +56,8 @@ use crate::{
         model_activation_elapsed_bucket,
     },
     updater::{
-        PackagerUpdateBackend, UpdateBackend, UpdateSchedule, UpdaterBuildConfig,
-        UpdaterDisabledReason, UpdaterService, UpdaterView, schedule_jitter,
+        UpdateBackend, UpdateSchedule, UpdaterDisabledReason, UpdaterService, UpdaterView,
+        schedule_jitter,
     },
 };
 
@@ -579,6 +577,7 @@ pub enum WorkerEvent {
     },
     PublicBrowseFinished {
         request_id: Uuid,
+        append: bool,
         result: Result<PublicBrowseResult, String>,
     },
     ChatIntegrationsUpdated {
@@ -590,126 +589,9 @@ pub enum WorkerEvent {
     Error(String),
 }
 
-pub struct WorkerHandle {
-    commands: AsyncSender<WorkerCommand>,
-    events: tokio::sync::broadcast::Receiver<WorkerEvent>,
-    thread: Option<thread::JoinHandle<()>>,
-    finished: StdReceiver<()>,
-}
-
-impl WorkerHandle {
-    pub fn spawn(paths: AppPaths) -> Self {
-        let (commands_tx, commands_rx) = tokio::sync::mpsc::channel(WORKER_COMMAND_CAPACITY);
-        let (events_tx, events_rx) = tokio::sync::broadcast::channel(WORKER_PRESENTATION_CAPACITY);
-        let (finished_tx, finished_rx) = mpsc::channel();
-        let thread = thread::Builder::new()
-            .name("airwiki-runtime".to_owned())
-            .spawn(move || {
-                let updater_backend = UpdaterBuildConfig::from_compile_time()
-                    .and_then(PackagerUpdateBackend::new)
-                    .map(|backend| Box::new(backend) as Box<dyn UpdateBackend>);
-                let runtime = tokio::runtime::Builder::new_multi_thread()
-                    .enable_all()
-                    .thread_name("airwiki-worker")
-                    .build()
-                    .expect("Tokio runtime must start");
-                runtime.block_on(run_worker(paths, commands_rx, events_tx, updater_backend));
-                drop(runtime);
-                let _ = finished_tx.send(());
-            })
-            .expect("background runtime thread must start");
-        Self {
-            commands: commands_tx,
-            events: events_rx,
-            thread: Some(thread),
-            finished: finished_rx,
-        }
-    }
-
-    pub fn send(&self, command: WorkerCommand) {
-        if let Err(error) = self.commands.try_send(command) {
-            match error {
-                tokio::sync::mpsc::error::TrySendError::Full(_) => {
-                    tracing::warn!(
-                        error_kind = "worker_busy",
-                        "background command queue is full"
-                    );
-                }
-                tokio::sync::mpsc::error::TrySendError::Closed(_) => {
-                    tracing::error!("background runtime stopped unexpectedly");
-                }
-            }
-        }
-    }
-
-    pub fn try_events(&mut self) -> impl Iterator<Item = WorkerEvent> + '_ {
-        std::iter::from_fn(move || {
-            loop {
-                match self.events.try_recv() {
-                    Ok(event) => return Some(event),
-                    Err(tokio::sync::broadcast::error::TryRecvError::Lagged(_)) => continue,
-                    Err(tokio::sync::broadcast::error::TryRecvError::Empty)
-                    | Err(tokio::sync::broadcast::error::TryRecvError::Closed) => return None,
-                }
-            }
-        })
-    }
-}
-
-const WORKER_COMMAND_CAPACITY: usize = 64;
 const WORKER_EVENT_CAPACITY: usize = 256;
+#[cfg(test)]
 const WORKER_PRESENTATION_CAPACITY: usize = 128;
-const WORKER_SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(2);
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum WorkerJoinOutcome {
-    Joined,
-    Panicked,
-    TimedOut,
-}
-
-fn join_worker_with_timeout(
-    thread: thread::JoinHandle<()>,
-    finished: &StdReceiver<()>,
-    timeout: Duration,
-) -> WorkerJoinOutcome {
-    match finished.recv_timeout(timeout) {
-        Ok(()) | Err(mpsc::RecvTimeoutError::Disconnected) => {
-            if thread.join().is_ok() {
-                WorkerJoinOutcome::Joined
-            } else {
-                WorkerJoinOutcome::Panicked
-            }
-        }
-        Err(mpsc::RecvTimeoutError::Timeout) => {
-            // Dropping a JoinHandle detaches the OS thread. This keeps application exit bounded
-            // when an OS integration such as Keychain does not return control to the worker.
-            drop(thread);
-            WorkerJoinOutcome::TimedOut
-        }
-    }
-}
-
-impl Drop for WorkerHandle {
-    fn drop(&mut self) {
-        let _ = self.commands.try_send(WorkerCommand::Shutdown);
-        let Some(thread) = self.thread.take() else {
-            return;
-        };
-        match join_worker_with_timeout(thread, &self.finished, WORKER_SHUTDOWN_TIMEOUT) {
-            WorkerJoinOutcome::Joined => {}
-            WorkerJoinOutcome::Panicked => {
-                tracing::error!("airwiki background runtime panicked during shutdown");
-            }
-            WorkerJoinOutcome::TimedOut => {
-                tracing::warn!(
-                    timeout_seconds = WORKER_SHUTDOWN_TIMEOUT.as_secs(),
-                    "airwiki background runtime did not stop before the shutdown deadline"
-                );
-            }
-        }
-    }
-}
 
 enum InternalEvent {
     VerificationFinished(Result<InstallOutcome, String>),
@@ -765,6 +647,7 @@ enum BackgroundCompletion {
     },
     PublicBrowse {
         request_id: Uuid,
+        append: bool,
         result: Result<PublicBrowseResult, String>,
     },
     ChatIntegrations {
@@ -906,7 +789,7 @@ enum ClaudeApprovalState {
 pub(crate) const PERIODIC_RECONCILE_INTERVAL: Duration = Duration::from_secs(15 * 60);
 const PERIODIC_RECONCILE_MAX_JITTER: Duration = Duration::from_secs(30);
 static MODEL_STATE_SEQUENCE: AtomicU64 = AtomicU64::new(1);
-static MODEL_STATE_PLAN_GATE: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+static MODEL_STATE_PLAN_GATE: tokio::sync::Semaphore = tokio::sync::Semaphore::const_new(1);
 
 fn model_state_request_is_current(state_sequence: u64, next_sequence: u64) -> bool {
     next_sequence == state_sequence.wrapping_add(1)
@@ -2046,12 +1929,13 @@ pub(crate) async fn run_worker(
                     }
                     WorkerCommand::BrowsePublicCollection { request_id, publisher_id, collection_id, cursor } => {
                         let services = Arc::clone(&services);
+                        let append = cursor.is_some();
                         background.spawn(async move {
                             let result = services
                                 .browse_public_collection(&publisher_id, collection_id, cursor)
                                 .await
                                 .map_err(|error| error.to_string());
-                            BackgroundCompletion::PublicBrowse { request_id, result }
+                            BackgroundCompletion::PublicBrowse { request_id, append, result }
                         });
                     }
                     WorkerCommand::SetPublicPublisherBlocked { publisher_id, blocked } => {
@@ -2846,10 +2730,10 @@ pub(crate) async fn run_worker(
                             WorkerEvent::SearchFinished { request_id, result },
                         );
                     }
-                    Some(Ok(BackgroundCompletion::PublicBrowse { request_id, result })) => {
+                    Some(Ok(BackgroundCompletion::PublicBrowse { request_id, append, result })) => {
                         let result = result
                             .map_err(|error| format!("Falló la navegación pública: {error}"));
-                        send(&events, WorkerEvent::PublicBrowseFinished { request_id, result });
+                        send(&events, WorkerEvent::PublicBrowseFinished { request_id, append, result });
                     }
                     Some(Ok(BackgroundCompletion::ChatIntegrations {
                         request_id,
@@ -3786,7 +3670,7 @@ fn firewall_install_preflight(
         FirewallDiagnosticState::Conflict => Err(FirewallActionError::Conflict),
         FirewallDiagnosticState::Unsupported => Err(FirewallActionError::Unsupported),
         FirewallDiagnosticState::RulesMissing
-            if snapshot.firewall_helper == FirewallHelperState::Verified =>
+            if snapshot.firewall_helper.can_request_elevation() =>
         {
             Ok(FirewallInstallDecision::Configure)
         }
@@ -4029,7 +3913,9 @@ fn send_model_state_with_known_plan(
     lifecycle.spawn(async move {
         // Snapshot verification can hash several GiB. Serialize it so rapid profile changes
         // discard queued stale requests instead of starting redundant filesystem work.
-        let _plan_guard = MODEL_STATE_PLAN_GATE.lock().await;
+        let Ok(_plan_guard) = MODEL_STATE_PLAN_GATE.acquire().await else {
+            return;
+        };
         if !model_state_request_is_current(
             state_sequence,
             MODEL_STATE_SEQUENCE.load(Ordering::SeqCst),
@@ -5086,6 +4972,8 @@ fn apply_claude_approval_state(
 
 #[cfg(test)]
 mod tests {
+    use crate::connectivity_platform::FirewallHelperState;
+
     use super::*;
 
     #[test]
@@ -5399,38 +5287,6 @@ mod tests {
             &listener,
             true,
         ));
-    }
-
-    #[test]
-    fn worker_join_reports_completion_after_runtime_stops() {
-        let (finished_tx, finished_rx) = mpsc::channel();
-        let thread = thread::spawn(move || {
-            let _ = finished_tx.send(());
-        });
-
-        assert_eq!(
-            join_worker_with_timeout(thread, &finished_rx, Duration::from_secs(1)),
-            WorkerJoinOutcome::Joined
-        );
-    }
-
-    #[test]
-    fn worker_join_timeout_detaches_a_blocked_thread() {
-        let (finished_tx, finished_rx) = mpsc::channel();
-        let (release_tx, release_rx) = mpsc::channel();
-        let (exited_tx, exited_rx) = mpsc::channel();
-        let thread = thread::spawn(move || {
-            let _ = release_rx.recv();
-            drop(finished_tx);
-            let _ = exited_tx.send(());
-        });
-
-        assert_eq!(
-            join_worker_with_timeout(thread, &finished_rx, Duration::ZERO),
-            WorkerJoinOutcome::TimedOut
-        );
-        assert!(release_tx.send(()).is_ok());
-        assert_eq!(exited_rx.recv_timeout(Duration::from_secs(1)), Ok(()));
     }
 
     #[test]

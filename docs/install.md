@@ -36,6 +36,10 @@ per-user autostart uses `SMAppService` only after consent.
 ## Windows x64
 
 1. Run the per-user NSIS installer from an interactive desktop session.
+   If Microsoft Edge WebView2 is absent, the installer downloads Microsoft's
+   bootstrapper and installs the runtime before AirWiki. A network failure is
+   reported without a partial AirWiki install and can be retried; the package
+   intentionally does not embed the offline WebView2 runtime.
 2. Verify Authenticode when using a signed candidate. An unknown-publisher
    warning means the artifact is not a validated public release.
 3. Keep LAN disabled on a Public network. On a Private or Domain network, the

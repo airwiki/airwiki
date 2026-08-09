@@ -1,8 +1,8 @@
 //! Background-service composition for the native desktop application.
 //!
-//! This module owns no egui state. It is created and called exclusively by the
-//! Tokio worker thread, while the UI communicates with that worker through
-//! channels. MCP starts independently; the optional LAN runtime is reconciled
+//! This module owns no WebView state. It is created and called exclusively by the
+//! Tokio worker task, while Tauri commands communicate with that worker through
+//! bounded channels. MCP starts independently; the optional LAN runtime is reconciled
 //! after platform readiness is known. Both use fail-closed proxies until
 //! [`DesktopServices::enable_models`] installs the real search engines.
 
@@ -55,9 +55,12 @@ use anyhow::{Context, Result, anyhow, bail};
 use async_trait::async_trait;
 use chrono::{DateTime, Duration as ChronoDuration, Utc};
 use tokio::{
-    sync::{Mutex as AsyncMutex, broadcast, mpsc, watch},
+    sync::{Semaphore, broadcast, mpsc, watch},
     task::JoinHandle,
 };
+
+#[cfg(test)]
+use tokio::sync::Mutex as AsyncMutex;
 use tokio_util::sync::CancellationToken;
 use uuid::Uuid;
 
@@ -1079,9 +1082,9 @@ pub struct DesktopServices {
     public_network: Mutex<Option<PublicNetworkRuntime>>,
     public_reader: Arc<PublicReader>,
     public_announcements: Arc<RwLock<HashMap<Uuid, PublicAnnouncementState>>>,
-    public_announcement_sync: Arc<AsyncMutex<()>>,
+    public_announcement_sync: Arc<Semaphore>,
     public_announcement_updates: watch::Sender<u64>,
-    search_topology: AsyncMutex<()>,
+    search_topology: Semaphore,
     network_generation: Arc<AtomicU64>,
     network_events: broadcast::Sender<SequencedNetworkEvent>,
     mcp: Option<McpServerHandle>,
@@ -1291,9 +1294,9 @@ impl DesktopServices {
             public_network: Mutex::new(None),
             public_reader,
             public_announcements: Arc::new(RwLock::new(HashMap::new())),
-            public_announcement_sync: Arc::new(AsyncMutex::new(())),
+            public_announcement_sync: Arc::new(Semaphore::new(1)),
             public_announcement_updates,
-            search_topology: AsyncMutex::new(()),
+            search_topology: Semaphore::new(1),
             network_generation,
             network_events,
             mcp: Some(mcp),
@@ -1535,11 +1538,15 @@ impl DesktopServices {
             return Err(error);
         }
 
-        // Commit the search topology under one short async lock. Model loading
+        // Commit the search topology under one serialized permit. Model loading
         // and smoke tests deliberately happen above the lock so disabling LAN
         // remains responsive. Re-read the runtime here instead of retaining a
         // stale handle across a concurrent LAN transition.
-        let _topology = self.search_topology.lock().await;
+        let _topology = self
+            .search_topology
+            .acquire()
+            .await
+            .context("se cerró el coordinador de topología de búsqueda")?;
         let local_federated: Arc<dyn FederatedSearch> = local.clone();
         let federated: Arc<dyn FederatedSearch> = if let Some(network) = self.network_handle()? {
             Arc::new(FederatedCoordinator::new(local_federated, network))
@@ -1791,7 +1798,11 @@ impl DesktopServices {
 
     pub async fn sync_public_collection(&self, collection_id: Uuid) -> Result<()> {
         let prepared = {
-            let _announcement_sync = self.public_announcement_sync.lock().await;
+            let _announcement_sync = self
+                .public_announcement_sync
+                .acquire()
+                .await
+                .context("se cerró el coordinador de anuncios públicos")?;
             let database = self.database.clone();
             let identity = self.public_identity.clone();
             let relay_readiness = self.current_public_relay_readiness()?;
@@ -2120,7 +2131,11 @@ impl DesktopServices {
     }
 
     pub async fn enable_lan(&self) -> Result<()> {
-        let _topology = self.search_topology.lock().await;
+        let _topology = self
+            .search_topology
+            .acquire()
+            .await
+            .context("se cerró el coordinador de topología de búsqueda")?;
         if self.network_handle()?.is_some() {
             return Ok(());
         }
@@ -2193,7 +2208,11 @@ impl DesktopServices {
     }
 
     pub async fn disable_lan(&self) -> Result<()> {
-        let _topology = self.search_topology.lock().await;
+        let _topology = self
+            .search_topology
+            .acquire()
+            .await
+            .context("se cerró el coordinador de topología de búsqueda")?;
         // Invalidate the forwarder before taking the runtime so an already
         // queued event from the previous generation cannot mutate trust or UI
         // state after LAN was disabled or restarted.
@@ -3351,7 +3370,7 @@ struct PublicManifestRenewalContext {
     identity: NodeIdentity,
     reader: Arc<PublicReader>,
     announcements: Arc<RwLock<HashMap<Uuid, PublicAnnouncementState>>>,
-    announcement_sync: Arc<AsyncMutex<()>>,
+    announcement_sync: Arc<Semaphore>,
     updates: watch::Sender<u64>,
     cancellation: CancellationToken,
 }
@@ -3409,7 +3428,13 @@ async fn renew_public_manifests_for_readiness(
     let database = context.database.clone();
     let identity = context.identity.clone();
     let prepared = {
-        let _announcement_sync = context.announcement_sync.lock().await;
+        let Ok(_announcement_sync) = context.announcement_sync.acquire().await else {
+            tracing::warn!(
+                error_kind = "public_manifest_coordinator_closed",
+                "public manifest coordinator stopped"
+            );
+            return;
+        };
         tokio::task::spawn_blocking(move || {
             let mut updates = Vec::new();
             for collection in database.list_collections()? {
@@ -4200,7 +4225,7 @@ mod tests {
                 identity: NodeIdentity::load_or_create(&MemorySecretStore::default()).unwrap(),
                 reader: Arc::new(PublicReader::new()),
                 announcements: Arc::clone(&announcements),
-                announcement_sync: Arc::new(AsyncMutex::new(())),
+                announcement_sync: Arc::new(Semaphore::new(1)),
                 updates: announcement_updates,
                 cancellation: renewal_cancellation.clone(),
             },
@@ -4300,7 +4325,7 @@ mod tests {
                 identity: NodeIdentity::load_or_create(&MemorySecretStore::default()).unwrap(),
                 reader: Arc::new(PublicReader::new()),
                 announcements: Arc::new(RwLock::new(HashMap::new())),
-                announcement_sync: Arc::new(AsyncMutex::new(())),
+                announcement_sync: Arc::new(Semaphore::new(1)),
                 updates: announcement_updates,
                 cancellation: renewal_cancellation.clone(),
             },

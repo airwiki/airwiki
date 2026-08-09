@@ -5,7 +5,7 @@ These instructions apply under `apps/` in addition to the repository root guidan
 ## Boundaries
 
 - `desktop` is the composition root. Keep domain, authorization, publication, ranking, and protocol rules in reusable crates rather than widgets or worker glue.
-- egui renders completed view models. Filesystem traversal, parsing, hashing, database-heavy work, inference, networking, and blocking operating-system calls run through the worker or an appropriate blocking boundary. Immediate window and tray integration may remain on the eframe thread when the platform API requires it.
+- The local Tauri WebView renders typed, completed snapshots and sends only explicit intents over IPC. Filesystem traversal, parsing, hashing, database-heavy work, inference, networking, and blocking operating-system calls remain in Rust behind the worker or an appropriate blocking boundary. Window, tray, and lifecycle callbacks stay bounded and contain no business logic.
 - Worker commands and snapshots use request identifiers where stale responses could alter the visible state. UI actions must remain idempotent across retries and repaint cycles.
 - `mcp-bridge` implements stdio transport only. Canonical server information, tools, schemas, limits, and sanitized errors remain in `airwiki-mcp`. The bridge uses the fixed loopback endpoint and never accepts arbitrary URLs, tokens, redirects, or proxies.
 - `windows-firewall-helper` is a narrow elevated boundary. It accepts only the fixed install/remove operations, derives the sibling application path, and manages only exact AirWiki LAN rules. Do not add general command execution, arbitrary paths, ports, or rule definitions.

@@ -1,7 +1,7 @@
 //! Signed desktop update checks and explicitly confirmed installation.
 //!
 //! Network and installer operations in this module are blocking. Callers must run
-//! them behind the desktop worker's blocking boundary, never on the egui thread
+//! them behind the desktop worker's blocking boundary, never in a Tauri command
 //! or directly on a Tokio executor thread.
 
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
@@ -22,13 +22,11 @@ use airwiki_windows_firewall::{
     PublisherTrustError, verify_open_artifact_publisher_matches_current_executable,
 };
 use async_trait::async_trait;
-use cargo_packager_updater::{
-    Config as PackagerConfig, Error as PackagerError, Update as PackagerUpdate, UpdaterBuilder,
-    semver::Version, url::Url,
-};
+use semver::Version;
 use tauri::AppHandle;
 use tauri_plugin_updater::{Error as TauriUpdaterError, Update as TauriUpdate, UpdaterExt};
 use thiserror::Error;
+use url::Url;
 #[cfg(target_os = "windows")]
 use windows::Win32::{
     Foundation::{CloseHandle, HANDLE, HANDLE_FLAG_INHERIT, HANDLE_FLAGS, SetHandleInformation},
@@ -895,29 +893,11 @@ fn install_windows_platform_update(version: &str, package: Vec<u8>) -> Result<()
 }
 
 #[cfg(not(target_os = "windows"))]
-fn install_packager_platform_update(
-    update: PackagerUpdate,
-    package: Vec<u8>,
-) -> Result<(), UpdateIssue> {
-    update.install(package).map_err(packager_issue)
-}
-
-#[cfg(target_os = "windows")]
-fn install_packager_platform_update(
-    update: PackagerUpdate,
-    package: Vec<u8>,
-) -> Result<(), UpdateIssue> {
-    install_windows_platform_update(&update.version, package)
-}
-
-#[cfg(not(target_os = "windows"))]
-#[allow(dead_code, reason = "used by the Tauri runner during migration")]
 fn install_tauri_platform_update(update: TauriUpdate, package: Vec<u8>) -> Result<(), UpdateIssue> {
     update.install(package).map_err(tauri_updater_issue)
 }
 
 #[cfg(target_os = "windows")]
-#[allow(dead_code, reason = "used by the Tauri runner during migration")]
 fn install_tauri_platform_update(update: TauriUpdate, package: Vec<u8>) -> Result<(), UpdateIssue> {
     install_windows_platform_update(&update.version, package)
 }
@@ -1088,92 +1068,6 @@ impl UpdaterService {
     }
 }
 
-pub(crate) struct PackagerUpdateBackend {
-    current_version: Version,
-    config: PackagerConfig,
-    checked_update: Option<PackagerUpdate>,
-    downloaded_package: Option<Vec<u8>>,
-}
-
-impl PackagerUpdateBackend {
-    pub(crate) fn new(config: UpdaterBuildConfig) -> Result<Self, UpdaterDisabledReason> {
-        let current_version = Version::parse(env!("CARGO_PKG_VERSION"))
-            .map_err(|_| UpdaterDisabledReason::InvalidCurrentVersion)?;
-        Ok(Self {
-            current_version,
-            config: PackagerConfig {
-                endpoints: vec![config.endpoint],
-                pubkey: config.public_key,
-                windows: None,
-            },
-            checked_update: None,
-            downloaded_package: None,
-        })
-    }
-
-    fn checked_update(&self, expected_version: &str) -> Result<&PackagerUpdate, UpdateIssue> {
-        self.checked_update
-            .as_ref()
-            .filter(|update| update.version == expected_version)
-            .ok_or_else(|| UpdateIssue::new(UpdateIssueCode::Internal))
-    }
-}
-
-#[async_trait]
-impl UpdateBackend for PackagerUpdateBackend {
-    async fn check(&mut self) -> Result<Option<UpdateSummary>, UpdateIssue> {
-        self.checked_update = None;
-        self.downloaded_package = None;
-
-        let current_version = self.current_version.clone();
-        let config = self.config.clone();
-        let update = tokio::task::spawn_blocking(move || {
-            let updater = UpdaterBuilder::new(current_version, config)
-                .version_comparator(|current, release| {
-                    release.version.pre.is_empty() && release.version > current
-                })
-                .timeout(NETWORK_TIMEOUT)
-                .build()
-                .map_err(packager_issue)?;
-            updater.check().map_err(packager_issue)
-        })
-        .await
-        .map_err(|_| UpdateIssue::new(UpdateIssueCode::Internal))??;
-        let Some(update) = update else {
-            return Ok(None);
-        };
-
-        let summary = UpdateSummary {
-            version: update.version.clone(),
-            release_notes: update.body.as_deref().map(truncate_release_notes),
-        };
-        self.checked_update = Some(update);
-        Ok(Some(summary))
-    }
-
-    async fn download(&mut self, expected_version: &str) -> Result<(), UpdateIssue> {
-        let update = self.checked_update(expected_version)?.clone();
-        let package =
-            tokio::task::spawn_blocking(move || update.download().map_err(packager_issue))
-                .await
-                .map_err(|_| UpdateIssue::new(UpdateIssueCode::Internal))??;
-        self.downloaded_package = Some(package);
-        Ok(())
-    }
-
-    async fn install(&mut self, expected_version: &str) -> Result<(), UpdateIssue> {
-        let update = self.checked_update(expected_version)?.clone();
-        let package = self
-            .downloaded_package
-            .take()
-            .ok_or_else(|| UpdateIssue::new(UpdateIssueCode::Internal))?;
-        tokio::task::spawn_blocking(move || install_packager_platform_update(update, package))
-            .await
-            .map_err(|_| UpdateIssue::new(UpdateIssueCode::Internal))?
-    }
-}
-
-#[allow(dead_code, reason = "used by the Tauri runner during migration")]
 pub(crate) struct TauriUpdateBackend {
     app: AppHandle,
     config: UpdaterBuildConfig,
@@ -1181,7 +1075,6 @@ pub(crate) struct TauriUpdateBackend {
     downloaded_package: Option<Vec<u8>>,
 }
 
-#[allow(dead_code, reason = "used by the Tauri runner during migration")]
 impl TauriUpdateBackend {
     pub(crate) fn new(
         app: AppHandle,
@@ -1206,7 +1099,6 @@ impl TauriUpdateBackend {
 }
 
 #[async_trait]
-#[allow(dead_code, reason = "used by the Tauri runner during migration")]
 impl UpdateBackend for TauriUpdateBackend {
     async fn check(&mut self) -> Result<Option<UpdateSummary>, UpdateIssue> {
         self.checked_update = None;
@@ -1266,30 +1158,6 @@ fn truncate_release_notes(notes: &str) -> String {
         .collect()
 }
 
-fn packager_issue(error: PackagerError) -> UpdateIssue {
-    let code = match error {
-        PackagerError::Reqwest(error) if error.is_decode() => UpdateIssueCode::InvalidManifest,
-        PackagerError::Reqwest(error) if error.is_connect() || error.is_timeout() => {
-            UpdateIssueCode::Offline
-        }
-        PackagerError::Reqwest(_) | PackagerError::Network(_) => UpdateIssueCode::Offline,
-        PackagerError::Serialization(_)
-        | PackagerError::ReleaseNotFound
-        | PackagerError::Semver(_)
-        | PackagerError::TargetNotFound(_)
-        | PackagerError::UrlParse(_) => UpdateIssueCode::InvalidManifest,
-        PackagerError::Minisign(_) | PackagerError::Base64(_) | PackagerError::SignatureUtf8(_) => {
-            UpdateIssueCode::InvalidSignature
-        }
-        PackagerError::UnsupportedArch
-        | PackagerError::UnsupportedOs
-        | PackagerError::UnsupportedUpdateFormat => UpdateIssueCode::Unsupported,
-        _ => UpdateIssueCode::Internal,
-    };
-    UpdateIssue::new(code)
-}
-
-#[allow(dead_code, reason = "used by the Tauri runner during migration")]
 fn tauri_updater_issue(error: TauriUpdaterError) -> UpdateIssue {
     let code = match error {
         TauriUpdaterError::Reqwest(error) if error.is_decode() => UpdateIssueCode::InvalidManifest,

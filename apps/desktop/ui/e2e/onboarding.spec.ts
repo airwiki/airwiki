@@ -94,14 +94,20 @@ describe('AirWiki real IPC journey', () => {
       { width: 1180, height: 760 },
       { width: 1440, height: 900 }
     ]) {
-      await browser.setWindowSize(
-        Math.ceil(viewport.width * devicePixelRatio),
-        Math.ceil(viewport.height * devicePixelRatio)
-      );
-      const dimensions = await browser.execute(() => ({
-        clientWidth: document.documentElement.clientWidth,
-        scrollWidth: document.documentElement.scrollWidth
-      }));
+      let physicalWidth = Math.ceil(viewport.width * devicePixelRatio);
+      const physicalHeight = Math.ceil(viewport.height * devicePixelRatio);
+      let dimensions: { clientWidth: number; scrollWidth: number } | undefined;
+      for (let attempt = 0; attempt < 3; attempt += 1) {
+        await browser.setWindowSize(physicalWidth, physicalHeight);
+        dimensions = await browser.execute(() => ({
+          clientWidth: document.documentElement.clientWidth,
+          scrollWidth: document.documentElement.scrollWidth
+        }));
+        if (dimensions.clientWidth >= viewport.width) break;
+        physicalWidth += Math.ceil((viewport.width - dimensions.clientWidth) * devicePixelRatio);
+      }
+      dimensions = required(dimensions, 'responsive viewport dimensions');
+      expect(dimensions.clientWidth).toBeGreaterThanOrEqual(viewport.width);
       expect(dimensions.scrollWidth).toBeLessThanOrEqual(dimensions.clientWidth);
     }
 

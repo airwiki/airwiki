@@ -128,6 +128,15 @@ describe('AirWiki real IPC journey', () => {
     expect(systemShell.mainScrollTop).toBe(0);
     expect(systemShell.railTop).toBe(0);
     expect(systemShell.navigationVisible).toBe(true);
+
+    await $('a[href="#system/updates"]').click();
+    await $('#system-updates').waitForDisplayed();
+    expect(await $('#system-preferences').isExisting()).toBe(false);
+    expect(await browser.execute(() => document.querySelector<HTMLElement>('.shell > main')?.scrollTop ?? -1)).toBe(0);
+
+    await $('a[href="#system/preferences"]').click();
+    await $('#system-preferences').waitForDisplayed();
+    expect(await $('#system-updates').isExisting()).toBe(false);
     const preferenceSelects = await $$('#system-preferences select');
     const appearance = required(preferenceSelects[1], 'appearance preference');
     await selectValue('#system-preferences select', 1, 'dark');

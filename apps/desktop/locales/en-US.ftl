@@ -105,6 +105,11 @@ primary-button-add-folder = Add folder
 primary-button-open-health = Open Health
 primary-button-view-options = View options
 primary-button-view-diagnostics = View diagnostics
+models-install-queued = Waiting for an available slot
+models-install-downloading = Downloading verified files
+models-install-verifying = Verifying integrity
+models-install-extracting = Preparing the local runtime
+models-install-activating = Activating the model
 
 collections-title = Knowledge folders
 collections-subtitle = Each knowledge folder watches one local folder and maintains an independent OKF bundle.

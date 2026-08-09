@@ -41,6 +41,7 @@ describe('AirWiki desktop shell', () => {
     for (const destination of ['Biblioteca', 'Revisión', 'Buscar', 'Sistema']) {
       expect(screen.getByRole('button', { name: destination })).toBeInTheDocument();
     }
+    expect(screen.getByRole('button', { name: 'Agregar carpeta' })).toBeInTheDocument();
   });
 
   it('keeps system actions reachable from keyboard navigation', async () => {

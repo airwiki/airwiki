@@ -4,7 +4,8 @@ import { dirname, resolve } from 'node:path';
 
 const uiRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const desktopRoot = resolve(uiRoot, '..');
-const tauriCli = fileURLToPath(import.meta.resolve('@tauri-apps/cli'));
+const tauriEntry = fileURLToPath(import.meta.resolve('@tauri-apps/cli'));
+const tauriCli = resolve(dirname(tauriEntry), 'tauri.js');
 const arguments_ = [
   tauriCli,
   'build',

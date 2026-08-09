@@ -11,6 +11,7 @@
 
   let container: HTMLDivElement;
   let graph: Core | null = null;
+  let resizeObserver: ResizeObserver | null = null;
   let loadFailed = false;
 
   const t = (id: string, args?: Record<string, string | number>) => message(locale, id, args);
@@ -66,7 +67,16 @@
           { selector: 'edge', style: { 'curve-style': 'bezier', 'line-color': '#355b70', 'target-arrow-color': '#61d6e8', 'target-arrow-shape': 'triangle', width: 1 } },
           { selector: 'node:selected', style: { 'border-color': '#61c995', 'border-width': 3, 'overlay-opacity': 0 } }
         ],
-        layout: { name: 'breadthfirst', roots: ['#index'], directed: true, padding: 34, spacingFactor: 1.25, animate: false }
+        layout: { name: 'breadthfirst', roots: ['index'], directed: true, padding: 24, spacingFactor: 1.15, animate: false }
+      });
+      resizeObserver = new ResizeObserver(() => {
+        graph?.resize();
+        graph?.fit(undefined, 24);
+      });
+      resizeObserver.observe(container);
+      requestAnimationFrame(() => {
+        graph?.resize();
+        graph?.fit(undefined, 24);
       });
       graph.on('tap', 'node', (event) => {
         const page = event.target.data('page') as KnowledgePageInput | undefined;
@@ -76,6 +86,8 @@
 
     return () => {
       disposed = true;
+      resizeObserver?.disconnect();
+      resizeObserver = null;
       graph?.destroy();
       graph = null;
     };

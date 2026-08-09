@@ -108,10 +108,9 @@
   .graph-heading p { margin-bottom: 5px; color: var(--cyan); font: 600 11px 'Space Grotesk', sans-serif; letter-spacing: .1em; text-transform: uppercase; }
   .graph-heading h3 { font: 500 22px 'Space Grotesk', sans-serif; }
   .graph-heading small { color: var(--muted); }
-  .graph-canvas { min-height: 340px; background: #081824; border-bottom: 1px solid var(--line); }
+  .graph-canvas { min-height: 340px; background: var(--graph-canvas); border-bottom: 1px solid var(--line); }
   .graph-index { display: flex; gap: 7px; padding-top: 14px; overflow-x: auto; }
   .graph-index button { flex: 0 0 auto; padding: 7px 10px; color: var(--muted); background: transparent; border: 1px solid var(--line); border-radius: 999px; cursor: pointer; }
   .graph-index button:hover, .graph-index button:focus-visible { color: inherit; border-color: var(--cyan); }
   .graph-error { padding: 20px; color: var(--amber); border-left: 2px solid var(--amber); }
-  @media (prefers-color-scheme: light) { .graph-canvas { background: #f4f8f9; } }
 </style>

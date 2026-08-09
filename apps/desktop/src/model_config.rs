@@ -10,7 +10,7 @@ use anyhow::{Context, Result, bail};
 use chrono::Utc;
 use serde::{Deserialize, Serialize};
 
-pub const CONFIG_SCHEMA_VERSION: u32 = 2;
+pub const CONFIG_SCHEMA_VERSION: u32 = 3;
 pub const MODEL_CATALOG_VERSION: u32 = 1;
 pub const ONBOARDING_VERSION: u32 = 1;
 
@@ -21,6 +21,15 @@ pub enum LocalePreference {
     System,
     Es,
     En,
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ThemePreference {
+    #[default]
+    System,
+    Light,
+    Dark,
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -61,6 +70,7 @@ pub struct DesktopConfig {
     pub accepted_licenses: Vec<AcceptedLicense>,
     pub completed_onboarding_version: Option<u32>,
     pub locale: LocalePreference,
+    pub theme: ThemePreference,
     pub lan_preference: LanPreference,
     pub close_behavior: CloseBehavior,
     pub automatic_update_checks: bool,
@@ -78,6 +88,7 @@ impl Default for DesktopConfig {
             accepted_licenses: Vec::new(),
             completed_onboarding_version: None,
             locale: LocalePreference::System,
+            theme: ThemePreference::System,
             lan_preference: LanPreference::Undecided,
             close_behavior: CloseBehavior::Ask,
             automatic_update_checks: false,
@@ -115,9 +126,51 @@ impl DesktopConfigV1 {
             // that behavior, while leaving every new remote action opt-in.
             completed_onboarding_version: Some(ONBOARDING_VERSION),
             locale: LocalePreference::System,
+            theme: ThemePreference::System,
             lan_preference: LanPreference::Enabled,
             close_behavior: CloseBehavior::Ask,
             automatic_update_checks: false,
+        })
+    }
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct DesktopConfigV2 {
+    schema_version: u32,
+    catalog_version: u32,
+    profile: ModelProfile,
+    enabled_capabilities: BTreeSet<ModelCapability>,
+    active_selection: Option<String>,
+    pending_selection: Option<String>,
+    accepted_licenses: Vec<AcceptedLicense>,
+    completed_onboarding_version: Option<u32>,
+    locale: LocalePreference,
+    lan_preference: LanPreference,
+    close_behavior: CloseBehavior,
+    automatic_update_checks: bool,
+}
+
+impl DesktopConfigV2 {
+    fn migrate(self) -> Result<DesktopConfig> {
+        if self.schema_version != 2 {
+            bail!("la configuración no corresponde al esquema 2");
+        }
+        validate_model_state(self.catalog_version, &self.enabled_capabilities)?;
+        Ok(DesktopConfig {
+            schema_version: CONFIG_SCHEMA_VERSION,
+            catalog_version: self.catalog_version,
+            profile: self.profile,
+            enabled_capabilities: self.enabled_capabilities,
+            active_selection: self.active_selection,
+            pending_selection: self.pending_selection,
+            accepted_licenses: self.accepted_licenses,
+            completed_onboarding_version: self.completed_onboarding_version,
+            locale: self.locale,
+            theme: ThemePreference::System,
+            lan_preference: self.lan_preference,
+            close_behavior: self.close_behavior,
+            automatic_update_checks: self.automatic_update_checks,
         })
     }
 }
@@ -179,6 +232,21 @@ impl DesktopConfig {
                 let migrated = serde_json::from_value::<DesktopConfigV1>(value)
                     .map_err(anyhow::Error::from)
                     .and_then(DesktopConfigV1::migrate);
+                match migrated {
+                    Ok(config) => {
+                        config.save_atomic(path)?;
+                        Ok(ConfigLoad {
+                            config,
+                            warning: None,
+                        })
+                    }
+                    Err(error) => quarantine_invalid(path, error.to_string()),
+                }
+            }
+            Some(2) => {
+                let migrated = serde_json::from_value::<DesktopConfigV2>(value)
+                    .map_err(anyhow::Error::from)
+                    .and_then(DesktopConfigV2::migrate);
                 match migrated {
                     Ok(config) => {
                         config.save_atomic(path)?;
@@ -413,6 +481,37 @@ mod tests {
             serde_json::from_slice::<serde_json::Value>(&fs::read(path).unwrap()).unwrap()["schema_version"],
             CONFIG_SCHEMA_VERSION
         );
+    }
+
+    #[test]
+    fn version_two_migration_preserves_preferences_and_adds_system_theme() -> Result<()> {
+        let directory = tempfile::tempdir()?;
+        let path = directory.path().join("config.json");
+        let legacy = serde_json::json!({
+            "schema_version": 2,
+            "catalog_version": 1,
+            "profile": "efficient",
+            "enabled_capabilities": ["structured_text"],
+            "active_selection": null,
+            "pending_selection": null,
+            "accepted_licenses": [],
+            "completed_onboarding_version": 1,
+            "locale": "es",
+            "lan_preference": "disabled",
+            "close_behavior": "hide_to_tray",
+            "automatic_update_checks": true
+        });
+        fs::write(&path, serde_json::to_vec_pretty(&legacy)?)?;
+
+        let loaded = DesktopConfig::load_or_default(&path)?;
+
+        assert_eq!(loaded.config.schema_version, CONFIG_SCHEMA_VERSION);
+        assert_eq!(loaded.config.locale, LocalePreference::Es);
+        assert_eq!(loaded.config.theme, ThemePreference::System);
+        assert_eq!(loaded.config.lan_preference, LanPreference::Disabled);
+        assert_eq!(loaded.config.close_behavior, CloseBehavior::HideToTray);
+        assert!(loaded.config.automatic_update_checks);
+        Ok(())
     }
 
     #[test]

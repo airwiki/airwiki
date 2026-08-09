@@ -77,6 +77,8 @@ export type NoticeSummary = { level: NoticeLevel, message: string, };
 
 export type LocalePreference = "system" | "es" | "en";
 
+export type ThemePreference = "system" | "light" | "dark";
+
 export type LanPreference = "undecided" | "disabled" | "enabled";
 
 export type CloseBehavior = "ask" | "hide_to_tray" | "quit";
@@ -133,9 +135,9 @@ export type UpdaterIssue = "notConfigured" | "invalidConfiguration" | "unsupport
 
 export type UpdaterSummary = { status: UpdaterStatus, version: string | null, releaseNotes: string | null, issue: UpdaterIssue | null, retryable: boolean, };
 
-export type PreferencesSummary = { completedOnboardingVersion: number | null, locale: LocalePreference, lanPreference: LanPreference, closeBehavior: CloseBehavior, automaticUpdateChecks: boolean, };
+export type PreferencesSummary = { completedOnboardingVersion: number | null, locale: LocalePreference, theme: ThemePreference, lanPreference: LanPreference, closeBehavior: CloseBehavior, automaticUpdateChecks: boolean, };
 
-export type PreferencesInput = { locale: LocalePreference, lanPreference: LanPreference, closeBehavior: CloseBehavior, automaticUpdateChecks: boolean, completeOnboarding: boolean, };
+export type PreferencesInput = { locale: LocalePreference, theme: ThemePreference, lanPreference: LanPreference, closeBehavior: CloseBehavior, automaticUpdateChecks: boolean, completeOnboarding: boolean, };
 
 export type AppPhase = "starting" | "ready";
 

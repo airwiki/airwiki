@@ -73,6 +73,38 @@
   let publicBrowseRequestId: string | null = null;
   let guidedRepairRequestId: string | null = null;
   let guidedRepairConfirmed = false;
+  let mainScrollRegion: HTMLElement | null = null;
+
+  function scrollMainTo(top: number) {
+    requestAnimationFrame(() => {
+      mainScrollRegion?.scrollTo({ top: Math.max(0, top), left: 0, behavior: 'auto' });
+    });
+  }
+
+  function scrollToSystemSection(section: SystemSection) {
+    requestAnimationFrame(() => {
+      const target = document.getElementById(`system-${section}`);
+      if (!mainScrollRegion || !target || !mainScrollRegion.contains(target)) return;
+      const regionTop = mainScrollRegion.getBoundingClientRect().top;
+      const targetTop = target.getBoundingClientRect().top;
+      mainScrollRegion.scrollTo({
+        top: Math.max(0, mainScrollRegion.scrollTop + targetTop - regionTop - 24),
+        left: 0,
+        behavior: 'auto'
+      });
+    });
+  }
+
+  function pushHash(hash: string) {
+    if (window.location.hash !== hash) window.history.pushState(null, '', hash);
+  }
+
+  function openSystemSection(event: MouseEvent, section: SystemSection) {
+    event.preventDefault();
+    systemSection = section;
+    pushHash(`#system/${section}`);
+    scrollToSystemSection(section);
+  }
 
   function translate(id: string, args?: MessageArgs): string {
     return message(locale, id, args);
@@ -98,15 +130,20 @@
       const matchedDestination = destinations.find((candidate) => candidate.id === route);
       if (matchedDestination) {
         destination = matchedDestination.id;
+        if (matchedDestination.id !== 'system') scrollMainTo(0);
       }
       const matchedSection = systemSections.find((candidate) => candidate.id === section);
       if (route === 'system' && matchedSection) {
         systemSection = matchedSection.id;
-        requestAnimationFrame(() => document.getElementById(`system-${systemSection}`)?.scrollIntoView({ block: 'start' }));
+        scrollToSystemSection(matchedSection.id);
+      } else if (route === 'system') {
+        systemSection = 'preferences';
+        scrollMainTo(0);
       }
     };
     syncRoute();
     window.addEventListener('hashchange', syncRoute);
+    window.addEventListener('popstate', syncRoute);
     const unlistenClose = '__TAURI_INTERNALS__' in window
       ? listen('close-choice-required', () => { closeChoiceRequired = true; })
       : Promise.resolve(() => {});
@@ -159,17 +196,22 @@
     }
     return () => {
       window.removeEventListener('hashchange', syncRoute);
+      window.removeEventListener('popstate', syncRoute);
       void unlistenClose.then((unlisten) => unlisten());
     };
   });
 
   function select(next: Destination) {
     destination = next;
-    window.location.hash = next === 'system' ? 'system/preferences' : next;
+    scrollMainTo(0);
     if (next === 'system') {
+      systemSection = 'preferences';
+      pushHash('#system/preferences');
       void refreshAutostartState();
       void runConnectivityAction('refresh');
       void runIntegrationAction({ kind: 'refresh' });
+    } else {
+      window.location.hash = next;
     }
     if (next === 'library') void refreshHealth();
   }
@@ -742,7 +784,7 @@
     </div>
   </aside>
 
-  <main>
+  <main bind:this={mainScrollRegion}>
     <header>
       <div><p class="eyebrow">{t('dashboard-eyebrow')}</p><h1>{t('dashboard-title')}</h1></div>
       <button class="primary" onclick={runNextAction} disabled={destination === 'review' && !snapshot?.reviews.length}><Sparkles size={17} />{nextActionLabel(locale)}</button>
@@ -930,7 +972,7 @@
         {#if destination === 'system' && snapshot}
           <nav class="system-subnav" aria-label={t('nav-group-system')}>
             {#each systemSections as section (section.id)}
-              <a href={`#system/${section.id}`} aria-current={systemSection === section.id ? 'page' : undefined}>{t(section.labelId)}</a>
+              <a href={`#system/${section.id}`} aria-current={systemSection === section.id ? 'page' : undefined} onclick={(event) => openSystemSection(event, section.id)}>{t(section.labelId)}</a>
             {/each}
           </nav>
           <div class="system-layout">

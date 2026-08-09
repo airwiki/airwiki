@@ -54,7 +54,7 @@ if (destination === 'system') {
     license: 'Apache-2.0', licenseUrl: null, revision: 'synthetic'
   };
 }
-window.location.hash = destination === 'system' ? 'system/preferences' : destination;
+window.location.hash = destination;
 
 let eventSink: ((event: UiEventEnvelope) => void) | null = null;
 const bridge: DevelopmentBridge = {

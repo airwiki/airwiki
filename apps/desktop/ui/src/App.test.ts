@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen } from '@testing-library/svelte';
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/svelte';
 import axe from 'axe-core';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import App from './App.svelte';
@@ -51,6 +51,54 @@ describe('AirWiki desktop shell', () => {
 
     expect(await screen.findByText('Identidad y capacidad local')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Guardar preferencias' })).toBeEnabled();
+  });
+
+  it('keeps System navigation inside the main scroll region', async () => {
+    const scrollTo = vi.spyOn(HTMLElement.prototype, 'scrollTo');
+    const viewportScroll = vi.spyOn(Element.prototype, 'scrollIntoView');
+    const pushState = vi.spyOn(window.history, 'pushState');
+    render(App);
+
+    await fireEvent.click(await screen.findByRole('button', { name: 'Sistema' }));
+    await waitFor(() => expect(scrollTo).toHaveBeenCalledWith({
+      top: 0, left: 0, behavior: 'auto'
+    }));
+    expect(window.location.hash).toBe('#system/preferences');
+    expect(pushState).toHaveBeenCalledTimes(1);
+    await fireEvent.click(screen.getByRole('button', { name: 'Sistema' }));
+    expect(pushState).toHaveBeenCalledTimes(1);
+
+    const main = document.querySelector<HTMLElement>('.shell > main');
+    const updates = document.getElementById('system-updates');
+    expect(main).not.toBeNull();
+    expect(updates).not.toBeNull();
+    if (!main || !updates) return;
+    Object.defineProperty(main, 'scrollTop', { configurable: true, value: 80 });
+    vi.spyOn(main, 'getBoundingClientRect').mockReturnValue({ top: 40 } as DOMRect);
+    vi.spyOn(updates, 'getBoundingClientRect').mockReturnValue({ top: 340 } as DOMRect);
+
+    await fireEvent.click(screen.getByRole('link', { name: 'Actualizaciones' }));
+    await waitFor(() => expect(scrollTo).toHaveBeenLastCalledWith({
+      top: 356, left: 0, behavior: 'auto'
+    }));
+    expect(window.location.hash).toBe('#system/updates');
+    expect(pushState).toHaveBeenCalledTimes(2);
+    await fireEvent.click(screen.getByRole('link', { name: 'Actualizaciones' }));
+    expect(pushState).toHaveBeenCalledTimes(2);
+    expect(viewportScroll).not.toHaveBeenCalled();
+
+    await fireEvent.click(screen.getByRole('button', { name: 'Biblioteca' }));
+    await waitFor(() => expect(scrollTo).toHaveBeenLastCalledWith({
+      top: 0, left: 0, behavior: 'auto'
+    }));
+    expect(await screen.findByText('Convierte una carpeta en conocimiento que puedas verificar')).toBeInTheDocument();
+
+    window.history.pushState(null, '', '#search');
+    window.dispatchEvent(new PopStateEvent('popstate'));
+    await waitFor(() => expect(scrollTo).toHaveBeenLastCalledWith({
+      top: 0, left: 0, behavior: 'auto'
+    }));
+    expect(await screen.findByRole('heading', { name: 'Buscar' })).toBeInTheDocument();
   });
 
   it('shows stable installed memory when the operating system cannot estimate availability', async () => {

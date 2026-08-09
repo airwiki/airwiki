@@ -45,7 +45,7 @@ use uuid::Uuid;
 use crate::{
     connectivity_platform::SystemDestination,
     i18n::{Localization, UiLocale},
-    model_config::{CloseBehavior, LanPreference, LocalePreference},
+    model_config::{CloseBehavior, LanPreference, LocalePreference, ThemePreference},
     paths::AppPaths,
     updater::{
         TauriUpdateBackend, UpdateBackend, UpdateIssueCode, UpdateSummary, UpdaterBuildConfig,
@@ -702,6 +702,7 @@ enum NoticeLevel {
 struct PreferencesSummary {
     completed_onboarding_version: Option<u32>,
     locale: LocalePreferenceDto,
+    theme: ThemePreferenceDto,
     lan_preference: LanPreferenceDto,
     close_behavior: CloseBehaviorDto,
     automatic_update_checks: bool,
@@ -712,6 +713,7 @@ struct PreferencesSummary {
 #[ts(rename_all = "camelCase")]
 struct PreferencesInput {
     locale: LocalePreferenceDto,
+    theme: ThemePreferenceDto,
     lan_preference: LanPreferenceDto,
     close_behavior: CloseBehaviorDto,
     automatic_update_checks: bool,
@@ -725,6 +727,15 @@ enum LocalePreferenceDto {
     System,
     Es,
     En,
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, Serialize, TS)]
+#[serde(rename_all = "snake_case")]
+#[ts(rename = "ThemePreference", rename_all = "snake_case")]
+enum ThemePreferenceDto {
+    System,
+    Light,
+    Dark,
 }
 
 #[derive(Clone, Copy, Debug, Deserialize, Serialize, TS)]
@@ -1277,6 +1288,26 @@ impl From<LocalePreferenceDto> for LocalePreference {
             LocalePreferenceDto::System => Self::System,
             LocalePreferenceDto::Es => Self::Es,
             LocalePreferenceDto::En => Self::En,
+        }
+    }
+}
+
+impl From<ThemePreference> for ThemePreferenceDto {
+    fn from(value: ThemePreference) -> Self {
+        match value {
+            ThemePreference::System => Self::System,
+            ThemePreference::Light => Self::Light,
+            ThemePreference::Dark => Self::Dark,
+        }
+    }
+}
+
+impl From<ThemePreferenceDto> for ThemePreference {
+    fn from(value: ThemePreferenceDto) -> Self {
+        match value {
+            ThemePreferenceDto::System => Self::System,
+            ThemePreferenceDto::Light => Self::Light,
+            ThemePreferenceDto::Dark => Self::Dark,
         }
     }
 }
@@ -1946,6 +1977,7 @@ async fn update_preferences(
             request_id,
             update: DesktopPreferencesUpdate {
                 locale: preferences.locale.into(),
+                theme: preferences.theme.into(),
                 lan_preference: preferences.lan_preference.into(),
                 close_behavior: preferences.close_behavior.into(),
                 automatic_update_checks: preferences.automatic_update_checks,
@@ -2573,6 +2605,7 @@ impl AppSnapshot {
                     self.preferences = Some(PreferencesSummary {
                         completed_onboarding_version: preferences.completed_onboarding_version,
                         locale: preferences.locale.into(),
+                        theme: preferences.theme.into(),
                         lan_preference: preferences.lan_preference.into(),
                         close_behavior: preferences.close_behavior.into(),
                         automatic_update_checks: preferences.automatic_update_checks,
@@ -3577,6 +3610,7 @@ fn ui_bindings_source() -> String {
         exported_declaration::<NoticeLevel>(&config),
         exported_declaration::<NoticeSummary>(&config),
         exported_declaration::<LocalePreferenceDto>(&config),
+        exported_declaration::<ThemePreferenceDto>(&config),
         exported_declaration::<LanPreferenceDto>(&config),
         exported_declaration::<CloseBehaviorDto>(&config),
         exported_declaration::<AutostartStatusDto>(&config),

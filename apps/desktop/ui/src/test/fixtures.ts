@@ -23,7 +23,7 @@ export function readySnapshot(): AppSnapshot {
     collectionScans: [], reviews: [], reanalyzingReviewIds: [], sourceIssues: [], peers: [],
     model: null, modelInstall: null, search: null, publicBrowse: null, reviewEvidence: null,
     knowledge: null, knowledgePage: null,
-    preferences: { completedOnboardingVersion: 1, locale: 'es', lanPreference: 'disabled', closeBehavior: 'ask', automaticUpdateChecks: false },
+    preferences: { completedOnboardingVersion: 1, locale: 'es', theme: 'system', lanPreference: 'disabled', closeBehavior: 'ask', automaticUpdateChecks: false },
     autostart: 'disabled',
     wikiHealth: { generation: 1, status: 'ready', errorCount: 0, warningCount: 0, updatingCount: 0, attentionCollectionId: null, checked: true },
     guidedRepair: null,

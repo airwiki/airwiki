@@ -23,7 +23,11 @@ vi.mock('@tauri-apps/api/event', () => ({
 }));
 
 describe('AirWiki desktop shell', () => {
-  afterEach(cleanup);
+  afterEach(() => {
+    cleanup();
+    delete document.documentElement.dataset.theme;
+    document.documentElement.style.colorScheme = '';
+  });
 
   beforeEach(() => {
     window.location.hash = '';
@@ -59,6 +63,27 @@ describe('AirWiki desktop shell', () => {
       expect(screen.getByRole('button', { name: destination })).toBeInTheDocument();
     }
     expect(screen.queryByRole('button', { name: 'Biblioteca' })).not.toBeInTheDocument();
+  });
+
+  it('applies an explicit persisted theme to the document', async () => {
+    const preferences = snapshot.preferences;
+    expect(preferences).not.toBeNull();
+    if (preferences) preferences.theme = 'light';
+    render(App);
+
+    await screen.findByText('Atlas');
+    expect(document.documentElement.dataset.theme).toBe('light');
+    expect(document.documentElement.style.colorScheme).toBe('light');
+  });
+
+  it('opens a stable System subsection from its hash route', async () => {
+    window.location.hash = '#system/updates';
+    render(App);
+
+    const updates = await screen.findByRole('link', { name: 'Actualizaciones' });
+    expect(updates).toHaveAttribute('aria-current', 'page');
+    expect(screen.getByRole('button', { name: 'Sistema' })).toHaveClass('active');
+    expect(document.getElementById('system-updates')).toBeInTheDocument();
   });
 
   it('has no serious or critical accessibility violations in the library view', async () => {

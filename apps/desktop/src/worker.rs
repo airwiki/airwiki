@@ -58,6 +58,7 @@ use crate::{
     },
     model_config::{
         CloseBehavior, DesktopConfig, LanPreference, LocalePreference, ONBOARDING_VERSION,
+        ThemePreference,
     },
     paths::AppPaths,
     services::{
@@ -231,6 +232,7 @@ pub struct ModelStateView {
 pub struct DesktopPreferencesView {
     pub completed_onboarding_version: Option<u32>,
     pub locale: LocalePreference,
+    pub theme: ThemePreference,
     pub lan_preference: LanPreference,
     pub close_behavior: CloseBehavior,
     pub automatic_update_checks: bool,
@@ -241,6 +243,7 @@ impl From<&DesktopConfig> for DesktopPreferencesView {
         Self {
             completed_onboarding_version: config.completed_onboarding_version,
             locale: config.locale,
+            theme: config.theme,
             lan_preference: config.lan_preference,
             close_behavior: config.close_behavior,
             automatic_update_checks: config.automatic_update_checks,
@@ -251,6 +254,7 @@ impl From<&DesktopConfig> for DesktopPreferencesView {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct DesktopPreferencesUpdate {
     pub locale: LocalePreference,
+    pub theme: ThemePreference,
     pub lan_preference: LanPreference,
     pub close_behavior: CloseBehavior,
     pub automatic_update_checks: bool,
@@ -1469,6 +1473,7 @@ pub(crate) async fn run_worker(
                     WorkerCommand::UpdateDesktopPreferences { request_id, update } => {
                         let previous = desktop_config.clone();
                         desktop_config.locale = update.locale;
+                        desktop_config.theme = update.theme;
                         desktop_config.lan_preference = update.lan_preference;
                         desktop_config.close_behavior = update.close_behavior;
                         desktop_config.automatic_update_checks = update.automatic_update_checks;

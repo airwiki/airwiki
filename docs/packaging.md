@@ -18,9 +18,13 @@ From the repository root:
 ```bash
 corepack enable
 corepack prepare pnpm@10.18.3 --activate
-pnpm --dir apps/desktop/ui install --frozen-lockfile --ignore-scripts
+pnpm --dir apps/desktop/ui install --frozen-lockfile --ignore-scripts --prod=false
 cargo run --locked -p xtask -- licenses check
 ```
+
+`--prod=false` is mandatory so an inherited `NODE_ENV=production` cannot omit
+the pinned Tauri, Svelte validation, and Vite build tools. Package wrappers fail
+before runtime preparation when any of those tools is absent.
 
 If the generated legal inventory is stale, regenerate it and review the complete
 diff before packaging:

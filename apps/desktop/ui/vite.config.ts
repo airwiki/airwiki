@@ -4,6 +4,6 @@ import { defineConfig } from 'vite';
 export default defineConfig({
   plugins: [svelte()],
   clearScreen: false,
-  server: { strictPort: true },
+  server: { strictPort: true, fs: { allow: ['..'] } },
   build: { target: ['es2022', 'chrome105', 'safari15'] }
 });

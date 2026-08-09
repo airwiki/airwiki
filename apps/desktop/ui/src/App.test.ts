@@ -4,10 +4,10 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import App from './App.svelte';
 import { readySnapshot } from './test/fixtures';
 
-const snapshot = readySnapshot();
+let snapshot = readySnapshot();
 
 vi.mock('./api', async (importOriginal) => {
-  const original = await importOriginal<typeof import('./api')>();
+  const original = await importOriginal() as typeof import('./api');
   return {
     ...original,
     connect: vi.fn(async () => snapshot),
@@ -27,6 +27,7 @@ describe('AirWiki desktop shell', () => {
 
   beforeEach(() => {
     window.location.hash = '';
+    snapshot = readySnapshot();
   });
 
   it('renders the four primary destinations and a local-first collection', async () => {
@@ -47,10 +48,23 @@ describe('AirWiki desktop shell', () => {
     expect(screen.getByRole('button', { name: 'Guardar preferencias' })).toBeEnabled();
   });
 
+  it('renders the same primary navigation in English', async () => {
+    const preferences = snapshot.preferences;
+    expect(preferences).not.toBeNull();
+    if (preferences) preferences.locale = 'en';
+    render(App);
+
+    expect(await screen.findByRole('button', { name: 'Library' })).toBeInTheDocument();
+    for (const destination of ['Review', 'Search', 'System']) {
+      expect(screen.getByRole('button', { name: destination })).toBeInTheDocument();
+    }
+    expect(screen.queryByRole('button', { name: 'Biblioteca' })).not.toBeInTheDocument();
+  });
+
   it('has no serious or critical accessibility violations in the library view', async () => {
     const { container } = render(App);
     await screen.findByText('Atlas');
     const result = await axe.run(container, { runOnly: { type: 'tag', values: ['wcag2a', 'wcag2aa'] } });
-    expect(result.violations.filter((violation) => ['serious', 'critical'].includes(violation.impact ?? ''))).toEqual([]);
+    expect(result.violations.filter((violation: (typeof result.violations)[number]) => ['serious', 'critical'].includes(violation.impact ?? ''))).toEqual([]);
   });
 });

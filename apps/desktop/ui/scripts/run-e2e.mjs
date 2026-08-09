@@ -6,7 +6,10 @@ import { fileURLToPath } from 'node:url';
 
 const uiRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const executable = process.platform === 'win32' ? 'airwiki.exe' : 'airwiki';
-const appBinaryPath = resolve(uiRoot, '../../../target/debug', executable);
+const debugTarget = process.platform === 'win32'
+  ? '../../../target/x86_64-pc-windows-msvc/debug'
+  : '../../../target/debug';
+const appBinaryPath = resolve(uiRoot, debugTarget, executable);
 const testRoot = mkdtempSync(join(tmpdir(), 'airwiki-e2e-'));
 const expectedPrefix = resolve(tmpdir()) + sep;
 if (!resolve(testRoot).startsWith(expectedPrefix)) throw new Error('unsafe E2E data root');

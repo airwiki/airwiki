@@ -18,27 +18,40 @@ async function selectValue(selector: string, index: number, value: string): Prom
 }
 
 describe('AirWiki real IPC journey', () => {
-  it('persists onboarding and explicit appearance preferences', async () => {
-    const onboarding = await $('main.onboarding');
-    await onboarding.waitForDisplayed();
+  after(async () => {
+    await browser.execute(() => {
+      const tauriWindow = window as typeof window & {
+        __TAURI_INTERNALS__: { invoke(command: string): Promise<unknown> };
+      };
+      return tauriWindow.__TAURI_INTERNALS__.invoke('quit_completely');
+    });
+  });
 
-    const onboardingSelects = await $$('main.onboarding select');
+  it('persists onboarding and explicit appearance preferences', async () => {
+    await browser.waitUntil(
+      () => browser.execute(() => Boolean(document.querySelector('main.onboarding:not(.startup)'))),
+      { timeout: 30_000, timeoutMsg: 'the runtime did not reach interactive onboarding' }
+    );
+    const onboarding = await $('main.onboarding:not(.startup)');
+    await expect(onboarding).toBeDisplayed();
+
+    const onboardingSelects = await $$('main.onboarding:not(.startup) select');
     const language = required(onboardingSelects[0], 'language preference');
     const localNetwork = required(onboardingSelects[1], 'local network preference');
     const closeBehavior = required(onboardingSelects[2], 'close behavior preference');
-    await selectValue('main.onboarding select', 0, 'en');
-    await selectValue('main.onboarding select', 1, 'disabled');
-    await selectValue('main.onboarding select', 2, 'ask');
+    await selectValue('main.onboarding:not(.startup) select', 0, 'en');
+    await selectValue('main.onboarding:not(.startup) select', 1, 'disabled');
+    await selectValue('main.onboarding:not(.startup) select', 2, 'ask');
     await expect(language).toHaveValue('en');
     await expect(localNetwork).toHaveValue('disabled');
     await expect(closeBehavior).toHaveValue('ask');
-    const finishOnboarding = await $('main.onboarding button.onboarding-action');
+    const finishOnboarding = await $('main.onboarding:not(.startup) button.onboarding-action');
     await expect(finishOnboarding).toBeEnabled();
     await finishOnboarding.click();
 
     const shell = await $('.shell');
     try {
-      await shell.waitForDisplayed();
+      await shell.waitForDisplayed({ timeout: 30_000 });
     } catch (error) {
       const message = await $('.action-message');
       const detail = await message.isExisting() ? await message.getText() : 'no UI error';

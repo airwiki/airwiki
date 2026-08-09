@@ -8,7 +8,7 @@
   import RefreshCw from '@lucide/svelte/icons/refresh-cw';
   import Sparkles from '@lucide/svelte/icons/sparkles';
   import { listen } from '@tauri-apps/api/event';
-  import { onMount } from 'svelte';
+  import { onMount, tick } from 'svelte';
   import { addCollection, addFederationIndex, approveReview, browsePublicCollection, cancelModelInstall, checkUpdates, configureFirewall, confirmPairing, connect, dialPeer, downloadUpdate, executeGuidedWikiRepair, hideToTray, installModels, installUpdate, loadKnowledgeBundle, loadKnowledgePage, loadReviewEvidence, manageIntegration, openExternalLink, openSystemDestination, pairPeer, pickCollectionFolder, prepareGuidedWikiRepair, quitCompletely, reanalyzeReview, refreshAutostart, refreshConnectivity, refreshWikiHealth, rejectReview, relinkCollection, removeFederationIndex, rescanCollection, revokePeer, searchKnowledge, setAutostart, setCollectionGrant, setPublicPublisherBlocked, updateCollectionPolicy, updatePreferences, updatePublicCollectionProfile, type AppSnapshot, type CloseBehavior, type CollectionPolicyInput, type CollectionSummary, type EnrichmentDraft, type FolderSelection, type IntegrationActionInput, type IntegrationClient, type KnowledgePageInput, type LanPreference, type LocalePreference, type ReviewSummary, type SearchHitSummary, type SystemDestination, type ThemePreference } from './api';
   import KnowledgeGraph from './KnowledgeGraph.svelte';
   import ContextAtlas from './ContextAtlas.svelte';
@@ -192,7 +192,7 @@
       if (event.requestId && event.requestId === publicBrowseRequestId) publicBrowseRequestId = null;
       if (event.requestId && event.requestId === guidedRepairRequestId) guidedRepairRequestId = null;
       runtimeMessageId = event.snapshot.phase === 'ready' ? 'status-ready' : 'status-working';
-    }).then((initial) => {
+    }).then(async (initial) => {
       snapshot = initial;
       if (initial.model?.licenseAccepted) modelLicensesConfirmed = true;
       if (initial.preferences) {
@@ -203,6 +203,7 @@
         automaticUpdateChecks = initial.preferences.automaticUpdateChecks;
       }
       runtimeMessageId = initial.phase === 'ready' ? 'status-ready' : runtimeMessageId;
+      await tick();
       syncRoute();
     }).catch(() => { runtimeMessageId = 'error-generic'; });
     if (destination === 'system') {

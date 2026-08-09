@@ -1206,26 +1206,39 @@ impl DesktopServices {
         secret_store: Arc<dyn SecretStore>,
         lan_enabled: bool,
     ) -> Result<Self> {
-        let core_paths = CoreAppPaths::at(&paths.data);
-        core_paths.ensure()?;
-        let database = Database::open(&paths.database)?;
-        let bundled_bootstrap_indexes =
-            parse_bundled_bootstrap_federation_indexes(BUNDLED_BOOTSTRAP_FEDERATION_INDEXES)?;
-        let bootstrap_database = database.clone();
-        tokio::task::spawn_blocking(move || {
-            install_bundled_bootstrap_federation_indexes(
-                &bootstrap_database,
-                bundled_bootstrap_indexes,
-            )
-        })
-        .await
-        .context("se detuvo el worker del registro bootstrap federado")??;
-        let recovery_database = database.clone();
-        let recovery = tokio::task::spawn_blocking(move || {
-            OkfPublicationMaterializer::new(recovery_database).recover_pending()
-        })
-        .await
-        .context("falló el worker de recuperación de publicaciones OKF")??;
+        let blocking_paths = paths.clone();
+        let (core_paths, database, recovery, identity, public_identity, access) =
+            tokio::task::spawn_blocking(move || {
+                let core_paths = CoreAppPaths::at(&blocking_paths.data);
+                core_paths.ensure()?;
+                let database = Database::open(&blocking_paths.database)?;
+                let bundled_bootstrap_indexes = parse_bundled_bootstrap_federation_indexes(
+                    BUNDLED_BOOTSTRAP_FEDERATION_INDEXES,
+                )?;
+                let bootstrap_database = database.clone();
+                install_bundled_bootstrap_federation_indexes(
+                    &bootstrap_database,
+                    bundled_bootstrap_indexes,
+                )?;
+                let recovery =
+                    OkfPublicationMaterializer::new(database.clone()).recover_pending()?;
+                let identity = NodeIdentity::load_or_create(secret_store.as_ref())
+                    .context("no se pudo cargar la identidad Ed25519 del dispositivo")?;
+                let public_identity =
+                    NodeIdentity::load_or_create_public_publisher(secret_store.as_ref())
+                        .context("no se pudo cargar la identidad pública Ed25519")?;
+                let access = restore_access_control(&database)?;
+                Ok::<_, anyhow::Error>((
+                    core_paths,
+                    database,
+                    recovery,
+                    identity,
+                    public_identity,
+                    access,
+                ))
+            })
+            .await
+            .context("se detuvo el worker de bootstrap privado")??;
         if recovery.pending > 0 {
             tracing::warn!(
                 pending = recovery.pending,
@@ -1234,12 +1247,7 @@ impl DesktopServices {
                 "some OKF publications remain pending after startup recovery"
             );
         }
-        let identity = NodeIdentity::load_or_create(secret_store.as_ref())
-            .context("no se pudo cargar la identidad Ed25519 del dispositivo")?;
-        let public_identity = NodeIdentity::load_or_create_public_publisher(secret_store.as_ref())
-            .context("no se pudo cargar la identidad pública Ed25519")?;
         let node_id = identity.peer_id().to_string();
-        let access = restore_access_control(&database)?;
 
         let authorized_proxy = Arc::new(DynamicAuthorizedSearchBackend::new(
             database.clone(),

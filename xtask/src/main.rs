@@ -7554,6 +7554,11 @@ mod tests {
         assert!(payload.contains("__TAURI_BUNDLE_TYPE_VAR_UNK"));
         assert!(payload.contains("__TAURI_BUNDLE_TYPE_VAR_NSS"));
         assert!(payload.contains("differs beyond the required Tauri NSIS bundle marker"));
+        let smoke =
+            fs::read_to_string(workspace_root().join("packaging/smoke-install-windows.ps1"))
+                .unwrap();
+        assert!(smoke.contains("Assert-WindowsNsisBundleTypePatch"));
+        assert!(smoke.contains("verified installed desktop executable"));
         assert!(
             script.contains(
                 "(Join-Path $PayloadRoot \"integrations\\bridge\\airwiki-mcp-bridge.exe\")"

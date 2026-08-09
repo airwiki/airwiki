@@ -4382,8 +4382,12 @@ fn verify_windows_installer_preflight_sources(template: &str) -> Result<()> {
         .find("${GetOptions} $CMDLINE \"/P\"")
         .context("NSIS must parse passive mode after the platform gate")?;
     let context = init
-        .find("!insertmacro SetContext")
+        .find("!insertmacro AirWikiSetContext")
         .context("NSIS must select its fixed registry context")?;
+    ensure!(
+        template.contains("!macro AirWikiSetContext") && !template.contains("!macro SetContext"),
+        "NSIS registry context macro must remain product-scoped to avoid Tauri collisions"
+    );
     let classify_call = init
         .find("Call ClassifyExistingInstallation")
         .context("NSIS must classify before every installer page")?;

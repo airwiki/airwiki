@@ -4626,11 +4626,11 @@ fn verify_windows_update_handoff_sources(template: &str, updater: &str) -> Resul
         .find("Call WaitForAirWikiUpdateShutdown")
         .context("NSIS install section does not wait for a clean updater shutdown")?;
     let recovery = install
-        .find("!insertmacro CheckIfAppIsRunning")
+        .find("!insertmacro CheckIfAppIsRunning \"${MAINBINARYNAME}.exe\" \"${PRODUCTNAME}\"")
         .context("NSIS install section has no stuck-process recovery")?;
     ensure!(
-        graceful_wait < recovery,
-        "NSIS must wait for clean updater shutdown before stuck-process recovery"
+        graceful_wait < recovery && !template.contains("!macro CheckIfAppIsRunning"),
+        "NSIS must use Tauri's current-user-aware stuck-process recovery after the clean updater shutdown wait"
     );
 
     ensure!(
@@ -6837,13 +6837,17 @@ mod tests {
     fn windows_update_handoff_rejects_forced_recovery_before_the_clean_wait() {
         let (template, updater) = windows_update_handoff_sources();
         let unsafe_template = template.replace(
-            "Call WaitForAirWikiUpdateShutdown\n  !insertmacro CheckIfAppIsRunning",
-            "!insertmacro CheckIfAppIsRunning\n  Call WaitForAirWikiUpdateShutdown",
+            "Call WaitForAirWikiUpdateShutdown\n  !insertmacro CheckIfAppIsRunning \"${MAINBINARYNAME}.exe\" \"${PRODUCTNAME}\"",
+            "!insertmacro CheckIfAppIsRunning \"${MAINBINARYNAME}.exe\" \"${PRODUCTNAME}\"\n  Call WaitForAirWikiUpdateShutdown",
         );
 
         let error = verify_windows_update_handoff_sources(&unsafe_template, &updater).unwrap_err();
 
-        assert!(error.to_string().contains("before stuck-process recovery"));
+        assert!(
+            error
+                .to_string()
+                .contains("after the clean updater shutdown")
+        );
     }
 
     #[test]

@@ -1,10 +1,9 @@
 <script lang="ts">
   import BookOpen from '@lucide/svelte/icons/book-open';
-  import CheckCircle2 from '@lucide/svelte/icons/circle-check-big';
-  import Search from '@lucide/svelte/icons/search';
+  import Share2 from '@lucide/svelte/icons/share-2';
   import Settings2 from '@lucide/svelte/icons/settings-2';
 
-  type Destination = 'library' | 'review' | 'search' | 'system';
+  type Destination = 'library' | 'review' | 'search' | 'share' | 'system';
 
   export let destination: Destination;
   export let status: string;
@@ -14,9 +13,8 @@
 
   const destinations = [
     { id: 'library', labelId: 'desktop-nav-library', icon: BookOpen, shortcut: '1' },
-    { id: 'review', labelId: 'nav-review', icon: CheckCircle2, shortcut: '2' },
-    { id: 'search', labelId: 'nav-search', icon: Search, shortcut: '3' },
-    { id: 'system', labelId: 'desktop-nav-system', icon: Settings2, shortcut: '4' }
+    { id: 'share', labelId: 'desktop-nav-share', icon: Share2, shortcut: '2' },
+    { id: 'system', labelId: 'desktop-nav-system', icon: Settings2, shortcut: '3' }
   ] as const;
 </script>
 

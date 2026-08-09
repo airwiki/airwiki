@@ -8,7 +8,7 @@ import { readySnapshot } from './test/fixtures';
 let snapshot = readySnapshot();
 const accessibilityCases = (['es', 'en'] as const).flatMap((locale) =>
   (['light', 'dark'] as const).flatMap((theme) =>
-    (['library', 'review', 'search', 'system/models', 'system/preferences', 'system/updates', 'system/connectivity', 'system/devices', 'system/integrations'] as const)
+    (['library', 'review', 'search', 'share/devices', 'share/integrations', 'share/connectivity', 'system/models', 'system/preferences', 'system/updates'] as const)
       .map((route) => [locale, theme, route] as const)
   )
 );
@@ -44,13 +44,15 @@ describe('AirWiki desktop shell', () => {
     snapshot = readySnapshot();
   });
 
-  it('renders the four primary destinations and a local-first collection', async () => {
+  it('renders a cohesive wiki, sharing, and system navigation', async () => {
     render(App);
 
     expect(await screen.findByText('Atlas')).toBeInTheDocument();
-    for (const destination of ['Biblioteca', 'Revisión', 'Buscar', 'Sistema']) {
+    for (const destination of ['Wiki', 'Compartir', 'Sistema']) {
       expect(screen.getByRole('button', { name: destination })).toBeInTheDocument();
     }
+    expect(screen.getByRole('search')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Por revisar · 0' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Agregar carpeta' })).toBeInTheDocument();
   });
 
@@ -61,6 +63,41 @@ describe('AirWiki desktop shell', () => {
 
     expect(loadKnowledgeBundle).toHaveBeenCalledOnce();
     expect(screen.queryByText(/Comprobando la salud/)).not.toBeInTheDocument();
+  });
+
+  it('keeps search available while moving between product areas', async () => {
+    render(App);
+
+    const search = await screen.findByRole('textbox', { name: 'Pregunta a tu conocimiento' });
+    await fireEvent.click(screen.getByRole('button', { name: 'Compartir' }));
+    expect(search).toBeInTheDocument();
+    await fireEvent.click(screen.getByRole('button', { name: 'Sistema' }));
+    expect(search).toBeInTheDocument();
+    await fireEvent.focus(search);
+    expect(await screen.findByRole('heading', { name: 'Buscar evidencia' })).toBeInTheDocument();
+  });
+
+  it('explains the editorial path and keeps review inside the wiki', async () => {
+    render(App);
+
+    expect(await screen.findByRole('navigation', { name: 'Cómo entra el conocimiento en tu wiki' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Fuentes 3' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /IA local/ })).toBeInTheDocument();
+    await fireEvent.click(screen.getByRole('button', { name: 'Por revisar · 0' }));
+    expect(await screen.findByRole('heading', { name: 'Revisión humana' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Wiki publicada' })).toBeInTheDocument();
+  });
+
+  it('groups collection, device, AI, and public access under Share', async () => {
+    render(App);
+
+    await fireEvent.click(await screen.findByRole('button', { name: 'Compartir' }));
+    expect(await screen.findByRole('heading', { name: 'Compartir empieza con conocimiento revisado' })).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Elige qué puede salir de este equipo' })).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: 'Otros equipos' })).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: 'Aplicaciones de chat' })).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: 'Conexión local' })).toBeInTheDocument();
+    expect(screen.queryByRole('link', { name: 'Actualizaciones' })).not.toBeInTheDocument();
   });
 
   it('opens a local search hit as a document even when the graph was selected', async () => {
@@ -115,7 +152,7 @@ describe('AirWiki desktop shell', () => {
 
     await fireEvent.click(await screen.findByRole('button', { name: 'Abrir' }));
     await fireEvent.click(screen.getByRole('button', { name: 'Grafo' }));
-    await fireEvent.click(screen.getByRole('button', { name: 'Buscar' }));
+    await fireEvent.focus(screen.getByRole('textbox', { name: 'Pregunta a tu conocimiento' }));
     await fireEvent.click(screen.getByRole('button', { name: 'Abrir evidencia local' }));
 
     expect(loadKnowledgePage).toHaveBeenCalledWith(collection.id, { kind: 'concept', id: conceptId });
@@ -159,11 +196,11 @@ describe('AirWiki desktop shell', () => {
     await fireEvent.click(screen.getByRole('link', { name: 'Actualizaciones' }));
     expect(pushState).toHaveBeenCalledTimes(2);
 
-    await fireEvent.click(screen.getByRole('button', { name: 'Biblioteca' }));
+    await fireEvent.click(screen.getByRole('button', { name: 'Wiki' }));
     await waitFor(() => expect(scrollTo).toHaveBeenLastCalledWith({
       top: 0, left: 0, behavior: 'auto'
     }));
-    expect(await screen.findByRole('heading', { name: 'Tu conocimiento, en este equipo' })).toBeInTheDocument();
+    expect(await screen.findByRole('heading', { name: 'Tu wiki verificada' })).toBeInTheDocument();
 
     window.history.pushState(null, '', '#search');
     window.dispatchEvent(new PopStateEvent('popstate'));
@@ -179,7 +216,7 @@ describe('AirWiki desktop shell', () => {
     if (hardware) hardware.availableMemoryBytes = 0;
     render(App);
 
-    await fireEvent.click(await screen.findByRole('button', { name: 'Sistema' }));
+    await fireEvent.click(await screen.findByRole('button', { name: 'Compartir' }));
     await fireEvent.click(screen.getByRole('link', { name: 'Otros equipos' }));
 
     expect(await screen.findByText('Memoria instalada')).toBeInTheDocument();
@@ -193,11 +230,11 @@ describe('AirWiki desktop shell', () => {
     if (preferences) preferences.locale = 'en';
     render(App);
 
-    expect(await screen.findByRole('button', { name: 'Library' })).toBeInTheDocument();
-    for (const destination of ['Review', 'Search', 'System']) {
+    expect(await screen.findByRole('button', { name: 'Wiki' })).toBeInTheDocument();
+    for (const destination of ['Share', 'System']) {
       expect(screen.getByRole('button', { name: destination })).toBeInTheDocument();
     }
-    expect(screen.queryByRole('button', { name: 'Biblioteca' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Compartir' })).not.toBeInTheDocument();
   });
 
   it('applies an explicit persisted theme to the document', async () => {
@@ -222,10 +259,11 @@ describe('AirWiki desktop shell', () => {
 
   it('supports local desktop navigation shortcuts', async () => {
     render(App);
-    await screen.findByRole('button', { name: 'Biblioteca' });
+    await screen.findByRole('button', { name: 'Wiki' });
 
-    await fireEvent.keyDown(window, { key: '3', metaKey: true });
+    await fireEvent.keyDown(window, { key: 'k', metaKey: true });
     expect(await screen.findByRole('heading', { name: 'Buscar evidencia' })).toBeInTheDocument();
+    expect(screen.getByRole('textbox', { name: 'Pregunta a tu conocimiento' })).toHaveFocus();
     await fireEvent.keyDown(window, { key: ',', metaKey: true });
     expect(await screen.findByRole('link', { name: 'Preferencias del dispositivo' })).toHaveAttribute('aria-current', 'page');
   });
@@ -254,7 +292,7 @@ describe('AirWiki desktop shell', () => {
     }
     window.location.hash = route;
     const { container } = render(App);
-    await screen.findByRole('button', { name: locale === 'en' ? 'Library' : 'Biblioteca' });
+    await screen.findByRole('button', { name: 'Wiki' });
     const result = await axe.run(container, { runOnly: { type: 'tag', values: ['wcag2a', 'wcag2aa'] } });
     expect(result.violations.filter((violation: (typeof result.violations)[number]) => ['serious', 'critical'].includes(violation.impact ?? ''))).toEqual([]);
   });

@@ -20,7 +20,7 @@ async function selectValue(selector: string, index: number, value: string): Prom
 async function measureNavigationPaintP95(): Promise<number> {
   const result = await browser.executeAsync((done) => {
     const buttons = Array.from(document.querySelectorAll<HTMLButtonElement>('nav button'));
-    if (buttons.length !== 4) {
+    if (buttons.length !== 3) {
       done([]);
       return;
     }
@@ -68,15 +68,30 @@ async function setCssViewport(width: number, height: number): Promise<void> {
 async function navigateToDestination(index: number): Promise<void> {
   const navigation = await $$('.rail nav button');
   await required(navigation[index], `destination ${index}`).click();
-  const expected = ['library', 'review', 'search', 'system'][index];
+  const expected = ['library', 'share', 'system'][index];
   await browser.waitUntil(
     () => browser.execute((route) => document.querySelector('.route-page')?.getAttribute('data-route') === route, expected),
     { timeout: 10_000, timeoutMsg: `destination ${expected} did not become interactive` }
   );
 }
 
+async function navigateToRoute(route: 'library' | 'review' | 'search' | 'share' | 'system'): Promise<void> {
+  if (route === 'library') await navigateToDestination(0);
+  if (route === 'share') await navigateToDestination(1);
+  if (route === 'system') await navigateToDestination(2);
+  if (route === 'review') {
+    await navigateToDestination(0);
+    await $('.wiki-tabs button:nth-child(2)').click();
+  }
+  if (route === 'search') await $('#global-knowledge-search').click();
+  await browser.waitUntil(
+    () => browser.execute((expected) => document.querySelector('.route-page')?.getAttribute('data-route') === expected, route),
+    { timeout: 10_000, timeoutMsg: `route ${route} did not become interactive` }
+  );
+}
+
 async function configureVisualPreferences(locale: 'en' | 'es', theme: 'light' | 'dark'): Promise<void> {
-  await navigateToDestination(3);
+  await navigateToDestination(2);
   await $('#system-preferences').waitForDisplayed();
   await selectValue('#system-preferences select', 0, locale);
   await selectValue('#system-preferences select', 1, theme);
@@ -93,14 +108,14 @@ async function assertVisualMatrix(): Promise<void> {
     { width: 1180, height: 760 },
     { width: 1440, height: 900 }
   ];
-  const routes = ['library', 'review', 'search', 'system'] as const;
+  const routes = ['library', 'review', 'search', 'share', 'system'] as const;
   for (const locale of ['en', 'es'] as const) {
     for (const theme of ['light', 'dark'] as const) {
       await configureVisualPreferences(locale, theme);
       for (const viewport of viewports) {
         await setCssViewport(viewport.width, viewport.height);
         for (let index = 0; index < routes.length; index += 1) {
-          await navigateToDestination(index);
+          await navigateToRoute(routes[index] ?? 'library');
           const result = await browser.checkScreen(`${locale}-${theme}-${routes[index]}`);
           const mismatch = typeof result === 'number' ? result : result.misMatchPercentage;
           expect(mismatch).toBeLessThanOrEqual(0.1);
@@ -146,9 +161,10 @@ describe('AirWiki real IPC journey', () => {
       const detail = await message.isExisting() ? await message.getText() : 'no UI error';
       throw new Error(`onboarding did not complete: ${detail}`, { cause: error });
     }
-    for (const destination of ['Library', 'Review', 'Search', 'System']) {
+    for (const destination of ['Wiki', 'Share', 'System']) {
       await expect($(`button*=${destination}`)).toBeDisplayed();
     }
+    await expect($('#global-knowledge-search')).toBeDisplayed();
     expect(await measureNavigationPaintP95()).toBeLessThanOrEqual(100);
 
     const devicePixelRatio = await browser.execute(() => window.devicePixelRatio || 1);

@@ -12,18 +12,19 @@
   import { addCollection, addFederationIndex, approveReview, browsePublicCollection, cancelModelInstall, checkUpdates, configureFirewall, confirmPairing, connect, dialPeer, downloadUpdate, executeGuidedWikiRepair, hideToTray, installModels, installUpdate, loadKnowledgeBundle, loadKnowledgePage, loadReviewEvidence, manageIntegration, openExternalLink, openSystemDestination, pairPeer, pickCollectionFolder, prepareGuidedWikiRepair, quitCompletely, reanalyzeReview, refreshAutostart, refreshConnectivity, refreshWikiHealth, rejectReview, relinkCollection, removeFederationIndex, rescanCollection, revokePeer, searchKnowledge, setAutostart, setCollectionGrant, setPublicPublisherBlocked, updateCollectionPolicy, updatePreferences, updatePublicCollectionProfile, type AppSnapshot, type CloseBehavior, type CollectionPolicyInput, type CollectionSummary, type EnrichmentDraft, type FolderSelection, type IntegrationActionInput, type IntegrationClient, type KnowledgePageInput, type LanPreference, type LocalePreference, type ReviewSummary, type SearchHitSummary, type SystemDestination, type ThemePreference } from './api';
   import KnowledgeGraph from './KnowledgeGraph.svelte';
   import ContextAtlas from './ContextAtlas.svelte';
+  import GlobalSearch from './GlobalSearch.svelte';
   import NavigationRail from './NavigationRail.svelte';
   import OnboardingFlow from './OnboardingFlow.svelte';
+  import WikiSpine from './WikiSpine.svelte';
   import type { AtlasModel } from './atlas';
   import { message, resolveLocale, type MessageArgs } from './i18n';
 
-  type Destination = 'library' | 'review' | 'search' | 'system';
+  type Destination = 'library' | 'review' | 'search' | 'share' | 'system';
   type SystemSection = 'models' | 'preferences' | 'updates' | 'connectivity' | 'devices' | 'integrations';
 
   const destinations = [
     { id: 'library', labelId: 'desktop-nav-library' },
-    { id: 'review', labelId: 'nav-review' },
-    { id: 'search', labelId: 'nav-search' },
+    { id: 'share', labelId: 'desktop-nav-share' },
     { id: 'system', labelId: 'desktop-nav-system' }
   ] as const;
   const systemSections = [
@@ -34,6 +35,8 @@
     { id: 'devices', labelId: 'devices-title' },
     { id: 'integrations', labelId: 'integrations-title' }
   ] as const;
+  const deviceSections = systemSections.filter((section) => ['models', 'preferences', 'updates'].includes(section.id));
+  const sharingSections = systemSections.filter((section) => ['devices', 'integrations', 'connectivity'].includes(section.id));
 
   let destination: Destination = 'library';
   let systemSection: SystemSection = 'preferences';
@@ -92,7 +95,7 @@
   function openSystemSection(event: MouseEvent, section: SystemSection) {
     event.preventDefault();
     systemSection = section;
-    pushHash(`#system/${section}`);
+    pushHash(`#${destination === 'share' ? 'share' : 'system'}/${section}`);
     scrollMainTo(0);
   }
 
@@ -107,8 +110,8 @@
 
   let t = translate;
   $: t = translatorFor(locale);
-  $: currentPageTitleId = destination === 'library' ? 'desktop-page-library-title' : destination === 'review' ? 'desktop-page-review-title' : destination === 'search' ? 'desktop-page-search-title' : systemSections.find((section) => section.id === systemSection)?.labelId ?? 'desktop-page-system-title';
-  $: currentPageDescriptionId = destination === 'library' ? 'desktop-page-library-body' : destination === 'review' ? 'desktop-page-review-body' : destination === 'search' ? 'desktop-page-search-body' : 'desktop-page-system-body';
+  $: currentPageTitleId = destination === 'library' ? 'desktop-page-library-title' : destination === 'review' ? 'desktop-page-review-title' : destination === 'search' ? 'desktop-page-search-title' : destination === 'share' ? 'desktop-page-share-title' : systemSections.find((section) => section.id === systemSection)?.labelId ?? 'desktop-page-system-title';
+  $: currentPageDescriptionId = destination === 'library' ? 'desktop-page-library-body' : destination === 'review' ? 'desktop-page-review-body' : destination === 'search' ? 'desktop-page-search-body' : destination === 'share' ? 'desktop-page-share-body' : 'desktop-page-system-body';
   $: currentNextActionLabel = nextActionLabel(locale, destination, snapshot?.reviews.length ?? 0);
   $: currentAtlas = atlasModel(destination, systemSection, snapshot, selectedReview, selectedCollectionId, question, includePublic);
 
@@ -125,14 +128,27 @@
       const matchedDestination = destinations.find((candidate) => candidate.id === route);
       if (matchedDestination) {
         destination = matchedDestination.id;
-        if (matchedDestination.id !== 'system') scrollMainTo(0);
+        scrollMainTo(0);
+      } else if (route === 'review' || route === 'search') {
+        destination = route;
+        scrollMainTo(0);
       }
       const matchedSection = systemSections.find((candidate) => candidate.id === section);
-      if (route === 'system' && matchedSection) {
+      if (route === 'system' && matchedSection && sharingSections.some((candidate) => candidate.id === matchedSection.id)) {
+        destination = 'share';
+        systemSection = matchedSection.id;
+        scrollMainTo(0);
+      } else if (route === 'system' && matchedSection) {
         systemSection = matchedSection.id;
         scrollMainTo(0);
       } else if (route === 'system') {
         systemSection = 'preferences';
+        scrollMainTo(0);
+      } else if (route === 'share' && matchedSection && sharingSections.some((candidate) => candidate.id === matchedSection.id)) {
+        systemSection = matchedSection.id;
+        scrollMainTo(0);
+      } else if (route === 'share') {
+        systemSection = 'devices';
         scrollMainTo(0);
       }
     };
@@ -141,14 +157,13 @@
     window.addEventListener('popstate', syncRoute);
     const handleShortcut = (event: KeyboardEvent) => {
       const command = event.metaKey || event.ctrlKey;
-      if (command && ['1', '2', '3', '4'].includes(event.key)) {
+      if (command && ['1', '2', '3'].includes(event.key)) {
         event.preventDefault();
         const target = destinations[Number(event.key) - 1];
         if (target) select(target.id);
       } else if (command && event.key.toLowerCase() === 'k') {
         event.preventDefault();
-        select('search');
-        requestAnimationFrame(() => document.querySelector<HTMLTextAreaElement>('#knowledge-question')?.focus());
+        requestAnimationFrame(() => document.querySelector<HTMLInputElement>('#global-knowledge-search')?.focus());
       } else if (command && event.key === ',') {
         event.preventDefault();
         select('system');
@@ -206,7 +221,7 @@
       await tick();
       syncRoute();
     }).catch(() => { runtimeMessageId = 'error-generic'; });
-    if (destination === 'system') {
+    if (destination === 'system' || destination === 'share') {
       void refreshAutostartState();
       void runConnectivityAction('refresh');
       void runIntegrationAction({ kind: 'refresh' });
@@ -228,10 +243,31 @@
       void refreshAutostartState();
       void runConnectivityAction('refresh');
       void runIntegrationAction({ kind: 'refresh' });
+    } else if (next === 'share') {
+      systemSection = 'devices';
+      pushHash('#share/devices');
+      void runConnectivityAction('refresh');
+      void runIntegrationAction({ kind: 'refresh' });
     } else {
       window.location.hash = next;
     }
     if (next === 'library') void refreshHealth();
+  }
+
+  function selectFromSpine(next: 'library' | 'review' | 'share' | 'system', section?: 'models') {
+    select(next);
+    if (next === 'system' && section) {
+      systemSection = section;
+      pushHash(`#system/${section}`);
+    }
+  }
+
+  function openSearch() {
+    if (destination !== 'search') {
+      destination = 'search';
+      pushHash('#search');
+      scrollMainTo(0);
+    }
   }
 
   function integrationName(client: IntegrationClient): string {
@@ -418,6 +454,7 @@
     if (currentDestination === 'library') return message(currentLocale, 'primary-button-add-folder');
     if (currentDestination === 'review') return message(currentLocale, reviewCount ? 'action-review' : 'review-empty-title');
     if (currentDestination === 'search') return message(currentLocale, 'search-question');
+    if (currentDestination === 'share') return message(currentLocale, 'desktop-share-manage');
     return message(currentLocale, 'action-confirm');
   }
 
@@ -499,17 +536,37 @@
         edges: [{ source: 'query', target: 'local' }, ...(includePublic ? [{ source: 'query', target: 'public' }] : [])]
       };
     }
+    if (destination === 'share') {
+      const sharedCollections = snapshot?.collections.filter((collection) => collection.peerShareable || collection.allowExternalAi || collection.internetPublic).length ?? 0;
+      return {
+        title: t('desktop-page-share-title'),
+        description: t('desktop-atlas-share-body'),
+        nodes: [
+          { id: 'wiki', label: t('desktop-spine-wiki'), detail: String(snapshot?.collections.reduce((total, item) => total + item.publishedCount, 0) ?? 0), tone: 'verified' },
+          { id: 'collections', label: t('desktop-share-permissions'), detail: String(sharedCollections), tone: sharedCollections ? 'active' : 'neutral' },
+          { id: 'devices', label: t('devices-title'), detail: String(snapshot?.peers.filter((peer) => peer.trust === 'trusted').length ?? 0), tone: snapshot?.peers.some((peer) => peer.trust === 'trusted') ? 'verified' : 'neutral' },
+          { id: 'integrations', label: t('desktop-share-ai-apps'), detail: String(snapshot?.integrations?.externalAiCollectionCount ?? 0), tone: snapshot?.integrations?.externalAiCollectionCount ? 'ai' : 'neutral' },
+          { id: 'public', label: t('desktop-share-public'), detail: String(snapshot?.collections.filter((collection) => collection.internetPublic).length ?? 0), tone: snapshot?.collections.some((collection) => collection.internetPublic) ? 'active' : 'neutral' }
+        ],
+        edges: [
+          { source: 'wiki', target: 'collections' },
+          { source: 'collections', target: 'devices' },
+          { source: 'collections', target: 'integrations' },
+          { source: 'collections', target: 'public' }
+        ],
+        selectedId: systemSection === 'devices' ? 'devices' : systemSection === 'integrations' ? 'integrations' : systemSection === 'connectivity' ? 'public' : 'collections'
+      };
+    }
     return {
       title: t(systemSections.find((section) => section.id === systemSection)?.labelId ?? 'desktop-nav-system'),
       description: t('desktop-atlas-system-body'),
       nodes: [
         { id: 'device', label: t('desktop-this-device'), tone: 'active' },
         { id: 'model', label: t('settings-local-ai'), detail: snapshot?.model?.active ? t('models-ready') : t('models-pending'), tone: snapshot?.model?.active ? 'verified' : 'attention' },
-        { id: 'network', label: t('desktop-connectivity'), detail: connectivityLabel(locale), tone: snapshot?.lanRuntime?.listener === 'listening' ? 'verified' : lanPreference === 'disabled' ? 'neutral' : 'attention' },
-        { id: 'integrations', label: t('integrations-title'), detail: String(snapshot?.integrations?.integrations.length ?? 0), tone: snapshot?.integrations?.integrations.some((integration) => integration.status === 'configured') ? 'verified' : 'neutral' }
+        { id: 'updates', label: t('updates-title'), detail: updaterLabel(locale), tone: snapshot?.updater?.status === 'available' ? 'attention' : 'neutral' }
       ],
-      edges: [{ source: 'device', target: 'model' }, { source: 'device', target: 'network' }, { source: 'device', target: 'integrations' }],
-      selectedId: systemSection === 'models' ? 'model' : systemSection === 'connectivity' || systemSection === 'devices' ? 'network' : systemSection === 'integrations' ? 'integrations' : 'device'
+      edges: [{ source: 'device', target: 'model' }, { source: 'device', target: 'updates' }],
+      selectedId: systemSection === 'models' ? 'model' : systemSection === 'updates' ? 'updates' : 'device'
     };
   }
 
@@ -524,6 +581,7 @@
     if (destination === 'review' && snapshot?.reviews[0]) await openReview(snapshot.reviews[0]);
     if (destination === 'search') document.querySelector<HTMLTextAreaElement>('#knowledge-question')?.focus();
     if (destination === 'system') await savePreferences(false);
+    if (destination === 'share') select('share');
   }
 
   async function chooseFolder() {
@@ -875,14 +933,26 @@
 
   <main bind:this={mainScrollRegion}>
     <header class="command-bar">
-      <div><p class="eyebrow">{t(destinations.find((item) => item.id === destination)?.labelId ?? 'app-title')}</p><h1>{t(currentPageTitleId)}</h1><p>{t(currentPageDescriptionId)}</p></div>
-      {#if destination !== 'system'}<button class="primary command-action" onclick={runNextAction} disabled={destination === 'review' && !snapshot.reviews.length}><Sparkles size={17} />{currentNextActionLabel}</button>{/if}
+      <GlobalSearch bind:question bind:includePublic busy={actionBusy} platform={snapshot.platform} {t} onopen={openSearch} onsearch={() => { openSearch(); void submitSearch(); }} />
+      <div class="command-context">
+        <div><p class="eyebrow">{destination === 'review' ? t('nav-review') : destination === 'search' ? t('nav-search') : t(destinations.find((item) => item.id === destination)?.labelId ?? 'app-title')}</p><h1>{t(currentPageTitleId)}</h1><p>{t(currentPageDescriptionId)}</p></div>
+        {#if destination === 'library' || destination === 'review'}<button class="primary command-action" onclick={runNextAction} disabled={destination === 'review' && !snapshot.reviews.length}><Sparkles size={17} />{currentNextActionLabel}</button>{/if}
+      </div>
     </header>
 
     <div class="page-grid">
       <section class="workspace" aria-live="polite">
         <div class="content">
-          {#key `${destination}:${destination === 'system' ? systemSection : ''}`}
+          {#if destination !== 'search' && destination !== 'system'}
+            <WikiSpine {snapshot} {destination} {t} onselect={selectFromSpine} />
+          {/if}
+          {#if destination === 'library' || destination === 'review'}
+            <nav class="wiki-tabs" aria-label={t('desktop-wiki-sections')}>
+              <button class:active={destination === 'library'} aria-current={destination === 'library' ? 'page' : undefined} onclick={() => select('library')}>{t('desktop-wiki-published')}</button>
+              <button class:active={destination === 'review'} class:attention={snapshot.reviews.length > 0} aria-current={destination === 'review' ? 'page' : undefined} onclick={() => select('review')}>{t('desktop-wiki-review-inbox', { count: snapshot.reviews.length })}</button>
+            </nav>
+          {/if}
+          {#key `${destination}:${destination === 'system' || destination === 'share' ? systemSection : ''}`}
           <div class="route-page" data-route={destination}>
 
         {#if destination === 'library' && snapshot?.wikiHealth}
@@ -921,7 +991,7 @@
           </div>
         {/if}
 
-        {#if destination === 'library' && editingCollectionId}
+        {#if (destination === 'library' || destination === 'share') && editingCollectionId}
           {@const activeCollection = snapshot?.collections.find((collection) => collection.id === editingCollectionId)}
           <section class="collection-settings" aria-labelledby="collection-settings-title">
             <div class="settings-heading"><div><p class="section-label">{t('collections-access-title')}</p><h3 id="collection-settings-title">{activeCollection?.name}</h3></div><button class="text-action" onclick={() => { editingCollectionId = null; relinkSelection = null; }}>{t('action-cancel')}</button></div>
@@ -1051,10 +1121,30 @@
           </div>
         {/if}
 
-        {#if destination === 'system' && snapshot}
-          <nav class="system-subnav" aria-label={t('nav-group-system')}>
-            {#each systemSections as section (section.id)}
-              <a href={`#system/${section.id}`} aria-current={systemSection === section.id ? 'page' : undefined} onclick={(event) => openSystemSection(event, section.id)}>{t(section.labelId)}</a>
+        {#if destination === 'share' && snapshot}
+          <section class="share-intro" aria-labelledby="share-intro-title">
+            <div><p class="section-label">{t('desktop-share-boundary')}</p><h2 id="share-intro-title">{t('desktop-share-intro-title')}</h2><p>{t('desktop-share-intro-body')}</p></div>
+            <div class="share-channels">
+              <span><strong>{snapshot.collections.filter((collection) => collection.peerShareable).length}</strong>{t('desktop-share-nearby')}</span>
+              <span class="ai"><strong>{snapshot.collections.filter((collection) => collection.allowExternalAi).length}</strong>{t('desktop-share-ai-apps')}</span>
+              <span><strong>{snapshot.collections.filter((collection) => collection.internetPublic).length}</strong>{t('desktop-share-public')}</span>
+            </div>
+          </section>
+          <section class="share-collections" aria-labelledby="share-collections-title">
+            <div class="settings-heading"><div><p class="section-label">{t('desktop-share-permissions')}</p><h3 id="share-collections-title">{t('desktop-share-choose-knowledge')}</h3></div></div>
+            <p>{t('desktop-share-collection-body')}</p>
+            <div class="records">
+              {#each snapshot.collections as collection (collection.id)}
+                <article><div><strong>{collection.name}</strong><small>{collection.localOnly ? t('collections-local-only') : [collection.peerShareable ? t('desktop-share-nearby') : '', collection.allowExternalAi ? t('desktop-share-ai-apps') : '', collection.internetPublic ? t('desktop-share-public') : ''].filter(Boolean).join(' · ')}</small></div><button class="secondary" onclick={() => editCollection(collection)}>{t('desktop-share-manage')}</button></article>
+              {:else}<p class="empty">{t('desktop-share-empty')}</p>{/each}
+            </div>
+          </section>
+        {/if}
+
+        {#if (destination === 'system' || destination === 'share') && snapshot}
+          <nav class="system-subnav" aria-label={destination === 'share' ? t('desktop-nav-share') : t('nav-group-system')}>
+            {#each destination === 'share' ? sharingSections : deviceSections as section (section.id)}
+              <a href={`#${destination}/${section.id}`} aria-current={systemSection === section.id ? 'page' : undefined} onclick={(event) => openSystemSection(event, section.id)}>{t(section.labelId)}</a>
             {/each}
           </nav>
           <div class="system-page">
@@ -1092,12 +1182,10 @@
         {/if}
 
         {#if destination === 'search'}
-          <form class="search-panel" onsubmit={(event) => { event.preventDefault(); submitSearch(); }}>
-            <label for="knowledge-question">{t('desktop-search-question')}</label>
-            <textarea id="knowledge-question" bind:value={question} maxlength="4096" rows="4" placeholder={t('desktop-search-placeholder')} required></textarea>
-            <label class="check"><input type="checkbox" bind:checked={includePublic} /> {t('desktop-search-include-public')}</label>
-            <button class="primary" disabled={actionBusy}>{t('desktop-search-evidence')}</button>
-          </form>
+          <section class="search-context">
+            <p class="section-label">{includePublic ? t('desktop-search-all-sources') : t('desktop-search-this-device')}</p>
+            <p>{t('desktop-search-persistent-help')}</p>
+          </section>
           {#if snapshot?.search}
             <div class="search-results" aria-live="polite">
               <p class="section-label">{snapshot.search.status === 'searching' ? t('desktop-search-partial') : t('desktop-search-found')}</p>

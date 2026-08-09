@@ -7609,7 +7609,10 @@ mod tests {
         assert!(workflow.contains("licenses:check macos-arm64"));
         assert!(workflow.contains("licenses:check windows-x64"));
         assert!(docs.contains("--ignore-scripts --prod=false"));
-        assert_eq!(npmrc.trim(), "ignore-scripts=true");
+        assert_eq!(
+            npmrc.lines().collect::<Vec<_>>(),
+            ["ignore-scripts=true", "engine-strict=true"]
+        );
         for tool in ["tauri", "svelte-check", "vite"] {
             assert!(macos.contains(tool));
             assert!(windows.contains(tool));

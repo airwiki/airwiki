@@ -51,7 +51,7 @@ use crate::{
         TauriUpdateBackend, UpdateBackend, UpdateIssueCode, UpdateSummary, UpdaterBuildConfig,
         UpdaterDisabledReason, UpdaterStatus, UpdaterView,
     },
-    worker::{DesktopPreferencesUpdate, WorkerCommand, WorkerEvent, run_worker},
+    worker::{DesktopPreferencesUpdate, WorkerCommand, WorkerEvent, WorkerIntent, run_worker},
 };
 
 const COMMAND_CAPACITY: usize = 64;
@@ -61,7 +61,7 @@ const CONTRACT_VERSION: u16 = 1;
 const FOLDER_SELECTION_TTL: Duration = Duration::from_secs(5 * 60);
 
 struct AppRuntime {
-    commands: mpsc::Sender<WorkerCommand>,
+    commands: mpsc::Sender<WorkerIntent>,
     cancellation: CancellationToken,
     snapshot: Mutex<watch::Receiver<PublishedSnapshot>>,
     folder_selections: Mutex<HashMap<Uuid, PendingFolderSelection>>,
@@ -1394,27 +1394,27 @@ fn connect(runtime: tauri::State<'_, AppRuntime>, events: Channel<UiEventEnvelop
 }
 
 #[tauri::command]
-fn install_models(
+async fn install_models(
     runtime: tauri::State<'_, AppRuntime>,
     licenses_confirmed: bool,
 ) -> Result<(), UiError> {
     if !licenses_confirmed {
         return Err(UiError::invalid("modelLicensesMustBeConfirmed"));
     }
-    send_command(&runtime, WorkerCommand::InstallModels)
+    send_command(&runtime, WorkerCommand::InstallModels).await
 }
 
 #[tauri::command]
-fn cancel_model_install(runtime: tauri::State<'_, AppRuntime>) -> Result<(), UiError> {
-    send_command(&runtime, WorkerCommand::CancelInstall)
+async fn cancel_model_install(runtime: tauri::State<'_, AppRuntime>) -> Result<(), UiError> {
+    send_command(&runtime, WorkerCommand::CancelInstall).await
 }
 
 #[tauri::command]
-fn set_model_profile(
+async fn set_model_profile(
     runtime: tauri::State<'_, AppRuntime>,
     profile: ModelProfile,
 ) -> Result<(), UiError> {
-    send_command(&runtime, WorkerCommand::SetModelProfile(profile))
+    send_command(&runtime, WorkerCommand::SetModelProfile(profile)).await
 }
 
 #[tauri::command]
@@ -1445,7 +1445,7 @@ async fn pick_collection_folder(
 }
 
 #[tauri::command]
-fn add_collection(
+async fn add_collection(
     runtime: tauri::State<'_, AppRuntime>,
     name: String,
     folder_token: String,
@@ -1462,10 +1462,11 @@ fn add_collection(
             folder,
         },
     )
+    .await
 }
 
 #[tauri::command]
-fn relink_collection(
+async fn relink_collection(
     runtime: tauri::State<'_, AppRuntime>,
     collection_id: String,
     folder_token: String,
@@ -1479,10 +1480,11 @@ fn relink_collection(
             folder,
         },
     )
+    .await
 }
 
 #[tauri::command]
-fn rescan_collection(
+async fn rescan_collection(
     runtime: tauri::State<'_, AppRuntime>,
     collection_id: String,
 ) -> Result<(), UiError> {
@@ -1490,10 +1492,11 @@ fn rescan_collection(
         &runtime,
         WorkerCommand::RescanCollection(parse_uuid(&collection_id)?),
     )
+    .await
 }
 
 #[tauri::command]
-fn update_collection_policy(
+async fn update_collection_policy(
     runtime: tauri::State<'_, AppRuntime>,
     collection_id: String,
     policy: CollectionPolicyInput,
@@ -1508,10 +1511,11 @@ fn update_collection_policy(
             internet_public: policy.internet_public,
         },
     )
+    .await
 }
 
 #[tauri::command]
-fn add_federation_index(
+async fn add_federation_index(
     runtime: tauri::State<'_, AppRuntime>,
     peer_id: String,
     address: String,
@@ -1522,10 +1526,11 @@ fn add_federation_index(
         &runtime,
         WorkerCommand::AddFederationIndex { peer_id, address },
     )
+    .await
 }
 
 #[tauri::command]
-fn remove_federation_index(
+async fn remove_federation_index(
     runtime: tauri::State<'_, AppRuntime>,
     peer_id: String,
 ) -> Result<(), UiError> {
@@ -1535,10 +1540,11 @@ fn remove_federation_index(
             peer_id: validate_peer_id(peer_id)?,
         },
     )
+    .await
 }
 
 #[tauri::command]
-fn update_public_collection_profile(
+async fn update_public_collection_profile(
     runtime: tauri::State<'_, AppRuntime>,
     collection_id: String,
     description: String,
@@ -1561,10 +1567,11 @@ fn update_public_collection_profile(
             languages,
         },
     )
+    .await
 }
 
 #[tauri::command]
-fn browse_public_collection(
+async fn browse_public_collection(
     runtime: tauri::State<'_, AppRuntime>,
     request_id: String,
     publisher_id: String,
@@ -1591,7 +1598,9 @@ fn browse_public_collection(
             collection_id: parse_uuid(&collection_id)?,
             cursor,
         },
-    ) {
+    )
+    .await
+    {
         if let Ok(mut requests) = runtime.requests.lock()
             && requests.public_browse == Some(request_id)
         {
@@ -1603,7 +1612,7 @@ fn browse_public_collection(
 }
 
 #[tauri::command]
-fn set_public_publisher_blocked(
+async fn set_public_publisher_blocked(
     runtime: tauri::State<'_, AppRuntime>,
     publisher_id: String,
     blocked: bool,
@@ -1615,26 +1624,28 @@ fn set_public_publisher_blocked(
             blocked,
         },
     )
+    .await
 }
 
 #[tauri::command]
-fn dial_peer(runtime: tauri::State<'_, AppRuntime>, address: String) -> Result<(), UiError> {
+async fn dial_peer(runtime: tauri::State<'_, AppRuntime>, address: String) -> Result<(), UiError> {
     send_command(
         &runtime,
         WorkerCommand::Dial {
             address: validate_network_address(address)?,
         },
     )
+    .await
 }
 
 #[tauri::command]
-fn pair_peer(runtime: tauri::State<'_, AppRuntime>, peer_id: String) -> Result<(), UiError> {
+async fn pair_peer(runtime: tauri::State<'_, AppRuntime>, peer_id: String) -> Result<(), UiError> {
     let peer_id = validate_peer_id(peer_id)?;
-    send_command(&runtime, WorkerCommand::Pair { peer_id })
+    send_command(&runtime, WorkerCommand::Pair { peer_id }).await
 }
 
 #[tauri::command]
-fn confirm_pairing(
+async fn confirm_pairing(
     runtime: tauri::State<'_, AppRuntime>,
     peer_id: String,
     accepted: bool,
@@ -1644,16 +1655,20 @@ fn confirm_pairing(
         &runtime,
         WorkerCommand::ConfirmPairing { peer_id, accepted },
     )
+    .await
 }
 
 #[tauri::command]
-fn revoke_peer(runtime: tauri::State<'_, AppRuntime>, peer_id: String) -> Result<(), UiError> {
+async fn revoke_peer(
+    runtime: tauri::State<'_, AppRuntime>,
+    peer_id: String,
+) -> Result<(), UiError> {
     let peer_id = validate_peer_id(peer_id)?;
-    send_command(&runtime, WorkerCommand::RevokePeer { peer_id })
+    send_command(&runtime, WorkerCommand::RevokePeer { peer_id }).await
 }
 
 #[tauri::command]
-fn set_collection_grant(
+async fn set_collection_grant(
     runtime: tauri::State<'_, AppRuntime>,
     peer_id: String,
     collection_id: String,
@@ -1669,6 +1684,7 @@ fn set_collection_grant(
             granted,
         },
     )
+    .await
 }
 
 #[derive(Debug, Deserialize, TS)]
@@ -1682,7 +1698,7 @@ enum IntegrationActionInput {
 }
 
 #[tauri::command]
-fn manage_integration(
+async fn manage_integration(
     runtime: tauri::State<'_, AppRuntime>,
     request_id: String,
     action: IntegrationActionInput,
@@ -1711,7 +1727,9 @@ fn manage_integration(
     if let Err(error) = send_command(
         &runtime,
         WorkerCommand::ManageChatIntegration { request_id, action },
-    ) {
+    )
+    .await
+    {
         if let Ok(mut requests) = runtime.requests.lock()
             && requests.integrations == Some(request_id)
         {
@@ -1723,7 +1741,7 @@ fn manage_integration(
 }
 
 #[tauri::command]
-fn search(
+async fn search(
     runtime: tauri::State<'_, AppRuntime>,
     request_id: String,
     question: String,
@@ -1749,10 +1767,11 @@ fn search(
             public_network,
         },
     )
+    .await
 }
 
 #[tauri::command]
-fn load_review_evidence(
+async fn load_review_evidence(
     runtime: tauri::State<'_, AppRuntime>,
     request_id: String,
     concept_id: String,
@@ -1784,10 +1803,11 @@ fn load_review_evidence(
             after_ordinal,
         },
     )
+    .await
 }
 
 #[tauri::command]
-fn approve_review(
+async fn approve_review(
     runtime: tauri::State<'_, AppRuntime>,
     concept_id: String,
     source_revision: u32,
@@ -1803,6 +1823,7 @@ fn approve_review(
             draft: draft.into(),
         },
     )
+    .await
 }
 
 fn approval_version(
@@ -1821,17 +1842,21 @@ fn approval_version(
 }
 
 #[tauri::command]
-fn reject_review(runtime: tauri::State<'_, AppRuntime>, concept_id: String) -> Result<(), UiError> {
+async fn reject_review(
+    runtime: tauri::State<'_, AppRuntime>,
+    concept_id: String,
+) -> Result<(), UiError> {
     send_command(
         &runtime,
         WorkerCommand::Reject {
             concept_id: parse_uuid(&concept_id)?,
         },
     )
+    .await
 }
 
 #[tauri::command]
-fn reanalyze_review(
+async fn reanalyze_review(
     runtime: tauri::State<'_, AppRuntime>,
     concept_id: String,
 ) -> Result<(), UiError> {
@@ -1841,10 +1866,11 @@ fn reanalyze_review(
             concept_id: parse_uuid(&concept_id)?,
         },
     )
+    .await
 }
 
 #[tauri::command]
-fn load_knowledge_bundle(
+async fn load_knowledge_bundle(
     runtime: tauri::State<'_, AppRuntime>,
     request_id: String,
     collection_id: String,
@@ -1864,10 +1890,11 @@ fn load_knowledge_bundle(
             collection_id,
         },
     )
+    .await
 }
 
 #[tauri::command]
-fn load_knowledge_page(
+async fn load_knowledge_page(
     runtime: tauri::State<'_, AppRuntime>,
     request_id: String,
     collection_id: String,
@@ -1898,10 +1925,11 @@ fn load_knowledge_page(
             expected_fingerprint,
         },
     )
+    .await
 }
 
 #[tauri::command]
-fn update_preferences(
+async fn update_preferences(
     runtime: tauri::State<'_, AppRuntime>,
     request_id: String,
     preferences: PreferencesInput,
@@ -1925,20 +1953,22 @@ fn update_preferences(
             },
         },
     )
+    .await
 }
 
 #[tauri::command]
-fn refresh_autostart(
+async fn refresh_autostart(
     runtime: tauri::State<'_, AppRuntime>,
     request_id: String,
 ) -> Result<(), UiError> {
     send_autostart_command(&runtime, request_id, |request_id| {
         WorkerCommand::RefreshAutostart { request_id }
     })
+    .await
 }
 
 #[tauri::command]
-fn set_autostart(
+async fn set_autostart(
     runtime: tauri::State<'_, AppRuntime>,
     request_id: String,
     enabled: bool,
@@ -1949,36 +1979,43 @@ fn set_autostart(
             enabled,
         }
     })
+    .await
 }
 
 #[tauri::command]
-fn check_updates(runtime: tauri::State<'_, AppRuntime>, request_id: String) -> Result<(), UiError> {
+async fn check_updates(
+    runtime: tauri::State<'_, AppRuntime>,
+    request_id: String,
+) -> Result<(), UiError> {
     send_updater_command(&runtime, request_id, |request_id| {
         WorkerCommand::CheckUpdates { request_id }
     })
+    .await
 }
 
 #[tauri::command]
-fn download_update(
+async fn download_update(
     runtime: tauri::State<'_, AppRuntime>,
     request_id: String,
 ) -> Result<(), UiError> {
     send_updater_command(&runtime, request_id, |request_id| {
         WorkerCommand::DownloadUpdate { request_id }
     })
+    .await
 }
 
 #[tauri::command]
-fn install_update(
+async fn install_update(
     runtime: tauri::State<'_, AppRuntime>,
     request_id: String,
 ) -> Result<(), UiError> {
     send_updater_command(&runtime, request_id, |request_id| {
         WorkerCommand::InstallUpdate { request_id }
     })
+    .await
 }
 
-fn send_updater_command(
+async fn send_updater_command(
     runtime: &AppRuntime,
     request_id: String,
     command: impl FnOnce(Uuid) -> WorkerCommand,
@@ -1989,7 +2026,7 @@ fn send_updater_command(
         .lock()
         .map_err(|_| UiError::internal())?
         .updater = Some(request_id);
-    if let Err(error) = send_command(runtime, command(request_id)) {
+    if let Err(error) = send_command(runtime, command(request_id)).await {
         if let Ok(mut requests) = runtime.requests.lock()
             && requests.updater == Some(request_id)
         {
@@ -2001,7 +2038,7 @@ fn send_updater_command(
 }
 
 #[tauri::command]
-fn refresh_wiki_health(
+async fn refresh_wiki_health(
     runtime: tauri::State<'_, AppRuntime>,
     request_id: String,
 ) -> Result<(), UiError> {
@@ -2011,7 +2048,9 @@ fn refresh_wiki_health(
         .lock()
         .map_err(|_| UiError::internal())?
         .wiki_health = Some(request_id);
-    if let Err(error) = send_command(&runtime, WorkerCommand::RefreshWikiHealth { request_id }) {
+    if let Err(error) =
+        send_command(&runtime, WorkerCommand::RefreshWikiHealth { request_id }).await
+    {
         if let Ok(mut requests) = runtime.requests.lock()
             && requests.wiki_health == Some(request_id)
         {
@@ -2023,7 +2062,7 @@ fn refresh_wiki_health(
 }
 
 #[tauri::command]
-fn prepare_guided_wiki_repair(
+async fn prepare_guided_wiki_repair(
     runtime: tauri::State<'_, AppRuntime>,
     request_id: String,
     collection_id: String,
@@ -2042,7 +2081,9 @@ fn prepare_guided_wiki_repair(
             request_id,
             collection_id,
         },
-    ) {
+    )
+    .await
+    {
         if let Ok(mut requests) = runtime.requests.lock() {
             remove_matching_request(&mut requests.guided_repair, &collection_id, &request_id);
         }
@@ -2052,7 +2093,7 @@ fn prepare_guided_wiki_repair(
 }
 
 #[tauri::command]
-fn execute_guided_wiki_repair(
+async fn execute_guided_wiki_repair(
     runtime: tauri::State<'_, AppRuntime>,
     request_id: String,
     collection_id: String,
@@ -2082,7 +2123,9 @@ fn execute_guided_wiki_repair(
             request_id,
             preview,
         },
-    ) {
+    )
+    .await
+    {
         if let Ok(mut requests) = runtime.requests.lock() {
             remove_matching_request(&mut requests.guided_repair, &collection_id, &request_id);
         }
@@ -2092,17 +2135,18 @@ fn execute_guided_wiki_repair(
 }
 
 #[tauri::command]
-fn refresh_connectivity(
+async fn refresh_connectivity(
     runtime: tauri::State<'_, AppRuntime>,
     request_id: String,
 ) -> Result<(), UiError> {
     send_connectivity_command(&runtime, request_id, |request_id| {
         WorkerCommand::RefreshConnectivity { request_id }
     })
+    .await
 }
 
 #[tauri::command]
-fn configure_firewall(
+async fn configure_firewall(
     runtime: tauri::State<'_, AppRuntime>,
     request_id: String,
     install: bool,
@@ -2113,10 +2157,11 @@ fn configure_firewall(
             install,
         }
     })
+    .await
 }
 
 #[tauri::command]
-fn open_system_destination(
+async fn open_system_destination(
     runtime: tauri::State<'_, AppRuntime>,
     request_id: String,
     destination: SystemDestinationInput,
@@ -2127,9 +2172,10 @@ fn open_system_destination(
             destination: destination.into(),
         }
     })
+    .await
 }
 
-fn send_connectivity_command(
+async fn send_connectivity_command(
     runtime: &AppRuntime,
     request_id: String,
     command: impl FnOnce(Uuid) -> WorkerCommand,
@@ -2140,7 +2186,7 @@ fn send_connectivity_command(
         .lock()
         .map_err(|_| UiError::internal())?
         .connectivity = Some(request_id);
-    if let Err(error) = send_command(runtime, command(request_id)) {
+    if let Err(error) = send_command(runtime, command(request_id)).await {
         if let Ok(mut requests) = runtime.requests.lock()
             && requests.connectivity == Some(request_id)
         {
@@ -2151,7 +2197,7 @@ fn send_connectivity_command(
     Ok(())
 }
 
-fn send_autostart_command(
+async fn send_autostart_command(
     runtime: &AppRuntime,
     request_id: String,
     command: impl FnOnce(Uuid) -> WorkerCommand,
@@ -2162,7 +2208,7 @@ fn send_autostart_command(
         .lock()
         .map_err(|_| UiError::internal())?
         .autostart = Some(request_id);
-    if let Err(error) = send_command(runtime, command(request_id)) {
+    if let Err(error) = send_command(runtime, command(request_id)).await {
         if let Ok(mut requests) = runtime.requests.lock()
             && requests.autostart == Some(request_id)
         {
@@ -2215,7 +2261,6 @@ fn begin_shutdown(app: AppHandle) {
         return;
     }
     runtime.cancellation.cancel();
-    let commands = runtime.commands.clone();
     let finished = runtime
         .worker_finished
         .lock()
@@ -2223,7 +2268,6 @@ fn begin_shutdown(app: AppHandle) {
         .and_then(|mut receiver| receiver.take());
     tauri::async_runtime::spawn(async move {
         let shutdown = async {
-            let _ = commands.send(WorkerCommand::Shutdown).await;
             if let Some(finished) = finished {
                 let _ = finished.await;
             }
@@ -2357,12 +2401,21 @@ impl UiError {
     }
 }
 
-fn send_command(runtime: &AppRuntime, command: WorkerCommand) -> Result<(), UiError> {
-    runtime.commands.try_send(command).map_err(|error| UiError {
-        code: match error {
-            mpsc::error::TrySendError::Full(_) => "busy",
-            mpsc::error::TrySendError::Closed(_) => "unavailable",
-        },
+async fn send_command(runtime: &AppRuntime, command: WorkerCommand) -> Result<(), UiError> {
+    let (accepted, response) = oneshot::channel();
+    runtime
+        .commands
+        .try_send(WorkerIntent { command, accepted })
+        .map_err(|error| UiError {
+            code: match error {
+                mpsc::error::TrySendError::Full(_) => "busy",
+                mpsc::error::TrySendError::Closed(_) => "unavailable",
+            },
+            message_key: "runtime-command-unavailable",
+            retryable: true,
+        })?;
+    response.await.map_err(|_| UiError {
+        code: "unavailable",
         message_key: "runtime-command-unavailable",
         retryable: true,
     })
@@ -3867,8 +3920,10 @@ mod tests {
         "/ui/src/generated/ui-contract.ts"
     );
 
-    fn runtime_with_selection(token: Uuid, path: PathBuf, expires_at: Instant) -> AppRuntime {
-        let (commands, _receiver) = mpsc::channel(COMMAND_CAPACITY);
+    fn test_runtime(
+        commands: mpsc::Sender<WorkerIntent>,
+        folder_selections: HashMap<Uuid, PendingFolderSelection>,
+    ) -> AppRuntime {
         let (_snapshot_sender, snapshot) = watch::channel(PublishedSnapshot {
             snapshot: AppSnapshot::starting(),
             request_id: None,
@@ -3878,10 +3933,7 @@ mod tests {
             commands,
             cancellation: CancellationToken::new(),
             snapshot: Mutex::new(snapshot),
-            folder_selections: Mutex::new(HashMap::from([(
-                token,
-                PendingFolderSelection { path, expires_at },
-            )])),
+            folder_selections: Mutex::new(folder_selections),
             review_versions: Arc::new(Mutex::new(HashMap::new())),
             knowledge_fingerprints: Arc::new(Mutex::new(HashMap::new())),
             guided_repairs: Arc::new(Mutex::new(HashMap::new())),
@@ -3890,6 +3942,52 @@ mod tests {
             exiting: AtomicBool::new(false),
             worker_finished: Mutex::new(Some(worker_finished)),
         }
+    }
+
+    fn runtime_with_selection(token: Uuid, path: PathBuf, expires_at: Instant) -> AppRuntime {
+        let (commands, _receiver) = mpsc::channel(COMMAND_CAPACITY);
+        test_runtime(
+            commands,
+            HashMap::from([(token, PendingFolderSelection { path, expires_at })]),
+        )
+    }
+
+    #[tokio::test]
+    async fn command_response_requires_worker_acceptance() {
+        let (commands, mut receiver) = mpsc::channel(COMMAND_CAPACITY);
+        let runtime = test_runtime(commands, HashMap::new());
+        let worker = tokio::spawn(async move {
+            if let Some(intent) = receiver.recv().await {
+                let _ = intent.accepted.send(());
+            }
+        });
+
+        assert!(
+            send_command(&runtime, WorkerCommand::CancelInstall)
+                .await
+                .is_ok()
+        );
+        assert!(
+            tokio::time::timeout(Duration::from_secs(1), worker)
+                .await
+                .is_ok()
+        );
+    }
+
+    #[tokio::test]
+    async fn command_response_fails_when_worker_is_disconnected() {
+        let (commands, receiver) = mpsc::channel(COMMAND_CAPACITY);
+        drop(receiver);
+        let runtime = test_runtime(commands, HashMap::new());
+
+        let error = send_command(&runtime, WorkerCommand::CancelInstall).await;
+        assert!(matches!(
+            error,
+            Err(UiError {
+                code: "unavailable",
+                ..
+            })
+        ));
     }
 
     #[test]

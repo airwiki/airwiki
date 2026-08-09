@@ -17,6 +17,12 @@ export default tseslint.config(
     }
   },
   {
+    files: ['scripts/**/*.mjs'],
+    languageOptions: {
+      globals: { ...globals.node }
+    }
+  },
+  {
     files: ['**/*.svelte'],
     languageOptions: {
       parserOptions: { parser: tseslint.parser }

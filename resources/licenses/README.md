@@ -7,7 +7,7 @@
   arm64 and Windows x64 distributed graphs, with legal texts deduplicated by
   SHA-256.
 - `NON_CARGO_COMPONENTS.md`: provenance, hashes, and verified licenses for
-  non-Cargo components used to build or inspect Windows packages.
+  bundled fonts and non-Cargo components used to build or inspect packages.
 - `non-cargo/`: normalized legal texts copied from the exact artifacts or source
   revisions listed by the non-Cargo inventory.
 

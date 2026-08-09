@@ -30,7 +30,15 @@ const LICENSE_REPORT: &str = "resources/licenses/THIRD_PARTY_LICENSES.md";
 const NON_CARGO_LICENSE_INVENTORY: &str = "resources/licenses/NON_CARGO_COMPONENTS.md";
 const APPLICATION_ID_LICENSE_ERROR: &str =
     "missing_verified_redistribution_license: nsis-applicationid-1.1";
-const VERIFIED_NON_CARGO_LEGAL_TEXTS: [(&str, &str); 21] = [
+const VERIFIED_NON_CARGO_LEGAL_TEXTS: [(&str, &str); 23] = [
+    (
+        "resources/licenses/non-cargo/Space-Grotesk-2.0.0-OFL.txt",
+        "564ce565c371c5e5bbf286006565a7c9aa55a9f56e7ca58d56e05d649dd61a72",
+    ),
+    (
+        "resources/licenses/non-cargo/Atkinson-Hyperlegible-Next-7925f50-OFL.txt",
+        "aca6a428580965d2297d1b718042dd427c2a9443ece3b0d02d758e161e0c4030",
+    ),
     (
         "resources/licenses/non-cargo/NSIS-3.11-COPYING.txt",
         "dc0f74a312c08ffc900548a67ae9a3670ed28ad25a3afda1fe0504da16f89361",
@@ -114,6 +122,16 @@ const VERIFIED_NON_CARGO_LEGAL_TEXTS: [(&str, &str); 21] = [
     (
         "resources/licenses/non-cargo/llama.cpp-b9946-openai-whisper-MIT.txt",
         "b5d65a59060e68c4ff940e1eddfa6f94b2d68fdf58ed7f4dd57721c997e35e9d",
+    ),
+];
+const VERIFIED_DISTRIBUTED_FONT_ASSETS: [(&str, &str); 2] = [
+    (
+        "apps/desktop/ui/src/assets/fonts/SpaceGrotesk-Variable.woff2",
+        "8e085aa438094f11487a836652edd5c054fa6a96f63fc7c282105ee3a4b08c07",
+    ),
+    (
+        "apps/desktop/ui/src/assets/fonts/AtkinsonHyperlegibleNext-Variable.woff2",
+        "abde1ad5cf78b9ac575ef90d991f2e9101eb0b3b6668bde9a00e2e1e27d99afd",
     ),
 ];
 const DISTRIBUTED_PACKAGES: [&str; 3] = [
@@ -1630,6 +1648,17 @@ fn validate_non_cargo_legal_inventory(root: &Path) -> Result<()> {
         );
     }
 
+    for (relative_path, expected_sha256) in VERIFIED_DISTRIBUTED_FONT_ASSETS {
+        let path = root.join(relative_path);
+        let bytes = read_regular_file(&path, MAX_LEGAL_FILE_BYTES)?;
+        let actual_sha256 = hex::encode(Sha256::digest(&bytes));
+        ensure!(
+            actual_sha256 == expected_sha256,
+            "verified font asset {} has SHA-256 {actual_sha256}, expected {expected_sha256}",
+            path.display()
+        );
+    }
+
     let inventory_path = root.join(NON_CARGO_LICENSE_INVENTORY);
     let inventory = String::from_utf8(read_regular_file(&inventory_path, MAX_LEGAL_FILE_BYTES)?)
         .with_context(|| format!("{} is not UTF-8", inventory_path.display()))?;
@@ -1659,6 +1688,10 @@ fn validate_non_cargo_legal_inventory(root: &Path) -> Result<()> {
         "8ee059f719506d610d0e11e15a36d5c6fd9a55801931b80215f9d26ed019e0d1",
         "36df9677aa6a2ae37a01c7aaa39c3206fa02a4e06bb5037ebe89e5828b931f31",
         "0bc26379d10e8dc97d4bab5b007391e3ce25454f080fd0f2b12be4afe238e6df",
+        "7220f5d04813fe83babe76d4fd23e02275021280",
+        "7925f50f649b3813257faf2f4c0b381011f434f1",
+        "8e085aa438094f11487a836652edd5c054fa6a96f63fc7c282105ee3a4b08c07",
+        "abde1ad5cf78b9ac575ef90d991f2e9101eb0b3b6668bde9a00e2e1e27d99afd",
     ] {
         ensure!(
             inventory.contains(required),
@@ -1686,6 +1719,8 @@ fn validate_non_cargo_legal_inventory(root: &Path) -> Result<()> {
         "stb_image",
         "sheredom/subprocess.h",
         "licenses/NON_CARGO_COMPONENTS.md",
+        "Space Grotesk 2.0.0",
+        "Atkinson Hyperlegible Next",
     ] {
         ensure!(
             notices.contains(required),

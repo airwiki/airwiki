@@ -1,10 +1,26 @@
 # Inventory of Components Not Managed by Cargo
 
-This inventory covers components outside Cargo that are involved in the Windows installer. The
-artifacts are identified by SHA-256. The included legal texts were copied from the exact artifacts
+This inventory covers distributed assets and build tools outside Cargo. The artifacts are
+identified by SHA-256. The included legal texts were copied from the exact artifacts
 or tags listed below, with line endings normalized to LF and a single trailing newline added. The
 application, the MCP bridge, and their Rust dependencies are covered by
 `THIRD_PARTY_LICENSES.md`.
+
+## Bundled interface fonts
+
+The desktop WebView bundles two variable WOFF2 files and never fetches fonts from a CDN or the
+network. Both are redistributed unmodified under the SIL Open Font License 1.1.
+
+- Space Grotesk 2.0.0, tag/commit `7220f5d04813fe83babe76d4fd23e02275021280`:
+  `apps/desktop/ui/src/assets/fonts/SpaceGrotesk-Variable.woff2`, 49,256 bytes, SHA-256
+  `8e085aa438094f11487a836652edd5c054fa6a96f63fc7c282105ee3a4b08c07`. The exact upstream
+  `OFL.txt` is included as `non-cargo/Space-Grotesk-2.0.0-OFL.txt`, SHA-256
+  `564ce565c371c5e5bbf286006565a7c9aa55a9f56e7ca58d56e05d649dd61a72`.
+- Atkinson Hyperlegible Next, commit `7925f50f649b3813257faf2f4c0b381011f434f1`:
+  `apps/desktop/ui/src/assets/fonts/AtkinsonHyperlegibleNext-Variable.woff2`, 48,188 bytes,
+  SHA-256 `abde1ad5cf78b9ac575ef90d991f2e9101eb0b3b6668bde9a00e2e1e27d99afd`. The exact upstream
+  `OFL.txt` is included as `non-cargo/Atkinson-Hyperlegible-Next-7925f50-OFL.txt`, SHA-256
+  `aca6a428580965d2297d1b718042dd427c2a9443ece3b0d02d758e161e0c4030`.
 
 ## llama.cpp b9946: Windows runtime built from source
 

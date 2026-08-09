@@ -113,6 +113,21 @@ describe('AirWiki real IPC journey', () => {
 
     await $('button*=System').click();
     await $('#system-preferences').waitForDisplayed();
+    const systemShell = await browser.execute(() => {
+      const main = document.querySelector<HTMLElement>('.shell > main');
+      const rail = document.querySelector<HTMLElement>('.rail');
+      const navigation = document.querySelector<HTMLElement>('.rail nav');
+      return {
+        documentScrollTop: document.scrollingElement?.scrollTop ?? -1,
+        mainScrollTop: main?.scrollTop ?? -1,
+        railTop: rail?.getBoundingClientRect().top ?? -1,
+        navigationVisible: navigation ? navigation.getBoundingClientRect().height > 0 : false
+      };
+    });
+    expect(systemShell.documentScrollTop).toBe(0);
+    expect(systemShell.mainScrollTop).toBe(0);
+    expect(systemShell.railTop).toBe(0);
+    expect(systemShell.navigationVisible).toBe(true);
     const preferenceSelects = await $$('#system-preferences select');
     const appearance = required(preferenceSelects[1], 'appearance preference');
     await selectValue('#system-preferences select', 1, 'dark');

@@ -88,6 +88,11 @@ Push-Location $Root
 $PreviousTemp = $env:TEMP
 $PreviousTmp = $env:TMP
 try {
+    & cargo run --locked -p xtask -- packaging verify-updater-embedded-key `
+        --binary $Desktop
+    if ($LASTEXITCODE -ne 0) {
+        throw "desktop binary does not contain the configured updater public key"
+    }
     Remove-AirWikiWindowsStagingPath `
         -Path $OutDir `
         -AllowedRoot (Join-Path $Root "target") `

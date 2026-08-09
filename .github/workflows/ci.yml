@@ -16,6 +16,51 @@ env:
   CARGO_TERM_COLOR: always
 
 jobs:
+  frontend:
+    name: Frontend checks (${{ matrix.target }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-14
+            target: macos-arm64
+          - os: windows-2022
+            target: windows-x64
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6.5.0
+        with:
+          node-version: 24.15.0
+          package-manager-cache: false
+      - name: Activate pinned pnpm
+        shell: bash
+        run: |
+          corepack enable
+          corepack prepare pnpm@10.18.3 --activate
+      - name: Install pinned frontend dependencies
+        shell: bash
+        run: pnpm --dir apps/desktop/ui install --frozen-lockfile --ignore-scripts --prod=false
+      - name: Type and Svelte checks
+        shell: bash
+        run: pnpm --dir apps/desktop/ui run check
+      - name: Lint
+        shell: bash
+        run: pnpm --dir apps/desktop/ui run lint
+      - name: Unit and accessibility tests
+        shell: bash
+        run: pnpm --dir apps/desktop/ui run test
+      - name: Native E2E contract typecheck
+        shell: bash
+        run: pnpm --dir apps/desktop/ui run check:e2e
+      - name: Platform npm license inventory
+        shell: bash
+        run: pnpm --dir apps/desktop/ui run licenses:check ${{ matrix.target }}
+      - name: Production dependency advisories
+        shell: bash
+        run: pnpm --dir apps/desktop/ui audit --audit-level high --prod
+
   native:
     name: Rust checks (${{ matrix.os }})
     strategy:

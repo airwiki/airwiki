@@ -1,4 +1,7 @@
 #![cfg_attr(target_os = "windows", windows_subsystem = "windows")]
+#[cfg(all(feature = "e2e", not(debug_assertions)))]
+compile_error!("the desktop e2e secret store must never be compiled into a release build");
+
 mod autostart;
 mod connectivity_platform;
 mod external_navigation;
@@ -14,6 +17,7 @@ mod worker;
 
 use std::{
     collections::HashMap,
+    ffi::OsStr,
     path::PathBuf,
     sync::{
         Arc, Mutex,
@@ -37,7 +41,7 @@ use tauri::{
     menu::{Menu, MenuItem},
     tray::{TrayIconBuilder, TrayIconEvent},
 };
-use tokio::sync::{broadcast, mpsc, oneshot, watch};
+use tokio::sync::{Semaphore, broadcast, mpsc, oneshot, watch};
 use tokio_util::sync::CancellationToken;
 use ts_rs::TS;
 use uuid::Uuid;
@@ -60,6 +64,114 @@ const TRANSIENT_EVENT_CAPACITY: usize = 128;
 const CONTRACT_VERSION: u16 = 1;
 const FOLDER_SELECTION_TTL: Duration = Duration::from_secs(5 * 60);
 
+#[derive(Clone, Copy)]
+enum NativeConfirmation {
+    ModelLicenses,
+    ExternalLink,
+    GuidedRepair,
+    ExternalCollectionPolicy,
+    CollectionGrant,
+    InstallUpdate,
+}
+
+impl NativeConfirmation {
+    const fn message_id(self) -> &'static str {
+        match self {
+            Self::ModelLicenses => "native-confirm-model-licenses",
+            Self::ExternalLink => "native-confirm-external-link",
+            Self::GuidedRepair => "native-confirm-guided-repair",
+            Self::ExternalCollectionPolicy => "native-confirm-external-policy",
+            Self::CollectionGrant => "native-confirm-collection-grant",
+            Self::InstallUpdate => "native-confirm-install-update",
+        }
+    }
+}
+
+async fn require_native_confirmation(
+    app: &AppHandle,
+    confirmation: NativeConfirmation,
+    detail: Option<&str>,
+) -> Result<(), UiError> {
+    let _permit = app
+        .state::<AppRuntime>()
+        .confirmation_gate
+        .clone()
+        .try_acquire_owned()
+        .map_err(|_| UiError::busy("humanConfirmationAlreadyOpen"))?;
+    let (title, mut description) = {
+        let localization =
+            Localization::new(UiLocale::from_system()).map_err(|_| UiError::internal())?;
+        let title = localization
+            .text("native-confirm-title")
+            .ok_or_else(UiError::internal)?;
+        let description = localization
+            .text(confirmation.message_id())
+            .ok_or_else(UiError::internal)?;
+        (title, description)
+    };
+    if let Some(detail) = detail {
+        description.push_str("\n\n");
+        description.push_str(detail);
+    }
+    let mut dialog = rfd::AsyncMessageDialog::new()
+        .set_level(rfd::MessageLevel::Warning)
+        .set_title(title)
+        .set_description(description)
+        .set_buttons(rfd::MessageButtons::YesNo);
+    if let Some(window) = app.get_webview_window("main") {
+        dialog = dialog.set_parent(&window);
+    }
+    if matches!(dialog.show().await, rfd::MessageDialogResult::Yes) {
+        Ok(())
+    } else {
+        Err(UiError::invalid("humanConfirmationRequired"))
+    }
+}
+
+fn launch_in_background<I>(arguments: I) -> bool
+where
+    I: IntoIterator,
+    I::Item: AsRef<OsStr>,
+{
+    arguments
+        .into_iter()
+        .any(|argument| argument.as_ref() == OsStr::new("--background"))
+}
+
+fn navigation_is_allowed(url: &url::Url) -> bool {
+    let packaged_origin = (url.scheme() == "tauri" && url.host_str() == Some("localhost"))
+        || (url.scheme() == "http" && url.host_str() == Some("tauri.localhost"));
+    let initial_blank = url.scheme() == "about" && url.path() == "blank";
+    let development_origin = cfg!(debug_assertions)
+        && url.scheme() == "http"
+        && matches!(url.host_str(), Some("127.0.0.1" | "localhost"))
+        && url.port() == Some(1420);
+    packaged_origin || initial_blank || development_origin
+}
+
+fn navigation_guard() -> tauri::plugin::TauriPlugin<tauri::Wry> {
+    tauri::plugin::Builder::new("navigation-guard")
+        .on_navigation(|_, url| navigation_is_allowed(url))
+        .build()
+}
+
+fn init_logging(paths: &AppPaths) -> Result<tracing_appender::non_blocking::WorkerGuard> {
+    std::fs::create_dir_all(&paths.logs).context("failed to create the sanitized log directory")?;
+    let file = tracing_appender::rolling::daily(&paths.logs, "airwiki.log");
+    let (writer, guard) = tracing_appender::non_blocking(file);
+    tracing_subscriber::fmt()
+        .with_env_filter(
+            tracing_subscriber::EnvFilter::try_from_default_env()
+                .unwrap_or_else(|_| "airwiki=info,airwiki_=info,warn".into()),
+        )
+        .with_writer(writer)
+        .with_ansi(false)
+        .with_target(true)
+        .try_init()
+        .map_err(|error| anyhow::anyhow!(error.to_string()))?;
+    Ok(guard)
+}
+
 struct AppRuntime {
     commands: mpsc::Sender<WorkerIntent>,
     cancellation: CancellationToken,
@@ -69,6 +181,7 @@ struct AppRuntime {
     knowledge_fingerprints: Arc<Mutex<HashMap<(Uuid, KnowledgePageId), String>>>,
     guided_repairs: Arc<Mutex<HashMap<Uuid, GuidedRepairPreview>>>,
     requests: Arc<Mutex<RequestTracker>>,
+    confirmation_gate: Arc<Semaphore>,
     tray_operational: AtomicBool,
     exiting: AtomicBool,
     worker_finished: Mutex<Option<oneshot::Receiver<()>>>,
@@ -1394,6 +1507,20 @@ struct CollectionPolicyInput {
     internet_public: bool,
 }
 
+fn policy_expands_authority(
+    current: Option<&CollectionSummary>,
+    requested: &CollectionPolicyInput,
+) -> bool {
+    current.map_or(
+        requested.peer_shareable || requested.allow_external_ai || requested.internet_public,
+        |current| {
+            (requested.peer_shareable && !current.peer_shareable)
+                || (requested.allow_external_ai && !current.allow_external_ai)
+                || (requested.internet_public && !current.internet_public)
+        },
+    )
+}
+
 #[tauri::command]
 fn connect(runtime: tauri::State<'_, AppRuntime>, events: Channel<UiEventEnvelope>) -> AppSnapshot {
     let Ok(snapshot_receiver) = runtime.snapshot.lock() else {
@@ -1426,12 +1553,10 @@ fn connect(runtime: tauri::State<'_, AppRuntime>, events: Channel<UiEventEnvelop
 
 #[tauri::command]
 async fn install_models(
+    app: AppHandle,
     runtime: tauri::State<'_, AppRuntime>,
-    licenses_confirmed: bool,
 ) -> Result<(), UiError> {
-    if !licenses_confirmed {
-        return Err(UiError::invalid("modelLicensesMustBeConfirmed"));
-    }
+    require_native_confirmation(&app, NativeConfirmation::ModelLicenses, None).await?;
     send_command(&runtime, WorkerCommand::InstallModels).await
 }
 
@@ -1528,14 +1653,33 @@ async fn rescan_collection(
 
 #[tauri::command]
 async fn update_collection_policy(
+    app: AppHandle,
     runtime: tauri::State<'_, AppRuntime>,
     collection_id: String,
     policy: CollectionPolicyInput,
 ) -> Result<(), UiError> {
+    let collection_id = parse_uuid(&collection_id)?;
+    let collection_id_text = collection_id.to_string();
+    let expands_authority = {
+        let snapshot = runtime.snapshot.lock().map_err(|_| UiError::internal())?;
+        let published = snapshot.borrow();
+        policy_expands_authority(
+            published
+                .snapshot
+                .collections
+                .iter()
+                .find(|collection| collection.id == collection_id_text),
+            &policy,
+        )
+    };
+    if expands_authority {
+        require_native_confirmation(&app, NativeConfirmation::ExternalCollectionPolicy, None)
+            .await?;
+    }
     send_command(
         &runtime,
         WorkerCommand::UpdateCollectionPolicy {
-            collection_id: parse_uuid(&collection_id)?,
+            collection_id,
             local_only: policy.local_only,
             peer_shareable: policy.peer_shareable,
             allow_external_ai: policy.allow_external_ai,
@@ -1700,11 +1844,15 @@ async fn revoke_peer(
 
 #[tauri::command]
 async fn set_collection_grant(
+    app: AppHandle,
     runtime: tauri::State<'_, AppRuntime>,
     peer_id: String,
     collection_id: String,
     granted: bool,
 ) -> Result<(), UiError> {
+    if granted {
+        require_native_confirmation(&app, NativeConfirmation::CollectionGrant, None).await?;
+    }
     let peer_id = validate_peer_id(peer_id)?;
     let collection_id = parse_uuid(&collection_id)?;
     send_command(
@@ -2038,9 +2186,11 @@ async fn download_update(
 
 #[tauri::command]
 async fn install_update(
+    app: AppHandle,
     runtime: tauri::State<'_, AppRuntime>,
     request_id: String,
 ) -> Result<(), UiError> {
+    require_native_confirmation(&app, NativeConfirmation::InstallUpdate, None).await?;
     send_updater_command(&runtime, request_id, |request_id| {
         WorkerCommand::InstallUpdate { request_id }
     })
@@ -2126,14 +2276,12 @@ async fn prepare_guided_wiki_repair(
 
 #[tauri::command]
 async fn execute_guided_wiki_repair(
+    app: AppHandle,
     runtime: tauri::State<'_, AppRuntime>,
     request_id: String,
     collection_id: String,
-    confirmed: bool,
 ) -> Result<(), UiError> {
-    if !confirmed {
-        return Err(UiError::invalid("guidedRepairConfirmationRequired"));
-    }
+    require_native_confirmation(&app, NativeConfirmation::GuidedRepair, None).await?;
     let collection_id = parse_uuid(&collection_id)?;
     let preview = runtime
         .guided_repairs
@@ -2252,12 +2400,10 @@ async fn send_autostart_command(
 }
 
 #[tauri::command]
-async fn open_external_link(url: String, confirmed: bool) -> Result<(), UiError> {
-    if !confirmed {
-        return Err(UiError::invalid("externalLinkConfirmationRequired"));
-    }
+async fn open_external_link(app: AppHandle, url: String) -> Result<(), UiError> {
     let url = external_navigation::validate_external_url(&url)
         .map_err(|_| UiError::invalid("invalidExternalLink"))?;
+    require_native_confirmation(&app, NativeConfirmation::ExternalLink, Some(url.as_str())).await?;
     tokio::task::spawn_blocking(move || external_navigation::open_external_url(&url))
         .await
         .map_err(|_| UiError::internal())?
@@ -2428,6 +2574,14 @@ impl UiError {
         Self {
             code: "internal",
             message_key: "runtimeStateUnavailable",
+            retryable: true,
+        }
+    }
+
+    const fn busy(message_key: &'static str) -> Self {
+        Self {
+            code: "busy",
+            message_key,
             retryable: true,
         }
     }
@@ -3747,7 +3901,10 @@ impl From<airwiki_types::SearchHit> for SearchHitSummary {
 }
 
 fn main() -> Result<()> {
+    let background_requested = launch_in_background(std::env::args_os().skip(1));
     let paths = AppPaths::discover().context("failed to discover application paths")?;
+    let logging_guard = init_logging(&paths)?;
+    tracing::info!(version = env!("CARGO_PKG_VERSION"), "starting AirWiki");
     let (commands, command_receiver) = mpsc::channel(COMMAND_CAPACITY);
     let (worker_events, mut presentation_events) = mpsc::channel(INTERNAL_EVENT_CAPACITY);
     let (progress_events, _) = broadcast::channel(TRANSIENT_EVENT_CAPACITY);
@@ -3773,7 +3930,8 @@ fn main() -> Result<()> {
     #[cfg(feature = "e2e")]
     let builder = builder.plugin(tauri_plugin_wdio_webdriver::init());
 
-    builder
+    let result = builder
+        .plugin(navigation_guard())
         .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
             show_main_window(app);
         }))
@@ -3787,6 +3945,7 @@ fn main() -> Result<()> {
             knowledge_fingerprints,
             guided_repairs,
             requests,
+            confirmation_gate: Arc::new(Semaphore::new(1)),
             tray_operational: AtomicBool::new(false),
             exiting: AtomicBool::new(false),
             worker_finished: Mutex::new(Some(worker_finished)),
@@ -3796,15 +3955,20 @@ fn main() -> Result<()> {
                 .and_then(|config| TauriUpdateBackend::new(app.handle().clone(), config))
                 .map(|backend| Box::new(backend) as Box<dyn UpdateBackend>);
             let presentation_app = app.handle().clone();
-            if install_tray(app).is_ok() {
+            let tray_operational = if install_tray(app).is_ok() {
                 app.state::<AppRuntime>()
                     .tray_operational
                     .store(true, Ordering::Release);
+                true
             } else {
                 tracing::warn!(
                     error_kind = "tray_unavailable",
                     "tray initialization failed"
                 );
+                false
+            };
+            if !background_requested || !tray_operational {
+                show_main_window(app.handle());
             }
             tauri::async_runtime::spawn(async move {
                 let mut snapshot = AppSnapshot::starting();
@@ -3946,7 +4110,9 @@ fn main() -> Result<()> {
             quit_completely
         ])
         .run(tauri::generate_context!())
-        .map_err(|error| anyhow::anyhow!(error.to_string()))
+        .map_err(|error| anyhow::anyhow!(error.to_string()));
+    drop(logging_guard);
+    result
 }
 
 #[cfg(test)]
@@ -3957,6 +4123,51 @@ mod tests {
         env!("CARGO_MANIFEST_DIR"),
         "/ui/src/generated/ui-contract.ts"
     );
+
+    #[test]
+    fn background_mode_requires_the_exact_flag() {
+        assert!(launch_in_background(["--background"]));
+        assert!(!launch_in_background(["background", "--foreground"]));
+    }
+
+    #[test]
+    fn navigation_guard_allows_only_local_application_origins()
+    -> Result<(), Box<dyn std::error::Error>> {
+        assert!(navigation_is_allowed(&url::Url::parse(
+            "tauri://localhost/library"
+        )?));
+        assert!(navigation_is_allowed(&url::Url::parse(
+            "http://tauri.localhost/system"
+        )?));
+        assert!(navigation_is_allowed(&url::Url::parse("about:blank")?));
+        assert!(!navigation_is_allowed(&url::Url::parse(
+            "https://airwiki.example.test/phishing"
+        )?));
+        assert!(!navigation_is_allowed(&url::Url::parse(
+            "file:///tmp/untrusted.html"
+        )?));
+        Ok(())
+    }
+
+    #[test]
+    fn every_native_confirmation_has_localized_copy() -> Result<(), Box<dyn std::error::Error>> {
+        let confirmations = [
+            NativeConfirmation::ModelLicenses,
+            NativeConfirmation::ExternalLink,
+            NativeConfirmation::GuidedRepair,
+            NativeConfirmation::ExternalCollectionPolicy,
+            NativeConfirmation::CollectionGrant,
+            NativeConfirmation::InstallUpdate,
+        ];
+        for locale in [UiLocale::EnUs, UiLocale::Es] {
+            let localization = Localization::new(locale)?;
+            assert!(localization.text("native-confirm-title").is_some());
+            for confirmation in confirmations {
+                assert!(localization.text(confirmation.message_id()).is_some());
+            }
+        }
+        Ok(())
+    }
 
     fn test_runtime(
         commands: mpsc::Sender<WorkerIntent>,
@@ -3976,6 +4187,7 @@ mod tests {
             knowledge_fingerprints: Arc::new(Mutex::new(HashMap::new())),
             guided_repairs: Arc::new(Mutex::new(HashMap::new())),
             requests: Arc::new(Mutex::new(RequestTracker::default())),
+            confirmation_gate: Arc::new(Semaphore::new(1)),
             tray_operational: AtomicBool::new(false),
             exiting: AtomicBool::new(false),
             worker_finished: Mutex::new(Some(worker_finished)),

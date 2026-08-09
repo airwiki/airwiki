@@ -87,9 +87,21 @@ describe('AirWiki desktop shell', () => {
     expect(document.getElementById('system-updates')).toBeInTheDocument();
   });
 
-  it('has no serious or critical accessibility violations in the library view', async () => {
+  it.each([
+    ['es', 'light', 'library'], ['es', 'light', 'review'], ['es', 'light', 'search'], ['es', 'light', 'system/preferences'],
+    ['es', 'dark', 'library'], ['es', 'dark', 'review'], ['es', 'dark', 'search'], ['es', 'dark', 'system/preferences'],
+    ['en', 'light', 'library'], ['en', 'light', 'review'], ['en', 'light', 'search'], ['en', 'light', 'system/preferences'],
+    ['en', 'dark', 'library'], ['en', 'dark', 'review'], ['en', 'dark', 'search'], ['en', 'dark', 'system/preferences']
+  ] as const)('has no serious or critical accessibility violations in %s/%s/%s', async (locale, theme, route) => {
+    const preferences = snapshot.preferences;
+    expect(preferences).not.toBeNull();
+    if (preferences) {
+      preferences.locale = locale;
+      preferences.theme = theme;
+    }
+    window.location.hash = route;
     const { container } = render(App);
-    await screen.findByText('Atlas');
+    await screen.findByRole('button', { name: locale === 'en' ? 'Library' : 'Biblioteca' });
     const result = await axe.run(container, { runOnly: { type: 'tag', values: ['wcag2a', 'wcag2aa'] } });
     expect(result.violations.filter((violation: (typeof result.violations)[number]) => ['serious', 'critical'].includes(violation.impact ?? ''))).toEqual([]);
   });

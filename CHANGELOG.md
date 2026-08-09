@@ -54,6 +54,13 @@ All notable user-visible changes to AirWiki will be documented here. The project
 
 ### Fixed
 
+- Restored process-lifetime sanitized desktop logging, honored background
+  autostart without exposing an inaccessible process, rejected remote WebView
+  navigation, and moved sensitive desktop consent to Rust-owned native dialogs.
+- Made release packaging prove that the configured updater key is embedded in
+  the candidate binary, unified executable/package icons, and added mandatory
+  frontend and npm supply-chain gates to pull-request CI.
+
 - Prevented a concurrent filesystem preflight from restarting an active
   same-content ingestion, so restoring a withdrawn source completes in one
   enrichment pass while interrupted jobs remain retryable after restart.

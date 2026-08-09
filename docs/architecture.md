@@ -112,13 +112,18 @@ The WebView loads only bundled assets under a strict CSP. Markdown becomes a
 typed safe AST in Rust; it never reaches `innerHTML`, and images, SVG, embeds,
 files and remote resources are excluded. Folder selection returns an opaque,
 single-use, expiring token, so JavaScript cannot submit arbitrary paths.
+An explicit navigation guard allows only the local application origin. Rust
+uses parented OS-native dialogs—not caller-supplied booleans—to establish human
+authority for sharing, external policy, repairs, model licenses, updates and
+external HTTP(S) destinations.
 Window, tray and lifecycle callbacks remain bounded and contain no business
 logic.
 
 The process has one instance per user session. Hiding the window preserves the
 worker, watchers, MCP and LAN. **Exit completely** performs a bounded shutdown.
 Optional autostart is per-user and confirmed; there is no daemon or system
-service.
+service. Autostart's exact `--background` mode remains hidden only after the
+tray is known to be operational; all foreground launches start visible.
 
 ## Trust and authorization
 

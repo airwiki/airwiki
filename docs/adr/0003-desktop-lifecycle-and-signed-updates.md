@@ -23,6 +23,10 @@ tray, single-instance, updater and shutdown state. The WebView receives no
 direct native plugins for filesystem, shell, HTTP, SQL, updater, autostart or
 process execution; it can invoke only the explicit commands registered by the
 composition root. A strict CSP permits bundled application resources only.
+An explicit navigation guard rejects every top-level destination except the
+packaged application origin (and the fixed local Vite origin in debug builds).
+HTTP(S) destinations open only through a closed Rust command and an
+OS-native, parented confirmation dialog.
 
 AirWiki runs one instance per user session. A second normal launch sends
 no application arguments to the existing process: Tauri's single-instance
@@ -41,6 +45,11 @@ consent:
 - Windows uses one exact entry under
   `HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Run`.
 
+Both entries launch the exact binary with `--background`. The process reads
+only that closed flag, creates the tray first, and leaves the initially hidden
+window hidden only when the tray is operational; foreground launches and tray
+failure show and focus the window.
+
 The operating system is authoritative for autostart state. Conflicts are not
 overwritten. AirWiki uses no `sudo`, daemon, system service, scheduled
 task, manual LaunchAgent write or machine-wide registry key.
@@ -52,6 +61,13 @@ query or PeerId. Download and installation require human confirmation and
 reject downgrades and invalid signatures. Offline failure does not block normal
 use. The stable manifest is published only after every artifact has passed its
 release gates.
+Release packaging verifies both the generated updater signature and that the
+desktop binary actually embeds the same public key supplied to the signer.
+
+Publication, sharing grants, external-AI/network policy expansion, model
+license acceptance, guided repair and updater installation obtain authority
+through OS-native dialogs created by Rust. A WebView-supplied boolean is never
+accepted as evidence of human consent.
 
 Native package trust remains an independent requirement:
 

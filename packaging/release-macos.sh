@@ -47,6 +47,8 @@ notarize() {
 
 cd "$ROOT"
 ./packaging/package-macos.sh
+cargo run --locked -p xtask -- packaging verify-updater-embedded-key \
+  --binary "$APP/Contents/MacOS/airwiki"
 
 # Notarize and staple the app independently because the updater distributes an
 # app archive rather than the DMG container.

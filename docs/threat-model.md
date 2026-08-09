@@ -85,7 +85,7 @@ Controls are not considered effective end to end until the
 | Crash splits approved DB and bundle state | Durable publication intent resumes idempotently before exposure | Altered sources or bundle return to human intervention |
 | Peer forges citation node | Receiver replaces `node_id` with the Noise-authenticated PeerId | A compromised source controls content under its own identity |
 | Prompt injection in evidence | Local LLM only proposes metadata; remote diagnostics are discarded; MCP instructions label evidence as untrusted data | A chat model may still follow hostile snippets; validate the golden prompt set |
-| Compromised WebView invokes ambient native authority | One local WebView, strict CSP, no remote scripts or navigation, no direct native plugins, explicit closed Tauri commands, bounded validated DTOs | A flaw in an exposed command or WebView runtime can still cross the boundary; test hostile and unknown payloads and keep commands narrow |
+| Compromised WebView invokes ambient native authority | One local WebView, strict CSP, explicit top-level navigation allowlist, no direct native plugins, explicit closed Tauri commands, bounded validated DTOs; grants, external policy, repairs, model licenses, updater installation and external links require an OS-native Rust-owned confirmation | A flaw in an exposed command or WebView runtime can still request a native prompt; test hostile and unknown payloads and keep commands narrow |
 | Web content reads or supplies arbitrary local paths | Native folder picker returns an opaque one-use token that expires after five minutes; Rust consumes it for add/relink and never accepts a JavaScript path | The selected folder remains a deliberate user grant; relinking still requires a fresh selection |
 | Out-of-order IPC state enables a stale decision | Snapshot/event schema versions, monotonic sequences, request IDs, review versions and fingerprints; lagged consumers request a full snapshot | A compromised local process is outside the model; saturation, reconnect and stale-approval tests remain mandatory |
 | Stale or mismatched evidence is shown during review | Worker requests bind request, concept, revision and an opaque review version; storage revalidates pending state, draft and all chunk evidence in the publication transaction; approval stays disabled without current evidence | A compromised local database remains outside the threat model |
@@ -102,7 +102,7 @@ Controls are not considered effective end to end until the
 | Update check leaks knowledge | No installation ID, PeerId, query, or content | Hosting provider still observes IP, user agent, and requested version |
 | Device is stolen | Secrets remain in OS credential storage; originals are not replicated | Disk and session protection are OS responsibilities |
 | Paired peer causes denial of service | Bounded payloads, deadlines, rate limits, one relevance inference per node | A trusted peer can consume bounded resources; revoke and block it |
-| Logs leak sensitive data | Sanitized structured logging; no queries or snippets by default | Review every new error boundary and sanitize before sharing |
+| Logs leak sensitive data | Sanitized structured logging writes through one process-lifetime non-blocking guard; no queries or snippets by default | Review every new error boundary and sanitize before sharing |
 
 ## Invariants
 

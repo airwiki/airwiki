@@ -279,9 +279,15 @@ async fn main() -> Result<()> {
                     .with_context(|| format!("{UPDATER_PUBLIC_KEY_ENV} is required"))?;
                 verify_updater_signature(&request, &public_key)
             }
+            Some("verify-updater-embedded-key") => {
+                let binary = parse_single_path_option(arguments.collect(), "--binary")?;
+                let public_key = std::env::var(UPDATER_PUBLIC_KEY_ENV)
+                    .with_context(|| format!("{UPDATER_PUBLIC_KEY_ENV} is required"))?;
+                verify_updater_embedded_key(&binary, &public_key)
+            }
             Some(other) => bail!("unknown packaging command: {other}"),
             None => bail!(
-                "missing packaging command; expected `verify-windows-uninstaller` or `verify-updater-signature`"
+                "missing packaging command; expected `verify-windows-uninstaller`, `verify-updater-signature` or `verify-updater-embedded-key`"
             ),
         },
         "help" | "--help" | "-h" => {
@@ -301,6 +307,9 @@ async fn main() -> Result<()> {
             println!("cargo run --locked -p xtask -- packaging verify-windows-uninstaller");
             println!(
                 "cargo run --locked -p xtask -- packaging verify-updater-signature --artifact <path> --signature <path>"
+            );
+            println!(
+                "cargo run --locked -p xtask -- packaging verify-updater-embedded-key --binary <path>"
             );
             println!(
                 "cargo run --locked -p xtask -- mcpb build --target <triple> --bridge <path> --output <path>"
@@ -2752,6 +2761,57 @@ struct UpdaterSignatureRequest {
     signature: PathBuf,
 }
 
+fn parse_single_path_option(arguments: Vec<String>, expected_flag: &str) -> Result<PathBuf> {
+    let mut arguments = arguments.into_iter();
+    let flag = arguments.next().context("missing path option")?;
+    ensure!(flag == expected_flag, "expected `{expected_flag}`");
+    let path = arguments
+        .next()
+        .with_context(|| format!("missing value for `{expected_flag}`"))?;
+    ensure!(arguments.next().is_none(), "unexpected extra path option");
+    Ok(PathBuf::from(path))
+}
+
+fn verify_updater_embedded_key(binary: &Path, encoded_public_key: &str) -> Result<()> {
+    let public_key = encoded_public_key.trim();
+    ensure!(!public_key.is_empty(), "updater public key is empty");
+    ensure!(
+        public_key.len() <= MAX_UPDATER_KEY_OR_SIGNATURE_BYTES as usize,
+        "updater public key exceeds the size limit"
+    );
+    let _ = decode_updater_box(public_key, "updater public key")?;
+    let metadata = fs::symlink_metadata(binary)
+        .with_context(|| format!("inspecting desktop binary `{}`", binary.display()))?;
+    ensure!(
+        metadata.file_type().is_file() && !metadata.file_type().is_symlink(),
+        "desktop binary must be a regular file"
+    );
+
+    let mut input = File::open(binary)
+        .with_context(|| format!("opening desktop binary `{}`", binary.display()))?;
+    let needle = public_key.as_bytes();
+    let mut overlap = Vec::with_capacity(needle.len().saturating_sub(1));
+    let mut chunk = [0_u8; 64 * 1024];
+    loop {
+        let read = input
+            .read(&mut chunk)
+            .with_context(|| format!("reading desktop binary `{}`", binary.display()))?;
+        if read == 0 {
+            break;
+        }
+        overlap.extend_from_slice(&chunk[..read]);
+        if overlap
+            .windows(needle.len())
+            .any(|candidate| candidate == needle)
+        {
+            return Ok(());
+        }
+        let retained = needle.len().saturating_sub(1).min(overlap.len());
+        overlap.drain(..overlap.len() - retained);
+    }
+    bail!("desktop binary does not embed the updater public key")
+}
+
 fn parse_updater_signature_request(arguments: Vec<String>) -> Result<UpdaterSignatureRequest> {
     let mut artifact = None;
     let mut signature = None;
@@ -5044,6 +5104,33 @@ mod tests {
         let error = verify_updater_signature(&request, &public_key).unwrap_err();
 
         assert!(error.to_string().contains("does not match"));
+    }
+
+    #[test]
+    fn updater_embedded_key_verification_requires_the_release_key_bytes() {
+        let directory = tempfile::tempdir().unwrap();
+        let binary = directory.path().join("airwiki");
+        let public_key = BASE64_STANDARD.encode(TEST_UPDATER_PUBLIC_KEY);
+        fs::write(&binary, format!("binary-prefix{public_key}binary-suffix")).unwrap();
+
+        verify_updater_embedded_key(&binary, &public_key).unwrap();
+
+        let different_key = BASE64_STANDARD.encode(
+            "untrusted comment: minisign public key\nRWQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+        );
+        let error = verify_updater_embedded_key(&binary, &different_key).unwrap_err();
+        assert!(error.to_string().contains("does not embed"));
+    }
+
+    #[test]
+    fn updater_embedded_key_request_requires_one_binary() {
+        let error = parse_single_path_option(
+            vec!["--artifact".to_owned(), "airwiki".to_owned()],
+            "--binary",
+        )
+        .unwrap_err();
+
+        assert!(error.to_string().contains("expected `--binary`"));
     }
 
     #[test]
@@ -8440,6 +8527,7 @@ mod tests {
             package.contains("$env:TAURI_SIGNING_PRIVATE_KEY")
                 && package.contains("& $Tauri signer sign $FinalInstaller")
                 && package.contains("packaging verify-updater-signature")
+                && package.contains("packaging verify-updater-embedded-key")
                 && package.contains("Tauri updater signature verification failed")
         );
         assert!(verify.contains("target\\windows-uninstaller\\airwiki-uninstall.exe"));
@@ -8471,6 +8559,27 @@ mod tests {
             release.contains("packaging verify-updater-signature")
                 && release.contains("--artifact \"$UPDATE_ARCHIVE\"")
                 && release.contains("--signature \"$UPDATE_ARCHIVE.sig\"")
+        );
+        assert!(
+            release.contains("packaging verify-updater-embedded-key")
+                && release.contains("--binary \"$APP/Contents/MacOS/airwiki\"")
+        );
+    }
+
+    #[test]
+    fn tauri_window_icons_match_the_packaging_brand_assets() {
+        let root = workspace_root();
+        let build_script = fs::read_to_string(root.join("apps/desktop/build.rs")).unwrap();
+        let tauri_ico = fs::read(root.join("apps/desktop/icons/icon.ico")).unwrap();
+        let brand_ico = fs::read(root.join("resources/branding/airwiki.ico")).unwrap();
+        let tauri_icns = fs::read(root.join("apps/desktop/icons/icon.icns")).unwrap();
+        let brand_icns = fs::read(root.join("resources/branding/airwiki.icns")).unwrap();
+
+        assert_eq!(tauri_ico, brand_ico);
+        assert_eq!(tauri_icns, brand_icns);
+        assert!(
+            build_script.contains("../../resources/branding/airwiki.ico"),
+            "the Windows executable must embed the same icon as the installer"
         );
     }
 

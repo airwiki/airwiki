@@ -38,8 +38,8 @@ export async function connect(onEvent: (event: UiEventEnvelope) => void): Promis
   return invoke<AppSnapshot>('connect', { events });
 }
 
-export async function installModels(licensesConfirmed: boolean): Promise<void> {
-  return invoke('install_models', { licensesConfirmed });
+export async function installModels(): Promise<void> {
+  return invoke('install_models');
 }
 
 export async function cancelModelInstall(): Promise<void> {
@@ -197,9 +197,9 @@ export async function prepareGuidedWikiRepair(collectionId: string): Promise<str
   return requestId;
 }
 
-export async function executeGuidedWikiRepair(collectionId: string, confirmed: boolean): Promise<string> {
+export async function executeGuidedWikiRepair(collectionId: string): Promise<string> {
   const requestId = crypto.randomUUID();
-  await invoke('execute_guided_wiki_repair', { requestId, collectionId, confirmed });
+  await invoke('execute_guided_wiki_repair', { requestId, collectionId });
   return requestId;
 }
 
@@ -215,8 +215,8 @@ export async function openSystemDestination(requestId: string, destination: Syst
   return invoke('open_system_destination', { requestId, destination });
 }
 
-export async function openExternalLink(url: string, confirmed: boolean): Promise<void> {
-  return invoke('open_external_link', { url, confirmed });
+export async function openExternalLink(url: string): Promise<void> {
+  return invoke('open_external_link', { url });
 }
 
 export async function hideToTray(): Promise<void> {

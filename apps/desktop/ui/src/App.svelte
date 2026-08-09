@@ -67,7 +67,6 @@
   let integrationRequestId: string | null = null;
   let updaterRequestId: string | null = null;
   let confirmUpdateInstall = false;
-  let pendingExternalUrl: string | null = null;
   let federationPeerId = '';
   let federationAddress = '';
   let manualPeerAddress = '';
@@ -233,12 +232,9 @@
     }
   }
 
-  async function confirmExternalLink() {
-    if (!pendingExternalUrl) return;
-    const url = pendingExternalUrl;
-    pendingExternalUrl = null;
+  async function openVerifiedExternalLink(url: string) {
     try {
-      await openExternalLink(url, true);
+      await openExternalLink(url);
     } catch {
       actionMessage = t('error-generic');
     }
@@ -492,7 +488,7 @@
   async function executeRepair(collectionId: string) {
     if (!guidedRepairConfirmed) return;
     try {
-      guidedRepairRequestId = await executeGuidedWikiRepair(collectionId, true);
+      guidedRepairRequestId = await executeGuidedWikiRepair(collectionId);
       guidedRepairConfirmed = false;
       actionMessage = t('notice-operation-complete');
     } catch {
@@ -694,7 +690,7 @@
   async function prepareLocalModel() {
     actionBusy = true;
     try {
-      await installModels(modelLicensesConfirmed || Boolean(snapshot?.model?.licenseAccepted));
+      await installModels();
       actionMessage = t('models-downloading', { artifact: snapshot?.model?.displayName ?? t('component-local-ai') });
     } catch {
       actionMessage = t('error-local-ai');
@@ -938,7 +934,7 @@
             {/each}
           </nav>
           <div class="system-layout">
-            <section id="system-models"><p class="section-label">{t('settings-local-ai')}</p><h3>{snapshot.model?.displayName ?? t('models-profile-automatic')}</h3><p>{snapshot.model?.active ? t('models-ready') : t('models-pending')}</p>{#if snapshot.modelInstall}<progress max={snapshot.modelInstall.totalBytes || 1} value={snapshot.modelInstall.downloaded}></progress><small>{modelInstallLabel(locale)}</small><button class="secondary" onclick={cancelModelInstall}>{t('action-cancel')}</button>{:else if snapshot.model && !snapshot.model.active}<label class="check license-check"><input type="checkbox" bind:checked={modelLicensesConfirmed} /> {t('models-accept-licenses')} · {snapshot.model.license ?? t('models-license')}</label><div class="row-actions"><button class="secondary" onclick={prepareLocalModel} disabled={!modelLicensesConfirmed && !snapshot.model.licenseAccepted}>{t('models-action-download')}</button>{#if snapshot.model.licenseUrl}<button class="text-action" onclick={() => { pendingExternalUrl = snapshot?.model?.licenseUrl ?? null; }}>{t('models-license')}</button>{/if}</div>{/if}</section>
+            <section id="system-models"><p class="section-label">{t('settings-local-ai')}</p><h3>{snapshot.model?.displayName ?? t('models-profile-automatic')}</h3><p>{snapshot.model?.active ? t('models-ready') : t('models-pending')}</p>{#if snapshot.modelInstall}<progress max={snapshot.modelInstall.totalBytes || 1} value={snapshot.modelInstall.downloaded}></progress><small>{modelInstallLabel(locale)}</small><button class="secondary" onclick={cancelModelInstall}>{t('action-cancel')}</button>{:else if snapshot.model && !snapshot.model.active}<label class="check license-check"><input type="checkbox" bind:checked={modelLicensesConfirmed} /> {t('models-accept-licenses')} · {snapshot.model.license ?? t('models-license')}</label><div class="row-actions"><button class="secondary" onclick={prepareLocalModel} disabled={!modelLicensesConfirmed && !snapshot.model.licenseAccepted}>{t('models-action-download')}</button>{#if snapshot.model.licenseUrl}<button class="text-action" onclick={() => openVerifiedExternalLink(snapshot?.model?.licenseUrl ?? '')}>{t('models-license')}</button>{/if}</div>{/if}</section>
             <section id="system-preferences" class="settings-form"><p class="section-label">{t('desktop-preferences')}</p><label><span>{t('settings-language')}</span><select bind:value={locale}><option value="system">{t('language-system')}</option><option value="es">{t('language-spanish')}</option><option value="en">{t('language-english')}</option></select></label><label><span>{t('settings-theme')}</span><select bind:value={theme}><option value="system">{t('theme-system')}</option><option value="light">{t('theme-light')}</option><option value="dark">{t('theme-dark')}</option></select></label><label><span>{t('desktop-lan')}</span><select bind:value={lanPreference}><option value="disabled">{t('desktop-disabled')}</option><option value="enabled">{t('desktop-enabled')}</option></select></label><label><span>{t('desktop-close')}</span><select bind:value={closeBehavior}><option value="ask">{t('desktop-ask')}</option><option value="hide_to_tray">{t('desktop-hide-tray')}</option><option value="quit">{t('desktop-quit')}</option></select></label><label class="check"><input type="checkbox" bind:checked={automaticUpdateChecks} /> {t('updates-automatic')}</label><button class="primary" onclick={() => savePreferences(false)} disabled={actionBusy}>{t('desktop-save-preferences')}</button></section>
             <section id="system-updates" class="updater-section" aria-live="polite"><div class="settings-heading"><div><p class="section-label">{t('updates-title')}</p><h3>{t('desktop-stable-channel')}</h3></div>{#if snapshot.updater?.status !== 'disabled'}<button class="text-action" onclick={() => runUpdaterAction('check')} disabled={updaterRequestId !== null || snapshot.updater?.status === 'checking' || snapshot.updater?.status === 'downloading' || snapshot.updater?.status === 'installing'}>{t('updates-check-now')}</button>{/if}</div><p>{updaterLabel(locale)}</p>{#if snapshot.updater?.releaseNotes}<div class="release-notes"><small>{t('desktop-release-notes')}</small><p>{snapshot.updater.releaseNotes}</p></div>{/if}<div class="row-actions">{#if snapshot.updater?.status === 'available'}<button class="secondary" onclick={() => runUpdaterAction('download')} disabled={updaterRequestId !== null}>{t('desktop-update-download')}</button>{:else if snapshot.updater?.status === 'readyToInstall' && !confirmUpdateInstall}<button class="primary" onclick={() => { confirmUpdateInstall = true; }}>{t('updates-install')}</button>{:else if snapshot.updater?.status === 'readyToInstall' && confirmUpdateInstall}<div class="install-confirmation" role="alert"><p>{t('desktop-update-install-body', { version: snapshot.updater.version ?? '' })}</p><button class="primary" onclick={() => runUpdaterAction('install')} disabled={updaterRequestId !== null}>{t('updates-confirm-install')}</button><button class="secondary" onclick={() => { confirmUpdateInstall = false; }} disabled={updaterRequestId !== null}>{t('action-cancel')}</button></div>{:else if snapshot.updater?.retryable}<button class="secondary" onclick={() => runUpdaterAction('check')} disabled={updaterRequestId !== null}>{t('action-retry')}</button>{/if}</div><small>{t('desktop-update-privacy')}</small></section>
             <section><p class="section-label">{t('desktop-sign-in')}</p><h3>{t('desktop-autostart')}</h3><p>{autostartLabel(locale)}</p><div class="row-actions">{#if snapshot.autostart === 'enabled'}<button class="secondary" onclick={() => changeAutostart(false)} disabled={autostartBusy}>{t('action-disable')}</button>{:else if snapshot.autostart !== 'unsupported' && snapshot.autostart !== 'conflict'}<button class="secondary" onclick={() => changeAutostart(true)} disabled={autostartBusy}>{autostartBusy ? t('autostart-checking') : t('action-enable')}</button>{/if}<button class="text-action" onclick={refreshAutostartState} disabled={autostartBusy}>{t('settings-refresh-status')}</button></div></section>
@@ -993,16 +989,6 @@
       <p class="section-label">{t('desktop-close-eyebrow')}</p><h2 id="close-title">{t('close-dialog-title')}</h2>
       <p>{t('desktop-hide-services')}</p>
       <div><button class="primary" onclick={() => applyCloseChoice('hide')}>{t('desktop-hide-tray')}</button><button class="danger" onclick={() => applyCloseChoice('quit')}>{t('desktop-quit')}</button><button class="secondary" onclick={() => applyCloseChoice('cancel')}>{t('action-cancel')}</button></div>
-    </div>
-  </div>
-{/if}
-{#if pendingExternalUrl}
-  <div class="modal-backdrop" role="presentation">
-    <div class="close-dialog" role="dialog" aria-modal="true" aria-labelledby="external-link-title">
-      <p class="section-label">{t('desktop-external-eyebrow')}</p><h2 id="external-link-title">{t('desktop-external-title')}</h2>
-      <p>{t('desktop-external-body')}</p>
-      <code class="external-destination">{pendingExternalUrl}</code>
-      <div><button class="primary" onclick={confirmExternalLink}>{t('desktop-open-link')}</button><button class="secondary" onclick={() => { pendingExternalUrl = null; }}>{t('action-cancel')}</button></div>
     </div>
   </div>
 {/if}

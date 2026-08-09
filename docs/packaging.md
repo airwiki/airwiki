@@ -16,6 +16,7 @@ embedded in packages.
 From the repository root:
 
 ```bash
+# Node.js 24.15.0 is required.
 corepack enable
 corepack prepare pnpm@10.18.3 --activate
 pnpm --dir apps/desktop/ui install --frozen-lockfile --ignore-scripts --prod=false
@@ -26,9 +27,15 @@ cargo run --locked -p xtask -- licenses check
 `--prod=false` is mandatory so an inherited `NODE_ENV=production` cannot omit
 the pinned Tauri, Svelte validation, and Vite build tools. Package wrappers fail
 before runtime preparation when any of those tools is absent.
+The UI manifest and `.npmrc` reject any Node or pnpm version other than the
+exact pinned toolchain used by CI and package pilots.
 The platform npm inventory must also match the installed frozen graph; generate
 it only on the corresponding verified platform and review all metadata and legal
 text changes.
+Every pull request runs the frozen install, Svelte/TypeScript checks, ESLint,
+Vitest/axe coverage, native-E2E typecheck, both platform license inventories and
+a production-dependency advisory scan. Package pilots repeat the platform
+inventory before bundling.
 
 If the generated legal inventory is stale, regenerate it and review the complete
 diff before packaging:
@@ -70,6 +77,11 @@ after an internal upgrade. The candidate must preserve that item, wait without
 blocking the async runtime, and fail closed if access is denied; deleting or
 silently replacing the device identity is never an acceptance shortcut.
 
+The signed release wrapper additionally proves that the public updater key in
+the signing environment is present in the final desktop executable before it
+signs or publishes the updater archive. Cargo rebuilds the desktop whenever an
+updater endpoint, updater key or bootstrap registry build input changes.
+
 Expected package content includes:
 
 - the complete pinned `llama-server` runtime;
@@ -100,6 +112,11 @@ The Windows path:
    firewall helper;
 4. creates the deterministic MCPB and per-user NSIS installer; and
 5. verifies the installer payload and uninstaller contracts.
+
+The signed wrapper also verifies the updater public key embedded in
+`airwiki.exe` before creating the final signed NSIS artifact. The Tauri window
+icons and packaging brand assets are byte-identical and enforced by tests, so
+the executable, shortcuts and installer cannot silently diverge.
 
 The accepted runtime directory contains exactly `llama-server.exe` and
 `BUILD-MANIFEST.json`. An unexpected DLL, executable, import, reparse point,

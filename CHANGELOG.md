@@ -54,9 +54,9 @@ All notable user-visible changes to AirWiki will be documented here. The project
 
 ### Fixed
 
-- Kept the desktop navigation rail fixed in place when opening System or a
-  deep-linked System subsection, and confined section jumps to the main content
-  scroller so settings no longer displace or freeze the application shell.
+- Kept the desktop navigation rail fixed in place and made every System
+  subsection an independently routed page, removing section jumps that could
+  displace or freeze the application shell.
 - Restored process-lifetime sanitized desktop logging, honored background
   autostart without exposing an inaccessible process, rejected remote WebView
   navigation, and moved sensitive desktop consent to Rust-owned native dialogs.

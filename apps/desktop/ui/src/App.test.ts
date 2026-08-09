@@ -5,6 +5,12 @@ import App from './App.svelte';
 import { readySnapshot } from './test/fixtures';
 
 let snapshot = readySnapshot();
+const accessibilityCases = (['es', 'en'] as const).flatMap((locale) =>
+  (['light', 'dark'] as const).flatMap((theme) =>
+    (['library', 'review', 'search', 'system/models', 'system/preferences', 'system/updates', 'system/connectivity', 'system/devices', 'system/integrations'] as const)
+      .map((route) => [locale, theme, route] as const)
+  )
+);
 
 vi.mock('./api', async (importOriginal) => {
   const original = await importOriginal() as typeof import('./api');
@@ -49,13 +55,12 @@ describe('AirWiki desktop shell', () => {
     const system = await screen.findByRole('button', { name: 'Sistema' });
     await fireEvent.click(system);
 
-    expect(await screen.findByText('Identidad y capacidad local')).toBeInTheDocument();
+    expect(await screen.findByRole('link', { name: 'Preferencias del dispositivo' })).toHaveAttribute('aria-current', 'page');
     expect(screen.getByRole('button', { name: 'Guardar preferencias' })).toBeEnabled();
   });
 
-  it('keeps System navigation inside the main scroll region', async () => {
+  it('renders System subsections as independent pages', async () => {
     const scrollTo = vi.spyOn(HTMLElement.prototype, 'scrollTo');
-    const viewportScroll = vi.spyOn(Element.prototype, 'scrollIntoView');
     const pushState = vi.spyOn(window.history, 'pushState');
     render(App);
 
@@ -67,25 +72,20 @@ describe('AirWiki desktop shell', () => {
     expect(pushState).toHaveBeenCalledTimes(1);
     await fireEvent.click(screen.getByRole('button', { name: 'Sistema' }));
     expect(pushState).toHaveBeenCalledTimes(1);
-
-    const main = document.querySelector<HTMLElement>('.shell > main');
-    const updates = document.getElementById('system-updates');
-    expect(main).not.toBeNull();
-    expect(updates).not.toBeNull();
-    if (!main || !updates) return;
-    Object.defineProperty(main, 'scrollTop', { configurable: true, value: 80 });
-    vi.spyOn(main, 'getBoundingClientRect').mockReturnValue({ top: 40 } as DOMRect);
-    vi.spyOn(updates, 'getBoundingClientRect').mockReturnValue({ top: 340 } as DOMRect);
+    expect(document.getElementById('system-preferences')).toBeInTheDocument();
+    expect(document.getElementById('system-models')).not.toBeInTheDocument();
+    expect(document.getElementById('system-updates')).not.toBeInTheDocument();
 
     await fireEvent.click(screen.getByRole('link', { name: 'Actualizaciones' }));
     await waitFor(() => expect(scrollTo).toHaveBeenLastCalledWith({
-      top: 356, left: 0, behavior: 'auto'
+      top: 0, left: 0, behavior: 'auto'
     }));
     expect(window.location.hash).toBe('#system/updates');
+    expect(document.getElementById('system-preferences')).not.toBeInTheDocument();
+    expect(document.getElementById('system-updates')).toBeInTheDocument();
     expect(pushState).toHaveBeenCalledTimes(2);
     await fireEvent.click(screen.getByRole('link', { name: 'Actualizaciones' }));
     expect(pushState).toHaveBeenCalledTimes(2);
-    expect(viewportScroll).not.toHaveBeenCalled();
 
     await fireEvent.click(screen.getByRole('button', { name: 'Biblioteca' }));
     await waitFor(() => expect(scrollTo).toHaveBeenLastCalledWith({
@@ -108,6 +108,7 @@ describe('AirWiki desktop shell', () => {
     render(App);
 
     await fireEvent.click(await screen.findByRole('button', { name: 'Sistema' }));
+    await fireEvent.click(screen.getByRole('link', { name: 'Otros equipos' }));
 
     expect(await screen.findByText('Memoria instalada')).toBeInTheDocument();
     expect(screen.getByText('16.0 GiB')).toBeInTheDocument();
@@ -146,14 +147,10 @@ describe('AirWiki desktop shell', () => {
     expect(updates).toHaveAttribute('aria-current', 'page');
     expect(screen.getByRole('button', { name: 'Sistema' })).toHaveClass('active');
     expect(document.getElementById('system-updates')).toBeInTheDocument();
+    expect(document.getElementById('system-preferences')).not.toBeInTheDocument();
   });
 
-  it.each([
-    ['es', 'light', 'library'], ['es', 'light', 'review'], ['es', 'light', 'search'], ['es', 'light', 'system/preferences'],
-    ['es', 'dark', 'library'], ['es', 'dark', 'review'], ['es', 'dark', 'search'], ['es', 'dark', 'system/preferences'],
-    ['en', 'light', 'library'], ['en', 'light', 'review'], ['en', 'light', 'search'], ['en', 'light', 'system/preferences'],
-    ['en', 'dark', 'library'], ['en', 'dark', 'review'], ['en', 'dark', 'search'], ['en', 'dark', 'system/preferences']
-  ] as const)('has no serious or critical accessibility violations in %s/%s/%s', async (locale, theme, route) => {
+  it.each(accessibilityCases)('has no serious or critical accessibility violations in %s/%s/%s', async (locale, theme, route) => {
     const preferences = snapshot.preferences;
     expect(preferences).not.toBeNull();
     if (preferences) {

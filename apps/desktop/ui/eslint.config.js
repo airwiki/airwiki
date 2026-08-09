@@ -23,6 +23,12 @@ export default tseslint.config(
     }
   },
   {
+    files: ['e2e/**/*.ts', 'wdio.conf.ts'],
+    languageOptions: {
+      globals: { ...globals.node, ...globals.mocha }
+    }
+  },
+  {
     files: ['**/*.svelte'],
     languageOptions: {
       parserOptions: { parser: tseslint.parser }

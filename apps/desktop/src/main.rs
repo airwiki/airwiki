@@ -3769,7 +3769,11 @@ fn main() -> Result<()> {
     let cancellation = CancellationToken::new();
     let worker_cancellation = cancellation.clone();
 
-    tauri::Builder::default()
+    let builder = tauri::Builder::default();
+    #[cfg(feature = "e2e")]
+    let builder = builder.plugin(tauri_plugin_wdio_webdriver::init());
+
+    builder
         .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
             show_main_window(app);
         }))
@@ -4455,6 +4459,34 @@ mod tests {
         anyhow::ensure!(
             committed == ui_bindings_source(),
             "UI bindings are stale; run `cargo run --locked -p xtask -- ui-bindings generate`"
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn tauri_updater_plugin_has_an_explicit_disabled_default() -> Result<()> {
+        let config_path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tauri.conf.json");
+        let config: serde_json::Value = serde_json::from_slice(
+            &std::fs::read(&config_path).context("failed to read the Tauri configuration")?,
+        )
+        .context("failed to parse the Tauri configuration")?;
+        let updater = config
+            .pointer("/plugins/updater")
+            .context("the updater plugin requires an explicit configuration object")?;
+
+        anyhow::ensure!(
+            updater
+                .pointer("/endpoints")
+                .and_then(serde_json::Value::as_array)
+                .is_some_and(Vec::is_empty),
+            "the base updater configuration must not contain network endpoints"
+        );
+        anyhow::ensure!(
+            updater
+                .pointer("/pubkey")
+                .and_then(serde_json::Value::as_str)
+                == Some(""),
+            "the base updater key must remain empty; release values are compile-time only"
         );
         Ok(())
     }

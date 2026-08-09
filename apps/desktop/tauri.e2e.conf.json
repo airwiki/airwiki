@@ -1,0 +1,18 @@
+{
+  "build": {
+    "beforeBuildCommand": "pnpm build --mode e2e"
+  },
+  "app": {
+    "security": {
+      "capabilities": [
+        {
+          "identifier": "e2e-main-window",
+          "description": "The isolated E2E runner exposes only the embedded WebDriver test server.",
+          "windows": ["main"],
+          "local": true,
+          "permissions": ["core:default", "wdio-webdriver:default"]
+        }
+      ]
+    }
+  }
+}

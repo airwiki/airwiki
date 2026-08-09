@@ -11,8 +11,13 @@ const targets = {
   'windows-x64': { platform: 'win32', arch: 'x64', output: 'NPM_LICENSES_WINDOWS_X64.md' }
 };
 const allowedLicenses = new Set([
-  'Apache-2.0', 'Apache-2.0 OR MIT', 'BSD-2-Clause', 'BSD-3-Clause',
-  'BlueOak-1.0.0', 'CC0-1.0', 'ISC', 'MIT', 'MIT-0', 'MPL-2.0'
+  '(MIT AND Zlib)', '(MIT OR CC0-1.0)', '(MIT OR GPL-3.0-or-later)',
+  '0BSD', 'Apache-2.0', 'Apache-2.0 OR MIT', 'BSD-2-Clause', 'BSD-3-Clause',
+  'BlueOak-1.0.0', 'CC-BY-3.0', 'CC-BY-4.0', 'CC0-1.0', 'ISC', 'MIT',
+  'MIT-0', 'MPL-2.0', 'Python-2.0', 'Unlicense'
+]);
+const reviewedMetadataOverrides = new Map([
+  ['css-value@0.0.1', { reportedLicense: 'Unknown', license: 'MIT', legalFile: 'Readme.md' }]
 ]);
 const [mode, targetName] = process.argv.slice(2);
 const target = targets[targetName];
@@ -49,13 +54,18 @@ const packages = [];
 const legalTexts = new Map();
 const missingLegalTexts = [];
 for (const [license, entries] of Object.entries(report)) {
-  if (!allowedLicenses.has(license)) {
-    throw new Error(`unreviewed npm license expression: ${license}`);
-  }
   for (const entry of entries) {
+    const packageKey = `${entry.name}@${[...entry.versions].sort().join(',')}`;
+    const metadataOverride = reviewedMetadataOverrides.get(packageKey);
+    if (metadataOverride && metadataOverride.reportedLicense !== license) {
+      throw new Error(`stale npm license metadata override: ${packageKey}`);
+    }
+    if (!allowedLicenses.has(license) && !metadataOverride) {
+      throw new Error(`unreviewed npm license expression: ${license} (${packageKey})`);
+    }
     const hashes = new Set();
     for (const packagePath of entry.paths) {
-      for (const legalPath of legalFiles(packagePath)) {
+      for (const legalPath of legalFiles(packagePath, metadataOverride?.legalFile)) {
         const content = normalizeLegalText(readFileSync(legalPath, 'utf8'));
         const hash = sha256(content);
         hashes.add(hash);
@@ -77,7 +87,7 @@ for (const [license, entries] of Object.entries(report)) {
     packages.push({
       name: entry.name,
       versions: [...entry.versions].sort(),
-      license,
+      license: metadataOverride?.license ?? license,
       homepage: entry.homepage ?? '',
       hashes: [...hashes].sort()
     });
@@ -98,15 +108,24 @@ if (mode === '--generate') {
   process.stdout.write(`${targetName} npm license inventory is current\n`);
 }
 
-function legalFiles(packagePath) {
+function legalFiles(packagePath, reviewedLegalFile) {
   const metadata = lstatSync(packagePath);
   if (!metadata.isDirectory() || metadata.isSymbolicLink()) {
     throw new Error(`package path is not a regular directory: ${packagePath}`);
   }
-  return readdirSync(packagePath, { withFileTypes: true })
+  const files = readdirSync(packagePath, { withFileTypes: true })
     .filter((entry) => entry.isFile() && /^(license|licence|copying|notice|copyright|unlicense)([._-].*)?$/i.test(entry.name))
     .map((entry) => join(packagePath, entry.name))
     .sort();
+  if (reviewedLegalFile) {
+    const reviewedPath = join(packagePath, reviewedLegalFile);
+    const reviewedMetadata = lstatSync(reviewedPath);
+    if (!reviewedMetadata.isFile() || reviewedMetadata.isSymbolicLink()) {
+      throw new Error(`reviewed legal path is not a regular file: ${reviewedPath}`);
+    }
+    files.push(reviewedPath);
+  }
+  return files;
 }
 
 function normalizeLegalText(content) {

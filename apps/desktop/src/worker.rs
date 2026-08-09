@@ -28,7 +28,14 @@ use tokio::task::JoinSet;
 use tokio_util::sync::CancellationToken;
 use uuid::Uuid;
 
-type Sender<T> = tokio::sync::broadcast::Sender<T>;
+type Sender<T> = tokio::sync::mpsc::Sender<T>;
+type ProgressSender<T> = tokio::sync::broadcast::Sender<T>;
+
+#[derive(Clone, Copy)]
+struct InstallEventSenders<'a> {
+    durable: &'a Sender<WorkerEvent>,
+    progress: &'a ProgressSender<WorkerEvent>,
+}
 
 use crate::{
     autostart::{AutostartManager, AutostartStatus},
@@ -590,8 +597,6 @@ pub enum WorkerEvent {
 }
 
 const WORKER_EVENT_CAPACITY: usize = 256;
-#[cfg(test)]
-const WORKER_PRESENTATION_CAPACITY: usize = 128;
 
 enum InternalEvent {
     VerificationFinished(Result<InstallOutcome, String>),
@@ -921,6 +926,8 @@ pub(crate) async fn run_worker(
     paths: AppPaths,
     mut commands: AsyncReceiver<WorkerCommand>,
     events: Sender<WorkerEvent>,
+    progress_events: ProgressSender<WorkerEvent>,
+    cancellation: CancellationToken,
     updater_backend: Result<Box<dyn UpdateBackend>, UpdaterDisabledReason>,
 ) {
     send(
@@ -933,18 +940,20 @@ pub(crate) async fn run_worker(
             source_issues: Vec::new(),
             blocked_public_publishers: Vec::new(),
         },
-    );
+    )
+    .await;
 
     let hardware = match diagnose_hardware(&paths.data) {
         Ok(report) => {
-            send(&events, WorkerEvent::Hardware(report.clone()));
+            send(&events, WorkerEvent::Hardware(report.clone())).await;
             report
         }
         Err(error) => {
             send(
                 &events,
                 WorkerEvent::Error(format!("Falló el diagnóstico: {error:#}")),
-            );
+            )
+            .await;
             return;
         }
     };
@@ -956,12 +965,13 @@ pub(crate) async fn run_worker(
                 WorkerEvent::Error(format!(
                     "No se pudo cargar la configuración de modelos: {error:#}"
                 )),
-            );
+            )
+            .await;
             return;
         }
     };
     if let Some(warning) = loaded_config.warning {
-        send(&events, WorkerEvent::Error(warning));
+        send(&events, WorkerEvent::Error(warning)).await;
     }
     let mut desktop_config = loaded_config.config;
     send(
@@ -970,7 +980,8 @@ pub(crate) async fn run_worker(
             request_id: Uuid::nil(),
             result: Ok(DesktopPreferencesView::from(&desktop_config)),
         },
-    );
+    )
+    .await;
     let (mut updater, updater_disabled_reason) = match updater_backend {
         Ok(backend) => (Some(UpdaterService::from_boxed(backend)), None),
         Err(reason) => (None, Some(reason)),
@@ -982,7 +993,8 @@ pub(crate) async fn run_worker(
                 request_id: Uuid::nil(),
                 result: Ok(UpdaterWorkerView::Disabled(reason)),
             },
-        );
+        )
+        .await;
     } else if let Some(service) = updater.as_ref() {
         send(
             &events,
@@ -990,7 +1002,8 @@ pub(crate) async fn run_worker(
                 request_id: Uuid::nil(),
                 result: Ok(UpdaterWorkerView::Ready(service.view().clone())),
             },
-        );
+        )
+        .await;
     }
     let mut updater_schedule = UpdateSchedule::new(
         Instant::now(),
@@ -1007,7 +1020,8 @@ pub(crate) async fn run_worker(
                 WorkerEvent::Error(format!(
                     "No se pudo iniciar el gestor de modelos: {error:#}"
                 )),
-            );
+            )
+            .await;
             return;
         }
     };
@@ -1036,7 +1050,8 @@ pub(crate) async fn run_worker(
                 WorkerEvent::Error(format!(
                     "No se pudieron iniciar los servicios privados: {error:#}"
                 )),
-            );
+            )
+            .await;
             return;
         }
     };
@@ -1067,9 +1082,9 @@ pub(crate) async fn run_worker(
     };
     let mut lan_local_addresses = Vec::new();
     let mut current_lan_listener = None;
-    send_lan_runtime(&events, lan_listener, lan_discovery, &lan_local_addresses);
-    send_ready(&services, &events);
-    refresh_peers(&services, &events);
+    send_lan_runtime(&events, lan_listener, lan_discovery, &lan_local_addresses).await;
+    send_ready(&services, &events).await;
+    refresh_peers(&services, &events).await;
 
     let (watch_tx, mut watch_rx) =
         tokio::sync::mpsc::channel::<CollectionWatchEvent>(WORKER_EVENT_CAPACITY);
@@ -1123,12 +1138,16 @@ pub(crate) async fn run_worker(
                     "No se pudo observar una colección: {}",
                     watcher_failure_summary(&failures)
                 )),
-            );
+            )
+            .await;
         }
-        Err(error) => send(
-            &events,
-            WorkerEvent::Error(format!("No se pudieron preparar los watchers: {error:#}")),
-        ),
+        Err(error) => {
+            send(
+                &events,
+                WorkerEvent::Error(format!("No se pudieron preparar los watchers: {error:#}")),
+            )
+            .await
+        }
         Ok(_) => {}
     }
     let mut watcher_retry = tokio::time::interval(Duration::from_secs(5));
@@ -1186,9 +1205,9 @@ pub(crate) async fn run_worker(
                 "La selección pendiente ya no existe, no es segura o no coincide con el perfil actual; se descartó"
                     .into(),
             ),
-        );
+        ).await;
         desktop_config.pending_selection = None;
-        let _ = persist_config(&desktop_config, &paths, &events);
+        let _ = persist_config(&desktop_config, &paths, &events).await;
     }
     let active_selection = desktop_config
         .active_selection
@@ -1202,7 +1221,7 @@ pub(crate) async fn run_worker(
                 "El modelo activo guardado ya no existe o no es seguro para este hardware; se intentará el fallback compatible"
                     .into(),
             ),
-        );
+        ).await;
     }
     let mut verifying_selection = pending_selection
         .or(active_selection)
@@ -1214,7 +1233,8 @@ pub(crate) async fn run_worker(
                 "Verificando la integridad de {}…",
                 verifying_selection.manifest.display_name
             )),
-        );
+        )
+        .await;
         spawn_verification(
             &mut lifecycle,
             asset_manager.clone(),
@@ -1228,8 +1248,9 @@ pub(crate) async fn run_worker(
             WorkerEvent::Error(
                 "No hay un modelo instalado que sea seguro para este hardware".into(),
             ),
-        );
-        send(&events, WorkerEvent::ModelsMissing);
+        )
+        .await;
+        send(&events, WorkerEvent::ModelsMissing).await;
         if !initial_model_state_scheduled {
             send_model_state(
                 &mut lifecycle,
@@ -1243,9 +1264,11 @@ pub(crate) async fn run_worker(
 
     'running: loop {
         tokio::select! {
+            biased;
+            () = cancellation.cancelled() => break 'running,
             changed = public_announcement_updates.changed(), if public_announcement_updates_open => {
                 if changed.is_ok() {
-                    refresh_collection_views(&services, &events);
+                    refresh_collection_views(&services, &events).await;
                 } else {
                     public_announcement_updates_open = false;
                 }
@@ -1261,7 +1284,7 @@ pub(crate) async fn run_worker(
                                     "No hay un modelo elegible: {}",
                                     recommendation.issues.join("; ")
                                 )),
-                            );
+                            ).await;
                             continue;
                         };
                         match model_lifecycle {
@@ -1272,19 +1295,19 @@ pub(crate) async fn run_worker(
                                     WorkerEvent::InstallQueued(
                                         "Esperando que termine la verificación actual…".into(),
                                     ),
-                                );
+                                ).await;
                                 send(
                                     &events,
                                     WorkerEvent::Notice(
                                         "La instalación comenzará al terminar la verificación actual"
                                             .into(),
                                     ),
-                                );
+                                ).await;
                             }
                             ModelLifecycle::Installing => send(
                                 &events,
                                 WorkerEvent::Notice("Ya hay una instalación en curso".into()),
-                            ),
+                            ).await,
                             ModelLifecycle::Enabling => {
                                 queued_install = true;
                                 send(
@@ -1292,14 +1315,14 @@ pub(crate) async fn run_worker(
                                     WorkerEvent::InstallQueued(
                                         "Esperando que termine el smoke test actual…".into(),
                                     ),
-                                );
+                                ).await;
                                 send(
                                     &events,
                                     WorkerEvent::Notice(
                                         "La instalación comenzará al terminar el smoke test actual"
                                             .into(),
                                     ),
-                                );
+                                ).await;
                             }
                             ModelLifecycle::Missing | ModelLifecycle::Ready => {
                                 if desktop_config.active_selection.as_deref()
@@ -1312,12 +1335,12 @@ pub(crate) async fn run_worker(
                                             "{} ya está activo y verificado",
                                             selection.manifest.display_name
                                         )),
-                                    );
+                                    ).await;
                                     continue;
                                 }
                                 let previous_config = desktop_config.clone();
                                 accept_selection_licenses(&mut desktop_config, &selection);
-                                if !persist_config(&desktop_config, &paths, &events) {
+                                if !persist_config(&desktop_config, &paths, &events).await {
                                     desktop_config = previous_config;
                                     send_model_state(
                                         &mut lifecycle,
@@ -1332,7 +1355,10 @@ pub(crate) async fn run_worker(
                                     &mut lifecycle,
                                     &asset_manager,
                                     selection,
-                                    &events,
+                                    InstallEventSenders {
+                                        durable: &events,
+                                        progress: &progress_events,
+                                    },
                                     &internal_tx,
                                     &mut install_cancel,
                                     paths.logs.join(MODEL_ACTIVATION_STATUS_FILE),
@@ -1347,14 +1373,14 @@ pub(crate) async fn run_worker(
                                 if queued_install =>
                             {
                                 queued_install = false;
-                                send(&events, WorkerEvent::InstallStopped);
+                                send(&events, WorkerEvent::InstallStopped).await;
                                 send(
                                     &events,
                                     WorkerEvent::Notice(
                                         "Instalación pendiente cancelada; la operación actual continúa"
                                             .into(),
                                     ),
-                                );
+                                ).await;
                             }
                             ModelLifecycle::Installing => {
                                 if let Some(cancel) = install_cancel.as_ref() {
@@ -1364,7 +1390,7 @@ pub(crate) async fn run_worker(
                             _ => send(
                                 &events,
                                 WorkerEvent::Notice("No hay una instalación cancelable".into()),
-                            ),
+                            ).await,
                         }
                     }
                     WorkerCommand::SetModelProfile(profile) => {
@@ -1375,7 +1401,7 @@ pub(crate) async fn run_worker(
                                     "Espera a que termine la verificación u operación de modelos para cambiar el perfil"
                                         .into(),
                                 ),
-                            );
+                            ).await;
                             send_model_state(
                                 &mut lifecycle,
                                 &events,
@@ -1391,7 +1417,7 @@ pub(crate) async fn run_worker(
                             profile,
                             &updated_recommendation,
                         );
-                        if !persist_config(&updated_config, &paths, &events) {
+                        if !persist_config(&updated_config, &paths, &events).await {
                             send_model_state(
                                 &mut lifecycle,
                                 &events,
@@ -1410,7 +1436,7 @@ pub(crate) async fn run_worker(
                                     "Se canceló la activación pendiente porque no coincide con el perfil; el modelo descargado se conserva"
                                         .into(),
                                 ),
-                            );
+                            ).await;
                         }
                         send_model_state(
                             &mut lifecycle,
@@ -1440,7 +1466,7 @@ pub(crate) async fn run_worker(
                             desktop_config.completed_onboarding_version = Some(ONBOARDING_VERSION);
                         }
                         let lan_changed = previous.lan_preference != desktop_config.lan_preference;
-                        let result = if persist_config(&desktop_config, &paths, &events) {
+                        let result = if persist_config(&desktop_config, &paths, &events).await {
                                 updater_schedule.set_enabled(
                                     Instant::now(),
                                     desktop_config.automatic_update_checks && updater.is_some(),
@@ -1459,7 +1485,7 @@ pub(crate) async fn run_worker(
                                         )
                                         .await
                                         {
-                                            send(&events, WorkerEvent::Error(message));
+                                            send(&events, WorkerEvent::Error(message)).await;
                                         }
                                     } else {
                                         lan_listener = LanListenerView::Starting;
@@ -1470,7 +1496,7 @@ pub(crate) async fn run_worker(
                                             lan_listener,
                                             lan_discovery,
                                             &lan_local_addresses,
-                                        );
+                                        ).await;
                                         if active_connectivity_request.is_none() {
                                             let diagnostic_id = Uuid::new_v4();
                                             active_connectivity_request = Some(diagnostic_id);
@@ -1481,7 +1507,7 @@ pub(crate) async fn run_worker(
                                         }
                                     }
                                 }
-                                refresh_peers(&services, &events);
+                                refresh_peers(&services, &events).await;
                                 Ok(DesktopPreferencesView::from(&desktop_config))
                         } else {
                             desktop_config = previous;
@@ -1490,7 +1516,7 @@ pub(crate) async fn run_worker(
                         send(
                             &events,
                             WorkerEvent::DesktopPreferencesUpdated { request_id, result },
-                        );
+                        ).await;
                     }
                     WorkerCommand::SetAutostart { request_id, enabled } => {
                         spawn_autostart(&mut background, request_id, Some(enabled));
@@ -1507,7 +1533,7 @@ pub(crate) async fn run_worker(
                             &mut active_updater_request,
                             request_id,
                             UpdaterOperation::Check,
-                        );
+                        ).await;
                     }
                     WorkerCommand::DownloadUpdate { request_id } => {
                         queue_updater_operation(
@@ -1518,7 +1544,7 @@ pub(crate) async fn run_worker(
                             &mut active_updater_request,
                             request_id,
                             UpdaterOperation::Download,
-                        );
+                        ).await;
                     }
                     WorkerCommand::InstallUpdate { request_id } => {
                         if firewall_update_overlap_is_busy(firewall_operation, None) {
@@ -1531,7 +1557,7 @@ pub(crate) async fn run_worker(
                                             .to_owned(),
                                     ),
                                 },
-                            );
+                            ).await;
                         } else {
                             queue_updater_operation(
                                 &mut background,
@@ -1541,7 +1567,7 @@ pub(crate) async fn run_worker(
                                 &mut active_updater_request,
                                 request_id,
                                 UpdaterOperation::Install,
-                            );
+                            ).await;
                         }
                     }
                     WorkerCommand::RefreshConnectivity { request_id } => {
@@ -1555,7 +1581,7 @@ pub(crate) async fn run_worker(
                                     request_id,
                                     result: Err(ConnectivityIssueCode::Busy),
                                 },
-                            );
+                            ).await;
                         } else {
                             active_connectivity_request = Some(request_id);
                             restart_lan_request = Some(request_id);
@@ -1574,7 +1600,7 @@ pub(crate) async fn run_worker(
                                     request_id,
                                     result: Err(ConnectivityIssueCode::Busy),
                                 },
-                            );
+                            ).await;
                         } else if install
                             && desktop_config.lan_preference != LanPreference::Enabled
                         {
@@ -1584,7 +1610,7 @@ pub(crate) async fn run_worker(
                                     request_id,
                                     result: Err(ConnectivityIssueCode::FirewallStateChanged),
                                 },
-                            );
+                            ).await;
                         } else {
                             active_connectivity_request = Some(request_id);
                             firewall_operation = Some(FirewallOperationTracker {
@@ -1598,7 +1624,7 @@ pub(crate) async fn run_worker(
                                     request_id,
                                     state: Some(FirewallOperationView::AwaitingWindows),
                                 },
-                            );
+                            ).await;
                             spawn_firewall_configuration(&mut background, request_id, install);
                         }
                     }
@@ -1616,7 +1642,7 @@ pub(crate) async fn run_worker(
                                     request_id,
                                     result: Err(ConnectivityIssueCode::Busy),
                                 },
-                            );
+                            ).await;
                         } else {
                             active_connectivity_request = Some(request_id);
                             spawn_system_destination(&mut background, request_id, destination);
@@ -1642,7 +1668,7 @@ pub(crate) async fn run_worker(
                                     collection_id,
                                     result: Err("wiki_repair_operation_in_progress".to_owned()),
                                 },
-                            );
+                            ).await;
                         } else {
                             active_guided_repair_request = Some(request_id);
                             spawn_guided_repair_preview(
@@ -1666,7 +1692,7 @@ pub(crate) async fn run_worker(
                                     collection_id,
                                     result: Err("wiki_repair_operation_in_progress".to_owned()),
                                 },
-                            );
+                            ).await;
                         } else {
                             active_guided_repair_request = Some(request_id);
                             spawn_guided_repair_execution(
@@ -1690,7 +1716,7 @@ pub(crate) async fn run_worker(
                                                 &mut background,
                                                 &events,
                                                 collection.id,
-                                            );
+                                            ).await;
                                         }
                                     }
                                     Err(error) => {
@@ -1701,12 +1727,12 @@ pub(crate) async fn run_worker(
                                             collection.id,
                                             "no se pudo crear el watcher de la colección nueva",
                                         );
-                                        send(&events, WorkerEvent::Error(format!("No se pudo observar la carpeta: {error:#}")));
+                                        send(&events, WorkerEvent::Error(format!("No se pudo observar la carpeta: {error:#}"))).await;
                                     }
                                 }
-                                refresh_content_views(&services, &events);
+                                refresh_content_views(&services, &events).await;
                             }
-                            Err(error) => send(&events, WorkerEvent::Error(format!("No se pudo crear la colección: {error:#}"))),
+                            Err(error) => send(&events, WorkerEvent::Error(format!("No se pudo crear la colección: {error:#}"))).await,
                         }
                     }
                     WorkerCommand::RelinkCollection { collection_id, folder } => {
@@ -1715,8 +1741,8 @@ pub(crate) async fn run_worker(
                             spawn_preflight(&services, &mut background, ready);
                         }
                         let ready = scan_scheduler.cancel(collection_id);
-                        publish_scan_state(&events, &scan_scheduler, collection_id);
-                        spawn_ready_scans(&services, &mut background, &events, ready);
+                        publish_scan_state(&events, &scan_scheduler, collection_id).await;
+                        spawn_ready_scans(&services, &mut background, &events, ready).await;
                         let services = Arc::clone(&services);
                         background.spawn_blocking(move || {
                             let result = services
@@ -1737,26 +1763,26 @@ pub(crate) async fn run_worker(
                     }
                     WorkerCommand::RescanCollection(collection_id) => {
                         if !services.models_ready() {
-                            send(&events, WorkerEvent::Error("Instala los modelos antes de escanear".into()));
+                            send(&events, WorkerEvent::Error("Instala los modelos antes de escanear".into())).await;
                             send(
                                 &events,
                                 WorkerEvent::CollectionScan {
                                     collection_id,
                                     state: None,
                                 },
-                            );
+                            ).await;
                         } else if !watchers.contains_key(&collection_id) {
                             send(&events, WorkerEvent::Error(
                                 "La colección no tiene un watcher activo; corrige la carpeta antes de escanear"
                                     .into(),
-                            ));
+                            )).await;
                             send(
                                 &events,
                                 WorkerEvent::CollectionScan {
                                     collection_id,
                                     state: None,
                                 },
-                            );
+                            ).await;
                         } else {
                             manual_rescans.insert(collection_id);
                             request_scan(
@@ -1765,19 +1791,19 @@ pub(crate) async fn run_worker(
                                 &mut background,
                                 &events,
                                 collection_id,
-                            );
+                            ).await;
                         }
                     }
                     WorkerCommand::UpdateCollectionPolicy { collection_id, local_only, peer_shareable, allow_external_ai, internet_public } => {
                         let policy = CollectionPolicy { local_only, peer_shareable, allow_external_ai, internet_public };
                         if let Err(error) = services.update_collection_policy(collection_id, policy) {
-                            send(&events, WorkerEvent::Error(format!("No se pudo actualizar la política: {error:#}")));
+                            send(&events, WorkerEvent::Error(format!("No se pudo actualizar la política: {error:#}"))).await;
                         } else if let Err(error) = services.reconcile_public_network().await {
-                            send(&events, WorkerEvent::Error(format!("No se pudo actualizar la red pública: {error:#}")));
+                            send(&events, WorkerEvent::Error(format!("No se pudo actualizar la red pública: {error:#}"))).await;
                         } else if let Err(error) = services.sync_public_collection(collection_id).await {
-                            send(&events, WorkerEvent::Error(format!("No se pudo sincronizar el anuncio público: {error:#}")));
+                            send(&events, WorkerEvent::Error(format!("No se pudo sincronizar el anuncio público: {error:#}"))).await;
                         }
-                        refresh_content_views(&services, &events);
+                        refresh_content_views(&services, &events).await;
                     }
                     WorkerCommand::Approve {
                         concept_id,
@@ -1790,7 +1816,7 @@ pub(crate) async fn run_worker(
                                 WorkerEvent::Notice(
                                     "Ese documento ya se está publicando".into(),
                                 ),
-                            );
+                            ).await;
                         } else {
                             spawn_review_approval(
                                 &services,
@@ -1803,11 +1829,11 @@ pub(crate) async fn run_worker(
                     }
                     WorkerCommand::Reject { concept_id } => {
                         if let Err(error) = services.reject_review(concept_id) {
-                            send(&events, WorkerEvent::Error(format!("No se pudo rechazar el borrador: {error:#}")));
+                            send(&events, WorkerEvent::Error(format!("No se pudo rechazar el borrador: {error:#}"))).await;
                         } else {
-                            send(&events, WorkerEvent::Notice("Borrador rechazado; permanece fuera de publicación".into()));
+                            send(&events, WorkerEvent::Notice("Borrador rechazado; permanece fuera de publicación".into())).await;
                         }
-                        refresh_content_views(&services, &events);
+                        refresh_content_views(&services, &events).await;
                     }
                     WorkerCommand::ReanalyzeReview { concept_id } => {
                         if model_lifecycle != ModelLifecycle::Ready || !services.models_ready() {
@@ -1817,14 +1843,14 @@ pub(crate) async fn run_worker(
                                     "El modelo local todavía no está listo para volver a analizar"
                                         .into(),
                                 ),
-                            );
+                            ).await;
                         } else if !reanalyzing_reviews.insert(concept_id) {
                             send(
                                 &events,
                                 WorkerEvent::Notice(
                                     "Ese documento ya se está volviendo a analizar".into(),
                                 ),
-                            );
+                            ).await;
                         } else {
                             send(
                                 &events,
@@ -1832,7 +1858,7 @@ pub(crate) async fn run_worker(
                                     concept_id,
                                     running: true,
                                 },
-                            );
+                            ).await;
                             spawn_review_reanalysis(&services, &mut background, concept_id);
                         }
                     }
@@ -1900,32 +1926,32 @@ pub(crate) async fn run_worker(
                         match services.add_federation_index(&peer_id, &address) {
                             Ok(()) => match services.restart_public_network().await {
                                 Ok(()) => match services.sync_all_public_collections().await {
-                                    Ok(()) => send(&events, WorkerEvent::Notice("Índice comunitario agregado".into())),
-                                    Err(error) => send(&events, WorkerEvent::Error(format!("El índice se agregó, pero no se pudieron sincronizar los anuncios: {error:#}"))),
+                                    Ok(()) => send(&events, WorkerEvent::Notice("Índice comunitario agregado".into())).await,
+                                    Err(error) => send(&events, WorkerEvent::Error(format!("El índice se agregó, pero no se pudieron sincronizar los anuncios: {error:#}"))).await,
                                 },
-                                Err(error) => send(&events, WorkerEvent::Error(format!("El índice se agregó, pero no se pudo reiniciar la red pública: {error:#}"))),
+                                Err(error) => send(&events, WorkerEvent::Error(format!("El índice se agregó, pero no se pudo reiniciar la red pública: {error:#}"))).await,
                             },
-                            Err(error) => send(&events, WorkerEvent::Error(format!("No se pudo agregar el índice: {error:#}"))),
+                            Err(error) => send(&events, WorkerEvent::Error(format!("No se pudo agregar el índice: {error:#}"))).await,
                         }
                     }
                     WorkerCommand::RemoveFederationIndex { peer_id } => {
                         match services.remove_federation_index(&peer_id) {
                             Ok(()) => match services.restart_public_network().await {
-                                Ok(()) => send(&events, WorkerEvent::Notice("Índice comunitario desactivado".into())),
-                                Err(error) => send(&events, WorkerEvent::Error(format!("El índice se desactivó, pero no se pudo reiniciar la red pública: {error:#}"))),
+                                Ok(()) => send(&events, WorkerEvent::Notice("Índice comunitario desactivado".into())).await,
+                                Err(error) => send(&events, WorkerEvent::Error(format!("El índice se desactivó, pero no se pudo reiniciar la red pública: {error:#}"))).await,
                             },
-                            Err(error) => send(&events, WorkerEvent::Error(format!("No se pudo desactivar el índice: {error:#}"))),
+                            Err(error) => send(&events, WorkerEvent::Error(format!("No se pudo desactivar el índice: {error:#}"))).await,
                         }
                     }
                     WorkerCommand::UpdatePublicCollectionProfile { collection_id, description, languages } => {
                         match services.update_public_collection_profile(collection_id, &description, &languages) {
                             Ok(()) => match services.sync_public_collection(collection_id).await {
-                                Ok(()) => send(&events, WorkerEvent::Notice("Perfil público actualizado".into())),
-                                Err(error) => send(&events, WorkerEvent::Error(format!("El perfil se guardó, pero no se pudo anunciar: {error:#}"))),
+                                Ok(()) => send(&events, WorkerEvent::Notice("Perfil público actualizado".into())).await,
+                                Err(error) => send(&events, WorkerEvent::Error(format!("El perfil se guardó, pero no se pudo anunciar: {error:#}"))).await,
                             },
-                            Err(error) => send(&events, WorkerEvent::Error(format!("No se pudo actualizar el perfil público: {error:#}"))),
+                            Err(error) => send(&events, WorkerEvent::Error(format!("No se pudo actualizar el perfil público: {error:#}"))).await,
                         }
-                        refresh_content_views(&services, &events);
+                        refresh_content_views(&services, &events).await;
                     }
                     WorkerCommand::BrowsePublicCollection { request_id, publisher_id, collection_id, cursor } => {
                         let services = Arc::clone(&services);
@@ -1948,15 +1974,15 @@ pub(crate) async fn run_worker(
                                     } else {
                                         "Publicador público desbloqueado".into()
                                     }),
-                                );
-                                send_ready(&services, &events);
+                                ).await;
+                                send_ready(&services, &events).await;
                             }
                             Err(error) => send(
                                 &events,
                                 WorkerEvent::Error(format!(
                                     "No se pudo actualizar el bloqueo del publicador: {error:#}"
                                 )),
-                            ),
+                            ).await,
                         }
                     }
                     WorkerCommand::ManageChatIntegration { request_id, action } => {
@@ -1969,7 +1995,7 @@ pub(crate) async fn run_worker(
                                         "Ya hay una operación de integración en curso".into(),
                                     ),
                                 },
-                            );
+                            ).await;
                         } else if let Some(error) = integration_manager_error.as_ref() {
                             send(
                                 &events,
@@ -1977,7 +2003,7 @@ pub(crate) async fn run_worker(
                                     request_id,
                                     result: Err(error.clone()),
                                 },
-                            );
+                            ).await;
                         } else if let Some(manager) = integration_manager.clone() {
                             active_integration_request = Some(request_id);
                             background.spawn(async move {
@@ -1999,30 +2025,30 @@ pub(crate) async fn run_worker(
                     }
                     WorkerCommand::Pair { peer_id } => {
                         if let Err(error) = services.begin_pairing(&peer_id).await {
-                            send(&events, WorkerEvent::Error(format!("No se pudo iniciar el emparejamiento: {error:#}")));
+                            send(&events, WorkerEvent::Error(format!("No se pudo iniciar el emparejamiento: {error:#}"))).await;
                         }
                     }
                     WorkerCommand::Dial { address } => {
                         if let Err(error) = services.dial(&address).await {
-                            send(&events, WorkerEvent::Error(format!("No se pudo conectar: {error:#}")));
+                            send(&events, WorkerEvent::Error(format!("No se pudo conectar: {error:#}"))).await;
                         }
                     }
                     WorkerCommand::ConfirmPairing { peer_id, accepted } => {
                         if let Err(error) = services.confirm_pairing(&peer_id, accepted).await {
-                            send(&events, WorkerEvent::Error(format!("No se pudo confirmar el emparejamiento: {error:#}")));
+                            send(&events, WorkerEvent::Error(format!("No se pudo confirmar el emparejamiento: {error:#}"))).await;
                         }
                     }
                     WorkerCommand::RevokePeer { peer_id } => {
                         if let Err(error) = services.revoke_peer(&peer_id).await {
-                            send(&events, WorkerEvent::Error(format!("No se pudo revocar el peer: {error:#}")));
+                            send(&events, WorkerEvent::Error(format!("No se pudo revocar el peer: {error:#}"))).await;
                         }
-                        refresh_peers(&services, &events);
+                        refresh_peers(&services, &events).await;
                     }
                     WorkerCommand::GrantCollection { peer_id, collection_id, granted } => {
                         if let Err(error) = services.set_collection_grant(&peer_id, collection_id, granted).await {
-                            send(&events, WorkerEvent::Error(format!("No se pudo cambiar el grant: {error:#}")));
+                            send(&events, WorkerEvent::Error(format!("No se pudo cambiar el grant: {error:#}"))).await;
                         }
-                        refresh_peers(&services, &events);
+                        refresh_peers(&services, &events).await;
                     }
                     WorkerCommand::Shutdown => break 'running,
                 }
@@ -2050,11 +2076,11 @@ pub(crate) async fn run_worker(
                                 if let Some(selection) = recommendation.selection.clone() {
                                     let previous_config = desktop_config.clone();
                                     accept_selection_licenses(&mut desktop_config, &selection);
-                                    if !persist_config(&desktop_config, &paths, &events) {
+                                    if !persist_config(&desktop_config, &paths, &events).await {
                                         desktop_config = previous_config;
                                         model_lifecycle = ModelLifecycle::Missing;
-                                        send(&events, WorkerEvent::InstallStopped);
-                                        send(&events, WorkerEvent::ModelsMissing);
+                                        send(&events, WorkerEvent::InstallStopped).await;
+                                        send(&events, WorkerEvent::ModelsMissing).await;
                                         send_model_state(
                                             &mut lifecycle,
                                             &events,
@@ -2068,7 +2094,10 @@ pub(crate) async fn run_worker(
                                         &mut lifecycle,
                                         &asset_manager,
                                         selection,
-                                        &events,
+                                        InstallEventSenders {
+                                            durable: &events,
+                                            progress: &progress_events,
+                                        },
                                         &internal_tx,
                                         &mut install_cancel,
                                         paths.logs.join(MODEL_ACTIVATION_STATUS_FILE),
@@ -2076,7 +2105,7 @@ pub(crate) async fn run_worker(
                                     model_lifecycle = ModelLifecycle::Installing;
                                 } else {
                                     model_lifecycle = ModelLifecycle::Missing;
-                                    send(&events, WorkerEvent::ModelsMissing);
+                                    send(&events, WorkerEvent::ModelsMissing).await;
                                 }
                             }
                             Err(error)
@@ -2089,13 +2118,13 @@ pub(crate) async fn run_worker(
                                 attempted_startup_fallback = true;
                                 let failed = verifying_selection.model_id;
                                 desktop_config.pending_selection = None;
-                                let _ = persist_config(&desktop_config, &paths, &events);
+                                let _ = persist_config(&desktop_config, &paths, &events).await;
                                 send(
                                     &events,
                                     WorkerEvent::Error(format!(
                                         "El modelo pendiente {failed} falló la verificación; se conserva el anterior: {error}"
                                     )),
-                                );
+                                ).await;
                                 if let Some(active) = desktop_config.active_selection.as_deref()
                                     .and_then(|id| selection_for_model(
                                         desktop_config.profile,
@@ -2112,7 +2141,7 @@ pub(crate) async fn run_worker(
                                     );
                                 } else {
                                     model_lifecycle = ModelLifecycle::Missing;
-                                    send(&events, WorkerEvent::ModelsMissing);
+                                    send(&events, WorkerEvent::ModelsMissing).await;
                                 }
                                 send_model_state(
                                     &mut lifecycle,
@@ -2136,8 +2165,8 @@ pub(crate) async fn run_worker(
                                             verifying_selection.manifest.display_name
                                         ),
                                     ),
-                                );
-                                send(&events, WorkerEvent::ModelsMissing);
+                                ).await;
+                                send(&events, WorkerEvent::ModelsMissing).await;
                                 if !initial_model_state_scheduled {
                                     send_model_state(
                                         &mut lifecycle,
@@ -2154,7 +2183,7 @@ pub(crate) async fn run_worker(
                         if model_lifecycle == ModelLifecycle::Installing =>
                     {
                         install_cancel = None;
-                        send(&events, WorkerEvent::InstallStopped);
+                        send(&events, WorkerEvent::InstallStopped).await;
                         match result {
                             Ok(outcome) => {
                                 let verified_plan = outcome.verified_install_plan();
@@ -2174,14 +2203,14 @@ pub(crate) async fn run_worker(
                                     desktop_config.pending_selection =
                                         Some(outcome.selection.model_id.to_owned());
                                     model_lifecycle = ModelLifecycle::Ready;
-                                    if persist_config(&desktop_config, &paths, &events) {
+                                    if persist_config(&desktop_config, &paths, &events).await {
                                         send(
                                             &events,
                                             WorkerEvent::RestartRequired(format!(
                                                 "{} quedó verificado y se activará al reiniciar",
                                                 outcome.selection.manifest.display_name
                                             )),
-                                        );
+                                        ).await;
                                     } else {
                                         desktop_config.pending_selection = previous_pending;
                                         send(
@@ -2190,7 +2219,7 @@ pub(crate) async fn run_worker(
                                                 "{} quedó descargado y verificado, pero no se pudo programar su activación",
                                                 outcome.selection.manifest.display_name
                                             )),
-                                        );
+                                        ).await;
                                     }
                                     send_model_state_with_known_plan(
                                         &mut lifecycle,
@@ -2221,9 +2250,9 @@ pub(crate) async fn run_worker(
                                         "Instalación cancelada; se conservará la descarga parcial para reanudar"
                                             .into(),
                                     ),
-                                );
+                                ).await;
                                 if model_lifecycle == ModelLifecycle::Missing {
-                                    send(&events, WorkerEvent::ModelsMissing);
+                                    send(&events, WorkerEvent::ModelsMissing).await;
                                 }
                                 send_model_state(
                                     &mut lifecycle,
@@ -2254,9 +2283,9 @@ pub(crate) async fn run_worker(
                                 send(
                                     &events,
                                     WorkerEvent::Error(message.to_owned()),
-                                );
+                                ).await;
                                 if model_lifecycle == ModelLifecycle::Missing {
-                                    send(&events, WorkerEvent::ModelsMissing);
+                                    send(&events, WorkerEvent::ModelsMissing).await;
                                 }
                                 send_model_state(
                                     &mut lifecycle,
@@ -2283,14 +2312,14 @@ pub(crate) async fn run_worker(
                             Ok(outcome) if can_stage => {
                                 let previous_pending = desktop_config.pending_selection.clone();
                                 desktop_config.pending_selection = Some(model_id.clone());
-                                if persist_config(&desktop_config, &paths, &events) {
+                                if persist_config(&desktop_config, &paths, &events).await {
                                     send(
                                         &events,
                                         WorkerEvent::RestartRequired(format!(
                                             "{} ya estaba descargado y verificado; se activará al reiniciar",
                                             outcome.selection.manifest.display_name
                                         )),
-                                    );
+                                    ).await;
                                     send_model_state_with_known_plan(
                                         &mut lifecycle,
                                         &events,
@@ -2337,7 +2366,7 @@ pub(crate) async fn run_worker(
                             &mut background,
                             &events,
                             collection_id,
-                        );
+                        ).await;
                         // A newly started scan begins with the same preflight.
                         // If the collection is already scanning or queued behind
                         // another one, run a separate inference-free preflight so
@@ -2359,13 +2388,13 @@ pub(crate) async fn run_worker(
                             spawn_preflight(&services, &mut background, ready);
                         }
                         let ready = scan_scheduler.cancel(collection_id);
-                        publish_scan_state(&events, &scan_scheduler, collection_id);
+                        publish_scan_state(&events, &scan_scheduler, collection_id).await;
                         spawn_ready_scans(
                             &services,
                             &mut background,
                             &events,
                             ready,
-                        );
+                        ).await;
                         request_quarantine(
                             &services,
                             &mut background,
@@ -2373,7 +2402,7 @@ pub(crate) async fn run_worker(
                             collection_id,
                             "el watcher de la colección dejó de estar disponible",
                         );
-                        send(&events, WorkerEvent::Error(format!("El watcher de {collection_id} se detuvo: {error}")));
+                        send(&events, WorkerEvent::Error(format!("El watcher de {collection_id} se detuvo: {error}"))).await;
                     }
                     None => {}
                 }
@@ -2413,7 +2442,7 @@ pub(crate) async fn run_worker(
                                 &mut background,
                                 &events,
                                 collection_id,
-                            );
+                            ).await;
                         }
                     }
                     Err(_error) => tracing::warn!(
@@ -2436,7 +2465,7 @@ pub(crate) async fn run_worker(
                             request_id: operation.request_id,
                             state: Some(FirewallOperationView::TakingLonger),
                         },
-                    );
+                    ).await;
                 }
                 if desktop_config.lan_preference == LanPreference::Enabled
                     && !firewall_request_is_busy(
@@ -2460,7 +2489,7 @@ pub(crate) async fn run_worker(
                         &mut active_updater_request,
                         Uuid::new_v4(),
                         UpdaterOperation::Check,
-                    );
+                    ).await;
                 }
             }
             _ = periodic_reconcile.tick() => {
@@ -2480,7 +2509,7 @@ pub(crate) async fn run_worker(
                     &mut scan_scheduler,
                     &mut background,
                     &events,
-                ) {
+                ).await {
                     Ok(summary) => tracing::info!(
                         reason = "periodic_safety_reconciliation",
                         checked_at = %checked_at.to_rfc3339(),
@@ -2513,15 +2542,15 @@ pub(crate) async fn run_worker(
                             Ok(()) => send(
                                 &events,
                                 WorkerEvent::Notice("Documento revisado y publicado".into()),
-                            ),
+                            ).await,
                             Err(error) => send(
                                 &events,
                                 WorkerEvent::Error(format!(
                                     "No se pudo publicar el concepto OKF: {error}"
                                 )),
-                            ),
+                            ).await,
                         }
-                        refresh_content_views(&services, &events);
+                        refresh_content_views(&services, &events).await;
                         spawn_next_wiki_health(
                             &services,
                             &mut background,
@@ -2533,7 +2562,7 @@ pub(crate) async fn run_worker(
                         if let Err(error) = result {
                             send(&events, WorkerEvent::Error(format!(
                                 "No se pudo retirar inmediatamente una revisión cambiada de la colección {collection_id}: {error}"
-                            )));
+                            ))).await;
                             request_quarantine(
                                 &services,
                                 &mut background,
@@ -2552,7 +2581,7 @@ pub(crate) async fn run_worker(
                                 &mut background,
                                 &events,
                                 collection_id,
-                            );
+                            ).await;
                         } else {
                             request_quarantine(
                                 &services,
@@ -2562,7 +2591,7 @@ pub(crate) async fn run_worker(
                                 "la prevalidación terminó sin un watcher activo",
                             );
                         }
-                        refresh_content_views(&services, &events);
+                        refresh_content_views(&services, &events).await;
                         for ready in preflight_scheduler.finish(collection_id) {
                             spawn_preflight(&services, &mut background, ready);
                         }
@@ -2591,7 +2620,7 @@ pub(crate) async fn run_worker(
                                     );
                                 }
                                 watcher_quarantined.remove(&collection_id);
-                                report_ingest_outcomes(&outcomes, &events);
+                                report_ingest_outcomes(&outcomes, &events).await;
                                 successful_manual_summary =
                                     Some(manual_rescan_summary(&outcomes));
                                 spawn_wiki_maintenance(
@@ -2604,7 +2633,7 @@ pub(crate) async fn run_worker(
                                 clear_manual_rescan(&mut manual_rescans, collection_id);
                                 send(&events, WorkerEvent::Error(format!(
                                     "Falló el escaneo de la colección {collection_id}: {error}"
-                                )));
+                                ))).await;
                                 request_quarantine(
                                     &services,
                                     &mut background,
@@ -2615,23 +2644,23 @@ pub(crate) async fn run_worker(
                             }
                             }
                         }
-                        refresh_content_views(&services, &events);
+                        refresh_content_views(&services, &events).await;
                         let ready = scan_scheduler.finish(collection_id);
-                        publish_scan_state(&events, &scan_scheduler, collection_id);
+                        publish_scan_state(&events, &scan_scheduler, collection_id).await;
                         if let Some(summary) = take_manual_rescan_summary(
                             &mut manual_rescans,
                             &scan_scheduler,
                             collection_id,
                             successful_manual_summary,
                         ) {
-                            send(&events, WorkerEvent::Notice(summary));
+                            send(&events, WorkerEvent::Notice(summary)).await;
                         }
                         spawn_ready_scans(
                             &services,
                             &mut background,
                             &events,
                             ready,
-                        );
+                        ).await;
                     }
                     Some(Ok(BackgroundCompletion::Quarantine { collection_id, result })) => {
                         match result {
@@ -2640,7 +2669,7 @@ pub(crate) async fn run_worker(
                                 WorkerEvent::Notice(format!(
                                     "La colección {collection_id} quedó retirada hasta un nuevo escaneo y revisión"
                                 )),
-                            ),
+                            ).await,
                             Err(error) => {
                                 // The collection was not proven safe. Allow the
                                 // watcher retry or a later failed scan to request
@@ -2651,10 +2680,10 @@ pub(crate) async fn run_worker(
                                     WorkerEvent::Error(format!(
                                         "No se pudo completar la cuarentena de la colección {collection_id}: {error}"
                                     )),
-                                );
+                                ).await;
                             }
                         }
-                        refresh_content_views(&services, &events);
+                        refresh_content_views(&services, &events).await;
                     }
                     Some(Ok(BackgroundCompletion::ReanalyzeReview { concept_id, result })) => {
                         reanalyzing_reviews.remove(&concept_id);
@@ -2664,7 +2693,7 @@ pub(crate) async fn run_worker(
                                 concept_id,
                                 running: false,
                             },
-                        );
+                        ).await;
                         match result {
                             Ok(()) => send(
                                 &events,
@@ -2672,15 +2701,15 @@ pub(crate) async fn run_worker(
                                     "El borrador automático se actualizó y continúa pendiente de aprobación"
                                         .into(),
                                 ),
-                            ),
+                            ).await,
                             Err(error) => send(
                                 &events,
                                 WorkerEvent::Error(format!(
                                     "No se pudo volver a analizar el documento; se conservó el borrador anterior: {error}"
                                 )),
-                            ),
+                            ).await,
                         }
-                        refresh_content_views(&services, &events);
+                        refresh_content_views(&services, &events).await;
                     }
                     Some(Ok(BackgroundCompletion::ReviewEvidence {
                         request_id,
@@ -2695,7 +2724,7 @@ pub(crate) async fn run_worker(
                             expected_source_revision,
                             result,
                         },
-                    ),
+                    ).await,
                     Some(Ok(BackgroundCompletion::KnowledgeBundle {
                         request_id,
                         collection_id,
@@ -2703,7 +2732,7 @@ pub(crate) async fn run_worker(
                     })) => send(
                         &events,
                         knowledge_bundle_loaded_event(request_id, collection_id, result),
-                    ),
+                    ).await,
                     Some(Ok(BackgroundCompletion::KnowledgePage {
                         request_id,
                         collection_id,
@@ -2717,7 +2746,7 @@ pub(crate) async fn run_worker(
                             page_id,
                             result,
                         ),
-                    ),
+                    ).await,
                     Some(Ok(BackgroundCompletion::Search { request_id, result, route_kind })) => {
                         let result = result
                             .map(|response| {
@@ -2728,12 +2757,12 @@ pub(crate) async fn run_worker(
                         send(
                             &events,
                             WorkerEvent::SearchFinished { request_id, result },
-                        );
+                        ).await;
                     }
                     Some(Ok(BackgroundCompletion::PublicBrowse { request_id, append, result })) => {
                         let result = result
                             .map_err(|error| format!("Falló la navegación pública: {error}"));
-                        send(&events, WorkerEvent::PublicBrowseFinished { request_id, append, result });
+                        send(&events, WorkerEvent::PublicBrowseFinished { request_id, append, result }).await;
                     }
                     Some(Ok(BackgroundCompletion::ChatIntegrations {
                         request_id,
@@ -2780,13 +2809,13 @@ pub(crate) async fn run_worker(
                         send(
                             &events,
                             WorkerEvent::ChatIntegrationsUpdated { request_id, result },
-                        );
+                        ).await;
                     }
                     Some(Ok(BackgroundCompletion::Autostart { request_id, result })) => {
                         send(
                             &events,
                             WorkerEvent::AutostartUpdated { request_id, result },
-                        );
+                        ).await;
                     }
                     Some(Ok(BackgroundCompletion::Updater {
                         request_id,
@@ -2803,7 +2832,7 @@ pub(crate) async fn run_worker(
                                 request_id,
                                 result: result.map(UpdaterWorkerView::Ready),
                             },
-                        );
+                        ).await;
                     }
                     Some(Ok(BackgroundCompletion::WikiMaintenance {
                         collection_id,
@@ -2817,7 +2846,7 @@ pub(crate) async fn run_worker(
                                         collection_id,
                                         repaired: true,
                                     },
-                                );
+                                ).await;
                             }
                             Ok(false) => {}
                             Err(_) => {
@@ -2831,7 +2860,7 @@ pub(crate) async fn run_worker(
                                         collection_id,
                                         repaired: false,
                                     },
-                                );
+                                ).await;
                             }
                         }
                         spawn_next_wiki_health(
@@ -2861,7 +2890,7 @@ pub(crate) async fn run_worker(
                                             &mut background,
                                             &events,
                                             collection_id,
-                                        );
+                                        ).await;
                                     }
                                     send(
                                         &events,
@@ -2869,23 +2898,23 @@ pub(crate) async fn run_worker(
                                             "La carpeta quedó vinculada y será reconciliada"
                                                 .to_owned(),
                                         ),
-                                    );
+                                    ).await;
                                 }
                                 Err(error) => send(
                                     &events,
                                     WorkerEvent::Error(format!(
                                         "La carpeta cambió, pero no se pudo iniciar su supervisión: {error}"
                                     )),
-                                ),
+                                ).await,
                             },
                             Err(error) => send(
                                 &events,
                                 WorkerEvent::Error(format!(
                                     "No se pudo volver a vincular la carpeta: {error}"
                                 )),
-                            ),
+                            ).await,
                         }
-                        refresh_content_views(&services, &events);
+                        refresh_content_views(&services, &events).await;
                     }
                     Some(Ok(BackgroundCompletion::LanAddressesResolved {
                         generation,
@@ -2913,7 +2942,7 @@ pub(crate) async fn run_worker(
                                 lan_listener,
                                 lan_discovery,
                                 &lan_local_addresses,
-                            );
+                            ).await;
                         }
                     }
                     Some(Ok(BackgroundCompletion::ConnectivityDiagnosed {
@@ -2935,7 +2964,7 @@ pub(crate) async fn run_worker(
                                         request_id,
                                         result: Ok(snapshot),
                                     },
-                                );
+                                ).await;
                                 Some(snapshot)
                             }
                             Err(error) => {
@@ -2945,7 +2974,7 @@ pub(crate) async fn run_worker(
                                         request_id,
                                         result: Err(error),
                                     },
-                                );
+                                ).await;
                                 None
                             }
                         };
@@ -2968,7 +2997,7 @@ pub(crate) async fn run_worker(
                         )
                         .await
                         {
-                            send(&events, WorkerEvent::Error(message));
+                            send(&events, WorkerEvent::Error(message)).await;
                         }
                     }
                     Some(Ok(BackgroundCompletion::FirewallConfigured {
@@ -2992,7 +3021,7 @@ pub(crate) async fn run_worker(
                                 request_id,
                                 state: None,
                             },
-                        );
+                        ).await;
                         let force_restart = restart_lan_request == Some(request_id);
                         if force_restart {
                             restart_lan_request = None;
@@ -3008,7 +3037,7 @@ pub(crate) async fn run_worker(
                                         request_id,
                                         result: Ok(snapshot),
                                     },
-                                );
+                                ).await;
                                 let policy = lan_runtime_policy(
                                     desktop_config.lan_preference == LanPreference::Enabled,
                                     Some(snapshot),
@@ -3028,7 +3057,7 @@ pub(crate) async fn run_worker(
                                 )
                                 .await
                                 {
-                                    send(&events, WorkerEvent::Error(message));
+                                    send(&events, WorkerEvent::Error(message)).await;
                                 }
                             }
                             Err(error) => {
@@ -3047,7 +3076,7 @@ pub(crate) async fn run_worker(
                                 )
                                 .await
                                 {
-                                    send(&events, WorkerEvent::Error(message));
+                                    send(&events, WorkerEvent::Error(message)).await;
                                 }
                                 send(
                                     &events,
@@ -3055,7 +3084,7 @@ pub(crate) async fn run_worker(
                                         request_id,
                                         result: Err(error.into()),
                                     },
-                                );
+                                ).await;
                                 let diagnostic_id = Uuid::new_v4();
                                 active_connectivity_request = Some(diagnostic_id);
                                 spawn_connectivity_diagnostic(&mut background, diagnostic_id);
@@ -3074,7 +3103,7 @@ pub(crate) async fn run_worker(
                                 generation,
                                 result,
                             },
-                        );
+                        ).await;
                     }
                     Some(Ok(BackgroundCompletion::GuidedWikiRepairPrepared {
                         request_id,
@@ -3091,7 +3120,7 @@ pub(crate) async fn run_worker(
                                 collection_id,
                                 result,
                             },
-                        );
+                        ).await;
                     }
                     Some(Ok(BackgroundCompletion::GuidedWikiRepairFinished {
                         request_id,
@@ -3108,8 +3137,8 @@ pub(crate) async fn run_worker(
                                 collection_id,
                                 result,
                             },
-                        );
-                        refresh_content_views(&services, &events);
+                        ).await;
+                        refresh_content_views(&services, &events).await;
                         spawn_next_wiki_health(
                             &services,
                             &mut background,
@@ -3144,8 +3173,8 @@ pub(crate) async fn run_worker(
                                     desktop_config.pending_selection = None;
                                 }
                                 let active_was_persisted =
-                                    persist_config(&desktop_config, &paths, &events);
-                                send(&events, WorkerEvent::ModelsReady);
+                                    persist_config(&desktop_config, &paths, &events).await;
+                                send(&events, WorkerEvent::ModelsReady).await;
                                 send(
                                     &events,
                                     WorkerEvent::Notice(if active_was_persisted {
@@ -3153,21 +3182,21 @@ pub(crate) async fn run_worker(
                                     } else {
                                         "El modelo está activo solo durante esta sesión; repara el guardado de configuración antes de reiniciar".into()
                                     }),
-                                );
-                                refresh_content_views(&services, &events);
+                                ).await;
+                                refresh_content_views(&services, &events).await;
                                 if let Err(error) = schedule_all_scans(
                                     &services,
                                     &watchers,
                                     &mut scan_scheduler,
                                     &mut background,
                                     &events,
-                                ) {
+                                ).await {
                                     send(
                                         &events,
                                         WorkerEvent::Error(format!(
                                             "No se pudieron programar los escaneos: {error:#}"
                                         )),
-                                    );
+                                    ).await;
                                 }
                                 send_model_state_with_known_plan(
                                     &mut lifecycle,
@@ -3199,12 +3228,15 @@ pub(crate) async fn run_worker(
                                     queued_install = false;
                                     let previous_config = desktop_config.clone();
                                     accept_selection_licenses(&mut desktop_config, &selection);
-                                    if persist_config(&desktop_config, &paths, &events) {
+                                    if persist_config(&desktop_config, &paths, &events).await {
                                         start_install(
                                             &mut lifecycle,
                                             &asset_manager,
                                             selection,
-                                            &events,
+                                            InstallEventSenders {
+                                                durable: &events,
+                                                progress: &progress_events,
+                                            },
                                             &internal_tx,
                                             &mut install_cancel,
                                             paths.logs.join(MODEL_ACTIVATION_STATUS_FILE),
@@ -3212,11 +3244,11 @@ pub(crate) async fn run_worker(
                                         model_lifecycle = ModelLifecycle::Installing;
                                     } else {
                                         desktop_config = previous_config;
-                                        send(&events, WorkerEvent::InstallStopped);
+                                        send(&events, WorkerEvent::InstallStopped).await;
                                     }
                                 } else {
                                     if queued_install {
-                                        send(&events, WorkerEvent::InstallStopped);
+                                        send(&events, WorkerEvent::InstallStopped).await;
                                     }
                                     queued_install = false;
                                 }
@@ -3227,7 +3259,7 @@ pub(crate) async fn run_worker(
                                     WorkerEvent::Error(format!(
                                         "Los modelos verificados no pudieron habilitarse: {error}"
                                     )),
-                                );
+                                ).await;
                                 let fallback = desktop_config
                                     .active_selection
                                     .as_deref()
@@ -3241,7 +3273,7 @@ pub(crate) async fn run_worker(
                                     });
                                 if let Some(active) = fallback {
                                     desktop_config.pending_selection = None;
-                                    let _ = persist_config(&desktop_config, &paths, &events);
+                                    let _ = persist_config(&desktop_config, &paths, &events).await;
                                     verifying_selection = active;
                                     model_lifecycle = ModelLifecycle::Verifying;
                                     spawn_verification(
@@ -3253,10 +3285,10 @@ pub(crate) async fn run_worker(
                                 } else {
                                     if queued_install {
                                         queued_install = false;
-                                        send(&events, WorkerEvent::InstallStopped);
+                                        send(&events, WorkerEvent::InstallStopped).await;
                                     }
                                     model_lifecycle = ModelLifecycle::Missing;
-                                    send(&events, WorkerEvent::ModelsMissing);
+                                    send(&events, WorkerEvent::ModelsMissing).await;
                                 }
                                 send_model_state_with_known_plan(
                                     &mut lifecycle,
@@ -3274,7 +3306,7 @@ pub(crate) async fn run_worker(
                         WorkerEvent::Error(format!(
                             "Una tarea de fondo terminó inesperadamente: {error}"
                         )),
-                    ),
+                    ).await,
                     None => {}
                 }
             }
@@ -3324,20 +3356,20 @@ pub(crate) async fn run_worker(
                                 lan_listener,
                                 lan_discovery,
                                 &lan_local_addresses,
-                            );
+                            ).await;
                         }
                         match services.handle_network_event(event) {
                             Ok(effect) => {
-                                if let Some(notice) = effect.notice { send(&events, WorkerEvent::Notice(notice)); }
-                                if let Some(warning) = effect.warning { send(&events, WorkerEvent::Error(warning)); }
-                                if effect.peers_changed { refresh_peers(&services, &events); }
+                                if let Some(notice) = effect.notice { send(&events, WorkerEvent::Notice(notice)).await; }
+                                if let Some(warning) = effect.warning { send(&events, WorkerEvent::Error(warning)).await; }
+                                if effect.peers_changed { refresh_peers(&services, &events).await; }
                             }
-                            Err(error) => send(&events, WorkerEvent::Error(format!("No se pudo persistir el evento LAN: {error:#}"))),
+                            Err(error) => send(&events, WorkerEvent::Error(format!("No se pudo persistir el evento LAN: {error:#}"))).await,
                         }
                     }
                     Err(tokio::sync::broadcast::error::RecvError::Lagged(count)) => {
                         tracing::warn!(count, "LAN presentation events were coalesced; restarting discovery");
-                        send(&events, WorkerEvent::Notice("La búsqueda de equipos se está sincronizando de nuevo".to_owned()));
+                        send(&events, WorkerEvent::Notice("La búsqueda de equipos se está sincronizando de nuevo".to_owned())).await;
                         lan_listener = LanListenerView::Starting;
                         lan_discovery = LanDiscoveryView::Starting;
                         invalidate_lan_address_resolution(
@@ -3349,13 +3381,13 @@ pub(crate) async fn run_worker(
                             lan_listener,
                             lan_discovery,
                             &lan_local_addresses,
-                        );
+                        ).await;
                         schedule_lan_runtime_restart(
                             &mut background,
                             &mut active_connectivity_request,
                             &mut restart_lan_request,
                         );
-                        refresh_peers(&services, &events);
+                        refresh_peers(&services, &events).await;
                     }
                     Err(tokio::sync::broadcast::error::RecvError::Closed) => {
                         network_open = false;
@@ -3370,8 +3402,8 @@ pub(crate) async fn run_worker(
                             lan_listener,
                             lan_discovery,
                             &lan_local_addresses,
-                        );
-                        send(&events, WorkerEvent::Error("El runtime LAN se detuvo".into()));
+                        ).await;
+                        send(&events, WorkerEvent::Error("El runtime LAN se detuvo".into())).await;
                     }
                 }
             }
@@ -3403,31 +3435,37 @@ pub(crate) async fn run_worker(
     }
 }
 
-fn send_ready(services: &DesktopServices, events: &Sender<WorkerEvent>) {
+async fn send_ready(services: &DesktopServices, events: &Sender<WorkerEvent>) {
     match (
         services.collection_views(),
         services.review_views(),
         services.source_issue_views(),
         services.blocked_public_publishers(),
     ) {
-        (Ok(collections), Ok(reviews), Ok(source_issues), Ok(blocked_public_publishers)) => send(
-            events,
-            WorkerEvent::Ready {
-                node_id: services.node_id().to_owned(),
-                mcp_url: services.mcp_endpoint().to_owned(),
-                collections,
-                reviews,
-                source_issues,
-                blocked_public_publishers,
-            },
-        ),
+        (Ok(collections), Ok(reviews), Ok(source_issues), Ok(blocked_public_publishers)) => {
+            send(
+                events,
+                WorkerEvent::Ready {
+                    node_id: services.node_id().to_owned(),
+                    mcp_url: services.mcp_endpoint().to_owned(),
+                    collections,
+                    reviews,
+                    source_issues,
+                    blocked_public_publishers,
+                },
+            )
+            .await
+        }
         (Err(error), _, _, _)
         | (_, Err(error), _, _)
         | (_, _, Err(error), _)
-        | (_, _, _, Err(error)) => send(
-            events,
-            WorkerEvent::Error(format!("No se pudo cargar el estado local: {error:#}")),
-        ),
+        | (_, _, _, Err(error)) => {
+            send(
+                events,
+                WorkerEvent::Error(format!("No se pudo cargar el estado local: {error:#}")),
+            )
+            .await
+        }
     }
 }
 
@@ -3452,7 +3490,7 @@ fn spawn_autostart(
     });
 }
 
-fn send_lan_runtime(
+async fn send_lan_runtime(
     events: &Sender<WorkerEvent>,
     listener: LanListenerView,
     discovery: LanDiscoveryView,
@@ -3466,7 +3504,8 @@ fn send_lan_runtime(
             discovery,
             local_addresses: local_addresses.to_vec(),
         },
-    );
+    )
+    .await;
 }
 
 async fn reconcile_lan_runtime(
@@ -3512,11 +3551,11 @@ async fn reconcile_lan_runtime(
         *listener = LanListenerView::Starting;
         *discovery = LanDiscoveryView::Starting;
         local_addresses.clear();
-        send_lan_runtime(events, *listener, *discovery, local_addresses);
+        send_lan_runtime(events, *listener, *discovery, local_addresses).await;
         if services.enable_lan().await.is_err() {
             *listener = LanListenerView::Failed;
             *discovery = LanDiscoveryView::Failed;
-            send_lan_runtime(events, *listener, *discovery, local_addresses);
+            send_lan_runtime(events, *listener, *discovery, local_addresses).await;
             tracing::warn!(
                 error_kind = "lan_runtime_start",
                 "optional LAN runtime could not start"
@@ -3542,7 +3581,7 @@ async fn reconcile_lan_runtime(
     } else {
         (LanListenerView::Stopped, LanDiscoveryView::Disabled)
     };
-    send_lan_runtime(events, *listener, *discovery, local_addresses);
+    send_lan_runtime(events, *listener, *discovery, local_addresses).await;
     if shutdown_failed {
         tracing::warn!(
             error_kind = "lan_runtime_stop",
@@ -3794,7 +3833,7 @@ fn guided_repair_error_code(error: &anyhow::Error) -> String {
     code.to_owned()
 }
 
-fn queue_updater_operation(
+async fn queue_updater_operation(
     background: &mut JoinSet<BackgroundCompletion>,
     events: &Sender<WorkerEvent>,
     updater: &mut Option<UpdaterService>,
@@ -3810,7 +3849,8 @@ fn queue_updater_operation(
                 request_id,
                 result: Err("Ya hay una operación de actualización en curso".to_owned()),
             },
-        );
+        )
+        .await;
         return;
     }
     let Some(mut updater) = updater.take() else {
@@ -3822,7 +3862,8 @@ fn queue_updater_operation(
                     disabled_reason.unwrap_or(UpdaterDisabledReason::NotConfigured),
                 )),
             },
-        );
+        )
+        .await;
         return;
     };
     *active_request = Some(request_id);
@@ -3872,14 +3913,19 @@ async fn run_updater_operation(
 }
 
 #[must_use]
-fn persist_config(config: &DesktopConfig, paths: &AppPaths, events: &Sender<WorkerEvent>) -> bool {
+async fn persist_config(
+    config: &DesktopConfig,
+    paths: &AppPaths,
+    events: &Sender<WorkerEvent>,
+) -> bool {
     if let Err(error) = config.save_atomic(&paths.config) {
         send(
             events,
             WorkerEvent::Error(format!(
                 "No se pudo guardar la configuración de modelos: {error:#}"
             )),
-        );
+        )
+        .await;
         false
     } else {
         true
@@ -3981,7 +4027,8 @@ fn send_model_state_with_known_plan(
                 license_accepted: selected
                     .is_some_and(|selection| selection_licenses_accepted(&config, selection)),
             }),
-        );
+        )
+        .await;
     });
 }
 
@@ -3996,45 +4043,57 @@ fn matching_known_install_plan(
     known_plan.filter(|plan| plan.selection.model_id == recommended)
 }
 
-fn refresh_content_views(services: &DesktopServices, events: &Sender<WorkerEvent>) {
-    refresh_collection_views(services, events);
+async fn refresh_content_views(services: &DesktopServices, events: &Sender<WorkerEvent>) {
+    refresh_collection_views(services, events).await;
     match services.review_views() {
-        Ok(reviews) => send(events, WorkerEvent::Reviews(reviews)),
-        Err(error) => send(
-            events,
-            WorkerEvent::Error(format!("No se pudo refrescar la revisión: {error:#}")),
-        ),
+        Ok(reviews) => send(events, WorkerEvent::Reviews(reviews)).await,
+        Err(error) => {
+            send(
+                events,
+                WorkerEvent::Error(format!("No se pudo refrescar la revisión: {error:#}")),
+            )
+            .await
+        }
     }
     match services.source_issue_views() {
-        Ok(issues) => send(events, WorkerEvent::SourceIssues(issues)),
-        Err(error) => send(
-            events,
-            WorkerEvent::Error(format!(
-                "No se pudieron refrescar los archivos pendientes: {error:#}"
-            )),
-        ),
+        Ok(issues) => send(events, WorkerEvent::SourceIssues(issues)).await,
+        Err(error) => {
+            send(
+                events,
+                WorkerEvent::Error(format!(
+                    "No se pudieron refrescar los archivos pendientes: {error:#}"
+                )),
+            )
+            .await
+        }
     }
 }
 
-fn refresh_collection_views(services: &DesktopServices, events: &Sender<WorkerEvent>) {
+async fn refresh_collection_views(services: &DesktopServices, events: &Sender<WorkerEvent>) {
     match services.collection_views() {
-        Ok(collections) => send(events, WorkerEvent::Collections(collections)),
-        Err(error) => send(
-            events,
-            WorkerEvent::Error(format!(
-                "No se pudieron refrescar las colecciones: {error:#}"
-            )),
-        ),
+        Ok(collections) => send(events, WorkerEvent::Collections(collections)).await,
+        Err(error) => {
+            send(
+                events,
+                WorkerEvent::Error(format!(
+                    "No se pudieron refrescar las colecciones: {error:#}"
+                )),
+            )
+            .await
+        }
     }
 }
 
-fn refresh_peers(services: &DesktopServices, events: &Sender<WorkerEvent>) {
+async fn refresh_peers(services: &DesktopServices, events: &Sender<WorkerEvent>) {
     match services.peer_views() {
-        Ok(peers) => send(events, WorkerEvent::Peers(peers)),
-        Err(error) => send(
-            events,
-            WorkerEvent::Error(format!("No se pudo refrescar la confianza LAN: {error:#}")),
-        ),
+        Ok(peers) => send(events, WorkerEvent::Peers(peers)).await,
+        Err(error) => {
+            send(
+                events,
+                WorkerEvent::Error(format!("No se pudo refrescar la confianza LAN: {error:#}")),
+            )
+            .await
+        }
     }
 }
 
@@ -4142,7 +4201,7 @@ fn start_install(
     lifecycle: &mut JoinSet<()>,
     manager: &AssetManager,
     selection: ModelSelection,
-    events: &Sender<WorkerEvent>,
+    events: InstallEventSenders<'_>,
     completion_tx: &AsyncSender<InternalEvent>,
     install_cancel: &mut Option<CancellationToken>,
     status_path: PathBuf,
@@ -4152,7 +4211,8 @@ fn start_install(
     let cancel = CancellationToken::new();
     *install_cancel = Some(cancel.clone());
     let manager = manager.clone();
-    let progress_tx = events.clone();
+    let lifecycle_events = events.durable.clone();
+    let progress_tx = events.progress.clone();
     let completion_tx = completion_tx.clone();
     lifecycle.spawn(async move {
         let started = Instant::now();
@@ -4162,7 +4222,7 @@ fn start_install(
             let attempt_progress = progress_tx.clone();
             let install =
                 manager.install_selection_checked(&selection, cancel.clone(), move |event| {
-                    send(&attempt_progress, WorkerEvent::InstallProgress(event))
+                    let _ = attempt_progress.send(WorkerEvent::InstallProgress(event));
                 });
             match AssertUnwindSafe(install).catch_unwind().await {
                 Ok(Ok(outcome)) => break Ok(outcome),
@@ -4176,12 +4236,12 @@ fn start_install(
                 {
                     transient_retries += 1;
                     send(
-                        &progress_tx,
+                        &lifecycle_events,
                         WorkerEvent::Notice(
                             "La descarga se interrumpió temporalmente; se reintentará sin perder el progreso"
                                 .to_owned(),
                         ),
-                    );
+                    ).await;
                     let retry_delay = Duration::from_secs(5 * u64::from(transient_retries));
                     tokio::select! {
                         () = cancel.cancelled() => {
@@ -4399,7 +4459,7 @@ const fn internal_event_name(event: &InternalEvent) -> &'static str {
     }
 }
 
-fn schedule_all_scans(
+async fn schedule_all_scans(
     services: &Arc<DesktopServices>,
     watchers: &HashMap<Uuid, CollectionWatcherHandle>,
     scheduler: &mut ScanScheduler,
@@ -4410,7 +4470,7 @@ fn schedule_all_scans(
         if watchers.contains_key(&collection.id)
             && !services.startup_preflight_blocks_automatic_scan(collection.id)?
         {
-            request_scan(services, scheduler, background, events, collection.id);
+            request_scan(services, scheduler, background, events, collection.id).await;
         }
     }
     Ok(())
@@ -4426,7 +4486,7 @@ struct PeriodicScanSummary {
 /// Schedules a safety reconciliation only for collections whose watcher is
 /// currently healthy. Existing queued, active or dirty work is sufficient: a
 /// periodic tick must not manufacture an otherwise unnecessary follow-up scan.
-fn schedule_idle_scans(
+async fn schedule_idle_scans(
     services: &Arc<DesktopServices>,
     watchers: &HashMap<Uuid, CollectionWatcherHandle>,
     scheduler: &mut ScanScheduler,
@@ -4453,15 +4513,15 @@ fn schedule_idle_scans(
             continue;
         };
         if !ready.contains(&collection_id) {
-            publish_scan_state(events, scheduler, collection_id);
+            publish_scan_state(events, scheduler, collection_id).await;
         }
-        spawn_ready_scans(services, background, events, ready);
+        spawn_ready_scans(services, background, events, ready).await;
         summary.scheduled += 1;
     }
     Ok(summary)
 }
 
-fn request_scan(
+async fn request_scan(
     services: &Arc<DesktopServices>,
     scheduler: &mut ScanScheduler,
     background: &mut JoinSet<BackgroundCompletion>,
@@ -4471,13 +4531,13 @@ fn request_scan(
     let ready = scheduler.request(collection_id);
     let requested_started = ready.contains(&collection_id);
     if !requested_started {
-        publish_scan_state(events, scheduler, collection_id);
+        publish_scan_state(events, scheduler, collection_id).await;
     }
-    spawn_ready_scans(services, background, events, ready);
+    spawn_ready_scans(services, background, events, ready).await;
     requested_started
 }
 
-fn publish_scan_state(
+async fn publish_scan_state(
     events: &Sender<WorkerEvent>,
     scheduler: &ScanScheduler,
     collection_id: Uuid,
@@ -4488,10 +4548,11 @@ fn publish_scan_state(
             collection_id,
             state: scheduler.state(collection_id),
         },
-    );
+    )
+    .await;
 }
 
-fn spawn_ready_scans(
+async fn spawn_ready_scans(
     services: &Arc<DesktopServices>,
     background: &mut JoinSet<BackgroundCompletion>,
     events: &Sender<WorkerEvent>,
@@ -4504,7 +4565,8 @@ fn spawn_ready_scans(
                 collection_id,
                 state: Some(CollectionScanState::Scanning),
             },
-        );
+        )
+        .await;
         spawn_scan(services, background, collection_id);
     }
 }
@@ -4763,7 +4825,7 @@ fn spawn_search(
                                 send(&events, WorkerEvent::SearchPartial {
                                     request_id,
                                     hits: partial.hits,
-                                });
+                                }).await;
                             }
                         }
                     }
@@ -4849,7 +4911,7 @@ fn clear_manual_rescan(manual_rescans: &mut HashSet<Uuid>, collection_id: Uuid) 
     manual_rescans.remove(&collection_id);
 }
 
-fn report_ingest_outcomes(outcomes: &[IngestOutcome], events: &Sender<WorkerEvent>) {
+async fn report_ingest_outcomes(outcomes: &[IngestOutcome], events: &Sender<WorkerEvent>) {
     let mut awaiting_review = 0_usize;
     for outcome in outcomes {
         match outcome {
@@ -4866,12 +4928,13 @@ fn report_ingest_outcomes(outcomes: &[IngestOutcome], events: &Sender<WorkerEven
             WorkerEvent::Notice(format!(
                 "{awaiting_review} documento(s) quedaron listos para revisión humana"
             )),
-        );
+        )
+        .await;
     }
 }
 
-fn send(events: &Sender<WorkerEvent>, event: WorkerEvent) {
-    let _ = events.send(event);
+async fn send(events: &Sender<WorkerEvent>, event: WorkerEvent) {
+    let _ = events.send(event).await;
 }
 
 fn search_coverage_view(response: &SearchResponse) -> SearchCoverageView {
@@ -4975,6 +5038,32 @@ mod tests {
     use crate::connectivity_platform::FirewallHelperState;
 
     use super::*;
+
+    #[tokio::test]
+    async fn durable_event_channel_applies_backpressure_when_saturated() {
+        let (sender, mut receiver) = tokio::sync::mpsc::channel(1);
+        send(&sender, WorkerEvent::Notice("first".to_owned())).await;
+        let blocked_sender = sender.clone();
+        let blocked = tokio::spawn(async move {
+            send(&blocked_sender, WorkerEvent::Notice("second".to_owned())).await;
+        });
+        tokio::task::yield_now().await;
+
+        assert!(!blocked.is_finished());
+        assert!(matches!(
+            receiver.recv().await,
+            Some(WorkerEvent::Notice(message)) if message == "first"
+        ));
+        assert!(
+            tokio::time::timeout(Duration::from_secs(1), blocked)
+                .await
+                .is_ok()
+        );
+        assert!(matches!(
+            receiver.recv().await,
+            Some(WorkerEvent::Notice(message)) if message == "second"
+        ));
+    }
 
     #[test]
     fn wiki_health_summary_keeps_the_completed_check_time() {
@@ -5238,9 +5327,9 @@ mod tests {
         assert_eq!(search_coverage_view(&response), SearchCoverageView::Partial);
     }
 
-    #[test]
-    fn lan_runtime_dto_preserves_only_explicit_advanced_fallback_addresses() {
-        let (events, mut receiver) = tokio::sync::broadcast::channel(WORKER_PRESENTATION_CAPACITY);
+    #[tokio::test]
+    async fn lan_runtime_dto_preserves_only_explicit_advanced_fallback_addresses() {
+        let (events, mut receiver) = tokio::sync::mpsc::channel(1);
         let address = "/ip4/192.168.1.25/tcp/61743/p2p/test".to_owned();
 
         send_lan_runtime(
@@ -5248,7 +5337,8 @@ mod tests {
             LanListenerView::Listening,
             LanDiscoveryView::Active,
             std::slice::from_ref(&address),
-        );
+        )
+        .await;
 
         match receiver.try_recv().unwrap() {
             WorkerEvent::LanRuntimeUpdated {
@@ -5541,17 +5631,17 @@ mod tests {
         assert!(!summary.contains("private failure"));
     }
 
-    #[test]
-    fn ingest_failure_is_presented_by_the_typed_issue_list_not_a_raw_notice() {
+    #[tokio::test]
+    async fn ingest_failure_is_presented_by_the_typed_issue_list_not_a_raw_notice() {
         let outcomes = vec![IngestOutcome::Failed {
             source_document_id: None,
             path: PathBuf::from("/private/customer/secret-report.pdf"),
             code: airwiki_core::SourceIssueCode::InvalidPdf,
             error: "parser failed on customer secret".into(),
         }];
-        let (sender, mut receiver) = tokio::sync::broadcast::channel(WORKER_PRESENTATION_CAPACITY);
+        let (sender, mut receiver) = tokio::sync::mpsc::channel(1);
 
-        report_ingest_outcomes(&outcomes, &sender);
+        report_ingest_outcomes(&outcomes, &sender).await;
 
         assert!(receiver.try_recv().is_err());
     }
@@ -5868,7 +5958,7 @@ mod tests {
             required_free_bytes: airwiki_inference::INSTALL_HEADROOM_BYTES,
             fits_available_disk: true,
         };
-        let (events, mut receiver) = tokio::sync::broadcast::channel(WORKER_PRESENTATION_CAPACITY);
+        let (events, mut receiver) = tokio::sync::mpsc::channel(1);
         let mut lifecycle = JoinSet::new();
 
         send_model_state_with_known_plan(

@@ -38,6 +38,7 @@ use tauri::{
     tray::{TrayIconBuilder, TrayIconEvent},
 };
 use tokio::sync::{broadcast, mpsc, oneshot, watch};
+use tokio_util::sync::CancellationToken;
 use ts_rs::TS;
 use uuid::Uuid;
 
@@ -54,12 +55,14 @@ use crate::{
 };
 
 const COMMAND_CAPACITY: usize = 64;
-const PRESENTATION_CAPACITY: usize = 128;
+const INTERNAL_EVENT_CAPACITY: usize = 256;
+const TRANSIENT_EVENT_CAPACITY: usize = 128;
 const CONTRACT_VERSION: u16 = 1;
 const FOLDER_SELECTION_TTL: Duration = Duration::from_secs(5 * 60);
 
 struct AppRuntime {
     commands: mpsc::Sender<WorkerCommand>,
+    cancellation: CancellationToken,
     snapshot: Mutex<watch::Receiver<PublishedSnapshot>>,
     folder_selections: Mutex<HashMap<Uuid, PendingFolderSelection>>,
     review_versions: Arc<Mutex<HashMap<Uuid, CachedReviewVersion>>>,
@@ -2211,6 +2214,7 @@ fn begin_shutdown(app: AppHandle) {
     if runtime.exiting.swap(true, Ordering::AcqRel) {
         return;
     }
+    runtime.cancellation.cancel();
     let commands = runtime.commands.clone();
     let finished = runtime
         .worker_finished
@@ -3454,6 +3458,19 @@ fn flush_block(current: &mut Option<BlockBuilder>, blocks: &mut Vec<KnowledgeBlo
     }
 }
 
+fn republish_snapshot_after_progress_lag(
+    snapshot_sender: &watch::Sender<PublishedSnapshot>,
+    snapshot: &mut AppSnapshot,
+) -> bool {
+    snapshot.sequence = snapshot.sequence.saturating_add(1);
+    snapshot_sender
+        .send(PublishedSnapshot {
+            snapshot: snapshot.clone(),
+            request_id: None,
+        })
+        .is_ok()
+}
+
 const fn heading_level(level: HeadingLevel) -> u8 {
     match level {
         HeadingLevel::H1 => 1,
@@ -3645,13 +3662,14 @@ impl From<airwiki_types::SearchHit> for SearchHitSummary {
 fn main() -> Result<()> {
     let paths = AppPaths::discover().context("failed to discover application paths")?;
     let (commands, command_receiver) = mpsc::channel(COMMAND_CAPACITY);
-    let (events, _) = broadcast::channel(PRESENTATION_CAPACITY);
-    let worker_events = events.clone();
+    let (worker_events, mut presentation_events) = mpsc::channel(INTERNAL_EVENT_CAPACITY);
+    let (progress_events, _) = broadcast::channel(TRANSIENT_EVENT_CAPACITY);
+    let worker_progress_events = progress_events.clone();
+    let mut presentation_progress_events = progress_events.subscribe();
     let (snapshot_sender, snapshot_receiver) = watch::channel(PublishedSnapshot {
         snapshot: AppSnapshot::starting(),
         request_id: None,
     });
-    let mut presentation_events = events.subscribe();
     let review_versions = Arc::new(Mutex::new(HashMap::new()));
     let presentation_review_versions = Arc::clone(&review_versions);
     let knowledge_fingerprints = Arc::new(Mutex::new(HashMap::new()));
@@ -3661,6 +3679,8 @@ fn main() -> Result<()> {
     let requests = Arc::new(Mutex::new(RequestTracker::default()));
     let presentation_requests = Arc::clone(&requests);
     let (worker_finished_sender, worker_finished) = oneshot::channel();
+    let cancellation = CancellationToken::new();
+    let worker_cancellation = cancellation.clone();
 
     tauri::Builder::default()
         .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
@@ -3669,6 +3689,7 @@ fn main() -> Result<()> {
         .plugin(tauri_plugin_updater::Builder::new().build())
         .manage(AppRuntime {
             commands,
+            cancellation,
             snapshot: Mutex::new(snapshot_receiver),
             folder_selections: Mutex::new(HashMap::new()),
             review_versions,
@@ -3697,56 +3718,62 @@ fn main() -> Result<()> {
             tauri::async_runtime::spawn(async move {
                 let mut snapshot = AppSnapshot::starting();
                 loop {
-                    match presentation_events.recv().await {
-                        Ok(event) => {
-                            let request_id = worker_event_request_id(&event);
-                            snapshot
-                                .apply(
-                                    event,
-                                    &presentation_review_versions,
-                                    &presentation_knowledge_fingerprints,
-                                    &presentation_guided_repairs,
-                                    &presentation_requests,
-                                )
-                                .await;
-                            if snapshot_sender
-                                .send(PublishedSnapshot {
-                                    snapshot: snapshot.clone(),
-                                    request_id,
-                                })
-                                .is_err()
-                            {
-                                break;
-                            }
-                            if snapshot.updater.as_ref().is_some_and(|updater| {
-                                matches!(updater.status, UpdaterStatusDto::Installed)
-                            }) {
-                                begin_shutdown(presentation_app.clone());
-                                break;
-                            }
+                    let event = tokio::select! {
+                        event = presentation_events.recv() => {
+                            let Some(event) = event else { break; };
+                            event
                         }
-                        Err(broadcast::error::RecvError::Lagged(_)) => {
-                            snapshot.notice = Some(NoticeSummary {
-                                level: NoticeLevel::Warning,
-                                message: "runtime-snapshot-required".to_owned(),
-                            });
-                            snapshot.sequence = snapshot.sequence.saturating_add(1);
-                            if snapshot_sender
-                                .send(PublishedSnapshot {
-                                    snapshot: snapshot.clone(),
-                                    request_id: None,
-                                })
-                                .is_err()
-                            {
-                                break;
+                        event = presentation_progress_events.recv() => match event {
+                            Ok(event) => event,
+                            Err(broadcast::error::RecvError::Lagged(_)) => {
+                                if !republish_snapshot_after_progress_lag(
+                                    &snapshot_sender,
+                                    &mut snapshot,
+                                ) {
+                                    break;
+                                }
+                                continue;
                             }
-                        }
-                        Err(broadcast::error::RecvError::Closed) => break,
+                            Err(broadcast::error::RecvError::Closed) => break,
+                        },
+                    };
+                    let request_id = worker_event_request_id(&event);
+                    snapshot
+                        .apply(
+                            event,
+                            &presentation_review_versions,
+                            &presentation_knowledge_fingerprints,
+                            &presentation_guided_repairs,
+                            &presentation_requests,
+                        )
+                        .await;
+                    if snapshot_sender
+                        .send(PublishedSnapshot {
+                            snapshot: snapshot.clone(),
+                            request_id,
+                        })
+                        .is_err()
+                    {
+                        break;
+                    }
+                    if snapshot.updater.as_ref().is_some_and(|updater| {
+                        matches!(updater.status, UpdaterStatusDto::Installed)
+                    }) {
+                        begin_shutdown(presentation_app.clone());
+                        break;
                     }
                 }
             });
             tauri::async_runtime::spawn(async move {
-                run_worker(paths, command_receiver, worker_events, updater_backend).await;
+                run_worker(
+                    paths,
+                    command_receiver,
+                    worker_events,
+                    worker_progress_events,
+                    worker_cancellation,
+                    updater_backend,
+                )
+                .await;
                 let _ = worker_finished_sender.send(());
             });
             Ok(())
@@ -3849,6 +3876,7 @@ mod tests {
         let (_worker_finished_sender, worker_finished) = oneshot::channel();
         AppRuntime {
             commands,
+            cancellation: CancellationToken::new(),
             snapshot: Mutex::new(snapshot),
             folder_selections: Mutex::new(HashMap::from([(
                 token,
@@ -4259,6 +4287,33 @@ mod tests {
             close_action(CloseBehavior::HideToTray, true),
             CloseAction::Hide
         );
+    }
+
+    #[test]
+    fn lagged_progress_receiver_republishes_a_complete_snapshot() {
+        let (progress_sender, _) = broadcast::channel(1);
+        let mut progress_receiver = progress_sender.subscribe();
+        assert!(progress_sender.send(WorkerEvent::InstallStopped).is_ok());
+        assert!(progress_sender.send(WorkerEvent::ModelsReady).is_ok());
+        assert!(matches!(
+            progress_receiver.try_recv(),
+            Err(broadcast::error::TryRecvError::Lagged(1))
+        ));
+
+        let mut snapshot = AppSnapshot::starting();
+        let (snapshot_sender, snapshot_receiver) = watch::channel(PublishedSnapshot {
+            snapshot: snapshot.clone(),
+            request_id: Some(Uuid::new_v4()),
+        });
+
+        assert!(republish_snapshot_after_progress_lag(
+            &snapshot_sender,
+            &mut snapshot,
+        ));
+        let published = snapshot_receiver.borrow();
+        assert_eq!(published.snapshot.sequence, 1);
+        assert!(published.request_id.is_none());
+        assert!(matches!(published.snapshot.phase, AppPhase::Starting));
     }
 
     #[test]

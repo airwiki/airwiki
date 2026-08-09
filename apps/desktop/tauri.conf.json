@@ -27,6 +27,12 @@
       }
     ]
   },
+  "plugins": {
+    "updater": {
+      "endpoints": [],
+      "pubkey": ""
+    }
+  },
   "bundle": {
     "active": false,
     "publisher": "AirWiki",

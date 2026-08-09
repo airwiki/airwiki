@@ -105,6 +105,11 @@ primary-button-add-folder = Agregar carpeta
 primary-button-open-health = Abrir Salud
 primary-button-view-options = Ver opciones
 primary-button-view-diagnostics = Ver diagnóstico
+models-install-queued = Esperando turno
+models-install-downloading = Descargando archivos verificados
+models-install-verifying = Verificando integridad
+models-install-extracting = Preparando runtime local
+models-install-activating = Activando el modelo
 
 collections-title = Carpetas de conocimiento
 collections-subtitle = Cada carpeta de conocimiento observa una carpeta local y mantiene un bundle OKF independiente.

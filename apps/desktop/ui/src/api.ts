@@ -1,4 +1,4 @@
-import { Channel, invoke } from '@tauri-apps/api/core';
+import { Channel, invoke as tauriInvoke } from '@tauri-apps/api/core';
 import type {
   AppSnapshot,
   CollectionPolicyInput,
@@ -14,7 +14,25 @@ import type {
 
 export type * from './generated/ui-contract';
 
+export interface DevelopmentBridge {
+  connect(onEvent: (event: UiEventEnvelope) => void): Promise<AppSnapshot>;
+  invoke(command: string, arguments_: Record<string, unknown> | undefined): Promise<unknown>;
+}
+
+let developmentBridge: DevelopmentBridge | null = null;
+
+export function installDevelopmentBridge(bridge: DevelopmentBridge): void {
+  if (!import.meta.env.DEV) throw new Error('the development bridge is unavailable in production');
+  developmentBridge = bridge;
+}
+
+async function invoke<T>(command: string, arguments_?: Record<string, unknown>): Promise<T> {
+  if (developmentBridge) return developmentBridge.invoke(command, arguments_) as Promise<T>;
+  return tauriInvoke<T>(command, arguments_);
+}
+
 export async function connect(onEvent: (event: UiEventEnvelope) => void): Promise<AppSnapshot> {
+  if (developmentBridge) return developmentBridge.connect(onEvent);
   const events = new Channel<UiEventEnvelope>();
   events.onmessage = onEvent;
   return invoke<AppSnapshot>('connect', { events });

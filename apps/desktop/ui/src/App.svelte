@@ -1,5 +1,14 @@
 <script lang="ts">
-  import { AlertTriangle, BookOpen, CheckCircle2, FileText, History, Network, RefreshCw, Search, Settings2, Sparkles } from '@lucide/svelte';
+  import AlertTriangle from '@lucide/svelte/icons/alert-triangle';
+  import BookOpen from '@lucide/svelte/icons/book-open';
+  import CheckCircle2 from '@lucide/svelte/icons/circle-check-big';
+  import FileText from '@lucide/svelte/icons/file-text';
+  import History from '@lucide/svelte/icons/history';
+  import Network from '@lucide/svelte/icons/network';
+  import RefreshCw from '@lucide/svelte/icons/refresh-cw';
+  import Search from '@lucide/svelte/icons/search';
+  import Settings2 from '@lucide/svelte/icons/settings-2';
+  import Sparkles from '@lucide/svelte/icons/sparkles';
   import { listen } from '@tauri-apps/api/event';
   import { onMount } from 'svelte';
   import { addCollection, addFederationIndex, approveReview, browsePublicCollection, cancelModelInstall, checkUpdates, configureFirewall, confirmPairing, connect, dialPeer, downloadUpdate, executeGuidedWikiRepair, hideToTray, installModels, installUpdate, loadKnowledgeBundle, loadKnowledgePage, loadReviewEvidence, manageIntegration, openExternalLink, openSystemDestination, pairPeer, pickCollectionFolder, prepareGuidedWikiRepair, quitCompletely, reanalyzeReview, refreshAutostart, refreshConnectivity, refreshWikiHealth, rejectReview, relinkCollection, removeFederationIndex, rescanCollection, revokePeer, searchKnowledge, setAutostart, setCollectionGrant, setPublicPublisherBlocked, updateCollectionPolicy, updatePreferences, updatePublicCollectionProfile, type AppSnapshot, type CloseBehavior, type CollectionPolicyInput, type CollectionSummary, type EnrichmentDraft, type FolderSelection, type IntegrationActionInput, type IntegrationClient, type KnowledgePageInput, type LanPreference, type LocalePreference, type ReviewSummary, type SearchHitSummary, type SystemDestination, type ThemePreference } from './api';
@@ -193,20 +202,21 @@
     }
   }
 
-  function updaterLabel(): string {
+  function updaterLabel(currentLocale: LocalePreference): string {
+    const localize = (id: string, args?: MessageArgs) => message(currentLocale, id, args);
     const updater = snapshot?.updater;
-    if (!updater) return t('updates-loading');
-    if (updater.issue === 'offline') return t('updates-issue-offline');
-    if (updater.issue === 'invalidSignature') return t('updates-issue-signature');
-    if (updater.issue === 'invalidManifest') return t('updates-issue-manifest');
-    if (updater.status === 'disabled') return t(updater.issue === 'notConfigured' ? 'updates-disabled-not-configured' : 'updates-disabled-platform');
-    if (updater.status === 'available') return t('updates-available', { version: updater.version ?? '' });
-    if (updater.status === 'downloading') return t('updates-downloading', { version: updater.version ?? '' });
-    if (updater.status === 'readyToInstall') return t('updates-ready-install', { version: updater.version ?? '' });
-    if (updater.status === 'installing') return t('updates-installing', { version: updater.version ?? '' });
-    if (updater.status === 'installed') return t('updates-installed', { version: updater.version ?? '' });
+    if (!updater) return localize('updates-loading');
+    if (updater.issue === 'offline') return localize('updates-issue-offline');
+    if (updater.issue === 'invalidSignature') return localize('updates-issue-signature');
+    if (updater.issue === 'invalidManifest') return localize('updates-issue-manifest');
+    if (updater.status === 'disabled') return localize(updater.issue === 'notConfigured' ? 'updates-disabled-not-configured' : 'updates-disabled-platform');
+    if (updater.status === 'available') return localize('updates-available', { version: updater.version ?? '' });
+    if (updater.status === 'downloading') return localize('updates-downloading', { version: updater.version ?? '' });
+    if (updater.status === 'readyToInstall') return localize('updates-ready-install', { version: updater.version ?? '' });
+    if (updater.status === 'installing') return localize('updates-installing', { version: updater.version ?? '' });
+    if (updater.status === 'installed') return localize('updates-installed', { version: updater.version ?? '' });
     const labels: Record<string, string> = { idle: 'updates-idle', checking: 'updates-checking', upToDate: 'updates-current' };
-    return t(labels[updater.status] ?? 'error-update');
+    return localize(labels[updater.status] ?? 'error-update');
   }
 
   async function runUpdaterAction(action: 'check' | 'download' | 'install') {
@@ -234,15 +244,15 @@
     }
   }
 
-  function connectivityLabel(): string {
-    if (snapshot?.lanRuntime?.listener === 'listening') return t('connectivity-active');
-    if (snapshot?.lanRuntime?.listener === 'starting') return t('connectivity-starting');
-    if (snapshot?.connectivity?.networkProfile === 'public') return t('connectivity-public-network');
-    if (snapshot?.connectivity?.firewall === 'rulesMissing') return t('connectivity-firewall-needed');
-    if (snapshot?.connectivity?.firewall === 'conflict' || snapshot?.connectivity?.firewall === 'legacyExposure') return t('connectivity-admin-needed');
-    if (snapshot?.lanRuntime?.listener === 'failed') return t('connectivity-failed');
-    if (lanPreference === 'disabled') return t('connectivity-disabled');
-    return t('connectivity-not-ready');
+  function connectivityLabel(currentLocale: LocalePreference): string {
+    if (snapshot?.lanRuntime?.listener === 'listening') return message(currentLocale, 'connectivity-active');
+    if (snapshot?.lanRuntime?.listener === 'starting') return message(currentLocale, 'connectivity-starting');
+    if (snapshot?.connectivity?.networkProfile === 'public') return message(currentLocale, 'connectivity-public-network');
+    if (snapshot?.connectivity?.firewall === 'rulesMissing') return message(currentLocale, 'connectivity-firewall-needed');
+    if (snapshot?.connectivity?.firewall === 'conflict' || snapshot?.connectivity?.firewall === 'legacyExposure') return message(currentLocale, 'connectivity-admin-needed');
+    if (snapshot?.lanRuntime?.listener === 'failed') return message(currentLocale, 'connectivity-failed');
+    if (lanPreference === 'disabled') return message(currentLocale, 'connectivity-disabled');
+    return message(currentLocale, 'connectivity-not-ready');
   }
 
   function lanStateLabel(state: string): string {
@@ -314,10 +324,11 @@
     if (collectionId) await openKnowledge(collectionId);
   }
 
-  function autostartLabel(): string {
+  function autostartLabel(currentLocale: LocalePreference): string {
     const status = snapshot?.autostart;
     const labels = { enabled: 'autostart-enabled', disabled: 'autostart-disabled', requiresApproval: 'autostart-needs-approval', conflict: 'autostart-conflict', unsupported: 'autostart-unsupported' } as const;
-    return t('settings-login-status', { status: status ? t(labels[status]) : t('autostart-checking') });
+    const statusLabel = status ? message(currentLocale, labels[status]) : message(currentLocale, 'autostart-checking');
+    return message(currentLocale, 'settings-login-status', { status: statusLabel });
   }
 
   async function refreshAutostartState() {
@@ -347,11 +358,11 @@
     }
   }
 
-  function nextActionLabel(): string {
-    if (destination === 'library') return t('primary-button-add-folder');
-    if (destination === 'review') return snapshot?.reviews.length ? t('action-review') : t('review-empty-title');
-    if (destination === 'search') return t('search-question');
-    return t('action-confirm');
+  function nextActionLabel(currentLocale: LocalePreference): string {
+    if (destination === 'library') return message(currentLocale, 'primary-button-add-folder');
+    if (destination === 'review') return message(currentLocale, snapshot?.reviews.length ? 'action-review' : 'review-empty-title');
+    if (destination === 'search') return message(currentLocale, 'search-question');
+    return message(currentLocale, 'action-confirm');
   }
 
   async function runNextAction() {
@@ -490,13 +501,15 @@
     }
   }
 
-  function modelInstallLabel(): string {
+  function modelInstallLabel(currentLocale: LocalePreference): string {
     const status = snapshot?.modelInstall?.status;
-    if (status === 'queued') return 'Esperando turno';
-    if (status === 'downloading') return 'Descargando archivos verificados';
-    if (status === 'verifying') return 'Verificando integridad';
-    if (status === 'extracting') return 'Preparando runtime local';
-    return 'Activando el modelo';
+    const labels: Record<string, string> = {
+      queued: 'models-install-queued',
+      downloading: 'models-install-downloading',
+      verifying: 'models-install-verifying',
+      extracting: 'models-install-extracting'
+    };
+    return message(currentLocale, labels[status ?? ''] ?? 'models-install-activating');
   }
 
   async function submitSearch() {
@@ -729,7 +742,7 @@
   <main>
     <header>
       <div><p class="eyebrow">{t('dashboard-eyebrow')}</p><h1>{t('dashboard-title')}</h1></div>
-      <button class="primary" onclick={runNextAction} disabled={destination === 'review' && !snapshot?.reviews.length}><Sparkles size={17} />{nextActionLabel()}</button>
+      <button class="primary" onclick={runNextAction} disabled={destination === 'review' && !snapshot?.reviews.length}><Sparkles size={17} />{nextActionLabel(locale)}</button>
     </header>
 
     <section class="workspace" aria-live="polite">
@@ -918,11 +931,11 @@
             {/each}
           </nav>
           <div class="system-layout">
-            <section id="system-models"><p class="section-label">{t('settings-local-ai')}</p><h3>{snapshot.model?.displayName ?? t('models-profile-automatic')}</h3><p>{snapshot.model?.active ? t('models-ready') : t('models-pending')}</p>{#if snapshot.modelInstall}<progress max={snapshot.modelInstall.totalBytes || 1} value={snapshot.modelInstall.downloaded}></progress><small>{modelInstallLabel()}</small><button class="secondary" onclick={cancelModelInstall}>{t('action-cancel')}</button>{:else if snapshot.model && !snapshot.model.active}<label class="check license-check"><input type="checkbox" bind:checked={modelLicensesConfirmed} /> {t('models-accept-licenses')} · {snapshot.model.license ?? t('models-license')}</label><div class="row-actions"><button class="secondary" onclick={prepareLocalModel} disabled={!modelLicensesConfirmed && !snapshot.model.licenseAccepted}>{t('models-action-download')}</button>{#if snapshot.model.licenseUrl}<button class="text-action" onclick={() => { pendingExternalUrl = snapshot?.model?.licenseUrl ?? null; }}>{t('models-license')}</button>{/if}</div>{/if}</section>
+            <section id="system-models"><p class="section-label">{t('settings-local-ai')}</p><h3>{snapshot.model?.displayName ?? t('models-profile-automatic')}</h3><p>{snapshot.model?.active ? t('models-ready') : t('models-pending')}</p>{#if snapshot.modelInstall}<progress max={snapshot.modelInstall.totalBytes || 1} value={snapshot.modelInstall.downloaded}></progress><small>{modelInstallLabel(locale)}</small><button class="secondary" onclick={cancelModelInstall}>{t('action-cancel')}</button>{:else if snapshot.model && !snapshot.model.active}<label class="check license-check"><input type="checkbox" bind:checked={modelLicensesConfirmed} /> {t('models-accept-licenses')} · {snapshot.model.license ?? t('models-license')}</label><div class="row-actions"><button class="secondary" onclick={prepareLocalModel} disabled={!modelLicensesConfirmed && !snapshot.model.licenseAccepted}>{t('models-action-download')}</button>{#if snapshot.model.licenseUrl}<button class="text-action" onclick={() => { pendingExternalUrl = snapshot?.model?.licenseUrl ?? null; }}>{t('models-license')}</button>{/if}</div>{/if}</section>
             <section id="system-preferences" class="settings-form"><p class="section-label">{t('desktop-preferences')}</p><label><span>{t('settings-language')}</span><select bind:value={locale}><option value="system">{t('language-system')}</option><option value="es">{t('language-spanish')}</option><option value="en">{t('language-english')}</option></select></label><label><span>{t('settings-theme')}</span><select bind:value={theme}><option value="system">{t('theme-system')}</option><option value="light">{t('theme-light')}</option><option value="dark">{t('theme-dark')}</option></select></label><label><span>{t('desktop-lan')}</span><select bind:value={lanPreference}><option value="disabled">{t('desktop-disabled')}</option><option value="enabled">{t('desktop-enabled')}</option></select></label><label><span>{t('desktop-close')}</span><select bind:value={closeBehavior}><option value="ask">{t('desktop-ask')}</option><option value="hide_to_tray">{t('desktop-hide-tray')}</option><option value="quit">{t('desktop-quit')}</option></select></label><label class="check"><input type="checkbox" bind:checked={automaticUpdateChecks} /> {t('updates-automatic')}</label><button class="primary" onclick={() => savePreferences(false)} disabled={actionBusy}>{t('desktop-save-preferences')}</button></section>
-            <section id="system-updates" class="updater-section" aria-live="polite"><div class="settings-heading"><div><p class="section-label">{t('updates-title')}</p><h3>{t('desktop-stable-channel')}</h3></div>{#if snapshot.updater?.status !== 'disabled'}<button class="text-action" onclick={() => runUpdaterAction('check')} disabled={updaterRequestId !== null || snapshot.updater?.status === 'checking' || snapshot.updater?.status === 'downloading' || snapshot.updater?.status === 'installing'}>{t('updates-check-now')}</button>{/if}</div><p>{updaterLabel()}</p>{#if snapshot.updater?.releaseNotes}<div class="release-notes"><small>{t('desktop-release-notes')}</small><p>{snapshot.updater.releaseNotes}</p></div>{/if}<div class="row-actions">{#if snapshot.updater?.status === 'available'}<button class="secondary" onclick={() => runUpdaterAction('download')} disabled={updaterRequestId !== null}>{t('desktop-update-download')}</button>{:else if snapshot.updater?.status === 'readyToInstall' && !confirmUpdateInstall}<button class="primary" onclick={() => { confirmUpdateInstall = true; }}>{t('updates-install')}</button>{:else if snapshot.updater?.status === 'readyToInstall' && confirmUpdateInstall}<div class="install-confirmation" role="alert"><p>{t('desktop-update-install-body', { version: snapshot.updater.version ?? '' })}</p><button class="primary" onclick={() => runUpdaterAction('install')} disabled={updaterRequestId !== null}>{t('updates-confirm-install')}</button><button class="secondary" onclick={() => { confirmUpdateInstall = false; }} disabled={updaterRequestId !== null}>{t('action-cancel')}</button></div>{:else if snapshot.updater?.retryable}<button class="secondary" onclick={() => runUpdaterAction('check')} disabled={updaterRequestId !== null}>{t('action-retry')}</button>{/if}</div><small>{t('desktop-update-privacy')}</small></section>
-            <section><p class="section-label">{t('desktop-sign-in')}</p><h3>{t('desktop-autostart')}</h3><p>{autostartLabel()}</p><div class="row-actions">{#if snapshot.autostart === 'enabled'}<button class="secondary" onclick={() => changeAutostart(false)} disabled={autostartBusy}>{t('action-disable')}</button>{:else if snapshot.autostart !== 'unsupported' && snapshot.autostart !== 'conflict'}<button class="secondary" onclick={() => changeAutostart(true)} disabled={autostartBusy}>{autostartBusy ? t('autostart-checking') : t('action-enable')}</button>{/if}<button class="text-action" onclick={refreshAutostartState} disabled={autostartBusy}>{t('settings-refresh-status')}</button></div></section>
-            <section id="system-connectivity" class="connectivity-section"><p class="section-label">{t('desktop-connectivity')}</p><h3>{t('desktop-known-devices', { count: snapshot.peers.length })}</h3><p>{connectivityLabel()}</p>{#if snapshot.lanRuntime}<dl><div><dt>{t('desktop-listener')}</dt><dd>{lanStateLabel(snapshot.lanRuntime.listener)}</dd></div><div><dt>{t('desktop-discovery')}</dt><dd>{lanStateLabel(snapshot.lanRuntime.discovery)}</dd></div><div><dt>{t('desktop-interfaces')}</dt><dd>{snapshot.lanRuntime.addressCount}</dd></div></dl>{/if}<div class="row-actions"><button class="secondary" onclick={() => runConnectivityAction('refresh')} disabled={connectivityRequestId !== null}>{connectivityRequestId ? t('updates-checking') : t('desktop-check')}</button>{#if snapshot.connectivity?.networkProfile === 'public'}<button class="text-action" onclick={() => runConnectivityAction('networkSettings')} disabled={connectivityRequestId !== null}>{t('desktop-network-settings')}</button>{/if}{#if snapshot.connectivity?.systemPermission === 'denied'}<button class="text-action" onclick={() => runConnectivityAction('localNetworkPrivacy')} disabled={connectivityRequestId !== null}>{t('desktop-local-network-permission')}</button>{/if}{#if snapshot.connectivity?.firewallHelper === 'verified' && snapshot.connectivity.firewall !== 'ready' && snapshot.connectivity.firewall !== 'notApplicable'}<button class="secondary" onclick={() => runConnectivityAction('install')} disabled={connectivityRequestId !== null || lanPreference !== 'enabled'}>{t('connectivity-configure-firewall')}</button>{/if}{#if snapshot.connectivity?.firewall === 'ready'}<button class="text-action" onclick={() => runConnectivityAction('remove')} disabled={connectivityRequestId !== null}>{t('desktop-firewall-remove')}</button>{/if}{#if snapshot.connectivity?.firewall === 'conflict' || snapshot.connectivity?.firewall === 'legacyExposure'}<button class="text-action" onclick={() => runConnectivityAction('advancedFirewall')} disabled={connectivityRequestId !== null}>{t('connectivity-open-advanced-firewall')}</button>{/if}</div><small>{t('desktop-sharing-guardrail')}</small></section>
+            <section id="system-updates" class="updater-section" aria-live="polite"><div class="settings-heading"><div><p class="section-label">{t('updates-title')}</p><h3>{t('desktop-stable-channel')}</h3></div>{#if snapshot.updater?.status !== 'disabled'}<button class="text-action" onclick={() => runUpdaterAction('check')} disabled={updaterRequestId !== null || snapshot.updater?.status === 'checking' || snapshot.updater?.status === 'downloading' || snapshot.updater?.status === 'installing'}>{t('updates-check-now')}</button>{/if}</div><p>{updaterLabel(locale)}</p>{#if snapshot.updater?.releaseNotes}<div class="release-notes"><small>{t('desktop-release-notes')}</small><p>{snapshot.updater.releaseNotes}</p></div>{/if}<div class="row-actions">{#if snapshot.updater?.status === 'available'}<button class="secondary" onclick={() => runUpdaterAction('download')} disabled={updaterRequestId !== null}>{t('desktop-update-download')}</button>{:else if snapshot.updater?.status === 'readyToInstall' && !confirmUpdateInstall}<button class="primary" onclick={() => { confirmUpdateInstall = true; }}>{t('updates-install')}</button>{:else if snapshot.updater?.status === 'readyToInstall' && confirmUpdateInstall}<div class="install-confirmation" role="alert"><p>{t('desktop-update-install-body', { version: snapshot.updater.version ?? '' })}</p><button class="primary" onclick={() => runUpdaterAction('install')} disabled={updaterRequestId !== null}>{t('updates-confirm-install')}</button><button class="secondary" onclick={() => { confirmUpdateInstall = false; }} disabled={updaterRequestId !== null}>{t('action-cancel')}</button></div>{:else if snapshot.updater?.retryable}<button class="secondary" onclick={() => runUpdaterAction('check')} disabled={updaterRequestId !== null}>{t('action-retry')}</button>{/if}</div><small>{t('desktop-update-privacy')}</small></section>
+            <section><p class="section-label">{t('desktop-sign-in')}</p><h3>{t('desktop-autostart')}</h3><p>{autostartLabel(locale)}</p><div class="row-actions">{#if snapshot.autostart === 'enabled'}<button class="secondary" onclick={() => changeAutostart(false)} disabled={autostartBusy}>{t('action-disable')}</button>{:else if snapshot.autostart !== 'unsupported' && snapshot.autostart !== 'conflict'}<button class="secondary" onclick={() => changeAutostart(true)} disabled={autostartBusy}>{autostartBusy ? t('autostart-checking') : t('action-enable')}</button>{/if}<button class="text-action" onclick={refreshAutostartState} disabled={autostartBusy}>{t('settings-refresh-status')}</button></div></section>
+            <section id="system-connectivity" class="connectivity-section"><p class="section-label">{t('desktop-connectivity')}</p><h3>{t('desktop-known-devices', { count: snapshot.peers.length })}</h3><p>{connectivityLabel(locale)}</p>{#if snapshot.lanRuntime}<dl><div><dt>{t('desktop-listener')}</dt><dd>{lanStateLabel(snapshot.lanRuntime.listener)}</dd></div><div><dt>{t('desktop-discovery')}</dt><dd>{lanStateLabel(snapshot.lanRuntime.discovery)}</dd></div><div><dt>{t('desktop-interfaces')}</dt><dd>{snapshot.lanRuntime.addressCount}</dd></div></dl>{/if}<div class="row-actions"><button class="secondary" onclick={() => runConnectivityAction('refresh')} disabled={connectivityRequestId !== null}>{connectivityRequestId ? t('updates-checking') : t('desktop-check')}</button>{#if snapshot.connectivity?.networkProfile === 'public'}<button class="text-action" onclick={() => runConnectivityAction('networkSettings')} disabled={connectivityRequestId !== null}>{t('desktop-network-settings')}</button>{/if}{#if snapshot.connectivity?.systemPermission === 'denied'}<button class="text-action" onclick={() => runConnectivityAction('localNetworkPrivacy')} disabled={connectivityRequestId !== null}>{t('desktop-local-network-permission')}</button>{/if}{#if snapshot.connectivity?.firewallHelper === 'verified' && snapshot.connectivity.firewall !== 'ready' && snapshot.connectivity.firewall !== 'notApplicable'}<button class="secondary" onclick={() => runConnectivityAction('install')} disabled={connectivityRequestId !== null || lanPreference !== 'enabled'}>{t('connectivity-configure-firewall')}</button>{/if}{#if snapshot.connectivity?.firewall === 'ready'}<button class="text-action" onclick={() => runConnectivityAction('remove')} disabled={connectivityRequestId !== null}>{t('desktop-firewall-remove')}</button>{/if}{#if snapshot.connectivity?.firewall === 'conflict' || snapshot.connectivity?.firewall === 'legacyExposure'}<button class="text-action" onclick={() => runConnectivityAction('advancedFirewall')} disabled={connectivityRequestId !== null}>{t('connectivity-open-advanced-firewall')}</button>{/if}</div><small>{t('desktop-sharing-guardrail')}</small></section>
             <section class="device-details"><p class="section-label">{t('desktop-this-device')}</p><h3>{t('desktop-identity-capacity')}</h3><dl>{#if snapshot.nodeId}<div><dt>{t('desktop-network-identity')}</dt><dd><code>{shortPeerId(snapshot.nodeId)}</code></dd></div>{/if}{#if snapshot.mcpUrl}<div><dt>{t('diagnostics-local-mcp')}</dt><dd><code>{snapshot.mcpUrl}</code></dd></div>{/if}{#if snapshot.hardware}<div><dt>{t('desktop-memory-available')}</dt><dd>{formatBytes(snapshot.hardware.availableMemoryBytes)}</dd></div><div><dt>{t('desktop-disk-available')}</dt><dd>{formatBytes(snapshot.hardware.availableDiskBytes)}</dd></div><div><dt>{t('models-acceleration')}</dt><dd>{snapshot.hardware.metalAvailable ? 'Metal' : snapshot.hardware.avx2 ? 'AVX2' : t('desktop-basic-cpu')}</dd></div>{/if}</dl>{#if snapshot.hardware?.issues.length}<p class="evidence-warning">{snapshot.hardware.issues.join(' · ')}</p>{/if}</section>
             <section class="network-advanced"><p class="section-label">{t('devices-manual-advanced')}</p><h3>{t('desktop-manual-connect')}</h3><p>{t('desktop-manual-connect-body')}</p><label><span>{t('desktop-address')}</span><input bind:value={manualPeerAddress} maxlength="500" placeholder="/ip4/192.168.1.20/tcp/12345/p2p/12D3Koo…" /></label><button class="secondary" onclick={connectManualPeer} disabled={lanPreference !== 'enabled' || !manualPeerAddress.trim()}>{t('action-connect')}</button></section>
             <section id="system-devices" class="peer-trust"><p class="section-label">{t('desktop-devices-permissions')}</p><h3>{t('desktop-explicit-trust')}</h3><p>{t('desktop-explicit-trust-body')}</p><div class="peer-list">{#each snapshot.peers as peer (peer.peerId)}<article><div class="peer-heading"><div><strong>{peer.deviceName ?? t('devices-nearby')}</strong><code title={peer.peerId}>{shortPeerId(peer.peerId)}</code><small>{peer.address}</small></div><span class:verified={peer.trust === 'trusted'}>{peer.trust === 'trusted' ? t('desktop-verified') : peer.trust === 'blocked' ? t('desktop-revoked') : peer.activity === 'pairing' ? t('desktop-verifying') : t('desktop-unverified')}</span></div>{#if peer.sasWords}<div class="sas" aria-label={t('desktop-sas')}><small>{t('desktop-sas-help')}</small><strong>{peer.sasWords.join(' · ')}</strong><div><button class="primary" onclick={() => runPeerAction(peer.peerId, 'accept')} disabled={peerActionId === peer.peerId}>{t('devices-code-matches')}</button><button class="danger" onclick={() => runPeerAction(peer.peerId, 'reject')} disabled={peerActionId === peer.peerId}>{t('devices-code-does-not-match')}</button></div></div>{:else if peer.trust === 'unpaired'}<button class="secondary" onclick={() => runPeerAction(peer.peerId, 'pair')} disabled={peerActionId === peer.peerId || peer.activity === 'notObserved'}>{t('desktop-verify-device')}</button>{:else if peer.trust === 'trusted'}<div class="grant-list">{#each snapshot.collections.filter((collection) => collection.peerShareable) as collection (collection.id)}<label class="check"><input type="checkbox" checked={peer.grantedCollectionIds.includes(collection.id)} onchange={(event) => changeGrant(peer.peerId, collection.id, event.currentTarget.checked)} disabled={peerActionId === peer.peerId} /> {collection.name}</label>{:else}<small>{t('desktop-no-shareable-folders')}</small>{/each}</div><button class="danger" onclick={() => runPeerAction(peer.peerId, 'revoke')} disabled={peerActionId === peer.peerId}>{t('desktop-revoke-trust')}</button>{/if}</article>{:else}<p class="empty">{t('desktop-no-devices')}</p>{/each}</div></section>

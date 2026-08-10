@@ -2564,6 +2564,7 @@ impl DesktopServices {
                 let source_name = source_display_name(&source.source_path);
                 Ok(ReviewItemView {
                     concept_id: concept.id,
+                    collection_id: concept.collection_id,
                     source_revision: source.revision,
                     source_name,
                     collection_name: collection.name,

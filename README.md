@@ -6,7 +6,7 @@
 
 AirWiki is an open-source, local-first Rust desktop knowledge base that turns folders of text-based Markdown and PDF files into human-reviewed OKF wikis. It is intended for individuals, communities, small teams, and organizations without assuming a particular company structure or network topology.
 
-Original documents remain on their source device. LAN collaboration returns bounded authorized snippets after pairing and grants. An experimental, separately opted-in public network can advertise reviewed collections through replaceable signed indexes and serve search or browse results directly from the owner without replicating documents. Local chat integrations distinguish answerability-accepted evidence from separately typed candidates that the chat model must verify, use a per-user MCP bridge, and never require AirWiki to store provider API keys.
+Each Wiki joins one source folder, its reviewed OKF bundle, and its access policy. Original documents remain on their source device. LAN collaboration returns bounded authorized snippets after pairing and grants. An experimental, separately opted-in public network can advertise reviewed Wikis through replaceable signed indexes and serve search or browse results directly from the owner without replicating documents. Local chat integrations distinguish answerability-accepted evidence from separately typed candidates that the chat model must verify, use a per-user MCP bridge, and never require AirWiki to store provider API keys.
 
 ## Project status
 
@@ -21,7 +21,7 @@ Tested development targets are macOS arm64 and Windows x64. Linux, web, and mobi
 - Compare each proposed draft with revision-bound local evidence and require human review before publishing an OKF wiki concept.
 - Search locally with lexical and vector evidence.
 - Discover, pair, authorize, and search other AirWiki nodes on a LAN.
-- Opt selected reviewed collections into experimental public search and browse through signed federated routing indexes.
+- Opt selected reviewed Wikis into experimental public search and browse through signed federated routing indexes.
 - Expose explicitly approved evidence through a read-only local MCP integration.
 - Inspect published OKF bundles and their health without changing source files.
 
@@ -60,8 +60,8 @@ The workspace separates dependency-light contracts, local domain logic, inferenc
 
 ## Privacy defaults
 
-- New collections are not available to external chats unless a person enables that policy.
-- Peer sharing requires an explicit collection policy, pairing, and a grant from the source node.
+- New Wikis are not available to external chats unless a person enables that policy.
+- Peer sharing requires an explicit Wiki policy, pairing, and a grant from the source node.
 - Modified knowledge is withdrawn until its new revision is reviewed and published.
 - The local model cannot publish, grant access, or decide whether content may leave a device.
 - The Wiki viewer does not load remote resources or request complete peer documents.

@@ -19,7 +19,7 @@ async function selectValue(selector: string, index: number, value: string): Prom
 
 async function measureNavigationPaintP95(): Promise<number> {
   const result = await browser.executeAsync((done) => {
-    const buttons = Array.from(document.querySelectorAll<HTMLButtonElement>('nav button'));
+    const buttons = Array.from(document.querySelectorAll<HTMLButtonElement>('.rail nav button, .rail-footer > button'));
     if (buttons.length !== 4) {
       done([]);
       return;
@@ -66,9 +66,9 @@ async function setCssViewport(width: number, height: number): Promise<void> {
 }
 
 async function navigateToDestination(index: number): Promise<void> {
-  const navigation = await $$('.rail nav button');
+  const navigation = await $$('.rail nav button, .rail-footer > button');
   await required(navigation[index], `destination ${index}`).click();
-  const expected = ['library', 'review', 'search', 'system'][index];
+  const expected = ['home', 'wikis', 'shared', 'system'][index];
   await browser.waitUntil(
     () => browser.execute((route) => document.querySelector('.route-page')?.getAttribute('data-route') === route, expected),
     { timeout: 10_000, timeoutMsg: `destination ${expected} did not become interactive` }
@@ -93,7 +93,7 @@ async function assertVisualMatrix(): Promise<void> {
     { width: 1180, height: 760 },
     { width: 1440, height: 900 }
   ];
-  const routes = ['library', 'review', 'search', 'system'] as const;
+  const routes = ['home', 'wikis', 'shared', 'system'] as const;
   for (const locale of ['en', 'es'] as const) {
     for (const theme of ['light', 'dark'] as const) {
       await configureVisualPreferences(locale, theme);
@@ -146,7 +146,7 @@ describe('AirWiki real IPC journey', () => {
       const detail = await message.isExisting() ? await message.getText() : 'no UI error';
       throw new Error(`onboarding did not complete: ${detail}`, { cause: error });
     }
-    for (const destination of ['Library', 'Review', 'Search', 'System']) {
+    for (const destination of ['Home', 'Wikis', 'Shared', 'Settings']) {
       await expect($(`button*=${destination}`)).toBeDisplayed();
     }
     expect(await measureNavigationPaintP95()).toBeLessThanOrEqual(100);
@@ -174,7 +174,7 @@ describe('AirWiki real IPC journey', () => {
       expect(dimensions.scrollWidth).toBeLessThanOrEqual(dimensions.clientWidth);
     }
 
-    await $('button*=System').click();
+    await $('button*=Settings').click();
     await $('#system-preferences').waitForDisplayed();
     const systemShell = await browser.execute(() => {
       const main = document.querySelector<HTMLElement>('.shell > main');

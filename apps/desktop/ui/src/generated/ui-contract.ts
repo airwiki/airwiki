@@ -9,17 +9,17 @@ export type SuggestedLink = { label: string, target: string, };
 
 export type EnrichmentDraft = { type: ConceptType, title: string, description: string, language: string, tags: Array<string>, entities: Array<SuggestedEntity>, links: Array<SuggestedLink>, summary: string, classificationConfidence: number, classificationExplanation: string, };
 
-export type CollectionSummary = { id: string, name: string, documentCount: number, needsReviewCount: number, publishedCount: number, failedCount: number, localOnly: boolean, peerShareable: boolean, allowExternalAi: boolean, internetPublic: boolean, publicDescription: string, publicLanguages: string, publicAnnouncement: PublicAnnouncementSummary, maintenanceRequired: boolean, };
+export type WikiSummary = { id: string, name: string, documentCount: number, needsReviewCount: number, publishedCount: number, failedCount: number, localOnly: boolean, peerShareable: boolean, allowExternalAi: boolean, internetPublic: boolean, publicDescription: string, publicLanguages: string, publicAnnouncement: PublicAnnouncementSummary, maintenanceRequired: boolean, };
 
 export type PublicAnnouncementSummary = { "status": "offline" } | { "status": "advertised", acceptedIndexes: number, } | { "status": "expired" };
 
 export type HardwareSummary = { os: string, architecture: string, totalMemoryBytes: number, availableMemoryBytes: number, availableDiskBytes: number, avx2: boolean, metalAvailable: boolean, supportedTarget: boolean, canInstall: boolean, issues: Array<string>, };
 
-export type CollectionScanStatus = "queued" | "scanning";
+export type WikiScanStatus = "queued" | "scanning";
 
-export type CollectionScanSummary = { collectionId: string, state: CollectionScanStatus, };
+export type WikiScanSummary = { wikiId: string, state: WikiScanStatus, };
 
-export type ReviewSummary = { conceptId: string, sourceRevision: number, sourceName: string, collectionName: string, draft: EnrichmentDraft, };
+export type ReviewSummary = { conceptId: string, wikiId: string, sourceRevision: number, sourceName: string, wikiName: string, draft: EnrichmentDraft, };
 
 export type ReviewExcerptSummary = { ordinal: number, headingOrPage: string, text: string, truncated: boolean, };
 
@@ -37,19 +37,19 @@ export type KnowledgeGraphLinkSummary = { source: KnowledgePageInput, target: Kn
 
 export type KnowledgeBundleStatus = "empty" | "ready" | "updating" | "failed";
 
-export type KnowledgeBundleSummary = { collectionId: string, collectionName: string, version: string, status: KnowledgeBundleStatus, concepts: Array<KnowledgeConceptSummary>, links: Array<KnowledgeGraphLinkSummary>, errorCount: number, warningCount: number, };
+export type KnowledgeBundleSummary = { wikiId: string, wikiName: string, version: string, status: KnowledgeBundleStatus, concepts: Array<KnowledgeConceptSummary>, links: Array<KnowledgeGraphLinkSummary>, errorCount: number, warningCount: number, };
 
 export type KnowledgePageStatus = "ready" | "failed";
 
-export type KnowledgePageSummary = { collectionId: string, page: KnowledgePageInput, title: string, status: KnowledgePageStatus, blocks: Array<KnowledgeBlock>, metadata: Array<[string, string]>, backlinks: Array<KnowledgePageInput>, truncated: boolean, };
+export type KnowledgePageSummary = { wikiId: string, page: KnowledgePageInput, title: string, status: KnowledgePageStatus, blocks: Array<KnowledgeBlock>, metadata: Array<[string, string]>, backlinks: Array<KnowledgePageInput>, truncated: boolean, };
 
-export type SourceIssueSummary = { collectionId: string, sourceName: string, collectionName: string, code: string, };
+export type SourceIssueSummary = { wikiId: string, sourceName: string, wikiName: string, code: string, };
 
 export type PeerTrust = "unpaired" | "trusted" | "blocked";
 
 export type PeerActivity = "notObserved" | "discovered" | "pairing" | "connected";
 
-export type PeerSummary = { peerId: string, deviceName: string | null, address: string, trust: PeerTrust, activity: PeerActivity, sasWords: Array<string> | null, grantedCollectionIds: Array<string>, };
+export type PeerSummary = { peerId: string, deviceName: string | null, address: string, trust: PeerTrust, activity: PeerActivity, sasWords: Array<string> | null, grantedWikiIds: Array<string>, };
 
 export type ModelSummary = { stateSequence: number, profile: string, recommendedModelId: string | null, displayName: string | null, recommendationReason: string | null, active: boolean, installed: boolean, degraded: boolean, issues: Array<string>, pendingModelId: string | null, downloadBytes: number, requiredFreeBytes: number, fitsAvailableDisk: boolean, licenseAccepted: boolean, license: string | null, licenseUrl: string | null, revision: string | null, };
 
@@ -57,7 +57,7 @@ export type ModelInstallStatus = "queued" | "downloading" | "verifying" | "extra
 
 export type ModelInstallSummary = { status: ModelInstallStatus, downloaded: number, totalBytes: number, };
 
-export type SearchHitSummary = { conceptId: string, collectionId: string, title: string, snippet: string, headingOrPage: string, logicalResourceUri: string, sourceRevision: number, sourceSha256: string, rank: number, nodeId: string, };
+export type SearchHitSummary = { conceptId: string, wikiId: string, title: string, snippet: string, headingOrPage: string, logicalResourceUri: string, sourceRevision: number, sourceSha256: string, rank: number, nodeId: string, };
 
 export type SearchStatus = "searching" | "complete" | "failed";
 
@@ -69,7 +69,7 @@ export type PublicBrowseStatus = "direct" | "relay" | "expired" | "offline" | "f
 
 export type PublicConceptSummaryDto = { conceptId: string, conceptType: ConceptType, title: string, description: string, language: string, tags: Array<string>, summary: string, sourceRevision: number, };
 
-export type PublicBrowseSummary = { requestId: string, status: PublicBrowseStatus, publisherId: string | null, collectionId: string | null, collectionName: string | null, description: string | null, languages: Array<string>, concepts: Array<PublicConceptSummaryDto>, nextCursor: string | null, };
+export type PublicBrowseSummary = { requestId: string, status: PublicBrowseStatus, publisherId: string | null, wikiId: string | null, wikiName: string | null, description: string | null, languages: Array<string>, concepts: Array<PublicConceptSummaryDto>, nextCursor: string | null, };
 
 export type NoticeLevel = "notice" | "warning" | "error";
 
@@ -87,7 +87,7 @@ export type AutostartStatus = "disabled" | "enabled" | "requiresApproval" | "con
 
 export type WikiHealthStatus = "ready" | "failed";
 
-export type WikiHealthSummary = { generation: number, status: WikiHealthStatus, errorCount: number, warningCount: number, updatingCount: number, attentionCollectionId: string | null, checked: boolean, };
+export type WikiHealthSummary = { generation: number, status: WikiHealthStatus, errorCount: number, warningCount: number, updatingCount: number, attentionWikiId: string | null, checked: boolean, };
 
 export type GuidedRepairStatus = "prepared" | "completed" | "failed";
 
@@ -97,7 +97,7 @@ export type GuidedRepairChangeDto = "withdraw_concept" | "remove_orphan" | "rege
 
 export type GuidedRepairFileSummary = { page: KnowledgePageInput, change: GuidedRepairChangeDto, };
 
-export type GuidedRepairSummary = { requestId: string, collectionId: string, status: GuidedRepairStatus, impactCode: string | null, authorities: Array<RepairAuthorityDto>, files: Array<GuidedRepairFileSummary>, conceptsReturnedToReview: number, orphanConceptsRemoved: number, };
+export type GuidedRepairSummary = { requestId: string, wikiId: string, status: GuidedRepairStatus, impactCode: string | null, authorities: Array<RepairAuthorityDto>, files: Array<GuidedRepairFileSummary>, conceptsReturnedToReview: number, orphanConceptsRemoved: number, };
 
 export type SystemPermissionStatus = "notApplicable" | "unknown" | "granted" | "denied";
 
@@ -125,7 +125,7 @@ export type IntegrationStatus = "notInstalled" | "available" | "awaitingClientAp
 
 export type IntegrationSummary = { client: IntegrationClient, status: IntegrationStatus, detectedVersion: string | null, activityRecent: boolean, restartRequired: boolean, };
 
-export type IntegrationsSummary = { integrations: Array<IntegrationSummary>, externalAiCollectionCount: number, };
+export type IntegrationsSummary = { integrations: Array<IntegrationSummary>, externalAiWikiCount: number, };
 
 export type IntegrationActionInput = { "kind": "refresh" } | { "kind": "connect", client: IntegrationClient, } | { "kind": "disconnect", client: IntegrationClient, } | { "kind": "confirmClaudeInstalled" } | { "kind": "openClaudeSettings" };
 
@@ -143,7 +143,7 @@ export type HostPlatform = "macOs" | "windows";
 
 export type AppPhase = "starting" | "ready";
 
-export type AppSnapshot = { schemaVersion: number, sequence: number, platform: HostPlatform, phase: AppPhase, nodeId: string | null, mcpUrl: string | null, blockedPublicPublishers: Array<string>, hardware: HardwareSummary | null, collections: Array<CollectionSummary>, collectionScans: Array<CollectionScanSummary>, reviews: Array<ReviewSummary>, reanalyzingReviewIds: Array<string>, sourceIssues: Array<SourceIssueSummary>, peers: Array<PeerSummary>, model: ModelSummary | null, modelInstall: ModelInstallSummary | null, search: SearchSummary | null, publicBrowse: PublicBrowseSummary | null, reviewEvidence: ReviewEvidenceSummary | null, knowledge: KnowledgeBundleSummary | null, knowledgePage: KnowledgePageSummary | null, preferences: PreferencesSummary | null, autostart: AutostartStatus | null, wikiHealth: WikiHealthSummary | null, guidedRepair: GuidedRepairSummary | null, connectivity: ConnectivitySummary | null, lanRuntime: LanRuntimeSummary | null, firewallOperation: FirewallOperationStatus | null, integrations: IntegrationsSummary | null, updater: UpdaterSummary | null, notice: NoticeSummary | null, };
+export type AppSnapshot = { schemaVersion: number, sequence: number, platform: HostPlatform, phase: AppPhase, nodeId: string | null, mcpUrl: string | null, blockedPublicPublishers: Array<string>, hardware: HardwareSummary | null, wikis: Array<WikiSummary>, wikiScans: Array<WikiScanSummary>, reviews: Array<ReviewSummary>, reanalyzingReviewIds: Array<string>, sourceIssues: Array<SourceIssueSummary>, peers: Array<PeerSummary>, model: ModelSummary | null, modelInstall: ModelInstallSummary | null, search: SearchSummary | null, publicBrowse: PublicBrowseSummary | null, reviewEvidence: ReviewEvidenceSummary | null, knowledge: KnowledgeBundleSummary | null, knowledgePage: KnowledgePageSummary | null, preferences: PreferencesSummary | null, autostart: AutostartStatus | null, wikiHealth: WikiHealthSummary | null, guidedRepair: GuidedRepairSummary | null, connectivity: ConnectivitySummary | null, lanRuntime: LanRuntimeSummary | null, firewallOperation: FirewallOperationStatus | null, integrations: IntegrationsSummary | null, updater: UpdaterSummary | null, notice: NoticeSummary | null, };
 
 export type UiEventKind = "stateChanged";
 
@@ -153,4 +153,4 @@ export type UiError = { code: string, messageKey: string, retryable: boolean, };
 
 export type FolderSelection = { token: string, displayPath: string, };
 
-export type CollectionPolicyInput = { localOnly: boolean, peerShareable: boolean, allowExternalAi: boolean, internetPublic: boolean, };
+export type WikiPolicyInput = { localOnly: boolean, peerShareable: boolean, allowExternalAi: boolean, internetPublic: boolean, };

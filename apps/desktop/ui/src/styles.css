@@ -482,6 +482,8 @@ button:active:not(:disabled) { transform: scale(.985); }
 .source-issue-list strong { color: var(--strong); }
 .source-issue-list small { margin-top: 2px; color: var(--muted); }
 .inline-empty.compact { padding: 12px; }
+.inline-empty.warning-empty { color: var(--amber); border-color: color-mix(in srgb, var(--amber) 28%, var(--line)); }
+.inline-empty.warning-empty small { color: var(--muted); }
 .relink-confirmation { margin-top: 12px; padding: 12px; background: var(--ink); border: 1px solid var(--line); border-radius: var(--control-radius); }
 .relink-confirmation p { margin: 0 0 10px; color: var(--muted); overflow-wrap: anywhere; }
 .review-drawer { width: min(560px, 100%); }

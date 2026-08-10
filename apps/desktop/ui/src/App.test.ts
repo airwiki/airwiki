@@ -102,6 +102,16 @@ describe('AirWiki wiki workspace', () => {
     expect(results.violations.filter((violation) => violation.impact === 'critical' || violation.impact === 'serious')).toEqual([]);
   });
 
+  it('distinguishes maintenance from an empty source-issue state', async () => {
+    snapshot.wikis[0].maintenanceRequired = true;
+    render(App);
+    await fireEvent.click(await screen.findByRole('row', { name: /Atlas 2 publicados/ }));
+    await fireEvent.click(screen.getByRole('button', { name: 'Detalles' }));
+
+    expect(screen.getByText('El contenido publicado necesita una comprobación')).toBeInTheDocument();
+    expect(screen.queryByText('No hay problemas con la fuente')).not.toBeInTheDocument();
+  });
+
   it('opens a local search result inside its wiki without placing the query in the URL', async () => {
     const wiki = snapshot.wikis[0];
     const conceptId = 'concept-atlas';

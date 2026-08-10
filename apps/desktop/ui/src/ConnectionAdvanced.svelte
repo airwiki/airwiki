@@ -23,7 +23,7 @@
 </script>
 
 <details class="advanced-disclosure connection-advanced" aria-busy={busy}>
-  <summary>{t('desktop-advanced-details')}</summary>
+  <summary>{t('desktop-network-controls')}</summary>
   {#if lanRuntime}
     <dl>
       <div><dt>{t('desktop-listener')}</dt><dd>{stateLabel(lanRuntime.listener)}</dd></div>

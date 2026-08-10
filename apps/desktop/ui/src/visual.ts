@@ -46,6 +46,21 @@ if (destination === 'search') {
     }]
   };
 }
+if (destination === 'graph') {
+  const wiki = snapshot.wikis[0];
+  snapshot.knowledge = {
+    wikiId: wiki.id, wikiName: wiki.name, version: 'synthetic-graph', status: 'ready', errorCount: 0, warningCount: 0,
+    concepts: [
+      { page: { kind: 'concept', id: 'safe-maintenance' }, title: 'Safe maintenance', description: 'Verified maintenance guidance.', conceptType: 'Procedure', tags: ['operations'] },
+      { page: { kind: 'concept', id: 'recovery' }, title: 'Recovery', description: 'Verified recovery guidance.', conceptType: 'Runbook', tags: ['recovery'] }
+    ],
+    links: [
+      { source: { kind: 'index' }, target: { kind: 'concept', id: 'safe-maintenance' }, label: 'Maintenance' },
+      { source: { kind: 'concept', id: 'safe-maintenance' }, target: { kind: 'concept', id: 'recovery' }, label: 'Recovery path' },
+      { source: { kind: 'log' }, target: { kind: 'concept', id: 'recovery' }, label: 'Recorded change' }
+    ]
+  };
+}
 if (destination === 'system') {
   snapshot.model = {
     stateSequence: 3, profile: 'balanced', recommendedModelId: 'synthetic-local-model',
@@ -57,6 +72,7 @@ if (destination === 'system') {
 }
 window.location.hash = destination === 'review'
   ? `wikis/${snapshot.wikis[0].id}/pending`
+  : destination === 'graph' ? `wikis/${snapshot.wikis[0].id}`
   : destination === 'library' ? 'wikis' : destination;
 
 let eventSink: ((event: UiEventEnvelope) => void) | null = null;

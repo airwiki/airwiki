@@ -19,8 +19,8 @@ async function selectValue(selector: string, index: number, value: string): Prom
 
 async function measureNavigationPaintP95(): Promise<number> {
   const result = await browser.executeAsync((done) => {
-    const buttons = Array.from(document.querySelectorAll<HTMLButtonElement>('.rail nav button, .rail-footer > button'));
-    if (buttons.length !== 4) {
+    const buttons = Array.from(document.querySelectorAll<HTMLButtonElement>('.top-brand, .top-actions .icon-button'));
+    if (buttons.length !== 2) {
       done([]);
       return;
     }
@@ -66,9 +66,9 @@ async function setCssViewport(width: number, height: number): Promise<void> {
 }
 
 async function navigateToDestination(index: number): Promise<void> {
-  const navigation = await $$('.rail nav button, .rail-footer > button');
+  const navigation = await $$('.top-brand, .top-actions .icon-button');
   await required(navigation[index], `destination ${index}`).click();
-  const expected = ['home', 'wikis', 'shared', 'system'][index];
+  const expected = ['wikis', 'system'][index];
   await browser.waitUntil(
     () => browser.execute((route) => document.querySelector('.route-page')?.getAttribute('data-route') === route, expected),
     { timeout: 10_000, timeoutMsg: `destination ${expected} did not become interactive` }
@@ -76,7 +76,7 @@ async function navigateToDestination(index: number): Promise<void> {
 }
 
 async function configureVisualPreferences(locale: 'en' | 'es', theme: 'light' | 'dark'): Promise<void> {
-  await navigateToDestination(3);
+  await navigateToDestination(1);
   await $('#system-preferences').waitForDisplayed();
   await selectValue('#system-preferences select', 0, locale);
   await selectValue('#system-preferences select', 1, theme);
@@ -93,7 +93,7 @@ async function assertVisualMatrix(): Promise<void> {
     { width: 1180, height: 760 },
     { width: 1440, height: 900 }
   ];
-  const routes = ['home', 'wikis', 'shared', 'system'] as const;
+  const routes = ['wikis', 'system'] as const;
   for (const locale of ['en', 'es'] as const) {
     for (const theme of ['light', 'dark'] as const) {
       await configureVisualPreferences(locale, theme);
@@ -146,9 +146,10 @@ describe('AirWiki real IPC journey', () => {
       const detail = await message.isExisting() ? await message.getText() : 'no UI error';
       throw new Error(`onboarding did not complete: ${detail}`, { cause: error });
     }
-    for (const destination of ['Home', 'Wikis', 'Shared', 'Settings']) {
-      await expect($(`button*=${destination}`)).toBeDisplayed();
-    }
+    await expect($('button*=AirWiki')).toBeDisplayed();
+    await expect($('button*=New wiki')).toBeDisplayed();
+    await expect($('button[aria-label="Settings"]')).toBeDisplayed();
+    await expect($('.system-status-bar')).toBeDisplayed();
     expect(await measureNavigationPaintP95()).toBeLessThanOrEqual(100);
 
     const devicePixelRatio = await browser.execute(() => window.devicePixelRatio || 1);
@@ -174,23 +175,25 @@ describe('AirWiki real IPC journey', () => {
       expect(dimensions.scrollWidth).toBeLessThanOrEqual(dimensions.clientWidth);
     }
 
-    await $('button*=Settings').click();
+    await $('button[aria-label="Settings"]').click();
     await $('#system-preferences').waitForDisplayed();
     const systemShell = await browser.execute(() => {
       const main = document.querySelector<HTMLElement>('.shell > main');
-      const rail = document.querySelector<HTMLElement>('.rail');
-      const navigation = document.querySelector<HTMLElement>('.rail nav');
+      const topBar = document.querySelector<HTMLElement>('.top-bar');
+      const statusBar = document.querySelector<HTMLElement>('.system-status-bar');
       return {
         documentScrollTop: document.scrollingElement?.scrollTop ?? -1,
         mainScrollTop: main?.scrollTop ?? -1,
-        railTop: rail?.getBoundingClientRect().top ?? -1,
-        navigationVisible: navigation ? navigation.getBoundingClientRect().height > 0 : false
+        topBarTop: topBar?.getBoundingClientRect().top ?? -1,
+        statusVisible: statusBar ? statusBar.getBoundingClientRect().height > 0 : false,
+        sidebarPresent: document.querySelector('.rail') !== null
       };
     });
     expect(systemShell.documentScrollTop).toBe(0);
     expect(systemShell.mainScrollTop).toBe(0);
-    expect(systemShell.railTop).toBe(0);
-    expect(systemShell.navigationVisible).toBe(true);
+    expect(systemShell.topBarTop).toBe(0);
+    expect(systemShell.statusVisible).toBe(true);
+    expect(systemShell.sidebarPresent).toBe(false);
 
     await $('a[href="#system/updates"]').click();
     await $('#system-updates').waitForDisplayed();

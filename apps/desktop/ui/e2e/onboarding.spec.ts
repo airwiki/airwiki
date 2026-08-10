@@ -73,6 +73,10 @@ async function navigateToDestination(index: number): Promise<void> {
     () => browser.execute((route) => document.querySelector('.route-page')?.getAttribute('data-route') === route, expected),
     { timeout: 10_000, timeoutMsg: `destination ${expected} did not become interactive` }
   );
+  await browser.waitUntil(
+    () => browser.execute(() => document.querySelector<HTMLElement>('.shell > main')?.scrollTop === 0),
+    { timeout: 10_000, timeoutMsg: `destination ${expected} did not start at the top` }
+  );
 }
 
 async function configureVisualPreferences(locale: 'en' | 'es', theme: 'light' | 'dark'): Promise<void> {

@@ -102,7 +102,10 @@
   }
 
   function scrollMainTo(top: number) {
-    mainScrollRegion?.scrollTo({ top: Math.max(0, top), left: 0, behavior: 'auto' });
+    const target = Math.max(0, top);
+    void tick().then(() => {
+      mainScrollRegion?.scrollTo({ top: target, left: 0, behavior: 'auto' });
+    });
   }
 
   function pushHash(hash: string) {

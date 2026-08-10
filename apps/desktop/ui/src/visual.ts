@@ -9,7 +9,7 @@ if (!import.meta.env.DEV) throw new Error('visual fixtures are available only fr
 const parameters = new URLSearchParams(window.location.search);
 const locale = parameters.get('locale') === 'en' ? 'en' : 'es';
 const theme = parameters.get('theme') === 'light' ? 'light' : 'dark';
-const destination = parameters.get('destination') ?? 'library';
+const destination = parameters.get('destination') ?? 'home';
 const snapshot = readySnapshot();
 if (snapshot.preferences) {
   snapshot.preferences.locale = locale;
@@ -18,7 +18,7 @@ if (snapshot.preferences) {
 }
 if (destination === 'review') {
   const review = {
-    conceptId: 'synthetic-review', sourceRevision: 4, sourceName: 'operating-guide.md', collectionName: 'Atlas',
+    conceptId: 'synthetic-review', wikiId: snapshot.wikis[0].id, sourceRevision: 4, sourceName: 'operating-guide.md', wikiName: 'Atlas',
     draft: {
       type: 'Procedure' as const, title: 'Safe maintenance window',
       description: 'A verified sequence for routine local maintenance.', language: 'en',
@@ -39,7 +39,7 @@ if (destination === 'review') {
 if (destination === 'search') {
   snapshot.search = {
     requestId: 'synthetic-search', status: 'complete', coverage: 'complete', hits: [{
-      conceptId: 'synthetic-result', collectionId: snapshot.collections[0].id,
+      conceptId: 'synthetic-result', wikiId: snapshot.wikis[0].id,
       title: 'Safe maintenance window', snippet: 'Back up local state and verify integrity before applying a change.',
       headingOrPage: 'Preparation', logicalResourceUri: 'okf://atlas/concepts/safe-maintenance',
       sourceRevision: 4, sourceSha256: 'a'.repeat(64), rank: 0.98, nodeId: snapshot.nodeId ?? 'local'
@@ -55,7 +55,9 @@ if (destination === 'system') {
     license: 'Apache-2.0', licenseUrl: null, revision: 'synthetic'
   };
 }
-window.location.hash = destination;
+window.location.hash = destination === 'review'
+  ? `wikis/${snapshot.wikis[0].id}/pending`
+  : destination === 'library' ? 'wikis' : destination;
 
 let eventSink: ((event: UiEventEnvelope) => void) | null = null;
 const bridge: DevelopmentBridge = {

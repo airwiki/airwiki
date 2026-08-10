@@ -1,7 +1,7 @@
 import { Channel, invoke as tauriInvoke } from '@tauri-apps/api/core';
 import type {
   AppSnapshot,
-  CollectionPolicyInput,
+  WikiPolicyInput,
   EnrichmentDraft,
   FolderSelection,
   IntegrationActionInput,
@@ -46,28 +46,28 @@ export async function cancelModelInstall(): Promise<void> {
   return invoke('cancel_model_install');
 }
 
-export async function pickCollectionFolder(): Promise<FolderSelection | null> {
-  return invoke('pick_collection_folder');
+export async function pickWikiFolder(): Promise<FolderSelection | null> {
+  return invoke('pick_wiki_folder');
 }
 
-export async function addCollection(name: string, folderToken: string): Promise<void> {
-  return invoke('add_collection', { name, folderToken });
+export async function addWiki(name: string, folderToken: string): Promise<void> {
+  return invoke('add_wiki', { name, folderToken });
 }
 
-export async function relinkCollection(collectionId: string, folderToken: string): Promise<void> {
-  return invoke('relink_collection', { collectionId, folderToken });
+export async function relinkWiki(wikiId: string, folderToken: string): Promise<void> {
+  return invoke('relink_wiki', { wikiId, folderToken });
 }
 
-export async function updateCollectionPolicy(collectionId: string, policy: CollectionPolicyInput): Promise<void> {
-  return invoke('update_collection_policy', { collectionId, policy });
+export async function updateWikiPolicy(wikiId: string, policy: WikiPolicyInput): Promise<void> {
+  return invoke('update_wiki_policy', { wikiId, policy });
 }
 
-export async function updatePublicCollectionProfile(
-  collectionId: string,
+export async function updatePublicWikiProfile(
+  wikiId: string,
   description: string,
   languages: string[]
 ): Promise<void> {
-  return invoke('update_public_collection_profile', { collectionId, description, languages });
+  return invoke('update_public_wiki_profile', { wikiId, description, languages });
 }
 
 export async function addFederationIndex(peerId: string, address: string): Promise<void> {
@@ -78,13 +78,13 @@ export async function removeFederationIndex(peerId: string): Promise<void> {
   return invoke('remove_federation_index', { peerId });
 }
 
-export async function browsePublicCollection(
+export async function browsePublicWiki(
   publisherId: string,
-  collectionId: string,
+  wikiId: string,
   cursor: string | null = null
 ): Promise<string> {
   const requestId = crypto.randomUUID();
-  await invoke('browse_public_collection', { requestId, publisherId, collectionId, cursor });
+  await invoke('browse_public_wiki', { requestId, publisherId, wikiId, cursor });
   return requestId;
 }
 
@@ -108,16 +108,16 @@ export async function revokePeer(peerId: string): Promise<void> {
   return invoke('revoke_peer', { peerId });
 }
 
-export async function setCollectionGrant(peerId: string, collectionId: string, granted: boolean): Promise<void> {
-  return invoke('set_collection_grant', { peerId, collectionId, granted });
+export async function setWikiGrant(peerId: string, wikiId: string, granted: boolean): Promise<void> {
+  return invoke('set_wiki_grant', { peerId, wikiId, granted });
 }
 
 export async function manageIntegration(requestId: string, action: IntegrationActionInput): Promise<void> {
   return invoke('manage_integration', { requestId, action });
 }
 
-export async function rescanCollection(collectionId: string): Promise<void> {
-  return invoke('rescan_collection', { collectionId });
+export async function rescanWiki(wikiId: string): Promise<void> {
+  return invoke('rescan_wiki', { wikiId });
 }
 
 export async function searchKnowledge(question: string, publicNetwork: boolean): Promise<string> {
@@ -149,15 +149,15 @@ export async function reanalyzeReview(conceptId: string): Promise<void> {
   return invoke('reanalyze_review', { conceptId });
 }
 
-export async function loadKnowledgeBundle(collectionId: string): Promise<string> {
+export async function loadWikiBundle(wikiId: string): Promise<string> {
   const requestId = crypto.randomUUID();
-  await invoke('load_knowledge_bundle', { requestId, collectionId });
+  await invoke('load_wiki_bundle', { requestId, wikiId });
   return requestId;
 }
 
-export async function loadKnowledgePage(collectionId: string, page: KnowledgePageInput): Promise<string> {
+export async function loadWikiPage(wikiId: string, page: KnowledgePageInput): Promise<string> {
   const requestId = crypto.randomUUID();
-  await invoke('load_knowledge_page', { requestId, collectionId, page });
+  await invoke('load_wiki_page', { requestId, wikiId, page });
   return requestId;
 }
 
@@ -191,15 +191,15 @@ export async function refreshWikiHealth(requestId: string): Promise<void> {
   return invoke('refresh_wiki_health', { requestId });
 }
 
-export async function prepareGuidedWikiRepair(collectionId: string): Promise<string> {
+export async function prepareGuidedWikiRepair(wikiId: string): Promise<string> {
   const requestId = crypto.randomUUID();
-  await invoke('prepare_guided_wiki_repair', { requestId, collectionId });
+  await invoke('prepare_guided_wiki_repair', { requestId, wikiId });
   return requestId;
 }
 
-export async function executeGuidedWikiRepair(collectionId: string): Promise<string> {
+export async function executeGuidedWikiRepair(wikiId: string): Promise<string> {
   const requestId = crypto.randomUUID();
-  await invoke('execute_guided_wiki_repair', { requestId, collectionId });
+  await invoke('execute_guided_wiki_repair', { requestId, wikiId });
   return requestId;
 }
 

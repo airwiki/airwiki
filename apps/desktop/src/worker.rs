@@ -114,6 +114,7 @@ pub enum CollectionScanState {
 #[derive(Debug, Clone)]
 pub struct ReviewItemView {
     pub concept_id: Uuid,
+    pub collection_id: Uuid,
     pub source_revision: u32,
     pub source_name: String,
     pub collection_name: String,

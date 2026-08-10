@@ -96,13 +96,13 @@
 
 <div class="graph-shell">
   <div class="graph-heading">
-    <div><p>{t('desktop-graph-verified')}</p><h3>{bundle.collectionName}</h3></div>
+    <div><p>{t('desktop-graph-verified')}</p><h3>{bundle.wikiName}</h3></div>
     <small>{t('knowledge-graph-counts', { nodes: bundle.concepts.length + 2, links: bundle.links.length })}</small>
   </div>
   {#if loadFailed}
     <p class="graph-error" role="status">{t('desktop-graph-error')}</p>
   {:else}
-    <div class="graph-canvas" bind:this={container} role="img" aria-label={t('desktop-graph-map-label', { collection: bundle.collectionName })}></div>
+    <div class="graph-canvas" bind:this={container} role="img" aria-label={t('desktop-graph-map-label', { collection: bundle.wikiName })}></div>
   {/if}
   <div class="graph-index" aria-label={t('desktop-graph-pages-label')}>
     <button onclick={() => onselect({ kind: 'index' })}>{t('knowledge-index-title')}</button>

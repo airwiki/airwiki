@@ -232,8 +232,8 @@ struct AppSnapshot {
     mcp_url: Option<String>,
     blocked_public_publishers: Vec<String>,
     hardware: Option<HardwareSummary>,
-    collections: Vec<CollectionSummary>,
-    collection_scans: Vec<CollectionScanSummary>,
+    wikis: Vec<WikiSummary>,
+    wiki_scans: Vec<WikiScanSummary>,
     reviews: Vec<ReviewSummary>,
     reanalyzing_review_ids: Vec<String>,
     source_issues: Vec<SourceIssueSummary>,
@@ -287,7 +287,7 @@ enum AppPhase {
 
 #[derive(Clone, Debug, Serialize, TS)]
 #[serde(rename_all = "camelCase")]
-struct CollectionSummary {
+struct WikiSummary {
     id: String,
     name: String,
     document_count: usize,
@@ -337,15 +337,15 @@ struct HardwareSummary {
 
 #[derive(Clone, Debug, Serialize, PartialEq, Eq, TS)]
 #[serde(rename_all = "camelCase")]
-struct CollectionScanSummary {
-    collection_id: String,
-    state: CollectionScanStatus,
+struct WikiScanSummary {
+    wiki_id: String,
+    state: WikiScanStatus,
 }
 
 #[derive(Clone, Copy, Debug, Serialize, PartialEq, Eq, TS)]
 #[serde(rename_all = "camelCase")]
 #[ts(rename_all = "camelCase")]
-enum CollectionScanStatus {
+enum WikiScanStatus {
     Queued,
     Scanning,
 }
@@ -354,9 +354,10 @@ enum CollectionScanStatus {
 #[serde(rename_all = "camelCase")]
 struct ReviewSummary {
     concept_id: String,
+    wiki_id: String,
     source_revision: u32,
     source_name: String,
-    collection_name: String,
+    wiki_name: String,
     draft: EnrichmentDraftDto,
 }
 
@@ -535,8 +536,8 @@ struct ReviewExcerptSummary {
 #[derive(Clone, Debug, Serialize, TS)]
 #[serde(rename_all = "camelCase")]
 struct KnowledgeBundleSummary {
-    collection_id: String,
-    collection_name: String,
+    wiki_id: String,
+    wiki_name: String,
     version: String,
     status: KnowledgeBundleStatus,
     concepts: Vec<KnowledgeConceptSummary>,
@@ -576,7 +577,7 @@ struct KnowledgeConceptSummary {
 #[derive(Clone, Debug, Serialize, TS)]
 #[serde(rename_all = "camelCase")]
 struct KnowledgePageSummary {
-    collection_id: String,
+    wiki_id: String,
     page: KnowledgePageInput,
     title: String,
     status: KnowledgePageStatus,
@@ -649,9 +650,9 @@ enum KnowledgeBlock {
 #[derive(Clone, Debug, Serialize, TS)]
 #[serde(rename_all = "camelCase")]
 struct SourceIssueSummary {
-    collection_id: String,
+    wiki_id: String,
     source_name: String,
-    collection_name: String,
+    wiki_name: String,
     code: String,
 }
 
@@ -664,7 +665,7 @@ struct PeerSummary {
     trust: PeerTrust,
     activity: PeerActivity,
     sas_words: Option<Vec<String>>,
-    granted_collection_ids: Vec<String>,
+    granted_wiki_ids: Vec<String>,
 }
 
 #[derive(Clone, Copy, Debug, Serialize, TS)]
@@ -747,8 +748,8 @@ struct PublicBrowseSummary {
     request_id: String,
     status: PublicBrowseStatus,
     publisher_id: Option<String>,
-    collection_id: Option<String>,
-    collection_name: Option<String>,
+    wiki_id: Option<String>,
+    wiki_name: Option<String>,
     description: Option<String>,
     languages: Vec<String>,
     concepts: Vec<PublicConceptSummaryDto>,
@@ -803,7 +804,7 @@ enum SearchCoverage {
 #[serde(rename_all = "camelCase")]
 struct SearchHitSummary {
     concept_id: String,
-    collection_id: String,
+    wiki_id: String,
     title: String,
     snippet: String,
     heading_or_page: String,
@@ -910,7 +911,7 @@ struct WikiHealthSummary {
     error_count: usize,
     warning_count: usize,
     updating_count: usize,
-    attention_collection_id: Option<String>,
+    attention_wiki_id: Option<String>,
     checked: bool,
 }
 
@@ -918,7 +919,7 @@ struct WikiHealthSummary {
 #[serde(rename_all = "camelCase")]
 struct GuidedRepairSummary {
     request_id: String,
-    collection_id: String,
+    wiki_id: String,
     status: GuidedRepairStatus,
     impact_code: Option<String>,
     authorities: Vec<RepairAuthorityDto>,
@@ -1088,7 +1089,7 @@ impl From<SystemDestinationInput> for SystemDestination {
 #[serde(rename_all = "camelCase")]
 struct IntegrationsSummary {
     integrations: Vec<IntegrationSummary>,
-    external_ai_collection_count: usize,
+    external_ai_wiki_count: usize,
 }
 
 #[derive(Clone, Debug, Serialize, TS)]
@@ -1344,7 +1345,7 @@ impl From<integrations::ChatIntegrationsSnapshot> for IntegrationsSummary {
                     restart_required: integration.restart_required,
                 })
                 .collect(),
-            external_ai_collection_count: value.external_ai_collection_count,
+            external_ai_wiki_count: value.external_ai_collection_count,
         }
     }
 }
@@ -1521,17 +1522,14 @@ struct FolderSelection {
 
 #[derive(Debug, Deserialize, TS)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
-struct CollectionPolicyInput {
+struct WikiPolicyInput {
     local_only: bool,
     peer_shareable: bool,
     allow_external_ai: bool,
     internet_public: bool,
 }
 
-fn policy_expands_authority(
-    current: Option<&CollectionSummary>,
-    requested: &CollectionPolicyInput,
-) -> bool {
+fn policy_expands_authority(current: Option<&WikiSummary>, requested: &WikiPolicyInput) -> bool {
     current.map_or(
         requested.peer_shareable || requested.allow_external_ai || requested.internet_public,
         |current| {
@@ -1595,7 +1593,7 @@ async fn set_model_profile(
 }
 
 #[tauri::command]
-async fn pick_collection_folder(
+async fn pick_wiki_folder(
     runtime: tauri::State<'_, AppRuntime>,
 ) -> Result<Option<FolderSelection>, UiError> {
     let Some(folder) = rfd::AsyncFileDialog::new().pick_folder().await else {
@@ -1622,14 +1620,14 @@ async fn pick_collection_folder(
 }
 
 #[tauri::command]
-async fn add_collection(
+async fn add_wiki(
     runtime: tauri::State<'_, AppRuntime>,
     name: String,
     folder_token: String,
 ) -> Result<(), UiError> {
     let name = name.trim();
     if name.is_empty() || name.chars().count() > 120 {
-        return Err(UiError::invalid("invalidCollectionName"));
+        return Err(UiError::invalid("invalidWikiName"));
     }
     let folder = consume_folder_selection(&runtime, &folder_token)?;
     send_command(
@@ -1643,12 +1641,12 @@ async fn add_collection(
 }
 
 #[tauri::command]
-async fn relink_collection(
+async fn relink_wiki(
     runtime: tauri::State<'_, AppRuntime>,
-    collection_id: String,
+    wiki_id: String,
     folder_token: String,
 ) -> Result<(), UiError> {
-    let collection_id = parse_uuid(&collection_id)?;
+    let collection_id = parse_uuid(&wiki_id)?;
     let folder = consume_folder_selection(&runtime, &folder_token)?;
     send_command(
         &runtime,
@@ -1661,25 +1659,25 @@ async fn relink_collection(
 }
 
 #[tauri::command]
-async fn rescan_collection(
+async fn rescan_wiki(
     runtime: tauri::State<'_, AppRuntime>,
-    collection_id: String,
+    wiki_id: String,
 ) -> Result<(), UiError> {
     send_command(
         &runtime,
-        WorkerCommand::RescanCollection(parse_uuid(&collection_id)?),
+        WorkerCommand::RescanCollection(parse_uuid(&wiki_id)?),
     )
     .await
 }
 
 #[tauri::command]
-async fn update_collection_policy(
+async fn update_wiki_policy(
     app: AppHandle,
     runtime: tauri::State<'_, AppRuntime>,
-    collection_id: String,
-    policy: CollectionPolicyInput,
+    wiki_id: String,
+    policy: WikiPolicyInput,
 ) -> Result<(), UiError> {
-    let collection_id = parse_uuid(&collection_id)?;
+    let collection_id = parse_uuid(&wiki_id)?;
     let collection_id_text = collection_id.to_string();
     let expands_authority = {
         let snapshot = runtime.snapshot.lock().map_err(|_| UiError::internal())?;
@@ -1687,7 +1685,7 @@ async fn update_collection_policy(
         policy_expands_authority(
             published
                 .snapshot
-                .collections
+                .wikis
                 .iter()
                 .find(|collection| collection.id == collection_id_text),
             &policy,
@@ -1740,9 +1738,9 @@ async fn remove_federation_index(
 }
 
 #[tauri::command]
-async fn update_public_collection_profile(
+async fn update_public_wiki_profile(
     runtime: tauri::State<'_, AppRuntime>,
-    collection_id: String,
+    wiki_id: String,
     description: String,
     languages: Vec<String>,
 ) -> Result<(), UiError> {
@@ -1758,7 +1756,7 @@ async fn update_public_collection_profile(
     send_command(
         &runtime,
         WorkerCommand::UpdatePublicCollectionProfile {
-            collection_id: parse_uuid(&collection_id)?,
+            collection_id: parse_uuid(&wiki_id)?,
             description,
             languages,
         },
@@ -1767,11 +1765,11 @@ async fn update_public_collection_profile(
 }
 
 #[tauri::command]
-async fn browse_public_collection(
+async fn browse_public_wiki(
     runtime: tauri::State<'_, AppRuntime>,
     request_id: String,
     publisher_id: String,
-    collection_id: String,
+    wiki_id: String,
     cursor: Option<String>,
 ) -> Result<(), UiError> {
     if cursor
@@ -1791,7 +1789,7 @@ async fn browse_public_collection(
         WorkerCommand::BrowsePublicCollection {
             request_id,
             publisher_id: validate_peer_id(publisher_id)?,
-            collection_id: parse_uuid(&collection_id)?,
+            collection_id: parse_uuid(&wiki_id)?,
             cursor,
         },
     )
@@ -1864,18 +1862,18 @@ async fn revoke_peer(
 }
 
 #[tauri::command]
-async fn set_collection_grant(
+async fn set_wiki_grant(
     app: AppHandle,
     runtime: tauri::State<'_, AppRuntime>,
     peer_id: String,
-    collection_id: String,
+    wiki_id: String,
     granted: bool,
 ) -> Result<(), UiError> {
     if granted {
         require_native_confirmation(&app, NativeConfirmation::CollectionGrant, None).await?;
     }
     let peer_id = validate_peer_id(peer_id)?;
-    let collection_id = parse_uuid(&collection_id)?;
+    let collection_id = parse_uuid(&wiki_id)?;
     send_command(
         &runtime,
         WorkerCommand::GrantCollection {
@@ -2070,13 +2068,13 @@ async fn reanalyze_review(
 }
 
 #[tauri::command]
-async fn load_knowledge_bundle(
+async fn load_wiki_bundle(
     runtime: tauri::State<'_, AppRuntime>,
     request_id: String,
-    collection_id: String,
+    wiki_id: String,
 ) -> Result<(), UiError> {
     let request_id = parse_uuid(&request_id)?;
-    let collection_id = parse_uuid(&collection_id)?;
+    let collection_id = parse_uuid(&wiki_id)?;
     runtime
         .requests
         .lock()
@@ -2094,13 +2092,13 @@ async fn load_knowledge_bundle(
 }
 
 #[tauri::command]
-async fn load_knowledge_page(
+async fn load_wiki_page(
     runtime: tauri::State<'_, AppRuntime>,
     request_id: String,
-    collection_id: String,
+    wiki_id: String,
     page: KnowledgePageInput,
 ) -> Result<(), UiError> {
-    let collection_id = parse_uuid(&collection_id)?;
+    let collection_id = parse_uuid(&wiki_id)?;
     let request_id = parse_uuid(&request_id)?;
     let page_id = KnowledgePageId::from(page);
     let expected_fingerprint = runtime
@@ -2268,10 +2266,10 @@ async fn refresh_wiki_health(
 async fn prepare_guided_wiki_repair(
     runtime: tauri::State<'_, AppRuntime>,
     request_id: String,
-    collection_id: String,
+    wiki_id: String,
 ) -> Result<(), UiError> {
     let request_id = parse_uuid(&request_id)?;
-    let collection_id = parse_uuid(&collection_id)?;
+    let collection_id = parse_uuid(&wiki_id)?;
     runtime
         .requests
         .lock()
@@ -2300,10 +2298,10 @@ async fn execute_guided_wiki_repair(
     app: AppHandle,
     runtime: tauri::State<'_, AppRuntime>,
     request_id: String,
-    collection_id: String,
+    wiki_id: String,
 ) -> Result<(), UiError> {
     require_native_confirmation(&app, NativeConfirmation::GuidedRepair, None).await?;
-    let collection_id = parse_uuid(&collection_id)?;
+    let collection_id = parse_uuid(&wiki_id)?;
     let preview = runtime
         .guided_repairs
         .lock()
@@ -2639,8 +2637,8 @@ impl AppSnapshot {
             mcp_url: None,
             blocked_public_publishers: Vec::new(),
             hardware: None,
-            collections: Vec::new(),
-            collection_scans: Vec::new(),
+            wikis: Vec::new(),
+            wiki_scans: Vec::new(),
             reviews: Vec::new(),
             reanalyzing_review_ids: Vec::new(),
             source_issues: Vec::new(),
@@ -2690,10 +2688,7 @@ impl AppSnapshot {
                 self.node_id = Some(node_id);
                 self.mcp_url = Some(mcp_url);
                 self.blocked_public_publishers = blocked_public_publishers;
-                self.collections = collections
-                    .into_iter()
-                    .map(CollectionSummary::from)
-                    .collect();
+                self.wikis = collections.into_iter().map(WikiSummary::from).collect();
                 self.reviews = reviews.into_iter().map(ReviewSummary::from).collect();
                 retain_pending_review_versions(review_versions, &self.reviews);
                 self.source_issues = source_issues
@@ -2716,15 +2711,12 @@ impl AppSnapshot {
                 });
             }
             WorkerEvent::Collections(collections) => {
-                self.collections = collections
-                    .into_iter()
-                    .map(CollectionSummary::from)
-                    .collect();
+                self.wikis = collections.into_iter().map(WikiSummary::from).collect();
             }
             WorkerEvent::CollectionScan {
                 collection_id,
                 state,
-            } => update_collection_scan(&mut self.collection_scans, collection_id, state),
+            } => update_wiki_scan(&mut self.wiki_scans, collection_id, state),
             WorkerEvent::Reviews(reviews) => {
                 self.reviews = reviews.into_iter().map(ReviewSummary::from).collect();
                 retain_pending_review_versions(review_versions, &self.reviews);
@@ -2819,7 +2811,7 @@ impl AppSnapshot {
                         error_count: summary.error_count,
                         warning_count: summary.warning_count,
                         updating_count: summary.updating_count,
-                        attention_collection_id: summary
+                        attention_wiki_id: summary
                             .attention_collection_id
                             .map(|collection_id| collection_id.to_string()),
                         checked: summary.checked_at.is_some(),
@@ -2830,7 +2822,7 @@ impl AppSnapshot {
                         error_count: 0,
                         warning_count: 0,
                         updating_count: 0,
-                        attention_collection_id: None,
+                        attention_wiki_id: None,
                         checked: false,
                     },
                 });
@@ -2862,9 +2854,11 @@ impl AppSnapshot {
                     }
                     .to_owned(),
                 });
-                if self.wiki_health.as_ref().is_some_and(|health| {
-                    health.attention_collection_id.as_ref() == Some(&collection_id)
-                }) {
+                if self
+                    .wiki_health
+                    .as_ref()
+                    .is_some_and(|health| health.attention_wiki_id.as_ref() == Some(&collection_id))
+                {
                     self.wiki_health = None;
                 }
             }
@@ -2894,7 +2888,7 @@ impl AppSnapshot {
                 self.guided_repair = Some(match result {
                     Ok(result) => GuidedRepairSummary {
                         request_id: request_id.to_string(),
-                        collection_id: collection_id.to_string(),
+                        wiki_id: collection_id.to_string(),
                         status: GuidedRepairStatus::Completed,
                         impact_code: None,
                         authorities: Vec::new(),
@@ -3037,8 +3031,8 @@ impl AppSnapshot {
                         }
                     }
                     self.knowledge = Some(KnowledgeBundleSummary {
-                        collection_id: collection_id.to_string(),
-                        collection_name: bundle.collection_name,
+                        wiki_id: collection_id.to_string(),
+                        wiki_name: bundle.collection_name,
                         version: bundle.fingerprint,
                         status: match bundle.state {
                             KnowledgeBundleState::Empty => KnowledgeBundleStatus::Empty,
@@ -3069,8 +3063,8 @@ impl AppSnapshot {
                         });
                     }
                     self.knowledge = Some(KnowledgeBundleSummary {
-                        collection_id: collection_id.to_string(),
-                        collection_name: String::new(),
+                        wiki_id: collection_id.to_string(),
+                        wiki_name: String::new(),
                         version: String::new(),
                         status: KnowledgeBundleStatus::Failed,
                         concepts: Vec::new(),
@@ -3184,8 +3178,8 @@ impl AppSnapshot {
                             request_id: request_id.to_string(),
                             status,
                             publisher_id: Some(result.summary.publisher_id),
-                            collection_id: Some(result.summary.collection_id.to_string()),
-                            collection_name: Some(result.summary.name),
+                            wiki_id: Some(result.summary.collection_id.to_string()),
+                            wiki_name: Some(result.summary.name),
                             description: Some(result.summary.description),
                             languages: result.summary.languages,
                             concepts,
@@ -3196,8 +3190,8 @@ impl AppSnapshot {
                         request_id: request_id.to_string(),
                         status: PublicBrowseStatus::Failed,
                         publisher_id: None,
-                        collection_id: None,
-                        collection_name: None,
+                        wiki_id: None,
+                        wiki_name: None,
                         description: None,
                         languages: Vec::new(),
                         concepts: Vec::new(),
@@ -3207,7 +3201,7 @@ impl AppSnapshot {
                 if append
                     && let Some(previous) = self.public_browse.take()
                     && previous.publisher_id == summary.publisher_id
-                    && previous.collection_id == summary.collection_id
+                    && previous.wiki_id == summary.wiki_id
                 {
                     let mut concepts = previous.concepts;
                     concepts.extend(summary.concepts);
@@ -3245,19 +3239,19 @@ impl AppSnapshot {
     }
 }
 
-fn update_collection_scan(
-    scans: &mut Vec<CollectionScanSummary>,
+fn update_wiki_scan(
+    scans: &mut Vec<WikiScanSummary>,
     collection_id: Uuid,
     state: Option<worker::CollectionScanState>,
 ) {
     let collection_id = collection_id.to_string();
-    scans.retain(|scan| scan.collection_id != collection_id);
+    scans.retain(|scan| scan.wiki_id != collection_id);
     if let Some(state) = state {
-        scans.push(CollectionScanSummary {
-            collection_id,
+        scans.push(WikiScanSummary {
+            wiki_id: collection_id,
             state: match state {
-                worker::CollectionScanState::Queued => CollectionScanStatus::Queued,
-                worker::CollectionScanState::Scanning => CollectionScanStatus::Scanning,
+                worker::CollectionScanState::Queued => WikiScanStatus::Queued,
+                worker::CollectionScanState::Scanning => WikiScanStatus::Scanning,
             },
         });
     }
@@ -3269,7 +3263,7 @@ fn guided_repair_preview_summary(
 ) -> GuidedRepairSummary {
     GuidedRepairSummary {
         request_id: request_id.to_string(),
-        collection_id: preview.collection_id.to_string(),
+        wiki_id: preview.collection_id.to_string(),
         status: GuidedRepairStatus::Prepared,
         impact_code: Some(preview.impact_code),
         authorities: preview
@@ -3303,7 +3297,7 @@ fn guided_repair_preview_summary(
 fn failed_guided_repair(request_id: Uuid, collection_id: Uuid) -> GuidedRepairSummary {
     GuidedRepairSummary {
         request_id: request_id.to_string(),
-        collection_id: collection_id.to_string(),
+        wiki_id: collection_id.to_string(),
         status: GuidedRepairStatus::Failed,
         impact_code: None,
         authorities: Vec::new(),
@@ -3473,7 +3467,7 @@ fn remove_matching_request(
     }
 }
 
-impl From<worker::CollectionView> for CollectionSummary {
+impl From<worker::CollectionView> for WikiSummary {
     fn from(value: worker::CollectionView) -> Self {
         Self {
             id: value.id.to_string(),
@@ -3506,9 +3500,10 @@ impl From<worker::ReviewItemView> for ReviewSummary {
     fn from(value: worker::ReviewItemView) -> Self {
         Self {
             concept_id: value.concept_id.to_string(),
+            wiki_id: value.collection_id.to_string(),
             source_revision: value.source_revision,
             source_name: value.source_name,
-            collection_name: value.collection_name,
+            wiki_name: value.collection_name,
             draft: value.draft.into(),
         }
     }
@@ -3541,7 +3536,7 @@ fn retain_pending_review_versions(
 
 fn failed_knowledge_page(collection_id: Uuid, page_id: KnowledgePageId) -> KnowledgePageSummary {
     KnowledgePageSummary {
-        collection_id: collection_id.to_string(),
+        wiki_id: collection_id.to_string(),
         page: page_id.into(),
         title: String::new(),
         status: KnowledgePageStatus::Failed,
@@ -3570,7 +3565,7 @@ fn knowledge_graph_links(links: &[KnowledgeLinkView]) -> Vec<KnowledgeGraphLinkS
 
 fn knowledge_page_summary(page: KnowledgePageView) -> KnowledgePageSummary {
     KnowledgePageSummary {
-        collection_id: page.collection_id.to_string(),
+        wiki_id: page.collection_id.to_string(),
         page: page.page_id.into(),
         title: page.title,
         status: KnowledgePageStatus::Ready,
@@ -3752,11 +3747,11 @@ fn ui_bindings_source() -> String {
         exported_declaration::<SuggestedEntityDto>(&config),
         exported_declaration::<SuggestedLinkDto>(&config),
         exported_declaration::<EnrichmentDraftDto>(&config),
-        exported_declaration::<CollectionSummary>(&config),
+        exported_declaration::<WikiSummary>(&config),
         exported_declaration::<PublicAnnouncementSummary>(&config),
         exported_declaration::<HardwareSummary>(&config),
-        exported_declaration::<CollectionScanStatus>(&config),
-        exported_declaration::<CollectionScanSummary>(&config),
+        exported_declaration::<WikiScanStatus>(&config),
+        exported_declaration::<WikiScanSummary>(&config),
         exported_declaration::<ReviewSummary>(&config),
         exported_declaration::<ReviewExcerptSummary>(&config),
         exported_declaration::<ReviewEvidenceStatus>(&config),
@@ -3824,7 +3819,7 @@ fn ui_bindings_source() -> String {
         exported_declaration::<UiEventEnvelope>(&config),
         exported_declaration::<UiError>(&config),
         exported_declaration::<FolderSelection>(&config),
-        exported_declaration::<CollectionPolicyInput>(&config),
+        exported_declaration::<WikiPolicyInput>(&config),
     ]
     .join("\n\n");
     format!(
@@ -3840,9 +3835,9 @@ fn exported_declaration<T: TS>(config: &ts_rs::Config) -> String {
 impl From<worker::SourceIssueView> for SourceIssueSummary {
     fn from(value: worker::SourceIssueView) -> Self {
         Self {
-            collection_id: value.collection_id.to_string(),
+            wiki_id: value.collection_id.to_string(),
             source_name: value.source_name,
-            collection_name: value.collection_name,
+            wiki_name: value.collection_name,
             code: format!("{:?}", value.code),
         }
     }
@@ -3850,12 +3845,12 @@ impl From<worker::SourceIssueView> for SourceIssueSummary {
 
 impl From<worker::PeerView> for PeerSummary {
     fn from(value: worker::PeerView) -> Self {
-        let mut granted_collection_ids = value
+        let mut granted_wiki_ids = value
             .granted_collections
             .into_iter()
             .map(|collection_id| collection_id.to_string())
             .collect::<Vec<_>>();
-        granted_collection_ids.sort();
+        granted_wiki_ids.sort();
         Self {
             peer_id: value.peer_id,
             device_name: value.device_name,
@@ -3872,7 +3867,7 @@ impl From<worker::PeerView> for PeerSummary {
                 worker::PeerActivityState::Connected => PeerActivity::Connected,
             },
             sas_words: value.sas_words.map(Vec::from),
-            granted_collection_ids,
+            granted_wiki_ids,
         }
     }
 }
@@ -3910,7 +3905,7 @@ impl From<airwiki_types::SearchHit> for SearchHitSummary {
     fn from(value: airwiki_types::SearchHit) -> Self {
         Self {
             concept_id: value.concept_id.to_string(),
-            collection_id: value.collection_id.to_string(),
+            wiki_id: value.collection_id.to_string(),
             title: value.title,
             snippet: value.snippet,
             heading_or_page: value.heading_or_page,
@@ -4093,29 +4088,29 @@ fn main() -> Result<()> {
             install_models,
             cancel_model_install,
             set_model_profile,
-            pick_collection_folder,
-            add_collection,
-            relink_collection,
-            rescan_collection,
-            update_collection_policy,
+            pick_wiki_folder,
+            add_wiki,
+            relink_wiki,
+            rescan_wiki,
+            update_wiki_policy,
             add_federation_index,
             remove_federation_index,
-            update_public_collection_profile,
-            browse_public_collection,
+            update_public_wiki_profile,
+            browse_public_wiki,
             set_public_publisher_blocked,
             dial_peer,
             pair_peer,
             confirm_pairing,
             revoke_peer,
-            set_collection_grant,
+            set_wiki_grant,
             manage_integration,
             search,
             load_review_evidence,
             approve_review,
             reject_review,
             reanalyze_review,
-            load_knowledge_bundle,
-            load_knowledge_page,
+            load_wiki_bundle,
+            load_wiki_page,
             update_preferences,
             refresh_autostart,
             set_autostart,
@@ -4356,12 +4351,12 @@ mod tests {
         let mut scans = Vec::new();
         let mut reviews = Vec::new();
 
-        update_collection_scan(
+        update_wiki_scan(
             &mut scans,
             collection_id,
             Some(worker::CollectionScanState::Queued),
         );
-        update_collection_scan(
+        update_wiki_scan(
             &mut scans,
             collection_id,
             Some(worker::CollectionScanState::Scanning),
@@ -4370,14 +4365,14 @@ mod tests {
 
         assert_eq!(
             scans,
-            vec![CollectionScanSummary {
-                collection_id: collection_id.to_string(),
-                state: CollectionScanStatus::Scanning,
+            vec![WikiScanSummary {
+                wiki_id: collection_id.to_string(),
+                state: WikiScanStatus::Scanning,
             }]
         );
         assert_eq!(reviews, vec![concept_id.to_string()]);
 
-        update_collection_scan(&mut scans, collection_id, None);
+        update_wiki_scan(&mut scans, collection_id, None);
         update_running_review(&mut reviews, concept_id, false);
 
         assert!(scans.is_empty());

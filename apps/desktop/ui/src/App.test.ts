@@ -84,6 +84,17 @@ describe('AirWiki wiki workspace', () => {
     expect(screen.getAllByText('Detalles avanzados')).toHaveLength(1);
   });
 
+  it('opens device preferences from disabled local-network guidance', async () => {
+    render(App);
+    await fireEvent.click(await screen.findByRole('button', { name: 'Red local: Opcional · Desactivado' }));
+    await fireEvent.click(screen.getByRole('button', { name: 'Preferencias del dispositivo' }));
+
+    expect(await screen.findByRole('heading', { name: 'Configuración', level: 1 })).toBeInTheDocument();
+    expect(screen.getByRole('combobox', { name: 'Red local' })).toBeInTheDocument();
+    expect(screen.queryByRole('dialog', { name: 'Conexiones' })).not.toBeInTheDocument();
+    expect(window.location.hash).toBe('#system/preferences');
+  });
+
   it('offers the closed Windows firewall action only when the helper is verified', async () => {
     snapshot.preferences!.lanPreference = 'enabled';
     snapshot.connectivity = { systemPermission: 'notApplicable', networkProfile: 'private', firewall: 'rulesMissing', firewallHelper: 'verified' };

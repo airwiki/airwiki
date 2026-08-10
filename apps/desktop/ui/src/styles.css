@@ -362,7 +362,7 @@ button:active:not(:disabled) { transform: scale(.985); }
 .search-scope { display: flex; align-items: center; gap: 6px; padding-right: 10px; color: var(--muted); font-size: 12px; white-space: nowrap; }
 .global-search kbd { color: var(--muted); font: 500 10px system-ui; }
 .global-search > button { display: grid; place-items: center; width: 30px; height: 30px; margin-left: 7px; color: #fff; background: #0b8394; border: 0; border-radius: 6px; cursor: pointer; }
-.drive-page { min-width: 0; min-height: 0; padding: 32px 40px 48px; overflow: auto; overscroll-behavior: contain; }
+.drive-page { min-width: 0; min-height: 0; padding: 32px 40px 48px; overflow: auto; overflow-anchor: none; overscroll-behavior: contain; }
 .drive-route { width: min(1180px, 100%); margin: 0 auto; }
 .page-heading { align-items: center; padding: 0 0 24px; border-bottom: 1px solid var(--line); }
 .page-heading h1 { max-width: none; font: 650 clamp(27px, 3vw, 34px)/1.15 system-ui, sans-serif; letter-spacing: -.025em; }
@@ -412,7 +412,9 @@ button:active:not(:disabled) { transform: scale(.985); }
 .content-tabs button { display: flex; align-items: center; gap: 7px; height: 100%; padding: 0 2px; color: var(--muted); background: transparent; border: 0; border-bottom: 2px solid transparent; cursor: pointer; }
 .content-tabs button.active { color: var(--strong); border-bottom-color: var(--cyan); }
 .content-tabs button span { min-width: 22px; padding: 2px 6px; color: var(--muted); background: var(--surface-raised); border-radius: 10px; font-size: 11px; text-align: center; }
-.content-tabs .details-tab { margin-left: auto; color: var(--cyan); }
+.content-tabs-bar { display: flex; align-items: stretch; height: 54px; border-bottom: 1px solid var(--line); }
+.content-tabs-bar .content-tabs { flex: 1; height: auto; border-bottom: 0; }
+.content-tabs-bar > .details-tab { padding: 0 2px; color: var(--cyan); background: transparent; border: 0; cursor: pointer; }
 .wiki-toolbar { display: flex; justify-content: flex-end; padding: 14px 0; }
 .view-switch { display: flex; padding: 3px; background: var(--surface-raised); border: 1px solid var(--line); border-radius: 7px; }
 .view-switch button { padding: 6px 11px; color: var(--muted); background: transparent; border: 0; border-radius: 5px; cursor: pointer; }
@@ -465,6 +467,23 @@ button:active:not(:disabled) { transform: scale(.985); }
 .policy-list strong, .policy-list small { display: block; }
 .policy-list small { margin-top: 4px; color: var(--muted); line-height: 1.35; }
 .drawer-actions { display: flex; gap: 9px; margin-top: 18px; }
+.drawer-actions .secondary { display: inline-flex; align-items: center; gap: 7px; }
+.wiki-details-list { margin: 18px 0 0; border-top: 1px solid var(--line); }
+.wiki-details-list > div { display: flex; align-items: baseline; justify-content: space-between; gap: 20px; padding: 12px 0; border-bottom: 1px solid var(--line); }
+.wiki-details-list dt { color: var(--muted); }
+.wiki-details-list dd { margin: 0; color: var(--strong); font-weight: 600; }
+.wiki-details-list .warning-text { color: var(--amber); }
+.details-section { padding: 22px 0; border-bottom: 1px solid var(--line); }
+.details-section h3 { margin: 0; font: 650 17px system-ui; }
+.details-section > div > p { margin: 5px 0 0; color: var(--muted); font-size: 13px; }
+.source-issue-list { display: grid; gap: 8px; margin: 14px 0 0; padding: 0; list-style: none; }
+.source-issue-list li { display: grid; grid-template-columns: auto minmax(0, 1fr); align-items: center; gap: 10px; padding: 11px 12px; color: var(--amber); background: color-mix(in srgb, var(--amber) 8%, transparent); border: 1px solid color-mix(in srgb, var(--amber) 24%, var(--line)); border-radius: var(--control-radius); }
+.source-issue-list strong, .source-issue-list small { display: block; }
+.source-issue-list strong { color: var(--strong); }
+.source-issue-list small { margin-top: 2px; color: var(--muted); }
+.inline-empty.compact { padding: 12px; }
+.relink-confirmation { margin-top: 12px; padding: 12px; background: var(--ink); border: 1px solid var(--line); border-radius: var(--control-radius); }
+.relink-confirmation p { margin: 0 0 10px; color: var(--muted); overflow-wrap: anywhere; }
 .review-drawer { width: min(560px, 100%); }
 .review-steps { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; padding: 18px 0; list-style: none; }
 .review-steps li { display: flex; align-items: center; gap: 7px; color: var(--muted); font-size: 12px; }

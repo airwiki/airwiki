@@ -57,6 +57,15 @@
     return roots.length > 0 ? roots : ['index'];
   }
 
+  function selectPage(page: KnowledgePageInput) {
+    graph?.elements().unselect();
+    graph?.edges().removeClass('related');
+    const node = graph?.getElementById(pageKey(page));
+    node?.select();
+    node?.connectedEdges().addClass('related');
+    onselect(page);
+  }
+
   onMount(() => {
     let disposed = false;
     void import('cytoscape').then(({ default: cytoscape }) => {
@@ -68,7 +77,6 @@
       const violet = palette.getPropertyValue('--violet').trim() || '#9585ff';
       const verify = palette.getPropertyValue('--verify').trim() || '#58c78d';
       const surface = palette.getPropertyValue('--slate').trim() || '#121b25';
-      const line = palette.getPropertyValue('--line').trim() || '#283a49';
       graph = cytoscape({
         container,
         elements: graphElements(),
@@ -79,11 +87,22 @@
           { selector: 'node', style: { 'background-color': surface, 'border-color': cyan, 'border-width': 1.5, color: strong, label: 'data(label)', 'font-family': 'Atkinson, sans-serif', 'font-size': '11px', 'text-background-color': surface, 'text-background-opacity': 0.92, 'text-background-padding': '2px', 'text-max-width': '120px', 'text-wrap': 'ellipsis', 'text-valign': 'bottom', 'text-margin-y': 8, height: 22, width: 22 } },
           { selector: 'node[kind = "index"]', style: { 'background-color': cyan, 'border-width': 0, height: 30, width: 30 } },
           { selector: 'node[kind = "log"]', style: { 'background-color': violet, 'border-color': violet } },
-          { selector: 'edge', style: { 'curve-style': 'bezier', 'line-color': line, 'line-opacity': 0.95, 'target-arrow-color': cyan, 'target-arrow-shape': 'triangle', 'arrow-scale': 1.15, 'source-endpoint': 'outside-to-node', 'target-endpoint': 'outside-to-node', width: 1.8, 'z-index': 1 } },
-          { selector: 'edge[label != ""]', style: { label: 'data(label)', color: muted, 'font-family': 'Atkinson, sans-serif', 'font-size': '9px', 'text-background-color': surface, 'text-background-opacity': 0.94, 'text-background-padding': '3px', 'text-margin-y': -9, 'text-rotation': 'autorotate' } },
+          { selector: 'edge', style: { 'curve-style': 'bezier', 'line-color': muted, 'line-opacity': 0.58, 'target-arrow-color': muted, 'target-arrow-shape': 'triangle', 'arrow-scale': 1, 'source-endpoint': 'outside-to-node', 'target-endpoint': 'outside-to-node', width: 1.7, 'z-index': 1 } },
+          { selector: 'edge.related', style: { 'line-color': cyan, 'line-opacity': 1, 'target-arrow-color': cyan, width: 2.2 } },
+          { selector: 'edge.related[label != ""]', style: { label: 'data(label)', color: muted, 'font-family': 'Atkinson, sans-serif', 'font-size': '9px', 'text-background-color': surface, 'text-background-opacity': 0.96, 'text-background-padding': '3px', 'text-margin-y': -9, 'text-rotation': 'autorotate' } },
           { selector: 'node:selected', style: { 'border-color': verify, 'border-width': 3, 'overlay-opacity': 0 } }
         ],
-        layout: { name: 'breadthfirst', roots: graphRoots(), directed: true, padding: 42, spacingFactor: 1.45, avoidOverlap: true, nodeDimensionsIncludeLabels: true, animate: false }
+        layout: {
+          name: 'breadthfirst',
+          roots: graphRoots(),
+          directed: true,
+          padding: 42,
+          spacingFactor: 1.35,
+          avoidOverlap: true,
+          nodeDimensionsIncludeLabels: true,
+          animate: false,
+          transform: (_node, position) => ({ x: position.y, y: position.x })
+        }
       });
       resizeObserver = new ResizeObserver(() => {
         graph?.resize();
@@ -96,7 +115,7 @@
       });
       graph.on('tap', 'node', (event) => {
         const page = event.target.data('page') as KnowledgePageInput | undefined;
-        if (page) onselect(page);
+        if (page) selectPage(page);
       });
     }).catch(() => { loadFailed = true; });
 
@@ -121,10 +140,10 @@
     <div class="graph-canvas" bind:this={container} role="img" aria-label={t('desktop-graph-map-label', { collection: bundle.wikiName })}></div>
   {/if}
   <div class="graph-index" aria-label={t('desktop-graph-pages-label')}>
-    <button onclick={() => onselect({ kind: 'index' })}>{t('knowledge-index-title')}</button>
-    <button onclick={() => onselect({ kind: 'log' })}>{t('knowledge-recovery-history')}</button>
+    <button onclick={() => selectPage({ kind: 'index' })}>{t('knowledge-index-title')}</button>
+    <button onclick={() => selectPage({ kind: 'log' })}>{t('knowledge-recovery-history')}</button>
     {#each bundle.concepts as concept (concept.title)}
-      <button onclick={() => onselect(concept.page)}>{concept.title}</button>
+      <button onclick={() => selectPage(concept.page)}>{concept.title}</button>
     {/each}
   </div>
 </div>

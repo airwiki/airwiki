@@ -537,8 +537,7 @@
 
   function openNetworkPreferences() {
     connectionsOpen = false;
-    systemSection = 'preferences';
-    pushHash('#system/preferences');
+    select('system');
   }
 
   function shortPeerId(peerId: string): string {

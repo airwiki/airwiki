@@ -744,6 +744,7 @@ desktop-atlas-system-body = Status of AirWiki's local components and how they re
 desktop-atlas-local = On this device
 desktop-atlas-public = Public network
 desktop-advanced-details = Advanced details
+desktop-network-controls = Network controls
 onboarding-progress-title = Setup progress
 desktop-source-issues-title = Sources that need attention
 desktop-source-issues-body = AirWiki keeps the last safe state and never publishes uncertain content.

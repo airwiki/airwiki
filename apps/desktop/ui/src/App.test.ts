@@ -2,7 +2,7 @@ import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/sv
 import axe from 'axe-core';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import App from './App.svelte';
-import { loadWikiBundle, loadWikiPage } from './api';
+import { loadWikiBundle, loadWikiPage, prepareGuidedWikiRepair } from './api';
 import { readySnapshot } from './test/fixtures';
 
 let snapshot = readySnapshot();
@@ -21,6 +21,7 @@ vi.mock('./api', async (importOriginal) => {
     refreshAutostart: vi.fn(async () => undefined),
     refreshConnectivity: vi.fn(async () => undefined),
     refreshWikiHealth: vi.fn(async () => undefined),
+    prepareGuidedWikiRepair: vi.fn(async () => 'repair-request'),
     manageIntegration: vi.fn(async () => undefined),
     loadWikiBundle: vi.fn(async () => undefined),
     loadWikiPage: vi.fn(async () => undefined)
@@ -61,6 +62,15 @@ describe('AirWiki wiki workspace', () => {
     expect(screen.getByRole('button', { name: 'Red local: Opcional · Desactivado' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Red pública: Opcional · Desactivado' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'MCP: Disponible' })).toBeInTheDocument();
+  });
+
+  it('gives advanced connection sections distinct names', async () => {
+    render(App);
+    await fireEvent.click(await screen.findByRole('button', { name: 'Red local: Opcional · Desactivado' }));
+
+    expect(screen.getByRole('dialog', { name: 'Conexiones' })).toBeInTheDocument();
+    expect(screen.getByText('Controles de red')).toBeInTheDocument();
+    expect(screen.getAllByText('Detalles avanzados')).toHaveLength(1);
   });
 
   it('opens a wiki as an independent page and requests its OKF bundle', async () => {
@@ -110,6 +120,16 @@ describe('AirWiki wiki workspace', () => {
 
     expect(screen.getByText('El contenido publicado necesita una comprobación')).toBeInTheDocument();
     expect(screen.queryByText('No hay problemas con la fuente')).not.toBeInTheDocument();
+  });
+
+  it('keeps guided repair reachable from the unified wiki workspace', async () => {
+    const wiki = snapshot.wikis[0];
+    wiki.maintenanceRequired = true;
+    snapshot.wikiHealth!.attentionWikiId = wiki.id;
+    render(App);
+
+    await fireEvent.click(await screen.findByRole('button', { name: 'Revisar reparación segura…' }));
+    expect(prepareGuidedWikiRepair).toHaveBeenCalledWith(wiki.id);
   });
 
   it('opens a local search result inside its wiki without placing the query in the URL', async () => {

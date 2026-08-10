@@ -991,6 +991,15 @@
                   {#each attentionWikis as wiki (wiki.id)}<button onclick={() => openWiki(wiki.id, wiki.needsReviewCount > 0 ? 'pending' : 'content')}><span class:warning={wiki.failedCount > 0 || wiki.maintenanceRequired} class="attention-icon"><AlertTriangle size={18} aria-hidden="true" /></span><span><strong>{wiki.name}</strong><small>{wiki.needsReviewCount > 0 ? t('desktop-wiki-review-count', { count: wiki.needsReviewCount }) : t('status-needs-attention')}</small></span><span>{t('action-open')}</span></button>{/each}
                   {#each snapshot.sourceIssues as issue (`${issue.wikiId}:${issue.sourceName}:${issue.code}`)}<button onclick={() => openWiki(issue.wikiId)}><span class="attention-icon warning"><AlertTriangle size={18} aria-hidden="true" /></span><span><strong>{issue.wikiName}</strong><small>{issue.sourceName} · {issue.code}</small></span><span>{t('action-open')}</span></button>{/each}
                 </div>
+                {#if snapshot.wikiHealth?.attentionWikiId}
+                  <div class="repair-summary">
+                    <div><strong>{t('knowledge-recovery-guided')}</strong><p>{t('knowledge-repair-review-help')}</p></div>
+                    <div class="row-actions"><button class="text-action" onclick={openAttentionWiki}>{t('action-open')}</button><button class="secondary" onclick={() => prepareRepair(snapshot!.wikiHealth!.attentionWikiId!)} disabled={guidedRepairRequestId !== null}>{t('knowledge-repair-review-action')}</button></div>
+                    {#if snapshot.guidedRepair?.wikiId === snapshot.wikiHealth.attentionWikiId && snapshot.guidedRepair.status === 'prepared'}
+                      <div class="repair-preview"><ul>{#each snapshot.guidedRepair.files as file, fileIndex (fileIndex)}<li><code>{file.page.kind}</code><span>{repairChangeLabel(file.change)}</span></li>{/each}</ul><label class="check"><input type="checkbox" bind:checked={guidedRepairConfirmed} />{t('knowledge-repair-confirm-warning')}</label><button class="danger" onclick={() => executeRepair(snapshot!.guidedRepair!.wikiId)} disabled={!guidedRepairConfirmed}>{t('knowledge-repair-confirm-action')}</button></div>
+                    {/if}
+                  </div>
+                {/if}
               </section>
             {/if}
             <section class="workspace-section public-discovery" id="public-wikis" aria-labelledby="public-wikis-title">

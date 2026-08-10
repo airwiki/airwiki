@@ -16,7 +16,10 @@ if (snapshot.preferences) {
   snapshot.preferences.theme = theme;
   if (parameters.get('onboarding') === '1') snapshot.preferences.completedOnboardingVersion = null;
 }
-if (parameters.get('maintenance') === '1') snapshot.wikis[0].maintenanceRequired = true;
+if (parameters.get('maintenance') === '1') {
+  snapshot.wikis[0].maintenanceRequired = true;
+  if (snapshot.wikiHealth) snapshot.wikiHealth.attentionWikiId = snapshot.wikis[0].id;
+}
 if (destination === 'review') {
   snapshot.wikis[0].needsReviewCount = 1;
   const review = {

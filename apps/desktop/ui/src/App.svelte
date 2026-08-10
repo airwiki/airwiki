@@ -41,6 +41,7 @@
   let relinkSelection: FolderSelection | null = null;
   let wikiName = '';
   let editingWikiId: string | null = null;
+  let detailsWikiId: string | null = null;
   let wikiPolicy: WikiPolicyInput = { localOnly: true, peerShareable: false, allowExternalAi: false, internetPublic: false };
   let publicDescription = '';
   let publicLanguages = '';
@@ -84,6 +85,7 @@
   let selectedWiki: WikiSummary | null;
   let selectedWikiReviews: ReviewSummary[];
   let sharedWikis: WikiSummary[];
+  const dialogFocusState: { wasOpen: boolean; returnTarget: HTMLElement | null } = { wasOpen: false, returnTarget: null };
 
   function actionMessageTone(): 'success' | 'progress' | 'error' {
     if (actionMessage === t('notice-operation-complete')) return 'success';
@@ -106,6 +108,13 @@
     void tick().then(() => {
       mainScrollRegion?.scrollTo({ top: target, left: 0, behavior: 'auto' });
     });
+  }
+
+  function dialogFocusableElements(node: HTMLElement | null): HTMLElement[] {
+    if (!node) return [];
+    return Array.from(node.querySelectorAll<HTMLElement>(
+      'button:not([disabled]), a[href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), summary, [tabindex]:not([tabindex="-1"])'
+    )).filter((element) => element.getAttribute('aria-hidden') !== 'true');
   }
 
   function pushHash(hash: string) {
@@ -147,6 +156,24 @@
     document.documentElement.style.colorScheme = theme === 'system' ? 'light dark' : theme;
   }
 
+  $: {
+    const dialogOpen = createWikiOpen || detailsWikiId !== null || editingWikiId !== null || selectedReview !== null || connectionsOpen || closeChoiceRequired;
+    if (typeof document !== 'undefined' && dialogOpen !== dialogFocusState.wasOpen) {
+      if (dialogOpen) {
+        dialogFocusState.returnTarget = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+        void tick().then(() => requestAnimationFrame(() => {
+          const dialog = document.querySelector<HTMLElement>('[role="dialog"]');
+          dialogFocusableElements(dialog).at(0)?.focus();
+        }));
+      } else {
+        const returnTarget = dialogFocusState.returnTarget;
+        dialogFocusState.returnTarget = null;
+        requestAnimationFrame(() => returnTarget?.focus());
+      }
+      dialogFocusState.wasOpen = dialogOpen;
+    }
+  }
+
   onMount(() => {
     const syncRoute = () => {
       const [rawRoute, section, detail] = window.location.hash.slice(1).split('/');
@@ -185,6 +212,25 @@
     window.addEventListener('hashchange', syncRoute);
     window.addEventListener('popstate', syncRoute);
     const handleShortcut = (event: KeyboardEvent) => {
+      if (dialogFocusState.wasOpen && event.key === 'Tab') {
+        const dialog = document.querySelector<HTMLElement>('[role="dialog"]');
+        const elements = dialogFocusableElements(dialog);
+        const first = elements.at(0);
+        const last = elements.at(-1);
+        if (!first || !last) {
+          event.preventDefault();
+          return;
+        }
+        if (event.shiftKey && document.activeElement === first) {
+          event.preventDefault();
+          last.focus();
+        } else if (!event.shiftKey && document.activeElement === last) {
+          event.preventDefault();
+          first.focus();
+        }
+        return;
+      }
+      if (dialogFocusState.wasOpen && event.key !== 'Escape') return;
       const command = event.metaKey || event.ctrlKey;
       if (command && event.key === '1') {
         event.preventDefault();
@@ -200,6 +246,7 @@
       } else if (event.key === 'Escape') {
         confirmUpdateInstall = false;
         editingWikiId = null;
+        detailsWikiId = null;
         relinkSelection = null;
         createWikiOpen = false;
         connectionsOpen = false;
@@ -328,6 +375,12 @@
     wikiTab = tab;
     pushHash(`#wikis/${selectedWikiId}${tab === 'pending' ? '/pending' : ''}`);
     if (tab === 'pending' && selectedWikiReviews[0] && !selectedReview) void openReview(selectedWikiReviews[0]);
+  }
+
+  function setKnowledgeMode(mode: 'document' | 'graph') {
+    const currentTop = mainScrollRegion?.scrollTop ?? 0;
+    knowledgeMode = mode;
+    scrollMainTo(currentTop);
   }
 
   function integrationName(client: IntegrationClient): string {
@@ -558,7 +611,6 @@
 
   function editWiki(wiki: WikiSummary) {
     editingWikiId = wiki.id;
-    relinkSelection = null;
     wikiPolicy = {
       localOnly: wiki.localOnly,
       peerShareable: wiki.peerShareable,
@@ -567,6 +619,11 @@
     };
     publicDescription = wiki.publicDescription;
     publicLanguages = wiki.publicLanguages;
+  }
+
+  function showWikiDetails(wikiId: string) {
+    detailsWikiId = wikiId;
+    relinkSelection = null;
   }
 
   async function chooseRelinkFolder() {
@@ -578,10 +635,10 @@
   }
 
   async function applyRelink() {
-    if (!editingWikiId || !relinkSelection) return;
+    if (!detailsWikiId || !relinkSelection) return;
     actionBusy = true;
     try {
-      await relinkWiki(editingWikiId, relinkSelection.token);
+      await relinkWiki(detailsWikiId, relinkSelection.token);
       relinkSelection = null;
       showOperationComplete();
     } catch {
@@ -954,14 +1011,16 @@
               <button class="text-action" onclick={() => editWiki(selectedWiki)}>{t('desktop-manage-access')}</button>
             </section>
 
-            <div class="content-tabs" role="tablist" aria-label={t('desktop-wiki-sections')}>
-              <button role="tab" aria-selected={wikiTab === 'content'} class:active={wikiTab === 'content'} onclick={() => openWikiTab('content')}>{t('desktop-wiki-content-tab')}</button>
-              <button role="tab" aria-selected={wikiTab === 'pending'} class:active={wikiTab === 'pending'} onclick={() => openWikiTab('pending')}>{t('desktop-wiki-pending-tab')}<span>{selectedWikiReviews.length}</span></button>
-              <button class="details-tab" onclick={() => editWiki(selectedWiki)}>{t('desktop-details')}</button>
+            <div class="content-tabs-bar">
+              <div class="content-tabs" role="tablist" aria-label={t('desktop-wiki-sections')}>
+                <button role="tab" aria-selected={wikiTab === 'content'} class:active={wikiTab === 'content'} onclick={() => openWikiTab('content')}>{t('desktop-wiki-content-tab')}</button>
+                <button role="tab" aria-selected={wikiTab === 'pending'} class:active={wikiTab === 'pending'} onclick={() => openWikiTab('pending')}>{t('desktop-wiki-pending-tab')}<span>{selectedWikiReviews.length}</span></button>
+              </div>
+              <button class="details-tab" onclick={() => showWikiDetails(selectedWiki.id)}>{t('desktop-details')}</button>
             </div>
 
             {#if wikiTab === 'content'}
-              <div class="wiki-toolbar"><div class="view-switch" aria-label={t('desktop-view-mode')}><button class:active={knowledgeMode === 'document'} onclick={() => { knowledgeMode = 'document'; }}>{t('desktop-list-view')}</button><button class:active={knowledgeMode === 'graph'} onclick={() => { knowledgeMode = 'graph'; }}>{t('knowledge-tab-graph')}</button></div></div>
+              <div class="wiki-toolbar"><div class="view-switch" aria-label={t('desktop-view-mode')}><button class:active={knowledgeMode === 'document'} onclick={() => setKnowledgeMode('document')}>{t('desktop-list-view')}</button><button class:active={knowledgeMode === 'graph'} onclick={() => setKnowledgeMode('graph')}>{t('knowledge-tab-graph')}</button></div></div>
               {#if knowledgeMode === 'graph' && snapshot.knowledge?.wikiId === selectedWiki.id && snapshot.knowledge.status === 'ready'}
                 <section class="graph-view">{#key `${snapshot.knowledge.wikiId}:${snapshot.knowledge.version}`}<KnowledgeGraph bundle={snapshot.knowledge} onselect={selectGraphPage} {locale} />{/key}</section>
               {:else}
@@ -1021,9 +1080,15 @@
   <div class="modal-backdrop" role="presentation"><div class="create-wiki-dialog" role="dialog" aria-modal="true" aria-labelledby="create-wiki-title"><form onsubmit={(event) => { event.preventDefault(); createWiki(); }}><p class="section-label">{t('desktop-new-wiki')}</p><h2 id="create-wiki-title">{t('desktop-name-wiki')}</h2><p>{folderSelection.displayPath}</p><label><span>{t('desktop-wiki-name')}</span><input bind:value={wikiName} maxlength="120" required /></label><div class="row-actions"><button type="button" class="secondary" onclick={() => { createWikiOpen = false; folderSelection = null; }}>{t('action-cancel')}</button><button class="primary" disabled={actionBusy || !wikiName.trim()}>{t('desktop-create-wiki')}</button></div></form></div></div>
 {/if}
 
+{#if detailsWikiId}
+  {@const detailsWiki = snapshot.wikis.find((wiki) => wiki.id === detailsWikiId)}
+  {@const detailsIssues = snapshot.sourceIssues.filter((issue) => issue.wikiId === detailsWikiId)}
+  <div class="drawer-backdrop" role="presentation" onclick={(event) => { if (event.currentTarget === event.target) { detailsWikiId = null; relinkSelection = null; } }}><div class="side-drawer details-drawer" role="dialog" aria-modal="true" aria-labelledby="details-title"><header><div><p class="section-label">{t('desktop-details')}</p><h2 id="details-title">{detailsWiki?.name}</h2></div><button class="icon-button" aria-label={t('action-close')} onclick={() => { detailsWikiId = null; relinkSelection = null; }}>×</button></header><p>{t('desktop-wiki-details-body')}</p>{#if detailsWiki}<dl class="wiki-details-list"><div><dt>{t('desktop-wiki-source-health')}</dt><dd class:warning-text={detailsWiki.maintenanceRequired || detailsWiki.failedCount > 0}>{detailsWiki.maintenanceRequired || detailsWiki.failedCount > 0 ? t('status-needs-attention') : t('desktop-wiki-health-ready')}</dd></div><div><dt>{t('desktop-wiki-documents')}</dt><dd>{detailsWiki.documentCount}</dd></div><div><dt>{t('desktop-wiki-published')}</dt><dd>{detailsWiki.publishedCount}</dd></div><div><dt>{t('desktop-wiki-pending')}</dt><dd>{detailsWiki.needsReviewCount}</dd></div><div><dt>{t('desktop-wiki-failed')}</dt><dd>{detailsWiki.failedCount}</dd></div></dl>{/if}<section class="details-section"><div><h3>{t('desktop-wiki-source-issues')}</h3><p>{t('desktop-folder-privacy')}</p></div>{#if detailsIssues.length > 0}<ul class="source-issue-list">{#each detailsIssues as issue (`${issue.sourceName}:${issue.code}`)}<li><AlertTriangle size={16} aria-hidden="true" /><span><strong>{issue.sourceName}</strong><small>{t('status-needs-attention')}</small></span></li>{/each}</ul>{:else}<div class="inline-empty compact"><CheckCircle2 size={18} aria-hidden="true" /><span><strong>{t('desktop-wiki-no-source-issues')}</strong></span></div>{/if}<div class="drawer-actions"><button class="secondary" onclick={() => detailsWiki && scanWiki(detailsWiki.id)} disabled={!detailsWiki || wikiScanState(detailsWiki.id) !== null}><RefreshCw size={16} aria-hidden="true" />{t('action-refresh')}</button><button class="secondary" onclick={chooseRelinkFolder}>{t('desktop-wiki-relink')}</button></div>{#if relinkSelection}<div class="relink-confirmation"><p>{relinkSelection.displayPath}</p><button class="primary" onclick={applyRelink} disabled={actionBusy}>{t('action-confirm')}</button></div>{/if}</section>{#if detailsWiki}<details class="advanced-disclosure"><summary>{t('desktop-advanced-details')}</summary><dl><div><dt>{t('desktop-wiki-id')}</dt><dd><code>{detailsWiki.id}</code></dd></div></dl></details>{/if}</div></div>
+{/if}
+
 {#if editingWikiId}
   {@const activeWiki = snapshot.wikis.find((wiki) => wiki.id === editingWikiId)}
-  <div class="drawer-backdrop" role="presentation" onclick={(event) => { if (event.currentTarget === event.target) editingWikiId = null; }}><div class="side-drawer" role="dialog" aria-modal="true" aria-labelledby="share-title"><header><div><p class="section-label">{t('desktop-share-action')}</p><h2 id="share-title">{activeWiki?.name}</h2></div><button class="icon-button" aria-label={t('action-close')} onclick={() => { editingWikiId = null; relinkSelection = null; }}>×</button></header><p>{t('desktop-share-drawer-body')}</p><div class="policy-list"><label><span><strong>{t('desktop-share-nearby')}</strong><small>{t('desktop-share-nearby-body')}</small></span><input type="checkbox" bind:checked={wikiPolicy.peerShareable} /></label><label><span><strong>{t('desktop-share-ai-apps')}</strong><small>{t('desktop-share-ai-apps-body')}</small></span><input type="checkbox" bind:checked={wikiPolicy.allowExternalAi} /></label><label><span><strong>{t('desktop-share-public')}</strong><small>{t('desktop-share-public-body')}</small></span><input type="checkbox" bind:checked={wikiPolicy.internetPublic} /></label></div>{#if wikiPolicy.internetPublic}<label><span>{t('desktop-wiki-public-description')}</span><textarea bind:value={publicDescription} maxlength="2048" rows="3"></textarea></label><label><span>{t('desktop-wiki-public-languages')}</span><input bind:value={publicLanguages} maxlength="300" placeholder="es, en" /></label>{/if}<div class="drawer-actions"><button class="primary" onclick={saveWikiPolicy} disabled={actionBusy}>{t('action-save')}</button>{#if wikiPolicy.internetPublic}<button class="secondary" onclick={savePublicProfile} disabled={actionBusy}>{t('desktop-wiki-public-profile-save')}</button>{/if}</div><details class="advanced-disclosure"><summary>{t('desktop-details')}</summary><p>{t('desktop-folder-privacy')}</p><button class="secondary" onclick={chooseRelinkFolder}>{t('desktop-wiki-relink')}</button>{#if relinkSelection}<p>{relinkSelection.displayPath}</p><button class="secondary" onclick={applyRelink}>{t('action-confirm')}</button>{/if}</details></div></div>
+  <div class="drawer-backdrop" role="presentation" onclick={(event) => { if (event.currentTarget === event.target) editingWikiId = null; }}><div class="side-drawer" role="dialog" aria-modal="true" aria-labelledby="share-title"><header><div><p class="section-label">{t('desktop-share-action')}</p><h2 id="share-title">{activeWiki?.name}</h2></div><button class="icon-button" aria-label={t('action-close')} onclick={() => { editingWikiId = null; }}>×</button></header><p>{t('desktop-share-drawer-body')}</p><div class="policy-list"><label><span><strong>{t('desktop-share-nearby')}</strong><small>{t('desktop-share-nearby-body')}</small></span><input type="checkbox" bind:checked={wikiPolicy.peerShareable} /></label><label><span><strong>{t('desktop-share-ai-apps')}</strong><small>{t('desktop-share-ai-apps-body')}</small></span><input type="checkbox" bind:checked={wikiPolicy.allowExternalAi} /></label><label><span><strong>{t('desktop-share-public')}</strong><small>{t('desktop-share-public-body')}</small></span><input type="checkbox" bind:checked={wikiPolicy.internetPublic} /></label></div>{#if wikiPolicy.internetPublic}<label><span>{t('desktop-wiki-public-description')}</span><textarea bind:value={publicDescription} maxlength="2048" rows="3"></textarea></label><label><span>{t('desktop-wiki-public-languages')}</span><input bind:value={publicLanguages} maxlength="300" placeholder="es, en" /></label>{/if}<div class="drawer-actions"><button class="primary" onclick={saveWikiPolicy} disabled={actionBusy}>{t('action-save')}</button>{#if wikiPolicy.internetPublic}<button class="secondary" onclick={savePublicProfile} disabled={actionBusy}>{t('desktop-wiki-public-profile-save')}</button>{/if}</div></div></div>
 {/if}
 
 {#if selectedReview && editDraft}

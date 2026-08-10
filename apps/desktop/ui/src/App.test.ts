@@ -75,6 +75,33 @@ describe('AirWiki wiki workspace', () => {
     expect(screen.getByRole('tab', { name: /Pendientes/ })).toBeInTheDocument();
   });
 
+  it('keeps wiki details and sharing as separate actions', async () => {
+    const { container } = render(App);
+    await fireEvent.click(await screen.findByRole('row', { name: /Atlas 2 publicados/ }));
+
+    const detailsButton = screen.getByRole('button', { name: 'Detalles' });
+    detailsButton.focus();
+    await fireEvent.click(detailsButton);
+    expect(screen.getByRole('dialog', { name: 'Atlas' })).toHaveTextContent('Estado de la fuente');
+    expect(screen.queryByText('Equipos cercanos')).not.toBeInTheDocument();
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Cerrar' })).toHaveFocus());
+    await fireEvent.keyDown(window, { key: 'Tab', shiftKey: true });
+    expect(screen.getByText('Detalles avanzados')).toHaveFocus();
+    let results = await axe.run(container, { rules: { region: { enabled: false } } });
+    expect(results.violations.filter((violation) => violation.impact === 'critical' || violation.impact === 'serious')).toEqual([]);
+    await fireEvent.click(screen.getByRole('button', { name: 'Cerrar' }));
+    await waitFor(() => expect(detailsButton).toHaveFocus());
+
+    const shareButton = screen.getByRole('button', { name: 'Compartir' });
+    shareButton.focus();
+    await fireEvent.click(shareButton);
+    expect(screen.getByRole('dialog', { name: 'Atlas' })).toHaveTextContent('Equipos cercanos');
+    expect(screen.queryByText('Documentos de origen')).not.toBeInTheDocument();
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Cerrar' })).toHaveFocus());
+    results = await axe.run(container, { rules: { region: { enabled: false } } });
+    expect(results.violations.filter((violation) => violation.impact === 'critical' || violation.impact === 'serious')).toEqual([]);
+  });
+
   it('opens a local search result inside its wiki without placing the query in the URL', async () => {
     const wiki = snapshot.wikis[0];
     const conceptId = 'concept-atlas';

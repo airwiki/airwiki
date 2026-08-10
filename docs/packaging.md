@@ -77,6 +77,18 @@ after an internal upgrade. The candidate must preserve that item, wait without
 blocking the async runtime, and fail closed if access is denied; deleting or
 silently replacing the device identity is never an acceptance shortcut.
 
+For repeated installed user-testing candidates, use one stable Apple Development
+identity so subsequent builds keep the same Keychain trust boundary:
+
+```bash
+AIRWIKI_SIGNING_PURPOSE=development \
+AIRWIKI_SIGNING_IDENTITY='Apple Development: Developer Name (TEAMID)' \
+./packaging/package-macos.sh
+```
+
+This remains an internal development signature. It is not Developer ID signing,
+not notarized, and must not be presented as a publicly trusted build.
+
 The signed release wrapper additionally proves that the public updater key in
 the signing environment is present in the final desktop executable before it
 signs or publishes the updater archive. Cargo rebuilds the desktop whenever an

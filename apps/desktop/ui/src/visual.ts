@@ -17,6 +17,7 @@ if (snapshot.preferences) {
   if (parameters.get('onboarding') === '1') snapshot.preferences.completedOnboardingVersion = null;
 }
 if (destination === 'review') {
+  snapshot.wikis[0].needsReviewCount = 1;
   const review = {
     conceptId: 'synthetic-review', wikiId: snapshot.wikis[0].id, sourceRevision: 4, sourceName: 'operating-guide.md', wikiName: 'Atlas',
     draft: {

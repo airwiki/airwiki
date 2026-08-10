@@ -8,7 +8,7 @@ import { readySnapshot } from './test/fixtures';
 let snapshot = readySnapshot();
 const accessibilityCases = (['es', 'en'] as const).flatMap((locale) =>
   (['light', 'dark'] as const).flatMap((theme) =>
-    (['home', 'wikis', 'shared', 'search', 'system/models', 'system/preferences', 'system/updates'] as const)
+    (['wikis', 'search', 'system/models', 'system/preferences', 'system/updates'] as const)
       .map((route) => [locale, theme, route] as const)
   )
 );
@@ -43,23 +43,31 @@ describe('AirWiki wiki workspace', () => {
     snapshot = readySnapshot();
   });
 
-  it('renders familiar primary navigation, global search, and the wiki list', async () => {
+  it('renders one wiki workspace with global search and no redundant sidebar', async () => {
     render(App);
 
     expect((await screen.findAllByText('Atlas')).length).toBeGreaterThan(0);
-    for (const destination of ['Inicio', 'Wikis', 'Compartido', 'Configuración']) {
-      expect(screen.getByRole('button', { name: destination })).toBeInTheDocument();
-    }
+    expect(screen.getByRole('heading', { name: 'Wikis' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Configuración' })).toBeInTheDocument();
     expect(screen.getByRole('search')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Nueva wiki' })).toBeInTheDocument();
-    expect(screen.queryByText('Biblioteca')).not.toBeInTheDocument();
+    expect(screen.queryByRole('complementary')).not.toBeInTheDocument();
+  });
+
+  it('shows real service states in the sidebar without treating disabled services as healthy', async () => {
+    render(App);
+
+    expect(await screen.findByRole('button', { name: 'IA local: Sin configurar' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Red local: Opcional · Desactivado' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Red pública: Opcional · Desactivado' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'MCP: Disponible' })).toBeInTheDocument();
   });
 
   it('opens a wiki as an independent page and requests its OKF bundle', async () => {
     render(App);
-    const wikiButton = (await screen.findAllByText('Atlas'))[1].closest('button');
+    const wikiButton = await screen.findByRole('row', { name: /Atlas 2 publicados/ });
     expect(wikiButton).not.toBeNull();
-    await fireEvent.click(wikiButton!);
+    await fireEvent.click(wikiButton);
 
     expect(loadWikiBundle).toHaveBeenCalledWith(snapshot.wikis[0].id);
     expect(window.location.hash).toBe(`#wikis/${snapshot.wikis[0].id}`);
@@ -84,6 +92,33 @@ describe('AirWiki wiki workspace', () => {
     expect(window.location.hash).not.toContain('Evidencia');
   });
 
+  it('never shows a completed empty search together with a stale progress message', async () => {
+    snapshot.search = { requestId: 'empty-search', status: 'complete', coverage: 'complete', hits: [] };
+    window.location.hash = '#search';
+    render(App);
+
+    expect(await screen.findByText('No encontramos evidencia coincidente')).toBeInTheDocument();
+    expect(screen.queryByText('Consultando los equipos disponibles…')).not.toBeInTheDocument();
+  });
+
+  it('keeps graph view selected when opening a graph node', async () => {
+    const wiki = snapshot.wikis[0];
+    snapshot.knowledge = {
+      wikiId: wiki.id, wikiName: wiki.name, version: 'graph-fixture', status: 'ready', errorCount: 0, warningCount: 0,
+      concepts: [{ page: { kind: 'concept', id: 'concept-atlas' }, title: 'Atlas concept', description: 'Verified concept', conceptType: 'Reference', tags: [] }],
+      links: [{ source: { kind: 'index' }, target: { kind: 'concept', id: 'concept-atlas' }, label: 'Verified concept' }]
+    };
+    render(App);
+    const wikiButton = await screen.findByRole('row', { name: /Atlas 2 publicados/ });
+    await fireEvent.click(wikiButton);
+    const graphButton = screen.getByRole('button', { name: 'Grafo' });
+    await fireEvent.click(graphButton);
+    await fireEvent.click(await screen.findByRole('button', { name: 'Atlas concept' }));
+
+    expect(graphButton).toHaveClass('active');
+    expect(loadWikiPage).toHaveBeenCalledWith(wiki.id, { kind: 'concept', id: 'concept-atlas' });
+  });
+
   it('uses independent settings pages that always return to the top', async () => {
     const scrollTo = vi.spyOn(HTMLElement.prototype, 'scrollTo');
     render(App);
@@ -101,7 +136,7 @@ describe('AirWiki wiki workspace', () => {
     cleanup();
     window.location.hash = '#review';
     render(App);
-    expect(await screen.findByRole('heading', { name: 'Inicio' })).toBeInTheDocument();
+    expect(await screen.findByRole('heading', { name: 'Wikis' })).toBeInTheDocument();
   });
 
   it('supports local navigation shortcuts and platform theming', async () => {
@@ -109,8 +144,8 @@ describe('AirWiki wiki workspace', () => {
     snapshot.preferences!.theme = 'dark';
     render(App);
     await screen.findAllByText('Atlas');
-    await fireEvent.keyDown(window, { key: '3', ctrlKey: true });
-    expect(window.location.hash).toBe('#shared/owned');
+    await fireEvent.keyDown(window, { key: '1', ctrlKey: true });
+    expect(window.location.hash).toBe('#wikis');
     expect(document.documentElement.dataset.platform).toBe('windows');
     expect(document.documentElement.dataset.theme).toBe('dark');
   });

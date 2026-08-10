@@ -41,7 +41,7 @@
       .filter((link) => nodeIds.has(pageKey(link.source)) && nodeIds.has(pageKey(link.target)))
       .map((link, index) => ({
         data: {
-          id: `link:${index}`,
+          id: `link:${pageKey(link.source)}:${pageKey(link.target)}:${index}`,
           source: pageKey(link.source),
           target: pageKey(link.target),
           label: link.label
@@ -50,10 +50,25 @@
     return [...nodes, ...edges];
   }
 
+  function graphRoots(): string[] {
+    const targets = new Set(bundle.links.map((link) => pageKey(link.target)));
+    const roots = ['index', 'log', ...bundle.concepts.map((concept) => pageKey(concept.page))]
+      .filter((nodeId) => !targets.has(nodeId));
+    return roots.length > 0 ? roots : ['index'];
+  }
+
   onMount(() => {
     let disposed = false;
     void import('cytoscape').then(({ default: cytoscape }) => {
       if (disposed) return;
+      const palette = getComputedStyle(container);
+      const strong = palette.getPropertyValue('--strong').trim() || '#dce7ec';
+      const muted = palette.getPropertyValue('--muted').trim() || '#93a7b4';
+      const cyan = palette.getPropertyValue('--cyan').trim() || '#59cfe1';
+      const violet = palette.getPropertyValue('--violet').trim() || '#9585ff';
+      const verify = palette.getPropertyValue('--verify').trim() || '#58c78d';
+      const surface = palette.getPropertyValue('--slate').trim() || '#121b25';
+      const line = palette.getPropertyValue('--line').trim() || '#283a49';
       graph = cytoscape({
         container,
         elements: graphElements(),
@@ -61,13 +76,14 @@
         maxZoom: 2.2,
         wheelSensitivity: 0.18,
         style: [
-          { selector: 'node', style: { 'background-color': '#163f54', 'border-color': '#61d6e8', 'border-width': 1.5, color: '#edf7f8', label: 'data(label)', 'font-family': 'Atkinson, sans-serif', 'font-size': '11px', 'text-max-width': '120px', 'text-wrap': 'ellipsis', 'text-valign': 'bottom', 'text-margin-y': 8, height: 22, width: 22 } },
-          { selector: 'node[kind = "index"]', style: { 'background-color': '#61d6e8', 'border-width': 0, height: 30, width: 30 } },
-          { selector: 'node[kind = "log"]', style: { 'background-color': '#9b8cff', 'border-color': '#9b8cff' } },
-          { selector: 'edge', style: { 'curve-style': 'bezier', 'line-color': '#355b70', 'target-arrow-color': '#61d6e8', 'target-arrow-shape': 'triangle', width: 1 } },
-          { selector: 'node:selected', style: { 'border-color': '#61c995', 'border-width': 3, 'overlay-opacity': 0 } }
+          { selector: 'node', style: { 'background-color': surface, 'border-color': cyan, 'border-width': 1.5, color: strong, label: 'data(label)', 'font-family': 'Atkinson, sans-serif', 'font-size': '11px', 'text-background-color': surface, 'text-background-opacity': 0.92, 'text-background-padding': '2px', 'text-max-width': '120px', 'text-wrap': 'ellipsis', 'text-valign': 'bottom', 'text-margin-y': 8, height: 22, width: 22 } },
+          { selector: 'node[kind = "index"]', style: { 'background-color': cyan, 'border-width': 0, height: 30, width: 30 } },
+          { selector: 'node[kind = "log"]', style: { 'background-color': violet, 'border-color': violet } },
+          { selector: 'edge', style: { 'curve-style': 'bezier', 'line-color': line, 'line-opacity': 0.95, 'target-arrow-color': cyan, 'target-arrow-shape': 'triangle', 'arrow-scale': 1.15, 'source-endpoint': 'outside-to-node', 'target-endpoint': 'outside-to-node', width: 1.8, 'z-index': 1 } },
+          { selector: 'edge[label != ""]', style: { label: 'data(label)', color: muted, 'font-family': 'Atkinson, sans-serif', 'font-size': '9px', 'text-background-color': surface, 'text-background-opacity': 0.94, 'text-background-padding': '3px', 'text-margin-y': -9, 'text-rotation': 'autorotate' } },
+          { selector: 'node:selected', style: { 'border-color': verify, 'border-width': 3, 'overlay-opacity': 0 } }
         ],
-        layout: { name: 'breadthfirst', roots: ['index'], directed: true, padding: 24, spacingFactor: 1.15, animate: false }
+        layout: { name: 'breadthfirst', roots: graphRoots(), directed: true, padding: 42, spacingFactor: 1.45, avoidOverlap: true, nodeDimensionsIncludeLabels: true, animate: false }
       });
       resizeObserver = new ResizeObserver(() => {
         graph?.resize();
@@ -120,7 +136,7 @@
   .graph-heading p { margin-bottom: 5px; color: var(--cyan); font: 600 11px 'Space Grotesk', sans-serif; letter-spacing: .1em; text-transform: uppercase; }
   .graph-heading h3 { font: 500 22px 'Space Grotesk', sans-serif; }
   .graph-heading small { color: var(--muted); }
-  .graph-canvas { min-height: 340px; background: var(--graph-canvas); border-bottom: 1px solid var(--line); }
+  .graph-canvas { position: relative; min-height: 340px; background: var(--graph-canvas); border-bottom: 1px solid var(--line); }
   .graph-index { display: flex; flex-wrap: wrap; gap: 7px; padding-top: 14px; }
   .graph-index button { flex: 1 1 220px; min-width: 0; padding: 7px 10px; overflow-wrap: anywhere; color: var(--muted); background: transparent; border: 1px solid var(--line); border-radius: 8px; text-align: left; cursor: pointer; }
   .graph-index button:hover, .graph-index button:focus-visible { color: inherit; border-color: var(--cyan); }

@@ -205,6 +205,56 @@ describe('AirWiki wiki workspace', () => {
     expect(screen.queryByText('No hay problemas con la fuente')).not.toBeInTheDocument();
   });
 
+  it('carries a maintenance reason and its safe next action into the opened wiki', async () => {
+    const wiki = snapshot.wikis[0];
+    wiki.maintenanceRequired = true;
+    snapshot.wikiHealth!.attentionWikiId = wiki.id;
+    const { container } = render(App);
+
+    expect(await screen.findByText('Comprobar contenido publicado')).toBeInTheDocument();
+    await fireEvent.click(screen.getByText('Ver qué hacer'));
+
+    expect(screen.getByRole('heading', { name: 'Qué necesita de ti' })).toBeInTheDocument();
+    expect(screen.getByText('Comprueba el contenido publicado')).toBeInTheDocument();
+    expect(screen.getByText(/Revisa exactamente qué cambiaría antes de confirmar/)).toBeInTheDocument();
+    await fireEvent.click(screen.getByRole('button', { name: 'Revisar reparación segura…' }));
+    expect(prepareGuidedWikiRepair).toHaveBeenCalledWith(wiki.id);
+    const results = await axe.run(container, { rules: { region: { enabled: false } } });
+    expect(results.violations.filter((violation) => violation.impact === 'critical' || violation.impact === 'serious')).toEqual([]);
+  });
+
+  it('explains skipped source files and translates their safe issue code', async () => {
+    const wiki = snapshot.wikis[0];
+    wiki.failedCount = 1;
+    snapshot.sourceIssues = [{
+      wikiId: wiki.id,
+      wikiName: wiki.name,
+      sourceName: 'manual.pdf',
+      code: 'EncryptedPdf'
+    }];
+    render(App);
+
+    expect(await screen.findByText('1 archivo necesita corrección')).toBeInTheDocument();
+    await fireEvent.click(screen.getByText('Ver qué hacer'));
+    expect(screen.getByText('Corrige 1 archivo de la carpeta')).toBeInTheDocument();
+    expect(screen.getByText(/no se reemplazará con resultados incompletos/)).toBeInTheDocument();
+    await fireEvent.click(screen.getByRole('button', { name: 'Ver archivos y solución' }));
+    expect(screen.getByRole('dialog', { name: wiki.name })).toHaveTextContent('El PDF está cifrado');
+    expect(screen.queryByText('EncryptedPdf')).not.toBeInTheDocument();
+  });
+
+  it('states that pending AI proposals remain unpublished until a person decides', async () => {
+    const wiki = snapshot.wikis[0];
+    wiki.needsReviewCount = 2;
+    render(App);
+
+    await fireEvent.click(await screen.findByText('Ver qué hacer'));
+    expect(screen.getByText('Revisa 2 propuestas')).toBeInTheDocument();
+    expect(screen.getByText(/No se publicarán hasta que revises la evidencia y decidas/)).toBeInTheDocument();
+    await fireEvent.click(screen.getByRole('button', { name: 'Revisar propuestas' }));
+    expect(screen.getByRole('tab', { name: /Pendientes/ })).toHaveAttribute('aria-selected', 'true');
+  });
+
   it('keeps guided repair reachable from the unified wiki workspace', async () => {
     const wiki = snapshot.wikis[0];
     wiki.maintenanceRequired = true;

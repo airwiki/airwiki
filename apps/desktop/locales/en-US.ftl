@@ -899,12 +899,36 @@ desktop-wiki-empty-body = Choose a folder to create your first wiki.
 desktop-wiki-private = Only you
 desktop-wiki-unknown = Unavailable wiki
 desktop-home-attention = Needs attention
-desktop-home-attention-body = Real reviews and issues that need a decision.
+desktop-home-attention-body = Actions AirWiki cannot complete safely without you.
 desktop-home-clear-title = Everything is up to date
 desktop-home-clear-body = There are no pending reviews or issues.
 desktop-home-your-wikis = Your wikis
 desktop-view-all = View all
 desktop-wiki-review-count = { $count } pending reviews
+desktop-attention-see-actions = See what to do
+desktop-attention-title = What AirWiki needs from you
+desktop-attention-body = AirWiki keeps the content in a safe state until you complete these actions.
+desktop-attention-files-summary = { $count ->
+    [one] 1 file needs correction
+   *[other] { $count } files need correction
+}
+desktop-attention-files-title = { $count ->
+    [one] Correct 1 file in the source folder
+   *[other] Correct { $count } files in the source folder
+}
+desktop-attention-files-body = AirWiki could not include these files. Existing published content will not be replaced with incomplete results.
+desktop-attention-files-action = See files and solutions
+desktop-attention-maintenance-summary = Check published content
+desktop-attention-maintenance-title = Check the published content
+desktop-attention-maintenance-body = AirWiki needs to compare the source folder with the published wiki again. It will not resolve ambiguous differences on its own.
+desktop-attention-repair-body = AirWiki found a difference between its approved records and the published wiki. Review exactly what would change before confirming.
+desktop-attention-check-source = Check now
+desktop-attention-reviews-title = { $count ->
+    [one] Review 1 proposal
+   *[other] Review { $count } proposals
+}
+desktop-attention-reviews-body = Local AI prepared changes based on the source. They will not be published until you review the evidence and decide.
+desktop-attention-reviews-action = Review proposals
 desktop-wiki-detail-body = { $published } published pages
 desktop-share-action = Share
 desktop-connections = Connections

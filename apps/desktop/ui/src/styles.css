@@ -547,6 +547,16 @@ button:active:not(:disabled) { transform: scale(.985); }
 .wiki-access-strip > div { display: flex; flex-wrap: wrap; gap: 6px; }
 .wiki-access-strip > div span { padding: 4px 8px; color: var(--cyan); background: color-mix(in srgb, var(--cyan) 9%, transparent); border-radius: 999px; font-size: 11px; }
 .wiki-access-strip > small { color: var(--muted); font-size: 11px; }
+.wiki-interventions { margin-top: 16px; background: color-mix(in srgb, var(--amber) 5%, var(--slate)); border: 1px solid color-mix(in srgb, var(--amber) 27%, var(--line)); border-left: 3px solid var(--amber); border-radius: var(--control-radius); overflow: hidden; }
+.wiki-interventions-heading { display: flex; align-items: flex-start; gap: 11px; padding: 15px 18px; color: var(--amber); border-bottom: 1px solid color-mix(in srgb, var(--amber) 20%, var(--line)); }
+.wiki-interventions-heading h2 { color: var(--strong); font: 650 17px system-ui, sans-serif; letter-spacing: -.01em; }
+.wiki-interventions-heading p { margin: 4px 0 0; color: var(--muted); font-size: 13px; line-height: 1.45; }
+.wiki-intervention-list article { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 16px; min-height: 74px; padding: 13px 18px; border-bottom: 1px solid color-mix(in srgb, var(--amber) 15%, var(--line)); }
+.wiki-intervention-list article:last-child { border-bottom: 0; }
+.wiki-intervention-list strong { color: var(--strong); }
+.wiki-intervention-list p { max-width: 720px; margin: 4px 0 0; color: var(--muted); font-size: 13px; line-height: 1.45; }
+.wiki-intervention-list button { flex: none; white-space: nowrap; }
+.wiki-interventions > .repair-preview { margin: 0 18px 18px; }
 .system-status-bar { grid-column: 1; grid-row: 2; display: grid; grid-template-columns: auto minmax(0, 1fr); align-items: center; gap: 20px; min-height: 48px; padding: 6px 22px; background: var(--slate); border-top: 1px solid var(--line); }
 .system-status-bar > strong { color: var(--muted); font-size: 10px; letter-spacing: .045em; text-transform: uppercase; }
 .system-status-bar > div { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 4px; }
@@ -565,4 +575,6 @@ button:active:not(:disabled) { transform: scale(.985); }
   .system-status-bar > strong { display: none; }
   .wiki-access-strip { grid-template-columns: auto minmax(0, 1fr) auto; }
   .wiki-access-strip > small { grid-column: 2; }
+  .wiki-intervention-list article { grid-template-columns: 1fr; }
+  .wiki-intervention-list button { justify-self: start; }
 }

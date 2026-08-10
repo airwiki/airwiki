@@ -491,6 +491,7 @@ button:active:not(:disabled) { transform: scale(.985); }
 .source-issue-list strong, .source-issue-list small { display: block; }
 .source-issue-list strong { color: var(--strong); }
 .source-issue-list small { margin-top: 2px; color: var(--muted); }
+.source-issue-list .source-issue-action { margin-top: 6px; color: var(--strong); }
 .inline-empty.compact { padding: 12px; }
 .inline-empty.warning-empty { color: var(--amber); border-color: color-mix(in srgb, var(--amber) 28%, var(--line)); }
 .inline-empty.warning-empty small { color: var(--muted); }

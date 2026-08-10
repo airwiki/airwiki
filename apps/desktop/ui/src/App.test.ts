@@ -2,7 +2,7 @@ import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/sv
 import axe from 'axe-core';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import App from './App.svelte';
-import { loadWikiBundle, loadWikiPage, prepareGuidedWikiRepair, updatePreferences } from './api';
+import { configureFirewall, loadWikiBundle, loadWikiPage, openSystemDestination, prepareGuidedWikiRepair, updatePreferences } from './api';
 import { readySnapshot } from './test/fixtures';
 
 let snapshot = readySnapshot();
@@ -23,6 +23,8 @@ vi.mock('./api', async (importOriginal) => {
     refreshWikiHealth: vi.fn(async () => undefined),
     prepareGuidedWikiRepair: vi.fn(async () => 'repair-request'),
     updatePreferences: vi.fn(async () => undefined),
+    configureFirewall: vi.fn(async () => undefined),
+    openSystemDestination: vi.fn(async () => undefined),
     manageIntegration: vi.fn(async () => undefined),
     loadWikiBundle: vi.fn(async () => undefined),
     loadWikiPage: vi.fn(async () => undefined)
@@ -72,6 +74,23 @@ describe('AirWiki wiki workspace', () => {
     expect(screen.getByRole('dialog', { name: 'Conexiones' })).toBeInTheDocument();
     expect(screen.getByText('Controles de red')).toBeInTheDocument();
     expect(screen.getAllByText('Detalles avanzados')).toHaveLength(1);
+  });
+
+  it('offers the closed Windows firewall action only when the helper is verified', async () => {
+    snapshot.preferences!.lanPreference = 'enabled';
+    snapshot.connectivity = { systemPermission: 'notApplicable', networkProfile: 'private', firewall: 'rulesMissing', firewallHelper: 'verified' };
+    render(App);
+    await fireEvent.click(await screen.findByRole('button', { name: 'Red local: Opcional · Desactivado' }));
+
+    await fireEvent.click(screen.getByRole('button', { name: 'Configurar firewall…' }));
+    expect(configureFirewall).toHaveBeenCalledWith(expect.any(String), true);
+
+    cleanup();
+    snapshot.connectivity.networkProfile = 'public';
+    render(App);
+    await fireEvent.click(await screen.findByRole('button', { name: 'Red local: Opcional · Desactivado' }));
+    await fireEvent.click(screen.getByRole('button', { name: 'Abrir configuración de red' }));
+    expect(openSystemDestination).toHaveBeenCalledWith(expect.any(String), 'networkSettings');
   });
 
   it('keeps modal focus inside connections when advanced disclosures are closed', async () => {

@@ -503,6 +503,9 @@ button:active:not(:disabled) { transform: scale(.985); }
 .connections-drawer { width: min(600px, 100%); }
 .connections-drawer > section { padding: 20px 0; border-bottom: 1px solid var(--line); }
 .connections-drawer .peer-list { grid-template-columns: 1fr; }
+.connection-guidance { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin-top: 14px; padding: 12px 14px; border-left: 3px solid var(--amber); background: color-mix(in srgb, var(--amber) 7%, transparent); }
+.connection-guidance p { margin: 0; color: var(--text); font-size: 13px; line-height: 1.45; }
+.connection-guidance button { flex: none; }
 .sas-words { display: block; margin: 12px 0; color: var(--violet); }
 .sr-only { position: absolute; width: 1px; height: 1px; padding: 0; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }
 @media (max-width: 1120px) {

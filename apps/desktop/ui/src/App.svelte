@@ -85,7 +85,10 @@
   let selectedWiki: WikiSummary | null;
   let selectedWikiReviews: ReviewSummary[];
   let sharedWikis: WikiSummary[];
-  const dialogFocusState: { wasOpen: boolean; returnTarget: HTMLElement | null } = { wasOpen: false, returnTarget: null };
+  type DialogId = 'create-wiki' | 'wiki-details' | 'wiki-access' | 'review' | 'connections' | 'close-choice' | null;
+  let activeDialogId: DialogId;
+  let dialogFocusGeneration = 0;
+  const dialogFocusState: { activeId: DialogId; returnTarget: HTMLElement | null } = { activeId: null, returnTarget: null };
 
   function actionMessageTone(): 'success' | 'progress' | 'error' {
     if (actionMessage === t('notice-operation-complete')) return 'success';
@@ -119,6 +122,36 @@
       const closedDisclosure = element.closest<HTMLDetailsElement>('details:not([open])');
       if (closedDisclosure?.querySelector(':scope > summary') !== element) return false;
       return true;
+    });
+  }
+
+  function dialogElement(dialogId: Exclude<DialogId, null>): HTMLElement | null {
+    const labelIds: Record<Exclude<DialogId, null>, string> = {
+      'create-wiki': 'create-wiki-title',
+      'wiki-details': 'details-title',
+      'wiki-access': 'share-title',
+      review: 'review-title',
+      connections: 'connections-title',
+      'close-choice': 'close-title'
+    };
+    return document.querySelector<HTMLElement>(`[role="dialog"][aria-labelledby="${labelIds[dialogId]}"]`);
+  }
+
+  function topDialogElement(): HTMLElement | null {
+    return Array.from(document.querySelectorAll<HTMLElement>('[role="dialog"]'))
+      .filter((dialog) => !dialog.closest('[hidden], [inert], [aria-hidden="true"]'))
+      .at(-1) ?? null;
+  }
+
+  function focusDialog(dialogId: Exclude<DialogId, null>) {
+    const generation = ++dialogFocusGeneration;
+    void tick().then(() => {
+      if (generation !== dialogFocusGeneration) return;
+      const dialog = dialogElement(dialogId);
+      const preferredTarget = dialogId === 'close-choice'
+        ? dialog?.querySelector<HTMLElement>('.primary')
+        : dialog?.querySelector<HTMLElement>('.icon-button');
+      (preferredTarget ?? dialogFocusableElements(dialog).at(0))?.focus();
     });
   }
 
@@ -161,22 +194,28 @@
     document.documentElement.style.colorScheme = theme === 'system' ? 'light dark' : theme;
   }
 
+  $: activeDialogId = closeChoiceRequired ? 'close-choice'
+    : selectedReview !== null ? 'review'
+      : editingWikiId !== null ? 'wiki-access'
+        : detailsWikiId !== null ? 'wiki-details'
+          : createWikiOpen ? 'create-wiki'
+            : connectionsOpen ? 'connections'
+              : null;
+
   $: {
-    const dialogOpen = createWikiOpen || detailsWikiId !== null || editingWikiId !== null || selectedReview !== null || connectionsOpen || closeChoiceRequired;
-    if (typeof document !== 'undefined' && dialogOpen !== dialogFocusState.wasOpen) {
-      if (dialogOpen) {
-        dialogFocusState.returnTarget = document.activeElement instanceof HTMLElement ? document.activeElement : null;
-        void tick().then(() => requestAnimationFrame(() => {
-          const dialog = document.querySelector<HTMLElement>('[role="dialog"]');
-          const closeButton = dialog?.querySelector<HTMLElement>('.icon-button');
-          (closeButton ?? dialogFocusableElements(dialog).at(0))?.focus();
-        }));
+    const dialogId = activeDialogId;
+    if (typeof document !== 'undefined' && dialogId !== dialogFocusState.activeId) {
+      if (dialogId !== null) {
+        if (dialogFocusState.activeId === null) {
+          dialogFocusState.returnTarget = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+        }
+        focusDialog(dialogId);
       } else {
         const returnTarget = dialogFocusState.returnTarget;
         dialogFocusState.returnTarget = null;
         requestAnimationFrame(() => returnTarget?.focus());
       }
-      dialogFocusState.wasOpen = dialogOpen;
+      dialogFocusState.activeId = dialogId;
     }
   }
 
@@ -218,12 +257,14 @@
     window.addEventListener('hashchange', syncRoute);
     window.addEventListener('popstate', syncRoute);
     const handleShortcut = (event: KeyboardEvent) => {
-      if (dialogFocusState.wasOpen && event.key === 'Tab') {
-        const dialog = document.querySelector<HTMLElement>('[role="dialog"]');
+      const dialog = topDialogElement();
+      if (dialog !== null && event.key === 'Tab') {
         const elements = dialogFocusableElements(dialog);
         const first = elements.at(0);
         const last = elements.at(-1);
-        const initial = dialog?.querySelector<HTMLElement>('.icon-button') ?? first;
+        const initial = dialog.getAttribute('aria-labelledby') === 'close-title'
+          ? dialog?.querySelector<HTMLElement>('.primary') ?? first
+          : dialog?.querySelector<HTMLElement>('.icon-button') ?? first;
         if (!first || !last) {
           event.preventDefault();
           return;
@@ -237,7 +278,7 @@
         }
         return;
       }
-      if (dialogFocusState.wasOpen && event.key !== 'Escape') return;
+      if (dialog !== null && event.key !== 'Escape') return;
       const command = event.metaKey || event.ctrlKey;
       if (command && event.key === '1') {
         event.preventDefault();
@@ -263,7 +304,10 @@
     };
     window.addEventListener('keydown', handleShortcut);
     const unlistenClose = '__TAURI_INTERNALS__' in window
-      ? listen('close-choice-required', () => { closeChoiceRequired = true; })
+      ? listen('close-choice-required', () => {
+        closeChoiceRequired = true;
+        focusDialog('close-choice');
+      })
       : Promise.resolve(() => {});
     connect((event) => {
       snapshot = event.snapshot;
@@ -1106,6 +1150,7 @@
   <SystemStatusBar {snapshot} {t} onselect={openServiceStatus} />
 </div>
 
+<div class="dialog-layer" inert={closeChoiceRequired} aria-hidden={closeChoiceRequired ? 'true' : undefined}>
 {#if createWikiOpen && folderSelection}
   <div class="modal-backdrop" role="presentation"><div class="create-wiki-dialog" role="dialog" aria-modal="true" aria-labelledby="create-wiki-title"><form onsubmit={(event) => { event.preventDefault(); createWiki(); }}><p class="section-label">{t('desktop-new-wiki')}</p><h2 id="create-wiki-title">{t('desktop-name-wiki')}</h2><p>{folderSelection.displayPath}</p><label><span>{t('desktop-wiki-name')}</span><input bind:value={wikiName} maxlength="120" required /></label><div class="row-actions"><button type="button" class="secondary" onclick={() => { createWikiOpen = false; folderSelection = null; }}>{t('action-cancel')}</button><button class="primary" disabled={actionBusy || !wikiName.trim()}>{t('desktop-create-wiki')}</button></div></form></div></div>
 {/if}
@@ -1129,9 +1174,11 @@
   <div class="drawer-backdrop" role="presentation" onclick={(event) => { if (event.currentTarget === event.target) connectionsOpen = false; }}><div class="side-drawer connections-drawer" role="dialog" aria-modal="true" aria-labelledby="connections-title"><header><div><p class="section-label">{t('desktop-page-shared-title')}</p><h2 id="connections-title">{t('desktop-connections')}</h2></div><button class="icon-button" aria-label={t('action-close')} onclick={() => { connectionsOpen = false; }}>×</button></header><section><div class="section-heading"><div><h3>{t('desktop-known-devices', { count: snapshot.peers.length })}</h3><p>{connectivityLabel(locale)}</p></div><button class="text-action" onclick={() => runConnectivityAction('refresh')}>{t('action-refresh')}</button></div>{#if lanPreference !== 'enabled'}<div class="connection-guidance"><p>{lanPreference === 'undecided' ? t('connectivity-undecided') : t('connectivity-disabled')}</p><button class="secondary" onclick={openNetworkPreferences}>{t('desktop-preferences')}</button></div>{:else if snapshot.connectivity?.networkProfile === 'public'}<div class="connection-guidance"><p>{t('connectivity-public-network')}</p><button class="secondary" onclick={() => runConnectivityAction('networkSettings')}>{t('connectivity-open-network-settings')}</button></div>{:else if snapshot.connectivity?.firewall === 'rulesMissing' && snapshot.connectivity.firewallHelper === 'verified'}<div class="connection-guidance"><p>{t('connectivity-firewall-needed')}</p><button class="secondary" onclick={() => runConnectivityAction('install')}>{t('connectivity-configure-firewall')}</button></div>{:else if snapshot.connectivity?.firewall === 'rulesMissing'}<div class="connection-guidance"><p>{t('connectivity-firewall-helper-repair')}</p></div>{:else if snapshot.connectivity?.firewall === 'conflict' || snapshot.connectivity?.firewall === 'legacyExposure' || snapshot.connectivity?.firewall === 'managedPolicy' || snapshot.connectivity?.firewall === 'firewallDisabled' || snapshot.connectivity?.firewall === 'blockAllInbound'}<div class="connection-guidance"><p>{firewallGuidanceLabel()}</p><button class="secondary" onclick={() => runConnectivityAction('advancedFirewall')}>{t('connectivity-open-advanced-firewall')}</button></div>{:else if snapshot.connectivity?.systemPermission === 'denied'}<div class="connection-guidance"><p>{t('connectivity-failed')}</p><button class="secondary" onclick={() => runConnectivityAction('localNetworkPrivacy')}>{t('connectivity-open-local-network-settings')}</button></div>{/if}<div class="peer-list">{#each snapshot.peers as peer (peer.peerId)}<article><div><strong>{peer.deviceName ?? t('devices-nearby')}</strong><small>{peer.trust === 'trusted' ? t('desktop-verified') : t('desktop-unverified')}</small></div>{#if peer.sasWords}<strong class="sas-words">{peer.sasWords.join(' · ')}</strong><div class="row-actions"><button class="primary" onclick={() => runPeerAction(peer.peerId, 'accept')}>{t('devices-code-matches')}</button><button class="danger" onclick={() => runPeerAction(peer.peerId, 'reject')}>{t('devices-code-does-not-match')}</button></div>{:else if peer.trust === 'unpaired'}<button class="secondary" onclick={() => runPeerAction(peer.peerId, 'pair')}>{t('desktop-verify-device')}</button>{:else if peer.trust === 'trusted'}<div class="grant-list">{#each snapshot.wikis.filter((wiki) => wiki.peerShareable) as wiki (wiki.id)}<label class="check"><input type="checkbox" checked={peer.grantedWikiIds.includes(wiki.id)} onchange={(event) => changeGrant(peer.peerId, wiki.id, event.currentTarget.checked)} />{wiki.name}</label>{/each}</div><button class="text-action" onclick={() => runPeerAction(peer.peerId, 'revoke')}>{t('desktop-revoke-trust')}</button>{/if}</article>{:else}<p class="empty">{t('desktop-no-devices')}</p>{/each}</div></section><section><div class="section-heading"><div><h3>{t('desktop-ai-clients')}</h3><p>{t('desktop-integration-body')}</p></div><button class="text-action" onclick={() => runIntegrationAction({ kind: 'refresh' })}>{t('action-refresh')}</button></div><div class="integration-list">{#each snapshot.integrations?.integrations ?? [] as integration (integration.client)}<article><div><strong>{integrationName(integration.client)}</strong><small>{integrationState(integration.status)}</small></div>{#if integration.status === 'available' || integration.status === 'updateAvailable'}<button class="secondary" onclick={() => runIntegrationAction({ kind: 'connect', client: integration.client })}>{t('integrations-connect')}</button>{:else if integration.status === 'configured'}<button class="text-action" onclick={() => runIntegrationAction({ kind: 'disconnect', client: integration.client })}>{t('integrations-disconnect')}</button>{/if}</article>{/each}</div></section><ConnectionAdvanced lanRuntime={snapshot.lanRuntime} peerId={federationPeerId} address={federationAddress} blockedPublishers={snapshot.blockedPublicPublishers} busy={peerActionId !== null} {t} onpeerid={(value) => { federationPeerId = value; }} onaddress={(value) => { federationAddress = value; }} onadd={() => saveFederationIndex(false)} onremove={() => saveFederationIndex(true)} onunblock={(publisherId) => changePublisherBlock(publisherId, false)} /><details class="advanced-disclosure"><summary>{t('desktop-advanced-details')}</summary><label><span>{t('desktop-address')}</span><input bind:value={manualPeerAddress} maxlength="500" /></label><button class="secondary" onclick={connectManualPeer}>{t('action-connect')}</button></details></div></div>
 {/if}
 
+</div>
+
 {/if}
 {#if closeChoiceRequired}
-  <div class="modal-backdrop" role="presentation">
+  <div class="modal-backdrop close-confirmation-backdrop" role="presentation">
     <div class="close-dialog" role="dialog" aria-modal="true" aria-labelledby="close-title">
       <p class="section-label">{t('desktop-close-eyebrow')}</p><h2 id="close-title">{t('close-dialog-title')}</h2>
       <p>{t('desktop-hide-services')}</p>

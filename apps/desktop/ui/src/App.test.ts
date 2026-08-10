@@ -240,6 +240,7 @@ describe('AirWiki wiki workspace', () => {
     expect(screen.getByText(/no se reemplazará con resultados incompletos/)).toBeInTheDocument();
     await fireEvent.click(screen.getByRole('button', { name: 'Ver archivos y solución' }));
     expect(screen.getByRole('dialog', { name: wiki.name })).toHaveTextContent('El PDF está cifrado');
+    expect(screen.getByRole('dialog', { name: wiki.name })).toHaveTextContent('Guarda una copia sin contraseña en la carpeta de origen');
     expect(screen.queryByText('EncryptedPdf')).not.toBeInTheDocument();
   });
 

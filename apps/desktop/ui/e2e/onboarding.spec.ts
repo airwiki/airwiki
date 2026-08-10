@@ -105,7 +105,14 @@ async function assertVisualMatrix(): Promise<void> {
         await setCssViewport(viewport.width, viewport.height);
         for (let index = 0; index < routes.length; index += 1) {
           await navigateToDestination(index);
+          await browser.execute(() => {
+            const style = document.createElement('style');
+            style.id = 'visual-capture-styles';
+            style.textContent = '.system-status-bar button:hover { color: var(--muted) !important; background: transparent !important; }';
+            document.head.append(style);
+          });
           const result = await browser.checkScreen(`${locale}-${theme}-${routes[index]}`);
+          await browser.execute(() => document.querySelector('#visual-capture-styles')?.remove());
           const mismatch = typeof result === 'number' ? result : result.misMatchPercentage;
           expect(mismatch).toBeLessThanOrEqual(0.1);
         }

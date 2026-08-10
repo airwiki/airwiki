@@ -864,7 +864,7 @@
   <OnboardingFlow {snapshot} bind:locale bind:lanPreference bind:closeBehavior bind:modelLicensesConfirmed {actionBusy} {actionMessage} onprepare={prepareLocalModel} onfinish={() => savePreferences(true)} />
 {:else}
 <div class="shell drive-shell">
-  <main class="drive-main" bind:this={mainScrollRegion}>
+  <main class="drive-main">
     <header class="top-bar">
       <button class="top-brand" onclick={() => select('wikis')} aria-label={t('desktop-nav-wikis')}><span class="brand-mark" aria-hidden="true">A</span><span>AirWiki</span></button>
       <GlobalSearch
@@ -881,7 +881,7 @@
       <div class="top-actions"><button class="secondary" onclick={chooseFolder}><Plus size={17} aria-hidden="true" />{t('desktop-new-wiki')}</button><button class="icon-button" class:active={destination === 'system'} aria-label={t('desktop-nav-system')} onclick={() => select('system')}><Settings2 size={19} aria-hidden="true" /></button></div>
     </header>
 
-    <section class="drive-page" aria-live="polite">
+    <section class="drive-page" aria-live="polite" bind:this={mainScrollRegion}>
       {#key `${destination}:${selectedWikiId ?? ''}:${wikiTab}:${sharedTab}:${systemSection}`}
         <div class="route-page drive-route" data-route={destination}>
           {#if destination === 'home'}

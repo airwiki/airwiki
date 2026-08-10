@@ -74,7 +74,7 @@ async function navigateToDestination(index: number): Promise<void> {
     { timeout: 10_000, timeoutMsg: `destination ${expected} did not become interactive` }
   );
   await browser.waitUntil(
-    () => browser.execute(() => document.querySelector<HTMLElement>('.shell > main')?.scrollTop === 0),
+    () => browser.execute(() => document.querySelector<HTMLElement>('.drive-page')?.scrollTop === 0),
     { timeout: 10_000, timeoutMsg: `destination ${expected} did not start at the top` }
   );
 }
@@ -197,7 +197,7 @@ describe('AirWiki real IPC journey', () => {
     await $('button[aria-label="Settings"]').click();
     await $('#system-preferences').waitForDisplayed();
     const systemShell = await browser.execute(() => {
-      const main = document.querySelector<HTMLElement>('.shell > main');
+      const main = document.querySelector<HTMLElement>('.drive-page');
       const topBar = document.querySelector<HTMLElement>('.top-bar');
       const statusBar = document.querySelector<HTMLElement>('.system-status-bar');
       return {
@@ -217,7 +217,7 @@ describe('AirWiki real IPC journey', () => {
     await $('a[href="#system/updates"]').click();
     await $('#system-updates').waitForDisplayed();
     expect(await $('#system-preferences').isExisting()).toBe(false);
-    expect(await browser.execute(() => document.querySelector<HTMLElement>('.shell > main')?.scrollTop ?? -1)).toBe(0);
+    expect(await browser.execute(() => document.querySelector<HTMLElement>('.drive-page')?.scrollTop ?? -1)).toBe(0);
 
     await $('a[href="#system/preferences"]').click();
     await $('#system-preferences').waitForDisplayed();

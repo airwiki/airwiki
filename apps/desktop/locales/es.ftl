@@ -899,12 +899,36 @@ desktop-wiki-empty-body = Elige una carpeta para crear tu primera wiki.
 desktop-wiki-private = Solo tú
 desktop-wiki-unknown = Wiki no disponible
 desktop-home-attention = Necesita atención
-desktop-home-attention-body = Revisiones y problemas reales que requieren una decisión.
+desktop-home-attention-body = Acciones que AirWiki no puede completar de forma segura sin ti.
 desktop-home-clear-title = Todo está al día
 desktop-home-clear-body = No hay revisiones ni problemas pendientes.
 desktop-home-your-wikis = Tus wikis
 desktop-view-all = Ver todas
 desktop-wiki-review-count = { $count } pendientes de revisión
+desktop-attention-see-actions = Ver qué hacer
+desktop-attention-title = Qué necesita de ti
+desktop-attention-body = AirWiki mantiene el contenido en un estado seguro hasta que completes estas acciones.
+desktop-attention-files-summary = { $count ->
+    [one] 1 archivo necesita corrección
+   *[other] { $count } archivos necesitan corrección
+}
+desktop-attention-files-title = { $count ->
+    [one] Corrige 1 archivo de la carpeta
+   *[other] Corrige { $count } archivos de la carpeta
+}
+desktop-attention-files-body = AirWiki no pudo incluir estos archivos. El contenido ya publicado no se reemplazará con resultados incompletos.
+desktop-attention-files-action = Ver archivos y solución
+desktop-attention-maintenance-summary = Comprobar contenido publicado
+desktop-attention-maintenance-title = Comprueba el contenido publicado
+desktop-attention-maintenance-body = AirWiki necesita volver a comparar la carpeta de origen con la wiki publicada. No resolverá diferencias ambiguas por su cuenta.
+desktop-attention-repair-body = AirWiki encontró una diferencia entre sus registros aprobados y la wiki publicada. Revisa exactamente qué cambiaría antes de confirmar.
+desktop-attention-check-source = Comprobar ahora
+desktop-attention-reviews-title = { $count ->
+    [one] Revisa 1 propuesta
+   *[other] Revisa { $count } propuestas
+}
+desktop-attention-reviews-body = La IA local preparó cambios basados en la fuente. No se publicarán hasta que revises la evidencia y decidas.
+desktop-attention-reviews-action = Revisar propuestas
 desktop-wiki-detail-body = { $published } páginas publicadas
 desktop-share-action = Compartir
 desktop-connections = Conexiones

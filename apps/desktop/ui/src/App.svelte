@@ -10,7 +10,7 @@
   import Sparkles from '@lucide/svelte/icons/sparkles';
   import { listen } from '@tauri-apps/api/event';
   import { onMount, tick } from 'svelte';
-  import { addFederationIndex, addWiki, approveReview, browsePublicWiki, cancelModelInstall, checkUpdates, configureFirewall, confirmPairing, connect, dialPeer, downloadUpdate, executeGuidedWikiRepair, hideToTray, installModels, installUpdate, loadReviewEvidence, loadWikiBundle, loadWikiPage, manageIntegration, openExternalLink, openSystemDestination, pairPeer, pickWikiFolder, prepareGuidedWikiRepair, quitCompletely, reanalyzeReview, refreshAutostart, refreshConnectivity, refreshWikiHealth, rejectReview, relinkWiki, removeFederationIndex, rescanWiki, revokePeer, searchKnowledge, setAutostart, setPublicPublisherBlocked, setWikiGrant, updatePreferences, updatePublicWikiProfile, updateWikiPolicy, type AppSnapshot, type CloseBehavior, type EnrichmentDraft, type FolderSelection, type IntegrationActionInput, type IntegrationClient, type KnowledgePageInput, type LanPreference, type LocalePreference, type ReviewSummary, type SearchHitSummary, type SystemDestination, type ThemePreference, type WikiPolicyInput, type WikiSummary } from './api';
+  import { addFederationIndex, addWiki, approveReview, browsePublicWiki, cancelModelInstall, checkUpdates, configureFirewall, confirmPairing, connect, dialPeer, downloadUpdate, executeGuidedWikiRepair, hideToTray, installModels, installUpdate, loadReviewEvidence, loadWikiBundle, loadWikiPage, manageIntegration, openExternalLink, openSystemDestination, pairPeer, pickWikiFolder, prepareGuidedWikiRepair, quitCompletely, reanalyzeReview, refreshAutostart, refreshConnectivity, refreshWikiHealth, rejectReview, relinkWiki, removeFederationIndex, rescanWiki, revokePeer, searchKnowledge, setAutostart, setPublicPublisherBlocked, setWikiGrant, updatePreferences, updatePublicWikiProfile, updateWikiPolicy, type AppSnapshot, type CloseBehavior, type EnrichmentDraft, type FolderSelection, type IntegrationActionInput, type IntegrationClient, type KnowledgePageInput, type LanPreference, type LocalePreference, type ReviewSummary, type SearchHitSummary, type SourceIssueSummary, type SystemDestination, type ThemePreference, type WikiPolicyInput, type WikiSummary } from './api';
   import KnowledgeGraph from './KnowledgeGraph.svelte';
   import ConnectionAdvanced from './ConnectionAdvanced.svelte';
   import GlobalSearch from './GlobalSearch.svelte';
@@ -182,10 +182,42 @@
     const rightAttention = Number(right.failedCount > 0 || right.maintenanceRequired || right.needsReviewCount > 0);
     return rightAttention - leftAttention || left.name.localeCompare(right.name, resolveLocale(locale));
   });
-  $: attentionWikis = orderedWikis.filter((wiki) => wiki.failedCount > 0 || wiki.maintenanceRequired);
+  $: attentionWikis = orderedWikis.filter((wiki) =>
+    wiki.failedCount > 0
+    || wiki.maintenanceRequired
+    || wiki.needsReviewCount > 0
+    || (snapshot?.sourceIssues.some((issue) => issue.wikiId === wiki.id) ?? false)
+  );
   $: selectedWiki = snapshot?.wikis.find((wiki) => wiki.id === selectedWikiId) ?? null;
   $: selectedWikiReviews = snapshot?.reviews.filter((review) => review.wikiId === selectedWikiId) ?? [];
   $: sharedWikis = orderedWikis.filter((wiki) => wiki.peerShareable || wiki.allowExternalAi || wiki.internetPublic);
+
+  const sourceIssueCodes: Record<string, string> = {
+    FileTooLarge: 'file-too-large',
+    Unreadable: 'unreadable',
+    InvalidUtf8: 'invalid-utf8',
+    InvalidPdf: 'invalid-pdf',
+    EncryptedPdf: 'encrypted-pdf',
+    TooManyPages: 'too-many-pages',
+    NoTextLayer: 'no-text-layer',
+    TooManyCharacters: 'too-many-characters',
+    ProcessingFailed: 'processing-failed'
+  };
+
+  function sourceIssueLabel(issue: SourceIssueSummary): string {
+    const code = sourceIssueCodes[issue.code];
+    return t(code ? `review-issue-cause-${code}` : 'review-issue-cause-unknown');
+  }
+
+  function wikiAttentionSummary(wiki: WikiSummary): string {
+    const summaries: string[] = [];
+    const issueCount = snapshot?.sourceIssues.filter((issue) => issue.wikiId === wiki.id).length ?? 0;
+    const failedCount = Math.max(issueCount, wiki.failedCount);
+    if (failedCount > 0) summaries.push(t('desktop-attention-files-summary', { count: failedCount }));
+    if (wiki.maintenanceRequired) summaries.push(t('desktop-attention-maintenance-summary'));
+    if (wiki.needsReviewCount > 0) summaries.push(t('desktop-wiki-review-count', { count: wiki.needsReviewCount }));
+    return summaries.join(' · ');
+  }
 
   $: if (typeof document !== 'undefined') {
     document.documentElement.lang = resolveLocale(locale);
@@ -1012,17 +1044,14 @@
 
             <section class="home-section" aria-labelledby="attention-title">
               <div class="section-heading"><div><h2 id="attention-title">{t('desktop-home-attention')}</h2><p>{t('desktop-home-attention-body')}</p></div><button class="text-action" onclick={refreshHealth} disabled={wikiHealthRequestId !== null}>{wikiHealthRequestId ? t('home-wiki-checking') : t('updates-check-now')}</button></div>
-              {#if attentionWikis.length || snapshot.sourceIssues.length}
+              {#if attentionWikis.length}
                 <div class="attention-list">
                   {#each attentionWikis as wiki (wiki.id)}
-                    <button onclick={() => openWiki(wiki.id, wiki.needsReviewCount > 0 ? 'pending' : 'content')}>
+                    <button onclick={() => openWiki(wiki.id, !wiki.maintenanceRequired && wiki.failedCount === 0 && wiki.needsReviewCount > 0 ? 'pending' : 'content')}>
                       <span class:warning={wiki.failedCount > 0 || wiki.maintenanceRequired} class="attention-icon"><AlertTriangle size={18} aria-hidden="true" /></span>
-                      <span><strong>{wiki.name}</strong><small>{wiki.needsReviewCount > 0 ? t('desktop-wiki-review-count', { count: wiki.needsReviewCount }) : t('status-needs-attention')}</small></span>
-                      <span>{t('action-open')}</span>
+                      <span><strong>{wiki.name}</strong><small>{wikiAttentionSummary(wiki)}</small></span>
+                      <span>{t('desktop-attention-see-actions')}</span>
                     </button>
-                  {/each}
-                  {#each snapshot.sourceIssues as issue (`${issue.wikiId}:${issue.sourceName}:${issue.code}`)}
-                    <button onclick={() => openWiki(issue.wikiId)}><span class="attention-icon warning"><AlertTriangle size={18} aria-hidden="true" /></span><span><strong>{issue.wikiName}</strong><small>{issue.sourceName} · {issue.code}</small></span><span>{t('action-open')}</span></button>
                   {/each}
                 </div>
               {:else}
@@ -1048,12 +1077,11 @@
               <div><h1>{t('desktop-page-wikis-title')}</h1><p>{t('desktop-page-wikis-body')}</p></div>
             </header>
             <WikiTable wikis={orderedWikis} scans={snapshot.wikiScans} {t} onopen={openWiki} />
-            {#if attentionWikis.length || snapshot.sourceIssues.length}
+            {#if attentionWikis.length}
               <section class="workspace-section" aria-labelledby="attention-title">
                 <div class="section-heading"><div><h2 id="attention-title">{t('desktop-home-attention')}</h2><p>{t('desktop-home-attention-body')}</p></div><button class="text-action" onclick={refreshHealth} disabled={wikiHealthRequestId !== null}>{wikiHealthRequestId ? t('home-wiki-checking') : t('updates-check-now')}</button></div>
                 <div class="attention-list">
-                  {#each attentionWikis as wiki (wiki.id)}<button onclick={() => openWiki(wiki.id, wiki.needsReviewCount > 0 ? 'pending' : 'content')}><span class:warning={wiki.failedCount > 0 || wiki.maintenanceRequired} class="attention-icon"><AlertTriangle size={18} aria-hidden="true" /></span><span><strong>{wiki.name}</strong><small>{wiki.needsReviewCount > 0 ? t('desktop-wiki-review-count', { count: wiki.needsReviewCount }) : t('status-needs-attention')}</small></span><span>{t('action-open')}</span></button>{/each}
-                  {#each snapshot.sourceIssues as issue (`${issue.wikiId}:${issue.sourceName}:${issue.code}`)}<button onclick={() => openWiki(issue.wikiId)}><span class="attention-icon warning"><AlertTriangle size={18} aria-hidden="true" /></span><span><strong>{issue.wikiName}</strong><small>{issue.sourceName} · {issue.code}</small></span><span>{t('action-open')}</span></button>{/each}
+                  {#each attentionWikis as wiki (wiki.id)}<button onclick={() => openWiki(wiki.id, !wiki.maintenanceRequired && wiki.failedCount === 0 && wiki.needsReviewCount > 0 ? 'pending' : 'content')}><span class:warning={wiki.failedCount > 0 || wiki.maintenanceRequired} class="attention-icon"><AlertTriangle size={18} aria-hidden="true" /></span><span><strong>{wiki.name}</strong><small>{wikiAttentionSummary(wiki)}</small></span><span>{t('desktop-attention-see-actions')}</span></button>{/each}
                 </div>
                 {#if snapshot.wikiHealth?.attentionWikiId}
                   <div class="repair-summary">
@@ -1072,6 +1100,7 @@
               {#if snapshot.publicBrowse}<div class="public-browse-detail"><div class="section-heading"><div><h3>{snapshot.publicBrowse.wikiName ?? t('desktop-public-origin-missing')}</h3><p>{snapshot.publicBrowse.description ?? ''}</p></div>{#if snapshot.publicBrowse.publisherId}<button class="danger" onclick={() => changePublisherBlock(snapshot!.publicBrowse!.publisherId!, true)}>{t('search-public-block-publisher')}</button>{/if}</div>{#each snapshot.publicBrowse.concepts as concept (`${concept.conceptId}:${concept.sourceRevision}`)}<article><small>{concept.conceptType} · {concept.language}</small><h3>{concept.title}</h3><p>{concept.summary}</p></article>{/each}{#if snapshot.publicBrowse.nextCursor}<button class="secondary" onclick={loadMorePublicConcepts}>{t('search-public-browse-more')}</button>{/if}</div>{/if}
             </section>
           {:else if destination === 'wikis' && selectedWiki}
+            {@const selectedWikiIssues = snapshot.sourceIssues.filter((issue) => issue.wikiId === selectedWiki.id)}
             <header class="page-heading wiki-heading">
               <div><nav class="breadcrumb" aria-label={t('desktop-nav-wikis')}><button onclick={() => { selectedWikiId = null; pushHash('#wikis'); }}>{t('desktop-nav-wikis')}</button><span aria-hidden="true">/</span><span>{selectedWiki.name}</span></nav><h1>{selectedWiki.name}</h1><p>{t('desktop-wiki-detail-body', { published: selectedWiki.publishedCount })}</p></div>
               <div class="heading-actions"><button class="secondary" onclick={() => scanWiki(selectedWiki.id)} disabled={wikiScanState(selectedWiki.id) !== null}><RefreshCw size={16} aria-hidden="true" />{t('action-refresh')}</button><button class="primary" onclick={() => editWiki(selectedWiki)}>{t('desktop-share-action')}</button></div>
@@ -1083,6 +1112,43 @@
               <small>{wikiPeers(selectedWiki.id).length > 0 ? wikiPeers(selectedWiki.id).join(' · ') : t('desktop-wiki-no-specific-access')}</small>
               <button class="text-action" onclick={() => editWiki(selectedWiki)}>{t('desktop-manage-access')}</button>
             </section>
+
+            {#if selectedWikiIssues.length > 0 || selectedWiki.failedCount > 0 || selectedWiki.maintenanceRequired || selectedWiki.needsReviewCount > 0}
+              <section class="wiki-interventions" aria-labelledby="wiki-interventions-title">
+                <div class="wiki-interventions-heading">
+                  <AlertTriangle size={19} aria-hidden="true" />
+                  <div><h2 id="wiki-interventions-title">{t('desktop-attention-title')}</h2><p>{t('desktop-attention-body')}</p></div>
+                </div>
+                <div class="wiki-intervention-list">
+                  {#if selectedWikiIssues.length > 0 || selectedWiki.failedCount > 0}
+                    {@const affectedFileCount = Math.max(selectedWikiIssues.length, selectedWiki.failedCount)}
+                    <article>
+                      <div><strong>{t('desktop-attention-files-title', { count: affectedFileCount })}</strong><p>{t('desktop-attention-files-body')}</p></div>
+                      <button class="secondary" onclick={() => showWikiDetails(selectedWiki.id)}>{t('desktop-attention-files-action')}</button>
+                    </article>
+                  {/if}
+                  {#if selectedWiki.maintenanceRequired}
+                    <article>
+                      <div><strong>{t('desktop-attention-maintenance-title')}</strong><p>{snapshot.wikiHealth?.attentionWikiId === selectedWiki.id ? t('desktop-attention-repair-body') : t('desktop-attention-maintenance-body')}</p></div>
+                      {#if snapshot.wikiHealth?.attentionWikiId === selectedWiki.id}
+                        <button class="secondary" onclick={() => prepareRepair(selectedWiki.id)} disabled={guidedRepairRequestId !== null}>{t('knowledge-repair-review-action')}</button>
+                      {:else}
+                        <button class="secondary" onclick={() => scanWiki(selectedWiki.id)} disabled={wikiScanState(selectedWiki.id) !== null}>{t('desktop-attention-check-source')}</button>
+                      {/if}
+                    </article>
+                  {/if}
+                  {#if selectedWiki.needsReviewCount > 0}
+                    <article>
+                      <div><strong>{t('desktop-attention-reviews-title', { count: selectedWiki.needsReviewCount })}</strong><p>{t('desktop-attention-reviews-body')}</p></div>
+                      <button class="secondary" onclick={() => openWikiTab('pending')}>{t('desktop-attention-reviews-action')}</button>
+                    </article>
+                  {/if}
+                </div>
+                {#if snapshot.guidedRepair?.wikiId === selectedWiki.id && snapshot.guidedRepair.status === 'prepared'}
+                  <div class="repair-preview"><ul>{#each snapshot.guidedRepair.files as file, fileIndex (fileIndex)}<li><code>{file.page.kind}</code><span>{repairChangeLabel(file.change)}</span></li>{/each}</ul><label class="check"><input type="checkbox" bind:checked={guidedRepairConfirmed} />{t('knowledge-repair-confirm-warning')}</label><button class="danger" onclick={() => executeRepair(snapshot!.guidedRepair!.wikiId)} disabled={!guidedRepairConfirmed}>{t('knowledge-repair-confirm-action')}</button></div>
+                {/if}
+              </section>
+            {/if}
 
             <div class="content-tabs-bar">
               <div class="content-tabs" role="tablist" aria-label={t('desktop-wiki-sections')}>
@@ -1157,7 +1223,7 @@
 {#if detailsWikiId}
   {@const detailsWiki = snapshot.wikis.find((wiki) => wiki.id === detailsWikiId)}
   {@const detailsIssues = snapshot.sourceIssues.filter((issue) => issue.wikiId === detailsWikiId)}
-  <div class="drawer-backdrop" role="presentation" onclick={(event) => { if (event.currentTarget === event.target) { detailsWikiId = null; relinkSelection = null; } }}><div class="side-drawer details-drawer" role="dialog" aria-modal="true" aria-labelledby="details-title"><header><div><p class="section-label">{t('desktop-details')}</p><h2 id="details-title">{detailsWiki?.name}</h2></div><button class="icon-button" aria-label={t('action-close')} onclick={() => { detailsWikiId = null; relinkSelection = null; }}>×</button></header><p>{t('desktop-wiki-details-body')}</p>{#if detailsWiki}<dl class="wiki-details-list"><div><dt>{t('desktop-wiki-source-health')}</dt><dd class:warning-text={detailsWiki.maintenanceRequired || detailsWiki.failedCount > 0}>{detailsWiki.maintenanceRequired || detailsWiki.failedCount > 0 ? t('status-needs-attention') : t('desktop-wiki-health-ready')}</dd></div><div><dt>{t('desktop-wiki-documents')}</dt><dd>{detailsWiki.documentCount}</dd></div><div><dt>{t('desktop-wiki-published')}</dt><dd>{detailsWiki.publishedCount}</dd></div><div><dt>{t('desktop-wiki-pending')}</dt><dd>{detailsWiki.needsReviewCount}</dd></div><div><dt>{t('desktop-wiki-failed')}</dt><dd>{detailsWiki.failedCount}</dd></div></dl>{/if}<section class="details-section"><div><h3>{t('desktop-wiki-source-issues')}</h3><p>{t('desktop-folder-privacy')}</p></div>{#if detailsIssues.length > 0}<ul class="source-issue-list">{#each detailsIssues as issue (`${issue.sourceName}:${issue.code}`)}<li><AlertTriangle size={16} aria-hidden="true" /><span><strong>{issue.sourceName}</strong><small>{t('status-needs-attention')}</small></span></li>{/each}</ul>{:else if detailsWiki?.maintenanceRequired}<div class="inline-empty compact warning-empty"><AlertTriangle size={18} aria-hidden="true" /><span><strong>{t('desktop-wiki-maintenance-required')}</strong><small>{t('desktop-wiki-maintenance-required-body')}</small></span></div>{:else}<div class="inline-empty compact"><CheckCircle2 size={18} aria-hidden="true" /><span><strong>{t('desktop-wiki-no-source-issues')}</strong></span></div>{/if}<div class="drawer-actions"><button class="secondary" onclick={() => detailsWiki && scanWiki(detailsWiki.id)} disabled={!detailsWiki || wikiScanState(detailsWiki.id) !== null}><RefreshCw size={16} aria-hidden="true" />{t('action-refresh')}</button><button class="secondary" onclick={chooseRelinkFolder}>{t('desktop-wiki-relink')}</button></div>{#if relinkSelection}<div class="relink-confirmation"><p>{relinkSelection.displayPath}</p><button class="primary" onclick={applyRelink} disabled={actionBusy}>{t('action-confirm')}</button></div>{/if}</section>{#if detailsWiki}<details class="advanced-disclosure"><summary>{t('desktop-advanced-details')}</summary><dl><div><dt>{t('desktop-wiki-id')}</dt><dd><code>{detailsWiki.id}</code></dd></div></dl></details>{/if}</div></div>
+  <div class="drawer-backdrop" role="presentation" onclick={(event) => { if (event.currentTarget === event.target) { detailsWikiId = null; relinkSelection = null; } }}><div class="side-drawer details-drawer" role="dialog" aria-modal="true" aria-labelledby="details-title"><header><div><p class="section-label">{t('desktop-details')}</p><h2 id="details-title">{detailsWiki?.name}</h2></div><button class="icon-button" aria-label={t('action-close')} onclick={() => { detailsWikiId = null; relinkSelection = null; }}>×</button></header><p>{t('desktop-wiki-details-body')}</p>{#if detailsWiki}<dl class="wiki-details-list"><div><dt>{t('desktop-wiki-source-health')}</dt><dd class:warning-text={detailsWiki.maintenanceRequired || detailsWiki.failedCount > 0}>{detailsWiki.maintenanceRequired || detailsWiki.failedCount > 0 ? t('status-needs-attention') : t('desktop-wiki-health-ready')}</dd></div><div><dt>{t('desktop-wiki-documents')}</dt><dd>{detailsWiki.documentCount}</dd></div><div><dt>{t('desktop-wiki-published')}</dt><dd>{detailsWiki.publishedCount}</dd></div><div><dt>{t('desktop-wiki-pending')}</dt><dd>{detailsWiki.needsReviewCount}</dd></div><div><dt>{t('desktop-wiki-failed')}</dt><dd>{detailsWiki.failedCount}</dd></div></dl>{/if}<section class="details-section"><div><h3>{t('desktop-wiki-source-issues')}</h3><p>{t('desktop-folder-privacy')}</p></div>{#if detailsIssues.length > 0}<ul class="source-issue-list">{#each detailsIssues as issue (`${issue.sourceName}:${issue.code}`)}<li><AlertTriangle size={16} aria-hidden="true" /><span><strong>{issue.sourceName}</strong><small>{sourceIssueLabel(issue)}</small></span></li>{/each}</ul>{:else if detailsWiki?.maintenanceRequired}<div class="inline-empty compact warning-empty"><AlertTriangle size={18} aria-hidden="true" /><span><strong>{t('desktop-wiki-maintenance-required')}</strong><small>{t('desktop-wiki-maintenance-required-body')}</small></span></div>{:else}<div class="inline-empty compact"><CheckCircle2 size={18} aria-hidden="true" /><span><strong>{t('desktop-wiki-no-source-issues')}</strong></span></div>{/if}<div class="drawer-actions"><button class="secondary" onclick={() => detailsWiki && scanWiki(detailsWiki.id)} disabled={!detailsWiki || wikiScanState(detailsWiki.id) !== null}><RefreshCw size={16} aria-hidden="true" />{t('action-refresh')}</button><button class="secondary" onclick={chooseRelinkFolder}>{t('desktop-wiki-relink')}</button></div>{#if relinkSelection}<div class="relink-confirmation"><p>{relinkSelection.displayPath}</p><button class="primary" onclick={applyRelink} disabled={actionBusy}>{t('action-confirm')}</button></div>{/if}</section>{#if detailsWiki}<details class="advanced-disclosure"><summary>{t('desktop-advanced-details')}</summary><dl><div><dt>{t('desktop-wiki-id')}</dt><dd><code>{detailsWiki.id}</code></dd></div></dl></details>{/if}</div></div>
 {/if}
 
 {#if editingWikiId}

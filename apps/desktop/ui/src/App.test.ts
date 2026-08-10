@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/svelte';
+import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/svelte';
 import axe from 'axe-core';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import App from './App.svelte';
@@ -6,6 +6,7 @@ import { configureFirewall, loadWikiBundle, loadWikiPage, openSystemDestination,
 import { readySnapshot } from './test/fixtures';
 
 let snapshot = readySnapshot();
+const tauriListeners = new Map<string, (event: unknown) => void>();
 const accessibilityCases = (['es', 'en'] as const).flatMap((locale) =>
   (['light', 'dark'] as const).flatMap((theme) =>
     (['wikis', 'search', 'system/models', 'system/preferences', 'system/updates'] as const)
@@ -31,7 +32,12 @@ vi.mock('./api', async (importOriginal) => {
   };
 });
 
-vi.mock('@tauri-apps/api/event', () => ({ listen: vi.fn(async () => () => undefined) }));
+vi.mock('@tauri-apps/api/event', () => ({
+  listen: vi.fn(async (event: string, handler: (event: unknown) => void) => {
+    tauriListeners.set(event, handler);
+    return () => { tauriListeners.delete(event); };
+  })
+}));
 
 describe('AirWiki wiki workspace', () => {
   afterEach(() => {
@@ -40,11 +46,13 @@ describe('AirWiki wiki workspace', () => {
     delete document.documentElement.dataset.theme;
     delete document.documentElement.dataset.platform;
     document.documentElement.style.colorScheme = '';
+    Reflect.deleteProperty(window, '__TAURI_INTERNALS__');
   });
 
   beforeEach(() => {
     window.location.hash = '';
     snapshot = readySnapshot();
+    tauriListeners.clear();
   });
 
   it('renders one wiki workspace with global search and no redundant sidebar', async () => {
@@ -104,6 +112,37 @@ describe('AirWiki wiki workspace', () => {
     expect(advancedSummary).toHaveFocus();
     await fireEvent.keyDown(window, { key: 'Tab' });
     expect(closeButton).toHaveFocus();
+  });
+
+  it('moves the focus trap to the close confirmation above an open drawer', async () => {
+    Object.defineProperty(window, '__TAURI_INTERNALS__', { configurable: true, value: {} });
+    render(App);
+    await fireEvent.click(await screen.findByRole('button', { name: 'Red local: Opcional · Desactivado' }));
+    await waitFor(() => expect(tauriListeners.has('close-choice-required')).toBe(true));
+
+    await act(() => {
+      tauriListeners.get('close-choice-required')?.({ payload: null });
+    });
+
+    const hideButton = await screen.findByRole('button', { name: 'Ocultar en bandeja' });
+    await waitFor(() => expect(hideButton).toHaveFocus());
+    expect(screen.getByRole('dialog', { name: 'Conexiones', hidden: true })).toHaveAttribute('aria-modal', 'true');
+    expect(hideButton.closest('.close-confirmation-backdrop')).not.toBeNull();
+  });
+
+  it('restores focus after cancelling a standalone close confirmation', async () => {
+    Object.defineProperty(window, '__TAURI_INTERNALS__', { configurable: true, value: {} });
+    render(App);
+    const settingsButton = await screen.findByRole('button', { name: 'Configuración' });
+    settingsButton.focus();
+    await waitFor(() => expect(tauriListeners.has('close-choice-required')).toBe(true));
+
+    await act(() => {
+      tauriListeners.get('close-choice-required')?.({ payload: null });
+    });
+    await fireEvent.click(await screen.findByRole('button', { name: 'Cancelar' }));
+
+    await waitFor(() => expect(settingsButton).toHaveFocus());
   });
 
   it('opens a wiki as an independent page and requests its OKF bundle', async () => {

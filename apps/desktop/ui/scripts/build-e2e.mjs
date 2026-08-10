@@ -4,8 +4,22 @@ import { dirname, resolve } from 'node:path';
 
 const uiRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const desktopRoot = resolve(uiRoot, '..');
+const svelteCheckPackage = fileURLToPath(import.meta.resolve('svelte-check/package.json'));
+const svelteCheckCli = resolve(dirname(svelteCheckPackage), 'bin', 'svelte-check');
+const vitePackage = fileURLToPath(import.meta.resolve('vite/package.json'));
+const viteCli = resolve(dirname(vitePackage), 'bin', 'vite.js');
 const tauriEntry = fileURLToPath(import.meta.resolve('@tauri-apps/cli'));
 const tauriCli = resolve(dirname(tauriEntry), 'tauri.js');
+
+function runNode(arguments_, cwd) {
+  const result = spawnSync(process.execPath, arguments_, { cwd, stdio: 'inherit' });
+  if (result.error) throw result.error;
+  if (result.status !== 0) process.exit(result.status ?? 1);
+}
+
+runNode([svelteCheckCli, '--tsconfig', './tsconfig.json'], uiRoot);
+runNode([viteCli, 'build', '--mode', 'e2e'], uiRoot);
+
 const arguments_ = [
   tauriCli,
   'build',

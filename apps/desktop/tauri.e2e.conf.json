@@ -1,6 +1,6 @@
 {
   "build": {
-    "beforeBuildCommand": "pnpm build --mode e2e"
+    "beforeBuildCommand": null
   },
   "app": {
     "security": {

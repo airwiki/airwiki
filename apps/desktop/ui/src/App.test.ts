@@ -2,7 +2,7 @@ import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/sv
 import axe from 'axe-core';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import App from './App.svelte';
-import { loadWikiBundle, loadWikiPage, prepareGuidedWikiRepair } from './api';
+import { loadWikiBundle, loadWikiPage, prepareGuidedWikiRepair, updatePreferences } from './api';
 import { readySnapshot } from './test/fixtures';
 
 let snapshot = readySnapshot();
@@ -22,6 +22,7 @@ vi.mock('./api', async (importOriginal) => {
     refreshConnectivity: vi.fn(async () => undefined),
     refreshWikiHealth: vi.fn(async () => undefined),
     prepareGuidedWikiRepair: vi.fn(async () => 'repair-request'),
+    updatePreferences: vi.fn(async () => undefined),
     manageIntegration: vi.fn(async () => undefined),
     loadWikiBundle: vi.fn(async () => undefined),
     loadWikiPage: vi.fn(async () => undefined)
@@ -197,6 +198,17 @@ describe('AirWiki wiki workspace', () => {
     await fireEvent.click(screen.getByRole('link', { name: 'IA local' }));
     expect(window.location.hash).toBe('#system/models');
     await waitFor(() => expect(scrollTo).toHaveBeenCalledWith({ top: 0, left: 0, behavior: 'auto' }));
+  });
+
+  it('lets users change the local-network preference after onboarding', async () => {
+    window.location.hash = '#system/preferences';
+    render(App);
+
+    const networkPreference = await screen.findByRole('combobox', { name: 'Red local' });
+    await fireEvent.change(networkPreference, { target: { value: 'enabled' } });
+    await fireEvent.click(screen.getByRole('button', { name: 'Guardar preferencias' }));
+
+    expect(updatePreferences).toHaveBeenCalledWith(expect.objectContaining({ lanPreference: 'enabled' }));
   });
 
   it('redirects previous top-level routes without retaining the old UI', async () => {

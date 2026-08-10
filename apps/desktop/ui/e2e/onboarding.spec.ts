@@ -160,19 +160,34 @@ describe('AirWiki real IPC journey', () => {
     ]) {
       let physicalWidth = Math.ceil(viewport.width * devicePixelRatio);
       const physicalHeight = Math.ceil(viewport.height * devicePixelRatio);
-      let dimensions: { clientWidth: number; scrollWidth: number } | undefined;
+      let dimensions: {
+        clientWidth: number;
+        scrollWidth: number;
+        statusHeight: number;
+        statusBottom: number;
+        viewportHeight: number;
+      } | undefined;
       for (let attempt = 0; attempt < 3; attempt += 1) {
         await browser.setWindowSize(physicalWidth, physicalHeight);
-        dimensions = await browser.execute(() => ({
-          clientWidth: document.documentElement.clientWidth,
-          scrollWidth: document.documentElement.scrollWidth
-        }));
+        dimensions = await browser.execute(() => {
+          const statusBar = document.querySelector<HTMLElement>('.system-status-bar');
+          const statusRect = statusBar?.getBoundingClientRect();
+          return {
+            clientWidth: document.documentElement.clientWidth,
+            scrollWidth: document.documentElement.scrollWidth,
+            statusHeight: statusRect?.height ?? 0,
+            statusBottom: statusRect?.bottom ?? Number.POSITIVE_INFINITY,
+            viewportHeight: window.innerHeight
+          };
+        });
         if (dimensions.clientWidth >= viewport.width) break;
         physicalWidth += Math.ceil((viewport.width - dimensions.clientWidth) * devicePixelRatio);
       }
       dimensions = required(dimensions, 'responsive viewport dimensions');
       expect(dimensions.clientWidth).toBeGreaterThanOrEqual(viewport.width);
       expect(dimensions.scrollWidth).toBeLessThanOrEqual(dimensions.clientWidth);
+      expect(dimensions.statusHeight).toBeGreaterThan(0);
+      expect(dimensions.statusBottom).toBeLessThanOrEqual(dimensions.viewportHeight);
     }
 
     await $('button[aria-label="Settings"]').click();

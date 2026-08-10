@@ -405,6 +405,7 @@ button:active:not(:disabled) { transform: scale(.985); }
 .search-state { display: flex; align-items: center; gap: 9px; min-height: 42px; padding: 10px 0; color: var(--muted); font-size: 13px; }
 .search-state.working { color: var(--violet); }
 .search-state.error { color: var(--coral); }
+.search-state.warning { color: var(--amber); }
 .action-message { position: fixed; z-index: 15; right: 24px; bottom: 24px; max-width: 440px; margin: 0; padding: 11px 14px; color: var(--strong); background: var(--slate); border: 1px solid var(--line); border-radius: var(--control-radius); box-shadow: 0 8px 30px #0003; }
 .action-message.success { color: var(--verify); border-color: color-mix(in srgb, var(--verify) 45%, var(--line)); }
 .action-message.progress { color: var(--violet); border-color: color-mix(in srgb, var(--violet) 45%, var(--line)); }

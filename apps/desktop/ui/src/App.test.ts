@@ -292,6 +292,16 @@ describe('AirWiki wiki workspace', () => {
     expect(screen.queryByText('Consultando los equipos disponibles…')).not.toBeInTheDocument();
   });
 
+  it('does not present an unavailable public search as a conclusive empty result', async () => {
+    snapshot.search = { requestId: 'offline-public-search', status: 'complete', coverage: 'publicNetworkOffline', hits: [] };
+    window.location.hash = '#search';
+    render(App);
+
+    expect(await screen.findByText('No se pudieron consultar todas las fuentes')).toBeInTheDocument();
+    expect(screen.getByText('La red pública está offline. La búsqueda local y en equipos emparejados sigue disponible.')).toBeInTheDocument();
+    expect(screen.queryByText('No encontramos evidencia coincidente')).not.toBeInTheDocument();
+  });
+
   it('keeps graph view selected when opening a graph node', async () => {
     const wiki = snapshot.wikis[0];
     snapshot.knowledge = {

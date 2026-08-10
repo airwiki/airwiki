@@ -654,12 +654,10 @@ search-origin-remote = Desde { $device }
 search-origin-remote-fallback = Desde otro equipo
 search-local-unavailable = Este resultado cambió. Vuelve a buscar antes de abrir su página publicada.
 search-coverage-federation-disabled = No se consultaron otros equipos emparejados porque la conexión local está desactivada.
-search-coverage-offline-devices = { $count ->
-    [one] Otro equipo no respondió. Estos resultados pueden estar incompletos.
-   *[other] { $count } equipos no respondieron. Estos resultados pueden estar incompletos.
-}
+search-coverage-offline-devices = Al menos otro equipo no respondió. Estos resultados pueden estar incompletos.
 search-coverage-public-offline = La red pública está offline. La búsqueda local y en equipos emparejados sigue disponible.
 search-coverage-partial = Una parte de la búsqueda no pudo completarse. Se muestran los resultados disponibles.
+search-coverage-incomplete-title = No se pudieron consultar todas las fuentes
 
 settings-title = Configuración
 settings-subtitle = Administra el idioma, la disponibilidad en segundo plano, la IA local y las actualizaciones firmadas.

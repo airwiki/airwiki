@@ -73,6 +73,19 @@ describe('AirWiki wiki workspace', () => {
     expect(screen.getAllByText('Detalles avanzados')).toHaveLength(1);
   });
 
+  it('keeps modal focus inside connections when advanced disclosures are closed', async () => {
+    render(App);
+    await fireEvent.click(await screen.findByRole('button', { name: 'Red local: Opcional · Desactivado' }));
+
+    const closeButton = screen.getByRole('button', { name: 'Cerrar' });
+    const advancedSummary = screen.getByText('Detalles avanzados');
+    await waitFor(() => expect(closeButton).toHaveFocus());
+    await fireEvent.keyDown(window, { key: 'Tab', shiftKey: true });
+    expect(advancedSummary).toHaveFocus();
+    await fireEvent.keyDown(window, { key: 'Tab' });
+    expect(closeButton).toHaveFocus();
+  });
+
   it('opens a wiki as an independent page and requests its OKF bundle', async () => {
     render(App);
     const wikiButton = await screen.findByRole('row', { name: /Atlas 2 publicados/ });

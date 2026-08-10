@@ -459,7 +459,7 @@ button:active:not(:disabled) { transform: scale(.985); }
 .create-wiki-dialog h2 { font: 650 25px system-ui; }
 .create-wiki-dialog p { margin: 0; color: var(--muted); overflow-wrap: anywhere; }
 .create-wiki-dialog label, .side-drawer > label, .review-drawer label, .connections-drawer label:not(.check) { display: grid; gap: 6px; color: var(--muted); font-size: 12px; }
-.create-wiki-dialog input, .side-drawer input, .side-drawer textarea { width: 100%; padding: 10px 11px; color: var(--strong); background: var(--ink); border: 1px solid var(--line); }
+.create-wiki-dialog input, .side-drawer input:not([type='checkbox']), .side-drawer textarea { width: 100%; padding: 10px 11px; color: var(--strong); background: var(--ink); border: 1px solid var(--line); }
 .drawer-backdrop { position: fixed; z-index: 30; inset: 0; display: flex; justify-content: flex-end; background: #02070b80; }
 .side-drawer { width: min(480px, 100%); height: 100%; padding: 26px; overflow: auto; color: var(--strong); background: var(--slate); border-left: 1px solid var(--line); box-shadow: -18px 0 55px #0004; }
 .side-drawer > header { align-items: flex-start; padding-bottom: 18px; }
@@ -471,6 +471,11 @@ button:active:not(:disabled) { transform: scale(.985); }
 .policy-list label { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 16px; min-height: 70px; border-bottom: 1px solid var(--line); cursor: pointer; }
 .policy-list strong, .policy-list small { display: block; }
 .policy-list small { margin-top: 4px; color: var(--muted); line-height: 1.35; }
+.policy-list input[type='checkbox'] { position: relative; flex: 0 0 auto; width: 38px; height: 22px; margin: 0; padding: 0; appearance: none; background: var(--surface-raised); border: 1px solid var(--line); border-radius: 999px; cursor: pointer; transition: background-color var(--motion-fast) var(--ease-native), border-color var(--motion-fast) var(--ease-native); }
+.policy-list input[type='checkbox']::before { content: ''; position: absolute; top: 3px; left: 3px; width: 14px; height: 14px; background: var(--muted); border-radius: 50%; transition: transform var(--motion-fast) var(--ease-native), background-color var(--motion-fast) var(--ease-native); }
+.policy-list input[type='checkbox']:checked { background: var(--cyan); border-color: var(--cyan); }
+.policy-list input[type='checkbox']:checked::before { background: var(--ink); transform: translateX(16px); }
+.policy-list input[type='checkbox']:focus-visible { outline: 2px solid var(--cyan); outline-offset: 3px; }
 .drawer-actions { display: flex; gap: 9px; margin-top: 18px; }
 .drawer-actions .secondary { display: inline-flex; align-items: center; gap: 7px; }
 .wiki-details-list { margin: 18px 0 0; border-top: 1px solid var(--line); }

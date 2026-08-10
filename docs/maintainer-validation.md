@@ -60,6 +60,15 @@ Manual platform gates must use installed applications in interactive desktop
 sessions. A macOS build cannot certify Windows behavior, and an SSH-launched
 process cannot substitute for the real Windows user session.
 
+Before starting Windows LAN acceptance, verify that Windows Application Control
+allows the exact installer and that the installed desktop, MCP bridge and
+firewall helper have valid Authenticode signatures from the same publisher.
+Unsigned candidates remain valid for local-only product checks, but they cannot
+exercise the fail-closed firewall boundary. A host-policy rejection is an
+environment prerequisite failure: preserve the policy, do not add manual
+firewall rules or bypass execution controls, and do not report the blocked LAN
+journey as either PASS or a product-search failure.
+
 The installed-model activation probe verifies only the selected model, its
 supervised loopback transport, and one bounded strict-JSON response. Candidate
 acceptance must separately exercise full production enrichment on at least two

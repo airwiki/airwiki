@@ -11,10 +11,21 @@ snippets, SAS words, or document contents while running this procedure.
 
 - Place the Mac and Windows PC on the same private subnet with multicast allowed.
 - Use development candidates built from the same commit.
+- The installed Windows candidate must carry valid Authenticode signatures from
+  the same publisher on the desktop, MCP bridge and firewall helper. An unsigned
+  build is useful for local-only checks, but it intentionally fails closed and
+  cannot qualify the Windows LAN journey.
+- Confirm Windows Application Control permits the exact candidate before
+  preparing fixtures. Do not disable or bypass host policy to make an unsigned
+  installer or test executable run.
 - Use copies of `fixtures/mac`, `fixtures/windows`, and `fixtures/private` only.
 - Confirm that AirWiki reports the recommended local models as ready.
 - On Windows, use only the two AirWiki firewall rules offered by the app;
   no rule may include the Public profile.
+
+This runbook covers private LAN federation. Public-network acceptance requires
+separate installed candidates with a live, unexpired federation bootstrap and
+must follow the [Internet federation acceptance runbook](internet-federation-runbook.md).
 
 ## Scenario
 

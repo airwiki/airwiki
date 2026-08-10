@@ -211,6 +211,15 @@ describe('AirWiki wiki workspace', () => {
     expect(updatePreferences).toHaveBeenCalledWith(expect.objectContaining({ lanPreference: 'enabled' }));
   });
 
+  it('shows an explicit local-network choice for existing undecided preferences', async () => {
+    snapshot.preferences!.lanPreference = 'undecided';
+    window.location.hash = '#system/preferences';
+    render(App);
+
+    expect(await screen.findByRole('combobox', { name: 'Red local' })).toHaveValue('undecided');
+    expect(screen.getByRole('option', { name: 'Preguntar antes de habilitar' })).toBeInTheDocument();
+  });
+
   it('redirects previous top-level routes without retaining the old UI', async () => {
     window.location.hash = '#library';
     render(App);

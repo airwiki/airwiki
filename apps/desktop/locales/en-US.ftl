@@ -231,6 +231,7 @@ onboarding-default-folder-name = My knowledge
 onboarding-lan-body = AirWiki can find other devices on the same network. Your system will ask permission before discovery starts, and every pairing still requires confirming a code.
 onboarding-lan-enable = Allow and find devices
 onboarding-lan-disable = Keep this device only
+settings-lan-undecided = Ask before enabling
 onboarding-background-body = These options keep local maintenance available without turning AirWiki into a system service.
 onboarding-background-close = Keep running when the window closes
 onboarding-background-login = Start when I sign in (recommended)

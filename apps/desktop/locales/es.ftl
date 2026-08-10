@@ -231,6 +231,7 @@ onboarding-default-folder-name = Mi conocimiento
 onboarding-lan-body = AirWiki puede buscar otros equipos en tu misma red. Verás el permiso del sistema antes de activar la búsqueda y cada emparejamiento seguirá requiriendo confirmar un código.
 onboarding-lan-enable = Permitir y buscar equipos
 onboarding-lan-disable = Mantener solo este equipo
+settings-lan-undecided = Preguntar antes de habilitar
 onboarding-background-body = Estas opciones mantienen el mantenimiento local disponible sin convertir AirWiki en un servicio del sistema.
 onboarding-background-close = Seguir funcionando al cerrar la ventana
 onboarding-background-login = Iniciar al entrar en mi sesión (recomendado)

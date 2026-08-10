@@ -79,6 +79,19 @@ async function navigateToDestination(index: number): Promise<void> {
   );
 }
 
+async function waitForVisualPaint(route: 'wikis' | 'system'): Promise<void> {
+  if (route === 'system') {
+    await browser.waitUntil(
+      () => browser.execute(() => document.querySelectorAll('#system-preferences select').length === 4),
+      { timeout: 10_000, timeoutMsg: 'system preferences did not reach their complete DOM state' }
+    );
+  }
+  await browser.executeAsync((done) => {
+    document.body.getBoundingClientRect();
+    requestAnimationFrame(() => requestAnimationFrame(() => done()));
+  });
+}
+
 async function configureVisualPreferences(locale: 'en' | 'es', theme: 'light' | 'dark'): Promise<void> {
   await navigateToDestination(1);
   await $('#system-preferences').waitForDisplayed();
@@ -111,6 +124,7 @@ async function assertVisualMatrix(): Promise<void> {
             style.textContent = '.system-status-bar button:hover { color: var(--muted) !important; background: transparent !important; }';
             document.head.append(style);
           });
+          await waitForVisualPaint(routes[index]);
           const result = await browser.checkScreen(`${locale}-${theme}-${routes[index]}`);
           await browser.execute(() => document.querySelector('#visual-capture-styles')?.remove());
           const mismatch = typeof result === 'number' ? result : result.misMatchPercentage;

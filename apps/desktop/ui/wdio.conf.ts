@@ -1,4 +1,17 @@
-import { join } from 'node:path';
+import { rmSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
+import { dirname, join } from 'node:path';
+
+const supportedBaselinePlatforms = new Set(['darwin', 'win32']);
+if (!supportedBaselinePlatforms.has(process.platform)) {
+  throw new Error(`visual baselines are unsupported on ${process.platform}`);
+}
+
+const uiRoot = dirname(fileURLToPath(import.meta.url));
+const baselineFolder = join(uiRoot, 'e2e', 'baselines', process.platform);
+if (process.env.UPDATE_VISUAL_BASELINES === '1') {
+  rmSync(baselineFolder, { recursive: true, force: true });
+}
 
 export const config: WebdriverIO.Config = {
   runner: 'local',
@@ -13,8 +26,8 @@ export const config: WebdriverIO.Config = {
   services: [[
     'visual',
     {
-      baselineFolder: join(process.cwd(), 'e2e', 'baselines', process.platform),
-      screenshotPath: join(process.cwd(), '.artifacts', 'visual'),
+      baselineFolder,
+      screenshotPath: join(uiRoot, '.artifacts', 'visual'),
       formatImageName: '{tag}-{width}x{height}',
       autoSaveBaseline: process.env.UPDATE_VISUAL_BASELINES === '1',
       alwaysSaveActualImage: false,

@@ -1,3 +1,7 @@
+param(
+    [string] $NodeBinDir
+)
+
 $ErrorActionPreference = "Stop"
 Set-StrictMode -Version Latest
 
@@ -21,6 +25,26 @@ $LlamaPolicy = Join-Path $Root "packaging\llama-windows-build-policy.json"
 . (Join-Path $PSScriptRoot "windows-runtime.ps1")
 . (Join-Path $PSScriptRoot "windows-payload.ps1")
 . (Join-Path $PSScriptRoot "windows-safe-staging.ps1")
+
+$PreviousPath = $env:Path
+if ($NodeBinDir) {
+    $ResolvedNodeBinDir = (Resolve-Path -LiteralPath $NodeBinDir).Path
+    $NodeExecutable = Join-Path $ResolvedNodeBinDir "node.exe"
+    $CorepackCli = Join-Path $ResolvedNodeBinDir "node_modules\corepack\dist\corepack.js"
+    if (-not (Test-Path -LiteralPath $NodeExecutable -PathType Leaf) -or
+        -not (Test-Path -LiteralPath $CorepackCli -PathType Leaf)) {
+        throw "NodeBinDir must contain the official Node.js Windows distribution"
+    }
+    $NodeVersion = (& $NodeExecutable --version 2>&1 | Out-String).Trim()
+    if ($LASTEXITCODE -ne 0 -or $NodeVersion -ne "v24.15.0") {
+        throw "NodeBinDir must provide Node.js v24.15.0"
+    }
+    & $NodeExecutable $CorepackCli enable pnpm --install-directory $ResolvedNodeBinDir
+    if ($LASTEXITCODE -ne 0) {
+        throw "Could not provision the pinned pnpm shim"
+    }
+    $env:Path = "$ResolvedNodeBinDir;$PreviousPath"
+}
 
 function Assert-X64Pe([string] $Path) {
     if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) {
@@ -231,5 +255,6 @@ try {
     }
     Write-Host "Verified fresh Windows x64 installer: $($Installers[0].FullName)"
 } finally {
+    $env:Path = $PreviousPath
     Pop-Location
 }

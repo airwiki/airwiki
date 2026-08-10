@@ -102,6 +102,18 @@ build policy:
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File packaging/package-windows.ps1
 ```
 
+When Node.js 24.15.0 is supplied as the official portable Windows archive
+instead of a machine-wide installation, pass its extracted directory explicitly:
+
+```powershell
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File packaging/package-windows.ps1 `
+  -NodeBinDir .\target\node-v24.15.0-win-x64
+```
+
+The packaging process verifies the exact Node version, provisions the locked
+pnpm shim in that directory, scopes it to the child build, and restores `PATH`
+afterward.
+
 The Windows path:
 
 1. builds `llama-server.exe` from the pinned source under the reviewed compiler,

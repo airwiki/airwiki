@@ -37,6 +37,7 @@ use pulldown_cmark::{CodeBlockKind, Event as MarkdownEvent, HeadingLevel, Parser
 use serde::{Deserialize, Serialize};
 use tauri::{
     AppHandle, Emitter, Manager, WindowEvent,
+    image::Image,
     ipc::Channel,
     menu::{Menu, MenuItem},
     tray::{TrayIconBuilder, TrayIconEvent},
@@ -63,6 +64,10 @@ const INTERNAL_EVENT_CAPACITY: usize = 256;
 const TRANSIENT_EVENT_CAPACITY: usize = 128;
 const CONTRACT_VERSION: u16 = 1;
 const FOLDER_SELECTION_TTL: Duration = Duration::from_secs(5 * 60);
+const TRAY_ICON_WIDTH: u32 = 24;
+const TRAY_ICON_HEIGHT: u32 = 24;
+const TRAY_ICON_RGBA: &[u8; 2_304] =
+    include_bytes!("../../../resources/branding/airwiki-tray.rgba");
 
 #[derive(Clone, Copy)]
 enum NativeConfirmation {
@@ -2501,6 +2506,10 @@ fn show_main_window(app: &AppHandle) {
     }
 }
 
+const fn tray_icon() -> Image<'static> {
+    Image::new(TRAY_ICON_RGBA, TRAY_ICON_WIDTH, TRAY_ICON_HEIGHT)
+}
+
 fn install_tray(app: &tauri::App) -> tauri::Result<()> {
     let labels = Localization::new(UiLocale::from_system()).ok();
     let open_label = match labels
@@ -2521,6 +2530,9 @@ fn install_tray(app: &tauri::App) -> tauri::Result<()> {
     let quit = MenuItem::with_id(app, "quit", quit_label, true, None::<&str>)?;
     let menu = Menu::with_items(app, &[&open, &quit])?;
     TrayIconBuilder::new()
+        .icon(tray_icon())
+        .icon_as_template(false)
+        .tooltip("AirWiki")
         .menu(&menu)
         .on_menu_event(|app, event| match event.id().as_ref() {
             "open" => show_main_window(app),
@@ -4667,6 +4679,20 @@ mod tests {
         assert_eq!(
             close_action(CloseBehavior::HideToTray, true),
             CloseAction::Hide
+        );
+    }
+
+    #[test]
+    fn tray_icon_has_expected_visible_rgba_pixels() {
+        let icon = tray_icon();
+
+        assert_eq!(icon.width(), TRAY_ICON_WIDTH);
+        assert_eq!(icon.height(), TRAY_ICON_HEIGHT);
+        assert_eq!(icon.rgba().len(), TRAY_ICON_RGBA.len());
+        assert!(
+            icon.rgba()
+                .chunks_exact(4)
+                .any(|pixel| matches!(pixel, [_, _, _, alpha] if *alpha != 0))
         );
     }
 

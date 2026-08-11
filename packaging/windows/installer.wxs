@@ -30,7 +30,7 @@
     <Property Id="AUTOLAUNCHAPP" Secure="yes" />
     <Property Id="LAUNCHAPPARGS" Secure="yes" />
     <Property Id="ARPNOREPAIR" Value="yes" Secure="yes" />
-    <Property Id="ARPNOMODIFY" Value="1" Secure="yes" />
+    <SetProperty Id="ARPNOMODIFY" Value="1" After="InstallValidate" Sequence="execute" />
 
     {{#if allow_downgrades}}
       <MajorUpgrade Schedule="afterInstallInitialize" AllowDowngrades="yes" />

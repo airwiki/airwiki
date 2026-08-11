@@ -3004,6 +3004,11 @@ fn verify_windows_msi_sources(config: &str, template: &str) -> Result<()> {
         "Windows MSI must not expose or inherit a configurable installation path"
     );
     ensure!(
+        template.contains("<Directory Id=\"SystemFolder\" />")
+            && template.matches("Directory=\"SystemFolder\"").count() == 2,
+        "Windows MSI PowerShell actions must resolve the standard SystemFolder directory"
+    );
+    ensure!(
         template.contains("<UIRef Id=\"WixUI_Minimal\" />")
             && template.contains(
                 "<SetProperty Id=\"ARPNOMODIFY\" Value=\"1\" After=\"InstallValidate\" Sequence=\"execute\" />"
@@ -9196,5 +9201,18 @@ mod tests {
         let error = verify_windows_msi_sources(&config, &template).unwrap_err();
 
         assert!(error.to_string().contains("UpgradeCode changed"));
+    }
+
+    #[test]
+    fn windows_msi_policy_rejects_an_unresolved_system_directory() {
+        let root = workspace_root();
+        let config =
+            fs::read_to_string(root.join("packaging/windows/tauri.msi.bundle.conf.json")).unwrap();
+        let template = fs::read_to_string(root.join("packaging/windows/installer.wxs")).unwrap();
+        let unsafe_template = template.replace("      <Directory Id=\"SystemFolder\" />\n", "");
+
+        let error = verify_windows_msi_sources(&config, &unsafe_template).unwrap_err();
+
+        assert!(error.to_string().contains("standard SystemFolder"));
     }
 }

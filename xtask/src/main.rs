@@ -25,6 +25,7 @@ use zip::{CompressionMethod, DateTime, ZipArchive, ZipWriter, write::SimpleFileO
 mod docs;
 mod retrieval;
 mod selector_corpus;
+mod windows_msi;
 
 const LICENSE_REPORT: &str = "resources/licenses/THIRD_PARTY_LICENSES.md";
 const NON_CARGO_LICENSE_INVENTORY: &str = "resources/licenses/NON_CARGO_COMPONENTS.md";
@@ -272,6 +273,13 @@ async fn main() -> Result<()> {
             None => bail!("missing mcpb command; expected `build` or `verify`"),
         },
         "packaging" => match arguments.next().as_deref() {
+            Some("generate-windows-msi-resources") => {
+                ensure!(
+                    arguments.next().is_none(),
+                    "generate-windows-msi-resources received unexpected arguments"
+                );
+                windows_msi::generate_workspace_fragment()
+            }
             Some("verify-windows-uninstaller") => verify_windows_uninstaller(),
             Some("verify-windows-msi") => verify_windows_msi(),
             Some("verify-updater-signature") => {
@@ -307,6 +315,7 @@ async fn main() -> Result<()> {
             println!("cargo run --locked -p xtask -- docs check");
             println!("cargo run --locked -p xtask -- packaging verify-windows-uninstaller");
             println!("cargo run --locked -p xtask -- packaging verify-windows-msi");
+            println!("cargo run --locked -p xtask -- packaging generate-windows-msi-resources");
             println!(
                 "cargo run --locked -p xtask -- packaging verify-updater-signature --artifact <path> --signature <path>"
             );
@@ -2938,6 +2947,8 @@ fn verify_windows_msi() -> Result<()> {
         .context("reading SignPath binary preparation")?;
     let package = fs::read_to_string(root.join("packaging/package-signpath-windows-msi.ps1"))
         .context("reading SignPath MSI packaging")?;
+    let unsigned_package = fs::read_to_string(root.join("packaging/package-windows.ps1"))
+        .context("reading unsigned Windows MSI packaging")?;
     let verify = fs::read_to_string(root.join("packaging/verify-signpath-windows-msi.ps1"))
         .context("reading SignPath MSI verification")?;
     let updater = fs::read_to_string(root.join("apps/desktop/src/updater.rs"))
@@ -2945,6 +2956,17 @@ fn verify_windows_msi() -> Result<()> {
     let main = fs::read_to_string(root.join("apps/desktop/src/main.rs"))
         .context("reading the desktop update shutdown handoff")?;
     verify_windows_signpath_sources(&workflow, &binaries, &msi, &prepare, &package, &verify)?;
+    ensure!(
+        package
+            .matches("packaging generate-windows-msi-resources")
+            .count()
+            == 1
+            && unsigned_package
+                .matches("packaging generate-windows-msi-resources")
+                .count()
+                == 1,
+        "Windows MSI packaging paths must generate the managed WiX resource fragment"
+    );
     verify_windows_msi_update_handoff_sources(&template, &updater, &main)
 }
 
@@ -2981,6 +3003,24 @@ fn verify_windows_msi_sources(config: &str, template: &str) -> Result<()> {
         "Windows MSI configuration must select the managed WiX template"
     );
     ensure!(
+        config.pointer("/bundle/resources").is_none()
+            && config
+                .pointer("/bundle/windows/wix/fragmentPaths/0")
+                .and_then(serde_json::Value::as_str)
+                == Some("../../target/windows-msi-resources.wxs")
+            && config
+                .pointer("/bundle/windows/wix/fragmentPaths/1")
+                .is_none()
+            && config
+                .pointer("/bundle/windows/wix/componentGroupRefs/0")
+                .and_then(serde_json::Value::as_str)
+                == Some("AirWikiResources")
+            && config
+                .pointer("/bundle/windows/wix/componentGroupRefs/1")
+                .is_none(),
+        "Windows MSI resources must use the managed per-user WiX fragment"
+    );
+    ensure!(
         template.contains("Based on Tauri bundler 2.9.4's WiX template")
             && template.contains("InstallScope=\"perUser\"")
             && template.contains("InstallPrivileges=\"limited\"")
@@ -3007,6 +3047,30 @@ fn verify_windows_msi_sources(config: &str, template: &str) -> Result<()> {
         template.contains("<Directory Id=\"SystemFolder\" />")
             && template.matches("Directory=\"SystemFolder\"").count() == 2,
         "Windows MSI PowerShell actions must resolve the standard SystemFolder directory"
+    );
+    ensure!(
+        template
+            .matches("Key=\"Software\\io.github.airwiki\\AirWiki\\Components\"")
+            .count()
+            == 2
+            && template
+                .contains("Name=\"MainExecutable\" Type=\"integer\" Value=\"1\" KeyPath=\"yes\"")
+            && template
+                .contains("Name=\"{{bin.id}}\" Type=\"integer\" Value=\"1\" KeyPath=\"yes\"")
+            && !template
+                .contains("<File Id=\"Path\" Source=\"{{main_binary_path}}\" KeyPath=\"yes\"")
+            && !template
+                .contains("<File Id=\"Bin_{{bin.id}}\" Source=\"{{bin.path}}\" KeyPath=\"yes\"")
+            && template.contains("<ComponentGroupRef Id=\"{{id}}\" />"),
+        "Windows MSI files below the user profile must use stable HKCU registry key paths"
+    );
+    ensure!(
+        template.contains(
+            "<RemoveFolder Id=\"RemoveAirWikiInstallDirectory\" Directory=\"INSTALLDIR\" On=\"uninstall\" />"
+        ) && template.contains(
+            "<RemoveFolder Id=\"RemoveAirWikiProgramsDirectory\" Directory=\"AirWikiProgramsFolder\" On=\"uninstall\" />"
+        ),
+        "Windows MSI must register its per-user program directories for empty-folder cleanup"
     );
     ensure!(
         template.contains("<UIRef Id=\"WixUI_Minimal\" />")
@@ -9214,5 +9278,53 @@ mod tests {
         let error = verify_windows_msi_sources(&config, &unsafe_template).unwrap_err();
 
         assert!(error.to_string().contains("standard SystemFolder"));
+    }
+
+    #[test]
+    fn windows_msi_policy_rejects_automatic_resource_components() {
+        let root = workspace_root();
+        let config = fs::read_to_string(root.join("packaging/windows/tauri.msi.bundle.conf.json"))
+            .unwrap()
+            .replace(
+                "\"targets\": [\"msi\"],",
+                "\"targets\": [\"msi\"], \"resources\": {},",
+            );
+        let template = fs::read_to_string(root.join("packaging/windows/installer.wxs")).unwrap();
+
+        let error = verify_windows_msi_sources(&config, &template).unwrap_err();
+
+        assert!(error.to_string().contains("per-user WiX fragment"));
+    }
+
+    #[test]
+    fn windows_msi_policy_rejects_file_keypaths_below_the_user_profile() {
+        let root = workspace_root();
+        let config =
+            fs::read_to_string(root.join("packaging/windows/tauri.msi.bundle.conf.json")).unwrap();
+        let template = fs::read_to_string(root.join("packaging/windows/installer.wxs")).unwrap();
+        let unsafe_template = template.replace(
+            "Source=\"{{main_binary_path}}\" Checksum=\"yes\"",
+            "Source=\"{{main_binary_path}}\" KeyPath=\"yes\" Checksum=\"yes\"",
+        );
+
+        let error = verify_windows_msi_sources(&config, &unsafe_template).unwrap_err();
+
+        assert!(error.to_string().contains("HKCU registry key paths"));
+    }
+
+    #[test]
+    fn windows_msi_policy_rejects_missing_profile_directory_cleanup() {
+        let root = workspace_root();
+        let config =
+            fs::read_to_string(root.join("packaging/windows/tauri.msi.bundle.conf.json")).unwrap();
+        let template = fs::read_to_string(root.join("packaging/windows/installer.wxs")).unwrap();
+        let unsafe_template = template.replace(
+            "        <RemoveFolder Id=\"RemoveAirWikiInstallDirectory\" Directory=\"INSTALLDIR\" On=\"uninstall\" />\n",
+            "",
+        );
+
+        let error = verify_windows_msi_sources(&config, &unsafe_template).unwrap_err();
+
+        assert!(error.to_string().contains("empty-folder cleanup"));
     }
 }

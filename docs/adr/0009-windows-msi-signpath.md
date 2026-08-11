@@ -34,7 +34,9 @@ The MSI remains per-user and installs immutable files only below the fixed
 `%LOCALAPPDATA%\Programs\AirWiki` directory. It does not accept an alternate
 installation directory. SQLite, OKF, configuration, models and identities keep
 their existing roots. The stable WiX UpgradeCode is committed and must not
-change. Downgrades fail closed.
+change. A deterministic generated fragment gives every immutable file a stable
+component identity and HKCU key path, and registers package directories for
+empty-only removal. Downgrades fail closed.
 
 Windows Installer owns transactional install, repair, upgrade and removal.
 AirWiki keeps exact-match cleanup for its optional autostart value and delegates

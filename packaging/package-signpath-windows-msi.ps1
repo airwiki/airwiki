@@ -132,6 +132,8 @@ try {
     if ($LASTEXITCODE -ne 0) { throw "Claude MCPB build failed" }
     & pnpm.cmd --dir apps\desktop\ui run build
     if ($LASTEXITCODE -ne 0) { throw "frontend build failed" }
+    & cargo run --locked -p xtask -- packaging generate-windows-msi-resources
+    if ($LASTEXITCODE -ne 0) { throw "Windows MSI resource fragment generation failed" }
 
     $Tauri = Get-VerifiedWindowsRegularFile $Tauri "pinned Tauri CLI"
     $TauriVersion = (& $Tauri --version 2>&1 | Out-String).Trim()

@@ -195,6 +195,13 @@ before costing if Windows marks either as a reparse point. Windows Installer
 owns only declared immutable files and never performs recursive
 application-data cleanup.
 
+The release scripts generate a deterministic WiX fragment for the exact
+runtime, helper, bridge, MCPB and legal-resource payload. Every component below
+the current-user profile has a stable HKCU registry key path, and every package
+directory has an uninstall row that removes it only when empty. This preserves
+Windows Installer repair and roaming-profile semantics without suppressing
+ICE38 or ICE64 validation.
+
 An unsupported development candidate previously installed directly under
 `%LOCALAPPDATA%\AirWiki` is not migrated in place because that tree can already
 contain user data. The new installer fails closed without uninstalling it.

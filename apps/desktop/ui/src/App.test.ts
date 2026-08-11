@@ -80,7 +80,7 @@ describe('AirWiki wiki workspace', () => {
 
     expect(await screen.findByRole('button', { name: 'IA local: Sin configurar' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Red local: Opcional · Desactivado' })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Red pública: Opcional · Desactivado' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Compartición pública: No compartida' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'MCP: Disponible' })).toBeInTheDocument();
   });
 
@@ -300,7 +300,18 @@ describe('AirWiki wiki workspace', () => {
     render(App);
 
     expect(await screen.findByText('No encontramos evidencia coincidente')).toBeInTheDocument();
+    expect(screen.getByText('Buscamos en este equipo y en los equipos autorizados disponibles. Prueba palabras que aparezcan en el contenido publicado.')).toBeInTheDocument();
     expect(screen.queryByText('Consultando los equipos disponibles…')).not.toBeInTheDocument();
+  });
+
+  it('names every source checked by a completed public search with no matches', async () => {
+    activateLocalSearch();
+    snapshot.search = { requestId: 'empty-public-search', status: 'complete', coverage: 'complete', hits: [] };
+    window.location.hash = '#search';
+    render(App);
+    await fireEvent.click(await screen.findByRole('checkbox', { name: 'Red pública' }));
+
+    expect(screen.getByText('Buscamos en este equipo, en los equipos autorizados disponibles y en la red pública. Prueba palabras que aparezcan en el contenido publicado.')).toBeInTheDocument();
   });
 
   it('does not present an unavailable public search as a conclusive empty result', async () => {

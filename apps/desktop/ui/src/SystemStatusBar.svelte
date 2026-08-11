@@ -27,11 +27,11 @@
           : { id: 'lan', label: translate('desktop-status-lan'), detail: translate('status-optional-disabled'), tone: 'off' };
 
     const publicWikis = current.wikis.filter((wiki) => wiki.internetPublic);
-    const publicNetwork: ServiceStatus = publicWikis.some((wiki) => wiki.publicAnnouncement.status === 'advertised')
-      ? { id: 'public', label: translate('desktop-status-public'), detail: translate('desktop-status-available'), tone: 'ready' }
+    const publicSharing: ServiceStatus = publicWikis.some((wiki) => wiki.publicAnnouncement.status === 'advertised')
+      ? { id: 'public', label: translate('desktop-status-public-sharing'), detail: translate('desktop-status-sharing'), tone: 'ready' }
       : publicWikis.length > 0
-        ? { id: 'public', label: translate('desktop-status-public'), detail: translate('desktop-status-offline'), tone: 'attention' }
-        : { id: 'public', label: translate('desktop-status-public'), detail: translate('status-optional-disabled'), tone: 'off' };
+        ? { id: 'public', label: translate('desktop-status-public-sharing'), detail: translate('desktop-status-not-published'), tone: 'attention' }
+        : { id: 'public', label: translate('desktop-status-public-sharing'), detail: translate('desktop-status-not-shared'), tone: 'off' };
 
     const mcp: ServiceStatus = current.mcpUrl
       ? { id: 'mcp', label: 'MCP', detail: translate('desktop-status-available'), tone: 'ready' }
@@ -43,7 +43,7 @@
         ? { id: 'indexing', label: translate('desktop-status-indexing'), detail: translate('status-needs-attention'), tone: 'attention' }
         : { id: 'indexing', label: translate('desktop-status-indexing'), detail: translate('status-ready'), tone: 'ready' };
 
-    return [model, lan, publicNetwork, mcp, indexing];
+    return [model, lan, publicSharing, mcp, indexing];
   }
 
   let services: ServiceStatus[];

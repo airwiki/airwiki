@@ -42,6 +42,9 @@
     {{/if}}
 
     <Media Id="1" Cabinet="app.cab" EmbedCab="yes" />
+    {{#if license}}
+      <WixVariable Id="WixUILicenseRtf" Value="{{license}}" />
+    {{/if}}
     <Icon Id="ProductIcon" SourceFile="{{icon_path}}" />
     <Property Id="ARPPRODUCTICON" Value="ProductIcon" />
 

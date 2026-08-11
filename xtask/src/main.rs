@@ -2932,10 +2932,13 @@ fn verify_windows_uninstaller() -> Result<()> {
 
 fn verify_windows_msi() -> Result<()> {
     let root = workspace_root();
+    let desktop_config = fs::read_to_string(root.join("apps/desktop/tauri.conf.json"))
+        .context("reading the desktop Tauri configuration")?;
     let config = fs::read_to_string(root.join("packaging/windows/tauri.msi.bundle.conf.json"))
         .context("reading the Windows MSI packager configuration")?;
     let template = fs::read_to_string(root.join("packaging/windows/installer.wxs"))
         .context("reading the managed Windows MSI template")?;
+    verify_windows_msi_license_sources(&desktop_config, &template)?;
     verify_windows_msi_sources(&config, &template)?;
     let workflow = fs::read_to_string(root.join(".github/workflows/windows-signpath.yml"))
         .context("reading the SignPath Windows workflow")?;
@@ -2967,7 +2970,35 @@ fn verify_windows_msi() -> Result<()> {
                 == 1,
         "Windows MSI packaging paths must generate the managed WiX resource fragment"
     );
+    ensure!(
+        package.matches("Assert-WindowsWixLicenseRtf").count() == 1
+            && unsigned_package
+                .matches("Assert-WindowsWixLicenseRtf")
+                .count()
+                == 1,
+        "Windows MSI packaging paths must validate the generated Apache-2.0 license dialog"
+    );
     verify_windows_msi_update_handoff_sources(&template, &updater, &main)
+}
+
+fn verify_windows_msi_license_sources(desktop_config: &str, template: &str) -> Result<()> {
+    let desktop_config: serde_json::Value =
+        serde_json::from_str(desktop_config).context("parsing the desktop Tauri configuration")?;
+    ensure!(
+        desktop_config
+            .pointer("/bundle/licenseFile")
+            .and_then(serde_json::Value::as_str)
+            == Some("../../LICENSE"),
+        "Windows MSI license dialog must use the versioned Apache-2.0 license"
+    );
+    ensure!(
+        template.matches("Id=\"WixUILicenseRtf\"").count() == 1
+            && template.contains(
+                "{{#if license}}\n      <WixVariable Id=\"WixUILicenseRtf\" Value=\"{{license}}\" />\n    {{/if}}"
+            ),
+        "Windows MSI template must bind the generated license RTF to WixUI_Minimal"
+    );
+    Ok(())
 }
 
 fn verify_windows_msi_sources(config: &str, template: &str) -> Result<()> {
@@ -9257,6 +9288,44 @@ mod tests {
         let template = fs::read_to_string(root.join("packaging/windows/installer.wxs")).unwrap();
 
         verify_windows_msi_sources(&config, &template).unwrap();
+    }
+
+    #[test]
+    fn windows_msi_license_policy_accepts_the_committed_sources() {
+        let root = workspace_root();
+        let desktop_config = fs::read_to_string(root.join("apps/desktop/tauri.conf.json")).unwrap();
+        let template = fs::read_to_string(root.join("packaging/windows/installer.wxs")).unwrap();
+
+        verify_windows_msi_license_sources(&desktop_config, &template).unwrap();
+    }
+
+    #[test]
+    fn windows_msi_license_policy_rejects_an_unbound_license_dialog() {
+        let root = workspace_root();
+        let desktop_config = fs::read_to_string(root.join("apps/desktop/tauri.conf.json")).unwrap();
+        let template = fs::read_to_string(root.join("packaging/windows/installer.wxs")).unwrap();
+        let unsafe_template = template.replace(
+            "      <WixVariable Id=\"WixUILicenseRtf\" Value=\"{{license}}\" />\n",
+            "",
+        );
+
+        let error =
+            verify_windows_msi_license_sources(&desktop_config, &unsafe_template).unwrap_err();
+
+        assert!(error.to_string().contains("bind the generated license RTF"));
+    }
+
+    #[test]
+    fn windows_msi_license_policy_rejects_an_unversioned_license_path() {
+        let root = workspace_root();
+        let desktop_config = fs::read_to_string(root.join("apps/desktop/tauri.conf.json"))
+            .unwrap()
+            .replace("../../LICENSE", "../../target/LICENSE");
+        let template = fs::read_to_string(root.join("packaging/windows/installer.wxs")).unwrap();
+
+        let error = verify_windows_msi_license_sources(&desktop_config, &template).unwrap_err();
+
+        assert!(error.to_string().contains("versioned Apache-2.0 license"));
     }
 
     #[test]

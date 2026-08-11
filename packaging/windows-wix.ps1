@@ -1,5 +1,26 @@
 Set-StrictMode -Version Latest
 
+function Assert-WindowsWixLicenseRtf([string] $ReleaseDir, [DateTime] $Started) {
+    $WixRoot = Join-Path $ReleaseDir "wix"
+    $Licenses = @(
+        Get-ChildItem -LiteralPath $WixRoot -Recurse -File -Filter LICENSE.rtf -ErrorAction SilentlyContinue
+    )
+    if ($Licenses.Count -ne 1) {
+        throw "Tauri must generate exactly one Windows installer license RTF"
+    }
+    $License = $Licenses[0]
+    if ($License.LastWriteTimeUtc -lt $Started) {
+        throw "Windows installer license RTF predates this packaging run"
+    }
+    $Text = [IO.File]::ReadAllText($License.FullName)
+    if (-not $Text.StartsWith("{\rtf1", [StringComparison]::Ordinal) -or
+        $Text.IndexOf("Apache License", [StringComparison]::Ordinal) -lt 0 -or
+        $Text.IndexOf("Version 2.0", [StringComparison]::Ordinal) -lt 0 -or
+        $Text.IndexOf("Lorem ipsum", [StringComparison]::OrdinalIgnoreCase) -ge 0) {
+        throw "Windows installer license RTF does not contain the reviewed Apache-2.0 terms"
+    }
+}
+
 function Write-WixLightDiagnostic([string] $Root, [string] $ReleaseDir) {
     $BuildDir = Join-Path $ReleaseDir "wix\x64"
     $Candle = Join-Path $Root "target\.tauri\WixTools314\candle.exe"

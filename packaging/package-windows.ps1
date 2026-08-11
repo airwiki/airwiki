@@ -282,6 +282,7 @@ try {
     } finally {
         Pop-Location
     }
+    Assert-WindowsWixLicenseRtf $ReleaseDir $Started
     Assert-X64Pe $Desktop
     Assert-WindowsDesktopEmbedsLlamaRuntimeHash $Desktop $LlamaRuntime $LlamaPolicy
 

@@ -144,6 +144,7 @@ try {
         -Path $BundleRoot `
         -AllowedRoot $TargetRoot `
         -Label "Tauri MSI output"
+    $BundleStarted = [DateTime]::UtcNow
     Push-Location (Join-Path $Root "apps\desktop")
     try {
         & $Tauri bundle `
@@ -158,6 +159,7 @@ try {
     } finally {
         Pop-Location
     }
+    Assert-WindowsWixLicenseRtf $ReleaseRoot $BundleStarted
 
     $Installers = @(Get-ChildItem -LiteralPath $BundleRoot -File -Filter *.msi)
     if ($Installers.Count -ne 2) {

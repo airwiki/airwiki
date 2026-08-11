@@ -76,15 +76,17 @@ function Assert-SameSignPathSigner([object] $Expected, [object] $Actual, [string
 }
 
 function Assert-ExpectedSignPathSigner([object] $Signer) {
-    $Expected = $env:AIRWIKI_WINDOWS_SIGNER_SHA256
-    if ([string]::IsNullOrWhiteSpace($Expected) -or $Expected -cnotmatch '^[0-9A-F]{64}$') {
-        throw "AIRWIKI_WINDOWS_SIGNER_SHA256 must be one uppercase SHA-256 certificate fingerprint"
+    $Configured = $env:AIRWIKI_WINDOWS_SIGNER_SHA256
+    if ([string]::IsNullOrWhiteSpace($Configured)) {
+        throw "AIRWIKI_WINDOWS_SIGNER_SHA256 must contain an uppercase SHA-256 certificate fingerprint"
     }
-    if (-not [String]::Equals(
-        $Expected,
-        [string] $Signer.Fingerprint,
-        [StringComparison]::Ordinal
-    )) {
+    $Expected = @($Configured.Split(',') | ForEach-Object { $_.Trim() })
+    if ($Expected.Count -lt 1 -or $Expected.Count -gt 2 -or
+        @($Expected | Where-Object { $_ -cnotmatch '^[0-9A-F]{64}$' }).Count -ne 0 -or
+        @($Expected | Select-Object -Unique).Count -ne $Expected.Count) {
+        throw "AIRWIKI_WINDOWS_SIGNER_SHA256 must contain one or two distinct uppercase SHA-256 certificate fingerprints"
+    }
+    if (-not ($Expected -ccontains [string] $Signer.Fingerprint)) {
         throw "signed artifact does not match the configured AirWiki certificate"
     }
 }

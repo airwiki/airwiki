@@ -42,6 +42,10 @@ Signing approval is separate from authoring a build and is never automated.
 - Signed outputs are independently checked for the expected certificate,
   timestamp, package identity, nested signer, payload equality, architecture,
   runtime receipt and MCPB identity before they can be promoted.
+- The expected certificate SHA-256 fingerprint is compiled into the desktop
+  and firewall helper. Rotation requires a reviewed release that temporarily
+  pins both the current and next fingerprints before SignPath changes keys;
+  publisher display names are never treated as identity.
 
 The committed artifact definitions are
 [`windows-binaries.xml`](../.signpath/windows-binaries.xml) and

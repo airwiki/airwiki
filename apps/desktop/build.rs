@@ -3,6 +3,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         "AIRWIKI_BOOTSTRAP_FEDERATION_INDEXES",
         "AIRWIKI_UPDATE_ENDPOINT",
         "AIRWIKI_UPDATER_PUBLIC_KEY",
+        "AIRWIKI_WINDOWS_SIGNER_SHA256",
     ] {
         println!("cargo:rerun-if-env-changed={name}");
     }

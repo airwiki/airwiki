@@ -109,6 +109,91 @@ function Expand-WindowsMsi([string] $Installer, [string] $Destination) {
     }
 }
 
+function Assert-WindowsMsiPayload(
+    [string] $Installer,
+    [string] $ExtractDir,
+    [string] $Desktop,
+    [string] $Bridge,
+    [string] $FirewallHelper,
+    [string] $Mcpb,
+    [string] $LlamaRuntime,
+    [string] $LlamaPolicy,
+    [string] $Xtask,
+    [string] $Root
+) {
+    Remove-AirWikiWindowsStagingPath `
+        -Path $ExtractDir `
+        -AllowedRoot (Join-Path $Root "target") `
+        -Label "Windows payload verification staging"
+    New-Item -ItemType Directory -Path $ExtractDir -Force | Out-Null
+    try {
+        Expand-WindowsMsi $Installer $ExtractDir
+        $PackagedDesktop = Get-SinglePayload $ExtractDir "airwiki.exe"
+        $PayloadRoot = [IO.Path]::GetDirectoryName($PackagedDesktop)
+        $PackagedBridge = Get-VerifiedWindowsRegularFile `
+            (Join-Path $PayloadRoot "integrations\bridge\airwiki-mcp-bridge.exe") `
+            "packaged MCP bridge"
+        $PackagedFirewallHelper = Get-VerifiedWindowsRegularFile `
+            (Join-Path $PayloadRoot "airwiki-windows-firewall-helper.exe") `
+            "packaged firewall helper"
+        $PackagedMcpb = Get-VerifiedWindowsRegularFile `
+            (Join-Path $PayloadRoot "integrations\airwiki-claude.mcpb") `
+            "packaged Claude MCPB"
+        $PackagedLlamaServer = Get-SinglePayload $ExtractDir "llama-server.exe"
+        $PackagedLicense = Get-VerifiedWindowsRegularFile `
+            (Join-Path $PayloadRoot "LICENSE") `
+            "packaged project license"
+        $PackagedNotices = Get-VerifiedWindowsRegularFile `
+            (Join-Path $PayloadRoot "THIRD_PARTY_NOTICES.md") `
+            "packaged third-party notices"
+        Assert-X64Pe $PackagedDesktop
+        Assert-X64Pe $PackagedBridge
+        Assert-X64Pe $PackagedFirewallHelper
+        Assert-WindowsFirewallHelperManifest `
+            $PackagedFirewallHelper `
+            "packaged Windows firewall helper"
+        Assert-WindowsMsiBundleTypePatch `
+            $Desktop `
+            $PackagedDesktop `
+            "Desktop executable"
+        Assert-SameBytes $Bridge $PackagedBridge "MCP bridge"
+        Assert-SameBytes $FirewallHelper $PackagedFirewallHelper "Windows Firewall helper"
+        Assert-SameBytes $Mcpb $PackagedMcpb "Claude MCPB"
+        Assert-SameBytes (Join-Path $Root "LICENSE") $PackagedLicense "project license"
+        Assert-SameBytes `
+            (Join-Path $Root "THIRD_PARTY_NOTICES.md") `
+            $PackagedNotices `
+            "third-party notices"
+        Assert-WindowsDirectoryTreeMatches `
+            (Join-Path $Root "resources\licenses") `
+            (Join-Path $PayloadRoot "licenses") `
+            "packaged license inventory"
+        $PackagedRuntimeRoot = Get-WindowsPackagedRuntimeRoot `
+            $PackagedDesktop `
+            $PackagedLlamaServer
+        Assert-WindowsRuntimeTreeMatches `
+            $LlamaRuntime `
+            $PackagedRuntimeRoot
+        $null = Get-WindowsLlamaRuntimeManifest $PackagedRuntimeRoot $LlamaPolicy
+        Assert-WindowsDesktopEmbedsLlamaRuntimeHash `
+            $PackagedDesktop `
+            $PackagedRuntimeRoot `
+            $LlamaPolicy
+        & $Xtask mcpb verify `
+            --target x86_64-pc-windows-msvc `
+            --bridge $PackagedBridge `
+            --output $PackagedMcpb
+        if ($LASTEXITCODE -ne 0) {
+            throw "Claude MCPB inside the MSI payload failed validation"
+        }
+    } finally {
+        Remove-AirWikiWindowsStagingPath `
+            -Path $ExtractDir `
+            -AllowedRoot (Join-Path $Root "target") `
+            -Label "Windows payload verification staging"
+    }
+}
+
 Push-Location $Root
 try {
     foreach ($FrontendTool in @($Tauri, $SvelteCheck, $Vite)) {
@@ -208,77 +293,18 @@ try {
         Assert-WindowsMsi $Installer.FullName
     }
 
-    $ExtractDir = Join-Path $Root "target\packages\windows-payload-check"
-    Remove-AirWikiWindowsStagingPath `
-        -Path $ExtractDir `
-        -AllowedRoot (Join-Path $Root "target") `
-        -Label "Windows payload verification staging"
-    New-Item -ItemType Directory -Path $ExtractDir -Force | Out-Null
-    try {
-        Expand-WindowsMsi $Installers[0].FullName $ExtractDir
-        $PackagedDesktop = Get-SinglePayload $ExtractDir "airwiki.exe"
-        $PayloadRoot = [IO.Path]::GetDirectoryName($PackagedDesktop)
-        $PackagedBridge = Get-VerifiedWindowsRegularFile `
-            (Join-Path $PayloadRoot "integrations\bridge\airwiki-mcp-bridge.exe") `
-            "packaged MCP bridge"
-        $PackagedFirewallHelper = Get-VerifiedWindowsRegularFile `
-            (Join-Path $PayloadRoot "airwiki-windows-firewall-helper.exe") `
-            "packaged firewall helper"
-        $PackagedMcpb = Get-VerifiedWindowsRegularFile `
-            (Join-Path $PayloadRoot "integrations\airwiki-claude.mcpb") `
-            "packaged Claude MCPB"
-        $PackagedLlamaServer = Get-SinglePayload $ExtractDir "llama-server.exe"
-        $PackagedLicense = Get-VerifiedWindowsRegularFile `
-            (Join-Path $PayloadRoot "LICENSE") `
-            "packaged project license"
-        $PackagedNotices = Get-VerifiedWindowsRegularFile `
-            (Join-Path $PayloadRoot "THIRD_PARTY_NOTICES.md") `
-            "packaged third-party notices"
-        Assert-X64Pe $PackagedDesktop
-        Assert-X64Pe $PackagedBridge
-        Assert-X64Pe $PackagedFirewallHelper
-        Assert-WindowsFirewallHelperManifest `
-            $PackagedFirewallHelper `
-            "packaged Windows firewall helper"
-        Assert-WindowsMsiBundleTypePatch `
-            $Desktop `
-            $PackagedDesktop `
-            "Desktop executable"
-        Assert-SameBytes $Bridge $PackagedBridge "MCP bridge"
-        Assert-SameBytes $FirewallHelper $PackagedFirewallHelper "Windows Firewall helper"
-        Assert-SameBytes $Mcpb $PackagedMcpb "Claude MCPB"
-        Assert-SameBytes (Join-Path $Root "LICENSE") $PackagedLicense "project license"
-        Assert-SameBytes `
-            (Join-Path $Root "THIRD_PARTY_NOTICES.md") `
-            $PackagedNotices `
-            "third-party notices"
-        Assert-WindowsDirectoryTreeMatches `
-            (Join-Path $Root "resources\licenses") `
-            (Join-Path $PayloadRoot "licenses") `
-            "packaged license inventory"
-        $PackagedRuntimeRoot = Get-WindowsPackagedRuntimeRoot `
-            $PackagedDesktop `
-            $PackagedLlamaServer
-        Assert-WindowsRuntimeTreeMatches `
-            $LlamaRuntime `
-            $PackagedRuntimeRoot
-        $null = Get-WindowsLlamaRuntimeManifest $PackagedRuntimeRoot $LlamaPolicy
-        Assert-WindowsDesktopEmbedsLlamaRuntimeHash `
-            $PackagedDesktop `
-            $PackagedRuntimeRoot `
-            $LlamaPolicy
-        & $Xtask mcpb verify `
-            --target x86_64-pc-windows-msvc `
-            --bridge $PackagedBridge `
-            --output $PackagedMcpb
-        if ($LASTEXITCODE -ne 0) {
-            throw "Claude MCPB inside the MSI payload failed validation"
-        }
-    } finally {
-        Remove-AirWikiWindowsStagingPath `
-            -Path $ExtractDir `
-            -AllowedRoot (Join-Path $Root "target") `
-            -Label "Windows payload verification staging"
+    for ($Index = 0; $Index -lt $Installers.Count; $Index++) {
+        Assert-WindowsMsiPayload `
+            -Installer $Installers[$Index].FullName `
+            -ExtractDir (Join-Path $Root "target\packages\windows-payload-check-$Index") `
+            -Desktop $Desktop `
+            -Bridge $Bridge `
+            -FirewallHelper $FirewallHelper `
+            -Mcpb $Mcpb `
+            -LlamaRuntime $LlamaRuntime `
+            -LlamaPolicy $LlamaPolicy `
+            -Xtask $Xtask `
+            -Root $Root
     }
     Write-Host "Verified fresh Windows x64 MSI installers: $($Installers.FullName -join ', ')"
 } finally {

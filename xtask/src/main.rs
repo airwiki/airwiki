@@ -2921,13 +2921,10 @@ fn verify_windows_uninstaller() -> Result<()> {
     let validated_smoke =
         fs::read_to_string(root.join("packaging/smoke-validated-windows-installer.ps1"))
             .context("reading the validated Windows installer smoke")?;
-    let updater = fs::read_to_string(root.join("apps/desktop/src/updater.rs"))
-        .context("reading the Windows updater implementation")?;
     verify_windows_installer_preflight_sources(&template)?;
     verify_windows_installer_smoke_sources(&smoke)?;
     verify_validated_installer_smoke_sources(&validated_smoke)?;
-    verify_windows_uninstaller_sources(&config, &template)?;
-    verify_windows_update_handoff_sources(&template, &updater)
+    verify_windows_uninstaller_sources(&config, &template)
 }
 
 fn verify_windows_msi() -> Result<()> {
@@ -2949,7 +2946,12 @@ fn verify_windows_msi() -> Result<()> {
         .context("reading SignPath MSI packaging")?;
     let verify = fs::read_to_string(root.join("packaging/verify-signpath-windows-msi.ps1"))
         .context("reading SignPath MSI verification")?;
-    verify_windows_signpath_sources(&workflow, &binaries, &msi, &prepare, &package, &verify)
+    let updater = fs::read_to_string(root.join("apps/desktop/src/updater.rs"))
+        .context("reading the Windows MSI updater implementation")?;
+    let main = fs::read_to_string(root.join("apps/desktop/src/main.rs"))
+        .context("reading the desktop update shutdown handoff")?;
+    verify_windows_signpath_sources(&workflow, &binaries, &msi, &prepare, &package, &verify)?;
+    verify_windows_msi_update_handoff_sources(&template, &updater, &main)
 }
 
 fn verify_windows_msi_sources(config: &str, template: &str) -> Result<()> {
@@ -3063,7 +3065,14 @@ fn verify_windows_signpath_sources(
             && workflow.contains("github-artifact-id:")
             && workflow.contains("secrets.SIGNPATH_API_TOKEN")
             && workflow.contains("vars.SIGNPATH_BINARIES_CONFIGURATION_SLUG")
-            && workflow.contains("vars.SIGNPATH_MSI_CONFIGURATION_SLUG"),
+            && workflow.contains("vars.SIGNPATH_MSI_CONFIGURATION_SLUG")
+            && workflow.contains(
+                "AIRWIKI_WINDOWS_SIGNER_SHA256: ${{ vars.AIRWIKI_WINDOWS_SIGNER_SHA256 }}"
+            )
+            && workflow
+                .matches("version: \"${{ env.AIRWIKI_SIGNING_VERSION }}\"")
+                .count()
+                == 2,
         "SignPath workflow must use two pinned, origin-verified signing requests on GitHub-hosted Windows"
     );
     ensure!(
@@ -3075,6 +3084,9 @@ fn verify_windows_signpath_sources(
     );
     ensure!(
         binaries.matches("<authenticode-sign />").count() == 3
+            && binaries.contains("<parameter name=\"version\" required=\"true\" />")
+            && binaries.matches("product-name=\"AirWiki\"").count() == 3
+            && binaries.matches("product-version=\"${version}\"").count() == 3
             && binaries.contains("path=\"airwiki.exe\"")
             && binaries.contains("path=\"airwiki-mcp-bridge.exe\"")
             && binaries.contains("path=\"airwiki-windows-firewall-helper.exe\""),
@@ -3082,6 +3094,9 @@ fn verify_windows_signpath_sources(
     );
     ensure!(
         msi.matches("<msi-file-set ").count() == 1
+            && msi.contains("<parameter name=\"version\" required=\"true\" />")
+            && msi.matches("product-name=\"AirWiki\"").count() == 4
+            && msi.matches("product-version=\"${version}\"").count() == 4
             && msi.matches("<include path=\"AirWiki_").count() == 2
             && msi.matches("<authenticode-sign />").count() == 1
             && msi.matches("<authenticode-verify />").count() == 4
@@ -4783,101 +4798,32 @@ fn verify_windows_installer_preflight_sources(template: &str) -> Result<()> {
     Ok(())
 }
 
-fn verify_windows_update_handoff_sources(template: &str, updater: &str) -> Result<()> {
-    const STRICT_UPDATER_BLOCK: &str = r#"  ${If} $UpdaterMode == 1
-    ${If} $PassiveMode != 1
-      SetErrorLevel 2
-      Abort
-    ${EndIf}
-    ${If} $ExistingInstallKind != "nsis"
-      SetErrorLevel 2
-      Abort
-    ${EndIf}
-    ${If} $InstallVersionRelation != "${RELATION_NEWER}"
-      SetErrorLevel 2
-      Abort
-    ${EndIf}
-  ${EndIf}"#;
-    const DOWNGRADE_REJECTION: &str = r#"  ${If} $InstallVersionRelation == "${RELATION_OLDER}"
-    SetErrorLevel 2
-    Abort
-  ${EndIf}"#;
-
+fn verify_windows_msi_update_handoff_sources(
+    template: &str,
+    updater: &str,
+    main: &str,
+) -> Result<()> {
     ensure!(
-        template.contains("Var UpdaterMode")
-            && template.contains("StrCpy $UpdaterMode 0")
-            && template.contains("${GetOptions} $CMDLINE \"/AIRWIKIUPDATE\" $UpdaterMode")
-            && template.contains(STRICT_UPDATER_BLOCK),
-        "NSIS in-app updates must require passive mode and a strictly newer embedded version"
+        template.contains("<Property Id=\"AUTOLAUNCHAPP\" Secure=\"yes\" />")
+            && template.contains("<Property Id=\"LAUNCHAPPARGS\" Secure=\"yes\" />")
+            && template.contains(
+                "<Custom Action=\"LaunchApplication\" After=\"InstallFinalize\">AUTOLAUNCHAPP AND NOT Installed</Custom>"
+            ),
+        "Windows MSI updates must relaunch only through the closed installer properties"
     );
     ensure!(
-        template.contains(DOWNGRADE_REJECTION),
-        "NSIS must reject every downgrade before installer sections"
-    );
-
-    let wait_start = template
-        .find("Function WaitForAirWikiUpdateShutdown")
-        .context("NSIS template has no bounded updater shutdown wait")?;
-    let wait_end = template[wait_start..]
-        .find("FunctionEnd")
-        .map(|offset| wait_start + offset)
-        .context("NSIS updater shutdown wait is not terminated")?;
-    let wait = &template[wait_start..wait_end];
-    let update_option = wait
-        .find("${GetOptions} $CMDLINE \"/AIRWIKIUPDATE\" $R0")
-        .context("NSIS updater shutdown wait does not require /AIRWIKIUPDATE")?;
-    let counter = wait
-        .find("StrCpy $R1 0")
-        .context("NSIS updater shutdown wait has no bounded counter")?;
-    let process_check = wait
-        .find("nsis_tauri_utils::FindProcess \"${MAINBINARYNAME}.exe\"")
-        .context("NSIS updater shutdown wait does not observe the desktop process")?;
-    let increment = wait
-        .find("IntOp $R1 $R1 + 1")
-        .context("NSIS updater shutdown wait does not advance its counter")?;
-    let bound = wait
-        .find("${If} $R1 >= 50")
-        .context("NSIS updater shutdown wait is not bounded to 50 attempts")?;
-    let sleep = wait
-        .find("Sleep 100")
-        .context("NSIS updater shutdown wait does not yield between attempts")?;
-    ensure!(
-        update_option < counter
-            && counter < process_check
-            && process_check < increment
-            && increment < bound
-            && bound < sleep,
-        "NSIS updater shutdown wait must parse /AIRWIKIUPDATE then poll for at most five seconds"
-    );
-
-    let install_start = template
-        .find("Section Install")
-        .context("NSIS template has no install section")?;
-    let install_end = template[install_start..]
-        .find("SectionEnd")
-        .map(|offset| install_start + offset)
-        .context("NSIS install section is not terminated")?;
-    let install = &template[install_start..install_end];
-    let graceful_wait = install
-        .find("Call WaitForAirWikiUpdateShutdown")
-        .context("NSIS install section does not wait for a clean updater shutdown")?;
-    let recovery = install
-        .find("!insertmacro CheckIfAppIsRunning \"${MAINBINARYNAME}.exe\" \"${PRODUCTNAME}\"")
-        .context("NSIS install section has no stuck-process recovery")?;
-    ensure!(
-        graceful_wait < recovery && !template.contains("!macro CheckIfAppIsRunning"),
-        "NSIS must use Tauri's current-user-aware stuck-process recovery after the clean updater shutdown wait"
-    );
-
-    ensure!(
-        updater.contains(
-            "const WINDOWS_INSTALLER_ARGS: [&str; 3] = [\"/P\", \"/R\", \"/AIRWIKIUPDATE\"]"
-        ) && updater.contains("launch_locked_windows_process(&package, &WINDOWS_INSTALLER_ARGS)")
+        updater.contains("airwiki-update.msi")
+            && updater.contains("trusted_windows_installer_path()?")
+            && updater.contains("GetSystemDirectoryW(None)")
+            && updater.contains("OsStr::new(\"/i\")")
+            && updater.contains("\"/passive\"")
+            && updater.contains("\"/norestart\"")
+            && updater.contains("\"AUTOLAUNCHAPP=1\"")
+            && updater.contains("\"LAUNCHAPPARGS=/AIRWIKIUPDATE\"")
             && updater.contains("CreateProcessW(")
             && updater.contains("PROC_THREAD_ATTRIBUTE_HANDLE_LIST")
-            && updater.contains("SetHandleInformation(")
             && updater.contains("package.preserve_after_launch()"),
-        "Windows updater must launch the locked NSIS directly with inherited guards and /P /R /AIRWIKIUPDATE"
+        "Windows updater must launch the locked MSI through trusted msiexec with closed arguments and inherited guards"
     );
     ensure!(
         updater.contains(".custom_flags(FILE_FLAG_OPEN_REPARSE_POINT.0)")
@@ -4890,18 +4836,22 @@ fn verify_windows_update_handoff_sources(template: &str, updater: &str) -> Resul
     ensure!(
         updater.contains("expected_windows_update_version(version, env!(\"CARGO_PKG_VERSION\"))")
             && updater.contains("install_windows_platform_update(&update.version, package)")
-            && updater.contains("FILE_VER_GET_NEUTRAL")
-            && updater.contains("MAX_WINDOWS_VERSION_INFO_BYTES")
-            && updater.contains("read_locked_windows_versions(package)")
-            && updater.contains("fixed_info.dwFileVersionMS")
-            && updater.contains("fixed_info.dwProductVersionMS")
-            && updater.contains("validate_embedded_windows_versions"),
-        "Windows updater must bind both signed PE versions to the manifest before launch"
+            && updater.contains("MsiOpenDatabaseW(")
+            && updater.contains("MSIDBOPEN_READONLY")
+            && updater.contains("ProductVersion")
+            && updater.contains("read_locked_windows_msi_version(package)")
+            && updater.contains("validate_windows_msi_version"),
+        "Windows updater must bind the signed MSI ProductVersion to the manifest before launch"
+    );
+    ensure!(
+        main.contains("if result.is_ok() {\n        begin_shutdown(app);")
+            && main.contains("tokio::time::timeout(Duration::from_secs(2), shutdown)"),
+        "Windows updater must begin bounded coordinated shutdown only after msiexec launches"
     );
     let normalized = updater.to_ascii_lowercase();
     ensure!(
         !normalized.contains("powershell") && !updater.contains("process::exit"),
-        "Windows updater must not use PowerShell or terminate the process from the worker"
+        "Windows MSI updater must not use PowerShell or terminate from the worker"
     );
     Ok(())
 }
@@ -5236,11 +5186,12 @@ mod tests {
         (config, template)
     }
 
-    fn windows_update_handoff_sources() -> (String, String) {
+    fn windows_update_handoff_sources() -> (String, String, String) {
         let root = workspace_root();
-        let template = fs::read_to_string(root.join("packaging/windows/installer.nsi")).unwrap();
+        let template = fs::read_to_string(root.join("packaging/windows/installer.wxs")).unwrap();
         let updater = fs::read_to_string(root.join("apps/desktop/src/updater.rs")).unwrap();
-        (template, updater)
+        let main = fs::read_to_string(root.join("apps/desktop/src/main.rs")).unwrap();
+        (template, updater, main)
     }
 
     fn windows_installer_smoke_source() -> String {
@@ -5436,15 +5387,15 @@ mod tests {
     }
 
     #[test]
-    fn windows_update_handoff_waits_cleanly_then_keeps_stuck_process_recovery() {
-        let (template, updater) = windows_update_handoff_sources();
+    fn windows_msi_update_handoff_is_closed_and_coordinated() {
+        let (template, updater, main) = windows_update_handoff_sources();
 
-        verify_windows_update_handoff_sources(&template, &updater).unwrap();
+        verify_windows_msi_update_handoff_sources(&template, &updater, &main).unwrap();
     }
 
     #[test]
     fn windows_installer_preflight_is_not_owned_by_the_reinstall_page() {
-        let (template, _) = windows_update_handoff_sources();
+        let (_, template) = windows_uninstaller_sources();
         let unsafe_template = template.replacen(
             "  Call ClassifyExistingInstallation\n  Call EnforceInstallPolicy",
             "  Call EnforceInstallPolicy",
@@ -6778,7 +6729,7 @@ mod tests {
 
     #[test]
     fn windows_installer_preflight_requires_client_windows_10_and_native_amd64() {
-        let (template, _) = windows_update_handoff_sources();
+        let (_, template) = windows_uninstaller_sources();
         for (needle, replacement, message) in [
             ("${AtLeastWin10}", "${RunningX64}", "Windows 10"),
             ("${IsServerOS}", "${AtLeastWin10}", "Windows Server"),
@@ -6792,7 +6743,7 @@ mod tests {
 
     #[test]
     fn windows_installer_platform_gate_is_the_first_on_init_action() {
-        let (template, _) = windows_update_handoff_sources();
+        let (_, template) = windows_uninstaller_sources();
         let unsafe_template = template.replacen(
             "Function .onInit\n  Call EnforceSupportedWindows",
             "Function .onInit\n  StrCpy $PassiveMode 0\n  Call EnforceSupportedWindows",
@@ -6810,7 +6761,7 @@ mod tests {
 
     #[test]
     fn windows_installer_platform_gate_rejects_inverted_predicates() {
-        let (template, _) = windows_update_handoff_sources();
+        let (_, template) = windows_uninstaller_sources();
         for (needle, replacement, message) in [
             (
                 "  ${IfNot} ${AtLeastWin10}\n    StrCpy $PlatformRejectionMessage \"$(UnsupportedWindowsVersion)\"",
@@ -6840,7 +6791,7 @@ mod tests {
 
     #[test]
     fn windows_installer_platform_rejection_is_localized_and_silent_safe() {
-        let (template, _) = windows_update_handoff_sources();
+        let (_, template) = windows_uninstaller_sources();
         for (needle, replacement, message) in [
             (
                 "LangString UnsupportedWindowsVersion ${LANG_SPANISH}",
@@ -6880,7 +6831,7 @@ mod tests {
 
     #[test]
     fn windows_installer_preflight_precedes_the_first_runtime_write() {
-        let (template, _) = windows_update_handoff_sources();
+        let (_, template) = windows_uninstaller_sources();
         let unsafe_template = template.replacen(
             "  Call ValidateInstallLocation\n\n  !if \"${DISPLAYLANGUAGESELECTOR}\" == \"true\"\n    !insertmacro MUI_LANGDLL_DISPLAY\n  !endif",
             "  !if \"${DISPLAYLANGUAGESELECTOR}\" == \"true\"\n    !insertmacro MUI_LANGDLL_DISPLAY\n  !endif\n\n  Call ValidateInstallLocation",
@@ -6898,7 +6849,7 @@ mod tests {
 
     #[test]
     fn windows_installer_preflight_rejects_invalid_installed_semver() {
-        let (template, _) = windows_update_handoff_sources();
+        let (_, template) = windows_uninstaller_sources();
         let unsafe_template = template.replace("__airwiki_invalid_semver__", "0.0.0");
 
         let error = verify_windows_installer_preflight_sources(&unsafe_template).unwrap_err();
@@ -6908,7 +6859,7 @@ mod tests {
 
     #[test]
     fn windows_installer_preflight_rejects_ambiguous_registry_classification() {
-        let (template, _) = windows_update_handoff_sources();
+        let (_, template) = windows_uninstaller_sources();
         for (needle, replacement, message) in [
             (
                 "IntOp $WixMetadataCount $WixMetadataCount + 1",
@@ -7006,7 +6957,7 @@ mod tests {
 
     #[test]
     fn windows_installer_preflight_dispatches_wix_before_legacy_reinstall_logic() {
-        let (template, _) = windows_update_handoff_sources();
+        let (_, template) = windows_uninstaller_sources();
         let unsafe_template = template.replacen(
             "Function PageLeaveReinstall\n  ${NSD_GetState} $R2 $R1\n\n  ${If} $ExistingInstallKind == \"wix\"",
             "Function PageLeaveReinstall\n  ${NSD_GetState} $R2 $R1\n\n  ${If} $ExistingInstallKind == \"wix\"\n    Goto reinst_done\n  ${EndIf}\n\n  ${If} $ExistingInstallKind == \"wix\"",
@@ -7024,7 +6975,7 @@ mod tests {
 
     #[test]
     fn windows_installer_preflight_requires_explicit_wix_migration_selection() {
-        let (template, _) = windows_update_handoff_sources();
+        let (_, template) = windows_uninstaller_sources();
         for (needle, replacement, message) in [
             (
                 "    ${If} $R1 != ${BST_CHECKED}\n      Abort\n    ${EndIf}\n    Goto reinst_uninstall",
@@ -7048,161 +6999,92 @@ mod tests {
     }
 
     #[test]
-    fn windows_update_handoff_rejects_a_missing_private_update_flag() {
-        let (template, updater) = windows_update_handoff_sources();
-        let unsafe_template = template.replace(
-            "${GetOptions} $CMDLINE \"/AIRWIKIUPDATE\" $R0",
-            "${GetOptions} $CMDLINE \"/UNSAFE\" $R0",
-        );
+    fn windows_msi_update_handoff_rejects_an_incomplete_argument_contract() {
+        let (template, updater, main) = windows_update_handoff_sources();
+        let unsafe_updater = updater.replace("\"AUTOLAUNCHAPP=1\",", "");
 
-        let error = verify_windows_update_handoff_sources(&unsafe_template, &updater).unwrap_err();
+        let error = verify_windows_msi_update_handoff_sources(&template, &unsafe_updater, &main)
+            .unwrap_err();
 
-        assert!(
-            error
-                .to_string()
-                .contains("does not require /AIRWIKIUPDATE")
-        );
+        assert!(error.to_string().contains("closed arguments"));
     }
 
     #[test]
-    fn windows_update_handoff_rejects_replay_or_downgrade_in_updater_mode() {
-        let (template, updater) = windows_update_handoff_sources();
-        let unsafe_template = template.replace(
-            "${If} $InstallVersionRelation != \"${RELATION_NEWER}\"",
-            "${If} $InstallVersionRelation == \"${RELATION_OLDER}\"",
-        );
-        assert_ne!(unsafe_template, template);
-
-        let error = verify_windows_update_handoff_sources(&unsafe_template, &updater).unwrap_err();
-
-        assert!(
-            error
-                .to_string()
-                .contains("strictly newer embedded version")
-        );
-    }
-
-    #[test]
-    fn windows_update_handoff_rejects_downgrade_policy_bypass() {
-        let (template, updater) = windows_update_handoff_sources();
-        let unsafe_template = template.replace(
-            "${If} $InstallVersionRelation == \"${RELATION_OLDER}\"",
-            "${If} $InstallVersionRelation == \"${RELATION_SAME}\"",
-        );
-        assert_ne!(unsafe_template, template);
-
-        let error = verify_windows_update_handoff_sources(&unsafe_template, &updater).unwrap_err();
-
-        assert!(error.to_string().contains("every downgrade"));
-    }
-
-    #[test]
-    fn windows_update_handoff_rejects_forced_recovery_before_the_clean_wait() {
-        let (template, updater) = windows_update_handoff_sources();
-        let unsafe_template = template.replace(
-            "Call WaitForAirWikiUpdateShutdown\n  !insertmacro CheckIfAppIsRunning \"${MAINBINARYNAME}.exe\" \"${PRODUCTNAME}\"",
-            "!insertmacro CheckIfAppIsRunning \"${MAINBINARYNAME}.exe\" \"${PRODUCTNAME}\"\n  Call WaitForAirWikiUpdateShutdown",
-        );
-
-        let error = verify_windows_update_handoff_sources(&unsafe_template, &updater).unwrap_err();
-
-        assert!(
-            error
-                .to_string()
-                .contains("after the clean updater shutdown")
-        );
-    }
-
-    #[test]
-    fn windows_update_handoff_rejects_an_incomplete_nsis_argument_contract() {
-        let (template, updater) = windows_update_handoff_sources();
-        let unsafe_updater = updater.replace(
-            "const WINDOWS_INSTALLER_ARGS: [&str; 3] = [\"/P\", \"/R\", \"/AIRWIKIUPDATE\"]",
-            "const WINDOWS_INSTALLER_ARGS: [&str; 2] = [\"/P\", \"/R\"]",
-        );
-
-        let error = verify_windows_update_handoff_sources(&template, &unsafe_updater).unwrap_err();
-
-        assert!(error.to_string().contains("/P /R /AIRWIKIUPDATE"));
-    }
-
-    #[test]
-    fn windows_update_handoff_rejects_missing_inherited_package_guards() {
-        let (template, updater) = windows_update_handoff_sources();
+    fn windows_msi_update_handoff_rejects_missing_inherited_package_guards() {
+        let (template, updater, main) = windows_update_handoff_sources();
         let unsafe_updater = updater.replace(
             "PROC_THREAD_ATTRIBUTE_HANDLE_LIST",
             "PROC_THREAD_ATTRIBUTE_PARENT_PROCESS",
         );
 
-        let error = verify_windows_update_handoff_sources(&template, &unsafe_updater).unwrap_err();
+        let error = verify_windows_msi_update_handoff_sources(&template, &unsafe_updater, &main)
+            .unwrap_err();
 
         assert!(error.to_string().contains("inherited guards"));
     }
 
     #[test]
-    fn windows_update_handoff_rejects_path_only_artifact_validation() {
-        let (template, updater) = windows_update_handoff_sources();
+    fn windows_msi_update_handoff_rejects_path_only_artifact_validation() {
+        let (template, updater, main) = windows_update_handoff_sources();
         let unsafe_updater = updater.replace(
             "compare_staged_package(&mut installer, package)?",
             "installer.seek(SeekFrom::Start(0))?",
         );
 
-        let error = verify_windows_update_handoff_sources(&template, &unsafe_updater).unwrap_err();
+        let error = verify_windows_msi_update_handoff_sources(&template, &unsafe_updater, &main)
+            .unwrap_err();
 
         assert!(error.to_string().contains("revalidate exact bytes"));
     }
 
     #[test]
-    fn windows_update_handoff_rejects_a_reparse_following_final_open() {
-        let (template, updater) = windows_update_handoff_sources();
+    fn windows_msi_update_handoff_rejects_a_reparse_following_final_open() {
+        let (template, updater, main) = windows_update_handoff_sources();
         let unsafe_updater = updater.replace(
             ".custom_flags(FILE_FLAG_OPEN_REPARSE_POINT.0)",
             ".custom_flags(0)",
         );
 
-        let error = verify_windows_update_handoff_sources(&template, &unsafe_updater).unwrap_err();
+        let error = verify_windows_msi_update_handoff_sources(&template, &unsafe_updater, &main)
+            .unwrap_err();
 
         assert!(error.to_string().contains("non-reparse read-only handle"));
     }
 
     #[test]
-    fn windows_update_handoff_rejects_an_unbound_manifest_version() {
-        let (template, updater) = windows_update_handoff_sources();
+    fn windows_msi_update_handoff_rejects_an_unbound_manifest_version() {
+        let (template, updater, main) = windows_update_handoff_sources();
         let unsafe_updater = updater.replace(
             "expected_windows_update_version(version, env!(\"CARGO_PKG_VERSION\"))",
             "expected_windows_update_version(\"999.0.0\", env!(\"CARGO_PKG_VERSION\"))",
         );
 
-        let error = verify_windows_update_handoff_sources(&template, &unsafe_updater).unwrap_err();
+        let error = verify_windows_msi_update_handoff_sources(&template, &unsafe_updater, &main)
+            .unwrap_err();
 
-        assert!(error.to_string().contains("signed PE versions"));
+        assert!(error.to_string().contains("MSI ProductVersion"));
     }
 
     #[test]
-    fn windows_update_handoff_rejects_single_field_pe_version_checks() {
-        let (template, updater) = windows_update_handoff_sources();
-        let unsafe_updater = updater.replace(
-            "fixed_info.dwProductVersionMS",
-            "fixed_info.dwFileVersionMS",
-        );
+    fn windows_msi_update_handoff_rejects_missing_product_version_query() {
+        let (template, updater, main) = windows_update_handoff_sources();
+        let unsafe_updater = updater.replace("ProductVersion", "UnsafeVersion");
 
-        let error = verify_windows_update_handoff_sources(&template, &unsafe_updater).unwrap_err();
+        let error = verify_windows_msi_update_handoff_sources(&template, &unsafe_updater, &main)
+            .unwrap_err();
 
-        assert!(error.to_string().contains("signed PE versions"));
+        assert!(error.to_string().contains("MSI ProductVersion"));
     }
 
     #[test]
-    fn windows_update_handoff_rejects_worker_process_termination() {
-        let (template, mut updater) = windows_update_handoff_sources();
-        updater.push_str("\nprocess::exit(0);\n");
+    fn windows_msi_update_handoff_rejects_shutdown_before_launch_success() {
+        let (template, updater, main) = windows_update_handoff_sources();
+        let unsafe_main = main.replace("if result.is_ok() {", "if result.is_err() {");
 
-        let error = verify_windows_update_handoff_sources(&template, &updater).unwrap_err();
+        let error = verify_windows_msi_update_handoff_sources(&template, &updater, &unsafe_main)
+            .unwrap_err();
 
-        assert!(
-            error
-                .to_string()
-                .contains("must not use PowerShell or terminate")
-        );
+        assert!(error.to_string().contains("only after msiexec launches"));
     }
 
     #[test]
@@ -7912,9 +7794,10 @@ mod tests {
             .find("cargo build --locked --release --target x86_64-pc-windows-msvc")
             .unwrap();
         let tauri_build = script.find("& $Tauri build").unwrap();
-        let receipt = script
-            .find("Assert-WindowsDesktopEmbedsLlamaRuntimeHash")
-            .unwrap();
+        let receipt = tauri_build
+            + script[tauri_build..]
+                .find("Assert-WindowsDesktopEmbedsLlamaRuntimeHash")
+                .unwrap();
         let mcpb_build = script.find("& $Xtask mcpb build").unwrap();
 
         assert!(

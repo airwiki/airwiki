@@ -2210,10 +2210,15 @@ async fn install_update(
     request_id: String,
 ) -> Result<(), UiError> {
     require_native_confirmation(&app, NativeConfirmation::InstallUpdate, None).await?;
-    send_updater_command(&runtime, request_id, |request_id| {
+    let result = send_updater_command(&runtime, request_id, |request_id| {
         WorkerCommand::InstallUpdate { request_id }
     })
-    .await
+    .await;
+    #[cfg(target_os = "windows")]
+    if result.is_ok() {
+        begin_shutdown(app);
+    }
+    result
 }
 
 async fn send_updater_command(

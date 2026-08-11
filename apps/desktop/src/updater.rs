@@ -8,10 +8,11 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 #[cfg(target_os = "windows")]
 use std::{
+    ffi::{OsStr, OsString},
     fs::{File, OpenOptions},
     io::{Read, Seek, SeekFrom, Write},
     mem::{size_of, size_of_val},
-    os::windows::ffi::OsStrExt,
+    os::windows::ffi::{OsStrExt, OsStringExt},
     os::windows::fs::OpenOptionsExt,
     os::windows::io::AsRawHandle,
     path::{Path, PathBuf},
@@ -29,19 +30,27 @@ use thiserror::Error;
 use url::Url;
 #[cfg(target_os = "windows")]
 use windows::Win32::{
-    Foundation::{CloseHandle, HANDLE, HANDLE_FLAG_INHERIT, HANDLE_FLAGS, SetHandleInformation},
+    Foundation::{
+        CloseHandle, ERROR_NO_MORE_ITEMS, ERROR_SUCCESS, HANDLE, HANDLE_FLAG_INHERIT, HANDLE_FLAGS,
+        SetHandleInformation,
+    },
     Storage::FileSystem::{
         BY_HANDLE_FILE_INFORMATION, FILE_ATTRIBUTE_DIRECTORY, FILE_ATTRIBUTE_REPARSE_POINT,
         FILE_FLAG_BACKUP_SEMANTICS, FILE_FLAG_OPEN_REPARSE_POINT, FILE_SHARE_READ, FILE_TYPE_DISK,
-        FILE_VER_GET_NEUTRAL, GetFileInformationByHandle, GetFileType, GetFileVersionInfoExW,
-        GetFileVersionInfoSizeExW, VS_FFI_SIGNATURE, VS_FFI_STRUCVERSION, VS_FIXEDFILEINFO,
-        VerQueryValueW,
+        GetFileInformationByHandle, GetFileType,
     },
-    System::Threading::{
-        CreateProcessW, DeleteProcThreadAttributeList, EXTENDED_STARTUPINFO_PRESENT,
-        InitializeProcThreadAttributeList, LPPROC_THREAD_ATTRIBUTE_LIST,
-        PROC_THREAD_ATTRIBUTE_HANDLE_LIST, PROCESS_INFORMATION, STARTUPINFOEXW, STARTUPINFOW,
-        UpdateProcThreadAttribute,
+    System::{
+        ApplicationInstallationAndServicing::{
+            MSIDBOPEN_READONLY, MSIHANDLE, MsiCloseHandle, MsiDatabaseOpenViewW, MsiOpenDatabaseW,
+            MsiRecordGetStringW, MsiViewExecute, MsiViewFetch,
+        },
+        SystemInformation::GetSystemDirectoryW,
+        Threading::{
+            CreateProcessW, DeleteProcThreadAttributeList, EXTENDED_STARTUPINFO_PRESENT,
+            InitializeProcThreadAttributeList, LPPROC_THREAD_ATTRIBUTE_LIST,
+            PROC_THREAD_ATTRIBUTE_HANDLE_LIST, PROCESS_INFORMATION, STARTUPINFOEXW, STARTUPINFOW,
+            UpdateProcThreadAttribute,
+        },
     },
 };
 #[cfg(all(target_os = "windows", test))]
@@ -58,9 +67,12 @@ const MAX_CHECK_JITTER: Duration = Duration::from_secs(30 * 60);
 const NETWORK_TIMEOUT: Duration = Duration::from_secs(15);
 const MAX_RELEASE_NOTES_CHARS: usize = 4_096;
 #[cfg(any(target_os = "windows", test))]
-const WINDOWS_INSTALLER_ARGS: [&str; 3] = ["/P", "/R", "/AIRWIKIUPDATE"];
-#[cfg(target_os = "windows")]
-const MAX_WINDOWS_VERSION_INFO_BYTES: u32 = 1024 * 1024;
+const WINDOWS_INSTALLER_ARGS: [&str; 4] = [
+    "/passive",
+    "/norestart",
+    "AUTOLAUNCHAPP=1",
+    "LAUNCHAPPARGS=/AIRWIKIUPDATE",
+];
 
 const COMPILED_ENDPOINT: Option<&str> = option_env!("AIRWIKI_UPDATE_ENDPOINT");
 const COMPILED_PUBLIC_KEY: Option<&str> = option_env!("AIRWIKI_UPDATER_PUBLIC_KEY");
@@ -268,55 +280,34 @@ where
 
 #[cfg(any(target_os = "windows", test))]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-struct WindowsExecutableVersion {
-    major: u16,
-    minor: u16,
+struct WindowsMsiVersion {
+    major: u8,
+    minor: u8,
     build: u16,
-    private: u16,
 }
 
 #[cfg(any(target_os = "windows", test))]
-impl WindowsExecutableVersion {
+impl WindowsMsiVersion {
     fn from_stable_semver(version: &Version) -> Result<Self, WindowsVersionValidationError> {
-        if !version.pre.is_empty() {
+        if !version.pre.is_empty() || !version.build.is_empty() {
             return Err(WindowsVersionValidationError::InvalidManifest);
         }
-        let private = if version.build.is_empty() {
-            0
-        } else {
-            version
-                .build
-                .as_str()
-                .parse::<u16>()
-                .map_err(|_| WindowsVersionValidationError::InvalidManifest)?
-        };
         Ok(Self {
-            major: u16::try_from(version.major)
+            major: u8::try_from(version.major)
                 .map_err(|_| WindowsVersionValidationError::InvalidManifest)?,
-            minor: u16::try_from(version.minor)
+            minor: u8::try_from(version.minor)
                 .map_err(|_| WindowsVersionValidationError::InvalidManifest)?,
             build: u16::try_from(version.patch)
                 .map_err(|_| WindowsVersionValidationError::InvalidManifest)?,
-            private,
         })
     }
 
-    #[cfg(target_os = "windows")]
-    fn from_fixed_words(most_significant: u32, least_significant: u32) -> Self {
-        Self {
-            major: (most_significant >> 16) as u16,
-            minor: most_significant as u16,
-            build: (least_significant >> 16) as u16,
-            private: least_significant as u16,
-        }
+    fn parse(value: &str) -> Result<Self, WindowsVersionValidationError> {
+        let version = Version::parse(value)
+            .map_err(|_| WindowsVersionValidationError::InvalidEmbeddedResource)?;
+        Self::from_stable_semver(&version)
+            .map_err(|_| WindowsVersionValidationError::InvalidEmbeddedResource)
     }
-}
-
-#[cfg(any(target_os = "windows", test))]
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-struct EmbeddedWindowsVersions {
-    file: WindowsExecutableVersion,
-    product: WindowsExecutableVersion,
 }
 
 #[cfg(any(target_os = "windows", test))]
@@ -332,26 +323,26 @@ enum WindowsVersionValidationError {
 fn expected_windows_update_version(
     manifest_version: &str,
     current_version: &str,
-) -> Result<WindowsExecutableVersion, WindowsVersionValidationError> {
+) -> Result<WindowsMsiVersion, WindowsVersionValidationError> {
     let expected = Version::parse(manifest_version)
         .map_err(|_| WindowsVersionValidationError::InvalidManifest)?;
     let current = Version::parse(current_version)
         .map_err(|_| WindowsVersionValidationError::InvalidManifest)?;
-    if !expected.pre.is_empty() {
+    if !expected.pre.is_empty() || !expected.build.is_empty() {
         return Err(WindowsVersionValidationError::InvalidManifest);
     }
     if expected <= current {
         return Err(WindowsVersionValidationError::NotNewer);
     }
-    WindowsExecutableVersion::from_stable_semver(&expected)
+    WindowsMsiVersion::from_stable_semver(&expected)
 }
 
 #[cfg(any(target_os = "windows", test))]
-fn validate_embedded_windows_versions(
-    expected: WindowsExecutableVersion,
-    embedded: EmbeddedWindowsVersions,
+fn validate_windows_msi_version(
+    expected: WindowsMsiVersion,
+    embedded: &str,
 ) -> Result<(), WindowsVersionValidationError> {
-    if embedded.file != expected || embedded.product != expected {
+    if WindowsMsiVersion::parse(embedded)? != expected {
         return Err(WindowsVersionValidationError::VersionMismatch);
     }
     Ok(())
@@ -390,7 +381,7 @@ impl LockedWindowsUpdatePackage {
             .open(directory.path())
             .map_err(|_| UpdateIssue::new(UpdateIssueCode::Internal))?;
         validate_windows_file_handle(&directory_guard, true)?;
-        let installer_path = directory.path().join("airwiki-update.exe");
+        let installer_path = directory.path().join("airwiki-update.msi");
         let mut writable_installer = OpenOptions::new()
             .read(true)
             .write(true)
@@ -502,100 +493,117 @@ fn validate_windows_file_handle(file: &File, expected_directory: bool) -> Result
 }
 
 #[cfg(target_os = "windows")]
-fn read_locked_windows_versions(
+fn read_locked_windows_msi_version(
     package: &LockedWindowsUpdatePackage,
-) -> Result<EmbeddedWindowsVersions, WindowsVersionValidationError> {
-    // Version.dll is path-based. The final file handle denies write/delete sharing
-    // and the directory guard denies replacement of its parent while this borrow
-    // is live, so the queried path remains bound to the already-compared artifact.
+) -> Result<String, WindowsVersionValidationError> {
+    const PRODUCT_VERSION_QUERY: &str =
+        "SELECT `Value` FROM `Property` WHERE `Property` = 'ProductVersion'";
+    const MAX_PRODUCT_VERSION_UNITS: usize = 64;
+
+    // Windows Installer opens by path. The live file and directory handles deny
+    // write, delete and parent replacement, so this path remains bound to the
+    // already-compared MSI for the complete query.
     if !package.path().is_absolute() {
         return Err(WindowsVersionValidationError::InvalidEmbeddedResource);
     }
     let path = nul_terminated_windows_path(package.path())
         .map_err(|_| WindowsVersionValidationError::InvalidEmbeddedResource)?;
-    let path = PCWSTR(path.as_ptr());
-    let mut ignored_handle = 0_u32;
-    // SAFETY: path is NUL-terminated and remains live for this size query.
-    let version_size =
-        unsafe { GetFileVersionInfoSizeExW(FILE_VER_GET_NEUTRAL, path, &mut ignored_handle) };
-    if version_size == 0 || version_size > MAX_WINDOWS_VERSION_INFO_BYTES {
-        return Err(WindowsVersionValidationError::InvalidEmbeddedResource);
-    }
-    let buffer_size = usize::try_from(version_size)
+    let query = nul_terminated_windows_text(PRODUCT_VERSION_QUERY)
         .map_err(|_| WindowsVersionValidationError::InvalidEmbeddedResource)?;
-    let mut buffer = vec![0_u8; buffer_size];
-    // SAFETY: buffer has exactly version_size writable bytes and path remains
-    // NUL-terminated and live. The same neutral-resource flags are used as in
-    // the preceding size query.
-    unsafe {
-        GetFileVersionInfoExW(
-            FILE_VER_GET_NEUTRAL,
-            path,
-            None,
-            version_size,
-            buffer.as_mut_ptr().cast(),
+    let database = open_msi_handle(|handle| {
+        // SAFETY: both PCWSTR values are NUL-terminated and live for the call;
+        // handle is writable and becomes owned only on ERROR_SUCCESS.
+        unsafe { MsiOpenDatabaseW(PCWSTR(path.as_ptr()), MSIDBOPEN_READONLY, handle) }
+    })?;
+    let view = open_msi_handle(|handle| {
+        // SAFETY: database is a live MSI database handle, query is NUL-terminated,
+        // and handle is writable and owned only on ERROR_SUCCESS.
+        unsafe { MsiDatabaseOpenViewW(database.raw(), PCWSTR(query.as_ptr()), handle) }
+    })?;
+    // SAFETY: view is a live SELECT view and a null record is required for a
+    // query without parameters.
+    ensure_msi_success(unsafe { MsiViewExecute(view.raw(), MSIHANDLE(0)) })?;
+    let record = open_msi_handle(|handle| {
+        // SAFETY: view is live and handle receives the first fetched record.
+        unsafe { MsiViewFetch(view.raw(), handle) }
+    })?;
+    let mut buffer = [0_u16; MAX_PRODUCT_VERSION_UNITS];
+    let mut length = u32::try_from(buffer.len())
+        .map_err(|_| WindowsVersionValidationError::InvalidEmbeddedResource)?;
+    // SAFETY: record is live, field 1 is the selected Value column, and buffer
+    // has `length` writable UTF-16 units.
+    ensure_msi_success(unsafe {
+        MsiRecordGetStringW(
+            record.raw(),
+            1,
+            Some(PWSTR(buffer.as_mut_ptr())),
+            Some(&mut length),
         )
+    })?;
+    let length = usize::try_from(length)
+        .map_err(|_| WindowsVersionValidationError::InvalidEmbeddedResource)?;
+    if length == 0 || length >= buffer.len() {
+        return Err(WindowsVersionValidationError::InvalidEmbeddedResource);
     }
-    .map_err(|_| WindowsVersionValidationError::InvalidEmbeddedResource)?;
+    let mut unexpected_record = MSIHANDLE(0);
+    // SAFETY: view remains live; a second successful row would make the property
+    // query ambiguous and is rejected below.
+    let second_status = unsafe { MsiViewFetch(view.raw(), &mut unexpected_record) };
+    if second_status == ERROR_SUCCESS.0 {
+        // SAFETY: a successful fetch returns a caller-owned MSI record handle.
+        let _ = unsafe { MsiCloseHandle(unexpected_record) };
+        return Err(WindowsVersionValidationError::InvalidEmbeddedResource);
+    }
+    if second_status != ERROR_NO_MORE_ITEMS.0 {
+        return Err(WindowsVersionValidationError::InvalidEmbeddedResource);
+    }
+    String::from_utf16(&buffer[..length])
+        .map_err(|_| WindowsVersionValidationError::InvalidEmbeddedResource)
+}
 
-    const ROOT_SUBBLOCK: [u16; 2] = [b'\\' as u16, 0];
-    let mut fixed_info_pointer = std::ptr::null_mut();
-    let mut fixed_info_length = 0_u32;
-    // SAFETY: buffer is initialized by GetFileVersionInfoExW, ROOT_SUBBLOCK is
-    // NUL-terminated, and both output pointers are writable for the call.
-    let found = unsafe {
-        VerQueryValueW(
-            buffer.as_ptr().cast(),
-            PCWSTR(ROOT_SUBBLOCK.as_ptr()),
-            &mut fixed_info_pointer,
-            &mut fixed_info_length,
-        )
-    }
-    .as_bool();
-    let fixed_info_size = size_of::<VS_FIXEDFILEINFO>();
-    if !found
-        || fixed_info_pointer.is_null()
-        || usize::try_from(fixed_info_length).ok() != Some(fixed_info_size)
-    {
-        return Err(WindowsVersionValidationError::InvalidEmbeddedResource);
-    }
-    let buffer_start = buffer.as_ptr() as usize;
-    let buffer_end = buffer_start
-        .checked_add(buffer.len())
-        .ok_or(WindowsVersionValidationError::InvalidEmbeddedResource)?;
-    let fixed_info_start = fixed_info_pointer as usize;
-    let fixed_info_end = fixed_info_start
-        .checked_add(fixed_info_size)
-        .ok_or(WindowsVersionValidationError::InvalidEmbeddedResource)?;
-    if fixed_info_start < buffer_start || fixed_info_end > buffer_end {
-        return Err(WindowsVersionValidationError::InvalidEmbeddedResource);
-    }
-    // SAFETY: the range check above proves that a complete VS_FIXEDFILEINFO lies
-    // inside buffer. read_unaligned avoids assuming alignment of the byte buffer.
-    let fixed_info =
-        unsafe { std::ptr::read_unaligned(fixed_info_pointer.cast::<VS_FIXEDFILEINFO>()) };
-    if fixed_info.dwSignature != VS_FFI_SIGNATURE as u32
-        || fixed_info.dwStrucVersion != VS_FFI_STRUCVERSION as u32
-    {
-        return Err(WindowsVersionValidationError::InvalidEmbeddedResource);
-    }
+#[cfg(target_os = "windows")]
+struct OwnedMsiHandle(MSIHANDLE);
 
-    Ok(EmbeddedWindowsVersions {
-        file: WindowsExecutableVersion::from_fixed_words(
-            fixed_info.dwFileVersionMS,
-            fixed_info.dwFileVersionLS,
-        ),
-        product: WindowsExecutableVersion::from_fixed_words(
-            fixed_info.dwProductVersionMS,
-            fixed_info.dwProductVersionLS,
-        ),
-    })
+#[cfg(target_os = "windows")]
+impl OwnedMsiHandle {
+    fn raw(&self) -> MSIHANDLE {
+        self.0
+    }
+}
+
+#[cfg(target_os = "windows")]
+impl Drop for OwnedMsiHandle {
+    fn drop(&mut self) {
+        // SAFETY: this wrapper is the sole owner of the nonzero MSI handle.
+        let _ = unsafe { MsiCloseHandle(self.0) };
+    }
+}
+
+#[cfg(target_os = "windows")]
+fn open_msi_handle(
+    open: impl FnOnce(*mut MSIHANDLE) -> u32,
+) -> Result<OwnedMsiHandle, WindowsVersionValidationError> {
+    let mut handle = MSIHANDLE(0);
+    ensure_msi_success(open(&mut handle))?;
+    if handle.0 == 0 {
+        return Err(WindowsVersionValidationError::InvalidEmbeddedResource);
+    }
+    Ok(OwnedMsiHandle(handle))
+}
+
+#[cfg(target_os = "windows")]
+fn ensure_msi_success(status: u32) -> Result<(), WindowsVersionValidationError> {
+    if status == ERROR_SUCCESS.0 {
+        Ok(())
+    } else {
+        Err(WindowsVersionValidationError::InvalidEmbeddedResource)
+    }
 }
 
 #[cfg(target_os = "windows")]
 #[derive(Debug)]
 struct NativeWindowsUpdateVerifier {
-    expected_version: WindowsExecutableVersion,
+    expected_version: WindowsMsiVersion,
 }
 
 #[cfg(target_os = "windows")]
@@ -603,9 +611,9 @@ impl UpdatePackageVerifier<LockedWindowsUpdatePackage> for NativeWindowsUpdateVe
     fn verify(&self, package: &LockedWindowsUpdatePackage) -> Result<(), UpdateIssue> {
         verify_open_artifact_publisher_matches_current_executable(package.file(), package.path())
             .map_err(publisher_trust_issue)?;
-        let embedded_versions =
-            read_locked_windows_versions(package).map_err(windows_version_issue)?;
-        validate_embedded_windows_versions(self.expected_version, embedded_versions)
+        let embedded_version =
+            read_locked_windows_msi_version(package).map_err(windows_version_issue)?;
+        validate_windows_msi_version(self.expected_version, &embedded_version)
             .map_err(windows_version_issue)
     }
 }
@@ -617,7 +625,13 @@ struct DirectWindowsUpdateLauncher;
 #[cfg(target_os = "windows")]
 impl UpdatePackageLauncher<LockedWindowsUpdatePackage> for DirectWindowsUpdateLauncher {
     fn launch(&self, package: LockedWindowsUpdatePackage) -> Result<(), UpdateIssue> {
-        let child = launch_locked_windows_process(&package, &WINDOWS_INSTALLER_ARGS)?;
+        let installer = package.path().as_os_str();
+        let arguments = std::iter::once(OsStr::new("/i"))
+            .chain(std::iter::once(installer))
+            .chain(WINDOWS_INSTALLER_ARGS.iter().map(OsStr::new))
+            .collect::<Vec<_>>();
+        let msiexec = trusted_windows_installer_path()?;
+        let child = launch_locked_windows_process(&package, &msiexec, &arguments)?;
         let _persisted_directory = package.preserve_after_launch();
         drop(child);
         Ok(())
@@ -627,10 +641,11 @@ impl UpdatePackageLauncher<LockedWindowsUpdatePackage> for DirectWindowsUpdateLa
 #[cfg(target_os = "windows")]
 fn launch_locked_windows_process(
     package: &LockedWindowsUpdatePackage,
-    arguments: &[&str],
+    application_path: &Path,
+    arguments: &[&OsStr],
 ) -> Result<WindowsChildProcess, UpdateIssue> {
-    let application = nul_terminated_windows_path(package.path())?;
-    let mut command_line = windows_command_line(package.path(), arguments)?;
+    let application = nul_terminated_windows_path(application_path)?;
+    let mut command_line = windows_command_line(application_path, arguments)?;
     let inherited_handles =
         InheritableWindowsHandles::new(package.file(), &package.directory_guard)?;
     let attribute_list = ProcThreadAttributeList::new(inherited_handles.as_slice())?;
@@ -823,7 +838,17 @@ impl WindowsChildProcess {
 
 #[cfg(target_os = "windows")]
 fn nul_terminated_windows_path(path: &Path) -> Result<Vec<u16>, UpdateIssue> {
-    let mut encoded = path.as_os_str().encode_wide().collect::<Vec<_>>();
+    nul_terminated_windows_units(path.as_os_str())
+}
+
+#[cfg(target_os = "windows")]
+fn nul_terminated_windows_text(value: &str) -> Result<Vec<u16>, UpdateIssue> {
+    nul_terminated_windows_units(OsStr::new(value))
+}
+
+#[cfg(target_os = "windows")]
+fn nul_terminated_windows_units(value: &OsStr) -> Result<Vec<u16>, UpdateIssue> {
+    let mut encoded = value.encode_wide().collect::<Vec<_>>();
     if encoded.contains(&0) {
         return Err(UpdateIssue::new(UpdateIssueCode::Internal));
     }
@@ -832,7 +857,37 @@ fn nul_terminated_windows_path(path: &Path) -> Result<Vec<u16>, UpdateIssue> {
 }
 
 #[cfg(target_os = "windows")]
-fn windows_command_line(path: &Path, arguments: &[&str]) -> Result<Vec<u16>, UpdateIssue> {
+fn trusted_windows_installer_path() -> Result<PathBuf, UpdateIssue> {
+    let required = unsafe { GetSystemDirectoryW(None) };
+    if required == 0 {
+        return Err(UpdateIssue::new(UpdateIssueCode::Internal));
+    }
+    let capacity = usize::try_from(required)
+        .ok()
+        .and_then(|value| value.checked_add(1))
+        .ok_or_else(|| UpdateIssue::new(UpdateIssueCode::Internal))?;
+    let mut buffer = vec![0_u16; capacity];
+    // SAFETY: buffer is writable for its complete length. The returned count
+    // excludes the terminating NUL when the call succeeds.
+    let written = unsafe { GetSystemDirectoryW(Some(&mut buffer)) };
+    let written =
+        usize::try_from(written).map_err(|_| UpdateIssue::new(UpdateIssueCode::Internal))?;
+    if written == 0 || written >= buffer.len() {
+        return Err(UpdateIssue::new(UpdateIssueCode::Internal));
+    }
+    let system_directory = PathBuf::from(OsString::from_wide(&buffer[..written]));
+    let installer = system_directory.join("msiexec.exe");
+    let metadata = installer
+        .metadata()
+        .map_err(|_| UpdateIssue::new(UpdateIssueCode::Internal))?;
+    if !metadata.is_file() {
+        return Err(UpdateIssue::new(UpdateIssueCode::Internal));
+    }
+    Ok(installer)
+}
+
+#[cfg(target_os = "windows")]
+fn windows_command_line(path: &Path, arguments: &[&OsStr]) -> Result<Vec<u16>, UpdateIssue> {
     const MAX_COMMAND_LINE_UNITS: usize = 32_767;
 
     let executable = path.as_os_str().encode_wide().collect::<Vec<_>>();
@@ -840,7 +895,7 @@ fn windows_command_line(path: &Path, arguments: &[&str]) -> Result<Vec<u16>, Upd
     push_quoted_windows_argument(&mut command_line, &executable)?;
     for argument in arguments {
         command_line.push(u16::from(b' '));
-        let encoded = argument.encode_utf16().collect::<Vec<_>>();
+        let encoded = argument.encode_wide().collect::<Vec<_>>();
         push_quoted_windows_argument(&mut command_line, &encoded)?;
     }
     if command_line.len() >= MAX_COMMAND_LINE_UNITS {
@@ -1202,15 +1257,15 @@ mod tests {
     }
 
     struct FakeEmbeddedWindowsVersionVerifier {
-        expected: WindowsExecutableVersion,
-        embedded: EmbeddedWindowsVersions,
+        expected: WindowsMsiVersion,
+        embedded: String,
         calls: Cell<usize>,
     }
 
     impl UpdatePackageVerifier<Vec<u8>> for FakeEmbeddedWindowsVersionVerifier {
         fn verify(&self, _package: &Vec<u8>) -> Result<(), UpdateIssue> {
             self.calls.set(self.calls.get() + 1);
-            validate_embedded_windows_versions(self.expected, self.embedded)
+            validate_windows_msi_version(self.expected, &self.embedded)
                 .map_err(windows_version_issue)
         }
     }
@@ -1333,20 +1388,27 @@ mod tests {
 
     #[test]
     fn windows_launcher_arguments_are_fixed_and_request_clean_update_shutdown() {
-        assert_eq!(WINDOWS_INSTALLER_ARGS, ["/P", "/R", "/AIRWIKIUPDATE"]);
+        assert_eq!(
+            WINDOWS_INSTALLER_ARGS,
+            [
+                "/passive",
+                "/norestart",
+                "AUTOLAUNCHAPP=1",
+                "LAUNCHAPPARGS=/AIRWIKIUPDATE",
+            ]
+        );
     }
 
     #[test]
-    fn windows_manifest_version_maps_numeric_build_metadata_to_private_component() {
-        let expected = expected_windows_update_version("0.2.0+5", "0.2.0").unwrap();
+    fn windows_manifest_version_maps_to_msi_product_version() {
+        let expected = expected_windows_update_version("9.2.5", "9.2.4").unwrap();
 
         assert_eq!(
             expected,
-            WindowsExecutableVersion {
-                major: 0,
+            WindowsMsiVersion {
+                major: 9,
                 minor: 2,
-                build: 0,
-                private: 5,
+                build: 5,
             }
         );
     }
@@ -1362,11 +1424,11 @@ mod tests {
             Err(WindowsVersionValidationError::InvalidManifest)
         );
         assert_eq!(
-            expected_windows_update_version("0.3.0+65536", "0.2.0"),
+            expected_windows_update_version("0.3.0+5", "0.2.0"),
             Err(WindowsVersionValidationError::InvalidManifest)
         );
         assert_eq!(
-            expected_windows_update_version("65536.0.0", "0.2.0"),
+            expected_windows_update_version("256.0.0", "0.2.0"),
             Err(WindowsVersionValidationError::InvalidManifest)
         );
         assert_eq!(
@@ -1381,19 +1443,10 @@ mod tests {
 
     #[test]
     fn older_embedded_windows_version_is_rejected_before_launch() {
-        let expected = expected_windows_update_version("999.0.0", "0.2.0").unwrap();
-        let embedded = WindowsExecutableVersion {
-            major: 998,
-            minor: 0,
-            build: 0,
-            private: 0,
-        };
+        let expected = expected_windows_update_version("9.0.0", "0.2.0").unwrap();
         let verifier = FakeEmbeddedWindowsVersionVerifier {
             expected,
-            embedded: EmbeddedWindowsVersions {
-                file: embedded,
-                product: embedded,
-            },
+            embedded: "8.0.0".to_owned(),
             calls: Cell::new(0),
         };
         let launcher = FakeUpdatePackageLauncher {
@@ -1414,49 +1467,14 @@ mod tests {
     }
 
     #[test]
-    fn file_and_product_versions_must_both_match_the_manifest() {
-        let expected = expected_windows_update_version("9.1.2+3", "0.2.0").unwrap();
-        let older = WindowsExecutableVersion {
-            major: 9,
-            minor: 1,
-            build: 1,
-            private: 3,
-        };
+    fn msi_product_version_must_match_the_manifest() {
+        let expected = expected_windows_update_version("9.1.2", "0.2.0").unwrap();
 
         assert_eq!(
-            validate_embedded_windows_versions(
-                expected,
-                EmbeddedWindowsVersions {
-                    file: older,
-                    product: expected,
-                },
-            ),
+            validate_windows_msi_version(expected, "9.1.1"),
             Err(WindowsVersionValidationError::VersionMismatch)
         );
-        assert_eq!(
-            validate_embedded_windows_versions(
-                expected,
-                EmbeddedWindowsVersions {
-                    file: expected,
-                    product: older,
-                },
-            ),
-            Err(WindowsVersionValidationError::VersionMismatch)
-        );
-    }
-
-    #[cfg(target_os = "windows")]
-    #[test]
-    fn extracts_fixed_versions_from_a_locked_pe_copy() {
-        let current_executable = std::env::current_exe().unwrap();
-        let executable_bytes = std::fs::read(current_executable).unwrap();
-        let package = LockedWindowsUpdatePackage::stage(&executable_bytes).unwrap();
-        let embedded = read_locked_windows_versions(&package).unwrap();
-        let current = Version::parse(env!("CARGO_PKG_VERSION")).unwrap();
-        let expected = WindowsExecutableVersion::from_stable_semver(&current).unwrap();
-
-        assert_eq!(embedded.file, expected);
-        assert_eq!(embedded.product, expected);
+        assert_eq!(validate_windows_msi_version(expected, "9.1.2"), Ok(()));
     }
 
     #[cfg(target_os = "windows")]
@@ -1471,11 +1489,9 @@ mod tests {
         let directory_path = package.directory.path().to_path_buf();
         let renamed_file = directory_path.join("replacement.exe");
         let renamed_directory = directory_path.with_extension("renamed");
-        let child = launch_locked_windows_process(
-            &package,
-            &["--ignored", "--exact", CHILD_TEST, "--nocapture"],
-        )
-        .unwrap();
+        let child_arguments = ["--ignored", "--exact", CHILD_TEST, "--nocapture"].map(OsStr::new);
+        let child =
+            launch_locked_windows_process(&package, &current_executable, &child_arguments).unwrap();
         assert!(child.is_running(), "the lock-holder child did not start");
         let persisted_directory = package.preserve_after_launch();
         assert_eq!(persisted_directory, directory_path);

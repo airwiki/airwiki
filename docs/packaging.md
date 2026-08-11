@@ -226,8 +226,10 @@ The workflow is pinned to SignPath action v2.2 by commit, requires the protected
 under `.signpath/`. Configure the organization, project, signing-policy and two
 artifact-configuration slugs as repository or environment variables; keep only
 `SIGNPATH_API_TOKEN` as an environment secret. The expected leaf-certificate
-SHA-256 fingerprint is `AIRWIKI_WINDOWS_SIGNER_SHA256` and is checked again on
-the MSI and every AirWiki executable.
+SHA-256 fingerprint is `AIRWIKI_WINDOWS_SIGNER_SHA256`; it is compiled into the
+AirWiki trust boundary and checked again on the MSI and every AirWiki
+executable. A comma-separated second fingerprint is permitted only for a
+reviewed certificate rotation and must be removed after the transition.
 
 Normal pull-request CI and `package-pilot.yml` remain unsigned and consume no
 signing secret. See the [code signing policy](code-signing-policy.md) and

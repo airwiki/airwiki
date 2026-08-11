@@ -228,6 +228,7 @@ dependencies = [
  "airwiki-mcp",
  "serde_json",
  "tokio",
+ "winresource",
 ]
 
 [[package]]

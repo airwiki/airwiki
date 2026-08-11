@@ -2531,7 +2531,7 @@ fn install_tray(app: &tauri::App) -> tauri::Result<()> {
     let menu = Menu::with_items(app, &[&open, &quit])?;
     TrayIconBuilder::new()
         .icon(tray_icon())
-        .icon_as_template(false)
+        .icon_as_template(cfg!(target_os = "macos"))
         .tooltip("AirWiki")
         .menu(&menu)
         .on_menu_event(|app, event| match event.id().as_ref() {

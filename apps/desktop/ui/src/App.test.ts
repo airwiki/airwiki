@@ -7,6 +7,15 @@ import { readySnapshot } from './test/fixtures';
 
 let snapshot = readySnapshot();
 const tauriListeners = new Map<string, (event: unknown) => void>();
+function activateLocalSearch() {
+  snapshot.model = {
+    stateSequence: 1, profile: 'automatic', recommendedModelId: 'synthetic-model',
+    displayName: 'Synthetic local model', recommendationReason: null, active: true,
+    installed: true, degraded: false, issues: [], pendingModelId: null,
+    downloadBytes: 0, requiredFreeBytes: 0, fitsAvailableDisk: true,
+    licenseAccepted: true, license: null, licenseUrl: null, revision: 'fixture'
+  };
+}
 const accessibilityCases = (['es', 'en'] as const).flatMap((locale) =>
   (['light', 'dark'] as const).flatMap((theme) =>
     (['wikis', 'search', 'system/models', 'system/preferences', 'system/updates'] as const)
@@ -269,6 +278,7 @@ describe('AirWiki wiki workspace', () => {
   it('opens a local search result inside its wiki without placing the query in the URL', async () => {
     const wiki = snapshot.wikis[0];
     const conceptId = 'concept-atlas';
+    activateLocalSearch();
     snapshot.search = {
       requestId: 'search-fixture', status: 'complete', coverage: 'complete',
       hits: [{ conceptId, wikiId: wiki.id, title: 'Evidencia Atlas', snippet: 'Contenido verificado.', headingOrPage: 'Atlas', logicalResourceUri: 'urn:airwiki:fixture', sourceRevision: 1, sourceSha256: '0123456789abcdef', rank: 1, nodeId: snapshot.nodeId! }]
@@ -284,6 +294,7 @@ describe('AirWiki wiki workspace', () => {
   });
 
   it('never shows a completed empty search together with a stale progress message', async () => {
+    activateLocalSearch();
     snapshot.search = { requestId: 'empty-search', status: 'complete', coverage: 'complete', hits: [] };
     window.location.hash = '#search';
     render(App);
@@ -293,6 +304,7 @@ describe('AirWiki wiki workspace', () => {
   });
 
   it('does not present an unavailable public search as a conclusive empty result', async () => {
+    activateLocalSearch();
     snapshot.search = { requestId: 'offline-public-search', status: 'complete', coverage: 'publicNetworkOffline', hits: [] };
     window.location.hash = '#search';
     render(App);
@@ -300,6 +312,16 @@ describe('AirWiki wiki workspace', () => {
     expect(await screen.findByText('No se pudieron consultar todas las fuentes')).toBeInTheDocument();
     expect(screen.getByText('La red pública está offline. La búsqueda local y en equipos emparejados sigue disponible.')).toBeInTheDocument();
     expect(screen.queryByText('No encontramos evidencia coincidente')).not.toBeInTheDocument();
+  });
+
+  it('keeps search visible but explains why it cannot run before local AI is ready', async () => {
+    window.location.hash = '#search';
+    render(App);
+
+    expect(await screen.findByRole('heading', { name: 'Preparando la búsqueda local' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Preparando la búsqueda local' })).toBeDisabled();
+    await fireEvent.click(screen.getByRole('button', { name: 'Ver estado de la IA local' }));
+    expect(window.location.hash).toBe('#system/models');
   });
 
   it('keeps graph view selected when opening a graph node', async () => {

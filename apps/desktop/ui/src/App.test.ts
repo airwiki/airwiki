@@ -1,4 +1,4 @@
-import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/svelte';
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/svelte';
 import axe from 'axe-core';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import App from './App.svelte';
@@ -308,6 +308,29 @@ describe('AirWiki wiki workspace', () => {
     expect(loadWikiPage).toHaveBeenCalledWith(wiki.id, { kind: 'concept', id: conceptId });
     expect(window.location.hash).toBe(`#wikis/${wiki.id}`);
     expect(window.location.hash).not.toContain('Evidencia');
+  });
+
+  it('labels a trusted peer result as nearby instead of public', async () => {
+    const peerId = '12D3KooSyntheticNearbyNode';
+    activateLocalSearch();
+    snapshot.peers = [{
+      peerId, deviceName: 'RUSTICO', address: '/ip4/192.0.2.1/tcp/4242',
+      trust: 'trusted', activity: 'connected', sasWords: null, grantedWikiIds: []
+    }];
+    snapshot.search = {
+      requestId: 'nearby-search', status: 'complete', coverage: 'complete',
+      hits: [{ conceptId: 'nearby-concept', wikiId: 'nearby-wiki', title: 'Evidencia cercana', snippet: 'Contenido autorizado.', headingOrPage: 'Responsable', logicalResourceUri: 'urn:airwiki:nearby', sourceRevision: 1, sourceSha256: '0123456789abcdef', rank: 1, nodeId: peerId }]
+    };
+    window.location.hash = '#search';
+    render(App);
+
+    const article = (await screen.findByRole('heading', { name: 'Evidencia cercana' })).closest('article');
+    expect(article).not.toBeNull();
+    const nearbyResult = within(article as HTMLElement);
+    expect(nearbyResult.getByText('RUSTICO · Responsable')).toBeInTheDocument();
+    expect(nearbyResult.getByText('Equipo cercano')).toBeInTheDocument();
+    expect(nearbyResult.queryByText('Red pública')).not.toBeInTheDocument();
+    expect(nearbyResult.queryByRole('button', { name: 'Abrir' })).not.toBeInTheDocument();
   });
 
   it('never shows a completed empty search together with a stale progress message', async () => {

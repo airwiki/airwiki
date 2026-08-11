@@ -7686,6 +7686,7 @@ mod tests {
     fn windows_msi_wrapper_rejects_stale_or_non_x64_payloads() {
         let script =
             fs::read_to_string(workspace_root().join("packaging/package-windows.ps1")).unwrap();
+        let wix = fs::read_to_string(workspace_root().join("packaging/windows-wix.ps1")).unwrap();
         assert!(script.contains("windows-safe-staging.ps1"));
         assert!(script.contains("Remove-AirWikiWindowsStagingPath"));
         assert!(script.contains("$TargetRoot = Join-Path $Root \"target\""));
@@ -7701,6 +7702,11 @@ mod tests {
         assert!(!script.contains("Get-Command 7z.exe"));
         assert!(script.contains("Get-FileHash -LiteralPath"));
         assert!(script.contains("Assert-WindowsMsiBundleTypePatch"));
+        assert!(script.contains("Write-WixLightDiagnostic $Root $ReleaseDir"));
+        assert!(wix.contains("$ObjectPaths = @($Objects | ForEach-Object { $_.FullName })"));
+        assert!(wix.contains("Push-Location $BuildDir"));
+        assert!(wix.contains("$ObjectPaths 2>&1"));
+        assert!(!wix.contains("\"*.wixobj\""));
         let payload =
             fs::read_to_string(workspace_root().join("packaging/windows-payload.ps1")).unwrap();
         assert!(payload.contains("__TAURI_BUNDLE_TYPE_VAR_UNK"));

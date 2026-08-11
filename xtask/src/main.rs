@@ -3085,10 +3085,10 @@ fn verify_windows_msi_sources(config: &str, template: &str) -> Result<()> {
             && template.contains("[IO.FileAttributes]::ReparsePoint")
             && template.contains("[LocalAppDataFolder]Programs\\{{product_name}}")
             && template
-                .matches("<Custom Action=\"RejectReparseInstallPath\" Before=\"CostInitialize\">NOT Installed</Custom>")
+                .matches("<Custom Action=\"RejectReparseInstallPath\" After=\"CostFinalize\">NOT Installed</Custom>")
                 .count()
                 == 2,
-        "Windows MSI must reject reparse points before both UI and silent execution"
+        "Windows MSI must reject reparse points after directory initialization in both UI and silent execution"
     );
     ensure!(
         template.contains("<MajorUpgrade")

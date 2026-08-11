@@ -116,12 +116,19 @@ fn add_file(
     destination: &str,
 ) -> Result<()> {
     ensure_regular_file(source, "Windows MSI resource")?;
+    ensure!(
+        source.is_absolute(),
+        "Windows MSI resource source must be absolute: {}",
+        source.display()
+    );
     validate_destination(destination)?;
     let digest = hex::encode(Sha256::digest(destination.as_bytes()));
     let resource = ResourceFile {
-        source: source
-            .canonicalize()
-            .with_context(|| format!("canonicalizing MSI resource {}", source.display()))?,
+        // Windows canonicalization adds a verbatim `\\?\` prefix that WiX 3
+        // Candle does not accept as a File/@Source path. The caller supplies
+        // workspace-rooted absolute paths and every traversed entry has already
+        // been checked with symlink_metadata.
+        source: source.to_path_buf(),
         destination: destination.to_owned(),
         digest,
     };

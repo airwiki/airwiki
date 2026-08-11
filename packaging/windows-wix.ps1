@@ -2,11 +2,34 @@ Set-StrictMode -Version Latest
 
 function Write-WixLightDiagnostic([string] $Root, [string] $ReleaseDir) {
     $BuildDir = Join-Path $ReleaseDir "wix\x64"
+    $Candle = Join-Path $Root "target\.tauri\WixTools314\candle.exe"
     $Light = Join-Path $Root "target\.tauri\WixTools314\light.exe"
     $UiExtension = Join-Path $Root "target\.tauri\WixTools314\WixUIExtension.dll"
     $UtilExtension = Join-Path $Root "target\.tauri\WixTools314\WixUtilExtension.dll"
     $Locale = Join-Path $BuildDir "locale.wxl"
     $Objects = @(Get-ChildItem -LiteralPath $BuildDir -File -Filter *.wixobj -ErrorAction SilentlyContinue)
+    $ResourceSource = Join-Path $Root "target\windows-msi-resources.wxs"
+    $Desktop = Join-Path $ReleaseDir "airwiki.exe"
+    if ((Test-Path -LiteralPath $Candle -PathType Leaf) -and
+        (Test-Path -LiteralPath $ResourceSource -PathType Leaf) -and
+        (Test-Path -LiteralPath $Desktop -PathType Leaf)) {
+        $DiagnosticObject = Join-Path $BuildDir "diagnostic-resources.wixobj"
+        Remove-Item -LiteralPath $DiagnosticObject -Force -ErrorAction SilentlyContinue
+        try {
+            Write-Warning "Tauri did not expose the WiX compiler error; rerunning the pinned compiler for diagnostics"
+            & $Candle `
+                -arch x64 `
+                -out $DiagnosticObject `
+                $ResourceSource `
+                "-dSourceDir=$Desktop" 2>&1 | ForEach-Object { Write-Warning ([string] $_) }
+            $CandleExitCode = $LASTEXITCODE
+            Write-Warning "Independent WiX compiler exit code: $CandleExitCode"
+        } catch {
+            Write-Warning "Could not produce the independent WiX compiler diagnostic: $($_.Exception.Message)"
+        } finally {
+            Remove-Item -LiteralPath $DiagnosticObject -Force -ErrorAction SilentlyContinue
+        }
+    }
     if (-not (Test-Path -LiteralPath $Light -PathType Leaf) -or
         -not (Test-Path -LiteralPath $UiExtension -PathType Leaf) -or
         -not (Test-Path -LiteralPath $UtilExtension -PathType Leaf) -or

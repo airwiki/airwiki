@@ -7772,6 +7772,10 @@ mod tests {
         assert!(script.contains("Get-FileHash -LiteralPath"));
         assert!(script.contains("Assert-WindowsMsiBundleTypePatch"));
         assert!(script.contains("Write-WixLightDiagnostic $Root $ReleaseDir"));
+        assert!(wix.contains("Tauri did not expose the WiX compiler error"));
+        assert!(wix.contains("Independent WiX compiler exit code"));
+        assert!(wix.contains("$ResourceSource"));
+        assert!(wix.contains("$DiagnosticObject"));
         assert!(wix.contains("$ObjectPaths = @($Objects | ForEach-Object { $_.FullName })"));
         assert!(wix.contains("Push-Location $BuildDir"));
         assert!(wix.contains("$ObjectPaths 2>&1"));

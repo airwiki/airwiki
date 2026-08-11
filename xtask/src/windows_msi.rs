@@ -236,7 +236,7 @@ fn render_directory_contents(
         let name = escape_xml_attribute(&file.destination);
         let spaces = " ".repeat(indent);
         xml.push_str(&format!(
-            "{spaces}<Component Id=\"{id}\" Guid=\"{guid}\" Win64=\"$(var.Win64)\">\n{spaces}  <File Id=\"{}\" Name=\"{name}\" Source=\"{source}\" />\n{spaces}  <RegistryValue Root=\"HKCU\" Key=\"{COMPONENT_REGISTRY_KEY}\" Name=\"File_{}\" Type=\"integer\" Value=\"1\" KeyPath=\"yes\" />\n{spaces}</Component>\n",
+            "{spaces}<Component Id=\"{id}\" Guid=\"{guid}\" Win64=\"yes\">\n{spaces}  <File Id=\"{}\" Name=\"{name}\" Source=\"{source}\" />\n{spaces}  <RegistryValue Root=\"HKCU\" Key=\"{COMPONENT_REGISTRY_KEY}\" Name=\"File_{}\" Type=\"integer\" Value=\"1\" KeyPath=\"yes\" />\n{spaces}</Component>\n",
             file_id(&file.digest),
             file.digest,
         ));
@@ -254,7 +254,7 @@ fn render_directory_contents(
         let guid = stable_guid("directory", &digest);
         let spaces = " ".repeat(indent);
         xml.push_str(&format!(
-            "{spaces}<Directory Id=\"{directory_id}\" Name=\"{}\">\n{spaces}  <Component Id=\"{component_id}\" Guid=\"{guid}\" Win64=\"$(var.Win64)\">\n{spaces}    <RemoveFolder Id=\"{}\" On=\"uninstall\" />\n{spaces}    <RegistryValue Root=\"HKCU\" Key=\"{COMPONENT_REGISTRY_KEY}\" Name=\"Directory_{digest}\" Type=\"integer\" Value=\"1\" KeyPath=\"yes\" />\n{spaces}  </Component>\n",
+            "{spaces}<Directory Id=\"{directory_id}\" Name=\"{}\">\n{spaces}  <Component Id=\"{component_id}\" Guid=\"{guid}\" Win64=\"yes\">\n{spaces}    <RemoveFolder Id=\"{}\" On=\"uninstall\" />\n{spaces}    <RegistryValue Root=\"HKCU\" Key=\"{COMPONENT_REGISTRY_KEY}\" Name=\"Directory_{digest}\" Type=\"integer\" Value=\"1\" KeyPath=\"yes\" />\n{spaces}  </Component>\n",
             escape_xml_attribute(name),
             remove_folder_id(&digest),
         ));
@@ -362,6 +362,8 @@ mod tests {
         assert!(xml.contains("<ComponentGroup Id=\"AirWikiResources\">"));
         assert_eq!(xml.matches("Root=\"HKCU\"").count(), 2);
         assert_eq!(xml.matches("KeyPath=\"yes\"").count(), 2);
+        assert_eq!(xml.matches("Win64=\"yes\"").count(), 2);
+        assert!(!xml.contains("$(var.Win64)"));
         assert_eq!(xml.matches("<RemoveFolder ").count(), 1);
         assert!(xml.contains(r#"Source="C:\build\A&amp;B.txt""#));
         assert!(xml.contains(&file_component_id(&digest)));

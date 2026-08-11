@@ -3004,6 +3004,14 @@ fn verify_windows_msi_sources(config: &str, template: &str) -> Result<()> {
         "Windows MSI must not expose or inherit a configurable installation path"
     );
     ensure!(
+        template.contains("<UIRef Id=\"WixUI_Minimal\" />")
+            && template.contains(
+                "<SetProperty Id=\"ARPNOMODIFY\" Value=\"1\" After=\"InstallValidate\" Sequence=\"execute\" />"
+            )
+            && !template.contains("<Property Id=\"ARPNOMODIFY\""),
+        "Windows MSI must not duplicate the ARPNOMODIFY symbol supplied by WixUI_Minimal"
+    );
+    ensure!(
         template.contains("Id=\"RejectReparseInstallPath\"")
             && template.contains("[IO.FileAttributes]::ReparsePoint")
             && template.contains("[LocalAppDataFolder]Programs\\{{product_name}}")

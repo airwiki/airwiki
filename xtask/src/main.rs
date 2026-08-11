@@ -273,6 +273,7 @@ async fn main() -> Result<()> {
         },
         "packaging" => match arguments.next().as_deref() {
             Some("verify-windows-uninstaller") => verify_windows_uninstaller(),
+            Some("verify-windows-msi") => verify_windows_msi(),
             Some("verify-updater-signature") => {
                 let request = parse_updater_signature_request(arguments.collect())?;
                 let public_key = std::env::var(UPDATER_PUBLIC_KEY_ENV)
@@ -287,7 +288,7 @@ async fn main() -> Result<()> {
             }
             Some(other) => bail!("unknown packaging command: {other}"),
             None => bail!(
-                "missing packaging command; expected `verify-windows-uninstaller`, `verify-updater-signature` or `verify-updater-embedded-key`"
+                "missing packaging command; expected `verify-windows-uninstaller`, `verify-windows-msi`, `verify-updater-signature` or `verify-updater-embedded-key`"
             ),
         },
         "help" | "--help" | "-h" => {
@@ -305,6 +306,7 @@ async fn main() -> Result<()> {
             println!("cargo run --locked -p xtask -- ui-bindings check");
             println!("cargo run --locked -p xtask -- docs check");
             println!("cargo run --locked -p xtask -- packaging verify-windows-uninstaller");
+            println!("cargo run --locked -p xtask -- packaging verify-windows-msi");
             println!(
                 "cargo run --locked -p xtask -- packaging verify-updater-signature --artifact <path> --signature <path>"
             );
@@ -2184,9 +2186,6 @@ fn validate_pinned_seven_zip_tool(root: &Path) -> Result<()> {
 }
 
 fn validate_local_windows_package_tools(package: &str) -> Result<()> {
-    let nsis_preparation = package
-        .find("prepare-verified-nsis-toolchain.ps1")
-        .context("Windows packaging does not prepare the pinned NSIS toolchain")?;
     let seven_zip_preparation = package
         .find("prepare-verified-7zip.ps1")
         .context("Windows packaging does not prepare the pinned 7-Zip extractor")?;
@@ -2194,18 +2193,18 @@ fn validate_local_windows_package_tools(package: &str) -> Result<()> {
         .find("& $Tauri build")
         .context("Windows packaging does not invoke the managed packager configuration")?;
     ensure!(
-        package.contains("$NsisToolCacheRoot = Join-Path $Root \"target\\.tauri\"")
-            && package.contains("-ToolCacheRoot $NsisToolCacheRoot")
-            && package.contains("$TauriVersion -ne \"tauri-cli 2.11.4\"")
+        package.contains("$TauriVersion -ne \"tauri-cli 2.11.4\"")
             && package.contains("target\\verified-tools\\7zip-26.02")
             && package.contains("-ToolRoot $SevenZipToolRoot")
             && !package.contains("Get-Command makensis")
+            && !package.contains("prepare-verified-nsis-toolchain.ps1")
             && !package.contains("Get-Command 7z.exe")
             && !package.contains("cargo-packager")
-            && package.contains("--config ..\\..\\packaging\\windows\\tauri.bundle.conf.json")
-            && nsis_preparation < packaging
+            && package.contains("--config ..\\..\\packaging\\windows\\tauri.msi.bundle.conf.json")
+            && package.contains("--bundles msi")
+            && package.contains("packaging verify-windows-msi")
             && seven_zip_preparation < packaging,
-        "Windows packaging must verify Tauri and prepare the pinned NSIS and 7-Zip tools before packaging"
+        "Windows packaging must verify Tauri and prepare the pinned 7-Zip tool before MSI packaging"
     );
     Ok(())
 }
@@ -2929,6 +2928,172 @@ fn verify_windows_uninstaller() -> Result<()> {
     verify_validated_installer_smoke_sources(&validated_smoke)?;
     verify_windows_uninstaller_sources(&config, &template)?;
     verify_windows_update_handoff_sources(&template, &updater)
+}
+
+fn verify_windows_msi() -> Result<()> {
+    let root = workspace_root();
+    let config = fs::read_to_string(root.join("packaging/windows/tauri.msi.bundle.conf.json"))
+        .context("reading the Windows MSI packager configuration")?;
+    let template = fs::read_to_string(root.join("packaging/windows/installer.wxs"))
+        .context("reading the managed Windows MSI template")?;
+    verify_windows_msi_sources(&config, &template)?;
+    let workflow = fs::read_to_string(root.join(".github/workflows/windows-signpath.yml"))
+        .context("reading the SignPath Windows workflow")?;
+    let binaries = fs::read_to_string(root.join(".signpath/windows-binaries.xml"))
+        .context("reading the SignPath binary artifact configuration")?;
+    let msi = fs::read_to_string(root.join(".signpath/windows-msi.xml"))
+        .context("reading the SignPath MSI artifact configuration")?;
+    let prepare = fs::read_to_string(root.join("packaging/prepare-signpath-windows-binaries.ps1"))
+        .context("reading SignPath binary preparation")?;
+    let package = fs::read_to_string(root.join("packaging/package-signpath-windows-msi.ps1"))
+        .context("reading SignPath MSI packaging")?;
+    let verify = fs::read_to_string(root.join("packaging/verify-signpath-windows-msi.ps1"))
+        .context("reading SignPath MSI verification")?;
+    verify_windows_signpath_sources(&workflow, &binaries, &msi, &prepare, &package, &verify)
+}
+
+fn verify_windows_msi_sources(config: &str, template: &str) -> Result<()> {
+    let config: serde_json::Value =
+        serde_json::from_str(config).context("parsing the Windows MSI packager configuration")?;
+    ensure!(
+        config
+            .pointer("/bundle/targets/0")
+            .and_then(serde_json::Value::as_str)
+            == Some("msi")
+            && config.pointer("/bundle/targets/1").is_none(),
+        "Windows MSI configuration must select only the MSI target"
+    );
+    ensure!(
+        config
+            .pointer("/bundle/windows/allowDowngrades")
+            .and_then(serde_json::Value::as_bool)
+            == Some(false),
+        "Windows MSI configuration must reject downgrades"
+    );
+    ensure!(
+        config
+            .pointer("/bundle/windows/wix/upgradeCode")
+            .and_then(serde_json::Value::as_str)
+            == Some("22b0c55b-2965-57de-887f-27be43e62110"),
+        "Windows MSI UpgradeCode changed"
+    );
+    ensure!(
+        config
+            .pointer("/bundle/windows/wix/template")
+            .and_then(serde_json::Value::as_str)
+            == Some("../../packaging/windows/installer.wxs"),
+        "Windows MSI configuration must select the managed WiX template"
+    );
+    ensure!(
+        template.contains("Based on Tauri bundler 2.9.4's WiX template")
+            && template.contains("InstallScope=\"perUser\"")
+            && template.contains("InstallPrivileges=\"limited\"")
+            && !template.contains("InstallScope=\"perMachine\"")
+            && !template.contains("<Property Id=\"ALLUSERS\" Value=\"1\""),
+        "Windows MSI must remain an explicitly per-user, non-elevated package"
+    );
+    ensure!(
+        template.contains("<Directory Id=\"LocalAppDataFolder\">")
+            && template.contains("<Directory Id=\"AirWikiProgramsFolder\" Name=\"Programs\">")
+            && template.contains("<Directory Id=\"INSTALLDIR\" Name=\"{{product_name}}\" />")
+            && !template.contains("ProgramFilesFolder")
+            && !template.contains("ProgramFiles64Folder"),
+        "Windows MSI binaries must remain below LocalAppData\\Programs\\AirWiki"
+    );
+    ensure!(
+        !template.contains("WIXUI_INSTALLDIR")
+            && !template.contains("InstallDirDlg")
+            && !template.contains("ConfigurableDirectory=\"INSTALLDIR\"")
+            && !template.contains("RegistrySearch Id=\"PrevInstallDir"),
+        "Windows MSI must not expose or inherit a configurable installation path"
+    );
+    ensure!(
+        template.contains("Id=\"RejectReparseInstallPath\"")
+            && template.contains("[IO.FileAttributes]::ReparsePoint")
+            && template.contains("[LocalAppDataFolder]Programs\\{{product_name}}")
+            && template
+                .matches("<Custom Action=\"RejectReparseInstallPath\" Before=\"CostInitialize\">NOT Installed</Custom>")
+                .count()
+                == 2,
+        "Windows MSI must reject reparse points before both UI and silent execution"
+    );
+    ensure!(
+        template.contains("<MajorUpgrade")
+            && template.contains("AllowSameVersionUpgrades=\"yes\"")
+            && template.contains("DownloadAndInvokeBootstrapper")
+            && template.contains("https://go.microsoft.com/fwlink/p/?LinkId=2124703"),
+        "Windows MSI must preserve downgrade and WebView2 bootstrap policy"
+    );
+    ensure!(
+        !template.contains("RemoveFile Id=")
+            && !template.contains("RemoveFolder Id=\"INSTALLDIR\"")
+            && !template.contains("RmDir")
+            && !template.contains("%LOCALAPPDATA%\\airwiki\\AirWiki")
+            && !template.contains("%APPDATA%\\airwiki\\AirWiki"),
+        "Windows MSI must not recursively delete its install tree or mutable AirWiki data"
+    );
+    Ok(())
+}
+
+fn verify_windows_signpath_sources(
+    workflow: &str,
+    binaries: &str,
+    msi: &str,
+    prepare: &str,
+    package: &str,
+    verify: &str,
+) -> Result<()> {
+    let pinned_action =
+        "signpath/github-action-submit-signing-request@b9d91eadd323de506c0c81cf0c7fe7438f3360fd";
+    ensure!(
+        workflow.matches(pinned_action).count() == 2
+            && workflow.matches("runs-on: windows-2022").count() == 2
+            && !workflow.contains("self-hosted")
+            && workflow.contains("environment: windows-signing")
+            && workflow.contains("github-artifact-id:")
+            && workflow.contains("secrets.SIGNPATH_API_TOKEN")
+            && workflow.contains("vars.SIGNPATH_BINARIES_CONFIGURATION_SLUG")
+            && workflow.contains("vars.SIGNPATH_MSI_CONFIGURATION_SLUG"),
+        "SignPath workflow must use two pinned, origin-verified signing requests on GitHub-hosted Windows"
+    );
+    ensure!(
+        !workflow.contains("AZURE_")
+            && !workflow.contains("artifact-signing")
+            && !workflow.contains("Disable")
+            && !workflow.contains("Set-RuleOption"),
+        "SignPath workflow must not retain Azure signing or weaken Windows execution policy"
+    );
+    ensure!(
+        binaries.matches("<authenticode-sign />").count() == 3
+            && binaries.contains("path=\"airwiki.exe\"")
+            && binaries.contains("path=\"airwiki-mcp-bridge.exe\"")
+            && binaries.contains("path=\"airwiki-windows-firewall-helper.exe\""),
+        "SignPath binary configuration must sign exactly the three AirWiki executables"
+    );
+    ensure!(
+        msi.matches("<msi-file path=").count() == 2
+            && msi.matches("<authenticode-sign />").count() == 2
+            && msi.matches("<authenticode-verify />").count() == 8
+            && msi.contains("AirWiki_*_x64_en-US.msi")
+            && msi.contains("AirWiki_*_x64_es-ES.msi")
+            && msi.contains("server/airwiki-mcp-bridge.exe"),
+        "SignPath MSI configuration must verify every nested AirWiki binary and sign both localized MSI containers"
+    );
+    ensure!(
+        prepare.contains("Set-WindowsMsiBundleType $Desktop")
+            && prepare.contains("SignatureStatus]::NotSigned")
+            && package.contains("Assert-WindowsMsiBundleType $SignedDesktop")
+            && package.contains("Get-VerifiedSignPathSignature")
+            && package.contains("mcpb build")
+            && package.contains(
+                "$Signature.Status -ne [System.Management.Automation.SignatureStatus]::NotSigned"
+            )
+            && verify.contains("Assert-ExpectedSignPathSigner")
+            && verify.contains("mcpb verify")
+            && verify.contains("localized MSI payloads contain different product bytes"),
+        "SignPath preparation, packaging and final verification do not preserve the staged binary identity"
+    );
+    Ok(())
 }
 
 fn powershell_function_range(source: &str, name: &str) -> Result<std::ops::Range<usize>> {
@@ -7623,7 +7788,7 @@ mod tests {
     }
 
     #[test]
-    fn windows_wrapper_rejects_stale_or_non_x64_payloads() {
+    fn windows_msi_wrapper_rejects_stale_or_non_x64_payloads() {
         let script =
             fs::read_to_string(workspace_root().join("packaging/package-windows.ps1")).unwrap();
         assert!(script.contains("windows-safe-staging.ps1"));
@@ -7632,18 +7797,19 @@ mod tests {
         assert!(!script.contains("Remove-Item -LiteralPath $OutDir -Recurse -Force"));
         assert!(script.contains("$Bytes[$Offset + 4] -ne 0x64"));
         assert!(script.contains("mcpb verify"));
-        assert!(script.contains("$Installers.Count -ne 1"));
+        assert!(script.contains("$Installers.Count -ne 2"));
         assert!(script.contains("LastWriteTimeUtc -lt $Started"));
         assert!(script.contains("prepare-verified-7zip.ps1"));
         assert!(script.contains("target\\verified-tools\\7zip-26.02"));
         assert!(!script.contains("Get-Command 7z.exe"));
         assert!(script.contains("Get-FileHash -LiteralPath"));
-        assert!(script.contains("Assert-WindowsNsisBundleTypePatch"));
+        assert!(script.contains("Assert-WindowsMsiBundleTypePatch"));
         let payload =
             fs::read_to_string(workspace_root().join("packaging/windows-payload.ps1")).unwrap();
         assert!(payload.contains("__TAURI_BUNDLE_TYPE_VAR_UNK"));
+        assert!(payload.contains("__TAURI_BUNDLE_TYPE_VAR_MSI"));
         assert!(payload.contains("__TAURI_BUNDLE_TYPE_VAR_NSS"));
-        assert!(payload.contains("differs beyond the required Tauri NSIS bundle marker"));
+        assert!(payload.contains("differs beyond the required Tauri bundle marker"));
         let smoke =
             fs::read_to_string(workspace_root().join("packaging/smoke-install-windows.ps1"))
                 .unwrap();
@@ -9083,5 +9249,47 @@ mod tests {
         let error = verify_validated_installer_smoke_sources(&unsafe_smoke).unwrap_err();
 
         assert!(error.to_string().contains("executable fingerprint changed"));
+    }
+
+    #[test]
+    fn windows_msi_policy_accepts_the_committed_configuration() {
+        let root = workspace_root();
+        let config =
+            fs::read_to_string(root.join("packaging/windows/tauri.msi.bundle.conf.json")).unwrap();
+        let template = fs::read_to_string(root.join("packaging/windows/installer.wxs")).unwrap();
+
+        verify_windows_msi_sources(&config, &template).unwrap();
+    }
+
+    #[test]
+    fn windows_msi_policy_rejects_a_configurable_install_directory() {
+        let root = workspace_root();
+        let config =
+            fs::read_to_string(root.join("packaging/windows/tauri.msi.bundle.conf.json")).unwrap();
+        let template = fs::read_to_string(root.join("packaging/windows/installer.wxs")).unwrap();
+        let unsafe_template = template.replace(
+            "Display=\"expand\"",
+            "Display=\"expand\" ConfigurableDirectory=\"INSTALLDIR\"",
+        );
+
+        let error = verify_windows_msi_sources(&config, &unsafe_template).unwrap_err();
+
+        assert!(error.to_string().contains("configurable installation path"));
+    }
+
+    #[test]
+    fn windows_msi_policy_rejects_a_changed_upgrade_code() {
+        let root = workspace_root();
+        let config = fs::read_to_string(root.join("packaging/windows/tauri.msi.bundle.conf.json"))
+            .unwrap()
+            .replace(
+                "22b0c55b-2965-57de-887f-27be43e62110",
+                "00000000-0000-0000-0000-000000000000",
+            );
+        let template = fs::read_to_string(root.join("packaging/windows/installer.wxs")).unwrap();
+
+        let error = verify_windows_msi_sources(&config, &template).unwrap_err();
+
+        assert!(error.to_string().contains("UpgradeCode changed"));
     }
 }

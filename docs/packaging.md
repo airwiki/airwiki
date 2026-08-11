@@ -134,11 +134,12 @@ The Windows path:
    `BUILD-MANIFEST.json`;
 3. builds the desktop with that exact runtime hash, plus the MCP bridge and
    firewall helper;
-4. creates the deterministic MCPB and per-user NSIS installer; and
-5. verifies the installer payload and uninstaller contracts.
+4. creates the deterministic MCPB and two localized per-user MSI installers;
+   and
+5. verifies the WiX policy, administrative-image payload and package contracts.
 
-The signed wrapper also verifies the updater public key embedded in
-`airwiki.exe` before creating the final signed NSIS artifact. The Tauri window
+The signed workflow also verifies the updater public key embedded in
+`airwiki.exe` before creating the final signed MSI artifact. The Tauri window
 icons and packaging brand assets are byte-identical and enforced by tests, so
 the executable, shortcuts and installer cannot silently diverge.
 
@@ -187,12 +188,12 @@ Current-user packages install binaries below `%LOCALAPPDATA%\Programs\AirWiki`.
 The separate local-first data roots remain under the documented
 `%LOCALAPPDATA%\airwiki\AirWiki` and `%APPDATA%\airwiki\AirWiki` locations, so
 launching the installed app cannot add mutable data to the verified package
-payload. The directory is fixed: the installer has no directory-selection page
-and rejects, before any page or write, any effective path (including `/D`) that
-is not the case-insensitive exact fixed path. Rejecting aliases instead of
-canonicalizing them avoids 8.3, junction, traversal, and trailing-dot
-equivalence bypasses. Existing `Programs` and `AirWiki` path components are
-also rejected if Windows marks either as a reparse point.
+payload. The directory is fixed by the WiX directory table: the installer has
+no directory-selection property or page and does not inherit an earlier
+arbitrary path. Existing `Programs` and `AirWiki` path components are rejected
+before costing if Windows marks either as a reparse point. Windows Installer
+owns only declared immutable files and never performs recursive
+application-data cleanup.
 
 An unsupported development candidate previously installed directly under
 `%LOCALAPPDATA%\AirWiki` is not migrated in place because that tree can already
@@ -209,8 +210,28 @@ then install the new candidate; the two data roots remain intact by default.
 - Managed rules are limited to application TCP and mDNS UDP 5353,
   Private/Domain, `LocalSubnet`, and no edge traversal.
 - The installer does not silently remove broad inherited rules or user data.
-- NSIS, 7-Zip, source archives, and their legal texts are pinned and verified;
+- WiX, 7-Zip, source archives, and their legal texts are pinned and verified;
   host `PATH` does not select release tools implicitly.
+
+### Windows open-source signing
+
+The manual `Windows signed MSI candidate` workflow uses two origin-verified
+SignPath requests. The first signs the MSI-tagged desktop, MCP bridge and
+firewall helper produced by the reviewed GitHub-hosted build. The second accepts
+only MSI packages containing those valid nested signatures—including the exact
+bridge bytes inside the MCPB—and signs the two localized MSI containers.
+
+The workflow is pinned to SignPath action v2.2 by commit, requires the protected
+`windows-signing` environment and uses the committed artifact configurations
+under `.signpath/`. Configure the organization, project, signing-policy and two
+artifact-configuration slugs as repository or environment variables; keep only
+`SIGNPATH_API_TOKEN` as an environment secret. The expected leaf-certificate
+SHA-256 fingerprint is `AIRWIKI_WINDOWS_SIGNER_SHA256` and is checked again on
+the MSI and every AirWiki executable.
+
+Normal pull-request CI and `package-pilot.yml` remain unsigned and consume no
+signing secret. See the [code signing policy](code-signing-policy.md) and
+[ADR 0009](adr/0009-windows-msi-signpath.md).
 
 Detailed public-signing experiments are preserved only as inert historical
 references in the [workflow archive](archive/release-workflows/README.md). They
@@ -250,11 +271,9 @@ public-trust signing, updater-key custody, final-byte SBOM and hashes, and clean
 platform acceptance. None of those requirements may be inferred from a green
 internal packaging run.
 
-No active workflow in this baseline signs or promotes a public release. Restoring
-such automation is a separate goal and requires reviewing the archived design
-against current platform contracts rather than copying it back unchanged.
-The guarded release scripts nevertheless produce signable Tauri updater
-artifacts: a final stapled macOS app archive and the final Authenticode-signed
-Windows NSIS installer. Each script creates the adjacent Tauri `.sig` only when
-the updater private key is present and verifies it with the compiled public key
-before the stable manifest can be generated.
+The active SignPath workflow can produce a manually approved, origin-verified
+Windows candidate; it does not publish or promote that candidate. Public
+distribution remains blocked until SignPath Foundation accepts the project,
+the signed MSI passes the installed Windows matrix, updater signatures are
+created and verified, and the remaining checklist is complete. The archived
+workflows remain inert historical references and must not be copied back.

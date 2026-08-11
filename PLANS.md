@@ -4,6 +4,80 @@ Most changes do not need a checked-in plan. Use a persistent plan only when work
 
 A plan records intent and acceptance, not a transcript, command log, or speculative design. Update it when evidence changes the approach. Finish it as `Completed` or `Superseded`; move durable architectural decisions into an ADR and user-visible changes into `CHANGELOG.md`.
 
+## Windows MSI and open-source signing
+
+Status: Active
+Last updated: 2026-08-10
+
+### User-visible outcome
+
+Windows users install, update and remove AirWiki through a public-trust-signed
+per-user MSI without purchasing a project-owned certificate. The package keeps
+the existing local data, identity, model, Wiki and integration locations and
+passes Smart App Control with every AirWiki-owned executable covered by the
+same SignPath signing request.
+
+### Minimum acceptance path
+
+1. Build one deterministic unsigned MSI from a reviewed GitHub-hosted Windows
+   job and submit it to SignPath with verified origin.
+2. Verify the returned MSI and its desktop, MCP bridge and firewall helper,
+   install it on the real Windows host with Smart App Control enforced, and
+   complete local, LAN, public and MCP journeys against the matching macOS
+   candidate.
+3. Upgrade, uninstall while preserving data, opt into firewall/data cleanup,
+   recover from cancellation and reject downgrade, unsafe paths, reparse points
+   and invalid or incomplete signatures.
+
+### Constraints
+
+- Preserve `%LOCALAPPDATA%\Programs\AirWiki` for immutable installed files and
+  the existing separate mutable data roots.
+- Preserve current per-user behavior, updater consent, firewall-helper
+  authority, MCPB layout, WebView2 bootstrap policy and Windows 10/11 x64 scope.
+- Sign only AirWiki-owned binaries; verify rather than re-sign pinned upstream
+  runtime files.
+- Signing credentials and SignPath identifiers remain outside source control.
+- The normal CI and unsigned pilot remain credential-free and offline except
+  for already reviewed tool downloads.
+
+### Deliberately deferred
+
+- Microsoft Store/MSIX distribution, machine-wide installation and Windows on
+  ARM.
+- Public promotion before the existing release checklist is complete.
+
+### Checkpoints
+
+- [ ] Record the MSI/SignPath architecture and transition policy.
+- [ ] Add a fixed per-user WiX template and deterministic package verification.
+- [ ] Port upgrade, downgrade, autostart, firewall and opt-in cleanup behavior.
+- [ ] Add deep-signing configuration and an origin-verified SignPath workflow.
+- [ ] Pass unsigned MSI build and destructive smoke tests on Windows.
+- [ ] Complete SignPath onboarding and verify the signed candidate under Smart
+      App Control.
+- [ ] Pass macOS-Windows local, LAN, public, MCP, update and recovery acceptance.
+- [ ] Remove NSIS-only implementation and documentation after the MSI gates pass.
+
+### Evidence and recovery
+
+- Evidence: reviewed commit, package hash, signature publisher, OS/build,
+  version, PASS/FAIL and bounded durations only.
+- Recovery: keep NSIS as the internal package until MSI acceptance completes;
+  never publish an unsigned MSI or promote its updater manifest.
+
+### Decisions
+
+- 2026-08-10: Azure Artifact Signing public trust cannot validate an individual
+  resident in Uruguay. A commercial IV certificate is disproportionate for the
+  current validation stage.
+- 2026-08-10: SignPath cannot deeply sign an NSIS executable or its generated
+  uninstaller. Move to MSI so Windows Installer owns removal and SignPath can
+  sign the package and nested AirWiki PE files in one verified-origin request.
+- 2026-08-10: The current NSIS candidate is internal and unsupported. Its
+  transition may require one explicit uninstall that preserves the separate
+  data roots; no public upgrade compatibility is claimed until MSI acceptance.
+
 ## Public infrastructure beta v1 closure
 
 Status: Completed

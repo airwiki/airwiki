@@ -26,7 +26,12 @@ const ADR_REQUIRED_SECTIONS: [&str; 4] = [
     "## Consequences",
     "## Rejected alternatives",
 ];
-const ACTIVE_WORKFLOWS: [&str; 3] = ["ci.yml", "dco.yml", "package-pilot.yml"];
+const ACTIVE_WORKFLOWS: [&str; 4] = [
+    "ci.yml",
+    "dco.yml",
+    "package-pilot.yml",
+    "windows-signpath.yml",
+];
 const ARCHIVED_WORKFLOWS: [&str; 2] = ["README.md", "promote-stable.yml.disabled"];
 const STALE_CARGO_DENY_COMMAND: &str = "cargo deny check --locked";
 
@@ -551,7 +556,7 @@ fn check_workflows(repository_root: &Path, issues: &mut Vec<String>) -> Result<(
     }
     for unexpected in active.difference(&expected) {
         issues.push(format!(
-            "unexpected active workflow `.github/workflows/{unexpected}`; signed release workflows must remain archived"
+            "unexpected active workflow `.github/workflows/{unexpected}`; release workflows require an explicit reviewed allowlist entry"
         ));
     }
 
@@ -823,7 +828,7 @@ mod tests {
     }
 
     #[test]
-    fn check_rejects_active_signed_release_workflow() {
+    fn check_rejects_an_unreviewed_release_workflow() {
         let fixture = Fixture::valid();
         fixture.write(".github/workflows/release-candidate.yml", "name: Release\n");
 

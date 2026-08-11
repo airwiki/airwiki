@@ -3081,9 +3081,10 @@ fn verify_windows_signpath_sources(
         "SignPath binary configuration must sign exactly the three AirWiki executables"
     );
     ensure!(
-        msi.matches("<msi-file path=").count() == 2
-            && msi.matches("<authenticode-sign />").count() == 2
-            && msi.matches("<authenticode-verify />").count() == 8
+        msi.matches("<msi-file-set ").count() == 1
+            && msi.matches("<include path=\"AirWiki_").count() == 2
+            && msi.matches("<authenticode-sign />").count() == 1
+            && msi.matches("<authenticode-verify />").count() == 4
             && msi.contains("AirWiki_*_x64_en-US.msi")
             && msi.contains("AirWiki_*_x64_es-ES.msi")
             && msi.contains("server/airwiki-mcp-bridge.exe"),

@@ -37,6 +37,7 @@ $CandidateSignedRoot = if ([IO.Path]::IsPathRooted($SignedBinaryRoot)) {
 . (Join-Path $PSScriptRoot "windows-runtime.ps1")
 . (Join-Path $PSScriptRoot "windows-safe-staging.ps1")
 . (Join-Path $PSScriptRoot "windows-signpath.ps1")
+. (Join-Path $PSScriptRoot "windows-wix.ps1")
 
 function Assert-TargetDescendant([string] $Path, [string] $Label) {
     $Boundary = [IO.Path]::GetFullPath($TargetRoot).TrimEnd('\') + '\'
@@ -148,7 +149,10 @@ try {
             --config ..\..\packaging\windows\tauri.msi.bundle.conf.json `
             --target x86_64-pc-windows-msvc `
             --bundles msi
-        if ($LASTEXITCODE -ne 0) { throw "Tauri MSI packaging failed" }
+        if ($LASTEXITCODE -ne 0) {
+            Write-WixLightDiagnostic $Root $ReleaseRoot
+            throw "Tauri MSI packaging failed"
+        }
     } finally {
         Pop-Location
     }

@@ -2971,6 +2971,12 @@ fn verify_windows_msi() -> Result<()> {
 }
 
 fn verify_windows_msi_sources(config: &str, template: &str) -> Result<()> {
+    const REPARSE_GUARD: &str = "$root = Join-Path ([Environment]::GetFolderPath([Environment+SpecialFolder]::LocalApplicationData)) 'Programs'; $paths = @($root, (Join-Path $root 'AirWiki')); foreach ($path in $paths) { if (Test-Path -LiteralPath $path) { $item = Get-Item -LiteralPath $path -Force -ErrorAction Stop; if (($item.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) { exit 23 } } }; exit 0";
+    let reparse_guard_utf16 = REPARSE_GUARD
+        .encode_utf16()
+        .flat_map(u16::to_le_bytes)
+        .collect::<Vec<_>>();
+    let encoded_reparse_guard = BASE64_STANDARD.encode(reparse_guard_utf16);
     let config: serde_json::Value =
         serde_json::from_str(config).context("parsing the Windows MSI packager configuration")?;
     ensure!(
@@ -3082,8 +3088,7 @@ fn verify_windows_msi_sources(config: &str, template: &str) -> Result<()> {
     );
     ensure!(
         template.contains("Id=\"RejectReparseInstallPath\"")
-            && template.contains("[\\[]IO.FileAttributes[\\]]::ReparsePoint")
-            && template.contains("@(&apos;[AirWikiProgramsFolder]&apos;, &apos;[INSTALLDIR]&apos;)")
+            && template.contains(&format!("-EncodedCommand {encoded_reparse_guard}"))
             && !template.contains("[LocalAppDataFolder]Programs\\{{product_name}}")
             && template
                 .matches("<Custom Action=\"RejectReparseInstallPath\" After=\"CostFinalize\">NOT Installed</Custom>")
@@ -3109,10 +3114,10 @@ fn verify_windows_msi_sources(config: &str, template: &str) -> Result<()> {
         "Windows MSI must remove only the exact AirWiki autostart entry during final uninstall"
     );
     ensure!(
-        template.matches("&amp; [\\{]").count() == 3
-            && template.matches("[\\}]").count() >= 5
-            && template.matches("[\\[]").count() == 7
-            && template.matches("[\\]]").count() == 7
+        template.matches("&amp; [\\{]").count() == 2
+            && template.matches("[\\}]").count() >= 3
+            && template.matches("[\\[]").count() == 6
+            && template.matches("[\\]]").count() == 6
             && !template.contains("[IO.FileAttributes]")
             && !template.contains("[StringComparison]")
             && !template.contains("[Net.ServicePointManager]")

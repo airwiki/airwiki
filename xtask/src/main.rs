@@ -3025,6 +3025,16 @@ fn verify_windows_msi_sources(config: &str, template: &str) -> Result<()> {
         "Windows MSI must preserve downgrade and WebView2 bootstrap policy"
     );
     ensure!(
+        template.contains("Id=\"RemoveExactAutostart\"")
+            && template.contains(
+                "$expected = &apos;&quot;[INSTALLDIR]airwiki.exe&quot; --background&apos;"
+            )
+            && template.contains("[StringComparison]::Ordinal")
+            && template.contains("Remove-ItemProperty -LiteralPath $key -Name &apos;AirWiki&apos;")
+            && template.contains("(REMOVE = \"ALL\") AND NOT UPGRADINGPRODUCTCODE"),
+        "Windows MSI must remove only the exact AirWiki autostart entry during final uninstall"
+    );
+    ensure!(
         !template.contains("RemoveFile Id=")
             && !template.contains("RemoveFolder Id=\"INSTALLDIR\"")
             && !template.contains("RmDir")

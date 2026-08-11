@@ -84,6 +84,7 @@
           <Directory Id="INSTALLDIR" Name="{{product_name}}" />
         </Directory>
       </Directory>
+      <Directory Id="SystemFolder" />
       <Directory Id="ProgramMenuFolder">
         <Directory Id="ApplicationProgramsFolder" Name="{{product_name}}" />
       </Directory>

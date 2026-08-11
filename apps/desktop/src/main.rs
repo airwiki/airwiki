@@ -27,8 +27,9 @@ use std::{
 };
 
 use airwiki_core::{
-    GuidedRepairChange, GuidedRepairPreview, KnowledgeBundleState, KnowledgeLinkDisposition,
-    KnowledgeLinkView, KnowledgePageId, KnowledgePageView, RepairAuthority, ReviewVersionToken,
+    CollectionMaintenanceStatus, GuidedRepairChange, GuidedRepairPreview, KnowledgeBundleState,
+    KnowledgeLinkDisposition, KnowledgeLinkView, KnowledgePageId, KnowledgePageView,
+    RepairAuthority, ReviewVersionToken,
 };
 use airwiki_inference::ModelProfile;
 use airwiki_types::{ConceptType, EnrichmentDraft, SearchPurpose, SuggestedEntity, SuggestedLink};
@@ -3524,9 +3525,23 @@ impl From<worker::CollectionView> for WikiSummary {
                     PublicAnnouncementSummary::Expired
                 }
             },
-            maintenance_required: value.maintenance.is_some(),
+            maintenance_required: maintenance_requires_attention(
+                value.maintenance.map(|maintenance| maintenance.status),
+            ),
         }
     }
+}
+
+const fn maintenance_requires_attention(status: Option<CollectionMaintenanceStatus>) -> bool {
+    matches!(
+        status,
+        Some(
+            CollectionMaintenanceStatus::Never
+                | CollectionMaintenanceStatus::Partial
+                | CollectionMaintenanceStatus::Failed
+                | CollectionMaintenanceStatus::Quarantined
+        )
+    )
 }
 
 impl From<worker::ReviewItemView> for ReviewSummary {
@@ -4180,6 +4195,27 @@ mod tests {
     fn background_mode_requires_the_exact_flag() {
         assert!(launch_in_background(["--background"]));
         assert!(!launch_in_background(["background", "--foreground"]));
+    }
+
+    #[test]
+    fn successful_maintenance_does_not_require_attention() {
+        assert!(!maintenance_requires_attention(Some(
+            CollectionMaintenanceStatus::Success
+        )));
+    }
+
+    #[test]
+    fn failed_maintenance_requires_attention() {
+        assert!(maintenance_requires_attention(Some(
+            CollectionMaintenanceStatus::Failed
+        )));
+    }
+
+    #[test]
+    fn interrupted_maintenance_requires_attention() {
+        assert!(maintenance_requires_attention(Some(
+            CollectionMaintenanceStatus::Never
+        )));
     }
 
     #[test]

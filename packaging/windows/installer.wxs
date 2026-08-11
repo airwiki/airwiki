@@ -61,12 +61,20 @@
         Impersonate="yes"
         Return="check"
         ExeCommand='WindowsPowerShell\v1.0\powershell.exe -NoLogo -NoProfile -NonInteractive -WindowStyle Hidden -Command "&amp; { $paths = @(&apos;[LocalAppDataFolder]Programs&apos;, &apos;[LocalAppDataFolder]Programs\{{product_name}}&apos;); foreach ($path in $paths) { if (Test-Path -LiteralPath $path) { $item = Get-Item -LiteralPath $path -Force -ErrorAction Stop; if (($item.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) { exit 23 } } }; exit 0 }"' />
+    <CustomAction
+        Id="RemoveExactAutostart"
+        Directory="SystemFolder"
+        Execute="immediate"
+        Impersonate="yes"
+        Return="check"
+        ExeCommand='WindowsPowerShell\v1.0\powershell.exe -NoLogo -NoProfile -NonInteractive -WindowStyle Hidden -Command "&amp; { $key = &apos;HKCU:\Software\Microsoft\Windows\CurrentVersion\Run&apos;; $expected = &apos;&quot;[INSTALLDIR]airwiki.exe&quot; --background&apos;; $current = (Get-ItemProperty -LiteralPath $key -Name &apos;AirWiki&apos; -ErrorAction SilentlyContinue).AirWiki; if ($null -ne $current -and [string]::Equals([string]$current, $expected, [StringComparison]::Ordinal)) { Remove-ItemProperty -LiteralPath $key -Name &apos;AirWiki&apos; -ErrorAction Stop }; exit 0 }"' />
 
     <InstallUISequence>
       <Custom Action="RejectReparseInstallPath" Before="CostInitialize">NOT Installed</Custom>
     </InstallUISequence>
     <InstallExecuteSequence>
       <Custom Action="RejectReparseInstallPath" Before="CostInitialize">NOT Installed</Custom>
+      <Custom Action="RemoveExactAutostart" Before="RemoveFiles"><![CDATA[(REMOVE = "ALL") AND NOT UPGRADINGPRODUCTCODE]]></Custom>
       <RemoveShortcuts>Installed AND NOT UPGRADINGPRODUCTCODE</RemoveShortcuts>
     </InstallExecuteSequence>
 

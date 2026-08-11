@@ -3083,7 +3083,8 @@ fn verify_windows_msi_sources(config: &str, template: &str) -> Result<()> {
     ensure!(
         template.contains("Id=\"RejectReparseInstallPath\"")
             && template.contains("[IO.FileAttributes]::ReparsePoint")
-            && template.contains("[LocalAppDataFolder]Programs\\{{product_name}}")
+            && template.contains("@(&apos;[AirWikiProgramsFolder]&apos;, &apos;[INSTALLDIR]&apos;)")
+            && !template.contains("[LocalAppDataFolder]Programs\\{{product_name}}")
             && template
                 .matches("<Custom Action=\"RejectReparseInstallPath\" After=\"CostFinalize\">NOT Installed</Custom>")
                 .count()
@@ -3106,6 +3107,13 @@ fn verify_windows_msi_sources(config: &str, template: &str) -> Result<()> {
             && template.contains("Remove-ItemProperty -LiteralPath $key -Name &apos;AirWiki&apos;")
             && template.contains("(REMOVE = \"ALL\") AND NOT UPGRADINGPRODUCTCODE"),
         "Windows MSI must remove only the exact AirWiki autostart entry during final uninstall"
+    );
+    ensure!(
+        template.matches("&amp; [\\{]").count() == 3
+            && template.matches("[\\}]").count() >= 5
+            && !template.contains("-Command \"&amp; {")
+            && !template.contains("Programs\\{{product_name}}"),
+        "Windows MSI PowerShell blocks and fixed paths must survive formatted-field expansion"
     );
     ensure!(
         !template.contains("RemoveFile Id=")

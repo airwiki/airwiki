@@ -6,7 +6,8 @@ $ErrorActionPreference = "Stop"
 Set-StrictMode -Version Latest
 
 $Root = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
-$OutDir = Join-Path $Root "target\packages\windows"
+$TargetRoot = Join-Path $Root "target"
+$OutDir = Join-Path $TargetRoot "packages\windows"
 $ReleaseDir = Join-Path $Root "target\x86_64-pc-windows-msvc\release"
 $Bridge = Join-Path $ReleaseDir "airwiki-mcp-bridge.exe"
 $Desktop = Join-Path $ReleaseDir "airwiki.exe"
@@ -204,9 +205,16 @@ try {
     if ($LASTEXITCODE -ne 0 -or $TauriVersion -ne "tauri-cli 2.11.4") {
         throw "Tauri CLI 2.11.4 is required"
     }
+    Assert-AirWikiWindowsPathHasNoReparsePoint `
+        $TargetRoot `
+        "Windows target staging root"
+    New-Item -ItemType Directory -Path $TargetRoot -Force | Out-Null
+    Assert-AirWikiWindowsPathHasNoReparsePoint `
+        $TargetRoot `
+        "Windows target staging root"
     Remove-AirWikiWindowsStagingPath `
         -Path $OutDir `
-        -AllowedRoot (Join-Path $Root "target") `
+        -AllowedRoot $TargetRoot `
         -Label "Windows package output"
     New-Item -ItemType Directory -Path $OutDir -Force | Out-Null
     $Started = [DateTime]::UtcNow

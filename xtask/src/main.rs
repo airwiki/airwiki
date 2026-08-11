@@ -7688,7 +7688,9 @@ mod tests {
             fs::read_to_string(workspace_root().join("packaging/package-windows.ps1")).unwrap();
         assert!(script.contains("windows-safe-staging.ps1"));
         assert!(script.contains("Remove-AirWikiWindowsStagingPath"));
-        assert!(script.contains("-AllowedRoot (Join-Path $Root \"target\")"));
+        assert!(script.contains("$TargetRoot = Join-Path $Root \"target\""));
+        assert!(script.contains("New-Item -ItemType Directory -Path $TargetRoot -Force"));
+        assert!(script.contains("-AllowedRoot $TargetRoot"));
         assert!(!script.contains("Remove-Item -LiteralPath $OutDir -Recurse -Force"));
         assert!(script.contains("$Bytes[$Offset + 4] -ne 0x64"));
         assert!(script.contains("mcpb verify"));

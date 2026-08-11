@@ -54,6 +54,9 @@ All notable user-visible changes to AirWiki will be documented here. The project
 
 ### Fixed
 
+- Replaced the WiX sample text in Windows installer license dialogs with the
+  versioned Apache-2.0 terms and made packaging reject missing, stale, or
+  placeholder license RTF input.
 - Kept the desktop navigation rail fixed in place and made every System
   subsection an independently routed page, removing section jumps that could
   displace or freeze the application shell.

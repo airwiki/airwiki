@@ -17,6 +17,7 @@ function Write-WixLightDiagnostic([string] $Root, [string] $ReleaseDir) {
     }
 
     $DiagnosticMsi = Join-Path $BuildDir "diagnostic-output.msi"
+    $ObjectPaths = @($Objects | ForEach-Object { $_.FullName })
     Remove-Item -LiteralPath $DiagnosticMsi -Force -ErrorAction SilentlyContinue
     try {
         [xml] $LocaleXml = Get-Content -LiteralPath $Locale -Raw
@@ -30,14 +31,20 @@ function Write-WixLightDiagnostic([string] $Root, [string] $ReleaseDir) {
             "$($Culture.ToLowerInvariant());en-US"
         }
         Write-Warning "Tauri did not expose the WiX linker error; rerunning the pinned linker for diagnostics"
-        & $Light `
-            -ext $UiExtension `
-            -ext $UtilExtension `
-            -o $DiagnosticMsi `
-            "-cultures:$Cultures" `
-            -loc $Locale `
-            "*.wixobj" 2>&1 | ForEach-Object { Write-Warning ([string] $_) }
-        Write-Warning "Independent WiX linker exit code: $LASTEXITCODE"
+        Push-Location $BuildDir
+        try {
+            & $Light `
+                -ext $UiExtension `
+                -ext $UtilExtension `
+                -o $DiagnosticMsi `
+                "-cultures:$Cultures" `
+                -loc $Locale `
+                $ObjectPaths 2>&1 | ForEach-Object { Write-Warning ([string] $_) }
+            $LightExitCode = $LASTEXITCODE
+        } finally {
+            Pop-Location
+        }
+        Write-Warning "Independent WiX linker exit code: $LightExitCode"
     } catch {
         Write-Warning "Could not produce the independent WiX linker diagnostic: $($_.Exception.Message)"
     } finally {

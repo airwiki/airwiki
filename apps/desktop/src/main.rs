@@ -3536,8 +3536,7 @@ const fn maintenance_requires_attention(status: Option<CollectionMaintenanceStat
     matches!(
         status,
         Some(
-            CollectionMaintenanceStatus::Never
-                | CollectionMaintenanceStatus::Partial
+            CollectionMaintenanceStatus::Partial
                 | CollectionMaintenanceStatus::Failed
                 | CollectionMaintenanceStatus::Quarantined
         )
@@ -4212,8 +4211,8 @@ mod tests {
     }
 
     #[test]
-    fn interrupted_maintenance_requires_attention() {
-        assert!(maintenance_requires_attention(Some(
+    fn pending_maintenance_does_not_require_human_attention() {
+        assert!(!maintenance_requires_attention(Some(
             CollectionMaintenanceStatus::Never
         )));
     }

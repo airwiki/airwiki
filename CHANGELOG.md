@@ -4,6 +4,7 @@ All notable user-visible changes to AirWiki will be documented here. The project
 
 ## [Unreleased]
 
+- Fixed the missing AirWiki system-tray icon on macOS and Windows.
 - Added an explicit, fail-closed recovery action after a device verification
   code is rejected; retrying never restores trust or wiki grants.
 

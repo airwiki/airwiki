@@ -263,6 +263,10 @@ try {
     if ($LASTEXITCODE -ne 0) {
         throw "Claude MCPB validation failed"
     }
+    & $Xtask packaging generate-windows-msi-resources
+    if ($LASTEXITCODE -ne 0) {
+        throw "Windows MSI resource fragment generation failed"
+    }
 
     Push-Location (Join-Path $Root "apps\desktop")
     try {

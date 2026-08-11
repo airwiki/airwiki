@@ -40,7 +40,7 @@ use tauri::{
     image::Image,
     ipc::Channel,
     menu::{Menu, MenuItem},
-    tray::{TrayIconBuilder, TrayIconEvent},
+    tray::{MouseButton, TrayIconBuilder, TrayIconEvent},
 };
 use tokio::sync::{Semaphore, broadcast, mpsc, oneshot, watch};
 use tokio_util::sync::CancellationToken;
@@ -2510,6 +2510,10 @@ const fn tray_icon() -> Image<'static> {
     Image::new(TRAY_ICON_RGBA, TRAY_ICON_WIDTH, TRAY_ICON_HEIGHT)
 }
 
+const fn tray_click_opens_window(button: MouseButton) -> bool {
+    matches!(button, MouseButton::Left)
+}
+
 fn install_tray(app: &tauri::App) -> tauri::Result<()> {
     let labels = Localization::new(UiLocale::from_system()).ok();
     let open_label = match labels
@@ -2540,7 +2544,10 @@ fn install_tray(app: &tauri::App) -> tauri::Result<()> {
             _ => {}
         })
         .on_tray_icon_event(|tray, event| {
-            if matches!(event, TrayIconEvent::Click { .. }) {
+            if matches!(
+                event,
+                TrayIconEvent::Click { button, .. } if tray_click_opens_window(button)
+            ) {
                 show_main_window(tray.app_handle());
             }
         })
@@ -4694,6 +4701,13 @@ mod tests {
                 .chunks_exact(4)
                 .any(|pixel| matches!(pixel, [_, _, _, alpha] if *alpha != 0))
         );
+    }
+
+    #[test]
+    fn tray_only_restores_the_window_on_left_click() {
+        assert!(tray_click_opens_window(MouseButton::Left));
+        assert!(!tray_click_opens_window(MouseButton::Right));
+        assert!(!tray_click_opens_window(MouseButton::Middle));
     }
 
     #[test]

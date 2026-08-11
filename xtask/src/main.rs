@@ -2186,25 +2186,19 @@ fn validate_pinned_seven_zip_tool(root: &Path) -> Result<()> {
 }
 
 fn validate_local_windows_package_tools(package: &str) -> Result<()> {
-    let seven_zip_preparation = package
-        .find("prepare-verified-7zip.ps1")
-        .context("Windows packaging does not prepare the pinned 7-Zip extractor")?;
-    let packaging = package
-        .find("& $Tauri build")
-        .context("Windows packaging does not invoke the managed packager configuration")?;
     ensure!(
         package.contains("$TauriVersion -ne \"tauri-cli 2.11.4\"")
-            && package.contains("target\\verified-tools\\7zip-26.02")
-            && package.contains("-ToolRoot $SevenZipToolRoot")
+            && package.contains("& $Tauri build")
+            && !package.contains("prepare-verified-7zip.ps1")
+            && !package.contains("SevenZipToolRoot")
             && !package.contains("Get-Command makensis")
             && !package.contains("prepare-verified-nsis-toolchain.ps1")
             && !package.contains("Get-Command 7z.exe")
             && !package.contains("cargo-packager")
             && package.contains("--config ..\\..\\packaging\\windows\\tauri.msi.bundle.conf.json")
             && package.contains("--bundles msi")
-            && package.contains("packaging verify-windows-msi")
-            && seven_zip_preparation < packaging,
-        "Windows packaging must verify Tauri and prepare the pinned 7-Zip tool before MSI packaging"
+            && package.contains("packaging verify-windows-msi"),
+        "Windows MSI packaging must use only the pinned Tauri configuration and toolchain"
     );
     Ok(())
 }
@@ -7692,8 +7686,8 @@ mod tests {
         assert!(script.contains("mcpb verify"));
         assert!(script.contains("$Installers.Count -ne 2"));
         assert!(script.contains("LastWriteTimeUtc -lt $Started"));
-        assert!(script.contains("prepare-verified-7zip.ps1"));
-        assert!(script.contains("target\\verified-tools\\7zip-26.02"));
+        assert!(!script.contains("prepare-verified-7zip.ps1"));
+        assert!(!script.contains("SevenZipToolRoot"));
         assert!(!script.contains("Get-Command 7z.exe"));
         assert!(script.contains("Get-FileHash -LiteralPath"));
         assert!(script.contains("Assert-WindowsMsiBundleTypePatch"));
@@ -8691,7 +8685,8 @@ mod tests {
                 && preparation.contains("$Entries.Count -ne $PinnedFiles.Count")
         );
         assert!(
-            package.contains("$SevenZip = Join-Path $SevenZipToolRoot \"7z.exe\"")
+            !package.contains("SevenZipToolRoot")
+                && !package.contains("prepare-verified-7zip.ps1")
                 && verify.contains("AIRWIKI_7ZIP_ROOT or -SevenZipToolRoot is required")
                 && !package.contains("Get-Command 7z.exe")
                 && !verify.contains("Get-Command 7z.exe")

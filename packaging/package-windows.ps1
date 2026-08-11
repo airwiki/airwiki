@@ -17,8 +17,6 @@ $Tauri = Join-Path $Root "apps\desktop\ui\node_modules\.bin\tauri.cmd"
 $SvelteCheck = Join-Path $Root "apps\desktop\ui\node_modules\.bin\svelte-check.cmd"
 $Vite = Join-Path $Root "apps\desktop\ui\node_modules\.bin\vite.cmd"
 $TauriInstallerDir = Join-Path $ReleaseDir "bundle\msi"
-$SevenZipToolRoot = Join-Path $Root "target\verified-tools\7zip-26.02"
-$SevenZip = Join-Path $SevenZipToolRoot "7z.exe"
 $LlamaRuntime = Join-Path $Root "resources\llama\windows-x64"
 $LlamaPolicy = Join-Path $Root "packaging\llama-windows-build-policy.json"
 . (Join-Path $PSScriptRoot "windows-runtime.ps1")
@@ -250,8 +248,6 @@ try {
     if ($LASTEXITCODE -ne 0 -or $TauriVersion -ne "tauri-cli 2.11.4") {
         throw "Tauri CLI 2.11.4 is required"
     }
-    & (Join-Path $PSScriptRoot "prepare-verified-7zip.ps1") `
-        -ToolRoot $SevenZipToolRoot | Out-Null
     Remove-AirWikiWindowsStagingPath `
         -Path $OutDir `
         -AllowedRoot (Join-Path $Root "target") `

@@ -210,8 +210,9 @@ then install the new candidate; the two data roots remain intact by default.
 - Managed rules are limited to application TCP and mDNS UDP 5353,
   Private/Domain, `LocalSubnet`, and no edge traversal.
 - The installer does not silently remove broad inherited rules or user data.
-- WiX, 7-Zip, source archives, and their legal texts are pinned and verified;
-  host `PATH` does not select release tools implicitly.
+- WiX, source archives, and their legal texts are pinned and verified; host
+  `PATH` does not select release tools implicitly. The MSI path uses Windows
+  Installer for payload inspection and does not prepare 7-Zip.
 
 ### Windows open-source signing
 

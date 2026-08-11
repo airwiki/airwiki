@@ -7,7 +7,7 @@ A plan records intent and acceptance, not a transcript, command log, or speculat
 ## Windows MSI and open-source signing
 
 Status: Active
-Last updated: 2026-08-10
+Last updated: 2026-08-11
 
 ### User-visible outcome
 
@@ -49,10 +49,10 @@ same SignPath signing request.
 
 ### Checkpoints
 
-- [ ] Record the MSI/SignPath architecture and transition policy.
-- [ ] Add a fixed per-user WiX template and deterministic package verification.
+- [x] Record the MSI/SignPath architecture and transition policy.
+- [x] Add a fixed per-user WiX template and deterministic package verification.
 - [ ] Port upgrade, downgrade, autostart, firewall and opt-in cleanup behavior.
-- [ ] Add deep-signing configuration and an origin-verified SignPath workflow.
+- [x] Add deep-signing configuration and an origin-verified SignPath workflow.
 - [ ] Pass unsigned MSI build and destructive smoke tests on Windows.
 - [ ] Complete SignPath onboarding and verify the signed candidate under Smart
       App Control.

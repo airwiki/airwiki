@@ -3507,6 +3507,25 @@ impl Database {
         Ok(())
     }
 
+    /// Allows a human to retry verification after a rejected pairing code.
+    ///
+    /// This deliberately restores neither trust nor grants. The peer must
+    /// complete pairing again before it can access any wiki.
+    pub fn allow_peer_pairing_again(&self, peer_id: &str) -> Result<()> {
+        let mut connection = self.connection()?;
+        let tx = connection.transaction()?;
+        tx.execute("DELETE FROM grants WHERE peer_id=?1", [peer_id])?;
+        let changed = tx.execute(
+            "UPDATE peers SET trusted=0,blocked=0,updated_at=?2 WHERE peer_id=?1",
+            params![peer_id, Utc::now().to_rfc3339()],
+        )?;
+        if changed != 1 {
+            bail!("unknown peer");
+        }
+        tx.commit()?;
+        Ok(())
+    }
+
     pub fn granted_collections(&self, peer_id: &str) -> Result<Vec<Uuid>> {
         self.granted_collections_for_search(peer_id, SearchPurpose::LocalAssistant)
     }
@@ -5983,6 +6002,19 @@ mod tests {
         db.revoke_peer("peer-b").unwrap();
         assert!(db.granted_collections("peer-b").unwrap().is_empty());
         assert!(db.list_grants(None).unwrap().is_empty());
+
+        db.allow_peer_pairing_again("peer-b").unwrap();
+        let peer = db.peer("peer-b").unwrap().unwrap();
+        assert!(!peer.trusted);
+        assert!(!peer.blocked);
+        assert!(db.granted_collections("peer-b").unwrap().is_empty());
+    }
+
+    #[test]
+    fn allowing_pairing_again_requires_a_known_peer() {
+        let (_temp, db, _collection) = setup();
+
+        assert!(db.allow_peer_pairing_again("unknown-peer").is_err());
     }
 
     #[test]

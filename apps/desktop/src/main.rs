@@ -1862,6 +1862,15 @@ async fn revoke_peer(
 }
 
 #[tauri::command]
+async fn allow_peer_pairing_again(
+    runtime: tauri::State<'_, AppRuntime>,
+    peer_id: String,
+) -> Result<(), UiError> {
+    let peer_id = validate_peer_id(peer_id)?;
+    send_command(&runtime, WorkerCommand::AllowPeerPairingAgain { peer_id }).await
+}
+
+#[tauri::command]
 async fn set_wiki_grant(
     app: AppHandle,
     runtime: tauri::State<'_, AppRuntime>,
@@ -4107,6 +4116,7 @@ fn main() -> Result<()> {
             pair_peer,
             confirm_pairing,
             revoke_peer,
+            allow_peer_pairing_again,
             set_wiki_grant,
             manage_integration,
             search,

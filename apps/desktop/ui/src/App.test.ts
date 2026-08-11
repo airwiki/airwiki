@@ -2,7 +2,7 @@ import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-libra
 import axe from 'axe-core';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import App from './App.svelte';
-import { configureFirewall, loadWikiBundle, loadWikiPage, openSystemDestination, prepareGuidedWikiRepair, updatePreferences } from './api';
+import { allowPeerPairingAgain, configureFirewall, loadWikiBundle, loadWikiPage, openSystemDestination, prepareGuidedWikiRepair, updatePreferences } from './api';
 import { readySnapshot } from './test/fixtures';
 
 let snapshot = readySnapshot();
@@ -36,6 +36,7 @@ vi.mock('./api', async (importOriginal) => {
     configureFirewall: vi.fn(async () => undefined),
     openSystemDestination: vi.fn(async () => undefined),
     manageIntegration: vi.fn(async () => undefined),
+    allowPeerPairingAgain: vi.fn(async () => undefined),
     loadWikiBundle: vi.fn(async () => undefined),
     loadWikiPage: vi.fn(async () => undefined)
   };
@@ -119,6 +120,22 @@ describe('AirWiki wiki workspace', () => {
     await fireEvent.click(await screen.findByRole('button', { name: 'Red local: Opcional · Desactivado' }));
     await fireEvent.click(screen.getByRole('button', { name: 'Abrir configuración de red' }));
     expect(openSystemDestination).toHaveBeenCalledWith(expect.any(String), 'networkSettings');
+  });
+
+  it('explains a rejected pairing and requires an explicit safe retry', async () => {
+    snapshot.preferences!.lanPreference = 'enabled';
+    snapshot.peers = [{
+      peerId: '12D3KooBlockedSyntheticPeer', deviceName: 'Office PC', address: '',
+      trust: 'blocked', activity: 'discovered', sasWords: null, grantedWikiIds: []
+    }];
+    render(App);
+    await fireEvent.click(await screen.findByRole('button', { name: 'Red local: Opcional · Desactivado' }));
+
+    expect(screen.getByText('Verificación bloqueada')).toBeInTheDocument();
+    expect(screen.getByText(/Los códigos no coincidieron/)).toBeInTheDocument();
+    await fireEvent.click(screen.getByRole('button', { name: 'Permitir volver a verificar' }));
+
+    expect(allowPeerPairingAgain).toHaveBeenCalledWith('12D3KooBlockedSyntheticPeer');
   });
 
   it('keeps modal focus inside connections when advanced disclosures are closed', async () => {

@@ -513,6 +513,10 @@ button:active:not(:disabled) { transform: scale(.985); }
 .connections-drawer { width: min(600px, 100%); }
 .connections-drawer > section { padding: 20px 0; border-bottom: 1px solid var(--line); }
 .connections-drawer .peer-list { grid-template-columns: 1fr; }
+.peer-summary { display: grid; gap: 3px; }
+.peer-summary small { color: var(--muted); }
+.blocked-peer-guidance { display: grid; justify-items: start; gap: 10px; margin-top: 12px; padding: 12px 14px; border-left: 2px solid var(--amber); background: color-mix(in srgb, var(--amber) 7%, transparent); }
+.blocked-peer-guidance p { margin: 0; color: var(--muted); }
 .connection-guidance { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin-top: 14px; padding: 12px 14px; border-left: 3px solid var(--amber); background: color-mix(in srgb, var(--amber) 7%, transparent); }
 .connection-guidance p { margin: 0; color: var(--text); font-size: 13px; line-height: 1.45; }
 .connection-guidance button { flex: none; }

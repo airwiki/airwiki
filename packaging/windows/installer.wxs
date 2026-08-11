@@ -51,9 +51,10 @@
       <Property Id="ARPURLUPDATEINFO" Value="{{homepage}}" />
     {{/if}}
 
-    <!-- A fixed-path package must reject pre-existing junctions before cost or
-         file actions. The command has no caller-controlled path and runs as the
-         interactive user; failure aborts before installation starts. -->
+    <!-- A fixed-path package must reject pre-existing junctions after
+         CostFinalize initializes formatted directory properties, but before
+         validation or file actions. The command has no caller-controlled path
+         and runs as the interactive user; failure aborts before installation. -->
     <CustomAction
         Id="RejectReparseInstallPath"
         Directory="SystemFolder"
@@ -70,10 +71,10 @@
         ExeCommand='WindowsPowerShell\v1.0\powershell.exe -NoLogo -NoProfile -NonInteractive -WindowStyle Hidden -Command "&amp; { $key = &apos;HKCU:\Software\Microsoft\Windows\CurrentVersion\Run&apos;; $expected = &apos;&quot;[INSTALLDIR]airwiki.exe&quot; --background&apos;; $current = (Get-ItemProperty -LiteralPath $key -Name &apos;AirWiki&apos; -ErrorAction SilentlyContinue).AirWiki; if ($null -ne $current -and [string]::Equals([string]$current, $expected, [StringComparison]::Ordinal)) { Remove-ItemProperty -LiteralPath $key -Name &apos;AirWiki&apos; -ErrorAction Stop }; exit 0 }"' />
 
     <InstallUISequence>
-      <Custom Action="RejectReparseInstallPath" Before="CostInitialize">NOT Installed</Custom>
+      <Custom Action="RejectReparseInstallPath" After="CostFinalize">NOT Installed</Custom>
     </InstallUISequence>
     <InstallExecuteSequence>
-      <Custom Action="RejectReparseInstallPath" Before="CostInitialize">NOT Installed</Custom>
+      <Custom Action="RejectReparseInstallPath" After="CostFinalize">NOT Installed</Custom>
       <Custom Action="RemoveExactAutostart" Before="RemoveFiles"><![CDATA[(REMOVE = "ALL") AND NOT UPGRADINGPRODUCTCODE]]></Custom>
       <RemoveShortcuts>Installed AND NOT UPGRADINGPRODUCTCODE</RemoveShortcuts>
     </InstallExecuteSequence>

@@ -879,6 +879,7 @@ desktop-page-shared-title = Shared
 desktop-page-shared-body = Decide which wikis your devices, AI apps, or the public network can access.
 desktop-search-public-short = Public network
 desktop-search-local-source = On this device
+desktop-search-nearby-source = Nearby device
 desktop-search-welcome-title = Search all your wikis
 desktop-search-welcome-body = Your query stays out of URLs, logs, and telemetry.
 desktop-status-local-ai = Local AI

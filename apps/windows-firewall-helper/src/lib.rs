@@ -24,6 +24,8 @@ const ARTIFACT_SIGNING_GENERIC_EKU: &str = "1.3.6.1.4.1.311.97.1.0";
 #[cfg(any(windows, test))]
 const CODE_SIGNING_EKU: &str = "1.3.6.1.5.5.7.3.3";
 #[cfg(windows)]
+const WINDOWS_SIGNER_SHA256: Option<&str> = option_env!("AIRWIKI_WINDOWS_SIGNER_SHA256");
+#[cfg(windows)]
 const FIREWALL_HELPER_BASENAME: &str = "airwiki-windows-firewall-helper.exe";
 const LOCAL_SUBNET: &str = "LocalSubnet";
 const NO_SERVICE: &str = "";
@@ -387,6 +389,14 @@ pub enum FirewallHelperTrustStatus {
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct SignerEvidence {
     enhanced_key_usage_oids: Vec<String>,
+    certificate_sha256: [u8; 32],
+}
+
+#[cfg(any(windows, test))]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum DurablePublicTrustIdentity<'a> {
+    ArtifactSigningSubscriber(&'a str),
+    PinnedCertificate,
 }
 
 #[cfg(any(windows, test))]
@@ -411,27 +421,94 @@ impl SignerEvidence {
         selected
     }
 
-    fn durable_public_trust_identity(&self) -> Option<&str> {
-        if !self.has_code_signing_eku()
-            || !self
-                .enhanced_key_usage_oids
-                .iter()
-                .any(|oid| oid == ARTIFACT_SIGNING_GENERIC_EKU)
-        {
+    fn durable_public_trust_identity(
+        &self,
+        pinned_certificates: &[[u8; 32]],
+    ) -> Option<DurablePublicTrustIdentity<'_>> {
+        if !self.has_code_signing_eku() {
             return None;
         }
-        self.unique_artifact_signing_subscriber_eku()
+        if self
+            .enhanced_key_usage_oids
+            .iter()
+            .any(|oid| oid == ARTIFACT_SIGNING_GENERIC_EKU)
+        {
+            return self
+                .unique_artifact_signing_subscriber_eku()
+                .map(DurablePublicTrustIdentity::ArtifactSigningSubscriber);
+        }
+        pinned_certificates
+            .contains(&self.certificate_sha256)
+            .then_some(DurablePublicTrustIdentity::PinnedCertificate)
     }
 }
 
 #[cfg(any(windows, test))]
-fn signers_have_same_identity(left: &SignerEvidence, right: &SignerEvidence) -> bool {
+fn signers_have_same_identity(
+    left: &SignerEvidence,
+    right: &SignerEvidence,
+    pinned_certificates: &[[u8; 32]],
+) -> bool {
     match (
-        left.durable_public_trust_identity(),
-        right.durable_public_trust_identity(),
+        left.durable_public_trust_identity(pinned_certificates),
+        right.durable_public_trust_identity(pinned_certificates),
     ) {
-        (Some(left_oid), Some(right_oid)) => left_oid == right_oid,
+        (
+            Some(DurablePublicTrustIdentity::ArtifactSigningSubscriber(left_oid)),
+            Some(DurablePublicTrustIdentity::ArtifactSigningSubscriber(right_oid)),
+        ) => left_oid == right_oid,
+        (
+            Some(DurablePublicTrustIdentity::PinnedCertificate),
+            Some(DurablePublicTrustIdentity::PinnedCertificate),
+        ) => true,
         _ => false,
+    }
+}
+
+#[cfg(windows)]
+fn configured_windows_signer_fingerprints() -> Option<Vec<[u8; 32]>> {
+    parse_configured_windows_signer_fingerprints(WINDOWS_SIGNER_SHA256?)
+}
+
+#[cfg(any(windows, test))]
+fn parse_configured_windows_signer_fingerprints(configured: &str) -> Option<Vec<[u8; 32]>> {
+    let configured = configured.trim();
+    if configured.is_empty() {
+        return None;
+    }
+    let fingerprints = configured
+        .split(',')
+        .map(|fingerprint| parse_sha256_fingerprint(fingerprint.trim()))
+        .collect::<Option<Vec<_>>>()?;
+    if !(1..=2).contains(&fingerprints.len())
+        || fingerprints.windows(2).any(|pair| pair[0] == pair[1])
+    {
+        return None;
+    }
+    Some(fingerprints)
+}
+
+#[cfg(any(windows, test))]
+fn parse_sha256_fingerprint(value: &str) -> Option<[u8; 32]> {
+    if value.len() != 64 {
+        return None;
+    }
+    let mut fingerprint = [0_u8; 32];
+    for (index, chunk) in value.as_bytes().chunks_exact(2).enumerate() {
+        let high = hex_nibble(chunk[0])?;
+        let low = hex_nibble(chunk[1])?;
+        fingerprint[index] = high << 4 | low;
+    }
+    Some(fingerprint)
+}
+
+#[cfg(any(windows, test))]
+const fn hex_nibble(value: u8) -> Option<u8> {
+    match value {
+        b'0'..=b'9' => Some(value - b'0'),
+        b'a'..=b'f' => Some(value - b'a' + 10),
+        b'A'..=b'F' => Some(value - b'A' + 10),
+        _ => None,
     }
 }
 
@@ -1035,6 +1112,14 @@ mod tests {
     fn signer_fixture(oids: &[&str]) -> SignerEvidence {
         SignerEvidence {
             enhanced_key_usage_oids: oids.iter().map(|oid| (*oid).to_owned()).collect(),
+            certificate_sha256: [0_u8; 32],
+        }
+    }
+
+    fn pinned_signer_fixture(fingerprint: [u8; 32]) -> SignerEvidence {
+        SignerEvidence {
+            enhanced_key_usage_oids: vec![CODE_SIGNING_EKU.to_owned()],
+            certificate_sha256: fingerprint,
         }
     }
 
@@ -1044,7 +1129,7 @@ mod tests {
         let left = signer_fixture(&[ARTIFACT_SIGNING_GENERIC_EKU, subscriber]);
         let right = signer_fixture(&[CODE_SIGNING_EKU, ARTIFACT_SIGNING_GENERIC_EKU, subscriber]);
 
-        assert!(!signers_have_same_identity(&left, &right));
+        assert!(!signers_have_same_identity(&left, &right, &[]));
     }
 
     #[test]
@@ -1085,7 +1170,7 @@ mod tests {
         let left = signer_fixture(&[CODE_SIGNING_EKU, ARTIFACT_SIGNING_GENERIC_EKU, subscriber]);
         let right = signer_fixture(&[CODE_SIGNING_EKU, ARTIFACT_SIGNING_GENERIC_EKU, subscriber]);
 
-        assert!(signers_have_same_identity(&left, &right));
+        assert!(signers_have_same_identity(&left, &right, &[]));
     }
 
     #[test]
@@ -1101,7 +1186,7 @@ mod tests {
             "1.3.6.1.4.1.311.97.100.201",
         ]);
 
-        assert!(!signers_have_same_identity(&left, &right));
+        assert!(!signers_have_same_identity(&left, &right, &[]));
     }
 
     #[test]
@@ -1113,7 +1198,7 @@ mod tests {
         ]);
         let right = signer_fixture(&[CODE_SIGNING_EKU, ARTIFACT_SIGNING_GENERIC_EKU]);
 
-        assert!(!signers_have_same_identity(&left, &right));
+        assert!(!signers_have_same_identity(&left, &right, &[]));
     }
 
     #[test]
@@ -1122,7 +1207,73 @@ mod tests {
         let left = signer_fixture(&[CODE_SIGNING_EKU, subscriber]);
         let right = signer_fixture(&[CODE_SIGNING_EKU, subscriber]);
 
-        assert!(!signers_have_same_identity(&left, &right));
+        assert!(!signers_have_same_identity(&left, &right, &[]));
+    }
+
+    #[test]
+    fn pinned_certificates_accept_an_explicitly_planned_rotation() {
+        let current_fingerprint = [0x11_u8; 32];
+        let next_fingerprint = [0x22_u8; 32];
+        let current = pinned_signer_fixture(current_fingerprint);
+        let next = pinned_signer_fixture(next_fingerprint);
+
+        assert!(signers_have_same_identity(
+            &current,
+            &next,
+            &[current_fingerprint, next_fingerprint],
+        ));
+    }
+
+    #[test]
+    fn unlisted_code_signing_certificate_is_rejected() {
+        let current_fingerprint = [0x11_u8; 32];
+        let unlisted_fingerprint = [0x33_u8; 32];
+        let current = pinned_signer_fixture(current_fingerprint);
+        let unlisted = pinned_signer_fixture(unlisted_fingerprint);
+
+        assert!(!signers_have_same_identity(
+            &current,
+            &unlisted,
+            &[current_fingerprint],
+        ));
+    }
+
+    #[test]
+    fn sha256_fingerprint_parser_accepts_hex_and_rejects_ambiguous_input() {
+        assert_eq!(
+            parse_sha256_fingerprint(
+                "00112233445566778899AABBCCDDEEFF00112233445566778899aabbccddeeff"
+            ),
+            Some([
+                0x00, 0x11, 0x22, 0x33, 0x44, 0x55, 0x66, 0x77, 0x88, 0x99, 0xaa, 0xbb, 0xcc, 0xdd,
+                0xee, 0xff, 0x00, 0x11, 0x22, 0x33, 0x44, 0x55, 0x66, 0x77, 0x88, 0x99, 0xaa, 0xbb,
+                0xcc, 0xdd, 0xee, 0xff,
+            ])
+        );
+        assert_eq!(parse_sha256_fingerprint("00:11"), None);
+        assert_eq!(parse_sha256_fingerprint(&"g".repeat(64)), None);
+    }
+
+    #[test]
+    fn configured_fingerprints_allow_one_rotation_without_duplicates() {
+        let current = "11".repeat(32);
+        let next = "22".repeat(32);
+
+        assert_eq!(
+            parse_configured_windows_signer_fingerprints(&format!("{current},{next}")),
+            Some(vec![[0x11_u8; 32], [0x22_u8; 32]])
+        );
+        assert_eq!(
+            parse_configured_windows_signer_fingerprints(&format!("{current},{current}")),
+            None
+        );
+        assert_eq!(
+            parse_configured_windows_signer_fingerprints(&format!(
+                "{current},{next},{}",
+                "33".repeat(32)
+            )),
+            None
+        );
     }
 
     #[cfg(not(windows))]

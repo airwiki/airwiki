@@ -14,6 +14,7 @@ concurrency:
 env:
   CARGO_TERM_COLOR: always
   AIRWIKI_UPDATE_ENDPOINT: https://github.com/airwiki/airwiki/releases/latest/download/latest.json
+  AIRWIKI_SIGNING_VERSION: 0.2.0
 
 jobs:
   build-signing-inputs:
@@ -24,6 +25,7 @@ jobs:
       artifact-id: ${{ steps.upload.outputs.artifact-id }}
     env:
       AIRWIKI_UPDATER_PUBLIC_KEY: ${{ vars.AIRWIKI_UPDATER_PUBLIC_KEY }}
+      AIRWIKI_WINDOWS_SIGNER_SHA256: ${{ vars.AIRWIKI_WINDOWS_SIGNER_SHA256 }}
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
       - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6.5.0
@@ -88,6 +90,8 @@ jobs:
           project-slug: ${{ vars.SIGNPATH_PROJECT_SLUG }}
           signing-policy-slug: ${{ vars.SIGNPATH_SIGNING_POLICY_SLUG }}
           artifact-configuration-slug: ${{ vars.SIGNPATH_BINARIES_CONFIGURATION_SLUG }}
+          parameters: |
+            version: "${{ env.AIRWIKI_SIGNING_VERSION }}"
           github-artifact-id: ${{ needs.build-signing-inputs.outputs.artifact-id }}
           output-artifact-directory: target/signpath/windows-binaries-signed
           wait-for-completion-timeout-in-seconds: "1200"
@@ -111,6 +115,8 @@ jobs:
           project-slug: ${{ vars.SIGNPATH_PROJECT_SLUG }}
           signing-policy-slug: ${{ vars.SIGNPATH_SIGNING_POLICY_SLUG }}
           artifact-configuration-slug: ${{ vars.SIGNPATH_MSI_CONFIGURATION_SLUG }}
+          parameters: |
+            version: "${{ env.AIRWIKI_SIGNING_VERSION }}"
           github-artifact-id: ${{ steps.upload-msi.outputs.artifact-id }}
           output-artifact-directory: target/packages/windows-signed
           wait-for-completion-timeout-in-seconds: "1200"

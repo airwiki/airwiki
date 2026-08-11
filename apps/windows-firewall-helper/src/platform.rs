@@ -24,7 +24,8 @@ use windows::{
             NetFwRule,
         },
         Security::Cryptography::{
-            CERT_FIND_EXT_ONLY_ENHKEY_USAGE_FLAG, CTL_USAGE, CertGetEnhancedKeyUsage,
+            CERT_FIND_EXT_ONLY_ENHKEY_USAGE_FLAG, CERT_SHA256_HASH_PROP_ID, CTL_USAGE,
+            CertGetCertificateContextProperty, CertGetEnhancedKeyUsage,
         },
         Security::WinTrust::{
             WINTRUST_ACTION_GENERIC_VERIFY_V2, WINTRUST_DATA, WINTRUST_DATA_0, WINTRUST_FILE_INFO,
@@ -50,9 +51,10 @@ use super::{
     ActiveFirewallEnforcement, DESKTOP_BASENAME, FIREWALL_HELPER_BASENAME, FirewallBackend,
     FirewallDiagnostic, FirewallDiagnosticStatus, FirewallHelperTrustStatus, FirewallProfiles,
     FirewallRuleSpec, HelperCommand, HelperError, InstalledFirewallRule, LocalPolicyState,
-    PublisherTrustError, RuleProtocol, SignerEvidence, diagnose_with_backend, expected_local_ports,
-    explicit_service_name, install_with_backend, managed_rule_specs, paths_match,
-    remove_with_backend, sibling_desktop_path, signers_have_same_identity,
+    PublisherTrustError, RuleProtocol, SignerEvidence, configured_windows_signer_fingerprints,
+    diagnose_with_backend, expected_local_ports, explicit_service_name, install_with_backend,
+    managed_rule_specs, paths_match, remove_with_backend, sibling_desktop_path,
+    signers_have_same_identity,
 };
 
 impl From<windows::core::Error> for HelperError {
@@ -259,7 +261,8 @@ fn compare_durable_publishers(
     expected_signer: &SignerEvidence,
     candidate_signer: &SignerEvidence,
 ) -> Result<(), PublisherTrustError> {
-    if signers_have_same_identity(expected_signer, candidate_signer) {
+    let pinned_certificates = configured_windows_signer_fingerprints().unwrap_or_default();
+    if signers_have_same_identity(expected_signer, candidate_signer, &pinned_certificates) {
         Ok(())
     } else {
         Err(PublisherTrustError::PublisherMismatch)
@@ -290,7 +293,11 @@ fn validate_trusted_signer(
         | HelperError::InboundBlocked
         | HelperError::Conflict(_) => PublisherTrustError::InspectionFailed,
     })?;
-    if signer.durable_public_trust_identity().is_none() {
+    let pinned_certificates = configured_windows_signer_fingerprints().unwrap_or_default();
+    if signer
+        .durable_public_trust_identity(&pinned_certificates)
+        .is_none()
+    {
         return Err(PublisherTrustError::Untrusted);
     }
     Ok(signer)
@@ -749,10 +756,35 @@ fn extract_signer_evidence(state: HANDLE) -> Result<SignerEvidence, HelperError>
         }
         let certificate = (*provider_cert).pCert;
         let enhanced_key_usage_oids = enhanced_key_usage_oids(certificate)?;
+        let certificate_sha256 = certificate_sha256(certificate)?;
         Ok(SignerEvidence {
             enhanced_key_usage_oids,
+            certificate_sha256,
         })
     }
+}
+
+fn certificate_sha256(
+    certificate: *const windows::Win32::Security::Cryptography::CERT_CONTEXT,
+) -> Result<[u8; 32], HelperError> {
+    let mut fingerprint = [0_u8; 32];
+    let mut bytes = u32::try_from(fingerprint.len()).map_err(|_| HelperError::Backend)?;
+    // SAFETY: certificate comes from the verified WinTrust provider chain and
+    // remains live until the trust state closes. The output buffer has exactly
+    // `bytes` writable bytes.
+    unsafe {
+        CertGetCertificateContextProperty(
+            certificate,
+            CERT_SHA256_HASH_PROP_ID,
+            Some(fingerprint.as_mut_ptr().cast()),
+            &mut bytes,
+        )
+    }
+    .map_err(|_| HelperError::InvalidSignature)?;
+    if usize::try_from(bytes).ok() != Some(fingerprint.len()) {
+        return Err(HelperError::InvalidSignature);
+    }
+    Ok(fingerprint)
 }
 
 fn enhanced_key_usage_oids(

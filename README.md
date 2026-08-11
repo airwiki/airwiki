@@ -42,6 +42,13 @@ cd ..
 
 The first-run flow checks the machine, proposes a local model profile, and explains every permission before applying it. Model downloads require disk space and network access on first use; curation and search work offline after the required assets have been verified.
 
+## Code signing policy
+
+Free code signing provided by [SignPath.io](https://about.signpath.io),
+certificate by [SignPath Foundation](https://signpath.org). Windows signing
+roles, privacy guarantees, origin verification and release controls are defined
+in the [AirWiki code signing policy](docs/code-signing-policy.md).
+
 Before submitting a cross-cutting change, run:
 
 ```bash
@@ -95,6 +102,7 @@ The workspace separates dependency-light contracts, local domain logic, inferenc
 - [Changelog](CHANGELOG.md)
 - [Contributing](CONTRIBUTING.md)
 - [Code review](CODE_REVIEW.md)
+- [Code signing policy](docs/code-signing-policy.md)
 - [Security policy](SECURITY.md)
 - [Third-party notices](THIRD_PARTY_NOTICES.md)
 

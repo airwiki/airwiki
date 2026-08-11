@@ -1,0 +1,30 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "bundle": {
+    "active": true,
+    "targets": ["msi"],
+    "useLocalToolsDir": true,
+    "icon": ["../../resources/branding/airwiki.ico"],
+    "resources": {
+      "../../resources/llama/windows-x64/": "llama/",
+      "../../target/x86_64-pc-windows-msvc/release/airwiki-mcp-bridge.exe": "integrations/bridge/airwiki-mcp-bridge.exe",
+      "../../target/x86_64-pc-windows-msvc/release/airwiki-windows-firewall-helper.exe": "airwiki-windows-firewall-helper.exe",
+      "../../target/mcpb/x86_64-pc-windows-msvc/airwiki-claude.mcpb": "integrations/airwiki-claude.mcpb",
+      "../../THIRD_PARTY_NOTICES.md": "THIRD_PARTY_NOTICES.md",
+      "../../LICENSE": "LICENSE",
+      "../../resources/licenses/": "licenses/"
+    },
+    "windows": {
+      "allowDowngrades": false,
+      "webviewInstallMode": {
+        "type": "downloadBootstrapper",
+        "silent": true
+      },
+      "wix": {
+        "upgradeCode": "22b0c55b-2965-57de-887f-27be43e62110",
+        "language": ["en-US", "es-ES"],
+        "template": "../../packaging/windows/installer.wxs"
+      }
+    }
+  }
+}

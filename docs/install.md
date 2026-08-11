@@ -39,7 +39,7 @@ per-user autostart uses `SMAppService` only after consent.
 
 ## Windows x64
 
-1. Run the per-user NSIS installer from an interactive desktop session.
+1. Run the per-user MSI installer from an interactive desktop session.
    If Microsoft Edge WebView2 is absent, the installer downloads Microsoft's
    bootstrapper and installs the runtime before AirWiki. A network failure is
    reported without a partial AirWiki install and can be retried; the package
@@ -57,8 +57,10 @@ incoming connections,” or delete inherited broad rules. Resolve those states i
 Windows settings or with the device administrator, then select **Check again**.
 Cancelling UAC leaves the node in local-only mode.
 
-Uninstall keeps local data by default. Removing application data and managed
-firewall rules are separate, explicit options.
+Windows Installer removes only immutable application files. Local data is kept
+by default. Remove managed firewall rules from AirWiki before uninstalling when
+that access is no longer wanted; cancelling UAC keeps the rules and does not
+affect the application removal.
 
 ## First start and local models
 
@@ -164,12 +166,16 @@ documents require review before publication.
 
 ## Windows uninstall
 
-The uninstaller removes autostart only when the stored command exactly matches
-the AirWiki entry. It can optionally request UAC to remove the two exact
-managed firewall rules. Cancelling that request does not block uninstall.
+Windows Installer removes the fixed per-user program and Start-menu entry. The
+application removes autostart only when the stored command exactly matches the
+AirWiki entry. Disable LAN sharing in AirWiki before uninstalling to request
+removal of the two exact managed firewall rules; cancelling that UAC request
+does not block later uninstall.
 
-Local data is also retained unless explicitly selected for deletion. Watched
-source folders are never application-data paths and are never removed.
+Local data is retained. The MSI transition is not complete until an explicit,
+separately confirmed data-removal path has passed the same containment tests as
+the previous candidate. Watched source folders are never application-data paths
+and are never removed.
 
 ## Local data
 

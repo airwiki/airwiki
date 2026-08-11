@@ -1,0 +1,22 @@
+<artifact-configuration xmlns="http://signpath.io/artifact-configuration/v1">
+  <zip-file>
+    <msi-file path="AirWiki_*_x64_en-US.msi" subject="AirWiki" author="AirWiki contributors">
+      <pe-file path="airwiki.exe"><authenticode-verify /></pe-file>
+      <pe-file path="integrations/bridge/airwiki-mcp-bridge.exe"><authenticode-verify /></pe-file>
+      <pe-file path="airwiki-windows-firewall-helper.exe"><authenticode-verify /></pe-file>
+      <zip-file path="integrations/airwiki-claude.mcpb">
+        <pe-file path="server/airwiki-mcp-bridge.exe"><authenticode-verify /></pe-file>
+      </zip-file>
+      <authenticode-sign />
+    </msi-file>
+    <msi-file path="AirWiki_*_x64_es-ES.msi" subject="AirWiki" author="AirWiki contributors">
+      <pe-file path="airwiki.exe"><authenticode-verify /></pe-file>
+      <pe-file path="integrations/bridge/airwiki-mcp-bridge.exe"><authenticode-verify /></pe-file>
+      <pe-file path="airwiki-windows-firewall-helper.exe"><authenticode-verify /></pe-file>
+      <zip-file path="integrations/airwiki-claude.mcpb">
+        <pe-file path="server/airwiki-mcp-bridge.exe"><authenticode-verify /></pe-file>
+      </zip-file>
+      <authenticode-sign />
+    </msi-file>
+  </zip-file>
+</artifact-configuration>

@@ -13,11 +13,10 @@ $Desktop = Join-Path $ReleaseDir "airwiki.exe"
 $FirewallHelper = Join-Path $ReleaseDir "airwiki-windows-firewall-helper.exe"
 $Mcpb = Join-Path $Root "target\mcpb\x86_64-pc-windows-msvc\airwiki-claude.mcpb"
 $Xtask = Join-Path $Root "target\debug\xtask.exe"
-$NsisToolCacheRoot = Join-Path $Root "target\.tauri"
 $Tauri = Join-Path $Root "apps\desktop\ui\node_modules\.bin\tauri.cmd"
 $SvelteCheck = Join-Path $Root "apps\desktop\ui\node_modules\.bin\svelte-check.cmd"
 $Vite = Join-Path $Root "apps\desktop\ui\node_modules\.bin\vite.cmd"
-$TauriInstallerDir = Join-Path $ReleaseDir "bundle\nsis"
+$TauriInstallerDir = Join-Path $ReleaseDir "bundle\msi"
 $SevenZipToolRoot = Join-Path $Root "target\verified-tools\7zip-26.02"
 $SevenZip = Join-Path $SevenZipToolRoot "7z.exe"
 $LlamaRuntime = Join-Path $Root "resources\llama\windows-x64"
@@ -68,7 +67,7 @@ function Assert-X64Pe([string] $Path) {
 function Get-SinglePayload([string] $Root, [string] $Name) {
     $Matches = @(Get-ChildItem -LiteralPath $Root -Recurse -File -Filter $Name)
     if ($Matches.Count -ne 1) {
-        throw "Expected exactly one $Name in the NSIS payload"
+        throw "Expected exactly one $Name in the MSI payload"
     }
     return $Matches[0].FullName
 }
@@ -77,7 +76,36 @@ function Assert-SameBytes([string] $Expected, [string] $Actual, [string] $Label)
     $ExpectedHash = (Get-FileHash -LiteralPath $Expected -Algorithm SHA256).Hash
     $ActualHash = (Get-FileHash -LiteralPath $Actual -Algorithm SHA256).Hash
     if ($ExpectedHash -ne $ActualHash) {
-        throw "$Label in the NSIS payload differs from the fresh artifact"
+        throw "$Label in the MSI payload differs from the fresh artifact"
+    }
+}
+
+function Assert-WindowsMsi([string] $Path) {
+    $Verified = Get-VerifiedWindowsRegularFile $Path "fresh MSI installer"
+    $Bytes = [IO.File]::ReadAllBytes($Verified)
+    $OleHeader = [byte[]] @(0xd0, 0xcf, 0x11, 0xe0, 0xa1, 0xb1, 0x1a, 0xe1)
+    if ($Bytes.Length -lt $OleHeader.Length) {
+        throw "MSI installer is truncated"
+    }
+    for ($Index = 0; $Index -lt $OleHeader.Length; $Index++) {
+        if ($Bytes[$Index] -ne $OleHeader[$Index]) {
+            throw "Installer is not an MSI compound file"
+        }
+    }
+}
+
+function Expand-WindowsMsi([string] $Installer, [string] $Destination) {
+    $MsiExec = Join-Path $env:SystemRoot "System32\msiexec.exe"
+    $VerifiedMsiExec = Get-VerifiedWindowsRegularFile $MsiExec "Windows Installer executable"
+    $Arguments = "/a `"$Installer`" /qn /norestart TARGETDIR=`"$Destination`""
+    $Process = Start-Process `
+        -FilePath $VerifiedMsiExec `
+        -ArgumentList $Arguments `
+        -Wait `
+        -PassThru `
+        -WindowStyle Hidden
+    if ($Process.ExitCode -ne 0) {
+        throw "Windows Installer could not extract the MSI payload (exit $($Process.ExitCode))"
     }
 }
 
@@ -92,8 +120,6 @@ try {
     if ($LASTEXITCODE -ne 0 -or $TauriVersion -ne "tauri-cli 2.11.4") {
         throw "Tauri CLI 2.11.4 is required"
     }
-    & (Join-Path $PSScriptRoot "prepare-verified-nsis-toolchain.ps1") `
-        -ToolCacheRoot $NsisToolCacheRoot | Out-Null
     & (Join-Path $PSScriptRoot "prepare-verified-7zip.ps1") `
         -ToolRoot $SevenZipToolRoot | Out-Null
     Remove-AirWikiWindowsStagingPath `
@@ -111,9 +137,9 @@ try {
     if ($LASTEXITCODE -ne 0) {
         throw "license validation failed"
     }
-    & $Xtask packaging verify-windows-uninstaller
+    & $Xtask packaging verify-windows-msi
     if ($LASTEXITCODE -ne 0) {
-        throw "Windows uninstaller policy validation failed"
+        throw "Windows MSI policy validation failed"
     }
     & powershell.exe -NoProfile -ExecutionPolicy Bypass -File packaging\fetch-llama-windows.ps1
     if ($LASTEXITCODE -ne 0) {
@@ -152,11 +178,11 @@ try {
     try {
         & $Tauri build `
             --ci `
-            --config ..\..\packaging\windows\tauri.bundle.conf.json `
+            --config ..\..\packaging\windows\tauri.msi.bundle.conf.json `
             --target x86_64-pc-windows-msvc `
-            --bundles nsis
+            --bundles msi
         if ($LASTEXITCODE -ne 0) {
-            throw "Tauri NSIS packaging failed"
+            throw "Tauri MSI packaging failed"
         }
     } finally {
         Pop-Location
@@ -164,19 +190,23 @@ try {
     Assert-X64Pe $Desktop
     Assert-WindowsDesktopEmbedsLlamaRuntimeHash $Desktop $LlamaRuntime $LlamaPolicy
 
-    $TauriInstallers = @(Get-ChildItem -LiteralPath $TauriInstallerDir -File -Filter *.exe)
-    if ($TauriInstallers.Count -ne 1) {
-        throw "Expected exactly one Tauri NSIS installer"
+    $TauriInstallers = @(Get-ChildItem -LiteralPath $TauriInstallerDir -File -Filter *.msi)
+    if ($TauriInstallers.Count -ne 2) {
+        throw "Expected exactly two localized Tauri MSI installers"
     }
-    Copy-Item -LiteralPath $TauriInstallers[0].FullName -Destination $OutDir
-    $Installers = @(Get-ChildItem -LiteralPath $OutDir -File -Filter *.exe)
-    if ($Installers.Count -ne 1) {
-        throw "Expected exactly one fresh NSIS installer"
+    foreach ($TauriInstaller in $TauriInstallers) {
+        Copy-Item -LiteralPath $TauriInstaller.FullName -Destination $OutDir
     }
-    if ($Installers[0].LastWriteTimeUtc -lt $Started) {
-        throw "NSIS installer predates this packaging run"
+    $Installers = @(Get-ChildItem -LiteralPath $OutDir -File -Filter *.msi)
+    if ($Installers.Count -ne 2) {
+        throw "Expected exactly two fresh localized MSI installers"
     }
-    Assert-WindowsPeMachine $Installers[0].FullName 0x014c "fresh NSIS installer"
+    foreach ($Installer in $Installers) {
+        if ($Installer.LastWriteTimeUtc -lt $Started) {
+            throw "MSI installer predates this packaging run"
+        }
+        Assert-WindowsMsi $Installer.FullName
+    }
 
     $ExtractDir = Join-Path $Root "target\packages\windows-payload-check"
     Remove-AirWikiWindowsStagingPath `
@@ -185,10 +215,7 @@ try {
         -Label "Windows payload verification staging"
     New-Item -ItemType Directory -Path $ExtractDir -Force | Out-Null
     try {
-        & $SevenZip x -y "-o$ExtractDir" $Installers[0].FullName | Out-Null
-        if ($LASTEXITCODE -ne 0) {
-            throw "7-Zip could not inspect the NSIS payload"
-        }
+        Expand-WindowsMsi $Installers[0].FullName $ExtractDir
         $PackagedDesktop = Get-SinglePayload $ExtractDir "airwiki.exe"
         $PayloadRoot = [IO.Path]::GetDirectoryName($PackagedDesktop)
         $PackagedBridge = Get-VerifiedWindowsRegularFile `
@@ -213,7 +240,7 @@ try {
         Assert-WindowsFirewallHelperManifest `
             $PackagedFirewallHelper `
             "packaged Windows firewall helper"
-        Assert-WindowsNsisBundleTypePatch `
+        Assert-WindowsMsiBundleTypePatch `
             $Desktop `
             $PackagedDesktop `
             "Desktop executable"
@@ -245,7 +272,7 @@ try {
             --bridge $PackagedBridge `
             --output $PackagedMcpb
         if ($LASTEXITCODE -ne 0) {
-            throw "Claude MCPB inside the NSIS payload failed validation"
+            throw "Claude MCPB inside the MSI payload failed validation"
         }
     } finally {
         Remove-AirWikiWindowsStagingPath `
@@ -253,7 +280,7 @@ try {
             -AllowedRoot (Join-Path $Root "target") `
             -Label "Windows payload verification staging"
     }
-    Write-Host "Verified fresh Windows x64 installer: $($Installers[0].FullName)"
+    Write-Host "Verified fresh Windows x64 MSI installers: $($Installers.FullName -join ', ')"
 } finally {
     $env:Path = $PreviousPath
     Pop-Location

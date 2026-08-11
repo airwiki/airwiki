@@ -3082,7 +3082,7 @@ fn verify_windows_msi_sources(config: &str, template: &str) -> Result<()> {
     );
     ensure!(
         template.contains("Id=\"RejectReparseInstallPath\"")
-            && template.contains("[IO.FileAttributes]::ReparsePoint")
+            && template.contains("[\\[]IO.FileAttributes[\\]]::ReparsePoint")
             && template.contains("@(&apos;[AirWikiProgramsFolder]&apos;, &apos;[INSTALLDIR]&apos;)")
             && !template.contains("[LocalAppDataFolder]Programs\\{{product_name}}")
             && template
@@ -3103,7 +3103,7 @@ fn verify_windows_msi_sources(config: &str, template: &str) -> Result<()> {
             && template.contains(
                 "$expected = &apos;&quot;[INSTALLDIR]airwiki.exe&quot; --background&apos;"
             )
-            && template.contains("[StringComparison]::Ordinal")
+            && template.contains("[\\[]StringComparison[\\]]::Ordinal")
             && template.contains("Remove-ItemProperty -LiteralPath $key -Name &apos;AirWiki&apos;")
             && template.contains("(REMOVE = \"ALL\") AND NOT UPGRADINGPRODUCTCODE"),
         "Windows MSI must remove only the exact AirWiki autostart entry during final uninstall"
@@ -3111,6 +3111,13 @@ fn verify_windows_msi_sources(config: &str, template: &str) -> Result<()> {
     ensure!(
         template.matches("&amp; [\\{]").count() == 3
             && template.matches("[\\}]").count() >= 5
+            && template.matches("[\\[]").count() == 7
+            && template.matches("[\\]]").count() == 7
+            && !template.contains("[IO.FileAttributes]")
+            && !template.contains("[StringComparison]")
+            && !template.contains("[Net.ServicePointManager]")
+            && !template.contains("[Net.SecurityProtocolType]")
+            && !template.contains("[IO.Path]")
             && !template.contains("-Command \"&amp; {")
             && !template.contains("Programs\\{{product_name}}"),
         "Windows MSI PowerShell blocks and fixed paths must survive formatted-field expansion"

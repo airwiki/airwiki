@@ -61,14 +61,14 @@
         Execute="firstSequence"
         Impersonate="yes"
         Return="check"
-        ExeCommand='WindowsPowerShell\v1.0\powershell.exe -NoLogo -NoProfile -NonInteractive -WindowStyle Hidden -Command "&amp; [\{] $paths = @(&apos;[AirWikiProgramsFolder]&apos;, &apos;[INSTALLDIR]&apos;); foreach ($path in $paths) [\{] if (Test-Path -LiteralPath $path) [\{] $item = Get-Item -LiteralPath $path -Force -ErrorAction Stop; if (($item.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) [\{] exit 23 [\}] [\}] [\}]; exit 0 [\}]"' />
+        ExeCommand='WindowsPowerShell\v1.0\powershell.exe -NoLogo -NoProfile -NonInteractive -WindowStyle Hidden -Command "&amp; [\{] $paths = @(&apos;[AirWikiProgramsFolder]&apos;, &apos;[INSTALLDIR]&apos;); foreach ($path in $paths) [\{] if (Test-Path -LiteralPath $path) [\{] $item = Get-Item -LiteralPath $path -Force -ErrorAction Stop; if (($item.Attributes -band [\[]IO.FileAttributes[\]]::ReparsePoint) -ne 0) [\{] exit 23 [\}] [\}] [\}]; exit 0 [\}]"' />
     <CustomAction
         Id="RemoveExactAutostart"
         Directory="SystemFolder"
         Execute="immediate"
         Impersonate="yes"
         Return="check"
-        ExeCommand='WindowsPowerShell\v1.0\powershell.exe -NoLogo -NoProfile -NonInteractive -WindowStyle Hidden -Command "&amp; [\{] $key = &apos;HKCU:\Software\Microsoft\Windows\CurrentVersion\Run&apos;; $expected = &apos;&quot;[INSTALLDIR]airwiki.exe&quot; --background&apos;; $current = (Get-ItemProperty -LiteralPath $key -Name &apos;AirWiki&apos; -ErrorAction SilentlyContinue).AirWiki; if ($null -ne $current -and [string]::Equals([string]$current, $expected, [StringComparison]::Ordinal)) [\{] Remove-ItemProperty -LiteralPath $key -Name &apos;AirWiki&apos; -ErrorAction Stop [\}]; exit 0 [\}]"' />
+        ExeCommand='WindowsPowerShell\v1.0\powershell.exe -NoLogo -NoProfile -NonInteractive -WindowStyle Hidden -Command "&amp; [\{] $key = &apos;HKCU:\Software\Microsoft\Windows\CurrentVersion\Run&apos;; $expected = &apos;&quot;[INSTALLDIR]airwiki.exe&quot; --background&apos;; $current = (Get-ItemProperty -LiteralPath $key -Name &apos;AirWiki&apos; -ErrorAction SilentlyContinue).AirWiki; if ($null -ne $current -and [\[]string[\]]::Equals([\[]string[\]]$current, $expected, [\[]StringComparison[\]]::Ordinal)) [\{] Remove-ItemProperty -LiteralPath $key -Name &apos;AirWiki&apos; -ErrorAction Stop [\}]; exit 0 [\}]"' />
 
     <InstallUISequence>
       <Custom Action="RejectReparseInstallPath" After="CostFinalize">NOT Installed</Custom>
@@ -186,7 +186,7 @@
         Directory="INSTALLDIR"
         Execute="deferred"
         Impersonate="yes"
-        ExeCommand='powershell.exe -NoLogo -NoProfile -NonInteractive -WindowStyle Hidden -Command "&amp; [\{] [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12; $target = Join-Path ([IO.Path]::GetTempPath()) &apos;MicrosoftEdgeWebView2Setup.exe&apos;; Invoke-WebRequest -UseBasicParsing -Uri &apos;https://go.microsoft.com/fwlink/p/?LinkId=2124703&apos; -OutFile $target; $process = Start-Process -FilePath $target -ArgumentList &apos;{{webview_installer_args}} /install&apos; -Wait -PassThru; exit $process.ExitCode [\}]"'
+        ExeCommand='powershell.exe -NoLogo -NoProfile -NonInteractive -WindowStyle Hidden -Command "&amp; [\{] [\[]Net.ServicePointManager[\]]::SecurityProtocol = [\[]Net.SecurityProtocolType[\]]::Tls12; $target = Join-Path ([\[]IO.Path[\]]::GetTempPath()) &apos;MicrosoftEdgeWebView2Setup.exe&apos;; Invoke-WebRequest -UseBasicParsing -Uri &apos;https://go.microsoft.com/fwlink/p/?LinkId=2124703&apos; -OutFile $target; $process = Start-Process -FilePath $target -ArgumentList &apos;{{webview_installer_args}} /install&apos; -Wait -PassThru; exit $process.ExitCode [\}]"'
         Return="check" />
     <InstallExecuteSequence>
       <Custom Action="DownloadAndInvokeBootstrapper" Before="InstallFinalize"><![CDATA[NOT(REMOVE OR INSTALLED_WEBVIEW2_VERSION)]]></Custom>

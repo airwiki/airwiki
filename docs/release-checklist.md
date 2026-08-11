@@ -50,14 +50,17 @@ constitute a supported public release.
 
 - [ ] Build the pinned llama.cpp runtime twice in isolated roots and require
   byte-identical output plus a complete build manifest.
-- [ ] Sign desktop, bridge, firewall helper, uninstaller, and final NSIS with the
-  approved public-trust publisher identity and RFC3161 timestamps.
+- [ ] Use the origin-verified SignPath workflow to sign the desktop, bridge and
+  firewall helper before packaging, then sign both localized MSI containers
+  with the approved public-trust identity and RFC3161 timestamps.
 - [ ] Validate Authenticode, code-signing EKU, durable publisher identity, PE
-  version metadata, helper elevation manifest, runtime imports, and exact payload.
+  version metadata, helper elevation manifest, runtime imports, nested MSI
+  signatures, and exact payload.
 - [ ] Build MCPB from the already signed bridge and compare its bytes with the
-  installer payload.
-- [ ] Install under a clean standard user, verify the materialized uninstaller,
-  uninstall, and confirm only explicitly selected AirWiki state is removed.
+  MSI payload.
+- [ ] Install both localized MSIs under a clean standard user; verify the fixed
+  per-user path, Start-menu entry, upgrade and uninstall; confirm mutable data is
+  retained unless a separately confirmed cleanup flow is used.
 
 ## Updater and promotion
 

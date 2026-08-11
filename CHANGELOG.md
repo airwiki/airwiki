@@ -4,6 +4,9 @@ All notable user-visible changes to AirWiki will be documented here. The project
 
 ## [Unreleased]
 
+- Added an explicit, fail-closed recovery action after a device verification
+  code is rejected; retrying never restores trust or wiki grants.
+
 ### Added
 
 - Added a bounded two-region Azure beta deployment for the public federation

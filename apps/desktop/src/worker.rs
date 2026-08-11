@@ -483,6 +483,9 @@ pub enum WorkerCommand {
     RevokePeer {
         peer_id: String,
     },
+    AllowPeerPairingAgain {
+        peer_id: String,
+    },
     GrantCollection {
         peer_id: String,
         collection_id: Uuid,
@@ -2045,6 +2048,12 @@ pub(crate) async fn run_worker(
                     WorkerCommand::RevokePeer { peer_id } => {
                         if let Err(error) = services.revoke_peer(&peer_id).await {
                             send(&events, WorkerEvent::Error(format!("No se pudo revocar el peer: {error:#}"))).await;
+                        }
+                        refresh_peers(&services, &events).await;
+                    }
+                    WorkerCommand::AllowPeerPairingAgain { peer_id } => {
+                        if let Err(error) = services.allow_peer_pairing_again(&peer_id) {
+                            send(&events, WorkerEvent::Error(format!("No se pudo permitir un nuevo emparejamiento: {error:#}"))).await;
                         }
                         refresh_peers(&services, &events).await;
                     }

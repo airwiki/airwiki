@@ -2392,6 +2392,20 @@ impl DesktopServices {
         )
     }
 
+    pub fn allow_peer_pairing_again(&self, peer_id: &str) -> Result<()> {
+        let peer = parse_peer_id(peer_id)?;
+        // Relax durable state first. If storage is unavailable, the shared ACL
+        // remains blocked and no network request can pass authorization.
+        self.database.allow_peer_pairing_again(peer_id)?;
+        self.access.unblock(peer);
+        self.audit(
+            "peer_pairing_allowed_again",
+            "peer",
+            Some(peer_id.to_owned()),
+            serde_json::json!({"peer_id": peer_id}),
+        )
+    }
+
     pub fn collection_views(&self) -> Result<Vec<CollectionView>> {
         let announcements = read_lock(&self.public_announcements, "public announcement state")?;
         self.database

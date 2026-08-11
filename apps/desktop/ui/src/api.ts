@@ -108,6 +108,10 @@ export async function revokePeer(peerId: string): Promise<void> {
   return invoke('revoke_peer', { peerId });
 }
 
+export async function allowPeerPairingAgain(peerId: string): Promise<void> {
+  return invoke('allow_peer_pairing_again', { peerId });
+}
+
 export async function setWikiGrant(peerId: string, wikiId: string, granted: boolean): Promise<void> {
   return invoke('set_wiki_grant', { peerId, wikiId, granted });
 }

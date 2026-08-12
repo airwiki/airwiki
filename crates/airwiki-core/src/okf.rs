@@ -21,8 +21,24 @@ pub struct OkfConcept {
     pub description: String,
     pub resource: String,
     pub tags: Vec<String>,
-    pub timestamp: DateTime<Utc>,
+    pub generated: OkfActorEvent,
+    pub verified: Vec<OkfActorEvent>,
+    pub status: OkfLifecycleStatus,
     pub airwiki: AirWikiProfile,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct OkfActorEvent {
+    pub by: String,
+    pub at: DateTime<Utc>,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum OkfLifecycleStatus {
+    Draft,
+    Stable,
+    Deprecated,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -33,9 +49,6 @@ pub struct AirWikiProfile {
     pub source_sha256: String,
     pub revision: u32,
     pub language: String,
-    pub status: String,
-    pub generator_model: String,
-    pub reviewed_at: DateTime<Utc>,
 }
 
 #[derive(Debug, Error)]
@@ -69,7 +82,7 @@ impl OkfConcept {
         reviewed_at: DateTime<Utc>,
     ) -> Self {
         Self {
-            concept_type: concept.draft.concept_type,
+            concept_type: concept.draft.concept_type.clone(),
             title: concept.draft.title.clone(),
             description: concept.draft.description.clone(),
             resource: concept.logical_resource_uri.clone(),
@@ -77,17 +90,22 @@ impl OkfConcept {
             // Human approval creates the visible OKF revision. `updated_at` is
             // operational state and changes again when two-phase publication
             // commits, so it is not a stable "last meaningful change" value.
-            timestamp: reviewed_at,
+            generated: OkfActorEvent {
+                by: format!("airwiki/{}", concept.generator_model),
+                at: reviewed_at,
+            },
+            verified: vec![OkfActorEvent {
+                by: "human:airwiki-user".to_owned(),
+                at: reviewed_at,
+            }],
+            status: OkfLifecycleStatus::Stable,
             airwiki: AirWikiProfile {
-                profile_version: 1,
+                profile_version: 2,
                 id: concept.id,
                 collection_id: concept.collection_id,
                 source_sha256: source.source_sha256.clone(),
                 revision: source.revision,
                 language: concept.draft.language.clone(),
-                status: "published".into(),
-                generator_model: concept.generator_model.clone(),
-                reviewed_at,
             },
         }
     }
@@ -102,7 +120,7 @@ impl OkfConcept {
         if !self.resource.starts_with("urn:airwiki:") {
             return Err(OkfValidationError::InvalidResource);
         }
-        if self.airwiki.profile_version != 1 {
+        if self.airwiki.profile_version != 2 {
             return Err(OkfValidationError::UnsupportedProfile(
                 self.airwiki.profile_version,
             ));
@@ -112,6 +130,16 @@ impl OkfConcept {
         }
         if self.tags.len() > 10 {
             return Err(OkfValidationError::TooManyTags);
+        }
+        if self.generated.by.trim().is_empty() || self.verified.is_empty() {
+            return Err(OkfValidationError::MissingReview);
+        }
+        if !self
+            .verified
+            .iter()
+            .any(|verification| verification.by.starts_with("human:"))
+        {
+            return Err(OkfValidationError::MissingReview);
         }
         let sha = &self.airwiki.source_sha256;
         if sha.len() != 64
@@ -271,7 +299,8 @@ impl OkfPublisher {
                 .to_lowercase()
                 .cmp(&right.draft.title.to_lowercase())
         });
-        let mut index = String::from("# Conceptos publicados\n\n");
+        let mut index =
+            String::from("---\nokf_version: \"0.2\"\n---\n\n# Conceptos publicados\n\n");
         for concept in concepts {
             index.push_str(&format!(
                 "* [{}](concepts/{}.md) - {}\n",
@@ -392,10 +421,28 @@ fn collapse_whitespace(value: &str) -> String {
 }
 
 fn validate_index_content(content: &str) -> Result<()> {
-    if content.starts_with("---") {
-        bail!("OKF index.md cannot contain concept frontmatter");
-    }
-    let mut lines = content.lines().filter(|line| !line.trim().is_empty());
+    let body = if let Some(rest) = content.strip_prefix("---\n") {
+        let end = rest
+            .find("\n---\n")
+            .context("OKF root index frontmatter is not terminated")?;
+        let frontmatter: serde_yaml::Value =
+            serde_yaml::from_str(&rest[..end]).context("OKF root index frontmatter is invalid")?;
+        let mapping = frontmatter
+            .as_mapping()
+            .context("OKF root index frontmatter must be a mapping")?;
+        if mapping.len() != 1
+            || mapping
+                .get(serde_yaml::Value::String("okf_version".to_owned()))
+                .and_then(serde_yaml::Value::as_str)
+                != Some("0.2")
+        {
+            bail!("OKF root index frontmatter may contain only okf_version 0.2");
+        }
+        &rest[end + "\n---\n".len()..]
+    } else {
+        content
+    };
+    let mut lines = body.lines().filter(|line| !line.trim().is_empty());
     if !lines.next().is_some_and(|line| line.starts_with("# ")) {
         bail!("OKF index.md must begin with a section heading");
     }
@@ -696,7 +743,7 @@ mod tests {
         let content = std::fs::read_to_string(path).unwrap();
         assert!(OkfConcept::parse(&content).is_ok());
         let index = std::fs::read_to_string(temp.path().join("index.md")).unwrap();
-        assert!(!index.starts_with("---"));
+        assert!(index.starts_with("---\nokf_version: \"0.2\"\n---"));
         validate_index_content(&index).unwrap();
         let log = std::fs::read_to_string(temp.path().join("log.md")).unwrap();
         validate_log_content(&log).unwrap();
@@ -802,6 +849,9 @@ mod tests {
             source_folder: PathBuf::from("/private/source"),
             wiki_folder: PathBuf::from("/private/wiki"),
             policy: airwiki_types::CollectionPolicy::local_only(),
+            origin: crate::storage::WikiOrigin::Folder,
+            indexing_mode: crate::storage::IndexingMode::Continuous,
+            okf_version: "0.2".to_owned(),
             created_at: Utc::now(),
             updated_at: Utc::now(),
         };

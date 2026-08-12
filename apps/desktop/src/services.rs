@@ -2436,6 +2436,9 @@ impl DesktopServices {
                         .unwrap_or_default(),
                     public_announcement: public_announcement_view(announcement, Utc::now()),
                     maintenance: self.database.collection_maintenance(collection.id)?,
+                    origin: collection.origin,
+                    indexing_mode: collection.indexing_mode,
+                    okf_version: collection.okf_version,
                 })
             })
             .collect()

@@ -10,8 +10,9 @@ use std::{
 };
 
 use airwiki_core::{
-    CollectionMaintenanceRecord, GuidedRepairPreview, GuidedRepairResult, IngestOutcome,
-    KnowledgeBundleView, KnowledgePageId, KnowledgePageView, ReviewVersionToken, WikiRepairError,
+    CollectionMaintenanceRecord, GuidedRepairPreview, GuidedRepairResult, IndexingMode,
+    IngestOutcome, KnowledgeBundleView, KnowledgePageId, KnowledgePageView, ReviewVersionToken,
+    WikiOrigin, WikiRepairError,
 };
 use airwiki_inference::{
     AssetManager, E5_FILES, E5_REVISION, HardwareReport, InstallEvent, InstallFailureKind,
@@ -89,6 +90,9 @@ pub struct CollectionView {
     pub public_languages: String,
     pub public_announcement: PublicAnnouncementStatusView,
     pub maintenance: Option<CollectionMaintenanceRecord>,
+    pub origin: WikiOrigin,
+    pub indexing_mode: IndexingMode,
+    pub okf_version: String,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

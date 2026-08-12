@@ -75,6 +75,9 @@ impl OkfPublicationMaterializer {
             .database
             .collection(current.collection_id)?
             .context("concept collection is missing")?;
+        if collection.okf_version != "0.2" {
+            bail!("legacy OKF wikis must be recreated from their source folder before publishing");
+        }
         if !source_revision_matches_disk(&source)? {
             bail!("the source changed after enrichment; rescan it before publishing");
         }
@@ -445,7 +448,10 @@ mod tests {
             fs::read_to_string(OkfPublisher::new(&collection.wiki_folder).concept_path(concept_id))
                 .unwrap();
         let profile = crate::okf::OkfConcept::parse(&concept_markdown).unwrap();
-        assert_eq!(profile.timestamp, published.reviewed_at.unwrap());
+        assert_eq!(
+            profile.verified.first().map(|event| event.at),
+            published.reviewed_at
+        );
         let bundle = OkfBundleInspector::new(database.clone())
             .inspect_bundle(collection_id)
             .unwrap();

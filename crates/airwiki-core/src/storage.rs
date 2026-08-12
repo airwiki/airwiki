@@ -24,6 +24,43 @@ const MIGRATION_3: &str = include_str!("../migrations/0003_collection_maintenanc
 const MIGRATION_4: &str = include_str!("../migrations/0004_public_federation.sql");
 const MIGRATION_5: &str = include_str!("../migrations/0005_public_federation_hardening.sql");
 const MIGRATION_6: &str = include_str!("../migrations/0006_bootstrap_registry_state.sql");
+const MIGRATION_7: &str = include_str!("../migrations/0007_okf_v02_origins_and_capabilities.sql");
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum WikiOrigin {
+    Folder,
+    ImportedOkf,
+    AiMemory,
+}
+
+impl WikiOrigin {
+    const fn as_str(self) -> &'static str {
+        match self {
+            Self::Folder => "folder",
+            Self::ImportedOkf => "imported_okf",
+            Self::AiMemory => "ai_memory",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum IndexingMode {
+    Continuous,
+    Manual,
+    NotApplicable,
+}
+
+impl IndexingMode {
+    const fn as_str(self) -> &'static str {
+        match self {
+            Self::Continuous => "continuous",
+            Self::Manual => "manual",
+            Self::NotApplicable => "not_applicable",
+        }
+    }
+}
 
 #[derive(Debug, Clone)]
 pub struct Database {
@@ -59,6 +96,9 @@ pub struct CollectionRecord {
     pub source_folder: PathBuf,
     pub wiki_folder: PathBuf,
     pub policy: CollectionPolicy,
+    pub origin: WikiOrigin,
+    pub indexing_mode: IndexingMode,
+    pub okf_version: String,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
 }
@@ -764,7 +804,13 @@ impl Database {
             tx.pragma_update(None, "user_version", 6)?;
             tx.commit()?;
         }
-        if version > 6 {
+        if version < 7 {
+            let tx = connection.transaction()?;
+            tx.execute_batch(MIGRATION_7)?;
+            tx.pragma_update(None, "user_version", 7)?;
+            tx.commit()?;
+        }
+        if version > 7 {
             bail!("database schema {version} is newer than this application supports");
         }
         let database = Self {
@@ -974,6 +1020,9 @@ impl Database {
             source_folder: absolute_path(source_folder.as_ref())?,
             wiki_folder: absolute_path(wiki_folder.as_ref())?,
             policy,
+            origin: WikiOrigin::Folder,
+            indexing_mode: IndexingMode::Continuous,
+            okf_version: "0.2".to_owned(),
             created_at: Utc::now(),
             updated_at: Utc::now(),
         };
@@ -982,8 +1031,9 @@ impl Database {
         }
         self.connection()?.execute(
             "INSERT INTO collections
-             (id,name,source_folder,wiki_folder,local_only,peer_shareable,allow_external_ai,internet_public,created_at,updated_at)
-             VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10)",
+             (id,name,source_folder,wiki_folder,local_only,peer_shareable,allow_external_ai,internet_public,
+              origin,indexing_mode,okf_version,created_at,updated_at)
+             VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13)",
             params![
                 record.id.to_string(),
                 record.name,
@@ -993,11 +1043,38 @@ impl Database {
                 record.policy.peer_shareable,
                 record.policy.allow_external_ai,
                 record.policy.internet_public,
+                record.origin.as_str(),
+                record.indexing_mode.as_str(),
+                record.okf_version,
                 record.created_at.to_rfc3339(),
                 record.updated_at.to_rfc3339(),
             ],
         )?;
         Ok(record)
+    }
+
+    pub fn update_collection_indexing_mode(
+        &self,
+        id: Uuid,
+        indexing_mode: IndexingMode,
+    ) -> Result<()> {
+        let collection = self
+            .collection(id)?
+            .with_context(|| format!("collection {id} does not exist"))?;
+        match (collection.origin, indexing_mode) {
+            (WikiOrigin::Folder, IndexingMode::Continuous | IndexingMode::Manual)
+            | (WikiOrigin::ImportedOkf | WikiOrigin::AiMemory, IndexingMode::NotApplicable) => {}
+            _ => bail!("indexing mode is not valid for this wiki origin"),
+        }
+        let count = self.connection()?.execute(
+            "UPDATE collections SET indexing_mode=?2,updated_at=?3 WHERE id=?1",
+            params![
+                id.to_string(),
+                indexing_mode.as_str(),
+                Utc::now().to_rfc3339()
+            ],
+        )?;
+        ensure_changed(count, "collection", id)
     }
 
     pub fn update_collection_policy(&self, id: Uuid, mut policy: CollectionPolicy) -> Result<()> {
@@ -1144,7 +1221,8 @@ impl Database {
         self.connection()?
             .query_row(
                 "SELECT id,name,source_folder,wiki_folder,local_only,peer_shareable,
-                 allow_external_ai,internet_public,created_at,updated_at FROM collections WHERE id=?1",
+                 allow_external_ai,internet_public,origin,indexing_mode,okf_version,created_at,updated_at
+                 FROM collections WHERE id=?1",
                 [id.to_string()],
                 collection_from_row,
             )
@@ -1156,7 +1234,8 @@ impl Database {
         let connection = self.connection()?;
         let mut statement = connection.prepare(
             "SELECT id,name,source_folder,wiki_folder,local_only,peer_shareable,
-             allow_external_ai,internet_public,created_at,updated_at FROM collections ORDER BY name COLLATE NOCASE",
+             allow_external_ai,internet_public,origin,indexing_mode,okf_version,created_at,updated_at
+             FROM collections ORDER BY name COLLATE NOCASE",
         )?;
         let rows = statement.query_map([], collection_from_row)?;
         rows.collect::<rusqlite::Result<_>>().map_err(Into::into)
@@ -3978,8 +4057,11 @@ fn collection_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<CollectionRe
             allow_external_ai: row.get(6)?,
             internet_public: row.get(7)?,
         },
-        created_at: datetime_sql(row.get::<_, String>(8)?)?,
-        updated_at: datetime_sql(row.get::<_, String>(9)?)?,
+        origin: wiki_origin_sql(row.get::<_, String>(8)?)?,
+        indexing_mode: indexing_mode_sql(row.get::<_, String>(9)?)?,
+        okf_version: row.get(10)?,
+        created_at: datetime_sql(row.get::<_, String>(11)?)?,
+        updated_at: datetime_sql(row.get::<_, String>(12)?)?,
     })
 }
 
@@ -4312,14 +4394,24 @@ fn status_sql(value: String) -> rusqlite::Result<DocumentStatus> {
 }
 
 fn concept_type_sql(value: String) -> rusqlite::Result<ConceptType> {
+    ConceptType::parse(value).ok_or_else(|| to_sql_error("concept type must not be empty"))
+}
+
+fn wiki_origin_sql(value: String) -> rusqlite::Result<WikiOrigin> {
     match value.as_str() {
-        "Document" => Ok(ConceptType::Document),
-        "Policy" => Ok(ConceptType::Policy),
-        "Procedure" => Ok(ConceptType::Procedure),
-        "Runbook" => Ok(ConceptType::Runbook),
-        "Reference" => Ok(ConceptType::Reference),
-        "Report" => Ok(ConceptType::Report),
-        _ => Err(to_sql_error(anyhow!("invalid concept type {value}"))),
+        "folder" => Ok(WikiOrigin::Folder),
+        "imported_okf" => Ok(WikiOrigin::ImportedOkf),
+        "ai_memory" => Ok(WikiOrigin::AiMemory),
+        _ => Err(to_sql_error(format!("invalid wiki origin {value}"))),
+    }
+}
+
+fn indexing_mode_sql(value: String) -> rusqlite::Result<IndexingMode> {
+    match value.as_str() {
+        "continuous" => Ok(IndexingMode::Continuous),
+        "manual" => Ok(IndexingMode::Manual),
+        "not_applicable" => Ok(IndexingMode::NotApplicable),
+        _ => Err(to_sql_error(format!("invalid indexing mode {value}"))),
     }
 }
 
@@ -4736,7 +4828,7 @@ mod tests {
         let temp = tempfile::tempdir().unwrap();
         let path = temp.path().join("db.sqlite");
         let db = Database::open(&path).unwrap();
-        assert_eq!(db.schema_version().unwrap(), 6);
+        assert_eq!(db.schema_version().unwrap(), 7);
         for table in [
             "collections",
             "source_documents",
@@ -4756,7 +4848,7 @@ mod tests {
             assert_eq!(db.count(table).unwrap(), 0);
         }
         drop(db);
-        assert_eq!(Database::open(path).unwrap().schema_version().unwrap(), 6);
+        assert_eq!(Database::open(path).unwrap().schema_version().unwrap(), 7);
     }
 
     #[test]
@@ -5273,7 +5365,7 @@ mod tests {
         drop(connection);
 
         let database = Database::open(&path).unwrap();
-        assert_eq!(database.schema_version().unwrap(), 6);
+        assert_eq!(database.schema_version().unwrap(), 7);
         assert_eq!(database.count("collections").unwrap(), 1);
         assert_eq!(database.count("source_documents").unwrap(), 1);
         assert_eq!(database.count("publication_claims").unwrap(), 0);
@@ -5313,7 +5405,7 @@ mod tests {
 
         let database = Database::open(&path).unwrap();
 
-        assert_eq!(database.schema_version().unwrap(), 6);
+        assert_eq!(database.schema_version().unwrap(), 7);
         assert!(
             database
                 .collection(collection_id)
@@ -5352,7 +5444,7 @@ mod tests {
 
         let database = Database::open(&path).unwrap();
         let collection = database.collection(collection_id).unwrap().unwrap();
-        assert_eq!(database.schema_version().unwrap(), 6);
+        assert_eq!(database.schema_version().unwrap(), 7);
         assert!(collection.policy.peer_shareable);
         assert!(collection.policy.allow_external_ai);
         assert!(!collection.policy.internet_public);
@@ -5386,7 +5478,7 @@ mod tests {
         drop(connection);
 
         let database = Database::open(path).unwrap();
-        assert_eq!(database.schema_version().unwrap(), 6);
+        assert_eq!(database.schema_version().unwrap(), 7);
         let indexes = database.list_federation_indexes().unwrap();
         assert_eq!(indexes.len(), 1);
         assert_eq!(indexes[0].registry_version, 0);
@@ -5425,7 +5517,7 @@ mod tests {
             expires_at: Utc::now() + chrono::Duration::days(1),
         }];
 
-        assert_eq!(database.schema_version().unwrap(), 6);
+        assert_eq!(database.schema_version().unwrap(), 7);
         assert_eq!(
             database
                 .count("federation_bootstrap_registry_state")
@@ -5435,6 +5527,60 @@ mod tests {
         assert!(
             database
                 .replace_bootstrap_federation_indexes(11, &downgrade)
+                .is_err()
+        );
+    }
+
+    #[test]
+    fn migration_seven_marks_existing_wikis_as_legacy_continuous_folders() {
+        let temp = tempfile::tempdir().unwrap();
+        let path = temp.path().join("version-six.sqlite");
+        let mut connection = Connection::open(&path).unwrap();
+        let tx = connection.transaction().unwrap();
+        tx.execute_batch(MIGRATION_1).unwrap();
+        tx.execute_batch(MIGRATION_2).unwrap();
+        tx.execute_batch(MIGRATION_3).unwrap();
+        tx.execute_batch(MIGRATION_4).unwrap();
+        tx.execute_batch(MIGRATION_5).unwrap();
+        tx.execute_batch(MIGRATION_6).unwrap();
+        let collection_id = Uuid::new_v4();
+        let now = Utc::now().to_rfc3339();
+        tx.execute(
+            "INSERT INTO collections
+             (id,name,source_folder,wiki_folder,created_at,updated_at)
+             VALUES (?1,'Legacy','/synthetic/source','/synthetic/wiki',?2,?2)",
+            params![collection_id.to_string(), now],
+        )
+        .unwrap();
+        tx.pragma_update(None, "user_version", 6).unwrap();
+        tx.commit().unwrap();
+        drop(connection);
+
+        let database = Database::open(path).unwrap();
+        let collection = database.collection(collection_id).unwrap().unwrap();
+
+        assert_eq!(database.schema_version().unwrap(), 7);
+        assert_eq!(collection.origin, WikiOrigin::Folder);
+        assert_eq!(collection.indexing_mode, IndexingMode::Continuous);
+        assert_eq!(collection.okf_version, "0.1");
+    }
+
+    #[test]
+    fn non_folder_wikis_cannot_enable_source_indexing() {
+        let (_temp, database, collection) = setup();
+        database
+            .connection()
+            .unwrap()
+            .execute(
+                "UPDATE collections SET origin='imported_okf',indexing_mode='not_applicable'
+                 WHERE id=?1",
+                [collection.id.to_string()],
+            )
+            .unwrap();
+
+        assert!(
+            database
+                .update_collection_indexing_mode(collection.id, IndexingMode::Continuous)
                 .is_err()
         );
     }

@@ -38,7 +38,9 @@ pub use knowledge::{
     KnowledgeBundleView, KnowledgeConceptView, KnowledgeLinkDisposition, KnowledgeLinkView,
     KnowledgePageId, KnowledgePageView, MAX_KNOWLEDGE_PAGE_BYTES, OkfBundleInspector,
 };
-pub use okf::{OkfConcept, OkfPublisher, OkfValidationError};
+pub use okf::{
+    AirWikiProfile, OkfActorEvent, OkfConcept, OkfLifecycleStatus, OkfPublisher, OkfValidationError,
+};
 pub use pipeline::{CollectionPreflight, IngestOutcome, IngestPipeline, ReviewEdits};
 pub use publication::{OkfPublicationMaterializer, PublicationRecoveryReport};
 pub use repair::{
@@ -59,8 +61,8 @@ pub use storage::{
     AuditEvent, BootstrapFederationIndexEntry, CollectionMaintenanceCounts,
     CollectionMaintenanceRecord, CollectionMaintenanceResult, CollectionMaintenanceStatus,
     CollectionRecord, CollectionStats, ConceptRecord, Database, FederationIndexRecord, GrantRecord,
-    JobRecord, PeerRecord, ReviewEvidenceChunkRecord, ReviewEvidencePageRecord,
-    ReviewReanalysisClaim, ReviewVersionToken, SourceDocumentRecord, StoredChunk,
+    IndexingMode, JobRecord, PeerRecord, ReviewEvidenceChunkRecord, ReviewEvidencePageRecord,
+    ReviewReanalysisClaim, ReviewVersionToken, SourceDocumentRecord, StoredChunk, WikiOrigin,
 };
 
 /// Embedding dimensionality required by multilingual-e5-small.

@@ -83,6 +83,10 @@ export async function updateWikiPolicy(wikiId: string, policy: WikiPolicyInput):
   return invoke('update_wiki_policy', { wikiId, policy });
 }
 
+export async function deleteWiki(wikiId: string): Promise<void> {
+  return invoke('delete_wiki', { wikiId });
+}
+
 export async function updatePublicWikiProfile(
   wikiId: string,
   description: string,

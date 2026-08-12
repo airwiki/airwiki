@@ -52,6 +52,7 @@ pub struct OkfImportedConcept {
     pub version: Option<String>,
     pub unknown_frontmatter: YamlValue,
     pub fingerprint: String,
+    pub search_text: String,
 }
 
 #[derive(Debug, Default)]
@@ -457,7 +458,14 @@ fn parse_concept(path: &str, markdown: &str) -> Result<OkfImportedConcept> {
             .map(ToOwned::to_owned),
         unknown_frontmatter,
         fingerprint: hex::encode(sha2::Sha256::digest(markdown.as_bytes())),
+        search_text: markdown_body(markdown).unwrap_or_default().to_owned(),
     })
+}
+
+fn markdown_body(markdown: &str) -> Option<&str> {
+    let rest = markdown.strip_prefix("---\n")?;
+    let end = rest.find("\n---\n")?;
+    Some(&rest[end + 5..])
 }
 
 fn normalize_verifications(value: YamlValue) -> YamlValue {

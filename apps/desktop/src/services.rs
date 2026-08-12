@@ -83,6 +83,42 @@ use crate::{
     },
 };
 
+fn delete_managed_wiki_files(
+    database: &Database,
+    vaults: &Path,
+    collection_id: Uuid,
+    bundle: &Path,
+) -> Result<()> {
+    let expected = vaults.join(collection_id.to_string());
+    if bundle != expected {
+        bail!("la ubicación administrada de la wiki no es válida");
+    }
+    let retired = vaults.join(format!(".delete-{collection_id}"));
+    if retired.exists() {
+        bail!("ya existe una eliminación incompleta para esta wiki");
+    }
+    if bundle.exists() {
+        let metadata = std::fs::symlink_metadata(bundle)
+            .context("no se pudo comprobar el bundle administrado")?;
+        if metadata.file_type().is_symlink() || !metadata.is_dir() {
+            bail!("el bundle administrado no es una carpeta segura");
+        }
+        std::fs::rename(bundle, &retired)
+            .context("no se pudo retirar atómicamente el bundle administrado")?;
+    }
+    if let Err(error) = database.delete_collection_record(collection_id) {
+        if retired.exists() {
+            let _ = std::fs::rename(&retired, bundle);
+        }
+        return Err(error).context("no se pudo eliminar el estado de la wiki");
+    }
+    if retired.exists() {
+        std::fs::remove_dir_all(&retired)
+            .context("la wiki se retiró, pero no se pudo limpiar su bundle")?;
+    }
+    Ok(())
+}
+
 #[cfg(not(feature = "e2e"))]
 const KEYRING_SERVICE: &str = "io.github.airwiki.AirWiki";
 #[cfg(not(feature = "e2e"))]
@@ -1883,6 +1919,49 @@ impl DesktopServices {
             runtime.cancellation.cancel();
             let _ = runtime.source_task.await;
             let _ = runtime.renewal_task.await;
+        }
+        Ok(())
+    }
+
+    pub async fn delete_wiki(&self, collection_id: Uuid) -> Result<()> {
+        let collection = self
+            .database
+            .collection(collection_id)?
+            .context("la wiki no existe")?;
+        for grant in self.database.list_grants(None)? {
+            if grant.collection_id == collection_id {
+                self.set_collection_grant(&grant.peer_id, collection_id, false)
+                    .await?;
+            }
+        }
+        self.update_collection_policy(collection_id, CollectionPolicy::local_only())?;
+        self.sync_public_collection(collection_id).await?;
+        self.reconcile_public_network().await?;
+
+        let database = self.database.clone();
+        let vaults = self.core_paths.vaults.clone();
+        let bundle = collection.wiki_folder.clone();
+        tokio::task::spawn_blocking(move || {
+            delete_managed_wiki_files(&database, &vaults, collection_id, &bundle)
+        })
+        .await
+        .context("se detuvo el worker de eliminación")??;
+        if let Ok(mut issues) = write_lock(&self.transient_source_issues, "source issue snapshot") {
+            issues.remove(&collection_id);
+        }
+        if self
+            .audit(
+                "wiki_deleted",
+                "collection",
+                Some(collection_id.to_string()),
+                serde_json::json!({"source_preserved": collection.origin == WikiOrigin::Folder}),
+            )
+            .is_err()
+        {
+            tracing::warn!(
+                error_kind = "wiki_deletion_audit_unavailable",
+                "wiki deletion completed but its audit receipt could not be stored"
+            );
         }
         Ok(())
     }
@@ -4031,6 +4110,50 @@ mod tests {
     use tokio::sync::{Notify, oneshot};
 
     use super::*;
+
+    #[test]
+    fn managed_wiki_deletion_preserves_the_source_folder() {
+        let temp = tempfile::tempdir().unwrap();
+        let vaults = temp.path().join("vaults");
+        let source = temp.path().join("source");
+        std::fs::create_dir_all(&vaults).unwrap();
+        std::fs::create_dir_all(&source).unwrap();
+        std::fs::write(source.join("original.md"), "source").unwrap();
+        let database = Database::in_memory().unwrap();
+        let placeholder = temp.path().join("placeholder");
+        let collection = database
+            .create_collection_with_origin(
+                "Wiki",
+                &source,
+                &placeholder,
+                CollectionPolicy::local_only(),
+                WikiOrigin::Folder,
+                airwiki_core::IndexingMode::Manual,
+            )
+            .unwrap();
+        let bundle = vaults.join(collection.id.to_string());
+        std::fs::create_dir_all(&bundle).unwrap();
+        std::fs::write(bundle.join("index.md"), "managed").unwrap();
+
+        delete_managed_wiki_files(&database, &vaults, collection.id, &bundle).unwrap();
+
+        assert!(source.join("original.md").exists());
+        assert!(!bundle.exists());
+        assert!(database.collection(collection.id).unwrap().is_none());
+    }
+
+    #[test]
+    fn managed_wiki_deletion_rejects_a_bundle_outside_the_vault() {
+        let temp = tempfile::tempdir().unwrap();
+        let vaults = temp.path().join("vaults");
+        let outside = temp.path().join("outside");
+        std::fs::create_dir_all(&vaults).unwrap();
+        std::fs::create_dir_all(&outside).unwrap();
+        let database = Database::in_memory().unwrap();
+
+        assert!(delete_managed_wiki_files(&database, &vaults, Uuid::new_v4(), &outside).is_err());
+        assert!(outside.exists());
+    }
 
     struct EmptyFederatedSearch;
 

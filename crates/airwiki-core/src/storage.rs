@@ -25,6 +25,7 @@ const MIGRATION_4: &str = include_str!("../migrations/0004_public_federation.sql
 const MIGRATION_5: &str = include_str!("../migrations/0005_public_federation_hardening.sql");
 const MIGRATION_6: &str = include_str!("../migrations/0006_bootstrap_registry_state.sql");
 const MIGRATION_7: &str = include_str!("../migrations/0007_okf_v02_origins_and_capabilities.sql");
+const MIGRATION_8: &str = include_str!("../migrations/0008_okf_projection_search.sql");
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -829,7 +830,13 @@ impl Database {
             tx.pragma_update(None, "user_version", 7)?;
             tx.commit()?;
         }
-        if version > 7 {
+        if version < 8 {
+            let tx = connection.transaction()?;
+            tx.execute_batch(MIGRATION_8)?;
+            tx.pragma_update(None, "user_version", 8)?;
+            tx.commit()?;
+        }
+        if version > 8 {
             bail!("database schema {version} is newer than this application supports");
         }
         let database = Self {
@@ -1121,9 +1128,14 @@ impl Database {
     }
 
     pub fn delete_collection_record(&self, id: Uuid) -> Result<()> {
-        let count = self
-            .connection()?
-            .execute("DELETE FROM collections WHERE id=?1", [id.to_string()])?;
+        let mut connection = self.connection()?;
+        let tx = connection.transaction()?;
+        tx.execute(
+            "DELETE FROM okf_projection_fts WHERE collection_id=?1",
+            [id.to_string()],
+        )?;
+        let count = tx.execute("DELETE FROM collections WHERE id=?1", [id.to_string()])?;
+        tx.commit()?;
         ensure_changed(count, "collection", id)
     }
 
@@ -1136,6 +1148,10 @@ impl Database {
         let tx = connection.transaction()?;
         tx.execute(
             "DELETE FROM okf_concept_projection WHERE collection_id=?1",
+            [collection_id.to_string()],
+        )?;
+        tx.execute(
+            "DELETE FROM okf_projection_fts WHERE collection_id=?1",
             [collection_id.to_string()],
         )?;
         let now = Utc::now().to_rfc3339();
@@ -1163,6 +1179,22 @@ impl Database {
                     concept.fingerprint,
                     serde_json::to_string(&serde_json::to_value(&concept.unknown_frontmatter)?)?,
                     now,
+                ],
+            )?;
+            tx.execute(
+                "INSERT INTO okf_projection_fts
+                 (collection_id,concept_id,logical_path,title,description,tags,text,fingerprint,lifecycle_status)
+                 VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9)",
+                params![
+                    collection_id.to_string(),
+                    concept_id.to_string(),
+                    concept.logical_path,
+                    concept.title,
+                    concept.description,
+                    concept.tags.join(" "),
+                    concept.search_text,
+                    concept.fingerprint,
+                    concept.lifecycle_status,
                 ],
             )?;
         }
@@ -3880,6 +3912,73 @@ impl Database {
         rows.collect::<rusqlite::Result<_>>().map_err(Into::into)
     }
 
+    pub(crate) fn projected_lexical_candidates(
+        &self,
+        query: &str,
+        collections: &[Uuid],
+        purpose: SearchPurpose,
+        limit: usize,
+    ) -> Result<Vec<RankedChunk>> {
+        if collections.is_empty() || limit == 0 {
+            return Ok(Vec::new());
+        }
+        let fts_query = fts_query(query);
+        if fts_query.is_empty() {
+            return Ok(Vec::new());
+        }
+        let placeholders = repeat_placeholders(collections.len(), 3);
+        let external_clause = if purpose == SearchPurpose::ExternalAi {
+            " AND col.allow_external_ai=1"
+        } else {
+            ""
+        };
+        let sql = format!(
+            "SELECT f.collection_id,f.concept_id,f.logical_path,f.title,f.text,f.fingerprint,
+             col.updated_at,bm25(okf_projection_fts)
+             FROM okf_projection_fts f
+             JOIN collections col ON col.id=f.collection_id
+             WHERE okf_projection_fts MATCH ?1 AND f.lifecycle_status='stable'
+             AND f.collection_id IN ({placeholders}){external_clause}
+             ORDER BY bm25(okf_projection_fts), f.concept_id LIMIT ?2"
+        );
+        let mut values: Vec<rusqlite::types::Value> = vec![
+            fts_query.into(),
+            i64::try_from(limit).unwrap_or(i64::MAX).into(),
+        ];
+        values.extend(collections.iter().map(|id| id.to_string().into()));
+        let connection = self.connection()?;
+        let mut statement = connection.prepare(&sql)?;
+        let rows = statement.query_map(params_from_iter(values), |row| {
+            let collection_id = uuid_sql(row.get(0)?)?;
+            let concept_id = uuid_sql(row.get(1)?)?;
+            let logical_path: String = row.get(2)?;
+            let title: String = row.get(3)?;
+            let text: String = row.get(4)?;
+            let fingerprint: String = row.get(5)?;
+            let text_sha256 = hex::encode(Sha256::digest(text.as_bytes()));
+            Ok(RankedChunk {
+                chunk: StoredChunk {
+                    id: Uuid::new_v5(&concept_id, b"okf-projection-search"),
+                    concept_id,
+                    source_document_id: Uuid::new_v5(&concept_id, b"okf-projection-source"),
+                    collection_id,
+                    ordinal: 0,
+                    heading_or_page: logical_path.clone(),
+                    text,
+                    text_sha256,
+                    embedding: Vec::new(),
+                    source_revision: 1,
+                },
+                title,
+                logical_resource_uri: format!("urn:airwiki:okf:{collection_id}:{logical_path}"),
+                source_sha256: fingerprint,
+                updated_at: datetime_sql(row.get(6)?)?,
+                lexical_score: row.get(7)?,
+            })
+        })?;
+        rows.collect::<rusqlite::Result<_>>().map_err(Into::into)
+    }
+
     /// Scans one collection with a process-local row cursor.
     ///
     /// SQLite stores the table rowid in `chunks_collection`, so the
@@ -3979,6 +4078,9 @@ impl Database {
     /// concurrent modification, deletion, review withdrawal or cloud-policy
     /// restriction that occurred after candidates were loaded.
     pub fn hit_is_current(&self, hit: &SearchHit, purpose: SearchPurpose) -> Result<bool> {
+        if self.projected_hit_is_current(hit, purpose, None, false)? {
+            return Ok(true);
+        }
         let external_clause = if purpose == SearchPurpose::ExternalAi {
             " AND col.allow_external_ai=1"
         } else {
@@ -4036,6 +4138,10 @@ impl Database {
     }
 
     fn public_hit_is_current_on(connection: &Connection, hit: &SearchHit) -> Result<bool> {
+        if projected_hit_is_current_on(connection, hit, SearchPurpose::LocalAssistant, None, true)?
+        {
+            return Ok(true);
+        }
         let mut statement = connection.prepare(
             "SELECT ch.ordinal,ch.text_sha256 FROM chunks ch
                 JOIN concepts co ON co.id=ch.concept_id
@@ -4076,6 +4182,9 @@ impl Database {
         peer_id: &str,
         purpose: SearchPurpose,
     ) -> Result<bool> {
+        if projected_hit_is_current_on(connection, hit, purpose, Some(peer_id), false)? {
+            return Ok(true);
+        }
         let external_ai = purpose == SearchPurpose::ExternalAi;
         let mut statement = connection.prepare(
             "SELECT ch.ordinal,ch.text_sha256 FROM chunks ch
@@ -4103,6 +4212,70 @@ impl Database {
         ])?;
         rows_contain_public_chunk(&mut rows, hit)
     }
+
+    fn projected_hit_is_current(
+        &self,
+        hit: &SearchHit,
+        purpose: SearchPurpose,
+        peer_id: Option<&str>,
+        public: bool,
+    ) -> Result<bool> {
+        let connection = self.connection()?;
+        projected_hit_is_current_on(&connection, hit, purpose, peer_id, public)
+    }
+}
+
+fn projected_hit_is_current_on(
+    connection: &Connection,
+    hit: &SearchHit,
+    purpose: SearchPurpose,
+    peer_id: Option<&str>,
+    public: bool,
+) -> Result<bool> {
+    let row = connection
+        .query_row(
+            "SELECT f.text,f.fingerprint,f.lifecycle_status,col.allow_external_ai,
+             col.internet_public,col.peer_shareable
+             FROM okf_projection_fts f JOIN collections col ON col.id=f.collection_id
+             WHERE f.collection_id=?1 AND f.concept_id=?2",
+            params![hit.collection_id.to_string(), hit.concept_id.to_string()],
+            |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, String>(2)?,
+                    row.get::<_, bool>(3)?,
+                    row.get::<_, bool>(4)?,
+                    row.get::<_, bool>(5)?,
+                ))
+            },
+        )
+        .optional()?;
+    let Some((text, fingerprint, lifecycle, external_ai, internet_public, peer_shareable)) = row
+    else {
+        return Ok(false);
+    };
+    if lifecycle != "stable"
+        || fingerprint != hit.source_sha256
+        || (purpose == SearchPurpose::ExternalAi && !external_ai)
+        || (public && !internet_public)
+        || (peer_id.is_some() && !peer_shareable)
+    {
+        return Ok(false);
+    }
+    if let Some(peer_id) = peer_id {
+        let allowed = connection.query_row(
+            "SELECT EXISTS(SELECT 1 FROM grants g JOIN peers p ON p.peer_id=g.peer_id
+             WHERE g.peer_id=?1 AND g.collection_id=?2 AND p.trusted=1 AND p.blocked=0)",
+            params![peer_id, hit.collection_id.to_string()],
+            |row| row.get::<_, bool>(0),
+        )?;
+        if !allowed {
+            return Ok(false);
+        }
+    }
+    let text_sha256 = hex::encode(Sha256::digest(text.as_bytes()));
+    Ok(hit.source_revision == 1 && public_chunk_id(&fingerprint, 0, &text_sha256) == hit.chunk_id)
 }
 
 fn rows_contain_public_chunk(rows: &mut rusqlite::Rows<'_>, hit: &SearchHit) -> Result<bool> {
@@ -4960,7 +5133,7 @@ mod tests {
         let temp = tempfile::tempdir().unwrap();
         let path = temp.path().join("db.sqlite");
         let db = Database::open(&path).unwrap();
-        assert_eq!(db.schema_version().unwrap(), 7);
+        assert_eq!(db.schema_version().unwrap(), 8);
         for table in [
             "collections",
             "source_documents",
@@ -4980,7 +5153,7 @@ mod tests {
             assert_eq!(db.count(table).unwrap(), 0);
         }
         drop(db);
-        assert_eq!(Database::open(path).unwrap().schema_version().unwrap(), 7);
+        assert_eq!(Database::open(path).unwrap().schema_version().unwrap(), 8);
     }
 
     #[test]
@@ -5497,7 +5670,7 @@ mod tests {
         drop(connection);
 
         let database = Database::open(&path).unwrap();
-        assert_eq!(database.schema_version().unwrap(), 7);
+        assert_eq!(database.schema_version().unwrap(), 8);
         assert_eq!(database.count("collections").unwrap(), 1);
         assert_eq!(database.count("source_documents").unwrap(), 1);
         assert_eq!(database.count("publication_claims").unwrap(), 0);
@@ -5537,7 +5710,7 @@ mod tests {
 
         let database = Database::open(&path).unwrap();
 
-        assert_eq!(database.schema_version().unwrap(), 7);
+        assert_eq!(database.schema_version().unwrap(), 8);
         assert!(
             database
                 .collection(collection_id)
@@ -5576,7 +5749,7 @@ mod tests {
 
         let database = Database::open(&path).unwrap();
         let collection = database.collection(collection_id).unwrap().unwrap();
-        assert_eq!(database.schema_version().unwrap(), 7);
+        assert_eq!(database.schema_version().unwrap(), 8);
         assert!(collection.policy.peer_shareable);
         assert!(collection.policy.allow_external_ai);
         assert!(!collection.policy.internet_public);
@@ -5610,7 +5783,7 @@ mod tests {
         drop(connection);
 
         let database = Database::open(path).unwrap();
-        assert_eq!(database.schema_version().unwrap(), 7);
+        assert_eq!(database.schema_version().unwrap(), 8);
         let indexes = database.list_federation_indexes().unwrap();
         assert_eq!(indexes.len(), 1);
         assert_eq!(indexes[0].registry_version, 0);
@@ -5649,7 +5822,7 @@ mod tests {
             expires_at: Utc::now() + chrono::Duration::days(1),
         }];
 
-        assert_eq!(database.schema_version().unwrap(), 7);
+        assert_eq!(database.schema_version().unwrap(), 8);
         assert_eq!(
             database
                 .count("federation_bootstrap_registry_state")
@@ -5691,7 +5864,7 @@ mod tests {
         let database = Database::open(path).unwrap();
         let collection = database.collection(collection_id).unwrap().unwrap();
 
-        assert_eq!(database.schema_version().unwrap(), 7);
+        assert_eq!(database.schema_version().unwrap(), 8);
         assert_eq!(collection.origin, WikiOrigin::Folder);
         assert_eq!(collection.indexing_mode, IndexingMode::Continuous);
         assert_eq!(collection.okf_version, "0.1");

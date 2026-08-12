@@ -57,7 +57,7 @@ impl fmt::Display for DocumentStatus {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum ConceptType {
     Document,
     Policy,
@@ -65,11 +65,84 @@ pub enum ConceptType {
     Runbook,
     Reference,
     Report,
+    Other(String),
 }
 
 impl fmt::Display for ConceptType {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{self:?}")
+        f.write_str(match self {
+            Self::Document => "Document",
+            Self::Policy => "Policy",
+            Self::Procedure => "Procedure",
+            Self::Runbook => "Runbook",
+            Self::Reference => "Reference",
+            Self::Report => "Report",
+            Self::Other(value) => value,
+        })
+    }
+}
+
+impl ConceptType {
+    /// Parses an OKF concept type without discarding extensions unknown to AirWiki.
+    pub fn parse(value: impl Into<String>) -> Option<Self> {
+        let value = value.into();
+        let trimmed = value.trim();
+        if trimmed.is_empty() {
+            return None;
+        }
+        Some(match trimmed {
+            "Document" => Self::Document,
+            "Policy" => Self::Policy,
+            "Procedure" => Self::Procedure,
+            "Runbook" => Self::Runbook,
+            "Reference" => Self::Reference,
+            "Report" => Self::Report,
+            _ => Self::Other(trimmed.to_owned()),
+        })
+    }
+}
+
+impl Serialize for ConceptType {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        serializer.serialize_str(&self.to_string())
+    }
+}
+
+impl<'de> Deserialize<'de> for ConceptType {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let value = String::deserialize(deserializer)?;
+        Self::parse(value).ok_or_else(|| serde::de::Error::custom("concept type must not be empty"))
+    }
+}
+
+#[cfg(test)]
+mod concept_type_tests {
+    use super::ConceptType;
+
+    #[test]
+    fn known_types_keep_the_existing_wire_representation() {
+        let encoded = serde_json::to_string(&ConceptType::Runbook);
+        assert!(matches!(encoded.as_deref(), Ok("\"Runbook\"")));
+    }
+
+    #[test]
+    fn unknown_okf_types_round_trip_without_loss() {
+        let decoded = serde_json::from_str::<ConceptType>("\"BigQuery Table\"");
+        assert!(matches!(
+            decoded,
+            Ok(ConceptType::Other(value)) if value == "BigQuery Table"
+        ));
+    }
+
+    #[test]
+    fn empty_okf_types_are_rejected() {
+        assert!(serde_json::from_str::<ConceptType>("\"  \"").is_err());
     }
 }
 

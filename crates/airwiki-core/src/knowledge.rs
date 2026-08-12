@@ -1875,19 +1875,37 @@ fn reconcile_concept(
     let description = yaml.and_then(|value| yaml_string_at(value, &["description"]));
     let tags = yaml.and_then(|value| yaml_strings_at(value, &["tags"]));
     let resource = yaml.and_then(|value| yaml_string_at(value, &["resource"]));
-    let timestamp = yaml.and_then(|value| yaml_datetime_at(value, &["timestamp"]));
+    let profile_version =
+        yaml.and_then(|value| yaml_u32_at(value, &["airwiki", "profile_version"]));
+    let is_v2 = profile_version == Some(2);
+    let timestamp = yaml.and_then(|value| {
+        if is_v2 {
+            yaml_datetime_at(value, &["generated", "at"])
+        } else {
+            yaml_datetime_at(value, &["timestamp"])
+        }
+    });
     let profile_id = yaml.and_then(|value| yaml_uuid_at(value, &["airwiki", "id"]));
     let profile_collection =
         yaml.and_then(|value| yaml_uuid_at(value, &["airwiki", "collection_id"]));
-    let profile_version =
-        yaml.and_then(|value| yaml_u32_at(value, &["airwiki", "profile_version"]));
     let revision = yaml.and_then(|value| yaml_u32_at(value, &["airwiki", "revision"]));
     let source_sha256 = yaml.and_then(|value| yaml_string_at(value, &["airwiki", "source_sha256"]));
     let language = yaml.and_then(|value| yaml_string_at(value, &["airwiki", "language"]));
-    let status = yaml.and_then(|value| yaml_string_at(value, &["airwiki", "status"]));
-    let generator_model =
-        yaml.and_then(|value| yaml_string_at(value, &["airwiki", "generator_model"]));
-    let reviewed_at = yaml.and_then(|value| yaml_datetime_at(value, &["airwiki", "reviewed_at"]));
+    let lifecycle_status = yaml.and_then(|value| yaml_string_at(value, &["status"]));
+    let generator_model = yaml.and_then(|value| {
+        if is_v2 {
+            yaml_string_at(value, &["generated", "by"])
+        } else {
+            yaml_string_at(value, &["airwiki", "generator_model"])
+        }
+    });
+    let reviewed_at = yaml.and_then(|value| {
+        if is_v2 {
+            latest_human_verification(value)
+        } else {
+            yaml_datetime_at(value, &["airwiki", "reviewed_at"])
+        }
+    });
     let extensions = concept_extensions(&page.parsed.metadata);
 
     if let Some(yaml) = yaml {
@@ -1938,7 +1956,7 @@ fn reconcile_concept(
             page_id,
             "airwiki.profile_version",
             profile_version.as_ref(),
-            Some(&1_u32),
+            Some(&2_u32),
         );
         compare_field(
             health,
@@ -1950,22 +1968,23 @@ fn reconcile_concept(
         compare_field(
             health,
             page_id,
-            "airwiki.status",
-            status.as_deref(),
-            Some("published"),
+            "status",
+            lifecycle_status.as_deref(),
+            Some("stable"),
         );
+        let expected_generator = format!("airwiki/{}", concept.generator_model);
         compare_field(
             health,
             page_id,
-            "airwiki.generator_model",
+            "generated.by",
             generator_model.as_deref(),
-            Some(concept.generator_model.as_str()),
+            Some(expected_generator.as_str()),
         );
         compare_concept_timestamp(health, page_id, timestamp.as_ref(), concept);
         compare_field(
             health,
             page_id,
-            "airwiki.reviewed_at",
+            "verified",
             reviewed_at.as_ref(),
             concept.reviewed_at.as_ref(),
         );
@@ -2053,15 +2072,16 @@ fn concept_extensions(metadata: &[(String, String)]) -> BTreeMap<String, String>
         "resource",
         "tags",
         "timestamp",
+        "generated.by",
+        "generated.at",
+        "verified",
+        "status",
         "airwiki.profile_version",
         "airwiki.id",
         "airwiki.collection_id",
         "airwiki.source_sha256",
         "airwiki.revision",
         "airwiki.language",
-        "airwiki.status",
-        "airwiki.generator_model",
-        "airwiki.reviewed_at",
     ];
     metadata
         .iter()
@@ -2144,6 +2164,21 @@ fn yaml_datetime_at(root: &YamlValue, path: &[&str]) -> Option<DateTime<Utc>> {
     DateTime::parse_from_rfc3339(yaml_at(root, path)?.as_str()?)
         .ok()
         .map(|value| value.with_timezone(&Utc))
+}
+
+fn latest_human_verification(root: &YamlValue) -> Option<DateTime<Utc>> {
+    let verified = yaml_at(root, &["verified"])?;
+    let entries = verified
+        .as_sequence()
+        .map(Vec::as_slice)
+        .unwrap_or_else(|| std::slice::from_ref(verified));
+    entries
+        .iter()
+        .filter(|entry| {
+            yaml_string_at(entry, &["by"]).is_some_and(|actor| actor.starts_with("human:"))
+        })
+        .filter_map(|entry| yaml_datetime_at(entry, &["at"]))
+        .max()
 }
 
 fn page_title(
@@ -2676,8 +2711,10 @@ mod tests {
         fs::write(
             &index_path,
             format!(
-                "\u{feff}---\r\nokf_version: '0.1'\r\n---\r\n\r\n{}",
-                index.replace('\n', "\r\n")
+                "\u{feff}{}",
+                index
+                    .replace("okf_version: \"0.2\"", "okf_version: '0.1'")
+                    .replace('\n', "\r\n")
             ),
         )
         .unwrap();

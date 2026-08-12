@@ -308,6 +308,27 @@ struct WikiSummary {
     public_languages: String,
     public_announcement: PublicAnnouncementSummary,
     maintenance_required: bool,
+    origin: WikiOriginDto,
+    indexing_mode: IndexingModeDto,
+    okf_version: String,
+}
+
+#[derive(Clone, Copy, Debug, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(rename_all = "camelCase")]
+enum WikiOriginDto {
+    Folder,
+    ImportedOkf,
+    AiMemory,
+}
+
+#[derive(Clone, Copy, Debug, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(rename_all = "camelCase")]
+enum IndexingModeDto {
+    Continuous,
+    Manual,
+    NotApplicable,
 }
 
 #[derive(Clone, Debug, Serialize, TS)]
@@ -385,16 +406,10 @@ struct EnrichmentDraftDto {
     classification_explanation: String,
 }
 
-#[derive(Clone, Copy, Debug, Deserialize, Serialize, TS)]
+#[derive(Clone, Debug, Deserialize, Serialize, TS)]
+#[serde(transparent)]
 #[ts(rename = "ConceptType")]
-enum ConceptTypeDto {
-    Document,
-    Policy,
-    Procedure,
-    Runbook,
-    Reference,
-    Report,
-}
+struct ConceptTypeDto(#[ts(type = "string")] ConceptType);
 
 #[derive(Clone, Debug, Deserialize, Serialize, TS)]
 #[serde(deny_unknown_fields)]
@@ -448,27 +463,13 @@ impl From<EnrichmentDraftDto> for EnrichmentDraft {
 
 impl From<ConceptType> for ConceptTypeDto {
     fn from(value: ConceptType) -> Self {
-        match value {
-            ConceptType::Document => Self::Document,
-            ConceptType::Policy => Self::Policy,
-            ConceptType::Procedure => Self::Procedure,
-            ConceptType::Runbook => Self::Runbook,
-            ConceptType::Reference => Self::Reference,
-            ConceptType::Report => Self::Report,
-        }
+        Self(value)
     }
 }
 
 impl From<ConceptTypeDto> for ConceptType {
     fn from(value: ConceptTypeDto) -> Self {
-        match value {
-            ConceptTypeDto::Document => Self::Document,
-            ConceptTypeDto::Policy => Self::Policy,
-            ConceptTypeDto::Procedure => Self::Procedure,
-            ConceptTypeDto::Runbook => Self::Runbook,
-            ConceptTypeDto::Reference => Self::Reference,
-            ConceptTypeDto::Report => Self::Report,
-        }
+        value.0
     }
 }
 
@@ -3528,6 +3529,17 @@ impl From<worker::CollectionView> for WikiSummary {
             maintenance_required: maintenance_requires_attention(
                 value.maintenance.map(|maintenance| maintenance.status),
             ),
+            origin: match value.origin {
+                airwiki_core::WikiOrigin::Folder => WikiOriginDto::Folder,
+                airwiki_core::WikiOrigin::ImportedOkf => WikiOriginDto::ImportedOkf,
+                airwiki_core::WikiOrigin::AiMemory => WikiOriginDto::AiMemory,
+            },
+            indexing_mode: match value.indexing_mode {
+                airwiki_core::IndexingMode::Continuous => IndexingModeDto::Continuous,
+                airwiki_core::IndexingMode::Manual => IndexingModeDto::Manual,
+                airwiki_core::IndexingMode::NotApplicable => IndexingModeDto::NotApplicable,
+            },
+            okf_version: value.okf_version,
         }
     }
 }

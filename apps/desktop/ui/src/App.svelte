@@ -10,7 +10,7 @@
   import Sparkles from '@lucide/svelte/icons/sparkles';
   import { listen } from '@tauri-apps/api/event';
   import { onMount, tick } from 'svelte';
-  import { addFederationIndex, addWiki, allowPeerPairingAgain, approveReview, browsePublicWiki, cancelModelInstall, checkUpdates, configureFirewall, confirmPairing, connect, dialPeer, downloadUpdate, executeGuidedWikiRepair, hideToTray, installModels, installUpdate, loadReviewEvidence, loadWikiBundle, loadWikiPage, manageIntegration, openExternalLink, openSystemDestination, pairPeer, pickWikiFolder, prepareGuidedWikiRepair, quitCompletely, reanalyzeReview, refreshAutostart, refreshConnectivity, refreshWikiHealth, rejectReview, relinkWiki, removeFederationIndex, rescanWiki, revokePeer, searchKnowledge, setAutostart, setPublicPublisherBlocked, setWikiGrant, updatePreferences, updatePublicWikiProfile, updateWikiPolicy, type AppSnapshot, type CloseBehavior, type EnrichmentDraft, type FolderSelection, type IntegrationActionInput, type IntegrationClient, type KnowledgePageInput, type LanPreference, type LocalePreference, type ReviewSummary, type SearchCoverage, type SearchHitSummary, type SourceIssueSummary, type SystemDestination, type ThemePreference, type WikiPolicyInput, type WikiSummary } from './api';
+  import { addFederationIndex, addWiki, allowPeerPairingAgain, approveReview, browsePublicWiki, cancelModelInstall, checkUpdates, configureFirewall, confirmPairing, connect, dialPeer, downloadUpdate, executeGuidedWikiRepair, hideToTray, importOkf, installModels, installUpdate, loadReviewEvidence, loadWikiBundle, loadWikiPage, manageIntegration, openExternalLink, openSystemDestination, pairPeer, pickOkfImport, pickWikiFolder, prepareGuidedWikiRepair, quitCompletely, reanalyzeReview, refreshAutostart, refreshConnectivity, refreshWikiHealth, rejectReview, relinkWiki, removeFederationIndex, rescanWiki, revokePeer, searchKnowledge, setAutostart, setPublicPublisherBlocked, setWikiGrant, updatePreferences, updatePublicWikiProfile, updateWikiPolicy, validateOkfImport, type AppSnapshot, type CloseBehavior, type EnrichmentDraft, type FolderSelection, type IntegrationActionInput, type IntegrationClient, type KnowledgePageInput, type LanPreference, type LocalePreference, type OkfImportSummary, type ReviewSummary, type SearchCoverage, type SearchHitSummary, type SourceIssueSummary, type SystemDestination, type ThemePreference, type WikiPolicyInput, type WikiSummary } from './api';
   import KnowledgeGraph from './KnowledgeGraph.svelte';
   import ConnectionAdvanced from './ConnectionAdvanced.svelte';
   import GlobalSearch from './GlobalSearch.svelte';
@@ -44,6 +44,10 @@
   let folderSelection: FolderSelection | null = null;
   let relinkSelection: FolderSelection | null = null;
   let wikiName = '';
+  let continuousIndexing = true;
+  let newWikiMenuOpen = false;
+  let okfImportSelection: FolderSelection | null = null;
+  let okfImportSummary: OkfImportSummary | null = null;
   let editingWikiId: string | null = null;
   let detailsWikiId: string | null = null;
   let wikiPolicy: WikiPolicyInput = { localOnly: true, peerShareable: false, allowExternalAi: false, internetPublic: false };
@@ -708,6 +712,7 @@
 
   async function chooseFolder() {
     actionMessage = '';
+    newWikiMenuOpen = false;
     try {
       folderSelection = await pickWikiFolder();
       if (folderSelection) createWikiOpen = true;
@@ -716,12 +721,47 @@
     }
   }
 
+  async function chooseOkfImport(zip: boolean) {
+    actionMessage = '';
+    newWikiMenuOpen = false;
+    actionBusy = true;
+    try {
+      okfImportSelection = await pickOkfImport(zip);
+      if (!okfImportSelection) return;
+      okfImportSummary = await validateOkfImport(okfImportSelection.token);
+      wikiName = '';
+    } catch {
+      actionMessage = t('desktop-okf-import-invalid');
+      okfImportSelection = null;
+      okfImportSummary = null;
+    } finally {
+      actionBusy = false;
+    }
+  }
+
+  async function confirmOkfImport() {
+    if (!okfImportSelection || !okfImportSummary || !wikiName.trim()) return;
+    actionBusy = true;
+    try {
+      await importOkf(wikiName, okfImportSelection.token);
+      wikiName = '';
+      okfImportSelection = null;
+      okfImportSummary = null;
+      showOperationComplete();
+    } catch {
+      actionMessage = t('desktop-okf-import-invalid');
+    } finally {
+      actionBusy = false;
+    }
+  }
+
   async function createWiki() {
     if (!folderSelection) return;
     actionBusy = true;
     try {
-      await addWiki(wikiName, folderSelection.token);
+      await addWiki(wikiName, folderSelection.token, continuousIndexing);
       wikiName = '';
+      continuousIndexing = true;
       folderSelection = null;
       createWikiOpen = false;
       showOperationComplete();
@@ -1074,7 +1114,7 @@
         onsearch={submitGlobalSearch}
         onopen={openGlobalSearch}
       />
-      <div class="top-actions"><button class="secondary" onclick={chooseFolder}><Plus size={17} aria-hidden="true" />{t('desktop-new-wiki')}</button><button class="icon-button" class:active={destination === 'system'} aria-label={t('desktop-nav-system')} onclick={() => select('system')}><Settings2 size={19} aria-hidden="true" /></button></div>
+      <div class="top-actions"><button class="secondary" aria-expanded={newWikiMenuOpen} onclick={() => { newWikiMenuOpen = !newWikiMenuOpen; }}><Plus size={17} aria-hidden="true" />{t('desktop-new-wiki')}</button><button class="icon-button" class:active={destination === 'system'} aria-label={t('desktop-nav-system')} onclick={() => select('system')}><Settings2 size={19} aria-hidden="true" /></button></div>
     </header>
 
     <section class="drive-page" aria-live="polite" bind:this={mainScrollRegion}>
@@ -1260,7 +1300,15 @@
 
 <div class="dialog-layer" inert={closeChoiceRequired} aria-hidden={closeChoiceRequired ? 'true' : undefined}>
 {#if createWikiOpen && folderSelection}
-  <div class="modal-backdrop" role="presentation"><div class="create-wiki-dialog" role="dialog" aria-modal="true" aria-labelledby="create-wiki-title"><form onsubmit={(event) => { event.preventDefault(); createWiki(); }}><p class="section-label">{t('desktop-new-wiki')}</p><h2 id="create-wiki-title">{t('desktop-name-wiki')}</h2><p>{folderSelection.displayPath}</p><TextField label={t('desktop-wiki-name')} bind:value={wikiName} maxlength={120} required /><div class="row-actions"><button type="button" class="secondary" onclick={() => { createWikiOpen = false; folderSelection = null; }}>{t('action-cancel')}</button><button class="primary" disabled={actionBusy || !wikiName.trim()}>{t('desktop-create-wiki')}</button></div></form></div></div>
+  <div class="modal-backdrop" role="presentation"><div class="create-wiki-dialog" role="dialog" aria-modal="true" aria-labelledby="create-wiki-title"><form onsubmit={(event) => { event.preventDefault(); createWiki(); }}><p class="section-label">{t('desktop-new-wiki')}</p><h2 id="create-wiki-title">{t('desktop-name-wiki')}</h2><p>{folderSelection.displayPath}</p><TextField label={t('desktop-wiki-name')} bind:value={wikiName} maxlength={120} required /><Switch label={t('desktop-continuous-indexing')} description={t('desktop-continuous-indexing-body')} bind:checked={continuousIndexing} /><div class="row-actions"><button type="button" class="secondary" onclick={() => { createWikiOpen = false; folderSelection = null; continuousIndexing = true; }}>{t('action-cancel')}</button><button class="primary" disabled={actionBusy || !wikiName.trim()}>{t('desktop-create-wiki')}</button></div></form></div></div>
+{/if}
+
+{#if newWikiMenuOpen}
+  <div class="modal-backdrop" role="presentation" onclick={(event) => { if (event.currentTarget === event.target) newWikiMenuOpen = false; }}><div class="create-wiki-dialog source-choice" role="dialog" aria-modal="true" aria-labelledby="new-wiki-source-title"><p class="section-label">{t('desktop-new-wiki')}</p><h2 id="new-wiki-source-title">{t('desktop-new-wiki-source')}</h2><button class="source-choice-item" onclick={chooseFolder}><strong>{t('desktop-new-wiki-folder')}</strong><span>{t('desktop-new-wiki-folder-body')}</span></button><button class="source-choice-item" onclick={() => chooseOkfImport(false)}><strong>{t('desktop-import-okf-folder')}</strong><span>{t('desktop-import-okf-body')}</span></button><button class="source-choice-item" onclick={() => chooseOkfImport(true)}><strong>{t('desktop-import-okf-zip')}</strong><span>{t('desktop-import-okf-body')}</span></button><button class="text-action" onclick={() => { newWikiMenuOpen = false; }}>{t('action-cancel')}</button></div></div>
+{/if}
+
+{#if okfImportSelection && okfImportSummary}
+  <div class="modal-backdrop" role="presentation"><div class="create-wiki-dialog" role="dialog" aria-modal="true" aria-labelledby="import-okf-title"><form onsubmit={(event) => { event.preventDefault(); confirmOkfImport(); }}><p class="section-label">OKF {okfImportSummary.okfVersion}</p><h2 id="import-okf-title">{t('desktop-import-okf-confirm')}</h2><p>{okfImportSelection.displayPath}</p><dl class="import-summary"><div><dt>{t('desktop-import-okf-concepts')}</dt><dd>{okfImportSummary.conceptCount}</dd></div><div><dt>{t('desktop-import-okf-files')}</dt><dd>{okfImportSummary.entryCount}</dd></div><div><dt>{t('desktop-import-okf-warnings')}</dt><dd>{okfImportSummary.warningCount}</dd></div></dl><TextField label={t('desktop-wiki-name')} bind:value={wikiName} maxlength={120} required /><div class="row-actions"><button type="button" class="secondary" onclick={() => { okfImportSelection = null; okfImportSummary = null; wikiName = ''; }}>{t('action-cancel')}</button><button class="primary" disabled={actionBusy || !wikiName.trim()}>{t('desktop-import-okf-action')}</button></div></form></div></div>
 {/if}
 
 {#if detailsWikiId}

@@ -400,6 +400,11 @@ pub enum WorkerCommand {
     AddCollection {
         name: String,
         folder: PathBuf,
+        indexing_mode: IndexingMode,
+    },
+    ImportOkfBundle {
+        name: String,
+        source: PathBuf,
     },
     RelinkCollection {
         collection_id: Uuid,
@@ -701,6 +706,9 @@ enum BackgroundCompletion {
         collection_id: Uuid,
         folder: PathBuf,
         result: Result<(), String>,
+    },
+    ImportOkfBundle {
+        result: Result<airwiki_core::OkfImportReport, String>,
     },
     ConnectivityDiagnosed {
         request_id: Uuid,
@@ -1714,9 +1722,10 @@ pub(crate) async fn run_worker(
                             );
                         }
                     }
-                    WorkerCommand::AddCollection { name, folder } => {
-                        match services.add_collection(name, &folder) {
+                    WorkerCommand::AddCollection { name, folder, indexing_mode } => {
+                        match services.add_folder_wiki(name, &folder, indexing_mode) {
                             Ok(collection) => {
+                                if indexing_mode == IndexingMode::Continuous {
                                 match CollectionWatcherHandle::spawn(collection.id, folder, watch_tx.clone()) {
                                     Ok(watcher) => {
                                         watchers.insert(collection.id, watcher);
@@ -1741,10 +1750,29 @@ pub(crate) async fn run_worker(
                                         send(&events, WorkerEvent::Error(format!("No se pudo observar la carpeta: {error:#}"))).await;
                                     }
                                 }
+                                } else if services.models_ready() {
+                                    request_scan(
+                                        &services,
+                                        &mut scan_scheduler,
+                                        &mut background,
+                                        &events,
+                                        collection.id,
+                                    ).await;
+                                }
                                 refresh_content_views(&services, &events).await;
                             }
                             Err(error) => send(&events, WorkerEvent::Error(format!("No se pudo crear la colección: {error:#}"))).await,
                         }
+                    }
+                    WorkerCommand::ImportOkfBundle { name, source } => {
+                        let services = Arc::clone(&services);
+                        background.spawn_blocking(move || {
+                            let result = services
+                                .import_okf_bundle(name, &source)
+                                .map(|(_, report)| report)
+                                .map_err(|error| format!("{error:#}"));
+                            BackgroundCompletion::ImportOkfBundle { result }
+                        });
                     }
                     WorkerCommand::RelinkCollection { collection_id, folder } => {
                         watchers.remove(&collection_id);
@@ -1782,10 +1810,9 @@ pub(crate) async fn run_worker(
                                     state: None,
                                 },
                             ).await;
-                        } else if !watchers.contains_key(&collection_id) {
+                        } else if services.collection_indexing_mode(collection_id).is_err() {
                             send(&events, WorkerEvent::Error(
-                                "La colección no tiene un watcher activo; corrige la carpeta antes de escanear"
-                                    .into(),
+                                "La wiki ya no está disponible".into(),
                             )).await;
                             send(
                                 &events,
@@ -2587,7 +2614,10 @@ pub(crate) async fn run_worker(
                                 "falló la prevalidación del filesystem observado",
                             );
                         }
-                        if watchers.contains_key(&collection_id) {
+                        let indexing_mode = services.collection_indexing_mode(collection_id);
+                        if matches!(indexing_mode, Ok(IndexingMode::Continuous))
+                            && watchers.contains_key(&collection_id)
+                        {
                             // The preflight may have raced with the follow-up
                             // scan that originally triggered it. Request one
                             // final pass while its watcher remains active.
@@ -2598,7 +2628,7 @@ pub(crate) async fn run_worker(
                                 &events,
                                 collection_id,
                             ).await;
-                        } else {
+                        } else if matches!(indexing_mode, Ok(IndexingMode::Continuous)) {
                             request_quarantine(
                                 &services,
                                 &mut background,
@@ -2614,7 +2644,10 @@ pub(crate) async fn run_worker(
                     }
                     Some(Ok(BackgroundCompletion::Scan { collection_id, result })) => {
                         let mut successful_manual_summary = None;
-                        if !watchers.contains_key(&collection_id) {
+                        let indexing_mode = services.collection_indexing_mode(collection_id);
+                        if matches!(indexing_mode, Ok(IndexingMode::Continuous))
+                            && !watchers.contains_key(&collection_id)
+                        {
                             clear_manual_rescan(&mut manual_rescans, collection_id);
                             request_quarantine(
                                 &services,
@@ -2623,7 +2656,10 @@ pub(crate) async fn run_worker(
                                 collection_id,
                                 "un escaneo terminó después de perderse el watcher",
                             );
-                        } else {
+                        } else if matches!(
+                            indexing_mode,
+                            Ok(IndexingMode::Continuous | IndexingMode::Manual)
+                        ) {
                             match result {
                             Ok(outcomes) => {
                                 if services
@@ -2659,6 +2695,15 @@ pub(crate) async fn run_worker(
                                 );
                             }
                             }
+                        } else {
+                            clear_manual_rescan(&mut manual_rescans, collection_id);
+                            send(
+                                &events,
+                                WorkerEvent::Error(
+                                    "La wiki no admite indexación desde archivos fuente".into(),
+                                ),
+                            )
+                            .await;
                         }
                         refresh_content_views(&services, &events).await;
                         let ready = scan_scheduler.finish(collection_id);
@@ -2927,6 +2972,25 @@ pub(crate) async fn run_worker(
                                 &events,
                                 WorkerEvent::Error(format!(
                                     "No se pudo volver a vincular la carpeta: {error}"
+                                )),
+                            ).await,
+                        }
+                        refresh_content_views(&services, &events).await;
+                    }
+                    Some(Ok(BackgroundCompletion::ImportOkfBundle { result })) => {
+                        match result {
+                            Ok(report) => send(
+                                &events,
+                                WorkerEvent::Notice(format!(
+                                    "Bundle OKF importado: {} conceptos y {} advertencias",
+                                    report.concept_count,
+                                    report.warnings.len()
+                                )),
+                            ).await,
+                            Err(error) => send(
+                                &events,
+                                WorkerEvent::Error(format!(
+                                    "No se pudo importar el bundle OKF: {error}"
                                 )),
                             ).await,
                         }
@@ -4121,7 +4185,9 @@ fn ensure_watchers(
     let mut started = Vec::new();
     let mut failures = Vec::new();
     for collection in services.collection_views()? {
-        if let std::collections::hash_map::Entry::Vacant(entry) = watchers.entry(collection.id) {
+        if collection.indexing_mode == IndexingMode::Continuous
+            && let std::collections::hash_map::Entry::Vacant(entry) = watchers.entry(collection.id)
+        {
             match CollectionWatcherHandle::spawn(collection.id, collection.folder, watch_tx.clone())
             {
                 Ok(watcher) => {

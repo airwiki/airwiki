@@ -1011,8 +1011,32 @@ impl Database {
         name: impl Into<String>,
         source_folder: impl AsRef<Path>,
         wiki_folder: impl AsRef<Path>,
-        mut policy: CollectionPolicy,
+        policy: CollectionPolicy,
     ) -> Result<CollectionRecord> {
+        self.create_collection_with_origin(
+            name,
+            source_folder,
+            wiki_folder,
+            policy,
+            WikiOrigin::Folder,
+            IndexingMode::Continuous,
+        )
+    }
+
+    pub fn create_collection_with_origin(
+        &self,
+        name: impl Into<String>,
+        source_folder: impl AsRef<Path>,
+        wiki_folder: impl AsRef<Path>,
+        mut policy: CollectionPolicy,
+        origin: WikiOrigin,
+        indexing_mode: IndexingMode,
+    ) -> Result<CollectionRecord> {
+        match (origin, indexing_mode) {
+            (WikiOrigin::Folder, IndexingMode::Continuous | IndexingMode::Manual)
+            | (WikiOrigin::ImportedOkf | WikiOrigin::AiMemory, IndexingMode::NotApplicable) => {}
+            _ => bail!("indexing mode is not valid for this wiki origin"),
+        }
         policy.normalize();
         let record = CollectionRecord {
             id: Uuid::new_v4(),
@@ -1020,8 +1044,8 @@ impl Database {
             source_folder: absolute_path(source_folder.as_ref())?,
             wiki_folder: absolute_path(wiki_folder.as_ref())?,
             policy,
-            origin: WikiOrigin::Folder,
-            indexing_mode: IndexingMode::Continuous,
+            origin,
+            indexing_mode,
             okf_version: "0.2".to_owned(),
             created_at: Utc::now(),
             updated_at: Utc::now(),
@@ -1074,6 +1098,13 @@ impl Database {
                 Utc::now().to_rfc3339()
             ],
         )?;
+        ensure_changed(count, "collection", id)
+    }
+
+    pub fn delete_collection_record(&self, id: Uuid) -> Result<()> {
+        let count = self
+            .connection()?
+            .execute("DELETE FROM collections WHERE id=?1", [id.to_string()])?;
         ensure_changed(count, "collection", id)
     }
 

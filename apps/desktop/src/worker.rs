@@ -431,6 +431,9 @@ pub enum WorkerCommand {
         allow_external_ai: bool,
         internet_public: bool,
     },
+    DeleteWiki {
+        collection_id: Uuid,
+    },
     Approve {
         concept_id: Uuid,
         expected_review_version: ReviewVersionToken,
@@ -1889,6 +1892,27 @@ pub(crate) async fn run_worker(
                             send(&events, WorkerEvent::Error(format!("No se pudo actualizar la red pública: {error:#}"))).await;
                         } else if let Err(error) = services.sync_public_collection(collection_id).await {
                             send(&events, WorkerEvent::Error(format!("No se pudo sincronizar el anuncio público: {error:#}"))).await;
+                        }
+                        refresh_content_views(&services, &events).await;
+                    }
+                    WorkerCommand::DeleteWiki { collection_id } => {
+                        watchers.remove(&collection_id);
+                        for ready in preflight_scheduler.cancel(collection_id) {
+                            spawn_preflight(&services, &mut background, ready);
+                        }
+                        let ready = scan_scheduler.cancel(collection_id);
+                        spawn_ready_scans(&services, &mut background, &events, ready).await;
+                        manual_rescans.remove(&collection_id);
+                        watcher_quarantined.remove(&collection_id);
+                        match services.delete_wiki(collection_id).await {
+                            Ok(()) => send(
+                                &events,
+                                WorkerEvent::Notice("La wiki se eliminó de AirWiki".to_owned()),
+                            ).await,
+                            Err(error) => send(
+                                &events,
+                                WorkerEvent::Error(format!("No se pudo eliminar la wiki: {error:#}")),
+                            ).await,
                         }
                         refresh_content_views(&services, &events).await;
                     }

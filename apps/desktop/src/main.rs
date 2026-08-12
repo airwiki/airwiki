@@ -77,6 +77,7 @@ enum NativeConfirmation {
     GuidedRepair,
     ExternalCollectionPolicy,
     CollectionGrant,
+    DeleteWiki,
     InstallUpdate,
 }
 
@@ -88,6 +89,7 @@ impl NativeConfirmation {
             Self::GuidedRepair => "native-confirm-guided-repair",
             Self::ExternalCollectionPolicy => "native-confirm-external-policy",
             Self::CollectionGrant => "native-confirm-collection-grant",
+            Self::DeleteWiki => "native-confirm-delete-wiki",
             Self::InstallUpdate => "native-confirm-install-update",
         }
     }
@@ -1854,6 +1856,17 @@ async fn update_wiki_policy(
         },
     )
     .await
+}
+
+#[tauri::command]
+async fn delete_wiki(
+    app: AppHandle,
+    runtime: tauri::State<'_, AppRuntime>,
+    wiki_id: String,
+) -> Result<(), UiError> {
+    let collection_id = parse_uuid(&wiki_id)?;
+    require_native_confirmation(&app, NativeConfirmation::DeleteWiki, None).await?;
+    send_command(&runtime, WorkerCommand::DeleteWiki { collection_id }).await
 }
 
 #[tauri::command]
@@ -4309,6 +4322,7 @@ fn main() -> Result<()> {
             relink_wiki,
             rescan_wiki,
             update_wiki_policy,
+            delete_wiki,
             add_federation_index,
             remove_federation_index,
             update_public_wiki_profile,

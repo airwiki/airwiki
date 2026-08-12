@@ -864,6 +864,7 @@ native-confirm-external-link = Open this HTTP or HTTPS destination outside AirWi
 native-confirm-guided-repair = Apply exactly the reviewed repair proposal to local knowledge?
 native-confirm-external-policy = Enable one or more sharing, public-network, or external-AI permissions for this folder?
 native-confirm-collection-grant = Grant the verified device access to this folder?
+native-confirm-delete-wiki = Withdraw every access and delete this wiki from AirWiki? This action cannot be undone.
 native-confirm-install-update = Install the downloaded, signature-verified AirWiki update and restart the app?
 
 # Wiki-centered shell
@@ -995,6 +996,9 @@ desktop-wiki-public-languages = Languages
 desktop-wiki-public-profile-save = Save public profile
 desktop-wiki-relink = Relink folder
 desktop-wiki-details-body = Source health and published content for this wiki.
+desktop-delete-wiki = Delete wiki
+desktop-delete-folder-wiki-body = AirWiki will delete its index and managed bundle. The original folder and documents will remain untouched.
+desktop-delete-managed-wiki-body = AirWiki will delete the managed bundle and all its access. This wiki has no external original folder.
 desktop-wiki-source-health = Source status
 desktop-wiki-health-ready = Up to date
 desktop-wiki-documents = Source documents

@@ -864,6 +864,7 @@ native-confirm-external-link = ¿Abrir este destino HTTP o HTTPS fuera de AirWik
 native-confirm-guided-repair = ¿Aplicar exactamente la propuesta de reparación revisada al conocimiento local?
 native-confirm-external-policy = ¿Habilitar uno o más permisos de compartición, red pública o IA externa para esta wiki?
 native-confirm-collection-grant = ¿Conceder al equipo verificado acceso a esta wiki?
+native-confirm-delete-wiki = ¿Retirar todos los accesos y eliminar esta wiki de AirWiki? Esta acción no se puede deshacer.
 native-confirm-install-update = ¿Instalar la actualización de AirWiki descargada y verificada por firma, y reiniciar la app?
 
 # Shell centrado en Wikis
@@ -995,6 +996,9 @@ desktop-wiki-public-languages = Idiomas
 desktop-wiki-public-profile-save = Guardar perfil público
 desktop-wiki-relink = Volver a vincular carpeta
 desktop-wiki-details-body = Estado de la fuente y contenido publicado de esta wiki.
+desktop-delete-wiki = Eliminar wiki
+desktop-delete-folder-wiki-body = AirWiki eliminará su índice y bundle administrado. La carpeta y los documentos originales permanecerán intactos.
+desktop-delete-managed-wiki-body = AirWiki eliminará el bundle administrado y todos sus accesos. Esta wiki no tiene una carpeta original externa.
 desktop-wiki-source-health = Estado de la fuente
 desktop-wiki-health-ready = Al día
 desktop-wiki-documents = Documentos de origen

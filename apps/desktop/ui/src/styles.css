@@ -551,6 +551,9 @@ button:active:not(:disabled) { transform: scale(.985); }
 .details-section { padding: 22px 0; border-bottom: 1px solid var(--line); }
 .details-section h3 { margin: 0; font: 650 17px system-ui; }
 .details-section > div > p { margin: 5px 0 0; color: var(--muted); font-size: 13px; }
+.danger-zone { margin-top: 24px; padding-top: 18px; border-top: 1px solid var(--line); }
+.danger-zone h3 { margin: 0 0 6px; font: 650 17px system-ui; }
+.danger-zone p { margin: 0 0 14px; color: var(--muted); font-size: 13px; }
 .source-issue-list { display: grid; gap: 8px; margin: 14px 0 0; padding: 0; list-style: none; }
 .source-issue-list li { display: grid; grid-template-columns: auto minmax(0, 1fr); align-items: center; gap: 10px; padding: 11px 12px; color: var(--amber); background: color-mix(in srgb, var(--amber) 8%, transparent); border: 1px solid color-mix(in srgb, var(--amber) 24%, var(--line)); border-radius: var(--control-radius); }
 .source-issue-list strong, .source-issue-list small { display: block; }

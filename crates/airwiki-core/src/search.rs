@@ -408,12 +408,25 @@ fn prepare_candidates(
     purpose: SearchPurpose,
     query_embedding: Vec<f32>,
 ) -> Result<PreparedCandidates> {
-    let lexical = database.lexical_candidates(
+    let mut lexical = database.lexical_candidates(
         &query,
         &collections,
         purpose,
         PRE_DEDUPLICATION_CANDIDATE_LIMIT,
     )?;
+    lexical.extend(database.projected_lexical_candidates(
+        &query,
+        &collections,
+        purpose,
+        PRE_DEDUPLICATION_CANDIDATE_LIMIT,
+    )?);
+    lexical.sort_by(|left, right| {
+        left.lexical_score
+            .partial_cmp(&right.lexical_score)
+            .unwrap_or(Ordering::Equal)
+            .then_with(|| left.chunk.id.cmp(&right.chunk.id))
+    });
+    lexical.truncate(PRE_DEDUPLICATION_CANDIDATE_LIMIT);
     let mut vector_scores = Vec::with_capacity(PRE_DEDUPLICATION_CANDIDATE_LIMIT * 2);
     for collection_id in &collections {
         let mut after_rowid = None;
@@ -840,6 +853,58 @@ mod tests {
         .unwrap();
         db.approve_concept(concept.id, draft).unwrap();
         (db, collection.id, concept.id)
+    }
+
+    #[tokio::test]
+    async fn imported_okf_is_searchable_from_its_derived_projection() {
+        let database = Database::in_memory().unwrap();
+        let collection = database
+            .create_collection_with_origin(
+                "Imported",
+                "/tmp/imported-search-source",
+                "/tmp/imported-search-bundle",
+                CollectionPolicy::local_only(),
+                crate::WikiOrigin::ImportedOkf,
+                crate::IndexingMode::NotApplicable,
+            )
+            .unwrap();
+        let concept = crate::OkfImportedConcept {
+            logical_path: "guides/recovery.md".to_owned(),
+            concept_type: "Operational Guide".to_owned(),
+            title: "Recuperación de Atlas".to_owned(),
+            description: "Procedimiento importado".to_owned(),
+            tags: vec!["atlas".to_owned()],
+            lifecycle_status: "stable".to_owned(),
+            generated: None,
+            verified: None,
+            sources: None,
+            version: Some("1".to_owned()),
+            unknown_frontmatter: serde_yaml::Value::Mapping(Default::default()),
+            fingerprint: "a".repeat(64),
+            search_text: "Reiniciar el servicio Atlas y validar la recuperación".to_owned(),
+        };
+        database
+            .replace_okf_concept_projection(collection.id, &[concept])
+            .unwrap();
+        let engine = HybridSearchEngine::new(
+            database,
+            Arc::new(DeterministicEmbeddingProvider),
+            Arc::new(AllRelevantEvidenceRelevanceProvider),
+            "local",
+        );
+
+        let response = engine
+            .search_local(SearchRequest::new(
+                "reiniciar Atlas",
+                SearchPurpose::LocalAssistant,
+                5,
+            ))
+            .await
+            .unwrap();
+
+        assert_eq!(response.hits.len(), 1);
+        assert_eq!(response.hits[0].collection_id, collection.id);
+        assert_eq!(response.hits[0].heading_or_page, "guides/recovery.md");
     }
 
     fn allow_external_ai(database: &Database, collection_id: Uuid) {

@@ -96,6 +96,20 @@ describe('AirWiki wiki workspace', () => {
     expect(screen.getByRole('button', { name: 'Conexiones: Cercana y pública' })).toBeInTheDocument();
   });
 
+  it('keeps connections pending until nearby discovery is active', async () => {
+    snapshot.lanRuntime = { listener: 'listening', discovery: 'starting', addressCount: 1 };
+    render(App);
+
+    expect(await screen.findByRole('button', { name: 'Conexiones: Trabajando' })).toBeInTheDocument();
+  });
+
+  it('surfaces a nearby discovery failure as an actionable connection state', async () => {
+    snapshot.lanRuntime = { listener: 'listening', discovery: 'failed', addressCount: 1 };
+    render(App);
+
+    expect(await screen.findByRole('button', { name: 'Conexiones: Necesita atención' })).toBeInTheDocument();
+  });
+
   it('gives advanced connection sections distinct names', async () => {
     render(App);
     await fireEvent.click(await screen.findByRole('button', { name: 'Conexiones: Solo este dispositivo' }));

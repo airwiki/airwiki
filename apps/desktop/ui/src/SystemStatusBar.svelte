@@ -22,9 +22,9 @@
             ? { id: 'knowledge', label: translate('desktop-status-knowledge'), detail: translate('desktop-status-knowledge-preparing'), tone: 'working' }
             : { id: 'knowledge', label: translate('desktop-status-knowledge'), detail: translate('desktop-status-knowledge-ready'), tone: 'ready' };
 
-    const lanWorking = current.lanRuntime?.listener === 'starting';
-    const lanFailed = current.lanRuntime?.listener === 'failed';
-    const lanAvailable = current.lanRuntime?.listener === 'listening';
+    const lanWorking = current.lanRuntime?.listener === 'starting' || current.lanRuntime?.discovery === 'starting';
+    const lanFailed = current.lanRuntime?.listener === 'failed' || current.lanRuntime?.discovery === 'failed';
+    const lanAvailable = current.lanRuntime?.listener === 'listening' && current.lanRuntime.discovery === 'active';
     const publicWikis = current.wikis.filter((wiki) => wiki.internetPublic);
     const publicAvailable = publicWikis.some((wiki) => wiki.publicAnnouncement.status === 'advertised');
     const publicFailed = publicWikis.length > 0 && !publicAvailable;

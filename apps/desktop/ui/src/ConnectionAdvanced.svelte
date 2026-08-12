@@ -1,5 +1,6 @@
 <script lang="ts">
   import type { LanRuntimeSummary } from './api';
+  import TextField from './components/controls/TextField.svelte';
   import type { MessageArgs } from './i18n';
 
   export let lanRuntime: LanRuntimeSummary | null;
@@ -34,8 +35,8 @@
   <section>
     <h3>{t('desktop-community-indexes')}</h3>
     <p>{t('desktop-community-indexes-body')}</p>
-    <label><span>{t('desktop-peer-id')}</span><input value={peerId} oninput={(event) => onpeerid(event.currentTarget.value)} maxlength="200" /></label>
-    <label><span>{t('desktop-multiaddress')}</span><input value={address} oninput={(event) => onaddress(event.currentTarget.value)} maxlength="500" /></label>
+    <TextField label={t('desktop-peer-id')} value={peerId} oninput={onpeerid} maxlength={200} />
+    <TextField label={t('desktop-multiaddress')} value={address} oninput={onaddress} maxlength={500} />
     <div class="row-actions"><button class="secondary" onclick={onadd} disabled={!peerId.trim() || !address.trim()}>{t('search-public-index-add')}</button><button class="text-action" onclick={onremove} disabled={!peerId.trim()}>{t('search-public-index-remove')}</button></div>
   </section>
   {#if blockedPublishers.length}

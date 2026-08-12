@@ -9,6 +9,7 @@ pub mod config;
 pub mod inference;
 pub mod ingest;
 pub mod knowledge;
+mod memory;
 pub mod okf;
 pub mod okf_import;
 pub mod pipeline;
@@ -39,6 +40,7 @@ pub use knowledge::{
     KnowledgeBundleView, KnowledgeConceptView, KnowledgeLinkDisposition, KnowledgeLinkView,
     KnowledgePageId, KnowledgePageView, MAX_KNOWLEDGE_PAGE_BYTES, OkfBundleInspector,
 };
+pub use memory::{AI_MEMORY_CONCEPT_MAX_BYTES, AiMemoryConceptInput, AiMemoryService};
 pub use okf::{
     AirWikiProfile, OkfActorEvent, OkfConcept, OkfLifecycleStatus, OkfPublisher, OkfValidationError,
 };

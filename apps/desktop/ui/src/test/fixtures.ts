@@ -19,7 +19,7 @@ export function readySnapshot(): AppSnapshot {
       needsReviewCount: 0, publishedCount: 2, failedCount: 0, localOnly: true,
       peerShareable: false, allowExternalAi: false, internetPublic: false,
       publicDescription: '', publicLanguages: '', publicAnnouncement: { status: 'offline' },
-      maintenanceRequired: false
+      maintenanceRequired: false, origin: 'folder', indexingMode: 'continuous', okfVersion: '0.2'
     }],
     wikiScans: [], reviews: [], reanalyzingReviewIds: [], sourceIssues: [], peers: [],
     model: null, modelInstall: null, search: null, publicBrowse: null, reviewEvidence: null,

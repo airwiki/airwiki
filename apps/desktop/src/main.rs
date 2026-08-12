@@ -1527,6 +1527,17 @@ struct FolderSelection {
     display_path: String,
 }
 
+#[derive(Clone, Debug, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+struct OkfImportSummary {
+    entry_count: usize,
+    concept_count: usize,
+    #[ts(type = "number")]
+    uncompressed_bytes: u64,
+    okf_version: String,
+    warning_count: usize,
+}
+
 #[derive(Debug, Deserialize, TS)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct WikiPolicyInput {
@@ -1627,10 +1638,103 @@ async fn pick_wiki_folder(
 }
 
 #[tauri::command]
+async fn pick_okf_import(
+    runtime: tauri::State<'_, AppRuntime>,
+    zip: bool,
+) -> Result<Option<FolderSelection>, UiError> {
+    let selection = if zip {
+        rfd::AsyncFileDialog::new()
+            .add_filter("OKF ZIP", &["zip"])
+            .pick_file()
+            .await
+    } else {
+        rfd::AsyncFileDialog::new().pick_folder().await
+    };
+    let Some(selection) = selection else {
+        return Ok(None);
+    };
+    let path = selection.path().to_path_buf();
+    let token = Uuid::new_v4();
+    let mut selections = runtime
+        .folder_selections
+        .lock()
+        .map_err(|_| UiError::internal())?;
+    selections.retain(|_, selection| selection.expires_at > Instant::now());
+    selections.insert(
+        token,
+        PendingFolderSelection {
+            path: path.clone(),
+            expires_at: Instant::now() + FOLDER_SELECTION_TTL,
+        },
+    );
+    Ok(Some(FolderSelection {
+        token: token.to_string(),
+        display_path: path.to_string_lossy().into_owned(),
+    }))
+}
+
+#[tauri::command]
+async fn validate_okf_import(
+    runtime: tauri::State<'_, AppRuntime>,
+    selection_token: String,
+) -> Result<OkfImportSummary, UiError> {
+    let token = Uuid::parse_str(&selection_token)
+        .map_err(|_| UiError::invalid("invalidFolderSelection"))?;
+    let path = {
+        let selections = runtime
+            .folder_selections
+            .lock()
+            .map_err(|_| UiError::internal())?;
+        let selection = selections
+            .get(&token)
+            .ok_or_else(|| UiError::invalid("folderSelectionExpired"))?;
+        if selection.expires_at <= Instant::now() {
+            return Err(UiError::invalid("folderSelectionExpired"));
+        }
+        selection.path.clone()
+    };
+    let report = tauri::async_runtime::spawn_blocking(move || {
+        airwiki_core::OkfImportValidator::validate_path(&path)
+    })
+    .await
+    .map_err(|_| UiError::internal())?
+    .map_err(|_| UiError::invalid("invalidOkfImport"))?;
+    Ok(OkfImportSummary {
+        entry_count: report.entry_count,
+        concept_count: report.concept_count,
+        uncompressed_bytes: report.uncompressed_bytes,
+        okf_version: report.okf_version,
+        warning_count: report.warnings.len(),
+    })
+}
+
+#[tauri::command]
+async fn import_okf(
+    runtime: tauri::State<'_, AppRuntime>,
+    name: String,
+    selection_token: String,
+) -> Result<(), UiError> {
+    let name = name.trim();
+    if name.is_empty() || name.chars().count() > 120 {
+        return Err(UiError::invalid("invalidWikiName"));
+    }
+    let source = consume_folder_selection(&runtime, &selection_token)?;
+    send_command(
+        &runtime,
+        WorkerCommand::ImportOkfBundle {
+            name: name.to_owned(),
+            source,
+        },
+    )
+    .await
+}
+
+#[tauri::command]
 async fn add_wiki(
     runtime: tauri::State<'_, AppRuntime>,
     name: String,
     folder_token: String,
+    continuous_indexing: bool,
 ) -> Result<(), UiError> {
     let name = name.trim();
     if name.is_empty() || name.chars().count() > 120 {
@@ -1642,6 +1746,11 @@ async fn add_wiki(
         WorkerCommand::AddCollection {
             name: name.to_owned(),
             folder,
+            indexing_mode: if continuous_indexing {
+                airwiki_core::IndexingMode::Continuous
+            } else {
+                airwiki_core::IndexingMode::Manual
+            },
         },
     )
     .await
@@ -3806,6 +3915,8 @@ fn ui_bindings_source() -> String {
         exported_declaration::<SuggestedEntityDto>(&config),
         exported_declaration::<SuggestedLinkDto>(&config),
         exported_declaration::<EnrichmentDraftDto>(&config),
+        exported_declaration::<WikiOriginDto>(&config),
+        exported_declaration::<IndexingModeDto>(&config),
         exported_declaration::<WikiSummary>(&config),
         exported_declaration::<PublicAnnouncementSummary>(&config),
         exported_declaration::<HardwareSummary>(&config),
@@ -3878,6 +3989,7 @@ fn ui_bindings_source() -> String {
         exported_declaration::<UiEventEnvelope>(&config),
         exported_declaration::<UiError>(&config),
         exported_declaration::<FolderSelection>(&config),
+        exported_declaration::<OkfImportSummary>(&config),
         exported_declaration::<WikiPolicyInput>(&config),
     ]
     .join("\n\n");
@@ -4148,6 +4260,9 @@ fn main() -> Result<()> {
             cancel_model_install,
             set_model_profile,
             pick_wiki_folder,
+            pick_okf_import,
+            validate_okf_import,
+            import_okf,
             add_wiki,
             relink_wiki,
             rescan_wiki,

@@ -9,6 +9,10 @@ export type SuggestedLink = { label: string, target: string, };
 
 export type EnrichmentDraft = { type: ConceptType, title: string, description: string, language: string, tags: Array<string>, entities: Array<SuggestedEntity>, links: Array<SuggestedLink>, summary: string, classificationConfidence: number, classificationExplanation: string, };
 
+export type WikiOriginDto = "folder" | "importedOkf" | "aiMemory";
+
+export type IndexingModeDto = "continuous" | "manual" | "notApplicable";
+
 export type WikiSummary = { id: string, name: string, documentCount: number, needsReviewCount: number, publishedCount: number, failedCount: number, localOnly: boolean, peerShareable: boolean, allowExternalAi: boolean, internetPublic: boolean, publicDescription: string, publicLanguages: string, publicAnnouncement: PublicAnnouncementSummary, maintenanceRequired: boolean, origin: WikiOriginDto, indexingMode: IndexingModeDto, okfVersion: string, };
 
 export type PublicAnnouncementSummary = { "status": "offline" } | { "status": "advertised", acceptedIndexes: number, } | { "status": "expired" };
@@ -152,5 +156,7 @@ export type UiEventEnvelope = { schemaVersion: number, sequence: number, request
 export type UiError = { code: string, messageKey: string, retryable: boolean, };
 
 export type FolderSelection = { token: string, displayPath: string, };
+
+export type OkfImportSummary = { entryCount: number, conceptCount: number, uncompressedBytes: number, okfVersion: string, warningCount: number, };
 
 export type WikiPolicyInput = { localOnly: boolean, peerShareable: boolean, allowExternalAi: boolean, internetPublic: boolean, };

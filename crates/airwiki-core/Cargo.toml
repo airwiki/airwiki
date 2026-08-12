@@ -36,6 +36,7 @@ tokenizers = { version = "0.22.2", optional = true, default-features = false, fe
 tracing.workspace = true
 uuid.workspace = true
 walkdir = "2.5.0"
+zip = { version = "6.0.0", default-features = false, features = ["deflate"] }
 
 [target.'cfg(windows)'.dependencies]
 windows-sys = { version = "0.61.2", features = ["Win32_Foundation", "Win32_Storage_FileSystem"] }

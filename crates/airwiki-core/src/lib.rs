@@ -10,6 +10,7 @@ pub mod inference;
 pub mod ingest;
 pub mod knowledge;
 pub mod okf;
+pub mod okf_import;
 pub mod pipeline;
 pub mod publication;
 pub mod repair;
@@ -41,6 +42,7 @@ pub use knowledge::{
 pub use okf::{
     AirWikiProfile, OkfActorEvent, OkfConcept, OkfLifecycleStatus, OkfPublisher, OkfValidationError,
 };
+pub use okf_import::{OkfImportReport, OkfImportValidator, OkfImportWarning};
 pub use pipeline::{CollectionPreflight, IngestOutcome, IngestPipeline, ReviewEdits};
 pub use publication::{OkfPublicationMaterializer, PublicationRecoveryReport};
 pub use repair::{

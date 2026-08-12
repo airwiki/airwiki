@@ -6,6 +6,7 @@ import type {
   FolderSelection,
   IntegrationActionInput,
   KnowledgePageInput,
+  OkfImportSummary,
   PreferencesInput,
   ReviewSummary,
   SystemDestination,
@@ -50,8 +51,24 @@ export async function pickWikiFolder(): Promise<FolderSelection | null> {
   return invoke('pick_wiki_folder');
 }
 
-export async function addWiki(name: string, folderToken: string): Promise<void> {
-  return invoke('add_wiki', { name, folderToken });
+export async function pickOkfImport(zip: boolean): Promise<FolderSelection | null> {
+  return invoke('pick_okf_import', { zip });
+}
+
+export async function validateOkfImport(selectionToken: string): Promise<OkfImportSummary> {
+  return invoke('validate_okf_import', { selectionToken });
+}
+
+export async function importOkf(name: string, selectionToken: string): Promise<void> {
+  return invoke('import_okf', { name, selectionToken });
+}
+
+export async function addWiki(
+  name: string,
+  folderToken: string,
+  continuousIndexing = true,
+): Promise<void> {
+  return invoke('add_wiki', { name, folderToken, continuousIndexing });
 }
 
 export async function relinkWiki(wikiId: string, folderToken: string): Promise<void> {

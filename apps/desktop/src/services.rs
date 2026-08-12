@@ -1595,11 +1595,18 @@ impl DesktopServices {
         Ok(())
     }
 
-    pub fn add_collection(
+    pub fn add_folder_wiki(
         &self,
         name: impl Into<String>,
         source_folder: impl AsRef<Path>,
+        indexing_mode: airwiki_core::IndexingMode,
     ) -> Result<CollectionRecord> {
+        if !matches!(
+            indexing_mode,
+            airwiki_core::IndexingMode::Continuous | airwiki_core::IndexingMode::Manual
+        ) {
+            bail!("una wiki de carpeta requiere indexación continua o manual");
+        }
         let source_folder = source_folder.as_ref();
         if !source_folder.is_dir() {
             bail!("la carpeta fuente no existe: {}", source_folder.display());
@@ -1632,11 +1639,13 @@ impl DesktopServices {
             }
         }
         let bundle_root = self.core_paths.vaults.join(Uuid::new_v4().to_string());
-        let collection = self.database.create_collection(
+        let collection = self.database.create_collection_with_origin(
             name,
             &source_folder,
             bundle_root,
             CollectionPolicy::local_only(),
+            airwiki_core::WikiOrigin::Folder,
+            indexing_mode,
         )?;
         self.audit(
             "collection_created",
@@ -1645,6 +1654,60 @@ impl DesktopServices {
             serde_json::json!({"source_folder": "[LOCAL_PATH_REDACTED]"}),
         )?;
         Ok(collection)
+    }
+
+    pub(crate) fn collection_indexing_mode(
+        &self,
+        collection_id: Uuid,
+    ) -> Result<airwiki_core::IndexingMode> {
+        self.database
+            .collection(collection_id)?
+            .map(|collection| collection.indexing_mode)
+            .with_context(|| format!("la wiki {collection_id} no existe"))
+    }
+
+    pub fn import_okf_bundle(
+        &self,
+        name: impl Into<String>,
+        source: &Path,
+    ) -> Result<(CollectionRecord, airwiki_core::OkfImportReport)> {
+        let name = name.into();
+        let collection_id = Uuid::new_v4();
+        let staging = self
+            .core_paths
+            .vaults
+            .join(format!(".import-{collection_id}"));
+        let bundle_root = self.core_paths.vaults.join(collection_id.to_string());
+        let report = airwiki_core::OkfImportValidator::materialize_path(source, &staging)?;
+        std::fs::rename(&staging, &bundle_root)
+            .context("no se pudo activar atómicamente el bundle OKF importado")?;
+        let record = self.database.create_collection_with_origin(
+            name,
+            &bundle_root,
+            &bundle_root,
+            CollectionPolicy::local_only(),
+            airwiki_core::WikiOrigin::ImportedOkf,
+            airwiki_core::IndexingMode::NotApplicable,
+        );
+        match record {
+            Ok(record) => {
+                self.audit(
+                    "okf_bundle_imported",
+                    "collection",
+                    Some(record.id.to_string()),
+                    serde_json::json!({
+                        "entry_count": report.entry_count,
+                        "concept_count": report.concept_count,
+                        "warning_count": report.warnings.len(),
+                    }),
+                )?;
+                Ok((record, report))
+            }
+            Err(error) => {
+                let _ = std::fs::remove_dir_all(&bundle_root);
+                Err(error).context("no se pudo registrar el bundle OKF importado")
+            }
+        }
     }
 
     pub fn relink_collection(

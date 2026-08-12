@@ -86,8 +86,17 @@ async function waitForVisualPaint(route: 'wikis' | 'system'): Promise<void> {
       { timeout: 10_000, timeoutMsg: 'system preferences did not reach their complete DOM state' }
     );
   }
-  await browser.execute(() => document.body.getBoundingClientRect());
-  await browser.pause(50);
+  await browser.execute(() => {
+    document.documentElement.removeAttribute('data-visual-paint-ready');
+    document.body.getBoundingClientRect();
+    requestAnimationFrame(() => requestAnimationFrame(() => {
+      document.documentElement.setAttribute('data-visual-paint-ready', 'true');
+    }));
+  });
+  await browser.waitUntil(
+    () => browser.execute(() => document.documentElement.getAttribute('data-visual-paint-ready') === 'true'),
+    { timeout: 10_000, timeoutMsg: 'visual route did not paint within the expected time' }
+  );
 }
 
 async function configureVisualPreferences(locale: 'en' | 'es', theme: 'light' | 'dark'): Promise<void> {

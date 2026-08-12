@@ -1483,7 +1483,7 @@ mod tests {
         const CHILD_TEST: &str = "updater::tests::windows_inherited_handle_child";
 
         let current_executable = std::env::current_exe().unwrap();
-        let executable_bytes = std::fs::read(current_executable).unwrap();
+        let executable_bytes = std::fs::read(&current_executable).unwrap();
         let package = LockedWindowsUpdatePackage::stage(&executable_bytes).unwrap();
         let installer_path = package.path().to_path_buf();
         let directory_path = package.directory.path().to_path_buf();

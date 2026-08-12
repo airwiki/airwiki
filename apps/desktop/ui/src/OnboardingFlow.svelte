@@ -3,6 +3,8 @@
   import ArrowRight from '@lucide/svelte/icons/arrow-right';
   import Check from '@lucide/svelte/icons/check';
   import type { AppSnapshot, CloseBehavior, LanPreference, LocalePreference } from './api';
+  import Checkbox from './components/controls/Checkbox.svelte';
+  import SelectField from './components/controls/SelectField.svelte';
   import { message } from './i18n';
 
   export let snapshot: AppSnapshot;
@@ -52,23 +54,23 @@
           <p class="eyebrow">{t('onboarding-welcome-title')}</p>
           <h1>{t('settings-language')}</h1>
           <p class="lede">{t('settings-subtitle')}</p>
-          <label class="choice-field"><span>{t('settings-language')}</span><select bind:value={locale}><option value="system">{t('language-system')}</option><option value="es">{t('language-spanish')}</option><option value="en">{t('language-english')}</option></select></label>
+          <div class="choice-field"><SelectField label={t('settings-language')} bind:value={locale} options={[{ value: 'system', label: t('language-system') }, { value: 'es', label: t('language-spanish') }, { value: 'en', label: t('language-english') }]} /></div>
         {:else if step === 1}
           <p class="eyebrow">{t('onboarding-privacy-title')}</p>
           <h1>{t('onboarding-lan-title')}</h1>
           <p class="lede">{t('onboarding-lan-body')}</p>
-          <label class="choice-field"><span>{t('desktop-lan')}</span><select bind:value={lanPreference}><option value="disabled">{t('onboarding-lan-disable')}</option><option value="enabled">{t('onboarding-lan-enable')}</option></select></label>
+          <div class="choice-field"><SelectField label={t('desktop-lan')} bind:value={lanPreference} options={[{ value: 'disabled', label: t('onboarding-lan-disable') }, { value: 'enabled', label: t('onboarding-lan-enable') }]} /></div>
           <p class="privacy-note">{t('onboarding-privacy-local')}</p>
         {:else if step === 2}
           <p class="eyebrow">{t('desktop-sign-in')}</p>
           <h1>{t('onboarding-background-title')}</h1>
           <p class="lede">{t('onboarding-background-body')}</p>
-          <label class="choice-field"><span>{t('desktop-close')}</span><select bind:value={closeBehavior}><option value="ask">{t('close-dialog-title')}</option><option value="hide_to_tray">{t('close-dialog-background')}</option><option value="quit">{t('tray-quit')}</option></select></label>
+          <div class="choice-field"><SelectField label={t('desktop-close')} bind:value={closeBehavior} options={[{ value: 'ask', label: t('close-dialog-title') }, { value: 'hide_to_tray', label: t('close-dialog-background') }, { value: 'quit', label: t('tray-quit') }]} /></div>
         {:else if step === 3 && hasModelStep && snapshot.model}
           <p class="eyebrow">{t('component-local-ai')}</p>
           <h1>{t('onboarding-model-title')}</h1>
           <p class="lede">{snapshot.model.displayName ?? t('onboarding-model-recommended')} · {(snapshot.model.downloadBytes / 1073741824).toFixed(1)} GiB</p>
-          <label class="license-choice"><input type="checkbox" bind:checked={modelLicensesConfirmed} /><span><strong>{t('models-accept-licenses')}</strong><small>{snapshot.model.license ?? t('models-license')}</small></span></label>
+          <div class="license-choice"><Checkbox label={t('models-accept-licenses')} description={snapshot.model.license ?? t('models-license')} bind:checked={modelLicensesConfirmed} /></div>
           <button class="secondary onboarding-model" onclick={onprepare} disabled={actionBusy || (!modelLicensesConfirmed && !snapshot.model.licenseAccepted) || !snapshot.model.fitsAvailableDisk}>{t('primary-button-prepare')}</button>
         {:else}
           <p class="eyebrow">{t('onboarding-review-title')}</p>

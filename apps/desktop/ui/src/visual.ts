@@ -9,8 +9,10 @@ if (!import.meta.env.DEV) throw new Error('visual fixtures are available only fr
 const parameters = new URLSearchParams(window.location.search);
 const locale = parameters.get('locale') === 'en' ? 'en' : 'es';
 const theme = parameters.get('theme') === 'light' ? 'light' : 'dark';
+const platform = parameters.get('platform') === 'windows' ? 'windows' : 'macOs';
 const destination = parameters.get('destination') ?? 'home';
 const snapshot = readySnapshot();
+snapshot.platform = platform;
 if (snapshot.preferences) {
   snapshot.preferences.locale = locale;
   snapshot.preferences.theme = theme;

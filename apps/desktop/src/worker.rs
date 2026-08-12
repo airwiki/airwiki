@@ -93,6 +93,15 @@ pub struct CollectionView {
     pub origin: WikiOrigin,
     pub indexing_mode: IndexingMode,
     pub okf_version: String,
+    pub trust_summary: TrustSummaryView,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TrustSummaryView {
+    Unverified,
+    MachineConfirmed,
+    HumanReviewed,
+    VerificationOutdated,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -411,6 +420,10 @@ pub enum WorkerCommand {
         folder: PathBuf,
     },
     RescanCollection(Uuid),
+    SetCollectionIndexing {
+        collection_id: Uuid,
+        indexing_mode: IndexingMode,
+    },
     UpdateCollectionPolicy {
         collection_id: Uuid,
         local_only: bool,
@@ -1107,7 +1120,9 @@ pub(crate) async fn run_worker(
     );
     if let Ok(collections) = services.collection_views() {
         for collection in collections {
-            spawn_wiki_maintenance(&services, &mut background, collection.id);
+            if collection.origin == WikiOrigin::Folder {
+                spawn_wiki_maintenance(&services, &mut background, collection.id);
+            }
         }
     }
     let mut watcher_quarantined = HashSet::new();
@@ -1810,9 +1825,12 @@ pub(crate) async fn run_worker(
                                     state: None,
                                 },
                             ).await;
-                        } else if services.collection_indexing_mode(collection_id).is_err() {
+                        } else if !matches!(
+                            services.collection_indexing_mode(collection_id),
+                            Ok(IndexingMode::Continuous | IndexingMode::Manual)
+                        ) {
                             send(&events, WorkerEvent::Error(
-                                "La wiki ya no está disponible".into(),
+                                "Esta wiki no tiene una carpeta de origen para actualizar".into(),
                             )).await;
                             send(
                                 &events,
@@ -1830,6 +1848,37 @@ pub(crate) async fn run_worker(
                                 &events,
                                 collection_id,
                             ).await;
+                        }
+                    }
+                    WorkerCommand::SetCollectionIndexing { collection_id, indexing_mode } => {
+                        if let Err(error) = services
+                            .database()
+                            .update_collection_indexing_mode(collection_id, indexing_mode)
+                        {
+                            send(&events, WorkerEvent::Error(format!(
+                                "No se pudo cambiar la indexación: {error:#}"
+                            ))).await;
+                        } else {
+                            watchers.remove(&collection_id);
+                            if indexing_mode == IndexingMode::Continuous {
+                                match services.collection_views()
+                                    .ok()
+                                    .and_then(|views| views.into_iter().find(|view| view.id == collection_id))
+                                    .map(|view| CollectionWatcherHandle::spawn(collection_id, view.folder, watch_tx.clone()))
+                                {
+                                    Some(Ok(watcher)) => {
+                                        watchers.insert(collection_id, watcher);
+                                        if services.models_ready() {
+                                            request_scan(&services, &mut scan_scheduler, &mut background, &events, collection_id).await;
+                                        }
+                                    }
+                                    _ => {
+                                        request_quarantine(&services, &mut background, &mut watcher_quarantined, collection_id, "no se pudo activar el watcher solicitado");
+                                        send(&events, WorkerEvent::Error("No se pudo activar la actualización automática".into())).await;
+                                    }
+                                }
+                            }
+                            refresh_content_views(&services, &events).await;
                         }
                     }
                     WorkerCommand::UpdateCollectionPolicy { collection_id, local_only, peer_shareable, allow_external_ai, internet_public } => {
@@ -2937,7 +2986,10 @@ pub(crate) async fn run_worker(
                         result,
                     })) => {
                         match result {
-                            Ok(()) => match CollectionWatcherHandle::spawn(
+                            Ok(()) if matches!(
+                                services.collection_indexing_mode(collection_id),
+                                Ok(IndexingMode::Continuous)
+                            ) => match CollectionWatcherHandle::spawn(
                                 collection_id,
                                 folder,
                                 watch_tx.clone(),
@@ -2968,6 +3020,24 @@ pub(crate) async fn run_worker(
                                     )),
                                 ).await,
                             },
+                            Ok(()) => {
+                                if services.models_ready() {
+                                    request_scan(
+                                        &services,
+                                        &mut scan_scheduler,
+                                        &mut background,
+                                        &events,
+                                        collection_id,
+                                    ).await;
+                                }
+                                send(
+                                    &events,
+                                    WorkerEvent::Notice(
+                                        "La carpeta quedó vinculada. La actualización automática sigue desactivada"
+                                            .to_owned(),
+                                    ),
+                                ).await;
+                            }
                             Err(error) => send(
                                 &events,
                                 WorkerEvent::Error(format!(

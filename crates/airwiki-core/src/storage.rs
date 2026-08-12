@@ -172,6 +172,25 @@ pub struct ConceptRecord {
     pub updated_at: DateTime<Utc>,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct OkfConceptProjectionRecord {
+    pub collection_id: Uuid,
+    pub concept_id: Uuid,
+    pub logical_path: String,
+    pub concept_type: ConceptType,
+    pub title: String,
+    pub description: String,
+    pub tags: Vec<String>,
+    pub lifecycle_status: String,
+    pub generation: Option<serde_json::Value>,
+    pub verifications: serde_json::Value,
+    pub provenance: serde_json::Value,
+    pub version: Option<String>,
+    pub fingerprint: String,
+    pub unknown_frontmatter: serde_json::Value,
+    pub indexed_at: DateTime<Utc>,
+}
+
 #[derive(Debug, Clone)]
 pub struct StoredChunk {
     pub id: Uuid,
@@ -1106,6 +1125,82 @@ impl Database {
             .connection()?
             .execute("DELETE FROM collections WHERE id=?1", [id.to_string()])?;
         ensure_changed(count, "collection", id)
+    }
+
+    pub fn replace_okf_concept_projection(
+        &self,
+        collection_id: Uuid,
+        concepts: &[crate::okf_import::OkfImportedConcept],
+    ) -> Result<()> {
+        let mut connection = self.connection()?;
+        let tx = connection.transaction()?;
+        tx.execute(
+            "DELETE FROM okf_concept_projection WHERE collection_id=?1",
+            [collection_id.to_string()],
+        )?;
+        let now = Utc::now().to_rfc3339();
+        for concept in concepts {
+            let concept_id = Uuid::new_v5(&collection_id, concept.logical_path.as_bytes());
+            tx.execute(
+                "INSERT INTO okf_concept_projection
+                 (collection_id,concept_id,logical_path,concept_type,title,description,tags_json,
+                  lifecycle_status,generation_json,verifications_json,provenance_json,version,
+                  fingerprint,unknown_frontmatter_json,indexed_at)
+                 VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15)",
+                params![
+                    collection_id.to_string(),
+                    concept_id.to_string(),
+                    concept.logical_path,
+                    concept.concept_type,
+                    concept.title,
+                    concept.description,
+                    serde_json::to_string(&concept.tags)?,
+                    concept.lifecycle_status,
+                    yaml_json(concept.generated.as_ref())?,
+                    yaml_json(concept.verified.as_ref())?.unwrap_or_else(|| "[]".to_owned()),
+                    yaml_json(concept.sources.as_ref())?.unwrap_or_else(|| "[]".to_owned()),
+                    concept.version,
+                    concept.fingerprint,
+                    serde_json::to_string(&serde_json::to_value(&concept.unknown_frontmatter)?)?,
+                    now,
+                ],
+            )?;
+        }
+        tx.commit()?;
+        Ok(())
+    }
+
+    pub fn list_okf_concept_projection(
+        &self,
+        collection_id: Uuid,
+    ) -> Result<Vec<OkfConceptProjectionRecord>> {
+        let connection = self.connection()?;
+        let mut statement = connection.prepare(
+            "SELECT collection_id,concept_id,logical_path,concept_type,title,description,tags_json,
+             lifecycle_status,generation_json,verifications_json,provenance_json,version,fingerprint,
+             unknown_frontmatter_json,indexed_at FROM okf_concept_projection
+             WHERE collection_id=?1 ORDER BY logical_path COLLATE NOCASE",
+        )?;
+        let rows = statement.query_map([collection_id.to_string()], |row| {
+            Ok(OkfConceptProjectionRecord {
+                collection_id: uuid_sql(row.get(0)?)?,
+                concept_id: uuid_sql(row.get(1)?)?,
+                logical_path: row.get(2)?,
+                concept_type: concept_type_sql(row.get(3)?)?,
+                title: row.get(4)?,
+                description: row.get(5)?,
+                tags: json_sql(row.get(6)?)?,
+                lifecycle_status: row.get(7)?,
+                generation: row.get::<_, Option<String>>(8)?.map(json_sql).transpose()?,
+                verifications: json_sql(row.get(9)?)?,
+                provenance: json_sql(row.get(10)?)?,
+                version: row.get(11)?,
+                fingerprint: row.get(12)?,
+                unknown_frontmatter: json_sql(row.get(13)?)?,
+                indexed_at: datetime_sql(row.get(14)?)?,
+            })
+        })?;
+        rows.collect::<rusqlite::Result<_>>().map_err(Into::into)
     }
 
     pub fn update_collection_policy(&self, id: Uuid, mut policy: CollectionPolicy) -> Result<()> {
@@ -4448,6 +4543,12 @@ fn indexing_mode_sql(value: String) -> rusqlite::Result<IndexingMode> {
 
 fn json_sql<T: for<'de> Deserialize<'de>>(value: String) -> rusqlite::Result<T> {
     serde_json::from_str(&value).map_err(to_sql_error)
+}
+
+fn yaml_json(value: Option<&serde_yaml::Value>) -> Result<Option<String>> {
+    value
+        .map(|value| serde_json::to_string(value).map_err(Into::into))
+        .transpose()
 }
 
 fn to_sql_error(error: impl std::fmt::Display) -> rusqlite::Error {

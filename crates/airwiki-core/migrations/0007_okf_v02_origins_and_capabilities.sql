@@ -6,8 +6,12 @@ ALTER TABLE collections ADD COLUMN okf_version TEXT NOT NULL DEFAULT '0.1';
 
 CREATE TABLE okf_concept_projection (
     collection_id TEXT NOT NULL REFERENCES collections(id) ON DELETE CASCADE,
+    concept_id TEXT NOT NULL,
     logical_path TEXT NOT NULL,
     concept_type TEXT NOT NULL,
+    title TEXT NOT NULL,
+    description TEXT NOT NULL,
+    tags_json TEXT NOT NULL DEFAULT '[]',
     lifecycle_status TEXT NOT NULL CHECK(lifecycle_status IN ('draft','stable','deprecated')),
     generation_json TEXT,
     verifications_json TEXT NOT NULL DEFAULT '[]',
@@ -16,7 +20,8 @@ CREATE TABLE okf_concept_projection (
     fingerprint TEXT NOT NULL,
     unknown_frontmatter_json TEXT NOT NULL DEFAULT '{}',
     indexed_at TEXT NOT NULL,
-    PRIMARY KEY(collection_id, logical_path)
+    PRIMARY KEY(collection_id, logical_path),
+    UNIQUE(collection_id, concept_id)
 );
 CREATE INDEX okf_projection_collection_status
     ON okf_concept_projection(collection_id, lifecycle_status);

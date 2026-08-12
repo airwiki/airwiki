@@ -42,7 +42,7 @@ pub use knowledge::{
 pub use okf::{
     AirWikiProfile, OkfActorEvent, OkfConcept, OkfLifecycleStatus, OkfPublisher, OkfValidationError,
 };
-pub use okf_import::{OkfImportReport, OkfImportValidator, OkfImportWarning};
+pub use okf_import::{OkfImportReport, OkfImportValidator, OkfImportWarning, OkfImportedConcept};
 pub use pipeline::{CollectionPreflight, IngestOutcome, IngestPipeline, ReviewEdits};
 pub use publication::{OkfPublicationMaterializer, PublicationRecoveryReport};
 pub use repair::{
@@ -63,8 +63,9 @@ pub use storage::{
     AuditEvent, BootstrapFederationIndexEntry, CollectionMaintenanceCounts,
     CollectionMaintenanceRecord, CollectionMaintenanceResult, CollectionMaintenanceStatus,
     CollectionRecord, CollectionStats, ConceptRecord, Database, FederationIndexRecord, GrantRecord,
-    IndexingMode, JobRecord, PeerRecord, ReviewEvidenceChunkRecord, ReviewEvidencePageRecord,
-    ReviewReanalysisClaim, ReviewVersionToken, SourceDocumentRecord, StoredChunk, WikiOrigin,
+    IndexingMode, JobRecord, OkfConceptProjectionRecord, PeerRecord, ReviewEvidenceChunkRecord,
+    ReviewEvidencePageRecord, ReviewReanalysisClaim, ReviewVersionToken, SourceDocumentRecord,
+    StoredChunk, WikiOrigin,
 };
 
 /// Embedding dimensionality required by multilingual-e5-small.

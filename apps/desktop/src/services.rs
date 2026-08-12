@@ -26,7 +26,8 @@ use airwiki_core::{
     IngestOutcome, IngestPipeline, KnowledgeBundleState, KnowledgeBundleView, KnowledgePageId,
     KnowledgePageView, LlamaServerProvider, OkfBundleInspector, OkfPublicationMaterializer,
     PinnedE5Snapshot, PinnedMmarcoRerankerSnapshot, RelevanceInput, ReviewEdits,
-    ReviewVersionToken, SourceIssueCode, Tokenizer, WikiRepairExecutor, WikiRepairPlanner,
+    ReviewVersionToken, SourceIssueCode, Tokenizer, WikiOrigin, WikiRepairExecutor,
+    WikiRepairPlanner,
 };
 use airwiki_inference::{
     GenerationSettings, InstallOutcome, LlamaSupervisor, LlamaSupervisorFailure,
@@ -1666,6 +1667,17 @@ impl DesktopServices {
             .with_context(|| format!("la wiki {collection_id} no existe"))
     }
 
+    pub(crate) fn collection_origin(&self, collection_id: Uuid) -> Result<WikiOrigin> {
+        self.database
+            .collection(collection_id)?
+            .map(|collection| collection.origin)
+            .with_context(|| format!("la wiki {collection_id} no existe"))
+    }
+
+    pub(crate) fn database(&self) -> &Database {
+        &self.database
+    }
+
     pub fn import_okf_bundle(
         &self,
         name: impl Into<String>,
@@ -1691,6 +1703,14 @@ impl DesktopServices {
         );
         match record {
             Ok(record) => {
+                if let Err(error) = self
+                    .database
+                    .replace_okf_concept_projection(record.id, &report.concepts)
+                {
+                    let _ = self.database.delete_collection_record(record.id);
+                    let _ = std::fs::remove_dir_all(&bundle_root);
+                    return Err(error).context("no se pudo proyectar el bundle OKF importado");
+                }
                 self.audit(
                     "okf_bundle_imported",
                     "collection",
@@ -2476,15 +2496,31 @@ impl DesktopServices {
             .into_iter()
             .map(|collection| {
                 let stats = self.database.collection_stats(collection.id)?;
+                let projected = if collection.origin == airwiki_core::WikiOrigin::Folder {
+                    Vec::new()
+                } else {
+                    self.database.list_okf_concept_projection(collection.id)?
+                };
                 let public_profile = self.database.public_collection_profile(collection.id)?;
                 let announcement = announcements.get(&collection.id).copied();
                 Ok(CollectionView {
                     id: collection.id,
                     name: collection.name,
                     folder: collection.source_folder,
-                    document_count: usize::try_from(stats.sources).unwrap_or(usize::MAX),
+                    document_count: if projected.is_empty() {
+                        usize::try_from(stats.sources).unwrap_or(usize::MAX)
+                    } else {
+                        projected.len()
+                    },
                     needs_review_count: usize::try_from(stats.needs_review).unwrap_or(usize::MAX),
-                    published_count: usize::try_from(stats.published).unwrap_or(usize::MAX),
+                    published_count: if projected.is_empty() {
+                        usize::try_from(stats.published).unwrap_or(usize::MAX)
+                    } else {
+                        projected
+                            .iter()
+                            .filter(|concept| concept.lifecycle_status == "stable")
+                            .count()
+                    },
                     failed_count: usize::try_from(stats.failed).unwrap_or(usize::MAX),
                     local_only: collection.policy.local_only,
                     peer_shareable: collection.policy.peer_shareable,
@@ -2502,6 +2538,7 @@ impl DesktopServices {
                     origin: collection.origin,
                     indexing_mode: collection.indexing_mode,
                     okf_version: collection.okf_version,
+                    trust_summary: summarize_projection_trust(&projected),
                 })
             })
             .collect()
@@ -2566,6 +2603,9 @@ impl DesktopServices {
     /// Regenerates only deterministic derived Wiki artifacts. Content-bearing
     /// concepts and history are left untouched for the guided repair UI.
     pub fn maintain_derived_wiki(&self, collection_id: Uuid) -> Result<bool> {
+        if self.collection_origin(collection_id)? != WikiOrigin::Folder {
+            return Ok(false);
+        }
         let bundle =
             OkfBundleInspector::new(self.database.clone()).inspect_bundle(collection_id)?;
         let plan = WikiRepairPlanner::plan(&bundle)?;
@@ -3760,6 +3800,59 @@ fn peer_presentation_states(
         PeerActivityState::NotObserved
     };
     (trust, activity)
+}
+
+fn summarize_projection_trust(
+    concepts: &[airwiki_core::OkfConceptProjectionRecord],
+) -> crate::worker::TrustSummaryView {
+    use crate::worker::TrustSummaryView;
+    if concepts.is_empty() {
+        return TrustSummaryView::Unverified;
+    }
+    let mut machine = false;
+    let mut human = false;
+    let mut outdated = false;
+    for concept in concepts {
+        let generated_at = concept
+            .generation
+            .as_ref()
+            .and_then(|generation| generation.get("at"))
+            .and_then(serde_json::Value::as_str)
+            .and_then(|value| DateTime::parse_from_rfc3339(value).ok());
+        let mut latest_human = None;
+        let verifications = concept
+            .verifications
+            .as_array()
+            .map(Vec::as_slice)
+            .unwrap_or_default();
+        for verification in verifications {
+            if verification
+                .get("by")
+                .and_then(serde_json::Value::as_str)
+                .is_some_and(|actor| actor.starts_with("human:"))
+            {
+                human = true;
+                let verified_at = verification
+                    .get("at")
+                    .and_then(serde_json::Value::as_str)
+                    .and_then(|value| DateTime::parse_from_rfc3339(value).ok());
+                latest_human = latest_human.max(verified_at);
+            } else if !verification.is_null() {
+                machine = true;
+            }
+        }
+        outdated |= generated_at
+            .is_some_and(|generated| latest_human.is_some_and(|verified| generated > verified));
+    }
+    if outdated {
+        TrustSummaryView::VerificationOutdated
+    } else if human {
+        TrustSummaryView::HumanReviewed
+    } else if machine {
+        TrustSummaryView::MachineConfirmed
+    } else {
+        TrustSummaryView::Unverified
+    }
 }
 
 fn parse_peer_id(value: &str) -> Result<PeerId> {

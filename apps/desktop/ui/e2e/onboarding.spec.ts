@@ -86,10 +86,8 @@ async function waitForVisualPaint(route: 'wikis' | 'system'): Promise<void> {
       { timeout: 10_000, timeoutMsg: 'system preferences did not reach their complete DOM state' }
     );
   }
-  await browser.executeAsync((done) => {
-    document.body.getBoundingClientRect();
-    requestAnimationFrame(() => requestAnimationFrame(() => done()));
-  });
+  await browser.execute(() => document.body.getBoundingClientRect());
+  await browser.pause(50);
 }
 
 async function configureVisualPreferences(locale: 'en' | 'es', theme: 'light' | 'dark'): Promise<void> {
@@ -259,6 +257,31 @@ describe('AirWiki real IPC journey', () => {
       scrollWidth: document.documentElement.scrollWidth
     }));
     expect(layout.scrollWidth).toBeLessThanOrEqual(layout.clientWidth);
+
+    await browser.execute(() => { window.location.hash = 'system/connectivity'; });
+    await $('.connections-drawer').waitForDisplayed();
+    await $('.connection-advanced > summary').click();
+    const desktopControlLayout = await browser.execute(() => {
+      const indicator = document.querySelector<HTMLElement>('.check-indicator');
+      const disclosure = document.querySelector<HTMLElement>('.connection-advanced > summary');
+      const statusGrid = document.querySelector<HTMLElement>('.connection-advanced > dl');
+      const firstStatus = statusGrid?.querySelector<HTMLElement>('dd');
+      return {
+        checkboxWidth: indicator?.getBoundingClientRect().width ?? 0,
+        checkboxHeight: indicator?.getBoundingClientRect().height ?? 0,
+        disclosureDisplay: disclosure ? getComputedStyle(disclosure).display : '',
+        statusDisplay: statusGrid ? getComputedStyle(statusGrid).display : '',
+        statusColumns: statusGrid ? getComputedStyle(statusGrid).gridTemplateColumns.split(' ').length : 0,
+        statusMarginLeft: firstStatus ? getComputedStyle(firstStatus).marginLeft : ''
+      };
+    });
+    expect(desktopControlLayout.checkboxWidth).toBe(16);
+    expect(desktopControlLayout.checkboxHeight).toBe(16);
+    expect(desktopControlLayout.disclosureDisplay).toBe('flex');
+    expect(desktopControlLayout.statusDisplay).toBe('grid');
+    expect(desktopControlLayout.statusColumns).toBe(3);
+    expect(desktopControlLayout.statusMarginLeft).toBe('0px');
+    await $('.connections-drawer button[aria-label="Close"]').click();
 
     await assertVisualMatrix();
   });

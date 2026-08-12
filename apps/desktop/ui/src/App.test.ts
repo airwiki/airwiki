@@ -76,18 +76,29 @@ describe('AirWiki wiki workspace', () => {
     expect(screen.queryByRole('complementary')).not.toBeInTheDocument();
   });
 
-  it('shows real service states in the sidebar without treating disabled services as healthy', async () => {
+  it('groups technical services into clear user-facing system states', async () => {
     render(App);
 
-    expect(await screen.findByRole('button', { name: 'IA local: Sin configurar' })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Red local: Opcional · Desactivado' })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Compartición pública: No compartida' })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'MCP: Disponible' })).toBeInTheDocument();
+    expect(await screen.findByRole('button', { name: 'Conocimiento local: Configura la búsqueda local' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Conexiones: Solo este dispositivo' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Apps de IA: Disponible' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /MCP:/ })).not.toBeInTheDocument();
+  });
+
+  it('summarizes ready local knowledge and both network scopes without losing their state', async () => {
+    activateLocalSearch();
+    snapshot.lanRuntime = { listener: 'listening', discovery: 'active', addressCount: 1 };
+    snapshot.wikis[0].internetPublic = true;
+    snapshot.wikis[0].publicAnnouncement = { status: 'advertised', acceptedIndexes: 1 };
+    render(App);
+
+    expect(await screen.findByRole('button', { name: 'Conocimiento local: Listo para buscar' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Conexiones: Cercana y pública' })).toBeInTheDocument();
   });
 
   it('gives advanced connection sections distinct names', async () => {
     render(App);
-    await fireEvent.click(await screen.findByRole('button', { name: 'Red local: Opcional · Desactivado' }));
+    await fireEvent.click(await screen.findByRole('button', { name: 'Conexiones: Solo este dispositivo' }));
 
     expect(screen.getByRole('dialog', { name: 'Conexiones' })).toBeInTheDocument();
     expect(screen.getByText('Controles de red')).toBeInTheDocument();
@@ -96,7 +107,7 @@ describe('AirWiki wiki workspace', () => {
 
   it('opens device preferences from disabled local-network guidance', async () => {
     render(App);
-    await fireEvent.click(await screen.findByRole('button', { name: 'Red local: Opcional · Desactivado' }));
+    await fireEvent.click(await screen.findByRole('button', { name: 'Conexiones: Solo este dispositivo' }));
     await fireEvent.click(screen.getByRole('button', { name: 'Preferencias del dispositivo' }));
 
     expect(await screen.findByRole('heading', { name: 'Configuración', level: 1 })).toBeInTheDocument();
@@ -109,7 +120,7 @@ describe('AirWiki wiki workspace', () => {
     snapshot.preferences!.lanPreference = 'enabled';
     snapshot.connectivity = { systemPermission: 'notApplicable', networkProfile: 'private', firewall: 'rulesMissing', firewallHelper: 'verified' };
     render(App);
-    await fireEvent.click(await screen.findByRole('button', { name: 'Red local: Opcional · Desactivado' }));
+    await fireEvent.click(await screen.findByRole('button', { name: 'Conexiones: Solo este dispositivo' }));
 
     await fireEvent.click(screen.getByRole('button', { name: 'Configurar firewall…' }));
     expect(configureFirewall).toHaveBeenCalledWith(expect.any(String), true);
@@ -117,7 +128,7 @@ describe('AirWiki wiki workspace', () => {
     cleanup();
     snapshot.connectivity.networkProfile = 'public';
     render(App);
-    await fireEvent.click(await screen.findByRole('button', { name: 'Red local: Opcional · Desactivado' }));
+    await fireEvent.click(await screen.findByRole('button', { name: 'Conexiones: Solo este dispositivo' }));
     await fireEvent.click(screen.getByRole('button', { name: 'Abrir configuración de red' }));
     expect(openSystemDestination).toHaveBeenCalledWith(expect.any(String), 'networkSettings');
   });
@@ -129,7 +140,7 @@ describe('AirWiki wiki workspace', () => {
       trust: 'blocked', activity: 'discovered', sasWords: null, grantedWikiIds: []
     }];
     render(App);
-    await fireEvent.click(await screen.findByRole('button', { name: 'Red local: Opcional · Desactivado' }));
+    await fireEvent.click(await screen.findByRole('button', { name: 'Conexiones: Solo este dispositivo' }));
 
     expect(screen.getByText('Verificación bloqueada')).toBeInTheDocument();
     expect(screen.getByText(/Los códigos no coincidieron/)).toBeInTheDocument();
@@ -140,7 +151,7 @@ describe('AirWiki wiki workspace', () => {
 
   it('keeps modal focus inside connections when advanced disclosures are closed', async () => {
     render(App);
-    await fireEvent.click(await screen.findByRole('button', { name: 'Red local: Opcional · Desactivado' }));
+    await fireEvent.click(await screen.findByRole('button', { name: 'Conexiones: Solo este dispositivo' }));
 
     const closeButton = screen.getByRole('button', { name: 'Cerrar' });
     const advancedSummary = screen.getByText('Detalles avanzados');
@@ -154,7 +165,7 @@ describe('AirWiki wiki workspace', () => {
   it('moves the focus trap to the close confirmation above an open drawer', async () => {
     Object.defineProperty(window, '__TAURI_INTERNALS__', { configurable: true, value: {} });
     render(App);
-    await fireEvent.click(await screen.findByRole('button', { name: 'Red local: Opcional · Desactivado' }));
+    await fireEvent.click(await screen.findByRole('button', { name: 'Conexiones: Solo este dispositivo' }));
     await waitFor(() => expect(tauriListeners.has('close-choice-required')).toBe(true));
 
     await act(() => {

@@ -1150,7 +1150,7 @@
               <strong>{t('desktop-wiki-access-title')}</strong>
               <div>{#if !selectedWiki.peerShareable && !selectedWiki.allowExternalAi && !selectedWiki.internetPublic}<span>{t('desktop-wiki-private')}</span>{/if}{#if selectedWiki.peerShareable}<span>{t('desktop-share-nearby')}</span>{/if}{#if selectedWiki.allowExternalAi}<span>{t('desktop-share-ai-apps')}</span>{/if}{#if selectedWiki.internetPublic}<span>{t('desktop-share-public')}</span>{/if}</div>
               <small>{wikiPeers(selectedWiki.id).length > 0 ? wikiPeers(selectedWiki.id).join(' · ') : t('desktop-wiki-no-specific-access')}</small>
-              <button class="text-action" onclick={() => editWiki(selectedWiki)}>{t('desktop-manage-access')}</button>
+              <button class="text-action" onclick={() => { connectionsOpen = true; }}>{t('desktop-manage-access')}</button>
             </section>
 
             {#if selectedWikiIssues.length > 0 || selectedWiki.failedCount > 0 || selectedWiki.maintenanceRequired || selectedWiki.needsReviewCount > 0}

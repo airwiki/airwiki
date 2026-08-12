@@ -194,6 +194,15 @@ describe('AirWiki wiki workspace', () => {
     expect(screen.getByRole('tab', { name: /Pendientes/ })).toBeInTheDocument();
   });
 
+  it('opens device grants from the wiki access summary', async () => {
+    render(App);
+    await fireEvent.click(await screen.findByRole('row', { name: /Atlas 2 publicados/ }));
+    await fireEvent.click(screen.getByRole('button', { name: 'Gestionar acceso' }));
+
+    expect(screen.getByRole('dialog', { name: 'Conexiones' })).toBeInTheDocument();
+    expect(screen.queryByRole('dialog', { name: 'Atlas' })).not.toBeInTheDocument();
+  });
+
   it('keeps wiki details and sharing as separate actions', async () => {
     const { container } = render(App);
     await fireEvent.click(await screen.findByRole('row', { name: /Atlas 2 publicados/ }));

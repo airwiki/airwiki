@@ -1,7 +1,7 @@
 <script lang="ts">
   import type { AppSnapshot } from './api';
 
-  type ServiceTarget = 'model' | 'lan' | 'public' | 'mcp' | 'indexing';
+  type ServiceTarget = 'knowledge' | 'connections' | 'apps';
   type ServiceTone = 'ready' | 'working' | 'off' | 'attention';
   type ServiceStatus = { id: ServiceTarget; label: string; detail: string; tone: ServiceTone };
 
@@ -10,40 +10,41 @@
   export let onselect: (target: ServiceTarget) => void;
 
   function statuses(current: AppSnapshot, translate: typeof t): ServiceStatus[] {
-    const model: ServiceStatus = current.modelInstall
-      ? { id: 'model', label: translate('desktop-status-local-ai'), detail: translate('status-working'), tone: 'working' }
-      : current.model?.degraded
-        ? { id: 'model', label: translate('desktop-status-local-ai'), detail: translate('status-needs-attention'), tone: 'attention' }
-        : current.model?.active
-          ? { id: 'model', label: translate('desktop-status-local-ai'), detail: translate('status-ready'), tone: 'ready' }
-          : { id: 'model', label: translate('desktop-status-local-ai'), detail: translate('desktop-status-not-configured'), tone: 'off' };
+    const indexingWorking = current.wikiScans.length > 0 || (current.wikiHealth?.updatingCount ?? 0) > 0;
+    const indexingFailed = current.wikiHealth?.status === 'failed' || (current.wikiHealth?.errorCount ?? 0) > 0;
+    const knowledge: ServiceStatus = current.modelInstall
+      ? { id: 'knowledge', label: translate('desktop-status-knowledge'), detail: translate('desktop-status-knowledge-preparing'), tone: 'working' }
+      : current.model?.degraded || indexingFailed
+        ? { id: 'knowledge', label: translate('desktop-status-knowledge'), detail: translate('status-needs-attention'), tone: 'attention' }
+        : !current.model?.active
+          ? { id: 'knowledge', label: translate('desktop-status-knowledge'), detail: translate('desktop-status-knowledge-needs-setup'), tone: 'off' }
+          : indexingWorking
+            ? { id: 'knowledge', label: translate('desktop-status-knowledge'), detail: translate('desktop-status-knowledge-preparing'), tone: 'working' }
+            : { id: 'knowledge', label: translate('desktop-status-knowledge'), detail: translate('desktop-status-knowledge-ready'), tone: 'ready' };
 
-    const lan: ServiceStatus = current.lanRuntime?.listener === 'starting'
-      ? { id: 'lan', label: translate('desktop-status-lan'), detail: translate('status-working'), tone: 'working' }
-      : current.lanRuntime?.listener === 'failed'
-        ? { id: 'lan', label: translate('desktop-status-lan'), detail: translate('status-needs-attention'), tone: 'attention' }
-        : current.lanRuntime?.listener === 'listening'
-          ? { id: 'lan', label: translate('desktop-status-lan'), detail: translate('desktop-status-available'), tone: 'ready' }
-          : { id: 'lan', label: translate('desktop-status-lan'), detail: translate('status-optional-disabled'), tone: 'off' };
-
+    const lanWorking = current.lanRuntime?.listener === 'starting';
+    const lanFailed = current.lanRuntime?.listener === 'failed';
+    const lanAvailable = current.lanRuntime?.listener === 'listening';
     const publicWikis = current.wikis.filter((wiki) => wiki.internetPublic);
-    const publicSharing: ServiceStatus = publicWikis.some((wiki) => wiki.publicAnnouncement.status === 'advertised')
-      ? { id: 'public', label: translate('desktop-status-public-sharing'), detail: translate('desktop-status-sharing'), tone: 'ready' }
-      : publicWikis.length > 0
-        ? { id: 'public', label: translate('desktop-status-public-sharing'), detail: translate('desktop-status-not-published'), tone: 'attention' }
-        : { id: 'public', label: translate('desktop-status-public-sharing'), detail: translate('desktop-status-not-shared'), tone: 'off' };
+    const publicAvailable = publicWikis.some((wiki) => wiki.publicAnnouncement.status === 'advertised');
+    const publicFailed = publicWikis.length > 0 && !publicAvailable;
+    const connections: ServiceStatus = lanWorking
+      ? { id: 'connections', label: translate('desktop-status-connections'), detail: translate('status-working'), tone: 'working' }
+      : lanFailed || publicFailed
+        ? { id: 'connections', label: translate('desktop-status-connections'), detail: translate('status-needs-attention'), tone: 'attention' }
+        : lanAvailable && publicAvailable
+          ? { id: 'connections', label: translate('desktop-status-connections'), detail: translate('desktop-status-nearby-and-public'), tone: 'ready' }
+          : lanAvailable
+            ? { id: 'connections', label: translate('desktop-status-connections'), detail: translate('desktop-status-nearby-available'), tone: 'ready' }
+            : publicAvailable
+              ? { id: 'connections', label: translate('desktop-status-connections'), detail: translate('desktop-status-public-active'), tone: 'ready' }
+              : { id: 'connections', label: translate('desktop-status-connections'), detail: translate('desktop-status-private'), tone: 'off' };
 
-    const mcp: ServiceStatus = current.mcpUrl
-      ? { id: 'mcp', label: 'MCP', detail: translate('desktop-status-available'), tone: 'ready' }
-      : { id: 'mcp', label: 'MCP', detail: translate('desktop-status-unavailable'), tone: 'attention' };
+    const apps: ServiceStatus = current.mcpUrl
+      ? { id: 'apps', label: translate('desktop-status-ai-apps'), detail: translate('desktop-status-available'), tone: 'ready' }
+      : { id: 'apps', label: translate('desktop-status-ai-apps'), detail: translate('desktop-status-unavailable'), tone: 'attention' };
 
-    const indexing: ServiceStatus = current.wikiScans.length > 0 || (current.wikiHealth?.updatingCount ?? 0) > 0
-      ? { id: 'indexing', label: translate('desktop-status-indexing'), detail: translate('status-working'), tone: 'working' }
-      : current.wikiHealth?.status === 'failed' || (current.wikiHealth?.errorCount ?? 0) > 0
-        ? { id: 'indexing', label: translate('desktop-status-indexing'), detail: translate('status-needs-attention'), tone: 'attention' }
-        : { id: 'indexing', label: translate('desktop-status-indexing'), detail: translate('status-ready'), tone: 'ready' };
-
-    return [model, lan, publicSharing, mcp, indexing];
+    return [knowledge, connections, apps];
   }
 
   let services: ServiceStatus[];

@@ -311,6 +311,17 @@ struct WikiSummary {
     origin: WikiOriginDto,
     indexing_mode: IndexingModeDto,
     okf_version: String,
+    trust_summary: TrustSummaryDto,
+}
+
+#[derive(Clone, Copy, Debug, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(rename_all = "camelCase")]
+enum TrustSummaryDto {
+    Unverified,
+    MachineConfirmed,
+    HumanReviewed,
+    VerificationOutdated,
 }
 
 #[derive(Clone, Copy, Debug, Serialize, TS)]
@@ -1724,6 +1735,27 @@ async fn import_okf(
         WorkerCommand::ImportOkfBundle {
             name: name.to_owned(),
             source,
+        },
+    )
+    .await
+}
+
+#[tauri::command]
+async fn set_wiki_indexing(
+    runtime: tauri::State<'_, AppRuntime>,
+    wiki_id: String,
+    continuous: bool,
+) -> Result<(), UiError> {
+    let collection_id = parse_uuid(&wiki_id)?;
+    send_command(
+        &runtime,
+        WorkerCommand::SetCollectionIndexing {
+            collection_id,
+            indexing_mode: if continuous {
+                airwiki_core::IndexingMode::Continuous
+            } else {
+                airwiki_core::IndexingMode::Manual
+            },
         },
     )
     .await
@@ -3649,6 +3681,14 @@ impl From<worker::CollectionView> for WikiSummary {
                 airwiki_core::IndexingMode::NotApplicable => IndexingModeDto::NotApplicable,
             },
             okf_version: value.okf_version,
+            trust_summary: match value.trust_summary {
+                worker::TrustSummaryView::Unverified => TrustSummaryDto::Unverified,
+                worker::TrustSummaryView::MachineConfirmed => TrustSummaryDto::MachineConfirmed,
+                worker::TrustSummaryView::HumanReviewed => TrustSummaryDto::HumanReviewed,
+                worker::TrustSummaryView::VerificationOutdated => {
+                    TrustSummaryDto::VerificationOutdated
+                }
+            },
         }
     }
 }
@@ -3917,6 +3957,7 @@ fn ui_bindings_source() -> String {
         exported_declaration::<EnrichmentDraftDto>(&config),
         exported_declaration::<WikiOriginDto>(&config),
         exported_declaration::<IndexingModeDto>(&config),
+        exported_declaration::<TrustSummaryDto>(&config),
         exported_declaration::<WikiSummary>(&config),
         exported_declaration::<PublicAnnouncementSummary>(&config),
         exported_declaration::<HardwareSummary>(&config),
@@ -4263,6 +4304,7 @@ fn main() -> Result<()> {
             pick_okf_import,
             validate_okf_import,
             import_okf,
+            set_wiki_indexing,
             add_wiki,
             relink_wiki,
             rescan_wiki,

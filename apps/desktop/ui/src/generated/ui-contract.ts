@@ -13,7 +13,9 @@ export type WikiOriginDto = "folder" | "importedOkf" | "aiMemory";
 
 export type IndexingModeDto = "continuous" | "manual" | "notApplicable";
 
-export type WikiSummary = { id: string, name: string, documentCount: number, needsReviewCount: number, publishedCount: number, failedCount: number, localOnly: boolean, peerShareable: boolean, allowExternalAi: boolean, internetPublic: boolean, publicDescription: string, publicLanguages: string, publicAnnouncement: PublicAnnouncementSummary, maintenanceRequired: boolean, origin: WikiOriginDto, indexingMode: IndexingModeDto, okfVersion: string, };
+export type TrustSummaryDto = "unverified" | "machineConfirmed" | "humanReviewed" | "verificationOutdated";
+
+export type WikiSummary = { id: string, name: string, documentCount: number, needsReviewCount: number, publishedCount: number, failedCount: number, localOnly: boolean, peerShareable: boolean, allowExternalAi: boolean, internetPublic: boolean, publicDescription: string, publicLanguages: string, publicAnnouncement: PublicAnnouncementSummary, maintenanceRequired: boolean, origin: WikiOriginDto, indexingMode: IndexingModeDto, okfVersion: string, trustSummary: TrustSummaryDto, };
 
 export type PublicAnnouncementSummary = { "status": "offline" } | { "status": "advertised", acceptedIndexes: number, } | { "status": "expired" };
 

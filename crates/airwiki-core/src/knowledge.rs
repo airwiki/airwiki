@@ -22,7 +22,10 @@ use sha2::{Digest, Sha256};
 use uuid::Uuid;
 use walkdir::WalkDir;
 
-use crate::storage::{CollectionRecord, ConceptRecord, Database, SourceDocumentRecord};
+use crate::storage::{
+    CollectionRecord, ConceptRecord, Database, OkfConceptProjectionRecord, SourceDocumentRecord,
+    WikiOrigin,
+};
 
 /// Hard upper bound for content returned by [`OkfBundleInspector::load_page`].
 /// Fingerprints are still calculated over the complete file using streaming
@@ -326,6 +329,7 @@ struct DatabaseBundleSnapshot {
     sources: BTreeMap<Uuid, Option<SourceDocumentRecord>>,
     publication_pending: bool,
     fingerprint: String,
+    projection: Vec<OkfConceptProjectionRecord>,
 }
 
 impl OkfBundleInspector {
@@ -336,7 +340,11 @@ impl OkfBundleInspector {
     pub fn inspect_bundle(&self, collection_id: Uuid) -> Result<KnowledgeBundleView> {
         let before = self.database_snapshot(collection_id)?;
         let files_before = bundle_tree_fingerprint(&before.collection.wiki_folder);
-        let mut view = self.inspect_collection(&before)?;
+        let mut view = if before.collection.origin == WikiOrigin::Folder {
+            self.inspect_collection(&before)?
+        } else {
+            self.inspect_projected_collection(&before)?
+        };
         let files_after = bundle_tree_fingerprint(&before.collection.wiki_folder);
         let after = self.database_snapshot(collection_id)?;
 
@@ -396,7 +404,7 @@ impl OkfBundleInspector {
         }
 
         let limit = max_bytes.min(MAX_KNOWLEDGE_PAGE_BYTES);
-        let page_path = page_id.path_below(&database_before.collection.wiki_folder);
+        let page_path = projected_page_path(&database_before, page_id)?;
         let snapshot = read_page_snapshot(&page_path, limit)?;
         if snapshot.fingerprint != inspected_fingerprint {
             bail!("La página de conocimiento cambió mientras se estaba cargando");
@@ -434,6 +442,16 @@ impl OkfBundleInspector {
 
     fn authorize_page(snapshot: &DatabaseBundleSnapshot, page_id: KnowledgePageId) -> Result<()> {
         if let KnowledgePageId::Concept(concept_id) = page_id {
+            if snapshot.collection.origin != WikiOrigin::Folder {
+                if snapshot
+                    .projection
+                    .iter()
+                    .any(|concept| concept.concept_id == concept_id)
+                {
+                    return Ok(());
+                }
+                bail!("El concepto no pertenece al bundle OKF solicitado");
+            }
             let concept = snapshot
                 .published
                 .iter()
@@ -473,6 +491,7 @@ impl OkfBundleInspector {
         let publication_pending = self
             .database
             .collection_has_publication_claim(collection_id)?;
+        let projection = self.database.list_okf_concept_projection(collection_id)?;
         let fingerprint =
             database_snapshot_fingerprint(&collection, &published, &sources, publication_pending)?;
         Ok(DatabaseBundleSnapshot {
@@ -481,6 +500,7 @@ impl OkfBundleInspector {
             sources,
             publication_pending,
             fingerprint,
+            projection,
         })
     }
 
@@ -637,6 +657,116 @@ impl OkfBundleInspector {
                 health,
             },
         ))
+    }
+
+    fn inspect_projected_collection(
+        &self,
+        snapshot: &DatabaseBundleSnapshot,
+    ) -> Result<KnowledgeBundleView> {
+        let collection = &snapshot.collection;
+        let mut health = BundleHealthReport {
+            checked_at: Utc::now(),
+            total_concepts: snapshot.projection.len(),
+            error_count: 0,
+            warning_count: 0,
+            issues: Vec::new(),
+        };
+        let mut pages = BTreeMap::new();
+        let mut fingerprints = BTreeMap::new();
+        for page_id in [KnowledgePageId::Index, KnowledgePageId::Log] {
+            if let Some(page) = inspect_managed_page(
+                &collection.wiki_folder,
+                page_id,
+                &mut health,
+                page_id == KnowledgePageId::Index,
+            )? {
+                fingerprints.insert(page.logical_path.clone(), page.snapshot.fingerprint.clone());
+                pages.insert(page_id, page);
+            }
+        }
+        for projected in &snapshot.projection {
+            let page_id = KnowledgePageId::Concept(projected.concept_id);
+            let path = collection.wiki_folder.join(&projected.logical_path);
+            if let Some(page) =
+                inspect_page_at(&path, &projected.logical_path, page_id, &mut health, true)?
+            {
+                if page.snapshot.fingerprint != projected.fingerprint {
+                    health.push(HealthIssue::new(
+                        HealthSeverity::Error,
+                        "projection_fingerprint_mismatch",
+                        Some(page_id),
+                        "El concepto cambió después de crear el índice local.",
+                    ));
+                }
+                fingerprints.insert(page.logical_path.clone(), page.snapshot.fingerprint.clone());
+                pages.insert(page_id, page);
+            }
+        }
+        let available = pages.keys().copied().collect::<BTreeSet<_>>();
+        let context = LinkContext::from_pages(&pages, &available);
+        let mut links = Vec::new();
+        for (page_id, page) in &pages {
+            links.extend(resolve_page_links_with_options(
+                *page_id,
+                &page.logical_path,
+                &page.parsed.body,
+                &context,
+                true,
+            ));
+        }
+        inspect_link_health(&links, &mut health);
+        inspect_reserved_page_shapes(&pages, &mut health);
+        let concepts = snapshot
+            .projection
+            .iter()
+            .filter_map(|projected| {
+                let page = pages.get(&KnowledgePageId::Concept(projected.concept_id))?;
+                Some(projected_concept_view(projected, page))
+            })
+            .collect();
+        let backlinks = build_backlinks(&links);
+        Ok(finalize_bundle(
+            collection,
+            &[],
+            BundleParts {
+                concepts,
+                links,
+                backlinks,
+                index_fingerprint: pages
+                    .get(&KnowledgePageId::Index)
+                    .map(|page| page.snapshot.fingerprint.clone()),
+                log_fingerprint: pages
+                    .get(&KnowledgePageId::Log)
+                    .map(|page| page.snapshot.fingerprint.clone()),
+                fingerprint_entries: fingerprints,
+                health,
+            },
+        ))
+    }
+}
+
+fn projected_page_path(
+    snapshot: &DatabaseBundleSnapshot,
+    page_id: KnowledgePageId,
+) -> Result<PathBuf> {
+    match page_id {
+        KnowledgePageId::Index | KnowledgePageId::Log => {
+            Ok(page_id.path_below(&snapshot.collection.wiki_folder))
+        }
+        KnowledgePageId::Concept(concept_id)
+            if snapshot.collection.origin != WikiOrigin::Folder =>
+        {
+            let projection = snapshot
+                .projection
+                .iter()
+                .find(|concept| concept.concept_id == concept_id)
+                .context("El concepto no pertenece al bundle OKF solicitado")?;
+            Ok(snapshot
+                .collection
+                .wiki_folder
+                .join(&projection.logical_path))
+        }
+        KnowledgePageId::Concept(_) => Ok(page_id.path_below(&snapshot.collection.wiki_folder)),
     }
 }
 
@@ -888,7 +1018,7 @@ fn finalize_bundle(
         hasher.update(b"\0");
         hasher.update(fingerprint.as_bytes());
     }
-    let state = if published.is_empty() {
+    let state = if concepts.is_empty() && published.is_empty() {
         KnowledgeBundleState::Empty
     } else if reconciliation_is_transient(published, &health) {
         KnowledgeBundleState::Updating
@@ -932,6 +1062,7 @@ fn reconciliation_is_transient(published: &[ConceptRecord], health: &BundleHealt
 struct InspectedPage {
     snapshot: PageSnapshot,
     parsed: ParsedMarkdown,
+    logical_path: String,
 }
 
 #[derive(Debug)]
@@ -959,7 +1090,17 @@ fn inspect_managed_page(
     required: bool,
 ) -> Result<Option<InspectedPage>> {
     let path = page_id.path_below(root);
-    let metadata = match fs::symlink_metadata(&path) {
+    inspect_page_at(&path, &page_id.relative_path(), page_id, health, required)
+}
+
+fn inspect_page_at(
+    path: &Path,
+    logical_path: &str,
+    page_id: KnowledgePageId,
+    health: &mut BundleHealthReport,
+    required: bool,
+) -> Result<Option<InspectedPage>> {
+    let metadata = match fs::symlink_metadata(path) {
         Ok(metadata) => metadata,
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
             if required {
@@ -1005,7 +1146,7 @@ fn inspect_managed_page(
         return Ok(None);
     }
 
-    let snapshot = match read_page_snapshot(&path, MAX_KNOWLEDGE_PAGE_BYTES) {
+    let snapshot = match read_page_snapshot(path, MAX_KNOWLEDGE_PAGE_BYTES) {
         Ok(snapshot) => snapshot,
         Err(error) => {
             health.push(HealthIssue::new(
@@ -1053,7 +1194,11 @@ fn inspect_managed_page(
             "El concepto OKF no tiene frontmatter YAML.",
         ));
     }
-    Ok(Some(InspectedPage { snapshot, parsed }))
+    Ok(Some(InspectedPage {
+        snapshot,
+        parsed,
+        logical_path: logical_path.to_owned(),
+    }))
 }
 
 fn read_page_snapshot(path: &Path, content_limit: usize) -> Result<PageSnapshot> {
@@ -1409,7 +1554,11 @@ impl LinkContext {
     ) -> Self {
         let mut context = Self::default();
         for page_id in available {
-            context.paths.insert(page_id.relative_path(), *page_id);
+            let path = pages
+                .get(page_id)
+                .map(|page| page.logical_path.clone())
+                .unwrap_or_else(|| page_id.relative_path());
+            context.paths.insert(path, *page_id);
         }
         for (page_id, page) in pages {
             if matches!(page_id, KnowledgePageId::Concept(_))
@@ -1454,11 +1603,36 @@ fn resolve_page_links(
     markdown_body: &str,
     context: &LinkContext,
 ) -> Vec<KnowledgeLinkView> {
+    resolve_page_links_with_path(source, &source.relative_path(), markdown_body, context)
+}
+
+fn resolve_page_links_with_path(
+    source: KnowledgePageId,
+    source_path: &str,
+    markdown_body: &str,
+    context: &LinkContext,
+) -> Vec<KnowledgeLinkView> {
+    resolve_page_links_with_options(source, source_path, markdown_body, context, false)
+}
+
+fn resolve_page_links_with_options(
+    source: KnowledgePageId,
+    source_path: &str,
+    markdown_body: &str,
+    context: &LinkContext,
+    allow_bundle_root_paths: bool,
+) -> Vec<KnowledgeLinkView> {
     extract_markdown_links(markdown_body)
         .into_iter()
         .map(|(label, raw_target)| KnowledgeLinkView {
             source,
-            disposition: resolve_link_target(source, &raw_target, context),
+            disposition: resolve_link_target_with_options(
+                source,
+                source_path,
+                &raw_target,
+                context,
+                allow_bundle_root_paths,
+            ),
             label,
             raw_target,
         })
@@ -1494,16 +1668,28 @@ fn extract_markdown_links(markdown: &str) -> Vec<(String, String)> {
     output
 }
 
+#[cfg(test)]
 fn resolve_link_target(
     source: KnowledgePageId,
+    source_path: &str,
     raw_target: &str,
     context: &LinkContext,
+) -> KnowledgeLinkDisposition {
+    resolve_link_target_with_options(source, source_path, raw_target, context, false)
+}
+
+fn resolve_link_target_with_options(
+    source: KnowledgePageId,
+    source_path: &str,
+    raw_target: &str,
+    context: &LinkContext,
+    allow_bundle_root_paths: bool,
 ) -> KnowledgeLinkDisposition {
     let target = raw_target.trim();
     if target.is_empty() || target.starts_with('#') || target.starts_with('?') {
         return KnowledgeLinkDisposition::Internal(source);
     }
-    if target.starts_with('/') || target.contains('\\') {
+    if target.contains('\\') || (target.starts_with('/') && !allow_bundle_root_paths) {
         return KnowledgeLinkDisposition::Unsafe;
     }
     if target.starts_with("urn:airwiki:") {
@@ -1526,12 +1712,21 @@ fn resolve_link_target(
         };
     }
 
-    let path_only = target.split(['#', '?']).next().unwrap_or(target);
+    let path_only = target
+        .split(['#', '?'])
+        .next()
+        .unwrap_or(target)
+        .trim_start_matches('/');
     if path_only.is_empty() {
         return KnowledgeLinkDisposition::Internal(source);
     }
-    let mut source_components = source.relative_path();
-    source_components.truncate(source_components.rfind('/').map_or(0, |index| index + 1));
+    let source_components = if target.starts_with('/') {
+        String::new()
+    } else {
+        let mut parent = source_path.to_owned();
+        parent.truncate(parent.rfind('/').map_or(0, |index| index + 1));
+        parent
+    };
     let mut components = source_components
         .split('/')
         .filter(|part| !part.is_empty())
@@ -2058,6 +2253,79 @@ fn reconcile_concept(
         source_sha256,
         language,
         generator_model,
+        reviewed_at,
+        extensions,
+        fingerprint: page.snapshot.fingerprint.clone(),
+    }
+}
+
+fn projected_concept_view(
+    projected: &OkfConceptProjectionRecord,
+    page: &InspectedPage,
+) -> KnowledgeConceptView {
+    let generated_at = projected
+        .generation
+        .as_ref()
+        .and_then(|value| value.get("at"))
+        .and_then(JsonValue::as_str)
+        .and_then(|value| DateTime::parse_from_rfc3339(value).ok())
+        .map(|value| value.with_timezone(&Utc));
+    let generator = projected
+        .generation
+        .as_ref()
+        .and_then(|value| value.get("by"))
+        .and_then(JsonValue::as_str)
+        .map(ToOwned::to_owned);
+    let reviewed_at = projected
+        .verifications
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter(|verification| {
+            verification
+                .get("by")
+                .and_then(JsonValue::as_str)
+                .is_some_and(|actor| actor.starts_with("human:"))
+        })
+        .filter_map(|verification| verification.get("at").and_then(JsonValue::as_str))
+        .filter_map(|value| DateTime::parse_from_rfc3339(value).ok())
+        .map(|value| value.with_timezone(&Utc))
+        .max();
+    let extensions = projected
+        .unknown_frontmatter
+        .as_object()
+        .map(|values| {
+            values
+                .iter()
+                .map(|(key, value)| {
+                    (
+                        key.clone(),
+                        value
+                            .as_str()
+                            .map(ToOwned::to_owned)
+                            .unwrap_or_else(|| value.to_string()),
+                    )
+                })
+                .collect()
+        })
+        .unwrap_or_default();
+    KnowledgeConceptView {
+        id: projected.concept_id,
+        relative_path: projected.logical_path.clone(),
+        concept_type: projected.concept_type.to_string(),
+        title: projected.title.clone(),
+        description: projected.description.clone(),
+        tags: projected.tags.clone(),
+        resource: page
+            .parsed
+            .yaml
+            .as_ref()
+            .and_then(|yaml| yaml_string_at(yaml, &["resource"])),
+        timestamp: generated_at,
+        revision: None,
+        source_sha256: None,
+        language: None,
+        generator_model: generator,
         reviewed_at,
         extensions,
         fingerprint: page.snapshot.fingerprint.clone(),
@@ -2625,6 +2893,55 @@ mod tests {
     }
 
     #[test]
+    fn imported_okf_uses_projected_paths_for_inspection_and_page_loading() {
+        let temp = tempfile::tempdir().unwrap();
+        let bundle = temp.path().join("bundle");
+        fs::create_dir_all(bundle.join("nested")).unwrap();
+        fs::write(
+            bundle.join("index.md"),
+            "---\nokf_version: \"0.2\"\n---\n\n# Imported\n* [Nested](/nested/item.md)\n",
+        )
+        .unwrap();
+        fs::write(
+            bundle.join("nested/item.md"),
+            "---\ntype: Future Knowledge\ntitle: Nested item\nstatus: stable\n---\n\n# Body\n",
+        )
+        .unwrap();
+        let report = crate::OkfImportValidator::validate_directory(&bundle).unwrap();
+        let database = Database::in_memory().unwrap();
+        let collection = database
+            .create_collection_with_origin(
+                "Imported",
+                &bundle,
+                &bundle,
+                CollectionPolicy::local_only(),
+                WikiOrigin::ImportedOkf,
+                crate::storage::IndexingMode::NotApplicable,
+            )
+            .unwrap();
+        database
+            .replace_okf_concept_projection(collection.id, &report.concepts)
+            .unwrap();
+        let inspector = OkfBundleInspector::new(database);
+
+        let view = inspector.inspect_bundle(collection.id).unwrap();
+        assert_eq!(view.state, KnowledgeBundleState::Ready);
+        assert_eq!(view.concepts[0].relative_path, "nested/item.md");
+        assert_eq!(view.concepts[0].concept_type, "Future Knowledge");
+        assert_eq!(view.health.error_count, 0);
+        let page_id = KnowledgePageId::Concept(view.concepts[0].id);
+        let page = inspector
+            .load_page(
+                collection.id,
+                page_id,
+                view.page_fingerprint(page_id),
+                MAX_KNOWLEDGE_PAGE_BYTES,
+            )
+            .unwrap();
+        assert!(page.body_markdown.contains("# Body"));
+    }
+
+    #[test]
     fn replacement_with_old_index_and_log_is_reported_as_updating() {
         let fixture = Fixture::new();
         let original = fixture.publish("replace.md", "Título versión uno");
@@ -2917,12 +3234,18 @@ mod tests {
 
         let context = LinkContext::from_bundle(&bundle);
         assert_eq!(
-            resolve_link_target(KnowledgePageId::Concept(source.id), &okf_resource, &context),
+            resolve_link_target(
+                KnowledgePageId::Concept(source.id),
+                &KnowledgePageId::Concept(source.id).relative_path(),
+                &okf_resource,
+                &context,
+            ),
             KnowledgeLinkDisposition::Internal(KnowledgePageId::Concept(target.id))
         );
         assert_eq!(
             resolve_link_target(
                 KnowledgePageId::Concept(source.id),
+                &KnowledgePageId::Concept(source.id).relative_path(),
                 &database_resource,
                 &context
             ),

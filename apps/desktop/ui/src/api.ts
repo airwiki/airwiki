@@ -63,6 +63,10 @@ export async function importOkf(name: string, selectionToken: string): Promise<v
   return invoke('import_okf', { name, selectionToken });
 }
 
+export async function setWikiIndexing(wikiId: string, continuous: boolean): Promise<void> {
+  return invoke('set_wiki_indexing', { wikiId, continuous });
+}
+
 export async function addWiki(
   name: string,
   folderToken: string,

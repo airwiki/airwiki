@@ -5,6 +5,7 @@ use std::path::{Component, Path, PathBuf};
 
 use anyhow::{Context, Result, bail};
 use serde_yaml::Value as YamlValue;
+use sha2::Digest;
 use walkdir::WalkDir;
 use zip::ZipArchive;
 
@@ -34,6 +35,23 @@ pub struct OkfImportReport {
     pub uncompressed_bytes: u64,
     pub okf_version: String,
     pub warnings: Vec<OkfImportWarning>,
+    pub concepts: Vec<OkfImportedConcept>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct OkfImportedConcept {
+    pub logical_path: String,
+    pub concept_type: String,
+    pub title: String,
+    pub description: String,
+    pub tags: Vec<String>,
+    pub lifecycle_status: String,
+    pub generated: Option<YamlValue>,
+    pub verified: Option<YamlValue>,
+    pub sources: Option<YamlValue>,
+    pub version: Option<String>,
+    pub unknown_frontmatter: YamlValue,
+    pub fingerprint: String,
 }
 
 #[derive(Debug, Default)]
@@ -237,6 +255,7 @@ struct ValidationState {
     root_version: Option<String>,
     paths: BTreeSet<String>,
     links: Vec<(String, String)>,
+    concepts_metadata: Vec<OkfImportedConcept>,
 }
 
 impl ValidationState {
@@ -263,7 +282,7 @@ impl ValidationState {
                     self.root_version = root_okf_version(markdown)?;
                 }
             } else if !filename.eq_ignore_ascii_case("log.md") {
-                validate_concept_frontmatter(markdown)?;
+                self.concepts_metadata.push(parse_concept(&path, markdown)?);
                 self.concepts = self.concepts.saturating_add(1);
             }
             self.links.extend(
@@ -301,6 +320,7 @@ impl ValidationState {
             uncompressed_bytes: self.bytes,
             okf_version: version,
             warnings,
+            concepts: self.concepts_metadata,
         })
     }
 }
@@ -350,17 +370,101 @@ fn frontmatter(markdown: &str) -> Result<Option<YamlValue>> {
     Ok(Some(yaml))
 }
 
-fn validate_concept_frontmatter(markdown: &str) -> Result<()> {
+fn parse_concept(path: &str, markdown: &str) -> Result<OkfImportedConcept> {
     let yaml = frontmatter(markdown)?.context("OKF concept is missing frontmatter")?;
-    let concept_type = yaml
+    let mapping = yaml
         .as_mapping()
-        .and_then(|mapping| mapping.get(YamlValue::String("type".to_owned())))
+        .context("OKF frontmatter must be a mapping")?;
+    let concept_type = mapping
+        .get(YamlValue::String("type".to_owned()))
         .and_then(YamlValue::as_str)
         .map(str::trim);
     if concept_type.is_none_or(str::is_empty) {
         bail!("OKF concept type is required")
     }
-    Ok(())
+    let title = mapping
+        .get(YamlValue::String("title".to_owned()))
+        .and_then(YamlValue::as_str)
+        .map(ToOwned::to_owned)
+        .unwrap_or_else(|| {
+            path.rsplit('/')
+                .next()
+                .unwrap_or(path)
+                .trim_end_matches(".md")
+                .to_owned()
+        });
+    let description = mapping
+        .get(YamlValue::String("description".to_owned()))
+        .and_then(YamlValue::as_str)
+        .unwrap_or_default()
+        .to_owned();
+    let tags = mapping
+        .get(YamlValue::String("tags".to_owned()))
+        .and_then(YamlValue::as_sequence)
+        .map(|values| {
+            values
+                .iter()
+                .filter_map(YamlValue::as_str)
+                .map(ToOwned::to_owned)
+                .collect()
+        })
+        .unwrap_or_default();
+    let lifecycle_status = mapping
+        .get(YamlValue::String("status".to_owned()))
+        .and_then(YamlValue::as_str)
+        .unwrap_or("stable");
+    if !matches!(lifecycle_status, "draft" | "stable" | "deprecated") {
+        bail!("OKF lifecycle status is invalid");
+    }
+    let known = [
+        "type",
+        "title",
+        "description",
+        "tags",
+        "status",
+        "generated",
+        "verified",
+        "sources",
+        "version",
+    ];
+    let unknown_frontmatter = YamlValue::Mapping(
+        mapping
+            .iter()
+            .filter(|(key, _)| key.as_str().is_none_or(|key| !known.contains(&key)))
+            .map(|(key, value)| (key.clone(), value.clone()))
+            .collect(),
+    );
+    Ok(OkfImportedConcept {
+        logical_path: path.to_owned(),
+        concept_type: concept_type.unwrap_or_default().to_owned(),
+        title,
+        description,
+        tags,
+        lifecycle_status: lifecycle_status.to_owned(),
+        generated: mapping
+            .get(YamlValue::String("generated".to_owned()))
+            .cloned(),
+        verified: mapping
+            .get(YamlValue::String("verified".to_owned()))
+            .cloned()
+            .map(normalize_verifications),
+        sources: mapping
+            .get(YamlValue::String("sources".to_owned()))
+            .cloned(),
+        version: mapping
+            .get(YamlValue::String("version".to_owned()))
+            .and_then(YamlValue::as_str)
+            .map(ToOwned::to_owned),
+        unknown_frontmatter,
+        fingerprint: hex::encode(sha2::Sha256::digest(markdown.as_bytes())),
+    })
+}
+
+fn normalize_verifications(value: YamlValue) -> YamlValue {
+    match value {
+        YamlValue::Mapping(_) => YamlValue::Sequence(vec![value]),
+        value => value,
+    }
 }
 
 fn root_okf_version(markdown: &str) -> Result<Option<String>> {
@@ -447,6 +551,25 @@ mod tests {
         assert_eq!(report.concept_count, 1);
         assert_eq!(report.okf_version, "0.2");
         assert_eq!(report.warnings.len(), 1);
+    }
+
+    #[test]
+    fn bare_verification_is_normalized_without_losing_metadata() {
+        let temp = tempfile::tempdir().unwrap();
+        fs::write(temp.path().join("index.md"), valid_index()).unwrap();
+        fs::write(
+            temp.path().join("concept.md"),
+            b"---\ntype: Reference\nverified:\n  by: human:owner\n  at: 2026-08-12T12:00:00Z\n---\n",
+        )
+        .unwrap();
+
+        let report = OkfImportValidator::validate_directory(temp.path()).unwrap();
+
+        assert!(
+            report.concepts[0].verified.as_ref().is_some_and(|value| {
+                value.as_sequence().is_some_and(|values| values.len() == 1)
+            })
+        );
     }
 
     #[test]

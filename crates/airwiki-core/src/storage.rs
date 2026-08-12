@@ -26,6 +26,11 @@ const MIGRATION_5: &str = include_str!("../migrations/0005_public_federation_har
 const MIGRATION_6: &str = include_str!("../migrations/0006_bootstrap_registry_state.sql");
 const MIGRATION_7: &str = include_str!("../migrations/0007_okf_v02_origins_and_capabilities.sql");
 const MIGRATION_8: &str = include_str!("../migrations/0008_okf_projection_search.sql");
+const MIGRATION_9: &str = include_str!("../migrations/0009_application_capability_hardening.sql");
+
+const APPLICATION_MUTATIONS_PER_MINUTE: u32 = 30;
+const APPLICATION_WIKI_CREATIONS_PER_HOUR: u32 = 5;
+const APPLICATION_MAX_WIKIS: u32 = 100;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -190,6 +195,33 @@ pub struct OkfConceptProjectionRecord {
     pub fingerprint: String,
     pub unknown_frontmatter: serde_json::Value,
     pub indexed_at: DateTime<Utc>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ApplicationCapabilityRecord {
+    pub app_id: Uuid,
+    pub display_name: String,
+    pub owner_kind: String,
+    pub capability_prefix: String,
+    pub secret_hash: String,
+    pub revoked_at: Option<DateTime<Utc>>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ApplicationWikiRole {
+    Owner,
+    Reader,
+    Editor,
+}
+
+impl ApplicationWikiRole {
+    const fn as_str(self) -> &'static str {
+        match self {
+            Self::Owner => "owner",
+            Self::Reader => "reader",
+            Self::Editor => "editor",
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -836,7 +868,13 @@ impl Database {
             tx.pragma_update(None, "user_version", 8)?;
             tx.commit()?;
         }
-        if version > 8 {
+        if version < 9 {
+            let tx = connection.transaction()?;
+            tx.execute_batch(MIGRATION_9)?;
+            tx.pragma_update(None, "user_version", 9)?;
+            tx.commit()?;
+        }
+        if version > 9 {
             bail!("database schema {version} is newer than this application supports");
         }
         let database = Self {
@@ -1235,6 +1273,258 @@ impl Database {
         rows.collect::<rusqlite::Result<_>>().map_err(Into::into)
     }
 
+    pub fn create_application_capability(
+        &self,
+        app_id: Uuid,
+        display_name: &str,
+        owner_kind: &str,
+        capability_prefix: &str,
+        secret_hash: &str,
+    ) -> Result<ApplicationCapabilityRecord> {
+        let display_name = display_name.trim();
+        if display_name.is_empty() || display_name.chars().count() > 120 {
+            bail!("application display name is invalid");
+        }
+        if owner_kind.is_empty() || owner_kind.len() > 64 || capability_prefix.len() != 16 {
+            bail!("application capability metadata is invalid");
+        }
+        let now = Utc::now();
+        self.connection()?.execute(
+            "INSERT INTO application_capabilities
+             (app_id,display_name,owner_kind,secret_hash,capability_prefix,created_at)
+             VALUES (?1,?2,?3,?4,?5,?6)",
+            params![
+                app_id.to_string(),
+                display_name,
+                owner_kind,
+                secret_hash,
+                capability_prefix,
+                now.to_rfc3339()
+            ],
+        )?;
+        Ok(ApplicationCapabilityRecord {
+            app_id,
+            display_name: display_name.to_owned(),
+            owner_kind: owner_kind.to_owned(),
+            capability_prefix: capability_prefix.to_owned(),
+            secret_hash: secret_hash.to_owned(),
+            revoked_at: None,
+        })
+    }
+
+    pub fn application_capability_by_prefix(
+        &self,
+        capability_prefix: &str,
+    ) -> Result<Option<ApplicationCapabilityRecord>> {
+        self.connection()?
+            .query_row(
+                "SELECT app_id,display_name,owner_kind,capability_prefix,secret_hash,revoked_at
+                 FROM application_capabilities WHERE capability_prefix=?1",
+                [capability_prefix],
+                |row| {
+                    Ok(ApplicationCapabilityRecord {
+                        app_id: uuid_sql(row.get(0)?)?,
+                        display_name: row.get(1)?,
+                        owner_kind: row.get(2)?,
+                        capability_prefix: row.get(3)?,
+                        secret_hash: row.get(4)?,
+                        revoked_at: row
+                            .get::<_, Option<String>>(5)?
+                            .map(datetime_sql)
+                            .transpose()?,
+                    })
+                },
+            )
+            .optional()
+            .map_err(Into::into)
+    }
+
+    pub fn set_application_capability_revoked(&self, app_id: Uuid, revoked: bool) -> Result<()> {
+        let count = self.connection()?.execute(
+            "UPDATE application_capabilities SET revoked_at=?2 WHERE app_id=?1",
+            params![app_id.to_string(), revoked.then(|| Utc::now().to_rfc3339())],
+        )?;
+        ensure_changed(count, "application capability", app_id)
+    }
+
+    pub fn set_application_wiki_role(
+        &self,
+        app_id: Uuid,
+        collection_id: Uuid,
+        role: Option<ApplicationWikiRole>,
+    ) -> Result<()> {
+        let connection = self.connection()?;
+        if let Some(role) = role {
+            let origin: String = connection.query_row(
+                "SELECT origin FROM collections WHERE id=?1",
+                [collection_id.to_string()],
+                |row| row.get(0),
+            )?;
+            if origin != WikiOrigin::AiMemory.as_str() {
+                bail!("applications may only receive grants for AI memory wikis");
+            }
+            let now = Utc::now().to_rfc3339();
+            connection.execute(
+                "INSERT INTO application_wiki_grants
+                 (app_id,collection_id,role,granted_at,confirmed_at)
+                 VALUES (?1,?2,?3,?4,?4)
+                 ON CONFLICT(app_id,collection_id) DO UPDATE SET role=excluded.role,confirmed_at=excluded.confirmed_at",
+                params![app_id.to_string(), collection_id.to_string(), role.as_str(), now],
+            )?;
+        } else {
+            connection.execute(
+                "DELETE FROM application_wiki_grants WHERE app_id=?1 AND collection_id=?2",
+                params![app_id.to_string(), collection_id.to_string()],
+            )?;
+        }
+        Ok(())
+    }
+
+    pub fn application_wiki_role(
+        &self,
+        app_id: Uuid,
+        collection_id: Uuid,
+    ) -> Result<Option<ApplicationWikiRole>> {
+        let role = self.connection()?.query_row(
+            "SELECT g.role FROM application_wiki_grants g
+             JOIN application_capabilities a ON a.app_id=g.app_id
+             JOIN collections c ON c.id=g.collection_id
+             WHERE g.app_id=?1 AND g.collection_id=?2 AND a.revoked_at IS NULL AND c.origin='ai_memory'",
+            params![app_id.to_string(), collection_id.to_string()],
+            |row| row.get::<_, String>(0),
+        ).optional()?;
+        role.map(|role| match role.as_str() {
+            "owner" => Ok(ApplicationWikiRole::Owner),
+            "reader" => Ok(ApplicationWikiRole::Reader),
+            "editor" => Ok(ApplicationWikiRole::Editor),
+            _ => bail!("application wiki role is invalid"),
+        })
+        .transpose()
+    }
+
+    pub fn application_memory_wikis(&self, app_id: Uuid) -> Result<Vec<CollectionRecord>> {
+        let connection = self.connection()?;
+        let mut statement = connection.prepare(
+            "SELECT c.id,c.name,c.source_folder,c.wiki_folder,c.local_only,c.peer_shareable,
+             c.allow_external_ai,c.internet_public,c.origin,c.indexing_mode,c.okf_version,
+             c.created_at,c.updated_at FROM collections c
+             JOIN application_wiki_grants g ON g.collection_id=c.id
+             JOIN application_capabilities a ON a.app_id=g.app_id
+             WHERE g.app_id=?1 AND c.origin='ai_memory' AND a.revoked_at IS NULL
+             ORDER BY c.name COLLATE NOCASE,c.id",
+        )?;
+        let rows = statement.query_map([app_id.to_string()], collection_from_row)?;
+        rows.collect::<rusqlite::Result<_>>().map_err(Into::into)
+    }
+
+    pub fn upsert_okf_concept_projection(
+        &self,
+        collection_id: Uuid,
+        concept: &crate::okf_import::OkfImportedConcept,
+    ) -> Result<OkfConceptProjectionRecord> {
+        let mut connection = self.connection()?;
+        let tx = connection.transaction()?;
+        let concept_id = Uuid::new_v5(&collection_id, concept.logical_path.as_bytes());
+        let now = Utc::now();
+        tx.execute(
+            "INSERT INTO okf_concept_projection
+             (collection_id,concept_id,logical_path,concept_type,title,description,tags_json,
+              lifecycle_status,generation_json,verifications_json,provenance_json,version,
+              fingerprint,unknown_frontmatter_json,indexed_at)
+             VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15)
+             ON CONFLICT(collection_id,logical_path) DO UPDATE SET
+              concept_type=excluded.concept_type,title=excluded.title,description=excluded.description,
+              tags_json=excluded.tags_json,lifecycle_status=excluded.lifecycle_status,
+              generation_json=excluded.generation_json,verifications_json=excluded.verifications_json,
+              provenance_json=excluded.provenance_json,version=excluded.version,
+              fingerprint=excluded.fingerprint,unknown_frontmatter_json=excluded.unknown_frontmatter_json,
+              indexed_at=excluded.indexed_at",
+            params![collection_id.to_string(), concept_id.to_string(), concept.logical_path,
+                concept.concept_type, concept.title, concept.description, serde_json::to_string(&concept.tags)?,
+                concept.lifecycle_status, yaml_json(concept.generated.as_ref())?,
+                yaml_json(concept.verified.as_ref())?.unwrap_or_else(|| "[]".to_owned()),
+                yaml_json(concept.sources.as_ref())?.unwrap_or_else(|| "[]".to_owned()), concept.version,
+                concept.fingerprint, serde_json::to_string(&serde_json::to_value(&concept.unknown_frontmatter)?)?,
+                now.to_rfc3339()],
+        )?;
+        tx.execute(
+            "DELETE FROM okf_projection_fts WHERE collection_id=?1 AND concept_id=?2",
+            params![collection_id.to_string(), concept_id.to_string()],
+        )?;
+        tx.execute(
+            "INSERT INTO okf_projection_fts
+             (collection_id,concept_id,logical_path,title,description,tags,text,fingerprint,lifecycle_status)
+             VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9)",
+            params![collection_id.to_string(), concept_id.to_string(), concept.logical_path,
+                concept.title, concept.description, concept.tags.join(" "), concept.search_text,
+                concept.fingerprint, concept.lifecycle_status],
+        )?;
+        tx.commit()?;
+        drop(connection);
+        self.list_okf_concept_projection(collection_id)?
+            .into_iter()
+            .find(|record| record.concept_id == concept_id)
+            .context("stored OKF concept projection is unavailable")
+    }
+
+    pub fn consume_application_rate_limit(&self, app_id: Uuid, wiki_creation: bool) -> Result<()> {
+        let mut connection = self.connection()?;
+        let tx = connection.transaction()?;
+        let now = Utc::now();
+        let row = tx
+            .query_row(
+                "SELECT mutations_window_started_at,mutations_in_window,
+             creations_window_started_at,creations_in_window
+             FROM application_capabilities WHERE app_id=?1 AND revoked_at IS NULL",
+                [app_id.to_string()],
+                |row| {
+                    Ok((
+                        row.get::<_, Option<String>>(0)?,
+                        row.get::<_, u32>(1)?,
+                        row.get::<_, Option<String>>(2)?,
+                        row.get::<_, u32>(3)?,
+                    ))
+                },
+            )
+            .optional()?
+            .context("application capability is unavailable")?;
+        let (mutation_start, mutation_count) =
+            next_rate_window(row.0, row.1, now, chrono::Duration::minutes(1))?;
+        if mutation_count >= APPLICATION_MUTATIONS_PER_MINUTE {
+            bail!("application mutation rate limit exceeded");
+        }
+        let (creation_start, creation_count) =
+            next_rate_window(row.2, row.3, now, chrono::Duration::hours(1))?;
+        if wiki_creation && creation_count >= APPLICATION_WIKI_CREATIONS_PER_HOUR {
+            bail!("application wiki creation rate limit exceeded");
+        }
+        if wiki_creation {
+            let wiki_count: u32 = tx.query_row(
+                "SELECT count(*) FROM application_wiki_grants WHERE app_id=?1 AND role='owner'",
+                [app_id.to_string()],
+                |row| row.get(0),
+            )?;
+            if wiki_count >= APPLICATION_MAX_WIKIS {
+                bail!("application wiki limit exceeded");
+            }
+        }
+        tx.execute(
+            "UPDATE application_capabilities SET last_used_at=?2,
+             mutations_window_started_at=?3,mutations_in_window=?4,
+             creations_window_started_at=?5,creations_in_window=?6 WHERE app_id=?1",
+            params![
+                app_id.to_string(),
+                now.to_rfc3339(),
+                mutation_start.to_rfc3339(),
+                mutation_count + 1,
+                creation_start.to_rfc3339(),
+                creation_count + u32::from(wiki_creation)
+            ],
+        )?;
+        tx.commit()?;
+        Ok(())
+    }
+
     pub fn update_collection_policy(&self, id: Uuid, mut policy: CollectionPolicy) -> Result<()> {
         policy.normalize();
         let now = Utc::now();
@@ -1369,6 +1659,24 @@ impl Database {
             params![
                 id.to_string(),
                 path_text(&source_folder),
+                Utc::now().to_rfc3339()
+            ],
+        )?;
+        ensure_changed(count, "collection", id)
+    }
+
+    pub(crate) fn update_collection_paths(
+        &self,
+        id: Uuid,
+        source_folder: &Path,
+        wiki_folder: &Path,
+    ) -> Result<()> {
+        let count = self.connection()?.execute(
+            "UPDATE collections SET source_folder=?2,wiki_folder=?3,updated_at=?4 WHERE id=?1",
+            params![
+                id.to_string(),
+                path_text(&absolute_path(source_folder)?),
+                path_text(&absolute_path(wiki_folder)?),
                 Utc::now().to_rfc3339()
             ],
         )?;
@@ -4766,6 +5074,25 @@ fn fts_query(query: &str) -> String {
         .join(" OR ")
 }
 
+fn next_rate_window(
+    started_at: Option<String>,
+    count: u32,
+    now: DateTime<Utc>,
+    duration: chrono::Duration,
+) -> Result<(DateTime<Utc>, u32)> {
+    let Some(started_at) = started_at else {
+        return Ok((now, 0));
+    };
+    let started_at = DateTime::parse_from_rfc3339(&started_at)
+        .context("application rate-limit timestamp is invalid")?
+        .with_timezone(&Utc);
+    if now.signed_duration_since(started_at) >= duration {
+        Ok((now, 0))
+    } else {
+        Ok((started_at, count))
+    }
+}
+
 fn repeat_placeholders(count: usize, start_index: usize) -> String {
     (0..count)
         .map(|index| format!("?{}", start_index + index))
@@ -5133,7 +5460,7 @@ mod tests {
         let temp = tempfile::tempdir().unwrap();
         let path = temp.path().join("db.sqlite");
         let db = Database::open(&path).unwrap();
-        assert_eq!(db.schema_version().unwrap(), 8);
+        assert_eq!(db.schema_version().unwrap(), 9);
         for table in [
             "collections",
             "source_documents",
@@ -5153,7 +5480,7 @@ mod tests {
             assert_eq!(db.count(table).unwrap(), 0);
         }
         drop(db);
-        assert_eq!(Database::open(path).unwrap().schema_version().unwrap(), 8);
+        assert_eq!(Database::open(path).unwrap().schema_version().unwrap(), 9);
     }
 
     #[test]
@@ -5670,7 +5997,7 @@ mod tests {
         drop(connection);
 
         let database = Database::open(&path).unwrap();
-        assert_eq!(database.schema_version().unwrap(), 8);
+        assert_eq!(database.schema_version().unwrap(), 9);
         assert_eq!(database.count("collections").unwrap(), 1);
         assert_eq!(database.count("source_documents").unwrap(), 1);
         assert_eq!(database.count("publication_claims").unwrap(), 0);
@@ -5710,7 +6037,7 @@ mod tests {
 
         let database = Database::open(&path).unwrap();
 
-        assert_eq!(database.schema_version().unwrap(), 8);
+        assert_eq!(database.schema_version().unwrap(), 9);
         assert!(
             database
                 .collection(collection_id)
@@ -5749,7 +6076,7 @@ mod tests {
 
         let database = Database::open(&path).unwrap();
         let collection = database.collection(collection_id).unwrap().unwrap();
-        assert_eq!(database.schema_version().unwrap(), 8);
+        assert_eq!(database.schema_version().unwrap(), 9);
         assert!(collection.policy.peer_shareable);
         assert!(collection.policy.allow_external_ai);
         assert!(!collection.policy.internet_public);
@@ -5783,7 +6110,7 @@ mod tests {
         drop(connection);
 
         let database = Database::open(path).unwrap();
-        assert_eq!(database.schema_version().unwrap(), 8);
+        assert_eq!(database.schema_version().unwrap(), 9);
         let indexes = database.list_federation_indexes().unwrap();
         assert_eq!(indexes.len(), 1);
         assert_eq!(indexes[0].registry_version, 0);
@@ -5822,7 +6149,7 @@ mod tests {
             expires_at: Utc::now() + chrono::Duration::days(1),
         }];
 
-        assert_eq!(database.schema_version().unwrap(), 8);
+        assert_eq!(database.schema_version().unwrap(), 9);
         assert_eq!(
             database
                 .count("federation_bootstrap_registry_state")
@@ -5864,7 +6191,7 @@ mod tests {
         let database = Database::open(path).unwrap();
         let collection = database.collection(collection_id).unwrap().unwrap();
 
-        assert_eq!(database.schema_version().unwrap(), 8);
+        assert_eq!(database.schema_version().unwrap(), 9);
         assert_eq!(collection.origin, WikiOrigin::Folder);
         assert_eq!(collection.indexing_mode, IndexingMode::Continuous);
         assert_eq!(collection.okf_version, "0.1");

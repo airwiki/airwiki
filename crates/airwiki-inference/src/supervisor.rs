@@ -576,7 +576,7 @@ mod tests {
             .stderr(Stdio::null())
             .kill_on_drop(true);
         let mut child = command.spawn().expect("synthetic child should start");
-        let child_stdin = child
+        let mut child_stdin = child
             .stdin
             .take()
             .expect("synthetic child stdin should be piped");
@@ -625,6 +625,11 @@ mod tests {
             .await
             .expect("health request should reach the synthetic listener")
             .expect("synthetic listener should report the accepted request");
+        use tokio::io::AsyncWriteExt;
+        child_stdin
+            .shutdown()
+            .await
+            .expect("synthetic child stdin should close cleanly");
         drop(child_stdin);
         let (result, elapsed) = tokio::time::timeout(Duration::from_secs(5), probe_task)
             .await

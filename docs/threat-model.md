@@ -18,6 +18,8 @@ Controls are not considered effective end to end until the
 - Ed25519 device identity and trusted-peer state;
 - separate public-publisher identity, signed manifests and tombstones;
 - collection grants and `allow_external_ai` policy;
+- application capability secrets, per-memory grants and managed OKF bundles;
+- pending attested-computation parameters and ephemeral receipts;
 - local models, runtime, and pinned artifact identities;
 - snippets returned through LAN or MCP;
 - client-owned ChatGPT, Claude, and Gemini configuration;
@@ -51,6 +53,13 @@ Controls are not considered effective end to end until the
     expiring routing metadata only. Unpaired readers receive bounded snippets or
     concept summaries directly from the owner over Noise-authenticated QUIC or
     relay routes. The owner remains the authorization authority.
+11. **Managed MCP application → memory backend.** The bridge authenticates with
+    a private capability resolved from a public integration identifier. The
+    backend uses bounded channels, per-Wiki grants, optimistic fingerprints,
+    quotas and rate limits.
+12. **OKF bundle → `airwiki-wasm`.** Components are untrusted bundle bytes. Only
+    hash-bound, import-free component-model artifacts run, without WASI or host
+    capabilities and under memory, fuel, time and payload limits.
 
 ## Threats and controls
 
@@ -72,6 +81,12 @@ Controls are not considered effective end to end until the
 | Ranking returns the least-wrong absent fact | Source node applies the pinned local answerability classifier to the bounded outgoing snippet; failures and timeouts close the path | The classifier is probabilistic; reassess both platforms when model, corpus, or policy changes |
 | External chat treats an authorized candidate as relevant | Candidates exist only for `external_ai`, remain separately typed and bounded, pass the same final authorization checks, lose to duplicate evidence, and carry instructions requiring explicit support | A chat model can still misuse an unrelated authorized snippet; minimize externally enabled collections and run the golden prompt set |
 | DNS rebinding reaches MCP | Loopback bind, exact authority including port, bounded body | Compromised local software can already call loopback |
+| Application capability is forged, crossed or revoked mid-operation | Random secret, hash-only SQLite storage, fixed bridge resolution, active-capability recheck, per-Wiki role and immediate revocation | Malware in the same user account may read the private credential file |
+| Assistant forges producer, human verification or permissions | Rust fixes immutable producer/version, generation time and lifecycle; MCP schemas exclude verification and sharing; only AI-memory bundles are writable | A user may still over-grant an application; review grants and revoke it |
+| Memory mutation splits filesystem and SQLite | Staging/atomic replacement, optimistic fingerprint, append-only journal and fail-closed startup reconciliation | Disk failure can require explicit recovery while the Wiki remains unavailable |
+| Malicious OKF optional metadata raises trust or enables code | Unknown/invalid fields are preserved with warnings but ignored for assurance, sharing and execution; future versions are local-only | A future field remains visually present and must not be mistaken for interpreted policy |
+| Attested component accesses host data or exhausts the node | No imports or WASI; in-bundle hash-bound artifacts; 8 MiB components, 64 MiB memory, 10M fuel, two-second deadline and bounded JSON | Compiler/runtime vulnerabilities remain in the local TCB; keep Wasmtime pinned and audited |
+| Computation result is mistaken for human-reviewed knowledge | Executor and attester confirmation are separate from human verification; saved results require a second native prompt and use `process:airwiki-wasm` with machine-confirmed trust | The deterministic attester proves the configured procedure, not the truth of its inputs |
 | Response-based exfiltration | At most ten items per typed lane, bounded snippets, a smaller global serialized MCP budget that drops candidates first, no paths/full documents/embeddings/indexes, and a global MCP rate limit | Repeated authorized queries may reconstruct information; minimize external-chat collections |
 | Another local process imitates a bridge | Loopback and collection policy; client label is diagnostic only | Loopback is not per-process authentication; protect the local account |
 | Duplicate desktop instances corrupt state | Per-user guard before SQLite/MCP/LAN/models, activation limited to `SHOW/OK` | Local name squatting can prevent startup but cannot start duplicate services |
@@ -114,13 +129,26 @@ Controls are not considered effective end to end until the
   lane by answerability. Rejected items may appear only as separately typed
   `external_ai` candidates.
 - LAN accepts only `/airwiki/search/2.0.0`; there is no v1 fallback.
-- Public catalog, search and browse use separate v1 protocols and never bypass
-  reviewed publication. Public browse cannot return originals, paths, chunks,
+- Public catalog, search and browse advertise v2 assurance metadata and fall
+  back to v1 during rollout; absent legacy metadata is unknown, never verified.
+  Neither version bypasses stable publication. Public browse cannot return originals, paths, chunks,
   embeddings or edit operations.
 - `external_ai` is never inferred from tags, classification, or model output.
 - Originals, local paths, embeddings, indexes, and collection listings do not
   cross LAN.
 - Bundle visualization is local, read-only, and causes no network traffic.
+- Unknown OKF fields/types are preserved; invalid optional metadata cannot raise
+  trust, authorize disclosure or enable execution.
+- Future OKF versions remain local-only. Legacy v0.1 remains readable but cannot
+  create new publication.
+- Application memory capability is independent from LAN, public and external
+  search policy; assistants cannot delete, share, grant or assert verification.
+- Human verification of managed concepts requires a Rust-owned native prompt
+  and the exact current fingerprint; changed permissions or malformed existing
+  verification metadata fail closed.
+- `airwiki-wasm` provides no host imports. Execution and saving each require a
+  separate Rust-owned native confirmation; raw parameters and receipts expire
+  from memory after ten minutes.
 - Guided repair withdraws affected revisions first and never restores exposure
   without new approval.
 - Revocation deletes grants and closes active connections.

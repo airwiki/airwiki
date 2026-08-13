@@ -1,8 +1,9 @@
 # Local chat integrations
 
-AirWiki exposes one read-only tool, `search_airwiki`, to
-ChatGPT Desktop/Work, Claude Desktop, and Gemini CLI. AirWiki does not
-need provider API keys; each client owns its account and session.
+AirWiki exposes `search_airwiki` plus capability-authenticated memory and
+attested-computation tools to ChatGPT Desktop/Work, Claude Desktop, Gemini CLI
+and generic local MCP clients. AirWiki does not need provider API keys; each
+client owns its account and session.
 
 ## Before connecting
 
@@ -19,6 +20,24 @@ Connecting a client never publishes documents, grants collections, changes peer
 permissions, or enables cloud access. Snippets requested from an authorized
 collection may enter the provider cloud and are then governed by that provider's
 policies.
+
+Each managed integration receives a random capability stored in AirWiki's
+private per-user files. The client configuration contains only a public
+integration identifier; the bridge resolves and sends the secret to the fixed
+loopback endpoint. The secret never appears in MCP arguments, tool responses,
+events or logs.
+
+An application may create and maintain only AI-memory Wikis it owns or has an
+explicit reader/editor grant for. It may create, edit and deprecate concepts,
+but cannot delete, share, verify, change history or operate on folder/imported
+Wikis. Granting one application access to another application's memory requires
+an OS-native confirmation in AirWiki. Revocation stops access immediately and
+does not delete the memory.
+
+Attested computation requests remain pending until the user confirms them in
+AirWiki. A result expires after ten minutes. Saving an accepted result requires
+a second confirmation and records a machine-confirmed process concept rather
+than a human review.
 
 ## ChatGPT Desktop/Work
 

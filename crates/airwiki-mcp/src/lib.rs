@@ -1693,6 +1693,27 @@ mod tests {
         requests: Mutex<Vec<SearchRequest>>,
     }
 
+    #[derive(Default)]
+    struct RecordingApplicationBackend {
+        calls: Mutex<Vec<(String, &'static str)>>,
+    }
+
+    #[async_trait]
+    impl McpApplicationBackend for RecordingApplicationBackend {
+        async fn call(
+            &self,
+            identity: McpApplicationIdentity,
+            tool: &'static str,
+            _arguments: serde_json::Value,
+        ) -> Result<serde_json::Value, McpApplicationError> {
+            self.calls
+                .lock()
+                .expect("application call lock")
+                .push((identity.capability, tool));
+            Ok(json!({"wikis": []}))
+        }
+    }
+
     #[async_trait]
     impl FederatedSearch for RecordingBackend {
         async fn search(
@@ -1890,6 +1911,85 @@ mod tests {
         assert_eq!(annotations.destructive_hint, Some(false));
         assert_eq!(annotations.idempotent_hint, Some(true));
         assert_eq!(annotations.open_world_hint, Some(false));
+    }
+
+    #[tokio::test]
+    async fn application_tools_are_advertised_but_require_a_capability_per_call() {
+        let application_backend = Arc::new(RecordingApplicationBackend::default());
+        let handle = start_with_application_backend(
+            McpServerConfig::default().with_port(0),
+            Arc::new(RecordingBackend::default()),
+            Some(application_backend.clone()),
+        )
+        .await
+        .expect("start capability-scoped MCP gateway");
+        let host = format!("127.0.0.1:{}", handle.local_addr().port());
+        let list_response = raw_json_request(
+            handle.local_addr(),
+            &host,
+            &json!({
+                "jsonrpc": "2.0",
+                "id": 1,
+                "method": "tools/list",
+                "params": {}
+            })
+            .to_string(),
+        )
+        .await;
+        for tool in [
+            "search_airwiki",
+            "list_airwiki_memories",
+            "create_airwiki_memory",
+            "get_airwiki_memory",
+            "write_airwiki_memory",
+            "deprecate_airwiki_memory",
+            "request_airwiki_computation",
+            "get_airwiki_computation_run",
+        ] {
+            assert!(
+                list_response.contains(tool),
+                "missing advertised tool {tool}"
+            );
+        }
+
+        let call_body = json!({
+            "jsonrpc": "2.0",
+            "id": 2,
+            "method": "tools/call",
+            "params": {
+                "name": "list_airwiki_memories",
+                "arguments": {}
+            }
+        })
+        .to_string();
+        let unauthorized = raw_json_request(handle.local_addr(), &host, &call_body).await;
+        assert!(unauthorized.contains("application authorization is required"));
+        assert!(
+            application_backend
+                .calls
+                .lock()
+                .expect("application call lock")
+                .is_empty()
+        );
+
+        let authorized = raw_json_request_with_capability(
+            handle.local_addr(),
+            &host,
+            &call_body,
+            "synthetic-capability",
+        )
+        .await;
+        assert!(authorized.contains("\\\"wikis\\\":[]"));
+        assert_eq!(
+            application_backend
+                .calls
+                .lock()
+                .expect("application call lock")
+                .as_slice(),
+            &[("synthetic-capability".to_owned(), "list_airwiki_memories")]
+        );
+
+        handle.shutdown().await.expect("graceful shutdown");
     }
 
     #[test]
@@ -2876,11 +2976,30 @@ mod tests {
         raw_json_request_with_optional_client(address, host, body, Some(client)).await
     }
 
+    async fn raw_json_request_with_capability(
+        address: SocketAddr,
+        host: &str,
+        body: &str,
+        capability: &str,
+    ) -> String {
+        raw_json_request_with_optional_headers(address, host, body, None, Some(capability)).await
+    }
+
     async fn raw_json_request_with_optional_client(
         address: SocketAddr,
         host: &str,
         body: &str,
         client: Option<McpClientKind>,
+    ) -> String {
+        raw_json_request_with_optional_headers(address, host, body, client, None).await
+    }
+
+    async fn raw_json_request_with_optional_headers(
+        address: SocketAddr,
+        host: &str,
+        body: &str,
+        client: Option<McpClientKind>,
+        capability: Option<&str>,
     ) -> String {
         let mut stream = tokio::net::TcpStream::connect(address)
             .await
@@ -2888,8 +3007,11 @@ mod tests {
         let client_header = client.map_or_else(String::new, |client| {
             format!("{MCP_CLIENT_HEADER}: {}\r\n", client.as_str())
         });
+        let capability_header = capability.map_or_else(String::new, |capability| {
+            format!("{MCP_CAPABILITY_HEADER}: {capability}\r\n")
+        });
         let request = format!(
-            "POST {MCP_PATH} HTTP/1.1\r\nHost: {host}\r\n{client_header}Connection: close\r\nContent-Type: application/json\r\nAccept: application/json, text/event-stream\r\nContent-Length: {}\r\n\r\n{body}",
+            "POST {MCP_PATH} HTTP/1.1\r\nHost: {host}\r\n{client_header}{capability_header}Connection: close\r\nContent-Type: application/json\r\nAccept: application/json, text/event-stream\r\nContent-Length: {}\r\n\r\n{body}",
             body.len()
         );
         stream

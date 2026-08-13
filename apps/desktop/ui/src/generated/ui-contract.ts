@@ -187,7 +187,7 @@ export type UiEventEnvelope = { schemaVersion: number, sequence: number, request
 
 export type UiError = { code: string, messageKey: string, retryable: boolean, };
 
-export type FolderSelection = { token: string, displayPath: string, };
+export type FolderSelection = { token: string, displayName: string, };
 
 export type OkfImportSummary = { entryCount: number, conceptCount: number, uncompressedBytes: number, declaredOkfVersion: string | null, compatibility: OkfCompatibilityDto, warningCount: number, warnings: Array<OkfWarningSummary>, restrictions: Array<WikiRestrictionDto>, };
 

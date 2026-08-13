@@ -613,6 +613,7 @@ review-issue-no-text-layer = This PDF has no selectable text. OCR is not support
 review-issue-too-many-characters = This document contains too much text. Split it into smaller files, then scan again.
 review-issue-processing-failed = Local processing did not finish. Keep AirWiki open and scan the folder again.
 review-approve = Approve and publish
+review-okf-read-only = This wiki cannot publish new changes in its current OKF format. Recreate it from its source folder to publish as OKF v0.2; you can still reject this proposal.
 review-reject = Reject draft
 review-reanalyze = Analyze again
 review-reanalyze-help = Creates a new draft with the active model. It never publishes the document.

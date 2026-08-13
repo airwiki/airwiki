@@ -1151,6 +1151,7 @@
     actionMessage = t('review-evidence-loading');
     try {
       await loadReviewEvidence(review);
+      actionBusy = false;
     } catch {
       actionMessage = t('review-evidence-approval-blocked');
       actionBusy = false;
@@ -1174,8 +1175,16 @@
       && snapshot.reviewEvidence.sourceRevision === selectedReview.sourceRevision;
   }
 
+  function selectedReviewIsReadOnly(): boolean {
+    if (!selectedReview) return true;
+    return snapshot?.wikis
+      .find((wiki) => wiki.id === selectedReview?.wikiId)
+      ?.restrictions.length !== 0;
+  }
+
   async function decideReview(decision: 'approve' | 'reject' | 'reanalyze') {
-    if (!selectedReview || (decision === 'approve' && (!editDraft || !evidenceIsCurrent()))) return;
+    if (!selectedReview || ((decision === 'approve' || decision === 'reanalyze') && selectedReviewIsReadOnly())) return;
+    if (decision === 'approve' && (!editDraft || !evidenceIsCurrent())) return;
     actionBusy = true;
     try {
       if (decision === 'approve' && editDraft) await approveReview(selectedReview.conceptId, selectedReview.sourceRevision, editDraft);
@@ -1572,7 +1581,7 @@
 {/if}
 
 {#if selectedReview && editDraft}
-  <div class="drawer-backdrop" role="presentation" onclick={(event) => { if (event.currentTarget === event.target) selectedReview = null; }}><div class="side-drawer review-drawer" role="dialog" aria-modal="true" aria-labelledby="review-title"><header><div><p class="section-label">{t('desktop-wiki-pending-tab')}</p><h2 id="review-title">{selectedReview.sourceName}</h2></div><button class="icon-button" aria-label={t('action-close')} onclick={() => { selectedReview = null; editDraft = null; }}>×</button></header><ol class="review-steps"><li class="active"><span>1</span>{t('desktop-evidence')}</li><li><span>2</span>{t('desktop-proposal')}</li><li><span>3</span>{t('desktop-decision')}</li></ol><section><h3>{t('desktop-evidence')}</h3>{#if snapshot.reviewEvidence?.status === 'ready' && snapshot.reviewEvidence.conceptId === selectedReview.conceptId}<div class="evidence-list">{#each snapshot.reviewEvidence.excerpts as line (line.ordinal)}<blockquote>{line.text}</blockquote>{/each}</div>{#if snapshot.reviewEvidence.nextOrdinal != null}<button class="text-action" onclick={loadMoreEvidence}>{t('desktop-load-more')}</button>{/if}{:else}<p class="evidence-warning">{t('review-evidence-approval-blocked')}</p>{/if}</section><section><h3>{t('desktop-proposal')}</h3><TextField label={t('review-edit-title')} bind:value={editDraft.title} maxlength={200} /><TextField label={t('review-edit-summary')} bind:value={editDraft.summary} maxlength={2000} rows={5} multiline /></section><footer><button class="danger" onclick={() => decideReview('reject')} disabled={actionBusy}>{t('review-reject')}</button><button class="secondary" onclick={() => decideReview('reanalyze')} disabled={actionBusy}>{t('review-reanalyze')}</button><button class="primary" onclick={() => decideReview('approve')} disabled={actionBusy || !evidenceIsCurrent()}>{t('review-approve')}</button></footer></div></div>
+  <div class="drawer-backdrop" role="presentation" onclick={(event) => { if (event.currentTarget === event.target) selectedReview = null; }}><div class="side-drawer review-drawer" role="dialog" aria-modal="true" aria-labelledby="review-title"><header><div><p class="section-label">{t('desktop-wiki-pending-tab')}</p><h2 id="review-title">{selectedReview.sourceName}</h2></div><button class="icon-button" aria-label={t('action-close')} onclick={() => { selectedReview = null; editDraft = null; }}>×</button></header><ol class="review-steps"><li class="active"><span>1</span>{t('desktop-evidence')}</li><li><span>2</span>{t('desktop-proposal')}</li><li><span>3</span>{t('desktop-decision')}</li></ol><section><h3>{t('desktop-evidence')}</h3>{#if snapshot.reviewEvidence?.status === 'ready' && snapshot.reviewEvidence.conceptId === selectedReview.conceptId}<div class="evidence-list">{#each snapshot.reviewEvidence.excerpts as line (line.ordinal)}<blockquote>{line.text}</blockquote>{/each}</div>{#if snapshot.reviewEvidence.nextOrdinal != null}<button class="text-action" onclick={loadMoreEvidence}>{t('desktop-load-more')}</button>{/if}{:else}<p class="evidence-warning">{t('review-evidence-approval-blocked')}</p>{/if}</section><section><h3>{t('desktop-proposal')}</h3><TextField label={t('review-edit-title')} bind:value={editDraft.title} maxlength={200} disabled={selectedReviewIsReadOnly()} /><TextField label={t('review-edit-summary')} bind:value={editDraft.summary} maxlength={2000} rows={5} multiline disabled={selectedReviewIsReadOnly()} /></section>{#if selectedReviewIsReadOnly()}<p class="evidence-warning" role="status">{t('review-okf-read-only')}</p>{/if}<footer><button class="danger" onclick={() => decideReview('reject')} disabled={actionBusy}>{t('review-reject')}</button><button class="secondary" onclick={() => decideReview('reanalyze')} disabled={actionBusy || selectedReviewIsReadOnly()}>{t('review-reanalyze')}</button><button class="primary" onclick={() => decideReview('approve')} disabled={actionBusy || selectedReviewIsReadOnly() || !evidenceIsCurrent()}>{t('review-approve')}</button></footer></div></div>
 {/if}
 
 {#if connectionsOpen}

@@ -3,9 +3,11 @@ import axe from 'axe-core';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import App from './App.svelte';
 import { allowPeerPairingAgain, approveReview, configureFirewall, loadWikiBundle, loadWikiPage, openSystemDestination, prepareGuidedWikiRepair, reanalyzeReview, rejectReview, updatePreferences, verifyWikiConcept } from './api';
+import type { UiEventEnvelope } from './generated/ui-contract';
 import { readySnapshot } from './test/fixtures';
 
 let snapshot = readySnapshot();
+let snapshotListener: ((event: UiEventEnvelope) => void) | null = null;
 const tauriListeners = new Map<string, (event: unknown) => void>();
 function activateLocalSearch() {
   snapshot.model = {
@@ -27,7 +29,10 @@ vi.mock('./api', async (importOriginal) => {
   const original = await importOriginal() as typeof import('./api');
   return {
     ...original,
-    connect: vi.fn(async () => snapshot),
+    connect: vi.fn(async (onEvent: (event: UiEventEnvelope) => void) => {
+      snapshotListener = onEvent;
+      return snapshot;
+    }),
     refreshAutostart: vi.fn(async () => undefined),
     refreshConnectivity: vi.fn(async () => undefined),
     refreshWikiHealth: vi.fn(async () => undefined),
@@ -66,6 +71,7 @@ describe('AirWiki wiki workspace', () => {
   beforeEach(() => {
     window.location.hash = '';
     snapshot = readySnapshot();
+    snapshotListener = null;
     tauriListeners.clear();
   });
 
@@ -576,13 +582,35 @@ describe('AirWiki wiki workspace', () => {
       concepts: [first, second], links: [], errorCount: 0, warningCount: 0
     };
     snapshot.knowledgePage = {
-      wikiId: wiki.id, page: second.page, concept: second, title: second.title,
-      status: 'ready', blocks: [{ kind: 'paragraph', text: 'Second body' }], metadata: [], backlinks: [], truncated: false
+      wikiId: wiki.id, page: first.page, concept: first, title: first.title,
+      status: 'ready', blocks: [{ kind: 'paragraph', text: 'First body' }], metadata: [], backlinks: [], truncated: false
     };
     window.location.hash = `#wikis/${wiki.id}`;
     render(App);
 
-    expect(await screen.findByRole('heading', { name: 'Second' })).toBeInTheDocument();
+    expect(await screen.findByRole('heading', { name: 'First' })).toBeInTheDocument();
+    expect(screen.getByText('Revisado por una persona')).toBeInTheDocument();
+    expect(screen.getByText('process:first')).toBeInTheDocument();
+
+    snapshot = {
+      ...snapshot,
+      sequence: snapshot.sequence + 1,
+      knowledgePage: {
+        wikiId: wiki.id, page: second.page, concept: second, title: second.title,
+        status: 'ready', blocks: [{ kind: 'paragraph', text: 'Second body' }], metadata: [], backlinks: [], truncated: false
+      }
+    };
+    await act(() => {
+      snapshotListener?.({
+        schemaVersion: snapshot.schemaVersion,
+        sequence: snapshot.sequence,
+        requestId: null,
+        kind: 'stateChanged',
+        snapshot
+      });
+    });
+
+    expect(screen.getByRole('heading', { name: 'Second' })).toBeInTheDocument();
     expect(screen.getByText('Reference')).toBeInTheDocument();
     expect(screen.getByText('Sin verificar')).toBeInTheDocument();
     expect(screen.queryByText('Revisado por una persona')).not.toBeInTheDocument();

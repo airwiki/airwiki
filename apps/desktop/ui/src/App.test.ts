@@ -674,6 +674,29 @@ describe('AirWiki wiki workspace', () => {
     expect(updatePreferences).toHaveBeenCalledWith(expect.objectContaining({ lanPreference: 'enabled' }));
   });
 
+  it('preserves unsaved preferences while background snapshots arrive', async () => {
+    window.location.hash = '#system/preferences';
+    render(App);
+
+    const networkPreference = await screen.findByRole('combobox', { name: 'Red local' });
+    await fireEvent.change(networkPreference, { target: { value: 'enabled' } });
+    const staleSnapshot = structuredClone(snapshot);
+    staleSnapshot.sequence += 1;
+    await act(() => {
+      snapshotListener?.({
+        schemaVersion: staleSnapshot.schemaVersion,
+        sequence: staleSnapshot.sequence,
+        requestId: null,
+        kind: 'stateChanged',
+        snapshot: staleSnapshot
+      });
+    });
+
+    expect(networkPreference).toHaveValue('enabled');
+    await fireEvent.click(screen.getByRole('button', { name: 'Guardar preferencias' }));
+    expect(updatePreferences).toHaveBeenCalledWith(expect.objectContaining({ lanPreference: 'enabled' }));
+  });
+
   it('shows an explicit local-network choice for existing undecided preferences', async () => {
     snapshot.preferences!.lanPreference = 'undecided';
     window.location.hash = '#system/preferences';

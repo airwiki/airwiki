@@ -57,6 +57,18 @@ jobs:
       - name: Platform npm license inventory
         shell: bash
         run: pnpm --dir apps/desktop/ui run licenses:check ${{ matrix.target }}
+      - name: Generate stale platform inventory for review
+        if: failure()
+        shell: bash
+        run: pnpm --dir apps/desktop/ui run licenses:generate ${{ matrix.target }}
+      - name: Upload stale platform inventory for review
+        if: failure()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: npm-license-inventory-${{ matrix.target }}
+          path: resources/licenses/NPM_LICENSES_*.md
+          if-no-files-found: error
+          retention-days: 7
       - name: Production dependency advisories
         shell: bash
         run: pnpm --dir apps/desktop/ui audit --audit-level high --prod

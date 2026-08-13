@@ -582,6 +582,45 @@ mod tests {
         Ok(())
     }
 
+    #[test]
+    fn rejects_components_over_the_declared_size_budget() -> anyhow::Result<()> {
+        let mut fixture = WasmFixture::new(false, ExecutorBehavior::ReturnReceipt)?;
+        let oversized = vec![0_u8; (super::MAX_COMPONENT_BYTES + 1) as usize];
+        fs::write(
+            fixture
+                .bundle_root
+                .join("computations/artifacts/executor.wasm"),
+            &oversized,
+        )?;
+        fixture.contract.executor.sha256 = sha256(&oversized);
+
+        assert!(matches!(
+            AirWikiWasmRuntime.execute(fixture.request()),
+            Err(AttestedComputationError::InvalidComponent)
+        ));
+        Ok(())
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn rejects_component_symlinks() -> anyhow::Result<()> {
+        use std::os::unix::fs::symlink;
+
+        let fixture = WasmFixture::new(false, ExecutorBehavior::ReturnReceipt)?;
+        let component = fixture
+            .bundle_root
+            .join("computations/artifacts/executor.wasm");
+        let target = fixture.bundle_root.join("executor-target.wasm");
+        fs::rename(&component, &target)?;
+        symlink(&target, &component)?;
+
+        assert!(matches!(
+            AirWikiWasmRuntime.execute(fixture.request()),
+            Err(AttestedComputationError::InvalidComponent)
+        ));
+        Ok(())
+    }
+
     struct WasmFixture {
         _temp: TempDir,
         bundle_root: std::path::PathBuf,

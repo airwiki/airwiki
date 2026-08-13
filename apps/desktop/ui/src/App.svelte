@@ -743,10 +743,6 @@
     return page.kind === 'concept' ? `concept:${page.path}` : page.kind;
   }
 
-  function selectedKnowledgeConcept(): KnowledgeConceptSummary | null {
-    return snapshot?.knowledgePage?.concept ?? null;
-  }
-
   function compatibilityLabel(wiki: WikiSummary): string {
     return t(`desktop-okf-compatibility-${wiki.okfCompatibility.kind}`);
   }
@@ -1480,7 +1476,7 @@
                     {#if snapshot.knowledge?.status === 'updating'}<p class="loading"><RefreshCw size={17} />{t('knowledge-updating-title')}</p>
                     {:else if snapshot.knowledgePage?.wikiId === selectedWiki.id && snapshot.knowledgePage.status === 'ready'}
                       <header><p class="section-label">{t('desktop-verified-page')}</p><h2>{snapshot.knowledgePage.title}</h2></header>
-                      {@const concept = selectedKnowledgeConcept()}
+                      {@const concept = snapshot.knowledgePage.concept}
                       {#if concept}
                         <aside class="concept-assurance" aria-label={t('desktop-concept-assurance-title')}>
                           <div><span>{t('desktop-concept-type')}</span><strong>{concept.conceptType}</strong></div>

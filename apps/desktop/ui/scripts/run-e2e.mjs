@@ -1,5 +1,5 @@
 import { spawn, spawnSync } from 'node:child_process';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -13,6 +13,50 @@ const appBinaryPath = resolve(uiRoot, debugTarget, executable);
 const testRoot = mkdtempSync(join(tmpdir(), 'airwiki-e2e-'));
 const expectedPrefix = resolve(tmpdir()) + sep;
 if (!resolve(testRoot).startsWith(expectedPrefix)) throw new Error('unsafe E2E data root');
+const sourceFixture = join(testRoot, 'fixtures', 'source');
+const okfFixture = join(testRoot, 'fixtures', 'okf-v02');
+mkdirSync(sourceFixture, { recursive: true });
+mkdirSync(join(okfFixture, 'architecture'), { recursive: true });
+writeFileSync(join(sourceFixture, 'synthetic-source.md'), [
+  '# Synthetic source',
+  '',
+  'This document exists only for the isolated desktop E2E journey.',
+  ''
+].join('\n'));
+writeFileSync(join(okfFixture, 'index.md'), [
+  '---',
+  'okf_version: "0.2"',
+  '---',
+  '# Synthetic OKF bundle',
+  '',
+  '- [Architecture decision](architecture/decision.md)',
+  ''
+].join('\n'));
+writeFileSync(join(okfFixture, 'architecture', 'index.md'), [
+  '# Architecture',
+  '',
+  '- [Decision](decision.md)',
+  ''
+].join('\n'));
+writeFileSync(join(okfFixture, 'architecture', 'decision.md'), [
+  '---',
+  'type: Decision',
+  'title: Synthetic architecture decision',
+  'generated:',
+  '  by: process:e2e',
+  '  at: 2026-08-13T09:00:00Z',
+  'status: stable',
+  'sources:',
+  '  - id: synthetic-fixture',
+  '    resource: urn:airwiki:e2e',
+  'x-e2e-extension:',
+  '  preserved: true',
+  '---',
+  '# Synthetic architecture decision',
+  '',
+  'The E2E runner preserves this portable OKF concept.',
+  ''
+].join('\n'));
 
 async function waitForWebDriver(child) {
   const deadline = Date.now() + 30_000;
@@ -89,6 +133,8 @@ const app = spawn(appBinaryPath, [], {
   env: {
     ...process.env,
     AIRWIKI_E2E_DATA_ROOT: testRoot,
+    AIRWIKI_E2E_WIKI_FOLDER: sourceFixture,
+    AIRWIKI_E2E_OKF_FOLDER: okfFixture,
     TAURI_WEBDRIVER_PORT: '4445'
   },
   stdio: 'inherit'
@@ -111,5 +157,9 @@ try {
   }
 } finally {
   await stopApp(app);
-  rmSync(testRoot, { recursive: true, force: true });
+  if (process.env.AIRWIKI_E2E_KEEP_DATA === '1') {
+    console.error(`E2E data retained at ${testRoot}`);
+  } else {
+    rmSync(testRoot, { recursive: true, force: true });
+  }
 }

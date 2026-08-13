@@ -80,9 +80,13 @@ jobs:
       matrix:
         os: [macos-14, windows-2022]
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 45
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6.5.0
+        with:
+          node-version: 24.15.0
+          package-manager-cache: false
       - uses: dtolnay/rust-toolchain@fa04a1451ff1842e2626ccb99004d0195b455a88 # master
         with:
           toolchain: 1.96.1
@@ -131,6 +135,17 @@ jobs:
         run: cargo run --locked -p xtask -- relevance validate
       - name: Synthetic retrieval pipeline
         run: cargo run --locked -p xtask -- retrieval validate
+      - name: Activate pinned pnpm
+        shell: bash
+        run: |
+          corepack enable
+          corepack prepare pnpm@10.18.3 --activate
+      - name: Install pinned E2E dependencies
+        shell: bash
+        run: pnpm --dir apps/desktop/ui install --frozen-lockfile --ignore-scripts --prod=false
+      - name: Native desktop E2E
+        shell: bash
+        run: pnpm --dir apps/desktop/ui e2e
 
   supply-chain:
     name: Advisories, licenses and sources

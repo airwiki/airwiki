@@ -1821,9 +1821,13 @@ async fn set_model_profile(
 async fn pick_wiki_folder(
     runtime: tauri::State<'_, AppRuntime>,
 ) -> Result<Option<FolderSelection>, UiError> {
+    #[cfg(feature = "e2e")]
+    let path = e2e_selection_path("AIRWIKI_E2E_WIKI_FOLDER")?;
+    #[cfg(not(feature = "e2e"))]
     let Some(folder) = rfd::AsyncFileDialog::new().pick_folder().await else {
         return Ok(None);
     };
+    #[cfg(not(feature = "e2e"))]
     let path = folder.path().to_path_buf();
     let token = Uuid::new_v4();
     let mut selections = runtime
@@ -1849,6 +1853,13 @@ async fn pick_okf_import(
     runtime: tauri::State<'_, AppRuntime>,
     zip: bool,
 ) -> Result<Option<FolderSelection>, UiError> {
+    #[cfg(feature = "e2e")]
+    let path = e2e_selection_path(if zip {
+        "AIRWIKI_E2E_OKF_ZIP"
+    } else {
+        "AIRWIKI_E2E_OKF_FOLDER"
+    })?;
+    #[cfg(not(feature = "e2e"))]
     let selection = if zip {
         rfd::AsyncFileDialog::new()
             .add_filter("OKF ZIP", &["zip"])
@@ -1857,9 +1868,11 @@ async fn pick_okf_import(
     } else {
         rfd::AsyncFileDialog::new().pick_folder().await
     };
+    #[cfg(not(feature = "e2e"))]
     let Some(selection) = selection else {
         return Ok(None);
     };
+    #[cfg(not(feature = "e2e"))]
     let path = selection.path().to_path_buf();
     let token = Uuid::new_v4();
     let mut selections = runtime
@@ -3139,6 +3152,37 @@ fn consume_folder_selection(runtime: &AppRuntime, token: &str) -> Result<PathBuf
         return Err(UiError::invalid("folderSelectionExpired"));
     }
     Ok(selection.path)
+}
+
+#[cfg(feature = "e2e")]
+fn e2e_selection_path(variable: &str) -> Result<PathBuf, UiError> {
+    let configured_root = std::env::var_os("AIRWIKI_E2E_DATA_ROOT")
+        .map(PathBuf::from)
+        .ok_or_else(UiError::internal)?;
+    let configured_selection = std::env::var_os(variable)
+        .map(PathBuf::from)
+        .ok_or_else(UiError::internal)?;
+    validated_e2e_selection_path(&configured_root, &configured_selection)
+}
+
+#[cfg(feature = "e2e")]
+fn validated_e2e_selection_path(
+    configured_root: &Path,
+    configured_selection: &Path,
+) -> Result<PathBuf, UiError> {
+    if !configured_root.is_absolute() || !configured_selection.is_absolute() {
+        return Err(UiError::invalid("invalidFolderSelection"));
+    }
+    let root = configured_root
+        .canonicalize()
+        .map_err(|_| UiError::invalid("invalidFolderSelection"))?;
+    let selected = configured_selection
+        .canonicalize()
+        .map_err(|_| UiError::invalid("invalidFolderSelection"))?;
+    if !selected.starts_with(&root) {
+        return Err(UiError::invalid("invalidFolderSelection"));
+    }
+    Ok(selected)
 }
 
 fn parse_uuid(value: &str) -> Result<Uuid, UiError> {
@@ -5726,6 +5770,25 @@ mod tests {
         assert_eq!(serialized, serde_json::Value::String("macOs".to_owned()));
         #[cfg(target_os = "windows")]
         assert_eq!(serialized, serde_json::Value::String("windows".to_owned()));
+        Ok(())
+    }
+
+    #[cfg(feature = "e2e")]
+    #[test]
+    fn e2e_selection_is_confined_to_its_canonical_test_root() -> Result<()> {
+        let temporary = tempfile::tempdir()?;
+        let root = temporary.path().join("root");
+        let fixture = root.join("fixture");
+        let outside = temporary.path().join("outside");
+        std::fs::create_dir_all(&fixture)?;
+        std::fs::create_dir_all(&outside)?;
+
+        assert_eq!(
+            validated_e2e_selection_path(&root, &fixture)?,
+            fixture.canonicalize()?
+        );
+        assert!(validated_e2e_selection_path(&root, &root.join("../outside")).is_err());
+        assert!(validated_e2e_selection_path(&root, &root.join("missing")).is_err());
         Ok(())
     }
 

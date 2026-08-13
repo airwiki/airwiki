@@ -2,7 +2,7 @@ import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testi
 import axe from 'axe-core';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import App from './App.svelte';
-import { allowPeerPairingAgain, configureFirewall, loadWikiBundle, loadWikiPage, openSystemDestination, prepareGuidedWikiRepair, updatePreferences, verifyWikiConcept } from './api';
+import { allowPeerPairingAgain, approveReview, configureFirewall, loadWikiBundle, loadWikiPage, openSystemDestination, prepareGuidedWikiRepair, reanalyzeReview, rejectReview, updatePreferences, verifyWikiConcept } from './api';
 import { readySnapshot } from './test/fixtures';
 
 let snapshot = readySnapshot();
@@ -39,7 +39,10 @@ vi.mock('./api', async (importOriginal) => {
     allowPeerPairingAgain: vi.fn(async () => undefined),
     loadWikiBundle: vi.fn(async () => undefined),
     loadWikiPage: vi.fn(async () => undefined),
-    verifyWikiConcept: vi.fn(async () => undefined)
+    verifyWikiConcept: vi.fn(async () => undefined),
+    approveReview: vi.fn(async () => undefined),
+    rejectReview: vi.fn(async () => undefined),
+    reanalyzeReview: vi.fn(async () => undefined)
   };
 });
 
@@ -333,6 +336,43 @@ describe('AirWiki wiki workspace', () => {
     expect(screen.getByText(/No se publicarán hasta que revises la evidencia y decidas/)).toBeInTheDocument();
     await fireEvent.click(screen.getByRole('button', { name: 'Revisar propuestas' }));
     expect(screen.getByRole('tab', { name: /Pendientes/ })).toHaveAttribute('aria-selected', 'true');
+  });
+
+  it('keeps legacy review cleanup available without offering an impossible publication', async () => {
+    const wiki = snapshot.wikis[0];
+    wiki.needsReviewCount = 1;
+    wiki.okfVersion = '0.1';
+    wiki.declaredOkfVersion = '0.1';
+    wiki.okfCompatibility = { kind: 'legacyV01' };
+    wiki.restrictions = ['legacyReadOnly'];
+    const review = {
+      conceptId: 'legacy-review', wikiId: wiki.id, sourceRevision: 2,
+      sourceName: 'legacy.md', wikiName: wiki.name,
+      draft: {
+        type: 'Reference', title: 'Legacy proposal', description: 'Synthetic fixture.',
+        language: 'es', tags: [], entities: [], links: [], summary: 'Cannot be republished as v0.1.',
+        classificationConfidence: 1, classificationExplanation: 'Synthetic fixture.'
+      }
+    };
+    snapshot.reviews = [review];
+    snapshot.reviewEvidence = {
+      requestId: 'legacy-evidence', conceptId: review.conceptId, sourceRevision: review.sourceRevision,
+      status: 'ready', excerpts: [{ ordinal: 0, headingOrPage: 'Legacy', text: 'Synthetic evidence.', truncated: false }],
+      totalChunks: 1, nextOrdinal: null
+    };
+    render(App);
+
+    await fireEvent.click(await screen.findByRole('row', { name: /Atlas 2 publicados/ }));
+    await fireEvent.click(screen.getByRole('tab', { name: /Pendientes/ }));
+    await fireEvent.click(await screen.findByRole('button', { name: /legacy\.md/ }));
+
+    expect(screen.getByRole('status')).toHaveTextContent('Vuelve a crearla desde la carpeta de origen');
+    expect(screen.getByRole('button', { name: 'Aprobar y publicar' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Volver a analizar' })).toBeDisabled();
+    await fireEvent.click(screen.getByRole('button', { name: 'Rechazar borrador' }));
+    expect(rejectReview).toHaveBeenCalledWith(review.conceptId);
+    expect(approveReview).not.toHaveBeenCalled();
+    expect(reanalyzeReview).not.toHaveBeenCalled();
   });
 
   it('keeps guided repair reachable from the unified wiki workspace', async () => {

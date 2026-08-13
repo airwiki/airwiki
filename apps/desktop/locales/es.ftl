@@ -613,6 +613,7 @@ review-issue-no-text-layer = Este PDF no tiene texto seleccionable. El OCR aún 
 review-issue-too-many-characters = Este documento contiene demasiado texto. Divídelo en archivos más pequeños y vuelve a escanear.
 review-issue-processing-failed = El procesamiento local no terminó. Mantén AirWiki abierto y vuelve a escanear la carpeta.
 review-approve = Aprobar y publicar
+review-okf-read-only = Esta wiki no puede publicar cambios nuevos con su formato OKF actual. Vuelve a crearla desde la carpeta de origen para publicar como OKF v0.2; aún puedes rechazar esta propuesta.
 review-reject = Rechazar borrador
 review-reanalyze = Volver a analizar
 review-reanalyze-help = Genera un nuevo borrador con el modelo activo. Nunca publica el documento.

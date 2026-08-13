@@ -118,13 +118,17 @@ impl AirWikiWasmRuntime {
             &request.contract.attester.sha256,
         )?;
         let engine = runtime_engine()?;
-        let _deadline = ExecutionDeadline::start(&engine);
         let executor = Component::new(&engine, &executor_bytes)
             .map_err(|_| AttestedComputationError::InvalidComponent)?;
         let attester = Component::new(&engine, &attester_bytes)
             .map_err(|_| AttestedComputationError::InvalidComponent)?;
         ensure_no_imports(&engine, &executor)?;
         ensure_no_imports(&engine, &attester)?;
+
+        // Epoch deadlines apply to stores that already exist. Start the bounded
+        // execution window only after both components have compiled and passed
+        // the import check so the single epoch tick cannot be consumed early.
+        let _deadline = ExecutionDeadline::start(&engine);
 
         let mut executor_store = limited_store(&engine)?;
         let executor_linker = Linker::new(&engine);
@@ -412,7 +416,7 @@ fn classify_wasmtime_error(error: wasmtime::Error) -> AttestedComputationError {
     {
         return AttestedComputationError::ResourceLimit;
     }
-    let message = error.to_string();
+    let message = format!("{error:#}");
     if message.contains("fuel") || message.contains("memory") || message.contains("epoch") {
         AttestedComputationError::ResourceLimit
     } else {
@@ -445,7 +449,17 @@ mod tests {
     #[derive(Debug, Clone, Copy)]
     enum ExecutorBehavior {
         ReturnReceipt,
+        ReturnMalformedReceipt,
+        ReturnIncompleteReceipt,
+        ReturnOversizedReceipt,
+        GrowMemoryBeyondLimit,
         ExhaustFuel,
+    }
+
+    #[derive(Debug, Clone, Copy)]
+    enum AttesterBehavior {
+        Accept,
+        Reject,
     }
 
     #[test]
@@ -499,6 +513,75 @@ mod tests {
         Ok(())
     }
 
+    #[test]
+    fn bounds_component_memory_growth() -> anyhow::Result<()> {
+        let fixture = WasmFixture::new(false, ExecutorBehavior::GrowMemoryBeyondLimit)?;
+
+        let result = AirWikiWasmRuntime.execute(fixture.request());
+        assert!(
+            matches!(result, Err(AttestedComputationError::ResourceLimit)),
+            "unexpected result: {result:?}"
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn rejects_malformed_and_incomplete_receipts() -> anyhow::Result<()> {
+        for behavior in [
+            ExecutorBehavior::ReturnMalformedReceipt,
+            ExecutorBehavior::ReturnIncompleteReceipt,
+        ] {
+            let fixture = WasmFixture::new(false, behavior)?;
+            assert!(matches!(
+                AirWikiWasmRuntime.execute(fixture.request()),
+                Err(AttestedComputationError::ExecutionFailed)
+            ));
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn bounds_receipt_and_parameter_payloads() -> anyhow::Result<()> {
+        let output_fixture = WasmFixture::new(false, ExecutorBehavior::ReturnOversizedReceipt)?;
+        assert!(matches!(
+            AirWikiWasmRuntime.execute(output_fixture.request()),
+            Err(AttestedComputationError::ResourceLimit)
+        ));
+
+        let mut input_fixture = WasmFixture::new(false, ExecutorBehavior::ReturnReceipt)?;
+        input_fixture.parameters = json!({ "query": "x".repeat(super::MAX_INPUT_BYTES) });
+        assert!(matches!(
+            AirWikiWasmRuntime.execute(input_fixture.request()),
+            Err(AttestedComputationError::ResourceLimit)
+        ));
+        Ok(())
+    }
+
+    #[test]
+    fn preserves_a_negative_attester_verdict() -> anyhow::Result<()> {
+        let fixture = WasmFixture::new_with_attester(
+            false,
+            ExecutorBehavior::ReturnReceipt,
+            AttesterBehavior::Reject,
+        )?;
+        let outcome = AirWikiWasmRuntime.execute(fixture.request())?;
+
+        assert_eq!(outcome.verdict, AttestedVerdict::Rejected);
+        Ok(())
+    }
+
+    #[test]
+    fn rejects_artifacts_outside_the_bundle() -> anyhow::Result<()> {
+        let mut fixture = WasmFixture::new(false, ExecutorBehavior::ReturnReceipt)?;
+        fixture.contract.executor.resource = "../../../executor.wasm".to_owned();
+
+        assert!(matches!(
+            AirWikiWasmRuntime.execute(fixture.request()),
+            Err(AttestedComputationError::InvalidContract)
+        ));
+        Ok(())
+    }
+
     struct WasmFixture {
         _temp: TempDir,
         bundle_root: std::path::PathBuf,
@@ -508,6 +591,14 @@ mod tests {
 
     impl WasmFixture {
         fn new(imported_executor: bool, behavior: ExecutorBehavior) -> anyhow::Result<Self> {
+            Self::new_with_attester(imported_executor, behavior, AttesterBehavior::Accept)
+        }
+
+        fn new_with_attester(
+            imported_executor: bool,
+            behavior: ExecutorBehavior,
+            attester_behavior: AttesterBehavior,
+        ) -> anyhow::Result<Self> {
             let temp = TempDir::new()?;
             let bundle_root = temp.path().join("bundle");
             let artifact_root = bundle_root.join("computations/artifacts");
@@ -517,7 +608,7 @@ mod tests {
             } else {
                 executor_component(behavior)
             };
-            let attester = attester_component();
+            let attester = attester_component(attester_behavior);
             let engine = runtime_engine().map_err(|error| anyhow::anyhow!("{error:?}"))?;
             wasmtime::component::Component::new(&engine, &executor)
                 .map_err(|error| anyhow::anyhow!("invalid executor fixture: {error:#}"))?;
@@ -572,7 +663,17 @@ mod tests {
     }
 
     fn executor_component(behavior: ExecutorBehavior) -> Vec<u8> {
-        let receipt = br#"{"value":42}"#;
+        let oversized_receipt;
+        let receipt: &[u8] = match behavior {
+            ExecutorBehavior::ReturnReceipt | ExecutorBehavior::ExhaustFuel => br#"{"value":42}"#,
+            ExecutorBehavior::GrowMemoryBeyondLimit => br#"{"value":42}"#,
+            ExecutorBehavior::ReturnMalformedReceipt => b"not-json",
+            ExecutorBehavior::ReturnIncompleteReceipt => br#"{"other":42}"#,
+            ExecutorBehavior::ReturnOversizedReceipt => {
+                oversized_receipt = vec![b'x'; super::MAX_OUTPUT_BYTES + 1];
+                &oversized_receipt
+            }
+        };
         let module = executor_module(receipt, behavior);
         let mut component = ComponentBuilder::default();
         let module_index = component.core_module(Some("executor"), &module);
@@ -620,8 +721,8 @@ mod tests {
         component.finish()
     }
 
-    fn attester_component() -> Vec<u8> {
-        let module = attester_module();
+    fn attester_component(behavior: AttesterBehavior) -> Vec<u8> {
+        let module = attester_module(behavior);
         let mut component = ComponentBuilder::default();
         let module_index = component.core_module(Some("attester"), &module);
         let instance = component.core_instantiate(Some("attester"), module_index, []);
@@ -710,7 +811,16 @@ mod tests {
         let mut code = CodeSection::new();
         let mut execute = Function::new([]);
         match behavior {
-            ExecutorBehavior::ReturnReceipt => {
+            ExecutorBehavior::ReturnReceipt
+            | ExecutorBehavior::ReturnMalformedReceipt
+            | ExecutorBehavior::ReturnIncompleteReceipt
+            | ExecutorBehavior::ReturnOversizedReceipt => {
+                execute.instruction(&Instruction::I32Const(0));
+            }
+            ExecutorBehavior::GrowMemoryBeyondLimit => {
+                execute.instruction(&Instruction::I32Const(1_024));
+                execute.instruction(&Instruction::MemoryGrow(0));
+                execute.instruction(&Instruction::Drop);
                 execute.instruction(&Instruction::I32Const(0));
             }
             ExecutorBehavior::ExhaustFuel => {
@@ -734,7 +844,7 @@ mod tests {
         module
     }
 
-    fn attester_module() -> Module {
+    fn attester_module(behavior: AttesterBehavior) -> Module {
         let mut module = Module::new();
         let mut types = TypeSection::new();
         types.ty().function(
@@ -764,7 +874,10 @@ mod tests {
         module.section(&exports);
         let mut code = CodeSection::new();
         let mut attest = Function::new([]);
-        attest.instruction(&Instruction::I32Const(0));
+        attest.instruction(&Instruction::I32Const(match behavior {
+            AttesterBehavior::Accept => 0,
+            AttesterBehavior::Reject => 1,
+        }));
         attest.instruction(&Instruction::End);
         code.function(&attest);
         code.function(&realloc_function());

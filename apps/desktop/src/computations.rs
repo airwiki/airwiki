@@ -729,4 +729,106 @@ attester:
                 .is_err()
         );
     }
+
+    #[test]
+    fn execution_rechecks_capability_revocation() -> anyhow::Result<()> {
+        let (_temp, database, coordinator, app_id, wiki_id) = coordinator_fixture()?;
+        let pending = coordinator.request(
+            app_id,
+            wiki_id,
+            "computations/contract.md",
+            serde_json::json!({"year": 2026}),
+        )?;
+        database.set_application_capability_revoked(app_id, true)?;
+
+        let error = coordinator
+            .execute_confirmed(pending.run_id)
+            .expect_err("a revoked capability must fail closed");
+
+        assert!(error.to_string().contains("revoked"));
+        assert_eq!(
+            database
+                .computation_run(pending.run_id)?
+                .context("computation run should remain auditable")?
+                .state,
+            ComputationRunState::Rejected
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn execution_rechecks_the_contract_fingerprint() -> anyhow::Result<()> {
+        let (temp, database, coordinator, app_id, wiki_id) = coordinator_fixture()?;
+        let pending = coordinator.request(
+            app_id,
+            wiki_id,
+            "computations/contract.md",
+            serde_json::json!({"year": 2026}),
+        )?;
+        let wiki_root = temp.path().join("wiki");
+        std::fs::write(
+            wiki_root.join("computations/contract.md"),
+            r#"---
+type: Attested Computation
+runtime: airwiki-wasm
+parameters:
+  - { name: year, type: integer, required: true }
+executor:
+  resource: executor.wasm
+  sha256: cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc
+attester:
+  resource: attester.wasm
+  sha256: bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
+---
+"#,
+        )?;
+        let imported = OkfImportValidator::validate_directory(&wiki_root)?;
+        database.replace_okf_concept_projection(wiki_id, &imported.concepts)?;
+
+        let error = coordinator
+            .execute_confirmed(pending.run_id)
+            .expect_err("a changed contract must fail closed");
+
+        assert!(error.to_string().contains("changed"));
+        assert_eq!(
+            database
+                .computation_run(pending.run_id)?
+                .context("computation run should remain auditable")?
+                .state,
+            ComputationRunState::Rejected
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn computation_status_is_isolated_by_application() -> anyhow::Result<()> {
+        let (_temp, database, coordinator, app_id, wiki_id) = coordinator_fixture()?;
+        let pending = coordinator.request(
+            app_id,
+            wiki_id,
+            "computations/contract.md",
+            serde_json::json!({"year": 2026}),
+        )?;
+        let other_app_id = Uuid::new_v4();
+        database.create_application_capability(
+            other_app_id,
+            "Other MCP",
+            "generic_mcp",
+            "other-mcp/1",
+            "6543210987654321",
+            &"d".repeat(64),
+        )?;
+
+        assert!(
+            coordinator
+                .status_for_application(other_app_id, pending.run_id)
+                .is_err()
+        );
+        assert!(
+            coordinator
+                .status_for_application(app_id, pending.run_id)
+                .is_ok()
+        );
+        Ok(())
+    }
 }

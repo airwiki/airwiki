@@ -22,7 +22,12 @@ Tested development targets are macOS arm64 and Windows x64. Linux, web, and mobi
 - Search locally with lexical and vector evidence.
 - Discover, pair, authorize, and search other AirWiki nodes on a LAN.
 - Opt selected reviewed Wikis into experimental public search and browse through signed federated routing indexes.
-- Expose explicitly approved evidence through a read-only local MCP integration.
+- Expose explicitly approved evidence through local MCP and let a
+  capability-authorized integration maintain isolated OKF memory Wikis.
+- Import compatible OKF v0.2 folders or ZIP bundles while preserving unknown
+  types and fields, and browse future versions locally under restrictions.
+- Run explicitly confirmed `airwiki-wasm` attested computations without WASI,
+  host imports, network or external filesystem access.
 - Inspect published OKF bundles and their health without changing source files.
 
 AirWiki is early-stage and welcomes contributors interested in Rust, local AI, privacy-preserving search, knowledge management, and accessible desktop UX. Start with [CONTRIBUTING.md](CONTRIBUTING.md) or browse the [open issues](https://github.com/airwiki/airwiki/issues).
@@ -94,6 +99,7 @@ The workspace separates dependency-light contracts, local domain logic, inferenc
 - [Selector adaptation experiment](docs/selector-adaptation-experiment.md)
 - [Pool-level abstention experiment](docs/pool-null-selector-experiment.md)
 - [Local chat integrations](docs/chat-integrations.md)
+- [AirWiki OKF v0.2 profile](docs/okf-v02-profile.md)
 - [Two-node manual acceptance](docs/two-node-runbook.md)
 - [Public federation beta infrastructure](docs/public-beta-infrastructure.md)
 - [Recovery](docs/recovery.md)
@@ -108,4 +114,4 @@ The workspace separates dependency-light contracts, local domain logic, inferenc
 
 ## Deliberate limits
 
-The current product does not provide OCR, DOCX ingestion, image/audio/video processing, DHT, a supported always-on public relay service, source-document replication, accounts, SSO, remote editing, MCP write operations, a system daemon, silent updates, or web/mobile access. Experimental federation can use explicitly configured validation or community relays.
+The current product does not provide OCR, DOCX ingestion, image/audio/video processing, DHT, a supported always-on public relay service, source-document replication, accounts, SSO, arbitrary remote editing, arbitrary script runtimes, a system daemon, silent updates, or web/mobile access. MCP mutation is limited to explicitly granted AI-memory Wikis. Experimental federation can use explicitly configured validation or community relays.

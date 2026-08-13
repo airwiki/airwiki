@@ -6,12 +6,13 @@ Scope: the union of the transitive dependency closures of `airwiki-desktop`, `ai
 
 If a crate declares an SPDX expression but does not include a separate legal file, the inventory assigns the standard MIT/Apache text bundled by the project or an identical text found in another crate with the same expression. Each text lists its origin explicitly.
 
-Third-party packages: **650**. Unique legal texts: **379**.
+Third-party packages: **697**. Unique legal texts: **388**.
 
 ## Packages
 
 | Package | Version | Declared license | Source | Included texts |
 | --- | --- | --- | --- | --- |
+| addr2line | 0.26.1 | Apache-2.0 OR MIT | [upstream](https://github.com/gimli-rs/addr2line) | [a60eea817514](#sha256-a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2), [e99d88d232bf](#sha256-e99d88d232bf57d70f0fb87f6b496d44b6653f99f8a63d250a54c61ea4bcde40) |
 | adler2 | 2.0.1 | 0BSD OR MIT OR Apache-2.0 | [upstream](https://github.com/oyvindln/adler2) | [23f18e03dc49](#sha256-23f18e03dc49df91622fe2a76176497404e46ced8a715d9d2b67a7446571cca3), [861399f8c21c](#sha256-861399f8c21c042b110517e76dc6b63a2b334276c8cf17412fc3c8908ca8dc17), [8ada45cd9f84](#sha256-8ada45cd9f843acf64e4722ae262c622a2b3b3007c7310ef36ac1061a30f6adb) |
 | aead | 0.5.2 | MIT OR Apache-2.0 | [upstream](https://github.com/RustCrypto/traits) | [949ab7b3e714](#sha256-949ab7b3e7140fee216f06fe3a2bd67d68dd511f8ea73c1e01c98cb348e9c8ae), [a9040321c371](#sha256-a9040321c3712d8fd0b09cf52b17445de04a23a10165049ae187cd39e5c86be5) |
 | aes | 0.8.4 | MIT OR Apache-2.0 | [upstream](https://github.com/RustCrypto/block-ciphers) | [a9040321c371](#sha256-a9040321c3712d8fd0b09cf52b17445de04a23a10165049ae187cd39e5c86be5), [f7e8ab639afe](#sha256-f7e8ab639afef15573680c97f796166835cbeb3865175882fea41c60d106b733) |
@@ -23,6 +24,7 @@ Third-party packages: **650**. Unique legal texts: **379**.
 | alloc-stdlib | 0.2.4 | BSD-3-Clause | [upstream](https://github.com/dropbox/rust-alloc-no-stdlib) | [6fe6d6a54d01](#sha256-6fe6d6a54d0190972a733d1292ac9a8679fc76e6899cbe871b85ce38c2f887f4) |
 | allocator-api2 | 0.2.21 | MIT OR Apache-2.0 | [upstream](https://github.com/zakarumych/allocator-api2) | [23f18e03dc49](#sha256-23f18e03dc49df91622fe2a76176497404e46ced8a715d9d2b67a7446571cca3), [62c7a1e35f56](#sha256-62c7a1e35f56406896d7aa7ca52d0cc0d272ac022b5d2796e7d6905db8a3636a) |
 | anyhow | 1.0.103 | MIT OR Apache-2.0 | [upstream](https://github.com/dtolnay/anyhow) | [23f18e03dc49](#sha256-23f18e03dc49df91622fe2a76176497404e46ced8a715d9d2b67a7446571cca3), [62c7a1e35f56](#sha256-62c7a1e35f56406896d7aa7ca52d0cc0d272ac022b5d2796e7d6905db8a3636a) |
+| arbitrary | 1.4.2 | MIT OR Apache-2.0 | [upstream](https://github.com/rust-fuzz/arbitrary/) | [15656cc11a83](#sha256-15656cc11a8331f28c0986b8ab97220d3e76f98e60ed388b5ffad37dfac4710c), [a60eea817514](#sha256-a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2) |
 | arrayref | 0.3.9 | BSD-2-Clause | [upstream](https://github.com/droundy/arrayref) | [1bc7e6f475b3](#sha256-1bc7e6f475b3ec99b7e2643411950ae2368c250dd4c5c325f80f9811362a94a1) |
 | arrayvec | 0.7.8 | MIT OR Apache-2.0 | [upstream](https://github.com/bluss/arrayvec) | [4da95ec4ecb6](#sha256-4da95ec4ecb65b738d470b7d762894ad9c97da93e6cbfb18b570fc2c96f4b871), [a60eea817514](#sha256-a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2) |
 | asn1-rs | 0.7.2 | MIT OR Apache-2.0 | [upstream](https://github.com/rusticata/asn1-rs.git) | [a5c61b93b6ee](#sha256-a5c61b93b6ee1d104af9920cf020ff3c7efe818e31fe562c72261847a728f513), [a60eea817514](#sha256-a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2) |
@@ -79,6 +81,7 @@ Third-party packages: **650**. Unique legal texts: **379**.
 | ciborium-ll | 0.2.2 | Apache-2.0 | [upstream](https://github.com/enarx/ciborium) | [c71d239df917](#sha256-c71d239df91726fc519c6eb72d318ec65820627232b2f796219e87dcf35d0ab4) |
 | cipher | 0.4.4 | MIT OR Apache-2.0 | [upstream](https://github.com/RustCrypto/traits) | [5c7bd92d1f09](#sha256-5c7bd92d1f096f12203dc1b601e3cb17484fa1b023e30b6b8edcc80e416237ec), [a9040321c371](#sha256-a9040321c3712d8fd0b09cf52b17445de04a23a10165049ae187cd39e5c86be5) |
 | cipher | 0.5.2 | MIT OR Apache-2.0 | [upstream](https://github.com/RustCrypto/traits) | [950d712c518a](#sha256-950d712c518a02fcb7cff96950aee304a1cc5283361712c980ea21e8d6d669a5), [a9040321c371](#sha256-a9040321c3712d8fd0b09cf52b17445de04a23a10165049ae187cd39e5c86be5) |
+| cobs | 0.3.0 | MIT OR Apache-2.0 | [upstream](https://github.com/jamesmunns/cobs.rs) | [b40930bbcf80](#sha256-b40930bbcf80744c86c46a12bc9da056641d722716c378f5659b9e555ef833e1), [e0cfa1006a64](#sha256-e0cfa1006a64520633de6bfbf563f5b1bea04ef0c5b73f049681931fa297dda3) |
 | compact_str | 0.9.1 | MIT | [upstream](https://github.com/ParkMyCar/compact_str) | [0d52feec7958](#sha256-0d52feec79589df30138dad3800323fe5686b764b73347330a2dfef8ac83efe8) |
 | const-oid | 0.10.2 | Apache-2.0 OR MIT | [upstream](https://github.com/RustCrypto/formats) | [73b9dc2e79c7](#sha256-73b9dc2e79c7308998dd30296e073aefaefb944a68fb89aa412c23c0edcabcaa), [a9040321c371](#sha256-a9040321c3712d8fd0b09cf52b17445de04a23a10165049ae187cd39e5c86be5) |
 | const-oid | 0.9.6 | Apache-2.0 OR MIT | [upstream](https://github.com/RustCrypto/formats/tree/master/const-oid) | [a9040321c371](#sha256-a9040321c3712d8fd0b09cf52b17445de04a23a10165049ae187cd39e5c86be5), [bada9e7ed8dc](#sha256-bada9e7ed8dc00d63502053c455d7c8d7575dfb7e8277a2a832531844d900682) |
@@ -89,9 +92,23 @@ Third-party packages: **650**. Unique legal texts: **379**.
 | core-foundation-sys | 0.8.7 | MIT OR Apache-2.0 | [upstream](https://github.com/servo/core-foundation-rs) | [62065228e42c](#sha256-62065228e42caebca7e7d7db1204cbb867033de5982ca4009928915e4095f3a3), [a60eea817514](#sha256-a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2) |
 | core-graphics | 0.25.0 | MIT OR Apache-2.0 | [upstream](https://github.com/servo/core-foundation-rs) | [62065228e42c](#sha256-62065228e42caebca7e7d7db1204cbb867033de5982ca4009928915e4095f3a3), [a60eea817514](#sha256-a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2), [ec82b96487e9](#sha256-ec82b96487e9e778ee610c7ab245162464782cfa1f555c2299333f8dbe5c036a) |
 | core-graphics-types | 0.2.0 | MIT OR Apache-2.0 | [upstream](https://github.com/servo/core-foundation-rs) | [62065228e42c](#sha256-62065228e42caebca7e7d7db1204cbb867033de5982ca4009928915e4095f3a3), [a60eea817514](#sha256-a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2) |
+| cpp_demangle | 0.5.1 | MIT OR Apache-2.0 | [upstream](https://github.com/gimli-rs/cpp_demangle) | [7b63ecd5f190](#sha256-7b63ecd5f1902af1b63729947373683c32745c16a10e8e6292e2e2dcd7e90ae0), [a60eea817514](#sha256-a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2) |
 | cpubits | 0.1.1 | MIT OR Apache-2.0 | [upstream](https://github.com/RustCrypto/utils) | [003736bc9840](#sha256-003736bc98408b53511b9cc8ff5d1af3bf0a8f17d53841cc39d8ab1b96a195b0), [a9040321c371](#sha256-a9040321c3712d8fd0b09cf52b17445de04a23a10165049ae187cd39e5c86be5) |
 | cpufeatures | 0.2.17 | MIT OR Apache-2.0 | [upstream](https://github.com/RustCrypto/utils) | [a9040321c371](#sha256-a9040321c3712d8fd0b09cf52b17445de04a23a10165049ae187cd39e5c86be5), [ae9baa7beea9](#sha256-ae9baa7beea910273c2f384c2a6b721fb7bd02bda3436074a1072e4ee689f985) |
 | cpufeatures | 0.3.0 | MIT OR Apache-2.0 | [upstream](https://github.com/RustCrypto/utils) | [a9040321c371](#sha256-a9040321c3712d8fd0b09cf52b17445de04a23a10165049ae187cd39e5c86be5), [ae9baa7beea9](#sha256-ae9baa7beea910273c2f384c2a6b721fb7bd02bda3436074a1072e4ee689f985) |
+| cranelift-assembler-x64 | 0.134.3 | Apache-2.0 WITH LLVM-exception | `registry+https://github.com/rust-lang/crates.io-index` | [c71d239df917](#sha256-c71d239df91726fc519c6eb72d318ec65820627232b2f796219e87dcf35d0ab4) |
+| cranelift-assembler-x64-meta | 0.134.3 | Apache-2.0 WITH LLVM-exception | `registry+https://github.com/rust-lang/crates.io-index` | [c71d239df917](#sha256-c71d239df91726fc519c6eb72d318ec65820627232b2f796219e87dcf35d0ab4) |
+| cranelift-bforest | 0.134.3 | Apache-2.0 WITH LLVM-exception | [upstream](https://github.com/bytecodealliance/wasmtime) | [a6c48161a09a](#sha256-a6c48161a09acc75a0e25503bab66a731eb5fba5392ed4bb4743e4ba5085327a) |
+| cranelift-bitset | 0.134.3 | Apache-2.0 WITH LLVM-exception | [upstream](https://github.com/bytecodealliance/wasmtime) | [c71d239df917](#sha256-c71d239df91726fc519c6eb72d318ec65820627232b2f796219e87dcf35d0ab4) |
+| cranelift-codegen | 0.134.3 | Apache-2.0 WITH LLVM-exception | [upstream](https://github.com/bytecodealliance/wasmtime) | [a6c48161a09a](#sha256-a6c48161a09acc75a0e25503bab66a731eb5fba5392ed4bb4743e4ba5085327a) |
+| cranelift-codegen-meta | 0.134.3 | Apache-2.0 WITH LLVM-exception | [upstream](https://github.com/bytecodealliance/wasmtime) | [a6c48161a09a](#sha256-a6c48161a09acc75a0e25503bab66a731eb5fba5392ed4bb4743e4ba5085327a) |
+| cranelift-codegen-shared | 0.134.3 | Apache-2.0 WITH LLVM-exception | [upstream](https://github.com/bytecodealliance/wasmtime) | [a6c48161a09a](#sha256-a6c48161a09acc75a0e25503bab66a731eb5fba5392ed4bb4743e4ba5085327a) |
+| cranelift-control | 0.134.3 | Apache-2.0 WITH LLVM-exception | [upstream](https://github.com/bytecodealliance/wasmtime) | [a6c48161a09a](#sha256-a6c48161a09acc75a0e25503bab66a731eb5fba5392ed4bb4743e4ba5085327a) |
+| cranelift-entity | 0.134.3 | Apache-2.0 WITH LLVM-exception | [upstream](https://github.com/bytecodealliance/wasmtime) | [a6c48161a09a](#sha256-a6c48161a09acc75a0e25503bab66a731eb5fba5392ed4bb4743e4ba5085327a) |
+| cranelift-frontend | 0.134.3 | Apache-2.0 WITH LLVM-exception | [upstream](https://github.com/bytecodealliance/wasmtime) | [a6c48161a09a](#sha256-a6c48161a09acc75a0e25503bab66a731eb5fba5392ed4bb4743e4ba5085327a) |
+| cranelift-isle | 0.134.3 | Apache-2.0 WITH LLVM-exception | [upstream](https://github.com/bytecodealliance/wasmtime/tree/main/cranelift/isle) | [c71d239df917](#sha256-c71d239df91726fc519c6eb72d318ec65820627232b2f796219e87dcf35d0ab4) |
+| cranelift-native | 0.134.3 | Apache-2.0 WITH LLVM-exception | [upstream](https://github.com/bytecodealliance/wasmtime) | [a6c48161a09a](#sha256-a6c48161a09acc75a0e25503bab66a731eb5fba5392ed4bb4743e4ba5085327a) |
+| cranelift-srcgen | 0.134.3 | Apache-2.0 WITH LLVM-exception | [upstream](https://github.com/bytecodealliance/wasmtime) | [c71d239df917](#sha256-c71d239df91726fc519c6eb72d318ec65820627232b2f796219e87dcf35d0ab4) |
 | crc32fast | 1.5.0 | MIT OR Apache-2.0 | [upstream](https://github.com/srijs/rust-crc32fast) | [61d383b05b87](#sha256-61d383b05b87d78f94d2937e2580cce47226d17823c0430fbcad09596537efcf), [b40930bbcf80](#sha256-b40930bbcf80744c86c46a12bc9da056641d722716c378f5659b9e555ef833e1) |
 | critical-section | 1.2.0 | MIT OR Apache-2.0 | [upstream](https://github.com/rust-embedded/critical-section) | [a60eea817514](#sha256-a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2), [fee6bdac4b91](#sha256-fee6bdac4b917351332567b9fd5013c2ef3c847dd113fd6216cf28e96637a157) |
 | crossbeam-channel | 0.5.16 | MIT OR Apache-2.0 | [upstream](https://github.com/crossbeam-rs/crossbeam) | [5734ed989dfc](#sha256-5734ed989dfca1f625b40281ee9f4530f91b2411ec01cb748223e7eb87e201ab), [a60eea817514](#sha256-a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2), [b16db96b93b1](#sha256-b16db96b93b1d7cf7bea533f572091ec6bca3234fbe0a83038be772ff391a44c) |
@@ -124,6 +141,7 @@ Third-party packages: **650**. Unique legal texts: **379**.
 | der | 0.8.1 | Apache-2.0 OR MIT | [upstream](https://github.com/RustCrypto/formats) | [73b9dc2e79c7](#sha256-73b9dc2e79c7308998dd30296e073aefaefb944a68fb89aa412c23c0edcabcaa), [a9040321c371](#sha256-a9040321c3712d8fd0b09cf52b17445de04a23a10165049ae187cd39e5c86be5) |
 | der-parser | 10.0.0 | MIT OR Apache-2.0 | [upstream](https://github.com/rusticata/der-parser.git) | [a5c61b93b6ee](#sha256-a5c61b93b6ee1d104af9920cf020ff3c7efe818e31fe562c72261847a728f513), [a60eea817514](#sha256-a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2) |
 | deranged | 0.5.8 | MIT OR Apache-2.0 | [upstream](https://github.com/jhpratt/deranged) | [231c837c45eb](#sha256-231c837c45eb53f108fb48929e488965bc4fcc14e9ea21d35f50e6b99d98685b), [edd65bdd8895](#sha256-edd65bdd88957a205c47d53fa499eed8865a70320f0f03f6391668cb304ea376) |
+| derive_arbitrary | 1.4.2 | MIT OR Apache-2.0 | [upstream](https://github.com/rust-fuzz/arbitrary) | [15656cc11a83](#sha256-15656cc11a8331f28c0986b8ab97220d3e76f98e60ed388b5ffad37dfac4710c), [a60eea817514](#sha256-a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2) |
 | derive_builder | 0.20.2 | MIT OR Apache-2.0 | [upstream](https://github.com/colin-kiegel/rust-derive-builder) | [8c9612877aac](#sha256-8c9612877aacfa1b42f5e80b679e6c3c93a7ba2bb99dfaf6e87e200dca4b4e6c), [b40930bbcf80](#sha256-b40930bbcf80744c86c46a12bc9da056641d722716c378f5659b9e555ef833e1) |
 | derive_builder_core | 0.20.2 | MIT OR Apache-2.0 | [upstream](https://github.com/colin-kiegel/rust-derive-builder) | [8c9612877aac](#sha256-8c9612877aacfa1b42f5e80b679e6c3c93a7ba2bb99dfaf6e87e200dca4b4e6c), [b40930bbcf80](#sha256-b40930bbcf80744c86c46a12bc9da056641d722716c378f5659b9e555ef833e1) |
 | derive_builder_macro | 0.20.2 | MIT OR Apache-2.0 | [upstream](https://github.com/colin-kiegel/rust-derive-builder) | [8c9612877aac](#sha256-8c9612877aacfa1b42f5e80b679e6c3c93a7ba2bb99dfaf6e87e200dca4b4e6c), [b40930bbcf80](#sha256-b40930bbcf80744c86c46a12bc9da056641d722716c378f5659b9e555ef833e1) |
@@ -151,6 +169,8 @@ Third-party packages: **650**. Unique legal texts: **379**.
 | either | 1.16.0 | MIT OR Apache-2.0 | [upstream](https://github.com/rayon-rs/either) | [7576269ea71f](#sha256-7576269ea71f767b99297934c0b2367532690f8c4badc695edf8e04ab6a1e545), [a60eea817514](#sha256-a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2) |
 | embed-resource | 3.0.11 | MIT | [upstream](https://github.com/nabijaczleweli/rust-embed-resource) | [1abdbbd4e3f9](#sha256-1abdbbd4e3f95e56c79d4a8af190254c23ddb14db34aadadfafef9c3af041113) |
 | embed_plist | 1.2.2 | MIT OR Apache-2.0 | [upstream](https://github.com/nvzqz/embed-plist-rs) | [cfc7749b96f6](#sha256-cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30), [daacc37f680c](#sha256-daacc37f680c7dd0a758ac99a109f2f57d9f21d3683df9e9245055922842a695) |
+| embedded-io | 0.4.0 | MIT OR Apache-2.0 | [upstream](https://github.com/embassy-rs/embedded-io) | [423e1c4900b3](#sha256-423e1c4900b3fbb41cda3e34530b2597d50c2e61473e18c085756c507e46fe1c), [a60eea817514](#sha256-a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2) |
+| embedded-io | 0.6.1 | MIT OR Apache-2.0 | [upstream](https://github.com/rust-embedded/embedded-hal) | [47674f8b7d98](#sha256-47674f8b7d98c232c6f81346c4cfe48933d913a9e257d7a522ad9f42e3dd61e1), [a60eea817514](#sha256-a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2) |
 | encoding_rs | 0.8.35 | (Apache-2.0 OR MIT) AND BSD-3-Clause | [upstream](https://github.com/hsivonen/encoding_rs) | [11789f45bb18](#sha256-11789f45bb180841cd362a5eee6789c68ddb573a11105e30768c308a6add0190), [3fa4ca83dcc9](#sha256-3fa4ca83dcc9237839b1bdeb2e6d16bdfb5ec0c5ce42b24694d8bbf0dcbef72c), [838118388fe5](#sha256-838118388fe5c2e7f1dbbaeed13e1c7f3ebf88be91319c7c1d77c18e987d1a50), [cfc7749b96f6](#sha256-cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30) |
 | enum-as-inner | 0.6.1 | MIT/Apache-2.0 | [upstream](https://github.com/bluejekyll/enum-as-inner) | [10d73bf26900](#sha256-10d73bf26900fa6dd6f2613bb962b7bd8fa1e66618fcf0f9f899aa071a4ee200), [b40930bbcf80](#sha256-b40930bbcf80744c86c46a12bc9da056641d722716c378f5659b9e555ef833e1), [b54db71f7d0b](#sha256-b54db71f7d0b1f62c8c1b6b297347b81f7c217b4ce7e58223a20d2275535cd17) |
 | equivalent | 1.0.2 | Apache-2.0 OR MIT | [upstream](https://github.com/indexmap-rs/equivalent) | [7365cc8878a1](#sha256-7365cc8878a1d7ce155a58c4ca09c3d7a6be413efa5334a80ea842912b669349), [a60eea817514](#sha256-a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2) |
@@ -194,6 +214,7 @@ Third-party packages: **650**. Unique legal texts: **379**.
 | getrandom | 0.3.4 | MIT OR Apache-2.0 | [upstream](https://github.com/rust-random/getrandom) | [29e9fe5074bd](#sha256-29e9fe5074bd27e0e5d5d110394fbbcd841baee2651a3c4b4560a632702cede4), [aaff376532ea](#sha256-aaff376532ea30a0cd5330b9502ad4a4c8bf769c539c87ffe78819d188a18ebf) |
 | getrandom | 0.4.3 | MIT OR Apache-2.0 | [upstream](https://github.com/rust-random/getrandom) | [523a42c25d24](#sha256-523a42c25d245dde9c015f882cec7f4555aad883382a6cf19b4b7d9b2cd5419b), [aaff376532ea](#sha256-aaff376532ea30a0cd5330b9502ad4a4c8bf769c539c87ffe78819d188a18ebf) |
 | ghash | 0.5.1 | Apache-2.0 OR MIT | [upstream](https://github.com/RustCrypto/universal-hashes) | [a9040321c371](#sha256-a9040321c3712d8fd0b09cf52b17445de04a23a10165049ae187cd39e5c86be5), [c0fabcc308b4](#sha256-c0fabcc308b450cb6fe62c9f56fae6abbeb9768eb80d992484c857d744846c2e) |
+| gimli | 0.33.0 | MIT OR Apache-2.0 | [upstream](https://github.com/gimli-rs/gimli) | [7b63ecd5f190](#sha256-7b63ecd5f1902af1b63729947373683c32745c16a10e8e6292e2e2dcd7e90ae0), [a60eea817514](#sha256-a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2) |
 | glob | 0.3.4 | MIT OR Apache-2.0 | [upstream](https://github.com/rust-lang/glob) | [6485b8ed310d](#sha256-6485b8ed310d3f0340bf1ad1f47645069ce4069dcc6bb46c7d5c6faf41de1fdb), [a60eea817514](#sha256-a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2) |
 | h2 | 0.4.15 | MIT | [upstream](https://github.com/hyperium/h2) | [b21623012e6c](#sha256-b21623012e6c453d944b0342c515b631cfcbf30704c2621b291526b69c10724d) |
 | half | 2.7.1 | MIT OR Apache-2.0 | [upstream](https://github.com/VoidStarKat/half-rs) | [508a77d2e7b5](#sha256-508a77d2e7b51d98adeed32648ad124b7b30241a8e70b2e72c99f92d8e5874d1), [a6cba85bc92e](#sha256-a6cba85bc92e0cff7a450b1d873c0eaa2e9fc96bf472df0247a26bec77bf3ff9) |
@@ -229,6 +250,7 @@ Third-party packages: **650**. Unique legal texts: **379**.
 | icu_properties | 2.2.0 | Unicode-3.0 | [upstream](https://github.com/unicode-org/icu4x) | [f367c1b8e1aa](#sha256-f367c1b8e1aa262435251e442901da4607b4650e0e63a026f5044473ecfb90f2) |
 | icu_properties_data | 2.2.0 | Unicode-3.0 | [upstream](https://github.com/unicode-org/icu4x) | [f367c1b8e1aa](#sha256-f367c1b8e1aa262435251e442901da4607b4650e0e63a026f5044473ecfb90f2) |
 | icu_provider | 2.2.0 | Unicode-3.0 | [upstream](https://github.com/unicode-org/icu4x) | [f367c1b8e1aa](#sha256-f367c1b8e1aa262435251e442901da4607b4650e0e63a026f5044473ecfb90f2) |
+| id-arena | 2.3.0 | MIT/Apache-2.0 | [upstream](https://github.com/fitzgen/id-arena) | [378f5840b258](#sha256-378f5840b258e2779c39418f3f2d7b2ba96f1c7917dd6be0713f88305dbda397), [a60eea817514](#sha256-a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2) |
 | ident_case | 1.0.1 | MIT/Apache-2.0 | [upstream](https://github.com/TedDriggs/ident_case) | [508a77d2e7b5](#sha256-508a77d2e7b51d98adeed32648ad124b7b30241a8e70b2e72c99f92d8e5874d1) |
 | idna | 1.1.0 | MIT OR Apache-2.0 | [upstream](https://github.com/servo/rust-url/) | [a60eea817514](#sha256-a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2), [b38f11f60967](#sha256-b38f11f6096706e6de553dabe2a7ed142d59b6fa8c97e290c67496154745cdd5) |
 | idna_adapter | 1.2.2 | Apache-2.0 OR MIT | [upstream](https://github.com/hsivonen/idna_adapter) | [8b43ce8accd6](#sha256-8b43ce8accd61e9d370b5ca9e9c4f953279b5c239926c62315b40e24df51b726), [a60eea817514](#sha256-a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2) |
@@ -256,6 +278,7 @@ Third-party packages: **650**. Unique legal texts: **379**.
 | keyboard-types | 0.7.0 | MIT OR Apache-2.0 | [upstream](https://github.com/pyfisch/keyboard-types) | [a60eea817514](#sha256-a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2), [dd57ede7eb6b](#sha256-dd57ede7eb6b56bc60b7c69f4b701b5550b9b5a1f4f47b98f26758ed74743f82) |
 | keyring | 3.6.3 | MIT OR Apache-2.0 | [upstream](https://github.com/hwchen/keyring-rs.git) | [157cc607717b](#sha256-157cc607717b1b372a69f6b4526f6ad18c1279af9f3267835cca2943f37bc07d), [78ebc2ea2a1c](#sha256-78ebc2ea2a1cec9cbec2e1a6fc15e73474fe22bdad7575518e7f4628651d49c4) |
 | lazy_static | 1.5.0 | MIT OR Apache-2.0 | [upstream](https://github.com/rust-lang-nursery/lazy-static.rs) | [0621878e61f0](#sha256-0621878e61f0d0fda054bcbe02df75192c28bde1ecc8289cbd86aeba2dd72720), [a60eea817514](#sha256-a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2) |
+| leb128fmt | 0.1.0 | MIT OR Apache-2.0 | [upstream](https://github.com/bluk/leb128fmt) | [23f18e03dc49](#sha256-23f18e03dc49df91622fe2a76176497404e46ced8a715d9d2b67a7446571cca3), [a60eea817514](#sha256-a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2) |
 | libc | 0.2.186 | MIT OR Apache-2.0 | [upstream](https://github.com/rust-lang/libc) | [123a331b5dbf](#sha256-123a331b5dbf04c30097fa43b8f858bc85df671fe776de498d01f3d6b7c1f69e), [62c7a1e35f56](#sha256-62c7a1e35f56406896d7aa7ca52d0cc0d272ac022b5d2796e7d6905db8a3636a) |
 | libm | 0.2.16 | MIT | [upstream](https://github.com/rust-lang/compiler-builtins) | [3823dda7cf04](#sha256-3823dda7cf046602f4b4e77ec8e227863dc4736037cc85bb33d9f19febe16bb7) |
 | libp2p | 0.56.0 | MIT | [upstream](https://github.com/libp2p/rust-libp2p) | [508a77d2e7b5](#sha256-508a77d2e7b51d98adeed32648ad124b7b30241a8e70b2e72c99f92d8e5874d1) |
@@ -285,6 +308,7 @@ Third-party packages: **650**. Unique legal texts: **379**.
 | lopdf | 0.44.0 | MIT | [upstream](https://github.com/J-F-Liu/lopdf.git) | [2fb01e6708ea](#sha256-2fb01e6708ea9d53e8b7e74bd82af23bce5256f19f4de93915027a53173c50d8) |
 | lru-slab | 0.1.2 | MIT OR Apache-2.0 OR Zlib | [upstream](https://github.com/Ralith/lru-slab) | [09785877275f](#sha256-09785877275ffada6c371b652a30e95c26b435126fc0fc62f1bc2d72171f80a4), [1466d9b4f3a5](#sha256-1466d9b4f3a59bb8997fc8d5fa977ce3f6a24bb2358793c09bfdf007039f6486), [cfc7749b96f6](#sha256-cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30) |
 | lzma-rust2 | 0.15.8 | Apache-2.0 | [upstream](https://github.com/hasenbanck/lzma-rust2/) | [c71d239df917](#sha256-c71d239df91726fc519c6eb72d318ec65820627232b2f796219e87dcf35d0ab4) |
+| mach2 | 0.6.0 | BSD-2-Clause OR MIT OR Apache-2.0 | [upstream](https://github.com/JohnTitor/mach2) | [044983df14c9](#sha256-044983df14c97f2f9570766aaf977b3cdfc4a06cf1f36b776331c5ff89b4fb89), [3f9f0f7e5a59](#sha256-3f9f0f7e5a5911a8042e32c83ff5d061ce1ffd02e8a207ec2135a44ad73b4191), [62c7a1e35f56](#sha256-62c7a1e35f56406896d7aa7ca52d0cc0d272ac022b5d2796e7d6905db8a3636a) |
 | macro_rules_attribute | 0.2.2 | Apache-2.0 OR MIT OR Zlib | [upstream](https://github.com/danielhenrymantilla/macro_rules_attribute-rs) | [1c41c0e19caa](#sha256-1c41c0e19caa2c20b0adfeb8219b606b21b7c63914aa3ae74ae3e091d7ce09ca), [388e98b08de1](#sha256-388e98b08de12ba8a9d4575883c8b0386c747cea188ed459380fc58d60da15c9), [603fb27ef326](#sha256-603fb27ef3266ea516872eefd9ae587746b8c34614a35c0fb24e4e9e0c17e137) |
 | macro_rules_attribute-proc_macro | 0.2.2 | Apache-2.0 OR MIT OR Zlib | [upstream](https://github.com/danielhenrymantilla/macro_rules_attribute-rs) | [1c41c0e19caa](#sha256-1c41c0e19caa2c20b0adfeb8219b606b21b7c63914aa3ae74ae3e091d7ce09ca), [388e98b08de1](#sha256-388e98b08de12ba8a9d4575883c8b0386c747cea188ed459380fc58d60da15c9), [603fb27ef326](#sha256-603fb27ef3266ea516872eefd9ae587746b8c34614a35c0fb24e4e9e0c17e137) |
 | markup5ever | 0.38.0 | MIT OR Apache-2.0 | [upstream](https://github.com/servo/html5ever) | [86dd7f026f91](#sha256-86dd7f026f916daf7511e39951ad8ea8cf55a8db67ae64060dacf829761c18f3), [a60eea817514](#sha256-a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2) |
@@ -342,6 +366,7 @@ Third-party packages: **650**. Unique legal texts: **379**.
 | objc2-security | 0.3.2 | Zlib OR Apache-2.0 OR MIT | [upstream](https://github.com/madsmtm/objc2) | [508a77d2e7b5](#sha256-508a77d2e7b51d98adeed32648ad124b7b30241a8e70b2e72c99f92d8e5874d1) |
 | objc2-service-management | 0.3.2 | Zlib OR Apache-2.0 OR MIT | [upstream](https://github.com/madsmtm/objc2) | [508a77d2e7b5](#sha256-508a77d2e7b51d98adeed32648ad124b7b30241a8e70b2e72c99f92d8e5874d1) |
 | objc2-web-kit | 0.3.2 | Zlib OR Apache-2.0 OR MIT | [upstream](https://github.com/madsmtm/objc2) | [508a77d2e7b5](#sha256-508a77d2e7b51d98adeed32648ad124b7b30241a8e70b2e72c99f92d8e5874d1) |
+| object | 0.39.1 | Apache-2.0 OR MIT | [upstream](https://github.com/gimli-rs/object) | [0b74dfa0bcee](#sha256-0b74dfa0bcee5c420c6b7f67b4b2658f9ab8388c97b8e733975f2cecbdd668a6), [a60eea817514](#sha256-a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2) |
 | oid-registry | 0.8.1 | MIT OR Apache-2.0 | [upstream](https://github.com/rusticata/oid-registry.git) | [a5c61b93b6ee](#sha256-a5c61b93b6ee1d104af9920cf020ff3c7efe818e31fe562c72261847a728f513), [a60eea817514](#sha256-a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2) |
 | once_cell | 1.21.4 | MIT OR Apache-2.0 | [upstream](https://github.com/matklad/once_cell) | [23f18e03dc49](#sha256-23f18e03dc49df91622fe2a76176497404e46ced8a715d9d2b67a7446571cca3), [a60eea817514](#sha256-a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2) |
 | onig | 6.5.3 | MIT | [upstream](https://github.com/iwillspeak/rust-onig) | [e9c1238c5beb](#sha256-e9c1238c5beb73c6cc130160418968058b21d486a7a445f0ceff27d51fbfdc44) |
@@ -374,6 +399,7 @@ Third-party packages: **650**. Unique legal texts: **379**.
 | poly1305 | 0.8.0 | Apache-2.0 OR MIT | [upstream](https://github.com/RustCrypto/universal-hashes) | [6d99fffea918](#sha256-6d99fffea918d1f7dfe567029c7bd21d6fcaf310ad28c44e6511a0e1f68c79ea), [a9040321c371](#sha256-a9040321c3712d8fd0b09cf52b17445de04a23a10165049ae187cd39e5c86be5) |
 | polyval | 0.6.2 | Apache-2.0 OR MIT | [upstream](https://github.com/RustCrypto/universal-hashes) | [a291b6910744](#sha256-a291b6910744d262a9e953c3b5868d74510e20161359f649a11e1791fde84fcd), [a9040321c371](#sha256-a9040321c3712d8fd0b09cf52b17445de04a23a10165049ae187cd39e5c86be5) |
 | portable-atomic | 1.13.1 | Apache-2.0 OR MIT | [upstream](https://github.com/taiki-e/portable-atomic) | [0d542e0c8804](#sha256-0d542e0c8804e39aa7f37eb00da5a762149dc682d7829451287e11b938e94594), [23f18e03dc49](#sha256-23f18e03dc49df91622fe2a76176497404e46ced8a715d9d2b67a7446571cca3) |
+| postcard | 1.1.3 | MIT OR Apache-2.0 | [upstream](https://github.com/jamesmunns/postcard) | [177540cad091](#sha256-177540cad091a40e8071db310bc3b6115c4e329a92a234609b60c154b008a888), [a60eea817514](#sha256-a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2) |
 | potential_utf | 0.1.5 | Unicode-3.0 | [upstream](https://github.com/unicode-org/icu4x) | [f367c1b8e1aa](#sha256-f367c1b8e1aa262435251e442901da4607b4650e0e63a026f5044473ecfb90f2) |
 | powerfmt | 0.2.0 | MIT OR Apache-2.0 | [upstream](https://github.com/jhpratt/powerfmt) | [070dbc7dda03](#sha256-070dbc7dda03a29296f2d58bdb9b7331af90f2abc9f31df22875d1eabaf29852), [155420c6403d](#sha256-155420c6403d4e0fca34105e3c03fdd6939b64c393c7ec6f95f5b72c5474eab0) |
 | ppv-lite86 | 0.2.21 | MIT OR Apache-2.0 | [upstream](https://github.com/cryptocorrosion/cryptocorrosion) | [0218327e7a48](#sha256-0218327e7a480793ffdd4eb792379a9709e5c135c7ba267f709d6f6d4d70af0a), [4cada0bd02ea](#sha256-4cada0bd02ea3692eee6f16400d86c6508bbd3bafb2b65fed0419f36d4f83e8f) |
@@ -384,6 +410,8 @@ Third-party packages: **650**. Unique legal texts: **379**.
 | prost | 0.14.4 | Apache-2.0 | [upstream](https://github.com/tokio-rs/prost) | [a60eea817514](#sha256-a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2) |
 | prost-derive | 0.14.4 | Apache-2.0 | [upstream](https://github.com/tokio-rs/prost) | [a60eea817514](#sha256-a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2) |
 | pulldown-cmark | 0.13.4 | MIT | [upstream](https://github.com/raphlinus/pulldown-cmark) | [c4f10f55904b](#sha256-c4f10f55904bdb9f27d3fbf94c354926d6cfe8b982276e556238c258941b243b) |
+| pulley-interpreter | 47.0.3 | Apache-2.0 WITH LLVM-exception | [upstream](https://github.com/bytecodealliance/wasmtime/tree/main/pulley) | [c71d239df917](#sha256-c71d239df91726fc519c6eb72d318ec65820627232b2f796219e87dcf35d0ab4) |
+| pulley-macros | 47.0.3 | Apache-2.0 WITH LLVM-exception | [upstream](https://github.com/bytecodealliance/wasmtime/tree/main/pulley/macros) | [c71d239df917](#sha256-c71d239df91726fc519c6eb72d318ec65820627232b2f796219e87dcf35d0ab4) |
 | quick-protobuf | 0.8.1 | MIT | [upstream](https://github.com/tafia/quick-protobuf) | [508a77d2e7b5](#sha256-508a77d2e7b51d98adeed32648ad124b7b30241a8e70b2e72c99f92d8e5874d1) |
 | quick-protobuf-codec | 0.3.1 | MIT | [upstream](https://github.com/libp2p/rust-libp2p) | [508a77d2e7b5](#sha256-508a77d2e7b51d98adeed32648ad124b7b30241a8e70b2e72c99f92d8e5874d1) |
 | quick-xml | 0.41.0 | MIT | [upstream](https://github.com/tafia/quick-xml) | [f0cf9b1c62bb](#sha256-f0cf9b1c62bbe3bd3a69f5f79c7158f513f612b4940a0a812d1db39d605318bc) |
@@ -410,6 +438,7 @@ Third-party packages: **650**. Unique legal texts: **379**.
 | recvmsg | 1.0.0 | 0BSD | `registry+https://github.com/rust-lang/crates.io-index` | [b4ee9d022957](#sha256-b4ee9d0229578ea46c95741f355943fcc81f248ca9f02a631ab1eb2f9b6ae8dc) |
 | ref-cast | 1.0.25 | MIT OR Apache-2.0 | [upstream](https://github.com/dtolnay/ref-cast) | [23f18e03dc49](#sha256-23f18e03dc49df91622fe2a76176497404e46ced8a715d9d2b67a7446571cca3), [62c7a1e35f56](#sha256-62c7a1e35f56406896d7aa7ca52d0cc0d272ac022b5d2796e7d6905db8a3636a) |
 | ref-cast-impl | 1.0.25 | MIT OR Apache-2.0 | [upstream](https://github.com/dtolnay/ref-cast) | [23f18e03dc49](#sha256-23f18e03dc49df91622fe2a76176497404e46ced8a715d9d2b67a7446571cca3), [62c7a1e35f56](#sha256-62c7a1e35f56406896d7aa7ca52d0cc0d272ac022b5d2796e7d6905db8a3636a) |
+| regalloc2 | 0.15.2 | Apache-2.0 WITH LLVM-exception | [upstream](https://github.com/bytecodealliance/regalloc2) | [a6c48161a09a](#sha256-a6c48161a09acc75a0e25503bab66a731eb5fba5392ed4bb4743e4ba5085327a) |
 | regex | 1.13.0 | MIT OR Apache-2.0 | [upstream](https://github.com/rust-lang/regex) | [6485b8ed310d](#sha256-6485b8ed310d3f0340bf1ad1f47645069ce4069dcc6bb46c7d5c6faf41de1fdb), [a60eea817514](#sha256-a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2) |
 | regex-automata | 0.4.15 | MIT OR Apache-2.0 | [upstream](https://github.com/rust-lang/regex) | [6485b8ed310d](#sha256-6485b8ed310d3f0340bf1ad1f47645069ce4069dcc6bb46c7d5c6faf41de1fdb), [a60eea817514](#sha256-a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2) |
 | regex-syntax | 0.8.11 | MIT OR Apache-2.0 | [upstream](https://github.com/rust-lang/regex) | [6485b8ed310d](#sha256-6485b8ed310d3f0340bf1ad1f47645069ce4069dcc6bb46c7d5c6faf41de1fdb), [74db5baf44a4](#sha256-74db5baf44a41b1000312c673544b3374e4198af5605c7f9080a402cec42cfa3), [a60eea817514](#sha256-a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2) |
@@ -421,6 +450,7 @@ Third-party packages: **650**. Unique legal texts: **379**.
 | rmcp | 2.2.0 | Apache-2.0 | [upstream](https://github.com/modelcontextprotocol/rust-sdk/) | [c71d239df917](#sha256-c71d239df91726fc519c6eb72d318ec65820627232b2f796219e87dcf35d0ab4) |
 | rmcp-macros | 2.2.0 | Apache-2.0 | [upstream](https://github.com/modelcontextprotocol/rust-sdk/) | [c71d239df917](#sha256-c71d239df91726fc519c6eb72d318ec65820627232b2f796219e87dcf35d0ab4) |
 | rusqlite | 0.37.0 | MIT | [upstream](https://github.com/rusqlite/rusqlite) | [c10c1f273375](#sha256-c10c1f27337546471e5f7e4e97fdd398b35b9d4e126115dcd22de8d8e65abf6f) |
+| rustc-demangle | 0.1.28 | MIT/Apache-2.0 | [upstream](https://github.com/rust-lang/rustc-demangle) | [378f5840b258](#sha256-378f5840b258e2779c39418f3f2d7b2ba96f1c7917dd6be0713f88305dbda397), [a60eea817514](#sha256-a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2) |
 | rustc-hash | 2.1.3 | Apache-2.0 OR MIT | [upstream](https://github.com/rust-lang/rustc-hash) | [23f18e03dc49](#sha256-23f18e03dc49df91622fe2a76176497404e46ced8a715d9d2b67a7446571cca3), [62c7a1e35f56](#sha256-62c7a1e35f56406896d7aa7ca52d0cc0d272ac022b5d2796e7d6905db8a3636a) |
 | rustc_version | 0.4.1 | MIT OR Apache-2.0 | [upstream](https://github.com/djc/rustc-version-rs) | [a60eea817514](#sha256-a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2), [c9a75f18b9ab](#sha256-c9a75f18b9ab2927829a208fc6aa2cf4e63b8420887ba29cdb265d6619ae82d5) |
 | rusticata-macros | 4.1.0 | MIT/Apache-2.0 | [upstream](https://github.com/rusticata/rusticata-macros.git) | [a5c61b93b6ee](#sha256-a5c61b93b6ee1d104af9920cf020ff3c7efe818e31fe562c72261847a728f513), [a60eea817514](#sha256-a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2) |
@@ -500,6 +530,7 @@ Third-party packages: **650**. Unique legal texts: **379**.
 | tagptr | 0.2.0 | MIT/Apache-2.0 | [upstream](https://github.com/oliver-giersch/tagptr.git) | [175d33d2e88f](#sha256-175d33d2e88fc3944f1f54125e886e7232a85380b73dce505e9088fe4e91c576), [a2b15e1e9004](#sha256-a2b15e1e900414317d0e00d887dd2747d4abd00382c6addeb5daf746bed4b52b) |
 | tao | 0.35.3 | Apache-2.0 | [upstream](https://github.com/tauri-apps/tao) | [02b6448337b7](#sha256-02b6448337b757772d90e5f31caaa0f9e6afaad2221c01771d0a3deaa4d4196c), [a8ad31b1c3f4](#sha256-a8ad31b1c3f40dca5a84119351b8fa8ddc868edd77fad8a8ebf6d8f2d16fa4ae) |
 | tar | 0.4.46 | MIT OR Apache-2.0 | [upstream](https://github.com/composefs/tar-rs) | [8ca6b96cea9e](#sha256-8ca6b96cea9e67c6c5c63f452c31bd396db8bd2406231fdea5d48ef462b48077), [a60eea817514](#sha256-a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2) |
+| target-lexicon | 0.13.5 | Apache-2.0 WITH LLVM-exception | [upstream](https://github.com/bytecodealliance/target-lexicon) | [a6c48161a09a](#sha256-a6c48161a09acc75a0e25503bab66a731eb5fba5392ed4bb4743e4ba5085327a) |
 | tauri | 2.11.5 | Apache-2.0 OR MIT | [upstream](https://github.com/tauri-apps/tauri) | [0d542e0c8804](#sha256-0d542e0c8804e39aa7f37eb00da5a762149dc682d7829451287e11b938e94594), [9dd42ea92cff](#sha256-9dd42ea92cff2ede5cd477cbfcce051b2d0115c0ac7f368ee88cb545055dff1d) |
 | tauri-build | 2.6.3 | Apache-2.0 OR MIT | [upstream](https://github.com/tauri-apps/tauri) | [0d542e0c8804](#sha256-0d542e0c8804e39aa7f37eb00da5a762149dc682d7829451287e11b938e94594), [9dd42ea92cff](#sha256-9dd42ea92cff2ede5cd477cbfcce051b2d0115c0ac7f368ee88cb545055dff1d) |
 | tauri-codegen | 2.6.3 | Apache-2.0 OR MIT | [upstream](https://github.com/tauri-apps/tauri) | [0d542e0c8804](#sha256-0d542e0c8804e39aa7f37eb00da5a762149dc682d7829451287e11b938e94594), [9dd42ea92cff](#sha256-9dd42ea92cff2ede5cd477cbfcce051b2d0115c0ac7f368ee88cb545055dff1d) |
@@ -589,6 +620,21 @@ Third-party packages: **650**. Unique legal texts: **379**.
 | vswhom-sys | 0.1.3 | MIT | [upstream](https://github.com/nabijaczleweli/vswhom-sys.rs) | [e339134e5373](#sha256-e339134e53732f093f68ef00bcec3687ebf964ef8c6c812f31e74099c07d3f49) |
 | walkdir | 2.5.0 | Unlicense/MIT | [upstream](https://github.com/BurntSushi/walkdir) | [01c266bced4a](#sha256-01c266bced4a434da0051174d6bee16a4c82cf634e2679b6155d40d75012390f), [0f96a83840e1](#sha256-0f96a83840e146e43c0ec96a22ec1f392e0680e6c1226e6f3ba87e0740af850f), [7e12e5df4bae](#sha256-7e12e5df4bae12cb21581ba157ced20e1986a0508dd10d0e8a4ab9a4cf94e85c) |
 | want | 0.3.1 | MIT | [upstream](https://github.com/seanmonstar/want) | [96d741569b18](#sha256-96d741569b18c61043e5ad2b8505b5e4891a27994b732b1da9f86f46be67f59a) |
+| wasm-encoder | 0.252.0 | Apache-2.0 WITH LLVM-exception OR Apache-2.0 OR MIT | [upstream](https://github.com/bytecodealliance/wasm-tools/tree/main/crates/wasm-encoder) | [23f18e03dc49](#sha256-23f18e03dc49df91622fe2a76176497404e46ced8a715d9d2b67a7446571cca3), [a60eea817514](#sha256-a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2), [a6c48161a09a](#sha256-a6c48161a09acc75a0e25503bab66a731eb5fba5392ed4bb4743e4ba5085327a) |
+| wasmparser | 0.252.0 | Apache-2.0 WITH LLVM-exception OR Apache-2.0 OR MIT | [upstream](https://github.com/bytecodealliance/wasm-tools/tree/main/crates/wasmparser) | [23f18e03dc49](#sha256-23f18e03dc49df91622fe2a76176497404e46ced8a715d9d2b67a7446571cca3), [a60eea817514](#sha256-a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2), [a6c48161a09a](#sha256-a6c48161a09acc75a0e25503bab66a731eb5fba5392ed4bb4743e4ba5085327a) |
+| wasmprinter | 0.252.0 | Apache-2.0 WITH LLVM-exception OR Apache-2.0 OR MIT | [upstream](https://github.com/bytecodealliance/wasm-tools/tree/main/crates/wasmprinter) | [23f18e03dc49](#sha256-23f18e03dc49df91622fe2a76176497404e46ced8a715d9d2b67a7446571cca3), [a60eea817514](#sha256-a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2), [a6c48161a09a](#sha256-a6c48161a09acc75a0e25503bab66a731eb5fba5392ed4bb4743e4ba5085327a) |
+| wasmtime | 47.0.3 | Apache-2.0 WITH LLVM-exception | [upstream](https://github.com/bytecodealliance/wasmtime) | [a6c48161a09a](#sha256-a6c48161a09acc75a0e25503bab66a731eb5fba5392ed4bb4743e4ba5085327a) |
+| wasmtime-environ | 47.0.3 | Apache-2.0 WITH LLVM-exception | [upstream](https://github.com/bytecodealliance/wasmtime) | [a6c48161a09a](#sha256-a6c48161a09acc75a0e25503bab66a731eb5fba5392ed4bb4743e4ba5085327a) |
+| wasmtime-internal-component-macro | 47.0.3 | Apache-2.0 WITH LLVM-exception | [upstream](https://github.com/bytecodealliance/wasmtime) | [c71d239df917](#sha256-c71d239df91726fc519c6eb72d318ec65820627232b2f796219e87dcf35d0ab4) |
+| wasmtime-internal-component-util | 47.0.3 | Apache-2.0 WITH LLVM-exception | [upstream](https://github.com/bytecodealliance/wasmtime) | [c71d239df917](#sha256-c71d239df91726fc519c6eb72d318ec65820627232b2f796219e87dcf35d0ab4) |
+| wasmtime-internal-core | 47.0.3 | Apache-2.0 WITH LLVM-exception | `registry+https://github.com/rust-lang/crates.io-index` | [c71d239df917](#sha256-c71d239df91726fc519c6eb72d318ec65820627232b2f796219e87dcf35d0ab4) |
+| wasmtime-internal-cranelift | 47.0.3 | Apache-2.0 WITH LLVM-exception | [upstream](https://github.com/bytecodealliance/wasmtime) | [a6c48161a09a](#sha256-a6c48161a09acc75a0e25503bab66a731eb5fba5392ed4bb4743e4ba5085327a) |
+| wasmtime-internal-fiber | 47.0.3 | Apache-2.0 WITH LLVM-exception | [upstream](https://github.com/bytecodealliance/wasmtime) | [a6c48161a09a](#sha256-a6c48161a09acc75a0e25503bab66a731eb5fba5392ed4bb4743e4ba5085327a) |
+| wasmtime-internal-jit-debug | 47.0.3 | Apache-2.0 WITH LLVM-exception | [upstream](https://github.com/bytecodealliance/wasmtime) | [c71d239df917](#sha256-c71d239df91726fc519c6eb72d318ec65820627232b2f796219e87dcf35d0ab4) |
+| wasmtime-internal-jit-icache-coherence | 47.0.3 | Apache-2.0 WITH LLVM-exception | [upstream](https://github.com/bytecodealliance/wasmtime) | [c71d239df917](#sha256-c71d239df91726fc519c6eb72d318ec65820627232b2f796219e87dcf35d0ab4) |
+| wasmtime-internal-unwinder | 47.0.3 | Apache-2.0 WITH LLVM-exception | [upstream](https://github.com/bytecodealliance/wasmtime) | [a6c48161a09a](#sha256-a6c48161a09acc75a0e25503bab66a731eb5fba5392ed4bb4743e4ba5085327a) |
+| wasmtime-internal-versioned-export-macros | 47.0.3 | Apache-2.0 WITH LLVM-exception | [upstream](https://github.com/bytecodealliance/wasmtime) | [c71d239df917](#sha256-c71d239df91726fc519c6eb72d318ec65820627232b2f796219e87dcf35d0ab4) |
+| wasmtime-internal-wit-bindgen | 47.0.3 | Apache-2.0 WITH LLVM-exception | [upstream](https://github.com/bytecodealliance/wasmtime) | [c71d239df917](#sha256-c71d239df91726fc519c6eb72d318ec65820627232b2f796219e87dcf35d0ab4) |
 | web-time | 1.1.0 | MIT OR Apache-2.0 | [upstream](https://github.com/daxpedda/web-time) | [54a744942eb3](#sha256-54a744942eb3fa63a74d8d359989ed6962c04f3f10ff20cfa08ff8aa7efbe4e6), [f428305bbf2e](#sha256-f428305bbf2e70fbd807af0f3c7ac1b7acfb95311640f451e9d2e48db6d7e96b) |
 | web_atoms | 0.2.5 | MIT OR Apache-2.0 | [upstream](https://github.com/servo/html5ever) | [86dd7f026f91](#sha256-86dd7f026f916daf7511e39951ad8ea8cf55a8db67ae64060dacf829761c18f3), [a60eea817514](#sha256-a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2) |
 | webpki-root-certs | 1.0.8 | CDLA-Permissive-2.0 | [upstream](https://github.com/rustls/webpki-roots) | [e271993808fe](#sha256-e271993808fec50ab29350b39539cdec611a9103f827e0aa26d61da70e2d33f8) |
@@ -636,6 +682,7 @@ Third-party packages: **650**. Unique legal texts: **379**.
 | winreg | 0.55.0 | MIT | [upstream](https://github.com/gentoo90/winreg-rs) | [ea021d8c6383](#sha256-ea021d8c6383c84d19c15ce90d3b1602cf448fdcc0bf3772c98e43c7bf1bf1d1) |
 | winreg | 0.56.0 | MIT | [upstream](https://github.com/gentoo90/winreg-rs) | [ea021d8c6383](#sha256-ea021d8c6383c84d19c15ce90d3b1602cf448fdcc0bf3772c98e43c7bf1bf1d1) |
 | winresource | 0.1.31 | MIT | [upstream](https://github.com/BenjaminRi/winresource) | [3564da09711c](#sha256-3564da09711c475669c15346bb25a1530a7de683c13f4a51489c15a6d74438fa) |
+| wit-parser | 0.252.0 | Apache-2.0 WITH LLVM-exception OR Apache-2.0 OR MIT | [upstream](https://github.com/bytecodealliance/wasm-tools/tree/main/crates/wit-parser) | [23f18e03dc49](#sha256-23f18e03dc49df91622fe2a76176497404e46ced8a715d9d2b67a7446571cca3), [a60eea817514](#sha256-a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2), [a6c48161a09a](#sha256-a6c48161a09acc75a0e25503bab66a731eb5fba5392ed4bb4743e4ba5085327a) |
 | writeable | 0.6.3 | Unicode-3.0 | [upstream](https://github.com/unicode-org/icu4x) | [f367c1b8e1aa](#sha256-f367c1b8e1aa262435251e442901da4607b4650e0e63a026f5044473ecfb90f2) |
 | wry | 0.55.1 | Apache-2.0 OR MIT | [upstream](https://github.com/tauri-apps/wry) | [a60eea817514](#sha256-a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2), [ef88893533af](#sha256-ef88893533af22ffbb68ceef0724ba1389518df26165a34f3c99ad30b884df4f), [f73041468536](#sha256-f73041468536d0b5fd1a6610fa3f317e3dc6cf9a0c0591a5529d6556a0d8a2c3) |
 | x25519-dalek | 2.0.1 | BSD-3-Clause | [upstream](https://github.com/dalek-cryptography/curve25519-dalek/tree/main/x25519-dalek) | [6fe6d6a54d01](#sha256-6fe6d6a54d0190972a733d1292ac9a8679fc76e6899cbe871b85ce38c2f887f4) |
@@ -1785,6 +1832,38 @@ IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 DEALINGS IN THE SOFTWARE.
 ```
 
+### sha256-044983df14c97f2f9570766aaf977b3cdfc4a06cf1f36b776331c5ff89b4fb89
+
+Used by:
+
+- `mach2 0.6.0 / LICENSE-BSD`
+
+```text
+Copyright (c) 2019 Nick Fitzgerald, 2021 Yuki Okushi
+All rights reserved.
+
+Redistribution and use in source and binary forms, with or without modification,
+are permitted provided that the following conditions are met:
+
+1. Redistributions of source code must retain the above copyright notice, this
+   list of conditions and the following disclaimer.
+
+2. Redistributions in binary form must reproduce the above copyright notice,
+   this list of conditions and the following disclaimer in the documentation
+   and/or other materials provided with the distribution.
+
+THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS" AND
+ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED
+WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
+DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE FOR
+ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES
+(INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES;
+LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON
+ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
+(INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
+SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+```
+
 ### sha256-061ce553795735ba48239b6e55b08d5ef2ce554051e6364bf3f6f37ac02a6474
 
 Used by:
@@ -2027,6 +2106,40 @@ Used by:
 
 ```text
 Copyright (c) 2018 The Servo Project Developers
+
+Permission is hereby granted, free of charge, to any
+person obtaining a copy of this software and associated
+documentation files (the "Software"), to deal in the
+Software without restriction, including without
+limitation the rights to use, copy, modify, merge,
+publish, distribute, sublicense, and/or sell copies of
+the Software, and to permit persons to whom the Software
+is furnished to do so, subject to the following
+conditions:
+
+The above copyright notice and this permission notice
+shall be included in all copies or substantial portions
+of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF
+ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED
+TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A
+PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT
+SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY
+CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION
+OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR
+IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
+DEALINGS IN THE SOFTWARE.
+```
+
+### sha256-0b74dfa0bcee5c420c6b7f67b4b2658f9ab8388c97b8e733975f2cecbdd668a6
+
+Used by:
+
+- `object 0.39.1 / LICENSE-MIT`
+
+```text
+Copyright (c) 2015 The Gimli Developers
 
 Permission is hereby granted, free of charge, to any
 person obtaining a copy of this software and associated
@@ -3158,6 +3271,43 @@ Used by:
    limitations under the License.
 ```
 
+### sha256-15656cc11a8331f28c0986b8ab97220d3e76f98e60ed388b5ffad37dfac4710c
+
+Used by:
+
+- `arbitrary 1.4.2 / LICENSE-MIT`
+- `derive_arbitrary 1.4.2 / LICENSE-MIT`
+
+```text
+MIT License
+
+Copyright (c) 2019 Manish Goregaokar
+
+Permission is hereby granted, free of charge, to any
+person obtaining a copy of this software and associated
+documentation files (the "Software"), to deal in the
+Software without restriction, including without
+limitation the rights to use, copy, modify, merge,
+publish, distribute, sublicense, and/or sell copies of
+the Software, and to permit persons to whom the Software
+is furnished to do so, subject to the following
+conditions:
+
+The above copyright notice and this permission notice
+shall be included in all copies or substantial portions
+of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF
+ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED
+TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A
+PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT
+SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY
+CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION
+OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR
+IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
+DEALINGS IN THE SOFTWARE.
+```
+
 ### sha256-157cc607717b1b372a69f6b4526f6ad18c1279af9f3267835cca2943f37bc07d
 
 Used by:
@@ -3286,6 +3436,40 @@ AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
+```
+
+### sha256-177540cad091a40e8071db310bc3b6115c4e329a92a234609b60c154b008a888
+
+Used by:
+
+- `postcard 1.1.3 / LICENSE-MIT`
+
+```text
+Copyright (c) 2019 Anthony James Munns
+
+Permission is hereby granted, free of charge, to any
+person obtaining a copy of this software and associated
+documentation files (the "Software"), to deal in the
+Software without restriction, including without
+limitation the rights to use, copy, modify, merge,
+publish, distribute, sublicense, and/or sell copies of
+the Software, and to permit persons to whom the Software
+is furnished to do so, subject to the following
+conditions:
+
+The above copyright notice and this permission notice
+shall be included in all copies or substantial portions
+of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF
+ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED
+TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A
+PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT
+SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY
+CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION
+OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR
+IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
+DEALINGS IN THE SOFTWARE.
 ```
 
 ### sha256-1954992a2b32e8a2af24a4c11b726902e344c1934b947a77f04d404908f8db30
@@ -4924,6 +5108,7 @@ Used by:
 - `erased-serde 0.4.10 / LICENSE-MIT`
 - `fastrand 2.4.1 / LICENSE-MIT`
 - `itoa 1.0.18 / LICENSE-MIT`
+- `leb128fmt 0.1.0 / LICENSE-MIT`
 - `minimal-lexical 0.2.1 / LICENSE-MIT`
 - `monostate 0.1.18 / LICENSE-MIT`
 - `monostate-impl 0.1.18 / LICENSE-MIT`
@@ -4962,6 +5147,10 @@ Used by:
 - `unicode-ident 1.0.24 / LICENSE-MIT`
 - `unsafe-libyaml 0.2.11 / LICENSE-MIT`
 - `utf8-zero 0.8.1 / LICENSE-MIT`
+- `wasm-encoder 0.252.0 / LICENSE-MIT`
+- `wasmparser 0.252.0 / LICENSE-MIT`
+- `wasmprinter 0.252.0 / LICENSE-MIT`
+- `wit-parser 0.252.0 / LICENSE-MIT`
 - `zmij 1.0.21 / LICENSE-MIT`
 
 ```text
@@ -7045,7 +7234,9 @@ Used by:
 - `filetime 0.2.29 / LICENSE-MIT`
 - `find-msvc-tools 0.1.9 / LICENSE-MIT`
 - `futures-timer 3.0.4 / LICENSE-MIT`
+- `id-arena 2.3.0 / LICENSE-MIT`
 - `pkg-config 0.3.33 / LICENSE-MIT`
+- `rustc-demangle 0.1.28 / LICENSE-MIT`
 - `socket2 0.5.10 / LICENSE-MIT`
 - `socket2 0.6.4 / LICENSE-MIT`
 
@@ -7913,6 +8104,40 @@ IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 DEALINGS IN THE SOFTWARE.
 ```
 
+### sha256-3f9f0f7e5a5911a8042e32c83ff5d061ce1ffd02e8a207ec2135a44ad73b4191
+
+Used by:
+
+- `mach2 0.6.0 / LICENSE-MIT`
+
+```text
+Copyright (c) 2019 Nick Fitzgerald, 2021 Yuki Okushi
+
+Permission is hereby granted, free of charge, to any
+person obtaining a copy of this software and associated
+documentation files (the "Software"), to deal in the
+Software without restriction, including without
+limitation the rights to use, copy, modify, merge,
+publish, distribute, sublicense, and/or sell copies of
+the Software, and to permit persons to whom the Software
+is furnished to do so, subject to the following
+conditions:
+
+The above copyright notice and this permission notice
+shall be included in all copies or substantial portions
+of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF
+ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED
+TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A
+PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT
+SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY
+CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION
+OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR
+IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
+DEALINGS IN THE SOFTWARE.
+```
+
 ### sha256-3fa4ca83dcc9237839b1bdeb2e6d16bdfb5ec0c5ce42b24694d8bbf0dcbef72c
 
 Used by:
@@ -8044,6 +8269,40 @@ AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
+```
+
+### sha256-423e1c4900b3fbb41cda3e34530b2597d50c2e61473e18c085756c507e46fe1c
+
+Used by:
+
+- `embedded-io 0.4.0 / LICENSE-MIT`
+
+```text
+Copyright (c) 2022 The embedded-io authors
+
+Permission is hereby granted, free of charge, to any
+person obtaining a copy of this software and associated
+documentation files (the "Software"), to deal in the
+Software without restriction, including without
+limitation the rights to use, copy, modify, merge,
+publish, distribute, sublicense, and/or sell copies of
+the Software, and to permit persons to whom the Software
+is furnished to do so, subject to the following
+conditions:
+
+The above copyright notice and this permission notice
+shall be included in all copies or substantial portions
+of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF
+ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED
+TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A
+PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT
+SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY
+CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION
+OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR
+IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
+DEALINGS IN THE SOFTWARE.
 ```
 
 ### sha256-4249c8e6c5ebb85f97c77e6457c6fafc1066406eb8f1ef61e796fbdc5ff18482
@@ -8579,6 +8838,40 @@ distributed under the License is distributed on an "AS IS" BASIS,
 WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 See the License for the specific language governing permissions and
 limitations under the License.
+```
+
+### sha256-47674f8b7d98c232c6f81346c4cfe48933d913a9e257d7a522ad9f42e3dd61e1
+
+Used by:
+
+- `embedded-io 0.6.1 / LICENSE-MIT`
+
+```text
+Copyright (c) 2023 The embedded-io authors
+
+Permission is hereby granted, free of charge, to any
+person obtaining a copy of this software and associated
+documentation files (the "Software"), to deal in the
+Software without restriction, including without
+limitation the rights to use, copy, modify, merge,
+publish, distribute, sublicense, and/or sell copies of
+the Software, and to permit persons to whom the Software
+is furnished to do so, subject to the following
+conditions:
+
+The above copyright notice and this permission notice
+shall be included in all copies or substantial portions
+of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF
+ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED
+TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A
+PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT
+SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY
+CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION
+OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR
+IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
+DEALINGS IN THE SOFTWARE.
 ```
 
 ### sha256-47dc9ff29128ddfb4d6a0435383c9f89120bc374dbcc1dd00b933a0b28aa7865
@@ -10573,6 +10866,7 @@ Used by:
 - `fastbloom 0.17.0 / LICENSE-APACHE`
 - `itoa 1.0.18 / LICENSE-APACHE`
 - `libc 0.2.186 / LICENSE-APACHE`
+- `mach2 0.6.0 / LICENSE-APACHE`
 - `monostate 0.1.18 / LICENSE-APACHE`
 - `monostate-impl 0.1.18 / LICENSE-APACHE`
 - `osakit 0.3.1 / LICENSE-APACHE`
@@ -13698,6 +13992,8 @@ Used by:
 
 Used by:
 
+- `cpp_demangle 0.5.1 / LICENSE-MIT`
+- `gimli 0.33.0 / LICENSE-MIT`
 - `heck 0.5.0 / LICENSE-MIT`
 - `unicode-bidi 0.3.18 / LICENSE-MIT`
 - `unicode-normalization 0.1.25 / LICENSE-MIT`
@@ -17711,7 +18007,9 @@ DEALINGS IN THE SOFTWARE.
 
 Used by:
 
+- `addr2line 0.26.1 / LICENSE-APACHE`
 - `ahash 0.8.12 / LICENSE-APACHE`
+- `arbitrary 1.4.2 / LICENSE-APACHE`
 - `arrayvec 0.7.8 / LICENSE-APACHE`
 - `asn1-rs 0.7.2 / LICENSE-APACHE`
 - `asn1-rs-derive 0.6.0 / LICENSE-APACHE`
@@ -17732,6 +18030,7 @@ Used by:
 - `core-foundation-sys 0.8.7 / LICENSE-APACHE`
 - `core-graphics 0.25.0 / LICENSE-APACHE`
 - `core-graphics-types 0.2.0 / LICENSE-APACHE`
+- `cpp_demangle 0.5.1 / LICENSE-APACHE`
 - `critical-section 1.2.0 / LICENSE-APACHE`
 - `crossbeam-channel 0.5.16 / LICENSE-APACHE`
 - `crossbeam-deque 0.8.7 / LICENSE-APACHE`
@@ -17739,8 +18038,11 @@ Used by:
 - `crossbeam-utils 0.8.22 / LICENSE-APACHE`
 - `curve25519-dalek-derive 0.1.1 / LICENSE-APACHE`
 - `der-parser 10.0.0 / LICENSE-APACHE`
+- `derive_arbitrary 1.4.2 / LICENSE-APACHE`
 - `displaydoc 0.2.6 / LICENSE-APACHE`
 - `either 1.16.0 / LICENSE-APACHE`
+- `embedded-io 0.4.0 / LICENSE-APACHE`
+- `embedded-io 0.6.1 / LICENSE-APACHE`
 - `equivalent 1.0.2 / LICENSE-APACHE`
 - `errno 0.3.14 / LICENSE-APACHE`
 - `fastrand 2.4.1 / LICENSE-APACHE`
@@ -17750,6 +18052,7 @@ Used by:
 - `fnv 1.0.7 / LICENSE-APACHE`
 - `form_urlencoded 1.2.2 / LICENSE-APACHE`
 - `futures-timer 3.0.4 / LICENSE-APACHE`
+- `gimli 0.33.0 / LICENSE-APACHE`
 - `glob 0.3.4 / LICENSE-APACHE`
 - `hashbrown 0.12.3 / LICENSE-APACHE`
 - `hashbrown 0.15.5 / LICENSE-APACHE`
@@ -17759,6 +18062,7 @@ Used by:
 - `html5ever 0.38.0 / LICENSE-APACHE`
 - `httparse 1.10.1 / LICENSE-APACHE`
 - `hyper-rustls 0.27.9 / LICENSE-APACHE`
+- `id-arena 2.3.0 / LICENSE-APACHE`
 - `idna 1.1.0 / LICENSE-APACHE`
 - `idna_adapter 1.2.2 / LICENSE-APACHE`
 - `indexmap 1.9.3 / LICENSE-APACHE`
@@ -17767,6 +18071,7 @@ Used by:
 - `itertools 0.14.0 / LICENSE-APACHE`
 - `keyboard-types 0.7.0 / LICENSE-APACHE`
 - `lazy_static 1.5.0 / LICENSE-APACHE`
+- `leb128fmt 0.1.0 / LICENSE-APACHE`
 - `lock_api 0.4.14 / LICENSE-APACHE`
 - `log 0.4.33 / LICENSE-APACHE`
 - `markup5ever 0.38.0 / LICENSE-APACHE`
@@ -17778,6 +18083,7 @@ Used by:
 - `num-complex 0.4.6 / LICENSE-APACHE`
 - `num-integer 0.1.46 / LICENSE-APACHE`
 - `num-traits 0.2.19 / LICENSE-APACHE`
+- `object 0.39.1 / LICENSE-APACHE`
 - `oid-registry 0.8.1 / LICENSE-APACHE`
 - `once_cell 1.21.4 / LICENSE-APACHE`
 - `parking_lot 0.12.5 / LICENSE-APACHE`
@@ -17786,6 +18092,7 @@ Used by:
 - `pkg-config 0.3.33 / LICENSE-APACHE`
 - `png 0.17.16 / LICENSE-APACHE`
 - `png 0.18.1 / LICENSE-APACHE`
+- `postcard 1.1.3 / LICENSE-APACHE`
 - `prost 0.14.4 / LICENSE`
 - `prost-derive 0.14.4 / LICENSE`
 - `rawpointer 0.2.1 / LICENSE-APACHE`
@@ -17796,6 +18103,7 @@ Used by:
 - `regex-automata 0.4.15 / LICENSE-APACHE`
 - `regex-syntax 0.8.11 / LICENSE-APACHE`
 - `ring 0.17.14 / src/polyfill/once_cell/LICENSE-APACHE`
+- `rustc-demangle 0.1.28 / LICENSE-APACHE`
 - `rustc_version 0.4.1 / LICENSE-APACHE`
 - `rusticata-macros 4.1.0 / LICENSE-APACHE`
 - `rustix 1.1.4 / LICENSE-APACHE`
@@ -17833,9 +18141,13 @@ Used by:
 - `uuid 1.23.4 / LICENSE-APACHE`
 - `vcpkg 0.2.15 / LICENSE-APACHE`
 - `version_check 0.9.5 / LICENSE-APACHE`
+- `wasm-encoder 0.252.0 / LICENSE-APACHE`
+- `wasmparser 0.252.0 / LICENSE-APACHE`
+- `wasmprinter 0.252.0 / LICENSE-APACHE`
 - `web_atoms 0.2.5 / LICENSE-APACHE`
 - `weezl 0.2.1 / LICENSE-APACHE`
 - `window-vibrancy 0.6.0 / LICENSE-APACHE`
+- `wit-parser 0.252.0 / LICENSE-APACHE`
 - `wry 0.55.1 / LICENSE-APACHE`
 - `x509-parser 0.17.0 / LICENSE-APACHE`
 - `xattr 1.6.1 / LICENSE-APACHE`
@@ -18048,7 +18360,26 @@ limitations under the License.
 
 Used by:
 
+- `cranelift-bforest 0.134.3 / LICENSE`
+- `cranelift-codegen 0.134.3 / LICENSE`
+- `cranelift-codegen-meta 0.134.3 / LICENSE`
+- `cranelift-codegen-shared 0.134.3 / LICENSE`
+- `cranelift-control 0.134.3 / LICENSE`
+- `cranelift-entity 0.134.3 / LICENSE`
+- `cranelift-frontend 0.134.3 / LICENSE`
+- `cranelift-native 0.134.3 / LICENSE`
+- `regalloc2 0.15.2 / LICENSE`
 - `rustix 1.1.4 / LICENSE-Apache-2.0_WITH_LLVM-exception`
+- `target-lexicon 0.13.5 / LICENSE`
+- `wasm-encoder 0.252.0 / LICENSE-Apache-2.0_WITH_LLVM-exception`
+- `wasmparser 0.252.0 / LICENSE-Apache-2.0_WITH_LLVM-exception`
+- `wasmprinter 0.252.0 / LICENSE-Apache-2.0_WITH_LLVM-exception`
+- `wasmtime 47.0.3 / LICENSE`
+- `wasmtime-environ 47.0.3 / LICENSE`
+- `wasmtime-internal-cranelift 47.0.3 / LICENSE`
+- `wasmtime-internal-fiber 47.0.3 / LICENSE`
+- `wasmtime-internal-unwinder 47.0.3 / LICENSE`
+- `wit-parser 0.252.0 / LICENSE-Apache-2.0_WITH_LLVM-exception`
 
 ```text
 
@@ -20099,6 +20430,7 @@ for the license to code that was sourced from the once_cell project.
 
 Used by:
 
+- `cobs 0.3.0 / LICENSE-APACHE`
 - `crc32fast 1.5.0 / LICENSE-APACHE`
 - `derive_builder 0.20.2 / LICENSE-APACHE`
 - `derive_builder_core 0.20.2 / LICENSE-APACHE`
@@ -21561,10 +21893,17 @@ Used by:
 - `ciborium 0.2.2 / LICENSE`
 - `ciborium-io 0.2.2 / LICENSE`
 - `ciborium-ll 0.2.2 / LICENSE`
+- `cranelift-assembler-x64 0.134.3 / standard text for Apache-2.0 WITH LLVM-exception (the crate includes no separate file)`
+- `cranelift-assembler-x64-meta 0.134.3 / standard text for Apache-2.0 WITH LLVM-exception (the crate includes no separate file)`
+- `cranelift-bitset 0.134.3 / standard text for Apache-2.0 WITH LLVM-exception (the crate includes no separate file)`
+- `cranelift-isle 0.134.3 / standard text for Apache-2.0 WITH LLVM-exception (the crate includes no separate file)`
+- `cranelift-srcgen 0.134.3 / standard text for Apache-2.0 WITH LLVM-exception (the crate includes no separate file)`
 - `esaxx-rs 0.1.10 / LICENSE`
 - `fastembed 5.17.2 / LICENSE`
 - `lzma-rust2 0.15.8 / LICENSE`
 - `ntapi 0.4.3 / LICENSE-APACHE`
+- `pulley-interpreter 47.0.3 / standard text for Apache-2.0 WITH LLVM-exception (the crate includes no separate file)`
+- `pulley-macros 47.0.3 / standard text for Apache-2.0 WITH LLVM-exception (the crate includes no separate file)`
 - `quinn 0.11.11 / LICENSE-APACHE`
 - `quinn-proto 0.11.16 / LICENSE-APACHE`
 - `quinn-udp 0.5.15 / LICENSE-APACHE`
@@ -21579,6 +21918,13 @@ Used by:
 - `sys-locale 0.3.2 / LICENSE-APACHE`
 - `tokenizers 0.22.2 / LICENSE`
 - `ureq 3.3.0 / LICENSE-APACHE`
+- `wasmtime-internal-component-macro 47.0.3 / standard text for Apache-2.0 WITH LLVM-exception (the crate includes no separate file)`
+- `wasmtime-internal-component-util 47.0.3 / standard text for Apache-2.0 WITH LLVM-exception (the crate includes no separate file)`
+- `wasmtime-internal-core 47.0.3 / standard text for Apache-2.0 WITH LLVM-exception (the crate includes no separate file)`
+- `wasmtime-internal-jit-debug 47.0.3 / standard text for Apache-2.0 WITH LLVM-exception (the crate includes no separate file)`
+- `wasmtime-internal-jit-icache-coherence 47.0.3 / standard text for Apache-2.0 WITH LLVM-exception (the crate includes no separate file)`
+- `wasmtime-internal-versioned-export-macros 47.0.3 / standard text for Apache-2.0 WITH LLVM-exception (the crate includes no separate file)`
+- `wasmtime-internal-wit-bindgen 47.0.3 / standard text for Apache-2.0 WITH LLVM-exception (the crate includes no separate file)`
 
 ```text
                                  Apache License
@@ -23254,6 +23600,34 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 ```
 
+### sha256-e0cfa1006a64520633de6bfbf563f5b1bea04ef0c5b73f049681931fa297dda3
+
+Used by:
+
+- `cobs 0.3.0 / LICENSE-MIT`
+
+```text
+Copyright (c) 2015 The cobs.rs Developers
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+```
+
 ### sha256-e20fa2b8e0a2565f24a792b94b4bf4b6c2b9d36f781d8a9516e218a036e6677a
 
 Used by:
@@ -23511,6 +23885,40 @@ freely, subject to the following restrictions:
    misrepresented as being the original software.
 
 3. This notice may not be removed or altered from any source distribution.
+```
+
+### sha256-e99d88d232bf57d70f0fb87f6b496d44b6653f99f8a63d250a54c61ea4bcde40
+
+Used by:
+
+- `addr2line 0.26.1 / LICENSE-MIT`
+
+```text
+Copyright (c) 2016-2018 The gimli Developers
+
+Permission is hereby granted, free of charge, to any
+person obtaining a copy of this software and associated
+documentation files (the "Software"), to deal in the
+Software without restriction, including without
+limitation the rights to use, copy, modify, merge,
+publish, distribute, sublicense, and/or sell copies of
+the Software, and to permit persons to whom the Software
+is furnished to do so, subject to the following
+conditions:
+
+The above copyright notice and this permission notice
+shall be included in all copies or substantial portions
+of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF
+ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED
+TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A
+PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT
+SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY
+CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION
+OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR
+IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
+DEALINGS IN THE SOFTWARE.
 ```
 
 ### sha256-e9c1238c5beb73c6cc130160418968058b21d486a7a445f0ceff27d51fbfdc44

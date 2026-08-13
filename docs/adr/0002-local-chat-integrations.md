@@ -3,6 +3,7 @@
 - Status: Accepted
 - Date: 2026-07-12
 - Superseded in part by: ADR 0003 (desktop lifecycle and per-user autostart)
+- Superseded in part by: ADR 0010 (capability-authenticated memory and computation tools)
 
 ## Context
 

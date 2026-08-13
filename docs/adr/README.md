@@ -17,6 +17,7 @@ tests, operational runbooks or evaluation reports.
 | [0007](0007-separate-evidence-from-authorized-candidates.md) | Separate answerability-accepted evidence from authorized external-chat candidates | Accepted | 2026-07-20 | Supersedes ADR 0001 and the answerability-only disclosure clause in ADR 0005 |
 | [0008](0008-public-federation.md) | Separate opt-in public federation from LAN authorization | Accepted | 2026-07-21 | Keeps ADR 0005 unchanged |
 | [0009](0009-windows-msi-signpath.md) | Use per-user MSI and origin-verified open-source signing on Windows | Accepted | 2026-08-10 | Refines ADR 0003 for the Windows package and signing provider |
+| [0010](0010-okf-v02-managed-memory-and-attested-computation.md) | Adopt OKF v0.2 for managed memory and attested computation | Accepted | 2026-08-13 | Supersedes ADR 0002 read-only MCP and extends ADR 0004 beyond folder publication |
 
 ## Policy
 

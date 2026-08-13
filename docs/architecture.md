@@ -29,8 +29,8 @@ xtask ──────────────┬──> airwiki-core
 - `airwiki-core` owns ingestion, SQLite, search, OKF publication and inspection.
 - `airwiki-inference` owns the model catalog, verified assets and local runtime.
 - `airwiki-network` owns authenticated LAN discovery, pairing and transport.
-- `airwiki-mcp` owns the read-only MCP contract, loopback gateway and stdio bridge
-  implementation.
+- `airwiki-mcp` owns search plus capability-authenticated memory/computation MCP
+  contracts, the loopback gateway and stdio bridge implementation.
 - `apps/desktop` is the composition root. It owns Tauri lifecycle and IPC,
   background orchestration, and the local Svelte WebView.
 - `apps/mcp-bridge` is a thin executable over `airwiki-mcp`. At runtime it exposes
@@ -70,6 +70,11 @@ SQLite is the source of operational state, local paths, jobs, trust, grants and
 audit events. Published OKF files are the source of truth for the visible wiki
 representation. Reconciliation reports disagreement rather than silently
 selecting one side. Original documents are never changed or replicated.
+
+Imported and AI-memory Wikis have no source folder. Their managed OKF v0.2
+bundle is the visible authority and SQLite is a searchable operational
+projection. Filesystem/SQLite mutations use atomic replacement and an
+append-only recovery journal. See the [AirWiki OKF v0.2 profile](okf-v02-profile.md).
 
 The watcher is a latency optimization. Startup and periodic full reconciliation
 are idempotent recovery paths for missed events, renames and interruptions.
@@ -134,6 +139,12 @@ tray is known to be operational; all foreground launches start visible.
   but the owner revalidates current publication, sequence and fingerprint under
   a disclosure lease before every response. See [ADR 0008](adr/0008-public-federation.md).
 - Local MCP requires `allow_external_ai`; it does not imply peer sharing.
+- Application memory uses a separate random capability and per-Wiki
+  owner/reader/editor grant. It never implies LAN, public or other-application
+  access. Grants and computation execution require native confirmation.
+- `airwiki-wasm` runs only internal hash-bound components with no imports and
+  bounded memory, fuel, time and payloads. Saving an accepted receipt requires
+  a second confirmation and creates machine-confirmed knowledge.
 - External-chat search separates answerability-accepted evidence from bounded
   authorized candidates. Both lanes are revalidated against current policy;
   local desktop search receives only evidence.

@@ -86,17 +86,21 @@ async function waitForVisualPaint(route: 'wikis' | 'system'): Promise<void> {
       { timeout: 10_000, timeoutMsg: 'system preferences did not reach their complete DOM state' }
     );
   }
-  await browser.execute(() => {
-    document.documentElement.removeAttribute('data-visual-paint-ready');
+  const painted = await browser.executeAsync((done) => {
+    let completed = false;
+    const finish = () => {
+      if (completed) return;
+      completed = true;
+      done(true);
+    };
     document.body.getBoundingClientRect();
+    const fallback = window.setTimeout(finish, 250);
     requestAnimationFrame(() => requestAnimationFrame(() => {
-      document.documentElement.setAttribute('data-visual-paint-ready', 'true');
+      window.clearTimeout(fallback);
+      finish();
     }));
   });
-  await browser.waitUntil(
-    () => browser.execute(() => document.documentElement.getAttribute('data-visual-paint-ready') === 'true'),
-    { timeout: 10_000, timeoutMsg: 'visual route did not paint within the expected time' }
-  );
+  expect(painted).toBe(true);
 }
 
 async function configureVisualPreferences(locale: 'en' | 'es', theme: 'light' | 'dark'): Promise<void> {
@@ -126,6 +130,7 @@ async function assertVisualMatrix(): Promise<void> {
         for (let index = 0; index < routes.length; index += 1) {
           await navigateToDestination(index);
           await browser.execute(() => {
+            if (document.activeElement instanceof HTMLElement) document.activeElement.blur();
             const style = document.createElement('style');
             style.id = 'visual-capture-styles';
             style.textContent = '.system-status-bar button:hover { color: var(--muted) !important; background: transparent !important; }';
@@ -142,12 +147,76 @@ async function assertVisualMatrix(): Promise<void> {
   }
 }
 
+async function createFolderWiki(): Promise<void> {
+  await $('button*=New wiki').click();
+  const sourceDialog = await $('#new-wiki-source-title');
+  await sourceDialog.waitForDisplayed();
+  await $('button*=From a folder').click();
+  await $('#create-wiki-title').waitForDisplayed();
+  const name = await $('.create-wiki-dialog input:not([type="checkbox"])');
+  await name.setValue('E2E folder wiki');
+  await expect($('.create-wiki-dialog input[role="switch"]')).toBeSelected();
+  await $('button*=Create wiki').click();
+  await $('button*=AirWiki').click();
+  try {
+    await browser.waitUntil(
+      () => browser.execute(() => Array.from(document.querySelectorAll('.wiki-row'))
+        .some((row) => row.textContent?.includes('E2E folder wiki') === true)),
+      { timeout: 10_000, timeoutMsg: 'folder wiki did not appear after the real IPC command' }
+    );
+  } catch (error) {
+    const diagnostic = await browser.execute(() => ({
+      actionMessage: document.querySelector('.action-message')?.textContent?.trim() ?? null,
+      dialogOpen: document.querySelector('#create-wiki-title') !== null,
+      wikiCount: document.querySelectorAll('.wiki-row').length,
+    }));
+    throw new Error(`folder wiki creation failed: ${JSON.stringify(diagnostic)}`, { cause: error });
+  }
+  const row = await $('.wiki-row*=E2E folder wiki');
+  await expect(row).toHaveText(expect.stringContaining('automatic updates'));
+}
+
+async function importOkfWiki(): Promise<void> {
+  await $('button*=New wiki').click();
+  await $('#new-wiki-source-title').waitForDisplayed();
+  await $('button*=Import OKF folder').click();
+  await $('#import-okf-title').waitForDisplayed();
+  await expect($('.create-wiki-dialog')).toHaveText(expect.stringContaining('OKF v0.2'));
+  await expect($('.create-wiki-dialog')).toHaveText(expect.stringContaining('1'));
+  const name = await $('.create-wiki-dialog input:not([type="checkbox"])');
+  await name.setValue('E2E imported wiki');
+  await $('button*=Import wiki').click();
+  await $('button*=AirWiki').click();
+  await browser.waitUntil(
+    () => browser.execute(() => Array.from(document.querySelectorAll('.wiki-row'))
+      .some((row) => row.textContent?.includes('E2E imported wiki') === true)),
+    { timeout: 10_000, timeoutMsg: 'imported OKF wiki did not appear after the real IPC command' }
+  );
+  const row = await $('.wiki-row*=E2E imported wiki');
+  await expect(row).toHaveText(expect.stringContaining('Imported OKF'));
+  await row.click();
+  await browser.waitUntil(
+    async () => (await $('.file-list')).isExisting(),
+    { timeout: 10_000, timeoutMsg: 'imported OKF hierarchy did not load' }
+  );
+  await expect($('.file-list')).toHaveText(expect.stringContaining('architecture/decision.md'));
+}
+
 describe('AirWiki real IPC journey', () => {
   it('persists onboarding and explicit appearance preferences', async () => {
-    await browser.waitUntil(
-      () => browser.execute(() => Boolean(document.querySelector('main.onboarding:not(.startup)'))),
-      { timeout: 30_000, timeoutMsg: 'the runtime did not reach interactive onboarding' }
-    );
+    try {
+      await browser.waitUntil(
+        () => browser.execute(() => Boolean(document.querySelector('main.onboarding:not(.startup)'))),
+        { timeout: 30_000, timeoutMsg: 'the runtime did not reach interactive onboarding' }
+      );
+    } catch (error) {
+      const diagnostic = await browser.execute(() => ({
+        bodyText: document.body.textContent?.trim().slice(0, 160) ?? '',
+        mainClass: document.querySelector('main')?.className ?? null,
+        readyState: document.readyState,
+      }));
+      throw new Error(`interactive onboarding was unavailable: ${JSON.stringify(diagnostic)}`, { cause: error });
+    }
     const onboarding = await $('main.onboarding:not(.startup)');
     await expect(onboarding).toBeDisplayed();
 
@@ -293,5 +362,14 @@ describe('AirWiki real IPC journey', () => {
     await $('.connections-drawer button[aria-label="Close"]').click();
 
     await assertVisualMatrix();
+    await configureVisualPreferences('en', 'light');
+    await navigateToDestination(0);
+    await createFolderWiki();
+    await importOkfWiki();
+    await $('button*=AirWiki').click();
+    await browser.waitUntil(
+      () => browser.execute(() => document.querySelector('.route-page')?.getAttribute('data-route') === 'wikis'),
+      { timeout: 10_000, timeoutMsg: 'wiki list did not restore after the OKF journey' }
+    );
   });
 });

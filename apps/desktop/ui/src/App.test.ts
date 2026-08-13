@@ -546,7 +546,7 @@ describe('AirWiki wiki workspace', () => {
       links: []
     };
     snapshot.knowledgePage = {
-      wikiId: wiki.id, page: { kind: 'concept', path: 'memory/decision.md' }, title: 'Decision', status: 'ready', blocks: [], metadata: [], backlinks: [], truncated: false
+      wikiId: wiki.id, page: { kind: 'concept', path: 'memory/decision.md' }, concept: snapshot.knowledge.concepts[0], title: 'Decision', status: 'ready', blocks: [], metadata: [], backlinks: [], truncated: false
     };
     window.location.hash = `#wikis/${wiki.id}`;
     render(App);
@@ -555,6 +555,38 @@ describe('AirWiki wiki workspace', () => {
 
     expect(verifyWikiConcept).toHaveBeenCalledWith(wiki.id, 'memory/decision.md', fingerprint);
     expect(loadWikiBundle).toHaveBeenCalledWith(wiki.id);
+  });
+
+  it('keeps concept assurance atomic with the loaded page', async () => {
+    const wiki = snapshot.wikis[0];
+    const first = {
+      conceptId: 'first', page: { kind: 'concept' as const, path: 'first.md' }, title: 'First',
+      description: '', conceptType: 'Reference', tags: [], lifecycle: 'stable', generatedBy: 'process:first',
+      verifiedBy: ['human:first'], sources: [], staleAfter: null,
+      assurance: { trust: 'humanReviewed' as const, freshness: 'fresh' as const, verificationOutdated: false },
+      warnings: [], executionAvailable: false, fingerprint: 'a'.repeat(64)
+    };
+    const second = {
+      ...first, conceptId: 'second', page: { kind: 'concept' as const, path: 'second.md' }, title: 'Second',
+      generatedBy: null, verifiedBy: [], assurance: { trust: 'unverified' as const, freshness: 'notDeclared' as const, verificationOutdated: false },
+      fingerprint: 'b'.repeat(64)
+    };
+    snapshot.knowledge = {
+      wikiId: wiki.id, wikiName: wiki.name, version: 'atomic-assurance', status: 'ready',
+      concepts: [first, second], links: [], errorCount: 0, warningCount: 0
+    };
+    snapshot.knowledgePage = {
+      wikiId: wiki.id, page: second.page, concept: second, title: second.title,
+      status: 'ready', blocks: [{ kind: 'paragraph', text: 'Second body' }], metadata: [], backlinks: [], truncated: false
+    };
+    window.location.hash = `#wikis/${wiki.id}`;
+    render(App);
+
+    expect(await screen.findByRole('heading', { name: 'Second' })).toBeInTheDocument();
+    expect(screen.getByText('Reference')).toBeInTheDocument();
+    expect(screen.getByText('Sin verificar')).toBeInTheDocument();
+    expect(screen.queryByText('Revisado por una persona')).not.toBeInTheDocument();
+    expect(screen.queryByText('process:first')).not.toBeInTheDocument();
   });
 
   it('uses independent settings pages that always return to the top', async () => {

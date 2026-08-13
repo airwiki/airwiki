@@ -744,9 +744,7 @@
   }
 
   function selectedKnowledgeConcept(): KnowledgeConceptSummary | null {
-    const selected = snapshot?.knowledgePage?.page;
-    if (!selected || selected.kind !== 'concept') return null;
-    return snapshot?.knowledge?.concepts.find((concept) => concept.page.kind === 'concept' && concept.page.path === selected.path) ?? null;
+    return snapshot?.knowledgePage?.concept ?? null;
   }
 
   function compatibilityLabel(wiki: WikiSummary): string {
@@ -1485,6 +1483,7 @@
                       {@const concept = selectedKnowledgeConcept()}
                       {#if concept}
                         <aside class="concept-assurance" aria-label={t('desktop-concept-assurance-title')}>
+                          <div><span>{t('desktop-concept-type')}</span><strong>{concept.conceptType}</strong></div>
                           <div><span>{t('desktop-concept-trust')}</span><strong>{assuranceLabel(concept)}</strong></div>
                           <div><span>{t('desktop-concept-freshness')}</span><strong>{t(`desktop-freshness-${concept.assurance.freshness}`)}</strong></div>
                           <div><span>{t('desktop-concept-lifecycle')}</span><strong>{concept.lifecycle}</strong></div>

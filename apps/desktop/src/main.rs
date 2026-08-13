@@ -688,6 +688,7 @@ struct OkfWarningSummary {
 struct KnowledgePageSummary {
     wiki_id: String,
     page: KnowledgePageInput,
+    concept: Option<KnowledgeConceptSummary>,
     title: String,
     status: KnowledgePageStatus,
     blocks: Vec<KnowledgeBlock>,
@@ -3811,8 +3812,14 @@ impl AppSnapshot {
                                     .collect::<HashMap<_, _>>()
                             })
                             .unwrap_or_default();
+                        let concepts = self
+                            .knowledge
+                            .as_ref()
+                            .filter(|bundle| bundle.wiki_id == collection_id.to_string())
+                            .map(|bundle| bundle.concepts.clone())
+                            .unwrap_or_default();
                         match tokio::task::spawn_blocking(move || {
-                            knowledge_page_summary(page, &page_inputs)
+                            knowledge_page_summary(page, &page_inputs, &concepts)
                         })
                         .await
                         {
@@ -4397,6 +4404,7 @@ fn failed_knowledge_page(collection_id: Uuid, page_id: KnowledgePageId) -> Knowl
     KnowledgePageSummary {
         wiki_id: collection_id.to_string(),
         page: reserved_page_input(page_id),
+        concept: None,
         title: String::new(),
         status: KnowledgePageStatus::Failed,
         blocks: Vec::new(),
@@ -4428,13 +4436,19 @@ fn knowledge_graph_links(
 fn knowledge_page_summary(
     page: KnowledgePageView,
     inputs: &HashMap<KnowledgePageId, KnowledgePageInput>,
+    concepts: &[KnowledgeConceptSummary],
 ) -> KnowledgePageSummary {
+    let page_input = inputs
+        .get(&page.page_id)
+        .cloned()
+        .unwrap_or_else(|| reserved_page_input(page.page_id));
     KnowledgePageSummary {
         wiki_id: page.collection_id.to_string(),
-        page: inputs
-            .get(&page.page_id)
-            .cloned()
-            .unwrap_or_else(|| reserved_page_input(page.page_id)),
+        concept: concepts
+            .iter()
+            .find(|concept| concept.page == page_input)
+            .cloned(),
+        page: page_input,
         title: page.title,
         status: KnowledgePageStatus::Ready,
         blocks: parse_knowledge_blocks(&page.body_markdown),
@@ -5519,6 +5533,73 @@ mod tests {
                 text: "fn main() {}\n".to_owned(),
             }]
         );
+    }
+
+    #[test]
+    fn knowledge_page_carries_only_its_matching_assurance() {
+        let collection_id = Uuid::new_v4();
+        let first_id = Uuid::new_v4();
+        let second_id = Uuid::new_v4();
+        let first_page = KnowledgePageInput::Concept {
+            path: "first.md".to_owned(),
+        };
+        let second_page = KnowledgePageInput::Concept {
+            path: "second.md".to_owned(),
+        };
+        let concepts = vec![
+            knowledge_concept_fixture(first_id, first_page.clone(), TrustSummaryDto::HumanReviewed),
+            knowledge_concept_fixture(second_id, second_page.clone(), TrustSummaryDto::Unverified),
+        ];
+        let inputs = HashMap::from([
+            (KnowledgePageId::Concept(first_id), first_page),
+            (KnowledgePageId::Concept(second_id), second_page),
+        ]);
+        let page = KnowledgePageView {
+            collection_id,
+            page_id: KnowledgePageId::Concept(second_id),
+            title: "Second".to_owned(),
+            fingerprint: "b".repeat(64),
+            body_markdown: "Second body".to_owned(),
+            metadata: Vec::new(),
+            outgoing_links: Vec::new(),
+            backlinks: Vec::new(),
+            truncated: false,
+        };
+
+        let summary = knowledge_page_summary(page, &inputs, &concepts);
+
+        assert_eq!(
+            summary.concept.map(|concept| concept.concept_id),
+            Some(second_id.to_string())
+        );
+    }
+
+    fn knowledge_concept_fixture(
+        concept_id: Uuid,
+        page: KnowledgePageInput,
+        trust: TrustSummaryDto,
+    ) -> KnowledgeConceptSummary {
+        KnowledgeConceptSummary {
+            concept_id: concept_id.to_string(),
+            page,
+            title: concept_id.to_string(),
+            description: String::new(),
+            concept_type: "Reference".to_owned(),
+            tags: Vec::new(),
+            lifecycle: "stable".to_owned(),
+            generated_by: None,
+            verified_by: Vec::new(),
+            sources: Vec::new(),
+            stale_after: None,
+            assurance: ConceptAssuranceSummary {
+                trust,
+                freshness: FreshnessSummary::NotDeclared,
+                verification_outdated: false,
+            },
+            warnings: Vec::new(),
+            execution_available: false,
+            fingerprint: "a".repeat(64),
+        }
     }
 
     #[test]

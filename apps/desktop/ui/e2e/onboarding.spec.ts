@@ -1,5 +1,7 @@
 import { $, $$, browser, expect } from '@wdio/globals';
 
+const runVisualMatrix = process.env.AIRWIKI_E2E_VISUAL !== '0';
+
 function required<T>(value: T | undefined, label: string): T {
   if (value === undefined) throw new Error(`missing ${label}`);
   return value;
@@ -361,7 +363,7 @@ describe('AirWiki real IPC journey', () => {
     expect(desktopControlLayout.statusMarginLeft).toBe('0px');
     await $('.connections-drawer button[aria-label="Close"]').click();
 
-    await assertVisualMatrix();
+    if (runVisualMatrix) await assertVisualMatrix();
     await configureVisualPreferences('en', 'light');
     await navigateToDestination(0);
     await createFolderWiki();

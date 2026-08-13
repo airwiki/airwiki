@@ -72,6 +72,7 @@
   let lanPreference: LanPreference = 'undecided';
   let closeBehavior: CloseBehavior = 'ask';
   let automaticUpdateChecks = false;
+  let preferencesDirty = false;
   let closeChoiceRequired = false;
   let modelLicensesConfirmed = false;
   let autostartBusy = false;
@@ -117,6 +118,29 @@
       if (actionMessage === completedMessage) actionMessage = '';
       actionMessageTimeout = null;
     }, 3200);
+  }
+
+  function applyPreferences(preferences: NonNullable<AppSnapshot['preferences']>) {
+    locale = preferences.locale;
+    theme = preferences.theme;
+    lanPreference = preferences.lanPreference;
+    closeBehavior = preferences.closeBehavior;
+    automaticUpdateChecks = preferences.automaticUpdateChecks;
+  }
+
+  function preferencesMatch(preferences: NonNullable<AppSnapshot['preferences']>): boolean {
+    return preferences.locale === locale
+      && preferences.theme === theme
+      && preferences.lanPreference === lanPreference
+      && preferences.closeBehavior === closeBehavior
+      && preferences.automaticUpdateChecks === automaticUpdateChecks;
+  }
+
+  function syncPreferences(preferences: AppSnapshot['preferences']) {
+    if (!preferences) return;
+    if (preferencesDirty && !preferencesMatch(preferences)) return;
+    applyPreferences(preferences);
+    preferencesDirty = false;
   }
 
   function scrollMainTo(top: number) {
@@ -380,13 +404,7 @@
       snapshot = event.snapshot;
       void openPendingSearchConcept(event.snapshot);
       if (event.snapshot.model?.licenseAccepted) modelLicensesConfirmed = true;
-      if (event.snapshot.preferences) {
-        locale = event.snapshot.preferences.locale;
-        theme = event.snapshot.preferences.theme;
-        lanPreference = event.snapshot.preferences.lanPreference;
-        closeBehavior = event.snapshot.preferences.closeBehavior;
-        automaticUpdateChecks = event.snapshot.preferences.automaticUpdateChecks;
-      }
+      syncPreferences(event.snapshot.preferences);
       if (selectedReview) {
         const currentReview = event.snapshot.reviews.find((review) => review.conceptId === selectedReview?.conceptId);
         if (!currentReview || currentReview.sourceRevision !== selectedReview.sourceRevision) {
@@ -412,13 +430,7 @@
     }).then(async (initial) => {
       snapshot = initial;
       if (initial.model?.licenseAccepted) modelLicensesConfirmed = true;
-      if (initial.preferences) {
-        locale = initial.preferences.locale;
-        theme = initial.preferences.theme;
-        lanPreference = initial.preferences.lanPreference;
-        closeBehavior = initial.preferences.closeBehavior;
-        automaticUpdateChecks = initial.preferences.automaticUpdateChecks;
-      }
+      syncPreferences(initial.preferences);
       runtimeMessageId = initial.phase === 'ready' ? 'status-ready' : runtimeMessageId;
       await tick();
       syncRoute();
@@ -1306,7 +1318,7 @@
     <p class="lede" aria-live="polite">{t(runtimeMessageId)}</p>
   </main>
 {:else if snapshot.preferences.completedOnboardingVersion == null}
-  <OnboardingFlow {snapshot} bind:locale bind:lanPreference bind:closeBehavior bind:modelLicensesConfirmed {actionBusy} {actionMessage} onprepare={prepareLocalModel} onfinish={() => savePreferences(true)} />
+  <OnboardingFlow {snapshot} bind:locale bind:lanPreference bind:closeBehavior bind:modelLicensesConfirmed {actionBusy} {actionMessage} onpreferenceschange={() => { preferencesDirty = true; }} onprepare={prepareLocalModel} onfinish={() => savePreferences(true)} />
 {:else}
 <div class="shell drive-shell">
   <main class="drive-main">
@@ -1550,7 +1562,7 @@
             <nav class="settings-nav" aria-label={t('desktop-page-system-title')}>{#each systemSections.slice(0, 3) as section (section.id)}<a href={`#system/${section.id}`} class:active={systemSection === section.id} onclick={(event) => openSystemSection(event, section.id)}>{t(section.labelId)}</a>{/each}</nav>
             <div class="settings-page">
               {#if systemSection === 'models'}<section id="system-models"><p class="section-label">{t('settings-local-ai')}</p><h2>{snapshot.model?.displayName ?? t('component-local-ai')}</h2><p>{snapshot.model?.active ? t('desktop-model-ready') : t('desktop-model-needs-setup')}</p>{#if snapshot.modelInstall}<progress max={snapshot.modelInstall.totalBytes} value={snapshot.modelInstall.downloaded}></progress><p>{modelInstallLabel(locale)}</p><button class="secondary" onclick={cancelModelInstall}>{t('action-cancel')}</button>{:else if !snapshot.model?.active}<button class="primary" onclick={prepareLocalModel} disabled={actionBusy}>{t('models-install')}</button>{/if}{#if snapshot.model?.licenseUrl}<button class="text-action" onclick={() => openVerifiedExternalLink(snapshot!.model!.licenseUrl!)}>{t('models-license-open')}</button>{/if}</section>{/if}
-              {#if systemSection === 'preferences'}<section id="system-preferences"><p class="section-label">{t('desktop-preferences')}</p><h2>{t('desktop-preferences')}</h2><div class="settings-form"><SelectField label={t('settings-language')} bind:value={locale} options={[{ value: 'system', label: t('language-system') }, { value: 'en', label: 'English' }, { value: 'es', label: 'Español' }]} /><SelectField label={t('settings-theme')} bind:value={theme} options={[{ value: 'system', label: t('theme-system') }, { value: 'light', label: t('theme-light') }, { value: 'dark', label: t('theme-dark') }]} /><SelectField label={t('desktop-lan')} bind:value={lanPreference} options={[{ value: 'undecided', label: t('settings-lan-undecided') }, { value: 'disabled', label: t('onboarding-lan-disable') }, { value: 'enabled', label: t('onboarding-lan-enable') }]} /><SelectField label={t('desktop-close')} bind:value={closeBehavior} options={[{ value: 'ask', label: t('desktop-ask') }, { value: 'hide', label: t('desktop-hide-tray') }, { value: 'quit', label: t('desktop-quit') }]} /><Switch label={t('updates-automatic')} bind:checked={automaticUpdateChecks} /><button class="primary" onclick={() => savePreferences()} disabled={actionBusy}>{t('desktop-save-preferences')}</button></div></section><section><p class="section-label">{t('settings-login-title')}</p><h2>{t('settings-login-heading')}</h2><p>{autostartLabel(locale)}</p><div class="row-actions"><button class="secondary" onclick={() => changeAutostart(true)} disabled={autostartBusy}>{t('action-enable')}</button><button class="text-action" onclick={refreshAutostartState} disabled={autostartBusy}>{t('action-refresh')}</button></div></section>{/if}
+              {#if systemSection === 'preferences'}<section id="system-preferences"><p class="section-label">{t('desktop-preferences')}</p><h2>{t('desktop-preferences')}</h2><div class="settings-form"><SelectField label={t('settings-language')} bind:value={locale} onchange={() => { preferencesDirty = true; }} options={[{ value: 'system', label: t('language-system') }, { value: 'en', label: 'English' }, { value: 'es', label: 'Español' }]} /><SelectField label={t('settings-theme')} bind:value={theme} onchange={() => { preferencesDirty = true; }} options={[{ value: 'system', label: t('theme-system') }, { value: 'light', label: t('theme-light') }, { value: 'dark', label: t('theme-dark') }]} /><SelectField label={t('desktop-lan')} bind:value={lanPreference} onchange={() => { preferencesDirty = true; }} options={[{ value: 'undecided', label: t('settings-lan-undecided') }, { value: 'disabled', label: t('onboarding-lan-disable') }, { value: 'enabled', label: t('onboarding-lan-enable') }]} /><SelectField label={t('desktop-close')} bind:value={closeBehavior} onchange={() => { preferencesDirty = true; }} options={[{ value: 'ask', label: t('desktop-ask') }, { value: 'hide', label: t('desktop-hide-tray') }, { value: 'quit', label: t('desktop-quit') }]} /><Switch label={t('updates-automatic')} bind:checked={automaticUpdateChecks} onchange={() => { preferencesDirty = true; }} /><button class="primary" onclick={() => savePreferences()} disabled={actionBusy}>{t('desktop-save-preferences')}</button></div></section><section><p class="section-label">{t('settings-login-title')}</p><h2>{t('settings-login-heading')}</h2><p>{autostartLabel(locale)}</p><div class="row-actions"><button class="secondary" onclick={() => changeAutostart(true)} disabled={autostartBusy}>{t('action-enable')}</button><button class="text-action" onclick={refreshAutostartState} disabled={autostartBusy}>{t('action-refresh')}</button></div></section>{/if}
               {#if systemSection === 'updates'}<section id="system-updates"><p class="section-label">{t('updates-title')}</p><h2>{t('updates-stable-title')}</h2><p>{updaterLabel(locale)}</p><div class="row-actions"><button class="secondary" onclick={() => runUpdaterAction('check')} disabled={updaterRequestId !== null}>{t('updates-check-now')}</button>{#if snapshot.updater?.status === 'available'}<button class="primary" onclick={() => runUpdaterAction('download')}>{t('updates-download')}</button>{:else if snapshot.updater?.status === 'readyToInstall'}<button class="primary" onclick={() => { confirmUpdateInstall = true; }}>{t('updates-install')}</button>{/if}</div>{#if confirmUpdateInstall}<div class="install-confirmation"><p>{t('updates-install-confirm')}</p><button class="primary" onclick={() => runUpdaterAction('install')}>{t('updates-install')}</button><button class="secondary" onclick={() => { confirmUpdateInstall = false; }}>{t('action-cancel')}</button></div>{/if}</section>{/if}
               <details class="advanced-disclosure"><summary>{t('desktop-advanced-details')}</summary><dl>{#if snapshot.nodeId}<div><dt>{t('desktop-network-identity')}</dt><dd><code>{shortPeerId(snapshot.nodeId)}</code></dd></div>{/if}{#if snapshot.mcpUrl}<div><dt>{t('diagnostics-local-mcp')}</dt><dd><code>{snapshot.mcpUrl}</code></dd></div>{/if}{#if snapshot.hardware}<div><dt>{t('desktop-memory-installed')}</dt><dd>{formatBytes(snapshot.hardware.totalMemoryBytes)}</dd></div><div><dt>{t('desktop-disk-available')}</dt><dd>{formatBytes(snapshot.hardware.availableDiskBytes)}</dd></div>{/if}</dl></details>
             </div>

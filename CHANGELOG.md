@@ -58,6 +58,9 @@ All notable user-visible changes to AirWiki will be documented here. The project
 
 ### Fixed
 
+- Kept unsaved device preferences stable while background connectivity and
+  status snapshots arrive, so a user's selection is never reverted before
+  they can save it.
 - Opened public search results in a dedicated, keyboard-accessible wiki viewer
   with explicit loading, route, OKF assurance, failure, pagination and return
   states instead of leaving the completed browse snapshot invisible.

@@ -143,8 +143,13 @@ jobs:
       - name: Install pinned E2E dependencies
         shell: bash
         run: pnpm --dir apps/desktop/ui install --frozen-lockfile --ignore-scripts --prod=false
-      - name: Native desktop E2E
+      - name: Native desktop functional E2E
         shell: bash
+        env:
+          # Hosted-runner window chrome is not stable enough to select the
+          # dimension-keyed visual baselines. Installed platform acceptance
+          # runs the same journey with the visual matrix enabled.
+          AIRWIKI_E2E_VISUAL: "0"
         run: pnpm --dir apps/desktop/ui e2e
 
   supply-chain:

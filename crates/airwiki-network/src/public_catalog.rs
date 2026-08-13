@@ -413,8 +413,6 @@ pub async fn run_public_catalog_server(
         )
         .map_err(|error| NetworkError::Transport(error.to_string()))?
         .with_quic()
-        .with_dns()
-        .map_err(|error| NetworkError::Transport(error.to_string()))?
         .with_behaviour(|_| behaviour)
         .map_err(|error| NetworkError::Transport(error.to_string()))?
         .build();
@@ -589,10 +587,6 @@ fn relay_host_is_publicly_routable(host: &libp2p::multiaddr::Protocol<'_>) -> bo
     match host {
         libp2p::multiaddr::Protocol::Ip4(ip) => ipv4_is_publicly_routable(*ip),
         libp2p::multiaddr::Protocol::Ip6(ip) => ipv6_is_publicly_routable(*ip),
-        libp2p::multiaddr::Protocol::Dns(_)
-        | libp2p::multiaddr::Protocol::Dns4(_)
-        | libp2p::multiaddr::Protocol::Dns6(_)
-        | libp2p::multiaddr::Protocol::Dnsaddr(_) => true,
         _ => false,
     }
 }
@@ -827,12 +821,19 @@ mod tests {
 
     #[test]
     fn relay_external_address_accepts_direct_tcp_and_quic_routes() {
-        let tcp = "/dns4/relay.example.org/tcp/42042".parse().unwrap();
+        let tcp = "/ip4/8.8.8.8/tcp/42042".parse().unwrap();
         let quic = "/ip6/2606:4700:4700::1111/udp/42042/quic-v1"
             .parse()
             .unwrap();
 
         assert!(validate_public_relay_external_address(&tcp).is_ok());
         assert!(validate_public_relay_external_address(&quic).is_ok());
+    }
+
+    #[test]
+    fn relay_external_address_rejects_dns_without_a_dns_transport() {
+        let dns = "/dns4/relay.example.org/tcp/42042".parse().unwrap();
+
+        assert!(validate_public_relay_external_address(&dns).is_err());
     }
 }

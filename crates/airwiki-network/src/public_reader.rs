@@ -36,6 +36,32 @@ pub struct PublicIndexEndpoint {
     pub address: Multiaddr,
 }
 
+impl PublicIndexEndpoint {
+    /// Public federation intentionally accepts only literal IP transports.
+    /// This keeps DNS resolution outside the libp2p runtime and confines
+    /// Hickory to bounded local mDNS service records.
+    pub fn validate(&self) -> Result<(), NetworkError> {
+        use libp2p::multiaddr::Protocol;
+
+        let protocols = self.address.iter().collect::<Vec<_>>();
+        let valid = matches!(
+            protocols.as_slice(),
+            [Protocol::Ip4(_) | Protocol::Ip6(_), Protocol::Tcp(port)] if *port != 0
+        ) || matches!(
+            protocols.as_slice(),
+            [Protocol::Ip4(_) | Protocol::Ip6(_), Protocol::Udp(port), Protocol::QuicV1]
+                if *port != 0
+        );
+        if valid {
+            Ok(())
+        } else {
+            Err(NetworkError::Transport(
+                "public federation endpoint must use a literal IP TCP or QUIC address".to_owned(),
+            ))
+        }
+    }
+}
+
 #[derive(Debug)]
 pub struct PublicReader {
     identity: Keypair,
@@ -628,6 +654,9 @@ impl PublicReader {
             .map_err(|error| SearchContractError::Unavailable(error.to_string()))?;
         let mut pending = HashSet::new();
         for endpoint in bounded_indexes(indexes) {
+            if endpoint.validate().is_err() {
+                continue;
+            }
             swarm.add_peer_address(endpoint.peer_id, endpoint.address.clone());
             pending.insert(
                 swarm
@@ -856,8 +885,6 @@ fn reader_swarm(
         )
         .map_err(|error| NetworkError::Transport(error.to_string()))?
         .with_quic()
-        .with_dns()
-        .map_err(|error| NetworkError::Transport(error.to_string()))?
         .with_relay_client(libp2p::noise::Config::new, libp2p::yamux::Config::default)
         .map_err(|error| NetworkError::Transport(error.to_string()))?
         .with_behaviour(move |_, relay| ReaderBehaviour {
@@ -1000,6 +1027,9 @@ async fn query_catalog_manifests(
 ) -> (Vec<SignedPublicCollectionManifest>, CatalogQueryState) {
     let mut pending = HashSet::new();
     for endpoint in bounded_indexes(indexes) {
+        if endpoint.validate().is_err() {
+            continue;
+        }
         swarm.add_peer_address(endpoint.peer_id, endpoint.address.clone());
         pending.insert(
             swarm
@@ -1534,6 +1564,27 @@ mod tests {
             .collect::<Vec<_>>();
 
         assert_eq!(bounded_indexes(&indexes).count(), MAX_INDEXES);
+    }
+
+    #[test]
+    fn public_index_endpoint_accepts_only_literal_ip_tcp_or_quic() {
+        let peer_id = PeerId::random();
+        let tcp = PublicIndexEndpoint {
+            peer_id,
+            address: "/ip4/127.0.0.1/tcp/42042".parse().unwrap(),
+        };
+        let quic = PublicIndexEndpoint {
+            peer_id,
+            address: "/ip6/::1/udp/42042/quic-v1".parse().unwrap(),
+        };
+        let dns = PublicIndexEndpoint {
+            peer_id,
+            address: "/dns4/index.example.org/tcp/42042".parse().unwrap(),
+        };
+
+        assert!(tcp.validate().is_ok());
+        assert!(quic.validate().is_ok());
+        assert!(dns.validate().is_err());
     }
 
     #[test]

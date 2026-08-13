@@ -25,6 +25,13 @@ Legacy reading uses `timestamp` only when `generated` is absent and a Markdown
 `# Citations` section only when `sources` is absent. These fallbacks never turn
 legacy metadata into a new v0.2 publication.
 
+When an existing installation first applies this profile, AirWiki preserves
+legacy and future-version bundle bytes but atomically resets their policy to
+local-only, removes LAN and application grants, and stops continuous indexing.
+Previously public bundles receive a higher-sequence v1/v2 tombstone. The
+withdrawal stays pending across restarts until at least one configured catalog
+accepts it; only then may the now-unused public runtime stop.
+
 ## Assurance
 
 AirWiki derives, rather than stores in OKF, three independent signals:
@@ -38,9 +45,9 @@ Malformed optional metadata is preserved but cannot raise trust, enable
 execution or authorize disclosure. A user may append a human verification to
 the exact current revision of an imported or AI-memory concept after a native
 confirmation; stale fingerprints and malformed existing verification metadata
-fail closed. Applications never receive this authority. Wiki summaries use the lowest trust among
-stable, non-deprecated concepts and show stale, warning and outdated counts
-separately.
+fail closed. Applications never receive this authority. Wiki summaries use the
+lowest trust among stable, non-deprecated concepts and show stale, warning and
+outdated counts separately.
 
 Only lifecycle `stable` may cross LAN, public federation or MCP search. `draft`,
 `deprecated` and unknown lifecycle values remain local.

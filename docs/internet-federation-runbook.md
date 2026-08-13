@@ -6,7 +6,9 @@ AirWiki candidates on different NATs. Use synthetic documents only.
 ## Setup
 
 1. Start at least one `airwiki-federation-index` on a reachable host and record
-   its exact PeerId and TCP/QUIC multiaddresses. Pass each externally reachable
+   its exact PeerId and literal-IP TCP/QUIC multiaddresses. DNS multiaddresses
+   are not accepted while the scoped Hickory audit exception remains active.
+   Pass each externally reachable
    address with `--external-address`; bind addresses and externally advertised
    addresses are intentionally separate. A wildcard bind such as `0.0.0.0`
    must never be advertised.

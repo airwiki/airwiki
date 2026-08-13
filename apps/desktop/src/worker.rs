@@ -1371,6 +1371,12 @@ pub(crate) async fn run_worker(
             () = cancellation.cancelled() => break 'running,
             changed = public_announcement_updates.changed(), if public_announcement_updates_open => {
                 if changed.is_ok() {
+                    if services.reconcile_public_network().await.is_err() {
+                        tracing::warn!(
+                            error_kind = "public_runtime_reconcile_after_announcement",
+                            "public runtime could not be reconciled after an announcement update"
+                        );
+                    }
                     refresh_collection_views(&services, &events).await;
                 } else {
                     public_announcement_updates_open = false;
@@ -2018,6 +2024,8 @@ pub(crate) async fn run_worker(
                             send(&events, WorkerEvent::Error(format!("No se pudo actualizar la red pública: {error:#}"))).await;
                         } else if let Err(error) = services.sync_public_collection(collection_id).await {
                             send(&events, WorkerEvent::Error(format!("No se pudo sincronizar el anuncio público: {error:#}"))).await;
+                        } else if let Err(error) = services.reconcile_public_network().await {
+                            send(&events, WorkerEvent::Error(format!("No se pudo finalizar la actualización de la red pública: {error:#}"))).await;
                         }
                         refresh_content_views(&services, &events).await;
                     }

@@ -299,6 +299,12 @@ fn parse_bundled_bootstrap_federation_indexes(
             PeerId::from_str(peer_id).context("la identidad bootstrap federada no es válida")?;
         let address = Multiaddr::from_str(multiaddr)
             .context("la dirección bootstrap federada no es válida")?;
+        PublicIndexEndpoint {
+            peer_id: peer,
+            address: address.clone(),
+        }
+        .validate()
+        .context("la dirección bootstrap federada debe usar una IP TCP o QUIC")?;
         let peer_id = peer.to_string();
         if !peers.insert(peer_id.clone()) {
             bail!("el registro bootstrap federado repite una identidad");
@@ -2162,6 +2168,13 @@ impl DesktopServices {
         collection_id: Uuid,
         source_folder: impl AsRef<Path>,
     ) -> Result<()> {
+        let collection = self
+            .database
+            .collection(collection_id)?
+            .context("la wiki ya no existe")?;
+        if !collection.okf_compatibility.permits_external_disclosure() {
+            bail!("la wiki usa un formato OKF restringido y no admite cambios de origen");
+        }
         let source_folder = source_folder.as_ref();
         if !source_folder.is_dir() {
             bail!("la carpeta seleccionada no existe");
@@ -2191,9 +2204,6 @@ impl DesktopServices {
                 bail!("la carpeta seleccionada se superpone con otra colección");
             }
         }
-        self.database
-            .collection(collection_id)?
-            .context("la colección ya no existe")?;
         self.database
             .update_collection_source_folder(collection_id, &source_folder)?;
         if let Ok(mut issues) = write_lock(&self.transient_source_issues, "source issue snapshot") {
@@ -2247,12 +2257,12 @@ impl DesktopServices {
     }
 
     pub async fn reconcile_public_network(&self) -> Result<()> {
-        let should_run = self
-            .database
-            .list_collections()?
-            .into_iter()
-            .any(|collection| collection.policy.internet_public);
-        let relay_addresses = self.public_relay_listen_addresses()?;
+        let should_run = !self.database.public_collections_needing_sync()?.is_empty();
+        let relay_addresses = if should_run {
+            self.public_relay_listen_addresses()?
+        } else {
+            Vec::new()
+        };
         let current = {
             let mut guard = mutex_lock(&self.public_network, "public network runtime")?;
             if should_run && guard.is_none() {
@@ -2407,6 +2417,7 @@ impl DesktopServices {
             return Ok(());
         }
         let expires_at = public_announcement_expiry(&announcement);
+        let is_tombstone = matches!(&announcement, PreparedPublicAnnouncement::Tombstone(_));
         let accepted = match announcement {
             PreparedPublicAnnouncement::Manifest(announcement) => self
                 .public_reader
@@ -2420,6 +2431,14 @@ impl DesktopServices {
                 .map_err(|error| anyhow!(error.to_string()))?,
             PreparedPublicAnnouncement::Missing => return Ok(()),
         };
+        if accepted > 0 && is_tombstone {
+            let database = self.database.clone();
+            tokio::task::spawn_blocking(move || {
+                complete_public_withdrawal_receipt(&database, collection_id).map(|_| ())
+            })
+            .await
+            .context("se detuvo el recibo de retiro público")??;
+        }
         let now = Utc::now();
         update_public_announcement_state(
             &self.public_announcements,
@@ -2437,17 +2456,10 @@ impl DesktopServices {
 
     pub async fn sync_all_public_collections(&self) -> Result<()> {
         let database = self.database.clone();
-        let collection_ids = tokio::task::spawn_blocking(move || {
-            database.list_collections().map(|collections| {
-                collections
-                    .into_iter()
-                    .filter(|item| item.policy.internet_public)
-                    .map(|item| item.id)
-                    .collect::<Vec<_>>()
-            })
-        })
-        .await
-        .context("se detuvo el worker de colecciones públicas")??;
+        let collection_ids =
+            tokio::task::spawn_blocking(move || database.public_collections_needing_sync())
+                .await
+                .context("se detuvo el worker de colecciones públicas")??;
         for collection_id in collection_ids {
             self.sync_public_collection(collection_id).await?;
         }
@@ -2459,15 +2471,9 @@ impl DesktopServices {
     }
 
     fn public_relay_listen_addresses(&self) -> Result<Vec<Multiaddr>> {
-        selected_federation_indexes(&self.database)?
+        federation_index_endpoints(&self.database)?
             .into_iter()
-            .map(|index| {
-                let peer = PeerId::from_str(&index.peer_id)
-                    .context("la identidad del relay público no es válida")?;
-                let address = Multiaddr::from_str(&index.multiaddr)
-                    .context("la dirección del relay público no es válida")?;
-                Ok(relay_circuit_address(address, peer))
-            })
+            .map(|endpoint| Ok(relay_circuit_address(endpoint.address, endpoint.peer_id)))
             .collect()
     }
 
@@ -2484,6 +2490,13 @@ impl DesktopServices {
     }
 
     pub async fn scan_collection(&self, collection_id: Uuid) -> Result<Vec<IngestOutcome>> {
+        let collection = self
+            .database
+            .collection(collection_id)?
+            .context("la wiki a actualizar no existe")?;
+        if !collection.okf_compatibility.permits_external_disclosure() {
+            bail!("la wiki usa un formato OKF restringido y no admite indexación");
+        }
         let outcomes = self.pipeline()?.scan_collection(collection_id).await?;
         self.replace_transient_source_issues(collection_id, &outcomes);
         Ok(outcomes)
@@ -2551,6 +2564,17 @@ impl DesktopServices {
     }
 
     pub async fn reanalyze_review(&self, concept_id: Uuid) -> Result<()> {
+        let concept = self
+            .database
+            .concept(concept_id)?
+            .context("el concepto a volver a analizar no existe")?;
+        let collection = self
+            .database
+            .collection(concept.collection_id)?
+            .context("la wiki del concepto no existe")?;
+        if !collection.okf_compatibility.permits_external_disclosure() {
+            bail!("la wiki usa un formato OKF restringido y no admite nuevas propuestas");
+        }
         self.pipeline()?.reanalyze_review(concept_id).await?;
         Ok(())
     }
@@ -2621,6 +2645,12 @@ impl DesktopServices {
         let peer = PeerId::from_str(peer_id).context("la identidad del índice no es válida")?;
         let address =
             Multiaddr::from_str(address).context("la dirección del índice no es válida")?;
+        PublicIndexEndpoint {
+            peer_id: peer,
+            address: address.clone(),
+        }
+        .validate()
+        .context("la dirección del índice público no es compatible")?;
         self.database.upsert_community_federation_index(
             &peer.to_string(),
             &address.to_string(),
@@ -3887,12 +3917,16 @@ fn federation_index_endpoints(database: &Database) -> Result<Vec<PublicIndexEndp
     selected_federation_indexes(database)?
         .into_iter()
         .map(|index| {
-            Ok(PublicIndexEndpoint {
+            let endpoint = PublicIndexEndpoint {
                 peer_id: PeerId::from_str(&index.peer_id)
                     .context("la identidad del índice federado no es válida")?,
                 address: Multiaddr::from_str(&index.multiaddr)
                     .context("la dirección del índice federado no es válida")?,
-            })
+            };
+            endpoint
+                .validate()
+                .context("el índice federado debe usar una IP TCP o QUIC")?;
+            Ok(endpoint)
         })
         .collect()
 }
@@ -4146,17 +4180,14 @@ async fn renew_public_manifests_for_readiness(
         };
         tokio::task::spawn_blocking(move || {
             let mut updates = Vec::new();
-            for collection in database.list_collections()? {
-                if !collection.policy.internet_public {
-                    continue;
-                }
+            for collection_id in database.public_collections_needing_sync()? {
                 let (endpoints, update) = prepare_next_public_announcement(
                     &database,
                     &identity,
-                    collection.id,
+                    collection_id,
                     relay_readiness.ready_relay_addresses(),
                 )?;
-                updates.push((collection.id, endpoints, update));
+                updates.push((collection_id, endpoints, update));
             }
             Result::<Vec<_>>::Ok(updates)
         })
@@ -4176,6 +4207,7 @@ async fn renew_public_manifests_for_readiness(
     }
     let mut accepted = 0_usize;
     let mut failed = 0_usize;
+    let mut runtime_is_idle = false;
     for (collection_id, endpoints, update) in updates {
         if context.cancellation.is_cancelled() {
             return;
@@ -4191,6 +4223,7 @@ async fn renew_public_manifests_for_readiness(
             continue;
         }
         let expires_at = public_announcement_expiry(&update);
+        let is_tombstone = matches!(&update, PreparedPublicAnnouncement::Tombstone(_));
         let result = tokio::select! {
             biased;
             () = context.cancellation.cancelled() => return,
@@ -4230,6 +4263,24 @@ async fn renew_public_manifests_for_readiness(
         match result {
             Ok(count) => {
                 accepted = accepted.saturating_add(count);
+                if count > 0 && is_tombstone {
+                    let database = context.database.clone();
+                    let receipt = tokio::task::spawn_blocking(move || {
+                        complete_public_withdrawal_receipt(&database, collection_id)
+                    })
+                    .await;
+                    match receipt {
+                        Ok(Ok(true)) => runtime_is_idle = true,
+                        Ok(Ok(false)) => {}
+                        Ok(Err(_)) | Err(_) => {
+                            failed = failed.saturating_add(1);
+                            tracing::warn!(
+                                error_kind = "public_withdrawal_receipt_failed",
+                                "public withdrawal was accepted but its durable receipt could not be stored"
+                            );
+                        }
+                    }
+                }
                 update_public_announcement_state(
                     &context.announcements,
                     collection_id,
@@ -4252,11 +4303,21 @@ async fn renew_public_manifests_for_readiness(
     if has_updates {
         notify_public_announcement_update(&context.updates);
     }
+    if runtime_is_idle {
+        context.cancellation.cancel();
+    }
     tracing::info!(accepted, failed, "public manifests renewed");
 }
 
 fn notify_public_announcement_update(updates: &watch::Sender<u64>) {
     updates.send_modify(|generation| *generation = generation.wrapping_add(1));
+}
+
+fn complete_public_withdrawal_receipt(database: &Database, collection_id: Uuid) -> Result<bool> {
+    database.complete_public_withdrawal(collection_id)?;
+    database
+        .public_collections_needing_sync()
+        .map(|pending| pending.is_empty())
 }
 
 fn source_issue_reason(message: &str, code: SourceIssueCode) -> Option<String> {
@@ -5020,6 +5081,46 @@ mod tests {
         assert_eq!(
             public_announcement_view(None, now),
             PublicAnnouncementStatusView::Offline
+        );
+    }
+
+    #[test]
+    fn accepted_public_withdrawal_clears_the_last_pending_runtime_reason() {
+        let database = Database::in_memory().unwrap();
+        let temporary = tempfile::tempdir().unwrap();
+        let source = temporary.path().join("source");
+        let bundle = temporary.path().join("bundle");
+        std::fs::create_dir_all(&source).unwrap();
+        std::fs::create_dir_all(&bundle).unwrap();
+        let collection = database
+            .create_collection(
+                "Synthetic withdrawal",
+                source,
+                bundle,
+                CollectionPolicy::local_only(),
+            )
+            .unwrap();
+        database
+            .update_collection_policy(
+                collection.id,
+                CollectionPolicy {
+                    local_only: false,
+                    peer_shareable: false,
+                    allow_external_ai: false,
+                    internet_public: true,
+                },
+            )
+            .unwrap();
+        database
+            .update_collection_policy(collection.id, CollectionPolicy::local_only())
+            .unwrap();
+
+        assert!(complete_public_withdrawal_receipt(&database, collection.id).unwrap());
+        assert!(
+            database
+                .public_collections_needing_sync()
+                .unwrap()
+                .is_empty()
         );
     }
 

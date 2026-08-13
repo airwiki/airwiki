@@ -141,6 +141,9 @@ Controls are not considered effective end to end until the
   trust, authorize disclosure or enable execution.
 - Future OKF versions remain local-only. Legacy v0.1 remains readable but cannot
   create new publication.
+- Applying the v0.2 compatibility gate removes legacy/future LAN and application
+  grants, disables their continuous indexing, and durably retries signed v1/v2
+  public tombstones without deleting their local bundle or source folder.
 - Application memory capability is independent from LAN, public and external
   search policy; assistants cannot delete, share, grant or assert verification.
 - Human verification of managed concepts requires a Rust-owned native prompt
@@ -194,8 +197,8 @@ must not be copied to another product.
 
 | Advisory | Dependency path | Limited rationale | Removal condition |
 | --- | --- | --- | --- |
-| `RUSTSEC-2026-0118` | `libp2p-mdns → hickory-proto 0.25.2` | Only the `mdns` feature is built; the affected DNSSEC validator is absent | Compatible libp2p/hickory update or feature change |
-| `RUSTSEC-2026-0119` | `libp2p-mdns → hickory-proto 0.25.2` | Outbound encoding is limited to application-owned service records | libp2p adopts `hickory-proto >=0.26.1` or attacker input reaches the encoder |
+| `RUSTSEC-2026-0118` | `libp2p-mdns → hickory-proto 0.25.2` | Hickory is built only through `libp2p-mdns`; the affected DNSSEC validator is absent | Compatible libp2p/hickory update or feature change |
+| `RUSTSEC-2026-0119` | `libp2p-mdns → hickory-proto 0.25.2` | `libp2p-dns` and `hickory-resolver` are not built; outbound encoding is limited to bounded application-owned mDNS service records | libp2p adopts `hickory-proto >=0.26.1` or attacker input reaches the encoder |
 | `RUSTSEC-2024-0436` (unmaintained) | `tokenizers → macro_rules_attribute → paste 1.0.15` | Maintenance warning, not a reported vulnerability; remains visible | Upstream removes or replaces `paste` |
 
 `cargo-audit` passes only the two scoped hickory exceptions explicitly.

@@ -34,8 +34,11 @@ describe('desktop form controls', () => {
     const onchange = vi.fn();
     render(Checkbox, { label: 'I reviewed the evidence', checked: false, onchange });
 
-    await fireEvent.click(screen.getByRole('checkbox', { name: 'I reviewed the evidence' }));
+    const checkbox = screen.getByRole('checkbox', { name: 'I reviewed the evidence' });
+    await fireEvent.click(checkbox);
     expect(onchange).toHaveBeenCalledWith(true);
+    expect(checkbox).toBeChecked();
+    expect(checkbox.closest('label')).toHaveClass('checked');
   });
 
   it('exposes reversible preferences as a semantic switch', async () => {

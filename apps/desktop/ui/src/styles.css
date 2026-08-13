@@ -182,8 +182,8 @@ button:active:not(:disabled) { transform: scale(.985); }
 .check-indicator { position: relative; width: 16px; height: 16px; margin-top: 1px; background: color-mix(in srgb, var(--control-bg, var(--slate)) 88%, var(--surface-raised)); border: 1px solid color-mix(in srgb, var(--line) 78%, var(--muted)); border-radius: 4px; box-shadow: 0 1px 1px #00000018, inset 0 1px 0 #ffffff0d; transition: background-color var(--motion-fast) var(--ease-native), border-color var(--motion-fast) var(--ease-native), box-shadow var(--motion-fast) ease; }
 .check-indicator::after { content: ''; position: absolute; top: 2px; left: 4.5px; width: 4px; height: 7px; border-right: 1.75px solid #fff; border-bottom: 1.75px solid #fff; opacity: 0; transform: rotate(45deg) scale(.7); transition: opacity var(--motion-fast), transform var(--motion-fast) var(--ease-native); }
 .check-control:hover .check-indicator { border-color: color-mix(in srgb, var(--line) 38%, var(--strong)); }
-.check-control > input:checked + .check-indicator { background: color-mix(in srgb, var(--cyan) 82%, #087f91); border-color: color-mix(in srgb, var(--cyan) 72%, var(--strong)); box-shadow: 0 1px 1px #00000022, inset 0 1px 0 #ffffff35; }
-.check-control > input:checked + .check-indicator::after { opacity: 1; transform: rotate(45deg) scale(1); }
+.check-control > input:checked + .check-indicator, .check-control.checked .check-indicator { background: color-mix(in srgb, var(--cyan) 82%, #087f91); border-color: color-mix(in srgb, var(--cyan) 72%, var(--strong)); box-shadow: 0 1px 1px #00000022, inset 0 1px 0 #ffffff35; }
+.check-control > input:checked + .check-indicator::after, .check-control.checked .check-indicator::after { opacity: 1; transform: rotate(45deg) scale(1); }
 .check-control > input:focus-visible + .check-indicator, .switch-control > input:focus-visible + .switch-track { box-shadow: 0 0 0 3px color-mix(in srgb, var(--cyan) 20%, transparent); }
 .check-control.disabled { cursor: not-allowed; opacity: .58; }
 .check-copy, .switch-copy { display: grid; gap: 2px; min-width: 0; }

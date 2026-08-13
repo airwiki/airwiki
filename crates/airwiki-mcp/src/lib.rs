@@ -1,4 +1,4 @@
-//! Private, read-only MCP gateway for AirWiki.
+//! Private, capability-scoped MCP gateway for AirWiki.
 //!
 //! The listener is deliberately not configurable beyond its port: it always
 //! binds IPv4 loopback. Both the MCP service and the two explicit discovery
@@ -752,7 +752,9 @@ impl ServerHandler for AirWikiMcp {
             .with_server_info(
                 Implementation::new("airwiki", env!("CARGO_PKG_VERSION"))
                     .with_title("AirWiki")
-                    .with_description("Read-only gateway to explicitly cloud-approved knowledge"),
+                    .with_description(
+                        "Policy-scoped search, AI memory, and attested computation gateway",
+                    ),
             )
             .with_instructions(SERVER_INSTRUCTIONS)
     }
@@ -1511,9 +1513,10 @@ pub async fn start_with_application_backend(
         },
         LocalSessionManager::default().into(),
         StreamableHttpServerConfig::default()
-            // The gateway exposes one read-only, request-scoped tool. Keeping no
-            // MCP session state also lets the Secure MCP Tunnel forward an
-            // independently delivered tool call without a prior local handshake.
+            // Every tool call is request-scoped and rechecks policy or the
+            // application capability. Keeping no MCP session state also lets
+            // the Secure MCP Tunnel forward an independently delivered search
+            // call without a prior local handshake.
             .with_stateful_mode(false)
             .with_allowed_hosts(allowed_hosts.clone())
             .with_cancellation_token(service_cancellation),

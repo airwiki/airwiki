@@ -328,7 +328,7 @@ fn metadata_is_link_or_reparse(metadata: &std::fs::Metadata) -> bool {
     }
     #[cfg(windows)]
     {
-        return metadata.file_attributes() & FILE_ATTRIBUTE_REPARSE_POINT != 0;
+        metadata.file_attributes() & FILE_ATTRIBUTE_REPARSE_POINT != 0
     }
     #[cfg(not(windows))]
     false

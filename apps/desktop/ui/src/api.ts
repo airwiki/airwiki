@@ -5,6 +5,7 @@ import type {
   EnrichmentDraft,
   FolderSelection,
   IntegrationActionInput,
+  ApplicationWikiRoleInput,
   KnowledgePageInput,
   OkfImportSummary,
   PreferencesInput,
@@ -145,6 +146,34 @@ export async function manageIntegration(requestId: string, action: IntegrationAc
   return invoke('manage_integration', { requestId, action });
 }
 
+export async function refreshComputations(): Promise<void> {
+  return invoke('refresh_computations');
+}
+
+export async function refreshApplicationAccess(): Promise<void> {
+  return invoke('refresh_application_access');
+}
+
+export async function setApplicationWikiRole(
+  appId: string,
+  wikiId: string,
+  role: ApplicationWikiRoleInput | null
+): Promise<void> {
+  return invoke('set_application_wiki_role', { appId, wikiId, role });
+}
+
+export async function rejectComputation(runId: string): Promise<void> {
+  return invoke('reject_computation', { runId });
+}
+
+export async function executeComputation(runId: string): Promise<void> {
+  return invoke('execute_computation', { runId });
+}
+
+export async function saveComputationResult(runId: string, targetWikiId: string): Promise<void> {
+  return invoke('save_computation_result', { runId, targetWikiId });
+}
+
 export async function rescanWiki(wikiId: string): Promise<void> {
   return invoke('rescan_wiki', { wikiId });
 }
@@ -188,6 +217,14 @@ export async function loadWikiPage(wikiId: string, page: KnowledgePageInput): Pr
   const requestId = crypto.randomUUID();
   await invoke('load_wiki_page', { requestId, wikiId, page });
   return requestId;
+}
+
+export async function verifyWikiConcept(
+  wikiId: string,
+  path: string,
+  expectedFingerprint: string
+): Promise<void> {
+  return invoke('verify_wiki_concept', { wikiId, path, expectedFingerprint });
 }
 
 export async function updatePreferences(preferences: PreferencesInput): Promise<string> {

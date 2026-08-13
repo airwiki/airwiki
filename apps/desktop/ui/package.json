@@ -8,6 +8,12 @@
     "node": "24.15.0",
     "pnpm": "10.18.3"
   },
+  "pnpm": {
+    "overrides": {
+      "@puppeteer/browsers": "3.2.0",
+      "serialize-javascript": "7.0.5"
+    }
+  },
   "scripts": {
     "dev": "vite --host 127.0.0.1 --port 1420 --strictPort",
     "build": "svelte-check --tsconfig ./tsconfig.json && vite build",

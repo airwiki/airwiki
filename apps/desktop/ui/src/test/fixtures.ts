@@ -20,7 +20,9 @@ export function readySnapshot(): AppSnapshot {
       peerShareable: false, allowExternalAi: false, internetPublic: false,
       publicDescription: '', publicLanguages: '', publicAnnouncement: { status: 'offline' },
       maintenanceRequired: false, origin: 'folder', indexingMode: 'continuous', okfVersion: '0.2',
-      trustSummary: 'humanReviewed'
+      declaredOkfVersion: '0.2', okfCompatibility: { kind: 'declaredV02' }, managedSizeBytes: 0,
+      staleConceptCount: 0, outdatedVerificationCount: 0, metadataWarningCount: 0,
+      trustSummary: 'humanReviewed', restrictions: []
     }],
     wikiScans: [], reviews: [], reanalyzingReviewIds: [], sourceIssues: [], peers: [],
     model: null, modelInstall: null, search: null, publicBrowse: null, reviewEvidence: null,
@@ -31,7 +33,7 @@ export function readySnapshot(): AppSnapshot {
     guidedRepair: null,
     connectivity: { systemPermission: 'notApplicable', networkProfile: 'notApplicable', firewall: 'notApplicable', firewallHelper: 'notApplicable' },
     lanRuntime: { listener: 'stopped', discovery: 'disabled', addressCount: 0 },
-    firewallOperation: null, integrations: { integrations: [], externalAiWikiCount: 0 },
+    firewallOperation: null, integrations: { integrations: [], externalAiWikiCount: 0 }, applicationAccess: [], pendingComputations: [], completedComputations: [],
     updater: { status: 'idle', version: null, releaseNotes: null, issue: null, retryable: false },
     notice: null
   };

@@ -1402,7 +1402,7 @@
               <strong>{t('desktop-wiki-access-title')}</strong>
               <div>{#if !selectedWiki.peerShareable && !selectedWiki.allowExternalAi && !selectedWiki.internetPublic}<span>{t('desktop-wiki-private')}</span>{/if}{#if selectedWiki.peerShareable}<span>{t('desktop-share-nearby')}</span>{/if}{#if selectedWiki.allowExternalAi}<span>{t('desktop-share-ai-apps')}</span>{/if}{#if selectedWiki.internetPublic}<span>{t('desktop-share-public')}</span>{/if}</div>
               <small>{wikiPeers(selectedWiki.id).length > 0 ? wikiPeers(selectedWiki.id).join(' · ') : t('desktop-wiki-no-specific-access')}</small>
-              <button class="text-action" onclick={() => { connectionsOpen = true; }}>{t('desktop-manage-access')}</button>
+              {#if selectedWiki.restrictions.length === 0}<button class="text-action" onclick={() => { connectionsOpen = true; }}>{t('desktop-manage-access')}</button>{/if}
             </section>
 
             {#if selectedWiki.okfCompatibility.kind === 'futureRestricted' || selectedWiki.okfCompatibility.kind === 'legacyV01' || selectedWiki.staleConceptCount > 0 || selectedWiki.outdatedVerificationCount > 0 || selectedWiki.metadataWarningCount > 0}

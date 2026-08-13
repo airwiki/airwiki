@@ -390,6 +390,7 @@ describe('AirWiki wiki workspace', () => {
     expect(screen.getByText(/AirWiki detuvo su indexación y uso compartido/)).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Actualizar' })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Compartir' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Gestionar acceso' })).not.toBeInTheDocument();
     await fireEvent.click(screen.getAllByRole('button', { name: 'Detalles' }).at(-1)!);
     expect(screen.queryByRole('checkbox', { name: 'Mantener actualizada automáticamente' })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Volver a vincular carpeta' })).not.toBeInTheDocument();

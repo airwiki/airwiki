@@ -2,7 +2,7 @@
 
 This file is generated. Do not edit it manually. Regenerate it with the pinned pnpm installation and `pnpm run licenses:generate`.
 
-Platform: `windows-x64`. Lockfile SHA-256: `72410137c6b5ce853802b5a4e5ef8f4d32379225d74e7f7d29ed2c34aba09ee3`. Package manager: `pnpm@10.18.3`.
+Platform: `windows-x64`. Lockfile SHA-256: `1d2a7efa76baca92d84671127981162209e294db0ca322adc61652932b5e0b74`. Package manager: `pnpm@10.18.3`.
 
 The inventory covers the installed production and development dependency closure. Local paths and machine-specific state are excluded. Identical legal texts are stored once by normalized SHA-256. Packages whose published tarball omits a legal file remain listed with their declared license and are called out explicitly.
 
@@ -101,7 +101,7 @@ The inventory covers the installed production and development dependency closure
 | @oxc-project/types | 0.143.0 | MIT | [source](https://oxc.rs) | `95ced5ecf1133fbf41d409b5555c86c344f83f3b019926057ddbc07cfdcc27b3` |
 | @pkgjs/parseargs | 0.11.0 | MIT | [source](https://github.com/pkgjs/parseargs#readme) | `c71d239df91726fc519c6eb72d318ec65820627232b2f796219e87dcf35d0ab4` |
 | @promptbook/utils | 0.69.5 | CC-BY-4.0 | [source](https://www.npmjs.com/package/@promptbook/core) | declared metadata only |
-| @puppeteer/browsers | 2.13.2 | Apache-2.0 | [source](https://github.com/puppeteer/puppeteer/tree/main#readme) | declared metadata only |
+| @puppeteer/browsers | 3.2.0 | Apache-2.0 | [source](https://github.com/puppeteer/puppeteer/tree/main#readme) | declared metadata only |
 | @rolldown/binding-win32-x64-msvc | 1.2.3 | MIT | [source](https://rolldown.rs/) | declared metadata only |
 | @rolldown/pluginutils | 1.0.1 | MIT | [source](https://github.com/rolldown/plugins/tree/main/packages/pluginutils#readme) | `e1919b3b98b8bf6c1b99fcc60a0ed46027c97ac947432e1278446c9606f50161` |
 | @sec-ant/readable-stream | 0.4.1 | MIT | [source](https://github.com/Sec-ant/readable-stream) | `7e32638e170fa7342000a703a8ed950e05095b2f73fc689992a82776a3c3bd3c` |
@@ -119,7 +119,6 @@ The inventory covers the installed production and development dependency closure
 | @testing-library/svelte-core | 1.1.3 | MIT | [source](https://github.com/testing-library/svelte-testing-library#readme) | `17a59e7c4f234754711bebc71b415cd95cf15d97353df7963ec34c6f7af9f685` |
 | @tokenizer/inflate | 0.4.1 | MIT | [source](https://github.com/Borewit/tokenizer-inflate#readme) | `014e6ca48061890284500ac8366fad874ae5005be740706d467246b0033509db` |
 | @tokenizer/token | 0.3.0 | MIT | [source](https://github.com/Borewit/tokenizer-token#readme) | declared metadata only |
-| @tootallnate/quickjs-emscripten | 0.23.0 | MIT | [source](https://github.com/justjake/quickjs-emscripten#readme) | `cc8e9104738f96dadb50ee4ac9754fe46a7123af52609fbf60470ce7d2868c38` |
 | @types/aria-query | 5.0.4 | MIT | [source](https://github.com/DefinitelyTyped/DefinitelyTyped/tree/master/types/aria-query) | `c2cfccb812fe482101a8f04597dfc5a9991a6b2748266c47ac91b6a5aae15383` |
 | @types/chai | 5.2.3 | MIT | [source](https://github.com/DefinitelyTyped/DefinitelyTyped/tree/master/types/chai) | `c2cfccb812fe482101a8f04597dfc5a9991a6b2748266c47ac91b6a5aae15383` |
 | @types/deep-eql | 4.0.2 | MIT | [source](https://github.com/DefinitelyTyped/DefinitelyTyped/tree/master/types/deep-eql) | `c2cfccb812fe482101a8f04597dfc5a9991a6b2748266c47ac91b6a5aae15383` |
@@ -139,7 +138,6 @@ The inventory covers the installed production and development dependency closure
 | @types/ws | 8.18.1 | MIT | [source](https://github.com/DefinitelyTyped/DefinitelyTyped/tree/master/types/ws) | `c2cfccb812fe482101a8f04597dfc5a9991a6b2748266c47ac91b6a5aae15383` |
 | @types/yargs | 17.0.35 | MIT | [source](https://github.com/DefinitelyTyped/DefinitelyTyped/tree/master/types/yargs) | `c2cfccb812fe482101a8f04597dfc5a9991a6b2748266c47ac91b6a5aae15383` |
 | @types/yargs-parser | 21.0.3 | MIT | [source](https://github.com/DefinitelyTyped/DefinitelyTyped/tree/master/types/yargs-parser) | `c2cfccb812fe482101a8f04597dfc5a9991a6b2748266c47ac91b6a5aae15383` |
-| @types/yauzl | 2.10.3 | MIT | [source](https://github.com/DefinitelyTyped/DefinitelyTyped/tree/master/types/yauzl) | `c2cfccb812fe482101a8f04597dfc5a9991a6b2748266c47ac91b6a5aae15383` |
 | @typescript-eslint/eslint-plugin | 8.66.0 | MIT | [source](https://typescript-eslint.io/packages/eslint-plugin) | `2eb5c7a0bba9deb77a98c81bf6b9d3fb1c67118eebf968b6b1a787b3f8928ee0` |
 | @typescript-eslint/parser | 8.66.0 | MIT | [source](https://typescript-eslint.io/packages/parser) | `2eb5c7a0bba9deb77a98c81bf6b9d3fb1c67118eebf968b6b1a787b3f8928ee0` |
 | @typescript-eslint/project-service | 8.66.0 | MIT | [source](https://typescript-eslint.io) | `053a75a14b7508a897466b65e12797201a06b0e9b5066d1223da72cac99601b5` |
@@ -191,7 +189,6 @@ The inventory covers the installed production and development dependency closure
 | argparse | 2.0.1 | Python-2.0 | [source](https://github.com/nodeca/argparse#readme) | `de4d1f2d2ad5ad0cfd1657a106476b31cb5db5ef9d1ff842b237c0c81f0c8a23` |
 | aria-query | 5.3.0, 5.3.1 | Apache-2.0 | [source](https://github.com/A11yance/aria-query#readme) | `c8df456c7ccba74b959087dff494d4ac2a12dfb0400c08b46b2494a08a000567` |
 | assertion-error | 2.0.1 | MIT | [source](https://github.com/chaijs/assertion-error#readme) | `2130216d5ab4c02134f8247f32999feda0abe1eaf028218baeac445c19ce4cea` |
-| ast-types | 0.13.4 | MIT | [source](http://github.com/benjamn/ast-types) | `a374b737c41b30b1ec04c5fcc17d1b853f008f217cc43a9dbea441abd9afde70` |
 | async | 3.2.6 | MIT | [source](https://caolan.github.io/async/) | `d9fed24f132985934fca621c4dc1dfb53e03377a24d0568d424383d7eaa9c0ac` |
 | async-exit-hook | 2.0.1 | MIT | [source](https://github.com/tapppi/async-exit-hook#readme) | `6fb9754611c20f6649f68805e8c990e83261f29316e29de9e6cedae607b8634c` |
 | await-to-js | 3.0.0 | MIT | [source](https://github.com/scopsy/await-to-js#readme) | `e5909d19273f75386213370789163e2cc09089883e3f9d780cb3b2bcbe8023d2` |
@@ -205,7 +202,6 @@ The inventory covers the installed production and development dependency closure
 | bare-stream | 2.13.3 | Apache-2.0 | [source](https://github.com/holepunchto/bare-stream#readme) | `c71d239df91726fc519c6eb72d318ec65820627232b2f796219e87dcf35d0ab4` |
 | bare-url | 2.5.1 | Apache-2.0 | [source](https://github.com/holepunchto/bare-url) | `c71d239df91726fc519c6eb72d318ec65820627232b2f796219e87dcf35d0ab4` |
 | base64-js | 1.5.1 | MIT | [source](https://github.com/beatgammit/base64-js) | `5b37224c080cdcc97c871ada971c224e9926370fe74f11b539aa1cf9f3b1aca1` |
-| basic-ftp | 5.3.1 | MIT | [source](https://github.com/patrickjuchli/basic-ftp#readme) | `5abeca78b582cb73907891ec8dbd9b239855a95d1f6b0d281165a1a6cea4618d` |
 | bidi-js | 1.0.3 | MIT | [source](https://github.com/lojjic/bidi-js#readme) | `49d4d143fed599deb502a0fe6e02f49832f87e9a3a4cd0502e469596d50faa6d` |
 | binary-extensions | 2.3.0 | MIT | [source](https://github.com/sindresorhus/binary-extensions#readme) | `96f0820026bd6dadc4af99c6dba7111d2e0190c092c376a746c13863e151d072` |
 | bmp-ts | 1.0.9 | MIT | [source](https://github.com/hipstersmoothie/bmp-ts#readme) | `8bfcf12013c5d0707794813d1f2787917eada9b8643bf47bfe0306fe018624c8` |
@@ -224,7 +220,7 @@ The inventory covers the installed production and development dependency closure
 | chokidar | 3.6.0, 4.0.3 | MIT | [source](https://github.com/paulmillr/chokidar) | `bdfd5e0edb6089e6586c8f15e6a86fab83ffbeeda3b3b7b33734ccb8c5906965`<br>`db9ba183d4cbfbaf6c27db2effddbb84b46340c33ed32a066bc0b144a3ea1298` |
 | ci-info | 4.4.0 | MIT | [source](https://github.com/watson/ci-info) | `f58943cb354fb2707fea2f7b26b04e6014ddb56835cdfd414c9d2c6c59165b64` |
 | cli-width | 4.1.0 | ISC | [source](https://github.com/knownasilya/cli-width) | `31493c14dc0b4eb1e06fe5d4bab3ca4e3b40f8749433455c713863238600cf1a` |
-| cliui | 7.0.4, 8.0.1 | ISC | [source](https://github.com/yargs/cliui#readme) | `2dc0465729366c3a7890dfa9e972a1ba7048a26c02116fb8b419a6a1ac110149` |
+| cliui | 7.0.4, 8.0.1, 9.0.1 | ISC | [source](https://github.com/yargs/cliui#readme) | `2dc0465729366c3a7890dfa9e972a1ba7048a26c02116fb8b419a6a1ac110149` |
 | clone | 1.0.4 | MIT | [source](https://github.com/pvorb/node-clone#readme) | `3fb0857ef0133928cf72c88dfc464e931486e88778961eedec25585e2321507f` |
 | clsx | 2.1.1 | MIT | [source](https://github.com/lukeed/clsx#readme) | `9a9edad7baae52622bddf3c15b2ef8a33d2c89f2d25408ad13e8a7481c6b0c97` |
 | color-convert | 2.0.1 | MIT | [source](https://github.com/Qix-/color-convert#readme) | `119fee4adef95a6af980129b12bbc02ef32a0a75737cbdd31b6922c0db0050bc` |
@@ -246,7 +242,6 @@ The inventory covers the installed production and development dependency closure
 | css.escape | 1.5.1 | MIT | [source](https://mths.be/cssescape) | `483acb265f182907d1caf6cff9c16c96f31325ed23792832cc5d8b12d5f88c8a` |
 | cssesc | 3.0.0 | MIT | [source](https://mths.be/cssesc) | `483acb265f182907d1caf6cff9c16c96f31325ed23792832cc5d8b12d5f88c8a` |
 | cytoscape | 3.34.0 | MIT | [source](http://js.cytoscape.org) | `4a5a644717fc90d678e8fbbc537a08452d0566726710eef47b196abd6363e635`<br>`f7ebdc2a36c48b5413fe0b60f7a16b6163ff171d5bb35f27dfda432962dd4f49` |
-| data-uri-to-buffer | 6.0.2 | MIT | [source](https://github.com/TooTallNate/proxy-agents#readme) | `819021ebdb731965692b2f38206ed1c96a956469827173dc668a1c6ba3e97097` |
 | data-urls | 7.0.0 | MIT | [source](https://github.com/jsdom/data-urls#readme) | `528eec83cb836a0adda9f8fc3d6a2a70a710d6cc0be9a155f92212c8df28acfa` |
 | debug | 4.4.3 | MIT | [source](https://github.com/debug-js/debug#readme) | `23eb8602cd5902bcfca56b23aa08e8672a809f5a12eaf8bb56abfa9d44e1a4fd` |
 | decamelize | 4.0.0, 6.0.1 | MIT | [source](https://github.com/sindresorhus/decamelize#readme) | `48da2f39e100d4085767e94966b43f4fa95ff6a0698fba57ed460914e35f94a0`<br>`5c932d88256b4ab958f64a856fa48e8bd1f55bc1d96b8149c65689e0c61789d3` |
@@ -256,7 +251,6 @@ The inventory covers the installed production and development dependency closure
 | deepmerge | 4.3.1 | MIT | [source](https://github.com/TehShrike/deepmerge) | `6cfc4687cb2f2d86f4a77e6b526290d3878e5e512f3fec2f4cb36a9cb36f798b` |
 | deepmerge-ts | 7.1.5 | BSD-3-Clause | [source](https://github.com/RebeccaStevens/deepmerge-ts#readme) | `734d8fd2baff4a5b7450a5b8242d4a960bc4ade3b0ade5e6cad642965d1d496d` |
 | defaults | 1.0.4 | MIT | [source](https://github.com/sindresorhus/node-defaults#readme) | `fe99d9a94ec7edc64a9767701f830f66e08239b000d653a359d66e640289ed0c` |
-| degenerator | 5.0.1 | MIT | [source](https://github.com/TooTallNate/proxy-agents#readme) | declared metadata only |
 | dequal | 2.0.3 | MIT | [source](https://github.com/lukeed/dequal#readme) | `306fa513e39b23a6e8747520de761809d206b99800ef41907b530226574c59ae` |
 | detect-libc | 2.1.2 | Apache-2.0 | [source](https://github.com/lovell/detect-libc#readme) | `b40930bbcf80744c86c46a12bc9da056641d722716c378f5659b9e555ef833e1` |
 | devalue | 5.9.0 | MIT | [source](https://github.com/sveltejs/devalue#readme) | `e399db7e952e45cae84f1b53d72ba8dbad2daaa7ab8cd1f0ab72fea5ab73b225` |
@@ -272,23 +266,20 @@ The inventory covers the installed production and development dependency closure
 | edge-paths | 3.0.5 | MIT | [source](https://github.com/shirshak55/edge-paths#readme) | `eb43bf7ab35c34fbfd52f1aff29e0ee8cad8d27f89cdd5a35bc20b415eef7146` |
 | edgedriver | 6.3.0 | MIT | [source](https://webdriver.io) | `f4ada6a68d65cae19744156fb78ece10b2eeaac576f405aa67668db181757e23` |
 | ejs | 3.1.10 | Apache-2.0 | [source](https://github.com/mde/ejs) | `cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30` |
-| emoji-regex | 8.0.0, 9.2.2 | MIT | [source](https://mths.be/emoji-regex) | `483acb265f182907d1caf6cff9c16c96f31325ed23792832cc5d8b12d5f88c8a` |
+| emoji-regex | 10.6.0, 8.0.0, 9.2.2 | MIT | [source](https://mths.be/emoji-regex) | `483acb265f182907d1caf6cff9c16c96f31325ed23792832cc5d8b12d5f88c8a` |
 | encoding-sniffer | 0.2.1 | MIT | [source](https://github.com/fb55/encoding-sniffer#readme) | `14ea882b80407e75e92b36d6f3b5e70d38427502747717ac1842f9b3e8d7302e` |
-| end-of-stream | 1.4.5 | MIT | [source](https://github.com/mafintosh/end-of-stream) | `c0993ca46cd47c09710a977d3a3d51602cff96f19e8d2eb8d5887aa20a7beead` |
 | entities | 4.5.0, 6.0.1, 7.0.1, 8.0.0 | BSD-2-Clause | [source](https://github.com/fb55/entities#readme) | `cb992345949ccd6e8394b2cd6c465f7b897c864f845937dbf64e8997f389e164` |
 | error-ex | 1.3.4 | MIT | [source](https://github.com/qix-/node-error-ex#readme) | `92b07a2e5b0e051d37dde85042c736d6d551cfcbc0983f39d7ef903b3986bbc1` |
 | es-module-lexer | 2.3.1 | MIT | [source](https://github.com/guybedford/es-module-lexer#readme) | `8a4b6c44eebfb026d23719a348145a661a555568dbfdc11618ff2d0dd9306b00` |
 | esbuild | 0.28.2 | MIT | [source](https://github.com/evanw/esbuild#readme) | `b40ec5baec7bb34fa5b1c09521fa3cd52d5fad7adafed74932a2010d3612a681` |
 | escalade | 3.2.0 | MIT | [source](https://github.com/lukeed/escalade#readme) | `9a9edad7baae52622bddf3c15b2ef8a33d2c89f2d25408ad13e8a7481c6b0c97` |
 | escape-string-regexp | 2.0.0, 4.0.0 | MIT | [source](https://github.com/sindresorhus/escape-string-regexp#readme) | `48da2f39e100d4085767e94966b43f4fa95ff6a0698fba57ed460914e35f94a0`<br>`5c932d88256b4ab958f64a856fa48e8bd1f55bc1d96b8149c65689e0c61789d3` |
-| escodegen | 2.1.0 | BSD-2-Clause | [source](http://github.com/estools/escodegen) | `d5d62471a28a9920416c7d37d387a3bf55f32cb768590f605f84990b76aee5de` |
 | eslint | 10.8.1 | MIT | [source](https://eslint.org) | `3b6be04f862a077a4b97929dbf247299360824d9365f8603c263769303ace18c` |
 | eslint-plugin-svelte | 3.22.0 | MIT | [source](https://sveltejs.github.io/eslint-plugin-svelte) | `e0074180337642e284567312cca2a5fe0474bbdabd2080822d42477f01e97b28` |
 | eslint-scope | 8.4.0, 9.1.2 | BSD-2-Clause | [source](https://github.com/eslint/js/blob/main/packages/eslint-scope/README.md) | `d3a724e2ed749f172ff70b62a1d0631b7d4b0ea273782365a3464d4e2d6b6dbd` |
 | eslint-visitor-keys | 3.4.3, 4.2.1, 5.0.1 | Apache-2.0 | [source](https://github.com/eslint/js/blob/main/packages/eslint-visitor-keys/README.md) | `d8bf34ff6d190640a01e7704ad78253fc181bc128949d71273fbbaa12f33c0b4` |
 | esm-env | 1.2.2 | MIT | [source](https://github.com/benmccann/esm-env) | `6df5276ee7531fcc5446f19082c12e77bb6c5f081fd2b6d6cf88180a5ee36acd` |
 | espree | 10.4.0, 11.2.0 | BSD-2-Clause | [source](https://github.com/eslint/js/blob/main/packages/espree/README.md) | `26c95937762a3dc17a3934a0a2773c70259ba4bf28dab713c225e4af8eb9d349` |
-| esprima | 4.0.1 | BSD-2-Clause | [source](http://esprima.org) | `94bcb9959136723aa4fb36e1a6c4d5c662a2369978cfae344dabfb83ae619e79` |
 | esquery | 1.7.0 | BSD-3-Clause | [source](https://github.com/estools/esquery/) | `ac68116ae73740de4190892f334992e449a124600924ec761e64319d3aac9e6e` |
 | esrap | 2.3.2 | MIT | [source](https://github.com/sveltejs/esrap#readme) | `8f8f0696ab4041a885d28bddf82e2ad673a6522cb644d6f972237f4f6e172a1d` |
 | esrecurse | 4.3.0 | BSD-2-Clause | [source](https://github.com/estools/esrecurse) | declared metadata only |
@@ -304,7 +295,6 @@ The inventory covers the installed production and development dependency closure
 | expect | 30.4.1 | MIT | [source](https://github.com/jestjs/jest#readme) | `9d5211db733ccdd26f9170bec24cdca84093f60415da6b769ee9cdf23d04e19f` |
 | expect-type | 1.4.0 | Apache-2.0 | [source](https://github.com/mmkal/expect-type#readme) | `7c6cc83c84eaa249a85bf12fe3eedd831bb50c696e8890b5248223ae68c7b408` |
 | expect-webdriverio | 5.7.0 | MIT | [source](https://webdriver.io) | `aa0371b43def81d7a45856d7bf2b25369b6b7acf331c8251cc5e107099d50a00` |
-| extract-zip | 2.0.1 | BSD-2-Clause | [source](https://github.com/maxogden/extract-zip#readme) | `77b2de947c65f3062fb347118ca198ca50898ead84a8509d8153fa65741f029b` |
 | fast-deep-equal | 2.0.1, 3.1.3 | MIT | [source](https://github.com/epoberezkin/fast-deep-equal#readme) | `7bf9b2de73a6b356761c948d0e9eeb4be6c1270bd04c79cd489c1e400ffdfc1a` |
 | fast-fifo | 1.3.2 | MIT | [source](https://github.com/mafintosh/fast-fifo) | `41a2aa55a9ebad3df900cf37fded512714a127f4300ef54b978f834a11ec4d48` |
 | fast-json-stable-stringify | 2.1.0 | MIT | [source](https://github.com/epoberezkin/fast-json-stable-stringify) | `a833d366242c298cf1b10263516572fb8dcbe68eb5072cdcac2b4546e2b4eb36` |
@@ -326,9 +316,9 @@ The inventory covers the installed production and development dependency closure
 | fs.realpath | 1.0.0 | ISC | [source](https://github.com/isaacs/fs.realpath#readme) | `8465b04b67f473341171b5c9c8b2c741a4a395b3f6ed58339b3a4f4db3db7472` |
 | geckodriver | 6.1.1 | MIT | [source](https://github.com/webdriverio-community/node-geckodriver#readme) | `e24c254362b30841cd770cb4ee6adb081250306de4aa699fbd9684e0bc9f7d06` |
 | get-caller-file | 2.0.5 | ISC | [source](https://github.com/stefanpenner/get-caller-file#readme) | `902dbb4154679fb2b8d7c33878183f45b268d01eae5e5033dddaa8852d45f213` |
+| get-east-asian-width | 1.6.0 | MIT | [source](https://github.com/sindresorhus/get-east-asian-width#readme) | `5c932d88256b4ab958f64a856fa48e8bd1f55bc1d96b8149c65689e0c61789d3` |
 | get-port | 7.2.0 | MIT | [source](https://github.com/sindresorhus/get-port#readme) | `5c932d88256b4ab958f64a856fa48e8bd1f55bc1d96b8149c65689e0c61789d3` |
-| get-stream | 5.2.0, 9.0.1 | MIT | [source](https://github.com/sindresorhus/get-stream#readme) | `5c932d88256b4ab958f64a856fa48e8bd1f55bc1d96b8149c65689e0c61789d3` |
-| get-uri | 6.0.5 | MIT | [source](https://github.com/TooTallNate/proxy-agents#readme) | `819021ebdb731965692b2f38206ed1c96a956469827173dc668a1c6ba3e97097` |
+| get-stream | 9.0.1 | MIT | [source](https://github.com/sindresorhus/get-stream#readme) | `5c932d88256b4ab958f64a856fa48e8bd1f55bc1d96b8149c65689e0c61789d3` |
 | gifwrap | 0.10.1 | MIT | [source](https://github.com/jtlapp/gifwrap#readme) | `c28a483580454d61210a1c7cc0899d75b68fa875cc7940ebafde3c49ca762439` |
 | glob | 10.5.0, 8.1.0 | ISC | [source](https://github.com/isaacs/node-glob#readme) | `cdbc258d13806538e727964c2436a8806e6e2496ccd616224aace6f7bf98dbc1`<br>`dedc5ba48845093da9bbe6f2bb0b3cc87d9829c7d49d55c2dfe661671364d821` |
 | glob-parent | 5.1.2, 6.0.2 | ISC | [source](https://github.com/gulpjs/glob-parent#readme) | `2c46f1325bd3822a33c1e2c1e49c18d13127ac00f9c8b3b79196c7a126f73cd9`<br>`fc68eb8f1c8e1d6b8be50f3c177927e24791cae7dc251e6253a012f37926a30c` |
@@ -355,7 +345,6 @@ The inventory covers the installed production and development dependency closure
 | inflight | 1.0.6 | ISC | [source](https://github.com/isaacs/inflight) | `05dc4d785ac3a488676d3ed10e901b75ad89dafcc63f8e66610fd4a39cc5c7e8` |
 | inherits | 2.0.4 | ISC | [source](https://github.com/isaacs/inherits#readme) | `69be713b3d6c33e0dba76c4d23d986d568593abca04ce47d75162af255d6a345` |
 | inquirer | 12.11.1 | MIT | [source](https://github.com/SBoudrias/Inquirer.js/blob/main/packages/inquirer/README.md) | `85aca0b12ce5ade4ff76e9cbbe7e0d5a4cdde979e3930727c272e1fa04b8cc23` |
-| ip-address | 10.4.0 | MIT | [source](https://github.com/beaugunderson/ip-address#readme) | `f8d791359a50cbcac82c29cb7b0b1b889b28be76fdd35b8ee33f0f7c8704702a` |
 | is-arrayish | 0.2.1 | MIT | [source](https://github.com/qix-/node-is-arrayish#readme) | `92b07a2e5b0e051d37dde85042c736d6d551cfcbc0983f39d7ef903b3986bbc1` |
 | is-binary-path | 2.1.0 | MIT | [source](https://github.com/sindresorhus/is-binary-path#readme) | `85fe65eefab89e2a683232b96e6f689279821a0bd3b351e9ab6a6ebd19dea567` |
 | is-extglob | 2.1.1 | MIT | [source](https://github.com/jonschlinkert/is-extglob) | `73b5283588baa142c5baaef5f56d3e8fdea7a30b214e8c5737e87640f882453a` |
@@ -411,7 +400,7 @@ The inventory covers the installed production and development dependency closure
 | log-symbols | 4.1.0 | MIT | [source](https://github.com/sindresorhus/log-symbols#readme) | `5c932d88256b4ab958f64a856fa48e8bd1f55bc1d96b8149c65689e0c61789d3` |
 | loglevel | 1.9.2 | MIT | [source](https://github.com/pimterry/loglevel) | `670938953c9a91c1b66881d8b3f1a167276e2f32d05d8ba7d9aebde1d15177e1` |
 | loglevel-plugin-prefix | 0.8.4 | MIT | [source](https://github.com/kutuluk/loglevel-plugin-prefix) | `f1e398b37a39361512bf8583a0238f191a9a426380fbc7cb38d44597aea44b6c` |
-| lru-cache | 10.4.3, 7.18.3 | ISC | [source](https://github.com/isaacs/node-lru-cache#readme) | `451ec07eeb9c4e1b86de9abdaa426462a8be48f887ec7421cf0bbb9c769555ab` |
+| lru-cache | 10.4.3 | ISC | [source](https://github.com/isaacs/node-lru-cache#readme) | `451ec07eeb9c4e1b86de9abdaa426462a8be48f887ec7421cf0bbb9c769555ab` |
 | lru-cache | 11.5.2 | BlueOak-1.0.0 | [source](https://github.com/isaacs/node-lru-cache#readme) | `8a1af140fdfbf5afd3df27f7e662f989c5b963a300020dfafce42033cae9e004` |
 | lz-string | 1.5.0 | MIT | [source](http://pieroxy.net/blog/pages/lz-string/index.html) | `433fc9dfe659dbfb1e91eed8351f13651e97bfa3ac6d03394c3d63f61d4bbc80` |
 | magic-string | 0.30.21, 1.1.0 | MIT | [source](https://github.com/Rich-Harris/magic-string#readme) | `1cbe51b907662f6cb1492b16c359384a595180bf0e4d101603ed525e75c4e484` |
@@ -423,13 +412,12 @@ The inventory covers the installed production and development dependency closure
 | minipass | 7.1.3 | BlueOak-1.0.0 | [source](https://github.com/isaacs/minipass#readme) | `8a1af140fdfbf5afd3df27f7e662f989c5b963a300020dfafce42033cae9e004` |
 | mitt | 3.0.1 | MIT | [source](https://github.com/developit/mitt) | `1cab22f196264195a4caec8ca5630170fdde76ee8f43346e47021d087332d3b0` |
 | mocha | 10.8.2 | MIT | [source](https://mochajs.org/) | `b5c6fed2ba4526a1df13b07ce0d9047596bef8835eb55222c754a7e2a741d156` |
-| modern-tar | 0.7.7 | MIT | [source](https://github.com/ayuhito/modern-tar) | `dbcbef54fa7e111b69b12a9787051f31f5378b40711b6c57c5a82d99dc8a9e0d` |
+| modern-tar | 0.7.7, 0.8.4 | MIT | [source](https://github.com/ayuhito/modern-tar) | `dbcbef54fa7e111b69b12a9787051f31f5378b40711b6c57c5a82d99dc8a9e0d` |
 | mri | 1.2.0 | MIT | [source](https://github.com/lukeed/mri#readme) | `306fa513e39b23a6e8747520de761809d206b99800ef41907b530226574c59ae` |
 | ms | 2.1.3 | MIT | [source](https://github.com/vercel/ms#readme) | `1662fae9b5314d11cf51284e2dcd1f006a354f7343f08712a730fcff9a359801` |
 | mute-stream | 2.0.0 | ISC | [source](https://github.com/npm/mute-stream#readme) | `4ec3d4c66cd87f5c8d8ad911b10f99bf27cb00cdfcff82621956e379186b016b` |
 | nanoid | 3.3.18 | MIT | [source](https://github.com/ai/nanoid#readme) | `da4db1480d9beea3483a2eda5c53b22238d0827d57da162b48f122e04d2d9987` |
 | natural-compare | 1.4.0 | MIT | [source](https://github.com/litejs/natural-compare-lite#readme) | declared metadata only |
-| netmask | 2.1.1 | MIT | [source](https://github.com/rs/node-netmask) | `c47e09b7a38f5f4ceec262e87037ce38911a9fb3f70af1a8199aa6d6bd3be8d0` |
 | normalize-package-data | 6.0.2, 7.0.1 | BSD-2-Clause | [source](https://github.com/npm/normalize-package-data#readme) | `a5f6f572f26172e1289f2f769cd93acf63ae90dcbb71a9f4953ced871ab38544` |
 | normalize-path | 3.0.0 | MIT | [source](https://github.com/jonschlinkert/normalize-path) | `e70ff771504ba41f2be55de812a017ff46433d7a250c862e38fc419159e44500` |
 | npm-run-path | 6.0.0 | MIT | [source](https://github.com/sindresorhus/npm-run-path#readme) | `5c932d88256b4ab958f64a856fa48e8bd1f55bc1d96b8149c65689e0c61789d3` |
@@ -441,8 +429,6 @@ The inventory covers the installed production and development dependency closure
 | optionator | 0.9.4 | MIT | [source](https://github.com/gkz/optionator) | `b9eb082c39fe245e38793699074c394c43a722c51fce031c3c165cb92a31035c` |
 | p-limit | 3.1.0, 4.0.0 | MIT | [source](https://github.com/sindresorhus/p-limit#readme) | `5c932d88256b4ab958f64a856fa48e8bd1f55bc1d96b8149c65689e0c61789d3` |
 | p-locate | 5.0.0, 6.0.0 | MIT | [source](https://github.com/sindresorhus/p-locate#readme) | `5c932d88256b4ab958f64a856fa48e8bd1f55bc1d96b8149c65689e0c61789d3` |
-| pac-proxy-agent | 7.2.0 | MIT | [source](https://github.com/TooTallNate/proxy-agents#readme) | `819021ebdb731965692b2f38206ed1c96a956469827173dc668a1c6ba3e97097` |
-| pac-resolver | 7.0.1 | MIT | [source](https://github.com/TooTallNate/proxy-agents#readme) | `71368fd0f5b4129191e9afcd1e1ef2dc89a9090d3e4d80bbab92dafd032b3bef` |
 | package-json-from-dist | 1.0.1 | BlueOak-1.0.0 | [source](https://github.com/isaacs/package-json-from-dist#readme) | `a49c9ba464796f65b59fca3f1e6ca40912df1e859f575383223f7ec6c5baae09` |
 | pako | 1.0.11 | (MIT AND Zlib) | [source](https://github.com/nodeca/pako) | `a04665b3b2de56c66730c1f720f528175739e4104f79073614aa611da1e85539` |
 | parse-bmfont-ascii | 1.0.6 | MIT | [source](https://github.com/mattdesl/parse-bmfont-ascii) | declared metadata only |
@@ -473,13 +459,8 @@ The inventory covers the installed production and development dependency closure
 | pretty-ms | 9.3.0 | MIT | [source](https://github.com/sindresorhus/pretty-ms#readme) | `5c932d88256b4ab958f64a856fa48e8bd1f55bc1d96b8149c65689e0c61789d3` |
 | process | 0.11.10 | MIT | [source](https://github.com/shtylman/node-process#readme) | `59a400d04c5078579acc27ddd6452c1bdf763f9506e01364700935fbb1a7c91b` |
 | process-nextick-args | 2.0.1 | MIT | [source](https://github.com/calvinmetcalf/process-nextick-args) | `ecdccbcf39024f624ded480c01c0b25458e1eca8f26ecf040933865ce56d9a4f` |
-| progress | 2.0.3 | MIT | [source](https://github.com/visionmedia/node-progress#readme) | `d7d2a7786de7c7cfd96f920c6f12927d74e1d2a861ca4498bf465c3bc3f4c21c` |
-| proxy-agent | 6.5.0 | MIT | [source](https://github.com/TooTallNate/proxy-agents#readme) | `71368fd0f5b4129191e9afcd1e1ef2dc89a9090d3e4d80bbab92dafd032b3bef` |
-| proxy-from-env | 1.1.0 | MIT | [source](https://github.com/Rob--W/proxy-from-env#readme) | `f55828df4b8752c48e765a806465b76a103e3cb363379c569b15a1df2ba2d79e` |
-| pump | 3.0.4 | MIT | [source](https://github.com/mafintosh/pump#readme) | `c0993ca46cd47c09710a977d3a3d51602cff96f19e8d2eb8d5887aa20a7beead` |
 | punycode | 2.3.1 | MIT | [source](https://mths.be/punycode) | `483acb265f182907d1caf6cff9c16c96f31325ed23792832cc5d8b12d5f88c8a` |
 | query-selector-shadow-dom | 1.0.1 | MIT | [source](https://github.com/webdriverio/query-selector-shadow-dom#readme) | `c979fed41a7fb18df3e178e1acd9f83ce11f5129d8e42a532b1a801a17856154` |
-| randombytes | 2.1.0 | MIT | [source](https://github.com/crypto-browserify/randombytes) | `ddc0dd5947bd2966b9a4cfde098566b011de0acfbe7814536955636ce9e3eced` |
 | react-is | 17.0.2, 19.2.8 | MIT | [source](https://react.dev/) | `52412d7bc7ce4157ea628bbaacb8829e0a9cb3c58f57f99176126bc8cf2bfc85`<br>`da6d3703ed11cbe42bd212c725957c98da23cbff1998c05fa4b3d976d1a58e93` |
 | read-pkg | 8.1.0 | MIT | [source](https://github.com/sindresorhus/read-pkg#readme) | `5c932d88256b4ab958f64a856fa48e8bd1f55bc1d96b8149c65689e0c61789d3` |
 | read-pkg-up | 10.1.0 | MIT | [source](https://github.com/sindresorhus/read-pkg-up#readme) | `5c932d88256b4ab958f64a856fa48e8bd1f55bc1d96b8149c65689e0c61789d3` |
@@ -505,7 +486,7 @@ The inventory covers the installed production and development dependency closure
 | saxes | 6.0.0 | ISC | [source](https://github.com/lddubeau/saxes#readme) | declared metadata only |
 | semver | 7.8.5 | ISC | [source](https://github.com/npm/node-semver#readme) | `4ec3d4c66cd87f5c8d8ad911b10f99bf27cb00cdfcff82621956e379186b016b` |
 | serialize-error | 12.0.0 | MIT | [source](https://github.com/sindresorhus/serialize-error#readme) | `5c932d88256b4ab958f64a856fa48e8bd1f55bc1d96b8149c65689e0c61789d3` |
-| serialize-javascript | 6.0.2 | BSD-3-Clause | [source](https://github.com/yahoo/serialize-javascript) | `d3dfa68a3c80e64eb10e46cef10e4208502da5ffb1387b11db00e42a507ab8f7` |
+| serialize-javascript | 7.0.5 | BSD-3-Clause | [source](https://github.com/yahoo/serialize-javascript) | `d3dfa68a3c80e64eb10e46cef10e4208502da5ffb1387b11db00e42a507ab8f7` |
 | setimmediate | 1.0.5 | MIT | [source](https://github.com/YuzuJS/setImmediate#readme) | `c4b4ad3a5746f1f5249a6dd90396ec519264e1bb02e01e48a6522c48a3a97cb4` |
 | shebang-command | 2.0.0 | MIT | [source](https://github.com/kevva/shebang-command#readme) | `69dee148a2cc470554dfa7142e830662062394d0fe67cddd379aba90dc60d6b3` |
 | shebang-regex | 3.0.0 | MIT | [source](https://github.com/sindresorhus/shebang-regex#readme) | `48da2f39e100d4085767e94966b43f4fa95ff6a0698fba57ed460914e35f94a0` |
@@ -513,10 +494,6 @@ The inventory covers the installed production and development dependency closure
 | signal-exit | 4.1.0 | ISC | [source](https://github.com/tapjs/signal-exit#readme) | `b173e19b9a78df305577ace0e52ef45a4bcc915ea28b47b256dc3b68dcb1f7e7` |
 | simple-xml-to-json | 1.2.7 | MIT | [source](https://github.com/nirgit/simple-xml-to-json) | `2a26ecc6ad02d385a1233195b397847f50106cf275cd72592e801cda0733f8e2` |
 | slash | 3.0.0 | MIT | [source](https://github.com/sindresorhus/slash#readme) | `48da2f39e100d4085767e94966b43f4fa95ff6a0698fba57ed460914e35f94a0` |
-| smart-buffer | 4.2.0 | MIT | [source](https://github.com/JoshGlazebrook/smart-buffer/) | `c46e2c333e1c9e6fcfd130cf91b8e54bf67b60fabbc04996f7e199b990353ff3` |
-| socks | 2.8.9 | MIT | [source](https://github.com/JoshGlazebrook/socks/) | `4f4f28866154c8d758241a64296e8790d45d7d912ff7b029930778c06d8f2a72` |
-| socks-proxy-agent | 8.0.5 | MIT | [source](https://github.com/TooTallNate/proxy-agents#readme) | `71368fd0f5b4129191e9afcd1e1ef2dc89a9090d3e4d80bbab92dafd032b3bef` |
-| source-map | 0.6.1 | BSD-3-Clause | [source](https://github.com/mozilla/source-map) | `6cb0631f71c7749763fd3dd1d5bee52dd1070ec17f2edc1710079ad070bd2fbd` |
 | source-map-js | 1.2.1 | BSD-3-Clause | [source](https://github.com/7rulnik/source-map-js) | `6cb0631f71c7749763fd3dd1d5bee52dd1070ec17f2edc1710079ad070bd2fbd` |
 | spacetrim | 0.11.59 | Apache-2.0 | [source](https://github.com/hejny/spacetrim#readme) | `278cac3fa41b889af64c6c5d8b60b39ecf20250e718f1d094dd3554388139077` |
 | spdx-correct | 3.2.0 | Apache-2.0 | [source](https://github.com/jslicense/spdx-correct.js#readme) | `cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30` |
@@ -529,7 +506,7 @@ The inventory covers the installed production and development dependency closure
 | std-env | 4.2.0 | MIT | [source](https://github.com/unjs/std-env#readme) | `46231df5a7733c3f52f11b71f3df61813007745b62b09031acfb45fb42d75082` |
 | stream-buffers | 3.0.3 | Unlicense | [source](https://github.com/samcday/node-stream-buffer#readme) | `7e12e5df4bae12cb21581ba157ced20e1986a0508dd10d0e8a4ab9a4cf94e85c` |
 | streamx | 2.28.0 | MIT | [source](https://github.com/mafintosh/streamx) | `41a2aa55a9ebad3df900cf37fded512714a127f4300ef54b978f834a11ec4d48` |
-| string-width | 4.2.3, 5.1.2 | MIT | [source](https://github.com/sindresorhus/string-width#readme) | `48da2f39e100d4085767e94966b43f4fa95ff6a0698fba57ed460914e35f94a0`<br>`5c932d88256b4ab958f64a856fa48e8bd1f55bc1d96b8149c65689e0c61789d3` |
+| string-width | 4.2.3, 5.1.2, 7.2.0, 8.2.2 | MIT | [source](https://github.com/sindresorhus/string-width#readme) | `48da2f39e100d4085767e94966b43f4fa95ff6a0698fba57ed460914e35f94a0`<br>`5c932d88256b4ab958f64a856fa48e8bd1f55bc1d96b8149c65689e0c61789d3` |
 | string_decoder | 1.1.1, 1.3.0 | MIT | [source](https://github.com/nodejs/string_decoder) | `ec62dc96da0099b87f4511736c87309335527fb7031639493e06c95728dc8c54` |
 | strip-ansi | 6.0.1, 7.2.0 | MIT | [source](https://github.com/chalk/strip-ansi#readme) | `48da2f39e100d4085767e94966b43f4fa95ff6a0698fba57ed460914e35f94a0`<br>`5c932d88256b4ab958f64a856fa48e8bd1f55bc1d96b8149c65689e0c61789d3` |
 | strip-final-newline | 4.0.0 | MIT | [source](https://github.com/sindresorhus/strip-final-newline#readme) | `5c932d88256b4ab958f64a856fa48e8bd1f55bc1d96b8149c65689e0c61789d3` |
@@ -542,7 +519,6 @@ The inventory covers the installed production and development dependency closure
 | svelte-check | 4.3.4 | MIT | [source](https://github.com/sveltejs/language-tools#readme) | `ada595bb2ec8d71616dde1b956edb8fbad63eadab32b8d9ab9310a1aef08e5c5` |
 | svelte-eslint-parser | 1.8.0 | MIT | [source](https://github.com/sveltejs/svelte-eslint-parser#readme) | `e0074180337642e284567312cca2a5fe0474bbdabd2080822d42477f01e97b28` |
 | symbol-tree | 3.2.4 | MIT | [source](https://github.com/jsdom/js-symbol-tree#symbol-tree) | `9ea1eccdabe469767a9edb9249a840b2461cf91b2434bf8a3e2fc1f414311cb1` |
-| tar-fs | 3.1.3 | MIT | [source](https://github.com/mafintosh/tar-fs) | `c0993ca46cd47c09710a977d3a3d51602cff96f19e8d2eb8d5887aa20a7beead` |
 | tar-stream | 3.2.0 | MIT | [source](https://github.com/mafintosh/tar-stream) | `c0993ca46cd47c09710a977d3a3d51602cff96f19e8d2eb8d5887aa20a7beead` |
 | teex | 1.0.1 | MIT | [source](https://github.com/mafintosh/teex) | `69b1ce578ad0aa97ce5302c7cb8d507c2fbe5a670712b02f0b4a2b95cae3184a` |
 | text-decoder | 1.2.7 | Apache-2.0 | [source](https://github.com/holepunchto/text-decoder#readme) | `c71d239df91726fc519c6eb72d318ec65820627232b2f796219e87dcf35d0ab4` |
@@ -590,7 +566,7 @@ The inventory covers the installed production and development dependency closure
 | why-is-node-running | 2.3.0 | MIT | [source](https://github.com/mafintosh/why-is-node-running) | `6a134e51aa31496c15a741592fc5d782b2dbf8d8b6b8524e15c8520ae0cd6374` |
 | word-wrap | 1.2.5 | MIT | [source](https://github.com/jonschlinkert/word-wrap) | `73b5283588baa142c5baaef5f56d3e8fdea7a30b214e8c5737e87640f882453a` |
 | workerpool | 6.5.1 | Apache-2.0 | [source](https://github.com/josdejong/workerpool) | `fbeb498edc5acbc8a4c3f24b93465759b2e8e495d503dcd0d21c46498ca39028` |
-| wrap-ansi | 6.2.0, 7.0.0, 8.1.0 | MIT | [source](https://github.com/chalk/wrap-ansi#readme) | `48da2f39e100d4085767e94966b43f4fa95ff6a0698fba57ed460914e35f94a0`<br>`5c932d88256b4ab958f64a856fa48e8bd1f55bc1d96b8149c65689e0c61789d3` |
+| wrap-ansi | 6.2.0, 7.0.0, 8.1.0, 9.0.2 | MIT | [source](https://github.com/chalk/wrap-ansi#readme) | `48da2f39e100d4085767e94966b43f4fa95ff6a0698fba57ed460914e35f94a0`<br>`5c932d88256b4ab958f64a856fa48e8bd1f55bc1d96b8149c65689e0c61789d3` |
 | wrappy | 1.0.2 | ISC | [source](https://github.com/npm/wrappy) | `4ec3d4c66cd87f5c8d8ad911b10f99bf27cb00cdfcff82621956e379186b016b` |
 | ws | 8.21.3 | MIT | [source](https://github.com/websockets/ws) | `2b29dcfe0d6471f7e8c92c5fb38c9f93edee10330937055440192f1832b1ecef` |
 | xml-name-validator | 5.0.0 | Apache-2.0 | [source](https://github.com/jsdom/xml-name-validator#readme) | `a6cba85bc92e0cff7a450b1d873c0eaa2e9fc96bf472df0247a26bec77bf3ff9` |
@@ -601,8 +577,8 @@ The inventory covers the installed production and development dependency closure
 | xmlchars | 2.2.0 | MIT | [source](https://github.com/lddubeau/xmlchars#readme) | `45d196313c2647d313cc65ca9b093d2d6974b64d35ee7346f2c60c9d518dff2c` |
 | y18n | 5.0.8 | ISC | [source](https://github.com/yargs/y18n) | `2034cce3b6fafcddd642c4175e01d3ddfc332a53b9f20fdc46b1466dc89ac469` |
 | yaml | 1.10.3, 2.9.0 | ISC | [source](https://eemeli.org/yaml/) | `0f10bab9eedc5d50183a6dbce9f76e8db974103bfd32d64674406dfeb7654ee7`<br>`5bba27375d93e9119f76c1015f7672cf9ad5f70952296e0842fb2243d6376869` |
-| yargs | 16.2.2, 17.7.3 | MIT | [source](https://yargs.js.org/) | `2f1a503bfab84b3ba7393627308b3274501e459e3b5185bbb56bbf16cb1602d4` |
-| yargs-parser | 20.2.9, 21.1.1 | ISC | [source](https://github.com/yargs/yargs-parser#readme) | `365496ca1f56da40b23c9815fc40fa9005847b2f8f8fd1c1a4929ef25ec8cd1d` |
+| yargs | 16.2.2, 17.7.3, 18.1.0 | MIT | [source](https://yargs.js.org/) | `2f1a503bfab84b3ba7393627308b3274501e459e3b5185bbb56bbf16cb1602d4` |
+| yargs-parser | 20.2.9, 21.1.1, 22.0.0 | ISC | [source](https://github.com/yargs/yargs-parser#readme) | `365496ca1f56da40b23c9815fc40fa9005847b2f8f8fd1c1a4929ef25ec8cd1d` |
 | yargs-unparser | 2.0.0 | MIT | [source](https://github.com/yargs/yargs-unparser) | `30877d17f7e38530d46b49fb375ee98ce2e8b085b3ee72d4c2888710416ef139` |
 | yauzl | 2.10.0 | MIT | [source](https://github.com/thejoshwolfe/yauzl) | `b303783d5eb7ca50b853ffa5f145e4e7998fab339831d848f507ca6cd970577a` |
 | yocto-queue | 0.1.0, 1.2.2 | MIT | [source](https://github.com/sindresorhus/yocto-queue#readme) | `5c932d88256b4ab958f64a856fa48e8bd1f55bc1d96b8149c65689e0c61789d3` |
@@ -619,12 +595,11 @@ The inventory covers the installed production and development dependency closure
 - `@humanfs/types@0.15.0`
 - `@nodable/entities@3.0.0`
 - `@promptbook/utils@0.69.5`
-- `@puppeteer/browsers@2.13.2`
+- `@puppeteer/browsers@3.2.0`
 - `@rolldown/binding-win32-x64-msvc@1.2.3`
 - `@tauri-apps/cli-win32-x64-msvc@2.11.4`
 - `@tokenizer/token@0.3.0`
 - `boolbase@1.0.0`
-- `degenerator@5.0.1`
 - `eastasianwidth@0.2.0`
 - `easy-table@1.2.0`
 - `esrecurse@4.3.0`
@@ -2660,7 +2635,7 @@ software or this license, under any kind of legal claim._**
 
 ### 2dc0465729366c3a7890dfa9e972a1ba7048a26c02116fb8b419a6a1ac110149
 
-Origins: `@isaacs/cliui@8.0.2`, `cliui@7.0.4, 8.0.1`. Upstream filename: `LICENSE.txt`.
+Origins: `@isaacs/cliui@8.0.2`, `cliui@7.0.4, 8.0.1, 9.0.1`. Upstream filename: `LICENSE.txt`.
 
 ~~~~text
 Copyright (c) 2015, Contributors
@@ -2737,7 +2712,7 @@ SOFTWARE.
 
 ### 2f1a503bfab84b3ba7393627308b3274501e459e3b5185bbb56bbf16cb1602d4
 
-Origins: `yargs@16.2.2, 17.7.3`. Upstream filename: `LICENSE`.
+Origins: `yargs@16.2.2, 17.7.3, 18.1.0`. Upstream filename: `LICENSE`.
 
 ~~~~text
 MIT License
@@ -3121,7 +3096,7 @@ THE SOFTWARE.
 
 ### 365496ca1f56da40b23c9815fc40fa9005847b2f8f8fd1c1a4929ef25ec8cd1d
 
-Origins: `yargs-parser@20.2.9, 21.1.1`. Upstream filename: `LICENSE.txt`.
+Origins: `yargs-parser@20.2.9, 21.1.1, 22.0.0`. Upstream filename: `LICENSE.txt`.
 
 ~~~~text
 Copyright (c) 2016, Contributors
@@ -5831,7 +5806,7 @@ CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
 ### 451ec07eeb9c4e1b86de9abdaa426462a8be48f887ec7421cf0bbb9c769555ab
 
-Origins: `lru-cache@7.18.3, 10.4.3`. Upstream filename: `LICENSE`.
+Origins: `lru-cache@10.4.3`. Upstream filename: `LICENSE`.
 
 ~~~~text
 The ISC License
@@ -5993,7 +5968,7 @@ OTHER DEALINGS IN THE SOFTWARE.
 
 ### 483acb265f182907d1caf6cff9c16c96f31325ed23792832cc5d8b12d5f88c8a
 
-Origins: `css.escape@1.5.1`, `cssesc@3.0.0`, `emoji-regex@8.0.0, 9.2.2`, `he@1.2.0`, `is-potential-custom-element-name@1.0.1`, `punycode@2.3.1`. Upstream filename: `LICENSE-MIT.txt`.
+Origins: `css.escape@1.5.1`, `cssesc@3.0.0`, `emoji-regex@8.0.0, 9.2.2, 10.6.0`, `he@1.2.0`, `is-potential-custom-element-name@1.0.1`, `punycode@2.3.1`. Upstream filename: `LICENSE-MIT.txt`.
 
 ~~~~text
 Copyright Mathias Bynens <https://mathiasbynens.be/>
@@ -6020,7 +5995,7 @@ WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
 ### 48da2f39e100d4085767e94966b43f4fa95ff6a0698fba57ed460914e35f94a0
 
-Origins: `ansi-regex@5.0.1, 6.2.2`, `ansi-styles@4.3.0, 5.2.0, 6.2.3`, `chalk@4.1.2, 5.6.2`, `decamelize@4.0.0, 6.0.1`, `escape-string-regexp@2.0.0, 4.0.0`, `has-flag@4.0.0`, `indent-string@4.0.0`, `is-fullwidth-code-point@3.0.0`, `is-plain-obj@2.1.0, 4.1.0`, `path-exists@4.0.0, 5.0.0`, `path-key@3.1.1, 4.0.0`, `redent@3.0.0`, `shebang-regex@3.0.0`, `slash@3.0.0`, `string-width@4.2.3, 5.1.2`, `strip-ansi@6.0.1, 7.2.0`, `strip-indent@3.0.0`, `supports-color@7.2.0, 8.1.1`, `wrap-ansi@6.2.0, 7.0.0, 8.1.0`. Upstream filename: `license`.
+Origins: `ansi-regex@5.0.1, 6.2.2`, `ansi-styles@4.3.0, 5.2.0, 6.2.3`, `chalk@4.1.2, 5.6.2`, `decamelize@4.0.0, 6.0.1`, `escape-string-regexp@2.0.0, 4.0.0`, `has-flag@4.0.0`, `indent-string@4.0.0`, `is-fullwidth-code-point@3.0.0`, `is-plain-obj@2.1.0, 4.1.0`, `path-exists@4.0.0, 5.0.0`, `path-key@3.1.1, 4.0.0`, `redent@3.0.0`, `shebang-regex@3.0.0`, `slash@3.0.0`, `string-width@4.2.3, 5.1.2, 7.2.0, 8.2.2`, `strip-ansi@6.0.1, 7.2.0`, `strip-indent@3.0.0`, `supports-color@7.2.0, 8.1.1`, `wrap-ansi@6.2.0, 7.0.0, 8.1.0, 9.0.2`. Upstream filename: `license`.
 
 ~~~~text
 MIT License
@@ -6206,33 +6181,6 @@ ANY SPECIAL, DIRECT, INDIRECT, OR CONSEQUENTIAL DAMAGES OR ANY DAMAGES
 WHATSOEVER RESULTING FROM LOSS OF USE, DATA OR PROFITS, WHETHER IN AN
 ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF OR
 IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
-~~~~
-
-### 4f4f28866154c8d758241a64296e8790d45d7d912ff7b029930778c06d8f2a72
-
-Origins: `socks@2.8.9`. Upstream filename: `LICENSE`.
-
-~~~~text
-The MIT License (MIT)
-
-Copyright (c) 2013 Josh Glazebrook
-
-Permission is hereby granted, free of charge, to any person obtaining a copy of
-this software and associated documentation files (the "Software"), to deal in
-the Software without restriction, including without limitation the rights to
-use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of
-the Software, and to permit persons to whom the Software is furnished to do so,
-subject to the following conditions:
-
-The above copyright notice and this permission notice shall be included in all
-copies or substantial portions of the Software.
-
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS
-FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR
-COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER
-IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN
-CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 ~~~~
 
 ### 4f8563870d0fca38bbc3e00b6f670cb7fa9f380ba9f26a7f7d1184a6b18b1653
@@ -7358,32 +7306,6 @@ ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF OR
 IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
 ~~~~
 
-### 5abeca78b582cb73907891ec8dbd9b239855a95d1f6b0d281165a1a6cea4618d
-
-Origins: `basic-ftp@5.3.1`. Upstream filename: `LICENSE.txt`.
-
-~~~~text
-Copyright (c) 2019 Patrick Juchli
-
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
-
-The above copyright notice and this permission notice shall be included in all
-copies or substantial portions of the Software.
-
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-SOFTWARE.
-~~~~
-
 ### 5b37224c080cdcc97c871ada971c224e9926370fe74f11b539aa1cf9f3b1aca1
 
 Origins: `base64-js@1.5.1`. Upstream filename: `LICENSE`.
@@ -7475,7 +7397,7 @@ The above copyright notice and this permission notice shall be included in all c
 
 ### 5c932d88256b4ab958f64a856fa48e8bd1f55bc1d96b8149c65689e0c61789d3
 
-Origins: `@sindresorhus/merge-streams@4.0.0`, `ansi-regex@5.0.1, 6.2.2`, `ansi-styles@4.3.0, 5.2.0, 6.2.3`, `camelcase@6.3.0`, `chalk@4.1.2, 5.6.2`, `decamelize@4.0.0, 6.0.1`, `escape-string-regexp@2.0.0, 4.0.0`, `execa@9.6.1`, `exit-hook@4.0.0`, `figures@6.1.0`, `file-type@21.3.4`, `find-up@5.0.0, 6.3.0`, `get-port@7.2.0`, `get-stream@5.2.0, 9.0.1`, `globals@16.5.0, 17.9.0`, `is-plain-obj@2.1.0, 4.1.0`, `is-stream@2.0.1, 4.0.1`, `is-unicode-supported@0.1.0, 2.1.0`, `locate-path@6.0.0, 7.2.0`, `log-symbols@4.1.0`, `npm-run-path@6.0.0`, `p-limit@3.1.0, 4.0.0`, `p-locate@5.0.0, 6.0.0`, `parse-json@7.1.1`, `parse-ms@4.0.0`, `path-exists@4.0.0, 5.0.0`, `path-key@3.1.1, 4.0.0`, `pretty-ms@9.3.0`, `read-pkg-up@10.1.0`, `read-pkg@8.1.0`, `serialize-error@12.0.0`, `string-width@4.2.3, 5.1.2`, `strip-ansi@6.0.1, 7.2.0`, `strip-final-newline@4.0.0`, `strip-json-comments@3.1.1`, `supports-color@7.2.0, 8.1.1`, `type-fest@3.13.1, 4.26.0, 4.41.0`, `uint8array-extras@1.5.0`, `unicorn-magic@0.3.0`, `wrap-ansi@6.2.0, 7.0.0, 8.1.0`, `yocto-queue@0.1.0, 1.2.2`, `yoctocolors-cjs@2.1.3`, `yoctocolors@2.2.0`. Upstream filename: `license`.
+Origins: `@sindresorhus/merge-streams@4.0.0`, `ansi-regex@5.0.1, 6.2.2`, `ansi-styles@4.3.0, 5.2.0, 6.2.3`, `camelcase@6.3.0`, `chalk@4.1.2, 5.6.2`, `decamelize@4.0.0, 6.0.1`, `escape-string-regexp@2.0.0, 4.0.0`, `execa@9.6.1`, `exit-hook@4.0.0`, `figures@6.1.0`, `file-type@21.3.4`, `find-up@5.0.0, 6.3.0`, `get-east-asian-width@1.6.0`, `get-port@7.2.0`, `get-stream@9.0.1`, `globals@16.5.0, 17.9.0`, `is-plain-obj@2.1.0, 4.1.0`, `is-stream@2.0.1, 4.0.1`, `is-unicode-supported@0.1.0, 2.1.0`, `locate-path@6.0.0, 7.2.0`, `log-symbols@4.1.0`, `npm-run-path@6.0.0`, `p-limit@3.1.0, 4.0.0`, `p-locate@5.0.0, 6.0.0`, `parse-json@7.1.1`, `parse-ms@4.0.0`, `path-exists@4.0.0, 5.0.0`, `path-key@3.1.1, 4.0.0`, `pretty-ms@9.3.0`, `read-pkg-up@10.1.0`, `read-pkg@8.1.0`, `serialize-error@12.0.0`, `string-width@4.2.3, 5.1.2, 7.2.0, 8.2.2`, `strip-ansi@6.0.1, 7.2.0`, `strip-final-newline@4.0.0`, `strip-json-comments@3.1.1`, `supports-color@7.2.0, 8.1.1`, `type-fest@3.13.1, 4.26.0, 4.41.0`, `uint8array-extras@1.5.0`, `unicorn-magic@0.3.0`, `wrap-ansi@6.2.0, 7.0.0, 8.1.0, 9.0.2`, `yocto-queue@0.1.0, 1.2.2`, `yoctocolors-cjs@2.1.3`, `yoctocolors@2.2.0`. Upstream filename: `license`.
 
 ~~~~text
 MIT License
@@ -8211,7 +8133,7 @@ SOFTWARE.
 
 ### 6cb0631f71c7749763fd3dd1d5bee52dd1070ec17f2edc1710079ad070bd2fbd
 
-Origins: `source-map-js@1.2.1`, `source-map@0.6.1`. Upstream filename: `LICENSE`.
+Origins: `source-map-js@1.2.1`. Upstream filename: `LICENSE`.
 
 ~~~~text
 
@@ -8371,7 +8293,7 @@ THE SOFTWARE.
 
 ### 71368fd0f5b4129191e9afcd1e1ef2dc89a9090d3e4d80bbab92dafd032b3bef
 
-Origins: `agent-base@7.1.4`, `http-proxy-agent@7.0.2`, `https-proxy-agent@7.0.6`, `pac-resolver@7.0.1`, `proxy-agent@6.5.0`, `socks-proxy-agent@8.0.5`. Upstream filename: `LICENSE`.
+Origins: `agent-base@7.1.4`, `http-proxy-agent@7.0.2`, `https-proxy-agent@7.0.6`. Upstream filename: `LICENSE`.
 
 ~~~~text
 (The MIT License)
@@ -8768,36 +8690,6 @@ IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY
 CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT,
 TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE
 SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
-~~~~
-
-### 77b2de947c65f3062fb347118ca198ca50898ead84a8509d8153fa65741f029b
-
-Origins: `extract-zip@2.0.1`. Upstream filename: `LICENSE`.
-
-~~~~text
-Copyright (c) 2014 Max Ogden and other contributors
-All rights reserved.
-
-Redistribution and use in source and binary forms, with or without
-modification, are permitted provided that the following conditions are met:
-
-* Redistributions of source code must retain the above copyright notice, this
-  list of conditions and the following disclaimer.
-
-* Redistributions in binary form must reproduce the above copyright notice,
-  this list of conditions and the following disclaimer in the documentation
-  and/or other materials provided with the distribution.
-
-THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
-AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
-IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
-DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE
-FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
-DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR
-SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER
-CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY,
-OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
-OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 ~~~~
 
 ### 7883225d5e84a6bbb9b170c3d891b4bf6d6259cee869c86bd86381a927071745
@@ -9281,35 +9173,6 @@ AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
-~~~~
-
-### 819021ebdb731965692b2f38206ed1c96a956469827173dc668a1c6ba3e97097
-
-Origins: `data-uri-to-buffer@6.0.2`, `get-uri@6.0.5`, `pac-proxy-agent@7.2.0`. Upstream filename: `LICENSE`.
-
-~~~~text
-(The MIT License)
-
-Copyright (c) 2014 Nathan Rajlich <nathan@tootallnate.net>
-
-Permission is hereby granted, free of charge, to any person obtaining
-a copy of this software and associated documentation files (the
-'Software'), to deal in the Software without restriction, including
-without limitation the rights to use, copy, modify, merge, publish,
-distribute, sublicense, and/or sell copies of the Software, and to
-permit persons to whom the Software is furnished to do so, subject to
-the following conditions:
-
-The above copyright notice and this permission notice shall be
-included in all copies or substantial portions of the Software.
-
-THE SOFTWARE IS PROVIDED 'AS IS', WITHOUT WARRANTY OF ANY KIND,
-EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
-MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.
-IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY
-CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT,
-TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE
-SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 ~~~~
 
 ### 8465b04b67f473341171b5c9c8b2c741a4a395b3f6ed58339b3a4f4db3db7472
@@ -10941,34 +10804,6 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 ~~~~
 
-### 94bcb9959136723aa4fb36e1a6c4d5c662a2369978cfae344dabfb83ae619e79
-
-Origins: `esprima@4.0.1`. Upstream filename: `LICENSE.BSD`.
-
-~~~~text
-Copyright JS Foundation and other contributors, https://js.foundation/
-
-Redistribution and use in source and binary forms, with or without
-modification, are permitted provided that the following conditions are met:
-
-  * Redistributions of source code must retain the above copyright
-    notice, this list of conditions and the following disclaimer.
-  * Redistributions in binary form must reproduce the above copyright
-    notice, this list of conditions and the following disclaimer in the
-    documentation and/or other materials provided with the distribution.
-
-THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
-AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
-IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
-ARE DISCLAIMED. IN NO EVENT SHALL <COPYRIGHT HOLDER> BE LIABLE FOR ANY
-DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES
-(INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES;
-LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND
-ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
-(INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF
-THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
-~~~~
-
 ### 94cfe87de9b178e8fee313a19178e625129e2ce559db32e772e7bd95114ee6ff
 
 Origins: `dom-serializer@2.0.0`. Upstream filename: `LICENSE`.
@@ -11553,33 +11388,6 @@ express Statement of Purpose.
  d. Affirmer understands and acknowledges that Creative Commons is not a
     party to this document and has no duty or obligation with respect to
     this CC0 or use of the Work.
-~~~~
-
-### a374b737c41b30b1ec04c5fcc17d1b853f008f217cc43a9dbea441abd9afde70
-
-Origins: `ast-types@0.13.4`. Upstream filename: `LICENSE`.
-
-~~~~text
-Copyright (c) 2013 Ben Newman <bn@cs.stanford.edu>
-
-Permission is hereby granted, free of charge, to any person obtaining
-a copy of this software and associated documentation files (the
-"Software"), to deal in the Software without restriction, including
-without limitation the rights to use, copy, modify, merge, publish,
-distribute, sublicense, and/or sell copies of the Software, and to
-permit persons to whom the Software is furnished to do so, subject to
-the following conditions:
-
-The above copyright notice and this permission notice shall be
-included in all copies or substantial portions of the Software.
-
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,
-EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
-MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.
-IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY
-CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT,
-TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE
-SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 ~~~~
 
 ### a49c9ba464796f65b59fca3f1e6ca40912df1e859f575383223f7ec6c5baae09
@@ -13184,7 +12992,7 @@ SOFTWARE.
 
 ### c0993ca46cd47c09710a977d3a3d51602cff96f19e8d2eb8d5887aa20a7beead
 
-Origins: `end-of-stream@1.4.5`, `pump@3.0.4`, `tar-fs@3.1.3`, `tar-stream@3.2.0`. Upstream filename: `LICENSE`.
+Origins: `tar-stream@3.2.0`. Upstream filename: `LICENSE`.
 
 ~~~~text
 The MIT License (MIT)
@@ -13320,7 +13128,7 @@ SOFTWARE.
 
 ### c2cfccb812fe482101a8f04597dfc5a9991a6b2748266c47ac91b6a5aae15383
 
-Origins: `@types/aria-query@5.0.4`, `@types/chai@5.2.3`, `@types/deep-eql@4.0.2`, `@types/esrecurse@4.3.1`, `@types/estree@1.0.9`, `@types/istanbul-lib-coverage@2.0.6`, `@types/istanbul-lib-report@3.0.3`, `@types/istanbul-reports@3.0.4`, `@types/json-schema@7.0.15`, `@types/mocha@10.0.10`, `@types/node@16.9.1, 20.19.43, 26.2.0`, `@types/normalize-package-data@2.4.4`, `@types/sinonjs__fake-timers@8.1.5`, `@types/stack-utils@2.0.3`, `@types/trusted-types@2.0.7`, `@types/which@2.0.2`, `@types/ws@8.18.1`, `@types/yargs-parser@21.0.3`, `@types/yargs@17.0.35`, `@types/yauzl@2.10.3`. Upstream filename: `LICENSE`.
+Origins: `@types/aria-query@5.0.4`, `@types/chai@5.2.3`, `@types/deep-eql@4.0.2`, `@types/esrecurse@4.3.1`, `@types/estree@1.0.9`, `@types/istanbul-lib-coverage@2.0.6`, `@types/istanbul-lib-report@3.0.3`, `@types/istanbul-reports@3.0.4`, `@types/json-schema@7.0.15`, `@types/mocha@10.0.10`, `@types/node@16.9.1, 20.19.43, 26.2.0`, `@types/normalize-package-data@2.4.4`, `@types/sinonjs__fake-timers@8.1.5`, `@types/stack-utils@2.0.3`, `@types/trusted-types@2.0.7`, `@types/which@2.0.2`, `@types/ws@8.18.1`, `@types/yargs-parser@21.0.3`, `@types/yargs@17.0.35`. Upstream filename: `LICENSE`.
 
 ~~~~text
     MIT License
@@ -13447,61 +13255,6 @@ FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR
 COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER
 IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN
 CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
-~~~~
-
-### c46e2c333e1c9e6fcfd130cf91b8e54bf67b60fabbc04996f7e199b990353ff3
-
-Origins: `smart-buffer@4.2.0`. Upstream filename: `LICENSE`.
-
-~~~~text
-The MIT License (MIT)
-
-Copyright (c) 2013-2017 Josh Glazebrook
-
-Permission is hereby granted, free of charge, to any person obtaining a copy of
-this software and associated documentation files (the "Software"), to deal in
-the Software without restriction, including without limitation the rights to
-use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of
-the Software, and to permit persons to whom the Software is furnished to do so,
-subject to the following conditions:
-
-The above copyright notice and this permission notice shall be included in all
-copies or substantial portions of the Software.
-
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS
-FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR
-COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER
-IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN
-CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
-~~~~
-
-### c47e09b7a38f5f4ceec262e87037ce38911a9fb3f70af1a8199aa6d6bd3be8d0
-
-Origins: `netmask@2.1.1`. Upstream filename: `LICENSE.md`.
-
-~~~~text
-MIT License
-
-Copyright (c) 2011 Olivier Poitrey rs@rhapsodyk.net
-
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
-
-The above copyright notice and this permission notice shall be included in all
-copies or substantial portions of the Software.
-
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-SOFTWARE.
 ~~~~
 
 ### c4b4ad3a5746f1f5249a6dd90396ec519264e1bb02e01e48a6522c48a3a97cb4
@@ -14348,34 +14101,6 @@ THIS IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS" AND ANY EXPRE
 EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 ~~~~
 
-### cc8e9104738f96dadb50ee4ac9754fe46a7123af52609fbf60470ce7d2868c38
-
-Origins: `@tootallnate/quickjs-emscripten@0.23.0`. Upstream filename: `LICENSE`.
-
-~~~~text
-MIT License
-
-quickjs-emscripten copyright (c) 2019 Jake Teton-Landis
-
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
-
-The above copyright notice and this permission notice shall be included in all
-copies or substantial portions of the Software.
-
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-SOFTWARE.
-~~~~
-
 ### cdbc258d13806538e727964c2436a8806e6e2496ccd616224aace6f7bf98dbc1
 
 Origins: `glob@8.1.0, 10.5.0`. Upstream filename: `LICENSE`.
@@ -14769,7 +14494,7 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 ### d3dfa68a3c80e64eb10e46cef10e4208502da5ffb1387b11db00e42a507ab8f7
 
-Origins: `serialize-javascript@6.0.2`. Upstream filename: `LICENSE`.
+Origins: `serialize-javascript@7.0.5`. Upstream filename: `LICENSE`.
 
 ~~~~text
 Copyright 2014 Yahoo! Inc.
@@ -14845,34 +14570,6 @@ Permission is hereby granted, free of charge, to any person obtaining a copy of 
 The above copyright notice and this permission notice shall be included in all copies or substantial portions of the Software.
 
 THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
-~~~~
-
-### d5d62471a28a9920416c7d37d387a3bf55f32cb768590f605f84990b76aee5de
-
-Origins: `escodegen@2.1.0`. Upstream filename: `LICENSE.BSD`.
-
-~~~~text
-Copyright (C) 2012 Yusuke Suzuki (twitter: @Constellation) and other contributors.
-
-Redistribution and use in source and binary forms, with or without
-modification, are permitted provided that the following conditions are met:
-
-  * Redistributions of source code must retain the above copyright
-    notice, this list of conditions and the following disclaimer.
-  * Redistributions in binary form must reproduce the above copyright
-    notice, this list of conditions and the following disclaimer in the
-    documentation and/or other materials provided with the distribution.
-
-THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
-AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
-IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
-ARE DISCLAIMED. IN NO EVENT SHALL <COPYRIGHT HOLDER> BE LIABLE FOR ANY
-DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES
-(INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES;
-LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND
-ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
-(INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF
-THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 ~~~~
 
 ### d628d654d7c3f6d67831863a81583382af4881233c1004db19a3e2c86fab5693
@@ -14966,35 +14663,6 @@ AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
-~~~~
-
-### d7d2a7786de7c7cfd96f920c6f12927d74e1d2a861ca4498bf465c3bc3f4c21c
-
-Origins: `progress@2.0.3`. Upstream filename: `LICENSE`.
-
-~~~~text
-(The MIT License)
-
-Copyright (c) 2017 TJ Holowaychuk <tj@vision-media.ca>
-
-Permission is hereby granted, free of charge, to any person obtaining
-a copy of this software and associated documentation files (the
-'Software'), to deal in the Software without restriction, including
-without limitation the rights to use, copy, modify, merge, publish,
-distribute, sublicense, and/or sell copies of the Software, and to
-permit persons to whom the Software is furnished to do so, subject to
-the following conditions:
-
-The above copyright notice and this permission notice shall be
-included in all copies or substantial portions of the Software.
-
-THE SOFTWARE IS PROVIDED 'AS IS', WITHOUT WARRANTY OF ANY KIND,
-EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
-MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.
-IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY
-CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT,
-TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE
-SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 ~~~~
 
 ### d8bf34ff6d190640a01e7704ad78253fc181bc128949d71273fbbaa12f33c0b4
@@ -15372,7 +15040,7 @@ SOFTWARE.
 
 ### dbcbef54fa7e111b69b12a9787051f31f5378b40711b6c57c5a82d99dc8a9e0d
 
-Origins: `modern-tar@0.7.7`. Upstream filename: `LICENSE`.
+Origins: `modern-tar@0.7.7, 0.8.4`. Upstream filename: `LICENSE`.
 
 ~~~~text
 MIT License
@@ -15438,34 +15106,6 @@ Permission is hereby granted, free of charge, to any person obtaining a copy of 
 The above copyright notice and this permission notice shall be included in all copies or substantial portions of the Software.
 
 THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
-~~~~
-
-### ddc0dd5947bd2966b9a4cfde098566b011de0acfbe7814536955636ce9e3eced
-
-Origins: `randombytes@2.1.0`. Upstream filename: `LICENSE`.
-
-~~~~text
-MIT License
-
-Copyright (c) 2017 crypto-browserify
-
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
-
-The above copyright notice and this permission notice shall be included in all
-copies or substantial portions of the Software.
-
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-SOFTWARE.
 ~~~~
 
 ### ddc110f3b89cc397cee99d3d64c4f746928b7a3bac02fed15101eb4d367079f6
@@ -16631,33 +16271,6 @@ Origins: `human-signals@8.0.1`. Upstream filename: `LICENSE`.
    limitations under the License.
 ~~~~
 
-### f55828df4b8752c48e765a806465b76a103e3cb363379c569b15a1df2ba2d79e
-
-Origins: `proxy-from-env@1.1.0`. Upstream filename: `LICENSE`.
-
-~~~~text
-The MIT License
-
-Copyright (C) 2016-2018 Rob Wu <rob@robwu.nl>
-
-Permission is hereby granted, free of charge, to any person obtaining a copy of
-this software and associated documentation files (the "Software"), to deal in
-the Software without restriction, including without limitation the rights to
-use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies
-of the Software, and to permit persons to whom the Software is furnished to do
-so, subject to the following conditions:
-
-The above copyright notice and this permission notice shall be included in all
-copies or substantial portions of the Software.
-
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS
-FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR
-COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER
-IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN
-CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
-~~~~
-
 ### f58943cb354fb2707fea2f7b26b04e6014ddb56835cdfd414c9d2c6c59165b64
 
 Origins: `ci-info@4.4.0`. Upstream filename: `LICENSE`.
@@ -16786,32 +16399,6 @@ AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
-~~~~
-
-### f8d791359a50cbcac82c29cb7b0b1b889b28be76fdd35b8ee33f0f7c8704702a
-
-Origins: `ip-address@10.4.0`. Upstream filename: `LICENSE`.
-
-~~~~text
-Copyright (C) 2011 by Beau Gunderson
-
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
-
-The above copyright notice and this permission notice shall be included in
-all copies or substantial portions of the Software.
-
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
-THE SOFTWARE.
 ~~~~
 
 ### f95f668fe64081ddb4153b322e34fdd719b991285ed08177d5ad7133b7988d92

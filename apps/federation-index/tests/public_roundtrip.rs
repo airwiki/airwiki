@@ -53,6 +53,8 @@ impl PublicSourceBackend for PublicFixtureBackend {
             updated_at: now,
             rank: 1,
             node_id: "replaced-by-transport".to_owned(),
+            assurance: None,
+            lifecycle_status: Some("stable".to_owned()),
         };
         Ok(PublicSearchDelivery::new(
             PublicSearchResponse {
@@ -97,6 +99,8 @@ impl PublicSourceBackend for PublicFixtureBackend {
                     logical_resource_uri: "urn:airwiki:atlas:recovery".to_owned(),
                     source_revision: 1,
                     updated_at: now,
+                    lifecycle_status: Some("stable".to_owned()),
+                    assurance: None,
                 }],
                 next_cursor: None,
             },
@@ -211,6 +215,7 @@ async fn public_search_round_trip_needs_no_lan_pairing_or_grant() {
             description: "Synthetic public collection".to_owned(),
             languages: vec!["en".to_owned()],
             concept_count: 1,
+            okf_compatibility: None,
             routing_terms: vec!["atlas".to_owned(), "recovery".to_owned()],
             routes: vec![source_address.to_string()],
             updated_at: now,
@@ -306,6 +311,7 @@ async fn public_search_preserves_owner_stage_after_slow_catalog() {
             description: "Synthetic public collection".to_owned(),
             languages: vec!["en".to_owned()],
             concept_count: 1,
+            okf_compatibility: None,
             routing_terms: vec!["atlas".to_owned(), "recovery".to_owned()],
             routes: vec![source_address.to_string()],
             updated_at: now,
@@ -412,6 +418,7 @@ async fn concurrent_public_routes_do_not_cross_between_success_and_timeout() {
             description: String::new(),
             languages: vec!["en".to_owned()],
             concept_count: 1,
+            okf_compatibility: None,
             routing_terms: vec!["fastowner".to_owned()],
             routes: vec![fast_source_address.to_string()],
             updated_at: now,
@@ -431,6 +438,7 @@ async fn concurrent_public_routes_do_not_cross_between_success_and_timeout() {
             description: String::new(),
             languages: vec!["en".to_owned()],
             concept_count: 1,
+            okf_compatibility: None,
             routing_terms: vec!["slowowner".to_owned()],
             routes: vec![slow_source_address.to_string()],
             updated_at: now,
@@ -558,6 +566,7 @@ async fn public_search_and_browse_use_outbound_relay_reservation() {
             description: "Synthetic public collection".to_owned(),
             languages: vec!["en".to_owned()],
             concept_count: 1,
+            okf_compatibility: None,
             routing_terms: vec!["atlas".to_owned(), "recovery".to_owned()],
             routes: vec![relayed_route.to_string()],
             updated_at: now,
@@ -764,6 +773,7 @@ async fn public_search_and_browse_fail_over_to_second_outbound_relay_reservation
             description: "Synthetic public collection".to_owned(),
             languages: vec!["en".to_owned()],
             concept_count: 1,
+            okf_compatibility: None,
             routing_terms: vec!["atlas".to_owned(), "recovery".to_owned()],
             routes: vec![
                 first_relayed_route.to_string(),
@@ -819,6 +829,7 @@ async fn public_search_and_browse_fail_over_to_second_outbound_relay_reservation
             description: "Synthetic public collection".to_owned(),
             languages: vec!["en".to_owned()],
             concept_count: 1,
+            okf_compatibility: None,
             routing_terms: vec!["atlas".to_owned(), "recovery".to_owned()],
             routes: vec![second_relayed_route.to_string()],
             updated_at: now,
@@ -941,6 +952,7 @@ async fn public_source_retries_relay_reservation_when_relay_starts_late() {
             description: "Synthetic public collection".to_owned(),
             languages: vec!["en".to_owned()],
             concept_count: 1,
+            okf_compatibility: None,
             routing_terms: vec!["atlas".to_owned(), "recovery".to_owned()],
             routes: vec![
                 relayed_peer_address(

@@ -15,6 +15,7 @@ pub mod coordinator;
 pub mod identity;
 pub mod pairing;
 pub mod public_catalog;
+mod public_codec;
 pub mod public_manifest;
 pub mod public_reader;
 pub mod public_source;
@@ -35,8 +36,8 @@ pub use libp2p::{Multiaddr, PeerId};
 pub use pairing::{PAIRING_PROTOCOL, PAIRING_TTL, PairingCode, PairingNonce, derive_sas};
 pub use public_catalog::{
     CatalogRejection, CatalogWireRequest, CatalogWireResponse, PublicCatalogBackend,
-    PublicCatalogBackendError, PublicCatalogServerConfig, run_public_catalog_server,
-    validate_public_relay_external_address,
+    PublicCatalogBackendError, PublicCatalogServerConfig, VersionedManifestPair,
+    VersionedTombstonePair, run_public_catalog_server, validate_public_relay_external_address,
 };
 pub use public_manifest::{
     PublicManifestError, sign_manifest, sign_tombstone, verify_manifest, verify_tombstone,

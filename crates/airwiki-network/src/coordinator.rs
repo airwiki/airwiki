@@ -238,6 +238,8 @@ mod tests {
             updated_at: Utc::now(),
             rank,
             node_id: title.to_owned(),
+            assurance: None,
+            lifecycle_status: None,
         }
     }
 

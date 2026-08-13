@@ -4,8 +4,10 @@ use thiserror::Error;
 use uuid::Uuid;
 
 use crate::{
-    ConceptType, MAX_QUERY_BYTES, MAX_SNIPPET_CHARS, MAX_TOP_K, MIN_TOP_K, PUBLIC_BROWSE_PROTOCOL,
-    PUBLIC_CATALOG_PROTOCOL, PUBLIC_SEARCH_PROTOCOL, SearchPurpose, SearchResponse,
+    ConceptType, MAX_QUERY_BYTES, MAX_SNIPPET_CHARS, MAX_TOP_K, MIN_TOP_K, OkfCompatibility,
+    PUBLIC_BROWSE_PROTOCOL, PUBLIC_BROWSE_PROTOCOL_V2, PUBLIC_CATALOG_PROTOCOL,
+    PUBLIC_CATALOG_PROTOCOL_V2, PUBLIC_SEARCH_PROTOCOL, PUBLIC_SEARCH_PROTOCOL_V2, SearchPurpose,
+    SearchResponse,
 };
 
 pub const MAX_PUBLIC_PAGE_SIZE: u8 = 50;
@@ -26,6 +28,8 @@ pub struct PublicCollectionManifest {
     pub description: String,
     pub languages: Vec<String>,
     pub concept_count: u32,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub okf_compatibility: Option<OkfCompatibility>,
     pub routing_terms: Vec<String>,
     pub routes: Vec<String>,
     pub updated_at: DateTime<Utc>,
@@ -34,7 +38,11 @@ pub struct PublicCollectionManifest {
 
 impl PublicCollectionManifest {
     pub fn validate(&self, now: DateTime<Utc>) -> Result<(), PublicContractError> {
-        if self.protocol_version != PUBLIC_CATALOG_PROTOCOL {
+        if !protocol_is_supported(
+            &self.protocol_version,
+            PUBLIC_CATALOG_PROTOCOL,
+            PUBLIC_CATALOG_PROTOCOL_V2,
+        ) {
             return Err(PublicContractError::UnsupportedProtocol);
         }
         validate_text(&self.publisher_id, 128)?;
@@ -88,6 +96,7 @@ impl PublicCollectionManifest {
             description: self.description.clone(),
             languages: self.languages.clone(),
             concept_count: self.concept_count,
+            okf_compatibility: self.okf_compatibility.clone(),
             updated_at: self.updated_at,
             expires_at: self.expires_at,
         }
@@ -126,6 +135,7 @@ pub struct PublicCollectionSummary {
     pub description: String,
     pub languages: Vec<String>,
     pub concept_count: u32,
+    pub okf_compatibility: Option<OkfCompatibility>,
     pub updated_at: DateTime<Utc>,
     pub expires_at: DateTime<Utc>,
 }
@@ -144,6 +154,10 @@ pub struct PublicConceptSummary {
     pub logical_resource_uri: String,
     pub source_revision: u32,
     pub updated_at: DateTime<Utc>,
+    #[serde(default)]
+    pub lifecycle_status: Option<String>,
+    #[serde(default)]
+    pub assurance: Option<crate::ConceptAssurance>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -157,7 +171,11 @@ pub struct PublicCatalogQuery {
 
 impl PublicCatalogQuery {
     pub fn validate(&self) -> Result<(), PublicContractError> {
-        if self.protocol_version != PUBLIC_CATALOG_PROTOCOL {
+        if !protocol_is_supported(
+            &self.protocol_version,
+            PUBLIC_CATALOG_PROTOCOL,
+            PUBLIC_CATALOG_PROTOCOL_V2,
+        ) {
             return Err(PublicContractError::UnsupportedProtocol);
         }
         validate_text(&self.query, MAX_QUERY_BYTES)?;
@@ -187,7 +205,11 @@ pub struct PublicSearchRequest {
 
 impl PublicSearchRequest {
     pub fn validate(&self) -> Result<(), PublicContractError> {
-        if self.protocol_version != PUBLIC_SEARCH_PROTOCOL {
+        if !protocol_is_supported(
+            &self.protocol_version,
+            PUBLIC_SEARCH_PROTOCOL,
+            PUBLIC_SEARCH_PROTOCOL_V2,
+        ) {
             return Err(PublicContractError::UnsupportedProtocol);
         }
         validate_text(&self.query, MAX_QUERY_BYTES)?;
@@ -241,7 +263,11 @@ pub struct PublicBrowseRequest {
 
 impl PublicBrowseRequest {
     pub fn validate(&self) -> Result<(), PublicContractError> {
-        if self.protocol_version != PUBLIC_BROWSE_PROTOCOL {
+        if !protocol_is_supported(
+            &self.protocol_version,
+            PUBLIC_BROWSE_PROTOCOL,
+            PUBLIC_BROWSE_PROTOCOL_V2,
+        ) {
             return Err(PublicContractError::UnsupportedProtocol);
         }
         if !(1..=MAX_PUBLIC_PAGE_SIZE).contains(&self.limit)
@@ -271,7 +297,7 @@ impl PublicBrowsePage {
         request: &PublicBrowseRequest,
         publisher_id: &str,
     ) -> Result<(), PublicContractError> {
-        if self.protocol_version != PUBLIC_BROWSE_PROTOCOL
+        if self.protocol_version != request.protocol_version
             || self.request_id != request.request_id
             || self.concepts.len() > usize::from(request.limit)
         {
@@ -306,6 +332,10 @@ impl PublicBrowsePage {
         }
         Ok(())
     }
+}
+
+fn protocol_is_supported(value: &str, legacy: &str, current: &str) -> bool {
+    value == legacy || value == current
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Error)]
@@ -358,6 +388,7 @@ mod tests {
             description: "Bounded public profile".to_owned(),
             languages: vec!["en".to_owned()],
             concept_count: 1,
+            okf_compatibility: None,
             routing_terms: vec!["synthetic".to_owned()],
             routes: vec!["/ip4/127.0.0.1/tcp/42042".to_owned()],
             updated_at: now,
@@ -462,6 +493,8 @@ mod tests {
             logical_resource_uri: "urn:airwiki:synthetic".to_owned(),
             source_revision: 1,
             updated_at: Utc::now(),
+            lifecycle_status: Some("stable".to_owned()),
+            assurance: Some(crate::ConceptAssurance::default()),
         };
         let mut page = PublicBrowsePage {
             protocol_version: PUBLIC_BROWSE_PROTOCOL.to_owned(),

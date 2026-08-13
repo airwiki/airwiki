@@ -5,6 +5,7 @@ mod public;
 pub use public::*;
 
 use std::fmt;
+use std::str::FromStr;
 use std::sync::{Arc, Condvar, Mutex, MutexGuard};
 
 use async_trait::async_trait;
@@ -17,6 +18,9 @@ pub const SEARCH_PROTOCOL: &str = "/airwiki/search/2.0.0";
 pub const PUBLIC_CATALOG_PROTOCOL: &str = "/airwiki/public-catalog/1.0.0";
 pub const PUBLIC_SEARCH_PROTOCOL: &str = "/airwiki/public-search/1.0.0";
 pub const PUBLIC_BROWSE_PROTOCOL: &str = "/airwiki/public-browse/1.0.0";
+pub const PUBLIC_CATALOG_PROTOCOL_V2: &str = "/airwiki/public-catalog/2.0.0";
+pub const PUBLIC_SEARCH_PROTOCOL_V2: &str = "/airwiki/public-search/2.0.0";
+pub const PUBLIC_BROWSE_PROTOCOL_V2: &str = "/airwiki/public-browse/2.0.0";
 pub const MAX_QUERY_BYTES: usize = 2 * 1024;
 pub const MAX_SNIPPET_CHARS: usize = 1_200;
 pub const MAX_HEADING_OR_PAGE_CHARS: usize = 300;
@@ -24,6 +28,187 @@ pub const MAX_RESPONSE_BYTES: usize = 256 * 1024;
 pub const MIN_TOP_K: u8 = 1;
 pub const DEFAULT_TOP_K: u8 = 5;
 pub const MAX_TOP_K: u8 = 10;
+
+/// How confidently AirWiki can interpret an OKF bundle.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum OkfCompatibility {
+    DeclaredV02,
+    UndeclaredV02Compatible,
+    LegacyV01,
+    FutureRestricted { declared_version: String },
+}
+
+impl OkfCompatibility {
+    /// Content from future formats is kept local until AirWiki understands the
+    /// declared contract. Legacy v0.1 bundles remain readable but cannot gain
+    /// new disclosure after the v0.2 migration.
+    pub const fn permits_external_disclosure(&self) -> bool {
+        matches!(self, Self::DeclaredV02 | Self::UndeclaredV02Compatible)
+    }
+}
+
+/// A producer or reviewer identity following the OKF v0.2 actor convention.
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(transparent)]
+pub struct ActorId(String);
+
+impl ActorId {
+    pub fn parse(value: impl Into<String>) -> Result<Self, ActorIdParseError> {
+        let value = value.into();
+        let valid_prefixed = ["human:", "process:"].into_iter().any(|prefix| {
+            value
+                .strip_prefix(prefix)
+                .is_some_and(valid_prefixed_actor_id)
+        });
+        let valid_producer = value.split_once('/').is_some_and(|(producer, version)| {
+            valid_actor_part(producer) && valid_actor_part(version)
+        });
+        if valid_prefixed || valid_producer {
+            Ok(Self(value))
+        } else {
+            Err(ActorIdParseError)
+        }
+    }
+
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+
+    pub fn is_human(&self) -> bool {
+        self.0.starts_with("human:")
+    }
+}
+
+impl fmt::Display for ActorId {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str(&self.0)
+    }
+}
+
+impl FromStr for ActorId {
+    type Err = ActorIdParseError;
+
+    fn from_str(value: &str) -> Result<Self, Self::Err> {
+        Self::parse(value)
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Error)]
+#[error("actor does not follow the OKF v0.2 naming convention")]
+pub struct ActorIdParseError;
+
+fn valid_actor_part(value: &str) -> bool {
+    !value.is_empty()
+        && value.len() <= 160
+        && value.chars().all(|character| {
+            !character.is_whitespace() && !character.is_control() && character != '/'
+        })
+}
+
+fn valid_prefixed_actor_id(value: &str) -> bool {
+    !value.is_empty()
+        && value.len() <= 160
+        && value
+            .chars()
+            .all(|character| !character.is_whitespace() && !character.is_control())
+}
+
+#[cfg(test)]
+mod okf_contract_tests {
+    use super::*;
+
+    #[test]
+    fn actor_convention_accepts_only_one_producer_version_separator() {
+        assert!(ActorId::parse("codex/1.2").is_ok());
+        assert!(ActorId::parse("human:user/local").is_ok());
+        assert!(ActorId::parse("process:airwiki-wasm").is_ok());
+        assert!(ActorId::parse("producer/version/extra").is_err());
+        assert!(ActorId::parse("producer/").is_err());
+    }
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum TrustTier {
+    #[default]
+    Unverified,
+    MachineConfirmed,
+    HumanReviewed,
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum FreshnessState {
+    #[default]
+    NotDeclared,
+    Fresh,
+    Stale,
+    Invalid,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+pub struct ConceptAssurance {
+    pub trust: TrustTier,
+    pub freshness: FreshnessState,
+    pub verification_outdated: bool,
+}
+
+/// Typed, portable subset of an OKF v0.2 Attested Computation contract that
+/// AirWiki can execute with its deliberately narrow component-model runtime.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AttestedComputationContract {
+    pub runtime: String,
+    #[serde(default)]
+    pub parameters: Vec<AttestedParameter>,
+    pub computation: Option<String>,
+    pub executor: AttestedExecutor,
+    pub attester: AttestedArtifact,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AttestedParameter {
+    pub name: String,
+    #[serde(rename = "type")]
+    pub parameter_type: String,
+    pub required: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AttestedExecutor {
+    pub resource: String,
+    pub sha256: String,
+    #[serde(default)]
+    pub receipt: Vec<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AttestedArtifact {
+    pub resource: String,
+    pub sha256: String,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum OkfWarningCode {
+    BrokenLink,
+    InvalidGenerated,
+    InvalidVerified,
+    InvalidSources,
+    InvalidStaleAfter,
+    InvalidOptionalMetadata,
+    LegacyTimestamp,
+    LegacyCitations,
+    UnsupportedRuntime,
+    InvalidAttestedComputation,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct OkfWarning {
+    pub code: OkfWarningCode,
+    pub logical_path: String,
+    pub field: Option<String>,
+}
 
 /// Publication state. Only `Published` may be returned outside its source node.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -371,6 +556,10 @@ pub struct SearchHit {
     pub updated_at: DateTime<Utc>,
     pub rank: u32,
     pub node_id: String,
+    #[serde(default)]
+    pub assurance: Option<ConceptAssurance>,
+    #[serde(default)]
+    pub lifecycle_status: Option<String>,
 }
 
 impl SearchHit {

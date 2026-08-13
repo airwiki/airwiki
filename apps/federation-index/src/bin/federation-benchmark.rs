@@ -48,6 +48,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                     description: "Reproducible public routing benchmark".to_owned(),
                     languages: vec!["en".to_owned()],
                     concept_count: 10,
+                    okf_compatibility: None,
                     routing_terms: vec![topic],
                     routes: vec!["/ip4/127.0.0.1/tcp/42043".to_owned()],
                     updated_at: now,

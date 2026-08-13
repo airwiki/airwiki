@@ -12,7 +12,9 @@ use std::fs::{self, File};
 use std::io::Read;
 use std::path::{Path, PathBuf};
 
-use airwiki_types::{CollectionPolicy, DocumentStatus};
+use airwiki_types::{
+    CollectionPolicy, ConceptAssurance, DocumentStatus, FreshnessState, OkfWarning, TrustTier,
+};
 use anyhow::{Context, Result, bail};
 use chrono::{DateTime, NaiveDate, Utc};
 use pulldown_cmark::{Event, Parser, Tag, TagEnd};
@@ -158,11 +160,29 @@ pub struct KnowledgeConceptView {
     pub language: Option<String>,
     pub generator_model: Option<String>,
     pub reviewed_at: Option<DateTime<Utc>>,
+    pub lifecycle_status: String,
+    pub generated_by: Option<String>,
+    pub verified_by: Vec<String>,
+    pub sources: Vec<KnowledgeSourceView>,
+    pub stale_after: Option<String>,
+    pub assurance: ConceptAssurance,
+    pub warnings: Vec<OkfWarning>,
+    pub execution_available: bool,
     /// Flattened OKF/frontmatter fields outside the v0.1 and AirWiki
     /// profile understood by this viewer. They are preserved for display but
     /// never interpreted as permissions or publication state.
     pub extensions: BTreeMap<String, String>,
     pub fingerprint: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct KnowledgeSourceView {
+    pub id: Option<String>,
+    pub title: Option<String>,
+    pub resource: Option<String>,
+    pub author: Option<String>,
+    pub usage_count: Option<u64>,
+    pub last_modified: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -2254,6 +2274,22 @@ fn reconcile_concept(
         language,
         generator_model,
         reviewed_at,
+        lifecycle_status: lifecycle_status.unwrap_or_else(|| "stable".to_owned()),
+        generated_by: yaml.and_then(|value| yaml_string_at(value, &["generated", "by"])),
+        verified_by: yaml.map(verification_actors_yaml).unwrap_or_default(),
+        sources: yaml.map(source_views_yaml).unwrap_or_default(),
+        stale_after: yaml.and_then(|value| yaml_string_at(value, &["stale_after"])),
+        assurance: ConceptAssurance {
+            trust: if reviewed_at.is_some() {
+                TrustTier::HumanReviewed
+            } else {
+                TrustTier::Unverified
+            },
+            freshness: FreshnessState::NotDeclared,
+            verification_outdated: false,
+        },
+        warnings: Vec::new(),
+        execution_available: false,
         extensions,
         fingerprint: page.snapshot.fingerprint.clone(),
     }
@@ -2327,9 +2363,116 @@ fn projected_concept_view(
         language: None,
         generator_model: generator,
         reviewed_at,
+        lifecycle_status: projected.lifecycle_status.clone(),
+        generated_by: projected
+            .generation
+            .as_ref()
+            .and_then(|value| value.get("by"))
+            .and_then(JsonValue::as_str)
+            .map(ToOwned::to_owned),
+        verified_by: verification_actors_json(&projected.verifications),
+        sources: source_views_json(&projected.provenance),
+        stale_after: projected.stale_after.clone(),
+        assurance: projected.assurance,
+        warnings: projected.warnings.clone(),
+        execution_available: projected.attested_computation.is_some()
+            && projected.lifecycle_status == "stable"
+            && projected.assurance.freshness != FreshnessState::Stale,
         extensions,
         fingerprint: page.snapshot.fingerprint.clone(),
     }
+}
+
+fn verification_actors_yaml(metadata: &YamlValue) -> Vec<String> {
+    let Some(verified) = yaml_at(metadata, &["verified"]) else {
+        return Vec::new();
+    };
+    verified
+        .as_sequence()
+        .map(|entries| {
+            entries
+                .iter()
+                .filter_map(|entry| yaml_string_at(entry, &["by"]))
+                .collect()
+        })
+        .or_else(|| yaml_string_at(verified, &["by"]).map(|actor| vec![actor]))
+        .unwrap_or_default()
+}
+
+fn verification_actors_json(verified: &JsonValue) -> Vec<String> {
+    verified
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter_map(|entry| entry.get("by").and_then(JsonValue::as_str))
+        .map(ToOwned::to_owned)
+        .collect()
+}
+
+fn source_views_yaml(metadata: &YamlValue) -> Vec<KnowledgeSourceView> {
+    yaml_at(metadata, &["sources"])
+        .and_then(YamlValue::as_sequence)
+        .into_iter()
+        .flatten()
+        .filter_map(|source| {
+            let mapping = source.as_mapping()?;
+            Some(KnowledgeSourceView {
+                id: yaml_mapping_string(mapping, "id"),
+                title: yaml_mapping_string(mapping, "title"),
+                resource: yaml_mapping_string(mapping, "resource"),
+                author: yaml_mapping_string(mapping, "author"),
+                usage_count: yaml_mapping_u64(mapping, "usage_count"),
+                last_modified: yaml_mapping_string(mapping, "last_modified"),
+            })
+        })
+        .collect()
+}
+
+fn source_views_json(provenance: &JsonValue) -> Vec<KnowledgeSourceView> {
+    provenance
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter_map(|source| {
+            source.as_object()?;
+            Some(KnowledgeSourceView {
+                id: source
+                    .get("id")
+                    .and_then(JsonValue::as_str)
+                    .map(ToOwned::to_owned),
+                title: source
+                    .get("title")
+                    .and_then(JsonValue::as_str)
+                    .map(ToOwned::to_owned),
+                resource: source
+                    .get("resource")
+                    .and_then(JsonValue::as_str)
+                    .map(ToOwned::to_owned),
+                author: source
+                    .get("author")
+                    .and_then(JsonValue::as_str)
+                    .map(ToOwned::to_owned),
+                usage_count: source.get("usage_count").and_then(JsonValue::as_u64),
+                last_modified: source
+                    .get("last_modified")
+                    .and_then(JsonValue::as_str)
+                    .map(ToOwned::to_owned),
+            })
+        })
+        .collect()
+}
+
+fn yaml_mapping_string(mapping: &serde_yaml::Mapping, key: &str) -> Option<String> {
+    mapping
+        .get(YamlValue::String(key.to_owned()))
+        .and_then(YamlValue::as_str)
+        .map(ToOwned::to_owned)
+}
+
+fn yaml_mapping_u64(mapping: &serde_yaml::Mapping, key: &str) -> Option<u64> {
+    mapping
+        .get(YamlValue::String(key.to_owned()))
+        .and_then(YamlValue::as_u64)
 }
 
 fn concept_extensions(metadata: &[(String, String)]) -> BTreeMap<String, String> {

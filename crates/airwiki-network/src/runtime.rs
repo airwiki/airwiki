@@ -2015,6 +2015,8 @@ mod tests {
                 updated_at: Utc::now(),
                 rank: 1,
                 node_id: "backend-must-not-control-this".to_owned(),
+                assurance: None,
+                lifecycle_status: Some("stable".to_owned()),
             });
         }
         response
@@ -2323,6 +2325,8 @@ mod tests {
             updated_at: Utc::now(),
             rank,
             node_id: node.to_owned(),
+            assurance: None,
+            lifecycle_status: None,
         }
     }
 

@@ -1,0 +1,22 @@
+package airwiki:attested@1.0.0;
+
+interface executor {
+  execute: func(parameters-json: string) -> string;
+}
+
+interface attester {
+  enum verdict {
+    accepted,
+    rejected,
+  }
+
+  attest: func(contract-json: string, parameters-json: string, receipt-json: string) -> verdict;
+}
+
+world executor-component {
+  export executor;
+}
+
+world attester-component {
+  export attester;
+}

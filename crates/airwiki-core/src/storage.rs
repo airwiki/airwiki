@@ -5,8 +5,9 @@ use std::str::FromStr;
 use std::sync::{Arc, Mutex, MutexGuard};
 
 use airwiki_types::{
-    CollectionPolicy, ConceptType, DisclosureGate, DisclosureLease, DisclosureMutationGuard,
-    DocumentStatus, EnrichmentDraft, PublicConceptSummary, SearchHit, SearchPurpose,
+    AttestedComputationContract, CollectionPolicy, ConceptAssurance, ConceptType, DisclosureGate,
+    DisclosureLease, DisclosureMutationGuard, DocumentStatus, EnrichmentDraft, FreshnessState,
+    OkfCompatibility, OkfWarning, PublicConceptSummary, SearchHit, SearchPurpose, TrustTier,
 };
 use anyhow::{Context, Result, anyhow, bail};
 use chrono::{DateTime, Utc};
@@ -27,6 +28,9 @@ const MIGRATION_6: &str = include_str!("../migrations/0006_bootstrap_registry_st
 const MIGRATION_7: &str = include_str!("../migrations/0007_okf_v02_origins_and_capabilities.sql");
 const MIGRATION_8: &str = include_str!("../migrations/0008_okf_projection_search.sql");
 const MIGRATION_9: &str = include_str!("../migrations/0009_application_capability_hardening.sql");
+const MIGRATION_10: &str = include_str!("../migrations/0010_okf_v02_assurance.sql");
+const MIGRATION_11: &str = include_str!("../migrations/0011_open_okf_lifecycle.sql");
+const MIGRATION_12: &str = include_str!("../migrations/0012_attested_computation_contracts.sql");
 
 const APPLICATION_MUTATIONS_PER_MINUTE: u32 = 30;
 const APPLICATION_WIKI_CREATIONS_PER_HOUR: u32 = 5;
@@ -105,8 +109,32 @@ pub struct CollectionRecord {
     pub origin: WikiOrigin,
     pub indexing_mode: IndexingMode,
     pub okf_version: String,
+    pub declared_okf_version: Option<String>,
+    pub okf_compatibility: OkfCompatibility,
+    pub managed_size_bytes: u64,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
+}
+
+#[derive(Debug, Clone)]
+pub struct NewCollection {
+    pub id: Uuid,
+    pub name: String,
+    pub source_folder: PathBuf,
+    pub wiki_folder: PathBuf,
+    pub policy: CollectionPolicy,
+    pub origin: WikiOrigin,
+    pub indexing_mode: IndexingMode,
+}
+
+#[derive(Debug, Clone)]
+pub struct NewManagedCollection {
+    pub id: Uuid,
+    pub name: String,
+    pub bundle_root: PathBuf,
+    pub origin: WikiOrigin,
+    pub replacement_fingerprint: String,
+    pub owner_app_id: Option<Uuid>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -191,9 +219,13 @@ pub struct OkfConceptProjectionRecord {
     pub generation: Option<serde_json::Value>,
     pub verifications: serde_json::Value,
     pub provenance: serde_json::Value,
+    pub stale_after: Option<String>,
+    pub assurance: ConceptAssurance,
+    pub warnings: Vec<OkfWarning>,
     pub version: Option<String>,
     pub fingerprint: String,
     pub unknown_frontmatter: serde_json::Value,
+    pub attested_computation: Option<AttestedComputationContract>,
     pub indexed_at: DateTime<Utc>,
 }
 
@@ -202,9 +234,87 @@ pub struct ApplicationCapabilityRecord {
     pub app_id: Uuid,
     pub display_name: String,
     pub owner_kind: String,
+    pub producer: String,
     pub capability_prefix: String,
     pub secret_hash: String,
     pub revoked_at: Option<DateTime<Utc>>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ApplicationGrantRecord {
+    pub app_id: Uuid,
+    pub collection_id: Uuid,
+    pub role: ApplicationWikiRole,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ComputationRunState {
+    AwaitingConfirmation,
+    Running,
+    Completed,
+    Rejected,
+    Failed,
+    Expired,
+}
+
+impl ComputationRunState {
+    const fn as_str(self) -> &'static str {
+        match self {
+            Self::AwaitingConfirmation => "awaiting_confirmation",
+            Self::Running => "running",
+            Self::Completed => "completed",
+            Self::Rejected => "rejected",
+            Self::Failed => "failed",
+            Self::Expired => "expired",
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ComputationRunRecord {
+    pub id: Uuid,
+    pub collection_id: Uuid,
+    pub logical_path: String,
+    pub actor_kind: String,
+    pub actor_id: Option<String>,
+    pub state: ComputationRunState,
+    pub contract_fingerprint: String,
+    pub executor_sha256: String,
+    pub attester_sha256: String,
+    pub parameter_schema: serde_json::Value,
+    pub receipt_sha256: Option<String>,
+    pub verdict: Option<String>,
+    pub requested_at: DateTime<Utc>,
+    pub confirmed_at: Option<DateTime<Utc>>,
+    pub completed_at: Option<DateTime<Utc>>,
+    pub expires_at: DateTime<Utc>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ManagedBundleMutationState {
+    Prepared,
+    FileReplaced,
+    RecoveryRequired,
+}
+
+impl ManagedBundleMutationState {
+    const fn as_str(self) -> &'static str {
+        match self {
+            Self::Prepared => "prepared",
+            Self::FileReplaced => "file_replaced",
+            Self::RecoveryRequired => "recovery_required",
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ManagedBundleMutationRecord {
+    pub id: Uuid,
+    pub collection_id: Uuid,
+    pub logical_path: String,
+    pub state: ManagedBundleMutationState,
+    pub previous_fingerprint: Option<String>,
+    pub replacement_fingerprint: String,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -577,6 +687,8 @@ pub(crate) struct RankedChunk {
     pub logical_resource_uri: String,
     pub source_sha256: String,
     pub updated_at: DateTime<Utc>,
+    pub assurance: Option<ConceptAssurance>,
+    pub lifecycle_status: Option<String>,
     pub lexical_score: Option<f64>,
 }
 
@@ -874,7 +986,25 @@ impl Database {
             tx.pragma_update(None, "user_version", 9)?;
             tx.commit()?;
         }
-        if version > 9 {
+        if version < 10 {
+            let tx = connection.transaction()?;
+            tx.execute_batch(MIGRATION_10)?;
+            tx.pragma_update(None, "user_version", 10)?;
+            tx.commit()?;
+        }
+        if version < 11 {
+            let tx = connection.transaction()?;
+            tx.execute_batch(MIGRATION_11)?;
+            tx.pragma_update(None, "user_version", 11)?;
+            tx.commit()?;
+        }
+        if version < 12 {
+            let tx = connection.transaction()?;
+            tx.execute_batch(MIGRATION_12)?;
+            tx.pragma_update(None, "user_version", 12)?;
+            tx.commit()?;
+        }
+        if version > 12 {
             bail!("database schema {version} is newer than this application supports");
         }
         let database = Self {
@@ -1092,53 +1222,101 @@ impl Database {
         name: impl Into<String>,
         source_folder: impl AsRef<Path>,
         wiki_folder: impl AsRef<Path>,
-        mut policy: CollectionPolicy,
+        policy: CollectionPolicy,
         origin: WikiOrigin,
         indexing_mode: IndexingMode,
     ) -> Result<CollectionRecord> {
-        match (origin, indexing_mode) {
-            (WikiOrigin::Folder, IndexingMode::Continuous | IndexingMode::Manual)
-            | (WikiOrigin::ImportedOkf | WikiOrigin::AiMemory, IndexingMode::NotApplicable) => {}
-            _ => bail!("indexing mode is not valid for this wiki origin"),
-        }
-        policy.normalize();
-        let record = CollectionRecord {
+        self.create_collection_with_id_and_origin(NewCollection {
             id: Uuid::new_v4(),
-            name: name.into().trim().to_owned(),
-            source_folder: absolute_path(source_folder.as_ref())?,
-            wiki_folder: absolute_path(wiki_folder.as_ref())?,
+            name: name.into(),
+            source_folder: source_folder.as_ref().to_path_buf(),
+            wiki_folder: wiki_folder.as_ref().to_path_buf(),
             policy,
             origin,
             indexing_mode,
-            okf_version: "0.2".to_owned(),
-            created_at: Utc::now(),
-            updated_at: Utc::now(),
-        };
-        if record.name.is_empty() {
-            bail!("collection name must not be empty");
+        })
+    }
+
+    pub fn create_collection_with_id_and_origin(
+        &self,
+        input: NewCollection,
+    ) -> Result<CollectionRecord> {
+        let record = build_collection_record(
+            input.id,
+            input.name,
+            &input.source_folder,
+            &input.wiki_folder,
+            input.policy,
+            input.origin,
+            input.indexing_mode,
+        )?;
+        let connection = self.connection()?;
+        insert_collection(&connection, &record)?;
+        Ok(record)
+    }
+
+    pub fn create_managed_collection_with_mutation(
+        &self,
+        input: NewManagedCollection,
+    ) -> Result<(CollectionRecord, ManagedBundleMutationRecord)> {
+        if !matches!(input.origin, WikiOrigin::ImportedOkf | WikiOrigin::AiMemory) {
+            bail!("only managed wiki origins can begin with a filesystem mutation");
         }
-        self.connection()?.execute(
-            "INSERT INTO collections
-             (id,name,source_folder,wiki_folder,local_only,peer_shareable,allow_external_ai,internet_public,
-              origin,indexing_mode,okf_version,created_at,updated_at)
-             VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13)",
+        if (input.origin == WikiOrigin::AiMemory) != input.owner_app_id.is_some() {
+            bail!("AI memory creation requires exactly one owning application");
+        }
+        let record = build_collection_record(
+            input.id,
+            input.name,
+            &input.bundle_root,
+            &input.bundle_root,
+            CollectionPolicy::local_only(),
+            input.origin,
+            IndexingMode::NotApplicable,
+        )?;
+        let mutation = ManagedBundleMutationRecord {
+            id: Uuid::new_v4(),
+            collection_id: input.id,
+            logical_path: ".".to_owned(),
+            state: ManagedBundleMutationState::Prepared,
+            previous_fingerprint: None,
+            replacement_fingerprint: input.replacement_fingerprint,
+        };
+        let now = Utc::now().to_rfc3339();
+        let mut connection = self.connection()?;
+        let tx = connection.transaction()?;
+        insert_collection(&tx, &record)?;
+        if let Some(app_id) = input.owner_app_id {
+            let active = tx.query_row(
+                "SELECT EXISTS(SELECT 1 FROM application_capabilities
+                               WHERE app_id=?1 AND revoked_at IS NULL)",
+                [app_id.to_string()],
+                |row| row.get::<_, bool>(0),
+            )?;
+            if !active {
+                bail!("application capability is unavailable");
+            }
+            tx.execute(
+                "INSERT INTO application_wiki_grants
+                 (app_id,collection_id,role,granted_at,confirmed_at)
+                 VALUES (?1,?2,'owner',?3,?3)",
+                params![app_id.to_string(), record.id.to_string(), now],
+            )?;
+        }
+        tx.execute(
+            "INSERT INTO managed_bundle_mutations
+             (id,collection_id,logical_path,state,previous_fingerprint,replacement_fingerprint,created_at,updated_at)
+             VALUES (?1,?2,?3,'prepared',NULL,?4,?5,?5)",
             params![
-                record.id.to_string(),
-                record.name,
-                path_text(&record.source_folder),
-                path_text(&record.wiki_folder),
-                record.policy.local_only,
-                record.policy.peer_shareable,
-                record.policy.allow_external_ai,
-                record.policy.internet_public,
-                record.origin.as_str(),
-                record.indexing_mode.as_str(),
-                record.okf_version,
-                record.created_at.to_rfc3339(),
-                record.updated_at.to_rfc3339(),
+                mutation.id.to_string(),
+                mutation.collection_id.to_string(),
+                mutation.logical_path,
+                mutation.replacement_fingerprint,
+                now,
             ],
         )?;
-        Ok(record)
+        tx.commit()?;
+        Ok((record, mutation))
     }
 
     pub fn update_collection_indexing_mode(
@@ -1199,8 +1377,9 @@ impl Database {
                 "INSERT INTO okf_concept_projection
                  (collection_id,concept_id,logical_path,concept_type,title,description,tags_json,
                   lifecycle_status,generation_json,verifications_json,provenance_json,version,
-                  fingerprint,unknown_frontmatter_json,indexed_at)
-                 VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15)",
+                  fingerprint,unknown_frontmatter_json,indexed_at,stale_after,trust_tier,
+                  freshness_state,verification_outdated,warnings_json,attested_computation_json)
+                 VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18,?19,?20,?21)",
                 params![
                     collection_id.to_string(),
                     concept_id.to_string(),
@@ -1217,6 +1396,12 @@ impl Database {
                     concept.fingerprint,
                     serde_json::to_string(&serde_json::to_value(&concept.unknown_frontmatter)?)?,
                     now,
+                    concept.stale_after,
+                    trust_tier_sql_value(concept.assurance.trust),
+                    freshness_state_sql_value(concept.assurance.freshness),
+                    concept.assurance.verification_outdated,
+                    serde_json::to_string(&concept.warnings)?,
+                    concept.attested_computation.as_ref().map(serde_json::to_string).transpose()?,
                 ],
             )?;
             tx.execute(
@@ -1248,7 +1433,8 @@ impl Database {
         let mut statement = connection.prepare(
             "SELECT collection_id,concept_id,logical_path,concept_type,title,description,tags_json,
              lifecycle_status,generation_json,verifications_json,provenance_json,version,fingerprint,
-             unknown_frontmatter_json,indexed_at FROM okf_concept_projection
+             unknown_frontmatter_json,indexed_at,stale_after,trust_tier,freshness_state,
+             verification_outdated,warnings_json,attested_computation_json FROM okf_concept_projection
              WHERE collection_id=?1 ORDER BY logical_path COLLATE NOCASE",
         )?;
         let rows = statement.query_map([collection_id.to_string()], |row| {
@@ -1264,9 +1450,20 @@ impl Database {
                 generation: row.get::<_, Option<String>>(8)?.map(json_sql).transpose()?,
                 verifications: json_sql(row.get(9)?)?,
                 provenance: json_sql(row.get(10)?)?,
+                stale_after: row.get(15)?,
+                assurance: ConceptAssurance {
+                    trust: trust_tier_sql(row.get(16)?)?,
+                    freshness: freshness_state_sql(row.get(17)?)?,
+                    verification_outdated: row.get(18)?,
+                },
+                warnings: json_sql(row.get(19)?)?,
                 version: row.get(11)?,
                 fingerprint: row.get(12)?,
                 unknown_frontmatter: json_sql(row.get(13)?)?,
+                attested_computation: row
+                    .get::<_, Option<String>>(20)?
+                    .map(json_sql)
+                    .transpose()?,
                 indexed_at: datetime_sql(row.get(14)?)?,
             })
         })?;
@@ -1278,6 +1475,7 @@ impl Database {
         app_id: Uuid,
         display_name: &str,
         owner_kind: &str,
+        producer: &str,
         capability_prefix: &str,
         secret_hash: &str,
     ) -> Result<ApplicationCapabilityRecord> {
@@ -1285,18 +1483,23 @@ impl Database {
         if display_name.is_empty() || display_name.chars().count() > 120 {
             bail!("application display name is invalid");
         }
-        if owner_kind.is_empty() || owner_kind.len() > 64 || capability_prefix.len() != 16 {
+        if owner_kind.is_empty()
+            || owner_kind.len() > 64
+            || producer.parse::<airwiki_types::ActorId>().is_err()
+            || capability_prefix.len() != 16
+        {
             bail!("application capability metadata is invalid");
         }
         let now = Utc::now();
         self.connection()?.execute(
             "INSERT INTO application_capabilities
-             (app_id,display_name,owner_kind,secret_hash,capability_prefix,created_at)
-             VALUES (?1,?2,?3,?4,?5,?6)",
+             (app_id,display_name,owner_kind,producer,secret_hash,capability_prefix,created_at)
+             VALUES (?1,?2,?3,?4,?5,?6,?7)",
             params![
                 app_id.to_string(),
                 display_name,
                 owner_kind,
+                producer,
                 secret_hash,
                 capability_prefix,
                 now.to_rfc3339()
@@ -1306,6 +1509,7 @@ impl Database {
             app_id,
             display_name: display_name.to_owned(),
             owner_kind: owner_kind.to_owned(),
+            producer: producer.to_owned(),
             capability_prefix: capability_prefix.to_owned(),
             secret_hash: secret_hash.to_owned(),
             revoked_at: None,
@@ -1318,7 +1522,7 @@ impl Database {
     ) -> Result<Option<ApplicationCapabilityRecord>> {
         self.connection()?
             .query_row(
-                "SELECT app_id,display_name,owner_kind,capability_prefix,secret_hash,revoked_at
+            "SELECT app_id,display_name,owner_kind,producer,capability_prefix,secret_hash,revoked_at
                  FROM application_capabilities WHERE capability_prefix=?1",
                 [capability_prefix],
                 |row| {
@@ -1326,10 +1530,11 @@ impl Database {
                         app_id: uuid_sql(row.get(0)?)?,
                         display_name: row.get(1)?,
                         owner_kind: row.get(2)?,
-                        capability_prefix: row.get(3)?,
-                        secret_hash: row.get(4)?,
+                        producer: row.get(3)?,
+                        capability_prefix: row.get(4)?,
+                        secret_hash: row.get(5)?,
                         revoked_at: row
-                            .get::<_, Option<String>>(5)?
+                            .get::<_, Option<String>>(6)?
                             .map(datetime_sql)
                             .transpose()?,
                     })
@@ -1337,6 +1542,154 @@ impl Database {
             )
             .optional()
             .map_err(Into::into)
+    }
+
+    pub fn application_capability_by_app_id(
+        &self,
+        app_id: Uuid,
+    ) -> Result<Option<ApplicationCapabilityRecord>> {
+        self.connection()?
+            .query_row(
+                "SELECT app_id,display_name,owner_kind,producer,capability_prefix,secret_hash,revoked_at
+                 FROM application_capabilities WHERE app_id=?1 AND revoked_at IS NULL",
+                [app_id.to_string()],
+                |row| {
+                    Ok(ApplicationCapabilityRecord {
+                        app_id: uuid_sql(row.get(0)?)?,
+                        display_name: row.get(1)?,
+                        owner_kind: row.get(2)?,
+                        producer: row.get(3)?,
+                        capability_prefix: row.get(4)?,
+                        secret_hash: row.get(5)?,
+                        revoked_at: row
+                            .get::<_, Option<String>>(6)?
+                            .map(datetime_sql)
+                            .transpose()?,
+                    })
+                },
+            )
+            .optional()
+            .map_err(Into::into)
+    }
+
+    pub fn application_capability_any_by_app_id(
+        &self,
+        app_id: Uuid,
+    ) -> Result<Option<ApplicationCapabilityRecord>> {
+        self.connection()?
+            .query_row(
+                "SELECT app_id,display_name,owner_kind,producer,capability_prefix,secret_hash,revoked_at
+                 FROM application_capabilities WHERE app_id=?1",
+                [app_id.to_string()],
+                |row| {
+                    Ok(ApplicationCapabilityRecord {
+                        app_id: uuid_sql(row.get(0)?)?,
+                        display_name: row.get(1)?,
+                        owner_kind: row.get(2)?,
+                        producer: row.get(3)?,
+                        capability_prefix: row.get(4)?,
+                        secret_hash: row.get(5)?,
+                        revoked_at: row
+                            .get::<_, Option<String>>(6)?
+                            .map(datetime_sql)
+                            .transpose()?,
+                    })
+                },
+            )
+            .optional()
+            .map_err(Into::into)
+    }
+
+    pub fn list_application_capabilities(&self) -> Result<Vec<ApplicationCapabilityRecord>> {
+        let connection = self.connection()?;
+        let mut statement = connection.prepare(
+            "SELECT app_id,display_name,owner_kind,producer,capability_prefix,secret_hash,revoked_at
+             FROM application_capabilities ORDER BY display_name COLLATE NOCASE,app_id",
+        )?;
+        let rows = statement.query_map([], |row| {
+            Ok(ApplicationCapabilityRecord {
+                app_id: uuid_sql(row.get(0)?)?,
+                display_name: row.get(1)?,
+                owner_kind: row.get(2)?,
+                producer: row.get(3)?,
+                capability_prefix: row.get(4)?,
+                secret_hash: row.get(5)?,
+                revoked_at: row
+                    .get::<_, Option<String>>(6)?
+                    .map(datetime_sql)
+                    .transpose()?,
+            })
+        })?;
+        rows.collect::<rusqlite::Result<_>>().map_err(Into::into)
+    }
+
+    pub fn list_application_wiki_grants(&self) -> Result<Vec<ApplicationGrantRecord>> {
+        let connection = self.connection()?;
+        let mut statement = connection.prepare(
+            "SELECT app_id,collection_id,role FROM application_wiki_grants
+             ORDER BY app_id,collection_id",
+        )?;
+        let rows = statement.query_map([], |row| {
+            let role = match row.get::<_, String>(2)?.as_str() {
+                "owner" => ApplicationWikiRole::Owner,
+                "reader" => ApplicationWikiRole::Reader,
+                "editor" => ApplicationWikiRole::Editor,
+                value => {
+                    return Err(to_sql_error(format!(
+                        "invalid application wiki role {value}"
+                    )));
+                }
+            };
+            Ok(ApplicationGrantRecord {
+                app_id: uuid_sql(row.get(0)?)?,
+                collection_id: uuid_sql(row.get(1)?)?,
+                role,
+            })
+        })?;
+        rows.collect::<rusqlite::Result<_>>().map_err(Into::into)
+    }
+
+    pub fn rotate_application_capability(
+        &self,
+        app_id: Uuid,
+        producer: &str,
+        capability_prefix: &str,
+        secret_hash: &str,
+    ) -> Result<()> {
+        if capability_prefix.len() != 16 || secret_hash.len() != 64 {
+            bail!("application capability secret metadata is invalid");
+        }
+        let count = self.connection()?.execute(
+            "UPDATE application_capabilities
+             SET capability_prefix=?3,secret_hash=?4,revoked_at=NULL,last_used_at=NULL,
+                 mutations_window_started_at=NULL,mutations_in_window=0,
+                 creations_window_started_at=NULL,creations_in_window=0
+             WHERE app_id=?1 AND producer=?2",
+            params![app_id.to_string(), producer, capability_prefix, secret_hash],
+        )?;
+        ensure_changed(count, "application capability", app_id)
+    }
+
+    pub fn authenticate_application_capability(
+        &self,
+        capability: &str,
+    ) -> Result<Option<ApplicationCapabilityRecord>> {
+        if capability.len() < 80 || capability.len() > 256 {
+            return Ok(None);
+        }
+        let prefix = &capability[..16];
+        let Some(record) = self.application_capability_by_prefix(prefix)? else {
+            return Ok(None);
+        };
+        if record.revoked_at.is_some() {
+            return Ok(None);
+        }
+        let actual = hex::encode(Sha256::digest(capability.as_bytes()));
+        if constant_time_eq(actual.as_bytes(), record.secret_hash.as_bytes()) {
+            Ok(Some(record))
+        } else {
+            Ok(None)
+        }
     }
 
     pub fn set_application_capability_revoked(&self, app_id: Uuid, revoked: bool) -> Result<()> {
@@ -1354,7 +1707,20 @@ impl Database {
         role: Option<ApplicationWikiRole>,
     ) -> Result<()> {
         let connection = self.connection()?;
+        let existing_role = connection
+            .query_row(
+                "SELECT role FROM application_wiki_grants WHERE app_id=?1 AND collection_id=?2",
+                params![app_id.to_string(), collection_id.to_string()],
+                |row| row.get::<_, String>(0),
+            )
+            .optional()?;
+        if existing_role.as_deref() == Some("owner") {
+            bail!("application ownership cannot be changed or removed");
+        }
         if let Some(role) = role {
+            if role == ApplicationWikiRole::Owner {
+                bail!("application ownership cannot be granted after wiki creation");
+            }
             let origin: String = connection.query_row(
                 "SELECT origin FROM collections WHERE id=?1",
                 [collection_id.to_string()],
@@ -1407,6 +1773,7 @@ impl Database {
         let mut statement = connection.prepare(
             "SELECT c.id,c.name,c.source_folder,c.wiki_folder,c.local_only,c.peer_shareable,
              c.allow_external_ai,c.internet_public,c.origin,c.indexing_mode,c.okf_version,
+             c.declared_okf_version,c.okf_compatibility,c.managed_size_bytes,
              c.created_at,c.updated_at FROM collections c
              JOIN application_wiki_grants g ON g.collection_id=c.id
              JOIN application_capabilities a ON a.app_id=g.app_id
@@ -1415,6 +1782,113 @@ impl Database {
         )?;
         let rows = statement.query_map([app_id.to_string()], collection_from_row)?;
         rows.collect::<rusqlite::Result<_>>().map_err(Into::into)
+    }
+
+    pub fn create_computation_run(&self, run: &ComputationRunRecord) -> Result<()> {
+        self.connection()?.execute(
+            "INSERT INTO computation_runs
+             (id,collection_id,logical_path,actor_kind,actor_id,state,contract_fingerprint,
+              executor_sha256,attester_sha256,parameter_schema_json,receipt_sha256,verdict,
+              requested_at,confirmed_at,completed_at,expires_at)
+             VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,NULL,NULL,?11,NULL,NULL,?12)",
+            params![
+                run.id.to_string(),
+                run.collection_id.to_string(),
+                run.logical_path,
+                run.actor_kind,
+                run.actor_id,
+                run.state.as_str(),
+                run.contract_fingerprint,
+                run.executor_sha256,
+                run.attester_sha256,
+                serde_json::to_string(&run.parameter_schema)?,
+                run.requested_at.to_rfc3339(),
+                run.expires_at.to_rfc3339(),
+            ],
+        )?;
+        Ok(())
+    }
+
+    pub fn computation_run(&self, id: Uuid) -> Result<Option<ComputationRunRecord>> {
+        self.connection()?
+            .query_row(
+                "SELECT id,collection_id,logical_path,actor_kind,actor_id,state,
+                 contract_fingerprint,executor_sha256,attester_sha256,parameter_schema_json,
+                 receipt_sha256,verdict,requested_at,confirmed_at,completed_at,expires_at
+                 FROM computation_runs WHERE id=?1",
+                [id.to_string()],
+                computation_run_from_row,
+            )
+            .optional()
+            .map_err(Into::into)
+    }
+
+    /// Closes runs that cannot be resumed after a desktop-runtime restart.
+    ///
+    /// Parameter values deliberately live only in memory, so replaying either
+    /// an unconfirmed or interrupted run would weaken the consent boundary.
+    pub fn close_orphaned_computation_runs(&self) -> Result<usize> {
+        let now = Utc::now().to_rfc3339();
+        let connection = self.connection()?;
+        let awaiting = connection.execute(
+            "UPDATE computation_runs SET state='expired',completed_at=?1
+             WHERE state='awaiting_confirmation'",
+            [&now],
+        )?;
+        let running = connection.execute(
+            "UPDATE computation_runs SET state='failed',completed_at=?1
+             WHERE state='running'",
+            [&now],
+        )?;
+        Ok(awaiting.saturating_add(running))
+    }
+
+    pub fn set_computation_run_state(
+        &self,
+        id: Uuid,
+        state: ComputationRunState,
+        receipt_sha256: Option<&str>,
+        verdict: Option<&str>,
+    ) -> Result<()> {
+        let now = Utc::now().to_rfc3339();
+        let confirmed_at = matches!(state, ComputationRunState::Running).then_some(now.as_str());
+        let completed_at = matches!(
+            state,
+            ComputationRunState::Completed
+                | ComputationRunState::Rejected
+                | ComputationRunState::Failed
+                | ComputationRunState::Expired
+        )
+        .then_some(now.as_str());
+        let expected_state = match state {
+            ComputationRunState::Running
+            | ComputationRunState::Rejected
+            | ComputationRunState::Expired => ComputationRunState::AwaitingConfirmation,
+            ComputationRunState::Completed | ComputationRunState::Failed => {
+                ComputationRunState::Running
+            }
+            ComputationRunState::AwaitingConfirmation => {
+                bail!("a computation run cannot return to awaiting confirmation")
+            }
+        };
+        let count = self.connection()?.execute(
+            "UPDATE computation_runs SET state=?2,
+             confirmed_at=COALESCE(confirmed_at,?3),completed_at=COALESCE(completed_at,?4),
+             receipt_sha256=?5,verdict=?6 WHERE id=?1 AND state=?7",
+            params![
+                id.to_string(),
+                state.as_str(),
+                confirmed_at,
+                completed_at,
+                receipt_sha256,
+                verdict,
+                expected_state.as_str(),
+            ],
+        )?;
+        if count != 1 {
+            bail!("computation run is unavailable or its state changed");
+        }
+        Ok(())
     }
 
     pub fn upsert_okf_concept_projection(
@@ -1430,22 +1904,29 @@ impl Database {
             "INSERT INTO okf_concept_projection
              (collection_id,concept_id,logical_path,concept_type,title,description,tags_json,
               lifecycle_status,generation_json,verifications_json,provenance_json,version,
-              fingerprint,unknown_frontmatter_json,indexed_at)
-             VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15)
+              fingerprint,unknown_frontmatter_json,indexed_at,stale_after,trust_tier,
+              freshness_state,verification_outdated,warnings_json,attested_computation_json)
+             VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18,?19,?20,?21)
              ON CONFLICT(collection_id,logical_path) DO UPDATE SET
               concept_type=excluded.concept_type,title=excluded.title,description=excluded.description,
               tags_json=excluded.tags_json,lifecycle_status=excluded.lifecycle_status,
               generation_json=excluded.generation_json,verifications_json=excluded.verifications_json,
               provenance_json=excluded.provenance_json,version=excluded.version,
               fingerprint=excluded.fingerprint,unknown_frontmatter_json=excluded.unknown_frontmatter_json,
-              indexed_at=excluded.indexed_at",
+              indexed_at=excluded.indexed_at,stale_after=excluded.stale_after,
+              trust_tier=excluded.trust_tier,freshness_state=excluded.freshness_state,
+              verification_outdated=excluded.verification_outdated,warnings_json=excluded.warnings_json,
+              attested_computation_json=excluded.attested_computation_json",
             params![collection_id.to_string(), concept_id.to_string(), concept.logical_path,
                 concept.concept_type, concept.title, concept.description, serde_json::to_string(&concept.tags)?,
                 concept.lifecycle_status, yaml_json(concept.generated.as_ref())?,
                 yaml_json(concept.verified.as_ref())?.unwrap_or_else(|| "[]".to_owned()),
                 yaml_json(concept.sources.as_ref())?.unwrap_or_else(|| "[]".to_owned()), concept.version,
                 concept.fingerprint, serde_json::to_string(&serde_json::to_value(&concept.unknown_frontmatter)?)?,
-                now.to_rfc3339()],
+                now.to_rfc3339(), concept.stale_after, trust_tier_sql_value(concept.assurance.trust),
+                freshness_state_sql_value(concept.assurance.freshness), concept.assurance.verification_outdated,
+                serde_json::to_string(&concept.warnings)?,
+                concept.attested_computation.as_ref().map(serde_json::to_string).transpose()?],
         )?;
         tx.execute(
             "DELETE FROM okf_projection_fts WHERE collection_id=?1 AND concept_id=?2",
@@ -1525,7 +2006,124 @@ impl Database {
         Ok(())
     }
 
+    pub fn ensure_application_managed_size(
+        &self,
+        app_id: Uuid,
+        replacement_wiki_id: Uuid,
+        replacement_bytes: u64,
+    ) -> Result<()> {
+        const MAX_MANAGED_BYTES: u64 = 256 * 1024 * 1024;
+        let current: u64 = self.connection()?.query_row(
+            "SELECT COALESCE(SUM(c.managed_size_bytes),0) FROM collections c
+             JOIN application_wiki_grants g ON g.collection_id=c.id
+             WHERE g.app_id=?1 AND g.role='owner' AND c.id!=?2",
+            params![app_id.to_string(), replacement_wiki_id.to_string()],
+            |row| row.get(0),
+        )?;
+        if current.saturating_add(replacement_bytes) > MAX_MANAGED_BYTES {
+            bail!("application managed memory limit exceeded");
+        }
+        Ok(())
+    }
+
+    pub fn begin_managed_bundle_mutation(
+        &self,
+        collection_id: Uuid,
+        logical_path: &str,
+        previous_fingerprint: Option<&str>,
+        replacement_fingerprint: &str,
+    ) -> Result<ManagedBundleMutationRecord> {
+        let id = Uuid::new_v4();
+        let now = Utc::now().to_rfc3339();
+        self.connection()?.execute(
+            "INSERT INTO managed_bundle_mutations
+             (id,collection_id,logical_path,state,previous_fingerprint,replacement_fingerprint,created_at,updated_at)
+             VALUES (?1,?2,?3,'prepared',?4,?5,?6,?6)",
+            params![
+                id.to_string(),
+                collection_id.to_string(),
+                logical_path,
+                previous_fingerprint,
+                replacement_fingerprint,
+                now,
+            ],
+        )?;
+        Ok(ManagedBundleMutationRecord {
+            id,
+            collection_id,
+            logical_path: logical_path.to_owned(),
+            state: ManagedBundleMutationState::Prepared,
+            previous_fingerprint: previous_fingerprint.map(ToOwned::to_owned),
+            replacement_fingerprint: replacement_fingerprint.to_owned(),
+        })
+    }
+
+    pub fn set_managed_bundle_mutation_state(
+        &self,
+        id: Uuid,
+        state: ManagedBundleMutationState,
+    ) -> Result<()> {
+        let count = self.connection()?.execute(
+            "UPDATE managed_bundle_mutations SET state=?2,updated_at=?3 WHERE id=?1",
+            params![id.to_string(), state.as_str(), Utc::now().to_rfc3339()],
+        )?;
+        ensure_changed(count, "managed bundle mutation", id)
+    }
+
+    pub fn complete_managed_bundle_mutation(&self, id: Uuid) -> Result<()> {
+        let count = self.connection()?.execute(
+            "DELETE FROM managed_bundle_mutations WHERE id=?1",
+            [id.to_string()],
+        )?;
+        ensure_changed(count, "managed bundle mutation", id)
+    }
+
+    pub fn pending_managed_bundle_mutations(&self) -> Result<Vec<ManagedBundleMutationRecord>> {
+        let connection = self.connection()?;
+        let mut statement = connection.prepare(
+            "SELECT id,collection_id,logical_path,state,previous_fingerprint,replacement_fingerprint
+             FROM managed_bundle_mutations WHERE state!='committed' ORDER BY created_at,id",
+        )?;
+        let rows = statement.query_map([], |row| {
+            Ok(ManagedBundleMutationRecord {
+                id: uuid_sql(row.get::<_, String>(0)?)?,
+                collection_id: uuid_sql(row.get::<_, String>(1)?)?,
+                logical_path: row.get(2)?,
+                state: managed_bundle_mutation_state_sql(row.get(3)?)?,
+                previous_fingerprint: row.get(4)?,
+                replacement_fingerprint: row.get(5)?,
+            })
+        })?;
+        rows.collect::<rusqlite::Result<_>>().map_err(Into::into)
+    }
+
+    pub fn pending_managed_bundle_mutations_for_collection(
+        &self,
+        collection_id: Uuid,
+    ) -> Result<Vec<ManagedBundleMutationRecord>> {
+        self.pending_managed_bundle_mutations().map(|mutations| {
+            mutations
+                .into_iter()
+                .filter(|mutation| mutation.collection_id == collection_id)
+                .collect()
+        })
+    }
+
     pub fn update_collection_policy(&self, id: Uuid, mut policy: CollectionPolicy) -> Result<()> {
+        if (policy.peer_shareable || policy.allow_external_ai || policy.internet_public)
+            && !self
+                .pending_managed_bundle_mutations_for_collection(id)?
+                .is_empty()
+        {
+            bail!("managed OKF bundle has a pending recovery and cannot be shared");
+        }
+        if self
+            .collection(id)?
+            .is_some_and(|collection| !collection.okf_compatibility.permits_external_disclosure())
+            && (policy.peer_shareable || policy.allow_external_ai || policy.internet_public)
+        {
+            bail!("this OKF compatibility level is restricted to local read-only use");
+        }
         policy.normalize();
         let now = Utc::now();
         let mut connection = self.connection()?;
@@ -1665,18 +2263,27 @@ impl Database {
         ensure_changed(count, "collection", id)
     }
 
-    pub(crate) fn update_collection_paths(
+    pub fn update_collection_okf_metadata(
         &self,
         id: Uuid,
-        source_folder: &Path,
-        wiki_folder: &Path,
+        declared_version: Option<&str>,
+        compatibility: &OkfCompatibility,
+        managed_size_bytes: u64,
     ) -> Result<()> {
+        let effective_version = match compatibility {
+            OkfCompatibility::LegacyV01 => "0.1",
+            OkfCompatibility::FutureRestricted { .. } => "future",
+            OkfCompatibility::DeclaredV02 | OkfCompatibility::UndeclaredV02Compatible => "0.2",
+        };
         let count = self.connection()?.execute(
-            "UPDATE collections SET source_folder=?2,wiki_folder=?3,updated_at=?4 WHERE id=?1",
+            "UPDATE collections SET okf_version=?2,declared_okf_version=?3,okf_compatibility=?4,
+             managed_size_bytes=?5,updated_at=?6 WHERE id=?1",
             params![
                 id.to_string(),
-                path_text(&absolute_path(source_folder)?),
-                path_text(&absolute_path(wiki_folder)?),
+                effective_version,
+                declared_version,
+                okf_compatibility_sql_value(compatibility),
+                managed_size_bytes,
                 Utc::now().to_rfc3339()
             ],
         )?;
@@ -1687,7 +2294,8 @@ impl Database {
         self.connection()?
             .query_row(
                 "SELECT id,name,source_folder,wiki_folder,local_only,peer_shareable,
-                 allow_external_ai,internet_public,origin,indexing_mode,okf_version,created_at,updated_at
+                 allow_external_ai,internet_public,origin,indexing_mode,okf_version,declared_okf_version,
+                 okf_compatibility,managed_size_bytes,created_at,updated_at
                  FROM collections WHERE id=?1",
                 [id.to_string()],
                 collection_from_row,
@@ -1700,7 +2308,8 @@ impl Database {
         let connection = self.connection()?;
         let mut statement = connection.prepare(
             "SELECT id,name,source_folder,wiki_folder,local_only,peer_shareable,
-             allow_external_ai,internet_public,origin,indexing_mode,okf_version,created_at,updated_at
+             allow_external_ai,internet_public,origin,indexing_mode,okf_version,declared_okf_version,
+             okf_compatibility,managed_size_bytes,created_at,updated_at
              FROM collections ORDER BY name COLLATE NOCASE",
         )?;
         let rows = statement.query_map([], collection_from_row)?;
@@ -2802,20 +3411,71 @@ impl Database {
         after_concept_id: Option<Uuid>,
         limit: u8,
     ) -> Result<Vec<PublicConceptSummary>> {
-        let is_public = connection
+        let public_origin = connection
             .query_row(
-                "SELECT internet_public FROM collections WHERE id=?1",
+                "SELECT origin FROM collections
+                 WHERE id=?1 AND internet_public=1
+                   AND okf_compatibility IN ('declared_v02','undeclared_v02_compatible')
+                   AND NOT EXISTS(SELECT 1 FROM managed_bundle_mutations m
+                                  WHERE m.collection_id=collections.id AND m.state!='committed')",
                 [collection_id.to_string()],
-                |row| row.get::<_, bool>(0),
+                |row| row.get::<_, String>(0),
             )
-            .optional()?
-            .unwrap_or(false);
-        if !is_public {
+            .optional()?;
+        let Some(public_origin) = public_origin else {
             bail!("collection is not publicly accessible");
-        }
+        };
         let after = after_concept_id
             .map(|id| id.to_string())
             .unwrap_or_default();
+        if public_origin != WikiOrigin::Folder.as_str() {
+            let mut statement = connection.prepare(
+                "SELECT p.concept_id,p.concept_type,p.title,p.description,p.tags_json,
+                        f.text,p.indexed_at,p.lifecycle_status,p.trust_tier,p.freshness_state,
+                        p.verification_outdated
+                 FROM okf_concept_projection p
+                 JOIN okf_projection_fts f
+                   ON f.collection_id=p.collection_id AND f.concept_id=p.concept_id
+                 WHERE p.collection_id=?1 AND p.lifecycle_status='stable' AND p.concept_id>?2
+                 ORDER BY p.concept_id LIMIT ?3",
+            )?;
+            return statement
+                .query_map(
+                    params![collection_id.to_string(), after, i64::from(limit)],
+                    |row| {
+                        let concept_id = uuid_sql(row.get::<_, String>(0)?)?;
+                        let summary = row
+                            .get::<_, String>(5)?
+                            .chars()
+                            .take(airwiki_types::MAX_SNIPPET_CHARS)
+                            .collect();
+                        Ok(PublicConceptSummary {
+                            publisher_id: publisher_id.to_owned(),
+                            collection_id,
+                            concept_id,
+                            concept_type: concept_type_sql(row.get::<_, String>(1)?)?,
+                            title: row.get(2)?,
+                            description: row.get(3)?,
+                            language: "und".to_owned(),
+                            tags: json_sql(row.get::<_, String>(4)?)?,
+                            summary,
+                            logical_resource_uri: format!(
+                                "urn:airwiki:okf:{collection_id}:{concept_id}"
+                            ),
+                            source_revision: 1,
+                            updated_at: datetime_sql(row.get::<_, String>(6)?)?,
+                            lifecycle_status: Some(row.get(7)?),
+                            assurance: Some(ConceptAssurance {
+                                trust: trust_tier_sql(row.get(8)?)?,
+                                freshness: freshness_state_sql(row.get(9)?)?,
+                                verification_outdated: row.get(10)?,
+                            }),
+                        })
+                    },
+                )?
+                .collect::<rusqlite::Result<_>>()
+                .map_err(Into::into);
+        }
         let mut statement = connection.prepare(
             "SELECT co.id,co.concept_type,co.title,co.description,co.language,co.tags_json,
                     co.summary,co.logical_resource_uri,sd.revision,co.updated_at
@@ -2823,7 +3483,10 @@ impl Database {
              JOIN source_documents sd ON sd.id=co.source_document_id
              JOIN collections col ON col.id=co.collection_id
              WHERE co.collection_id=?1 AND co.status='published' AND sd.status='published'
-               AND col.internet_public=1 AND co.id>?2
+               AND col.internet_public=1
+               AND NOT EXISTS(SELECT 1 FROM managed_bundle_mutations m
+                              WHERE m.collection_id=col.id AND m.state!='committed')
+               AND co.id>?2
              ORDER BY co.id LIMIT ?3",
         )?;
         statement
@@ -2843,6 +3506,12 @@ impl Database {
                         logical_resource_uri: row.get(7)?,
                         source_revision: row.get(8)?,
                         updated_at: datetime_sql(row.get::<_, String>(9)?)?,
+                        lifecycle_status: Some("stable".to_owned()),
+                        assurance: Some(ConceptAssurance {
+                            trust: TrustTier::HumanReviewed,
+                            freshness: FreshnessState::NotDeclared,
+                            verification_outdated: false,
+                        }),
                     })
                 },
             )?
@@ -2859,7 +3528,9 @@ impl Database {
             .query_row(
                 "SELECT p.manifest_sequence FROM public_collection_profiles p
                  JOIN collections c ON c.id=p.collection_id
-                 WHERE p.collection_id=?1 AND c.internet_public=1",
+                 WHERE p.collection_id=?1 AND c.internet_public=1
+                   AND NOT EXISTS(SELECT 1 FROM managed_bundle_mutations m
+                                  WHERE m.collection_id=c.id AND m.state!='committed')",
                 [collection_id.to_string()],
                 |row| row.get(0),
             )
@@ -2885,14 +3556,33 @@ impl Database {
         connection: &Connection,
         collection_id: Uuid,
     ) -> Result<String> {
-        let mut statement = connection.prepare(
+        let origin = connection
+            .query_row(
+                "SELECT origin FROM collections
+                 WHERE id=?1 AND internet_public=1
+                   AND okf_compatibility IN ('declared_v02','undeclared_v02_compatible')
+                   AND NOT EXISTS(SELECT 1 FROM managed_bundle_mutations m
+                                  WHERE m.collection_id=collections.id AND m.state!='committed')",
+                [collection_id.to_string()],
+                |row| row.get::<_, String>(0),
+            )
+            .optional()?
+            .context("public collection is unavailable")?;
+        let query = if origin == WikiOrigin::Folder.as_str() {
             "SELECT co.id,sd.source_sha256,sd.revision,co.updated_at
              FROM concepts co
              JOIN source_documents sd ON sd.id=co.source_document_id
              JOIN collections col ON col.id=co.collection_id
              WHERE co.collection_id=?1 AND co.status='published' AND sd.status='published'
-               AND col.internet_public=1 ORDER BY co.id",
-        )?;
+               AND col.internet_public=1
+             ORDER BY co.id"
+        } else {
+            "SELECT concept_id,fingerprint,1,indexed_at
+             FROM okf_concept_projection
+             WHERE collection_id=?1 AND lifecycle_status='stable'
+             ORDER BY concept_id"
+        };
+        let mut statement = connection.prepare(query)?;
         let rows = statement.query_map([collection_id.to_string()], |row| {
             Ok((
                 row.get::<_, String>(0)?,
@@ -2919,14 +3609,33 @@ impl Database {
 
     pub fn public_manifest_material(&self, collection_id: Uuid) -> Result<PublicManifestMaterial> {
         let connection = self.connection()?;
-        let mut statement = connection.prepare(
+        let origin = connection
+            .query_row(
+                "SELECT origin FROM collections
+                 WHERE id=?1 AND internet_public=1
+                   AND okf_compatibility IN ('declared_v02','undeclared_v02_compatible')
+                   AND NOT EXISTS(SELECT 1 FROM managed_bundle_mutations m
+                                  WHERE m.collection_id=collections.id AND m.state!='committed')",
+                [collection_id.to_string()],
+                |row| row.get::<_, String>(0),
+            )
+            .optional()?
+            .context("public collection is unavailable")?;
+        let query = if origin == WikiOrigin::Folder.as_str() {
             "SELECT co.title,co.description,co.language,co.tags_json,co.updated_at
              FROM concepts co
              JOIN source_documents sd ON sd.id=co.source_document_id
              JOIN collections col ON col.id=co.collection_id
              WHERE co.collection_id=?1 AND co.status='published' AND sd.status='published'
-               AND col.internet_public=1 ORDER BY co.id",
-        )?;
+               AND col.internet_public=1
+             ORDER BY co.id"
+        } else {
+            "SELECT title,description,'und',tags_json,indexed_at
+             FROM okf_concept_projection
+             WHERE collection_id=?1 AND lifecycle_status='stable'
+             ORDER BY concept_id"
+        };
+        let mut statement = connection.prepare(query)?;
         let rows = statement.query_map([collection_id.to_string()], |row| {
             Ok((
                 row.get::<_, String>(0)?,
@@ -4082,7 +4791,11 @@ impl Database {
         let connection = self.connection()?;
         let placeholders = repeat_placeholders(requested.len(), 1);
         let sql = format!(
-            "SELECT id FROM collections WHERE internet_public=1 AND id IN ({placeholders})"
+            "SELECT id FROM collections WHERE internet_public=1
+             AND okf_compatibility IN ('declared_v02','undeclared_v02_compatible')
+             AND NOT EXISTS(SELECT 1 FROM managed_bundle_mutations m
+                            WHERE m.collection_id=collections.id AND m.state!='committed')
+             AND id IN ({placeholders})"
         );
         let values = requested.iter().map(Uuid::to_string).collect::<Vec<_>>();
         let mut statement = connection.prepare(&sql)?;
@@ -4104,7 +4817,10 @@ impl Database {
             "SELECT g.collection_id FROM grants g JOIN peers p ON p.peer_id=g.peer_id
              JOIN collections c ON c.id=g.collection_id
              WHERE g.peer_id=?1 AND p.trusted=1 AND p.blocked=0 AND c.peer_shareable=1
-               AND (?2=0 OR c.allow_external_ai=1)",
+               AND c.okf_compatibility IN ('declared_v02','undeclared_v02_compatible')
+               AND (?2=0 OR c.allow_external_ai=1)
+               AND NOT EXISTS(SELECT 1 FROM managed_bundle_mutations m
+                              WHERE m.collection_id=c.id AND m.state!='committed')",
         )?;
         let external_ai = purpose == SearchPurpose::ExternalAi;
         let rows =
@@ -4236,17 +4952,25 @@ impl Database {
         }
         let placeholders = repeat_placeholders(collections.len(), 3);
         let external_clause = if purpose == SearchPurpose::ExternalAi {
-            " AND col.allow_external_ai=1"
+            " AND col.allow_external_ai=1
+              AND col.okf_compatibility IN ('declared_v02','undeclared_v02_compatible')
+              AND f.lifecycle_status='stable'"
         } else {
             ""
         };
         let sql = format!(
             "SELECT f.collection_id,f.concept_id,f.logical_path,f.title,f.text,f.fingerprint,
-             col.updated_at,bm25(okf_projection_fts)
+             col.updated_at,p.trust_tier,p.freshness_state,p.verification_outdated,
+             f.lifecycle_status,
+             bm25(okf_projection_fts)
              FROM okf_projection_fts f
              JOIN collections col ON col.id=f.collection_id
-             WHERE okf_projection_fts MATCH ?1 AND f.lifecycle_status='stable'
+             JOIN okf_concept_projection p
+               ON p.collection_id=f.collection_id AND p.concept_id=f.concept_id
+             WHERE okf_projection_fts MATCH ?1
              AND f.collection_id IN ({placeholders}){external_clause}
+             AND NOT EXISTS(SELECT 1 FROM managed_bundle_mutations m
+                            WHERE m.collection_id=col.id AND m.state!='committed')
              ORDER BY bm25(okf_projection_fts), f.concept_id LIMIT ?2"
         );
         let mut values: Vec<rusqlite::types::Value> = vec![
@@ -4281,7 +5005,13 @@ impl Database {
                 logical_resource_uri: format!("urn:airwiki:okf:{collection_id}:{logical_path}"),
                 source_sha256: fingerprint,
                 updated_at: datetime_sql(row.get(6)?)?,
-                lexical_score: row.get(7)?,
+                assurance: Some(ConceptAssurance {
+                    trust: trust_tier_sql(row.get(7)?)?,
+                    freshness: freshness_state_sql(row.get(8)?)?,
+                    verification_outdated: row.get(9)?,
+                }),
+                lifecycle_status: Some(row.get(10)?),
+                lexical_score: row.get(11)?,
             })
         })?;
         rows.collect::<rusqlite::Result<_>>().map_err(Into::into)
@@ -4543,7 +5273,9 @@ fn projected_hit_is_current_on(
     let row = connection
         .query_row(
             "SELECT f.text,f.fingerprint,f.lifecycle_status,col.allow_external_ai,
-             col.internet_public,col.peer_shareable
+             col.internet_public,col.peer_shareable,col.okf_compatibility,
+             NOT EXISTS(SELECT 1 FROM managed_bundle_mutations m
+                        WHERE m.collection_id=col.id AND m.state!='committed')
              FROM okf_projection_fts f JOIN collections col ON col.id=f.collection_id
              WHERE f.collection_id=?1 AND f.concept_id=?2",
             params![hit.collection_id.to_string(), hit.concept_id.to_string()],
@@ -4555,16 +5287,34 @@ fn projected_hit_is_current_on(
                     row.get::<_, bool>(3)?,
                     row.get::<_, bool>(4)?,
                     row.get::<_, bool>(5)?,
+                    row.get::<_, String>(6)?,
+                    row.get::<_, bool>(7)?,
                 ))
             },
         )
         .optional()?;
-    let Some((text, fingerprint, lifecycle, external_ai, internet_public, peer_shareable)) = row
+    let Some((
+        text,
+        fingerprint,
+        lifecycle,
+        external_ai,
+        internet_public,
+        peer_shareable,
+        compatibility,
+        mutation_free,
+    )) = row
     else {
         return Ok(false);
     };
-    if lifecycle != "stable"
+    let local_only = purpose == SearchPurpose::LocalAssistant && peer_id.is_none() && !public;
+    if (!local_only && lifecycle != "stable")
         || fingerprint != hit.source_sha256
+        || (!local_only
+            && !matches!(
+                compatibility.as_str(),
+                "declared_v02" | "undeclared_v02_compatible"
+            ))
+        || (!local_only && !mutation_free)
         || (purpose == SearchPurpose::ExternalAi && !external_ai)
         || (public && !internet_public)
         || (peer_id.is_some() && !peer_shareable)
@@ -4653,6 +5403,7 @@ fn delete_chunks_for_concept(tx: &Transaction<'_>, concept_id: Uuid) -> Result<(
 }
 
 fn collection_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<CollectionRecord> {
+    let declared_okf_version = row.get::<_, Option<String>>(11)?;
     Ok(CollectionRecord {
         id: uuid_sql(row.get::<_, String>(0)?)?,
         name: row.get(1)?,
@@ -4667,8 +5418,11 @@ fn collection_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<CollectionRe
         origin: wiki_origin_sql(row.get::<_, String>(8)?)?,
         indexing_mode: indexing_mode_sql(row.get::<_, String>(9)?)?,
         okf_version: row.get(10)?,
-        created_at: datetime_sql(row.get::<_, String>(11)?)?,
-        updated_at: datetime_sql(row.get::<_, String>(12)?)?,
+        declared_okf_version: declared_okf_version.clone(),
+        okf_compatibility: okf_compatibility_sql(row.get(12)?, declared_okf_version.as_deref())?,
+        managed_size_bytes: row.get(13)?,
+        created_at: datetime_sql(row.get::<_, String>(14)?)?,
+        updated_at: datetime_sql(row.get::<_, String>(15)?)?,
     })
 }
 
@@ -4835,6 +5589,12 @@ fn ranked_chunk_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<RankedChun
         logical_resource_uri: row.get(11)?,
         source_sha256: row.get(12)?,
         updated_at: datetime_sql(row.get::<_, String>(13)?)?,
+        assurance: Some(ConceptAssurance {
+            trust: TrustTier::HumanReviewed,
+            freshness: FreshnessState::NotDeclared,
+            verification_outdated: false,
+        }),
+        lifecycle_status: Some("stable".to_owned()),
         lexical_score: row.get(14)?,
     })
 }
@@ -4968,6 +5728,72 @@ fn path_text(path: &Path) -> String {
     path.to_string_lossy().into_owned()
 }
 
+fn build_collection_record(
+    id: Uuid,
+    name: String,
+    source_folder: &Path,
+    wiki_folder: &Path,
+    mut policy: CollectionPolicy,
+    origin: WikiOrigin,
+    indexing_mode: IndexingMode,
+) -> Result<CollectionRecord> {
+    match (origin, indexing_mode) {
+        (WikiOrigin::Folder, IndexingMode::Continuous | IndexingMode::Manual)
+        | (WikiOrigin::ImportedOkf | WikiOrigin::AiMemory, IndexingMode::NotApplicable) => {}
+        _ => bail!("indexing mode is not valid for this wiki origin"),
+    }
+    policy.normalize();
+    let now = Utc::now();
+    let record = CollectionRecord {
+        id,
+        name: name.trim().to_owned(),
+        source_folder: absolute_path(source_folder)?,
+        wiki_folder: absolute_path(wiki_folder)?,
+        policy,
+        origin,
+        indexing_mode,
+        okf_version: "0.2".to_owned(),
+        declared_okf_version: Some("0.2".to_owned()),
+        okf_compatibility: OkfCompatibility::DeclaredV02,
+        managed_size_bytes: 0,
+        created_at: now,
+        updated_at: now,
+    };
+    if record.name.is_empty() {
+        bail!("collection name must not be empty");
+    }
+    Ok(record)
+}
+
+fn insert_collection(connection: &Connection, record: &CollectionRecord) -> Result<()> {
+    connection.execute(
+        "INSERT INTO collections
+         (id,name,source_folder,wiki_folder,local_only,peer_shareable,allow_external_ai,internet_public,
+          origin,indexing_mode,okf_version,declared_okf_version,okf_compatibility,managed_size_bytes,
+          created_at,updated_at)
+         VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16)",
+        params![
+            record.id.to_string(),
+            record.name,
+            path_text(&record.source_folder),
+            path_text(&record.wiki_folder),
+            record.policy.local_only,
+            record.policy.peer_shareable,
+            record.policy.allow_external_ai,
+            record.policy.internet_public,
+            record.origin.as_str(),
+            record.indexing_mode.as_str(),
+            record.okf_version,
+            record.declared_okf_version,
+            okf_compatibility_sql_value(&record.okf_compatibility),
+            record.managed_size_bytes,
+            record.created_at.to_rfc3339(),
+            record.updated_at.to_rfc3339(),
+        ],
+    )?;
+    Ok(())
+}
+
 fn parse_uuid(value: &str) -> Result<Uuid> {
     Uuid::from_str(value).with_context(|| format!("invalid UUID in database: {value}"))
 }
@@ -5022,6 +5848,114 @@ fn indexing_mode_sql(value: String) -> rusqlite::Result<IndexingMode> {
     }
 }
 
+fn okf_compatibility_sql(
+    value: String,
+    declared_version: Option<&str>,
+) -> rusqlite::Result<OkfCompatibility> {
+    match value.as_str() {
+        "declared_v02" => Ok(OkfCompatibility::DeclaredV02),
+        "undeclared_v02_compatible" => Ok(OkfCompatibility::UndeclaredV02Compatible),
+        "legacy_v01" => Ok(OkfCompatibility::LegacyV01),
+        "future_restricted" => Ok(OkfCompatibility::FutureRestricted {
+            declared_version: declared_version.unwrap_or("unknown").to_owned(),
+        }),
+        _ => Err(to_sql_error(format!("invalid OKF compatibility {value}"))),
+    }
+}
+
+fn okf_compatibility_sql_value(value: &OkfCompatibility) -> &'static str {
+    match value {
+        OkfCompatibility::DeclaredV02 => "declared_v02",
+        OkfCompatibility::UndeclaredV02Compatible => "undeclared_v02_compatible",
+        OkfCompatibility::LegacyV01 => "legacy_v01",
+        OkfCompatibility::FutureRestricted { .. } => "future_restricted",
+    }
+}
+
+fn managed_bundle_mutation_state_sql(
+    value: String,
+) -> rusqlite::Result<ManagedBundleMutationState> {
+    match value.as_str() {
+        "prepared" => Ok(ManagedBundleMutationState::Prepared),
+        "file_replaced" => Ok(ManagedBundleMutationState::FileReplaced),
+        "recovery_required" => Ok(ManagedBundleMutationState::RecoveryRequired),
+        _ => Err(to_sql_error(format!(
+            "invalid managed bundle mutation state {value}"
+        ))),
+    }
+}
+
+fn computation_run_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<ComputationRunRecord> {
+    Ok(ComputationRunRecord {
+        id: uuid_sql(row.get(0)?)?,
+        collection_id: uuid_sql(row.get(1)?)?,
+        logical_path: row.get(2)?,
+        actor_kind: row.get(3)?,
+        actor_id: row.get(4)?,
+        state: computation_run_state_sql(row.get(5)?)?,
+        contract_fingerprint: row.get(6)?,
+        executor_sha256: row.get(7)?,
+        attester_sha256: row.get(8)?,
+        parameter_schema: json_sql(row.get(9)?)?,
+        receipt_sha256: row.get(10)?,
+        verdict: row.get(11)?,
+        requested_at: datetime_sql(row.get(12)?)?,
+        confirmed_at: optional_datetime(row.get(13)?)?,
+        completed_at: optional_datetime(row.get(14)?)?,
+        expires_at: datetime_sql(row.get(15)?)?,
+    })
+}
+
+fn computation_run_state_sql(value: String) -> rusqlite::Result<ComputationRunState> {
+    match value.as_str() {
+        "awaiting_confirmation" => Ok(ComputationRunState::AwaitingConfirmation),
+        "running" => Ok(ComputationRunState::Running),
+        "completed" => Ok(ComputationRunState::Completed),
+        "rejected" => Ok(ComputationRunState::Rejected),
+        "failed" => Ok(ComputationRunState::Failed),
+        "expired" => Ok(ComputationRunState::Expired),
+        _ => Err(to_sql_error(format!(
+            "invalid computation run state {value}"
+        ))),
+    }
+}
+
+fn trust_tier_sql(value: String) -> rusqlite::Result<TrustTier> {
+    match value.as_str() {
+        "unverified" => Ok(TrustTier::Unverified),
+        "machine_confirmed" => Ok(TrustTier::MachineConfirmed),
+        "human_reviewed" => Ok(TrustTier::HumanReviewed),
+        _ => Err(to_sql_error(format!("invalid trust tier {value}"))),
+    }
+}
+
+const fn trust_tier_sql_value(value: TrustTier) -> &'static str {
+    match value {
+        TrustTier::Unverified => "unverified",
+        TrustTier::MachineConfirmed => "machine_confirmed",
+        TrustTier::HumanReviewed => "human_reviewed",
+    }
+}
+
+fn freshness_state_sql(value: String) -> rusqlite::Result<FreshnessState> {
+    match value.as_str() {
+        "not_declared" => Ok(FreshnessState::NotDeclared),
+        "fresh" => Ok(FreshnessState::Fresh),
+        "stale" => Ok(FreshnessState::Stale),
+        "invalid" => Ok(FreshnessState::Invalid),
+        _ => Err(to_sql_error(format!("invalid freshness state {value}"))),
+    }
+}
+
+const fn freshness_state_sql_value(value: FreshnessState) -> &'static str {
+    match value {
+        FreshnessState::NotDeclared => "not_declared",
+        FreshnessState::Fresh => "fresh",
+        FreshnessState::Stale => "stale",
+        FreshnessState::Invalid => "invalid",
+    }
+}
+
 fn json_sql<T: for<'de> Deserialize<'de>>(value: String) -> rusqlite::Result<T> {
     serde_json::from_str(&value).map_err(to_sql_error)
 }
@@ -5030,6 +5964,18 @@ fn yaml_json(value: Option<&serde_yaml::Value>) -> Result<Option<String>> {
     value
         .map(|value| serde_json::to_string(value).map_err(Into::into))
         .transpose()
+}
+
+fn constant_time_eq(left: &[u8], right: &[u8]) -> bool {
+    if left.len() != right.len() {
+        return false;
+    }
+    left.iter()
+        .zip(right)
+        .fold(0_u8, |difference, (left, right)| {
+            difference | (left ^ right)
+        })
+        == 0
 }
 
 fn to_sql_error(error: impl std::fmt::Display) -> rusqlite::Error {
@@ -5460,7 +6406,7 @@ mod tests {
         let temp = tempfile::tempdir().unwrap();
         let path = temp.path().join("db.sqlite");
         let db = Database::open(&path).unwrap();
-        assert_eq!(db.schema_version().unwrap(), 9);
+        assert_eq!(db.schema_version().unwrap(), 12);
         for table in [
             "collections",
             "source_documents",
@@ -5480,7 +6426,7 @@ mod tests {
             assert_eq!(db.count(table).unwrap(), 0);
         }
         drop(db);
-        assert_eq!(Database::open(path).unwrap().schema_version().unwrap(), 9);
+        assert_eq!(Database::open(path).unwrap().schema_version().unwrap(), 12);
     }
 
     #[test]
@@ -5997,7 +6943,7 @@ mod tests {
         drop(connection);
 
         let database = Database::open(&path).unwrap();
-        assert_eq!(database.schema_version().unwrap(), 9);
+        assert_eq!(database.schema_version().unwrap(), 12);
         assert_eq!(database.count("collections").unwrap(), 1);
         assert_eq!(database.count("source_documents").unwrap(), 1);
         assert_eq!(database.count("publication_claims").unwrap(), 0);
@@ -6037,7 +6983,7 @@ mod tests {
 
         let database = Database::open(&path).unwrap();
 
-        assert_eq!(database.schema_version().unwrap(), 9);
+        assert_eq!(database.schema_version().unwrap(), 12);
         assert!(
             database
                 .collection(collection_id)
@@ -6076,7 +7022,7 @@ mod tests {
 
         let database = Database::open(&path).unwrap();
         let collection = database.collection(collection_id).unwrap().unwrap();
-        assert_eq!(database.schema_version().unwrap(), 9);
+        assert_eq!(database.schema_version().unwrap(), 12);
         assert!(collection.policy.peer_shareable);
         assert!(collection.policy.allow_external_ai);
         assert!(!collection.policy.internet_public);
@@ -6110,7 +7056,7 @@ mod tests {
         drop(connection);
 
         let database = Database::open(path).unwrap();
-        assert_eq!(database.schema_version().unwrap(), 9);
+        assert_eq!(database.schema_version().unwrap(), 12);
         let indexes = database.list_federation_indexes().unwrap();
         assert_eq!(indexes.len(), 1);
         assert_eq!(indexes[0].registry_version, 0);
@@ -6149,7 +7095,7 @@ mod tests {
             expires_at: Utc::now() + chrono::Duration::days(1),
         }];
 
-        assert_eq!(database.schema_version().unwrap(), 9);
+        assert_eq!(database.schema_version().unwrap(), 12);
         assert_eq!(
             database
                 .count("federation_bootstrap_registry_state")
@@ -6191,10 +7137,122 @@ mod tests {
         let database = Database::open(path).unwrap();
         let collection = database.collection(collection_id).unwrap().unwrap();
 
-        assert_eq!(database.schema_version().unwrap(), 9);
+        assert_eq!(database.schema_version().unwrap(), 12);
         assert_eq!(collection.origin, WikiOrigin::Folder);
         assert_eq!(collection.indexing_mode, IndexingMode::Continuous);
         assert_eq!(collection.okf_version, "0.1");
+    }
+
+    #[test]
+    fn latest_migrations_preserve_open_lifecycle_and_assurance() {
+        let temp = tempfile::tempdir().unwrap();
+        let path = temp.path().join("version-ten.sqlite");
+        let mut connection = Connection::open(&path).unwrap();
+        connection
+            .pragma_update(None, "foreign_keys", "ON")
+            .unwrap();
+        let tx = connection.transaction().unwrap();
+        for migration in [
+            MIGRATION_1,
+            MIGRATION_2,
+            MIGRATION_3,
+            MIGRATION_4,
+            MIGRATION_5,
+            MIGRATION_6,
+            MIGRATION_7,
+            MIGRATION_8,
+            MIGRATION_9,
+            MIGRATION_10,
+        ] {
+            tx.execute_batch(migration).unwrap();
+        }
+        let collection_id = Uuid::new_v4();
+        let concept_id = Uuid::new_v4();
+        let now = Utc::now().to_rfc3339();
+        tx.execute(
+            "INSERT INTO collections
+             (id,name,source_folder,wiki_folder,origin,indexing_mode,okf_version,
+              declared_okf_version,okf_compatibility,created_at,updated_at)
+             VALUES (?1,'Migrated','/synthetic/wiki','/synthetic/wiki','imported_okf',
+                     'not_applicable','0.2','0.2','declared_v02',?2,?2)",
+            params![collection_id.to_string(), now],
+        )
+        .unwrap();
+        tx.execute(
+            "INSERT INTO okf_concept_projection
+             (collection_id,concept_id,logical_path,concept_type,title,description,lifecycle_status,
+              fingerprint,indexed_at,trust_tier,freshness_state,verification_outdated,warnings_json)
+             VALUES (?1,?2,'concept.md','Unknown Type','Concept','','stable',?3,?4,
+                     'human_reviewed','fresh',1,'[]')",
+            params![
+                collection_id.to_string(),
+                concept_id.to_string(),
+                "f".repeat(64),
+                now
+            ],
+        )
+        .unwrap();
+        tx.pragma_update(None, "user_version", 10).unwrap();
+        tx.commit().unwrap();
+        drop(connection);
+
+        let database = Database::open(path).unwrap();
+        let concepts = database.list_okf_concept_projection(collection_id).unwrap();
+
+        assert_eq!(database.schema_version().unwrap(), 12);
+        assert_eq!(concepts.len(), 1);
+        assert_eq!(concepts[0].concept_type.to_string(), "Unknown Type");
+        assert_eq!(concepts[0].lifecycle_status, "stable");
+        assert_eq!(concepts[0].assurance.trust, TrustTier::HumanReviewed);
+        assert_eq!(concepts[0].assurance.freshness, FreshnessState::Fresh);
+        assert!(concepts[0].assurance.verification_outdated);
+        assert!(concepts[0].attested_computation.is_none());
+    }
+
+    #[test]
+    fn runtime_restart_closes_non_resumable_computation_runs() {
+        let (_temp, database, collection) = setup();
+        let now = Utc::now();
+        let awaiting = ComputationRunRecord {
+            id: Uuid::new_v4(),
+            collection_id: collection.id,
+            logical_path: "computations/awaiting.md".to_owned(),
+            actor_kind: "application".to_owned(),
+            actor_id: Some(Uuid::new_v4().to_string()),
+            state: ComputationRunState::AwaitingConfirmation,
+            contract_fingerprint: "a".repeat(64),
+            executor_sha256: "b".repeat(64),
+            attester_sha256: "c".repeat(64),
+            parameter_schema: serde_json::json!([]),
+            receipt_sha256: None,
+            verdict: None,
+            requested_at: now,
+            confirmed_at: None,
+            completed_at: None,
+            expires_at: now + chrono::Duration::minutes(10),
+        };
+        let mut running = awaiting.clone();
+        running.id = Uuid::new_v4();
+        running.logical_path = "computations/running.md".to_owned();
+        database.create_computation_run(&awaiting).unwrap();
+        database.create_computation_run(&running).unwrap();
+        database
+            .set_computation_run_state(running.id, ComputationRunState::Running, None, None)
+            .unwrap();
+
+        assert_eq!(database.close_orphaned_computation_runs().unwrap(), 2);
+        assert_eq!(
+            database
+                .computation_run(awaiting.id)
+                .unwrap()
+                .unwrap()
+                .state,
+            ComputationRunState::Expired
+        );
+        assert_eq!(
+            database.computation_run(running.id).unwrap().unwrap().state,
+            ComputationRunState::Failed
+        );
     }
 
     #[test]

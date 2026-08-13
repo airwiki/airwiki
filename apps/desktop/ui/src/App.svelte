@@ -853,8 +853,8 @@
       if (!okfImportSelection) return;
       okfImportSummary = await validateOkfImport(okfImportSelection.token);
       wikiName = '';
-    } catch {
-      actionMessage = t('desktop-okf-import-invalid');
+    } catch (error) {
+      actionMessage = importErrorMessage(error);
       okfImportSelection = null;
       okfImportSummary = null;
     } finally {
@@ -871,11 +871,19 @@
       okfImportSelection = null;
       okfImportSummary = null;
       showOperationComplete();
-    } catch {
-      actionMessage = t('desktop-okf-import-invalid');
+    } catch (error) {
+      actionMessage = importErrorMessage(error);
     } finally {
       actionBusy = false;
     }
+  }
+
+  function importErrorMessage(error: unknown): string {
+    if (typeof error === 'object' && error !== null && 'messageKey' in error) {
+      const messageKey = (error as { messageKey?: unknown }).messageKey;
+      if (messageKey === 'folderSelectionExpired') return t('desktop-folder-selection-expired');
+    }
+    return t('desktop-okf-import-invalid');
   }
 
   async function createWiki() {

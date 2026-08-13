@@ -16,12 +16,10 @@ mod services;
 mod updater;
 mod worker;
 
-#[cfg(feature = "e2e")]
-use std::path::Path;
 use std::{
     collections::HashMap,
     ffi::OsStr,
-    path::PathBuf,
+    path::{Path, PathBuf},
     sync::{
         Arc, Mutex,
         atomic::{AtomicBool, Ordering},
@@ -1714,7 +1712,7 @@ struct UiError {
 #[serde(rename_all = "camelCase")]
 struct FolderSelection {
     token: String,
-    display_path: String,
+    display_name: String,
 }
 
 #[derive(Clone, Debug, Serialize, TS)]
@@ -1846,7 +1844,7 @@ async fn pick_wiki_folder(
     );
     Ok(Some(FolderSelection {
         token: token.to_string(),
-        display_path: path.to_string_lossy().into_owned(),
+        display_name: selected_item_name(&path),
     }))
 }
 
@@ -1891,8 +1889,16 @@ async fn pick_okf_import(
     );
     Ok(Some(FolderSelection {
         token: token.to_string(),
-        display_path: path.to_string_lossy().into_owned(),
+        display_name: selected_item_name(&path),
     }))
+}
+
+fn selected_item_name(path: &Path) -> String {
+    path.to_str()
+        .and_then(|path| path.rsplit(['/', '\\']).find(|part| !part.is_empty()))
+        .filter(|name| !name.trim().is_empty())
+        .unwrap_or("Selected item")
+        .to_owned()
 }
 
 #[tauri::command]
@@ -5288,6 +5294,18 @@ mod tests {
             Some(expected)
         );
         assert!(consume_folder_selection(&runtime, &token.to_string()).is_err());
+    }
+
+    #[test]
+    fn folder_selection_discloses_only_the_selected_item_name() {
+        assert_eq!(
+            selected_item_name(Path::new("/Users/alice/private/wiki")),
+            "wiki"
+        );
+        assert_eq!(
+            selected_item_name(Path::new("C:\\Users\\alice\\private\\wiki.zip")),
+            "wiki.zip"
+        );
     }
 
     #[test]

@@ -24,7 +24,7 @@
   }
 </script>
 
-<label class:compact class:disabled class="check-control">
+<label class:compact class:disabled class:checked class="check-control">
   <input
     type="checkbox"
     checked={checked}

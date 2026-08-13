@@ -34,7 +34,10 @@ use airwiki_inference::{
     LlamaSupervisorFailureKind, ModelSelection, RuntimeExitClass, SupervisorConfig,
     ThinkingControl, bundled_runtime_is_accelerated,
 };
-use airwiki_mcp::{McpClientActivitySnapshot, McpServerConfig, McpServerHandle, start_mcp_server};
+use airwiki_mcp::{
+    McpApplicationBackend, McpApplicationError, McpApplicationIdentity, McpClientActivitySnapshot,
+    McpServerConfig, McpServerHandle, start_with_application_backend,
+};
 #[cfg(feature = "e2e")]
 use airwiki_network::FileSecretStore;
 #[cfg(not(feature = "e2e"))]
@@ -60,7 +63,7 @@ use anyhow::{Context, Result, anyhow, bail};
 use async_trait::async_trait;
 use chrono::{DateTime, Duration as ChronoDuration, Utc};
 use tokio::{
-    sync::{Semaphore, broadcast, mpsc, watch},
+    sync::{Semaphore, broadcast, mpsc, oneshot, watch},
     task::JoinHandle,
 };
 
@@ -70,6 +73,7 @@ use tokio_util::sync::CancellationToken;
 use uuid::Uuid;
 
 use crate::{
+    computations::{CompletedComputation, ComputationCoordinator, PendingComputation},
     manual_lan_route,
     model_activation_status::{
         ModelActivationElapsedBucket, ModelActivationErrorKind, ModelActivationExitClass,
@@ -77,7 +81,8 @@ use crate::{
     },
     paths::AppPaths,
     worker::{
-        CollectionView, PeerActivityState, PeerTrustState, PeerView, PublicAnnouncementStatusView,
+        ApplicationAccessView, ApplicationWikiGrantView, ApplicationWikiRoleView, CollectionView,
+        PeerActivityState, PeerTrustState, PeerView, PublicAnnouncementStatusView,
         ReviewEvidenceErrorView, ReviewEvidenceExcerptView, ReviewEvidencePageView, ReviewItemView,
         SourceIssueView,
     },
@@ -1032,24 +1037,40 @@ struct PublicNetworkRuntime {
 }
 
 enum PreparedPublicAnnouncement {
-    Manifest(airwiki_types::SignedPublicCollectionManifest),
-    Tombstone(airwiki_types::SignedPublicCollectionTombstone),
+    Manifest(Box<PreparedManifestAnnouncement>),
+    Tombstone(Box<PreparedTombstoneAnnouncement>),
     Missing,
+}
+
+struct PreparedManifestAnnouncement {
+    current: airwiki_types::SignedPublicCollectionManifest,
+    legacy: airwiki_types::SignedPublicCollectionManifest,
+}
+
+struct PreparedTombstoneAnnouncement {
+    current: airwiki_types::SignedPublicCollectionTombstone,
+    legacy: airwiki_types::SignedPublicCollectionTombstone,
 }
 
 fn public_announcement_expiry(
     announcement: &PreparedPublicAnnouncement,
 ) -> Option<chrono::DateTime<Utc>> {
     match announcement {
-        PreparedPublicAnnouncement::Manifest(manifest) => Some(manifest.manifest.expires_at),
+        PreparedPublicAnnouncement::Manifest(announcement) => {
+            Some(announcement.current.manifest.expires_at)
+        }
         PreparedPublicAnnouncement::Tombstone(_) | PreparedPublicAnnouncement::Missing => None,
     }
 }
 
 fn public_announcement_sequence(announcement: &PreparedPublicAnnouncement) -> Option<u64> {
     match announcement {
-        PreparedPublicAnnouncement::Manifest(manifest) => Some(manifest.manifest.sequence),
-        PreparedPublicAnnouncement::Tombstone(tombstone) => Some(tombstone.tombstone.sequence),
+        PreparedPublicAnnouncement::Manifest(announcement) => {
+            Some(announcement.current.manifest.sequence)
+        }
+        PreparedPublicAnnouncement::Tombstone(announcement) => {
+            Some(announcement.current.tombstone.sequence)
+        }
         PreparedPublicAnnouncement::Missing => None,
     }
 }
@@ -1135,6 +1156,216 @@ pub struct DesktopServices {
     live_peers: RwLock<HashMap<PeerId, LivePeer>>,
     startup_preflight_blocked: RwLock<HashSet<Uuid>>,
     transient_source_issues: RwLock<HashMap<Uuid, Vec<TransientSourceIssue>>>,
+    memories: airwiki_core::AiMemoryService,
+    computations: ComputationCoordinator,
+    application_backend_cancellation: CancellationToken,
+    application_backend_task: Option<JoinHandle<()>>,
+}
+
+#[derive(Clone)]
+struct DesktopMcpApplicationBackend {
+    requests: mpsc::Sender<McpApplicationRequest>,
+}
+
+struct McpApplicationRequest {
+    identity: McpApplicationIdentity,
+    tool: &'static str,
+    arguments: serde_json::Value,
+    response: oneshot::Sender<std::result::Result<serde_json::Value, McpApplicationError>>,
+}
+
+#[async_trait]
+impl McpApplicationBackend for DesktopMcpApplicationBackend {
+    async fn call(
+        &self,
+        identity: McpApplicationIdentity,
+        tool: &'static str,
+        arguments: serde_json::Value,
+    ) -> std::result::Result<serde_json::Value, McpApplicationError> {
+        let (response, receiver) = oneshot::channel();
+        self.requests
+            .try_send(McpApplicationRequest {
+                identity,
+                tool,
+                arguments,
+                response,
+            })
+            .map_err(|_| McpApplicationError::Unavailable)?;
+        receiver
+            .await
+            .map_err(|_| McpApplicationError::Unavailable)?
+    }
+}
+
+fn spawn_mcp_application_backend(
+    database: Database,
+    memories: airwiki_core::AiMemoryService,
+    computations: ComputationCoordinator,
+) -> (
+    DesktopMcpApplicationBackend,
+    CancellationToken,
+    JoinHandle<()>,
+) {
+    const REQUEST_CAPACITY: usize = 64;
+    let (sender, mut receiver) = mpsc::channel::<McpApplicationRequest>(REQUEST_CAPACITY);
+    let cancellation = CancellationToken::new();
+    let task_cancellation = cancellation.clone();
+    let task = tokio::spawn(async move {
+        loop {
+            let request = tokio::select! {
+                biased;
+                () = task_cancellation.cancelled() => break,
+                request = receiver.recv() => request,
+            };
+            let Some(request) = request else {
+                break;
+            };
+            let McpApplicationRequest {
+                identity,
+                tool,
+                arguments,
+                response,
+            } = request;
+            let database = database.clone();
+            let memories = memories.clone();
+            let computations = computations.clone();
+            let result = tokio::task::spawn_blocking(move || {
+                let capability = database
+                    .authenticate_application_capability(&identity.capability)
+                    .map_err(|_| McpApplicationError::Unavailable)?
+                    .ok_or(McpApplicationError::Unauthorized)?;
+                call_memory_tool(&memories, &computations, &capability, tool, arguments)
+            })
+            .await
+            .unwrap_or(Err(McpApplicationError::Unavailable));
+            let _ = response.send(result);
+        }
+    });
+    (
+        DesktopMcpApplicationBackend { requests: sender },
+        cancellation,
+        task,
+    )
+}
+
+fn call_memory_tool(
+    memories: &airwiki_core::AiMemoryService,
+    computations: &ComputationCoordinator,
+    capability: &airwiki_core::storage::ApplicationCapabilityRecord,
+    tool: &str,
+    arguments: serde_json::Value,
+) -> std::result::Result<serde_json::Value, McpApplicationError> {
+    let app_id = capability.app_id;
+    match tool {
+        "list_airwiki_memories" => {
+            let memories = memories
+                .list(app_id)
+                .map_err(|_| McpApplicationError::Unavailable)?;
+            Ok(
+                serde_json::json!({"wikis": memories.into_iter().map(|wiki| serde_json::json!({"wikiId": wiki.id, "name": wiki.name})).collect::<Vec<_>>() }),
+            )
+        }
+        "create_airwiki_memory" => {
+            let input: airwiki_mcp::CreateAirWikiMemoryInput =
+                serde_json::from_value(arguments).map_err(|_| McpApplicationError::Invalid)?;
+            let wiki = memories
+                .create(app_id, &input.name)
+                .map_err(|_| McpApplicationError::Invalid)?;
+            Ok(serde_json::json!({"wikiId": wiki.id, "name": wiki.name}))
+        }
+        "get_airwiki_memory" => {
+            let input: airwiki_mcp::GetAirWikiMemoryInput =
+                serde_json::from_value(arguments).map_err(|_| McpApplicationError::Invalid)?;
+            let wiki_id =
+                Uuid::parse_str(&input.wiki_id).map_err(|_| McpApplicationError::Invalid)?;
+            let concepts = memories
+                .get(app_id, wiki_id)
+                .map_err(|_| McpApplicationError::Unauthorized)?;
+            Ok(
+                serde_json::json!({"wikiId": wiki_id, "concepts": concepts.into_iter().map(memory_concept_json).collect::<Vec<_>>() }),
+            )
+        }
+        "write_airwiki_memory" => {
+            let input: airwiki_mcp::WriteAirWikiMemoryInput =
+                serde_json::from_value(arguments).map_err(|_| McpApplicationError::Invalid)?;
+            let wiki_id =
+                Uuid::parse_str(&input.wiki_id).map_err(|_| McpApplicationError::Invalid)?;
+            let concept_id = input
+                .concept_id
+                .as_deref()
+                .map(Uuid::parse_str)
+                .transpose()
+                .map_err(|_| McpApplicationError::Invalid)?;
+            let concept_type = airwiki_types::ConceptType::parse(input.concept_type)
+                .ok_or(McpApplicationError::Invalid)?;
+            let stored = memories
+                .write(
+                    app_id,
+                    wiki_id,
+                    concept_id,
+                    input.expected_fingerprint.as_deref(),
+                    &airwiki_core::AiMemoryConceptInput {
+                        title: input.title,
+                        description: input.description,
+                        concept_type,
+                        tags: input.tags,
+                        body_markdown: input.body_markdown,
+                    },
+                )
+                .map_err(|_| McpApplicationError::Invalid)?;
+            Ok(memory_concept_json(stored))
+        }
+        "deprecate_airwiki_memory" => {
+            let input: airwiki_mcp::DeprecateAirWikiMemoryInput =
+                serde_json::from_value(arguments).map_err(|_| McpApplicationError::Invalid)?;
+            let wiki_id =
+                Uuid::parse_str(&input.wiki_id).map_err(|_| McpApplicationError::Invalid)?;
+            let concept_id =
+                Uuid::parse_str(&input.concept_id).map_err(|_| McpApplicationError::Invalid)?;
+            let stored = memories
+                .deprecate(app_id, wiki_id, concept_id, &input.expected_fingerprint)
+                .map_err(|_| McpApplicationError::Invalid)?;
+            Ok(memory_concept_json(stored))
+        }
+        "request_airwiki_computation" => {
+            let input: airwiki_mcp::RequestAirWikiComputationInput =
+                serde_json::from_value(arguments).map_err(|_| McpApplicationError::Invalid)?;
+            let wiki_id =
+                Uuid::parse_str(&input.wiki_id).map_err(|_| McpApplicationError::Invalid)?;
+            let pending = computations
+                .request(app_id, wiki_id, &input.logical_path, input.parameters)
+                .map_err(|_| McpApplicationError::Invalid)?;
+            Ok(serde_json::json!({
+                "runId": pending.run_id,
+                "state": "awaiting_confirmation",
+                "expiresAt": pending.expires_at,
+            }))
+        }
+        "get_airwiki_computation_run" => {
+            let input: airwiki_mcp::GetAirWikiComputationRunInput =
+                serde_json::from_value(arguments).map_err(|_| McpApplicationError::Invalid)?;
+            let run_id =
+                Uuid::parse_str(&input.run_id).map_err(|_| McpApplicationError::Invalid)?;
+            computations
+                .status_for_application(app_id, run_id)
+                .map_err(|_| McpApplicationError::Unauthorized)
+        }
+        _ => Err(McpApplicationError::Invalid),
+    }
+}
+
+fn memory_concept_json(concept: airwiki_core::OkfConceptProjectionRecord) -> serde_json::Value {
+    serde_json::json!({
+        "conceptId": concept.concept_id,
+        "path": concept.logical_path,
+        "type": concept.concept_type,
+        "title": concept.title,
+        "description": concept.description,
+        "tags": concept.tags,
+        "status": concept.lifecycle_status,
+        "fingerprint": concept.fingerprint,
+        "assurance": concept.assurance,
+    })
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -1244,7 +1475,7 @@ impl DesktopServices {
         lan_enabled: bool,
     ) -> Result<Self> {
         let blocking_paths = paths.clone();
-        let (core_paths, database, recovery, identity, public_identity, access) =
+        let (core_paths, database, recovery, managed_recovery, identity, public_identity, access) =
             tokio::task::spawn_blocking(move || {
                 let core_paths = CoreAppPaths::at(&blocking_paths.data);
                 core_paths.ensure()?;
@@ -1259,6 +1490,9 @@ impl DesktopServices {
                 )?;
                 let recovery =
                     OkfPublicationMaterializer::new(database.clone()).recover_pending()?;
+                let managed_recovery =
+                    airwiki_core::AiMemoryService::new(database.clone(), core_paths.vaults.clone())
+                        .recover_pending()?;
                 let identity = NodeIdentity::load_or_create(secret_store.as_ref())
                     .context("no se pudo cargar la identidad Ed25519 del dispositivo")?;
                 let public_identity =
@@ -1269,6 +1503,7 @@ impl DesktopServices {
                     core_paths,
                     database,
                     recovery,
+                    managed_recovery,
                     identity,
                     public_identity,
                     access,
@@ -1282,6 +1517,13 @@ impl DesktopServices {
                 completed = recovery.completed,
                 cancelled = recovery.cancelled,
                 "some OKF publications remain pending after startup recovery"
+            );
+        }
+        if managed_recovery.pending > 0 || managed_recovery.recovered > 0 {
+            tracing::warn!(
+                pending = managed_recovery.pending,
+                recovered = managed_recovery.recovered,
+                "AI memory bundle recovery completed with pending work"
             );
         }
         let node_id = identity.peer_id().to_string();
@@ -1322,7 +1564,18 @@ impl DesktopServices {
                 .set_publisher_blocked(publisher_id, true)
                 .await;
         }
-        let mcp = match start_mcp_server(McpServerConfig::default(), federated_proxy.clone()).await
+        let computations = ComputationCoordinator::new(database.clone())?;
+        let memories =
+            airwiki_core::AiMemoryService::new(database.clone(), core_paths.vaults.clone());
+        let (application_backend, application_backend_cancellation, application_backend_task) =
+            spawn_mcp_application_backend(database.clone(), memories.clone(), computations.clone());
+        let application_backend: Arc<dyn McpApplicationBackend> = Arc::new(application_backend);
+        let mcp = match start_with_application_backend(
+            McpServerConfig::default(),
+            federated_proxy.clone(),
+            Some(application_backend),
+        )
+        .await
         {
             Ok(handle) => handle,
             Err(error) => {
@@ -1331,6 +1584,8 @@ impl DesktopServices {
                     runtime.task.abort();
                     runtime.event_forwarder.abort();
                 }
+                application_backend_cancellation.cancel();
+                let _ = application_backend_task.await;
                 return Err(error).context("no se pudo iniciar el MCP local");
             }
         };
@@ -1359,6 +1614,10 @@ impl DesktopServices {
             live_peers: RwLock::new(HashMap::new()),
             startup_preflight_blocked: RwLock::new(HashSet::new()),
             transient_source_issues: RwLock::new(HashMap::new()),
+            memories,
+            computations,
+            application_backend_cancellation,
+            application_backend_task: Some(application_backend_task),
         };
         services.reconcile_public_network().await?;
         Ok(services)
@@ -1391,6 +1650,109 @@ impl DesktopServices {
         };
         let receiver = handle.subscribe_client_activities();
         *receiver.borrow()
+    }
+
+    pub(crate) fn pending_computations(&self) -> Result<Vec<PendingComputation>> {
+        self.computations.pending()
+    }
+
+    pub(crate) fn completed_computations(&self) -> Result<Vec<CompletedComputation>> {
+        self.computations.completed()
+    }
+
+    pub(crate) fn subscribe_computation_updates(&self) -> watch::Receiver<u64> {
+        self.computations.subscribe()
+    }
+
+    pub(crate) fn reject_computation(&self, run_id: Uuid) -> Result<()> {
+        self.computations.reject(run_id)
+    }
+
+    pub(crate) fn execute_computation(
+        &self,
+        run_id: Uuid,
+    ) -> Result<airwiki_core::AirWikiWasmOutcome> {
+        self.computations.execute_confirmed(run_id)
+    }
+
+    pub(crate) fn save_computation_result(&self, run_id: Uuid, target_wiki_id: Uuid) -> Result<()> {
+        let receipt = self.computations.accepted_receipt(run_id)?;
+        self.memories.save_process_result(
+            target_wiki_id,
+            "Attested computation result",
+            &receipt,
+        )?;
+        self.computations.mark_saved(run_id)
+    }
+
+    pub(crate) fn application_access_views(&self) -> Result<Vec<ApplicationAccessView>> {
+        let grants = self.database.list_application_wiki_grants()?;
+        let collections = self
+            .database
+            .list_collections()?
+            .into_iter()
+            .map(|wiki| (wiki.id, wiki.managed_size_bytes))
+            .collect::<HashMap<_, _>>();
+        self.database
+            .list_application_capabilities()?
+            .into_iter()
+            .map(|application| {
+                let application_grants = grants
+                    .iter()
+                    .filter(|grant| grant.app_id == application.app_id)
+                    .map(|grant| ApplicationWikiGrantView {
+                        wiki_id: grant.collection_id,
+                        role: match grant.role {
+                            airwiki_core::ApplicationWikiRole::Owner => {
+                                ApplicationWikiRoleView::Owner
+                            }
+                            airwiki_core::ApplicationWikiRole::Reader => {
+                                ApplicationWikiRoleView::Reader
+                            }
+                            airwiki_core::ApplicationWikiRole::Editor => {
+                                ApplicationWikiRoleView::Editor
+                            }
+                        },
+                    })
+                    .collect::<Vec<_>>();
+                let owned_wiki_count = application_grants
+                    .iter()
+                    .filter(|grant| grant.role == ApplicationWikiRoleView::Owner)
+                    .count();
+                let managed_bytes = application_grants
+                    .iter()
+                    .filter(|grant| grant.role == ApplicationWikiRoleView::Owner)
+                    .filter_map(|grant| collections.get(&grant.wiki_id))
+                    .copied()
+                    .fold(0_u64, u64::saturating_add);
+                Ok(ApplicationAccessView {
+                    app_id: application.app_id,
+                    display_name: application.display_name,
+                    producer: application.producer,
+                    active: application.revoked_at.is_none(),
+                    owned_wiki_count,
+                    managed_bytes,
+                    grants: application_grants,
+                })
+            })
+            .collect()
+    }
+
+    pub(crate) fn set_application_wiki_role(
+        &self,
+        app_id: Uuid,
+        wiki_id: Uuid,
+        role: Option<ApplicationWikiRoleView>,
+    ) -> Result<()> {
+        self.database.set_application_wiki_role(
+            app_id,
+            wiki_id,
+            role.map(|role| match role {
+                ApplicationWikiRoleView::Owner => airwiki_core::ApplicationWikiRole::Owner,
+                ApplicationWikiRoleView::Reader => airwiki_core::ApplicationWikiRole::Reader,
+                ApplicationWikiRoleView::Editor => airwiki_core::ApplicationWikiRole::Editor,
+            }),
+        )
     }
 
     pub fn subscribe_network_events(&self) -> broadcast::Receiver<SequencedNetworkEvent> {
@@ -1675,15 +2037,19 @@ impl DesktopServices {
                 );
             }
         }
-        let bundle_root = self.core_paths.vaults.join(Uuid::new_v4().to_string());
-        let collection = self.database.create_collection_with_origin(
-            name,
-            &source_folder,
-            bundle_root,
-            CollectionPolicy::local_only(),
-            airwiki_core::WikiOrigin::Folder,
-            indexing_mode,
-        )?;
+        let collection_id = Uuid::new_v4();
+        let bundle_root = self.core_paths.vaults.join(collection_id.to_string());
+        let collection =
+            self.database
+                .create_collection_with_id_and_origin(airwiki_core::NewCollection {
+                    id: collection_id,
+                    name: name.into(),
+                    source_folder,
+                    wiki_folder: bundle_root,
+                    policy: CollectionPolicy::local_only(),
+                    origin: airwiki_core::WikiOrigin::Folder,
+                    indexing_mode,
+                })?;
         self.audit(
             "collection_created",
             "collection",
@@ -1727,26 +2093,47 @@ impl DesktopServices {
             .join(format!(".import-{collection_id}"));
         let bundle_root = self.core_paths.vaults.join(collection_id.to_string());
         let report = airwiki_core::OkfImportValidator::materialize_path(source, &staging)?;
-        std::fs::rename(&staging, &bundle_root)
-            .context("no se pudo activar atómicamente el bundle OKF importado")?;
-        let record = self.database.create_collection_with_origin(
-            name,
-            &bundle_root,
-            &bundle_root,
-            CollectionPolicy::local_only(),
-            airwiki_core::WikiOrigin::ImportedOkf,
-            airwiki_core::IndexingMode::NotApplicable,
+        let prepared = self.database.create_managed_collection_with_mutation(
+            airwiki_core::NewManagedCollection {
+                id: collection_id,
+                name,
+                bundle_root: bundle_root.clone(),
+                origin: airwiki_core::WikiOrigin::ImportedOkf,
+                replacement_fingerprint: format!("import:{}", report.uncompressed_bytes),
+                owner_app_id: None,
+            },
         );
-        match record {
-            Ok(record) => {
+        match prepared {
+            Ok((record, mutation)) => {
+                if let Err(error) = std::fs::rename(&staging, &bundle_root) {
+                    let _ = self.database.delete_collection_record(record.id);
+                    let _ = std::fs::remove_dir_all(&staging);
+                    return Err(error)
+                        .context("no se pudo activar atómicamente el bundle OKF importado");
+                }
+                self.database.set_managed_bundle_mutation_state(
+                    mutation.id,
+                    airwiki_core::ManagedBundleMutationState::FileReplaced,
+                )?;
+                self.database.update_collection_okf_metadata(
+                    record.id,
+                    report.declared_okf_version.as_deref(),
+                    &report.compatibility,
+                    report.uncompressed_bytes,
+                )?;
                 if let Err(error) = self
                     .database
                     .replace_okf_concept_projection(record.id, &report.concepts)
                 {
-                    let _ = self.database.delete_collection_record(record.id);
-                    let _ = std::fs::remove_dir_all(&bundle_root);
-                    return Err(error).context("no se pudo proyectar el bundle OKF importado");
+                    let _ = self.database.set_managed_bundle_mutation_state(
+                        mutation.id,
+                        airwiki_core::ManagedBundleMutationState::RecoveryRequired,
+                    );
+                    return Err(error)
+                        .context("el bundle OKF quedó pendiente de reconciliación segura");
                 }
+                self.database
+                    .complete_managed_bundle_mutation(mutation.id)?;
                 self.audit(
                     "okf_bundle_imported",
                     "collection",
@@ -1757,10 +2144,14 @@ impl DesktopServices {
                         "warning_count": report.warnings.len(),
                     }),
                 )?;
-                Ok((record, report))
+                let reconciled = self
+                    .database
+                    .collection(record.id)?
+                    .context("la wiki importada desapareció durante la reconciliación")?;
+                Ok((reconciled, report))
             }
             Err(error) => {
-                let _ = std::fs::remove_dir_all(&bundle_root);
+                let _ = std::fs::remove_dir_all(&staging);
                 Err(error).context("no se pudo registrar el bundle OKF importado")
             }
         }
@@ -2017,14 +2408,14 @@ impl DesktopServices {
         }
         let expires_at = public_announcement_expiry(&announcement);
         let accepted = match announcement {
-            PreparedPublicAnnouncement::Manifest(manifest) => self
+            PreparedPublicAnnouncement::Manifest(announcement) => self
                 .public_reader
-                .register_manifest(&endpoints, manifest)
+                .register_versioned_manifests(&endpoints, announcement.current, announcement.legacy)
                 .await
                 .map_err(|error| anyhow!(error.to_string()))?,
-            PreparedPublicAnnouncement::Tombstone(tombstone) => self
+            PreparedPublicAnnouncement::Tombstone(announcement) => self
                 .public_reader
-                .withdraw_manifest(&endpoints, tombstone)
+                .withdraw_versioned_manifests(&endpoints, announcement.current, announcement.legacy)
                 .await
                 .map_err(|error| anyhow!(error.to_string()))?,
             PreparedPublicAnnouncement::Missing => return Ok(()),
@@ -2617,6 +3008,23 @@ impl DesktopServices {
                     origin: collection.origin,
                     indexing_mode: collection.indexing_mode,
                     okf_version: collection.okf_version,
+                    declared_okf_version: collection.declared_okf_version,
+                    okf_compatibility: collection.okf_compatibility,
+                    managed_size_bytes: collection.managed_size_bytes,
+                    stale_concept_count: projected
+                        .iter()
+                        .filter(|concept| {
+                            concept.assurance.freshness == airwiki_types::FreshnessState::Stale
+                        })
+                        .count(),
+                    outdated_verification_count: projected
+                        .iter()
+                        .filter(|concept| concept.assurance.verification_outdated)
+                        .count(),
+                    metadata_warning_count: projected
+                        .iter()
+                        .map(|concept| concept.warnings.len())
+                        .sum(),
                     trust_summary: summarize_projection_trust(&projected),
                 })
             })
@@ -2677,6 +3085,23 @@ impl DesktopServices {
             KNOWLEDGE_READ_ATTEMPTS,
             KNOWLEDGE_READ_RETRY_DELAY,
         )
+    }
+
+    pub fn verify_managed_concept(
+        &self,
+        wiki_id: Uuid,
+        logical_path: &str,
+        expected_fingerprint: &str,
+    ) -> Result<()> {
+        self.memories
+            .verify_managed_concept(wiki_id, logical_path, expected_fingerprint)?;
+        self.audit(
+            "managed_concept_human_verified",
+            "collection",
+            Some(wiki_id.to_string()),
+            serde_json::json!({"scope": "single_concept"}),
+        )?;
+        Ok(())
     }
 
     /// Regenerates only deterministic derived Wiki artifacts. Content-bearing
@@ -3108,6 +3533,10 @@ impl DesktopServices {
         if let Some(mcp) = self.mcp.take() {
             mcp.shutdown().await?;
         }
+        self.application_backend_cancellation.cancel();
+        if let Some(task) = self.application_backend_task.take() {
+            let _ = task.await;
+        }
         let network = self
             .network
             .get_mut()
@@ -3493,73 +3922,135 @@ fn prepare_public_announcement(
     };
     let publisher_id = identity.peer_id().to_string();
     if !collection.policy.internet_public {
-        let tombstone = prepare_public_tombstone(
+        let (current, legacy) = prepare_public_tombstones(
             identity,
             &publisher_id,
             collection_id,
             profile.manifest_sequence,
         )?;
-        return Ok((endpoints, PreparedPublicAnnouncement::Tombstone(tombstone)));
+        return Ok((
+            endpoints,
+            PreparedPublicAnnouncement::Tombstone(Box::new(PreparedTombstoneAnnouncement {
+                current,
+                legacy,
+            })),
+        ));
+    }
+    if !collection.okf_compatibility.permits_external_disclosure() {
+        let (current, legacy) = prepare_public_tombstones(
+            identity,
+            &publisher_id,
+            collection_id,
+            profile.manifest_sequence,
+        )?;
+        return Ok((
+            endpoints,
+            PreparedPublicAnnouncement::Tombstone(Box::new(PreparedTombstoneAnnouncement {
+                current,
+                legacy,
+            })),
+        ));
     }
     let material = database.public_manifest_material(collection_id)?;
     if material.concept_count == 0 {
-        let tombstone = prepare_public_tombstone(
+        let (current, legacy) = prepare_public_tombstones(
             identity,
             &publisher_id,
             collection_id,
             profile.manifest_sequence,
         )?;
-        return Ok((endpoints, PreparedPublicAnnouncement::Tombstone(tombstone)));
+        return Ok((
+            endpoints,
+            PreparedPublicAnnouncement::Tombstone(Box::new(PreparedTombstoneAnnouncement {
+                current,
+                legacy,
+            })),
+        ));
     }
     let routes = ready_public_routes(&endpoints, identity.peer_id(), ready_relay_addresses);
     if routes.is_empty() {
-        let tombstone = prepare_public_tombstone(
+        let (current, legacy) = prepare_public_tombstones(
             identity,
             &publisher_id,
             collection_id,
             profile.manifest_sequence,
         )?;
-        return Ok((endpoints, PreparedPublicAnnouncement::Tombstone(tombstone)));
+        return Ok((
+            endpoints,
+            PreparedPublicAnnouncement::Tombstone(Box::new(PreparedTombstoneAnnouncement {
+                current,
+                legacy,
+            })),
+        ));
     }
     let fingerprint = database.public_collection_fingerprint(collection_id)?;
     let now = Utc::now();
-    let manifest = sign_manifest(
-        identity.keypair(),
-        PublicCollectionManifest {
-            protocol_version: PUBLIC_CATALOG_PROTOCOL.to_owned(),
-            publisher_id,
-            collection_id,
-            sequence: profile.manifest_sequence,
-            publication_fingerprint: fingerprint,
-            name: collection.name,
-            description: profile.description,
-            languages: profile.languages,
-            concept_count: material.concept_count,
-            routing_terms: material.routing_terms,
-            routes,
-            updated_at: material.updated_at.max(now),
-            expires_at: now + ChronoDuration::minutes(15),
-        },
-    )?;
-    Ok((endpoints, PreparedPublicAnnouncement::Manifest(manifest)))
+    let current_manifest = PublicCollectionManifest {
+        protocol_version: airwiki_types::PUBLIC_CATALOG_PROTOCOL_V2.to_owned(),
+        publisher_id: publisher_id.clone(),
+        collection_id,
+        sequence: profile.manifest_sequence,
+        publication_fingerprint: fingerprint.clone(),
+        name: collection.name.clone(),
+        description: profile.description.clone(),
+        languages: profile.languages.clone(),
+        concept_count: material.concept_count,
+        okf_compatibility: Some(collection.okf_compatibility),
+        routing_terms: material.routing_terms.clone(),
+        routes: routes.clone(),
+        updated_at: material.updated_at.max(now),
+        expires_at: now + ChronoDuration::minutes(15),
+    };
+    let legacy_manifest = PublicCollectionManifest {
+        protocol_version: PUBLIC_CATALOG_PROTOCOL.to_owned(),
+        publisher_id,
+        collection_id,
+        sequence: profile.manifest_sequence,
+        publication_fingerprint: fingerprint,
+        name: collection.name,
+        description: profile.description,
+        languages: profile.languages,
+        concept_count: material.concept_count,
+        okf_compatibility: None,
+        routing_terms: material.routing_terms,
+        routes,
+        updated_at: material.updated_at.max(now),
+        expires_at: now + ChronoDuration::minutes(15),
+    };
+    let current = sign_manifest(identity.keypair(), current_manifest)?;
+    let legacy = sign_manifest(identity.keypair(), legacy_manifest)?;
+    Ok((
+        endpoints,
+        PreparedPublicAnnouncement::Manifest(Box::new(PreparedManifestAnnouncement {
+            current,
+            legacy,
+        })),
+    ))
 }
 
-fn prepare_public_tombstone(
+fn prepare_public_tombstones(
     identity: &NodeIdentity,
     publisher_id: &str,
     collection_id: Uuid,
     sequence: u64,
-) -> Result<airwiki_types::SignedPublicCollectionTombstone> {
-    Ok(sign_tombstone(
+) -> Result<(
+    airwiki_types::SignedPublicCollectionTombstone,
+    airwiki_types::SignedPublicCollectionTombstone,
+)> {
+    let current = sign_tombstone(
         identity.keypair(),
         PublicCollectionTombstone {
-            protocol_version: PUBLIC_CATALOG_PROTOCOL.to_owned(),
+            protocol_version: airwiki_types::PUBLIC_CATALOG_PROTOCOL_V2.to_owned(),
             publisher_id: publisher_id.to_owned(),
             collection_id,
             sequence,
             withdrawn_at: Utc::now(),
         },
-    )?)
+    )?;
+    let mut legacy_tombstone = current.tombstone.clone();
+    legacy_tombstone.protocol_version = PUBLIC_CATALOG_PROTOCOL.to_owned();
+    let legacy = sign_tombstone(identity.keypair(), legacy_tombstone)?;
+    Ok((current, legacy))
 }
 
 fn ready_public_routes(
@@ -3705,11 +4196,29 @@ async fn renew_public_manifests_for_readiness(
             () = context.cancellation.cancelled() => return,
             result = async {
                 match update {
-                    PreparedPublicAnnouncement::Manifest(manifest) => {
-                        Some(context.reader.register_manifest(&endpoints, manifest).await)
+                    PreparedPublicAnnouncement::Manifest(announcement) => {
+                        Some(
+                            context
+                                .reader
+                                .register_versioned_manifests(
+                                    &endpoints,
+                                    announcement.current,
+                                    announcement.legacy,
+                                )
+                                .await,
+                        )
                     }
-                    PreparedPublicAnnouncement::Tombstone(tombstone) => {
-                        Some(context.reader.withdraw_manifest(&endpoints, tombstone).await)
+                    PreparedPublicAnnouncement::Tombstone(announcement) => {
+                        Some(
+                            context
+                                .reader
+                                .withdraw_versioned_manifests(
+                                    &endpoints,
+                                    announcement.current,
+                                    announcement.legacy,
+                                )
+                                .await,
+                        )
                     }
                     PreparedPublicAnnouncement::Missing => None,
                 }
@@ -3885,52 +4394,59 @@ fn summarize_projection_trust(
     concepts: &[airwiki_core::OkfConceptProjectionRecord],
 ) -> crate::worker::TrustSummaryView {
     use crate::worker::TrustSummaryView;
-    if concepts.is_empty() {
+    use airwiki_types::TrustTier;
+    let mut stable = concepts
+        .iter()
+        .filter(|concept| concept.lifecycle_status == "stable");
+    let Some(first) = stable.next() else {
         return TrustSummaryView::Unverified;
-    }
-    let mut machine = false;
-    let mut human = false;
-    let mut outdated = false;
-    for concept in concepts {
-        let generated_at = concept
-            .generation
-            .as_ref()
-            .and_then(|generation| generation.get("at"))
-            .and_then(serde_json::Value::as_str)
-            .and_then(|value| DateTime::parse_from_rfc3339(value).ok());
-        let mut latest_human = None;
-        let verifications = concept
-            .verifications
-            .as_array()
-            .map(Vec::as_slice)
-            .unwrap_or_default();
-        for verification in verifications {
-            if verification
-                .get("by")
-                .and_then(serde_json::Value::as_str)
-                .is_some_and(|actor| actor.starts_with("human:"))
-            {
-                human = true;
-                let verified_at = verification
-                    .get("at")
-                    .and_then(serde_json::Value::as_str)
-                    .and_then(|value| DateTime::parse_from_rfc3339(value).ok());
-                latest_human = latest_human.max(verified_at);
-            } else if !verification.is_null() {
-                machine = true;
+    };
+    let mut summary = first.assurance.trust;
+    for concept in stable {
+        summary = match (summary, concept.assurance.trust) {
+            (TrustTier::Unverified, _) | (_, TrustTier::Unverified) => TrustTier::Unverified,
+            (TrustTier::MachineConfirmed, _) | (_, TrustTier::MachineConfirmed) => {
+                TrustTier::MachineConfirmed
             }
-        }
-        outdated |= generated_at
-            .is_some_and(|generated| latest_human.is_some_and(|verified| generated > verified));
+            _ => TrustTier::HumanReviewed,
+        };
     }
-    if outdated {
-        TrustSummaryView::VerificationOutdated
-    } else if human {
-        TrustSummaryView::HumanReviewed
-    } else if machine {
-        TrustSummaryView::MachineConfirmed
-    } else {
-        TrustSummaryView::Unverified
+    match summary {
+        TrustTier::Unverified => TrustSummaryView::Unverified,
+        TrustTier::MachineConfirmed => TrustSummaryView::MachineConfirmed,
+        TrustTier::HumanReviewed => TrustSummaryView::HumanReviewed,
+    }
+}
+
+#[cfg(test)]
+fn synthetic_projection_for_trust(
+    lifecycle_status: &str,
+    trust: airwiki_types::TrustTier,
+) -> airwiki_core::OkfConceptProjectionRecord {
+    airwiki_core::OkfConceptProjectionRecord {
+        collection_id: Uuid::new_v4(),
+        concept_id: Uuid::new_v4(),
+        logical_path: "synthetic.md".to_owned(),
+        concept_type: airwiki_types::ConceptType::Reference,
+        title: "Synthetic".to_owned(),
+        description: String::new(),
+        tags: Vec::new(),
+        lifecycle_status: lifecycle_status.to_owned(),
+        generation: None,
+        verifications: serde_json::json!([]),
+        provenance: serde_json::json!([]),
+        stale_after: None,
+        version: None,
+        fingerprint: "a".repeat(64),
+        unknown_frontmatter: serde_json::json!({}),
+        attested_computation: None,
+        assurance: airwiki_types::ConceptAssurance {
+            trust,
+            freshness: airwiki_types::FreshnessState::NotDeclared,
+            verification_outdated: false,
+        },
+        warnings: Vec::new(),
+        indexed_at: Utc::now(),
     }
 }
 
@@ -4110,6 +4626,32 @@ mod tests {
     use tokio::sync::{Notify, oneshot};
 
     use super::*;
+
+    #[test]
+    fn wiki_trust_summary_ignores_non_stable_concepts_and_defaults_conservatively() {
+        use crate::worker::TrustSummaryView;
+        use airwiki_types::TrustTier;
+
+        assert_eq!(
+            summarize_projection_trust(&[]),
+            TrustSummaryView::Unverified
+        );
+        assert_eq!(
+            summarize_projection_trust(&[synthetic_projection_for_trust(
+                "draft",
+                TrustTier::HumanReviewed,
+            )]),
+            TrustSummaryView::Unverified
+        );
+        assert_eq!(
+            summarize_projection_trust(&[
+                synthetic_projection_for_trust("stable", TrustTier::HumanReviewed),
+                synthetic_projection_for_trust("stable", TrustTier::Unverified),
+                synthetic_projection_for_trust("deprecated", TrustTier::HumanReviewed),
+            ]),
+            TrustSummaryView::Unverified
+        );
+    }
 
     #[test]
     fn managed_wiki_deletion_preserves_the_source_folder() {
@@ -4805,13 +5347,25 @@ mod tests {
         )
         .unwrap();
         let ready_sequence = match ready {
-            PreparedPublicAnnouncement::Manifest(manifest) => manifest.manifest.sequence,
+            PreparedPublicAnnouncement::Manifest(announcement) => {
+                assert_eq!(
+                    announcement.current.manifest.sequence,
+                    announcement.legacy.manifest.sequence
+                );
+                announcement.current.manifest.sequence
+            }
             _ => panic!("a ready relay must produce a manifest"),
         };
         let (_, offline) =
             prepare_next_public_announcement(&database, &publisher, collection.id, &[]).unwrap();
         let offline_sequence = match &offline {
-            PreparedPublicAnnouncement::Tombstone(tombstone) => tombstone.tombstone.sequence,
+            PreparedPublicAnnouncement::Tombstone(announcement) => {
+                assert_eq!(
+                    announcement.current.tombstone.sequence,
+                    announcement.legacy.tombstone.sequence
+                );
+                announcement.current.tombstone.sequence
+            }
             _ => panic!("zero ready relays must produce a tombstone"),
         };
 
@@ -5518,6 +6072,8 @@ mod tests {
             updated_at: published.updated_at,
             rank: 1,
             node_id: "test-node".into(),
+            assurance: None,
+            lifecycle_status: Some("stable".to_owned()),
         };
         response.hits.push(hit.clone());
         response.authorized_candidates.push(hit);

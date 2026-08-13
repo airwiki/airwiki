@@ -93,6 +93,12 @@ pub struct CollectionView {
     pub origin: WikiOrigin,
     pub indexing_mode: IndexingMode,
     pub okf_version: String,
+    pub declared_okf_version: Option<String>,
+    pub okf_compatibility: airwiki_types::OkfCompatibility,
+    pub managed_size_bytes: u64,
+    pub stale_concept_count: usize,
+    pub outdated_verification_count: usize,
+    pub metadata_warning_count: usize,
     pub trust_summary: TrustSummaryView,
 }
 
@@ -101,7 +107,6 @@ pub enum TrustSummaryView {
     Unverified,
     MachineConfirmed,
     HumanReviewed,
-    VerificationOutdated,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -240,6 +245,30 @@ pub struct ModelStateView {
     pub license_url: Option<String>,
     pub revision: Option<String>,
     pub license_accepted: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ApplicationWikiRoleView {
+    Owner,
+    Reader,
+    Editor,
+}
+
+#[derive(Debug, Clone)]
+pub struct ApplicationWikiGrantView {
+    pub wiki_id: Uuid,
+    pub role: ApplicationWikiRoleView,
+}
+
+#[derive(Debug, Clone)]
+pub struct ApplicationAccessView {
+    pub app_id: Uuid,
+    pub display_name: String,
+    pub producer: String,
+    pub active: bool,
+    pub owned_wiki_count: usize,
+    pub managed_bytes: u64,
+    pub grants: Vec<ApplicationWikiGrantView>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -462,6 +491,12 @@ pub enum WorkerCommand {
         page_id: KnowledgePageId,
         expected_fingerprint: String,
     },
+    VerifyManagedConcept {
+        collection_id: Uuid,
+        logical_path: String,
+        expected_fingerprint: String,
+        completed: oneshot::Sender<Result<(), String>>,
+    },
     Search {
         request_id: Uuid,
         question: String,
@@ -494,6 +529,23 @@ pub enum WorkerCommand {
     ManageChatIntegration {
         request_id: Uuid,
         action: IntegrationAction,
+    },
+    RefreshApplicationAccess,
+    SetApplicationWikiRole {
+        app_id: Uuid,
+        wiki_id: Uuid,
+        role: Option<ApplicationWikiRoleView>,
+    },
+    RefreshComputations,
+    RejectComputation {
+        run_id: Uuid,
+    },
+    ExecuteComputation {
+        run_id: Uuid,
+    },
+    SaveComputationResult {
+        run_id: Uuid,
+        target_wiki_id: Uuid,
     },
     Pair {
         peer_id: String,
@@ -632,6 +684,11 @@ pub enum WorkerEvent {
         request_id: Uuid,
         result: Result<ChatIntegrationsSnapshot, String>,
     },
+    ApplicationAccessUpdated(Vec<ApplicationAccessView>),
+    ComputationsUpdated {
+        pending: Vec<crate::computations::PendingComputation>,
+        completed: Vec<crate::computations::CompletedComputation>,
+    },
     Peers(Vec<PeerView>),
     Notice(String),
     Error(String),
@@ -649,9 +706,17 @@ enum InternalEvent {
 }
 
 enum BackgroundCompletion {
+    Computation {
+        result: Result<(), String>,
+    },
     Approve {
         concept_id: Uuid,
         result: Result<(), String>,
+    },
+    VerifyManagedConcept {
+        collection_id: Uuid,
+        result: Result<(), String>,
+        completed: oneshot::Sender<Result<(), String>>,
     },
     Preflight {
         collection_id: Uuid,
@@ -1080,8 +1145,10 @@ pub(crate) async fn run_worker(
     };
     let mut public_announcement_updates = services.subscribe_public_announcement_updates();
     let mut public_announcement_updates_open = true;
+    let mut computation_updates = services.subscribe_computation_updates();
+    let mut computation_updates_open = true;
     let (integration_manager, integration_manager_error) =
-        match ChatIntegrationManager::new(paths.clone()) {
+        match ChatIntegrationManager::new(paths.clone(), services.database().clone()) {
             Ok(manager) => (Some(manager), None),
             Err(error) => (
                 None,
@@ -1295,6 +1362,8 @@ pub(crate) async fn run_worker(
     )
     .await;
     send_ready(&services, &events).await;
+    refresh_computations(&services, &events).await;
+    refresh_application_access(&services, &events).await;
 
     'running: loop {
         tokio::select! {
@@ -1307,11 +1376,68 @@ pub(crate) async fn run_worker(
                     public_announcement_updates_open = false;
                 }
             }
+            changed = computation_updates.changed(), if computation_updates_open => {
+                if changed.is_ok() {
+                    refresh_computations(&services, &events).await;
+                } else {
+                    computation_updates_open = false;
+                }
+            }
             intent = commands.recv() => {
                 let Some(intent) = intent else { break 'running };
                 let WorkerIntent { command, accepted } = intent;
                 let _ = accepted.send(());
                 match command {
+                    WorkerCommand::RefreshComputations => {
+                        refresh_computations(&services, &events).await;
+                    }
+                    WorkerCommand::RefreshApplicationAccess => {
+                        refresh_application_access(&services, &events).await;
+                    }
+                    WorkerCommand::SetApplicationWikiRole { app_id, wiki_id, role } => {
+                        let result = services.set_application_wiki_role(app_id, wiki_id, role);
+                        if let Err(error) = result {
+                            send(
+                                &events,
+                                WorkerEvent::Error(format!(
+                                    "No se pudo actualizar el acceso de la aplicación: {error:#}"
+                                )),
+                            )
+                            .await;
+                        }
+                        refresh_application_access(&services, &events).await;
+                    }
+                    WorkerCommand::RejectComputation { run_id } => {
+                        if let Err(error) = services.reject_computation(run_id) {
+                            send(
+                                &events,
+                                WorkerEvent::Error(format!(
+                                    "No se pudo rechazar la computación: {error:#}"
+                                )),
+                            )
+                            .await;
+                        }
+                        refresh_computations(&services, &events).await;
+                    }
+                    WorkerCommand::ExecuteComputation { run_id } => {
+                        let services = Arc::clone(&services);
+                        background.spawn_blocking(move || {
+                            let result = services
+                                .execute_computation(run_id)
+                                .map(|_| ())
+                                .map_err(|error| format!("{error:#}"));
+                            BackgroundCompletion::Computation { result }
+                        });
+                    }
+                    WorkerCommand::SaveComputationResult { run_id, target_wiki_id } => {
+                        let services = Arc::clone(&services);
+                        background.spawn_blocking(move || {
+                            let result = services
+                                .save_computation_result(run_id, target_wiki_id)
+                                .map_err(|error| format!("{error:#}"));
+                            BackgroundCompletion::Computation { result }
+                        });
+                    }
                     WorkerCommand::InstallModels => {
                         let Some(selection) = recommendation.selection.clone() else {
                             send(
@@ -2013,6 +2139,21 @@ pub(crate) async fn run_worker(
                             expected_fingerprint,
                         );
                     }
+                    WorkerCommand::VerifyManagedConcept {
+                        collection_id,
+                        logical_path,
+                        expected_fingerprint,
+                        completed,
+                    } => {
+                        spawn_managed_concept_verification(
+                            &services,
+                            &mut background,
+                            collection_id,
+                            logical_path,
+                            expected_fingerprint,
+                            completed,
+                        );
+                    }
                     WorkerCommand::Search {
                         request_id,
                         question,
@@ -2652,6 +2793,25 @@ pub(crate) async fn run_worker(
             }
             completion = background.join_next(), if !background.is_empty() => {
                 match completion {
+                    Some(Ok(BackgroundCompletion::Computation { result })) => {
+                        match result {
+                            Ok(()) => send(
+                                &events,
+                                WorkerEvent::Notice(
+                                    "Computación completada y atestada".into()
+                                ),
+                            )
+                            .await,
+                            Err(error) => send(
+                                &events,
+                                WorkerEvent::Error(format!(
+                                    "La computación no pudo completarse: {error}"
+                                )),
+                            )
+                            .await,
+                        }
+                        refresh_computations(&services, &events).await;
+                    }
                     Some(Ok(BackgroundCompletion::Approve { concept_id, result })) => {
                         approving_reviews.remove(&concept_id);
                         match result {
@@ -2673,6 +2833,36 @@ pub(crate) async fn run_worker(
                             &mut wiki_health_generation,
                             Uuid::new_v4(),
                         );
+                    }
+                    Some(Ok(BackgroundCompletion::VerifyManagedConcept {
+                        collection_id,
+                        result,
+                        completed,
+                    })) => {
+                        let _ = completed.send(result.clone());
+                        match result {
+                            Ok(()) => send(
+                                &events,
+                                WorkerEvent::Notice(
+                                    "El concepto quedó verificado por una persona".into(),
+                                ),
+                            )
+                            .await,
+                            Err(error) => send(
+                                &events,
+                                WorkerEvent::Error(format!(
+                                    "No se pudo verificar el concepto OKF: {error}"
+                                )),
+                            )
+                            .await,
+                        }
+                        refresh_content_views(&services, &events).await;
+                        if services.sync_public_collection(collection_id).await.is_err() {
+                            tracing::warn!(
+                                error_kind = "public_manifest_sync_after_verification",
+                                "verified collection manifest could not be refreshed"
+                            );
+                        }
                     }
                     Some(Ok(BackgroundCompletion::Preflight { collection_id, result })) => {
                         if let Err(error) = result {
@@ -2944,6 +3134,7 @@ pub(crate) async fn run_worker(
                             &events,
                             WorkerEvent::ChatIntegrationsUpdated { request_id, result },
                         ).await;
+                        refresh_application_access(&services, &events).await;
                     }
                     Some(Ok(BackgroundCompletion::Autostart { request_id, result })) => {
                         send(
@@ -3637,6 +3828,40 @@ async fn send_ready(services: &DesktopServices, events: &Sender<WorkerEvent>) {
             send(
                 events,
                 WorkerEvent::Error(format!("No se pudo cargar el estado local: {error:#}")),
+            )
+            .await
+        }
+    }
+}
+
+async fn refresh_computations(services: &DesktopServices, events: &Sender<WorkerEvent>) {
+    match (
+        services.pending_computations(),
+        services.completed_computations(),
+    ) {
+        (Ok(pending), Ok(completed)) => {
+            send(
+                events,
+                WorkerEvent::ComputationsUpdated { pending, completed },
+            )
+            .await
+        }
+        (Err(_), _) | (_, Err(_)) => {
+            tracing::warn!(
+                error_kind = "computation_queue_refresh",
+                "pending computations could not be refreshed"
+            );
+        }
+    }
+}
+
+async fn refresh_application_access(services: &DesktopServices, events: &Sender<WorkerEvent>) {
+    match services.application_access_views() {
+        Ok(applications) => send(events, WorkerEvent::ApplicationAccessUpdated(applications)).await,
+        Err(_) => {
+            send(
+                events,
+                WorkerEvent::Error("No se pudo actualizar el acceso de las aplicaciones".into()),
             )
             .await
         }
@@ -4964,6 +5189,30 @@ fn spawn_knowledge_page(
     });
 }
 
+fn spawn_managed_concept_verification(
+    services: &Arc<DesktopServices>,
+    background: &mut JoinSet<BackgroundCompletion>,
+    collection_id: Uuid,
+    logical_path: String,
+    expected_fingerprint: String,
+    completed: oneshot::Sender<Result<(), String>>,
+) {
+    let services = Arc::clone(services);
+    background.spawn(async move {
+        let result = tokio::task::spawn_blocking(move || {
+            services.verify_managed_concept(collection_id, &logical_path, &expected_fingerprint)
+        })
+        .await
+        .map_err(|error| format!("falló el worker de verificación OKF: {error}"))
+        .and_then(|result| result.map_err(|error| format!("{error:#}")));
+        BackgroundCompletion::VerifyManagedConcept {
+            collection_id,
+            result,
+            completed,
+        }
+    });
+}
+
 struct SearchTask {
     request_id: Uuid,
     question: String,
@@ -5152,6 +5401,7 @@ fn apply_recent_mcp_activities(
             McpClientKind::ChatGptDesktop => ChatClientKind::ChatGptDesktop,
             McpClientKind::ClaudeDesktop => ChatClientKind::ClaudeDesktop,
             McpClientKind::GeminiCli => ChatClientKind::GeminiCli,
+            McpClientKind::GenericMcp => ChatClientKind::GenericMcp,
         };
         if let Some(view) = integrations.iter_mut().find(|view| view.client == client) {
             view.activity_recent = true;
@@ -5635,6 +5885,10 @@ mod tests {
                 client: McpClientKind::GeminiCli,
                 observed_at: recent,
             },
+            McpClientActivity {
+                client: McpClientKind::GenericMcp,
+                observed_at: recent,
+            },
         ];
 
         let claude_recent = apply_recent_mcp_activities(&mut all_recent, activities, now);
@@ -5663,6 +5917,10 @@ mod tests {
                 client: McpClientKind::GeminiCli,
                 observed_at: recent,
             },
+            McpClientActivity {
+                client: McpClientKind::GenericMcp,
+                observed_at: old,
+            },
         ];
 
         let claude_recent = apply_recent_mcp_activities(&mut mixed, mixed_activities, now);
@@ -5671,6 +5929,7 @@ mod tests {
         assert!(mixed[0].activity_recent);
         assert!(!mixed[1].activity_recent);
         assert!(mixed[2].activity_recent);
+        assert!(!mixed[3].activity_recent);
     }
 
     #[test]

@@ -3,10 +3,11 @@ use std::str::FromStr;
 use std::time::Duration;
 
 use airwiki_types::{
-    PUBLIC_BROWSE_PROTOCOL, PUBLIC_CATALOG_PROTOCOL, PUBLIC_SEARCH_PROTOCOL, PublicBrowsePage,
-    PublicBrowseRequest, PublicCatalogQuery, PublicCollectionSummary, PublicCollectionTarget,
-    PublicSearchRequest, SearchContractError, SearchHit, SearchRequest, SearchResponse,
-    SignedPublicCollectionManifest, SignedPublicCollectionTombstone,
+    PUBLIC_BROWSE_PROTOCOL, PUBLIC_BROWSE_PROTOCOL_V2, PUBLIC_CATALOG_PROTOCOL,
+    PUBLIC_CATALOG_PROTOCOL_V2, PUBLIC_SEARCH_PROTOCOL, PUBLIC_SEARCH_PROTOCOL_V2,
+    PublicBrowsePage, PublicBrowseRequest, PublicCatalogQuery, PublicCollectionSummary,
+    PublicCollectionTarget, PublicSearchRequest, SearchContractError, SearchHit, SearchRequest,
+    SearchResponse, SignedPublicCollectionManifest, SignedPublicCollectionTombstone,
 };
 use libp2p::identity::Keypair;
 use libp2p::request_response::{self, OutboundRequestId, ProtocolSupport};
@@ -15,9 +16,11 @@ use libp2p::{Multiaddr, PeerId, StreamProtocol, Swarm, SwarmBuilder};
 use tokio::sync::{Semaphore, mpsc};
 use tokio::time::{Instant, timeout_at};
 
+use crate::public_codec::{ProtocolPayload, VersionedCborCodec};
 use crate::{
     CatalogWireRequest, CatalogWireResponse, NetworkError, PublicBrowseWireResponse,
-    PublicSearchWireResponse, PublicSourceRejection, verify_manifest,
+    PublicSearchWireResponse, PublicSourceRejection, VersionedManifestPair, VersionedTombstonePair,
+    verify_manifest,
 };
 
 const INDEX_DEADLINE: Duration = Duration::from_millis(1_000);
@@ -161,49 +164,38 @@ impl PublicReader {
             SearchContractError::Unavailable("public reader is shutting down".to_owned())
         })?;
         let started = Instant::now();
-        let mut swarm = reader_swarm(self.identity.clone())
+        let mut swarm = reader_swarm(self.identity.clone(), CatalogProtocolMode::CurrentFirst)
             .map_err(|error| SearchContractError::Unavailable(error.to_string()))?;
         let catalog_query = PublicCatalogQuery {
-            protocol_version: PUBLIC_CATALOG_PROTOCOL.to_owned(),
+            protocol_version: PUBLIC_CATALOG_PROTOCOL_V2.to_owned(),
             request_id: request.request_id,
             query: request.query.clone(),
             languages: Vec::new(),
             limit: airwiki_types::MAX_PUBLIC_CANDIDATES,
         };
-        let mut pending_catalog = HashSet::new();
-        for endpoint in bounded_indexes(indexes) {
-            swarm.add_peer_address(endpoint.peer_id, endpoint.address.clone());
-            pending_catalog.insert(swarm.behaviour_mut().catalog.send_request(
-                &endpoint.peer_id,
-                CatalogWireRequest::Query(catalog_query.clone()),
-            ));
-        }
-        if pending_catalog.is_empty() {
+        if bounded_indexes(indexes).next().is_none() {
             return Err(SearchContractError::Unavailable(
                 "no public federation index is configured".to_owned(),
             ));
         }
-        let mut manifests = Vec::new();
-        let mut catalog_state = CatalogQueryState::default();
         let index_deadline = public_index_deadline(started);
-        while !pending_catalog.is_empty() {
-            let event = match timeout_at(
-                index_deadline,
-                futures::StreamExt::select_next_some(&mut swarm),
-            )
-            .await
-            {
-                Ok(event) => event,
-                Err(_) => break,
-            };
-            collect_catalog_event(
-                event,
-                &mut pending_catalog,
-                &mut manifests,
-                &mut catalog_state,
-            );
+        let (mut manifests, mut catalog_state) =
+            query_catalog_manifests(&mut swarm, indexes, &catalog_query, index_deadline).await;
+        if manifests.is_empty() && Instant::now() < index_deadline {
+            let mut legacy_swarm =
+                reader_swarm(self.identity.clone(), CatalogProtocolMode::LegacyOnly)
+                    .map_err(|error| SearchContractError::Unavailable(error.to_string()))?;
+            let mut legacy_query = catalog_query.clone();
+            legacy_query.protocol_version = PUBLIC_CATALOG_PROTOCOL.to_owned();
+            let (legacy_manifests, legacy_state) =
+                query_catalog_manifests(&mut legacy_swarm, indexes, &legacy_query, index_deadline)
+                    .await;
+            if legacy_state.successful > 0 {
+                swarm = legacy_swarm;
+                manifests = legacy_manifests;
+                catalog_state = legacy_state;
+            }
         }
-        catalog_state.failed = catalog_state.failed.saturating_add(pending_catalog.len());
         let catalog_partial = catalog_query_is_partial(catalog_state)?;
         let candidates = {
             let blocked = self.blocked_publishers.read().await;
@@ -250,7 +242,7 @@ impl PublicReader {
                 }
             }
             let public_request = PublicSearchRequest {
-                protocol_version: PUBLIC_SEARCH_PROTOCOL.to_owned(),
+                protocol_version: PUBLIC_SEARCH_PROTOCOL_V2.to_owned(),
                 request_id: request.request_id,
                 query: request.query.clone(),
                 purpose: request.purpose,
@@ -389,7 +381,7 @@ impl PublicReader {
             .map_err(|_| SearchContractError::Unauthorized)?;
         let peer = PeerId::from_str(&manifest.manifest.publisher_id)
             .map_err(|_| SearchContractError::Unauthorized)?;
-        let mut swarm = reader_swarm(self.identity.clone())
+        let mut swarm = reader_swarm(self.identity.clone(), CatalogProtocolMode::CurrentFirst)
             .map_err(|error| SearchContractError::Unavailable(error.to_string()))?;
         for route in &manifest.manifest.routes {
             if let Ok(address) = Multiaddr::from_str(route) {
@@ -397,7 +389,7 @@ impl PublicReader {
             }
         }
         let request = PublicBrowseRequest {
-            protocol_version: PUBLIC_BROWSE_PROTOCOL.to_owned(),
+            protocol_version: PUBLIC_BROWSE_PROTOCOL_V2.to_owned(),
             request_id: uuid::Uuid::new_v4(),
             collection_id: manifest.manifest.collection_id,
             cursor,
@@ -448,9 +440,16 @@ impl PublicReader {
                             if blocked.contains(&manifest.manifest.publisher_id) {
                                 return Err(SearchContractError::Unauthorized);
                             }
+                            let mut negotiated_request = request.clone();
+                            negotiated_request
+                                .protocol_version
+                                .clone_from(&page.protocol_version);
                             if page.manifest_sequence < manifest.manifest.sequence
                                 || page
-                                    .validate_for(&request, &manifest.manifest.publisher_id)
+                                    .validate_for(
+                                        &negotiated_request,
+                                        &manifest.manifest.publisher_id,
+                                    )
                                     .is_err()
                                 || response_peer != peer
                             {
@@ -566,6 +565,22 @@ impl PublicReader {
             .await
     }
 
+    pub async fn register_versioned_manifests(
+        &self,
+        indexes: &[PublicIndexEndpoint],
+        current: SignedPublicCollectionManifest,
+        legacy: SignedPublicCollectionManifest,
+    ) -> Result<usize, SearchContractError> {
+        self.catalog_update(
+            indexes,
+            CatalogWireRequest::RegisterVersioned(Box::new(VersionedManifestPair {
+                current,
+                legacy,
+            })),
+        )
+        .await
+    }
+
     pub async fn withdraw_manifest(
         &self,
         indexes: &[PublicIndexEndpoint],
@@ -575,12 +590,41 @@ impl PublicReader {
             .await
     }
 
+    pub async fn withdraw_versioned_manifests(
+        &self,
+        indexes: &[PublicIndexEndpoint],
+        current: SignedPublicCollectionTombstone,
+        legacy: SignedPublicCollectionTombstone,
+    ) -> Result<usize, SearchContractError> {
+        self.catalog_update(
+            indexes,
+            CatalogWireRequest::WithdrawVersioned(Box::new(VersionedTombstonePair {
+                current,
+                legacy,
+            })),
+        )
+        .await
+    }
+
     async fn catalog_update(
         &self,
         indexes: &[PublicIndexEndpoint],
         update: CatalogWireRequest,
     ) -> Result<usize, SearchContractError> {
-        let mut swarm = reader_swarm(self.identity.clone())
+        let catalog_mode = match &update {
+            CatalogWireRequest::Register(manifest)
+                if manifest.manifest.protocol_version == PUBLIC_CATALOG_PROTOCOL =>
+            {
+                CatalogProtocolMode::LegacyOnly
+            }
+            CatalogWireRequest::Withdraw(tombstone)
+                if tombstone.tombstone.protocol_version == PUBLIC_CATALOG_PROTOCOL =>
+            {
+                CatalogProtocolMode::LegacyOnly
+            }
+            _ => CatalogProtocolMode::CurrentFirst,
+        };
+        let mut swarm = reader_swarm(self.identity.clone(), catalog_mode)
             .map_err(|error| SearchContractError::Unavailable(error.to_string()))?;
         let mut pending = HashSet::new();
         for endpoint in bounded_indexes(indexes) {
@@ -750,29 +794,54 @@ impl OwnerRouteTracker {
 
 #[derive(NetworkBehaviour)]
 struct ReaderBehaviour {
-    catalog: request_response::cbor::Behaviour<CatalogWireRequest, CatalogWireResponse>,
-    search: request_response::cbor::Behaviour<PublicSearchRequest, PublicSearchWireResponse>,
-    browse: request_response::cbor::Behaviour<PublicBrowseRequest, PublicBrowseWireResponse>,
+    catalog:
+        request_response::Behaviour<VersionedCborCodec<CatalogWireRequest, CatalogWireResponse>>,
+    search: request_response::Behaviour<
+        VersionedCborCodec<PublicSearchRequest, PublicSearchWireResponse>,
+    >,
+    browse: request_response::Behaviour<
+        VersionedCborCodec<PublicBrowseRequest, PublicBrowseWireResponse>,
+    >,
     relay: libp2p::relay::client::Behaviour,
     dcutr: libp2p::dcutr::Behaviour,
     limits: libp2p::connection_limits::Behaviour,
 }
 
-fn reader_swarm(identity: Keypair) -> Result<Swarm<ReaderBehaviour>, NetworkError> {
+#[derive(Debug, Clone, Copy)]
+enum CatalogProtocolMode {
+    CurrentFirst,
+    LegacyOnly,
+}
+
+fn reader_swarm(
+    identity: Keypair,
+    catalog_mode: CatalogProtocolMode,
+) -> Result<Swarm<ReaderBehaviour>, NetworkError> {
     let local_peer = identity.public().to_peer_id();
-    let catalog = outbound_behaviour(
-        PUBLIC_CATALOG_PROTOCOL,
-        128 * 1024,
-        512 * 1024,
-        INDEX_DEADLINE,
-    )?;
-    let search = outbound_behaviour(
+    let catalog = match catalog_mode {
+        CatalogProtocolMode::CurrentFirst => versioned_outbound_behaviour(
+            PUBLIC_CATALOG_PROTOCOL_V2,
+            PUBLIC_CATALOG_PROTOCOL,
+            128 * 1024,
+            512 * 1024,
+            INDEX_DEADLINE,
+        )?,
+        CatalogProtocolMode::LegacyOnly => legacy_outbound_behaviour(
+            PUBLIC_CATALOG_PROTOCOL,
+            128 * 1024,
+            512 * 1024,
+            INDEX_DEADLINE,
+        )?,
+    };
+    let search = versioned_outbound_behaviour(
+        PUBLIC_SEARCH_PROTOCOL_V2,
         PUBLIC_SEARCH_PROTOCOL,
         16 * 1024,
         256 * 1024,
         OWNER_RESPONSE_BUDGET,
     )?;
-    let browse = outbound_behaviour(
+    let browse = versioned_outbound_behaviour(
+        PUBLIC_BROWSE_PROTOCOL_V2,
         PUBLIC_BROWSE_PROTOCOL,
         16 * 1024,
         256 * 1024,
@@ -809,24 +878,72 @@ fn reader_swarm(identity: Keypair) -> Result<Swarm<ReaderBehaviour>, NetworkErro
         .map(|builder| builder.build())
 }
 
-fn outbound_behaviour<Request, Response>(
+fn legacy_outbound_behaviour<Request, Response>(
     protocol: &'static str,
     request_bytes: u64,
     response_bytes: u64,
     request_timeout: Duration,
-) -> Result<request_response::cbor::Behaviour<Request, Response>, NetworkError>
+) -> Result<request_response::Behaviour<VersionedCborCodec<Request, Response>>, NetworkError>
 where
-    Request: serde::Serialize + serde::de::DeserializeOwned + Send + 'static,
-    Response: serde::Serialize + serde::de::DeserializeOwned + Send + 'static,
+    Request: Clone
+        + ProtocolPayload
+        + serde::Serialize
+        + serde::de::DeserializeOwned
+        + Send
+        + Sync
+        + 'static,
+    Response: Clone
+        + ProtocolPayload
+        + serde::Serialize
+        + serde::de::DeserializeOwned
+        + Send
+        + Sync
+        + 'static,
 {
     let protocol = StreamProtocol::try_from_owned(protocol.to_owned())
         .map_err(|error| NetworkError::Transport(error.to_string()))?;
-    let codec = request_response::cbor::codec::Codec::<Request, Response>::default()
-        .set_request_size_maximum(request_bytes)
-        .set_response_size_maximum(response_bytes);
     Ok(request_response::Behaviour::with_codec(
-        codec,
+        VersionedCborCodec::new(request_bytes, response_bytes),
         [(protocol, ProtocolSupport::Outbound)],
+        request_response::Config::default()
+            .with_request_timeout(request_timeout)
+            .with_max_concurrent_streams(32),
+    ))
+}
+
+fn versioned_outbound_behaviour<Request, Response>(
+    current_protocol: &'static str,
+    legacy_protocol: &'static str,
+    request_bytes: u64,
+    response_bytes: u64,
+    request_timeout: Duration,
+) -> Result<request_response::Behaviour<VersionedCborCodec<Request, Response>>, NetworkError>
+where
+    Request: Clone
+        + ProtocolPayload
+        + serde::Serialize
+        + serde::de::DeserializeOwned
+        + Send
+        + Sync
+        + 'static,
+    Response: Clone
+        + ProtocolPayload
+        + serde::Serialize
+        + serde::de::DeserializeOwned
+        + Send
+        + Sync
+        + 'static,
+{
+    let current = StreamProtocol::try_from_owned(current_protocol.to_owned())
+        .map_err(|error| NetworkError::Transport(error.to_string()))?;
+    let legacy = StreamProtocol::try_from_owned(legacy_protocol.to_owned())
+        .map_err(|error| NetworkError::Transport(error.to_string()))?;
+    Ok(request_response::Behaviour::with_codec(
+        VersionedCborCodec::new(request_bytes, response_bytes),
+        [
+            (current, ProtocolSupport::Outbound),
+            (legacy, ProtocolSupport::Outbound),
+        ],
         request_response::Config::default()
             .with_request_timeout(request_timeout)
             .with_max_concurrent_streams(32),
@@ -873,6 +990,36 @@ fn collect_catalog_event(
         }
         _ => {}
     }
+}
+
+async fn query_catalog_manifests(
+    swarm: &mut Swarm<ReaderBehaviour>,
+    indexes: &[PublicIndexEndpoint],
+    query: &PublicCatalogQuery,
+    deadline: Instant,
+) -> (Vec<SignedPublicCollectionManifest>, CatalogQueryState) {
+    let mut pending = HashSet::new();
+    for endpoint in bounded_indexes(indexes) {
+        swarm.add_peer_address(endpoint.peer_id, endpoint.address.clone());
+        pending.insert(
+            swarm
+                .behaviour_mut()
+                .catalog
+                .send_request(&endpoint.peer_id, CatalogWireRequest::Query(query.clone())),
+        );
+    }
+    let mut manifests = Vec::new();
+    let mut state = CatalogQueryState::default();
+    while !pending.is_empty() {
+        let event =
+            match timeout_at(deadline, futures::StreamExt::select_next_some(&mut *swarm)).await {
+                Ok(event) => event,
+                Err(_) => break,
+            };
+        collect_catalog_event(event, &mut pending, &mut manifests, &mut state);
+    }
+    state.failed = state.failed.saturating_add(pending.len());
+    (manifests, state)
 }
 
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
@@ -965,8 +1112,10 @@ fn collect_search_event(
                 let manifests = pending_owner.manifests;
                 match response {
                     PublicSearchWireResponse::Success(mut response)
-                        if response.protocol_version == PUBLIC_SEARCH_PROTOCOL
-                            && response.response.request_id == expected.request_id
+                        if matches!(
+                            response.protocol_version.as_str(),
+                            PUBLIC_SEARCH_PROTOCOL | PUBLIC_SEARCH_PROTOCOL_V2
+                        ) && response.response.request_id == expected.request_id
                             && peer == pending_owner.peer
                             && revisions_are_current(&response.manifest_sequences, &manifests)
                             && public_search_hits_are_valid(
@@ -1257,6 +1406,8 @@ mod tests {
             updated_at: Utc::now(),
             rank,
             node_id: "synthetic".to_owned(),
+            assurance: None,
+            lifecycle_status: None,
         }
     }
 
@@ -1273,6 +1424,7 @@ mod tests {
                 description: String::new(),
                 languages: vec!["en".to_owned()],
                 concept_count: 1,
+                okf_compatibility: None,
                 routing_terms: vec!["synthetic".to_owned()],
                 routes: vec!["/ip4/127.0.0.1/tcp/1".to_owned()],
                 updated_at: now,
@@ -1399,6 +1551,7 @@ mod tests {
                     description: String::new(),
                     languages: vec!["en".to_owned()],
                     concept_count: 1,
+                    okf_compatibility: None,
                     routing_terms: vec!["synthetic".to_owned()],
                     routes: vec!["/ip4/127.0.0.1/tcp/1".to_owned()],
                     updated_at: now,

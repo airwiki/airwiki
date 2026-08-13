@@ -79,6 +79,22 @@ impl PublicCatalogBackend for CatalogBackend {
             .map_err(map_backend_error)
     }
 
+    async fn register_versioned(
+        &self,
+        current: SignedPublicCollectionManifest,
+        legacy: SignedPublicCollectionManifest,
+    ) -> Result<(), PublicCatalogBackendError> {
+        let store = std::sync::Arc::clone(&self.store);
+        tokio::task::spawn_blocking(move || {
+            let now = Utc::now();
+            store.register(&legacy, now)?;
+            store.register(&current, now)
+        })
+        .await
+        .map_err(map_catalog_join_error)?
+        .map_err(map_backend_error)
+    }
+
     async fn withdraw(
         &self,
         tombstone: SignedPublicCollectionTombstone,
@@ -88,6 +104,21 @@ impl PublicCatalogBackend for CatalogBackend {
             .await
             .map_err(map_catalog_join_error)?
             .map_err(map_backend_error)
+    }
+
+    async fn withdraw_versioned(
+        &self,
+        current: SignedPublicCollectionTombstone,
+        legacy: SignedPublicCollectionTombstone,
+    ) -> Result<(), PublicCatalogBackendError> {
+        let store = std::sync::Arc::clone(&self.store);
+        tokio::task::spawn_blocking(move || {
+            store.withdraw(&legacy)?;
+            store.withdraw(&current)
+        })
+        .await
+        .map_err(map_catalog_join_error)?
+        .map_err(map_backend_error)
     }
 
     async fn query(
@@ -162,7 +193,7 @@ impl CatalogStore {
     }
 
     fn initialize(
-        connection: Connection,
+        mut connection: Connection,
         limits: CatalogLimits,
     ) -> Result<Self, CatalogStoreError> {
         connection.execute_batch(
@@ -170,11 +201,12 @@ impl CatalogStore {
                 manifest_id INTEGER PRIMARY KEY,
                 publisher_id TEXT NOT NULL,
                 collection_id TEXT NOT NULL,
+                protocol_version TEXT NOT NULL,
                 sequence INTEGER NOT NULL CHECK(sequence >= 0),
                 signed_cbor BLOB,
                 expires_at TEXT,
                 withdrawn INTEGER NOT NULL DEFAULT 0,
-                UNIQUE(publisher_id,collection_id)
+                UNIQUE(publisher_id,collection_id,protocol_version)
              );
              CREATE VIRTUAL TABLE IF NOT EXISTS catalog_fts USING fts5(
                 publisher_id UNINDEXED,collection_id UNINDEXED,name,description,routing_terms,
@@ -182,6 +214,7 @@ impl CatalogStore {
              );
              CREATE INDEX IF NOT EXISTS manifests_expiry_idx ON manifests(expires_at);",
         )?;
+        migrate_legacy_manifests(&mut connection)?;
         Ok(Self {
             connection: Mutex::new(connection),
             limits,
@@ -201,8 +234,13 @@ impl CatalogStore {
         purge_catalog_entries(&tx, now)?;
         let known_id = tx
             .query_row(
-                "SELECT manifest_id FROM manifests WHERE publisher_id=?1 AND collection_id=?2",
-                params![manifest.publisher_id, manifest.collection_id.to_string()],
+                "SELECT manifest_id FROM manifests
+                 WHERE publisher_id=?1 AND collection_id=?2 AND protocol_version=?3",
+                params![
+                    manifest.publisher_id,
+                    manifest.collection_id.to_string(),
+                    manifest.protocol_version,
+                ],
                 |row| row.get::<_, i64>(0),
             )
             .optional()?;
@@ -218,6 +256,7 @@ impl CatalogStore {
             &tx,
             &manifest.publisher_id,
             &manifest.collection_id.to_string(),
+            &manifest.protocol_version,
             manifest.sequence,
         )?;
         let manifest_id = if let Some(manifest_id) = known_id {
@@ -235,11 +274,12 @@ impl CatalogStore {
             manifest_id
         } else {
             tx.execute(
-                "INSERT INTO manifests(publisher_id,collection_id,sequence,signed_cbor,expires_at,withdrawn)
-                 VALUES (?1,?2,?3,?4,?5,0)",
+                "INSERT INTO manifests(publisher_id,collection_id,protocol_version,sequence,signed_cbor,expires_at,withdrawn)
+                 VALUES (?1,?2,?3,?4,?5,?6,0)",
                 params![
                     manifest.publisher_id,
                     manifest.collection_id.to_string(),
+                    manifest.protocol_version,
                     manifest.sequence,
                     encoded,
                     manifest.expires_at.to_rfc3339(),
@@ -284,12 +324,18 @@ impl CatalogStore {
             &tx,
             &tombstone.publisher_id,
             &tombstone.collection_id.to_string(),
+            &tombstone.protocol_version,
             tombstone.sequence,
         )?;
         let known_id = tx
             .query_row(
-                "SELECT manifest_id FROM manifests WHERE publisher_id=?1 AND collection_id=?2",
-                params![tombstone.publisher_id, tombstone.collection_id.to_string()],
+                "SELECT manifest_id FROM manifests
+                 WHERE publisher_id=?1 AND collection_id=?2 AND protocol_version=?3",
+                params![
+                    tombstone.publisher_id,
+                    tombstone.collection_id.to_string(),
+                    tombstone.protocol_version,
+                ],
                 |row| row.get::<_, i64>(0),
             )
             .optional()?;
@@ -308,11 +354,12 @@ impl CatalogStore {
             )?;
             ensure_catalog_capacity(&tx, self.limits.max_entries)?;
             tx.execute(
-                "INSERT INTO manifests(publisher_id,collection_id,sequence,signed_cbor,expires_at,withdrawn)
-                 VALUES (?1,?2,?3,NULL,NULL,1)",
+                "INSERT INTO manifests(publisher_id,collection_id,protocol_version,sequence,signed_cbor,expires_at,withdrawn)
+                 VALUES (?1,?2,?3,?4,NULL,NULL,1)",
                 params![
                     tombstone.publisher_id,
                     tombstone.collection_id.to_string(),
+                    tombstone.protocol_version,
                     tombstone.sequence,
                 ],
             )?;
@@ -334,23 +381,47 @@ impl CatalogStore {
             return Ok(Vec::new());
         }
         let connection = self.connection()?;
+        let protocols = if query.protocol_version == airwiki_types::PUBLIC_CATALOG_PROTOCOL_V2 {
+            (
+                airwiki_types::PUBLIC_CATALOG_PROTOCOL_V2,
+                airwiki_types::PUBLIC_CATALOG_PROTOCOL,
+            )
+        } else {
+            (
+                airwiki_types::PUBLIC_CATALOG_PROTOCOL,
+                airwiki_types::PUBLIC_CATALOG_PROTOCOL,
+            )
+        };
         let mut statement = connection.prepare(
             "SELECT m.signed_cbor FROM catalog_fts f
              JOIN manifests m ON m.manifest_id=f.rowid
              WHERE catalog_fts MATCH ?1 AND m.withdrawn=0 AND m.expires_at>?2
-             ORDER BY bm25(catalog_fts),m.publisher_id,m.collection_id LIMIT ?3",
+               AND m.protocol_version IN (?3,?4)
+             ORDER BY bm25(catalog_fts),m.publisher_id,m.collection_id,
+                      CASE WHEN m.protocol_version=?3 THEN 0 ELSE 1 END
+             LIMIT ?5",
         )?;
         let rows = statement.query_map(
             params![
                 fts,
                 now.to_rfc3339(),
-                i64::from(query.limit.min(MAX_PUBLIC_CANDIDATES)),
+                protocols.0,
+                protocols.1,
+                i64::from(query.limit.min(MAX_PUBLIC_CANDIDATES)).saturating_mul(2),
             ],
             |row| row.get::<_, Vec<u8>>(0),
         )?;
         let mut manifests = Vec::new();
+        let mut selected = std::collections::HashSet::new();
         for row in rows {
             let signed: SignedPublicCollectionManifest = decode(&row?)?;
+            let key = (
+                signed.manifest.publisher_id.clone(),
+                signed.manifest.collection_id,
+            );
+            if !selected.insert(key) {
+                continue;
+            }
             if !query.languages.is_empty()
                 && !signed
                     .manifest
@@ -361,6 +432,9 @@ impl CatalogStore {
                 continue;
             }
             manifests.push(signed);
+            if manifests.len() >= usize::from(query.limit.min(MAX_PUBLIC_CANDIDATES)) {
+                break;
+            }
         }
         Ok(manifests)
     }
@@ -376,6 +450,50 @@ impl CatalogStore {
     fn connection(&self) -> Result<MutexGuard<'_, Connection>, CatalogStoreError> {
         self.connection.lock().map_err(|_| CatalogStoreError::Lock)
     }
+}
+
+fn migrate_legacy_manifests(connection: &mut Connection) -> Result<(), CatalogStoreError> {
+    let has_protocol_version = {
+        let mut statement = connection.prepare("PRAGMA table_info(manifests)")?;
+        let columns = statement.query_map([], |row| row.get::<_, String>(1))?;
+        let mut found = false;
+        for column in columns {
+            if column? == "protocol_version" {
+                found = true;
+                break;
+            }
+        }
+        found
+    };
+    if has_protocol_version {
+        return Ok(());
+    }
+    let tx = connection.transaction()?;
+    tx.execute_batch(
+        "ALTER TABLE manifests RENAME TO manifests_legacy;
+         CREATE TABLE manifests(
+            manifest_id INTEGER PRIMARY KEY,
+            publisher_id TEXT NOT NULL,
+            collection_id TEXT NOT NULL,
+            protocol_version TEXT NOT NULL,
+            sequence INTEGER NOT NULL CHECK(sequence >= 0),
+            signed_cbor BLOB,
+            expires_at TEXT,
+            withdrawn INTEGER NOT NULL DEFAULT 0,
+            UNIQUE(publisher_id,collection_id,protocol_version)
+         );
+         INSERT INTO manifests(
+            manifest_id,publisher_id,collection_id,protocol_version,sequence,
+            signed_cbor,expires_at,withdrawn
+         )
+         SELECT manifest_id,publisher_id,collection_id,
+                '/airwiki/public-catalog/1.0.0',sequence,signed_cbor,expires_at,withdrawn
+         FROM manifests_legacy;
+         DROP TABLE manifests_legacy;
+         CREATE INDEX IF NOT EXISTS manifests_expiry_idx ON manifests(expires_at);",
+    )?;
+    tx.commit()?;
+    Ok(())
 }
 
 fn manifest_expiry_limit(now: DateTime<Utc>) -> DateTime<Utc> {
@@ -414,9 +532,11 @@ fn ensure_catalog_capacity(
     connection: &Connection,
     max_entries: u32,
 ) -> Result<(), CatalogStoreError> {
-    let entry_count = connection.query_row("SELECT count(*) FROM manifests", [], |row| {
-        row.get::<_, u32>(0)
-    })?;
+    let entry_count = connection.query_row(
+        "SELECT count(*) FROM (SELECT DISTINCT publisher_id,collection_id FROM manifests)",
+        [],
+        |row| row.get::<_, u32>(0),
+    )?;
     if entry_count >= max_entries {
         return Err(CatalogStoreError::CapacityLimit);
     }
@@ -429,7 +549,7 @@ fn ensure_publisher_capacity(
     max_collections: u32,
 ) -> Result<(), CatalogStoreError> {
     let publisher_count = connection.query_row(
-        "SELECT count(*) FROM manifests WHERE publisher_id=?1",
+        "SELECT count(DISTINCT collection_id) FROM manifests WHERE publisher_id=?1",
         [publisher_id],
         |row| row.get::<_, u32>(0),
     )?;
@@ -443,12 +563,14 @@ fn reject_stale(
     connection: &Connection,
     publisher_id: &str,
     collection_id: &str,
+    protocol_version: &str,
     sequence: u64,
 ) -> Result<(), CatalogStoreError> {
     let previous = connection
         .query_row(
-            "SELECT sequence FROM manifests WHERE publisher_id=?1 AND collection_id=?2",
-            params![publisher_id, collection_id],
+            "SELECT sequence FROM manifests
+             WHERE publisher_id=?1 AND collection_id=?2 AND protocol_version=?3",
+            params![publisher_id, collection_id, protocol_version],
             |row| row.get::<_, u64>(0),
         )
         .optional()?;
@@ -524,6 +646,7 @@ mod tests {
                 description: "Synthetic routing fixture".to_owned(),
                 languages: vec!["en".to_owned()],
                 concept_count: 3,
+                okf_compatibility: None,
                 routing_terms: vec!["atlas".to_owned(), "recovery".to_owned()],
                 routes: vec!["/ip4/127.0.0.1/tcp/42043".to_owned()],
                 updated_at,

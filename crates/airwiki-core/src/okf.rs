@@ -22,9 +22,18 @@ pub struct OkfConcept {
     pub resource: String,
     pub tags: Vec<String>,
     pub generated: OkfActorEvent,
+    pub sources: Vec<OkfSource>,
     pub verified: Vec<OkfActorEvent>,
     pub status: OkfLifecycleStatus,
     pub airwiki: AirWikiProfile,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct OkfSource {
+    pub id: String,
+    pub resource: String,
+    pub title: String,
+    pub last_modified: NaiveDate,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -94,6 +103,12 @@ impl OkfConcept {
                 by: format!("airwiki/{}", concept.generator_model),
                 at: reviewed_at,
             },
+            sources: vec![OkfSource {
+                id: format!("source-{}", source.id),
+                resource: format!("urn:airwiki:source:{}", source.source_sha256),
+                title: "AirWiki source document".to_owned(),
+                last_modified: source.updated_at.date_naive(),
+            }],
             verified: vec![OkfActorEvent {
                 by: "human:airwiki-user".to_owned(),
                 at: reviewed_at,
@@ -133,6 +148,15 @@ impl OkfConcept {
         }
         if self.generated.by.trim().is_empty() || self.verified.is_empty() {
             return Err(OkfValidationError::MissingReview);
+        }
+        if self.sources.is_empty()
+            || self.sources.iter().any(|source| {
+                source.id.trim().is_empty()
+                    || source.resource.trim().is_empty()
+                    || source.title.trim().is_empty()
+            })
+        {
+            return Err(OkfValidationError::InvalidResource);
         }
         if !self
             .verified
@@ -722,6 +746,12 @@ mod tests {
         let rendered = profile.render(&concept.draft).unwrap();
         let parsed = OkfConcept::parse(&rendered).unwrap();
         assert_eq!(parsed.airwiki.id, concept.id);
+        assert_eq!(
+            parsed.sources.first().map(|source| source.last_modified),
+            Some(source.updated_at.date_naive())
+        );
+        assert!(rendered.contains("last_modified: 202"));
+        assert!(!rendered.contains(&source.updated_at.to_rfc3339()));
         assert!(!rendered.contains("private.md"));
     }
 
@@ -852,6 +882,9 @@ mod tests {
             origin: crate::storage::WikiOrigin::Folder,
             indexing_mode: crate::storage::IndexingMode::Continuous,
             okf_version: "0.2".to_owned(),
+            declared_okf_version: Some("0.2".to_owned()),
+            okf_compatibility: airwiki_types::OkfCompatibility::DeclaredV02,
+            managed_size_bytes: 0,
             created_at: Utc::now(),
             updated_at: Utc::now(),
         };

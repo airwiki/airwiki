@@ -317,6 +317,8 @@ impl HybridSearchEngine {
                 updated_at: candidate.updated_at,
                 rank: 0,
                 node_id: self.node_id.clone(),
+                assurance: candidate.assurance,
+                lifecycle_status: candidate.lifecycle_status,
             };
             hit.sanitize_for_wire();
             let destination = match decision {
@@ -878,10 +880,14 @@ mod tests {
             generated: None,
             verified: None,
             sources: None,
+            stale_after: None,
             version: Some("1".to_owned()),
             unknown_frontmatter: serde_yaml::Value::Mapping(Default::default()),
+            attested_computation: None,
             fingerprint: "a".repeat(64),
             search_text: "Reiniciar el servicio Atlas y validar la recuperación".to_owned(),
+            assurance: airwiki_types::ConceptAssurance::default(),
+            warnings: Vec::new(),
         };
         database
             .replace_okf_concept_projection(collection.id, &[concept])

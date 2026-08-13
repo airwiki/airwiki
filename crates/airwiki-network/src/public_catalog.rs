@@ -1,8 +1,8 @@
 use std::{collections::BTreeMap, sync::Arc, time::Duration};
 
 use airwiki_types::{
-    PUBLIC_CATALOG_PROTOCOL, PublicCatalogQuery, SignedPublicCollectionManifest,
-    SignedPublicCollectionTombstone,
+    PUBLIC_CATALOG_PROTOCOL, PUBLIC_CATALOG_PROTOCOL_V2, PublicCatalogQuery,
+    SignedPublicCollectionManifest, SignedPublicCollectionTombstone,
 };
 use async_trait::async_trait;
 use libp2p::request_response::{self, ProtocolSupport, ResponseChannel};
@@ -13,6 +13,7 @@ use thiserror::Error;
 use tokio::task::JoinSet;
 use tokio_util::sync::CancellationToken;
 
+use crate::public_codec::{ProtocolPayload, VersionedCborCodec};
 use crate::{NetworkError, NodeIdentity, PeerRateLimiter};
 
 const CATALOG_REQUEST_BYTES: u64 = 128 * 1024;
@@ -23,8 +24,22 @@ const PUBLIC_RELAY_SUMMARY_INTERVAL: Duration = Duration::from_secs(15 * 60);
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum CatalogWireRequest {
     Register(SignedPublicCollectionManifest),
+    RegisterVersioned(Box<VersionedManifestPair>),
     Withdraw(SignedPublicCollectionTombstone),
+    WithdrawVersioned(Box<VersionedTombstonePair>),
     Query(PublicCatalogQuery),
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct VersionedManifestPair {
+    pub current: SignedPublicCollectionManifest,
+    pub legacy: SignedPublicCollectionManifest,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct VersionedTombstonePair {
+    pub current: SignedPublicCollectionTombstone,
+    pub legacy: SignedPublicCollectionTombstone,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -32,6 +47,147 @@ pub enum CatalogWireResponse {
     Accepted,
     Results(Vec<SignedPublicCollectionManifest>),
     Rejected(CatalogRejection),
+}
+
+impl ProtocolPayload for CatalogWireRequest {
+    fn prepare_for_protocol(&mut self, protocol: &str) -> std::io::Result<()> {
+        match self {
+            Self::Query(query) => {
+                ensure_catalog_protocol(protocol)?;
+                query.protocol_version = protocol.to_owned();
+                Ok(())
+            }
+            Self::Register(signed) => {
+                validate_catalog_protocol(&signed.manifest.protocol_version, protocol)
+            }
+            Self::RegisterVersioned(pair) => match protocol {
+                PUBLIC_CATALOG_PROTOCOL_V2 => {
+                    validate_catalog_protocol(
+                        &pair.current.manifest.protocol_version,
+                        PUBLIC_CATALOG_PROTOCOL_V2,
+                    )?;
+                    validate_catalog_protocol(
+                        &pair.legacy.manifest.protocol_version,
+                        PUBLIC_CATALOG_PROTOCOL,
+                    )
+                }
+                PUBLIC_CATALOG_PROTOCOL => {
+                    validate_catalog_protocol(
+                        &pair.legacy.manifest.protocol_version,
+                        PUBLIC_CATALOG_PROTOCOL,
+                    )?;
+                    *self = Self::Register(pair.legacy.clone());
+                    Ok(())
+                }
+                _ => Err(protocol_mismatch()),
+            },
+            Self::Withdraw(signed) => {
+                validate_catalog_protocol(&signed.tombstone.protocol_version, protocol)
+            }
+            Self::WithdrawVersioned(pair) => match protocol {
+                PUBLIC_CATALOG_PROTOCOL_V2 => {
+                    validate_catalog_protocol(
+                        &pair.current.tombstone.protocol_version,
+                        PUBLIC_CATALOG_PROTOCOL_V2,
+                    )?;
+                    validate_catalog_protocol(
+                        &pair.legacy.tombstone.protocol_version,
+                        PUBLIC_CATALOG_PROTOCOL,
+                    )
+                }
+                PUBLIC_CATALOG_PROTOCOL => {
+                    validate_catalog_protocol(
+                        &pair.legacy.tombstone.protocol_version,
+                        PUBLIC_CATALOG_PROTOCOL,
+                    )?;
+                    *self = Self::Withdraw(pair.legacy.clone());
+                    Ok(())
+                }
+                _ => Err(protocol_mismatch()),
+            },
+        }
+    }
+
+    fn validate_protocol(&self, protocol: &str) -> std::io::Result<()> {
+        match self {
+            Self::Query(query) => validate_catalog_protocol(&query.protocol_version, protocol),
+            Self::Register(signed) => {
+                validate_catalog_protocol(&signed.manifest.protocol_version, protocol)
+            }
+            Self::RegisterVersioned(pair) => {
+                validate_catalog_protocol(protocol, PUBLIC_CATALOG_PROTOCOL_V2)?;
+                validate_catalog_protocol(
+                    &pair.current.manifest.protocol_version,
+                    PUBLIC_CATALOG_PROTOCOL_V2,
+                )?;
+                validate_catalog_protocol(
+                    &pair.legacy.manifest.protocol_version,
+                    PUBLIC_CATALOG_PROTOCOL,
+                )
+            }
+            Self::Withdraw(signed) => {
+                validate_catalog_protocol(&signed.tombstone.protocol_version, protocol)
+            }
+            Self::WithdrawVersioned(pair) => {
+                validate_catalog_protocol(protocol, PUBLIC_CATALOG_PROTOCOL_V2)?;
+                validate_catalog_protocol(
+                    &pair.current.tombstone.protocol_version,
+                    PUBLIC_CATALOG_PROTOCOL_V2,
+                )?;
+                validate_catalog_protocol(
+                    &pair.legacy.tombstone.protocol_version,
+                    PUBLIC_CATALOG_PROTOCOL,
+                )
+            }
+        }
+    }
+}
+
+impl ProtocolPayload for CatalogWireResponse {
+    fn prepare_for_protocol(&mut self, protocol: &str) -> std::io::Result<()> {
+        self.validate_protocol(protocol)
+    }
+
+    fn validate_protocol(&self, protocol: &str) -> std::io::Result<()> {
+        ensure_catalog_protocol(protocol)?;
+        if let Self::Results(manifests) = self
+            && manifests.iter().any(|signed| {
+                signed.manifest.protocol_version != protocol
+                    && !(protocol == PUBLIC_CATALOG_PROTOCOL_V2
+                        && signed.manifest.protocol_version == PUBLIC_CATALOG_PROTOCOL)
+            })
+        {
+            return Err(protocol_mismatch());
+        }
+        Ok(())
+    }
+}
+
+fn ensure_catalog_protocol(protocol: &str) -> std::io::Result<()> {
+    if matches!(
+        protocol,
+        PUBLIC_CATALOG_PROTOCOL | PUBLIC_CATALOG_PROTOCOL_V2
+    ) {
+        Ok(())
+    } else {
+        Err(protocol_mismatch())
+    }
+}
+
+fn validate_catalog_protocol(declared: &str, negotiated: &str) -> std::io::Result<()> {
+    ensure_catalog_protocol(negotiated)?;
+    if declared == negotiated {
+        Ok(())
+    } else {
+        Err(protocol_mismatch())
+    }
+}
+
+fn protocol_mismatch() -> std::io::Error {
+    std::io::Error::new(
+        std::io::ErrorKind::InvalidData,
+        "catalog payload protocol does not match the negotiated protocol",
+    )
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -73,10 +229,28 @@ pub trait PublicCatalogBackend: Send + Sync + 'static {
         manifest: SignedPublicCollectionManifest,
     ) -> Result<(), PublicCatalogBackendError>;
 
+    async fn register_versioned(
+        &self,
+        current: SignedPublicCollectionManifest,
+        legacy: SignedPublicCollectionManifest,
+    ) -> Result<(), PublicCatalogBackendError> {
+        self.register(legacy).await?;
+        self.register(current).await
+    }
+
     async fn withdraw(
         &self,
         tombstone: SignedPublicCollectionTombstone,
     ) -> Result<(), PublicCatalogBackendError>;
+
+    async fn withdraw_versioned(
+        &self,
+        current: SignedPublicCollectionTombstone,
+        legacy: SignedPublicCollectionTombstone,
+    ) -> Result<(), PublicCatalogBackendError> {
+        self.withdraw(legacy).await?;
+        self.withdraw(current).await
+    }
 
     async fn query(
         &self,
@@ -93,9 +267,8 @@ pub struct PublicCatalogServerConfig {
 
 #[derive(NetworkBehaviour)]
 struct CatalogBehaviour {
-    catalog: request_response::Behaviour<
-        request_response::cbor::codec::Codec<CatalogWireRequest, CatalogWireResponse>,
-    >,
+    catalog:
+        request_response::Behaviour<VersionedCborCodec<CatalogWireRequest, CatalogWireResponse>>,
     relay: libp2p::relay::Behaviour,
     limits: libp2p::connection_limits::Behaviour,
 }
@@ -203,15 +376,17 @@ pub async fn run_public_catalog_server(
             "no public catalog listen address".to_owned(),
         ));
     }
-    let protocol = StreamProtocol::try_from_owned(PUBLIC_CATALOG_PROTOCOL.to_owned())
+    let current = StreamProtocol::try_from_owned(PUBLIC_CATALOG_PROTOCOL_V2.to_owned())
         .map_err(|error| NetworkError::Transport(error.to_string()))?;
-    let codec =
-        request_response::cbor::codec::Codec::<CatalogWireRequest, CatalogWireResponse>::default()
-            .set_request_size_maximum(CATALOG_REQUEST_BYTES)
-            .set_response_size_maximum(CATALOG_RESPONSE_BYTES);
+    let legacy = StreamProtocol::try_from_owned(PUBLIC_CATALOG_PROTOCOL.to_owned())
+        .map_err(|error| NetworkError::Transport(error.to_string()))?;
+    let codec = VersionedCborCodec::new(CATALOG_REQUEST_BYTES, CATALOG_RESPONSE_BYTES);
     let catalog = request_response::Behaviour::with_codec(
         codec,
-        [(protocol, ProtocolSupport::Full)],
+        [
+            (current, ProtocolSupport::Full),
+            (legacy, ProtocolSupport::Full),
+        ],
         request_response::Config::default()
             .with_request_timeout(config.request_timeout)
             .with_max_concurrent_streams(CATALOG_CONCURRENT_STREAMS),
@@ -457,7 +632,15 @@ async fn handle_request(
 ) -> CatalogWireResponse {
     let result = match request {
         CatalogWireRequest::Register(manifest) => backend.register(manifest).await.map(|()| None),
+        CatalogWireRequest::RegisterVersioned(pair) => backend
+            .register_versioned(pair.current, pair.legacy)
+            .await
+            .map(|()| None),
         CatalogWireRequest::Withdraw(tombstone) => backend.withdraw(tombstone).await.map(|()| None),
+        CatalogWireRequest::WithdrawVersioned(pair) => backend
+            .withdraw_versioned(pair.current, pair.legacy)
+            .await
+            .map(|()| None),
         CatalogWireRequest::Query(query) => backend.query(query).await.map(Some),
     };
     match result {

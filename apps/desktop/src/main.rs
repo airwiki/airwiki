@@ -3,6 +3,7 @@
 compile_error!("the desktop e2e secret store must never be compiled into a release build");
 
 mod autostart;
+mod computations;
 mod connectivity_platform;
 mod external_navigation;
 mod i18n;
@@ -79,6 +80,10 @@ enum NativeConfirmation {
     CollectionGrant,
     DeleteWiki,
     InstallUpdate,
+    ExecuteComputation,
+    SaveComputationResult,
+    ApplicationGrant,
+    VerifyManagedConcept,
 }
 
 impl NativeConfirmation {
@@ -91,6 +96,10 @@ impl NativeConfirmation {
             Self::CollectionGrant => "native-confirm-collection-grant",
             Self::DeleteWiki => "native-confirm-delete-wiki",
             Self::InstallUpdate => "native-confirm-install-update",
+            Self::ExecuteComputation => "native-confirm-execute-computation",
+            Self::SaveComputationResult => "native-confirm-save-computation-result",
+            Self::ApplicationGrant => "native-confirm-application-grant",
+            Self::VerifyManagedConcept => "native-confirm-verify-managed-concept",
         }
     }
 }
@@ -186,7 +195,7 @@ struct AppRuntime {
     snapshot: Mutex<watch::Receiver<PublishedSnapshot>>,
     folder_selections: Mutex<HashMap<Uuid, PendingFolderSelection>>,
     review_versions: Arc<Mutex<HashMap<Uuid, CachedReviewVersion>>>,
-    knowledge_fingerprints: Arc<Mutex<HashMap<(Uuid, KnowledgePageId), String>>>,
+    knowledge_fingerprints: Arc<Mutex<HashMap<(Uuid, KnowledgePageInput), CachedKnowledgePage>>>,
     guided_repairs: Arc<Mutex<HashMap<Uuid, GuidedRepairPreview>>>,
     requests: Arc<Mutex<RequestTracker>>,
     confirmation_gate: Arc<Semaphore>,
@@ -261,6 +270,9 @@ struct AppSnapshot {
     lan_runtime: Option<LanRuntimeSummary>,
     firewall_operation: Option<FirewallOperationStatus>,
     integrations: Option<IntegrationsSummary>,
+    application_access: Vec<ApplicationAccessSummary>,
+    pending_computations: Vec<PendingComputationSummary>,
+    completed_computations: Vec<CompletedComputationSummary>,
     updater: Option<UpdaterSummary>,
     notice: Option<NoticeSummary>,
 }
@@ -313,7 +325,23 @@ struct WikiSummary {
     origin: WikiOriginDto,
     indexing_mode: IndexingModeDto,
     okf_version: String,
+    declared_okf_version: Option<String>,
+    okf_compatibility: OkfCompatibilityDto,
+    #[ts(type = "number")]
+    managed_size_bytes: u64,
+    stale_concept_count: usize,
+    outdated_verification_count: usize,
+    metadata_warning_count: usize,
     trust_summary: TrustSummaryDto,
+    restrictions: Vec<WikiRestrictionDto>,
+}
+
+#[derive(Clone, Copy, Debug, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(rename_all = "camelCase")]
+enum WikiRestrictionDto {
+    LegacyReadOnly,
+    FutureFormatLocalOnly,
 }
 
 #[derive(Clone, Copy, Debug, Serialize, TS)]
@@ -323,7 +351,20 @@ enum TrustSummaryDto {
     Unverified,
     MachineConfirmed,
     HumanReviewed,
-    VerificationOutdated,
+}
+
+#[derive(Clone, Debug, Serialize, TS)]
+#[serde(rename_all = "camelCase", tag = "kind")]
+#[ts(rename_all = "camelCase", tag = "kind")]
+enum OkfCompatibilityDto {
+    DeclaredV02,
+    UndeclaredV02Compatible,
+    LegacyV01,
+    FutureRestricted {
+        #[serde(rename = "declaredVersion")]
+        #[ts(rename = "declaredVersion")]
+        declared_version: String,
+    },
 }
 
 #[derive(Clone, Copy, Debug, Serialize, TS)]
@@ -587,11 +628,59 @@ enum KnowledgeBundleStatus {
 #[derive(Clone, Debug, Serialize, TS)]
 #[serde(rename_all = "camelCase")]
 struct KnowledgeConceptSummary {
+    concept_id: String,
     page: KnowledgePageInput,
     title: String,
     description: String,
     concept_type: String,
     tags: Vec<String>,
+    lifecycle: String,
+    generated_by: Option<String>,
+    verified_by: Vec<String>,
+    sources: Vec<KnowledgeSourceSummary>,
+    stale_after: Option<String>,
+    assurance: ConceptAssuranceSummary,
+    warnings: Vec<OkfWarningSummary>,
+    execution_available: bool,
+    fingerprint: String,
+}
+
+#[derive(Clone, Debug, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+struct KnowledgeSourceSummary {
+    id: Option<String>,
+    title: Option<String>,
+    resource: Option<String>,
+    author: Option<String>,
+    #[ts(type = "number | null")]
+    usage_count: Option<u64>,
+    last_modified: Option<String>,
+}
+
+#[derive(Clone, Copy, Debug, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+struct ConceptAssuranceSummary {
+    trust: TrustSummaryDto,
+    freshness: FreshnessSummary,
+    verification_outdated: bool,
+}
+
+#[derive(Clone, Copy, Debug, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(rename_all = "camelCase")]
+enum FreshnessSummary {
+    NotDeclared,
+    Fresh,
+    Stale,
+    Invalid,
+}
+
+#[derive(Clone, Debug, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+struct OkfWarningSummary {
+    code: OkfWarningCodeDto,
+    logical_path: String,
+    field: Option<String>,
 }
 
 #[derive(Clone, Debug, Serialize, TS)]
@@ -615,32 +704,18 @@ enum KnowledgePageStatus {
     Failed,
 }
 
-#[derive(Clone, Copy, Debug, Deserialize, Serialize, PartialEq, Eq, TS)]
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq, Hash, TS)]
 #[serde(tag = "kind", rename_all = "camelCase", deny_unknown_fields)]
 enum KnowledgePageInput {
     Index,
     Log,
-    Concept { id: Uuid },
+    Concept { path: String },
 }
 
-impl From<KnowledgePageId> for KnowledgePageInput {
-    fn from(value: KnowledgePageId) -> Self {
-        match value {
-            KnowledgePageId::Index => Self::Index,
-            KnowledgePageId::Log => Self::Log,
-            KnowledgePageId::Concept(id) => Self::Concept { id },
-        }
-    }
-}
-
-impl From<KnowledgePageInput> for KnowledgePageId {
-    fn from(value: KnowledgePageInput) -> Self {
-        match value {
-            KnowledgePageInput::Index => Self::Index,
-            KnowledgePageInput::Log => Self::Log,
-            KnowledgePageInput::Concept { id } => Self::Concept(id),
-        }
-    }
+#[derive(Clone)]
+struct CachedKnowledgePage {
+    page_id: KnowledgePageId,
+    fingerprint: String,
 }
 
 #[derive(Clone, Debug, Serialize, PartialEq, Eq, TS)]
@@ -772,6 +847,7 @@ struct PublicBrowseSummary {
     wiki_name: Option<String>,
     description: Option<String>,
     languages: Vec<String>,
+    okf_compatibility: Option<OkfCompatibilityDto>,
     concepts: Vec<PublicConceptSummaryDto>,
     next_cursor: Option<String>,
 }
@@ -798,6 +874,8 @@ struct PublicConceptSummaryDto {
     tags: Vec<String>,
     summary: String,
     source_revision: u32,
+    lifecycle: Option<String>,
+    assurance: Option<ConceptAssuranceSummary>,
 }
 
 #[derive(Clone, Copy, Debug, Serialize, TS)]
@@ -833,6 +911,8 @@ struct SearchHitSummary {
     source_sha256: String,
     rank: u32,
     node_id: String,
+    assurance: Option<ConceptAssuranceSummary>,
+    lifecycle: Option<String>,
 }
 
 #[derive(Clone, Debug, Serialize, TS)]
@@ -1114,6 +1194,73 @@ struct IntegrationsSummary {
 
 #[derive(Clone, Debug, Serialize, TS)]
 #[serde(rename_all = "camelCase")]
+struct PendingComputationSummary {
+    run_id: String,
+    wiki_id: String,
+    wiki_name: String,
+    logical_path: String,
+    application_name: String,
+    parameters: Vec<ComputationParameterSummary>,
+    expires_at: String,
+}
+
+#[derive(Clone, Debug, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+struct ComputationParameterSummary {
+    name: String,
+    parameter_type: String,
+}
+
+#[derive(Clone, Debug, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+struct CompletedComputationSummary {
+    run_id: String,
+    wiki_name: String,
+    logical_path: String,
+    application_name: String,
+    verdict: String,
+    expires_at: String,
+}
+
+#[derive(Clone, Debug, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+struct ApplicationAccessSummary {
+    app_id: String,
+    display_name: String,
+    producer: String,
+    active: bool,
+    owned_wiki_count: usize,
+    #[ts(type = "number")]
+    managed_bytes: u64,
+    grants: Vec<ApplicationWikiGrantSummary>,
+}
+
+#[derive(Clone, Debug, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+struct ApplicationWikiGrantSummary {
+    wiki_id: String,
+    role: ApplicationWikiRoleSummary,
+}
+
+#[derive(Clone, Copy, Debug, Serialize, PartialEq, Eq, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(rename_all = "camelCase")]
+enum ApplicationWikiRoleSummary {
+    Owner,
+    Reader,
+    Editor,
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, Serialize, PartialEq, Eq, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(rename_all = "camelCase")]
+enum ApplicationWikiRoleInput {
+    Reader,
+    Editor,
+}
+
+#[derive(Clone, Debug, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
 struct UpdaterSummary {
     status: UpdaterStatusDto,
     version: Option<String>,
@@ -1158,6 +1305,14 @@ struct IntegrationSummary {
     detected_version: Option<String>,
     activity_recent: bool,
     restart_required: bool,
+    mcp_setup: Option<McpStdioSetupDto>,
+}
+
+#[derive(Clone, Debug, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+struct McpStdioSetupDto {
+    command: String,
+    args: Vec<String>,
 }
 
 #[derive(Clone, Copy, Debug, Deserialize, Serialize, TS)]
@@ -1167,6 +1322,7 @@ enum IntegrationClientDto {
     ChatGptDesktop,
     ClaudeDesktop,
     GeminiCli,
+    GenericMcp,
 }
 
 #[derive(Clone, Copy, Debug, Serialize, TS)]
@@ -1189,6 +1345,7 @@ impl From<IntegrationClientDto> for integrations::ChatClientKind {
             IntegrationClientDto::ChatGptDesktop => Self::ChatGptDesktop,
             IntegrationClientDto::ClaudeDesktop => Self::ClaudeDesktop,
             IntegrationClientDto::GeminiCli => Self::GeminiCli,
+            IntegrationClientDto::GenericMcp => Self::GenericMcp,
         }
     }
 }
@@ -1199,6 +1356,7 @@ impl From<integrations::ChatClientKind> for IntegrationClientDto {
             integrations::ChatClientKind::ChatGptDesktop => Self::ChatGptDesktop,
             integrations::ChatClientKind::ClaudeDesktop => Self::ClaudeDesktop,
             integrations::ChatClientKind::GeminiCli => Self::GeminiCli,
+            integrations::ChatClientKind::GenericMcp => Self::GenericMcp,
         }
     }
 }
@@ -1336,9 +1494,8 @@ impl From<integrations::ChatIntegrationsSnapshot> for IntegrationsSummary {
             integrations: value
                 .integrations
                 .into_iter()
-                .map(|integration| IntegrationSummary {
-                    client: integration.client.into(),
-                    status: match integration.status {
+                .map(|integration| {
+                    let status = match integration.status {
                         integrations::IntegrationStatus::NotInstalled => {
                             IntegrationStatusDto::NotInstalled
                         }
@@ -1359,10 +1516,28 @@ impl From<integrations::ChatIntegrationsSnapshot> for IntegrationsSummary {
                             IntegrationStatusDto::Unsupported
                         }
                         integrations::IntegrationStatus::Error => IntegrationStatusDto::Error,
-                    },
-                    detected_version: integration.detected_version,
-                    activity_recent: integration.activity_recent,
-                    restart_required: integration.restart_required,
+                    };
+                    let mcp_setup = if integration.client
+                        == integrations::ChatClientKind::GenericMcp
+                        && matches!(status, IntegrationStatusDto::Configured)
+                    {
+                        integration.planned_path.as_ref().and_then(|path| {
+                            path.to_str().map(|command| McpStdioSetupDto {
+                                command: command.to_owned(),
+                                args: vec!["--client".to_owned(), "generic-mcp".to_owned()],
+                            })
+                        })
+                    } else {
+                        None
+                    };
+                    IntegrationSummary {
+                        client: integration.client.into(),
+                        status,
+                        detected_version: integration.detected_version,
+                        activity_recent: integration.activity_recent,
+                        restart_required: integration.restart_required,
+                        mcp_setup,
+                    }
                 })
                 .collect(),
             external_ai_wiki_count: value.external_ai_collection_count,
@@ -1547,8 +1722,27 @@ struct OkfImportSummary {
     concept_count: usize,
     #[ts(type = "number")]
     uncompressed_bytes: u64,
-    okf_version: String,
+    declared_okf_version: Option<String>,
+    compatibility: OkfCompatibilityDto,
     warning_count: usize,
+    warnings: Vec<OkfWarningSummary>,
+    restrictions: Vec<WikiRestrictionDto>,
+}
+
+#[derive(Clone, Copy, Debug, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(rename_all = "camelCase")]
+enum OkfWarningCodeDto {
+    BrokenLink,
+    InvalidGenerated,
+    InvalidVerified,
+    InvalidSources,
+    InvalidStaleAfter,
+    InvalidOptionalMetadata,
+    LegacyTimestamp,
+    LegacyCitations,
+    UnsupportedRuntime,
+    InvalidAttestedComputation,
 }
 
 #[derive(Debug, Deserialize, TS)]
@@ -1716,8 +1910,11 @@ async fn validate_okf_import(
         entry_count: report.entry_count,
         concept_count: report.concept_count,
         uncompressed_bytes: report.uncompressed_bytes,
-        okf_version: report.okf_version,
+        declared_okf_version: report.declared_okf_version,
+        restrictions: restrictions_for_compatibility(&report.compatibility),
+        compatibility: report.compatibility.into(),
         warning_count: report.warnings.len(),
+        warnings: report.warnings.into_iter().map(Into::into).collect(),
     })
 }
 
@@ -2109,6 +2306,167 @@ async fn manage_integration(
 }
 
 #[tauri::command]
+async fn refresh_computations(runtime: tauri::State<'_, AppRuntime>) -> Result<(), UiError> {
+    send_command(&runtime, WorkerCommand::RefreshComputations).await
+}
+
+#[tauri::command]
+async fn refresh_application_access(runtime: tauri::State<'_, AppRuntime>) -> Result<(), UiError> {
+    send_command(&runtime, WorkerCommand::RefreshApplicationAccess).await
+}
+
+#[tauri::command]
+async fn set_application_wiki_role(
+    app: AppHandle,
+    runtime: tauri::State<'_, AppRuntime>,
+    app_id: String,
+    wiki_id: String,
+    role: Option<ApplicationWikiRoleInput>,
+) -> Result<(), UiError> {
+    let app_id = parse_uuid(&app_id)?;
+    let wiki_id = parse_uuid(&wiki_id)?;
+    let (application_name, wiki_name) = {
+        let snapshot = runtime.snapshot.lock().map_err(|_| UiError::internal())?;
+        let snapshot = &snapshot.borrow().snapshot;
+        let application_name = snapshot
+            .application_access
+            .iter()
+            .find(|application| application.app_id == app_id.to_string() && application.active)
+            .map(|application| application.display_name.clone())
+            .ok_or_else(|| UiError::invalid("applicationUnavailable"))?;
+        let wiki_name = snapshot
+            .wikis
+            .iter()
+            .find(|wiki| {
+                wiki.id == wiki_id.to_string() && matches!(wiki.origin, WikiOriginDto::AiMemory)
+            })
+            .map(|wiki| wiki.name.clone())
+            .ok_or_else(|| UiError::invalid("wikiUnavailable"))?;
+        (application_name, wiki_name)
+    };
+    require_native_confirmation(
+        &app,
+        NativeConfirmation::ApplicationGrant,
+        Some(&format!("{application_name}\n{wiki_name}")),
+    )
+    .await?;
+    send_command(
+        &runtime,
+        WorkerCommand::SetApplicationWikiRole {
+            app_id,
+            wiki_id,
+            role: role.map(|role| match role {
+                ApplicationWikiRoleInput::Reader => worker::ApplicationWikiRoleView::Reader,
+                ApplicationWikiRoleInput::Editor => worker::ApplicationWikiRoleView::Editor,
+            }),
+        },
+    )
+    .await
+}
+
+#[tauri::command]
+async fn reject_computation(
+    runtime: tauri::State<'_, AppRuntime>,
+    run_id: String,
+) -> Result<(), UiError> {
+    send_command(
+        &runtime,
+        WorkerCommand::RejectComputation {
+            run_id: parse_uuid(&run_id)?,
+        },
+    )
+    .await
+}
+
+#[tauri::command]
+async fn execute_computation(
+    app: AppHandle,
+    runtime: tauri::State<'_, AppRuntime>,
+    run_id: String,
+) -> Result<(), UiError> {
+    let run_id = parse_uuid(&run_id)?;
+    let pending = runtime
+        .snapshot
+        .lock()
+        .map_err(|_| UiError::internal())?
+        .borrow()
+        .snapshot
+        .pending_computations
+        .iter()
+        .find(|pending| pending.run_id == run_id.to_string())
+        .cloned()
+        .ok_or_else(|| UiError::invalid("computationRunUnavailable"))?;
+    let parameter_summary = pending
+        .parameters
+        .iter()
+        .map(|parameter| format!("{}: {}", parameter.name, parameter.parameter_type))
+        .collect::<Vec<_>>()
+        .join("\n");
+    require_native_confirmation(
+        &app,
+        NativeConfirmation::ExecuteComputation,
+        Some(&format!(
+            "{}\n{}\n{}\n{}",
+            pending.application_name, pending.wiki_name, pending.logical_path, parameter_summary
+        )),
+    )
+    .await?;
+    send_command(&runtime, WorkerCommand::ExecuteComputation { run_id }).await
+}
+
+#[tauri::command]
+async fn save_computation_result(
+    app: AppHandle,
+    runtime: tauri::State<'_, AppRuntime>,
+    run_id: String,
+    target_wiki_id: String,
+) -> Result<(), UiError> {
+    let run_id = parse_uuid(&run_id)?;
+    let target_wiki_id = parse_uuid(&target_wiki_id)?;
+    let (run, target_wiki_name) = {
+        let snapshot = runtime
+            .snapshot
+            .lock()
+            .map_err(|_| UiError::internal())?
+            .borrow()
+            .snapshot
+            .clone();
+        let run = snapshot
+            .completed_computations
+            .into_iter()
+            .find(|run| run.run_id == run_id.to_string() && run.verdict == "accepted")
+            .ok_or_else(|| UiError::invalid("computationRunUnavailable"))?;
+        let target_wiki_name = snapshot
+            .wikis
+            .into_iter()
+            .find(|wiki| {
+                wiki.id == target_wiki_id.to_string()
+                    && matches!(wiki.origin, WikiOriginDto::AiMemory)
+            })
+            .map(|wiki| wiki.name)
+            .ok_or_else(|| UiError::invalid("wikiUnavailable"))?;
+        (run, target_wiki_name)
+    };
+    require_native_confirmation(
+        &app,
+        NativeConfirmation::SaveComputationResult,
+        Some(&format!(
+            "{}\n{}\n{}",
+            run.wiki_name, run.logical_path, target_wiki_name
+        )),
+    )
+    .await?;
+    send_command(
+        &runtime,
+        WorkerCommand::SaveComputationResult {
+            run_id,
+            target_wiki_id,
+        },
+    )
+    .await
+}
+
+#[tauri::command]
 async fn search(
     runtime: tauri::State<'_, AppRuntime>,
     request_id: String,
@@ -2270,12 +2628,11 @@ async fn load_wiki_page(
 ) -> Result<(), UiError> {
     let collection_id = parse_uuid(&wiki_id)?;
     let request_id = parse_uuid(&request_id)?;
-    let page_id = KnowledgePageId::from(page);
-    let expected_fingerprint = runtime
+    let cached = runtime
         .knowledge_fingerprints
         .lock()
         .map_err(|_| UiError::internal())?
-        .get(&(collection_id, page_id))
+        .get(&(collection_id, page))
         .cloned()
         .ok_or_else(|| UiError::invalid("currentKnowledgeSnapshotRequired"))?;
     runtime
@@ -2289,11 +2646,53 @@ async fn load_wiki_page(
         WorkerCommand::LoadKnowledgePage {
             request_id,
             collection_id,
-            page_id,
-            expected_fingerprint,
+            page_id: cached.page_id,
+            expected_fingerprint: cached.fingerprint,
         },
     )
     .await
+}
+
+#[tauri::command]
+async fn verify_wiki_concept(
+    app: AppHandle,
+    runtime: tauri::State<'_, AppRuntime>,
+    wiki_id: String,
+    path: String,
+    expected_fingerprint: String,
+) -> Result<(), UiError> {
+    let collection_id = parse_uuid(&wiki_id)?;
+    let path = validate_knowledge_path(path)?;
+    let expected = runtime
+        .knowledge_fingerprints
+        .lock()
+        .map_err(|_| UiError::internal())?
+        .get(&(
+            collection_id,
+            KnowledgePageInput::Concept { path: path.clone() },
+        ))
+        .cloned()
+        .ok_or_else(|| UiError::invalid("currentKnowledgeSnapshotRequired"))?;
+    if expected.fingerprint != expected_fingerprint {
+        return Err(UiError::invalid("currentKnowledgeSnapshotRequired"));
+    }
+    require_native_confirmation(&app, NativeConfirmation::VerifyManagedConcept, Some(&path))
+        .await?;
+    let (completed, completion) = oneshot::channel();
+    send_command(
+        &runtime,
+        WorkerCommand::VerifyManagedConcept {
+            collection_id,
+            logical_path: path,
+            expected_fingerprint,
+            completed,
+        },
+    )
+    .await?;
+    completion
+        .await
+        .map_err(|_| UiError::internal())?
+        .map_err(|_| UiError::invalid("managedConceptVerificationFailed"))
 }
 
 #[tauri::command]
@@ -2769,6 +3168,21 @@ fn validate_network_address(value: String) -> Result<String, UiError> {
     Ok(value)
 }
 
+fn validate_knowledge_path(value: String) -> Result<String, UiError> {
+    if value.is_empty()
+        || value.len() > 1_024
+        || value.contains('\\')
+        || value.starts_with('/')
+        || !value.to_ascii_lowercase().ends_with(".md")
+        || value
+            .split('/')
+            .any(|part| part.is_empty() || matches!(part, "." | ".."))
+    {
+        return Err(UiError::invalid("knowledgePathInvalid"));
+    }
+    Ok(value)
+}
+
 impl UiError {
     const fn invalid(message_key: &'static str) -> Self {
         Self {
@@ -2847,6 +3261,9 @@ impl AppSnapshot {
             lan_runtime: None,
             firewall_operation: None,
             integrations: None,
+            application_access: Vec::new(),
+            pending_computations: Vec::new(),
+            completed_computations: Vec::new(),
             updater: None,
             notice: None,
         }
@@ -2856,7 +3273,7 @@ impl AppSnapshot {
         &mut self,
         event: WorkerEvent,
         review_versions: &Mutex<HashMap<Uuid, CachedReviewVersion>>,
-        knowledge_fingerprints: &Mutex<HashMap<(Uuid, KnowledgePageId), String>>,
+        knowledge_fingerprints: &Mutex<HashMap<(Uuid, KnowledgePageInput), CachedKnowledgePage>>,
         guided_repairs: &Mutex<HashMap<Uuid, GuidedRepairPreview>>,
         requests: &Mutex<RequestTracker>,
     ) {
@@ -3112,6 +3529,22 @@ impl AppSnapshot {
                     });
                 }
             },
+            WorkerEvent::ComputationsUpdated { pending, completed } => {
+                self.pending_computations = pending
+                    .into_iter()
+                    .map(PendingComputationSummary::from)
+                    .collect();
+                self.completed_computations = completed
+                    .into_iter()
+                    .map(CompletedComputationSummary::from)
+                    .collect();
+            }
+            WorkerEvent::ApplicationAccessUpdated(applications) => {
+                self.application_access = applications
+                    .into_iter()
+                    .map(ApplicationAccessSummary::from)
+                    .collect();
+            }
             WorkerEvent::UpdaterUpdated { result, .. } => match result {
                 Ok(updater) => self.updater = Some(updater.into()),
                 Err(_) => {
@@ -3197,25 +3630,41 @@ impl AppSnapshot {
                 ..
             } => match result {
                 Ok(bundle) if bundle.collection_id == collection_id => {
-                    let graph_links = knowledge_graph_links(&bundle.links);
+                    let graph_links = knowledge_graph_links(&bundle.links, &bundle.concepts);
                     if let Ok(mut fingerprints) = knowledge_fingerprints.lock() {
                         fingerprints.retain(|(cached_collection, _), _| {
                             *cached_collection != collection_id
                         });
                         if let Some(fingerprint) = bundle.index_fingerprint.as_ref() {
                             fingerprints.insert(
-                                (collection_id, KnowledgePageId::Index),
-                                fingerprint.clone(),
+                                (collection_id, KnowledgePageInput::Index),
+                                CachedKnowledgePage {
+                                    page_id: KnowledgePageId::Index,
+                                    fingerprint: fingerprint.clone(),
+                                },
                             );
                         }
                         if let Some(fingerprint) = bundle.log_fingerprint.as_ref() {
-                            fingerprints
-                                .insert((collection_id, KnowledgePageId::Log), fingerprint.clone());
+                            fingerprints.insert(
+                                (collection_id, KnowledgePageInput::Log),
+                                CachedKnowledgePage {
+                                    page_id: KnowledgePageId::Log,
+                                    fingerprint: fingerprint.clone(),
+                                },
+                            );
                         }
                         for concept in &bundle.concepts {
                             fingerprints.insert(
-                                (collection_id, KnowledgePageId::Concept(concept.id)),
-                                concept.fingerprint.clone(),
+                                (
+                                    collection_id,
+                                    KnowledgePageInput::Concept {
+                                        path: concept.relative_path.clone(),
+                                    },
+                                ),
+                                CachedKnowledgePage {
+                                    page_id: KnowledgePageId::Concept(concept.id),
+                                    fingerprint: concept.fingerprint.clone(),
+                                },
                             );
                         }
                     }
@@ -3232,11 +3681,38 @@ impl AppSnapshot {
                             .concepts
                             .into_iter()
                             .map(|concept| KnowledgeConceptSummary {
-                                page: KnowledgePageInput::Concept { id: concept.id },
+                                concept_id: concept.id.to_string(),
+                                page: KnowledgePageInput::Concept {
+                                    path: concept.relative_path,
+                                },
                                 title: concept.title,
                                 description: concept.description,
                                 concept_type: concept.concept_type,
                                 tags: concept.tags,
+                                lifecycle: concept.lifecycle_status,
+                                generated_by: concept.generated_by,
+                                verified_by: concept.verified_by,
+                                sources: concept
+                                    .sources
+                                    .into_iter()
+                                    .map(|source| KnowledgeSourceSummary {
+                                        id: source.id,
+                                        title: source.title,
+                                        resource: source.resource,
+                                        author: source.author,
+                                        usage_count: source.usage_count,
+                                        last_modified: source.last_modified,
+                                    })
+                                    .collect(),
+                                stale_after: concept.stale_after,
+                                assurance: ConceptAssuranceSummary::from(concept.assurance),
+                                warnings: concept
+                                    .warnings
+                                    .into_iter()
+                                    .map(OkfWarningSummary::from)
+                                    .collect(),
+                                execution_available: concept.execution_available,
+                                fingerprint: concept.fingerprint,
                             })
                             .collect(),
                         links: graph_links,
@@ -3272,8 +3748,21 @@ impl AppSnapshot {
             } => {
                 self.knowledge_page = Some(match result {
                     Ok(page) if page.collection_id == collection_id && page.page_id == page_id => {
-                        match tokio::task::spawn_blocking(move || knowledge_page_summary(page))
-                            .await
+                        let page_inputs = knowledge_fingerprints
+                            .lock()
+                            .ok()
+                            .map(|fingerprints| {
+                                fingerprints
+                                    .iter()
+                                    .filter(|((wiki_id, _), _)| *wiki_id == collection_id)
+                                    .map(|((_, input), cached)| (cached.page_id, input.clone()))
+                                    .collect::<HashMap<_, _>>()
+                            })
+                            .unwrap_or_default();
+                        match tokio::task::spawn_blocking(move || {
+                            knowledge_page_summary(page, &page_inputs)
+                        })
+                        .await
                         {
                             Ok(summary) => summary,
                             Err(_) => failed_knowledge_page(collection_id, page_id),
@@ -3357,6 +3846,10 @@ impl AppSnapshot {
                                             tags: concept.tags,
                                             summary: concept.summary,
                                             source_revision: concept.source_revision,
+                                            lifecycle: concept.lifecycle_status,
+                                            assurance: concept
+                                                .assurance
+                                                .map(ConceptAssuranceSummary::from),
                                         })
                                         .collect(),
                                     page.next_cursor,
@@ -3371,6 +3864,10 @@ impl AppSnapshot {
                             wiki_name: Some(result.summary.name),
                             description: Some(result.summary.description),
                             languages: result.summary.languages,
+                            okf_compatibility: result
+                                .summary
+                                .okf_compatibility
+                                .map(OkfCompatibilityDto::from),
                             concepts,
                             next_cursor,
                         }
@@ -3383,6 +3880,7 @@ impl AppSnapshot {
                         wiki_name: None,
                         description: None,
                         languages: Vec::new(),
+                        okf_compatibility: None,
                         concepts: Vec::new(),
                         next_cursor: None,
                     },
@@ -3467,7 +3965,7 @@ fn guided_repair_preview_summary(
             .files
             .into_iter()
             .map(|file| GuidedRepairFileSummary {
-                page: file.page.into(),
+                page: reserved_page_input(file.page),
                 change: match file.change {
                     GuidedRepairChange::WithdrawConcept => GuidedRepairChangeDto::WithdrawConcept,
                     GuidedRepairChange::RemoveOrphan => GuidedRepairChangeDto::RemoveOrphan,
@@ -3694,14 +4192,102 @@ impl From<worker::CollectionView> for WikiSummary {
                 airwiki_core::IndexingMode::NotApplicable => IndexingModeDto::NotApplicable,
             },
             okf_version: value.okf_version,
+            declared_okf_version: value.declared_okf_version,
+            restrictions: restrictions_for_compatibility(&value.okf_compatibility),
+            okf_compatibility: value.okf_compatibility.into(),
+            managed_size_bytes: value.managed_size_bytes,
+            stale_concept_count: value.stale_concept_count,
+            outdated_verification_count: value.outdated_verification_count,
+            metadata_warning_count: value.metadata_warning_count,
             trust_summary: match value.trust_summary {
                 worker::TrustSummaryView::Unverified => TrustSummaryDto::Unverified,
                 worker::TrustSummaryView::MachineConfirmed => TrustSummaryDto::MachineConfirmed,
                 worker::TrustSummaryView::HumanReviewed => TrustSummaryDto::HumanReviewed,
-                worker::TrustSummaryView::VerificationOutdated => {
-                    TrustSummaryDto::VerificationOutdated
+            },
+        }
+    }
+}
+
+fn restrictions_for_compatibility(
+    compatibility: &airwiki_types::OkfCompatibility,
+) -> Vec<WikiRestrictionDto> {
+    match compatibility {
+        airwiki_types::OkfCompatibility::LegacyV01 => vec![WikiRestrictionDto::LegacyReadOnly],
+        airwiki_types::OkfCompatibility::FutureRestricted { .. } => {
+            vec![WikiRestrictionDto::FutureFormatLocalOnly]
+        }
+        airwiki_types::OkfCompatibility::DeclaredV02
+        | airwiki_types::OkfCompatibility::UndeclaredV02Compatible => Vec::new(),
+    }
+}
+
+impl From<airwiki_types::OkfWarning> for OkfWarningSummary {
+    fn from(value: airwiki_types::OkfWarning) -> Self {
+        Self {
+            code: match value.code {
+                airwiki_types::OkfWarningCode::BrokenLink => OkfWarningCodeDto::BrokenLink,
+                airwiki_types::OkfWarningCode::InvalidGenerated => {
+                    OkfWarningCodeDto::InvalidGenerated
+                }
+                airwiki_types::OkfWarningCode::InvalidVerified => {
+                    OkfWarningCodeDto::InvalidVerified
+                }
+                airwiki_types::OkfWarningCode::InvalidSources => OkfWarningCodeDto::InvalidSources,
+                airwiki_types::OkfWarningCode::InvalidStaleAfter => {
+                    OkfWarningCodeDto::InvalidStaleAfter
+                }
+                airwiki_types::OkfWarningCode::InvalidOptionalMetadata => {
+                    OkfWarningCodeDto::InvalidOptionalMetadata
+                }
+                airwiki_types::OkfWarningCode::LegacyTimestamp => {
+                    OkfWarningCodeDto::LegacyTimestamp
+                }
+                airwiki_types::OkfWarningCode::LegacyCitations => {
+                    OkfWarningCodeDto::LegacyCitations
+                }
+                airwiki_types::OkfWarningCode::UnsupportedRuntime => {
+                    OkfWarningCodeDto::UnsupportedRuntime
+                }
+                airwiki_types::OkfWarningCode::InvalidAttestedComputation => {
+                    OkfWarningCodeDto::InvalidAttestedComputation
                 }
             },
+            logical_path: value.logical_path,
+            field: value.field,
+        }
+    }
+}
+
+impl From<airwiki_types::OkfCompatibility> for OkfCompatibilityDto {
+    fn from(value: airwiki_types::OkfCompatibility) -> Self {
+        match value {
+            airwiki_types::OkfCompatibility::DeclaredV02 => Self::DeclaredV02,
+            airwiki_types::OkfCompatibility::UndeclaredV02Compatible => {
+                Self::UndeclaredV02Compatible
+            }
+            airwiki_types::OkfCompatibility::LegacyV01 => Self::LegacyV01,
+            airwiki_types::OkfCompatibility::FutureRestricted { declared_version } => {
+                Self::FutureRestricted { declared_version }
+            }
+        }
+    }
+}
+
+impl From<airwiki_types::ConceptAssurance> for ConceptAssuranceSummary {
+    fn from(value: airwiki_types::ConceptAssurance) -> Self {
+        Self {
+            trust: match value.trust {
+                airwiki_types::TrustTier::Unverified => TrustSummaryDto::Unverified,
+                airwiki_types::TrustTier::MachineConfirmed => TrustSummaryDto::MachineConfirmed,
+                airwiki_types::TrustTier::HumanReviewed => TrustSummaryDto::HumanReviewed,
+            },
+            freshness: match value.freshness {
+                airwiki_types::FreshnessState::NotDeclared => FreshnessSummary::NotDeclared,
+                airwiki_types::FreshnessState::Fresh => FreshnessSummary::Fresh,
+                airwiki_types::FreshnessState::Stale => FreshnessSummary::Stale,
+                airwiki_types::FreshnessState::Invalid => FreshnessSummary::Invalid,
+            },
+            verification_outdated: value.verification_outdated,
         }
     }
 }
@@ -3758,7 +4344,7 @@ fn retain_pending_review_versions(
 fn failed_knowledge_page(collection_id: Uuid, page_id: KnowledgePageId) -> KnowledgePageSummary {
     KnowledgePageSummary {
         wiki_id: collection_id.to_string(),
-        page: page_id.into(),
+        page: reserved_page_input(page_id),
         title: String::new(),
         status: KnowledgePageStatus::Failed,
         blocks: Vec::new(),
@@ -3768,7 +4354,10 @@ fn failed_knowledge_page(collection_id: Uuid, page_id: KnowledgePageId) -> Knowl
     }
 }
 
-fn knowledge_graph_links(links: &[KnowledgeLinkView]) -> Vec<KnowledgeGraphLinkSummary> {
+fn knowledge_graph_links(
+    links: &[KnowledgeLinkView],
+    concepts: &[airwiki_core::KnowledgeConceptView],
+) -> Vec<KnowledgeGraphLinkSummary> {
     links
         .iter()
         .filter_map(|link| {
@@ -3776,24 +4365,62 @@ fn knowledge_graph_links(links: &[KnowledgeLinkView]) -> Vec<KnowledgeGraphLinkS
                 return None;
             };
             Some(KnowledgeGraphLinkSummary {
-                source: link.source.into(),
-                target: target.into(),
+                source: page_input_for(link.source, concepts)?,
+                target: page_input_for(target, concepts)?,
                 label: link.label.clone(),
             })
         })
         .collect()
 }
 
-fn knowledge_page_summary(page: KnowledgePageView) -> KnowledgePageSummary {
+fn knowledge_page_summary(
+    page: KnowledgePageView,
+    inputs: &HashMap<KnowledgePageId, KnowledgePageInput>,
+) -> KnowledgePageSummary {
     KnowledgePageSummary {
         wiki_id: page.collection_id.to_string(),
-        page: page.page_id.into(),
+        page: inputs
+            .get(&page.page_id)
+            .cloned()
+            .unwrap_or_else(|| reserved_page_input(page.page_id)),
         title: page.title,
         status: KnowledgePageStatus::Ready,
         blocks: parse_knowledge_blocks(&page.body_markdown),
         metadata: page.metadata,
-        backlinks: page.backlinks.into_iter().map(Into::into).collect(),
+        backlinks: page
+            .backlinks
+            .into_iter()
+            .filter_map(|backlink| inputs.get(&backlink).cloned())
+            .collect(),
         truncated: page.truncated,
+    }
+}
+
+fn page_input_for(
+    page: KnowledgePageId,
+    concepts: &[airwiki_core::KnowledgeConceptView],
+) -> Option<KnowledgePageInput> {
+    match page {
+        KnowledgePageId::Index => Some(KnowledgePageInput::Index),
+        KnowledgePageId::Log => Some(KnowledgePageInput::Log),
+        KnowledgePageId::Concept(id) => {
+            concepts
+                .iter()
+                .find(|concept| concept.id == id)
+                .map(|concept| KnowledgePageInput::Concept {
+                    path: concept.relative_path.clone(),
+                })
+        }
+    }
+}
+
+fn reserved_page_input(page: KnowledgePageId) -> KnowledgePageInput {
+    match page {
+        KnowledgePageId::Index => KnowledgePageInput::Index,
+        KnowledgePageId::Log => KnowledgePageInput::Log,
+        KnowledgePageId::Concept(_) => KnowledgePageInput::Concept {
+            path: String::new(),
+        },
     }
 }
 
@@ -3971,6 +4598,8 @@ fn ui_bindings_source() -> String {
         exported_declaration::<WikiOriginDto>(&config),
         exported_declaration::<IndexingModeDto>(&config),
         exported_declaration::<TrustSummaryDto>(&config),
+        exported_declaration::<OkfCompatibilityDto>(&config),
+        exported_declaration::<WikiRestrictionDto>(&config),
         exported_declaration::<WikiSummary>(&config),
         exported_declaration::<PublicAnnouncementSummary>(&config),
         exported_declaration::<HardwareSummary>(&config),
@@ -3983,6 +4612,11 @@ fn ui_bindings_source() -> String {
         exported_declaration::<KnowledgePageInput>(&config),
         exported_declaration::<KnowledgeBlock>(&config),
         exported_declaration::<KnowledgeConceptSummary>(&config),
+        exported_declaration::<KnowledgeSourceSummary>(&config),
+        exported_declaration::<ConceptAssuranceSummary>(&config),
+        exported_declaration::<FreshnessSummary>(&config),
+        exported_declaration::<OkfWarningCodeDto>(&config),
+        exported_declaration::<OkfWarningSummary>(&config),
         exported_declaration::<KnowledgeGraphLinkSummary>(&config),
         exported_declaration::<KnowledgeBundleStatus>(&config),
         exported_declaration::<KnowledgeBundleSummary>(&config),
@@ -4028,8 +4662,16 @@ fn ui_bindings_source() -> String {
         exported_declaration::<SystemDestinationInput>(&config),
         exported_declaration::<IntegrationClientDto>(&config),
         exported_declaration::<IntegrationStatusDto>(&config),
+        exported_declaration::<McpStdioSetupDto>(&config),
         exported_declaration::<IntegrationSummary>(&config),
         exported_declaration::<IntegrationsSummary>(&config),
+        exported_declaration::<ApplicationWikiRoleInput>(&config),
+        exported_declaration::<ApplicationWikiRoleSummary>(&config),
+        exported_declaration::<ApplicationWikiGrantSummary>(&config),
+        exported_declaration::<ApplicationAccessSummary>(&config),
+        exported_declaration::<ComputationParameterSummary>(&config),
+        exported_declaration::<PendingComputationSummary>(&config),
+        exported_declaration::<CompletedComputationSummary>(&config),
         exported_declaration::<IntegrationActionInput>(&config),
         exported_declaration::<UpdaterStatusDto>(&config),
         exported_declaration::<UpdaterIssueDto>(&config),
@@ -4097,6 +4739,69 @@ impl From<worker::PeerView> for PeerSummary {
     }
 }
 
+impl From<computations::PendingComputation> for PendingComputationSummary {
+    fn from(value: computations::PendingComputation) -> Self {
+        Self {
+            run_id: value.run_id.to_string(),
+            wiki_id: value.wiki_id.to_string(),
+            wiki_name: value.wiki_name,
+            logical_path: value.logical_path,
+            application_name: value.application_name,
+            parameters: value
+                .parameters
+                .into_iter()
+                .map(|parameter| ComputationParameterSummary {
+                    name: parameter.name,
+                    parameter_type: parameter.parameter_type,
+                })
+                .collect(),
+            expires_at: value.expires_at.to_rfc3339(),
+        }
+    }
+}
+
+impl From<computations::CompletedComputation> for CompletedComputationSummary {
+    fn from(value: computations::CompletedComputation) -> Self {
+        Self {
+            run_id: value.run_id.to_string(),
+            wiki_name: value.wiki_name,
+            logical_path: value.logical_path,
+            application_name: value.application_name,
+            verdict: value.verdict,
+            expires_at: value.expires_at.to_rfc3339(),
+        }
+    }
+}
+
+impl From<worker::ApplicationAccessView> for ApplicationAccessSummary {
+    fn from(value: worker::ApplicationAccessView) -> Self {
+        Self {
+            app_id: value.app_id.to_string(),
+            display_name: value.display_name,
+            producer: value.producer,
+            active: value.active,
+            owned_wiki_count: value.owned_wiki_count,
+            managed_bytes: value.managed_bytes,
+            grants: value
+                .grants
+                .into_iter()
+                .map(|grant| ApplicationWikiGrantSummary {
+                    wiki_id: grant.wiki_id.to_string(),
+                    role: match grant.role {
+                        worker::ApplicationWikiRoleView::Owner => ApplicationWikiRoleSummary::Owner,
+                        worker::ApplicationWikiRoleView::Reader => {
+                            ApplicationWikiRoleSummary::Reader
+                        }
+                        worker::ApplicationWikiRoleView::Editor => {
+                            ApplicationWikiRoleSummary::Editor
+                        }
+                    },
+                })
+                .collect(),
+        }
+    }
+}
+
 impl From<worker::ModelStateView> for ModelSummary {
     fn from(value: worker::ModelStateView) -> Self {
         Self {
@@ -4139,6 +4844,8 @@ impl From<airwiki_types::SearchHit> for SearchHitSummary {
             source_sha256: value.source_sha256,
             rank: value.rank,
             node_id: value.node_id,
+            assurance: value.assurance.map(ConceptAssuranceSummary::from),
+            lifecycle: value.lifecycle_status,
         }
     }
 }
@@ -4335,6 +5042,12 @@ fn main() -> Result<()> {
             allow_peer_pairing_again,
             set_wiki_grant,
             manage_integration,
+            refresh_application_access,
+            set_application_wiki_role,
+            refresh_computations,
+            reject_computation,
+            execute_computation,
+            save_computation_result,
             search,
             load_review_evidence,
             approve_review,
@@ -4342,6 +5055,7 @@ fn main() -> Result<()> {
             reanalyze_review,
             load_wiki_bundle,
             load_wiki_page,
+            verify_wiki_concept,
             update_preferences,
             refresh_autostart,
             set_autostart,
@@ -4428,6 +5142,9 @@ mod tests {
             NativeConfirmation::ExternalCollectionPolicy,
             NativeConfirmation::CollectionGrant,
             NativeConfirmation::InstallUpdate,
+            NativeConfirmation::ExecuteComputation,
+            NativeConfirmation::SaveComputationResult,
+            NativeConfirmation::ApplicationGrant,
         ];
         for locale in [UiLocale::EnUs, UiLocale::Es] {
             let localization = Localization::new(locale)?;
@@ -4563,6 +5280,7 @@ mod tests {
     #[test]
     fn graph_contract_exposes_only_internal_knowledge_links() {
         let concept_id = Uuid::new_v4();
+        let relative_path = format!("concepts/{concept_id}.md");
         let links = vec![
             KnowledgeLinkView {
                 source: KnowledgePageId::Index,
@@ -4585,12 +5303,39 @@ mod tests {
                 disposition: KnowledgeLinkDisposition::Unsafe,
             },
         ];
+        let concepts = vec![airwiki_core::KnowledgeConceptView {
+            id: concept_id,
+            relative_path: relative_path.clone(),
+            concept_type: "Document".to_owned(),
+            title: "Verified concept".to_owned(),
+            description: String::new(),
+            tags: Vec::new(),
+            resource: None,
+            timestamp: None,
+            revision: None,
+            source_sha256: None,
+            language: None,
+            generator_model: None,
+            reviewed_at: None,
+            lifecycle_status: "stable".to_owned(),
+            generated_by: None,
+            verified_by: Vec::new(),
+            sources: Vec::new(),
+            stale_after: None,
+            assurance: airwiki_types::ConceptAssurance::default(),
+            warnings: Vec::new(),
+            execution_available: false,
+            extensions: Default::default(),
+            fingerprint: "fingerprint".to_owned(),
+        }];
 
         assert_eq!(
-            knowledge_graph_links(&links),
+            knowledge_graph_links(&links, &concepts),
             vec![KnowledgeGraphLinkSummary {
                 source: KnowledgePageInput::Index,
-                target: KnowledgePageInput::Concept { id: concept_id },
+                target: KnowledgePageInput::Concept {
+                    path: relative_path
+                },
                 label: "Verified concept".to_owned(),
             }]
         );
@@ -4866,17 +5611,28 @@ mod tests {
     }
 
     #[test]
-    fn integration_contract_excludes_paths_and_diagnostic_detail() -> Result<()> {
+    fn integration_contract_excludes_diagnostics_and_only_exposes_generic_setup() -> Result<()> {
         let summary = IntegrationsSummary::from(integrations::ChatIntegrationsSnapshot {
-            integrations: vec![integrations::IntegrationView {
-                client: integrations::ChatClientKind::ClaudeDesktop,
-                status: integrations::IntegrationStatus::Error,
-                detected_version: Some("synthetic".to_owned()),
-                detail: "sensitive diagnostic".to_owned(),
-                planned_path: Some(PathBuf::from("/synthetic/private/config")),
-                activity_recent: false,
-                restart_required: false,
-            }],
+            integrations: vec![
+                integrations::IntegrationView {
+                    client: integrations::ChatClientKind::ClaudeDesktop,
+                    status: integrations::IntegrationStatus::Error,
+                    detected_version: Some("synthetic".to_owned()),
+                    detail: "sensitive diagnostic".to_owned(),
+                    planned_path: Some(PathBuf::from("/synthetic/private/config")),
+                    activity_recent: false,
+                    restart_required: false,
+                },
+                integrations::IntegrationView {
+                    client: integrations::ChatClientKind::GenericMcp,
+                    status: integrations::IntegrationStatus::Configured,
+                    detected_version: None,
+                    detail: "sensitive diagnostic".to_owned(),
+                    planned_path: Some(PathBuf::from("/synthetic/managed/bridge")),
+                    activity_recent: false,
+                    restart_required: false,
+                },
+            ],
             external_ai_collection_count: 0,
         });
         let serialized = serde_json::to_value(summary)?;
@@ -4888,8 +5644,16 @@ mod tests {
             (
                 integration.get("detail").is_none(),
                 integration.get("plannedPath").is_none(),
+                integration.get("mcpSetup") == Some(&serde_json::Value::Null),
             ),
-            (true, true)
+            (true, true, true)
+        );
+        assert_eq!(
+            serialized.pointer("/integrations/1/mcpSetup"),
+            Some(&serde_json::json!({
+                "command": "/synthetic/managed/bridge",
+                "args": ["--client", "generic-mcp"]
+            }))
         );
         Ok(())
     }

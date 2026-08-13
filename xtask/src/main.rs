@@ -158,7 +158,16 @@ const MAX_MCPB_BINARY_BYTES: u64 = 64 * 1024 * 1024;
 const MAX_MCPB_UNCOMPRESSED_BYTES: u64 = 128 * 1024 * 1024;
 const MAX_MCPB_LEGAL_FILES: usize = 1_024;
 const MCPB_NAME: &str = "airwiki";
-const MCPB_TOOL: &str = "search_airwiki";
+const MCPB_TOOLS: [&str; 8] = [
+    "search_airwiki",
+    "list_airwiki_memories",
+    "create_airwiki_memory",
+    "get_airwiki_memory",
+    "write_airwiki_memory",
+    "deprecate_airwiki_memory",
+    "request_airwiki_computation",
+    "get_airwiki_computation_run",
+];
 const MAX_UPDATER_KEY_OR_SIGNATURE_BYTES: u64 = 16 * 1024;
 const UPDATER_PUBLIC_KEY_ENV: &str = "AIRWIKI_UPDATER_PUBLIC_KEY";
 
@@ -696,8 +705,8 @@ fn mcpb_manifest(target: McpbTarget) -> Result<Vec<u8>> {
         "name": MCPB_NAME,
         "display_name": "AirWiki",
         "version": env!("CARGO_PKG_VERSION"),
-        "description": "Search human-reviewed knowledge explicitly approved for external chat.",
-        "long_description": "Connects Claude Desktop to the local AirWiki application. AirWiki must remain open; the extension is read-only and does not grant access to collections.",
+        "description": "Search approved knowledge and maintain explicitly authorized AI memory wikis.",
+        "long_description": "Connects Claude Desktop to the local AirWiki application. AirWiki must remain open. Search access, AI memory ownership, sharing, and computation confirmations remain independent AirWiki permissions.",
         "author": { "name": "AirWiki contributors" },
         "license": "Apache-2.0",
         "server": {
@@ -709,10 +718,10 @@ fn mcpb_manifest(target: McpbTarget) -> Result<Vec<u8>> {
                 "env": {}
             }
         },
-        "tools": [{
-            "name": MCPB_TOOL,
-            "description": "Search read-only evidence approved for external chat."
-        }],
+        "tools": MCPB_TOOLS.iter().map(|name| serde_json::json!({
+            "name": name,
+            "description": "Use this AirWiki operation only within the capability approved for this application."
+        })).collect::<Vec<_>>(),
         "tools_generated": false,
         "prompts_generated": false,
         "compatibility": {
@@ -790,10 +799,14 @@ fn validate_mcpb_manifest(bytes: &[u8], target: McpbTarget) -> Result<()> {
         .get("tools")
         .and_then(serde_json::Value::as_array)
         .context("MCPB tools are missing")?;
-    ensure!(tools.len() == 1, "MCPB must declare exactly one tool");
+    let tool_names = tools
+        .iter()
+        .filter_map(|tool| tool.get("name"))
+        .filter_map(serde_json::Value::as_str)
+        .collect::<Vec<_>>();
     ensure!(
-        tools[0].get("name").and_then(serde_json::Value::as_str) == Some(MCPB_TOOL),
-        "MCPB declares an unexpected tool"
+        tool_names.as_slice() == MCPB_TOOLS,
+        "MCPB declares an unexpected tool set"
     );
     ensure!(
         bytes == mcpb_manifest(target)?,

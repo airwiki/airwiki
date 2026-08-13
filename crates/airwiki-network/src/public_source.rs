@@ -5,8 +5,9 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use airwiki_types::{
-    DisclosureLease, PUBLIC_BROWSE_PROTOCOL, PUBLIC_SEARCH_PROTOCOL, PublicBrowsePage,
-    PublicBrowseRequest, PublicSearchRequest, PublicSearchResponse,
+    ConceptType, DisclosureLease, PUBLIC_BROWSE_PROTOCOL, PUBLIC_BROWSE_PROTOCOL_V2,
+    PUBLIC_SEARCH_PROTOCOL, PUBLIC_SEARCH_PROTOCOL_V2, PublicBrowsePage, PublicBrowseRequest,
+    PublicSearchRequest, PublicSearchResponse,
 };
 use async_trait::async_trait;
 use libp2p::core::transport::ListenerId;
@@ -20,6 +21,7 @@ use tokio::task::JoinSet;
 use tokio::time::Instant as TokioInstant;
 use tokio_util::sync::CancellationToken;
 
+use crate::public_codec::{ProtocolPayload, VersionedCborCodec};
 use crate::{NetworkError, NodeIdentity, PeerRateLimiter};
 
 const PUBLIC_REQUEST_BYTES: u64 = 16 * 1024;
@@ -41,6 +43,119 @@ pub enum PublicSearchWireResponse {
 pub enum PublicBrowseWireResponse {
     Success(PublicBrowsePage),
     Rejected(PublicSourceRejection),
+}
+
+impl ProtocolPayload for PublicSearchRequest {
+    fn prepare_for_protocol(&mut self, protocol: &str) -> std::io::Result<()> {
+        self.protocol_version = match protocol {
+            PUBLIC_SEARCH_PROTOCOL => PUBLIC_SEARCH_PROTOCOL,
+            PUBLIC_SEARCH_PROTOCOL_V2 => PUBLIC_SEARCH_PROTOCOL_V2,
+            _ => return Err(unsupported_public_protocol()),
+        }
+        .to_owned();
+        Ok(())
+    }
+
+    fn validate_protocol(&self, protocol: &str) -> std::io::Result<()> {
+        validate_declared_protocol(&self.protocol_version, protocol)
+    }
+}
+
+impl ProtocolPayload for PublicSearchWireResponse {
+    fn prepare_for_protocol(&mut self, protocol: &str) -> std::io::Result<()> {
+        if let Self::Success(response) = self {
+            response.protocol_version = match protocol {
+                PUBLIC_SEARCH_PROTOCOL => PUBLIC_SEARCH_PROTOCOL,
+                PUBLIC_SEARCH_PROTOCOL_V2 => PUBLIC_SEARCH_PROTOCOL_V2,
+                _ => return Err(unsupported_public_protocol()),
+            }
+            .to_owned();
+            if protocol == PUBLIC_SEARCH_PROTOCOL {
+                for hit in response
+                    .response
+                    .hits
+                    .iter_mut()
+                    .chain(&mut response.response.authorized_candidates)
+                {
+                    hit.assurance = None;
+                    hit.lifecycle_status = None;
+                }
+            }
+        }
+        Ok(())
+    }
+
+    fn validate_protocol(&self, protocol: &str) -> std::io::Result<()> {
+        match self {
+            Self::Success(response) => {
+                validate_declared_protocol(&response.protocol_version, protocol)
+            }
+            Self::Rejected(_) => Ok(()),
+        }
+    }
+}
+
+impl ProtocolPayload for PublicBrowseRequest {
+    fn prepare_for_protocol(&mut self, protocol: &str) -> std::io::Result<()> {
+        self.protocol_version = match protocol {
+            PUBLIC_BROWSE_PROTOCOL => PUBLIC_BROWSE_PROTOCOL,
+            PUBLIC_BROWSE_PROTOCOL_V2 => PUBLIC_BROWSE_PROTOCOL_V2,
+            _ => return Err(unsupported_public_protocol()),
+        }
+        .to_owned();
+        Ok(())
+    }
+
+    fn validate_protocol(&self, protocol: &str) -> std::io::Result<()> {
+        validate_declared_protocol(&self.protocol_version, protocol)
+    }
+}
+
+impl ProtocolPayload for PublicBrowseWireResponse {
+    fn prepare_for_protocol(&mut self, protocol: &str) -> std::io::Result<()> {
+        if let Self::Success(page) = self {
+            page.protocol_version = match protocol {
+                PUBLIC_BROWSE_PROTOCOL => PUBLIC_BROWSE_PROTOCOL,
+                PUBLIC_BROWSE_PROTOCOL_V2 => PUBLIC_BROWSE_PROTOCOL_V2,
+                _ => return Err(unsupported_public_protocol()),
+            }
+            .to_owned();
+            if protocol == PUBLIC_BROWSE_PROTOCOL {
+                page.concepts
+                    .retain(|concept| !matches!(concept.concept_type, ConceptType::Other(_)));
+                for concept in &mut page.concepts {
+                    concept.lifecycle_status = None;
+                    concept.assurance = None;
+                }
+            }
+        }
+        Ok(())
+    }
+
+    fn validate_protocol(&self, protocol: &str) -> std::io::Result<()> {
+        match self {
+            Self::Success(page) => validate_declared_protocol(&page.protocol_version, protocol),
+            Self::Rejected(_) => Ok(()),
+        }
+    }
+}
+
+fn validate_declared_protocol(declared: &str, negotiated: &str) -> std::io::Result<()> {
+    if declared == negotiated {
+        Ok(())
+    } else {
+        Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            "public payload protocol does not match the negotiated protocol",
+        ))
+    }
+}
+
+fn unsupported_public_protocol() -> std::io::Error {
+    std::io::Error::new(
+        std::io::ErrorKind::InvalidData,
+        "unsupported public protocol",
+    )
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -177,8 +292,12 @@ impl fmt::Debug for PublicRelayReadiness {
 
 #[derive(NetworkBehaviour)]
 struct SourceBehaviour {
-    search: request_response::cbor::Behaviour<PublicSearchRequest, PublicSearchWireResponse>,
-    browse: request_response::cbor::Behaviour<PublicBrowseRequest, PublicBrowseWireResponse>,
+    search: request_response::Behaviour<
+        VersionedCborCodec<PublicSearchRequest, PublicSearchWireResponse>,
+    >,
+    browse: request_response::Behaviour<
+        VersionedCborCodec<PublicBrowseRequest, PublicBrowseWireResponse>,
+    >,
     relay: libp2p::relay::client::Behaviour,
     dcutr: libp2p::dcutr::Behaviour,
     autonat: libp2p::autonat::Behaviour,
@@ -616,8 +735,16 @@ fn public_source_swarm(
     identity: &NodeIdentity,
     request_timeout: Duration,
 ) -> Result<libp2p::Swarm<SourceBehaviour>, NetworkError> {
-    let search = public_behaviour(PUBLIC_SEARCH_PROTOCOL, request_timeout)?;
-    let browse = public_behaviour(PUBLIC_BROWSE_PROTOCOL, request_timeout)?;
+    let search = public_behaviour(
+        PUBLIC_SEARCH_PROTOCOL_V2,
+        PUBLIC_SEARCH_PROTOCOL,
+        request_timeout,
+    )?;
+    let browse = public_behaviour(
+        PUBLIC_BROWSE_PROTOCOL_V2,
+        PUBLIC_BROWSE_PROTOCOL,
+        request_timeout,
+    )?;
     let local_peer = identity.peer_id();
     let swarm = SwarmBuilder::with_existing_identity(identity.keypair().clone())
         .with_tokio()
@@ -690,21 +817,37 @@ fn probe_listener_address(address: &Multiaddr) -> Option<std::io::Result<()>> {
 }
 
 fn public_behaviour<Request, Response>(
-    protocol: &'static str,
+    current_protocol: &'static str,
+    legacy_protocol: &'static str,
     timeout: Duration,
-) -> Result<request_response::cbor::Behaviour<Request, Response>, NetworkError>
+) -> Result<request_response::Behaviour<VersionedCborCodec<Request, Response>>, NetworkError>
 where
-    Request: serde::Serialize + serde::de::DeserializeOwned + Send + 'static,
-    Response: serde::Serialize + serde::de::DeserializeOwned + Send + 'static,
+    Request: Clone
+        + ProtocolPayload
+        + serde::Serialize
+        + serde::de::DeserializeOwned
+        + Send
+        + Sync
+        + 'static,
+    Response: Clone
+        + ProtocolPayload
+        + serde::Serialize
+        + serde::de::DeserializeOwned
+        + Send
+        + Sync
+        + 'static,
 {
-    let protocol = StreamProtocol::try_from_owned(protocol.to_owned())
+    let current = StreamProtocol::try_from_owned(current_protocol.to_owned())
         .map_err(|error| NetworkError::Transport(error.to_string()))?;
-    let codec = request_response::cbor::codec::Codec::<Request, Response>::default()
-        .set_request_size_maximum(PUBLIC_REQUEST_BYTES)
-        .set_response_size_maximum(PUBLIC_RESPONSE_BYTES);
+    let legacy = StreamProtocol::try_from_owned(legacy_protocol.to_owned())
+        .map_err(|error| NetworkError::Transport(error.to_string()))?;
+    let codec = VersionedCborCodec::new(PUBLIC_REQUEST_BYTES, PUBLIC_RESPONSE_BYTES);
     Ok(request_response::Behaviour::with_codec(
         codec,
-        [(protocol, ProtocolSupport::Full)],
+        [
+            (current, ProtocolSupport::Full),
+            (legacy, ProtocolSupport::Full),
+        ],
         request_response::Config::default()
             .with_request_timeout(timeout)
             .with_max_concurrent_streams(PUBLIC_CONCURRENT_STREAMS),

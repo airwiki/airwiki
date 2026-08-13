@@ -73,7 +73,10 @@ pub fn sign_tombstone(
 pub fn verify_tombstone(
     signed: &SignedPublicCollectionTombstone,
 ) -> Result<(), PublicManifestError> {
-    if signed.tombstone.protocol_version != airwiki_types::PUBLIC_CATALOG_PROTOCOL {
+    if !matches!(
+        signed.tombstone.protocol_version.as_str(),
+        airwiki_types::PUBLIC_CATALOG_PROTOCOL | airwiki_types::PUBLIC_CATALOG_PROTOCOL_V2
+    ) {
         return Err(PublicContractError::UnsupportedProtocol.into());
     }
     let public = decode_public(&signed.public_key)?;
@@ -122,6 +125,7 @@ mod tests {
             description: "Synthetic public knowledge".to_owned(),
             languages: vec!["es".to_owned()],
             concept_count: 1,
+            okf_compatibility: None,
             routing_terms: vec!["atlas".to_owned()],
             routes: vec!["/ip4/127.0.0.1/udp/41000/quic-v1".to_owned()],
             updated_at: Utc::now(),

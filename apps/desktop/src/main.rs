@@ -16,6 +16,8 @@ mod services;
 mod updater;
 mod worker;
 
+#[cfg(feature = "e2e")]
+use std::path::Path;
 use std::{
     collections::HashMap,
     ffi::OsStr,
@@ -5784,7 +5786,8 @@ mod tests {
         std::fs::create_dir_all(&outside)?;
 
         assert_eq!(
-            validated_e2e_selection_path(&root, &fixture)?,
+            validated_e2e_selection_path(&root, &fixture)
+                .map_err(|error| { anyhow::anyhow!("E2E selection failed with {}", error.code) })?,
             fixture.canonicalize()?
         );
         assert!(validated_e2e_selection_path(&root, &root.join("../outside")).is_err());

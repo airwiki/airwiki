@@ -982,6 +982,7 @@ desktop-import-okf-folder = Import OKF folder
 desktop-import-okf-zip = Import OKF ZIP
 desktop-import-okf-body = Copies a validated OKF v0.2 bundle. No source files are watched.
 desktop-okf-import-invalid = The bundle does not meet the OKF v0.2 format or safety limits.
+desktop-folder-selection-expired = The selected folder or file expired. Select it again to continue safely.
 desktop-import-okf-confirm = Review the bundle before importing
 desktop-import-okf-concepts = Concepts
 desktop-import-okf-files = Entries

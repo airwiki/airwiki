@@ -447,6 +447,10 @@ button:active:not(:disabled) { transform: scale(.985); }
 .repair-summary > .repair-preview { grid-column: 1 / -1; }
 .attention-icon { display: grid; place-items: center; width: 30px; height: 30px; color: var(--cyan); background: color-mix(in srgb, var(--cyan) 10%, transparent); border-radius: 50%; }
 .attention-icon.warning { color: var(--amber); background: color-mix(in srgb, var(--amber) 11%, transparent); }
+.computation-list { margin-top: 14px; background: var(--slate); border: 1px solid var(--line); border-radius: var(--panel-radius); overflow: hidden; }
+.computation-list article { display: grid; grid-template-columns: 34px minmax(0, 1fr) auto; align-items: center; gap: 12px; min-height: 76px; padding: 12px 16px; border-bottom: 1px solid var(--line); }
+.computation-list article:last-child { border-bottom: 0; }
+.computation-list p { margin: 4px 0 0; color: var(--muted); font-size: 13px; line-height: 1.4; }
 .all-clear { display: flex; align-items: center; gap: 13px; margin-top: 14px; padding: 18px; color: var(--verify); background: var(--slate); border: 1px solid var(--line); border-radius: var(--panel-radius); }
 .all-clear p { margin: 3px 0 0; color: var(--muted); }
 .wiki-table { margin-top: 14px; background: var(--slate); border: 1px solid var(--line); border-radius: var(--panel-radius); overflow: hidden; }
@@ -579,6 +583,18 @@ button:active:not(:disabled) { transform: scale(.985); }
 .connections-drawer > section { padding: 20px 0; border-bottom: 1px solid var(--line); }
 .connections-drawer .peer-list { grid-template-columns: 1fr; }
 .connections-drawer .peer-list article { display: grid; gap: 12px; padding: 16px 0; }
+.application-access-list { display: grid; gap: 14px; margin-top: 18px; }
+.application-access-list > article { display: grid; gap: 12px; padding: 14px; background: var(--surface-raised); border: 1px solid var(--line); border-radius: var(--control-radius); }
+.application-access-list > article > div > strong, .application-access-list > article > div > small { display: block; }
+.application-access-list > article > div > small { margin-top: 3px; color: var(--muted); }
+.integration-list article:has(.mcp-setup) { flex-wrap: wrap; }
+.mcp-setup { flex: 1 0 100%; display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 10px 14px; align-items: center; padding: 12px; background: var(--surface-raised); border: 1px solid var(--line); border-radius: var(--control-radius); }
+.mcp-setup > div { grid-column: 1 / -1; }
+.mcp-setup pre { min-width: 0; margin: 0; padding: 10px 12px; overflow: auto; color: var(--text); background: var(--surface); border: 1px solid var(--line); border-radius: calc(var(--control-radius) - 2px); font: 12px/1.45 ui-monospace, SFMono-Regular, Consolas, monospace; white-space: pre-wrap; overflow-wrap: anywhere; }
+.mcp-setup pre:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
+.computation-parameters { display: flex; flex-wrap: wrap; gap: 6px; margin: 8px 0 0; padding: 0; list-style: none; }
+.computation-parameters li { display: inline-flex; align-items: center; gap: 5px; padding: 3px 7px; color: var(--muted); background: var(--surface-raised); border: 1px solid var(--line); border-radius: 999px; font-size: 12px; }
+.computation-parameters code { color: var(--text); }
 .peer-summary { display: grid; gap: 3px; }
 .peer-summary small { color: var(--muted); }
 .grant-list { gap: 2px; margin: 0; }
@@ -638,6 +654,21 @@ button:active:not(:disabled) { transform: scale(.985); }
 .wiki-access-strip > div { display: flex; flex-wrap: wrap; gap: 6px; }
 .wiki-access-strip > div span { padding: 4px 8px; color: var(--cyan); background: color-mix(in srgb, var(--cyan) 9%, transparent); border-radius: 999px; font-size: 11px; }
 .wiki-access-strip > small { color: var(--muted); font-size: 11px; }
+.wiki-assurance-strip { display: flex; align-items: center; justify-content: space-between; gap: 18px; padding: 12px 14px; color: var(--amber); background: color-mix(in srgb, var(--amber) 5%, var(--slate)); border-bottom: 1px solid color-mix(in srgb, var(--amber) 25%, var(--line)); }
+.wiki-assurance-strip strong, .wiki-assurance-strip small { display: block; }
+.wiki-assurance-strip small { margin-top: 3px; color: var(--muted); font-size: 12px; line-height: 1.4; }
+.concept-assurance { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px 20px; margin: 16px 0 22px; padding: 14px 16px; background: var(--surface-raised); border: 1px solid var(--line); border-radius: var(--control-radius); }
+.concept-assurance > div span, .concept-assurance > div strong { display: block; }
+.concept-assurance > div span { color: var(--muted); font-size: 11px; }
+.concept-assurance > div strong { margin-top: 3px; color: var(--strong); font-size: 13px; overflow-wrap: anywhere; }
+.concept-assurance details, .concept-assurance .metadata-warning { grid-column: 1 / -1; }
+.concept-assurance .concept-verify { grid-column: 1 / -1; justify-self: start; }
+.concept-assurance details { padding-top: 10px; border-top: 1px solid var(--line); }
+.concept-assurance summary { color: var(--cyan); cursor: pointer; }
+.concept-assurance ul { display: grid; gap: 8px; margin: 10px 0 0; padding: 0; list-style: none; }
+.concept-assurance li strong, .concept-assurance li small { display: block; }
+.concept-assurance li small { color: var(--muted); }
+.metadata-warning { display: flex; align-items: flex-start; gap: 8px; margin: 0; color: var(--amber); font-size: 12px; line-height: 1.4; }
 .wiki-interventions { margin-top: 16px; background: color-mix(in srgb, var(--amber) 5%, var(--slate)); border: 1px solid color-mix(in srgb, var(--amber) 27%, var(--line)); border-left: 3px solid var(--amber); border-radius: var(--control-radius); overflow: hidden; }
 .wiki-interventions-heading { display: flex; align-items: flex-start; gap: 11px; padding: 15px 18px; color: var(--amber); border-bottom: 1px solid color-mix(in srgb, var(--amber) 20%, var(--line)); }
 .wiki-interventions-heading h2 { color: var(--strong); font: 650 17px system-ui, sans-serif; letter-spacing: -.01em; }
@@ -669,4 +700,11 @@ button:active:not(:disabled) { transform: scale(.985); }
   .wiki-access-strip > small { grid-column: 2; }
   .wiki-intervention-list article { grid-template-columns: 1fr; }
   .wiki-intervention-list button { justify-self: start; }
+}
+
+@media (max-width: 760px) {
+  .computation-list article { grid-template-columns: 30px minmax(0, 1fr); }
+  .computation-list .row-actions { grid-column: 2; }
+  .concept-assurance { grid-template-columns: 1fr; }
+  .concept-assurance details, .concept-assurance .metadata-warning, .concept-assurance .concept-verify { grid-column: 1; }
 }

@@ -13,9 +13,13 @@ export type WikiOriginDto = "folder" | "importedOkf" | "aiMemory";
 
 export type IndexingModeDto = "continuous" | "manual" | "notApplicable";
 
-export type TrustSummaryDto = "unverified" | "machineConfirmed" | "humanReviewed" | "verificationOutdated";
+export type TrustSummaryDto = "unverified" | "machineConfirmed" | "humanReviewed";
 
-export type WikiSummary = { id: string, name: string, documentCount: number, needsReviewCount: number, publishedCount: number, failedCount: number, localOnly: boolean, peerShareable: boolean, allowExternalAi: boolean, internetPublic: boolean, publicDescription: string, publicLanguages: string, publicAnnouncement: PublicAnnouncementSummary, maintenanceRequired: boolean, origin: WikiOriginDto, indexingMode: IndexingModeDto, okfVersion: string, trustSummary: TrustSummaryDto, };
+export type OkfCompatibilityDto = { "kind": "declaredV02" } | { "kind": "undeclaredV02Compatible" } | { "kind": "legacyV01" } | { "kind": "futureRestricted", declaredVersion: string, };
+
+export type WikiRestrictionDto = "legacyReadOnly" | "futureFormatLocalOnly";
+
+export type WikiSummary = { id: string, name: string, documentCount: number, needsReviewCount: number, publishedCount: number, failedCount: number, localOnly: boolean, peerShareable: boolean, allowExternalAi: boolean, internetPublic: boolean, publicDescription: string, publicLanguages: string, publicAnnouncement: PublicAnnouncementSummary, maintenanceRequired: boolean, origin: WikiOriginDto, indexingMode: IndexingModeDto, okfVersion: string, declaredOkfVersion: string | null, okfCompatibility: OkfCompatibilityDto, managedSizeBytes: number, staleConceptCount: number, outdatedVerificationCount: number, metadataWarningCount: number, trustSummary: TrustSummaryDto, restrictions: Array<WikiRestrictionDto>, };
 
 export type PublicAnnouncementSummary = { "status": "offline" } | { "status": "advertised", acceptedIndexes: number, } | { "status": "expired" };
 
@@ -33,11 +37,21 @@ export type ReviewEvidenceStatus = "ready" | "stale" | "missing" | "failed";
 
 export type ReviewEvidenceSummary = { requestId: string, conceptId: string, sourceRevision: number, status: ReviewEvidenceStatus, excerpts: Array<ReviewExcerptSummary>, totalChunks: number, nextOrdinal: number | null, };
 
-export type KnowledgePageInput = { "kind": "index" } | { "kind": "log" } | { "kind": "concept", id: string, };
+export type KnowledgePageInput = { "kind": "index" } | { "kind": "log" } | { "kind": "concept", path: string, };
 
 export type KnowledgeBlock = { "kind": "heading", level: number, text: string, } | { "kind": "paragraph", text: string, } | { "kind": "listItem", ordered: boolean, text: string, } | { "kind": "code", language: string | null, text: string, } | { "kind": "quote", text: string, } | { "kind": "rule" };
 
-export type KnowledgeConceptSummary = { page: KnowledgePageInput, title: string, description: string, conceptType: string, tags: Array<string>, };
+export type KnowledgeConceptSummary = { conceptId: string, page: KnowledgePageInput, title: string, description: string, conceptType: string, tags: Array<string>, lifecycle: string, generatedBy: string | null, verifiedBy: Array<string>, sources: Array<KnowledgeSourceSummary>, staleAfter: string | null, assurance: ConceptAssuranceSummary, warnings: Array<OkfWarningSummary>, executionAvailable: boolean, fingerprint: string, };
+
+export type KnowledgeSourceSummary = { id: string | null, title: string | null, resource: string | null, author: string | null, usageCount: number | null, lastModified: string | null, };
+
+export type ConceptAssuranceSummary = { trust: TrustSummaryDto, freshness: FreshnessSummary, verificationOutdated: boolean, };
+
+export type FreshnessSummary = "notDeclared" | "fresh" | "stale" | "invalid";
+
+export type OkfWarningCodeDto = "brokenLink" | "invalidGenerated" | "invalidVerified" | "invalidSources" | "invalidStaleAfter" | "invalidOptionalMetadata" | "legacyTimestamp" | "legacyCitations" | "unsupportedRuntime" | "invalidAttestedComputation";
+
+export type OkfWarningSummary = { code: OkfWarningCodeDto, logicalPath: string, field: string | null, };
 
 export type KnowledgeGraphLinkSummary = { source: KnowledgePageInput, target: KnowledgePageInput, label: string, };
 
@@ -63,7 +77,7 @@ export type ModelInstallStatus = "queued" | "downloading" | "verifying" | "extra
 
 export type ModelInstallSummary = { status: ModelInstallStatus, downloaded: number, totalBytes: number, };
 
-export type SearchHitSummary = { conceptId: string, wikiId: string, title: string, snippet: string, headingOrPage: string, logicalResourceUri: string, sourceRevision: number, sourceSha256: string, rank: number, nodeId: string, };
+export type SearchHitSummary = { conceptId: string, wikiId: string, title: string, snippet: string, headingOrPage: string, logicalResourceUri: string, sourceRevision: number, sourceSha256: string, rank: number, nodeId: string, assurance: ConceptAssuranceSummary | null, lifecycle: string | null, };
 
 export type SearchStatus = "searching" | "complete" | "failed";
 
@@ -73,9 +87,9 @@ export type SearchSummary = { requestId: string, status: SearchStatus, hits: Arr
 
 export type PublicBrowseStatus = "direct" | "relay" | "expired" | "offline" | "failed";
 
-export type PublicConceptSummaryDto = { conceptId: string, conceptType: ConceptType, title: string, description: string, language: string, tags: Array<string>, summary: string, sourceRevision: number, };
+export type PublicConceptSummaryDto = { conceptId: string, conceptType: ConceptType, title: string, description: string, language: string, tags: Array<string>, summary: string, sourceRevision: number, lifecycle: string | null, assurance: ConceptAssuranceSummary | null, };
 
-export type PublicBrowseSummary = { requestId: string, status: PublicBrowseStatus, publisherId: string | null, wikiId: string | null, wikiName: string | null, description: string | null, languages: Array<string>, concepts: Array<PublicConceptSummaryDto>, nextCursor: string | null, };
+export type PublicBrowseSummary = { requestId: string, status: PublicBrowseStatus, publisherId: string | null, wikiId: string | null, wikiName: string | null, description: string | null, languages: Array<string>, okfCompatibility: OkfCompatibilityDto | null, concepts: Array<PublicConceptSummaryDto>, nextCursor: string | null, };
 
 export type NoticeLevel = "notice" | "warning" | "error";
 
@@ -125,13 +139,29 @@ export type FirewallOperationStatus = "awaitingWindows" | "takingLonger";
 
 export type SystemDestination = "networkSettings" | "advancedFirewall" | "localNetworkPrivacy";
 
-export type IntegrationClient = "chatGptDesktop" | "claudeDesktop" | "geminiCli";
+export type IntegrationClient = "chatGptDesktop" | "claudeDesktop" | "geminiCli" | "genericMcp";
 
 export type IntegrationStatus = "notInstalled" | "available" | "awaitingClientApproval" | "configured" | "updateAvailable" | "conflict" | "unsupported" | "error";
 
-export type IntegrationSummary = { client: IntegrationClient, status: IntegrationStatus, detectedVersion: string | null, activityRecent: boolean, restartRequired: boolean, };
+export type McpStdioSetupDto = { command: string, args: Array<string>, };
+
+export type IntegrationSummary = { client: IntegrationClient, status: IntegrationStatus, detectedVersion: string | null, activityRecent: boolean, restartRequired: boolean, mcpSetup: McpStdioSetupDto | null, };
 
 export type IntegrationsSummary = { integrations: Array<IntegrationSummary>, externalAiWikiCount: number, };
+
+export type ApplicationWikiRoleInput = "reader" | "editor";
+
+export type ApplicationWikiRoleSummary = "owner" | "reader" | "editor";
+
+export type ApplicationWikiGrantSummary = { wikiId: string, role: ApplicationWikiRoleSummary, };
+
+export type ApplicationAccessSummary = { appId: string, displayName: string, producer: string, active: boolean, ownedWikiCount: number, managedBytes: number, grants: Array<ApplicationWikiGrantSummary>, };
+
+export type ComputationParameterSummary = { name: string, parameterType: string, };
+
+export type PendingComputationSummary = { runId: string, wikiId: string, wikiName: string, logicalPath: string, applicationName: string, parameters: Array<ComputationParameterSummary>, expiresAt: string, };
+
+export type CompletedComputationSummary = { runId: string, wikiName: string, logicalPath: string, applicationName: string, verdict: string, expiresAt: string, };
 
 export type IntegrationActionInput = { "kind": "refresh" } | { "kind": "connect", client: IntegrationClient, } | { "kind": "disconnect", client: IntegrationClient, } | { "kind": "confirmClaudeInstalled" } | { "kind": "openClaudeSettings" };
 
@@ -149,7 +179,7 @@ export type HostPlatform = "macOs" | "windows";
 
 export type AppPhase = "starting" | "ready";
 
-export type AppSnapshot = { schemaVersion: number, sequence: number, platform: HostPlatform, phase: AppPhase, nodeId: string | null, mcpUrl: string | null, blockedPublicPublishers: Array<string>, hardware: HardwareSummary | null, wikis: Array<WikiSummary>, wikiScans: Array<WikiScanSummary>, reviews: Array<ReviewSummary>, reanalyzingReviewIds: Array<string>, sourceIssues: Array<SourceIssueSummary>, peers: Array<PeerSummary>, model: ModelSummary | null, modelInstall: ModelInstallSummary | null, search: SearchSummary | null, publicBrowse: PublicBrowseSummary | null, reviewEvidence: ReviewEvidenceSummary | null, knowledge: KnowledgeBundleSummary | null, knowledgePage: KnowledgePageSummary | null, preferences: PreferencesSummary | null, autostart: AutostartStatus | null, wikiHealth: WikiHealthSummary | null, guidedRepair: GuidedRepairSummary | null, connectivity: ConnectivitySummary | null, lanRuntime: LanRuntimeSummary | null, firewallOperation: FirewallOperationStatus | null, integrations: IntegrationsSummary | null, updater: UpdaterSummary | null, notice: NoticeSummary | null, };
+export type AppSnapshot = { schemaVersion: number, sequence: number, platform: HostPlatform, phase: AppPhase, nodeId: string | null, mcpUrl: string | null, blockedPublicPublishers: Array<string>, hardware: HardwareSummary | null, wikis: Array<WikiSummary>, wikiScans: Array<WikiScanSummary>, reviews: Array<ReviewSummary>, reanalyzingReviewIds: Array<string>, sourceIssues: Array<SourceIssueSummary>, peers: Array<PeerSummary>, model: ModelSummary | null, modelInstall: ModelInstallSummary | null, search: SearchSummary | null, publicBrowse: PublicBrowseSummary | null, reviewEvidence: ReviewEvidenceSummary | null, knowledge: KnowledgeBundleSummary | null, knowledgePage: KnowledgePageSummary | null, preferences: PreferencesSummary | null, autostart: AutostartStatus | null, wikiHealth: WikiHealthSummary | null, guidedRepair: GuidedRepairSummary | null, connectivity: ConnectivitySummary | null, lanRuntime: LanRuntimeSummary | null, firewallOperation: FirewallOperationStatus | null, integrations: IntegrationsSummary | null, applicationAccess: Array<ApplicationAccessSummary>, pendingComputations: Array<PendingComputationSummary>, completedComputations: Array<CompletedComputationSummary>, updater: UpdaterSummary | null, notice: NoticeSummary | null, };
 
 export type UiEventKind = "stateChanged";
 
@@ -159,6 +189,6 @@ export type UiError = { code: string, messageKey: string, retryable: boolean, };
 
 export type FolderSelection = { token: string, displayPath: string, };
 
-export type OkfImportSummary = { entryCount: number, conceptCount: number, uncompressedBytes: number, okfVersion: string, warningCount: number, };
+export type OkfImportSummary = { entryCount: number, conceptCount: number, uncompressedBytes: number, declaredOkfVersion: string | null, compatibility: OkfCompatibilityDto, warningCount: number, warnings: Array<OkfWarningSummary>, restrictions: Array<WikiRestrictionDto>, };
 
 export type WikiPolicyInput = { localOnly: boolean, peerShareable: boolean, allowExternalAi: boolean, internetPublic: boolean, };

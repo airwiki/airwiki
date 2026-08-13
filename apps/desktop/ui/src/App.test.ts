@@ -2,7 +2,7 @@ import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testi
 import axe from 'axe-core';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import App from './App.svelte';
-import { allowPeerPairingAgain, configureFirewall, loadWikiBundle, loadWikiPage, openSystemDestination, prepareGuidedWikiRepair, updatePreferences } from './api';
+import { allowPeerPairingAgain, configureFirewall, loadWikiBundle, loadWikiPage, openSystemDestination, prepareGuidedWikiRepair, updatePreferences, verifyWikiConcept } from './api';
 import { readySnapshot } from './test/fixtures';
 
 let snapshot = readySnapshot();
@@ -38,7 +38,8 @@ vi.mock('./api', async (importOriginal) => {
     manageIntegration: vi.fn(async () => undefined),
     allowPeerPairingAgain: vi.fn(async () => undefined),
     loadWikiBundle: vi.fn(async () => undefined),
-    loadWikiPage: vi.fn(async () => undefined)
+    loadWikiPage: vi.fn(async () => undefined),
+    verifyWikiConcept: vi.fn(async () => undefined)
   };
 });
 
@@ -117,6 +118,24 @@ describe('AirWiki wiki workspace', () => {
     expect(screen.getByRole('dialog', { name: 'Conexiones' })).toBeInTheDocument();
     expect(screen.getByText('Controles de red')).toBeInTheDocument();
     expect(screen.getAllByText('Detalles avanzados')).toHaveLength(1);
+  });
+
+  it('shows a copyable generic MCP setup without exposing a capability', async () => {
+    snapshot.integrations = {
+      externalAiWikiCount: 0,
+      integrations: [{
+        client: 'genericMcp', status: 'configured', detectedVersion: null,
+        activityRecent: false, restartRequired: false,
+        mcpSetup: { command: '/synthetic/managed/airwiki-mcp-bridge', args: ['--client', 'generic-mcp'] }
+      }]
+    };
+    render(App);
+    await fireEvent.click(await screen.findByRole('button', { name: 'Apps de IA: Disponible' }));
+
+    expect(screen.getByText('Cliente MCP genérico')).toBeInTheDocument();
+    const setup = screen.getByText(/synthetic\/managed\/airwiki-mcp-bridge/);
+    expect(setup).toHaveTextContent('"generic-mcp"');
+    expect(setup).not.toHaveTextContent('capability');
   });
 
   it('opens device preferences from disabled local-network guidance', async () => {
@@ -332,14 +351,20 @@ describe('AirWiki wiki workspace', () => {
     activateLocalSearch();
     snapshot.search = {
       requestId: 'search-fixture', status: 'complete', coverage: 'complete',
-      hits: [{ conceptId, wikiId: wiki.id, title: 'Evidencia Atlas', snippet: 'Contenido verificado.', headingOrPage: 'Atlas', logicalResourceUri: 'urn:airwiki:fixture', sourceRevision: 1, sourceSha256: '0123456789abcdef', rank: 1, nodeId: snapshot.nodeId! }]
+      hits: [{ conceptId, wikiId: wiki.id, title: 'Evidencia Atlas', snippet: 'Contenido verificado.', headingOrPage: 'Atlas', logicalResourceUri: 'urn:airwiki:fixture', sourceRevision: 1, sourceSha256: '0123456789abcdef', rank: 1, nodeId: snapshot.nodeId!, assurance: { trust: 'humanReviewed', freshness: 'fresh', verificationOutdated: false }, lifecycle: 'stable' }]
+    };
+    snapshot.knowledge = {
+      wikiId: wiki.id, wikiName: wiki.name, version: 'search-fixture', status: 'ready', errorCount: 0, warningCount: 0,
+      concepts: [{ conceptId, page: { kind: 'concept', path: 'guides/atlas.md' }, title: 'Evidencia Atlas', description: 'Contenido verificado.', conceptType: 'Reference', tags: [], lifecycle: 'stable', generatedBy: 'airwiki/test', verifiedBy: ['human:test'], sources: [], staleAfter: null, assurance: { trust: 'humanReviewed', freshness: 'fresh', verificationOutdated: false }, warnings: [], executionAvailable: false, fingerprint: 'a'.repeat(64) }],
+      links: []
     };
     window.location.hash = '#search';
     render(App);
+    expect(await screen.findByText('Revisado por una persona')).toBeInTheDocument();
     await fireEvent.click((await screen.findAllByRole('button', { name: 'Abrir' }))[0]);
 
     expect(loadWikiBundle).toHaveBeenCalledWith(wiki.id);
-    expect(loadWikiPage).toHaveBeenCalledWith(wiki.id, { kind: 'concept', id: conceptId });
+    expect(loadWikiPage).toHaveBeenCalledWith(wiki.id, { kind: 'concept', path: 'guides/atlas.md' });
     expect(window.location.hash).toBe(`#wikis/${wiki.id}`);
     expect(window.location.hash).not.toContain('Evidencia');
   });
@@ -353,7 +378,7 @@ describe('AirWiki wiki workspace', () => {
     }];
     snapshot.search = {
       requestId: 'nearby-search', status: 'complete', coverage: 'complete',
-      hits: [{ conceptId: 'nearby-concept', wikiId: 'nearby-wiki', title: 'Evidencia cercana', snippet: 'Contenido autorizado.', headingOrPage: 'Responsable', logicalResourceUri: 'urn:airwiki:nearby', sourceRevision: 1, sourceSha256: '0123456789abcdef', rank: 1, nodeId: peerId }]
+      hits: [{ conceptId: 'nearby-concept', wikiId: 'nearby-wiki', title: 'Evidencia cercana', snippet: 'Contenido autorizado.', headingOrPage: 'Responsable', logicalResourceUri: 'urn:airwiki:nearby', sourceRevision: 1, sourceSha256: '0123456789abcdef', rank: 1, nodeId: peerId, assurance: null, lifecycle: null }]
     };
     window.location.hash = '#search';
     render(App);
@@ -399,6 +424,28 @@ describe('AirWiki wiki workspace', () => {
     expect(screen.queryByText('No encontramos evidencia coincidente')).not.toBeInTheDocument();
   });
 
+  it('shows public v2 assurance and labels legacy metadata as unavailable', async () => {
+    snapshot.publicBrowse = {
+      requestId: 'browse-v2', status: 'direct', publisherId: 'publisher', wikiId: 'public-wiki',
+      wikiName: 'Wiki pública', description: 'Conocimiento compartido', languages: ['es'],
+      okfCompatibility: { kind: 'declaredV02' }, nextCursor: null,
+      concepts: [{
+        conceptId: 'public-v2', conceptType: 'Reference', title: 'Concepto v2',
+        description: '', language: 'es', tags: [], summary: 'Resumen público', sourceRevision: 1,
+        lifecycle: 'stable', assurance: { trust: 'machineConfirmed', freshness: 'stale', verificationOutdated: false }
+      }, {
+        conceptId: 'public-v1', conceptType: 'Document', title: 'Concepto anterior',
+        description: '', language: 'es', tags: [], summary: 'Resumen anterior', sourceRevision: 1,
+        lifecycle: null, assurance: null
+      }]
+    };
+    render(App);
+
+    expect(await screen.findByText('OKF v0.2')).toBeInTheDocument();
+    expect(screen.getByText('Confirmado por proceso · Necesita revalidación · stable')).toBeInTheDocument();
+    expect(screen.getByText('Metadata de confianza no disponible (nodo anterior)')).toBeInTheDocument();
+  });
+
   it('keeps search visible but explains why it cannot run before local AI is ready', async () => {
     window.location.hash = '#search';
     render(App);
@@ -413,8 +460,8 @@ describe('AirWiki wiki workspace', () => {
     const wiki = snapshot.wikis[0];
     snapshot.knowledge = {
       wikiId: wiki.id, wikiName: wiki.name, version: 'graph-fixture', status: 'ready', errorCount: 0, warningCount: 0,
-      concepts: [{ page: { kind: 'concept', id: 'concept-atlas' }, title: 'Atlas concept', description: 'Verified concept', conceptType: 'Reference', tags: [] }],
-      links: [{ source: { kind: 'index' }, target: { kind: 'concept', id: 'concept-atlas' }, label: 'Verified concept' }]
+      concepts: [{ conceptId: 'concept-atlas', page: { kind: 'concept', path: 'architecture/atlas.md' }, title: 'Atlas concept', description: 'Verified concept', conceptType: 'Reference', tags: [], lifecycle: 'stable', generatedBy: 'airwiki/test', verifiedBy: ['human:test'], sources: [], staleAfter: null, assurance: { trust: 'humanReviewed', freshness: 'notDeclared', verificationOutdated: false }, warnings: [], executionAvailable: false, fingerprint: 'a'.repeat(64) }],
+      links: [{ source: { kind: 'index' }, target: { kind: 'concept', path: 'architecture/atlas.md' }, label: 'Verified concept' }]
     };
     render(App);
     const wikiButton = await screen.findByRole('row', { name: /Atlas 2 publicados/ });
@@ -424,7 +471,28 @@ describe('AirWiki wiki workspace', () => {
     await fireEvent.click(await screen.findByRole('button', { name: 'Atlas concept' }));
 
     expect(graphButton).toHaveClass('active');
-    expect(loadWikiPage).toHaveBeenCalledWith(wiki.id, { kind: 'concept', id: 'concept-atlas' });
+    expect(loadWikiPage).toHaveBeenCalledWith(wiki.id, { kind: 'concept', path: 'architecture/atlas.md' });
+  });
+
+  it('offers human verification only for editable managed OKF revisions', async () => {
+    const wiki = snapshot.wikis[0];
+    wiki.origin = 'importedOkf';
+    const fingerprint = 'a'.repeat(64);
+    snapshot.knowledge = {
+      wikiId: wiki.id, wikiName: wiki.name, version: 'managed-fixture', status: 'ready', errorCount: 0, warningCount: 0,
+      concepts: [{ conceptId: 'managed-concept', page: { kind: 'concept', path: 'memory/decision.md' }, title: 'Decision', description: 'Unverified decision', conceptType: 'Decision', tags: [], lifecycle: 'stable', generatedBy: 'codex/1', verifiedBy: [], sources: [], staleAfter: null, assurance: { trust: 'unverified', freshness: 'notDeclared', verificationOutdated: false }, warnings: [], executionAvailable: false, fingerprint }],
+      links: []
+    };
+    snapshot.knowledgePage = {
+      wikiId: wiki.id, page: { kind: 'concept', path: 'memory/decision.md' }, title: 'Decision', status: 'ready', blocks: [], metadata: [], backlinks: [], truncated: false
+    };
+    window.location.hash = `#wikis/${wiki.id}`;
+    render(App);
+
+    await fireEvent.click(await screen.findByRole('button', { name: 'Marcar como revisado por una persona' }));
+
+    expect(verifyWikiConcept).toHaveBeenCalledWith(wiki.id, 'memory/decision.md', fingerprint);
+    expect(loadWikiBundle).toHaveBeenCalledWith(wiki.id);
   });
 
   it('uses independent settings pages that always return to the top', async () => {

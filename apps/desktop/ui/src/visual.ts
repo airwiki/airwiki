@@ -49,7 +49,8 @@ if (destination === 'search') {
       conceptId: 'synthetic-result', wikiId: snapshot.wikis[0].id,
       title: 'Safe maintenance window', snippet: 'Back up local state and verify integrity before applying a change.',
       headingOrPage: 'Preparation', logicalResourceUri: 'okf://atlas/concepts/safe-maintenance',
-      sourceRevision: 4, sourceSha256: 'a'.repeat(64), rank: 0.98, nodeId: snapshot.nodeId ?? 'local'
+      sourceRevision: 4, sourceSha256: 'a'.repeat(64), rank: 0.98, nodeId: snapshot.nodeId ?? 'local',
+      assurance: { trust: 'humanReviewed', freshness: 'fresh', verificationOutdated: false }, lifecycle: 'stable'
     }]
   };
 }
@@ -58,13 +59,13 @@ if (destination === 'graph') {
   snapshot.knowledge = {
     wikiId: wiki.id, wikiName: wiki.name, version: 'synthetic-graph', status: 'ready', errorCount: 0, warningCount: 0,
     concepts: [
-      { page: { kind: 'concept', id: 'safe-maintenance' }, title: 'Safe maintenance', description: 'Verified maintenance guidance.', conceptType: 'Procedure', tags: ['operations'] },
-      { page: { kind: 'concept', id: 'recovery' }, title: 'Recovery', description: 'Verified recovery guidance.', conceptType: 'Runbook', tags: ['recovery'] }
+      { conceptId: 'safe-maintenance', page: { kind: 'concept', path: 'operations/safe-maintenance.md' }, title: 'Safe maintenance', description: 'Verified maintenance guidance.', conceptType: 'Procedure', tags: ['operations'], lifecycle: 'stable', generatedBy: 'airwiki/demo', verifiedBy: ['human:demo'], sources: [], staleAfter: null, assurance: { trust: 'humanReviewed', freshness: 'fresh', verificationOutdated: false }, warnings: [], executionAvailable: false, fingerprint: 'a'.repeat(64) },
+      { conceptId: 'recovery', page: { kind: 'concept', path: 'operations/recovery.md' }, title: 'Recovery', description: 'Verified recovery guidance.', conceptType: 'Runbook', tags: ['recovery'], lifecycle: 'stable', generatedBy: 'airwiki/demo', verifiedBy: ['human:demo'], sources: [], staleAfter: null, assurance: { trust: 'humanReviewed', freshness: 'fresh', verificationOutdated: false }, warnings: [], executionAvailable: false, fingerprint: 'b'.repeat(64) }
     ],
     links: [
-      { source: { kind: 'index' }, target: { kind: 'concept', id: 'safe-maintenance' }, label: 'Maintenance' },
-      { source: { kind: 'concept', id: 'safe-maintenance' }, target: { kind: 'concept', id: 'recovery' }, label: 'Recovery path' },
-      { source: { kind: 'log' }, target: { kind: 'concept', id: 'recovery' }, label: 'Recorded change' }
+      { source: { kind: 'index' }, target: { kind: 'concept', path: 'operations/safe-maintenance.md' }, label: 'Maintenance' },
+      { source: { kind: 'concept', path: 'operations/safe-maintenance.md' }, target: { kind: 'concept', path: 'operations/recovery.md' }, label: 'Recovery path' },
+      { source: { kind: 'log' }, target: { kind: 'concept', path: 'operations/recovery.md' }, label: 'Recorded change' }
     ]
   };
 }

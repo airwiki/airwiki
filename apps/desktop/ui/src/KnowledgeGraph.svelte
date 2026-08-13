@@ -17,14 +17,14 @@
   const t = (id: string, args?: Record<string, string | number>) => message(locale, id, args);
 
   function pageKey(page: KnowledgePageInput): string {
-    if (page.kind === 'concept') return `concept:${page.id}`;
+    if (page.kind === 'concept') return `concept:${page.path}`;
     return page.kind;
   }
 
   function pageTitle(page: KnowledgePageInput): string {
     if (page.kind === 'index') return t('knowledge-index-title');
     if (page.kind === 'log') return t('knowledge-recovery-history');
-    return bundle.concepts.find((concept) => concept.page.kind === 'concept' && concept.page.id === page.id)?.title ?? t('knowledge-concept-fallback');
+    return bundle.concepts.find((concept) => concept.page.kind === 'concept' && concept.page.path === page.path)?.title ?? t('knowledge-concept-fallback');
   }
 
   function graphElements(): ElementDefinition[] {

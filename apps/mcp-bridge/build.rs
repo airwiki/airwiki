@@ -5,7 +5,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         resource.set("ProductName", "AirWiki");
         resource.set(
             "FileDescription",
-            "Provides the local read-only MCP bridge for AirWiki",
+            "Provides the local capability-scoped MCP bridge for AirWiki",
         );
         resource.compile()?;
     }

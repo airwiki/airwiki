@@ -6,7 +6,7 @@
 > an advanced reference for a future remote or web use case. Its credentials
 > are managed outside AirWiki.
 
-AirWiki exposes one read-only Streamable HTTP endpoint:
+AirWiki exposes one capability-scoped Streamable HTTP endpoint:
 
 ```text
 http://127.0.0.1:43123/mcp
@@ -37,9 +37,17 @@ relevance claim. Peer and backend diagnostics are discarded, and AirWiki does
 not synthesize a second answer. The listener accepts only
 `Host: 127.0.0.1:43123` or `Host: localhost:43123`.
 
-The endpoint is stateless. Requests are independently validated and no
-`Mcp-Session-Id` is created. Every search rechecks `allow_external_ai` and
-source-node authorization.
+The endpoint also advertises AI-memory and attested-computation tools. Those
+tools require the private capability resolved by an AirWiki-managed local
+bridge; forwarding the endpoint through a tunnel does not grant that
+capability. Calls without it fail closed. Memory tools can affect only
+`ai_memory` Wikis covered by the application's owner/editor grant and cannot
+share, verify, delete, or change folder/imported Wikis.
+
+The endpoint is stateless at the MCP transport layer. Requests are independently
+validated and no `Mcp-Session-Id` is created. Every search rechecks
+`allow_external_ai` and source-node authorization; every application call
+rechecks the current capability and per-Wiki role.
 
 ## Prerequisites
 

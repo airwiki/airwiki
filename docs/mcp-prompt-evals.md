@@ -62,8 +62,10 @@ Before running the cases, confirm:
    collections are visible for `external_ai`.
 2. Grants allow the gateway to query `atlas-win`; the offline-peer case states
    when to stop it.
-3. MCP advertises exactly one read-only tool and exposes no additional resources
-   or prompts.
+3. MCP advertises `search_airwiki` plus the capability-authenticated memory and
+   computation tools, and exposes no resources or prompts. Calls to application
+   tools without a valid application capability must fail without revealing
+   whether a memory or computation exists.
 4. Application and tunnel logs are sanitized. Do not enable logging for
    questions, snippets, MCP bodies, or model responses.
 5. multilingual-e5-small and the pinned mMARCO mMiniLMv2 snapshot are verified;

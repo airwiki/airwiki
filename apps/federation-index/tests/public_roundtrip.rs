@@ -513,7 +513,7 @@ async fn public_search_and_browse_use_outbound_relay_reservation() {
         index_identity.clone(),
         airwiki_network::PublicCatalogServerConfig::new(vec![index_address.clone()])
             .with_external_addresses(vec![
-                format!("/dns4/relay.invalid/udp/{index_port}/quic-v1")
+                format!("/ip4/8.8.8.8/udp/{index_port}/quic-v1")
                     .parse()
                     .unwrap(),
             ]),
@@ -684,7 +684,7 @@ async fn public_search_and_browse_fail_over_to_second_outbound_relay_reservation
         first_index_identity.clone(),
         airwiki_network::PublicCatalogServerConfig::new(vec![first_index_address.clone()])
             .with_external_addresses(vec![
-                format!("/dns4/relay.invalid/tcp/{first_index_port}")
+                format!("/ip4/8.8.8.8/tcp/{first_index_port}")
                     .parse()
                     .unwrap(),
             ]),
@@ -697,7 +697,7 @@ async fn public_search_and_browse_fail_over_to_second_outbound_relay_reservation
         second_index_identity.clone(),
         airwiki_network::PublicCatalogServerConfig::new(vec![second_index_address.clone()])
             .with_external_addresses(vec![
-                format!("/dns4/relay.invalid/tcp/{second_index_port}")
+                format!("/ip4/1.1.1.1/tcp/{second_index_port}")
                     .parse()
                     .unwrap(),
             ]),
@@ -924,7 +924,7 @@ async fn public_source_retries_relay_reservation_when_relay_starts_late() {
         index_identity.clone(),
         airwiki_network::PublicCatalogServerConfig::new(vec![index_address.clone()])
             .with_external_addresses(vec![
-                format!("/dns4/relay.invalid/udp/{index_port}/quic-v1")
+                format!("/ip4/8.8.8.8/udp/{index_port}/quic-v1")
                     .parse()
                     .unwrap(),
             ]),

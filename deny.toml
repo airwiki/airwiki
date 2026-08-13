@@ -9,8 +9,8 @@ all-features = true
 yanked = "deny"
 unmaintained = "workspace"
 ignore = [
-  { id = "RUSTSEC-2026-0118", reason = "hickory-proto is compiled by libp2p-mdns with default features disabled and only the mdns feature; the vulnerable DNSSEC validator is absent" },
-  { id = "RUSTSEC-2026-0119", reason = "the pilot uses hickory only behind libp2p's bounded mDNS service records; outgoing names are application-controlled; remove this exception when rust-libp2p upgrades hickory" },
+  { id = "RUSTSEC-2026-0118", reason = "hickory-proto is reachable only through libp2p-mdns; libp2p-dns and hickory-resolver are excluded, so the vulnerable DNSSEC validator is absent" },
+  { id = "RUSTSEC-2026-0119", reason = "the pilot uses hickory only behind libp2p's bounded mDNS service records; DNS transports are excluded and outgoing names are application-controlled; remove this exception when rust-libp2p upgrades hickory" },
 ]
 
 [licenses]

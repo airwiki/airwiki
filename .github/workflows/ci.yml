@@ -155,6 +155,15 @@ jobs:
           cargo audit
           --ignore RUSTSEC-2026-0118
           --ignore RUSTSEC-2026-0119
+      - name: Hickory remains confined to local mDNS
+        shell: bash
+        run: |
+          feature_tree="$(cargo tree --edges features --invert hickory-proto@0.25.2)"
+          grep -q 'libp2p-mdns' <<<"$feature_tree"
+          if grep -Eq 'hickory-resolver|libp2p-dns' <<<"$feature_tree"; then
+            echo 'Hickory escaped the reviewed local-mDNS feature boundary.' >&2
+            exit 1
+          fi
       - name: Install cargo-deny
         run: cargo install cargo-deny --version 0.20.2 --locked
       - name: Dependency policy

@@ -281,7 +281,7 @@ describe('AirWiki wiki workspace', () => {
     snapshot.wikis[0].maintenanceRequired = true;
     render(App);
     await fireEvent.click(await screen.findByRole('row', { name: /Atlas 2 publicados/ }));
-    await fireEvent.click(screen.getByRole('button', { name: 'Detalles' }));
+    await fireEvent.click(screen.getAllByRole('button', { name: 'Detalles' }).at(-1)!);
 
     expect(screen.getByText('El contenido publicado necesita una comprobación')).toBeInTheDocument();
     expect(screen.queryByText('No hay problemas con la fuente')).not.toBeInTheDocument();
@@ -373,6 +373,27 @@ describe('AirWiki wiki workspace', () => {
     expect(rejectReview).toHaveBeenCalledWith(review.conceptId);
     expect(approveReview).not.toHaveBeenCalled();
     expect(reanalyzeReview).not.toHaveBeenCalled();
+  });
+
+  it('presents restricted OKF wikis as local read-only without impossible actions', async () => {
+    const wiki = snapshot.wikis[0];
+    wiki.origin = 'folder';
+    wiki.indexingMode = 'manual';
+    wiki.okfVersion = '0.1';
+    wiki.declaredOkfVersion = '0.1';
+    wiki.okfCompatibility = { kind: 'legacyV01' };
+    wiki.restrictions = ['legacyReadOnly'];
+    render(App);
+
+    await fireEvent.click(await screen.findByRole('row', { name: /Atlas 2 publicados/ }));
+
+    expect(screen.getByText(/AirWiki detuvo su indexación y uso compartido/)).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Actualizar' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Compartir' })).not.toBeInTheDocument();
+    await fireEvent.click(screen.getAllByRole('button', { name: 'Detalles' }).at(-1)!);
+    expect(screen.queryByRole('checkbox', { name: 'Mantener actualizada automáticamente' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Volver a vincular carpeta' })).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Eliminar wiki' })).toBeInTheDocument();
   });
 
   it('keeps guided repair reachable from the unified wiki workspace', async () => {

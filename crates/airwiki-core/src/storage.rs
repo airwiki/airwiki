@@ -31,6 +31,7 @@ const MIGRATION_9: &str = include_str!("../migrations/0009_application_capabilit
 const MIGRATION_10: &str = include_str!("../migrations/0010_okf_v02_assurance.sql");
 const MIGRATION_11: &str = include_str!("../migrations/0011_open_okf_lifecycle.sql");
 const MIGRATION_12: &str = include_str!("../migrations/0012_attested_computation_contracts.sql");
+const MIGRATION_13: &str = include_str!("../migrations/0013_restrict_incompatible_okf.sql");
 
 const APPLICATION_MUTATIONS_PER_MINUTE: u32 = 30;
 const APPLICATION_WIKI_CREATIONS_PER_HOUR: u32 = 5;
@@ -144,6 +145,7 @@ pub struct PublicCollectionProfileRecord {
     pub languages: Vec<String>,
     pub manifest_sequence: u64,
     pub enabled_at: Option<DateTime<Utc>>,
+    pub withdrawal_pending: bool,
     pub updated_at: DateTime<Utc>,
 }
 
@@ -1004,7 +1006,13 @@ impl Database {
             tx.pragma_update(None, "user_version", 12)?;
             tx.commit()?;
         }
-        if version > 12 {
+        if version < 13 {
+            let tx = connection.transaction()?;
+            tx.execute_batch(MIGRATION_13)?;
+            tx.pragma_update(None, "user_version", 13)?;
+            tx.commit()?;
+        }
+        if version > 13 {
             bail!("database schema {version} is newer than this application supports");
         }
         let database = Self {
@@ -1327,6 +1335,9 @@ impl Database {
         let collection = self
             .collection(id)?
             .with_context(|| format!("collection {id} does not exist"))?;
+        if !collection.okf_compatibility.permits_external_disclosure() {
+            bail!("this OKF compatibility level is restricted to local read-only use");
+        }
         match (collection.origin, indexing_mode) {
             (WikiOrigin::Folder, IndexingMode::Continuous | IndexingMode::Manual)
             | (WikiOrigin::ImportedOkf | WikiOrigin::AiMemory, IndexingMode::NotApplicable) => {}
@@ -2151,16 +2162,19 @@ impl Database {
         if previous_public != Some(policy.internet_public) {
             tx.execute(
                 "INSERT INTO public_collection_profiles
-                 (collection_id,description,languages_json,manifest_sequence,enabled_at,updated_at)
-                 VALUES (?1,'','[]',1,?2,?3)
+                 (collection_id,description,languages_json,manifest_sequence,enabled_at,updated_at,
+                  withdrawal_pending)
+                 VALUES (?1,'','[]',1,?2,?3,?4)
                  ON CONFLICT(collection_id) DO UPDATE SET
                    manifest_sequence=manifest_sequence+1,
                    enabled_at=?2,
-                   updated_at=?3",
+                   updated_at=?3,
+                   withdrawal_pending=?4",
                 params![
                     id.to_string(),
                     policy.internet_public.then(|| now.to_rfc3339()),
                     now.to_rfc3339(),
+                    !policy.internet_public,
                 ],
             )?;
         }
@@ -2174,7 +2188,8 @@ impl Database {
     ) -> Result<Option<PublicCollectionProfileRecord>> {
         self.connection()?
             .query_row(
-                "SELECT collection_id,description,languages_json,manifest_sequence,enabled_at,updated_at
+                "SELECT collection_id,description,languages_json,manifest_sequence,enabled_at,updated_at,
+                        withdrawal_pending
                  FROM public_collection_profiles WHERE collection_id=?1",
                 [collection_id.to_string()],
                 public_collection_profile_from_row,
@@ -2183,12 +2198,53 @@ impl Database {
             .map_err(Into::into)
     }
 
+    pub fn public_collections_needing_sync(&self) -> Result<Vec<Uuid>> {
+        let connection = self.connection()?;
+        let mut statement = connection.prepare(
+            "SELECT c.id FROM collections c
+             LEFT JOIN public_collection_profiles p ON p.collection_id=c.id
+             WHERE c.internet_public=1 OR p.withdrawal_pending=1
+             ORDER BY c.id",
+        )?;
+        let rows = statement.query_map([], |row| row.get::<_, String>(0))?;
+        rows.map(|row| parse_uuid(&row?)).collect()
+    }
+
+    pub fn pending_public_withdrawals(&self) -> Result<Vec<Uuid>> {
+        let connection = self.connection()?;
+        let mut statement = connection.prepare(
+            "SELECT collection_id FROM public_collection_profiles
+             WHERE withdrawal_pending=1 ORDER BY collection_id",
+        )?;
+        let rows = statement.query_map([], |row| row.get::<_, String>(0))?;
+        rows.map(|row| parse_uuid(&row?)).collect()
+    }
+
+    pub fn complete_public_withdrawal(&self, collection_id: Uuid) -> Result<()> {
+        self.connection()?.execute(
+            "UPDATE public_collection_profiles SET withdrawal_pending=0,updated_at=?2
+             WHERE collection_id=?1 AND EXISTS(
+               SELECT 1 FROM collections c WHERE c.id=?1 AND c.internet_public=0
+             )",
+            params![collection_id.to_string(), Utc::now().to_rfc3339()],
+        )?;
+        Ok(())
+    }
+
     pub fn update_public_collection_profile(
         &self,
         collection_id: Uuid,
         description: &str,
         languages: &[String],
     ) -> Result<PublicCollectionProfileRecord> {
+        let collection = self
+            .collection(collection_id)?
+            .context("public collection does not exist")?;
+        if !collection.policy.internet_public
+            || !collection.okf_compatibility.permits_external_disclosure()
+        {
+            bail!("collection is not eligible for a public profile");
+        }
         let description = description.trim();
         if description.chars().count() > 1_000 || description.chars().any(char::is_control) {
             bail!("public collection description is invalid");
@@ -3099,8 +3155,10 @@ impl Database {
                         sd.byte_size,sd.revision
                  FROM concepts co
                  JOIN source_documents sd ON sd.id=co.source_document_id
+                 JOIN collections col ON col.id=co.collection_id
                  WHERE co.id=?1 AND co.status='needs_review' AND sd.status='needs_review'
-                   AND sd.concept_id=co.id",
+                   AND sd.concept_id=co.id
+                   AND col.okf_compatibility IN ('declared_v02','undeclared_v02_compatible')",
                 [concept_id.to_string()],
                 |row| {
                     Ok((
@@ -5439,6 +5497,7 @@ fn public_collection_profile_from_row(
             .map(datetime_sql)
             .transpose()?,
         updated_at: datetime_sql(row.get::<_, String>(5)?)?,
+        withdrawal_pending: row.get(6)?,
     })
 }
 
@@ -6406,7 +6465,7 @@ mod tests {
         let temp = tempfile::tempdir().unwrap();
         let path = temp.path().join("db.sqlite");
         let db = Database::open(&path).unwrap();
-        assert_eq!(db.schema_version().unwrap(), 12);
+        assert_eq!(db.schema_version().unwrap(), 13);
         for table in [
             "collections",
             "source_documents",
@@ -6426,7 +6485,7 @@ mod tests {
             assert_eq!(db.count(table).unwrap(), 0);
         }
         drop(db);
-        assert_eq!(Database::open(path).unwrap().schema_version().unwrap(), 12);
+        assert_eq!(Database::open(path).unwrap().schema_version().unwrap(), 13);
     }
 
     #[test]
@@ -6496,6 +6555,11 @@ mod tests {
             .unwrap();
         assert_eq!(disabled.manifest_sequence, 2);
         assert!(disabled.enabled_at.is_none());
+        assert!(disabled.withdrawal_pending);
+        assert_eq!(db.pending_public_withdrawals().unwrap(), [collection.id]);
+
+        db.complete_public_withdrawal(collection.id).unwrap();
+        assert!(db.pending_public_withdrawals().unwrap().is_empty());
     }
 
     #[test]
@@ -6943,7 +7007,7 @@ mod tests {
         drop(connection);
 
         let database = Database::open(&path).unwrap();
-        assert_eq!(database.schema_version().unwrap(), 12);
+        assert_eq!(database.schema_version().unwrap(), 13);
         assert_eq!(database.count("collections").unwrap(), 1);
         assert_eq!(database.count("source_documents").unwrap(), 1);
         assert_eq!(database.count("publication_claims").unwrap(), 0);
@@ -6958,7 +7022,7 @@ mod tests {
     }
 
     #[test]
-    fn migration_three_preserves_version_two_collection_state() {
+    fn migration_three_preserves_content_but_restricts_legacy_policy() {
         let temp = tempfile::tempdir().unwrap();
         let path = temp.path().join("version-two.sqlite");
         let mut connection = Connection::open(&path).unwrap();
@@ -6983,20 +7047,16 @@ mod tests {
 
         let database = Database::open(&path).unwrap();
 
-        assert_eq!(database.schema_version().unwrap(), 12);
-        assert!(
-            database
-                .collection(collection_id)
-                .unwrap()
-                .unwrap()
-                .policy
-                .peer_shareable
+        assert_eq!(database.schema_version().unwrap(), 13);
+        assert_eq!(
+            database.collection(collection_id).unwrap().unwrap().policy,
+            CollectionPolicy::local_only()
         );
         assert_eq!(database.count("collection_maintenance").unwrap(), 0);
     }
 
     #[test]
-    fn migration_four_keeps_existing_collections_private() {
+    fn migration_four_removes_legacy_lan_and_ai_disclosure() {
         let temp = tempfile::tempdir().unwrap();
         let path = temp.path().join("version-three.sqlite");
         let mut connection = Connection::open(&path).unwrap();
@@ -7022,10 +7082,8 @@ mod tests {
 
         let database = Database::open(&path).unwrap();
         let collection = database.collection(collection_id).unwrap().unwrap();
-        assert_eq!(database.schema_version().unwrap(), 12);
-        assert!(collection.policy.peer_shareable);
-        assert!(collection.policy.allow_external_ai);
-        assert!(!collection.policy.internet_public);
+        assert_eq!(database.schema_version().unwrap(), 13);
+        assert_eq!(collection.policy, CollectionPolicy::local_only());
         assert!(
             database
                 .public_collection_profile(collection_id)
@@ -7056,7 +7114,7 @@ mod tests {
         drop(connection);
 
         let database = Database::open(path).unwrap();
-        assert_eq!(database.schema_version().unwrap(), 12);
+        assert_eq!(database.schema_version().unwrap(), 13);
         let indexes = database.list_federation_indexes().unwrap();
         assert_eq!(indexes.len(), 1);
         assert_eq!(indexes[0].registry_version, 0);
@@ -7095,7 +7153,7 @@ mod tests {
             expires_at: Utc::now() + chrono::Duration::days(1),
         }];
 
-        assert_eq!(database.schema_version().unwrap(), 12);
+        assert_eq!(database.schema_version().unwrap(), 13);
         assert_eq!(
             database
                 .count("federation_bootstrap_registry_state")
@@ -7110,7 +7168,7 @@ mod tests {
     }
 
     #[test]
-    fn migration_seven_marks_existing_wikis_as_legacy_continuous_folders() {
+    fn migration_seven_marks_existing_wikis_as_legacy_manual_folders() {
         let temp = tempfile::tempdir().unwrap();
         let path = temp.path().join("version-six.sqlite");
         let mut connection = Connection::open(&path).unwrap();
@@ -7137,10 +7195,168 @@ mod tests {
         let database = Database::open(path).unwrap();
         let collection = database.collection(collection_id).unwrap().unwrap();
 
-        assert_eq!(database.schema_version().unwrap(), 12);
+        assert_eq!(database.schema_version().unwrap(), 13);
         assert_eq!(collection.origin, WikiOrigin::Folder);
-        assert_eq!(collection.indexing_mode, IndexingMode::Continuous);
+        assert_eq!(collection.indexing_mode, IndexingMode::Manual);
         assert_eq!(collection.okf_version, "0.1");
+    }
+
+    #[test]
+    fn migration_thirteen_withdraws_incompatible_disclosure_and_preserves_content() {
+        let temp = tempfile::tempdir().unwrap();
+        let path = temp.path().join("version-twelve.sqlite");
+        let mut connection = Connection::open(&path).unwrap();
+        connection
+            .pragma_update(None, "foreign_keys", "ON")
+            .unwrap();
+        let tx = connection.transaction().unwrap();
+        for migration in [
+            MIGRATION_1,
+            MIGRATION_2,
+            MIGRATION_3,
+            MIGRATION_4,
+            MIGRATION_5,
+            MIGRATION_6,
+            MIGRATION_7,
+            MIGRATION_8,
+            MIGRATION_9,
+            MIGRATION_10,
+            MIGRATION_11,
+            MIGRATION_12,
+        ] {
+            tx.execute_batch(migration).unwrap();
+        }
+        let collection_id = Uuid::new_v4();
+        let app_id = Uuid::new_v4();
+        let now = Utc::now().to_rfc3339();
+        tx.execute(
+            "INSERT INTO collections
+             (id,name,source_folder,wiki_folder,local_only,peer_shareable,allow_external_ai,
+              internet_public,origin,indexing_mode,okf_version,declared_okf_version,
+              okf_compatibility,created_at,updated_at)
+             VALUES (?1,'Legacy','/synthetic/source','/synthetic/wiki',0,1,1,1,'folder',
+                     'continuous','0.1','0.1','legacy_v01',?2,?2)",
+            params![collection_id.to_string(), now],
+        )
+        .unwrap();
+        tx.execute(
+            "INSERT INTO peers(peer_id,trusted,blocked,created_at,updated_at)
+             VALUES ('peer-legacy',1,0,?1,?1)",
+            [&now],
+        )
+        .unwrap();
+        tx.execute(
+            "INSERT INTO grants(peer_id,collection_id,granted_at)
+             VALUES ('peer-legacy',?1,?2)",
+            params![collection_id.to_string(), now],
+        )
+        .unwrap();
+        tx.execute(
+            "INSERT INTO application_capabilities
+             (app_id,display_name,owner_kind,secret_hash,producer,created_at)
+             VALUES (?1,'Synthetic','generic',?2,'synthetic/1.0',?3)",
+            params![app_id.to_string(), "a".repeat(64), now],
+        )
+        .unwrap();
+        tx.execute(
+            "INSERT INTO application_wiki_grants
+             (app_id,collection_id,role,granted_at,confirmed_at)
+             VALUES (?1,?2,'reader',?3,?3)",
+            params![app_id.to_string(), collection_id.to_string(), now],
+        )
+        .unwrap();
+        tx.execute(
+            "INSERT INTO public_collection_profiles
+             (collection_id,description,languages_json,manifest_sequence,enabled_at,updated_at)
+             VALUES (?1,'Legacy public','[]',7,?2,?2)",
+            params![collection_id.to_string(), now],
+        )
+        .unwrap();
+        tx.pragma_update(None, "user_version", 12).unwrap();
+        tx.commit().unwrap();
+        drop(connection);
+
+        let database = Database::open(path).unwrap();
+        let collection = database.collection(collection_id).unwrap().unwrap();
+        let profile = database
+            .public_collection_profile(collection_id)
+            .unwrap()
+            .unwrap();
+
+        assert_eq!(database.schema_version().unwrap(), 13);
+        assert_eq!(collection.policy, CollectionPolicy::local_only());
+        assert_eq!(collection.indexing_mode, IndexingMode::Manual);
+        assert_eq!(database.count("collections").unwrap(), 1);
+        assert!(database.list_grants(None).unwrap().is_empty());
+        assert!(
+            database
+                .list_application_wiki_grants()
+                .unwrap()
+                .into_iter()
+                .all(|grant| grant.app_id != app_id)
+        );
+        assert_eq!(profile.manifest_sequence, 8);
+        assert!(profile.enabled_at.is_none());
+        assert!(profile.withdrawal_pending);
+        assert_eq!(
+            database.public_collections_needing_sync().unwrap(),
+            [collection_id]
+        );
+    }
+
+    #[test]
+    fn migration_thirteen_disables_persisted_dns_federation_indexes() {
+        let temp = tempfile::tempdir().unwrap();
+        let path = temp.path().join("version-twelve-dns.sqlite");
+        let mut connection = Connection::open(&path).unwrap();
+        let tx = connection.transaction().unwrap();
+        for migration in [
+            MIGRATION_1,
+            MIGRATION_2,
+            MIGRATION_3,
+            MIGRATION_4,
+            MIGRATION_5,
+            MIGRATION_6,
+            MIGRATION_7,
+            MIGRATION_8,
+            MIGRATION_9,
+            MIGRATION_10,
+            MIGRATION_11,
+            MIGRATION_12,
+        ] {
+            tx.execute_batch(migration).unwrap();
+        }
+        let now = Utc::now().to_rfc3339();
+        tx.execute(
+            "INSERT INTO federation_indexes
+             (peer_id,multiaddr,enabled,source,created_at,updated_at)
+             VALUES ('dns-index','/dns4/index.example.org/tcp/42042',1,'community',?1,?1),
+                    ('ip-index','/ip4/192.0.2.10/tcp/42042',1,'community',?1,?1)",
+            [&now],
+        )
+        .unwrap();
+        tx.pragma_update(None, "user_version", 12).unwrap();
+        tx.commit().unwrap();
+        drop(connection);
+
+        let database = Database::open(path).unwrap();
+        let indexes = database.list_federation_indexes().unwrap();
+
+        assert_eq!(indexes.len(), 2);
+        assert!(
+            !indexes
+                .iter()
+                .find(|item| item.peer_id == "dns-index")
+                .unwrap()
+                .enabled
+        );
+        assert!(
+            indexes
+                .iter()
+                .find(|item| item.peer_id == "ip-index")
+                .unwrap()
+                .enabled
+        );
     }
 
     #[test]
@@ -7199,7 +7415,7 @@ mod tests {
         let database = Database::open(path).unwrap();
         let concepts = database.list_okf_concept_projection(collection_id).unwrap();
 
-        assert_eq!(database.schema_version().unwrap(), 12);
+        assert_eq!(database.schema_version().unwrap(), 13);
         assert_eq!(concepts.len(), 1);
         assert_eq!(concepts[0].concept_type.to_string(), "Unknown Type");
         assert_eq!(concepts[0].lifecycle_status, "stable");
@@ -7641,6 +7857,40 @@ mod tests {
             )
             .unwrap();
         assert_eq!(job_state, "failed");
+    }
+
+    #[test]
+    fn restricted_okf_review_cannot_be_claimed_for_reanalysis() {
+        let (temp, db, collection) = setup();
+        let path = temp.path().join("source/restricted-review.md");
+        std::fs::write(&path, "hello").unwrap();
+        let source = db
+            .register_source(collection.id, &path, "aaa", "markdown", 5)
+            .unwrap();
+        db.mark_extracted(source.id(), 0, 5).unwrap();
+        let concept = db
+            .save_enrichment(source.id(), draft(), "peer-a", "fake")
+            .unwrap();
+        db.connection()
+            .unwrap()
+            .execute(
+                "UPDATE collections
+                 SET okf_version='0.1',declared_okf_version='0.1',okf_compatibility='legacy_v01'
+                 WHERE id=?1",
+                [collection.id.to_string()],
+            )
+            .unwrap();
+
+        assert!(db.begin_review_reanalysis(concept.id).is_err());
+        assert_eq!(
+            db.concept(concept.id).unwrap().unwrap().status,
+            DocumentStatus::NeedsReview
+        );
+        assert_eq!(
+            db.source_document(source.id()).unwrap().unwrap().status,
+            DocumentStatus::NeedsReview
+        );
+        assert_eq!(db.count("jobs").unwrap(), 0);
     }
 
     #[test]

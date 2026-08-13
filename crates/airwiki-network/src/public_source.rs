@@ -755,8 +755,6 @@ fn public_source_swarm(
         )
         .map_err(|error| NetworkError::Transport(error.to_string()))?
         .with_quic()
-        .with_dns()
-        .map_err(|error| NetworkError::Transport(error.to_string()))?
         .with_relay_client(libp2p::noise::Config::new, libp2p::yamux::Config::default)
         .map_err(|error| NetworkError::Transport(error.to_string()))?
         .with_behaviour(move |_, relay| SourceBehaviour {

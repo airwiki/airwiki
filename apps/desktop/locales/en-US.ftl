@@ -1023,6 +1023,7 @@ desktop-okf-local-only = Local read-only
 desktop-okf-version-undeclared = OKF version not declared
 desktop-okf-metadata-warning = Ignored metadata
 desktop-okf-future-restriction-body = You can browse and search locally, but AirWiki will not publish, edit, verify, or execute this bundle until it understands the version.
+desktop-okf-legacy-restriction-body = This wiki remains available locally, but AirWiki has stopped indexing and sharing it. Recreate it from its source folder to publish in OKF v0.2.
 desktop-okf-status-summary = { $stale } to revalidate · { $outdated } outdated verifications · { $warnings } metadata warnings
 desktop-concept-assurance-title = Trust and provenance
 desktop-concept-trust = Trust

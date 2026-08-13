@@ -2,7 +2,7 @@ import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testi
 import axe from 'axe-core';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import App from './App.svelte';
-import { allowPeerPairingAgain, approveReview, configureFirewall, loadWikiBundle, loadWikiPage, openSystemDestination, prepareGuidedWikiRepair, reanalyzeReview, rejectReview, updatePreferences, verifyWikiConcept } from './api';
+import { allowPeerPairingAgain, approveReview, browsePublicWiki, configureFirewall, loadWikiBundle, loadWikiPage, openSystemDestination, prepareGuidedWikiRepair, reanalyzeReview, rejectReview, updatePreferences, verifyWikiConcept } from './api';
 import type { UiEventEnvelope } from './generated/ui-contract';
 import { readySnapshot } from './test/fixtures';
 
@@ -42,6 +42,7 @@ vi.mock('./api', async (importOriginal) => {
     openSystemDestination: vi.fn(async () => undefined),
     manageIntegration: vi.fn(async () => undefined),
     allowPeerPairingAgain: vi.fn(async () => undefined),
+    browsePublicWiki: vi.fn(async () => 'public-browse-request'),
     loadWikiBundle: vi.fn(async () => undefined),
     loadWikiPage: vi.fn(async () => undefined),
     verifyWikiConcept: vi.fn(async () => undefined),
@@ -512,6 +513,41 @@ describe('AirWiki wiki workspace', () => {
     expect(await screen.findByText('OKF v0.2')).toBeInTheDocument();
     expect(screen.getByText('Confirmado por proceso · Necesita revalidación · stable')).toBeInTheDocument();
     expect(screen.getByText('Metadata de confianza no disponible (nodo anterior)')).toBeInTheDocument();
+  });
+
+  it('opens a public search result in a dedicated viewer and returns to the results', async () => {
+    activateLocalSearch();
+    snapshot.search = {
+      requestId: 'public-search', status: 'complete', coverage: 'complete',
+      hits: [{ conceptId: 'public-concept', wikiId: 'public-wiki', title: 'Resultado público', snippet: 'Evidencia pública.', headingOrPage: 'Guía', logicalResourceUri: 'urn:airwiki:public', sourceRevision: 1, sourceSha256: '0123456789abcdef', rank: 1, nodeId: '12D3KooPublicPublisher', assurance: null, lifecycle: 'stable' }]
+    };
+    window.location.hash = '#search';
+    const { container } = render(App);
+
+    await fireEvent.click(await screen.findByRole('button', { name: 'Abrir' }));
+    expect(browsePublicWiki).toHaveBeenCalledWith('12D3KooPublicPublisher', 'public-wiki');
+    expect(screen.getByText('Abriendo wiki pública')).toBeInTheDocument();
+
+    snapshot = {
+      ...snapshot,
+      sequence: snapshot.sequence + 1,
+      publicBrowse: {
+        requestId: 'public-browse-request', status: 'direct', publisherId: '12D3KooPublicPublisher', wikiId: 'public-wiki',
+        wikiName: 'Wiki pública', description: 'Bundle validado', languages: ['es'], okfCompatibility: { kind: 'declaredV02' }, nextCursor: null,
+        concepts: [{ conceptId: 'public-concept', conceptType: 'Guide', title: 'Concepto público', description: '', language: 'es', tags: [], summary: 'Resumen visible', sourceRevision: 1, lifecycle: 'stable', assurance: { trust: 'humanReviewed', freshness: 'fresh', verificationOutdated: false } }]
+      }
+    };
+    await act(() => {
+      snapshotListener?.({ schemaVersion: snapshot.schemaVersion, sequence: snapshot.sequence, requestId: 'public-browse-request', kind: 'stateChanged', snapshot });
+    });
+
+    expect(screen.getByRole('heading', { name: 'Wiki pública' })).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Concepto público' })).toBeInTheDocument();
+    expect(screen.getByText('Conexión directa autenticada')).toBeInTheDocument();
+    const accessibility = await axe.run(container, { rules: { region: { enabled: false } } });
+    expect(accessibility.violations.filter((violation) => ['critical', 'serious'].includes(violation.impact ?? ''))).toEqual([]);
+    await fireEvent.click(screen.getByRole('button', { name: 'Volver a los resultados' }));
+    expect(screen.getByRole('heading', { name: 'Resultado público' })).toBeInTheDocument();
   });
 
   it('keeps search visible but explains why it cannot run before local AI is ready', async () => {

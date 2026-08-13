@@ -58,6 +58,9 @@ All notable user-visible changes to AirWiki will be documented here. The project
 
 ### Fixed
 
+- Opened public search results in a dedicated, keyboard-accessible wiki viewer
+  with explicit loading, route, OKF assurance, failure, pagination and return
+  states instead of leaving the completed browse snapshot invisible.
 - Replaced the WiX sample text in Windows installer license dialogs with the
   versioned Apache-2.0 terms and made packaging reject missing, stale, or
   placeholder license RTF input.

@@ -14,7 +14,6 @@
   export let modelLicensesConfirmed: boolean;
   export let actionBusy: boolean;
   export let actionMessage: string;
-  export let onpreferenceschange: (() => void) | undefined = undefined;
   export let onprepare: () => void;
   export let onfinish: () => void;
 
@@ -55,18 +54,18 @@
           <p class="eyebrow">{t('onboarding-welcome-title')}</p>
           <h1>{t('settings-language')}</h1>
           <p class="lede">{t('settings-subtitle')}</p>
-          <div class="choice-field"><SelectField label={t('settings-language')} bind:value={locale} onchange={onpreferenceschange} options={[{ value: 'system', label: t('language-system') }, { value: 'es', label: t('language-spanish') }, { value: 'en', label: t('language-english') }]} /></div>
+          <div class="choice-field"><SelectField label={t('settings-language')} bind:value={locale} options={[{ value: 'system', label: t('language-system') }, { value: 'es', label: t('language-spanish') }, { value: 'en', label: t('language-english') }]} /></div>
         {:else if step === 1}
           <p class="eyebrow">{t('onboarding-privacy-title')}</p>
           <h1>{t('onboarding-lan-title')}</h1>
           <p class="lede">{t('onboarding-lan-body')}</p>
-          <div class="choice-field"><SelectField label={t('desktop-lan')} bind:value={lanPreference} onchange={onpreferenceschange} options={[{ value: 'disabled', label: t('onboarding-lan-disable') }, { value: 'enabled', label: t('onboarding-lan-enable') }]} /></div>
+          <div class="choice-field"><SelectField label={t('desktop-lan')} bind:value={lanPreference} options={[{ value: 'disabled', label: t('onboarding-lan-disable') }, { value: 'enabled', label: t('onboarding-lan-enable') }]} /></div>
           <p class="privacy-note">{t('onboarding-privacy-local')}</p>
         {:else if step === 2}
           <p class="eyebrow">{t('desktop-sign-in')}</p>
           <h1>{t('onboarding-background-title')}</h1>
           <p class="lede">{t('onboarding-background-body')}</p>
-          <div class="choice-field"><SelectField label={t('desktop-close')} bind:value={closeBehavior} onchange={onpreferenceschange} options={[{ value: 'ask', label: t('close-dialog-title') }, { value: 'hide_to_tray', label: t('close-dialog-background') }, { value: 'quit', label: t('tray-quit') }]} /></div>
+          <div class="choice-field"><SelectField label={t('desktop-close')} bind:value={closeBehavior} options={[{ value: 'ask', label: t('close-dialog-title') }, { value: 'hide_to_tray', label: t('close-dialog-background') }, { value: 'quit', label: t('tray-quit') }]} /></div>
         {:else if step === 3 && hasModelStep && snapshot.model}
           <p class="eyebrow">{t('component-local-ai')}</p>
           <h1>{t('onboarding-model-title')}</h1>

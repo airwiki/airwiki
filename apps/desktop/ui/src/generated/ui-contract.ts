@@ -61,7 +61,7 @@ export type KnowledgeBundleSummary = { wikiId: string, wikiName: string, version
 
 export type KnowledgePageStatus = "ready" | "failed";
 
-export type KnowledgePageSummary = { wikiId: string, page: KnowledgePageInput, title: string, status: KnowledgePageStatus, blocks: Array<KnowledgeBlock>, metadata: Array<[string, string]>, backlinks: Array<KnowledgePageInput>, truncated: boolean, };
+export type KnowledgePageSummary = { wikiId: string, page: KnowledgePageInput, concept: KnowledgeConceptSummary | null, title: string, status: KnowledgePageStatus, blocks: Array<KnowledgeBlock>, metadata: Array<[string, string]>, backlinks: Array<KnowledgePageInput>, truncated: boolean, };
 
 export type SourceIssueSummary = { wikiId: string, sourceName: string, wikiName: string, code: string, };
 

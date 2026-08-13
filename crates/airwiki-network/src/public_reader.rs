@@ -1217,9 +1217,24 @@ fn log_public_owner_outbound_failure(error: &request_response::OutboundFailure) 
         request_response::OutboundFailure::UnsupportedProtocols => {
             "public_owner_protocol_unsupported"
         }
-        request_response::OutboundFailure::Io(_) => "public_owner_io_failed",
+        request_response::OutboundFailure::Io(error) => public_owner_io_error_kind(error.kind()),
     };
     tracing::warn!(error_kind, "public owner request failed");
+}
+
+fn public_owner_io_error_kind(kind: std::io::ErrorKind) -> &'static str {
+    match kind {
+        std::io::ErrorKind::ConnectionRefused => "public_owner_io_connection_refused",
+        std::io::ErrorKind::ConnectionReset => "public_owner_io_connection_reset",
+        std::io::ErrorKind::ConnectionAborted => "public_owner_io_connection_aborted",
+        std::io::ErrorKind::NotConnected => "public_owner_io_not_connected",
+        std::io::ErrorKind::BrokenPipe => "public_owner_io_broken_pipe",
+        std::io::ErrorKind::TimedOut => "public_owner_io_timed_out",
+        std::io::ErrorKind::UnexpectedEof => "public_owner_io_unexpected_eof",
+        std::io::ErrorKind::InvalidData => "public_owner_io_invalid_data",
+        std::io::ErrorKind::PermissionDenied => "public_owner_io_permission_denied",
+        _ => "public_owner_io_failed",
+    }
 }
 
 fn merge_route_kind(current: PublicRouteKind, observed: PublicRouteKind) -> PublicRouteKind {
@@ -1774,6 +1789,26 @@ mod tests {
         assert_eq!(
             merge_route_kind(PublicRouteKind::Relay, PublicRouteKind::Direct),
             PublicRouteKind::Relay
+        );
+    }
+
+    #[test]
+    fn owner_io_failures_use_fixed_sanitized_classes() {
+        assert_eq!(
+            public_owner_io_error_kind(std::io::ErrorKind::ConnectionReset),
+            "public_owner_io_connection_reset"
+        );
+        assert_eq!(
+            public_owner_io_error_kind(std::io::ErrorKind::UnexpectedEof),
+            "public_owner_io_unexpected_eof"
+        );
+        assert_eq!(
+            public_owner_io_error_kind(std::io::ErrorKind::InvalidData),
+            "public_owner_io_invalid_data"
+        );
+        assert_eq!(
+            public_owner_io_error_kind(std::io::ErrorKind::Other),
+            "public_owner_io_failed"
         );
     }
 

@@ -36,25 +36,41 @@ writeFileSync(join(okfFixture, 'architecture', 'index.md'), [
   '# Architecture',
   '',
   '- [Decision](decision.md)',
+  '- [Verified reference](verified.md)',
   ''
 ].join('\n'));
 writeFileSync(join(okfFixture, 'architecture', 'decision.md'), [
   '---',
   'type: Decision',
   'title: Synthetic architecture decision',
-  'generated:',
-  '  by: process:e2e',
-  '  at: 2026-08-13T09:00:00Z',
   'status: stable',
-  'sources:',
-  '  - id: synthetic-fixture',
-  '    resource: urn:airwiki:e2e',
   'x-e2e-extension:',
   '  preserved: true',
   '---',
   '# Synthetic architecture decision',
   '',
   'The E2E runner preserves this portable OKF concept.',
+  ''
+].join('\n'));
+writeFileSync(join(okfFixture, 'architecture', 'verified.md'), [
+  '---',
+  'type: Reference',
+  'title: Verified architecture reference',
+  'generated:',
+  '  by: process:e2e',
+  '  at: 2026-08-13T09:00:00Z',
+  'verified:',
+  '  by: human:e2e',
+  '  at: 2026-08-13T09:01:00Z',
+  'stale_after: 2027-08-13',
+  'status: stable',
+  'sources:',
+  '  - id: synthetic-fixture',
+  '    resource: urn:airwiki:e2e',
+  '---',
+  '# Verified architecture reference',
+  '',
+  'This concept proves that assurance changes atomically with the selected page.',
   ''
 ].join('\n'));
 

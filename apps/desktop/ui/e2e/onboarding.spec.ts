@@ -184,7 +184,7 @@ async function importOkfWiki(): Promise<void> {
   await $('button*=Import OKF folder').click();
   await $('#import-okf-title').waitForDisplayed();
   await expect($('.create-wiki-dialog')).toHaveText(expect.stringContaining('OKF v0.2'));
-  await expect($('.create-wiki-dialog')).toHaveText(expect.stringContaining('1'));
+  await expect($('.create-wiki-dialog')).toHaveText(expect.stringContaining('2'));
   const name = await $('.create-wiki-dialog input:not([type="checkbox"])');
   await name.setValue('E2E imported wiki');
   await $('button*=Import wiki').click();
@@ -202,6 +202,25 @@ async function importOkfWiki(): Promise<void> {
     { timeout: 10_000, timeoutMsg: 'imported OKF hierarchy did not load' }
   );
   await expect($('.file-list')).toHaveText(expect.stringContaining('architecture/decision.md'));
+  await expect($('.file-list')).toHaveText(expect.stringContaining('architecture/verified.md'));
+
+  await $('.file-list').$('button*=Synthetic architecture decision').click();
+  await browser.waitUntil(
+    () => browser.execute(() => document.querySelector('.concept-assurance')?.textContent?.includes('Unverified') === true),
+    { timeout: 10_000, timeoutMsg: 'unverified concept assurance did not load' }
+  );
+  await expect($('.concept-assurance')).toHaveText(expect.stringContaining('Decision'));
+
+  await $('.file-list').$('button*=Verified architecture reference').click();
+  await browser.waitUntil(
+    () => browser.execute(() => document.querySelector('.concept-assurance')?.textContent?.includes('Human-reviewed') === true),
+    { timeout: 10_000, timeoutMsg: 'verified concept assurance did not replace the previous page atomically' }
+  );
+  const assurance = await $('.concept-assurance');
+  await expect(assurance).toHaveText(expect.stringContaining('Reference'));
+  await expect(assurance).toHaveText(expect.stringContaining('Current'));
+  await expect(assurance).toHaveText(expect.stringContaining('process:e2e'));
+  await expect(assurance).not.toHaveText(expect.stringContaining('Unverified'));
 }
 
 describe('AirWiki real IPC journey', () => {

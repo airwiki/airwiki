@@ -265,6 +265,7 @@ async function assertVisualMatrix(): Promise<void> {
           await navigateToDestination(index);
           await browser.execute(() => {
             if (document.activeElement instanceof HTMLElement) document.activeElement.blur();
+            document.querySelector('.action-message')?.remove();
             const style = document.createElement('style');
             style.id = 'visual-capture-styles';
             style.textContent = '.system-status-bar button:hover { color: var(--muted) !important; background: transparent !important; }';
@@ -393,6 +394,7 @@ async function exerciseGenericMcpMemory(): Promise<void> {
   let article = await genericMcpArticle();
   const connect = await article.$('button*=Connect');
   if (!await connect.isExisting()) throw new Error(`generic MCP is not connectable: ${await article.getText()}`);
+  await connect.waitForEnabled({ timeout: 30_000 });
   await connect.click();
   try {
     await browser.waitUntil(

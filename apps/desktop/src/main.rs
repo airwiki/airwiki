@@ -193,6 +193,7 @@ fn init_logging(paths: &AppPaths) -> Result<tracing_appender::non_blocking::Work
 
 struct AppRuntime {
     commands: mpsc::Sender<WorkerIntent>,
+    presentation_events: mpsc::Sender<WorkerEvent>,
     cancellation: CancellationToken,
     snapshot: Mutex<watch::Receiver<PublishedSnapshot>>,
     folder_selections: Mutex<HashMap<Uuid, PendingFolderSelection>>,
@@ -231,6 +232,7 @@ struct RequestTracker {
     wiki_health: Option<Uuid>,
     connectivity: Option<Uuid>,
     integrations: Option<Uuid>,
+    completed_integration: Option<Uuid>,
     updater: Option<Uuid>,
 }
 
@@ -272,6 +274,8 @@ struct AppSnapshot {
     lan_runtime: Option<LanRuntimeSummary>,
     firewall_operation: Option<FirewallOperationStatus>,
     integrations: Option<IntegrationsSummary>,
+    integration_request_id: Option<String>,
+    integration_completed_request_id: Option<String>,
     application_access: Vec<ApplicationAccessSummary>,
     pending_computations: Vec<PendingComputationSummary>,
     completed_computations: Vec<CompletedComputationSummary>,
@@ -1774,8 +1778,9 @@ fn connect(runtime: tauri::State<'_, AppRuntime>, events: Channel<UiEventEnvelop
         return AppSnapshot::starting();
     };
     let mut receiver = snapshot_receiver.clone();
-    let snapshot = receiver.borrow().snapshot.clone();
+    let mut snapshot = receiver.borrow().snapshot.clone();
     drop(snapshot_receiver);
+    sync_integration_request_state(&mut snapshot, &runtime.requests);
     tauri::async_runtime::spawn(async move {
         while receiver.changed().await.is_ok() {
             let published = receiver.borrow_and_update().clone();
@@ -2294,6 +2299,10 @@ async fn manage_integration(
 ) -> Result<(), UiError> {
     let request_id = parse_uuid(&request_id)?;
     reserve_integration_request(&runtime.requests, request_id)?;
+    if let Err(error) = publish_integration_request_state(&runtime).await {
+        release_integration_request(&runtime.requests, request_id)?;
+        return Err(error);
+    }
     let action = match action {
         IntegrationActionInput::Refresh => integrations::IntegrationAction::Refresh,
         IntegrationActionInput::Connect { client } => {
@@ -2315,10 +2324,12 @@ async fn manage_integration(
     )
     .await
     {
-        if let Ok(mut requests) = runtime.requests.lock()
-            && requests.integrations == Some(request_id)
-        {
-            requests.integrations = None;
+        release_integration_request(&runtime.requests, request_id)?;
+        if publish_integration_request_state(&runtime).await.is_err() {
+            tracing::warn!(
+                error_kind = "integration_request_state_unavailable",
+                "failed to publish integration request rollback"
+            );
         }
         return Err(error);
     }
@@ -2335,6 +2346,29 @@ fn reserve_integration_request(
     }
     requests.integrations = Some(request_id);
     Ok(())
+}
+
+fn release_integration_request(
+    requests: &Mutex<RequestTracker>,
+    request_id: Uuid,
+) -> Result<(), UiError> {
+    let mut requests = requests.lock().map_err(|_| UiError::internal())?;
+    if requests.integrations == Some(request_id) {
+        requests.integrations = None;
+    }
+    Ok(())
+}
+
+async fn publish_integration_request_state(runtime: &AppRuntime) -> Result<(), UiError> {
+    runtime
+        .presentation_events
+        .send(WorkerEvent::IntegrationRequestStateChanged)
+        .await
+        .map_err(|_| UiError {
+            code: "unavailable",
+            message_key: "runtime-command-unavailable",
+            retryable: true,
+        })
 }
 
 #[tauri::command]
@@ -3332,6 +3366,8 @@ impl AppSnapshot {
             lan_runtime: None,
             firewall_operation: None,
             integrations: None,
+            integration_request_id: None,
+            integration_completed_request_id: None,
             application_access: Vec::new(),
             pending_computations: Vec::new(),
             completed_computations: Vec::new(),
@@ -3348,7 +3384,9 @@ impl AppSnapshot {
         guided_repairs: &Mutex<HashMap<Uuid, GuidedRepairPreview>>,
         requests: &Mutex<RequestTracker>,
     ) {
-        if !request_is_current(&event, requests) {
+        let event_is_current = request_is_current(&event, requests);
+        sync_integration_request_state(self, requests);
+        if !event_is_current {
             return;
         }
         self.sequence = self.sequence.saturating_add(1);
@@ -3600,6 +3638,7 @@ impl AppSnapshot {
                     });
                 }
             },
+            WorkerEvent::IntegrationRequestStateChanged => {}
             WorkerEvent::ComputationsUpdated { pending, completed } => {
                 self.pending_computations = pending
                     .into_iter()
@@ -4018,6 +4057,17 @@ impl AppSnapshot {
     }
 }
 
+fn sync_integration_request_state(snapshot: &mut AppSnapshot, requests: &Mutex<RequestTracker>) {
+    if let Ok(requests) = requests.lock() {
+        snapshot.integration_request_id = requests
+            .integrations
+            .map(|request_id| request_id.to_string());
+        snapshot.integration_completed_request_id = requests
+            .completed_integration
+            .map(|request_id| request_id.to_string());
+    }
+}
+
 fn update_wiki_scan(
     scans: &mut Vec<WikiScanSummary>,
     collection_id: Uuid,
@@ -4325,6 +4375,7 @@ fn request_is_current(event: &WorkerEvent, requests: &Mutex<RequestTracker>) -> 
         WorkerEvent::ChatIntegrationsUpdated { request_id, .. } => {
             if requests.integrations == Some(*request_id) {
                 requests.integrations = None;
+                requests.completed_integration = Some(*request_id);
                 true
             } else {
                 false
@@ -5077,6 +5128,7 @@ fn main() -> Result<()> {
     let (commands, command_receiver) = mpsc::channel(COMMAND_CAPACITY);
     let presentation_commands = commands.clone();
     let (worker_events, mut presentation_events) = mpsc::channel(INTERNAL_EVENT_CAPACITY);
+    let runtime_presentation_events = worker_events.clone();
     let (progress_events, _) = broadcast::channel(TRANSIENT_EVENT_CAPACITY);
     let worker_progress_events = progress_events.clone();
     let mut presentation_progress_events = progress_events.subscribe();
@@ -5108,6 +5160,7 @@ fn main() -> Result<()> {
         .plugin(tauri_plugin_updater::Builder::new().build())
         .manage(AppRuntime {
             commands,
+            presentation_events: runtime_presentation_events,
             cancellation,
             snapshot: Mutex::new(snapshot_receiver),
             folder_selections: Mutex::new(HashMap::new()),
@@ -5406,8 +5459,11 @@ mod tests {
             request_id: None,
         });
         let (_worker_finished_sender, worker_finished) = oneshot::channel();
+        let (presentation_events, _presentation_events_receiver) =
+            mpsc::channel(INTERNAL_EVENT_CAPACITY);
         AppRuntime {
             commands,
+            presentation_events,
             cancellation: CancellationToken::new(),
             snapshot: Mutex::new(snapshot),
             folder_selections: Mutex::new(folder_selections),
@@ -5894,6 +5950,114 @@ mod tests {
         assert_eq!(
             requests.lock().expect("request tracker").integrations,
             Some(original)
+        );
+    }
+
+    #[test]
+    fn reconnect_merges_the_authoritative_integration_request_state() {
+        let active_request = Uuid::new_v4();
+        let completed_request = Uuid::new_v4();
+        let requests = Mutex::new(RequestTracker {
+            integrations: Some(active_request),
+            completed_integration: Some(completed_request),
+            ..RequestTracker::default()
+        });
+        let mut snapshot = AppSnapshot::starting();
+
+        sync_integration_request_state(&mut snapshot, &requests);
+
+        assert_eq!(
+            snapshot.integration_request_id.as_deref(),
+            Some(active_request.to_string().as_str())
+        );
+        assert_eq!(
+            snapshot.integration_completed_request_id.as_deref(),
+            Some(completed_request.to_string().as_str())
+        );
+    }
+
+    #[tokio::test]
+    async fn integration_request_reservation_and_rollback_are_published() {
+        let request_id = Uuid::new_v4();
+        let (commands, _commands_receiver) = mpsc::channel(COMMAND_CAPACITY);
+        let (presentation_events, mut presentation_events_receiver) =
+            mpsc::channel(INTERNAL_EVENT_CAPACITY);
+        let mut runtime = test_runtime(commands, HashMap::new());
+        runtime.presentation_events = presentation_events;
+
+        reserve_integration_request(&runtime.requests, request_id)
+            .expect("integration request should be reserved");
+        publish_integration_request_state(&runtime)
+            .await
+            .expect("reservation should be published");
+        assert!(matches!(
+            presentation_events_receiver.recv().await,
+            Some(WorkerEvent::IntegrationRequestStateChanged)
+        ));
+
+        release_integration_request(&runtime.requests, request_id)
+            .expect("integration request should be released");
+        publish_integration_request_state(&runtime)
+            .await
+            .expect("rollback should be published");
+        assert!(matches!(
+            presentation_events_receiver.recv().await,
+            Some(WorkerEvent::IntegrationRequestStateChanged)
+        ));
+        assert!(
+            runtime
+                .requests
+                .lock()
+                .expect("request tracker")
+                .integrations
+                .is_none()
+        );
+    }
+
+    #[tokio::test]
+    async fn snapshot_preserves_integration_busy_state_across_coalesced_events() {
+        let request_id = Uuid::new_v4();
+        let requests = Mutex::new(RequestTracker {
+            integrations: Some(request_id),
+            ..RequestTracker::default()
+        });
+        let review_versions = Mutex::new(HashMap::new());
+        let knowledge_fingerprints = Mutex::new(HashMap::new());
+        let guided_repairs = Mutex::new(HashMap::new());
+        let mut snapshot = AppSnapshot::starting();
+
+        snapshot
+            .apply(
+                WorkerEvent::Notice("synthetic unrelated event".to_owned()),
+                &review_versions,
+                &knowledge_fingerprints,
+                &guided_repairs,
+                &requests,
+            )
+            .await;
+        let expected_request_id = request_id.to_string();
+        assert_eq!(
+            snapshot.integration_request_id.as_deref(),
+            Some(expected_request_id.as_str())
+        );
+        assert!(snapshot.integration_completed_request_id.is_none());
+
+        snapshot
+            .apply(
+                WorkerEvent::ChatIntegrationsUpdated {
+                    request_id,
+                    result: Err("synthetic completion".to_owned()),
+                },
+                &review_versions,
+                &knowledge_fingerprints,
+                &guided_repairs,
+                &requests,
+            )
+            .await;
+        assert!(snapshot.integration_request_id.is_none());
+        assert_eq!(
+            snapshot.integration_completed_request_id.as_deref(),
+            Some(expected_request_id.as_str())
         );
     }
 

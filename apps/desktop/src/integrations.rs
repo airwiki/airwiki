@@ -354,11 +354,12 @@ struct IntegrationEnvironment {
     platform: HostPlatform,
     home: PathBuf,
     path_entries: Vec<PathBuf>,
+    discover_host_clients: bool,
     current_exe: PathBuf,
 }
 
 impl IntegrationEnvironment {
-    fn discover() -> Result<Self> {
+    fn discover(paths: &AppPaths) -> Result<Self> {
         #[cfg(target_os = "macos")]
         let platform = HostPlatform::MacOs;
         #[cfg(target_os = "windows")]
@@ -366,16 +367,25 @@ impl IntegrationEnvironment {
         #[cfg(not(any(target_os = "macos", target_os = "windows")))]
         let platform = HostPlatform::Unsupported;
 
-        let home = std::env::var_os(if cfg!(windows) { "USERPROFILE" } else { "HOME" })
-            .map(PathBuf::from)
-            .context("no se encontró el directorio personal")?;
-        let path_entries = std::env::var_os("PATH")
-            .map(|value| std::env::split_paths(&value).collect())
-            .unwrap_or_default();
+        #[cfg(feature = "e2e")]
+        let (home, path_entries, discover_host_clients) =
+            (paths.data.join("integration-home"), Vec::new(), false);
+        #[cfg(not(feature = "e2e"))]
+        let (home, path_entries, discover_host_clients) = {
+            let _ = paths;
+            let home = std::env::var_os(if cfg!(windows) { "USERPROFILE" } else { "HOME" })
+                .map(PathBuf::from)
+                .context("no se encontró el directorio personal")?;
+            let path_entries = std::env::var_os("PATH")
+                .map(|value| std::env::split_paths(&value).collect())
+                .unwrap_or_default();
+            (home, path_entries, true)
+        };
         Ok(Self {
             platform,
             home,
             path_entries,
+            discover_host_clients,
             current_exe: std::env::current_exe()
                 .context("no se pudo localizar el ejecutable actual")?,
         })
@@ -393,9 +403,10 @@ pub(crate) struct ChatIntegrationManager {
 
 impl ChatIntegrationManager {
     pub(crate) fn new(paths: AppPaths, database: airwiki_core::Database) -> Result<Self> {
+        let environment = IntegrationEnvironment::discover(&paths)?;
         Ok(Self {
             paths,
-            environment: IntegrationEnvironment::discover()?,
+            environment,
             runner: Arc::new(SystemCommandRunner),
             opener: Arc::new(SystemPathOpener),
             database,
@@ -852,6 +863,9 @@ impl ChatIntegrationManager {
     }
 
     fn find_codex(&self) -> Option<PathBuf> {
+        if !self.environment.discover_host_clients {
+            return None;
+        }
         let mut candidates = program_candidates("codex", &self.environment.path_entries);
         if self.environment.platform == HostPlatform::MacOs {
             candidates.extend([
@@ -1327,6 +1341,9 @@ impl ChatIntegrationManager {
     }
 
     fn find_claude(&self) -> Option<PathBuf> {
+        if !self.environment.discover_host_clients {
+            return None;
+        }
         let candidates = match self.environment.platform {
             HostPlatform::MacOs => vec![
                 PathBuf::from("/Applications/Claude.app"),
@@ -2147,12 +2164,31 @@ mod tests {
                 platform: test_platform(),
                 home: root,
                 path_entries: Vec::new(),
+                discover_host_clients: false,
                 current_exe,
             },
             runner: Arc::new(RecordingRunner::default()),
             opener: Arc::new(RecordingOpener::default()),
             database: airwiki_core::Database::in_memory().unwrap(),
         }
+    }
+
+    #[cfg(feature = "e2e")]
+    #[test]
+    fn e2e_integration_discovery_does_not_inspect_host_clients() {
+        let temp = TempDir::new().unwrap();
+        let paths = AppPaths {
+            data: temp.path().join("data"),
+            database: temp.path().join("data/airwiki.sqlite3"),
+            logs: temp.path().join("data/logs"),
+            config: temp.path().join("config/config.json"),
+        };
+
+        let environment = IntegrationEnvironment::discover(&paths).unwrap();
+
+        assert_eq!(environment.home, paths.data.join("integration-home"));
+        assert!(environment.path_entries.is_empty());
+        assert!(!environment.discover_host_clients);
     }
 
     fn tools_list_output() -> Vec<u8> {
@@ -2456,6 +2492,7 @@ mod tests {
                 platform: HostPlatform::MacOs,
                 home: temp.path().to_path_buf(),
                 path_entries: Vec::new(),
+                discover_host_clients: false,
                 current_exe: executable,
             },
             runner,

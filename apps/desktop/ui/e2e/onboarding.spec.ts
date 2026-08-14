@@ -363,6 +363,37 @@ async function genericMcpArticle() {
   throw new Error('generic MCP article is missing');
 }
 
+async function clickGenericMcpAction(label: 'Connect' | 'Disconnect'): Promise<void> {
+  try {
+    await browser.waitUntil(
+      () => browser.execute((expectedLabel) => {
+        const article = Array.from(document.querySelectorAll('.integration-list article'))
+          .find((candidate) => candidate.textContent?.includes('Generic MCP client') === true);
+        const button = article
+          ? Array.from(article.querySelectorAll<HTMLButtonElement>('button'))
+            .find((candidate) => candidate.textContent?.trim() === expectedLabel)
+          : undefined;
+        if (!button || button.disabled) return false;
+        button.click();
+        return true;
+      }, label),
+      { timeout: 30_000, timeoutMsg: `the generic MCP ${label} action did not become available` }
+    );
+  } catch (error) {
+    const diagnostic = await browser.execute(() => ({
+      actionMessage: document.querySelector('.action-message')?.textContent?.trim() ?? null,
+      integrations: Array.from(document.querySelectorAll('.integration-list article'))
+        .map((article) => ({
+          text: article.textContent?.trim().slice(0, 160) ?? '',
+          buttons: Array.from(article.querySelectorAll<HTMLButtonElement>('button'))
+            .map((button) => ({ text: button.textContent?.trim() ?? '', disabled: button.disabled }))
+        })),
+      route: window.location.hash
+    }));
+    throw new Error(`generic MCP ${label} failed: ${JSON.stringify(diagnostic)}`, { cause: error });
+  }
+}
+
 async function exerciseGenericMcpMemory(): Promise<void> {
   const expectedTools = [
     'search_airwiki',
@@ -391,11 +422,8 @@ async function exerciseGenericMcpMemory(): Promise<void> {
     }));
     throw new Error(`generic MCP discovery failed: ${JSON.stringify(diagnostic)}`, { cause: error });
   }
-  let article = await genericMcpArticle();
-  const connect = await article.$('button*=Connect');
-  if (!await connect.isExisting()) throw new Error(`generic MCP is not connectable: ${await article.getText()}`);
-  await connect.waitForEnabled({ timeout: 30_000 });
-  await connect.click();
+  await clickGenericMcpAction('Connect');
+  let article: WebdriverIO.Element;
   try {
     await browser.waitUntil(
       () => browser.execute(() => Array.from(document.querySelectorAll('.integration-list article'))
@@ -516,8 +544,7 @@ async function exerciseGenericMcpMemory(): Promise<void> {
 
     await $('button[aria-label^="AI apps:"]').click();
     await $('.connections-drawer').waitForDisplayed();
-    article = await genericMcpArticle();
-    await article.$('button*=Disconnect').click();
+    await clickGenericMcpAction('Disconnect');
     await browser.waitUntil(
       () => browser.execute(() => Array.from(document.querySelectorAll('.integration-list article'))
         .some((candidate) => candidate.textContent?.includes('Generic MCP client') === true

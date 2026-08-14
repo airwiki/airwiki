@@ -687,6 +687,7 @@ pub enum WorkerEvent {
         request_id: Uuid,
         result: Result<ChatIntegrationsSnapshot, String>,
     },
+    IntegrationRequestStateChanged,
     ApplicationAccessUpdated(Vec<ApplicationAccessView>),
     ComputationsUpdated {
         pending: Vec<crate::computations::PendingComputation>,

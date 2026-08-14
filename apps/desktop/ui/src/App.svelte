@@ -434,7 +434,10 @@
       }
       if (event.requestId && event.requestId === wikiHealthRequestId) wikiHealthRequestId = null;
       if (event.requestId && event.requestId === connectivityRequestId) connectivityRequestId = null;
-      if (event.requestId && event.requestId === integrationRequestId) integrationRequestId = null;
+      syncIntegrationRequest(
+        event.snapshot.integrationRequestId,
+        event.snapshot.integrationCompletedRequestId
+      );
       if (event.requestId && event.requestId === updaterRequestId) updaterRequestId = null;
       if (event.requestId && event.requestId === publicBrowseRequestId) {
         publicBrowseRequestId = null;
@@ -445,6 +448,10 @@
     }).then(async (initial) => {
       const connected = snapshot && snapshot.sequence > initial.sequence ? snapshot : initial;
       snapshot = connected;
+      syncIntegrationRequest(
+        connected.integrationRequestId,
+        connected.integrationCompletedRequestId
+      );
       if (connected.model?.licenseAccepted) modelLicensesConfirmed = true;
       syncPreferences(connected.preferences);
       runtimeMessageId = connected.phase === 'ready' ? 'status-ready' : runtimeMessageId;
@@ -553,6 +560,16 @@
       unsupported: 'integration-status-unsupported', error: 'integration-status-error'
     };
     return t(labels[status] ?? 'error-generic');
+  }
+
+  function syncIntegrationRequest(activeRequestId: string | null, completedRequestId: string | null) {
+    if (integrationRequestId === null) {
+      integrationRequestId = activeRequestId;
+      return;
+    }
+    if (completedRequestId === integrationRequestId) {
+      integrationRequestId = activeRequestId;
+    }
   }
 
   async function runIntegrationAction(action: IntegrationActionInput) {

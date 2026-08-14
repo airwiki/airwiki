@@ -10,6 +10,7 @@ use std::{
     collections::VecDeque,
     fmt,
     net::{Ipv4Addr, SocketAddr},
+    path::PathBuf,
     str::FromStr,
     sync::{
         Arc, Mutex,
@@ -978,9 +979,7 @@ impl BridgeHttpBackend {
 }
 
 fn read_bridge_capability(client: McpClientKind) -> Option<String> {
-    let project = directories::ProjectDirs::from("io.github", "airwiki", "AirWiki")?;
-    let path = project
-        .data_local_dir()
+    let path = bridge_data_local_dir()?
         .join("integrations")
         .join("capabilities")
         .join(format!("{}.cap", client.as_str()));
@@ -998,6 +997,16 @@ fn read_bridge_capability(client: McpClientKind) -> Option<String> {
     let value = std::fs::read_to_string(path).ok()?;
     let value = value.trim();
     (value.len() >= 80 && value.len() <= 256).then(|| value.to_owned())
+}
+
+fn bridge_data_local_dir() -> Option<PathBuf> {
+    #[cfg(feature = "e2e")]
+    if let Some(value) = std::env::var_os("AIRWIKI_E2E_DATA_ROOT") {
+        let root = PathBuf::from(value);
+        return root.is_absolute().then(|| root.join("data"));
+    }
+    directories::ProjectDirs::from("io.github", "airwiki", "AirWiki")
+        .map(|project| project.data_local_dir().to_path_buf())
 }
 
 enum BridgeForwardResponse {

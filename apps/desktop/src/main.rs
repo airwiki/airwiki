@@ -2293,11 +2293,7 @@ async fn manage_integration(
     action: IntegrationActionInput,
 ) -> Result<(), UiError> {
     let request_id = parse_uuid(&request_id)?;
-    runtime
-        .requests
-        .lock()
-        .map_err(|_| UiError::internal())?
-        .integrations = Some(request_id);
+    reserve_integration_request(&runtime.requests, request_id)?;
     let action = match action {
         IntegrationActionInput::Refresh => integrations::IntegrationAction::Refresh,
         IntegrationActionInput::Connect { client } => {
@@ -2326,6 +2322,18 @@ async fn manage_integration(
         }
         return Err(error);
     }
+    Ok(())
+}
+
+fn reserve_integration_request(
+    requests: &Mutex<RequestTracker>,
+    request_id: Uuid,
+) -> Result<(), UiError> {
+    let mut requests = requests.lock().map_err(|_| UiError::internal())?;
+    if requests.integrations.is_some() {
+        return Err(UiError::busy("integrationOperationAlreadyRunning"));
+    }
+    requests.integrations = Some(request_id);
     Ok(())
 }
 
@@ -5715,6 +5723,22 @@ mod tests {
             },
             &requests,
         ));
+    }
+
+    #[test]
+    fn duplicate_integration_request_keeps_the_original_reservation() {
+        let original = Uuid::new_v4();
+        let duplicate = Uuid::new_v4();
+        let requests = Mutex::new(RequestTracker::default());
+
+        assert!(reserve_integration_request(&requests, original).is_ok());
+        let error = reserve_integration_request(&requests, duplicate)
+            .expect_err("a duplicate integration operation must be rejected");
+        assert_eq!(error.code, "busy");
+        assert_eq!(
+            requests.lock().expect("request tracker").integrations,
+            Some(original)
+        );
     }
 
     #[test]

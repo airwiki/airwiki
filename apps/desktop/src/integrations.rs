@@ -427,20 +427,24 @@ impl ChatIntegrationManager {
     }
 
     async fn inspect_all(&self) -> Result<Vec<IntegrationView>> {
-        let mut views = Vec::with_capacity(ChatClientKind::ALL.len());
-        for client in ChatClientKind::ALL {
-            match self.inspect(client).await {
-                Ok(view) => views.push(view),
-                Err(error) => views.push(view(
+        let inspections = ChatClientKind::ALL.map(|client| async move {
+            let result = self.inspect(client).await;
+            (client, result)
+        });
+        Ok(futures::future::join_all(inspections)
+            .await
+            .into_iter()
+            .map(|(client, result)| match result {
+                Ok(view) => view,
+                Err(error) => view(
                     client,
                     IntegrationStatus::Error,
                     format!("No se pudo comprobar esta integración: {error:#}"),
                     None,
                     Some(self.managed_bridge_path()),
-                )),
-            }
-        }
-        Ok(views)
+                ),
+            })
+            .collect())
     }
 
     async fn inspect(&self, client: ChatClientKind) -> Result<IntegrationView> {

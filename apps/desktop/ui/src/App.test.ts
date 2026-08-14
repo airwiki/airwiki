@@ -2,7 +2,7 @@ import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testi
 import axe from 'axe-core';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import App from './App.svelte';
-import { allowPeerPairingAgain, approveReview, browsePublicWiki, configureFirewall, loadWikiBundle, loadWikiPage, openSystemDestination, prepareGuidedWikiRepair, reanalyzeReview, rejectReview, updatePreferences, verifyWikiConcept } from './api';
+import { allowPeerPairingAgain, approveReview, browsePublicWiki, configureFirewall, connect, loadWikiBundle, loadWikiPage, manageIntegration, openSystemDestination, prepareGuidedWikiRepair, reanalyzeReview, rejectReview, updatePreferences, verifyWikiConcept } from './api';
 import type { UiEventEnvelope } from './generated/ui-contract';
 import { readySnapshot } from './test/fixtures';
 
@@ -87,6 +87,30 @@ describe('AirWiki wiki workspace', () => {
     expect(screen.queryByRole('complementary')).not.toBeInTheDocument();
   });
 
+  it('does not let a stale connect response replace a newer channel snapshot', async () => {
+    const starting = readySnapshot();
+    starting.sequence = 0;
+    starting.phase = 'starting';
+    starting.preferences = null;
+    const latest = readySnapshot();
+    latest.sequence = 2;
+    vi.mocked(connect).mockImplementationOnce(async (onEvent) => {
+      onEvent({
+        schemaVersion: latest.schemaVersion,
+        sequence: latest.sequence,
+        requestId: null,
+        kind: 'stateChanged',
+        snapshot: latest
+      });
+      return starting;
+    });
+
+    render(App);
+
+    expect(await screen.findByRole('heading', { name: 'Wikis' })).toBeInTheDocument();
+    expect(screen.queryByText('Trabajando')).not.toBeInTheDocument();
+  });
+
   it('groups technical services into clear user-facing system states', async () => {
     render(App);
 
@@ -146,6 +170,15 @@ describe('AirWiki wiki workspace', () => {
     const setup = screen.getByText(/synthetic\/managed\/airwiki-mcp-bridge/);
     expect(setup).toHaveTextContent('"generic-mcp"');
     expect(setup).not.toHaveTextContent('capability');
+  });
+
+  it('refreshes integrations when an integration deep link opens connections', async () => {
+    window.location.hash = '#system/integrations';
+    render(App);
+
+    expect(await screen.findByRole('dialog', { name: 'Conexiones' })).toBeInTheDocument();
+    await waitFor(() => expect(manageIntegration).toHaveBeenCalledWith(expect.any(String), { kind: 'refresh' }));
+    expect(window.location.hash).toBe('#wikis');
   });
 
   it('opens device preferences from disabled local-network guidance', async () => {

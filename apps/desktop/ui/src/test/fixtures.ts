@@ -33,7 +33,9 @@ export function readySnapshot(): AppSnapshot {
     guidedRepair: null,
     connectivity: { systemPermission: 'notApplicable', networkProfile: 'notApplicable', firewall: 'notApplicable', firewallHelper: 'notApplicable' },
     lanRuntime: { listener: 'stopped', discovery: 'disabled', addressCount: 0 },
-    firewallOperation: null, integrations: { integrations: [], externalAiWikiCount: 0 }, applicationAccess: [], pendingComputations: [], completedComputations: [],
+    firewallOperation: null, integrations: { integrations: [], externalAiWikiCount: 0 },
+    integrationRequestId: null, integrationCompletedRequestId: null,
+    applicationAccess: [], pendingComputations: [], completedComputations: [],
     updater: { status: 'idle', version: null, releaseNotes: null, issue: null, retryable: false },
     notice: null
   };

@@ -181,6 +181,119 @@ describe('AirWiki wiki workspace', () => {
     expect(window.location.hash).toBe('#wikis');
   });
 
+  it('uses durable snapshot state to finish a coalesced integration request', async () => {
+    snapshot.integrations = {
+      externalAiWikiCount: 0,
+      integrations: [{
+        client: 'genericMcp', status: 'available', detectedVersion: null,
+        activityRecent: false, restartRequired: false, mcpSetup: null
+      }]
+    };
+    render(App);
+    await fireEvent.click(await screen.findByRole('button', { name: 'Configuración' }));
+    await waitFor(() => expect(manageIntegration).toHaveBeenCalledWith(expect.any(String), { kind: 'refresh' }));
+    const refreshRequestId = vi.mocked(manageIntegration).mock.calls[0]?.[0];
+    expect(refreshRequestId).toEqual(expect.any(String));
+
+    await fireEvent.click(screen.getByRole('button', { name: 'Apps de IA: Disponible' }));
+    const genericMcpArticle = (await screen.findByText('Cliente MCP genérico')).closest('article');
+    expect(genericMcpArticle).not.toBeNull();
+    const connectButton = within(genericMcpArticle as HTMLElement).getByRole('button', { name: 'Conectar' });
+    expect(connectButton).toBeDisabled();
+
+    snapshot = {
+      ...snapshot,
+      sequence: snapshot.sequence + 1,
+      integrationRequestId: null,
+      integrationCompletedRequestId: null
+    };
+    await act(() => {
+      snapshotListener?.({
+        schemaVersion: snapshot.schemaVersion,
+        sequence: snapshot.sequence,
+        requestId: null,
+        kind: 'stateChanged',
+        snapshot
+      });
+    });
+    expect(connectButton).toBeDisabled();
+
+    snapshot = { ...snapshot, sequence: snapshot.sequence + 1, integrationRequestId: refreshRequestId ?? null };
+    await act(() => {
+      snapshotListener?.({
+        schemaVersion: snapshot.schemaVersion,
+        sequence: snapshot.sequence,
+        requestId: null,
+        kind: 'stateChanged',
+        snapshot
+      });
+    });
+    expect(connectButton).toBeDisabled();
+
+    snapshot = {
+      ...snapshot,
+      sequence: snapshot.sequence + 1,
+      integrationRequestId: null,
+      integrationCompletedRequestId: refreshRequestId ?? null
+    };
+    await act(() => {
+      snapshotListener?.({
+        schemaVersion: snapshot.schemaVersion,
+        sequence: snapshot.sequence,
+        requestId: null,
+        kind: 'stateChanged',
+        snapshot
+      });
+    });
+    expect(connectButton).toBeEnabled();
+  });
+
+  it('releases integration controls when dispatch fails after an active snapshot', async () => {
+    let rejectIntegration: ((error: Error) => void) | null = null;
+    vi.mocked(manageIntegration).mockImplementationOnce(() => new Promise<void>((_resolve, reject) => {
+      rejectIntegration = reject;
+    }));
+    snapshot.integrations = {
+      externalAiWikiCount: 0,
+      integrations: [{
+        client: 'genericMcp', status: 'available', detectedVersion: null,
+        activityRecent: false, restartRequired: false, mcpSetup: null
+      }]
+    };
+    render(App);
+    await fireEvent.click(await screen.findByRole('button', { name: 'Configuración' }));
+    await waitFor(() => expect(manageIntegration).toHaveBeenCalledWith(expect.any(String), { kind: 'refresh' }));
+    const refreshRequestId = vi.mocked(manageIntegration).mock.calls[0]?.[0];
+    expect(refreshRequestId).toEqual(expect.any(String));
+
+    snapshot = {
+      ...snapshot,
+      sequence: snapshot.sequence + 1,
+      integrationRequestId: refreshRequestId ?? null
+    };
+    await act(() => {
+      snapshotListener?.({
+        schemaVersion: snapshot.schemaVersion,
+        sequence: snapshot.sequence,
+        requestId: null,
+        kind: 'stateChanged',
+        snapshot
+      });
+    });
+    await fireEvent.click(screen.getByRole('button', { name: 'Apps de IA: Disponible' }));
+    const genericMcpArticle = (await screen.findByText('Cliente MCP genérico')).closest('article');
+    expect(genericMcpArticle).not.toBeNull();
+    const connectButton = within(genericMcpArticle as HTMLElement).getByRole('button', { name: 'Conectar' });
+    expect(connectButton).toBeDisabled();
+
+    if (!rejectIntegration) throw new Error('integration rejection was not captured');
+    await act(async () => {
+      rejectIntegration?.(new Error('synthetic dispatch failure'));
+      await Promise.resolve();
+    });
+    expect(connectButton).toBeEnabled();
+  });
+
   it('opens device preferences from disabled local-network guidance', async () => {
     render(App);
     await fireEvent.click(await screen.findByRole('button', { name: 'Conexiones: Solo este dispositivo' }));

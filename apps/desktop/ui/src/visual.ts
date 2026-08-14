@@ -91,6 +91,10 @@ const bridge: DevelopmentBridge = {
   },
   async invoke(_command, arguments_) {
     const requestId = typeof arguments_?.requestId === 'string' ? arguments_.requestId : null;
+    if (_command === 'manage_integration' && requestId) {
+      snapshot.integrationRequestId = null;
+      snapshot.integrationCompletedRequestId = requestId;
+    }
     queueMicrotask(() => {
       snapshot.sequence += 1;
       eventSink?.({ schemaVersion: snapshot.schemaVersion, sequence: snapshot.sequence, requestId, kind: 'stateChanged', snapshot });

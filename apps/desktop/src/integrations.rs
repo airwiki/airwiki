@@ -48,6 +48,7 @@ const MANAGED_TOOLS: [&str; 8] = [
 const PROCESS_TIMEOUT: Duration = Duration::from_secs(10);
 const VERIFY_TIMEOUT: Duration = Duration::from_secs(5);
 const MAX_PROCESS_OUTPUT: usize = 64 * 1024;
+const MAX_BRIDGE_VERIFY_OUTPUT: usize = airwiki_mcp::MAX_MANAGED_BRIDGE_VERIFICATION_BYTES;
 const MAX_BRIDGE_BYTES: u64 = 64 * 1024 * 1024;
 #[cfg(target_os = "windows")]
 const FILE_ATTRIBUTE_REPARSE_POINT: u32 = 0x0400;
@@ -147,6 +148,7 @@ struct CommandSpec {
     environment: Vec<(OsString, OsString)>,
     stdin: Option<Vec<u8>>,
     timeout: Duration,
+    stdout_limit: usize,
 }
 
 impl CommandSpec {
@@ -157,6 +159,7 @@ impl CommandSpec {
             environment: Vec::new(),
             stdin: None,
             timeout: PROCESS_TIMEOUT,
+            stdout_limit: MAX_PROCESS_OUTPUT,
         }
     }
 
@@ -177,6 +180,11 @@ impl CommandSpec {
 
     fn timeout(mut self, timeout: Duration) -> Self {
         self.timeout = timeout;
+        self
+    }
+
+    fn stdout_limit(mut self, limit: usize) -> Self {
+        self.stdout_limit = limit;
         self
     }
 }
@@ -248,8 +256,8 @@ impl CommandRunner for SystemCommandRunner {
         let process = async {
             let (status, stdout, stderr) = tokio::try_join!(
                 async { child.wait().await.context("no se pudo esperar al proceso") },
-                read_bounded(stdout),
-                read_bounded(stderr),
+                read_bounded(stdout, spec.stdout_limit),
+                read_bounded(stderr, MAX_PROCESS_OUTPUT),
             )?;
             Ok::<_, anyhow::Error>(CommandOutput {
                 success: status.success(),
@@ -267,7 +275,7 @@ impl CommandRunner for SystemCommandRunner {
     }
 }
 
-async fn read_bounded(mut reader: impl AsyncRead + Unpin) -> Result<Vec<u8>> {
+async fn read_bounded(mut reader: impl AsyncRead + Unpin, limit: usize) -> Result<Vec<u8>> {
     let mut output = Vec::new();
     let mut chunk = [0_u8; 4096];
     loop {
@@ -278,7 +286,7 @@ async fn read_bounded(mut reader: impl AsyncRead + Unpin) -> Result<Vec<u8>> {
         if read == 0 {
             return Ok(output);
         }
-        if output.len().saturating_add(read) > MAX_PROCESS_OUTPUT {
+        if output.len().saturating_add(read) > limit {
             bail!("la salida del proceso excedió el límite permitido");
         }
         output.extend_from_slice(&chunk[..read]);
@@ -732,7 +740,8 @@ impl ChatIntegrationManager {
                 CommandSpec::new(bridge.to_path_buf())
                     .args(["--client", client.bridge_id()])
                     .stdin(input.into_bytes())
-                    .timeout(VERIFY_TIMEOUT),
+                    .timeout(VERIFY_TIMEOUT)
+                    .stdout_limit(MAX_BRIDGE_VERIFY_OUTPUT),
             )
             .await
             .context("el puente MCP no superó su verificación local")?;
@@ -1667,12 +1676,15 @@ fn verify_tools_list(stdout: &str) -> Result<()> {
                     .and_then(|result| result.get("tools"))
                     .and_then(Value::as_array)
                     .context("tools/list no devolvió herramientas")?;
-                let actual = tools
+                let mut actual = tools
                     .iter()
                     .filter_map(|tool| tool.get("name"))
                     .filter_map(Value::as_str)
                     .collect::<Vec<_>>();
-                found_tools = actual.as_slice() == MANAGED_TOOLS;
+                let mut expected = MANAGED_TOOLS;
+                actual.sort_unstable();
+                expected.sort_unstable();
+                found_tools = actual.as_slice() == expected;
             }
             _ => {}
         }
@@ -2166,6 +2178,12 @@ mod tests {
                 std::io::stdout().flush().unwrap();
                 std::process::exit(0);
             }
+            Ok("bridge-oversized") => {
+                let bytes = vec![b'x'; MAX_BRIDGE_VERIFY_OUTPUT + 1];
+                std::io::stdout().write_all(&bytes).unwrap();
+                std::io::stdout().flush().unwrap();
+                std::process::exit(0);
+            }
             Ok("timeout") => {
                 std::thread::sleep(Duration::from_secs(5));
                 std::process::exit(0);
@@ -2179,6 +2197,27 @@ mod tests {
     async fn system_command_runner_rejects_excessive_output() {
         let error = SystemCommandRunner
             .run(runner_helper_spec("oversized"))
+            .await
+            .unwrap_err();
+
+        assert!(error.to_string().contains("excedió el límite"));
+    }
+
+    #[tokio::test]
+    async fn system_command_runner_accepts_the_bounded_bridge_verification_output() {
+        let output = SystemCommandRunner
+            .run(runner_helper_spec("oversized").stdout_limit(MAX_BRIDGE_VERIFY_OUTPUT))
+            .await
+            .unwrap();
+
+        assert!(output.stdout.len() > MAX_PROCESS_OUTPUT);
+        assert!(output.stdout.len() <= MAX_BRIDGE_VERIFY_OUTPUT);
+    }
+
+    #[tokio::test]
+    async fn system_command_runner_rejects_output_above_the_bridge_verification_limit() {
+        let error = SystemCommandRunner
+            .run(runner_helper_spec("bridge-oversized").stdout_limit(MAX_BRIDGE_VERIFY_OUTPUT))
             .await
             .unwrap_err();
 
@@ -2358,16 +2397,27 @@ mod tests {
 
     #[test]
     fn tools_list_verification_accepts_the_exact_managed_tool_set() {
-        let tools = MANAGED_TOOLS
+        let exact_tools = MANAGED_TOOLS
             .iter()
             .map(|name| serde_json::json!({"name": name}))
             .collect::<Vec<_>>();
-        let output = format!(
-            "{{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":{{}}}}\n{}\n",
-            serde_json::json!({"jsonrpc":"2.0","id":2,"result":{"tools":tools}})
-        );
+        let output_for = |tools: Vec<Value>| {
+            format!(
+                "{{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":{{}}}}\n{}\n",
+                serde_json::json!({"jsonrpc":"2.0","id":2,"result":{"tools":tools}})
+            )
+        };
+        let mut reordered_tools = exact_tools.clone();
+        reordered_tools.reverse();
+        let mut duplicated_tools = exact_tools.clone();
+        duplicated_tools.push(serde_json::json!({"name": SEARCH_TOOL}));
+        let mut extra_tools = exact_tools.clone();
+        extra_tools.push(serde_json::json!({"name": "unexpected_tool"}));
 
-        assert!(verify_tools_list(&output).is_ok());
+        assert!(verify_tools_list(&output_for(exact_tools)).is_ok());
+        assert!(verify_tools_list(&output_for(reordered_tools)).is_ok());
+        assert!(verify_tools_list(&output_for(duplicated_tools)).is_err());
+        assert!(verify_tools_list(&output_for(extra_tools)).is_err());
         assert!(
             verify_tools_list("{\"jsonrpc\":\"2.0\",\"id\":2,\"result\":{\"tools\":[]}}").is_err()
         );

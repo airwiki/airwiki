@@ -193,16 +193,22 @@ describe('AirWiki wiki workspace', () => {
   });
 
   it('keeps modal focus inside connections when advanced disclosures are closed', async () => {
-    render(App);
+    const { container } = render(App);
     await fireEvent.click(await screen.findByRole('button', { name: 'Conexiones: Solo este dispositivo' }));
 
+    const shell = container.querySelector('.drive-shell');
     const closeButton = screen.getByRole('button', { name: 'Cerrar' });
     const advancedSummary = screen.getByText('Detalles avanzados');
+    expect((shell as HTMLElement & { inert: boolean }).inert).toBe(true);
+    expect(shell).toHaveAttribute('aria-hidden', 'true');
     await waitFor(() => expect(closeButton).toHaveFocus());
     await fireEvent.keyDown(window, { key: 'Tab', shiftKey: true });
     expect(advancedSummary).toHaveFocus();
     await fireEvent.keyDown(window, { key: 'Tab' });
     expect(closeButton).toHaveFocus();
+    await fireEvent.click(closeButton);
+    expect((shell as HTMLElement & { inert: boolean }).inert).toBe(false);
+    expect(shell).not.toHaveAttribute('aria-hidden');
   });
 
   it('moves the focus trap to the close confirmation above an open drawer', async () => {
@@ -371,7 +377,7 @@ describe('AirWiki wiki workspace', () => {
 
     await fireEvent.click(await screen.findByRole('row', { name: /Atlas 2 publicados/ }));
     await fireEvent.click(screen.getByRole('tab', { name: /Pendientes/ }));
-    await fireEvent.click(await screen.findByRole('button', { name: /legacy\.md/ }));
+    expect(await screen.findByRole('dialog', { name: 'legacy.md' })).toBeInTheDocument();
 
     expect(screen.getByRole('status')).toHaveTextContent('Vuelve a crearla desde la carpeta de origen');
     expect(screen.getByRole('button', { name: 'Aprobar y publicar' })).toBeDisabled();

@@ -1147,6 +1147,8 @@ pub(crate) async fn run_worker(
     let mut public_announcement_updates_open = true;
     let mut computation_updates = services.subscribe_computation_updates();
     let mut computation_updates_open = true;
+    let mut application_updates = services.subscribe_application_updates();
+    let mut application_updates_open = true;
     let (integration_manager, integration_manager_error) =
         match ChatIntegrationManager::new(paths.clone(), services.database().clone()) {
             Ok(manager) => (Some(manager), None),
@@ -1387,6 +1389,14 @@ pub(crate) async fn run_worker(
                     refresh_computations(&services, &events).await;
                 } else {
                     computation_updates_open = false;
+                }
+            }
+            changed = application_updates.changed(), if application_updates_open => {
+                if changed.is_ok() {
+                    refresh_collection_views(&services, &events).await;
+                    refresh_application_access(&services, &events).await;
+                } else {
+                    application_updates_open = false;
                 }
             }
             intent = commands.recv() => {

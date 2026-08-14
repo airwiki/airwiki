@@ -689,11 +689,10 @@ describe('AirWiki real IPC journey', () => {
     expect(desktopControlLayout.statusMarginLeft).toBe('0px');
     await $('.connections-drawer button[aria-label="Close"]').click();
 
-    await exerciseGenericMcpMemory();
-
     if (runVisualMatrix) await assertVisualMatrix();
     await configureVisualPreferences('en', 'light');
     await navigateToDestination(0);
+    await exerciseGenericMcpMemory();
     await createFolderWiki();
     await importOkfWiki();
     await $('button*=AirWiki').click();

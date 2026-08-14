@@ -23,6 +23,9 @@ use airwiki_types::{
     MAX_TOP_K, MIN_TOP_K, SearchContractError, SearchHit, SearchPurpose, SearchRequest,
     SearchResponse,
 };
+pub use airwiki_types::{
+    MAX_COMPUTATION_REQUESTS_PER_MINUTE, MAX_PENDING_COMPUTATIONS_PER_APPLICATION,
+};
 use axum::{
     Router,
     extract::{Request, State},
@@ -588,7 +591,7 @@ fn application_tool_routes() -> Vec<rmcp::handler::server::tool::ToolRoute<AirWi
         ),
         application_tool::<RequestAirWikiComputationInput>(
             "request_airwiki_computation",
-            "Request an attested computation",
+            "Request an attested computation (maximum 16 pending and 30 requests per minute)",
             false,
         ),
         application_tool::<GetAirWikiComputationRunInput>(

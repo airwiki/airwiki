@@ -1,6 +1,11 @@
 use std::path::{Path, PathBuf};
 
-use airwiki_types::{ActorId, ConceptAssurance, ConceptType, FreshnessState, TrustTier};
+#[cfg(windows)]
+use std::os::windows::fs::MetadataExt;
+
+#[cfg(test)]
+use airwiki_types::TrustTier;
+use airwiki_types::{ActorId, ConceptType};
 use anyhow::{Context, Result, bail};
 use chrono::Utc;
 use serde::Serialize;
@@ -8,7 +13,7 @@ use sha2::{Digest, Sha256};
 use uuid::Uuid;
 
 use crate::okf::atomic_write;
-use crate::okf_import::append_human_verification;
+use crate::okf_import::{append_human_verification, parse_concept};
 use crate::storage::ApplicationWikiRole;
 use crate::{
     CollectionRecord, Database, ManagedBundleMutationState, NewManagedCollection,
@@ -16,6 +21,10 @@ use crate::{
 };
 
 pub const AI_MEMORY_CONCEPT_MAX_BYTES: usize = 48 * 1024;
+const PROCESS_RESULT_CONCEPT_MAX_BYTES: usize = 1024 * 1024;
+
+#[cfg(windows)]
+const FILE_ATTRIBUTE_REPARSE_POINT: u32 = 0x0400;
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct ManagedBundleRecoveryReport {
@@ -43,9 +52,11 @@ struct AttributedMemoryWrite<'a> {
     wiki_id: Uuid,
     concept_id: Option<Uuid>,
     expected_fingerprint: Option<&'a str>,
+    new_logical_path: Option<String>,
     input: &'a AiMemoryConceptInput,
     producer: &'a ActorId,
     verifier: Option<&'a ActorId>,
+    rendered_size_limit: usize,
 }
 
 impl AiMemoryService {
@@ -85,23 +96,11 @@ impl AiMemoryService {
                 report.recovered = report.recovered.saturating_add(1);
                 continue;
             }
-            let recovered = (|| {
-                let imported = OkfImportValidator::validate_directory(&wiki.wiki_folder)?;
-                self.database
-                    .replace_okf_concept_projection(wiki.id, &imported.concepts)?;
-                if wiki.origin == WikiOrigin::AiMemory {
-                    let concepts = self.database.list_okf_concept_projection(wiki.id)?;
-                    regenerate_index(&wiki.wiki_folder, &wiki.name, &concepts)?;
-                }
-                let managed_size = managed_bundle_size(&wiki.wiki_folder)?;
-                self.database.update_collection_okf_metadata(
-                    wiki.id,
-                    imported.declared_okf_version.as_deref(),
-                    &imported.compatibility,
-                    managed_size,
-                )?;
-                self.database.complete_managed_bundle_mutation(mutation.id)
-            })();
+            let recovered = if mutation.logical_path == "." {
+                self.recover_managed_bundle_creation(&wiki, &mutation)
+            } else {
+                self.recover_managed_concept_mutation(&wiki, &mutation)
+            };
             if recovered.is_ok() {
                 report.recovered = report.recovered.saturating_add(1);
             } else {
@@ -115,6 +114,81 @@ impl AiMemoryService {
         Ok(report)
     }
 
+    fn recover_managed_bundle_creation(
+        &self,
+        wiki: &CollectionRecord,
+        mutation: &crate::ManagedBundleMutationRecord,
+    ) -> Result<()> {
+        let imported = OkfImportValidator::validate_directory(&wiki.wiki_folder)?;
+        if imported.bundle_fingerprint != mutation.replacement_fingerprint {
+            bail!("managed OKF bundle does not match its recovery journal");
+        }
+        self.database
+            .replace_okf_concept_projection(wiki.id, &imported.concepts)?;
+        self.database.update_collection_okf_metadata(
+            wiki.id,
+            imported.declared_okf_version.as_deref(),
+            &imported.compatibility,
+            imported.uncompressed_bytes,
+        )?;
+        self.database.complete_managed_bundle_mutation(mutation.id)
+    }
+
+    fn recover_managed_concept_mutation(
+        &self,
+        wiki: &CollectionRecord,
+        mutation: &crate::ManagedBundleMutationRecord,
+    ) -> Result<()> {
+        let current_projection = self
+            .database
+            .list_okf_concept_projection(wiki.id)?
+            .into_iter()
+            .find(|concept| concept.logical_path == mutation.logical_path);
+        let projected_fingerprint = current_projection
+            .as_ref()
+            .map(|concept| concept.fingerprint.as_str());
+        let path = checked_memory_path(&wiki.wiki_folder, &mutation.logical_path)?;
+        let filesystem_fingerprint = managed_file_fingerprint(&path)?;
+        let previous = mutation.previous_fingerprint.as_deref();
+
+        if mutation.state != ManagedBundleMutationState::FileReplaced
+            && filesystem_fingerprint.as_deref() == previous
+            && projected_fingerprint == previous
+        {
+            return self.database.complete_managed_bundle_mutation(mutation.id);
+        }
+        if filesystem_fingerprint.as_deref() != Some(&mutation.replacement_fingerprint)
+            || !matches!(
+                projected_fingerprint,
+                value if value == previous || value == Some(&mutation.replacement_fingerprint)
+            )
+        {
+            bail!("managed OKF concept does not match its recovery journal");
+        }
+
+        let imported = OkfImportValidator::validate_directory(&wiki.wiki_folder)?;
+        let replacement = imported
+            .concepts
+            .iter()
+            .find(|concept| concept.logical_path == mutation.logical_path)
+            .filter(|concept| concept.fingerprint == mutation.replacement_fingerprint)
+            .context("managed OKF replacement does not match its recovery journal")?;
+        self.database
+            .upsert_okf_concept_projection(wiki.id, replacement)?;
+        if wiki.origin == WikiOrigin::AiMemory {
+            let concepts = self.database.list_okf_concept_projection(wiki.id)?;
+            regenerate_index(&wiki.wiki_folder, &wiki.name, &concepts)?;
+        }
+        let managed_size = managed_bundle_size(&wiki.wiki_folder)?;
+        self.database.update_collection_okf_metadata(
+            wiki.id,
+            imported.declared_okf_version.as_deref(),
+            &imported.compatibility,
+            managed_size,
+        )?;
+        self.database.complete_managed_bundle_mutation(mutation.id)
+    }
+
     pub fn create(&self, app_id: Uuid, name: &str) -> Result<CollectionRecord> {
         self.database.consume_application_rate_limit(app_id, true)?;
         let _producer = self.application_producer(app_id)?;
@@ -126,6 +200,13 @@ impl AiMemoryService {
             let _ = std::fs::remove_dir_all(&staging);
             return Err(error);
         }
+        let replacement_fingerprint = match OkfImportValidator::validate_directory(&staging) {
+            Ok(report) => report.bundle_fingerprint,
+            Err(error) => {
+                let _ = std::fs::remove_dir_all(&staging);
+                return Err(error).context("could not validate AI memory staging");
+            }
+        };
         let bundle = self.vaults.join(wiki_id.to_string());
         let (record, mutation) =
             match self
@@ -135,7 +216,7 @@ impl AiMemoryService {
                     name: name.to_owned(),
                     bundle_root: bundle.clone(),
                     origin: WikiOrigin::AiMemory,
-                    replacement_fingerprint: hex::encode(Sha256::digest(index.as_bytes())),
+                    replacement_fingerprint,
                     owner_app_id: Some(app_id),
                 }) {
                 Ok(prepared) => prepared,
@@ -192,14 +273,17 @@ impl AiMemoryService {
         self.database
             .consume_application_rate_limit(app_id, false)?;
         let producer = self.application_producer(app_id)?;
+        let quota_owner_app_id = self.owner_app_id(wiki_id)?;
         self.write_attributed(AttributedMemoryWrite {
-            quota_owner_app_id: app_id,
+            quota_owner_app_id,
             wiki_id,
             concept_id,
             expected_fingerprint,
+            new_logical_path: None,
             input,
             producer: &producer,
             verifier: None,
+            rendered_size_limit: AI_MEMORY_CONCEPT_MAX_BYTES,
         })
     }
 
@@ -211,6 +295,7 @@ impl AiMemoryService {
     pub fn save_process_result(
         &self,
         wiki_id: Uuid,
+        run_id: Uuid,
         title: &str,
         receipt: &serde_json::Value,
     ) -> Result<OkfConceptProjectionRecord> {
@@ -221,20 +306,20 @@ impl AiMemoryService {
         if wiki.origin != WikiOrigin::AiMemory {
             bail!("computation results can only be saved to an AI memory wiki");
         }
-        let owner_app_id = self
+        let owner_app_id = self.owner_app_id(wiki_id)?;
+        let logical_path = format!("results/{run_id}.md");
+        if let Some(existing) = self
             .database
-            .list_application_wiki_grants()?
+            .list_okf_concept_projection(wiki_id)?
             .into_iter()
-            .find(|grant| {
-                grant.collection_id == wiki_id && grant.role == ApplicationWikiRole::Owner
-            })
-            .map(|grant| grant.app_id)
-            .context("AI memory owner is unavailable")?;
+            .find(|concept| concept.logical_path == logical_path)
+        {
+            return Ok(existing);
+        }
         let actor = ActorId::parse("process:airwiki-wasm")?;
         let body_markdown = format!(
             "```json\n{}\n```",
-            serde_json::to_string_pretty(receipt)
-                .context("could not serialize computation receipt")?
+            serde_json::to_string(receipt).context("could not serialize computation receipt")?
         );
         let input = AiMemoryConceptInput {
             title: title.to_owned(),
@@ -249,9 +334,11 @@ impl AiMemoryService {
             wiki_id,
             concept_id: None,
             expected_fingerprint: None,
+            new_logical_path: Some(logical_path),
             input: &input,
             producer: &actor,
             verifier: Some(&actor),
+            rendered_size_limit: PROCESS_RESULT_CONCEPT_MAX_BYTES,
         })
     }
 
@@ -264,9 +351,11 @@ impl AiMemoryService {
             wiki_id,
             concept_id,
             expected_fingerprint,
+            new_logical_path,
             input,
             producer,
             verifier,
+            rendered_size_limit,
         } = write;
         validate_input(input)?;
         let existing = self.database.list_okf_concept_projection(wiki_id)?;
@@ -285,7 +374,7 @@ impl AiMemoryService {
             (None, None) => {}
         }
         let logical_path = existing.as_ref().map_or_else(
-            || format!("concepts/{}.md", Uuid::new_v4()),
+            || new_logical_path.unwrap_or_else(|| format!("concepts/{}.md", Uuid::new_v4())),
             |concept| concept.logical_path.clone(),
         );
         let wiki = self
@@ -293,21 +382,20 @@ impl AiMemoryService {
             .collection(wiki_id)?
             .context("AI memory wiki does not exist")?;
         let generated_at = Utc::now();
-        let rendered = render_concept(producer, generated_at, input, "stable", verifier)?;
-        if rendered.len() > AI_MEMORY_CONCEPT_MAX_BYTES {
+        let verified = verification_metadata(existing.as_ref(), verifier, generated_at)?;
+        let rendered = render_concept(producer, generated_at, input, "stable", verified.as_ref())?;
+        if rendered.len() > rendered_size_limit {
             bail!("AI memory concept exceeds the size limit");
         }
         let path = checked_memory_path(&wiki.wiki_folder, &logical_path)?;
+        ensure_managed_write_target_is_current(
+            &path,
+            existing
+                .as_ref()
+                .map(|concept| concept.fingerprint.as_str()),
+        )?;
         let mut projected = self.database.list_okf_concept_projection(wiki_id)?;
-        let provisional = imported_concept(
-            &logical_path,
-            input,
-            "stable",
-            &rendered,
-            producer,
-            generated_at,
-            verifier,
-        );
+        let provisional = parse_concept(&logical_path, &rendered, generated_at)?;
         let provisional_id = Uuid::new_v5(&wiki_id, logical_path.as_bytes());
         projected.retain(|concept| concept.concept_id != provisional_id);
         projected.push(projection_preview(wiki_id, provisional_id, &provisional)?);
@@ -325,8 +413,11 @@ impl AiMemoryService {
             &provisional.fingerprint,
         )?;
         if let Err(error) = atomic_write(&path, rendered.as_bytes()) {
-            let _ = self.database.complete_managed_bundle_mutation(mutation.id);
-            return Err(error);
+            let _ = self.database.set_managed_bundle_mutation_state(
+                mutation.id,
+                ManagedBundleMutationState::RecoveryRequired,
+            );
+            return Err(error).context("AI memory mutation requires recovery");
         }
         let committed: Result<OkfConceptProjectionRecord> = (|| {
             self.database.set_managed_bundle_mutation_state(
@@ -383,37 +474,35 @@ impl AiMemoryService {
             .database
             .collection(wiki_id)?
             .context("AI memory wiki does not exist")?;
+        let path = checked_memory_path(&wiki.wiki_folder, &concept.logical_path)?;
+        let original = read_current_managed_concept(&path, &concept.fingerprint)?;
         let input = AiMemoryConceptInput {
             title: concept.title.clone(),
             description: concept.description.clone(),
             concept_type: concept.concept_type.clone(),
             tags: concept.tags.clone(),
-            body_markdown: read_body(&checked_memory_path(
-                &wiki.wiki_folder,
-                &concept.logical_path,
-            )?)?,
+            body_markdown: read_body(&original)?,
         };
         let producer = self.application_producer(app_id)?;
         let generated_at = Utc::now();
-        let rendered = render_concept(&producer, generated_at, &input, "deprecated", None)?;
-        let path = checked_memory_path(&wiki.wiki_folder, &concept.logical_path)?;
-        let imported = imported_concept(
-            &concept.logical_path,
-            &input,
-            "deprecated",
-            &rendered,
+        let verified = verification_metadata(Some(&concept), None, generated_at)?;
+        let rendered = render_concept(
             &producer,
             generated_at,
-            None,
-        );
+            &input,
+            "deprecated",
+            verified.as_ref(),
+        )?;
+        let imported = parse_concept(&concept.logical_path, &rendered, generated_at)?;
         let mut projected = self.database.list_okf_concept_projection(wiki_id)?;
         projected.retain(|projected| projected.concept_id != concept.concept_id);
         projected.push(projection_preview(wiki_id, concept.concept_id, &imported)?);
         let next_index = render_index(&wiki.name, &projected);
         let managed_size =
             projected_bundle_size(&wiki.wiki_folder, &path, rendered.len(), next_index.len())?;
+        let owner_app_id = self.owner_app_id(wiki_id)?;
         self.database
-            .ensure_application_managed_size(app_id, wiki_id, managed_size)?;
+            .ensure_application_managed_size(owner_app_id, wiki_id, managed_size)?;
         let mutation = self.database.begin_managed_bundle_mutation(
             wiki_id,
             &concept.logical_path,
@@ -421,8 +510,11 @@ impl AiMemoryService {
             &imported.fingerprint,
         )?;
         if let Err(error) = atomic_write(&path, rendered.as_bytes()) {
-            let _ = self.database.complete_managed_bundle_mutation(mutation.id);
-            return Err(error);
+            let _ = self.database.set_managed_bundle_mutation_state(
+                mutation.id,
+                ManagedBundleMutationState::RecoveryRequired,
+            );
+            return Err(error).context("AI memory deprecation requires recovery");
         }
         let committed: Result<OkfConceptProjectionRecord> = (|| {
             self.database.set_managed_bundle_mutation_state(
@@ -507,15 +599,7 @@ impl AiMemoryService {
             bail!("verified OKF bundle exceeds the size limit");
         }
         if wiki.origin == WikiOrigin::AiMemory {
-            let owner_app_id = self
-                .database
-                .list_application_wiki_grants()?
-                .into_iter()
-                .find(|grant| {
-                    grant.collection_id == wiki_id && grant.role == ApplicationWikiRole::Owner
-                })
-                .map(|grant| grant.app_id)
-                .context("AI memory owner is unavailable")?;
+            let owner_app_id = self.owner_app_id(wiki_id)?;
             self.database
                 .ensure_application_managed_size(owner_app_id, wiki_id, managed_size)?;
         }
@@ -527,8 +611,11 @@ impl AiMemoryService {
             &replacement_fingerprint,
         )?;
         if let Err(error) = atomic_write(&path, rendered.as_bytes()) {
-            let _ = self.database.complete_managed_bundle_mutation(mutation.id);
-            return Err(error);
+            let _ = self.database.set_managed_bundle_mutation_state(
+                mutation.id,
+                ManagedBundleMutationState::RecoveryRequired,
+            );
+            return Err(error).context("managed verification requires recovery");
         }
         let committed = (|| {
             self.database.set_managed_bundle_mutation_state(
@@ -592,6 +679,17 @@ impl AiMemoryService {
             .parse()
             .context("application producer is invalid")
     }
+
+    fn owner_app_id(&self, wiki_id: Uuid) -> Result<Uuid> {
+        self.database
+            .list_application_wiki_grants()?
+            .into_iter()
+            .find(|grant| {
+                grant.collection_id == wiki_id && grant.role == ApplicationWikiRole::Owner
+            })
+            .map(|grant| grant.app_id)
+            .context("AI memory owner is unavailable")
+    }
 }
 
 const MAX_CONCEPT_BYTES_FOR_MANAGED_VERIFICATION: usize = 1024 * 1024;
@@ -630,7 +728,7 @@ struct MemoryFrontmatter<'a> {
     status: &'a str,
     generated: Generated<'a>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    verified: Option<Verified<'a>>,
+    verified: Option<&'a serde_yaml::Value>,
 }
 
 #[derive(Serialize)]
@@ -650,7 +748,7 @@ fn render_concept(
     generated_at: chrono::DateTime<Utc>,
     input: &AiMemoryConceptInput,
     status: &str,
-    verifier: Option<&ActorId>,
+    verified: Option<&serde_yaml::Value>,
 ) -> Result<String> {
     let frontmatter = MemoryFrontmatter {
         r#type: input.concept_type.to_string(),
@@ -662,10 +760,7 @@ fn render_concept(
             by: producer.as_str(),
             at: generated_at.to_rfc3339(),
         },
-        verified: verifier.map(|actor| Verified {
-            by: actor.as_str(),
-            at: generated_at.to_rfc3339(),
-        }),
+        verified,
     };
     Ok(format!(
         "---\n{}---\n\n{}\n",
@@ -674,48 +769,32 @@ fn render_concept(
     ))
 }
 
-fn imported_concept(
-    path: &str,
-    input: &AiMemoryConceptInput,
-    status: &str,
-    rendered: &str,
-    producer: &ActorId,
-    generated_at: chrono::DateTime<Utc>,
+fn verification_metadata(
+    existing: Option<&OkfConceptProjectionRecord>,
     verifier: Option<&ActorId>,
-) -> OkfImportedConcept {
-    OkfImportedConcept {
-        logical_path: path.to_owned(),
-        concept_type: input.concept_type.to_string(),
-        title: input.title.trim().to_owned(),
-        description: input.description.trim().to_owned(),
-        tags: input.tags.clone(),
-        lifecycle_status: status.to_owned(),
-        generated: serde_yaml::to_value(Generated {
-            by: producer.as_str(),
+    generated_at: chrono::DateTime<Utc>,
+) -> Result<Option<serde_yaml::Value>> {
+    if let Some(actor) = verifier {
+        return serde_yaml::to_value(Verified {
+            by: actor.as_str(),
             at: generated_at.to_rfc3339(),
         })
-        .ok(),
-        verified: verifier.and_then(|actor| {
-            serde_yaml::to_value(Verified {
-                by: actor.as_str(),
-                at: generated_at.to_rfc3339(),
-            })
-            .ok()
-        }),
-        sources: None,
-        stale_after: None,
-        version: None,
-        unknown_frontmatter: serde_yaml::Value::Mapping(Default::default()),
-        attested_computation: None,
-        fingerprint: hex::encode(Sha256::digest(rendered.as_bytes())),
-        search_text: input.body_markdown.clone(),
-        assurance: ConceptAssurance {
-            trust: verifier.map_or(TrustTier::Unverified, |_| TrustTier::MachineConfirmed),
-            freshness: FreshnessState::NotDeclared,
-            verification_outdated: false,
-        },
-        warnings: Vec::new(),
+        .map(Some)
+        .context("could not serialize managed verification metadata");
     }
+    let Some(verifications) = existing.map(|concept| &concept.verifications) else {
+        return Ok(None);
+    };
+    if verifications.is_null()
+        || verifications
+            .as_array()
+            .is_some_and(std::vec::Vec::is_empty)
+    {
+        return Ok(None);
+    }
+    serde_yaml::to_value(verifications)
+        .map(Some)
+        .context("could not preserve managed verification metadata")
 }
 
 fn projection_preview(
@@ -843,15 +922,75 @@ fn checked_memory_path(root: &Path, logical_path: &str) -> Result<PathBuf> {
     {
         bail!("AI memory path is invalid");
     }
-    let path = root.join(logical_path);
-    if !path.starts_with(root) {
-        bail!("AI memory path escapes its bundle");
+    let root_metadata =
+        std::fs::symlink_metadata(root).context("AI memory bundle root is unavailable")?;
+    if !root_metadata.is_dir() || metadata_is_link_or_reparse(&root_metadata) {
+        bail!("AI memory bundle root is not a safe directory");
+    }
+    let parts = logical_path.split('/').collect::<Vec<_>>();
+    let mut path = root.to_path_buf();
+    for (index, part) in parts.iter().enumerate() {
+        path.push(part);
+        match std::fs::symlink_metadata(&path) {
+            Ok(metadata) => {
+                if metadata_is_link_or_reparse(&metadata)
+                    || index + 1 < parts.len() && !metadata.is_dir()
+                    || index + 1 == parts.len() && !metadata.is_file()
+                {
+                    bail!("AI memory path contains an unsafe filesystem entry");
+                }
+            }
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+            Err(error) => return Err(error).context("AI memory path could not be inspected"),
+        }
     }
     Ok(path)
 }
 
-fn read_body(path: &Path) -> Result<String> {
-    let markdown = std::fs::read_to_string(path)?;
+fn metadata_is_link_or_reparse(metadata: &std::fs::Metadata) -> bool {
+    if metadata.file_type().is_symlink() {
+        return true;
+    }
+    #[cfg(windows)]
+    {
+        metadata.file_attributes() & FILE_ATTRIBUTE_REPARSE_POINT != 0
+    }
+    #[cfg(not(windows))]
+    false
+}
+
+fn ensure_managed_write_target_is_current(path: &Path, expected: Option<&str>) -> Result<()> {
+    match (std::fs::read(path), expected) {
+        (Ok(bytes), Some(expected)) if hex::encode(Sha256::digest(&bytes)) == expected => Ok(()),
+        (Ok(_), Some(_)) => bail!("AI memory concept changed outside the current snapshot"),
+        (Ok(_), None) => {
+            bail!("AI memory concept path already exists outside the current snapshot")
+        }
+        (Err(error), Some(_)) if error.kind() == std::io::ErrorKind::NotFound => {
+            bail!("AI memory concept disappeared outside the current snapshot")
+        }
+        (Err(error), None) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        (Err(error), _) => Err(error).context("AI memory concept could not be inspected"),
+    }
+}
+
+fn read_current_managed_concept(path: &Path, expected_fingerprint: &str) -> Result<String> {
+    let bytes = std::fs::read(path).context("could not read AI memory concept")?;
+    if hex::encode(Sha256::digest(&bytes)) != expected_fingerprint {
+        bail!("AI memory concept changed outside the current snapshot");
+    }
+    String::from_utf8(bytes).context("AI memory concept must be UTF-8")
+}
+
+fn managed_file_fingerprint(path: &Path) -> Result<Option<String>> {
+    match std::fs::read(path) {
+        Ok(bytes) => Ok(Some(hex::encode(Sha256::digest(bytes)))),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(None),
+        Err(error) => Err(error).context("managed OKF concept could not be inspected"),
+    }
+}
+
+fn read_body(markdown: &str) -> Result<String> {
     let rest = markdown
         .strip_prefix("---\n")
         .context("AI memory frontmatter is missing")?;
@@ -912,14 +1051,30 @@ mod tests {
     fn confirmed_computation_result_is_machine_confirmed_by_the_process() {
         let (_temp, _database, service, app_id) = service();
         let wiki = service.create(app_id, "Computed memory").unwrap();
+        let run_id = Uuid::new_v4();
 
         let stored = service
-            .save_process_result(wiki.id, "Revenue result", &serde_json::json!({"value": 42}))
+            .save_process_result(
+                wiki.id,
+                run_id,
+                "Revenue result",
+                &serde_json::json!({"value": 42}),
+            )
+            .unwrap();
+        let repeated = service
+            .save_process_result(
+                wiki.id,
+                run_id,
+                "Revenue result",
+                &serde_json::json!({"value": 42}),
+            )
             .unwrap();
         let markdown =
             std::fs::read_to_string(wiki.wiki_folder.join(&stored.logical_path)).unwrap();
 
         assert_eq!(stored.assurance.trust, TrustTier::MachineConfirmed);
+        assert_eq!(stored.concept_id, repeated.concept_id);
+        assert_eq!(service.get(app_id, wiki.id).unwrap().len(), 1);
         assert_eq!(
             stored
                 .generation
@@ -929,8 +1084,50 @@ mod tests {
             Some("process:airwiki-wasm")
         );
         assert!(markdown.contains("by: process:airwiki-wasm"));
-        assert!(markdown.contains("\"value\": 42"));
+        assert!(markdown.contains("\"value\":42"));
         assert!(!markdown.contains("human:"));
+    }
+
+    #[test]
+    fn valid_large_computation_receipt_can_be_saved() {
+        let (_temp, _database, service, app_id) = service();
+        let wiki = service.create(app_id, "Large computed memory").unwrap();
+        let receipt = serde_json::json!({"payload": "x".repeat(64 * 1024)});
+
+        let stored = service
+            .save_process_result(
+                wiki.id,
+                Uuid::new_v4(),
+                "Large computation result",
+                &receipt,
+            )
+            .unwrap();
+
+        let markdown = std::fs::read_to_string(wiki.wiki_folder.join(stored.logical_path)).unwrap();
+        assert!(markdown.len() > AI_MEMORY_CONCEPT_MAX_BYTES);
+        assert!(markdown.contains("process:airwiki-wasm"));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn memory_write_rejects_a_symlinked_concept_directory() {
+        use std::os::unix::fs::symlink;
+
+        let (temp, _database, service, app_id) = service();
+        let wiki = service.create(app_id, "Confined memory").unwrap();
+        let outside = temp.path().join("outside");
+        std::fs::create_dir_all(&outside).unwrap();
+        symlink(&outside, wiki.wiki_folder.join("concepts")).unwrap();
+        let input = AiMemoryConceptInput {
+            title: "Escaping concept".to_owned(),
+            description: String::new(),
+            concept_type: ConceptType::Reference,
+            tags: Vec::new(),
+            body_markdown: "Must remain inside the managed vault.".to_owned(),
+        };
+
+        assert!(service.write(app_id, wiki.id, None, None, &input).is_err());
+        assert!(std::fs::read_dir(outside).unwrap().next().is_none());
     }
 
     #[test]
@@ -963,6 +1160,48 @@ mod tests {
     }
 
     #[test]
+    fn application_mutations_preserve_human_verification_as_outdated() {
+        let (_temp, _database, service, app_id) = service();
+        let wiki = service.create(app_id, "Verified memory").unwrap();
+        let input = AiMemoryConceptInput {
+            title: "Decision".to_owned(),
+            description: "Reviewed decision".to_owned(),
+            concept_type: ConceptType::Other("Decision".to_owned()),
+            tags: Vec::new(),
+            body_markdown: "Keep the data local.".to_owned(),
+        };
+        let created = service.write(app_id, wiki.id, None, None, &input).unwrap();
+        let verified = service
+            .verify_managed_concept(wiki.id, &created.logical_path, &created.fingerprint)
+            .unwrap();
+        let updated_input = AiMemoryConceptInput {
+            body_markdown: "Keep the data local and encrypted.".to_owned(),
+            ..input
+        };
+
+        let updated = service
+            .write(
+                app_id,
+                wiki.id,
+                Some(verified.concept_id),
+                Some(&verified.fingerprint),
+                &updated_input,
+            )
+            .unwrap();
+        let deprecated = service
+            .deprecate(app_id, wiki.id, updated.concept_id, &updated.fingerprint)
+            .unwrap();
+        let markdown =
+            std::fs::read_to_string(wiki.wiki_folder.join(&deprecated.logical_path)).unwrap();
+
+        assert_eq!(updated.assurance.trust, TrustTier::HumanReviewed);
+        assert!(updated.assurance.verification_outdated);
+        assert_eq!(deprecated.assurance.trust, TrustTier::HumanReviewed);
+        assert!(deprecated.assurance.verification_outdated);
+        assert!(markdown.contains("by: human:airwiki-user"));
+    }
+
+    #[test]
     fn computation_result_cannot_be_saved_to_a_folder_wiki() {
         let (temp, database, service, _app_id) = service();
         let source = temp.path().join("source");
@@ -979,7 +1218,12 @@ mod tests {
 
         assert!(
             service
-                .save_process_result(wiki.id, "Blocked result", &serde_json::json!({"value": 42}))
+                .save_process_result(
+                    wiki.id,
+                    Uuid::new_v4(),
+                    "Blocked result",
+                    &serde_json::json!({"value": 42}),
+                )
                 .is_err()
         );
     }
@@ -1019,6 +1263,46 @@ mod tests {
             )
             .unwrap();
         assert!(service.get(other, wiki.id).is_err());
+    }
+
+    #[test]
+    fn external_concept_change_is_never_overwritten_by_an_application() {
+        let (_temp, database, service, app_id) = service();
+        let wiki = service.create(app_id, "Externally changed memory").unwrap();
+        let input = AiMemoryConceptInput {
+            title: "Fact".to_owned(),
+            description: String::new(),
+            concept_type: ConceptType::Reference,
+            tags: Vec::new(),
+            body_markdown: "Original fact".to_owned(),
+        };
+        let created = service.write(app_id, wiki.id, None, None, &input).unwrap();
+        let path = wiki.wiki_folder.join(&created.logical_path);
+        let external = b"---\ntype: Reference\n---\n\nExternally changed fact\n";
+        std::fs::write(&path, external).unwrap();
+        let replacement = AiMemoryConceptInput {
+            body_markdown: "Application replacement".to_owned(),
+            ..input
+        };
+
+        assert!(
+            service
+                .write(
+                    app_id,
+                    wiki.id,
+                    Some(created.concept_id),
+                    Some(&created.fingerprint),
+                    &replacement,
+                )
+                .is_err()
+        );
+        assert_eq!(std::fs::read(path).unwrap(), external);
+        assert!(
+            database
+                .pending_managed_bundle_mutations_for_collection(wiki.id)
+                .unwrap()
+                .is_empty()
+        );
     }
 
     #[test]
@@ -1067,6 +1351,136 @@ mod tests {
             .set_application_capability_revoked(collaborator, true)
             .unwrap();
         assert!(service.get(collaborator, wiki.id).is_err());
+        assert!(
+            database
+                .set_application_wiki_role(
+                    collaborator,
+                    wiki.id,
+                    Some(ApplicationWikiRole::Reader),
+                )
+                .is_err()
+        );
+        database
+            .set_application_capability_revoked(collaborator, false)
+            .unwrap();
+        assert_eq!(
+            database
+                .application_wiki_role(collaborator, wiki.id)
+                .unwrap(),
+            None
+        );
+        assert!(service.get(collaborator, wiki.id).is_err());
+    }
+
+    #[test]
+    fn editor_mutations_use_the_owner_managed_size_quota() {
+        let (_temp, database, service, owner) = service();
+        let quota_wiki = service.create(owner, "Quota memory").unwrap();
+        let shared_wiki = service.create(owner, "Shared memory").unwrap();
+        database
+            .update_collection_okf_metadata(
+                quota_wiki.id,
+                Some("0.2"),
+                &airwiki_types::OkfCompatibility::DeclaredV02,
+                256 * 1024 * 1024,
+            )
+            .unwrap();
+        let editor = Uuid::new_v4();
+        database
+            .create_application_capability(
+                editor,
+                "Claude",
+                "claude",
+                "claude/test",
+                "fedcba9876543210",
+                &"b".repeat(64),
+            )
+            .unwrap();
+        database
+            .set_application_wiki_role(editor, shared_wiki.id, Some(ApplicationWikiRole::Editor))
+            .unwrap();
+        let input = AiMemoryConceptInput {
+            title: "Shared decision".to_owned(),
+            description: String::new(),
+            concept_type: ConceptType::Other("Decision".to_owned()),
+            tags: Vec::new(),
+            body_markdown: "Keep the owner's quota authoritative.".to_owned(),
+        };
+
+        assert!(
+            service
+                .write(editor, shared_wiki.id, None, None, &input)
+                .is_err()
+        );
+    }
+
+    #[test]
+    fn pending_bundle_mutation_blocks_overlapping_writes() {
+        let (_temp, database, service, owner) = service();
+        let wiki = service.create(owner, "Serialized memory").unwrap();
+        let input = AiMemoryConceptInput {
+            title: "Decision".to_owned(),
+            description: String::new(),
+            concept_type: ConceptType::Other("Decision".to_owned()),
+            tags: Vec::new(),
+            body_markdown: "Serialize managed writes.".to_owned(),
+        };
+        let concept = service.write(owner, wiki.id, None, None, &input).unwrap();
+        let pending = database
+            .begin_managed_bundle_mutation(
+                wiki.id,
+                &concept.logical_path,
+                Some(&concept.fingerprint),
+                &"a".repeat(64),
+            )
+            .unwrap();
+
+        assert!(
+            service
+                .write(
+                    owner,
+                    wiki.id,
+                    Some(concept.concept_id),
+                    Some(&concept.fingerprint),
+                    &input,
+                )
+                .is_err()
+        );
+        assert!(
+            database
+                .begin_managed_bundle_mutation(
+                    wiki.id,
+                    &concept.logical_path,
+                    Some("stale"),
+                    &"b".repeat(64),
+                )
+                .is_err()
+        );
+
+        database
+            .complete_managed_bundle_mutation(pending.id)
+            .unwrap();
+        assert!(
+            database
+                .begin_managed_bundle_mutation(
+                    wiki.id,
+                    &concept.logical_path,
+                    Some("stale"),
+                    &"b".repeat(64),
+                )
+                .is_err()
+        );
+        assert!(
+            service
+                .write(
+                    owner,
+                    wiki.id,
+                    Some(concept.concept_id),
+                    Some(&concept.fingerprint),
+                    &input,
+                )
+                .is_ok()
+        );
     }
 
     #[test]
@@ -1099,6 +1513,94 @@ mod tests {
                 .pending_managed_bundle_mutations()
                 .unwrap()
                 .is_empty()
+        );
+    }
+
+    #[test]
+    fn recovery_applies_only_the_journaled_concept_replacement() {
+        let (_temp, database, service, app_id) = service();
+        let wiki = service.create(app_id, "Recoverable memory").unwrap();
+        let input = AiMemoryConceptInput {
+            title: "Fact".to_owned(),
+            description: String::new(),
+            concept_type: ConceptType::Reference,
+            tags: Vec::new(),
+            body_markdown: "Before crash".to_owned(),
+        };
+        let original = service.write(app_id, wiki.id, None, None, &input).unwrap();
+        let replacement = b"---\ntype: Reference\nstatus: stable\n---\n\nAfter crash\n";
+        let replacement_fingerprint = hex::encode(Sha256::digest(replacement));
+        database
+            .begin_managed_bundle_mutation(
+                wiki.id,
+                &original.logical_path,
+                Some(&original.fingerprint),
+                &replacement_fingerprint,
+            )
+            .unwrap();
+        std::fs::write(wiki.wiki_folder.join(&original.logical_path), replacement).unwrap();
+
+        let report = service.recover_pending().unwrap();
+        let recovered = database
+            .list_okf_concept_projection(wiki.id)
+            .unwrap()
+            .into_iter()
+            .find(|concept| concept.logical_path == original.logical_path)
+            .unwrap();
+
+        assert_eq!(report.recovered, 1);
+        assert_eq!(report.pending, 0);
+        assert_eq!(recovered.fingerprint, replacement_fingerprint);
+        assert!(
+            database
+                .pending_managed_bundle_mutations()
+                .unwrap()
+                .is_empty()
+        );
+    }
+
+    #[test]
+    fn recovery_keeps_ambiguous_concept_bytes_blocked() {
+        let (_temp, database, service, app_id) = service();
+        let wiki = service.create(app_id, "Ambiguous memory").unwrap();
+        let input = AiMemoryConceptInput {
+            title: "Fact".to_owned(),
+            description: String::new(),
+            concept_type: ConceptType::Reference,
+            tags: Vec::new(),
+            body_markdown: "Before crash".to_owned(),
+        };
+        let original = service.write(app_id, wiki.id, None, None, &input).unwrap();
+        let mutation = database
+            .begin_managed_bundle_mutation(
+                wiki.id,
+                &original.logical_path,
+                Some(&original.fingerprint),
+                &"a".repeat(64),
+            )
+            .unwrap();
+        let ambiguous = b"---\ntype: Reference\nstatus: stable\n---\n\nUnknown state\n";
+        let path = wiki.wiki_folder.join(&original.logical_path);
+        std::fs::write(&path, ambiguous).unwrap();
+
+        let report = service.recover_pending().unwrap();
+        let projection = database
+            .list_okf_concept_projection(wiki.id)
+            .unwrap()
+            .into_iter()
+            .find(|concept| concept.logical_path == original.logical_path)
+            .unwrap();
+        let pending = database.pending_managed_bundle_mutations().unwrap();
+
+        assert_eq!(report.recovered, 0);
+        assert_eq!(report.pending, 1);
+        assert_eq!(projection.fingerprint, original.fingerprint);
+        assert_eq!(std::fs::read(path).unwrap(), ambiguous);
+        assert_eq!(pending.len(), 1);
+        assert_eq!(pending[0].id, mutation.id);
+        assert_eq!(
+            pending[0].state,
+            ManagedBundleMutationState::RecoveryRequired
         );
     }
 

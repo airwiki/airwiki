@@ -125,20 +125,21 @@ impl AirWikiWasmRuntime {
         ensure_no_imports(&engine, &executor)?;
         ensure_no_imports(&engine, &attester)?;
 
-        // Epoch deadlines apply to stores that already exist. Start the bounded
-        // execution window only after both components have compiled and passed
-        // the import check so the single epoch tick cannot be consumed early.
-        let _deadline = ExecutionDeadline::start(&engine);
-
-        let mut executor_store = limited_store(&engine)?;
-        let executor_linker = Linker::new(&engine);
-        let executor_instance =
-            ExecutorComponent::instantiate(&mut executor_store, &executor, &executor_linker)
-                .map_err(classify_wasmtime_error)?;
-        let receipt_json = executor_instance
-            .airwiki_attested_executor()
-            .call_execute(&mut executor_store, &parameters)
-            .map_err(classify_wasmtime_error)?;
+        // Each component receives its own epoch window after compilation and
+        // import validation. A slow executor cannot consume the attester's
+        // independent two-second budget.
+        let receipt_json = {
+            let _deadline = ExecutionDeadline::start(&engine);
+            let mut executor_store = limited_store(&engine)?;
+            let executor_linker = Linker::new(&engine);
+            let executor_instance =
+                ExecutorComponent::instantiate(&mut executor_store, &executor, &executor_linker)
+                    .map_err(classify_wasmtime_error)?;
+            executor_instance
+                .airwiki_attested_executor()
+                .call_execute(&mut executor_store, &parameters)
+                .map_err(classify_wasmtime_error)?
+        };
         if receipt_json.len() > MAX_OUTPUT_BYTES {
             return Err(AttestedComputationError::ResourceLimit);
         }
@@ -146,23 +147,26 @@ impl AirWikiWasmRuntime {
             .map_err(|_| AttestedComputationError::ExecutionFailed)?;
         validate_receipt_fields(request.contract, &receipt)?;
 
-        let mut attester_store = limited_store(&engine)?;
-        let attester_linker = Linker::new(&engine);
-        let attester_instance = attester_bindings::AttesterComponent::instantiate(
-            &mut attester_store,
-            &attester,
-            &attester_linker,
-        )
-        .map_err(classify_wasmtime_error)?;
-        let verdict = attester_instance
-            .airwiki_attested_attester()
-            .call_attest(
+        let verdict = {
+            let _deadline = ExecutionDeadline::start(&engine);
+            let mut attester_store = limited_store(&engine)?;
+            let attester_linker = Linker::new(&engine);
+            let attester_instance = attester_bindings::AttesterComponent::instantiate(
                 &mut attester_store,
-                &contract_json,
-                &parameters,
-                &receipt_json,
+                &attester,
+                &attester_linker,
             )
             .map_err(classify_wasmtime_error)?;
+            attester_instance
+                .airwiki_attested_attester()
+                .call_attest(
+                    &mut attester_store,
+                    &contract_json,
+                    &parameters,
+                    &receipt_json,
+                )
+                .map_err(classify_wasmtime_error)?
+        };
 
         Ok(AirWikiWasmOutcome {
             receipt,
@@ -189,8 +193,11 @@ impl ExecutionDeadline {
         let (stop, receiver) = sync_channel(1);
         let engine = engine.clone();
         let task = std::thread::spawn(move || {
-            if receiver.recv_timeout(Duration::from_secs(2)).is_err() {
-                engine.increment_epoch();
+            loop {
+                match receiver.recv_timeout(Duration::from_secs(2)) {
+                    Ok(()) | Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => break,
+                    Err(std::sync::mpsc::RecvTimeoutError::Timeout) => engine.increment_epoch(),
+                }
             }
         });
         Self {

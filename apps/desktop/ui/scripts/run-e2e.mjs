@@ -15,6 +15,9 @@ const expectedPrefix = resolve(tmpdir()) + sep;
 if (!resolve(testRoot).startsWith(expectedPrefix)) throw new Error('unsafe E2E data root');
 const sourceFixture = join(testRoot, 'fixtures', 'source');
 const okfFixture = join(testRoot, 'fixtures', 'okf-v02');
+const freshnessDeadline = new Date();
+freshnessDeadline.setUTCFullYear(freshnessDeadline.getUTCFullYear() + 1);
+const staleAfter = freshnessDeadline.toISOString().slice(0, 10);
 mkdirSync(sourceFixture, { recursive: true });
 mkdirSync(join(okfFixture, 'architecture'), { recursive: true });
 writeFileSync(join(sourceFixture, 'synthetic-source.md'), [
@@ -62,7 +65,7 @@ writeFileSync(join(okfFixture, 'architecture', 'verified.md'), [
   'verified:',
   '  by: human:e2e',
   '  at: 2026-08-13T09:01:00Z',
-  'stale_after: 2027-08-13',
+  `stale_after: ${staleAfter}`,
   'status: stable',
   'sources:',
   '  - id: synthetic-fixture',

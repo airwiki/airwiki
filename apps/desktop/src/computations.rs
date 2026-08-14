@@ -6,7 +6,7 @@ use airwiki_core::{
     ComputationRunState, Database,
 };
 use anyhow::{Context, Result, bail};
-use chrono::{Duration, Utc};
+use chrono::{DateTime, Duration, Utc};
 use serde_json::Value;
 use sha2::{Digest, Sha256};
 use tokio::sync::watch;
@@ -110,6 +110,7 @@ impl ComputationCoordinator {
             .context("application capability is unavailable")?;
         validate_parameters(&contract, &parameters)?;
         let now = Utc::now();
+        self.prune_expired(now)?;
         let expires_at = now + Duration::minutes(10);
         let run_id = Uuid::new_v4();
         let parameter_schema = Value::Array(
@@ -178,7 +179,16 @@ impl ComputationCoordinator {
     }
 
     pub(crate) fn status_for_application(&self, app_id: Uuid, run_id: Uuid) -> Result<Value> {
-        let run = self
+        self.status_for_application_at(app_id, run_id, Utc::now())
+    }
+
+    fn status_for_application_at(
+        &self,
+        app_id: Uuid,
+        run_id: Uuid,
+        now: DateTime<Utc>,
+    ) -> Result<Value> {
+        let mut run = self
             .database
             .computation_run(run_id)?
             .context("computation run is unavailable")?;
@@ -186,46 +196,38 @@ impl ComputationCoordinator {
         if run.actor_id.as_deref() != Some(app_id.as_str()) {
             bail!("application is not authorized for this computation run");
         }
+        if run.state == ComputationRunState::AwaitingConfirmation
+            && run.expires_at <= now
+            && self
+                .database
+                .expire_computation_run_if_awaiting(run_id, now)?
+        {
+            self.pending
+                .lock()
+                .map_err(|_| anyhow::anyhow!("computation queue is unavailable"))?
+                .remove(&run_id);
+            run = self
+                .database
+                .computation_run(run_id)?
+                .context("expired computation run disappeared")?;
+            self.notify();
+        }
         let receipt = self
             .outcomes
             .lock()
             .map_err(|_| anyhow::anyhow!("computation outcomes are unavailable"))?
             .get(&run.id)
-            .filter(|outcome| outcome.expires_at > Utc::now())
+            .filter(|outcome| outcome.expires_at > now)
             .map(|outcome| outcome.outcome.receipt.clone());
         Ok(sanitized_run(&run, receipt))
     }
 
     pub(crate) fn pending(&self) -> Result<Vec<PendingComputation>> {
-        let mut pending = self
+        self.prune_expired(Utc::now())?;
+        let pending = self
             .pending
             .lock()
             .map_err(|_| anyhow::anyhow!("computation queue is unavailable"))?;
-        let now = Utc::now();
-        let expired = pending
-            .keys()
-            .copied()
-            .filter(|id| {
-                self.database
-                    .computation_run(*id)
-                    .ok()
-                    .flatten()
-                    .is_none_or(|run| run.expires_at <= now)
-            })
-            .collect::<Vec<_>>();
-        for id in expired {
-            pending.remove(&id);
-            let _ = self.database.set_computation_run_state(
-                id,
-                ComputationRunState::Expired,
-                None,
-                None,
-            );
-        }
-        self.outcomes
-            .lock()
-            .map_err(|_| anyhow::anyhow!("computation outcomes are unavailable"))?
-            .retain(|_, outcome| outcome.expires_at > now);
         pending
             .iter()
             .map(|(id, pending)| {
@@ -256,11 +258,11 @@ impl ComputationCoordinator {
 
     pub(crate) fn completed(&self) -> Result<Vec<CompletedComputation>> {
         let now = Utc::now();
-        let mut outcomes = self
+        self.prune_expired(now)?;
+        let outcomes = self
             .outcomes
             .lock()
             .map_err(|_| anyhow::anyhow!("computation outcomes are unavailable"))?;
-        outcomes.retain(|_, outcome| outcome.expires_at > now);
         outcomes
             .iter()
             .map(|(id, outcome)| {
@@ -297,38 +299,52 @@ impl ComputationCoordinator {
             .collect()
     }
 
-    pub(crate) fn accepted_receipt(&self, run_id: Uuid) -> Result<Value> {
-        let outcomes = self
+    pub(crate) fn with_claimed_accepted_receipt<T>(
+        &self,
+        run_id: Uuid,
+        save: impl FnOnce(&Value) -> Result<T>,
+    ) -> Result<T> {
+        let now = Utc::now();
+        let mut outcomes = self
             .outcomes
             .lock()
             .map_err(|_| anyhow::anyhow!("computation outcomes are unavailable"))?;
         let outcome = outcomes
             .get(&run_id)
-            .filter(|outcome| outcome.expires_at > Utc::now())
+            .filter(|outcome| outcome.expires_at > now)
             .context("computation result is unavailable")?;
         if outcome.outcome.verdict != airwiki_core::AttestedVerdict::Accepted {
             bail!("only an accepted computation result can be saved");
         }
-        Ok(outcome.outcome.receipt.clone())
-    }
-
-    pub(crate) fn mark_saved(&self, run_id: Uuid) -> Result<()> {
-        self.outcomes
-            .lock()
-            .map_err(|_| anyhow::anyhow!("computation outcomes are unavailable"))?
+        let claimed = outcomes
             .remove(&run_id)
             .context("computation result is unavailable")?;
-        self.notify();
-        Ok(())
+        drop(outcomes);
+        match save(&claimed.outcome.receipt) {
+            Ok(saved) => {
+                self.notify();
+                Ok(saved)
+            }
+            Err(error) => {
+                if claimed.expires_at > Utc::now() {
+                    self.outcomes
+                        .lock()
+                        .map_err(|_| anyhow::anyhow!("computation outcomes are unavailable"))?
+                        .insert(run_id, claimed);
+                }
+                self.notify();
+                Err(error)
+            }
+        }
     }
 
     pub(crate) fn reject(&self, run_id: Uuid) -> Result<()> {
-        let removed = self
+        let pending = self
             .pending
             .lock()
             .map_err(|_| anyhow::anyhow!("computation queue is unavailable"))?
-            .remove(&run_id);
-        if removed.is_none() {
+            .contains_key(&run_id);
+        if !pending {
             bail!("pending computation run is unavailable");
         }
         self.database.set_computation_run_state(
@@ -337,6 +353,10 @@ impl ComputationCoordinator {
             None,
             None,
         )?;
+        self.pending
+            .lock()
+            .map_err(|_| anyhow::anyhow!("computation queue is unavailable"))?
+            .remove(&run_id);
         self.notify();
         Ok(())
     }
@@ -354,16 +374,16 @@ impl ComputationCoordinator {
             .computation_run(run_id)?
             .context("computation run is unavailable")?;
         if run.expires_at <= Utc::now() {
-            self.pending
-                .lock()
-                .map_err(|_| anyhow::anyhow!("computation queue is unavailable"))?
-                .remove(&run_id);
             self.database.set_computation_run_state(
                 run_id,
                 ComputationRunState::Expired,
                 None,
                 None,
             )?;
+            self.pending
+                .lock()
+                .map_err(|_| anyhow::anyhow!("computation queue is unavailable"))?
+                .remove(&run_id);
             bail!("computation run expired");
         }
         if self
@@ -425,6 +445,9 @@ impl ComputationCoordinator {
             .attested_computation
             .context("attested computation is not executable")?;
         validate_parameters(&contract, &pending.parameters)?;
+        // This conditional transition is the execution claim. Revalidation
+        // deliberately leaves the queue entry in place, while SQLite permits
+        // only one caller to move awaiting_confirmation -> running.
         self.database.set_computation_run_state(
             run_id,
             ComputationRunState::Running,
@@ -447,11 +470,12 @@ impl ComputationCoordinator {
                     airwiki_core::AttestedVerdict::Accepted => "accepted",
                     airwiki_core::AttestedVerdict::Rejected => "rejected",
                 };
-                self.database.set_computation_run_state(
+                let result_expires_at = Utc::now() + Duration::minutes(10);
+                self.database.complete_computation_run(
                     run_id,
-                    ComputationRunState::Completed,
-                    Some(&outcome.receipt_sha256),
-                    Some(verdict),
+                    &outcome.receipt_sha256,
+                    verdict,
+                    result_expires_at,
                 )?;
                 self.outcomes
                     .lock()
@@ -460,7 +484,7 @@ impl ComputationCoordinator {
                         run_id,
                         EphemeralOutcome {
                             outcome: outcome.clone(),
-                            expires_at: run.expires_at,
+                            expires_at: result_expires_at,
                         },
                     );
                 self.notify();
@@ -495,17 +519,53 @@ impl ComputationCoordinator {
         }
     }
 
-    fn reject_before_execution<T>(&self, run_id: Uuid, message: &str) -> Result<T> {
-        self.pending
+    fn prune_expired(&self, now: DateTime<Utc>) -> Result<()> {
+        let mut pending = self
+            .pending
             .lock()
-            .map_err(|_| anyhow::anyhow!("computation queue is unavailable"))?
-            .remove(&run_id);
+            .map_err(|_| anyhow::anyhow!("computation queue is unavailable"))?;
+        let mut removed = Vec::new();
+        for id in pending.keys().copied().collect::<Vec<_>>() {
+            match self.database.computation_run(id)? {
+                None => removed.push(id),
+                Some(run) if run.expires_at <= now => {
+                    if run.state == ComputationRunState::AwaitingConfirmation {
+                        self.database.expire_computation_run_if_awaiting(id, now)?;
+                    }
+                    removed.push(id);
+                }
+                Some(_) => {}
+            }
+        }
+        for id in &removed {
+            pending.remove(id);
+        }
+        drop(pending);
+        let mut outcomes = self
+            .outcomes
+            .lock()
+            .map_err(|_| anyhow::anyhow!("computation outcomes are unavailable"))?;
+        let outcome_count = outcomes.len();
+        outcomes.retain(|_, outcome| outcome.expires_at > now);
+        let changed = !removed.is_empty() || outcomes.len() != outcome_count;
+        drop(outcomes);
+        if changed {
+            self.notify();
+        }
+        Ok(())
+    }
+
+    fn reject_before_execution<T>(&self, run_id: Uuid, message: &str) -> Result<T> {
         self.database.set_computation_run_state(
             run_id,
             ComputationRunState::Rejected,
             None,
             None,
         )?;
+        self.pending
+            .lock()
+            .map_err(|_| anyhow::anyhow!("computation queue is unavailable"))?
+            .remove(&run_id);
         self.notify();
         bail!("{message}")
     }
@@ -801,6 +861,38 @@ attester:
     }
 
     #[test]
+    fn revalidation_failure_keeps_the_pending_run_recoverable() -> anyhow::Result<()> {
+        let (_temp, database, coordinator, app_id, wiki_id) = coordinator_fixture()?;
+        let pending = coordinator.request(
+            app_id,
+            wiki_id,
+            "computations/contract.md",
+            serde_json::json!({"year": 2026}),
+        )?;
+        database.replace_okf_concept_projection(wiki_id, &[])?;
+
+        assert!(coordinator.execute_confirmed(pending.run_id).is_err());
+        assert_eq!(
+            database
+                .computation_run(pending.run_id)?
+                .context("computation run should remain auditable")?
+                .state,
+            ComputationRunState::AwaitingConfirmation
+        );
+        assert_eq!(coordinator.pending()?.len(), 1);
+
+        coordinator.reject(pending.run_id)?;
+        assert_eq!(
+            database
+                .computation_run(pending.run_id)?
+                .context("rejected computation run should remain auditable")?
+                .state,
+            ComputationRunState::Rejected
+        );
+        Ok(())
+    }
+
+    #[test]
     fn computation_status_is_isolated_by_application() -> anyhow::Result<()> {
         let (_temp, database, coordinator, app_id, wiki_id) = coordinator_fixture()?;
         let pending = coordinator.request(
@@ -828,6 +920,118 @@ attester:
             coordinator
                 .status_for_application(app_id, pending.run_id)
                 .is_ok()
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn computation_requests_are_bounded_per_application() -> anyhow::Result<()> {
+        let (_temp, _database, coordinator, app_id, wiki_id) = coordinator_fixture()?;
+        for _ in 0..airwiki_types::MAX_PENDING_COMPUTATIONS_PER_APPLICATION {
+            coordinator.request(
+                app_id,
+                wiki_id,
+                "computations/contract.md",
+                serde_json::json!({"year": 2026}),
+            )?;
+        }
+
+        assert!(
+            coordinator
+                .request(
+                    app_id,
+                    wiki_id,
+                    "computations/contract.md",
+                    serde_json::json!({"year": 2026}),
+                )
+                .is_err()
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn computation_request_rate_limit_counts_terminal_runs() -> anyhow::Result<()> {
+        let (_temp, _database, coordinator, app_id, wiki_id) = coordinator_fixture()?;
+        for _ in 0..airwiki_types::MAX_COMPUTATION_REQUESTS_PER_MINUTE {
+            let pending = coordinator.request(
+                app_id,
+                wiki_id,
+                "computations/contract.md",
+                serde_json::json!({"year": 2026}),
+            )?;
+            coordinator.reject(pending.run_id)?;
+        }
+
+        assert!(
+            coordinator
+                .request(
+                    app_id,
+                    wiki_id,
+                    "computations/contract.md",
+                    serde_json::json!({"year": 2026}),
+                )
+                .is_err()
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn status_query_transitions_an_expired_request() -> anyhow::Result<()> {
+        let (_temp, database, coordinator, app_id, wiki_id) = coordinator_fixture()?;
+        let pending = coordinator.request(
+            app_id,
+            wiki_id,
+            "computations/contract.md",
+            serde_json::json!({"year": 2026}),
+        )?;
+
+        let status =
+            coordinator.status_for_application_at(app_id, pending.run_id, pending.expires_at)?;
+
+        assert_eq!(status.get("state").and_then(Value::as_str), Some("expired"));
+        assert_eq!(
+            database
+                .computation_run(pending.run_id)?
+                .context("expired run should remain auditable")?
+                .state,
+            ComputationRunState::Expired
+        );
+        assert!(coordinator.pending()?.is_empty());
+        Ok(())
+    }
+
+    #[test]
+    fn accepted_receipt_claim_is_retry_safe() -> anyhow::Result<()> {
+        let (_temp, _database, coordinator, _app_id, _wiki_id) = coordinator_fixture()?;
+        let run_id = Uuid::new_v4();
+        coordinator
+            .outcomes
+            .lock()
+            .map_err(|_| anyhow::anyhow!("test outcome lock is unavailable"))?
+            .insert(
+                run_id,
+                EphemeralOutcome {
+                    outcome: AirWikiWasmOutcome {
+                        receipt: serde_json::json!({"value": 42}),
+                        receipt_sha256: "a".repeat(64),
+                        verdict: airwiki_core::AttestedVerdict::Accepted,
+                    },
+                    expires_at: Utc::now() + Duration::minutes(10),
+                },
+            );
+
+        let failed: Result<()> =
+            coordinator.with_claimed_accepted_receipt(run_id, |_| bail!("synthetic save failure"));
+        assert!(failed.is_err());
+        assert!(
+            coordinator
+                .with_claimed_accepted_receipt(run_id, |_| Ok(()))
+                .is_ok()
+        );
+        assert!(
+            coordinator
+                .with_claimed_accepted_receipt(run_id, |_| Ok(()))
+                .is_err()
         );
         Ok(())
     }

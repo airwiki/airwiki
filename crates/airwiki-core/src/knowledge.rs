@@ -12,6 +12,9 @@ use std::fs::{self, File};
 use std::io::Read;
 use std::path::{Path, PathBuf};
 
+#[cfg(windows)]
+use std::os::windows::fs::MetadataExt;
+
 use airwiki_types::{
     CollectionPolicy, ConceptAssurance, DocumentStatus, FreshnessState, OkfWarning, TrustTier,
 };
@@ -28,6 +31,9 @@ use crate::storage::{
     CollectionRecord, ConceptRecord, Database, OkfConceptProjectionRecord, SourceDocumentRecord,
     WikiOrigin,
 };
+
+#[cfg(windows)]
+const FILE_ATTRIBUTE_REPARSE_POINT: u32 = 0x0400;
 
 /// Hard upper bound for content returned by [`OkfBundleInspector::load_page`].
 /// Fingerprints are still calculated over the complete file using streaming
@@ -442,7 +448,11 @@ impl OkfBundleInspector {
         if database_before.fingerprint != database_after.fingerprint {
             bail!("La autorización o publicación cambió mientras se cargaba la página");
         }
-        let final_fingerprint = fingerprint_regular_file(&page_path)?;
+        let final_page_path = projected_page_path(&database_after, page_id)?;
+        if final_page_path != page_path {
+            bail!("La ubicación de la página cambió mientras se estaba cargando");
+        }
+        let final_fingerprint = fingerprint_regular_file(&final_page_path)?;
         if final_fingerprint != snapshot.fingerprint {
             bail!("La página de conocimiento cambió mientras se estaba cargando");
         }
@@ -538,7 +548,7 @@ impl OkfBundleInspector {
         let mut fingerprint_entries = BTreeMap::<String, String>::new();
 
         match fs::symlink_metadata(&collection.wiki_folder) {
-            Ok(metadata) if metadata.file_type().is_symlink() => {
+            Ok(metadata) if metadata_is_link_or_reparse(&metadata) => {
                 health.push(HealthIssue::new(
                     HealthSeverity::Error,
                     "unsafe_bundle_root",
@@ -691,6 +701,48 @@ impl OkfBundleInspector {
             warning_count: 0,
             issues: Vec::new(),
         };
+        match fs::symlink_metadata(&collection.wiki_folder) {
+            Ok(metadata) if metadata_is_link_or_reparse(&metadata) => {
+                health.push(HealthIssue::new(
+                    HealthSeverity::Error,
+                    "unsafe_bundle_root",
+                    None,
+                    "La raíz administrada del bundle OKF es un enlace o reparse point.",
+                ));
+                return Ok(finalize_bundle(
+                    collection,
+                    &[],
+                    BundleParts::empty(BTreeMap::new(), health),
+                ));
+            }
+            Ok(metadata) if !metadata.is_dir() => {
+                health.push(HealthIssue::new(
+                    HealthSeverity::Error,
+                    "invalid_bundle_root",
+                    None,
+                    "La raíz administrada del bundle OKF no es un directorio.",
+                ));
+                return Ok(finalize_bundle(
+                    collection,
+                    &[],
+                    BundleParts::empty(BTreeMap::new(), health),
+                ));
+            }
+            Ok(_) => {}
+            Err(error) => {
+                health.push(HealthIssue::new(
+                    HealthSeverity::Error,
+                    "missing_bundle",
+                    None,
+                    format!("No se pudo inspeccionar la raíz del bundle OKF: {error}"),
+                ));
+                return Ok(finalize_bundle(
+                    collection,
+                    &[],
+                    BundleParts::empty(BTreeMap::new(), health),
+                ));
+            }
+        }
         let mut pages = BTreeMap::new();
         let mut fingerprints = BTreeMap::new();
         for page_id in [KnowledgePageId::Index, KnowledgePageId::Log] {
@@ -698,7 +750,7 @@ impl OkfBundleInspector {
                 &collection.wiki_folder,
                 page_id,
                 &mut health,
-                page_id == KnowledgePageId::Index,
+                page_id == KnowledgePageId::Index && collection.origin == WikiOrigin::AiMemory,
             )? {
                 fingerprints.insert(page.logical_path.clone(), page.snapshot.fingerprint.clone());
                 pages.insert(page_id, page);
@@ -706,7 +758,19 @@ impl OkfBundleInspector {
         }
         for projected in &snapshot.projection {
             let page_id = KnowledgePageId::Concept(projected.concept_id);
-            let path = collection.wiki_folder.join(&projected.logical_path);
+            let path =
+                match checked_projected_path(&collection.wiki_folder, &projected.logical_path) {
+                    Ok(path) => path,
+                    Err(_) => {
+                        health.push(HealthIssue::new(
+                            HealthSeverity::Error,
+                            "unsafe_projected_path",
+                            Some(page_id),
+                            "La ruta proyectada atraviesa una entrada insegura del bundle.",
+                        ));
+                        continue;
+                    }
+                };
             if let Some(page) =
                 inspect_page_at(&path, &projected.logical_path, page_id, &mut health, true)?
             {
@@ -781,10 +845,7 @@ fn projected_page_path(
                 .iter()
                 .find(|concept| concept.concept_id == concept_id)
                 .context("El concepto no pertenece al bundle OKF solicitado")?;
-            Ok(snapshot
-                .collection
-                .wiki_folder
-                .join(&projection.logical_path))
+            checked_projected_path(&snapshot.collection.wiki_folder, &projection.logical_path)
         }
         KnowledgePageId::Concept(_) => Ok(page_id.path_below(&snapshot.collection.wiki_folder)),
     }
@@ -797,6 +858,51 @@ fn mark_bundle_updating(view: &mut KnowledgeBundleView, code: &str, message: &st
             .push(HealthIssue::new(HealthSeverity::Info, code, None, message));
         view.health.finalize();
     }
+}
+
+fn metadata_is_link_or_reparse(metadata: &fs::Metadata) -> bool {
+    if metadata.file_type().is_symlink() {
+        return true;
+    }
+    #[cfg(windows)]
+    {
+        metadata.file_attributes() & FILE_ATTRIBUTE_REPARSE_POINT != 0
+    }
+    #[cfg(not(windows))]
+    false
+}
+
+fn checked_projected_path(root: &Path, logical_path: &str) -> Result<PathBuf> {
+    if logical_path.contains('\\')
+        || logical_path.starts_with('/')
+        || logical_path
+            .split('/')
+            .any(|part| part.is_empty() || matches!(part, "." | ".."))
+    {
+        bail!("La ruta proyectada del bundle OKF no es válida");
+    }
+    let root_metadata =
+        fs::symlink_metadata(root).context("No se pudo inspeccionar la raíz del bundle OKF")?;
+    if metadata_is_link_or_reparse(&root_metadata) || !root_metadata.is_dir() {
+        bail!("La raíz del bundle OKF no es un directorio seguro");
+    }
+    let parts = logical_path.split('/').collect::<Vec<_>>();
+    let mut path = root.to_path_buf();
+    for (index, part) in parts.iter().enumerate() {
+        path.push(part);
+        match fs::symlink_metadata(&path) {
+            Ok(metadata)
+                if metadata_is_link_or_reparse(&metadata)
+                    || index + 1 < parts.len() && !metadata.is_dir() =>
+            {
+                bail!("La ruta proyectada atraviesa una entrada insegura");
+            }
+            Ok(_) => {}
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+            Err(error) => return Err(error).context("No se pudo inspeccionar la ruta proyectada"),
+        }
+    }
+    Ok(path)
 }
 
 fn database_snapshot_fingerprint(
@@ -918,7 +1024,7 @@ fn bundle_tree_fingerprint(root: &Path) -> String {
     let mut hasher = Sha256::new();
     hash_bytes(&mut hasher, b"airwiki-okf-filesystem-snapshot-v1");
     match fs::symlink_metadata(root) {
-        Ok(metadata) if metadata.file_type().is_symlink() => {
+        Ok(metadata) if metadata_is_link_or_reparse(&metadata) => {
             hash_bytes(&mut hasher, b"root-symlink");
             return hex::encode(hasher.finalize());
         }
@@ -1147,7 +1253,7 @@ fn inspect_page_at(
             return Ok(None);
         }
     };
-    if metadata.file_type().is_symlink() {
+    if metadata_is_link_or_reparse(&metadata) {
         health.push(HealthIssue::new(
             HealthSeverity::Error,
             "unsafe_page_symlink",
@@ -1224,7 +1330,7 @@ fn inspect_page_at(
 fn read_page_snapshot(path: &Path, content_limit: usize) -> Result<PageSnapshot> {
     let metadata = fs::symlink_metadata(path)
         .with_context(|| format!("No se pudo inspeccionar la página {}", path.display()))?;
-    if metadata.file_type().is_symlink() || !metadata.is_file() {
+    if metadata_is_link_or_reparse(&metadata) || !metadata.is_file() {
         bail!("La página no es un archivo regular o es un enlace simbólico");
     }
     let mut file = File::open(path)
@@ -1257,7 +1363,7 @@ fn read_page_snapshot(path: &Path, content_limit: usize) -> Result<PageSnapshot>
             path.display()
         )
     })?;
-    if path_after.file_type().is_symlink()
+    if metadata_is_link_or_reparse(&path_after)
         || !path_after.is_file()
         || opened_stamp != handle_after
         || opened_stamp != FileStamp::from_metadata(&path_after)
@@ -1308,7 +1414,7 @@ impl FileStamp {
 fn fingerprint_regular_file(path: &Path) -> Result<String> {
     let path_before = fs::symlink_metadata(path)
         .with_context(|| format!("No se pudo inspeccionar la página {}", path.display()))?;
-    if path_before.file_type().is_symlink() || !path_before.is_file() {
+    if metadata_is_link_or_reparse(&path_before) || !path_before.is_file() {
         bail!("La página no es un archivo regular o es un enlace simbólico");
     }
     let mut file = File::open(path)
@@ -1330,7 +1436,7 @@ fn fingerprint_regular_file(path: &Path) -> Result<String> {
             path.display()
         )
     })?;
-    if path_after.file_type().is_symlink()
+    if metadata_is_link_or_reparse(&path_after)
         || !path_after.is_file()
         || opened_stamp != handle_after
         || opened_stamp != FileStamp::from_metadata(&path_after)
@@ -3082,6 +3188,83 @@ mod tests {
             )
             .unwrap();
         assert!(page.body_markdown.contains("# Body"));
+    }
+
+    #[test]
+    fn imported_okf_without_root_index_is_a_healthy_bundle() {
+        let temp = tempfile::tempdir().unwrap();
+        let bundle = temp.path().join("bundle");
+        fs::create_dir_all(bundle.join("nested")).unwrap();
+        fs::write(
+            bundle.join("nested/item.md"),
+            "---\ntype: Future Knowledge\ntitle: Nested item\nstatus: stable\n---\n\n# Body\n",
+        )
+        .unwrap();
+        let report = crate::OkfImportValidator::validate_directory(&bundle).unwrap();
+        let database = Database::in_memory().unwrap();
+        let collection = database
+            .create_collection_with_origin(
+                "Imported",
+                &bundle,
+                &bundle,
+                CollectionPolicy::local_only(),
+                WikiOrigin::ImportedOkf,
+                crate::storage::IndexingMode::NotApplicable,
+            )
+            .unwrap();
+        database
+            .replace_okf_concept_projection(collection.id, &report.concepts)
+            .unwrap();
+
+        let view = OkfBundleInspector::new(database)
+            .inspect_bundle(collection.id)
+            .unwrap();
+
+        assert_eq!(view.state, KnowledgeBundleState::Ready);
+        assert!(view.health.is_healthy(), "{:#?}", view.health.issues);
+        assert!(!has_issue(&view, "missing_index"));
+        assert_eq!(view.concepts.len(), 1);
+        assert_eq!(view.concepts[0].relative_path, "nested/item.md");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn projected_bundle_with_symlinked_root_is_rejected_fail_closed() {
+        use std::os::unix::fs::symlink;
+
+        let temp = tempfile::tempdir().unwrap();
+        let bundle = temp.path().join("bundle");
+        fs::create_dir_all(bundle.join("nested")).unwrap();
+        fs::write(
+            bundle.join("nested/item.md"),
+            "---\ntype: Operational Guide\nstatus: stable\n---\n\n# Private body\n",
+        )
+        .unwrap();
+        let report = crate::OkfImportValidator::validate_directory(&bundle).unwrap();
+        let database = Database::in_memory().unwrap();
+        let collection = database
+            .create_collection_with_origin(
+                "Imported",
+                &bundle,
+                &bundle,
+                CollectionPolicy::local_only(),
+                WikiOrigin::ImportedOkf,
+                crate::storage::IndexingMode::NotApplicable,
+            )
+            .unwrap();
+        database
+            .replace_okf_concept_projection(collection.id, &report.concepts)
+            .unwrap();
+        let outside = temp.path().join("outside");
+        fs::rename(&bundle, &outside).unwrap();
+        symlink(&outside, &bundle).unwrap();
+
+        let view = OkfBundleInspector::new(database)
+            .inspect_bundle(collection.id)
+            .unwrap();
+
+        assert!(has_issue(&view, "unsafe_bundle_root"));
+        assert!(view.concepts.is_empty());
     }
 
     #[test]

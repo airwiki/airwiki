@@ -17,6 +17,9 @@ use std::{
     time::{Duration, Instant},
 };
 
+#[cfg(windows)]
+use std::os::windows::fs::MetadataExt;
+
 use airwiki_core::inference::{GenerationExecutionClass, GenerationFailure, GenerationFailureKind};
 use airwiki_core::{
     AppPaths as CoreAppPaths, AuditEvent, BootstrapFederationIndexEntry, CollectionRecord,
@@ -88,6 +91,59 @@ use crate::{
     },
 };
 
+#[cfg(windows)]
+const FILE_ATTRIBUTE_REPARSE_POINT: u32 = 0x0400;
+
+#[derive(Debug, Clone, Copy, Default)]
+struct RetiredBundleRecoveryReport {
+    recovered: usize,
+    pending: usize,
+}
+
+fn metadata_is_link_or_reparse(metadata: &std::fs::Metadata) -> bool {
+    if metadata.file_type().is_symlink() {
+        return true;
+    }
+    #[cfg(windows)]
+    {
+        metadata.file_attributes() & FILE_ATTRIBUTE_REPARSE_POINT != 0
+    }
+    #[cfg(not(windows))]
+    false
+}
+
+fn recover_retired_managed_wiki_files(vaults: &Path) -> Result<RetiredBundleRecoveryReport> {
+    let mut report = RetiredBundleRecoveryReport::default();
+    for entry in std::fs::read_dir(vaults).context("no se pudo inspeccionar el vault de wikis")? {
+        let entry = match entry {
+            Ok(entry) => entry,
+            Err(_) => {
+                report.pending = report.pending.saturating_add(1);
+                continue;
+            }
+        };
+        let name = entry.file_name();
+        let Some(marker) = name.to_str().and_then(|name| name.strip_prefix(".delete-")) else {
+            continue;
+        };
+        if Uuid::parse_str(marker).is_err() {
+            continue;
+        }
+        let path = entry.path();
+        let safe_directory = std::fs::symlink_metadata(&path)
+            .is_ok_and(|metadata| metadata.is_dir() && !metadata_is_link_or_reparse(&metadata));
+        if !safe_directory {
+            report.pending = report.pending.saturating_add(1);
+            continue;
+        }
+        match std::fs::remove_dir_all(&path) {
+            Ok(()) => report.recovered = report.recovered.saturating_add(1),
+            Err(_) => report.pending = report.pending.saturating_add(1),
+        }
+    }
+    Ok(report)
+}
+
 fn delete_managed_wiki_files(
     database: &Database,
     vaults: &Path,
@@ -105,7 +161,7 @@ fn delete_managed_wiki_files(
     if bundle.exists() {
         let metadata = std::fs::symlink_metadata(bundle)
             .context("no se pudo comprobar el bundle administrado")?;
-        if metadata.file_type().is_symlink() || !metadata.is_dir() {
+        if metadata_is_link_or_reparse(&metadata) || !metadata.is_dir() {
             bail!("el bundle administrado no es una carpeta segura");
         }
         std::fs::rename(bundle, &retired)
@@ -120,6 +176,25 @@ fn delete_managed_wiki_files(
     if retired.exists() {
         std::fs::remove_dir_all(&retired)
             .context("la wiki se retiró, pero no se pudo limpiar su bundle")?;
+    }
+    Ok(())
+}
+
+fn ensure_public_withdrawal_completed(database: &Database, collection_id: Uuid) -> Result<()> {
+    if database
+        .public_collection_profile(collection_id)?
+        .is_some_and(|profile| profile.withdrawal_pending)
+    {
+        bail!(
+            "la wiki ya no se comparte, pero su retiro público debe confirmarse antes de eliminarla"
+        );
+    }
+    Ok(())
+}
+
+fn ensure_folder_ingestion_source(collection: &CollectionRecord) -> Result<()> {
+    if collection.origin != WikiOrigin::Folder {
+        bail!("solo las wikis creadas desde una carpeta pueden indexar archivos de origen");
     }
     Ok(())
 }
@@ -1481,42 +1556,50 @@ impl DesktopServices {
         lan_enabled: bool,
     ) -> Result<Self> {
         let blocking_paths = paths.clone();
-        let (core_paths, database, recovery, managed_recovery, identity, public_identity, access) =
-            tokio::task::spawn_blocking(move || {
-                let core_paths = CoreAppPaths::at(&blocking_paths.data);
-                core_paths.ensure()?;
-                let database = Database::open(&blocking_paths.database)?;
-                let bundled_bootstrap_indexes = parse_bundled_bootstrap_federation_indexes(
-                    BUNDLED_BOOTSTRAP_FEDERATION_INDEXES,
-                )?;
-                let bootstrap_database = database.clone();
-                install_bundled_bootstrap_federation_indexes(
-                    &bootstrap_database,
-                    bundled_bootstrap_indexes,
-                )?;
-                let recovery =
-                    OkfPublicationMaterializer::new(database.clone()).recover_pending()?;
-                let managed_recovery =
-                    airwiki_core::AiMemoryService::new(database.clone(), core_paths.vaults.clone())
-                        .recover_pending()?;
-                let identity = NodeIdentity::load_or_create(secret_store.as_ref())
-                    .context("no se pudo cargar la identidad Ed25519 del dispositivo")?;
-                let public_identity =
-                    NodeIdentity::load_or_create_public_publisher(secret_store.as_ref())
-                        .context("no se pudo cargar la identidad pública Ed25519")?;
-                let access = restore_access_control(&database)?;
-                Ok::<_, anyhow::Error>((
-                    core_paths,
-                    database,
-                    recovery,
-                    managed_recovery,
-                    identity,
-                    public_identity,
-                    access,
-                ))
-            })
-            .await
-            .context("se detuvo el worker de bootstrap privado")??;
+        let (
+            core_paths,
+            database,
+            recovery,
+            managed_recovery,
+            retired_recovery,
+            identity,
+            public_identity,
+            access,
+        ) = tokio::task::spawn_blocking(move || {
+            let core_paths = CoreAppPaths::at(&blocking_paths.data);
+            core_paths.ensure()?;
+            let retired_recovery = recover_retired_managed_wiki_files(&core_paths.vaults)?;
+            let database = Database::open(&blocking_paths.database)?;
+            let bundled_bootstrap_indexes =
+                parse_bundled_bootstrap_federation_indexes(BUNDLED_BOOTSTRAP_FEDERATION_INDEXES)?;
+            let bootstrap_database = database.clone();
+            install_bundled_bootstrap_federation_indexes(
+                &bootstrap_database,
+                bundled_bootstrap_indexes,
+            )?;
+            let recovery = OkfPublicationMaterializer::new(database.clone()).recover_pending()?;
+            let managed_recovery =
+                airwiki_core::AiMemoryService::new(database.clone(), core_paths.vaults.clone())
+                    .recover_pending()?;
+            let identity = NodeIdentity::load_or_create(secret_store.as_ref())
+                .context("no se pudo cargar la identidad Ed25519 del dispositivo")?;
+            let public_identity =
+                NodeIdentity::load_or_create_public_publisher(secret_store.as_ref())
+                    .context("no se pudo cargar la identidad pública Ed25519")?;
+            let access = restore_access_control(&database)?;
+            Ok::<_, anyhow::Error>((
+                core_paths,
+                database,
+                recovery,
+                managed_recovery,
+                retired_recovery,
+                identity,
+                public_identity,
+                access,
+            ))
+        })
+        .await
+        .context("se detuvo el worker de bootstrap privado")??;
         if recovery.pending > 0 {
             tracing::warn!(
                 pending = recovery.pending,
@@ -1530,6 +1613,13 @@ impl DesktopServices {
                 pending = managed_recovery.pending,
                 recovered = managed_recovery.recovered,
                 "AI memory bundle recovery completed with pending work"
+            );
+        }
+        if retired_recovery.pending > 0 || retired_recovery.recovered > 0 {
+            tracing::warn!(
+                pending = retired_recovery.pending,
+                recovered = retired_recovery.recovered,
+                "retired managed wiki cleanup completed with pending work"
             );
         }
         let node_id = identity.peer_id().to_string();
@@ -1682,13 +1772,17 @@ impl DesktopServices {
     }
 
     pub(crate) fn save_computation_result(&self, run_id: Uuid, target_wiki_id: Uuid) -> Result<()> {
-        let receipt = self.computations.accepted_receipt(run_id)?;
-        self.memories.save_process_result(
-            target_wiki_id,
-            "Attested computation result",
-            &receipt,
-        )?;
-        self.computations.mark_saved(run_id)
+        self.computations
+            .with_claimed_accepted_receipt(run_id, |receipt| {
+                self.memories
+                    .save_process_result(
+                        target_wiki_id,
+                        run_id,
+                        "Attested computation result",
+                        receipt,
+                    )
+                    .map(|_| ())
+            })
     }
 
     pub(crate) fn application_access_views(&self) -> Result<Vec<ApplicationAccessView>> {
@@ -1915,6 +2009,7 @@ impl DesktopServices {
             .database
             .list_collections()?
             .into_iter()
+            .filter(|collection| collection.origin == WikiOrigin::Folder)
             .map(|collection| collection.id)
             .collect::<Vec<_>>();
         let preflight = async {
@@ -2105,7 +2200,7 @@ impl DesktopServices {
                 name,
                 bundle_root: bundle_root.clone(),
                 origin: airwiki_core::WikiOrigin::ImportedOkf,
-                replacement_fingerprint: format!("import:{}", report.uncompressed_bytes),
+                replacement_fingerprint: report.bundle_fingerprint.clone(),
                 owner_app_id: None,
             },
         );
@@ -2338,6 +2433,7 @@ impl DesktopServices {
         self.update_collection_policy(collection_id, CollectionPolicy::local_only())?;
         self.sync_public_collection(collection_id).await?;
         self.reconcile_public_network().await?;
+        ensure_public_withdrawal_completed(&self.database, collection_id)?;
 
         let database = self.database.clone();
         let vaults = self.core_paths.vaults.clone();
@@ -2494,6 +2590,7 @@ impl DesktopServices {
             .database
             .collection(collection_id)?
             .context("la wiki a actualizar no existe")?;
+        ensure_folder_ingestion_source(&collection)?;
         if !collection.okf_compatibility.permits_external_disclosure() {
             bail!("la wiki usa un formato OKF restringido y no admite indexación");
         }
@@ -2507,6 +2604,11 @@ impl DesktopServices {
     /// The worker runs this on a blocking thread when a watcher event arrives
     /// while another scan is still performing inference.
     pub fn preflight_collection(&self, collection_id: Uuid) -> Result<()> {
+        let collection = self
+            .database
+            .collection(collection_id)?
+            .context("la wiki a comprobar no existe")?;
+        ensure_folder_ingestion_source(&collection)?;
         let _ = self.pipeline()?.preflight_collection(collection_id)?;
         let _ = self.database.bump_public_manifest_sequence(collection_id)?;
         Ok(())
@@ -4756,6 +4858,76 @@ mod tests {
 
         assert!(delete_managed_wiki_files(&database, &vaults, Uuid::new_v4(), &outside).is_err());
         assert!(outside.exists());
+    }
+
+    #[test]
+    fn deletion_waits_for_a_durable_public_withdrawal_receipt() {
+        let temp = tempfile::tempdir().unwrap();
+        let source = temp.path().join("source");
+        let bundle = temp.path().join("bundle");
+        std::fs::create_dir_all(&source).unwrap();
+        let database = Database::in_memory().unwrap();
+        let collection = database
+            .create_collection(
+                "Public wiki",
+                &source,
+                &bundle,
+                CollectionPolicy::local_only(),
+            )
+            .unwrap();
+        database
+            .update_collection_policy(
+                collection.id,
+                CollectionPolicy {
+                    local_only: false,
+                    peer_shareable: false,
+                    allow_external_ai: false,
+                    internet_public: true,
+                },
+            )
+            .unwrap();
+        database
+            .update_collection_policy(collection.id, CollectionPolicy::local_only())
+            .unwrap();
+
+        assert!(ensure_public_withdrawal_completed(&database, collection.id).is_err());
+        database.complete_public_withdrawal(collection.id).unwrap();
+        assert!(ensure_public_withdrawal_completed(&database, collection.id).is_ok());
+    }
+
+    #[test]
+    fn managed_wikis_are_not_folder_ingestion_sources() {
+        let temp = tempfile::tempdir().unwrap();
+        let bundle = temp.path().join("imported");
+        std::fs::create_dir_all(&bundle).unwrap();
+        let database = Database::in_memory().unwrap();
+        let collection = database
+            .create_collection_with_origin(
+                "Imported",
+                &bundle,
+                &bundle,
+                CollectionPolicy::local_only(),
+                WikiOrigin::ImportedOkf,
+                airwiki_core::IndexingMode::NotApplicable,
+            )
+            .unwrap();
+
+        assert!(ensure_folder_ingestion_source(&collection).is_err());
+    }
+
+    #[test]
+    fn retired_managed_wiki_cleanup_is_retried_at_startup() {
+        let temp = tempfile::tempdir().unwrap();
+        let vaults = temp.path().join("vaults");
+        let retired = vaults.join(format!(".delete-{}", Uuid::new_v4()));
+        std::fs::create_dir_all(&retired).unwrap();
+        std::fs::write(retired.join("locked-before-restart.md"), "synthetic").unwrap();
+
+        let report = recover_retired_managed_wiki_files(&vaults).unwrap();
+
+        assert_eq!(report.recovered, 1);
+        assert_eq!(report.pending, 0);
+        assert!(!retired.exists());
     }
 
     struct EmptyFederatedSearch;

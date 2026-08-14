@@ -25,6 +25,22 @@ The source is Apache-2.0 and the official repository is [airwiki/airwiki](https:
 - Prefer a focused change. Do not combine behavior changes, broad refactors, dependency upgrades, and formatting churn.
 - Use synthetic fixtures. Never commit private documents, personal data, credentials, models, runtimes, databases, logs, certificates, or generated local state.
 
+## Project knowledge in AirWiki
+
+When the AirWiki MCP integration is available, use the AI-memory Wiki named
+`AirWiki — Documentación del proyecto` for durable, reusable project knowledge.
+After a confirmed architecture, product rule, contributor workflow, or recurring
+pitfall changes, create or update the corresponding concept and cite the
+versioned repository documents that remain authoritative.
+
+Do not use this Wiki for transient branch status, test output, speculative
+designs, local paths, identities, queries, logs, credentials, private content or
+anything already better represented by source control. Agent-authored concepts
+remain unverified until a person reviews them; never verify, share, grant access
+or change exposure policy on the user's behalf. If the integration is
+unavailable, continue the repository task normally and report that AirWiki
+synchronization remains pending rather than creating an alternative local store.
+
 ## Workspace ownership
 
 - `airwiki-types`: dependency-light contracts and domain value types.

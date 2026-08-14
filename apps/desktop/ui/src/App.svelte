@@ -344,6 +344,8 @@
           destination = 'wikis';
           connectionsOpen = true;
           pushHash('#wikis');
+          if (section === 'integrations') void runIntegrationAction({ kind: 'refresh' });
+          else void runConnectivityAction('refresh');
           return;
         }
         destination = 'system';
@@ -441,10 +443,11 @@
       if (event.requestId && event.requestId === guidedRepairRequestId) guidedRepairRequestId = null;
       runtimeMessageId = event.snapshot.phase === 'ready' ? 'status-ready' : 'status-working';
     }).then(async (initial) => {
-      snapshot = initial;
-      if (initial.model?.licenseAccepted) modelLicensesConfirmed = true;
-      syncPreferences(initial.preferences);
-      runtimeMessageId = initial.phase === 'ready' ? 'status-ready' : runtimeMessageId;
+      const connected = snapshot && snapshot.sequence > initial.sequence ? snapshot : initial;
+      snapshot = connected;
+      if (connected.model?.licenseAccepted) modelLicensesConfirmed = true;
+      syncPreferences(connected.preferences);
+      runtimeMessageId = connected.phase === 'ready' ? 'status-ready' : runtimeMessageId;
       await tick();
       syncRoute();
     }).catch(() => { runtimeMessageId = 'error-generic'; });
@@ -496,7 +499,9 @@
     pushHash('#wikis');
     scrollMainTo(0);
     if (target === 'connections') void runConnectivityAction('refresh');
-    if (target === 'apps') void runIntegrationAction({ kind: 'refresh' });
+    if (target === 'apps' && !snapshot?.integrations && !integrationRequestId) {
+      void runIntegrationAction({ kind: 'refresh' });
+    }
     if (target === 'knowledge') void refreshHealth();
   }
 

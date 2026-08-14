@@ -20,6 +20,12 @@ function runNode(arguments_, cwd) {
 runNode([svelteCheckCli, '--tsconfig', './tsconfig.json'], uiRoot);
 runNode([viteCli, 'build', '--mode', 'e2e'], uiRoot);
 
+const bridgeArguments = ['build', '--locked', '-p', 'airwiki-mcp-bridge', '--features', 'e2e'];
+if (process.platform === 'win32') bridgeArguments.push('--target', 'x86_64-pc-windows-msvc');
+const bridge = spawnSync('cargo', bridgeArguments, { cwd: resolve(desktopRoot, '../..'), stdio: 'inherit' });
+if (bridge.error) throw bridge.error;
+if (bridge.status !== 0) process.exit(bridge.status ?? 1);
+
 const arguments_ = [
   tauriCli,
   'build',

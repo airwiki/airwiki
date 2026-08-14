@@ -3148,11 +3148,11 @@ pub(crate) async fn run_worker(
                                     )
                                 })
                         });
+                        refresh_application_access(&services, &events).await;
                         send(
                             &events,
                             WorkerEvent::ChatIntegrationsUpdated { request_id, result },
                         ).await;
-                        refresh_application_access(&services, &events).await;
                     }
                     Some(Ok(BackgroundCompletion::Autostart { request_id, result })) => {
                         send(

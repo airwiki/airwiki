@@ -1,5 +1,5 @@
 import { spawn, spawnSync } from 'node:child_process';
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -10,8 +10,8 @@ const debugTarget = process.platform === 'win32'
   ? '../../../target/x86_64-pc-windows-msvc/debug'
   : '../../../target/debug';
 const appBinaryPath = resolve(uiRoot, debugTarget, executable);
-const testRoot = mkdtempSync(join(tmpdir(), 'airwiki-e2e-'));
-const expectedPrefix = resolve(tmpdir()) + sep;
+const testRoot = realpathSync(mkdtempSync(join(tmpdir(), 'airwiki-e2e-')));
+const expectedPrefix = realpathSync(tmpdir()) + sep;
 if (!resolve(testRoot).startsWith(expectedPrefix)) throw new Error('unsafe E2E data root');
 const sourceFixture = join(testRoot, 'fixtures', 'source');
 const okfFixture = join(testRoot, 'fixtures', 'okf-v02');

@@ -172,6 +172,8 @@ fn navigation_guard() -> tauri::plugin::TauriPlugin<tauri::Wry> {
         .build()
 }
 
+const DEFAULT_LOG_FILTER: &str = "airwiki=info,airwiki_=info";
+
 fn init_logging(paths: &AppPaths) -> Result<tracing_appender::non_blocking::WorkerGuard> {
     std::fs::create_dir_all(&paths.logs).context("failed to create the sanitized log directory")?;
     let file = tracing_appender::rolling::daily(&paths.logs, "airwiki.log");
@@ -179,7 +181,7 @@ fn init_logging(paths: &AppPaths) -> Result<tracing_appender::non_blocking::Work
     tracing_subscriber::fmt()
         .with_env_filter(
             tracing_subscriber::EnvFilter::try_from_default_env()
-                .unwrap_or_else(|_| "airwiki=info,airwiki_=info,warn".into()),
+                .unwrap_or_else(|_| DEFAULT_LOG_FILTER.into()),
         )
         .with_writer(writer)
         .with_ansi(false)
@@ -5157,6 +5159,15 @@ mod tests {
     fn background_mode_requires_the_exact_flag() {
         assert!(launch_in_background(["--background"]));
         assert!(!launch_in_background(["background", "--foreground"]));
+    }
+
+    #[test]
+    fn default_logging_does_not_enable_dependency_events() {
+        assert!(DEFAULT_LOG_FILTER.split(',').all(|directive| {
+            directive
+                .split_once('=')
+                .is_some_and(|(target, _)| target.starts_with("airwiki"))
+        }));
     }
 
     #[test]

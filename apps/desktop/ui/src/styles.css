@@ -559,7 +559,7 @@ button:active:not(:disabled) { transform: scale(.985); }
 .import-summary dt { color: var(--muted); font-size: 12px; }
 .import-summary dd { margin: 0; color: var(--text); font-size: 20px; font-weight: 650; }
 .drawer-backdrop { position: fixed; z-index: 30; inset: 0; display: flex; justify-content: flex-end; background: #02070b80; }
-.side-drawer { width: min(480px, 100%); height: 100%; padding: 26px; overflow: auto; color: var(--strong); background: var(--slate); border-left: 1px solid var(--line); box-shadow: -18px 0 55px #0004; }
+.side-drawer { box-sizing: border-box; width: min(480px, 100%); height: 100%; padding: 26px; overflow: auto; overscroll-behavior: contain; color: var(--strong); background: var(--slate); border-left: 1px solid var(--line); box-shadow: -18px 0 55px #0004; }
 .side-drawer > header { align-items: flex-start; padding-bottom: 18px; }
 .side-drawer h2 { max-width: none; font: 650 25px system-ui; }
 .side-drawer > p { color: var(--muted); line-height: 1.5; }

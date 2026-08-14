@@ -1239,6 +1239,7 @@ pub struct DesktopServices {
     transient_source_issues: RwLock<HashMap<Uuid, Vec<TransientSourceIssue>>>,
     memories: airwiki_core::AiMemoryService,
     computations: ComputationCoordinator,
+    application_updates: watch::Sender<u64>,
     application_backend_cancellation: CancellationToken,
     application_backend_task: Option<JoinHandle<()>>,
 }
@@ -1282,6 +1283,7 @@ fn spawn_mcp_application_backend(
     database: Database,
     memories: airwiki_core::AiMemoryService,
     computations: ComputationCoordinator,
+    application_updates: watch::Sender<u64>,
 ) -> (
     DesktopMcpApplicationBackend,
     CancellationToken,
@@ -1310,6 +1312,8 @@ fn spawn_mcp_application_backend(
             let database = database.clone();
             let memories = memories.clone();
             let computations = computations.clone();
+            let updates = application_updates.clone();
+            let changes_visible_state = application_tool_changes_visible_state(tool);
             let result = tokio::task::spawn_blocking(move || {
                 let capability = database
                     .authenticate_application_capability(&identity.capability)
@@ -1319,6 +1323,9 @@ fn spawn_mcp_application_backend(
             })
             .await
             .unwrap_or(Err(McpApplicationError::Unavailable));
+            if result.is_ok() && changes_visible_state {
+                updates.send_modify(|generation| *generation = generation.wrapping_add(1));
+            }
             let _ = response.send(result);
         }
     });
@@ -1326,6 +1333,13 @@ fn spawn_mcp_application_backend(
         DesktopMcpApplicationBackend { requests: sender },
         cancellation,
         task,
+    )
+}
+
+fn application_tool_changes_visible_state(tool: &str) -> bool {
+    matches!(
+        tool,
+        "create_airwiki_memory" | "write_airwiki_memory" | "deprecate_airwiki_memory"
     )
 }
 
@@ -1414,7 +1428,12 @@ fn call_memory_tool(
             let wiki_id =
                 Uuid::parse_str(&input.wiki_id).map_err(|_| McpApplicationError::Invalid)?;
             let pending = computations
-                .request(app_id, wiki_id, &input.logical_path, input.parameters)
+                .request(
+                    app_id,
+                    wiki_id,
+                    &input.logical_path,
+                    serde_json::Value::Object(input.parameters),
+                )
                 .map_err(|_| McpApplicationError::Invalid)?;
             Ok(serde_json::json!({
                 "runId": pending.run_id,
@@ -1663,8 +1682,14 @@ impl DesktopServices {
         let computations = ComputationCoordinator::new(database.clone())?;
         let memories =
             airwiki_core::AiMemoryService::new(database.clone(), core_paths.vaults.clone());
+        let (application_updates, _) = watch::channel(0_u64);
         let (application_backend, application_backend_cancellation, application_backend_task) =
-            spawn_mcp_application_backend(database.clone(), memories.clone(), computations.clone());
+            spawn_mcp_application_backend(
+                database.clone(),
+                memories.clone(),
+                computations.clone(),
+                application_updates.clone(),
+            );
         let application_backend: Arc<dyn McpApplicationBackend> = Arc::new(application_backend);
         let mcp = match start_with_application_backend(
             McpServerConfig::default(),
@@ -1712,6 +1737,7 @@ impl DesktopServices {
             transient_source_issues: RwLock::new(HashMap::new()),
             memories,
             computations,
+            application_updates,
             application_backend_cancellation,
             application_backend_task: Some(application_backend_task),
         };
@@ -1758,6 +1784,10 @@ impl DesktopServices {
 
     pub(crate) fn subscribe_computation_updates(&self) -> watch::Receiver<u64> {
         self.computations.subscribe()
+    }
+
+    pub(crate) fn subscribe_application_updates(&self) -> watch::Receiver<u64> {
+        self.application_updates.subscribe()
     }
 
     pub(crate) fn reject_computation(&self, run_id: Uuid) -> Result<()> {
@@ -4789,6 +4819,25 @@ mod tests {
     use tokio::sync::{Notify, oneshot};
 
     use super::*;
+
+    #[test]
+    fn only_memory_mutations_refresh_visible_application_state() {
+        for tool in [
+            "create_airwiki_memory",
+            "write_airwiki_memory",
+            "deprecate_airwiki_memory",
+        ] {
+            assert!(application_tool_changes_visible_state(tool));
+        }
+        for tool in [
+            "list_airwiki_memories",
+            "get_airwiki_memory",
+            "request_airwiki_computation",
+            "get_airwiki_computation_run",
+        ] {
+            assert!(!application_tool_changes_visible_state(tool));
+        }
+    }
 
     #[test]
     fn wiki_trust_summary_ignores_non_stable_concepts_and_defaults_conservatively() {

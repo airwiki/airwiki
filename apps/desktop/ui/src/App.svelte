@@ -1333,7 +1333,7 @@
 {:else if snapshot.preferences.completedOnboardingVersion == null}
   <OnboardingFlow {snapshot} bind:locale bind:lanPreference bind:closeBehavior bind:modelLicensesConfirmed {actionBusy} {actionMessage} onprepare={prepareLocalModel} onfinish={() => savePreferences(true)} />
 {:else}
-<div class="shell drive-shell">
+<div class="shell drive-shell" inert={activeDialogId !== null} aria-hidden={activeDialogId !== null ? 'true' : undefined}>
   <main class="drive-main">
     <header class="top-bar">
       <button class="top-brand" onclick={() => select('wikis')} aria-label={t('desktop-nav-wikis')}><span class="brand-mark" aria-hidden="true">A</span><span>AirWiki</span></button>

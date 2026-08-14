@@ -60,6 +60,8 @@ pub const MCP_PATH: &str = "/mcp";
 /// Informational client tag sent by managed stdio bridges.
 pub const MCP_CLIENT_HEADER: &str = "x-airwiki-client";
 pub const MCP_CAPABILITY_HEADER: &str = "x-airwiki-capability";
+/// Maximum stdout accepted while verifying the managed bridge's protocol handshake.
+pub const MAX_MANAGED_BRIDGE_VERIFICATION_BYTES: usize = 2 * 1024 * 1024;
 /// Stable tool error returned while the desktop gateway is unavailable.
 pub const MCP_BRIDGE_UNAVAILABLE_MESSAGE: &str = "AirWiki is not running or ready";
 
@@ -253,8 +255,16 @@ pub struct SearchAirWikiInput {
     pub question: String,
     /// Number of evidence items to return (defaults to 5; range 1..=10).
     #[serde(default)]
-    #[schemars(range(min = MIN_TOP_K, max = MAX_TOP_K))]
+    #[schemars(schema_with = "mcp_top_k_schema")]
     pub top_k: Option<u8>,
+}
+
+fn mcp_top_k_schema(_: &mut schemars::SchemaGenerator) -> schemars::Schema {
+    schemars::json_schema!({
+        "type": "integer",
+        "minimum": MIN_TOP_K,
+        "maximum": MAX_TOP_K,
+    })
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -305,7 +315,7 @@ pub struct DeprecateAirWikiMemoryInput {
 pub struct RequestAirWikiComputationInput {
     pub wiki_id: String,
     pub logical_path: String,
-    pub parameters: serde_json::Value,
+    pub parameters: serde_json::Map<String, serde_json::Value>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
@@ -368,6 +378,7 @@ pub struct McpSearchItem {
     /// OKF trust, freshness and verification state when the source provides it.
     pub assurance: Option<McpConceptAssurance>,
     /// Rank within the lane returned by this search call.
+    #[schemars(schema_with = "mcp_u32_schema")]
     pub rank: u32,
 }
 
@@ -422,11 +433,20 @@ pub struct McpProvenance {
     /// Stable logical citation URI that does not expose a local filesystem path.
     pub logical_resource_uri: String,
     /// Human-approved source revision represented by this evidence item.
+    #[schemars(schema_with = "mcp_u32_schema")]
     pub source_revision: u32,
     /// SHA-256 of the approved source revision.
     pub source_sha256: String,
     /// Identifier of the node that authorized and returned the evidence.
     pub node_id: String,
+}
+
+fn mcp_u32_schema(_: &mut schemars::SchemaGenerator) -> schemars::Schema {
+    schemars::json_schema!({
+        "type": "integer",
+        "minimum": 0,
+        "maximum": u32::MAX,
+    })
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize, JsonSchema, PartialEq, Eq)]
@@ -2654,6 +2674,115 @@ mod tests {
         let tools = read_json_line(&mut client_read).await;
         assert_eq!(tools.get("id").and_then(serde_json::Value::as_u64), Some(2));
         assert!(tools.to_string().contains("search_airwiki"));
+
+        client_write.shutdown().await.expect("close client input");
+        tokio::time::timeout(Duration::from_secs(1), server_task)
+            .await
+            .expect("server shutdown timeout")
+            .expect("join server task");
+    }
+
+    #[tokio::test]
+    async fn managed_stdio_tool_schemas_fit_the_verification_budget() {
+        let mut server =
+            AirWikiMcp::bridge_with_endpoint(McpClientKind::GenericMcp, "http://127.0.0.1:9/mcp")
+                .expect("bridge service");
+        server.bridge_identity = Some(McpApplicationIdentity {
+            capability: "synthetic-capability".to_owned(),
+        });
+        for route in application_tool_routes() {
+            server.tool_router.add_route(route);
+        }
+        let (server_transport, client_transport) = tokio::io::duplex(64 * 1024);
+        let server_task = tokio::spawn(async move {
+            let running = server
+                .serve(server_transport)
+                .await
+                .expect("initialize stdio bridge");
+            running.waiting().await.expect("stdio task")
+        });
+        let (client_read, mut client_write) = tokio::io::split(client_transport);
+        let mut client_read = BufReader::new(client_read);
+
+        write_json_line(
+            &mut client_write,
+            &json!({
+                "jsonrpc": "2.0",
+                "id": 1,
+                "method": "initialize",
+                "params": {
+                    "protocolVersion": "2025-06-18",
+                    "capabilities": {},
+                    "clientInfo": { "name": "bridge-budget-test", "version": "0.0.0" }
+                }
+            }),
+        )
+        .await;
+        let _initialize = read_json_line(&mut client_read).await;
+        write_json_line(
+            &mut client_write,
+            &json!({ "jsonrpc": "2.0", "method": "notifications/initialized" }),
+        )
+        .await;
+        write_json_line(
+            &mut client_write,
+            &json!({ "jsonrpc": "2.0", "id": 2, "method": "tools/list", "params": {} }),
+        )
+        .await;
+        let tools = read_json_line(&mut client_read).await;
+        let serialized = serde_json::to_vec(&tools).expect("serialize tools/list response");
+
+        assert!(
+            serialized.len() <= MAX_MANAGED_BRIDGE_VERIFICATION_BYTES - 4096,
+            "managed tools/list response is {} bytes",
+            serialized.len()
+        );
+        for tool in [
+            "search_airwiki",
+            "list_airwiki_memories",
+            "create_airwiki_memory",
+            "get_airwiki_memory",
+            "write_airwiki_memory",
+            "deprecate_airwiki_memory",
+            "request_airwiki_computation",
+            "get_airwiki_computation_run",
+        ] {
+            assert!(tools.to_string().contains(tool), "missing tool {tool}");
+        }
+        let parameter_schema = tools
+            .get("result")
+            .and_then(|result| result.get("tools"))
+            .and_then(serde_json::Value::as_array)
+            .and_then(|listed_tools| {
+                listed_tools.iter().find(|tool| {
+                    tool.get("name").and_then(serde_json::Value::as_str)
+                        == Some("request_airwiki_computation")
+                })
+            })
+            .and_then(|tool| tool.get("inputSchema"))
+            .and_then(|schema| schema.get("properties"))
+            .and_then(|properties| properties.get("parameters"))
+            .expect("computation parameters schema");
+        assert_eq!(
+            parameter_schema
+                .get("type")
+                .and_then(serde_json::Value::as_str),
+            Some("object")
+        );
+        fn contains_unsigned_format(value: &serde_json::Value) -> bool {
+            match value {
+                serde_json::Value::Array(values) => values.iter().any(contains_unsigned_format),
+                serde_json::Value::Object(values) => {
+                    values.get("format").is_some_and(|format| {
+                        format
+                            .as_str()
+                            .is_some_and(|format| format.starts_with("uint"))
+                    }) || values.values().any(contains_unsigned_format)
+                }
+                _ => false,
+            }
+        }
+        assert!(!contains_unsigned_format(&tools));
 
         client_write.shutdown().await.expect("close client input");
         tokio::time::timeout(Duration::from_secs(1), server_task)

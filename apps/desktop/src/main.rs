@@ -2635,20 +2635,24 @@ async fn load_wiki_bundle(
 ) -> Result<(), UiError> {
     let request_id = parse_uuid(&request_id)?;
     let collection_id = parse_uuid(&wiki_id)?;
-    runtime
-        .requests
-        .lock()
-        .map_err(|_| UiError::internal())?
-        .knowledge_bundle
-        .insert(collection_id, request_id);
-    send_command(
+    {
+        let mut requests = runtime.requests.lock().map_err(|_| UiError::internal())?;
+        track_latest_knowledge_bundle_request(&mut requests, collection_id, request_id);
+    }
+    let result = send_command(
         &runtime,
         WorkerCommand::LoadKnowledgeBundle {
             request_id,
             collection_id,
         },
     )
-    .await
+    .await;
+    if result.is_err()
+        && let Ok(mut requests) = runtime.requests.lock()
+    {
+        remove_matching_request(&mut requests.knowledge_bundle, &collection_id, &request_id);
+    }
+    result
 }
 
 #[tauri::command]
@@ -2667,13 +2671,11 @@ async fn load_wiki_page(
         .get(&(collection_id, page))
         .cloned()
         .ok_or_else(|| UiError::invalid("currentKnowledgeSnapshotRequired"))?;
-    runtime
-        .requests
-        .lock()
-        .map_err(|_| UiError::internal())?
-        .knowledge_page
-        .insert(collection_id, request_id);
-    send_command(
+    {
+        let mut requests = runtime.requests.lock().map_err(|_| UiError::internal())?;
+        track_latest_knowledge_page_request(&mut requests, collection_id, request_id);
+    }
+    let result = send_command(
         &runtime,
         WorkerCommand::LoadKnowledgePage {
             request_id,
@@ -2682,7 +2684,13 @@ async fn load_wiki_page(
             expected_fingerprint: cached.fingerprint,
         },
     )
-    .await
+    .await;
+    if result.is_err()
+        && let Ok(mut requests) = runtime.requests.lock()
+    {
+        remove_matching_request(&mut requests.knowledge_page, &collection_id, &request_id);
+    }
+    result
 }
 
 #[tauri::command]
@@ -3840,6 +3848,21 @@ impl AppSnapshot {
                     _ => failed_knowledge_page(collection_id, page_id),
                 });
             }
+            WorkerEvent::ApplicationWikiUpdated { collection_id } => {
+                let collection_id = collection_id.or_else(|| {
+                    self.knowledge
+                        .as_ref()
+                        .and_then(|knowledge| knowledge.wiki_id.parse().ok())
+                });
+                if let Some(collection_id) = collection_id {
+                    invalidate_knowledge_for_wiki(
+                        self,
+                        collection_id,
+                        knowledge_fingerprints,
+                        requests,
+                    );
+                }
+            }
             WorkerEvent::SearchPartial { request_id, hits } => {
                 self.search = Some(SearchSummary {
                     request_id: request_id.to_string(),
@@ -4010,6 +4033,107 @@ fn update_wiki_scan(
                 worker::CollectionScanState::Scanning => WikiScanStatus::Scanning,
             },
         });
+    }
+}
+
+fn invalidate_knowledge_for_wiki(
+    snapshot: &mut AppSnapshot,
+    collection_id: Uuid,
+    knowledge_fingerprints: &Mutex<HashMap<(Uuid, KnowledgePageInput), CachedKnowledgePage>>,
+    requests: &Mutex<RequestTracker>,
+) {
+    if let Ok(mut fingerprints) = knowledge_fingerprints.lock() {
+        fingerprints.retain(|(wiki_id, _), _| *wiki_id != collection_id);
+    }
+    if let Ok(mut requests) = requests.lock() {
+        requests.knowledge_bundle.remove(&collection_id);
+        requests.knowledge_page.remove(&collection_id);
+    }
+    if snapshot
+        .knowledge
+        .as_ref()
+        .is_some_and(|knowledge| knowledge.wiki_id == collection_id.to_string())
+        && let Some(knowledge) = snapshot.knowledge.take()
+    {
+        snapshot.knowledge = Some(KnowledgeBundleSummary {
+            wiki_id: knowledge.wiki_id,
+            wiki_name: knowledge.wiki_name,
+            version: String::new(),
+            status: KnowledgeBundleStatus::Updating,
+            concepts: Vec::new(),
+            links: Vec::new(),
+            error_count: 0,
+            warning_count: 0,
+        });
+        snapshot.knowledge_page = None;
+    }
+}
+
+fn application_wiki_reload_target(
+    snapshot: &AppSnapshot,
+    event: &WorkerEvent,
+    requests: &Mutex<RequestTracker>,
+) -> Option<Uuid> {
+    let WorkerEvent::ApplicationWikiUpdated { collection_id } = event else {
+        return None;
+    };
+    let open_wiki_id = snapshot
+        .knowledge
+        .as_ref()
+        .and_then(|knowledge| knowledge.wiki_id.parse().ok());
+    let pending_wiki_id = requests
+        .lock()
+        .ok()
+        .and_then(|requests| requests.knowledge_bundle.keys().next().copied());
+    if let Some(pending_wiki_id) = pending_wiki_id {
+        return collection_id
+            .is_none_or(|collection_id| collection_id == pending_wiki_id)
+            .then_some(pending_wiki_id);
+    }
+    let collection_id = collection_id.or(open_wiki_id)?;
+    (open_wiki_id == Some(collection_id)).then_some(collection_id)
+}
+
+async fn queue_knowledge_reload(
+    commands: &mpsc::Sender<WorkerIntent>,
+    requests: &Mutex<RequestTracker>,
+    collection_id: Uuid,
+) -> bool {
+    let request_id = Uuid::new_v4();
+    {
+        let Ok(mut tracker) = requests.lock() else {
+            return false;
+        };
+        track_latest_knowledge_bundle_request(&mut tracker, collection_id, request_id);
+    }
+    let (accepted, _response) = oneshot::channel();
+    if commands
+        .send(WorkerIntent {
+            command: WorkerCommand::LoadKnowledgeBundle {
+                request_id,
+                collection_id,
+            },
+            accepted,
+        })
+        .await
+        .is_err()
+    {
+        if let Ok(mut requests) = requests.lock() {
+            remove_matching_request(&mut requests.knowledge_bundle, &collection_id, &request_id);
+        }
+        return false;
+    }
+    true
+}
+
+fn fail_knowledge_reload(snapshot: &mut AppSnapshot, collection_id: Uuid) {
+    if let Some(knowledge) = snapshot
+        .knowledge
+        .as_mut()
+        .filter(|knowledge| knowledge.wiki_id == collection_id.to_string())
+    {
+        knowledge.status = KnowledgeBundleStatus::Failed;
+        knowledge.error_count = 1;
     }
 }
 
@@ -4221,6 +4345,25 @@ fn remove_matching_request(
     } else {
         false
     }
+}
+
+fn track_latest_knowledge_bundle_request(
+    requests: &mut RequestTracker,
+    collection_id: Uuid,
+    request_id: Uuid,
+) {
+    requests.knowledge_bundle.clear();
+    requests.knowledge_page.clear();
+    requests.knowledge_bundle.insert(collection_id, request_id);
+}
+
+fn track_latest_knowledge_page_request(
+    requests: &mut RequestTracker,
+    collection_id: Uuid,
+    request_id: Uuid,
+) {
+    requests.knowledge_page.clear();
+    requests.knowledge_page.insert(collection_id, request_id);
 }
 
 impl From<worker::CollectionView> for WikiSummary {
@@ -4932,6 +5075,7 @@ fn main() -> Result<()> {
     let logging_guard = init_logging(&paths)?;
     tracing::info!(version = env!("CARGO_PKG_VERSION"), "starting AirWiki");
     let (commands, command_receiver) = mpsc::channel(COMMAND_CAPACITY);
+    let presentation_commands = commands.clone();
     let (worker_events, mut presentation_events) = mpsc::channel(INTERNAL_EVENT_CAPACITY);
     let (progress_events, _) = broadcast::channel(TRANSIENT_EVENT_CAPACITY);
     let worker_progress_events = progress_events.clone();
@@ -5018,6 +5162,8 @@ fn main() -> Result<()> {
                             Err(broadcast::error::RecvError::Closed) => break,
                         },
                     };
+                    let knowledge_reload =
+                        application_wiki_reload_target(&snapshot, &event, &presentation_requests);
                     let request_id = worker_event_request_id(&event);
                     snapshot
                         .apply(
@@ -5028,6 +5174,16 @@ fn main() -> Result<()> {
                             &presentation_requests,
                         )
                         .await;
+                    if let Some(collection_id) = knowledge_reload
+                        && !queue_knowledge_reload(
+                            &presentation_commands,
+                            &presentation_requests,
+                            collection_id,
+                        )
+                        .await
+                    {
+                        fail_knowledge_reload(&mut snapshot, collection_id);
+                    }
                     if snapshot_sender
                         .send(PublishedSnapshot {
                             snapshot: snapshot.clone(),
@@ -5739,6 +5895,202 @@ mod tests {
             requests.lock().expect("request tracker").integrations,
             Some(original)
         );
+    }
+
+    #[test]
+    fn application_update_invalidates_and_reloads_only_the_open_wiki() {
+        let wiki_id = Uuid::new_v4();
+        let event = WorkerEvent::ApplicationWikiUpdated {
+            collection_id: Some(wiki_id),
+        };
+        let mut snapshot = AppSnapshot::starting();
+        snapshot.knowledge = Some(KnowledgeBundleSummary {
+            wiki_id: wiki_id.to_string(),
+            wiki_name: "Memory".to_owned(),
+            version: "before-update".to_owned(),
+            status: KnowledgeBundleStatus::Ready,
+            concepts: Vec::new(),
+            links: Vec::new(),
+            error_count: 0,
+            warning_count: 0,
+        });
+        snapshot.knowledge_page = Some(failed_knowledge_page(wiki_id, KnowledgePageId::Index));
+        let fingerprints = Mutex::new(HashMap::new());
+        let stale_bundle_request = Uuid::new_v4();
+        let stale_page_request = Uuid::new_v4();
+        let requests = Mutex::new(RequestTracker {
+            knowledge_bundle: HashMap::from([(wiki_id, stale_bundle_request)]),
+            knowledge_page: HashMap::from([(wiki_id, stale_page_request)]),
+            ..RequestTracker::default()
+        });
+
+        assert_eq!(
+            application_wiki_reload_target(&AppSnapshot::starting(), &event, &requests),
+            Some(wiki_id)
+        );
+        assert_eq!(
+            application_wiki_reload_target(&snapshot, &event, &requests),
+            Some(wiki_id)
+        );
+        assert_eq!(
+            application_wiki_reload_target(
+                &snapshot,
+                &WorkerEvent::ApplicationWikiUpdated {
+                    collection_id: None,
+                },
+                &requests,
+            ),
+            Some(wiki_id)
+        );
+        invalidate_knowledge_for_wiki(&mut snapshot, wiki_id, &fingerprints, &requests);
+
+        assert!(snapshot.knowledge.as_ref().is_some_and(|knowledge| {
+            knowledge.wiki_id == wiki_id.to_string()
+                && matches!(knowledge.status, KnowledgeBundleStatus::Updating)
+                && knowledge.concepts.is_empty()
+        }));
+        assert!(snapshot.knowledge_page.is_none());
+        assert_eq!(
+            application_wiki_reload_target(&snapshot, &event, &requests),
+            Some(wiki_id)
+        );
+        let tracker = requests.lock().expect("request tracker");
+        assert!(!tracker.knowledge_bundle.contains_key(&wiki_id));
+        assert!(!tracker.knowledge_page.contains_key(&wiki_id));
+    }
+
+    #[test]
+    fn application_update_preserves_an_unrelated_open_wiki() {
+        let open_wiki_id = Uuid::new_v4();
+        let updated_wiki_id = Uuid::new_v4();
+        let mut snapshot = AppSnapshot::starting();
+        snapshot.knowledge = Some(KnowledgeBundleSummary {
+            wiki_id: open_wiki_id.to_string(),
+            wiki_name: "Open wiki".to_owned(),
+            version: "current".to_owned(),
+            status: KnowledgeBundleStatus::Ready,
+            concepts: Vec::new(),
+            links: Vec::new(),
+            error_count: 0,
+            warning_count: 0,
+        });
+        snapshot.knowledge_page = Some(failed_knowledge_page(open_wiki_id, KnowledgePageId::Index));
+        let fingerprints = Mutex::new(HashMap::new());
+        let requests = Mutex::new(RequestTracker::default());
+
+        invalidate_knowledge_for_wiki(&mut snapshot, updated_wiki_id, &fingerprints, &requests);
+
+        assert!(
+            snapshot
+                .knowledge
+                .as_ref()
+                .is_some_and(|knowledge| knowledge.wiki_id == open_wiki_id.to_string())
+        );
+        assert!(snapshot.knowledge_page.is_some());
+    }
+
+    #[test]
+    fn latest_wiki_selection_supersedes_an_automatic_reload() {
+        let first_wiki_id = Uuid::new_v4();
+        let selected_wiki_id = Uuid::new_v4();
+        let mut snapshot = AppSnapshot::starting();
+        snapshot.knowledge = Some(KnowledgeBundleSummary {
+            wiki_id: first_wiki_id.to_string(),
+            wiki_name: "First wiki".to_owned(),
+            version: "current".to_owned(),
+            status: KnowledgeBundleStatus::Updating,
+            concepts: Vec::new(),
+            links: Vec::new(),
+            error_count: 0,
+            warning_count: 0,
+        });
+        let mut tracker = RequestTracker::default();
+        track_latest_knowledge_bundle_request(&mut tracker, first_wiki_id, Uuid::new_v4());
+        track_latest_knowledge_bundle_request(&mut tracker, selected_wiki_id, Uuid::new_v4());
+        let requests = Mutex::new(tracker);
+
+        assert_eq!(
+            application_wiki_reload_target(
+                &snapshot,
+                &WorkerEvent::ApplicationWikiUpdated {
+                    collection_id: Some(first_wiki_id),
+                },
+                &requests,
+            ),
+            None
+        );
+        assert_eq!(
+            application_wiki_reload_target(
+                &snapshot,
+                &WorkerEvent::ApplicationWikiUpdated {
+                    collection_id: Some(selected_wiki_id),
+                },
+                &requests,
+            ),
+            Some(selected_wiki_id)
+        );
+        let tracker = requests.lock().expect("request tracker");
+        assert_eq!(tracker.knowledge_bundle.len(), 1);
+        assert!(tracker.knowledge_bundle.contains_key(&selected_wiki_id));
+    }
+
+    #[tokio::test]
+    async fn application_update_queues_a_versioned_bundle_reload() {
+        let wiki_id = Uuid::new_v4();
+        let (commands, mut receiver) = mpsc::channel(1);
+        let requests = Mutex::new(RequestTracker::default());
+
+        assert!(queue_knowledge_reload(&commands, &requests, wiki_id).await);
+
+        let intent = receiver.try_recv().expect("knowledge reload command");
+        let WorkerCommand::LoadKnowledgeBundle {
+            request_id,
+            collection_id,
+        } = intent.command
+        else {
+            panic!("expected a knowledge bundle reload");
+        };
+        assert_eq!(collection_id, wiki_id);
+        assert_eq!(
+            requests
+                .lock()
+                .expect("request tracker")
+                .knowledge_bundle
+                .get(&wiki_id),
+            Some(&request_id)
+        );
+    }
+
+    #[tokio::test]
+    async fn application_reload_waits_for_bounded_command_capacity() {
+        let wiki_id = Uuid::new_v4();
+        let (commands, mut receiver) = mpsc::channel(1);
+        let requests = Arc::new(Mutex::new(RequestTracker::default()));
+        let (accepted, _response) = oneshot::channel();
+        commands
+            .send(WorkerIntent {
+                command: WorkerCommand::RefreshComputations,
+                accepted,
+            })
+            .await
+            .expect("fill command channel");
+        let queued_commands = commands.clone();
+        let queued_requests = Arc::clone(&requests);
+        let reload = tokio::spawn(async move {
+            queue_knowledge_reload(&queued_commands, &queued_requests, wiki_id).await
+        });
+
+        let first = receiver.recv().await.expect("first command");
+        assert!(matches!(first.command, WorkerCommand::RefreshComputations));
+        assert!(reload.await.expect("reload task"));
+        let second = receiver.recv().await.expect("reload command");
+        assert!(matches!(
+            second.command,
+            WorkerCommand::LoadKnowledgeBundle {
+                collection_id,
+                ..
+            } if collection_id == wiki_id
+        ));
     }
 
     #[test]

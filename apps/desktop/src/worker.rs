@@ -667,6 +667,9 @@ pub enum WorkerEvent {
         page_id: KnowledgePageId,
         result: Result<KnowledgePageView, String>,
     },
+    ApplicationWikiUpdated {
+        collection_id: Option<Uuid>,
+    },
     SearchFinished {
         request_id: Uuid,
         result: Result<(Vec<SearchHit>, SearchCoverageView, PublicRouteKind), String>,
@@ -1391,12 +1394,29 @@ pub(crate) async fn run_worker(
                     computation_updates_open = false;
                 }
             }
-            changed = application_updates.changed(), if application_updates_open => {
-                if changed.is_ok() {
-                    refresh_collection_views(&services, &events).await;
-                    refresh_application_access(&services, &events).await;
-                } else {
-                    application_updates_open = false;
+            update = application_updates.recv(), if application_updates_open => {
+                match update {
+                    Ok(collection_id) => {
+                        refresh_collection_views(&services, &events).await;
+                        refresh_application_access(&services, &events).await;
+                        send(
+                            &events,
+                            WorkerEvent::ApplicationWikiUpdated {
+                                collection_id: Some(collection_id),
+                            },
+                        ).await;
+                    }
+                    Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => {
+                        refresh_collection_views(&services, &events).await;
+                        refresh_application_access(&services, &events).await;
+                        send(
+                            &events,
+                            WorkerEvent::ApplicationWikiUpdated { collection_id: None },
+                        ).await;
+                    }
+                    Err(tokio::sync::broadcast::error::RecvError::Closed) => {
+                        application_updates_open = false;
+                    }
                 }
             }
             intent = commands.recv() => {

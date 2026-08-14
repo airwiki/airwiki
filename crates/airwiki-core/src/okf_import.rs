@@ -1,4 +1,4 @@
-use std::collections::{BTreeSet, HashSet};
+use std::collections::{BTreeMap, BTreeSet, HashSet};
 use std::fs::{self, File};
 use std::io::{Read, Seek};
 use std::path::{Component, Path, PathBuf};
@@ -37,6 +37,11 @@ pub struct OkfImportReport {
     pub compatibility: OkfCompatibility,
     pub warnings: Vec<OkfWarning>,
     pub concepts: Vec<OkfImportedConcept>,
+    /// Deterministic digest of every logical directory, file path, and file byte.
+    ///
+    /// This is intentionally not a trust signal. It binds validation to the
+    /// exact bundle later materialized into AirWiki's managed storage.
+    pub bundle_fingerprint: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -176,7 +181,7 @@ impl OkfImportValidator {
                 extract_zip(source, staging)?;
             }
             let actual = Self::validate_directory(staging)?;
-            if actual != expected {
+            if actual.bundle_fingerprint != expected.bundle_fingerprint {
                 bail!("OKF import changed while it was being copied");
             }
             Ok(actual)
@@ -310,6 +315,8 @@ struct ValidationState {
     bytes: u64,
     root_version: Option<String>,
     paths: BTreeSet<String>,
+    directories: BTreeSet<String>,
+    file_fingerprints: BTreeMap<String, String>,
     portable_paths: HashSet<String>,
     portable_directories: HashSet<String>,
     links: Vec<(String, String)>,
@@ -319,13 +326,16 @@ struct ValidationState {
 
 impl ValidationState {
     fn accept_directory(&mut self, path: String) -> Result<()> {
-        self.count_entry()?;
         let key = portable_path_key(&path);
         if self.portable_paths.contains(&key) {
             bail!("OKF import contains a file and directory path collision");
         }
-        self.portable_directories.insert(key);
-        self.accept_directory_ancestors(&path)
+        self.accept_directory_ancestors(&path)?;
+        if self.portable_directories.insert(key) {
+            self.count_entry()?;
+            self.directories.insert(path);
+        }
+        Ok(())
     }
 
     fn accept(&mut self, path: String, bytes: &[u8]) -> Result<()> {
@@ -345,6 +355,8 @@ impl ValidationState {
         {
             bail!("OKF import contains duplicate or non-portable colliding paths");
         }
+        self.file_fingerprints
+            .insert(path.clone(), hex::encode(sha2::Sha256::digest(bytes)));
         if !path.to_ascii_lowercase().ends_with(".md") {
             return Ok(());
         }
@@ -384,7 +396,10 @@ impl ValidationState {
             if self.portable_paths.contains(&key) {
                 bail!("OKF import contains a file and directory path collision");
             }
-            self.portable_directories.insert(key);
+            if self.portable_directories.insert(key) {
+                self.count_entry()?;
+                self.directories.insert(logical);
+            }
         }
         Ok(())
     }
@@ -428,6 +443,7 @@ impl ValidationState {
     }
 
     fn finish(self) -> Result<OkfImportReport> {
+        let bundle_fingerprint = bundle_fingerprint(&self.directories, &self.file_fingerprints);
         let saw_legacy_signal = self.concepts.iter().any(|concept| {
             concept.warnings.iter().any(|warning| {
                 matches!(
@@ -470,8 +486,28 @@ impl ValidationState {
             compatibility,
             warnings,
             concepts: self.concepts,
+            bundle_fingerprint,
         })
     }
+}
+
+fn bundle_fingerprint(directories: &BTreeSet<String>, files: &BTreeMap<String, String>) -> String {
+    let mut hasher = sha2::Sha256::new();
+    hasher.update(b"airwiki-okf-import-snapshot-v1");
+    for path in directories {
+        hash_snapshot_field(&mut hasher, b'd', path.as_bytes());
+    }
+    for (path, fingerprint) in files {
+        hash_snapshot_field(&mut hasher, b'f', path.as_bytes());
+        hash_snapshot_field(&mut hasher, b'h', fingerprint.as_bytes());
+    }
+    hex::encode(hasher.finalize())
+}
+
+fn hash_snapshot_field(hasher: &mut sha2::Sha256, kind: u8, value: &[u8]) {
+    hasher.update([kind]);
+    hasher.update(u64::try_from(value.len()).unwrap_or(u64::MAX).to_be_bytes());
+    hasher.update(value);
 }
 
 struct ParsedMarkdown<'a> {
@@ -518,7 +554,11 @@ fn split_frontmatter(markdown: &str) -> Result<ParsedMarkdown<'_>> {
     })
 }
 
-fn parse_concept(path: &str, markdown: &str, now: DateTime<Utc>) -> Result<OkfImportedConcept> {
+pub(crate) fn parse_concept(
+    path: &str,
+    markdown: &str,
+    now: DateTime<Utc>,
+) -> Result<OkfImportedConcept> {
     let parsed = split_frontmatter(markdown)?;
     let yaml = parsed.yaml.context("OKF concept is missing frontmatter")?;
     let mapping = yaml
@@ -1565,5 +1605,63 @@ mod tests {
         fs::write(source.path().join("concept.md"), CONCEPT).unwrap();
         OkfImportValidator::materialize_path(source.path(), &staging).unwrap();
         assert_eq!(fs::read(staging.join("concept.md")).unwrap(), CONCEPT);
+    }
+
+    #[test]
+    fn resource_bytes_participate_in_the_bundle_fingerprint() {
+        let source = tempfile::tempdir().unwrap();
+        fs::write(source.path().join("concept.md"), CONCEPT).unwrap();
+        fs::write(source.path().join("resource.bin"), b"AAAA").unwrap();
+        let before = OkfImportValidator::validate_directory(source.path()).unwrap();
+
+        fs::write(source.path().join("resource.bin"), b"BBBB").unwrap();
+        let after = OkfImportValidator::validate_directory(source.path()).unwrap();
+
+        assert_eq!(before.uncompressed_bytes, after.uncompressed_bytes);
+        assert_ne!(before.bundle_fingerprint, after.bundle_fingerprint);
+        assert_ne!(before, after);
+    }
+
+    #[test]
+    fn materialization_accepts_zip_with_implicit_directories() {
+        let parent = tempfile::tempdir().unwrap();
+        let archive_path = parent.path().join("bundle.zip");
+        let staging = parent.path().join("staging");
+        let file = File::create(&archive_path).unwrap();
+        let mut writer = zip::ZipWriter::new(file);
+        writer
+            .start_file("concepts/item.md", zip::write::SimpleFileOptions::default())
+            .unwrap();
+        writer.write_all(CONCEPT).unwrap();
+        writer.finish().unwrap();
+
+        let report = OkfImportValidator::materialize_path(&archive_path, &staging).unwrap();
+
+        assert_eq!(report.entry_count, 2);
+        assert_eq!(fs::read(staging.join("concepts/item.md")).unwrap(), CONCEPT);
+    }
+
+    #[test]
+    fn materialization_accepts_zip_entries_in_non_filesystem_order() {
+        let parent = tempfile::tempdir().unwrap();
+        let archive_path = parent.path().join("unordered.zip");
+        let staging = parent.path().join("staging");
+        let file = File::create(&archive_path).unwrap();
+        let mut writer = zip::ZipWriter::new(file);
+        for name in ["z.md", "a.md", "m.md", "b.md", "y.md"] {
+            writer
+                .start_file(name, zip::write::SimpleFileOptions::default())
+                .unwrap();
+            writer
+                .write_all(format!("---\ntype: Reference\ntitle: {name}\n---\nbody").as_bytes())
+                .unwrap();
+        }
+        writer.finish().unwrap();
+
+        let report = OkfImportValidator::materialize_path(&archive_path, &staging).unwrap();
+
+        assert_eq!(report.concept_count, 5);
+        assert!(staging.join("a.md").is_file());
+        assert!(staging.join("z.md").is_file());
     }
 }

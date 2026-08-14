@@ -85,14 +85,10 @@ impl PublicCatalogBackend for CatalogBackend {
         legacy: SignedPublicCollectionManifest,
     ) -> Result<(), PublicCatalogBackendError> {
         let store = std::sync::Arc::clone(&self.store);
-        tokio::task::spawn_blocking(move || {
-            let now = Utc::now();
-            store.register(&legacy, now)?;
-            store.register(&current, now)
-        })
-        .await
-        .map_err(map_catalog_join_error)?
-        .map_err(map_backend_error)
+        tokio::task::spawn_blocking(move || store.register_versioned(&current, &legacy, Utc::now()))
+            .await
+            .map_err(map_catalog_join_error)?
+            .map_err(map_backend_error)
     }
 
     async fn withdraw(
@@ -112,13 +108,10 @@ impl PublicCatalogBackend for CatalogBackend {
         legacy: SignedPublicCollectionTombstone,
     ) -> Result<(), PublicCatalogBackendError> {
         let store = std::sync::Arc::clone(&self.store);
-        tokio::task::spawn_blocking(move || {
-            store.withdraw(&legacy)?;
-            store.withdraw(&current)
-        })
-        .await
-        .map_err(map_catalog_join_error)?
-        .map_err(map_backend_error)
+        tokio::task::spawn_blocking(move || store.withdraw_versioned(&current, &legacy))
+            .await
+            .map_err(map_catalog_join_error)?
+            .map_err(map_backend_error)
     }
 
     async fn query(
@@ -232,73 +225,40 @@ impl CatalogStore {
         let mut connection = self.connection()?;
         let tx = connection.transaction()?;
         purge_catalog_entries(&tx, now)?;
-        let known_id = tx
-            .query_row(
-                "SELECT manifest_id FROM manifests
-                 WHERE publisher_id=?1 AND collection_id=?2 AND protocol_version=?3",
-                params![
-                    manifest.publisher_id,
-                    manifest.collection_id.to_string(),
-                    manifest.protocol_version,
-                ],
-                |row| row.get::<_, i64>(0),
-            )
-            .optional()?;
-        if known_id.is_none() {
-            ensure_publisher_capacity(
-                &tx,
-                &manifest.publisher_id,
-                self.limits.max_collections_per_publisher,
-            )?;
-            ensure_catalog_capacity(&tx, self.limits.max_entries)?;
-        }
-        reject_stale(
+        ensure_collection_capacity(
             &tx,
             &manifest.publisher_id,
             &manifest.collection_id.to_string(),
-            &manifest.protocol_version,
-            manifest.sequence,
+            self.limits,
         )?;
-        let manifest_id = if let Some(manifest_id) = known_id {
-            tx.execute(
-                "UPDATE manifests SET sequence=?2,signed_cbor=?3,expires_at=?4,withdrawn=0
-                 WHERE manifest_id=?1",
-                params![
-                    manifest_id,
-                    manifest.sequence,
-                    encoded,
-                    manifest.expires_at.to_rfc3339(),
-                ],
-            )?;
-            tx.execute("DELETE FROM catalog_fts WHERE rowid=?1", [manifest_id])?;
-            manifest_id
-        } else {
-            tx.execute(
-                "INSERT INTO manifests(publisher_id,collection_id,protocol_version,sequence,signed_cbor,expires_at,withdrawn)
-                 VALUES (?1,?2,?3,?4,?5,?6,0)",
-                params![
-                    manifest.publisher_id,
-                    manifest.collection_id.to_string(),
-                    manifest.protocol_version,
-                    manifest.sequence,
-                    encoded,
-                    manifest.expires_at.to_rfc3339(),
-                ],
-            )?;
-            tx.last_insert_rowid()
-        };
-        tx.execute(
-            "INSERT INTO catalog_fts(rowid,publisher_id,collection_id,name,description,routing_terms)
-             VALUES (?1,?2,?3,?4,?5,?6)",
-            params![
-                manifest_id,
-                manifest.publisher_id,
-                manifest.collection_id.to_string(),
-                manifest.name,
-                manifest.description,
-                manifest.routing_terms.join(" "),
-            ],
+        store_manifest(&tx, signed, &encoded)?;
+        tx.commit()?;
+        Ok(())
+    }
+
+    pub fn register_versioned(
+        &self,
+        current: &SignedPublicCollectionManifest,
+        legacy: &SignedPublicCollectionManifest,
+        now: DateTime<Utc>,
+    ) -> Result<(), CatalogStoreError> {
+        verify_manifest(current, now).map_err(|_| CatalogStoreError::Verification)?;
+        verify_manifest(legacy, now).map_err(|_| CatalogStoreError::Verification)?;
+        validate_manifest_pair(current, legacy)?;
+        let current_encoded = encode(current)?;
+        let legacy_encoded = encode(legacy)?;
+        let manifest = &current.manifest;
+        let mut connection = self.connection()?;
+        let tx = connection.transaction()?;
+        purge_catalog_entries(&tx, now)?;
+        ensure_collection_capacity(
+            &tx,
+            &manifest.publisher_id,
+            &manifest.collection_id.to_string(),
+            self.limits,
         )?;
+        store_manifest(&tx, legacy, &legacy_encoded)?;
+        store_manifest(&tx, current, &current_encoded)?;
         tx.commit()?;
         Ok(())
     }
@@ -320,50 +280,38 @@ impl CatalogStore {
         let mut connection = self.connection()?;
         let tx = connection.transaction()?;
         purge_catalog_entries(&tx, now)?;
-        reject_stale(
+        ensure_collection_capacity(
             &tx,
             &tombstone.publisher_id,
             &tombstone.collection_id.to_string(),
-            &tombstone.protocol_version,
-            tombstone.sequence,
+            self.limits,
         )?;
-        let known_id = tx
-            .query_row(
-                "SELECT manifest_id FROM manifests
-                 WHERE publisher_id=?1 AND collection_id=?2 AND protocol_version=?3",
-                params![
-                    tombstone.publisher_id,
-                    tombstone.collection_id.to_string(),
-                    tombstone.protocol_version,
-                ],
-                |row| row.get::<_, i64>(0),
-            )
-            .optional()?;
-        if let Some(manifest_id) = known_id {
-            tx.execute(
-                "UPDATE manifests SET sequence=?2,signed_cbor=NULL,expires_at=NULL,withdrawn=1
-                 WHERE manifest_id=?1",
-                params![manifest_id, tombstone.sequence],
-            )?;
-            tx.execute("DELETE FROM catalog_fts WHERE rowid=?1", [manifest_id])?;
-        } else {
-            ensure_publisher_capacity(
-                &tx,
-                &tombstone.publisher_id,
-                self.limits.max_collections_per_publisher,
-            )?;
-            ensure_catalog_capacity(&tx, self.limits.max_entries)?;
-            tx.execute(
-                "INSERT INTO manifests(publisher_id,collection_id,protocol_version,sequence,signed_cbor,expires_at,withdrawn)
-                 VALUES (?1,?2,?3,?4,NULL,NULL,1)",
-                params![
-                    tombstone.publisher_id,
-                    tombstone.collection_id.to_string(),
-                    tombstone.protocol_version,
-                    tombstone.sequence,
-                ],
-            )?;
-        }
+        store_tombstone(&tx, signed)?;
+        tx.commit()?;
+        Ok(())
+    }
+
+    pub fn withdraw_versioned(
+        &self,
+        current: &SignedPublicCollectionTombstone,
+        legacy: &SignedPublicCollectionTombstone,
+    ) -> Result<(), CatalogStoreError> {
+        verify_tombstone(current).map_err(|_| CatalogStoreError::Verification)?;
+        verify_tombstone(legacy).map_err(|_| CatalogStoreError::Verification)?;
+        validate_tombstone_pair(current, legacy)?;
+        let tombstone = &current.tombstone;
+        let now = Utc::now();
+        let mut connection = self.connection()?;
+        let tx = connection.transaction()?;
+        purge_catalog_entries(&tx, now)?;
+        ensure_collection_capacity(
+            &tx,
+            &tombstone.publisher_id,
+            &tombstone.collection_id.to_string(),
+            self.limits,
+        )?;
+        store_tombstone(&tx, legacy)?;
+        store_tombstone(&tx, current)?;
         tx.commit()?;
         Ok(())
     }
@@ -397,8 +345,14 @@ impl CatalogStore {
              JOIN manifests m ON m.manifest_id=f.rowid
              WHERE catalog_fts MATCH ?1 AND m.withdrawn=0 AND m.expires_at>?2
                AND m.protocol_version IN (?3,?4)
-             ORDER BY bm25(catalog_fts),m.publisher_id,m.collection_id,
-                      CASE WHEN m.protocol_version=?3 THEN 0 ELSE 1 END
+               AND (m.protocol_version=?3 OR NOT EXISTS(
+                 SELECT 1 FROM manifests preferred
+                 WHERE preferred.publisher_id=m.publisher_id
+                   AND preferred.collection_id=m.collection_id
+                   AND preferred.protocol_version=?3
+                   AND preferred.withdrawn=0 AND preferred.expires_at>?2
+               ))
+             ORDER BY bm25(catalog_fts),m.publisher_id,m.collection_id
              LIMIT ?5",
         )?;
         let rows = statement.query_map(
@@ -528,6 +482,174 @@ fn purge_catalog_entries(
     Ok(expired.len())
 }
 
+fn validate_manifest_pair(
+    current: &SignedPublicCollectionManifest,
+    legacy: &SignedPublicCollectionManifest,
+) -> Result<(), CatalogStoreError> {
+    let current = &current.manifest;
+    let legacy = &legacy.manifest;
+    if current.publisher_id != legacy.publisher_id
+        || current.collection_id != legacy.collection_id
+        || current.sequence != legacy.sequence
+        || current.protocol_version == legacy.protocol_version
+    {
+        return Err(CatalogStoreError::Verification);
+    }
+    Ok(())
+}
+
+fn validate_tombstone_pair(
+    current: &SignedPublicCollectionTombstone,
+    legacy: &SignedPublicCollectionTombstone,
+) -> Result<(), CatalogStoreError> {
+    let current = &current.tombstone;
+    let legacy = &legacy.tombstone;
+    if current.publisher_id != legacy.publisher_id
+        || current.collection_id != legacy.collection_id
+        || current.sequence != legacy.sequence
+        || current.protocol_version == legacy.protocol_version
+    {
+        return Err(CatalogStoreError::Verification);
+    }
+    Ok(())
+}
+
+fn ensure_collection_capacity(
+    connection: &Connection,
+    publisher_id: &str,
+    collection_id: &str,
+    limits: CatalogLimits,
+) -> Result<(), CatalogStoreError> {
+    let known = connection.query_row(
+        "SELECT EXISTS(SELECT 1 FROM manifests WHERE publisher_id=?1 AND collection_id=?2)",
+        params![publisher_id, collection_id],
+        |row| row.get::<_, bool>(0),
+    )?;
+    if !known {
+        ensure_publisher_capacity(
+            connection,
+            publisher_id,
+            limits.max_collections_per_publisher,
+        )?;
+        ensure_catalog_capacity(connection, limits.max_entries)?;
+    }
+    Ok(())
+}
+
+fn store_manifest(
+    connection: &Connection,
+    signed: &SignedPublicCollectionManifest,
+    encoded: &[u8],
+) -> Result<(), CatalogStoreError> {
+    let manifest = &signed.manifest;
+    reject_stale(
+        connection,
+        &manifest.publisher_id,
+        &manifest.collection_id.to_string(),
+        &manifest.protocol_version,
+        manifest.sequence,
+    )?;
+    let known_id = connection
+        .query_row(
+            "SELECT manifest_id FROM manifests
+             WHERE publisher_id=?1 AND collection_id=?2 AND protocol_version=?3",
+            params![
+                manifest.publisher_id,
+                manifest.collection_id.to_string(),
+                manifest.protocol_version,
+            ],
+            |row| row.get::<_, i64>(0),
+        )
+        .optional()?;
+    let manifest_id = if let Some(manifest_id) = known_id {
+        connection.execute(
+            "UPDATE manifests SET sequence=?2,signed_cbor=?3,expires_at=?4,withdrawn=0
+             WHERE manifest_id=?1",
+            params![
+                manifest_id,
+                manifest.sequence,
+                encoded,
+                manifest.expires_at.to_rfc3339(),
+            ],
+        )?;
+        connection.execute("DELETE FROM catalog_fts WHERE rowid=?1", [manifest_id])?;
+        manifest_id
+    } else {
+        connection.execute(
+            "INSERT INTO manifests(publisher_id,collection_id,protocol_version,sequence,signed_cbor,expires_at,withdrawn)
+             VALUES (?1,?2,?3,?4,?5,?6,0)",
+            params![
+                manifest.publisher_id,
+                manifest.collection_id.to_string(),
+                manifest.protocol_version,
+                manifest.sequence,
+                encoded,
+                manifest.expires_at.to_rfc3339(),
+            ],
+        )?;
+        connection.last_insert_rowid()
+    };
+    connection.execute(
+        "INSERT INTO catalog_fts(rowid,publisher_id,collection_id,name,description,routing_terms)
+         VALUES (?1,?2,?3,?4,?5,?6)",
+        params![
+            manifest_id,
+            manifest.publisher_id,
+            manifest.collection_id.to_string(),
+            manifest.name,
+            manifest.description,
+            manifest.routing_terms.join(" "),
+        ],
+    )?;
+    Ok(())
+}
+
+fn store_tombstone(
+    connection: &Connection,
+    signed: &SignedPublicCollectionTombstone,
+) -> Result<(), CatalogStoreError> {
+    let tombstone = &signed.tombstone;
+    reject_stale(
+        connection,
+        &tombstone.publisher_id,
+        &tombstone.collection_id.to_string(),
+        &tombstone.protocol_version,
+        tombstone.sequence,
+    )?;
+    let known_id = connection
+        .query_row(
+            "SELECT manifest_id FROM manifests
+             WHERE publisher_id=?1 AND collection_id=?2 AND protocol_version=?3",
+            params![
+                tombstone.publisher_id,
+                tombstone.collection_id.to_string(),
+                tombstone.protocol_version,
+            ],
+            |row| row.get::<_, i64>(0),
+        )
+        .optional()?;
+    if let Some(manifest_id) = known_id {
+        connection.execute(
+            "UPDATE manifests SET sequence=?2,signed_cbor=NULL,expires_at=NULL,withdrawn=1
+             WHERE manifest_id=?1",
+            params![manifest_id, tombstone.sequence],
+        )?;
+        connection.execute("DELETE FROM catalog_fts WHERE rowid=?1", [manifest_id])?;
+    } else {
+        connection.execute(
+            "INSERT INTO manifests(publisher_id,collection_id,protocol_version,sequence,signed_cbor,expires_at,withdrawn)
+             VALUES (?1,?2,?3,?4,NULL,NULL,1)",
+            params![
+                tombstone.publisher_id,
+                tombstone.collection_id.to_string(),
+                tombstone.protocol_version,
+                tombstone.sequence,
+            ],
+        )?;
+    }
+    Ok(())
+}
+
 fn ensure_catalog_capacity(
     connection: &Connection,
     max_entries: u32,
@@ -604,7 +726,8 @@ fn decode<T: serde::de::DeserializeOwned>(bytes: &[u8]) -> Result<T, CatalogStor
 mod tests {
     use airwiki_network::{sign_manifest, sign_tombstone};
     use airwiki_types::{
-        PUBLIC_CATALOG_PROTOCOL, PublicCollectionManifest, PublicCollectionTombstone,
+        PUBLIC_CATALOG_PROTOCOL, PUBLIC_CATALOG_PROTOCOL_V2, PublicCollectionManifest,
+        PublicCollectionTombstone,
     };
     use chrono::Duration;
     use libp2p::identity::Keypair;
@@ -634,10 +757,28 @@ mod tests {
         updated_at: DateTime<Utc>,
         expires_at: DateTime<Utc>,
     ) -> SignedPublicCollectionManifest {
+        signed_manifest_for_protocol(
+            keypair,
+            collection_id,
+            sequence,
+            updated_at,
+            expires_at,
+            PUBLIC_CATALOG_PROTOCOL,
+        )
+    }
+
+    fn signed_manifest_for_protocol(
+        keypair: &Keypair,
+        collection_id: Uuid,
+        sequence: u64,
+        updated_at: DateTime<Utc>,
+        expires_at: DateTime<Utc>,
+        protocol_version: &str,
+    ) -> SignedPublicCollectionManifest {
         sign_manifest(
             keypair,
             PublicCollectionManifest {
-                protocol_version: PUBLIC_CATALOG_PROTOCOL.to_owned(),
+                protocol_version: protocol_version.to_owned(),
                 publisher_id: keypair.public().to_peer_id().to_string(),
                 collection_id,
                 sequence,
@@ -836,6 +977,137 @@ mod tests {
                 .unwrap(),
             2
         );
+    }
+
+    #[test]
+    fn versioned_registration_counts_one_collection_and_commits_both_protocols() {
+        let store = CatalogStore::in_memory_with_limits(CatalogLimits {
+            max_entries: 1,
+            max_collections_per_publisher: 1,
+        })
+        .unwrap();
+        let keypair = Keypair::generate_ed25519();
+        let collection_id = Uuid::new_v4();
+        let now = Utc::now();
+        let legacy = signed_manifest_for_protocol(
+            &keypair,
+            collection_id,
+            1,
+            now,
+            now + Duration::minutes(15),
+            PUBLIC_CATALOG_PROTOCOL,
+        );
+        let current = signed_manifest_for_protocol(
+            &keypair,
+            collection_id,
+            1,
+            now,
+            now + Duration::minutes(15),
+            PUBLIC_CATALOG_PROTOCOL_V2,
+        );
+
+        store.register_versioned(&current, &legacy, now).unwrap();
+
+        assert_eq!(
+            store
+                .connection()
+                .unwrap()
+                .query_row("SELECT count(*) FROM manifests", [], |row| row
+                    .get::<_, u32>(0))
+                .unwrap(),
+            2
+        );
+        let mut current_query = query("atlas");
+        current_query.protocol_version = PUBLIC_CATALOG_PROTOCOL_V2.to_owned();
+        assert_eq!(store.query(&current_query, now).unwrap(), vec![current]);
+    }
+
+    #[test]
+    fn current_query_prefers_v2_even_when_legacy_metadata_ranks_higher() {
+        let store = CatalogStore::in_memory().unwrap();
+        let keypair = Keypair::generate_ed25519();
+        let collection_id = Uuid::new_v4();
+        let now = Utc::now();
+        let mut legacy = signed_manifest_for_protocol(
+            &keypair,
+            collection_id,
+            1,
+            now,
+            now + Duration::minutes(15),
+            PUBLIC_CATALOG_PROTOCOL,
+        )
+        .manifest;
+        legacy.name = "Legacy recovery recovery recovery".to_owned();
+        legacy.routing_terms = vec!["recovery".to_owned()];
+        let legacy = sign_manifest(&keypair, legacy).unwrap();
+        let mut current = signed_manifest_for_protocol(
+            &keypair,
+            collection_id,
+            1,
+            now,
+            now + Duration::minutes(15),
+            PUBLIC_CATALOG_PROTOCOL_V2,
+        )
+        .manifest;
+        current.name = "Current catalog".to_owned();
+        current.routing_terms = vec!["recovery".to_owned()];
+        let current = sign_manifest(&keypair, current).unwrap();
+        store.register_versioned(&current, &legacy, now).unwrap();
+        let mut current_query = query("recovery");
+        current_query.protocol_version = PUBLIC_CATALOG_PROTOCOL_V2.to_owned();
+
+        assert_eq!(store.query(&current_query, now).unwrap(), vec![current]);
+    }
+
+    #[test]
+    fn versioned_withdrawal_rolls_back_when_either_protocol_is_stale() {
+        let store = CatalogStore::in_memory().unwrap();
+        let keypair = Keypair::generate_ed25519();
+        let collection_id = Uuid::new_v4();
+        let now = Utc::now();
+        let legacy = signed_manifest_for_protocol(
+            &keypair,
+            collection_id,
+            1,
+            now,
+            now + Duration::minutes(15),
+            PUBLIC_CATALOG_PROTOCOL,
+        );
+        let current = signed_manifest_for_protocol(
+            &keypair,
+            collection_id,
+            2,
+            now,
+            now + Duration::minutes(15),
+            PUBLIC_CATALOG_PROTOCOL_V2,
+        );
+        store.register(&legacy, now).unwrap();
+        store.register(&current, now).unwrap();
+        let tombstone = |protocol_version: &str, sequence| {
+            sign_tombstone(
+                &keypair,
+                PublicCollectionTombstone {
+                    protocol_version: protocol_version.to_owned(),
+                    publisher_id: keypair.public().to_peer_id().to_string(),
+                    collection_id,
+                    sequence,
+                    withdrawn_at: now,
+                },
+            )
+            .unwrap()
+        };
+        let legacy_tombstone = tombstone(PUBLIC_CATALOG_PROTOCOL, 2);
+        let stale_current_tombstone = tombstone(PUBLIC_CATALOG_PROTOCOL_V2, 2);
+
+        assert!(matches!(
+            store.withdraw_versioned(&stale_current_tombstone, &legacy_tombstone),
+            Err(CatalogStoreError::StaleSequence)
+        ));
+
+        assert_eq!(store.query(&query("atlas"), now).unwrap(), vec![legacy]);
+        let mut current_query = query("atlas");
+        current_query.protocol_version = PUBLIC_CATALOG_PROTOCOL_V2.to_owned();
+        assert_eq!(store.query(&current_query, now).unwrap(), vec![current]);
     }
 
     #[test]

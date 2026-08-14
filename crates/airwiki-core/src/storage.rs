@@ -5,13 +5,17 @@ use std::str::FromStr;
 use std::sync::{Arc, Mutex, MutexGuard};
 
 use airwiki_types::{
-    AttestedComputationContract, CollectionPolicy, ConceptAssurance, ConceptType, DisclosureGate,
-    DisclosureLease, DisclosureMutationGuard, DocumentStatus, EnrichmentDraft, FreshnessState,
-    OkfCompatibility, OkfWarning, PublicConceptSummary, SearchHit, SearchPurpose, TrustTier,
+    AttestedComputationContract, COMPUTATION_RUN_RETENTION_SECONDS, CollectionPolicy,
+    ConceptAssurance, ConceptType, DisclosureGate, DisclosureLease, DisclosureMutationGuard,
+    DocumentStatus, EnrichmentDraft, FreshnessState, MAX_COMPUTATION_REQUESTS_PER_MINUTE,
+    MAX_PENDING_COMPUTATIONS_PER_APPLICATION, OkfCompatibility, OkfWarning, PublicConceptSummary,
+    SearchHit, SearchPurpose, TrustTier,
 };
 use anyhow::{Context, Result, anyhow, bail};
-use chrono::{DateTime, Utc};
-use rusqlite::{Connection, OptionalExtension, Transaction, params, params_from_iter};
+use chrono::{DateTime, Duration, Utc};
+use rusqlite::{
+    Connection, OptionalExtension, Transaction, TransactionBehavior, params, params_from_iter,
+};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use uuid::Uuid;
@@ -32,6 +36,7 @@ const MIGRATION_10: &str = include_str!("../migrations/0010_okf_v02_assurance.sq
 const MIGRATION_11: &str = include_str!("../migrations/0011_open_okf_lifecycle.sql");
 const MIGRATION_12: &str = include_str!("../migrations/0012_attested_computation_contracts.sql");
 const MIGRATION_13: &str = include_str!("../migrations/0013_restrict_incompatible_okf.sql");
+const MIGRATION_14: &str = include_str!("../migrations/0014_bound_computation_runs.sql");
 
 const APPLICATION_MUTATIONS_PER_MINUTE: u32 = 30;
 const APPLICATION_WIKI_CREATIONS_PER_HOUR: u32 = 5;
@@ -686,7 +691,6 @@ impl SourceRegistration {
 pub(crate) struct RankedChunk {
     pub chunk: StoredChunk,
     pub title: String,
-    pub logical_resource_uri: String,
     pub source_sha256: String,
     pub updated_at: DateTime<Utc>,
     pub assurance: Option<ConceptAssurance>,
@@ -1012,7 +1016,13 @@ impl Database {
             tx.pragma_update(None, "user_version", 13)?;
             tx.commit()?;
         }
-        if version > 13 {
+        if version < 14 {
+            let tx = connection.transaction()?;
+            tx.execute_batch(MIGRATION_14)?;
+            tx.pragma_update(None, "user_version", 14)?;
+            tx.commit()?;
+        }
+        if version > 14 {
             bail!("database schema {version} is newer than this application supports");
         }
         let database = Self {
@@ -1685,10 +1695,15 @@ impl Database {
         &self,
         capability: &str,
     ) -> Result<Option<ApplicationCapabilityRecord>> {
-        if capability.len() < 80 || capability.len() > 256 {
+        if capability.len() < 80
+            || capability.len() > 256
+            || !capability.bytes().all(|byte| byte.is_ascii_hexdigit())
+        {
             return Ok(None);
         }
-        let prefix = &capability[..16];
+        let Some(prefix) = capability.get(..16) else {
+            return Ok(None);
+        };
         let Some(record) = self.application_capability_by_prefix(prefix)? else {
             return Ok(None);
         };
@@ -1704,11 +1719,21 @@ impl Database {
     }
 
     pub fn set_application_capability_revoked(&self, app_id: Uuid, revoked: bool) -> Result<()> {
-        let count = self.connection()?.execute(
+        let mut connection = self.connection()?;
+        let tx = connection.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let count = tx.execute(
             "UPDATE application_capabilities SET revoked_at=?2 WHERE app_id=?1",
             params![app_id.to_string(), revoked.then(|| Utc::now().to_rfc3339())],
         )?;
-        ensure_changed(count, "application capability", app_id)
+        ensure_changed(count, "application capability", app_id)?;
+        if revoked {
+            tx.execute(
+                "DELETE FROM application_wiki_grants WHERE app_id=?1 AND role!='owner'",
+                [app_id.to_string()],
+            )?;
+        }
+        tx.commit()?;
+        Ok(())
     }
 
     pub fn set_application_wiki_role(
@@ -1717,8 +1742,9 @@ impl Database {
         collection_id: Uuid,
         role: Option<ApplicationWikiRole>,
     ) -> Result<()> {
-        let connection = self.connection()?;
-        let existing_role = connection
+        let mut connection = self.connection()?;
+        let tx = connection.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let existing_role = tx
             .query_row(
                 "SELECT role FROM application_wiki_grants WHERE app_id=?1 AND collection_id=?2",
                 params![app_id.to_string(), collection_id.to_string()],
@@ -1732,7 +1758,16 @@ impl Database {
             if role == ApplicationWikiRole::Owner {
                 bail!("application ownership cannot be granted after wiki creation");
             }
-            let origin: String = connection.query_row(
+            let active: bool = tx.query_row(
+                "SELECT EXISTS(SELECT 1 FROM application_capabilities
+                               WHERE app_id=?1 AND revoked_at IS NULL)",
+                [app_id.to_string()],
+                |row| row.get(0),
+            )?;
+            if !active {
+                bail!("application capability is unavailable");
+            }
+            let origin: String = tx.query_row(
                 "SELECT origin FROM collections WHERE id=?1",
                 [collection_id.to_string()],
                 |row| row.get(0),
@@ -1741,7 +1776,7 @@ impl Database {
                 bail!("applications may only receive grants for AI memory wikis");
             }
             let now = Utc::now().to_rfc3339();
-            connection.execute(
+            tx.execute(
                 "INSERT INTO application_wiki_grants
                  (app_id,collection_id,role,granted_at,confirmed_at)
                  VALUES (?1,?2,?3,?4,?4)
@@ -1749,11 +1784,12 @@ impl Database {
                 params![app_id.to_string(), collection_id.to_string(), role.as_str(), now],
             )?;
         } else {
-            connection.execute(
+            tx.execute(
                 "DELETE FROM application_wiki_grants WHERE app_id=?1 AND collection_id=?2",
                 params![app_id.to_string(), collection_id.to_string()],
             )?;
         }
+        tx.commit()?;
         Ok(())
     }
 
@@ -1796,7 +1832,47 @@ impl Database {
     }
 
     pub fn create_computation_run(&self, run: &ComputationRunRecord) -> Result<()> {
-        self.connection()?.execute(
+        let actor_id = run
+            .actor_id
+            .as_deref()
+            .context("application computation actor is required")?;
+        if run.actor_kind != "application" {
+            bail!("computation request actor is invalid");
+        }
+        let mut connection = self.connection()?;
+        let tx = connection.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let now = run.requested_at;
+        tx.execute(
+            "UPDATE computation_runs SET state='expired',completed_at=?1
+             WHERE state='awaiting_confirmation' AND expires_at<=?1",
+            [now.to_rfc3339()],
+        )?;
+        tx.execute(
+            "DELETE FROM computation_runs
+             WHERE state IN ('completed','rejected','failed','expired')
+               AND COALESCE(completed_at,expires_at)<?1",
+            [(now - Duration::seconds(COMPUTATION_RUN_RETENTION_SECONDS)).to_rfc3339()],
+        )?;
+        let pending: u32 = tx.query_row(
+            "SELECT count(*) FROM computation_runs
+             WHERE actor_kind='application' AND actor_id=?1
+               AND state IN ('awaiting_confirmation','running')",
+            [actor_id],
+            |row| row.get(0),
+        )?;
+        if pending >= MAX_PENDING_COMPUTATIONS_PER_APPLICATION {
+            bail!("application pending computation limit exceeded");
+        }
+        let recent: u32 = tx.query_row(
+            "SELECT count(*) FROM computation_runs
+             WHERE actor_kind='application' AND actor_id=?1 AND requested_at>=?2",
+            params![actor_id, (now - Duration::minutes(1)).to_rfc3339()],
+            |row| row.get(0),
+        )?;
+        if recent >= MAX_COMPUTATION_REQUESTS_PER_MINUTE {
+            bail!("application computation request rate limit exceeded");
+        }
+        tx.execute(
             "INSERT INTO computation_runs
              (id,collection_id,logical_path,actor_kind,actor_id,state,contract_fingerprint,
               executor_sha256,attester_sha256,parameter_schema_json,receipt_sha256,verdict,
@@ -1817,7 +1893,17 @@ impl Database {
                 run.expires_at.to_rfc3339(),
             ],
         )?;
+        tx.commit()?;
         Ok(())
+    }
+
+    pub fn expire_computation_run_if_awaiting(&self, id: Uuid, now: DateTime<Utc>) -> Result<bool> {
+        let count = self.connection()?.execute(
+            "UPDATE computation_runs SET state='expired',completed_at=?2
+             WHERE id=?1 AND state='awaiting_confirmation' AND expires_at<=?2",
+            params![id.to_string(), now.to_rfc3339()],
+        )?;
+        Ok(count == 1)
     }
 
     pub fn computation_run(&self, id: Uuid) -> Result<Option<ComputationRunRecord>> {
@@ -1839,17 +1925,24 @@ impl Database {
     /// Parameter values deliberately live only in memory, so replaying either
     /// an unconfirmed or interrupted run would weaken the consent boundary.
     pub fn close_orphaned_computation_runs(&self) -> Result<usize> {
-        let now = Utc::now().to_rfc3339();
+        let now = Utc::now();
+        let now_text = now.to_rfc3339();
         let connection = self.connection()?;
         let awaiting = connection.execute(
             "UPDATE computation_runs SET state='expired',completed_at=?1
              WHERE state='awaiting_confirmation'",
-            [&now],
+            [&now_text],
         )?;
         let running = connection.execute(
             "UPDATE computation_runs SET state='failed',completed_at=?1
              WHERE state='running'",
-            [&now],
+            [&now_text],
+        )?;
+        connection.execute(
+            "DELETE FROM computation_runs
+             WHERE state IN ('completed','rejected','failed','expired')
+               AND COALESCE(completed_at,expires_at)<?1",
+            [(now - Duration::seconds(COMPUTATION_RUN_RETENTION_SECONDS)).to_rfc3339()],
         )?;
         Ok(awaiting.saturating_add(running))
     }
@@ -1894,6 +1987,32 @@ impl Database {
                 receipt_sha256,
                 verdict,
                 expected_state.as_str(),
+            ],
+        )?;
+        if count != 1 {
+            bail!("computation run is unavailable or its state changed");
+        }
+        Ok(())
+    }
+
+    pub fn complete_computation_run(
+        &self,
+        id: Uuid,
+        receipt_sha256: &str,
+        verdict: &str,
+        result_expires_at: DateTime<Utc>,
+    ) -> Result<()> {
+        let completed_at = Utc::now().to_rfc3339();
+        let count = self.connection()?.execute(
+            "UPDATE computation_runs SET state='completed',completed_at=?2,
+             receipt_sha256=?3,verdict=?4,expires_at=?5
+             WHERE id=?1 AND state='running'",
+            params![
+                id.to_string(),
+                completed_at,
+                receipt_sha256,
+                verdict,
+                result_expires_at.to_rfc3339(),
             ],
         )?;
         if count != 1 {
@@ -2046,7 +2165,29 @@ impl Database {
     ) -> Result<ManagedBundleMutationRecord> {
         let id = Uuid::new_v4();
         let now = Utc::now().to_rfc3339();
-        self.connection()?.execute(
+        let mut connection = self.connection()?;
+        let tx = connection.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let pending = tx.query_row(
+            "SELECT EXISTS(SELECT 1 FROM managed_bundle_mutations
+                           WHERE collection_id=?1 AND state!='committed')",
+            [collection_id.to_string()],
+            |row| row.get::<_, bool>(0),
+        )?;
+        if pending {
+            bail!("managed OKF bundle already has a pending mutation");
+        }
+        let current_fingerprint = tx
+            .query_row(
+                "SELECT fingerprint FROM okf_concept_projection
+                 WHERE collection_id=?1 AND logical_path=?2",
+                params![collection_id.to_string(), logical_path],
+                |row| row.get::<_, String>(0),
+            )
+            .optional()?;
+        if current_fingerprint.as_deref() != previous_fingerprint {
+            bail!("managed OKF concept fingerprint is stale");
+        }
+        tx.execute(
             "INSERT INTO managed_bundle_mutations
              (id,collection_id,logical_path,state,previous_fingerprint,replacement_fingerprint,created_at,updated_at)
              VALUES (?1,?2,?3,'prepared',?4,?5,?6,?6)",
@@ -2059,6 +2200,7 @@ impl Database {
                 now,
             ],
         )?;
+        tx.commit()?;
         Ok(ManagedBundleMutationRecord {
             id,
             collection_id,
@@ -3518,7 +3660,7 @@ impl Database {
                             tags: json_sql(row.get::<_, String>(4)?)?,
                             summary,
                             logical_resource_uri: format!(
-                                "urn:airwiki:okf:{collection_id}:{concept_id}"
+                                "urn:airwiki:{publisher_id}:{concept_id}"
                             ),
                             source_revision: 1,
                             updated_at: datetime_sql(row.get::<_, String>(6)?)?,
@@ -5060,7 +5202,6 @@ impl Database {
                     source_revision: 1,
                 },
                 title,
-                logical_resource_uri: format!("urn:airwiki:okf:{collection_id}:{logical_path}"),
                 source_sha256: fingerprint,
                 updated_at: datetime_sql(row.get(6)?)?,
                 assurance: Some(ConceptAssurance {
@@ -5645,7 +5786,6 @@ fn ranked_chunk_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<RankedChun
     Ok(RankedChunk {
         chunk,
         title: row.get(10)?,
-        logical_resource_uri: row.get(11)?,
         source_sha256: row.get(12)?,
         updated_at: datetime_sql(row.get::<_, String>(13)?)?,
         assurance: Some(ConceptAssurance {
@@ -6465,7 +6605,7 @@ mod tests {
         let temp = tempfile::tempdir().unwrap();
         let path = temp.path().join("db.sqlite");
         let db = Database::open(&path).unwrap();
-        assert_eq!(db.schema_version().unwrap(), 13);
+        assert_eq!(db.schema_version().unwrap(), 14);
         for table in [
             "collections",
             "source_documents",
@@ -6485,7 +6625,7 @@ mod tests {
             assert_eq!(db.count(table).unwrap(), 0);
         }
         drop(db);
-        assert_eq!(Database::open(path).unwrap().schema_version().unwrap(), 13);
+        assert_eq!(Database::open(path).unwrap().schema_version().unwrap(), 14);
     }
 
     #[test]
@@ -7007,7 +7147,7 @@ mod tests {
         drop(connection);
 
         let database = Database::open(&path).unwrap();
-        assert_eq!(database.schema_version().unwrap(), 13);
+        assert_eq!(database.schema_version().unwrap(), 14);
         assert_eq!(database.count("collections").unwrap(), 1);
         assert_eq!(database.count("source_documents").unwrap(), 1);
         assert_eq!(database.count("publication_claims").unwrap(), 0);
@@ -7047,7 +7187,7 @@ mod tests {
 
         let database = Database::open(&path).unwrap();
 
-        assert_eq!(database.schema_version().unwrap(), 13);
+        assert_eq!(database.schema_version().unwrap(), 14);
         assert_eq!(
             database.collection(collection_id).unwrap().unwrap().policy,
             CollectionPolicy::local_only()
@@ -7082,7 +7222,7 @@ mod tests {
 
         let database = Database::open(&path).unwrap();
         let collection = database.collection(collection_id).unwrap().unwrap();
-        assert_eq!(database.schema_version().unwrap(), 13);
+        assert_eq!(database.schema_version().unwrap(), 14);
         assert_eq!(collection.policy, CollectionPolicy::local_only());
         assert!(
             database
@@ -7114,7 +7254,7 @@ mod tests {
         drop(connection);
 
         let database = Database::open(path).unwrap();
-        assert_eq!(database.schema_version().unwrap(), 13);
+        assert_eq!(database.schema_version().unwrap(), 14);
         let indexes = database.list_federation_indexes().unwrap();
         assert_eq!(indexes.len(), 1);
         assert_eq!(indexes[0].registry_version, 0);
@@ -7153,7 +7293,7 @@ mod tests {
             expires_at: Utc::now() + chrono::Duration::days(1),
         }];
 
-        assert_eq!(database.schema_version().unwrap(), 13);
+        assert_eq!(database.schema_version().unwrap(), 14);
         assert_eq!(
             database
                 .count("federation_bootstrap_registry_state")
@@ -7195,7 +7335,7 @@ mod tests {
         let database = Database::open(path).unwrap();
         let collection = database.collection(collection_id).unwrap().unwrap();
 
-        assert_eq!(database.schema_version().unwrap(), 13);
+        assert_eq!(database.schema_version().unwrap(), 14);
         assert_eq!(collection.origin, WikiOrigin::Folder);
         assert_eq!(collection.indexing_mode, IndexingMode::Manual);
         assert_eq!(collection.okf_version, "0.1");
@@ -7283,7 +7423,7 @@ mod tests {
             .unwrap()
             .unwrap();
 
-        assert_eq!(database.schema_version().unwrap(), 13);
+        assert_eq!(database.schema_version().unwrap(), 14);
         assert_eq!(collection.policy, CollectionPolicy::local_only());
         assert_eq!(collection.indexing_mode, IndexingMode::Manual);
         assert_eq!(database.count("collections").unwrap(), 1);
@@ -7415,7 +7555,7 @@ mod tests {
         let database = Database::open(path).unwrap();
         let concepts = database.list_okf_concept_projection(collection_id).unwrap();
 
-        assert_eq!(database.schema_version().unwrap(), 13);
+        assert_eq!(database.schema_version().unwrap(), 14);
         assert_eq!(concepts.len(), 1);
         assert_eq!(concepts[0].concept_type.to_string(), "Unknown Type");
         assert_eq!(concepts[0].lifecycle_status, "stable");
@@ -7468,6 +7608,60 @@ mod tests {
         assert_eq!(
             database.computation_run(running.id).unwrap().unwrap().state,
             ComputationRunState::Failed
+        );
+    }
+
+    #[test]
+    fn completed_computation_receipt_gets_its_own_expiry_window() {
+        let (_temp, database, collection) = setup();
+        let now = Utc::now();
+        let run = ComputationRunRecord {
+            id: Uuid::new_v4(),
+            collection_id: collection.id,
+            logical_path: "computations/receipt-window.md".to_owned(),
+            actor_kind: "application".to_owned(),
+            actor_id: Some(Uuid::new_v4().to_string()),
+            state: ComputationRunState::AwaitingConfirmation,
+            contract_fingerprint: "a".repeat(64),
+            executor_sha256: "b".repeat(64),
+            attester_sha256: "c".repeat(64),
+            parameter_schema: serde_json::json!([]),
+            receipt_sha256: None,
+            verdict: None,
+            requested_at: now,
+            confirmed_at: None,
+            completed_at: None,
+            expires_at: now + chrono::Duration::seconds(1),
+        };
+        database.create_computation_run(&run).unwrap();
+        database
+            .set_computation_run_state(run.id, ComputationRunState::Running, None, None)
+            .unwrap();
+        let result_expires_at = now + chrono::Duration::minutes(10);
+
+        database
+            .complete_computation_run(run.id, &"d".repeat(64), "accepted", result_expires_at)
+            .unwrap();
+
+        let completed = database.computation_run(run.id).unwrap().unwrap();
+        assert_eq!(completed.state, ComputationRunState::Completed);
+        assert_eq!(completed.expires_at, result_expires_at);
+        assert_eq!(
+            completed.receipt_sha256.as_deref(),
+            Some("dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd")
+        );
+    }
+
+    #[test]
+    fn malformed_utf8_capability_is_rejected_without_slicing_panic() {
+        let database = Database::in_memory().unwrap();
+        let malformed = format!("{}{}{}", "é".repeat(7), "€", "a".repeat(80));
+
+        assert!(
+            database
+                .authenticate_application_capability(&malformed)
+                .unwrap()
+                .is_none()
         );
     }
 

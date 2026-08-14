@@ -311,7 +311,10 @@ impl HybridSearchEngine {
                 title: candidate.title,
                 snippet,
                 heading_or_page: candidate.chunk.heading_or_page,
-                logical_resource_uri: candidate.logical_resource_uri,
+                logical_resource_uri: format!(
+                    "urn:airwiki:{}:{}",
+                    self.node_id, candidate.chunk.concept_id
+                ),
                 source_revision: candidate.chunk.source_revision,
                 source_sha256: candidate.source_sha256,
                 updated_at: candidate.updated_at,
@@ -911,6 +914,10 @@ mod tests {
         assert_eq!(response.hits.len(), 1);
         assert_eq!(response.hits[0].collection_id, collection.id);
         assert_eq!(response.hits[0].heading_or_page, "guides/recovery.md");
+        assert_eq!(
+            response.hits[0].logical_resource_uri,
+            format!("urn:airwiki:local:{}", response.hits[0].concept_id)
+        );
     }
 
     fn allow_external_ai(database: &Database, collection_id: Uuid) {

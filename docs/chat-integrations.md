@@ -37,7 +37,9 @@ does not delete the memory.
 Attested computation requests remain pending until the user confirms them in
 AirWiki. A result expires after ten minutes. Saving an accepted result requires
 a second confirmation and records a machine-confirmed process concept rather
-than a human review.
+than a human review. Each application is limited to 16 pending computation
+requests and 30 requests per minute. Sanitized terminal run metadata is retained
+for at most 24 hours and is pruned on startup or the next request.
 
 ## ChatGPT Desktop/Work
 

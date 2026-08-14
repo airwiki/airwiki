@@ -28,6 +28,9 @@ pub const MAX_RESPONSE_BYTES: usize = 256 * 1024;
 pub const MIN_TOP_K: u8 = 1;
 pub const DEFAULT_TOP_K: u8 = 5;
 pub const MAX_TOP_K: u8 = 10;
+pub const MAX_PENDING_COMPUTATIONS_PER_APPLICATION: u32 = 16;
+pub const MAX_COMPUTATION_REQUESTS_PER_MINUTE: u32 = 30;
+pub const COMPUTATION_RUN_RETENTION_SECONDS: i64 = 24 * 60 * 60;
 
 /// How confidently AirWiki can interpret an OKF bundle.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

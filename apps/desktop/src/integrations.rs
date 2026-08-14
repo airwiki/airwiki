@@ -491,18 +491,45 @@ impl ChatIntegrationManager {
         client: ChatClientKind,
     ) -> Result<CapabilityProvision> {
         let path = self.capability_path(client);
+        let app_id = application_id(client);
         if regular_file(&path)? {
+            let parent = path
+                .parent()
+                .context("la capacidad no tiene un directorio padre")?;
+            if path_contains_link_or_reparse_point(parent).await? {
+                bail!("el directorio de capacidades contiene un enlace no permitido")
+            }
+            let metadata = fs::symlink_metadata(&path)
+                .await
+                .context("no se pudo inspeccionar la capacidad privada")?;
+            if metadata.len() > 256 {
+                bail!("la capacidad privada de la integración excede el tamaño permitido")
+            }
+            set_private_permissions(&path).await?;
             let secret = fs::read_to_string(&path)
                 .await
                 .context("no se pudo leer la capacidad privada de la integración")?;
-            if self
+            match self
                 .database
                 .authenticate_application_capability(secret.trim())?
-                .is_some()
             {
-                return Ok(CapabilityProvision::Existing);
+                Some(capability) if capability.app_id == app_id => {
+                    return Ok(CapabilityProvision::Existing);
+                }
+                Some(_) => bail!("la capacidad privada pertenece a otra integración"),
+                None if self
+                    .database
+                    .application_capability_any_by_app_id(app_id)?
+                    .is_some_and(|capability| capability.revoked_at.is_some()) =>
+                {
+                    fs::remove_file(&path)
+                        .await
+                        .context("no se pudo reemplazar la capacidad revocada")?;
+                }
+                None => {
+                    bail!("la capacidad privada de la integración no coincide con su registro")
+                }
             }
-            bail!("la capacidad privada de la integración no coincide con su registro")
         }
         let mut random = [0_u8; 48];
         getrandom::fill(&mut random).context("no se pudo generar una capacidad segura")?;
@@ -510,7 +537,6 @@ impl ChatIntegrationManager {
         let prefix = secret
             .get(..16)
             .context("la capacidad generada no contiene un prefijo válido")?;
-        let app_id = Uuid::new_v5(&Uuid::NAMESPACE_URL, client.bridge_id().as_bytes());
         let secret_hash = hex::encode(Sha256::digest(secret.as_bytes()));
         if self
             .database
@@ -543,7 +569,7 @@ impl ChatIntegrationManager {
     }
 
     async fn revoke_application_capability(&self, client: ChatClientKind) -> Result<()> {
-        let app_id = Uuid::new_v5(&Uuid::NAMESPACE_URL, client.bridge_id().as_bytes());
+        let app_id = application_id(client);
         if self
             .database
             .application_capability_by_app_id(app_id)?
@@ -992,13 +1018,27 @@ impl ChatIntegrationManager {
         if !regular_file(&path)? {
             return Ok(false);
         }
+        let parent = path
+            .parent()
+            .context("la capacidad no tiene un directorio padre")?;
+        if path_contains_link_or_reparse_point(parent).await? {
+            return Ok(false);
+        }
+        let metadata = fs::symlink_metadata(&path)
+            .await
+            .context("no se pudo inspeccionar la capacidad privada")?;
+        if metadata.len() > 256 || !private_permissions_are_valid(&metadata) {
+            return Ok(false);
+        }
         let secret = fs::read_to_string(path)
             .await
             .context("no se pudo leer la capacidad privada de la integración")?;
         Ok(self
             .database
             .authenticate_application_capability(secret.trim())?
-            .is_some())
+            .is_some_and(|capability| {
+                capability.app_id == application_id(ChatClientKind::GenericMcp)
+            }))
     }
 
     async fn connect_generic_mcp(&self) -> Result<()> {
@@ -1379,6 +1419,10 @@ impl ChatIntegrationManager {
         }
         Ok(true)
     }
+}
+
+fn application_id(client: ChatClientKind) -> Uuid {
+    Uuid::new_v5(&Uuid::NAMESPACE_URL, client.bridge_id().as_bytes())
 }
 
 fn view(
@@ -1844,6 +1888,18 @@ async fn set_private_permissions(path: &Path) -> Result<()> {
     fs::set_permissions(path, std::fs::Permissions::from_mode(0o600))
         .await
         .context("no se pudieron restringir los permisos de la capacidad")
+}
+
+#[cfg(unix)]
+fn private_permissions_are_valid(metadata: &std::fs::Metadata) -> bool {
+    use std::os::unix::fs::PermissionsExt;
+
+    metadata.permissions().mode() & 0o077 == 0
+}
+
+#[cfg(not(unix))]
+fn private_permissions_are_valid(_metadata: &std::fs::Metadata) -> bool {
+    true
 }
 
 #[cfg(not(unix))]
@@ -2454,6 +2510,89 @@ mod tests {
         assert!(manager.connect(ChatClientKind::GenericMcp).await.is_err());
         assert!(!manager.generic_capability_is_active().await.unwrap());
         assert!(!manager.capability_path(ChatClientKind::GenericMcp).exists());
+    }
+
+    #[tokio::test]
+    async fn revoked_capability_file_is_replaced_on_reconnect() {
+        let temp = TempDir::new().unwrap();
+        let executable = temp.path().join("airwiki-desktop");
+        std::fs::write(&executable, b"desktop").unwrap();
+        let manager = test_manager(&temp, executable);
+        manager
+            .ensure_application_capability(ChatClientKind::GenericMcp)
+            .await
+            .unwrap();
+        let path = manager.capability_path(ChatClientKind::GenericMcp);
+        let previous = std::fs::read_to_string(&path).unwrap();
+        manager
+            .database
+            .set_application_capability_revoked(application_id(ChatClientKind::GenericMcp), true)
+            .unwrap();
+
+        let provision = manager
+            .ensure_application_capability(ChatClientKind::GenericMcp)
+            .await
+            .unwrap();
+        let replacement = std::fs::read_to_string(path).unwrap();
+
+        assert_eq!(provision, CapabilityProvision::Created);
+        assert_ne!(replacement, previous);
+        assert!(manager.generic_capability_is_active().await.unwrap());
+    }
+
+    #[tokio::test]
+    async fn reused_capability_must_belong_to_the_selected_client() {
+        let temp = TempDir::new().unwrap();
+        let executable = temp.path().join("airwiki-desktop");
+        std::fs::write(&executable, b"desktop").unwrap();
+        let manager = test_manager(&temp, executable);
+        manager
+            .ensure_application_capability(ChatClientKind::ChatGptDesktop)
+            .await
+            .unwrap();
+        let chatgpt_secret =
+            std::fs::read(manager.capability_path(ChatClientKind::ChatGptDesktop)).unwrap();
+        let generic_path = manager.capability_path(ChatClientKind::GenericMcp);
+        std::fs::write(&generic_path, chatgpt_secret).unwrap();
+
+        let error = manager
+            .ensure_application_capability(ChatClientKind::GenericMcp)
+            .await
+            .unwrap_err();
+
+        assert!(error.to_string().contains("otra integración"));
+        assert!(!manager.generic_capability_is_active().await.unwrap());
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn reused_capability_permissions_are_repaired_before_acceptance() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let temp = TempDir::new().unwrap();
+        let executable = temp.path().join("airwiki-desktop");
+        std::fs::write(&executable, b"desktop").unwrap();
+        let manager = test_manager(&temp, executable);
+        manager
+            .ensure_application_capability(ChatClientKind::GenericMcp)
+            .await
+            .unwrap();
+        let path = manager.capability_path(ChatClientKind::GenericMcp);
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o644)).unwrap();
+
+        assert!(!manager.generic_capability_is_active().await.unwrap());
+
+        let provision = manager
+            .ensure_application_capability(ChatClientKind::GenericMcp)
+            .await
+            .unwrap();
+
+        assert_eq!(provision, CapabilityProvision::Existing);
+        assert_eq!(
+            std::fs::metadata(path).unwrap().permissions().mode() & 0o777,
+            0o600
+        );
+        assert!(manager.generic_capability_is_active().await.unwrap());
     }
 
     #[tokio::test]

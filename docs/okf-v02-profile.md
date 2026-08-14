@@ -87,3 +87,7 @@ for at most ten minutes. SQLite stores only the actor, timestamps, contract and
 component hashes, parameter names/types, receipt hash and verdict. Saving an
 accepted receipt is a separate confirmed action into an AI-memory Wiki and
 records machine confirmation by `process:airwiki-wasm`.
+
+An application may hold at most 16 pending computation requests and submit at
+most 30 per minute. Terminal sanitized run metadata is retained for no more than
+24 hours and is pruned on startup or when another request arrives.

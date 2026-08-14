@@ -765,12 +765,17 @@ impl ChatIntegrationManager {
                 Some(self.managed_bridge_path()),
             ));
         };
-        if !self.codex_supported(&codex).await? {
+        // Codex startup can include its own plugin discovery. Probe support and
+        // version concurrently so a slow CLI cannot serialize two independent
+        // process timeouts and block every integration action.
+        let (supported, detected_version) =
+            tokio::join!(self.codex_supported(&codex), self.program_version(&codex));
+        if !supported? {
             return Ok(view(
                 ChatClientKind::ChatGptDesktop,
                 IntegrationStatus::Unsupported,
                 "La versión detectada no admite administración MCP local.",
-                self.program_version(&codex).await,
+                detected_version,
                 Some(self.managed_bridge_path()),
             ));
         }
@@ -782,7 +787,7 @@ impl ChatIntegrationManager {
             ChatClientKind::ChatGptDesktop,
             status,
             detail,
-            self.program_version(&codex).await,
+            detected_version,
             Some(self.managed_bridge_path()),
         ))
     }

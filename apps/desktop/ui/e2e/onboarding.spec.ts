@@ -453,6 +453,9 @@ async function exerciseGenericMcpMemory(): Promise<void> {
     const conceptId = stringField(first, 'conceptId');
     const firstFingerprint = stringField(first, 'fingerprint');
     expect(first.status).toBe('stable');
+    await $('.connections-drawer .icon-button').click();
+    await $(`.wiki-row*=${memoryName}`).click();
+    await expect($('.file-list')).toHaveText(expect.stringContaining('Portable agent memory'));
 
     const updated = await client.callTool('write_airwiki_memory', {
       wiki_id: wikiId,
@@ -466,6 +469,11 @@ async function exerciseGenericMcpMemory(): Promise<void> {
     });
     const updatedFingerprint = stringField(updated, 'fingerprint');
     expect(updatedFingerprint).not.toBe(firstFingerprint);
+    await browser.waitUntil(
+      () => browser.execute(() => Array.from(document.querySelectorAll('.file-list strong'))
+        .some((title) => title.textContent?.trim() === 'Portable agent memory updated')),
+      { timeout: 10_000, timeoutMsg: 'the open AI-memory wiki did not refresh after an MCP write' }
+    );
 
     let staleRejected = false;
     try {
@@ -490,6 +498,8 @@ async function exerciseGenericMcpMemory(): Promise<void> {
     const persisted = record(afterStale.concepts[0], 'persisted concept');
     expect(persisted.title).toBe('Portable agent memory updated');
     expect(persisted.fingerprint).toBe(updatedFingerprint);
+    await $('.file-list').$('button*=Portable agent memory updated').click();
+    await expect($('.concept-assurance')).toHaveText(expect.stringContaining('stable'));
 
     const deprecated = await client.callTool('deprecate_airwiki_memory', {
       wiki_id: wikiId,
@@ -497,7 +507,15 @@ async function exerciseGenericMcpMemory(): Promise<void> {
       expected_fingerprint: updatedFingerprint
     });
     expect(deprecated.status).toBe('deprecated');
+    await browser.waitUntil(
+      () => browser.execute(() => document.querySelector('.concept-assurance') === null),
+      { timeout: 10_000, timeoutMsg: 'the open AI-memory page was not invalidated after deprecation' }
+    );
+    await $('.file-list').$('button*=Portable agent memory updated').click();
+    await expect($('.concept-assurance')).toHaveText(expect.stringContaining('deprecated'));
 
+    await $('button[aria-label^="AI apps:"]').click();
+    await $('.connections-drawer').waitForDisplayed();
     article = await genericMcpArticle();
     await article.$('button*=Disconnect').click();
     await browser.waitUntil(

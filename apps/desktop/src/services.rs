@@ -1239,7 +1239,7 @@ pub struct DesktopServices {
     transient_source_issues: RwLock<HashMap<Uuid, Vec<TransientSourceIssue>>>,
     memories: airwiki_core::AiMemoryService,
     computations: ComputationCoordinator,
-    application_updates: watch::Sender<u64>,
+    application_updates: broadcast::Sender<Uuid>,
     application_backend_cancellation: CancellationToken,
     application_backend_task: Option<JoinHandle<()>>,
 }
@@ -1283,7 +1283,7 @@ fn spawn_mcp_application_backend(
     database: Database,
     memories: airwiki_core::AiMemoryService,
     computations: ComputationCoordinator,
-    application_updates: watch::Sender<u64>,
+    application_updates: broadcast::Sender<Uuid>,
 ) -> (
     DesktopMcpApplicationBackend,
     CancellationToken,
@@ -1313,7 +1313,6 @@ fn spawn_mcp_application_backend(
             let memories = memories.clone();
             let computations = computations.clone();
             let updates = application_updates.clone();
-            let changes_visible_state = application_tool_changes_visible_state(tool);
             let result = tokio::task::spawn_blocking(move || {
                 let capability = database
                     .authenticate_application_capability(&identity.capability)
@@ -1323,8 +1322,10 @@ fn spawn_mcp_application_backend(
             })
             .await
             .unwrap_or(Err(McpApplicationError::Unavailable));
-            if result.is_ok() && changes_visible_state {
-                updates.send_modify(|generation| *generation = generation.wrapping_add(1));
+            if let Ok(value) = &result
+                && let Some(wiki_id) = application_update_wiki_id(tool, value)
+            {
+                let _ = updates.send(wiki_id);
             }
             let _ = response.send(result);
         }
@@ -1336,11 +1337,13 @@ fn spawn_mcp_application_backend(
     )
 }
 
-fn application_tool_changes_visible_state(tool: &str) -> bool {
+fn application_update_wiki_id(tool: &str, result: &serde_json::Value) -> Option<Uuid> {
     matches!(
         tool,
         "create_airwiki_memory" | "write_airwiki_memory" | "deprecate_airwiki_memory"
     )
+    .then(|| result.get("wikiId")?.as_str()?.parse().ok())
+    .flatten()
 }
 
 fn call_memory_tool(
@@ -1456,6 +1459,7 @@ fn call_memory_tool(
 
 fn memory_concept_json(concept: airwiki_core::OkfConceptProjectionRecord) -> serde_json::Value {
     serde_json::json!({
+        "wikiId": concept.collection_id,
         "conceptId": concept.concept_id,
         "path": concept.logical_path,
         "type": concept.concept_type,
@@ -1682,7 +1686,7 @@ impl DesktopServices {
         let computations = ComputationCoordinator::new(database.clone())?;
         let memories =
             airwiki_core::AiMemoryService::new(database.clone(), core_paths.vaults.clone());
-        let (application_updates, _) = watch::channel(0_u64);
+        let (application_updates, _) = broadcast::channel(128);
         let (application_backend, application_backend_cancellation, application_backend_task) =
             spawn_mcp_application_backend(
                 database.clone(),
@@ -1786,7 +1790,7 @@ impl DesktopServices {
         self.computations.subscribe()
     }
 
-    pub(crate) fn subscribe_application_updates(&self) -> watch::Receiver<u64> {
+    pub(crate) fn subscribe_application_updates(&self) -> broadcast::Receiver<Uuid> {
         self.application_updates.subscribe()
     }
 
@@ -4821,13 +4825,15 @@ mod tests {
     use super::*;
 
     #[test]
-    fn only_memory_mutations_refresh_visible_application_state() {
+    fn memory_mutations_identify_the_wiki_to_refresh() {
+        let wiki_id = Uuid::new_v4();
+        let result = serde_json::json!({ "wikiId": wiki_id });
         for tool in [
             "create_airwiki_memory",
             "write_airwiki_memory",
             "deprecate_airwiki_memory",
         ] {
-            assert!(application_tool_changes_visible_state(tool));
+            assert_eq!(application_update_wiki_id(tool, &result), Some(wiki_id));
         }
         for tool in [
             "list_airwiki_memories",
@@ -4835,8 +4841,12 @@ mod tests {
             "request_airwiki_computation",
             "get_airwiki_computation_run",
         ] {
-            assert!(!application_tool_changes_visible_state(tool));
+            assert_eq!(application_update_wiki_id(tool, &result), None);
         }
+        assert_eq!(
+            application_update_wiki_id("write_airwiki_memory", &serde_json::json!({})),
+            None
+        );
     }
 
     #[test]

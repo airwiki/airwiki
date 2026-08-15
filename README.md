@@ -1,45 +1,105 @@
 # AirWiki
 
 <p align="center">
-  <img src="resources/branding/airwiki-mark.png" alt="AirWiki logo" width="220">
+  <img src="resources/branding/airwiki-mark.png" alt="AirWiki" width="150">
 </p>
 
-AirWiki is an open-source, local-first Rust desktop knowledge base that turns folders of text-based Markdown and PDF files into human-reviewed OKF wikis. It is intended for individuals, communities, small teams, and organizations without assuming a particular company structure or network topology.
+<p align="center">
+  <strong>Your private, portable wiki—built from the knowledge you already have.</strong>
+</p>
 
-Each Wiki joins one source folder, its reviewed OKF bundle, and its access policy. Original documents remain on their source device. LAN collaboration returns bounded authorized snippets after pairing and grants. An experimental, separately opted-in public network can advertise reviewed Wikis through replaceable signed indexes and serve search or browse results directly from the owner without replicating documents. Local chat integrations distinguish answerability-accepted evidence from separately typed candidates that the chat model must verify, use a per-user MCP bridge, and never require AirWiki to store provider API keys.
+<p align="center">
+  macOS 13+ · Windows 10/11 · OKF v0.2 · Apache-2.0
+</p>
 
-## Project status
+<p align="center">
+  <a href="#how-it-works">How it works</a> ·
+  <a href="#availability">Availability</a> ·
+  <a href="#run-from-source">Run from source</a> ·
+  <a href="CONTRIBUTING.md">Contribute</a>
+</p>
 
-This repository is the development baseline for [airwiki/airwiki](https://github.com/airwiki/airwiki), not a supported public release. The source is available under [Apache-2.0](LICENSE). Builds must be described as development or internal release candidates until public contacts, bundled notices, clean platform gates, signing, and notarization are complete.
+AirWiki is an open-source desktop app that turns folders, [Open Knowledge Format (OKF)](https://github.com/GoogleCloudPlatform/knowledge-catalog/blob/main/okf/SPEC.md) bundles, and assistant conversations into wikis you can search, review, and selectively share. It keeps knowledge on your device by default and uses local AI to help organize it without taking control away from you.
 
-Tested development targets are macOS arm64 and Windows x64. Linux, web, and mobile are not currently supported.
+> [!IMPORTANT]
+> AirWiki is in active development and does not have a supported public download yet. Current builds are development or internal release candidates. See [Availability](#availability) before installing or testing one.
 
-## Current capabilities
+![AirWiki showing a synthetic Wiki proposal that requires human review before publication](docs/assets/airwiki-review.jpg)
 
-- Watch folders containing Markdown and text-based PDF files.
-- Extract and enrich documents with a locally managed model.
-- Compare each proposed draft with revision-bound local evidence and require human review before publishing an OKF wiki concept.
-- Search locally with lexical and vector evidence.
-- Discover, pair, authorize, and search other AirWiki nodes on a LAN.
-- Opt selected reviewed Wikis into experimental public search and browse through signed federated routing indexes.
-- Expose explicitly approved evidence through local MCP and let a
-  capability-authorized integration maintain isolated OKF memory Wikis.
-- Install a global, instruction-only AirWiki skill for Codex/ChatGPT, Claude
-  Code and Gemini CLI so a plain request can create or maintain project and
-  thematic memory without adding files to the repository.
-- Import compatible OKF v0.2 folders or ZIP bundles while preserving unknown
-  types and fields, and browse future versions locally under restrictions.
-- Run explicitly confirmed `airwiki-wasm` attested computations without WASI,
-  host imports, network or external filesystem access.
-- Inspect published OKF bundles and their health without changing source files.
+## Why AirWiki
 
-AirWiki is early-stage and welcomes contributors interested in Rust, local AI, privacy-preserving search, knowledge management, and accessible desktop UX. Start with [CONTRIBUTING.md](CONTRIBUTING.md) or browse the [open issues](https://github.com/airwiki/airwiki/issues).
+### Keep knowledge portable
 
-## Quick start for development
+A Wiki is an OKF v0.2 bundle: human-readable Markdown and YAML that is not locked inside a proprietary cloud database. Folder-based Wikis leave the original documents untouched, while imported and assistant-managed Wikis remain portable bundles.
 
-Install the native build tools for your platform, the Rust version pinned in
-`rust-toolchain.toml`, Node.js 24, and Corepack. Install the exact frontend graph
-without package lifecycle scripts, then start the Tauri development runner:
+### Let AI assist, not decide
+
+Local models can extract, enrich, index, and propose knowledge. AirWiki keeps every folder-derived proposal tied to its source revision and requires a person to compare the evidence before publication.
+
+### Share only what you choose
+
+Local use, paired-device access, external AI access, and experimental public discovery are separate permissions. Connecting a client or another device never silently publishes a Wiki or grants access to it.
+
+### Give assistants durable memory without committing it to Git
+
+Codex, ChatGPT, Claude Code, Gemini CLI, and generic MCP clients can search approved evidence. Authorized clients can also create and maintain isolated memory Wikis through AirWiki without adding generated memory files to a repository.
+
+## How it works
+
+1. **Create a Wiki.** Start from a folder, import an OKF v0.2 folder or ZIP, or ask an authorized assistant to create a memory Wiki.
+2. **Build trusted knowledge.** AirWiki indexes locally. For source folders, local AI prepares proposals and shows the exact evidence behind them.
+3. **Search and share deliberately.** Search your device, paired devices, or opted-in public Wikis. Enable access independently for each Wiki and destination.
+
+Folder Wikis can watch for new files or update manually. Imported OKF Wikis have no source watcher. Assistant memory Wikis can be edited only by their owning application or another application that you explicitly authorize.
+
+## Who it is for
+
+- People and researchers who already keep useful knowledge in local files.
+- Communities and small teams that need selective sharing without centralizing every document.
+- Developers and knowledge workers who want portable memory across multiple AI assistants.
+- Organizations evaluating local-first knowledge workflows with explicit trust boundaries.
+
+## What works today
+
+- Create continuously updated or manual Wikis from Markdown and text-based PDF folders.
+- Import hierarchical OKF v0.2 folders and ZIP bundles while preserving unknown types and fields.
+- Browse published concepts as a file-like tree or an on-demand relationship graph.
+- Review local-AI proposals against revision-bound source evidence before publishing.
+- Search with local lexical and vector retrieval, including provenance and assurance state.
+- Pair devices on a private LAN and grant access per Wiki.
+- Opt selected, reviewed Wikis into experimental public search and browse.
+- Connect ChatGPT/Codex, Claude, Gemini, and generic MCP clients without storing provider API keys.
+- Create isolated assistant-memory Wikis with fingerprint-based updates and revocable capabilities.
+- Inspect trust, freshness, lifecycle, provenance, compatibility, and health for OKF v0.2 concepts.
+- Run explicitly confirmed `airwiki-wasm` attested computations in a constrained, no-WASI sandbox.
+
+## Privacy by default
+
+- New Wikis are local-only.
+- Original folder contents remain on the source device and are never deleted by AirWiki.
+- Publication, peer sharing, public discovery, and external AI access require independent human decisions.
+- Changed source knowledge is withdrawn until its new revision is reviewed.
+- The local model cannot publish, grant access, or decide whether content may leave the device.
+- The Wiki viewer does not load remote resources or request complete documents from peers.
+- Default logs omit documents, queries, snippets, credentials, local paths, and network identities.
+
+Read the [threat model](docs/threat-model.md) for the complete trust boundaries and failure behavior.
+
+## Availability
+
+| Platform | Current development target |
+| --- | --- |
+| macOS | Apple silicon, macOS 13 or later |
+| Windows | Windows 10/11 x64 with AVX2 |
+| Linux, web, mobile | Not currently supported |
+
+There are no supported public release artifacts yet. Use only development candidates obtained through an agreed private channel, verify their SHA-256 independently, and do not bypass Gatekeeper, SmartScreen, model hashes, or runtime verification. Public signing, notarization, bundled notices, and clean platform gates must be complete before AirWiki is presented as a supported release.
+
+For current candidate requirements and first-run behavior, read [Installing and running AirWiki](docs/install.md).
+
+## Run from source
+
+You need the native build tools for your platform, the Rust toolchain pinned in [`rust-toolchain.toml`](rust-toolchain.toml), Node.js 24.15.0, Corepack, and the [Tauri v2 prerequisites](https://v2.tauri.app/start/prerequisites/).
 
 ```bash
 cd apps/desktop/ui
@@ -48,73 +108,68 @@ cd ..
 ./ui/node_modules/.bin/tauri dev
 ```
 
-The first-run flow checks the machine, proposes a local model profile, and explains every permission before applying it. Model downloads require disk space and network access on first use; curation and search work offline after the required assets have been verified.
+The first-run flow checks the device, recommends a local model profile, and explains each permission before applying it. Initial model preparation needs disk space and network access; curation and local search work offline after the required assets are verified.
 
-## Code signing policy
+This repository welcomes contributors interested in Rust, local AI, privacy-preserving search, knowledge management, and accessible desktop UX. Start with [CONTRIBUTING.md](CONTRIBUTING.md) and the [open issues](https://github.com/airwiki/airwiki/issues).
 
-Free code signing provided by [SignPath.io](https://about.signpath.io),
-certificate by [SignPath Foundation](https://signpath.org). Windows signing
-roles, privacy guarantees, origin verification and release controls are defined
-in the [AirWiki code signing policy](docs/code-signing-policy.md).
+Before the public release, feedback is especially valuable around first-run clarity, evidence review, permission boundaries, cross-device search, and assistant memory. Please use [GitHub Issues](https://github.com/airwiki/airwiki/issues) for reproducible problems and focused product feedback.
 
-Before submitting a cross-cutting change, run:
+## Architecture at a glance
 
-```bash
-cargo fmt --all -- --check
-cargo clippy --workspace --all-targets --all-features --locked -- -D warnings
-cargo test --workspace --all-features --locked
-cargo run --locked -p xtask -- docs check
-cargo run --locked -p xtask -- licenses check
+AirWiki is a Rust workspace with a Tauri v2 desktop shell and Svelte UI. SQLite owns operational state and local paths; published OKF files are the source of truth for each visible Wiki. Domain rules stay outside the UI and transport layers.
+
+```text
+folders / OKF / assistant memory
+              │
+              ▼
+     local ingestion + review
+              │
+              ▼
+       portable OKF v0.2
+          │     │     │
+          ▼     ▼     ▼
+       local   LAN   public/MCP
 ```
 
-Run `cargo deny --locked check` when dependencies or `Cargo.lock` change. See [CONTRIBUTING.md](CONTRIBUTING.md) for proportional validation and contribution rules.
+<details>
+<summary>Repository map</summary>
 
-## Architecture
-
-The workspace separates dependency-light contracts, local domain logic, inference, LAN transport, MCP, and desktop composition. SQLite owns operational state and local paths; published OKF files are the source of truth for the visible wiki representation. See the [architecture overview](docs/architecture.md) and [architecture decision records](docs/adr/README.md).
-
-## Privacy defaults
-
-- New Wikis are not available to external chats unless a person enables that policy.
-- Peer sharing requires an explicit Wiki policy, pairing, and a grant from the source node.
-- Modified knowledge is withdrawn until its new revision is reviewed and published.
-- The local model cannot publish, grant access, or decide whether content may leave a device.
-- The Wiki viewer does not load remote resources or request complete peer documents.
-- Logs omit knowledge, queries, snippets, credentials, local paths, and network identities by default.
-- Cloud-facing tests use only [synthetic fixtures](fixtures/README.md).
-
-## Repository map
-
-- `crates/`: domain contracts and reusable core, inference, LAN, and MCP behavior.
-- `apps/`: the desktop application and its narrowly scoped helper executables.
-- `packaging/`: development package scripts and platform manifests.
-- `xtask/`: reproducible documentation, licensing, evaluation, and repository
-  checks.
-- `docs/`: architecture, decisions, operations, security, and internal release guidance.
+- `crates/`: contracts, domain logic, inference, networking, and MCP behavior.
+- `apps/`: the Tauri desktop application and narrowly scoped helper executables.
+- `packaging/`: development packaging and platform manifests.
+- `xtask/`: reproducible documentation, licensing, evaluation, and repository checks.
+- `docs/`: architecture, decisions, security, operations, and release guidance.
 - `fixtures/`: synthetic test material only.
+
+</details>
+
+See the [architecture overview](docs/architecture.md) and [architecture decisions](docs/adr/README.md) for details.
 
 ## Documentation
 
+### Use and evaluate AirWiki
+
 - [Installation and local operation](docs/install.md)
-- [Architecture](docs/architecture.md)
-- [Architecture decisions](docs/adr/README.md)
-- [Retrieval-quality evaluation](docs/retrieval-quality-evaluation.md)
-- [Selector adaptation experiment](docs/selector-adaptation-experiment.md)
-- [Pool-level abstention experiment](docs/pool-null-selector-experiment.md)
-- [Local chat integrations](docs/chat-integrations.md)
-- [AirWiki OKF v0.2 profile](docs/okf-v02-profile.md)
-- [Two-node manual acceptance](docs/two-node-runbook.md)
-- [Public federation beta infrastructure](docs/public-beta-infrastructure.md)
+- [Local chat integrations and assisted memory](docs/chat-integrations.md)
+- [AirWiki's OKF v0.2 profile](docs/okf-v02-profile.md)
+- [Two-node acceptance runbook](docs/two-node-runbook.md)
 - [Recovery](docs/recovery.md)
-- [Threat model](docs/threat-model.md)
-- [Development packaging](docs/packaging.md)
-- [Changelog](CHANGELOG.md)
+
+### Build and contribute
+
 - [Contributing](CONTRIBUTING.md)
+- [Architecture](docs/architecture.md)
+- [Threat model](docs/threat-model.md)
 - [Code review](CODE_REVIEW.md)
+- [Development packaging](docs/packaging.md)
 - [Code signing policy](docs/code-signing-policy.md)
 - [Security policy](SECURITY.md)
-- [Third-party notices](THIRD_PARTY_NOTICES.md)
+- [Changelog](CHANGELOG.md)
 
 ## Deliberate limits
 
-The current product does not provide OCR, DOCX ingestion, image/audio/video processing, DHT, a supported always-on public relay service, source-document replication, accounts, SSO, arbitrary remote editing, arbitrary script runtimes, a system daemon, silent updates, or web/mobile access. MCP mutation is limited to explicitly granted AI-memory Wikis. Experimental federation can use explicitly configured validation or community relays.
+AirWiki does not currently provide OCR, DOCX ingestion, image/audio/video processing, cloud sync, accounts, SSO, source-document replication, arbitrary remote editing, arbitrary script runtimes, a system daemon, silent updates, or web/mobile access. MCP mutation is limited to explicitly authorized AI-memory Wikis. Public federation remains experimental and has no supported always-on public relay service.
+
+## License
+
+AirWiki is open source under the [Apache License 2.0](LICENSE). Windows code signing for development candidates is provided by [SignPath.io](https://about.signpath.io), with a certificate from the [SignPath Foundation](https://signpath.org), under the project's [code signing policy](docs/code-signing-policy.md).

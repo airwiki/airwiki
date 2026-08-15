@@ -1,10 +1,11 @@
 # Internal packaging
 
-AirWiki currently produces internal development candidates with the pinned
-Tauri v2 CLI and bundler. Packaging does not create a supported public release.
-Public signing, notarization, updater promotion, and repository-hosted release
-automation remain deferred until the [public release checklist](release-checklist.md)
-is complete.
+AirWiki produces internal development candidates with the pinned Tauri v2 CLI
+and bundler. The protected public workflows add native signing, notarization,
+updater signatures, exact release metadata and a human promotion gate. Their
+existence does not make a candidate supported: every applicable item in the
+[public release checklist](release-checklist.md) must pass first. See the
+[release process](release-process.md) for repository configuration and operation.
 
 Installers contain the desktop application, local MCP bridge, platform runtime,
 licenses, and platform-specific integration assets. Model weights and future
@@ -223,8 +224,9 @@ then install the new candidate; the two data roots remain intact by default.
 
 ### Windows open-source signing
 
-The manual `Windows signed MSI candidate` workflow uses two origin-verified
-SignPath requests. The first signs the MSI-tagged desktop, MCP bridge and
+The reusable `Windows signed MSI candidate` workflow uses two origin-verified
+SignPath requests. It may run manually for a candidate or as the Windows stage
+of `Prepare signed public release`. The first request signs the MSI-tagged desktop, MCP bridge and
 firewall helper produced by the reviewed GitHub-hosted build. The second accepts
 only MSI packages containing those valid nested signatures—including the exact
 bridge bytes inside the MCPB—and signs the two localized MSI containers.
@@ -273,7 +275,7 @@ or on Windows:
 Get-FileHash target\packages\windows\* -Algorithm SHA256
 ```
 
-## Public distribution remains deferred
+## Public distribution gate
 
 A public release requires repository governance, monitored security and conduct
 contacts, protected environments, Developer ID plus notarization, Windows
@@ -281,9 +283,8 @@ public-trust signing, updater-key custody, final-byte SBOM and hashes, and clean
 platform acceptance. None of those requirements may be inferred from a green
 internal packaging run.
 
-The active SignPath workflow can produce a manually approved, origin-verified
-Windows candidate; it does not publish or promote that candidate. Public
-distribution remains blocked until SignPath Foundation accepts the project,
-the signed MSI passes the installed Windows matrix, updater signatures are
-created and verified, and the remaining checklist is complete. The archived
-workflows remain inert historical references and must not be copied back.
+`prepare-release.yml` creates only a private draft. `promote-release.yml`
+re-downloads and verifies that draft on both platforms, then waits for the
+protected human release approval. The stable manifest is derived from final
+signed bytes and becomes public with the installers. Archived workflows remain
+inert historical references and are not release inputs.

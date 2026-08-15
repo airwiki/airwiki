@@ -5,10 +5,12 @@ This guide covers the tested development targets: macOS arm64 and Windows
 subnet with multicast available. Hiding the window keeps the node running;
 **Exit completely** stops it.
 
-AirWiki is still a development candidate. Until an official release
-exists, use only artifacts supplied through an agreed private channel and verify
-their SHA-256 independently. Do not bypass Gatekeeper, SmartScreen, model hashes,
-or runtime verification.
+AirWiki is still a development candidate. When an official release exists, use
+only the signed installers on the
+[latest GitHub release](https://github.com/airwiki/airwiki/releases/latest) and
+verify them against its `SHA256SUMS`. Until then, use only artifacts supplied
+through an agreed private channel and verify their SHA-256 independently. Do not
+bypass Gatekeeper, SmartScreen, model hashes, or runtime verification.
 
 ## Before installing
 

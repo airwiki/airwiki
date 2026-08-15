@@ -96,6 +96,8 @@ constitute a supported public release.
 ## Current deliberate blockers
 
 The official source repository is [airwiki/airwiki](https://github.com/airwiki/airwiki).
-The development baseline still has no public contact, signing credentials,
-updater key, or active signed-release workflow. Clearing any one blocker does not
-waive the others.
+The repository now contains fail-closed preparation and promotion workflows,
+but no public release exists until the protected environments, credentials,
+updater-key custody, contacts, legal review and complete installed acceptance
+matrix are configured and recorded. Clearing any one blocker does not waive the
+others. Follow the [public release process](release-process.md).

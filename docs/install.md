@@ -139,12 +139,15 @@ is not evidence by itself; verify the stated effect.
 
 ## Connect a local chat client
 
-After preflight is ready, open **Integrations** and refresh detection. AirWiki can register ChatGPT Desktop/Work and Gemini CLI through supported CLIs and
-open Claude's MCPB installer. Every configuration change shows the client,
-versioned bridge, and cloud boundary before confirmation.
+After preflight is ready, open **Connections** and refresh detection. AirWiki
+can register ChatGPT Desktop/Work, Codex, Claude Code and Gemini CLI through
+supported CLIs, and can open Claude Desktop's MCPB installer. For clients with
+documented user skills, one confirmation installs the local MCP connection and
+the global AirWiki workflow guide; the prompt lists every global file first.
+Open a new conversation after installing or updating the guide.
 
 **Allow in external chats** is independent from **Share with authorized peers**.
-Connecting a client never enables a collection. See
+Connecting a client never enables a Wiki, sharing or publication. See
 [local chat integrations](chat-integrations.md).
 
 ## Background operation, autostart, and updates

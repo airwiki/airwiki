@@ -24,6 +24,9 @@ Tested development targets are macOS arm64 and Windows x64. Linux, web, and mobi
 - Opt selected reviewed Wikis into experimental public search and browse through signed federated routing indexes.
 - Expose explicitly approved evidence through local MCP and let a
   capability-authorized integration maintain isolated OKF memory Wikis.
+- Install a global, instruction-only AirWiki skill for Codex/ChatGPT, Claude
+  Code and Gemini CLI so a plain request can create or maintain project and
+  thematic memory without adding files to the repository.
 - Import compatible OKF v0.2 folders or ZIP bundles while preserving unknown
   types and fields, and browse future versions locally under restrictions.
 - Run explicitly confirmed `airwiki-wasm` attested computations without WASI,

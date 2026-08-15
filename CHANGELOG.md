@@ -10,6 +10,13 @@ All notable user-visible changes to AirWiki will be documented here. The project
 
 ### Added
 
+- Added a versioned global AirWiki skill and assisted-memory guide for
+  ChatGPT/Codex, Claude Code and Gemini CLI, installed together with MCP after
+  one native confirmation. Claude Desktop and generic clients receive the same
+  safe list/read/write-with-fingerprint workflow through MCP instructions.
+- Added Claude Code as a first-class, separately authorized application with a
+  user-scoped stdio configuration and isolated Wiki ownership.
+
 - Added a bounded two-region Azure beta deployment for the public federation
   index/relay, with a live USD 50 monthly cost gate, per-node budgets,
   availability alerts, hardened single-node services, private versioned
@@ -120,6 +127,11 @@ All notable user-visible changes to AirWiki will be documented here. The project
 - Kept Wiki Health recovery actions honest: filesystem and ambiguous findings now require manual recovery instead of offering a guided repair that cannot complete, while missing pages are no longer rendered as dead links.
 
 ### Security
+
+- Made workflow-guide installation receipt-bound, atomic and fail-closed:
+  documented user roots only, no links or reparse points, preserved BOM and line
+  endings, no overwrite or removal of user-modified files, and immediate
+  capability revocation on disconnect.
 
 - Added 15-minute, identifier-free relay outcome counts grouped by a fixed
   status allowlist, without reader-success events, per-event timestamps or

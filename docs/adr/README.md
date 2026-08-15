@@ -9,7 +9,7 @@ tests, operational runbooks or evaluation reports.
 | Number | Decision | Status | Date | Relationship |
 | --- | --- | --- | --- | --- |
 | [0001](0001-answerability-gated-search-v2.md) | Gate federated evidence by local answerability | Superseded | 2026-07-12 | Superseded by ADR 0007 |
-| [0002](0002-local-chat-integrations.md) | Connect local chat clients through one MCP stdio bridge | Accepted | 2026-07-12 | Lifecycle and per-user autostart superseded by ADR 0003 |
+| [0002](0002-local-chat-integrations.md) | Connect local chat clients through one MCP stdio bridge | Accepted | 2026-08-14 | Lifecycle and per-user autostart superseded by ADR 0003 |
 | [0003](0003-desktop-lifecycle-and-signed-updates.md) | Keep desktop services available and require signed updates | Accepted | 2026-07-12 | Supersedes ADR 0002 only for lifecycle and per-user autostart |
 | [0004](0004-sqlite-okf-authority-and-reconciliation.md) | Separate SQLite operational authority from visible OKF authority | Accepted | 2026-07-15 | — |
 | [0005](0005-lan-identity-pairing-and-authorization.md) | Bind LAN authorization to persistent identity and human-confirmed SAS | Accepted | 2026-07-15 | Answerability-only disclosure clause superseded by ADR 0007 |

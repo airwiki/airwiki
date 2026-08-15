@@ -140,8 +140,8 @@ Record only sanitized evidence.
 When acceptance is complete, run **Promote verified stable release** with the
 same version. The workflow:
 
-1. requires the draft to remain a prerelease tied to a full commit still
-   reachable from `main`;
+1. requires either the exact private draft or its exact stable recovery state,
+   tied to a full commit still reachable from `main`;
 2. re-downloads the exact asset allowlist and verifies every SHA-256, provenance
    entry and SBOM identity;
 3. independently re-verifies Developer ID, notarization, stapling and the macOS
@@ -161,6 +161,12 @@ release without changing its assets. Consequently `latest.json` and the
 installers become visible together, the promotion is safe to retry after an
 interruption, and the updater manifest can never point at an unpublished
 prerelease.
+
+If GitHub completed publication but the runner stopped before recording the
+final checks, rerunning promotion accepts only that exact stable recovery state.
+It repeats the complete metadata and native platform verification, passes
+through `public-release` approval again and then confirms the release is the
+stable latest version. Mixed draft/prerelease states always fail closed.
 
 Do not delete or move old stable tags, assets or updater manifests. If any gate
 fails, leave the candidate private, correct the source through a new pull request

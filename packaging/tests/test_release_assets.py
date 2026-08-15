@@ -48,6 +48,61 @@ class ReleaseAssetTests(unittest.TestCase):
             self.generate(directory)
             self.verify(directory)
 
+            spdx = json.loads(
+                (directory / f"airwiki-{self.version}.spdx.json").read_text(
+                    encoding="utf-8"
+                )
+            )
+            self.assertTrue(spdx["files"])
+            self.assertTrue(
+                all(
+                    record["licenseInfoInFiles"] == ["NOASSERTION"]
+                    for record in spdx["files"]
+                )
+            )
+
+    def test_official_spdx_schema_rejects_a_missing_required_field(self) -> None:
+        root = SCRIPT.parents[1]
+        document = MODULE.spdx_document(
+            root,
+            {},
+            self.version,
+            self.commit,
+            "2026-08-15T12:00:00Z",
+        )
+        del document["creationInfo"]
+
+        with self.assertRaisesRegex(ValueError, "required field"):
+            MODULE.validate_spdx_document(root, document)
+
+    def test_npm_inventory_callouts_must_exist_in_the_package_table(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            inventory = Path(temporary) / "npm.md"
+            inventory.write_text(
+                "# Inventory\n\n"
+                "## Packages\n\n"
+                "| Package | Version(s) | Declared license |\n"
+                "| --- | --- | --- |\n"
+                "| example | 1.0.0 | MIT |\n\n"
+                "## Packages without a published legal file\n\n"
+                "- `missing@1.0.0`\n",
+                encoding="utf-8",
+            )
+
+            with self.assertRaisesRegex(ValueError, "package callout"):
+                MODULE.parse_inventory(inventory, "npm")
+
+    def test_platform_only_npm_packages_are_present_in_the_sbom_input(self) -> None:
+        root = SCRIPT.parents[1]
+        packages = MODULE.parse_inventory(
+            root / "resources/licenses/NPM_LICENSES_MACOS_ARM64.md", "npm"
+        )
+
+        self.assertIn(
+            "@tauri-apps/cli-darwin-arm64",
+            {package["name"] for package in packages},
+        )
+
     def test_unexpected_asset_is_rejected(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             directory = Path(temporary)

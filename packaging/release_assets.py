@@ -19,6 +19,7 @@ STABLE_SEMVER = re.compile(
     r"^(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)$"
 )
 REPOSITORY = "airwiki/airwiki"
+SPDX_23_SCHEMA_SHA256 = "3ec6cd5b8ba0c9a3e821da48536fa1b814567dc7e4376efe98d3e7b2a7a8d230"
 
 
 def base_asset_names(version: str) -> set[str]:
@@ -119,7 +120,108 @@ def parse_inventory(path: Path, ecosystem: str) -> list[dict[str, str]]:
             )
     if not packages:
         raise ValueError(f"license inventory contains no packages: {path.name}")
+    if ecosystem == "npm":
+        validate_missing_legal_file_inventory(path, packages)
     return packages
+
+
+def validate_missing_legal_file_inventory(
+    path: Path, packages: list[dict[str, str]]
+) -> None:
+    known = {(package["name"], package["version"]) for package in packages}
+    seen: set[tuple[str, str]] = set()
+    in_missing_legal_files = False
+    for line in path.read_text(encoding="utf-8").splitlines():
+        if line == "## Packages without a published legal file":
+            in_missing_legal_files = True
+            continue
+        if in_missing_legal_files and line.startswith("## "):
+            break
+        if not in_missing_legal_files or not line.startswith("- "):
+            continue
+        match = re.fullmatch(r"- `([^`]+)`", line)
+        if match is None or "@" not in match.group(1):
+            raise ValueError(f"license inventory contains an invalid package callout: {path.name}")
+        name, version = match.group(1).rsplit("@", 1)
+        package = (name, version)
+        if not name or not version or package not in known or package in seen:
+            raise ValueError(
+                f"license inventory package callout is missing, malformed or duplicated: {path.name}"
+            )
+        seen.add(package)
+
+
+def load_spdx_schema(root: Path) -> dict[str, object]:
+    path = root / "packaging/schemas/spdx-2.3.schema.json"
+    if digest(path) != SPDX_23_SCHEMA_SHA256:
+        raise ValueError("vendored SPDX 2.3 schema does not match its reviewed upstream bytes")
+    schema = json.loads(path.read_text(encoding="utf-8"))
+    if not isinstance(schema, dict):
+        raise ValueError("vendored SPDX 2.3 schema is not a JSON object")
+    return schema
+
+
+def json_type_matches(value: object, expected: str) -> bool:
+    if expected == "object":
+        return isinstance(value, dict)
+    if expected == "array":
+        return isinstance(value, list)
+    if expected == "string":
+        return isinstance(value, str)
+    if expected == "boolean":
+        return isinstance(value, bool)
+    if expected == "integer":
+        return isinstance(value, int) and not isinstance(value, bool)
+    raise ValueError(f"vendored SPDX schema uses unsupported JSON type: {expected}")
+
+
+def validate_json_schema(value: object, schema: dict[str, object], location: str) -> None:
+    expected_type = schema.get("type")
+    if isinstance(expected_type, str) and not json_type_matches(value, expected_type):
+        raise ValueError(f"SPDX schema type mismatch at {location}")
+
+    allowed_values = schema.get("enum")
+    if isinstance(allowed_values, list) and value not in allowed_values:
+        raise ValueError(f"SPDX schema enum mismatch at {location}")
+
+    if isinstance(value, dict):
+        properties = schema.get("properties", {})
+        required = schema.get("required", [])
+        if not isinstance(properties, dict) or not isinstance(required, list):
+            raise ValueError(f"vendored SPDX schema has an invalid object rule at {location}")
+        missing = [name for name in required if isinstance(name, str) and name not in value]
+        if missing:
+            raise ValueError(f"SPDX schema required field is missing at {location}.{missing[0]}")
+        if schema.get("additionalProperties") is False:
+            unknown = set(value) - set(properties)
+            if unknown:
+                raise ValueError(
+                    f"SPDX schema rejects field at {location}.{sorted(unknown)[0]}"
+                )
+        for name, item in value.items():
+            item_schema = properties.get(name)
+            if isinstance(item_schema, dict):
+                validate_json_schema(item, item_schema, f"{location}.{name}")
+
+    if isinstance(value, list):
+        minimum = schema.get("minItems")
+        if isinstance(minimum, int) and len(value) < minimum:
+            raise ValueError(f"SPDX schema requires more items at {location}")
+        item_schema = schema.get("items")
+        if isinstance(item_schema, dict):
+            for index, item in enumerate(value):
+                validate_json_schema(item, item_schema, f"{location}[{index}]")
+
+
+def validate_spdx_document(root: Path, document: dict[str, object]) -> None:
+    validate_json_schema(document, load_spdx_schema(root), "$")
+    files = document.get("files")
+    if not isinstance(files, list) or any(
+        not isinstance(record, dict)
+        or record.get("licenseInfoInFiles") != ["NOASSERTION"]
+        for record in files
+    ):
+        raise ValueError("release SPDX file records must declare licenseInfoInFiles")
 
 
 def spdx_document(
@@ -209,6 +311,7 @@ def spdx_document(
                     {"algorithm": "SHA256", "checksumValue": digest(files[name])},
                 ],
                 "licenseConcluded": "NOASSERTION",
+                "licenseInfoInFiles": ["NOASSERTION"],
                 "copyrightText": "NOASSERTION",
             }
         )
@@ -262,10 +365,9 @@ def generate(args: argparse.Namespace) -> None:
     root = Path(__file__).resolve().parent.parent
     base_files = require_exact_files(directory, base_asset_names(args.version))
     spdx_path = directory / f"airwiki-{args.version}.spdx.json"
-    atomic_json(
-        spdx_path,
-        spdx_document(root, base_files, args.version, args.commit, args.created_at),
-    )
+    spdx = spdx_document(root, base_files, args.version, args.commit, args.created_at)
+    validate_spdx_document(root, spdx)
+    atomic_json(spdx_path, spdx)
     provenance_inputs = {**base_files, spdx_path.name: spdx_path}
     provenance = {
         "schemaVersion": 1,
@@ -348,6 +450,7 @@ def verify(args: argparse.Namespace) -> None:
             raise ValueError(f"release provenance digest mismatch: {name}")
 
     spdx = json.loads(files[f"airwiki-{args.version}.spdx.json"].read_text(encoding="utf-8"))
+    validate_spdx_document(Path(__file__).resolve().parent.parent, spdx)
     if (
         spdx.get("spdxVersion") != "SPDX-2.3"
         or spdx.get("dataLicense") != "CC0-1.0"

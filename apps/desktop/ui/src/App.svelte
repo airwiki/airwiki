@@ -10,10 +10,11 @@
   import Sparkles from '@lucide/svelte/icons/sparkles';
   import { listen } from '@tauri-apps/api/event';
   import { onMount, tick } from 'svelte';
-  import { addFederationIndex, addWiki, allowPeerPairingAgain, approveReview, browsePublicWiki, cancelModelInstall, checkUpdates, configureFirewall, confirmPairing, connect, deleteWiki, dialPeer, downloadUpdate, executeComputation, executeGuidedWikiRepair, hideToTray, importOkf, installModels, installUpdate, loadReviewEvidence, loadWikiBundle, loadWikiPage, manageIntegration, openExternalLink, openSystemDestination, pairPeer, pickOkfImport, pickWikiFolder, prepareGuidedWikiRepair, quitCompletely, reanalyzeReview, refreshApplicationAccess, refreshAutostart, refreshComputations, refreshConnectivity, refreshWikiHealth, rejectComputation, rejectReview, relinkWiki, removeFederationIndex, rescanWiki, revokePeer, saveComputationResult, searchKnowledge, setApplicationWikiRole, setAutostart, setPublicPublisherBlocked, setWikiGrant, setWikiIndexing, updatePreferences, updatePublicWikiProfile, updateWikiPolicy, validateOkfImport, verifyWikiConcept, type AppSnapshot, type ApplicationWikiRoleInput, type CloseBehavior, type EnrichmentDraft, type FolderSelection, type IntegrationActionInput, type IntegrationClient, type KnowledgeConceptSummary, type KnowledgePageInput, type LanPreference, type LocalePreference, type OkfImportSummary, type PublicConceptSummaryDto, type ReviewSummary, type SearchCoverage, type SearchHitSummary, type SourceIssueSummary, type SystemDestination, type ThemePreference, type WikiPolicyInput, type WikiSummary } from './api';
+  import { addFederationIndex, addWiki, allowPeerPairingAgain, approveReview, browsePublicWiki, cancelModelInstall, checkUpdates, configureFirewall, confirmPairing, connect, deleteWiki, dialPeer, downloadUpdate, executeComputation, executeGuidedWikiRepair, hideToTray, importOkf, installModels, installUpdate, loadReviewEvidence, loadWikiBundle, loadWikiPage, manageIntegration, openExternalLink, openSystemDestination, pairPeer, pickOkfImport, pickWikiFolder, prepareGuidedWikiRepair, quitCompletely, reanalyzeReview, refreshApplicationAccess, refreshAutostart, refreshComputations, refreshConnectivity, refreshWikiHealth, rejectComputation, rejectReview, relinkWiki, removeFederationIndex, rescanWiki, revokePeer, saveComputationResult, searchKnowledge, setApplicationWikiRole, setAutostart, setPublicPublisherBlocked, setWikiGrant, setWikiIndexing, updatePreferences, updatePublicWikiProfile, updateWikiPolicy, validateOkfImport, verifyWikiConcept, type AppSnapshot, type ApplicationWikiRoleInput, type CloseBehavior, type EnrichmentDraft, type FolderSelection, type IntegrationActionInput, type KnowledgeConceptSummary, type KnowledgePageInput, type LanPreference, type LocalePreference, type OkfImportSummary, type PublicConceptSummaryDto, type ReviewSummary, type SearchCoverage, type SearchHitSummary, type SourceIssueSummary, type SystemDestination, type ThemePreference, type WikiPolicyInput, type WikiSummary } from './api';
   import KnowledgeGraph from './KnowledgeGraph.svelte';
   import ConnectionAdvanced from './ConnectionAdvanced.svelte';
   import GlobalSearch from './GlobalSearch.svelte';
+  import IntegrationList from './IntegrationList.svelte';
   import OnboardingFlow from './OnboardingFlow.svelte';
   import PublicWikiViewer from './PublicWikiViewer.svelte';
   import SystemStatusBar from './SystemStatusBar.svelte';
@@ -342,10 +343,9 @@
       if (route === 'system' && matchedSection) {
         if (section === 'connectivity' || section === 'devices' || section === 'integrations') {
           destination = 'wikis';
-          connectionsOpen = true;
+          openConnectionsPanel();
           pushHash('#wikis');
-          if (section === 'integrations') void runIntegrationAction({ kind: 'refresh' });
-          else void runConnectivityAction('refresh');
+          if (section !== 'integrations') void runConnectivityAction('refresh');
           return;
         }
         destination = 'system';
@@ -502,14 +502,17 @@
     }
     destination = 'wikis';
     selectedWikiId = null;
-    connectionsOpen = target === 'connections' || target === 'apps';
+    connectionsOpen = false;
+    if (target === 'connections' || target === 'apps') openConnectionsPanel();
     pushHash('#wikis');
     scrollMainTo(0);
     if (target === 'connections') void runConnectivityAction('refresh');
-    if (target === 'apps' && !snapshot?.integrations && !integrationRequestId) {
-      void runIntegrationAction({ kind: 'refresh' });
-    }
     if (target === 'knowledge') void refreshHealth();
+  }
+
+  function openConnectionsPanel() {
+    connectionsOpen = true;
+    if (integrationRequestId === null) void runIntegrationAction({ kind: 'refresh' });
   }
 
   function openGlobalSearch() {
@@ -543,23 +546,6 @@
     const currentTop = mainScrollRegion?.scrollTop ?? 0;
     knowledgeMode = mode;
     scrollMainTo(currentTop);
-  }
-
-  function integrationName(client: IntegrationClient): string {
-    if (client === 'chatGptDesktop') return 'ChatGPT Desktop / Work';
-    if (client === 'claudeDesktop') return 'Claude Desktop';
-    if (client === 'geminiCli') return 'Gemini CLI';
-    return t('integrations-generic-mcp');
-  }
-
-  function integrationState(status: string): string {
-    const labels: Record<string, string> = {
-      notInstalled: 'integration-status-not-installed', available: 'integration-status-available',
-      awaitingClientApproval: 'integration-status-awaiting-approval', configured: 'integration-status-configured',
-      updateAvailable: 'integration-status-update-available', conflict: 'integration-status-conflict',
-      unsupported: 'integration-status-unsupported', error: 'integration-status-error'
-    };
-    return t(labels[status] ?? 'error-generic');
   }
 
   function syncIntegrationRequest(activeRequestId: string | null, completedRequestId: string | null) {
@@ -1471,7 +1457,7 @@
               </section>
             {/if}
             <section class="workspace-section public-discovery" id="public-wikis" aria-labelledby="public-wikis-title">
-              <div class="section-heading"><div><h2 id="public-wikis-title">{t('desktop-public-network')}</h2><p>{t('desktop-public-discover-body')}</p></div><button class="secondary" onclick={() => { connectionsOpen = true; }}>{t('desktop-connections')}</button></div>
+              <div class="section-heading"><div><h2 id="public-wikis-title">{t('desktop-public-network')}</h2><p>{t('desktop-public-discover-body')}</p></div><button class="secondary" onclick={openConnectionsPanel}>{t('desktop-connections')}</button></div>
               {#if snapshot?.search?.hits.some(isPublicSearchHit)}<div class="search-results">{#each snapshot.search.hits.filter(isPublicSearchHit) as hit (`${hit.nodeId}:${hit.wikiId}:${hit.conceptId}:${hit.rank}`)}<article><small>{searchOriginFor(hit)}</small><h3>{hit.title}</h3><p>{hit.snippet}</p><button class="text-action" onclick={() => openSearchHit(hit)}>{t('action-open')}</button></article>{/each}</div>{:else}<div class="inline-empty"><BookOpen size={20} aria-hidden="true" /><span><strong>{t('desktop-public-empty-title')}</strong><small>{t('desktop-public-search-help')}</small></span></div>{/if}
               {#if snapshot.publicBrowse}<div class="public-browse-detail"><div class="section-heading"><div><h3>{snapshot.publicBrowse.wikiName ?? t('desktop-public-origin-missing')}</h3><p>{snapshot.publicBrowse.description ?? ''}</p><small>{snapshot.publicBrowse.okfCompatibility ? t(`desktop-okf-compatibility-${snapshot.publicBrowse.okfCompatibility.kind}`) : t('desktop-public-metadata-unavailable')}</small></div>{#if snapshot.publicBrowse.publisherId}<button class="danger" onclick={() => changePublisherBlock(snapshot!.publicBrowse!.publisherId!, true)}>{t('search-public-block-publisher')}</button>{/if}</div>{#each snapshot.publicBrowse.concepts as concept (`${concept.conceptId}:${concept.sourceRevision}`)}<article><small>{concept.conceptType} · {concept.language}</small><h3>{concept.title}</h3><p>{concept.summary}</p><span>{publicConceptMetadata(concept)}</span></article>{/each}{#if snapshot.publicBrowse.nextCursor}<button class="secondary" onclick={loadMorePublicConcepts}>{t('search-public-browse-more')}</button>{/if}</div>{/if}
             </section>
@@ -1486,7 +1472,7 @@
               <strong>{t('desktop-wiki-access-title')}</strong>
               <div>{#if !selectedWiki.peerShareable && !selectedWiki.allowExternalAi && !selectedWiki.internetPublic}<span>{t('desktop-wiki-private')}</span>{/if}{#if selectedWiki.peerShareable}<span>{t('desktop-share-nearby')}</span>{/if}{#if selectedWiki.allowExternalAi}<span>{t('desktop-share-ai-apps')}</span>{/if}{#if selectedWiki.internetPublic}<span>{t('desktop-share-public')}</span>{/if}</div>
               <small>{wikiPeers(selectedWiki.id).length > 0 ? wikiPeers(selectedWiki.id).join(' · ') : t('desktop-wiki-no-specific-access')}</small>
-              {#if selectedWiki.restrictions.length === 0}<button class="text-action" onclick={() => { connectionsOpen = true; }}>{t('desktop-manage-access')}</button>{/if}
+              {#if selectedWiki.restrictions.length === 0}<button class="text-action" onclick={openConnectionsPanel}>{t('desktop-manage-access')}</button>{/if}
             </section>
 
             {#if selectedWiki.okfCompatibility.kind === 'futureRestricted' || selectedWiki.okfCompatibility.kind === 'legacyV01' || selectedWiki.staleConceptCount > 0 || selectedWiki.outdatedVerificationCount > 0 || selectedWiki.metadataWarningCount > 0}
@@ -1583,7 +1569,7 @@
               </section>
             {/if}
           {:else if destination === 'shared'}
-            <header class="page-heading"><div><h1>{t('desktop-page-shared-title')}</h1><p>{t('desktop-page-shared-body')}</p></div><button class="secondary" onclick={() => { connectionsOpen = true; }}>{t('desktop-connections')}</button></header>
+            <header class="page-heading"><div><h1>{t('desktop-page-shared-title')}</h1><p>{t('desktop-page-shared-body')}</p></div><button class="secondary" onclick={openConnectionsPanel}>{t('desktop-connections')}</button></header>
             <div class="content-tabs" role="tablist" aria-label={t('desktop-page-shared-title')}><button role="tab" aria-selected={sharedTab === 'owned'} class:active={sharedTab === 'owned'} onclick={() => openSharedTab('owned')}>{t('desktop-shared-by-you')}</button><button role="tab" aria-selected={sharedTab === 'public'} class:active={sharedTab === 'public'} onclick={() => openSharedTab('public')}>{t('desktop-public-network')}</button></div>
             {#if sharedTab === 'owned'}
               <section class="shared-section"><div class="section-heading"><div><h2>{t('desktop-shared-owned-title')}</h2><p>{t('desktop-shared-owned-body')}</p></div></div><WikiTable wikis={sharedWikis} scans={snapshot!.wikiScans} {t} onopen={(wikiId) => { const wiki = snapshot?.wikis.find((item) => item.id === wikiId); if (wiki) editWiki(wiki); }} /></section>
@@ -1672,7 +1658,72 @@
 {/if}
 
 {#if connectionsOpen}
-  <div class="drawer-backdrop" role="presentation" onclick={(event) => { if (event.currentTarget === event.target) connectionsOpen = false; }}><div class="side-drawer connections-drawer" role="dialog" aria-modal="true" aria-labelledby="connections-title"><header><div><p class="section-label">{t('desktop-page-shared-title')}</p><h2 id="connections-title">{t('desktop-connections')}</h2></div><button class="icon-button" aria-label={t('action-close')} onclick={() => { connectionsOpen = false; }}>×</button></header><section><div class="section-heading"><div><h3>{t('desktop-known-devices', { count: snapshot.peers.length })}</h3><p>{connectivityLabel(locale)}</p></div><button class="text-action" onclick={() => runConnectivityAction('refresh')}>{t('action-refresh')}</button></div>{#if lanPreference !== 'enabled'}<div class="connection-guidance"><p>{lanPreference === 'undecided' ? t('connectivity-undecided') : t('connectivity-disabled')}</p><button class="secondary" onclick={openNetworkPreferences}>{t('desktop-preferences')}</button></div>{:else if snapshot.connectivity?.networkProfile === 'public'}<div class="connection-guidance"><p>{t('connectivity-public-network')}</p><button class="secondary" onclick={() => runConnectivityAction('networkSettings')}>{t('connectivity-open-network-settings')}</button></div>{:else if snapshot.connectivity?.firewall === 'rulesMissing' && snapshot.connectivity.firewallHelper === 'verified'}<div class="connection-guidance"><p>{t('connectivity-firewall-needed')}</p><button class="secondary" onclick={() => runConnectivityAction('install')}>{t('connectivity-configure-firewall')}</button></div>{:else if snapshot.connectivity?.firewall === 'rulesMissing'}<div class="connection-guidance"><p>{t('connectivity-firewall-helper-repair')}</p></div>{:else if snapshot.connectivity?.firewall === 'conflict' || snapshot.connectivity?.firewall === 'legacyExposure' || snapshot.connectivity?.firewall === 'managedPolicy' || snapshot.connectivity?.firewall === 'firewallDisabled' || snapshot.connectivity?.firewall === 'blockAllInbound'}<div class="connection-guidance"><p>{firewallGuidanceLabel()}</p><button class="secondary" onclick={() => runConnectivityAction('advancedFirewall')}>{t('connectivity-open-advanced-firewall')}</button></div>{:else if snapshot.connectivity?.systemPermission === 'denied'}<div class="connection-guidance"><p>{t('connectivity-failed')}</p><button class="secondary" onclick={() => runConnectivityAction('localNetworkPrivacy')}>{t('connectivity-open-local-network-settings')}</button></div>{/if}<div class="peer-list">{#each snapshot.peers as peer (peer.peerId)}<article><div class="peer-summary"><strong>{peer.deviceName ?? t('devices-nearby')}</strong><small>{peer.trust === 'trusted' ? t('desktop-verified') : peer.trust === 'blocked' ? t('desktop-pairing-blocked') : t('desktop-unverified')}</small></div>{#if peer.sasWords}<strong class="sas-words">{peer.sasWords.join(' · ')}</strong><div class="row-actions"><button class="primary" disabled={peerActionId === peer.peerId} onclick={() => runPeerAction(peer.peerId, 'accept')}>{t('devices-code-matches')}</button><button class="danger" disabled={peerActionId === peer.peerId} onclick={() => runPeerAction(peer.peerId, 'reject')}>{t('devices-code-does-not-match')}</button></div>{:else if peer.trust === 'unpaired'}<button class="secondary" disabled={peerActionId === peer.peerId} onclick={() => runPeerAction(peer.peerId, 'pair')}>{t('desktop-verify-device')}</button>{:else if peer.trust === 'blocked'}<div class="blocked-peer-guidance"><p>{t('desktop-pairing-blocked-help')}</p><button class="secondary" disabled={peerActionId === peer.peerId} onclick={() => runPeerAction(peer.peerId, 'allowAgain')}>{t('desktop-allow-pairing-again')}</button></div>{:else if peer.trust === 'trusted'}<div class="grant-list">{#each snapshot.wikis.filter((wiki) => wiki.peerShareable) as wiki (wiki.id)}<Checkbox label={wiki.name} checked={peer.grantedWikiIds.includes(wiki.id)} onchange={(checked) => changeGrant(peer.peerId, wiki.id, checked)} />{/each}</div><button class="text-action" disabled={peerActionId === peer.peerId} onclick={() => runPeerAction(peer.peerId, 'revoke')}>{t('desktop-revoke-trust')}</button>{/if}</article>{:else}<p class="empty">{t('desktop-no-devices')}</p>{/each}</div></section><section><div class="section-heading"><div><h3>{t('desktop-ai-clients')}</h3><p>{t('desktop-integration-body')}</p></div><button class="text-action" disabled={integrationRequestId !== null} onclick={() => runIntegrationAction({ kind: 'refresh' })}>{t('action-refresh')}</button></div><div class="integration-list">{#each snapshot.integrations?.integrations ?? [] as integration (integration.client)}<article><div><strong>{integrationName(integration.client)}</strong><small>{integrationState(integration.status)}</small></div>{#if integration.status === 'available' || integration.status === 'updateAvailable'}<button class="secondary" disabled={integrationRequestId !== null} onclick={() => runIntegrationAction({ kind: 'connect', client: integration.client })}>{t('integrations-connect')}</button>{:else if integration.status === 'configured'}<button class="text-action" disabled={integrationRequestId !== null} onclick={() => runIntegrationAction({ kind: 'disconnect', client: integration.client })}>{t('integrations-disconnect')}</button>{/if}{#if integration.mcpSetup}<div class="mcp-setup"><div><strong>{t('integrations-generic-setup')}</strong><small>{t('integrations-generic-setup-help')}</small></div><pre>{mcpSetupText(integration.mcpSetup.command, integration.mcpSetup.args)}</pre><button class="secondary" onclick={() => copyMcpSetup(integration.mcpSetup?.command ?? '', integration.mcpSetup?.args ?? [])}>{t('action-copy')}</button></div>{/if}</article>{/each}</div><div class="application-access-list">{#each snapshot.applicationAccess.filter((application) => application.active) as application (application.appId)}<article><div><strong>{application.displayName}</strong><small>{t('desktop-application-quota', { count: application.ownedWikiCount, size: formatBytes(application.managedBytes) })}</small></div>{#each snapshot.wikis.filter((wiki) => wiki.origin === 'aiMemory' && application.grants.some((grant) => grant.wikiId === wiki.id && grant.role === 'owner') === false) as wiki (wiki.id)}<SelectField label={wiki.name} value={applicationGrantRole(application.appId, wiki.id)} options={[{ value: 'none', label: t('desktop-application-no-access') }, { value: 'reader', label: t('desktop-application-reader') }, { value: 'editor', label: t('desktop-application-editor') }]} onchange={(value) => changeApplicationGrant(application.appId, wiki.id, value === 'none' ? null : value as ApplicationWikiRoleInput)} disabled={actionBusy} />{/each}</article>{/each}</div></section><ConnectionAdvanced lanRuntime={snapshot.lanRuntime} peerId={federationPeerId} address={federationAddress} blockedPublishers={snapshot.blockedPublicPublishers} busy={peerActionId !== null} {t} onpeerid={(value) => { federationPeerId = value; }} onaddress={(value) => { federationAddress = value; }} onadd={() => saveFederationIndex(false)} onremove={() => saveFederationIndex(true)} onunblock={(publisherId) => changePublisherBlock(publisherId, false)} /><details class="advanced-disclosure"><summary>{t('desktop-advanced-details')}</summary><TextField label={t('desktop-address')} bind:value={manualPeerAddress} maxlength={500} /><button class="secondary" onclick={connectManualPeer}>{t('action-connect')}</button></details></div></div>
+  <div class="drawer-backdrop" role="presentation" onclick={(event) => { if (event.currentTarget === event.target) connectionsOpen = false; }}>
+    <div class="side-drawer connections-drawer" role="dialog" aria-modal="true" aria-labelledby="connections-title">
+      <header>
+        <div><p class="section-label">{t('desktop-page-shared-title')}</p><h2 id="connections-title">{t('desktop-connections')}</h2></div>
+        <button class="icon-button" aria-label={t('action-close')} onclick={() => { connectionsOpen = false; }}>×</button>
+      </header>
+      <section>
+        <div class="section-heading">
+          <div><h3>{t('desktop-known-devices', { count: snapshot.peers.length })}</h3><p>{connectivityLabel(locale)}</p></div>
+          <button class="text-action" onclick={() => runConnectivityAction('refresh')}>{t('action-refresh')}</button>
+        </div>
+        {#if lanPreference !== 'enabled'}
+          <div class="connection-guidance"><p>{lanPreference === 'undecided' ? t('connectivity-undecided') : t('connectivity-disabled')}</p><button class="secondary" onclick={openNetworkPreferences}>{t('desktop-preferences')}</button></div>
+        {:else if snapshot.connectivity?.networkProfile === 'public'}
+          <div class="connection-guidance"><p>{t('connectivity-public-network')}</p><button class="secondary" onclick={() => runConnectivityAction('networkSettings')}>{t('connectivity-open-network-settings')}</button></div>
+        {:else if snapshot.connectivity?.firewall === 'rulesMissing' && snapshot.connectivity.firewallHelper === 'verified'}
+          <div class="connection-guidance"><p>{t('connectivity-firewall-needed')}</p><button class="secondary" onclick={() => runConnectivityAction('install')}>{t('connectivity-configure-firewall')}</button></div>
+        {:else if snapshot.connectivity?.firewall === 'rulesMissing'}
+          <div class="connection-guidance"><p>{t('connectivity-firewall-helper-repair')}</p></div>
+        {:else if snapshot.connectivity?.firewall === 'conflict' || snapshot.connectivity?.firewall === 'legacyExposure' || snapshot.connectivity?.firewall === 'managedPolicy' || snapshot.connectivity?.firewall === 'firewallDisabled' || snapshot.connectivity?.firewall === 'blockAllInbound'}
+          <div class="connection-guidance"><p>{firewallGuidanceLabel()}</p><button class="secondary" onclick={() => runConnectivityAction('advancedFirewall')}>{t('connectivity-open-advanced-firewall')}</button></div>
+        {:else if snapshot.connectivity?.systemPermission === 'denied'}
+          <div class="connection-guidance"><p>{t('connectivity-failed')}</p><button class="secondary" onclick={() => runConnectivityAction('localNetworkPrivacy')}>{t('connectivity-open-local-network-settings')}</button></div>
+        {/if}
+        <div class="peer-list">
+          {#each snapshot.peers as peer (peer.peerId)}
+            <article>
+              <div class="peer-summary"><strong>{peer.deviceName ?? t('devices-nearby')}</strong><small>{peer.trust === 'trusted' ? t('desktop-verified') : peer.trust === 'blocked' ? t('desktop-pairing-blocked') : t('desktop-unverified')}</small></div>
+              {#if peer.sasWords}
+                <strong class="sas-words">{peer.sasWords.join(' · ')}</strong>
+                <div class="row-actions"><button class="primary" disabled={peerActionId === peer.peerId} onclick={() => runPeerAction(peer.peerId, 'accept')}>{t('devices-code-matches')}</button><button class="danger" disabled={peerActionId === peer.peerId} onclick={() => runPeerAction(peer.peerId, 'reject')}>{t('devices-code-does-not-match')}</button></div>
+              {:else if peer.trust === 'unpaired'}
+                <button class="secondary" disabled={peerActionId === peer.peerId} onclick={() => runPeerAction(peer.peerId, 'pair')}>{t('desktop-verify-device')}</button>
+              {:else if peer.trust === 'blocked'}
+                <div class="blocked-peer-guidance"><p>{t('desktop-pairing-blocked-help')}</p><button class="secondary" disabled={peerActionId === peer.peerId} onclick={() => runPeerAction(peer.peerId, 'allowAgain')}>{t('desktop-allow-pairing-again')}</button></div>
+              {:else if peer.trust === 'trusted'}
+                <div class="grant-list">{#each snapshot.wikis.filter((wiki) => wiki.peerShareable) as wiki (wiki.id)}<Checkbox label={wiki.name} checked={peer.grantedWikiIds.includes(wiki.id)} onchange={(checked) => changeGrant(peer.peerId, wiki.id, checked)} />{/each}</div>
+                <button class="text-action" disabled={peerActionId === peer.peerId} onclick={() => runPeerAction(peer.peerId, 'revoke')}>{t('desktop-revoke-trust')}</button>
+              {/if}
+            </article>
+          {:else}
+            <p class="empty">{t('desktop-no-devices')}</p>
+          {/each}
+        </div>
+      </section>
+      <section>
+        <div class="section-heading">
+          <div><h3>{t('desktop-ai-clients')}</h3><p>{t('desktop-integration-body')}</p></div>
+          <button class="text-action" disabled={integrationRequestId !== null} onclick={() => runIntegrationAction({ kind: 'refresh' })}>{t('action-refresh')}</button>
+        </div>
+        <IntegrationList integrations={snapshot.integrations?.integrations ?? []} busy={integrationRequestId !== null} {t} onaction={runIntegrationAction} oncopy={copyMcpSetup} />
+        <div class="application-access-list">
+          {#each snapshot.applicationAccess.filter((application) => application.active) as application (application.appId)}
+            <article>
+              <div><strong>{application.displayName}</strong><small>{t('desktop-application-quota', { count: application.ownedWikiCount, size: formatBytes(application.managedBytes) })}</small></div>
+              {#each snapshot.wikis.filter((wiki) => wiki.origin === 'aiMemory' && application.grants.some((grant) => grant.wikiId === wiki.id && grant.role === 'owner') === false) as wiki (wiki.id)}
+                <SelectField label={wiki.name} value={applicationGrantRole(application.appId, wiki.id)} options={[{ value: 'none', label: t('desktop-application-no-access') }, { value: 'reader', label: t('desktop-application-reader') }, { value: 'editor', label: t('desktop-application-editor') }]} onchange={(value) => changeApplicationGrant(application.appId, wiki.id, value === 'none' ? null : value as ApplicationWikiRoleInput)} disabled={actionBusy} />
+              {/each}
+            </article>
+          {/each}
+        </div>
+      </section>
+      <ConnectionAdvanced lanRuntime={snapshot.lanRuntime} peerId={federationPeerId} address={federationAddress} blockedPublishers={snapshot.blockedPublicPublishers} busy={peerActionId !== null} {t} onpeerid={(value) => { federationPeerId = value; }} onaddress={(value) => { federationAddress = value; }} onadd={() => saveFederationIndex(false)} onremove={() => saveFederationIndex(true)} onunblock={(publisherId) => changePublisherBlock(publisherId, false)} />
+      <details class="advanced-disclosure"><summary>{t('desktop-advanced-details')}</summary><TextField label={t('desktop-address')} bind:value={manualPeerAddress} maxlength={500} /><button class="secondary" onclick={connectManualPeer}>{t('action-connect')}</button></details>
+    </div>
+  </div>
 {/if}
 
 </div>

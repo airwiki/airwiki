@@ -53,6 +53,7 @@ mod tests {
         for (value, expected) in [
             ("chatgpt-desktop", McpClientKind::ChatGptDesktop),
             ("claude-desktop", McpClientKind::ClaudeDesktop),
+            ("claude-code", McpClientKind::ClaudeCode),
             ("gemini-cli", McpClientKind::GeminiCli),
             ("generic-mcp", McpClientKind::GenericMcp),
         ] {

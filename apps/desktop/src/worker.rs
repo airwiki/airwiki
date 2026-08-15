@@ -5439,6 +5439,7 @@ fn apply_recent_mcp_activities(
         let client = match activity.client {
             McpClientKind::ChatGptDesktop => ChatClientKind::ChatGptDesktop,
             McpClientKind::ClaudeDesktop => ChatClientKind::ClaudeDesktop,
+            McpClientKind::ClaudeCode => ChatClientKind::ClaudeCode,
             McpClientKind::GeminiCli => ChatClientKind::GeminiCli,
             McpClientKind::GenericMcp => ChatClientKind::GenericMcp,
         };
@@ -5461,7 +5462,9 @@ fn update_claude_approval_after_action(state: &mut ClaudeApprovalState, action: 
         IntegrationAction::Refresh
         | IntegrationAction::Connect(_)
         | IntegrationAction::Disconnect(_)
-        | IntegrationAction::OpenClaudeSettings => {}
+        | IntegrationAction::OpenClaudeSettings
+        | IntegrationAction::InstallWorkflowGuide(_)
+        | IntegrationAction::RemoveWorkflowGuide(_) => {}
     }
 }
 
@@ -5895,6 +5898,7 @@ mod tests {
             planned_path: None,
             activity_recent: false,
             restart_required: false,
+            workflow_guide: crate::workflow_guides::WorkflowGuideView::unsupported(),
         }
     }
 
@@ -5918,6 +5922,10 @@ mod tests {
             },
             McpClientActivity {
                 client: McpClientKind::ClaudeDesktop,
+                observed_at: recent,
+            },
+            McpClientActivity {
+                client: McpClientKind::ClaudeCode,
                 observed_at: recent,
             },
             McpClientActivity {
@@ -5953,6 +5961,10 @@ mod tests {
                 observed_at: old,
             },
             McpClientActivity {
+                client: McpClientKind::ClaudeCode,
+                observed_at: old,
+            },
+            McpClientActivity {
                 client: McpClientKind::GeminiCli,
                 observed_at: recent,
             },
@@ -5967,8 +5979,9 @@ mod tests {
         assert!(!claude_recent);
         assert!(mixed[0].activity_recent);
         assert!(!mixed[1].activity_recent);
-        assert!(mixed[2].activity_recent);
-        assert!(!mixed[3].activity_recent);
+        assert!(!mixed[2].activity_recent);
+        assert!(mixed[3].activity_recent);
+        assert!(!mixed[4].activity_recent);
     }
 
     #[test]

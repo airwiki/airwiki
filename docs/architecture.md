@@ -32,7 +32,8 @@ xtask ──────────────┬──> airwiki-core
 - `airwiki-mcp` owns search plus capability-authenticated memory/computation MCP
   contracts, the loopback gateway and stdio bridge implementation.
 - `apps/desktop` is the composition root. It owns Tauri lifecycle and IPC,
-  background orchestration, and the local Svelte WebView.
+  background orchestration, the local Svelte WebView, client integration
+  discovery, and atomic installation of versioned global workflow guides.
 - `apps/mcp-bridge` is a thin executable over `airwiki-mcp`. At runtime it exposes
   stdio to a local chat client and forwards only to the desktop's fixed loopback
   MCP endpoint.
@@ -58,11 +59,20 @@ desktop process -----------------> airwiki-mcp gateway
       | explicit elevated install/remove request (Windows only)
       v
 airwiki-windows-firewall-helper
+
+desktop integration worker -- confirmed, receipt-bound writes --> documented
+                                                            client user roots
 ```
 
 Reusable crates never depend on the desktop UI. Transport adapters do not own
 curation or collection policy. Add a crate only for a durable dependency or
 privilege boundary; otherwise prefer a module.
+
+Workflow-guide resources are immutable package inputs. The desktop resolves
+only documented client roots, performs filesystem inspection and mutation in
+`spawn_blocking`, and owns rollback. MCP capabilities remain separate from
+skills: instructions can guide an agent, but Rust authorization still gates
+every read or mutation.
 
 ## Sources of truth
 

@@ -201,6 +201,10 @@ try {
         Assert-SameBytes $SignedDesktop $PackagedDesktop[0].FullName "MSI desktop"
         Assert-SameBytes $SignedBridge $PackagedBridge "MSI MCP bridge"
         Assert-SameBytes $SignedHelper $PackagedHelper "MSI firewall helper"
+        Assert-WindowsDirectoryTreeMatches `
+            (Join-Path $Root "resources\integrations\workflow") `
+            (Join-Path $PayloadRoot "integrations\workflow") `
+            "MSI AirWiki workflow guide"
         & cargo run --locked -p xtask -- mcpb verify `
             --target x86_64-pc-windows-msvc `
             --bridge $PackagedBridge `

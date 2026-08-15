@@ -15,6 +15,7 @@ mod paths;
 mod services;
 mod updater;
 mod worker;
+mod workflow_guides;
 
 use std::{
     collections::HashMap,
@@ -84,6 +85,10 @@ enum NativeConfirmation {
     SaveComputationResult,
     ApplicationGrant,
     VerifyManagedConcept,
+    ConnectIntegration,
+    ConnectIntegrationWithBuiltInGuide,
+    InstallWorkflowGuide,
+    RemoveWorkflowGuide,
 }
 
 impl NativeConfirmation {
@@ -100,6 +105,12 @@ impl NativeConfirmation {
             Self::SaveComputationResult => "native-confirm-save-computation-result",
             Self::ApplicationGrant => "native-confirm-application-grant",
             Self::VerifyManagedConcept => "native-confirm-verify-managed-concept",
+            Self::ConnectIntegration => "native-confirm-connect-integration",
+            Self::ConnectIntegrationWithBuiltInGuide => {
+                "native-confirm-connect-integration-built-in"
+            }
+            Self::InstallWorkflowGuide => "native-confirm-install-workflow-guide",
+            Self::RemoveWorkflowGuide => "native-confirm-remove-workflow-guide",
         }
     }
 }
@@ -109,6 +120,10 @@ async fn require_native_confirmation(
     confirmation: NativeConfirmation,
     detail: Option<&str>,
 ) -> Result<(), UiError> {
+    #[cfg(feature = "e2e")]
+    if e2e_confirmation_is_preapproved() {
+        return Ok(());
+    }
     let _permit = app
         .state::<AppRuntime>()
         .confirmation_gate
@@ -143,6 +158,13 @@ async fn require_native_confirmation(
     } else {
         Err(UiError::invalid("humanConfirmationRequired"))
     }
+}
+
+#[cfg(feature = "e2e")]
+fn e2e_confirmation_is_preapproved() -> bool {
+    std::env::var_os("AIRWIKI_E2E_DATA_ROOT").is_some()
+        && std::env::var_os("AIRWIKI_E2E_CONFIRMATIONS")
+            .is_some_and(|value| value == OsStr::new("allow"))
 }
 
 fn launch_in_background<I>(arguments: I) -> bool
@@ -1313,6 +1335,36 @@ struct IntegrationSummary {
     activity_recent: bool,
     restart_required: bool,
     mcp_setup: Option<McpStdioSetupDto>,
+    workflow_guide: WorkflowGuideSummary,
+}
+
+#[derive(Clone, Debug, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+struct WorkflowGuideSummary {
+    kind: WorkflowGuideKindDto,
+    status: WorkflowGuideStatusDto,
+    version: Option<String>,
+    restart_required: bool,
+}
+
+#[derive(Clone, Copy, Debug, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(rename = "WorkflowGuideKind", rename_all = "camelCase")]
+enum WorkflowGuideKindDto {
+    NativeSkill,
+    McpInstructions,
+}
+
+#[derive(Clone, Copy, Debug, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(rename = "WorkflowGuideStatus", rename_all = "camelCase")]
+enum WorkflowGuideStatusDto {
+    Available,
+    Installed,
+    UpdateAvailable,
+    BuiltIn,
+    Conflict,
+    Unsupported,
 }
 
 #[derive(Clone, Debug, Serialize, TS)]
@@ -1328,6 +1380,7 @@ struct McpStdioSetupDto {
 enum IntegrationClientDto {
     ChatGptDesktop,
     ClaudeDesktop,
+    ClaudeCode,
     GeminiCli,
     GenericMcp,
 }
@@ -1351,6 +1404,7 @@ impl From<IntegrationClientDto> for integrations::ChatClientKind {
         match value {
             IntegrationClientDto::ChatGptDesktop => Self::ChatGptDesktop,
             IntegrationClientDto::ClaudeDesktop => Self::ClaudeDesktop,
+            IntegrationClientDto::ClaudeCode => Self::ClaudeCode,
             IntegrationClientDto::GeminiCli => Self::GeminiCli,
             IntegrationClientDto::GenericMcp => Self::GenericMcp,
         }
@@ -1362,6 +1416,7 @@ impl From<integrations::ChatClientKind> for IntegrationClientDto {
         match value {
             integrations::ChatClientKind::ChatGptDesktop => Self::ChatGptDesktop,
             integrations::ChatClientKind::ClaudeDesktop => Self::ClaudeDesktop,
+            integrations::ChatClientKind::ClaudeCode => Self::ClaudeCode,
             integrations::ChatClientKind::GeminiCli => Self::GeminiCli,
             integrations::ChatClientKind::GenericMcp => Self::GenericMcp,
         }
@@ -1544,6 +1599,38 @@ impl From<integrations::ChatIntegrationsSnapshot> for IntegrationsSummary {
                         activity_recent: integration.activity_recent,
                         restart_required: integration.restart_required,
                         mcp_setup,
+                        workflow_guide: WorkflowGuideSummary {
+                            kind: match integration.workflow_guide.kind {
+                                workflow_guides::WorkflowGuideKind::NativeSkill => {
+                                    WorkflowGuideKindDto::NativeSkill
+                                }
+                                workflow_guides::WorkflowGuideKind::McpInstructions => {
+                                    WorkflowGuideKindDto::McpInstructions
+                                }
+                            },
+                            status: match integration.workflow_guide.status {
+                                workflow_guides::WorkflowGuideStatus::Available => {
+                                    WorkflowGuideStatusDto::Available
+                                }
+                                workflow_guides::WorkflowGuideStatus::Installed => {
+                                    WorkflowGuideStatusDto::Installed
+                                }
+                                workflow_guides::WorkflowGuideStatus::UpdateAvailable => {
+                                    WorkflowGuideStatusDto::UpdateAvailable
+                                }
+                                workflow_guides::WorkflowGuideStatus::BuiltIn => {
+                                    WorkflowGuideStatusDto::BuiltIn
+                                }
+                                workflow_guides::WorkflowGuideStatus::Conflict => {
+                                    WorkflowGuideStatusDto::Conflict
+                                }
+                                workflow_guides::WorkflowGuideStatus::Unsupported => {
+                                    WorkflowGuideStatusDto::Unsupported
+                                }
+                            },
+                            version: integration.workflow_guide.version,
+                            restart_required: integration.workflow_guide.restart_required,
+                        },
                     }
                 })
                 .collect(),
@@ -2289,14 +2376,55 @@ enum IntegrationActionInput {
     Disconnect { client: IntegrationClientDto },
     ConfirmClaudeInstalled,
     OpenClaudeSettings,
+    InstallWorkflowGuide { client: IntegrationClientDto },
+    RemoveWorkflowGuide { client: IntegrationClientDto },
 }
 
 #[tauri::command]
 async fn manage_integration(
+    app: AppHandle,
     runtime: tauri::State<'_, AppRuntime>,
     request_id: String,
     action: IntegrationActionInput,
 ) -> Result<(), UiError> {
+    match &action {
+        IntegrationActionInput::Connect { client } => {
+            let confirmation = match client {
+                IntegrationClientDto::ClaudeDesktop | IntegrationClientDto::GenericMcp => {
+                    NativeConfirmation::ConnectIntegrationWithBuiltInGuide
+                }
+                IntegrationClientDto::ChatGptDesktop
+                | IntegrationClientDto::ClaudeCode
+                | IntegrationClientDto::GeminiCli => NativeConfirmation::ConnectIntegration,
+            };
+            require_native_confirmation(
+                &app,
+                confirmation,
+                Some(integration_confirmation_detail(*client)),
+            )
+            .await?;
+        }
+        IntegrationActionInput::InstallWorkflowGuide { client } => {
+            require_native_confirmation(
+                &app,
+                NativeConfirmation::InstallWorkflowGuide,
+                Some(integration_confirmation_detail(*client)),
+            )
+            .await?;
+        }
+        IntegrationActionInput::RemoveWorkflowGuide { client } => {
+            require_native_confirmation(
+                &app,
+                NativeConfirmation::RemoveWorkflowGuide,
+                Some(integration_confirmation_detail(*client)),
+            )
+            .await?;
+        }
+        IntegrationActionInput::Refresh
+        | IntegrationActionInput::Disconnect { .. }
+        | IntegrationActionInput::ConfirmClaudeInstalled
+        | IntegrationActionInput::OpenClaudeSettings => {}
+    }
     let request_id = parse_uuid(&request_id)?;
     reserve_integration_request(&runtime.requests, request_id)?;
     if let Err(error) = publish_integration_request_state(&runtime).await {
@@ -2317,6 +2445,12 @@ async fn manage_integration(
         IntegrationActionInput::OpenClaudeSettings => {
             integrations::IntegrationAction::OpenClaudeSettings
         }
+        IntegrationActionInput::InstallWorkflowGuide { client } => {
+            integrations::IntegrationAction::InstallWorkflowGuide(client.into())
+        }
+        IntegrationActionInput::RemoveWorkflowGuide { client } => {
+            integrations::IntegrationAction::RemoveWorkflowGuide(client.into())
+        }
     };
     if let Err(error) = send_command(
         &runtime,
@@ -2334,6 +2468,22 @@ async fn manage_integration(
         return Err(error);
     }
     Ok(())
+}
+
+const fn integration_confirmation_detail(client: IntegrationClientDto) -> &'static str {
+    match client {
+        IntegrationClientDto::ChatGptDesktop => {
+            "ChatGPT/Codex\n• ~/.agents/skills/airwiki/\n• $CODEX_HOME/AirWiki.md\n• $CODEX_HOME/AGENTS.md"
+        }
+        IntegrationClientDto::ClaudeCode => {
+            "Claude Code\n• $CLAUDE_CONFIG_DIR/skills/airwiki/\n• $CLAUDE_CONFIG_DIR/AirWiki.md\n• $CLAUDE_CONFIG_DIR/CLAUDE.md"
+        }
+        IntegrationClientDto::GeminiCli => {
+            "Gemini CLI\n• $GEMINI_CLI_HOME/.gemini/skills/airwiki/\n• $GEMINI_CLI_HOME/.gemini/AirWiki.md\n• $GEMINI_CLI_HOME/.gemini/GEMINI.md"
+        }
+        IntegrationClientDto::ClaudeDesktop => "Claude Desktop\n• MCPB",
+        IntegrationClientDto::GenericMcp => "Generic MCP",
+    }
 }
 
 fn reserve_integration_request(
@@ -4933,6 +5083,9 @@ fn ui_bindings_source() -> String {
         exported_declaration::<IntegrationClientDto>(&config),
         exported_declaration::<IntegrationStatusDto>(&config),
         exported_declaration::<McpStdioSetupDto>(&config),
+        exported_declaration::<WorkflowGuideKindDto>(&config),
+        exported_declaration::<WorkflowGuideStatusDto>(&config),
+        exported_declaration::<WorkflowGuideSummary>(&config),
         exported_declaration::<IntegrationSummary>(&config),
         exported_declaration::<IntegrationsSummary>(&config),
         exported_declaration::<ApplicationWikiRoleInput>(&config),
@@ -5439,6 +5592,12 @@ mod tests {
             NativeConfirmation::ExecuteComputation,
             NativeConfirmation::SaveComputationResult,
             NativeConfirmation::ApplicationGrant,
+            NativeConfirmation::VerifyManagedConcept,
+            NativeConfirmation::DeleteWiki,
+            NativeConfirmation::ConnectIntegration,
+            NativeConfirmation::ConnectIntegrationWithBuiltInGuide,
+            NativeConfirmation::InstallWorkflowGuide,
+            NativeConfirmation::RemoveWorkflowGuide,
         ];
         for locale in [UiLocale::EnUs, UiLocale::Es] {
             let localization = Localization::new(locale)?;
@@ -6318,6 +6477,7 @@ mod tests {
                     planned_path: Some(PathBuf::from("/synthetic/private/config")),
                     activity_recent: false,
                     restart_required: false,
+                    workflow_guide: workflow_guides::WorkflowGuideView::built_in(),
                 },
                 integrations::IntegrationView {
                     client: integrations::ChatClientKind::GenericMcp,
@@ -6327,6 +6487,7 @@ mod tests {
                     planned_path: Some(PathBuf::from("/synthetic/managed/bridge")),
                     activity_recent: false,
                     restart_required: false,
+                    workflow_guide: workflow_guides::WorkflowGuideView::built_in(),
                 },
             ],
             external_ai_collection_count: 0,

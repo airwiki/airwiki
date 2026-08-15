@@ -1,7 +1,7 @@
 # ADR 0002: Connect local chat clients through one MCP stdio bridge
 
 - Status: Accepted
-- Date: 2026-07-12
+- Date: 2026-08-14
 - Superseded in part by: ADR 0003 (desktop lifecycle and per-user autostart)
 - Superseded in part by: ADR 0010 (capability-authenticated memory and computation tools)
 
@@ -13,10 +13,14 @@ can register MCP processes, while Claude Desktop distributes local extensions
 as MCPB packages. Requiring tunnels, API keys or manual configuration editing
 would contradict the goal of a simple local installation.
 
-Relevant contracts are the official [Codex MCP documentation],
-[Gemini CLI MCP server documentation] and [MCPB manifest v0.3].
+Relevant contracts are the official [Codex MCP documentation], [Codex skills
+documentation], [Claude Code memory documentation], [Gemini CLI skills
+documentation], [Gemini CLI MCP server documentation] and [MCPB manifest v0.3].
 
 [Codex MCP documentation]: https://developers.openai.com/codex/mcp/
+[Codex skills documentation]: https://developers.openai.com/codex/skills/
+[Claude Code memory documentation]: https://code.claude.com/docs/en/memory
+[Gemini CLI skills documentation]: https://geminicli.com/docs/cli/tutorials/skills-getting-started/
 [Gemini CLI MCP server documentation]: https://geminicli.com/docs/tools/mcp-server/
 [MCPB manifest v0.3]: https://github.com/modelcontextprotocol/mcpb/blob/70fe3b34cd6dff1b3bba046638edc72a6467a4fb/MANIFEST.md
 
@@ -25,13 +29,29 @@ Relevant contracts are the official [Codex MCP documentation],
 The desktop keeps Streamable HTTP MCP at `127.0.0.1:43123/mcp` as the canonical
 internal endpoint. A separate Rust executable, `airwiki-mcp-bridge`,
 exposes the same contract over stdio and forwards only to that fixed endpoint.
-Managed ChatGPT Desktop/Work, Claude Desktop and Gemini CLI integrations use the
-same bridge.
+Managed ChatGPT Desktop/Work, Codex, Claude Desktop, Claude Code and Gemini CLI
+integrations use the same bridge. Each client retains a distinct capability and
+application identity.
 
 Installation is per-user, visible, confirmed and reversible. The bridge accepts
 no arbitrary endpoint, ignores ambient proxies, stores no credentials and
-grants no collection access. Each client's configuration remains its own source
+grants no Wiki access. Each client's configuration remains its own source
 of truth.
+
+For Codex/ChatGPT, Claude Code and Gemini CLI, the same native confirmation also
+installs a versioned, instruction-only user skill plus an `AirWiki.md` imported
+once from the client's global instructions. AirWiki uses only documented user
+roots, never modifies repository files, stages and hashes managed bytes, and
+records a private receipt. User-modified resources become conflicts and are not
+overwritten or deleted. Claude Desktop receives equivalent server instructions
+inside the MCPB; generic MCP clients receive standard MCP instructions without
+filesystem writes.
+
+The guide directs agents to list and read before mutation, use optimistic
+fingerprints, create only after an explicit request, and avoid secrets,
+personal data and transient state. It grants no publication, sharing,
+verification or permission authority. If AirWiki is unavailable, the primary
+task continues with one pending-sync notice and no repository-local fallback.
 
 The application must remain running in the user's session, either visible or
 hidden. ADR 0003 supersedes this ADR's original exclusion of tray operation and
@@ -41,7 +61,11 @@ services.
 ## Consequences
 
 - There is one definition of MCP tools, instructions and response schemas.
+- A plain-language request can invoke a consistent memory workflow across
+  clients that support user skills or MCP instructions.
 - All managed clients share bridge limits, errors and fixes.
+- Skill or instruction updates require a new conversation and never replace
+  user-modified files.
 - Claude requires an additional confirmation in its MCPB installer.
 - Loopback does not authenticate operating-system accounts. Any process running
   as the user may attempt to call it; `allow_external_ai`, the answerability

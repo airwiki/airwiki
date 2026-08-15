@@ -8,6 +8,7 @@
       "../../target/packaging-resources/macos/llama/": "llama/",
       "../../target/aarch64-apple-darwin/release/airwiki-mcp-bridge": "integrations/bridge/airwiki-mcp-bridge",
       "../../target/mcpb/aarch64-apple-darwin/airwiki-claude.mcpb": "integrations/airwiki-claude.mcpb",
+      "../../resources/integrations/workflow/": "integrations/workflow/",
       "../../THIRD_PARTY_NOTICES.md": "THIRD_PARTY_NOTICES.md",
       "../../LICENSE": "LICENSE",
       "../../resources/licenses/": "licenses/"

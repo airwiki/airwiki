@@ -268,7 +268,14 @@ async function assertVisualMatrix(): Promise<void> {
             document.querySelector('.action-message')?.remove();
             const style = document.createElement('style');
             style.id = 'visual-capture-styles';
-            style.textContent = '.system-status-bar button:hover { color: var(--muted) !important; background: transparent !important; }';
+            style.textContent = `
+              .system-status-bar button:hover { color: var(--muted) !important; background: transparent !important; }
+              .select-control select:hover:not(:disabled),
+              .select-control select:focus-visible {
+                border-color: var(--control-border, var(--line)) !important;
+                box-shadow: inset 0 1px 1px #0000000d !important;
+              }
+            `;
             document.head.append(style);
           });
           await waitForVisualPaint(routes[index]);
@@ -437,6 +444,9 @@ async function exerciseGenericMcpMemory(): Promise<void> {
   }
 
   article = await genericMcpArticle();
+  await expect(article).toHaveText(expect.stringContaining('Local connection'));
+  await expect(article).toHaveText(expect.stringContaining('Assisted memory'));
+  await expect(article).toHaveText(expect.stringContaining('Included with the connection'));
   const setupText = await article.$('.mcp-setup pre').getText();
   const setup = record(JSON.parse(setupText), 'generic MCP setup');
   const command = stringField(setup, 'command');
@@ -719,13 +729,18 @@ describe('AirWiki real IPC journey', () => {
       const disclosure = document.querySelector<HTMLElement>('.connection-advanced > summary');
       const statusGrid = document.querySelector<HTMLElement>('.connection-advanced > dl');
       const firstStatus = statusGrid?.querySelector<HTMLElement>('dd');
+      const drawer = document.querySelector<HTMLElement>('.connections-drawer');
+      const integration = document.querySelector<HTMLElement>('.integration-item');
       return {
         checkboxWidth: indicator?.getBoundingClientRect().width ?? 0,
         checkboxHeight: indicator?.getBoundingClientRect().height ?? 0,
         disclosureDisplay: disclosure ? getComputedStyle(disclosure).display : '',
         statusDisplay: statusGrid ? getComputedStyle(statusGrid).display : '',
         statusColumns: statusGrid ? getComputedStyle(statusGrid).gridTemplateColumns.split(' ').length : 0,
-        statusMarginLeft: firstStatus ? getComputedStyle(firstStatus).marginLeft : ''
+        statusMarginLeft: firstStatus ? getComputedStyle(firstStatus).marginLeft : '',
+        drawerClientWidth: drawer?.clientWidth ?? 0,
+        drawerScrollWidth: drawer?.scrollWidth ?? Number.POSITIVE_INFINITY,
+        integrationColumns: integration ? getComputedStyle(integration).gridTemplateColumns.split(' ').length : 0
       };
     });
     expect(desktopControlLayout.checkboxWidth).toBe(16);
@@ -734,6 +749,8 @@ describe('AirWiki real IPC journey', () => {
     expect(desktopControlLayout.statusDisplay).toBe('grid');
     expect(desktopControlLayout.statusColumns).toBe(3);
     expect(desktopControlLayout.statusMarginLeft).toBe('0px');
+    expect(desktopControlLayout.drawerScrollWidth).toBeLessThanOrEqual(desktopControlLayout.drawerClientWidth);
+    expect(desktopControlLayout.integrationColumns).toBe(2);
     await $('.connections-drawer button[aria-label="Close"]').click();
 
     if (runVisualMatrix) await assertVisualMatrix();

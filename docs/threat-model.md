@@ -60,6 +60,10 @@ Controls are not considered effective end to end until the
 12. **OKF bundle → `airwiki-wasm`.** Components are untrusted bundle bytes. Only
     hash-bound, import-free component-model artifacts run, without WASI or host
     capabilities and under memory, fuel, time and payload limits.
+13. **Desktop → client user instructions.** A native confirmation lists the
+    documented global files before AirWiki installs a skill, `AirWiki.md` and one
+    import. Staging, hashes, private receipts and exact-root checks constrain the
+    write; no repository file is modified.
 
 ## Threats and controls
 
@@ -83,6 +87,9 @@ Controls are not considered effective end to end until the
 | DNS rebinding reaches MCP | Loopback bind, exact authority including port, bounded body | Compromised local software can already call loopback |
 | Application capability is forged, crossed or revoked mid-operation | Random secret, hash-only SQLite storage, fixed bridge resolution, active-capability recheck, per-Wiki role and immediate revocation | Malware in the same user account may read the private credential file |
 | Assistant forges producer, human verification or permissions | Rust fixes immutable producer/version, generation time and lifecycle; MCP schemas exclude verification and sharing; only AI-memory bundles are writable | A user may still over-grant an application; review grants and revoke it |
+| Workflow-guide installation overwrites user instructions | Only documented absolute user roots, no symlink/reparse traversal, bounded UTF-8 parsing, atomic writes, BOM/EOL preservation and an exact single import; user-modified managed files become conflicts | Software under the same user account can race or alter the files; reinspection fails closed and requires manual resolution |
+| A workflow guide expands an assistant's authority | The packaged skill contains no code, excludes secrets and transient data, and explicitly forbids verification, sharing, publication and permission changes; every MCP call still requires the application's capability and Wiki grant | Models may ignore instructions; Rust contracts and authorization, not the skill, remain authoritative |
+| Disconnect removes unrelated global configuration | Private receipts identify exact installed hashes; removal occurs only while skill, guide and import still match, and rollback restores only bytes changed by the failed operation | A conflict may require the user to remove or reconcile stale text manually |
 | Memory mutation splits filesystem and SQLite | Staging/atomic replacement, optimistic fingerprint, append-only journal and fail-closed startup reconciliation | Disk failure can require explicit recovery while the Wiki remains unavailable |
 | Malicious OKF optional metadata raises trust or enables code | Unknown/invalid fields are preserved with warnings but ignored for assurance, sharing and execution; future versions are local-only | A future field remains visually present and must not be mistaken for interpreted policy |
 | Attested component accesses host data or exhausts the node | No imports or WASI; in-bundle hash-bound artifacts; 8 MiB components, 64 MiB memory, 10M fuel, two-second deadline and bounded JSON | Compiler/runtime vulnerabilities remain in the local TCB; keep Wasmtime pinned and audited |

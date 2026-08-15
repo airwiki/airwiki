@@ -8,7 +8,8 @@
     "resources": {
       "../../target/validated-windows-bundle/staging/llama/": "llama/",
       "../../target/validated-windows-bundle/staging/airwiki-mcp-bridge.exe": "integrations/bridge/airwiki-mcp-bridge.exe",
-      "../../target/validated-windows-bundle/staging/airwiki-windows-firewall-helper.exe": "airwiki-windows-firewall-helper.exe"
+      "../../target/validated-windows-bundle/staging/airwiki-windows-firewall-helper.exe": "airwiki-windows-firewall-helper.exe",
+      "../../resources/integrations/workflow/": "integrations/workflow/"
     },
     "windows": {
       "allowDowngrades": false,

@@ -152,6 +152,15 @@ describe('AirWiki wiki workspace', () => {
     expect(screen.getByRole('dialog', { name: 'Conexiones' })).toBeInTheDocument();
     expect(screen.getByText('Controles de red')).toBeInTheDocument();
     expect(screen.getAllByText('Detalles avanzados')).toHaveLength(1);
+    await waitFor(() => expect(manageIntegration).toHaveBeenCalledWith(expect.any(String), { kind: 'refresh' }));
+  });
+
+  it('loads integrations when connections open from public sharing', async () => {
+    render(App);
+    await fireEvent.click(await screen.findByRole('button', { name: 'Conexiones' }));
+
+    expect(screen.getByRole('dialog', { name: 'Conexiones' })).toBeInTheDocument();
+    await waitFor(() => expect(manageIntegration).toHaveBeenCalledWith(expect.any(String), { kind: 'refresh' }));
   });
 
   it('shows a copyable generic MCP setup without exposing a capability', async () => {
@@ -160,7 +169,8 @@ describe('AirWiki wiki workspace', () => {
       integrations: [{
         client: 'genericMcp', status: 'configured', detectedVersion: null,
         activityRecent: false, restartRequired: false,
-        mcpSetup: { command: '/synthetic/managed/airwiki-mcp-bridge', args: ['--client', 'generic-mcp'] }
+        mcpSetup: { command: '/synthetic/managed/airwiki-mcp-bridge', args: ['--client', 'generic-mcp'] },
+        workflowGuide: { kind: 'mcpInstructions', status: 'builtIn', version: '1', restartRequired: true }
       }]
     };
     render(App);
@@ -186,7 +196,8 @@ describe('AirWiki wiki workspace', () => {
       externalAiWikiCount: 0,
       integrations: [{
         client: 'genericMcp', status: 'available', detectedVersion: null,
-        activityRecent: false, restartRequired: false, mcpSetup: null
+        activityRecent: false, restartRequired: false, mcpSetup: null,
+        workflowGuide: { kind: 'mcpInstructions', status: 'builtIn', version: '1', restartRequired: true }
       }]
     };
     render(App);
@@ -257,7 +268,8 @@ describe('AirWiki wiki workspace', () => {
       externalAiWikiCount: 0,
       integrations: [{
         client: 'genericMcp', status: 'available', detectedVersion: null,
-        activityRecent: false, restartRequired: false, mcpSetup: null
+        activityRecent: false, restartRequired: false, mcpSetup: null,
+        workflowGuide: { kind: 'mcpInstructions', status: 'builtIn', version: '1', restartRequired: true }
       }]
     };
     render(App);

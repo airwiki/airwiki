@@ -8929,6 +8929,7 @@ mod tests {
         assert!(
             release.contains("packaging verify-updater-embedded-key")
                 && release.contains("--binary \"$APP/Contents/MacOS/airwiki\"")
+                && release.contains("rm -rf -- \"$DMG_STAGE\" \"$APP\"")
         );
     }
 
@@ -8964,7 +8965,14 @@ mod tests {
                 && promote.contains("$is_prerelease\" == \"false\"")
                 && promote.contains("verify-macos-release.sh")
                 && promote.contains("verify-signpath-windows-msi.ps1")
-                && promote.contains("--draft=false --prerelease=false --latest")
+                && promote.contains("Release target changed after verification.")
+                && promote.contains("Release tag does not resolve to the verified commit.")
+                && promote.contains("gh api --method POST \"repos/$GITHUB_REPOSITORY/git/refs\"")
+                && promote.contains("--target \"$expected_commit\"")
+                && promote.contains("--verify-tag")
+                && promote.contains("--draft=false")
+                && promote.contains("--prerelease=false")
+                && promote.contains("--latest")
                 && !promote.contains("packaging/generate-update-manifest.py")
                 && !promote.contains("gh release upload")
                 && !promote.contains("--clobber")
@@ -8973,9 +8981,7 @@ mod tests {
         let final_set_check = promote
             .find("Draft assets changed after platform verification.")
             .unwrap();
-        let publication = promote
-            .find("--draft=false --prerelease=false --latest")
-            .unwrap();
+        let publication = promote.find("gh release edit \"v${version}\"").unwrap();
         assert!(
             final_set_check < publication,
             "the protected job must bind publication to the previously verified asset set"

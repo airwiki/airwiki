@@ -227,18 +227,54 @@ jobs:
             --version "$AIRWIKI_RELEASE_VERSION" \
             --commit "${{ needs.inspect-draft.outputs.commit-sha }}"
 
-          release_state="$(gh release view "v${AIRWIKI_RELEASE_VERSION}" \
-            --json isDraft,isPrerelease --jq '[.isDraft,.isPrerelease] | @tsv')"
+          version="$AIRWIKI_RELEASE_VERSION"
+          expected_commit="${{ needs.inspect-draft.outputs.commit-sha }}"
+          release="$(gh release view "v${version}" \
+            --json isDraft,isPrerelease,targetCommitish)"
+          release_state="$(jq -r '[.isDraft,.isPrerelease] | @tsv' <<<"$release")"
           if [[ "$release_state" != $'true\ttrue' && "$release_state" != $'false\tfalse' ]]; then
             echo "Release state changed to an invalid promotion state." >&2
             exit 1
           fi
-          version="$AIRWIKI_RELEASE_VERSION"
-          gh release edit "v${version}" --draft=false --prerelease=false --latest
+          if [[ "$(jq -r '.targetCommitish' <<<"$release")" != "$expected_commit" ]]; then
+            echo "Release target changed after verification." >&2
+            exit 1
+          fi
+
+          tag_ref="refs/tags/v${version}"
+          tag_refs="$(git ls-remote --tags origin "$tag_ref" "${tag_ref}^{}")"
+          if [[ -z "$tag_refs" ]]; then
+            gh api --method POST "repos/$GITHUB_REPOSITORY/git/refs" \
+              -f "ref=$tag_ref" \
+              -f "sha=$expected_commit" >/dev/null
+            tag_refs="$(git ls-remote --tags origin "$tag_ref" "${tag_ref}^{}")"
+          fi
+          tag_commit="$(awk -v tag="$tag_ref" '
+            $2 == tag { direct = $1 }
+            $2 == tag "^{}" { peeled = $1 }
+            END { print peeled != "" ? peeled : direct }
+          ' <<<"$tag_refs")"
+          if [[ "$tag_commit" != "$expected_commit" ]]; then
+            echo "Release tag does not resolve to the verified commit." >&2
+            exit 1
+          fi
+
+          gh release edit "v${version}" \
+            --target "$expected_commit" \
+            --verify-tag \
+            --draft=false \
+            --prerelease=false \
+            --latest
           state="$(gh release view "v${version}" --json isDraft,isPrerelease \
             --jq '[.isDraft,.isPrerelease] | @tsv')"
           latest="$(gh release view --json tagName --jq '.tagName')"
-          if [[ "$state" != $'false\tfalse' || "$latest" != "v${version}" ]]; then
+          published_commit="$(git ls-remote --tags origin "$tag_ref" "${tag_ref}^{}" | awk -v tag="$tag_ref" '
+            $2 == tag { direct = $1 }
+            $2 == tag "^{}" { peeled = $1 }
+            END { print peeled != "" ? peeled : direct }
+          ')"
+          if [[ "$state" != $'false\tfalse' || "$latest" != "v${version}" || \
+            "$published_commit" != "$expected_commit" ]]; then
             echo "GitHub did not publish the expected stable latest release." >&2
             exit 1
           fi

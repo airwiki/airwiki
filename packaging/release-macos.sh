@@ -15,7 +15,7 @@ DMG_RESOURCES="$ROOT/target/packages/macos/airwiki-dmg-resources.plist"
 DMG_STAGE=$(mktemp -d "${TMPDIR:-/tmp}/airwiki-dmg.XXXXXX")
 
 cleanup() {
-  rm -rf -- "$DMG_STAGE"
+  rm -rf -- "$DMG_STAGE" "$APP"
   rm -f -- "$NOTARY_ZIP" "$DMG_RESOURCES"
 }
 trap cleanup EXIT HUP INT TERM

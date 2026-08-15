@@ -75,6 +75,8 @@ constitute a supported public release.
 - [ ] Reject invalid signatures, equal versions, downgrades, replayed historical
   installers, redirects, symlinks, reparse points, and unexpected assets.
 - [ ] Create a draft prerelease tied to the exact audited commit.
+- [ ] Protect `v*` tags against update and deletion; resolve the release target
+  and final tag to the exact audited commit immediately before publication.
 - [ ] Re-download and verify the complete draft before human promotion.
 - [ ] Match every legal payload and the complete SPDX dependency inventory to
   the reviewed release commit; match macOS bundle/build metadata and Windows PE

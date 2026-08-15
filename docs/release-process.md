@@ -25,6 +25,9 @@ Create protected GitHub environments named `macos-signing`, `windows-signing`
 and `public-release`. Restrict deployment branches to `main`. Require a human
 reviewer for both signing environments and for `public-release`; do not allow an
 initiating administrator to bypass the final promotion approval.
+Protect tags matching `v*` against updates and deletion. The promotion workflow
+creates the exact release tag only after approval and never moves an existing
+tag.
 
 Configure these non-secret repository variables so verification jobs can use
 them without entering a signing environment:
@@ -158,8 +161,9 @@ same version. The workflow:
 The first verification fingerprints the complete `SHA256SUMS` inventory. Both
 native platform jobs require that exact inventory and verify their downloaded
 bytes against it. Immediately before publication, the protected job downloads
-the complete draft again and refuses to continue if the inventory fingerprint
-changed while approval was pending.
+the complete draft again, revalidates the release target, creates or resolves the
+immutable tag at the verified commit, and refuses to continue if the inventory
+fingerprint or target changed while approval was pending.
 
 After approval, it publishes that same verified draft as the latest stable
 release without changing its assets. Consequently `latest.json` and the

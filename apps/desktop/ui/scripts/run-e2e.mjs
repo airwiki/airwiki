@@ -152,6 +152,7 @@ const app = spawn(appBinaryPath, [], {
   env: {
     ...process.env,
     AIRWIKI_E2E_DATA_ROOT: testRoot,
+    AIRWIKI_E2E_CONFIRMATIONS: 'allow',
     AIRWIKI_E2E_WIKI_FOLDER: sourceFixture,
     AIRWIKI_E2E_OKF_FOLDER: okfFixture,
     TAURI_WEBDRIVER_PORT: '4445'

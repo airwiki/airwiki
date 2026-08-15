@@ -20,7 +20,7 @@ export const config: WebdriverIO.Config = {
   hostname: '127.0.0.1',
   port: 4445,
   path: '/',
-  capabilities: [{}],
+  capabilities: [{ 'wdio:enforceWebDriverClassic': true }],
   framework: 'mocha',
   reporters: ['spec'],
   services: [[

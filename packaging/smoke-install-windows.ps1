@@ -741,6 +741,10 @@ function Assert-InstalledRelease([string] $CaseId) {
         "integrations/airwiki-claude.mcpb" `
         $Mcpb `
         "Claude MCPB"
+    Add-WindowsPayloadTree $ExpectedPayload `
+        "integrations/workflow" `
+        (Join-Path $Root "resources\integrations\workflow") `
+        "AirWiki workflow guide"
     Add-WindowsPayloadFile $ExpectedPayload "LICENSE" `
         (Join-Path $Root "LICENSE") "project license"
     Add-WindowsPayloadFile $ExpectedPayload "THIRD_PARTY_NOTICES.md" `

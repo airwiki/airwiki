@@ -10,6 +10,7 @@
       "../../target/x86_64-pc-windows-msvc/release/airwiki-mcp-bridge.exe": "integrations/bridge/airwiki-mcp-bridge.exe",
       "../../target/x86_64-pc-windows-msvc/release/airwiki-windows-firewall-helper.exe": "airwiki-windows-firewall-helper.exe",
       "../../target/mcpb/x86_64-pc-windows-msvc/airwiki-claude.mcpb": "integrations/airwiki-claude.mcpb",
+      "../../resources/integrations/workflow/": "integrations/workflow/",
       "../../THIRD_PARTY_NOTICES.md": "THIRD_PARTY_NOTICES.md",
       "../../LICENSE": "LICENSE",
       "../../resources/licenses/": "licenses/"

@@ -67,6 +67,11 @@ fn generate_fragment(
     add_file(&mut resources, &root.join("LICENSE"), "LICENSE")?;
     add_tree(&mut resources, runtime, "llama")?;
     add_tree(&mut resources, &root.join("resources/licenses"), "licenses")?;
+    add_tree(
+        &mut resources,
+        &root.join("resources/integrations/workflow"),
+        "integrations/workflow",
+    )?;
 
     ensure!(!resources.is_empty(), "Windows MSI resource set is empty");
     let document = render_fragment(resources.into_values())?;
@@ -386,9 +391,15 @@ mod tests {
         let release = target.join("release");
         let runtime = root.join("runtime");
         let licenses = root.join("resources/licenses");
+        let workflow = root.join("resources/integrations/workflow");
         let mcpb = target.join("airwiki-claude.mcpb");
         let output = target.join("windows-msi-resources.wxs");
-        for directory in [&release, &runtime, &licenses] {
+        for directory in [
+            &release,
+            &runtime,
+            &licenses,
+            &workflow.join("airwiki/agents"),
+        ] {
             fs::create_dir_all(directory).expect("fixture directory should be created");
         }
         for (path, contents) in [
@@ -400,6 +411,12 @@ mod tests {
             (runtime.join("llama-server.exe"), b"runtime".as_slice()),
             (runtime.join("BUILD-MANIFEST.json"), b"manifest".as_slice()),
             (licenses.join("Apache-2.0.txt"), b"license".as_slice()),
+            (workflow.join("AirWiki.md"), b"awareness".as_slice()),
+            (workflow.join("airwiki/SKILL.md"), b"skill".as_slice()),
+            (
+                workflow.join("airwiki/agents/openai.yaml"),
+                b"metadata".as_slice(),
+            ),
             (mcpb.clone(), b"mcpb".as_slice()),
             (root.join("THIRD_PARTY_NOTICES.md"), b"notices".as_slice()),
             (root.join("LICENSE"), b"project license".as_slice()),
@@ -422,12 +439,15 @@ mod tests {
             "llama-server.exe",
             "BUILD-MANIFEST.json",
             "Apache-2.0.txt",
+            "AirWiki.md",
+            "SKILL.md",
+            "openai.yaml",
             "THIRD_PARTY_NOTICES.md",
             "LICENSE",
         ] {
             assert!(first.contains(destination), "missing {destination}");
         }
-        assert_eq!(first.matches("KeyPath=\"yes\"").count(), 12);
-        assert_eq!(first.matches("<RemoveFolder ").count(), 4);
+        assert_eq!(first.matches("KeyPath=\"yes\"").count(), 18);
+        assert_eq!(first.matches("<RemoveFolder ").count(), 7);
     }
 }

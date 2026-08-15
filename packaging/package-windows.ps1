@@ -168,6 +168,10 @@ function Assert-WindowsMsiPayload(
             (Join-Path $Root "resources\licenses") `
             (Join-Path $PayloadRoot "licenses") `
             "packaged license inventory"
+        Assert-WindowsDirectoryTreeMatches `
+            (Join-Path $Root "resources\integrations\workflow") `
+            (Join-Path $PayloadRoot "integrations\workflow") `
+            "packaged AirWiki workflow guide"
         $PackagedRuntimeRoot = Get-WindowsPackagedRuntimeRoot `
             $PackagedDesktop `
             $PackagedLlamaServer
@@ -226,6 +230,10 @@ try {
     & $Xtask licenses check
     if ($LASTEXITCODE -ne 0) {
         throw "license validation failed"
+    }
+    & $Xtask workflow-guide check
+    if ($LASTEXITCODE -ne 0) {
+        throw "AirWiki workflow guide validation failed"
     }
     & $Xtask packaging verify-windows-msi
     if ($LASTEXITCODE -ne 0) {

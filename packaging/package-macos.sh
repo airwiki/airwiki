@@ -15,6 +15,8 @@ RELEASE_BRIDGE="$ROOT/target/aarch64-apple-darwin/release/airwiki-mcp-bridge"
 PACKAGED_BRIDGE="$APP/Contents/Resources/integrations/bridge/airwiki-mcp-bridge"
 SOURCE_MCPB="$ROOT/target/mcpb/aarch64-apple-darwin/airwiki-claude.mcpb"
 PACKAGED_MCPB="$APP/Contents/Resources/integrations/airwiki-claude.mcpb"
+SOURCE_WORKFLOW_GUIDE="$ROOT/resources/integrations/workflow"
+PACKAGED_WORKFLOW_GUIDE="$APP/Contents/Resources/integrations/workflow"
 SOURCE_ICON="$ROOT/resources/branding/airwiki.icns"
 PACKAGED_ICON="$APP/Contents/Resources/airwiki.icns"
 READY_STAMP="$ROOT/target/packaging-macos-ready.stamp"
@@ -65,6 +67,7 @@ rm -rf -- "$APP" "$FINAL_APP" "$STAGED_RUNTIME_DIR"
 rm -f -- "$TAURI_DMG" "$OUT_DIR/$OUT_NAME" "$OUT_DIR/rw.$OUT_NAME"
 rm -f -- "$SOURCE_MCPB" "$READY_STAMP"
 
+cargo run --locked -p xtask -- workflow-guide check
 cargo run --locked -p xtask -- licenses check
 ./packaging/fetch-llama-macos.sh
 mkdir -p -- "$STAGED_RUNTIME_DIR"
@@ -107,6 +110,12 @@ if [ ! -x "$RELEASE_BINARY" ] || [ ! -x "$PACKAGED_BINARY" ] ||
 fi
 if [ ! -f "$SOURCE_MCPB" ] || [ ! -f "$PACKAGED_MCPB" ]; then
   echo "fresh or packaged Claude MCPB is missing" >&2
+  exit 1
+fi
+if [ ! -d "$PACKAGED_WORKFLOW_GUIDE" ] ||
+  [ -n "$(find "$PACKAGED_WORKFLOW_GUIDE" -type l -print -quit)" ] ||
+  ! diff -qr "$SOURCE_WORKFLOW_GUIDE" "$PACKAGED_WORKFLOW_GUIDE" >/dev/null; then
+  echo "packaged AirWiki workflow guide differs from its immutable source" >&2
   exit 1
 fi
 if [ ! -f "$SOURCE_ICON" ] || [ ! -f "$PACKAGED_ICON" ]; then

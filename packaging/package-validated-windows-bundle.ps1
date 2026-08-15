@@ -17,6 +17,7 @@ if ([Environment]::OSVersion.Platform -ne [PlatformID]::Win32NT) {
 $Root = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
 $Config = Join-Path $Root "packaging\windows\tauri.validated.bundle.conf.json"
 $LlamaPolicy = Join-Path $Root "packaging\llama-windows-build-policy.json"
+$WorkflowGuide = Join-Path $Root "resources\integrations\workflow"
 $TargetRoot = Join-Path $Root "target"
 $WorkRoot = Join-Path $TargetRoot "validated-windows-bundle"
 $StageRoot = Join-Path $WorkRoot "staging"
@@ -72,6 +73,7 @@ function New-InstalledCoreManifest(
     [string] $Helper,
     [string] $LlamaServer,
     [string] $LlamaManifest,
+    [string] $WorkflowGuide,
     [string] $Label
 ) {
     $Manifest = New-WindowsPayloadManifest
@@ -96,6 +98,11 @@ function New-InstalledCoreManifest(
         "llama/BUILD-MANIFEST.json" `
         $LlamaManifest `
         "$Label llama.cpp build manifest"
+    Add-WindowsPayloadTree `
+        $Manifest `
+        "integrations/workflow" `
+        $WorkflowGuide `
+        "$Label AirWiki workflow guide"
     return $Manifest
 }
 
@@ -354,6 +361,7 @@ try {
         $BundleHelper `
         $BundleLlamaServer `
         $BundleLlamaManifest `
+        $WorkflowGuide `
         "validated bundle"
     Assert-ExactExtractedNsisPayload `
         $ExpectedInstalledCore `

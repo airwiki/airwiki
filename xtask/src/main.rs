@@ -255,6 +255,17 @@ async fn main() -> Result<()> {
             Some(other) => bail!("unknown ui-bindings command: {other}"),
             None => bail!("missing ui-bindings command; expected `generate` or `check`"),
         },
+        "workflow-guide" => match arguments.next().as_deref() {
+            Some("check") => {
+                ensure!(
+                    arguments.next().is_none(),
+                    "workflow-guide check received unexpected arguments"
+                );
+                validate_workflow_guide()
+            }
+            Some(other) => bail!("unknown workflow-guide command: {other}"),
+            None => bail!("missing workflow-guide command; expected `check`"),
+        },
         "docs" => match arguments.next().as_deref() {
             Some("check") => {
                 ensure!(
@@ -321,6 +332,7 @@ async fn main() -> Result<()> {
             println!("cargo run --locked -p xtask -- licenses check");
             println!("cargo run --locked -p xtask -- ui-bindings generate");
             println!("cargo run --locked -p xtask -- ui-bindings check");
+            println!("cargo run --locked -p xtask -- workflow-guide check");
             println!("cargo run --locked -p xtask -- docs check");
             println!("cargo run --locked -p xtask -- packaging verify-windows-uninstaller");
             println!("cargo run --locked -p xtask -- packaging verify-windows-msi");
@@ -341,6 +353,73 @@ async fn main() -> Result<()> {
         }
         unknown => bail!("unknown xtask command: {unknown}"),
     }
+}
+
+fn validate_workflow_guide() -> Result<()> {
+    const MAX_SKILL_BYTES: usize = 64 * 1024;
+    const MAX_AWARENESS_BYTES: usize = 16 * 1024;
+    const REQUIRED_SKILL_TERMS: [&str; 8] = [
+        "list_airwiki_memories",
+        "create_airwiki_memory",
+        "get_airwiki_memory",
+        "write_airwiki_memory",
+        "deprecate_airwiki_memory",
+        "expected_fingerprint",
+        "pause AirWiki",
+        "pausa AirWiki",
+    ];
+    let root = workspace_root().join("resources/integrations/workflow");
+    let skill_root = root.join("airwiki");
+    let skill = read_utf8_bounded(&skill_root.join("SKILL.md"), MAX_SKILL_BYTES)?;
+    let metadata = read_utf8_bounded(&skill_root.join("agents/openai.yaml"), MAX_AWARENESS_BYTES)?;
+    let awareness = read_utf8_bounded(&root.join("AirWiki.md"), MAX_AWARENESS_BYTES)?;
+
+    ensure!(
+        !skill_root.join("scripts").exists(),
+        "the AirWiki skill must remain instruction-only"
+    );
+    let frontmatter = skill
+        .strip_prefix("---\n")
+        .and_then(|value| value.split_once("\n---\n"))
+        .context("AirWiki SKILL.md needs exact YAML frontmatter delimiters")?;
+    ensure!(
+        frontmatter.0.lines().any(|line| line == "name: airwiki"),
+        "AirWiki skill name is missing or changed"
+    );
+    ensure!(
+        frontmatter
+            .0
+            .lines()
+            .any(|line| line.starts_with("description: ") && line.len() > 32),
+        "AirWiki skill description is missing or too short"
+    );
+    for term in REQUIRED_SKILL_TERMS {
+        ensure!(skill.contains(term), "AirWiki skill is missing `{term}`");
+    }
+    ensure!(
+        metadata.contains("display_name: \"AirWiki\"")
+            && metadata.contains("value: \"airwiki\"")
+            && metadata.contains("allow_implicit_invocation: true"),
+        "AirWiki OpenAI metadata is incomplete"
+    );
+    ensure!(
+        awareness.contains("`airwiki` skill")
+            && awareness.contains("explicitly creates or selects a wiki")
+            && awareness.contains("Never verify, publish, share, grant access"),
+        "AirWiki awareness guide is missing its activation or safety boundary"
+    );
+    println!("validated bundled AirWiki workflow guide");
+    Ok(())
+}
+
+fn read_utf8_bounded(path: &Path, limit: usize) -> Result<String> {
+    let bytes = fs::read(path).with_context(|| format!("reading {}", path.display()))?;
+    ensure!(
+        bytes.len() <= limit,
+        "{} exceeds its size limit",
+        path.display()
+    );
+    String::from_utf8(bytes).with_context(|| format!("{} is not UTF-8", path.display()))
 }
 
 fn run_ui_bindings_test(test_name: &str, ignored: bool) -> Result<()> {
@@ -7769,18 +7848,27 @@ mod tests {
         let macos_wrapper = fs::read_to_string(root.join("packaging/package-macos.sh")).unwrap();
         let windows =
             fs::read_to_string(root.join("packaging/windows/tauri.bundle.conf.json")).unwrap();
+        let validated_windows =
+            fs::read_to_string(root.join("packaging/windows/tauri.validated.bundle.conf.json"))
+                .unwrap();
         let windows_wrapper =
             fs::read_to_string(root.join("packaging/package-windows.ps1")).unwrap();
         for config in [&macos, &windows] {
             assert!(config.contains("airwiki-mcp-bridge"));
             assert!(config.contains("airwiki-claude.mcpb"));
+            assert!(config.contains("resources/integrations/workflow"));
             assert!(config.contains("resources/licenses"));
         }
         assert!(windows.contains("airwiki-windows-firewall-helper.exe"));
+        assert!(validated_windows.contains("resources/integrations/workflow"));
         assert!(macos_wrapper.contains("mcpb build"));
+        assert!(macos_wrapper.contains("workflow-guide check"));
+        assert!(macos_wrapper.contains("PACKAGED_WORKFLOW_GUIDE"));
         assert!(macos_wrapper.contains("./ui/node_modules/.bin/tauri build"));
         assert!(!windows.contains("beforePackagingCommand"));
         assert!(windows_wrapper.contains("licenses check"));
+        assert!(windows_wrapper.contains("workflow-guide check"));
+        assert!(windows_wrapper.contains("packaged AirWiki workflow guide"));
         assert!(windows_wrapper.contains("fetch-llama-windows.ps1"));
         assert!(windows_wrapper.contains("cargo build --locked --release"));
         assert!(windows_wrapper.contains("mcpb build"));

@@ -160,6 +160,10 @@ try {
         (Join-Path $Root "resources\licenses") `
         (Join-Path $PayloadRoot "licenses") `
         "packaged license inventory"
+    Assert-WindowsDirectoryTreeMatches `
+        (Join-Path $Root "resources\integrations\workflow") `
+        (Join-Path $PayloadRoot "integrations\workflow") `
+        "packaged AirWiki workflow guide"
     $PackagedRuntimeRoot = Get-WindowsPackagedRuntimeRoot `
         $PackagedDesktop `
         $PackagedLlamaServer

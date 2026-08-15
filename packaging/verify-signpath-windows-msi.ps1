@@ -118,6 +118,10 @@ try {
 
         $null = Get-WindowsLlamaRuntimeManifest $RuntimeRoot $LlamaPolicy
         Assert-WindowsDesktopEmbedsLlamaRuntimeHash $Desktop $RuntimeRoot $LlamaPolicy
+        Assert-WindowsDirectoryTreeMatches `
+            (Join-Path $Root "resources\integrations\workflow") `
+            (Join-Path $PayloadRoot "integrations\workflow") `
+            "signed MSI AirWiki workflow guide"
         & cargo run --locked -p xtask -- mcpb verify `
             --target x86_64-pc-windows-msvc `
             --bridge $Bridge `

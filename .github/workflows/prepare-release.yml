@@ -14,6 +14,7 @@ on:
 
 permissions:
   actions: read
+  checks: read
   contents: read
 
 concurrency:
@@ -225,6 +226,15 @@ jobs:
           cp resources/licenses/NPM_LICENSES_WINDOWS_X64.md target/public-release/
           cp resources/licenses/NON_CARGO_COMPONENTS.md target/public-release/
           created_at="$(date -u +'%Y-%m-%dT%H:%M:%SZ')"
+          python3 packaging/generate-update-manifest.py \
+            --version "$AIRWIKI_RELEASE_VERSION" \
+            --published-at "$created_at" \
+            --base-url "https://github.com/airwiki/airwiki/releases/download/v${AIRWIKI_RELEASE_VERSION}" \
+            --macos target/public-release/AirWiki.app.tar.gz \
+            --macos-signature target/public-release/AirWiki.app.tar.gz.sig \
+            --windows "target/public-release/AirWiki_${AIRWIKI_RELEASE_VERSION}_x64_en-US.msi" \
+            --windows-signature "target/public-release/AirWiki_${AIRWIKI_RELEASE_VERSION}_x64_en-US.msi.sig" \
+            --output target/public-release/latest.json
           python3 packaging/release_assets.py generate \
             --directory target/public-release \
             --version "$AIRWIKI_RELEASE_VERSION" \

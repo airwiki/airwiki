@@ -120,12 +120,13 @@ the manifests differ, or the required checks are not green. It then:
 4. verifies native identity, architecture, payload, MCPB, runtime and updater
    signatures on each platform; and
 5. creates a private draft prerelease containing the exact installers, updater
-   artifacts, hashes, SPDX SBOM, provenance and legal inventories.
+   artifacts and manifest, hashes, SPDX SBOM, provenance and legal inventories.
 
 The generated `SHA256SUMS` covers every draft asset except itself. Provenance is
 bound to the repository, full commit, version and workflow run. The SPDX file
 enumerates the final release files and the exact Cargo/npm dependency inventories
-used by the packages.
+used by the packages. `latest.json` remains private with the draft and its bytes
+are covered by those metadata checks.
 
 ## Acceptance and promotion
 
@@ -147,10 +148,11 @@ same version. The workflow:
    MSI updater signatures; and
 5. waits at the protected `public-release` environment.
 
-After approval, it generates `latest.json` from the already verified final bytes,
-attaches it as the last private draft mutation and publishes the release as the
-latest stable version. Consequently the manifest and installers become visible
-together; it can never point at an unpublished prerelease.
+After approval, it publishes the already verified draft as the latest stable
+release without changing its assets. Consequently `latest.json` and the
+installers become visible together, the promotion is safe to retry after an
+interruption, and the updater manifest can never point at an unpublished
+prerelease.
 
 Do not delete or move old stable tags, assets or updater manifests. If any gate
 fails, leave the candidate private, correct the source through a new pull request

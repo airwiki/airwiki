@@ -38,6 +38,7 @@ def base_asset_names(version: str) -> set[str]:
         "NPM_LICENSES_MACOS_ARM64.md",
         "NPM_LICENSES_WINDOWS_X64.md",
         "NON_CARGO_COMPONENTS.md",
+        "latest.json",
     }
 
 

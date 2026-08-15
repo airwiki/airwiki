@@ -8943,11 +8943,13 @@ mod tests {
         assert!(
             prepare.contains("workflow_dispatch:")
                 && prepare.contains("commit_sha:")
+                && prepare.contains("checks: read")
                 && prepare.contains("environment: macos-signing")
                 && prepare.contains("uses: ./.github/workflows/windows-signpath.yml")
                 && prepare.contains("--draft")
                 && prepare.contains("--prerelease")
                 && prepare.contains("--target \"$AIRWIKI_RELEASE_COMMIT\"")
+                && prepare.contains("packaging/generate-update-manifest.py")
                 && prepare.contains("packaging/release_assets.py generate")
                 && !prepare.contains("self-hosted")
         );
@@ -8956,17 +8958,23 @@ mod tests {
                 && promote.contains("packaging/release_assets.py verify")
                 && promote.contains("verify-macos-release.sh")
                 && promote.contains("verify-signpath-windows-msi.ps1")
-                && promote.contains("packaging/generate-update-manifest.py")
-                && promote.contains("gh release upload")
                 && promote.contains("--draft=false --prerelease=false --latest")
+                && !promote.contains("packaging/generate-update-manifest.py")
+                && !promote.contains("gh release upload")
                 && !promote.contains("--clobber")
                 && !promote.contains("git push --force")
         );
-        let manifest_upload = promote.find("gh release upload").unwrap();
-        let publication = promote
-            .find("--draft=false --prerelease=false --latest")
+        let manifest_generation = prepare
+            .find("packaging/generate-update-manifest.py")
             .unwrap();
-        assert!(manifest_upload < publication);
+        let metadata_generation = prepare
+            .find("packaging/release_assets.py generate")
+            .unwrap();
+        let draft_creation = prepare.find("gh release create").unwrap();
+        assert!(
+            manifest_generation < metadata_generation && metadata_generation < draft_creation,
+            "the private draft must contain the updater manifest covered by release metadata"
+        );
     }
 
     #[test]

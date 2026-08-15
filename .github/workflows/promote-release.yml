@@ -175,24 +175,13 @@ jobs:
             --directory target/public-release \
             --version "$AIRWIKI_RELEASE_VERSION" \
             --commit "${{ needs.inspect-draft.outputs.commit-sha }}"
-      - name: Publish stable updater manifest last
+      - name: Publish the verified stable release
         env:
           GH_TOKEN: ${{ github.token }}
         shell: bash
         run: |
           set -euo pipefail
           version="$AIRWIKI_RELEASE_VERSION"
-          published_at="$(date -u +'%Y-%m-%dT%H:%M:%SZ')"
-          python3 packaging/generate-update-manifest.py \
-            --version "$version" \
-            --published-at "$published_at" \
-            --base-url "https://github.com/airwiki/airwiki/releases/download/v${version}" \
-            --macos target/public-release/AirWiki.app.tar.gz \
-            --macos-signature target/public-release/AirWiki.app.tar.gz.sig \
-            --windows "target/public-release/AirWiki_${version}_x64_en-US.msi" \
-            --windows-signature "target/public-release/AirWiki_${version}_x64_en-US.msi.sig" \
-            --output target/public-release/latest.json
-          gh release upload "v${version}" target/public-release/latest.json
           gh release edit "v${version}" --draft=false --prerelease=false --latest
           state="$(gh release view "v${version}" --json isDraft,isPrerelease \
             --jq '[.isDraft,.isPrerelease] | @tsv')"

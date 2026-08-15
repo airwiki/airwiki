@@ -42,7 +42,7 @@ constitute a supported public release.
 - [ ] Notarize and staple the application, updater archive, and final DMG as
   applicable.
 - [ ] Pass `codesign`, `spctl`, `notarytool`, `stapler`, architecture, runtime
-  closure, MCPB, and legal-payload checks.
+  closure, MCPB, DMG checksum, EULA-resource, and legal-payload checks.
 - [ ] Audit the upstream llama.cpp binary against its linked-source and legal
   closure before public redistribution.
 

@@ -292,10 +292,8 @@ if ! hdiutil verify "$OUT_DIR/$OUT_NAME"; then
   echo "packaged DMG failed integrity verification" >&2
   exit 1
 fi
-if ! DMG_RESOURCES=$(hdiutil udifderez -xml "$OUT_DIR/$OUT_NAME" 2>/dev/null) ||
-  ! printf '%s' "$DMG_RESOURCES" | grep -q '<key>LPic</key>' ||
-  ! printf '%s' "$DMG_RESOURCES" | grep -q '<key>STR#</key>' ||
-  ! printf '%s' "$DMG_RESOURCES" | grep -q '<key>TEXT</key>'; then
+if ! hdiutil udifderez -xml "$OUT_DIR/$OUT_NAME" 2>/dev/null |
+  python3 "$ROOT/packaging/macos_dmg_license_resources.py" --input -; then
   echo "packaged DMG does not contain the required license agreement" >&2
   exit 1
 fi

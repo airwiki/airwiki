@@ -110,10 +110,8 @@ codesign --verify --strict --verbose=2 "$DMG"
 xcrun stapler validate -v "$DMG"
 hdiutil verify "$DMG"
 spctl --assess --type open --context context:primary-signature --verbose=4 "$DMG"
-DMG_RESOURCES=$(hdiutil udifderez -xml "$DMG" 2>/dev/null)
-if ! printf '%s' "$DMG_RESOURCES" | grep -q '<key>LPic</key>' ||
-  ! printf '%s' "$DMG_RESOURCES" | grep -q '<key>STR#</key>' ||
-  ! printf '%s' "$DMG_RESOURCES" | grep -q '<key>TEXT</key>'; then
+if ! hdiutil udifderez -xml "$DMG" 2>/dev/null |
+  python3 "$ROOT/packaging/macos_dmg_license_resources.py" --input -; then
   echo "release DMG does not contain the required license agreement resources" >&2
   exit 1
 fi

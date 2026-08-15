@@ -8917,8 +8917,10 @@ mod tests {
 
     #[test]
     fn macos_release_verifies_the_generated_updater_signature() {
-        let release =
-            fs::read_to_string(workspace_root().join("packaging/release-macos.sh")).unwrap();
+        let root = workspace_root();
+        let release = fs::read_to_string(root.join("packaging/release-macos.sh")).unwrap();
+        let package = fs::read_to_string(root.join("packaging/package-macos.sh")).unwrap();
+        let verify = fs::read_to_string(root.join("packaging/verify-macos-release.sh")).unwrap();
 
         assert!(release.contains("tauri signer sign \"$UPDATE_ARCHIVE\""));
         assert!(
@@ -8930,6 +8932,18 @@ mod tests {
             release.contains("packaging verify-updater-embedded-key")
                 && release.contains("--binary \"$APP/Contents/MacOS/airwiki\"")
                 && release.contains("rm -rf -- \"$DMG_STAGE\" \"$APP\"")
+        );
+        assert!(
+            release.contains("macos_dmg_license_resources.py")
+                && release.contains("--output \"$DMG_LICENSE_RESOURCES\"")
+                && release
+                    .contains("hdiutil udifrez -xml \"$DMG_LICENSE_RESOURCES\" '' -quiet \"$DMG\"")
+                && !release.contains("udifrez \"$DMG\"")
+                && !release.contains("-replaceall")
+        );
+        assert!(
+            package.contains("macos_dmg_license_resources.py")
+                && verify.contains("macos_dmg_license_resources.py")
         );
     }
 

@@ -121,7 +121,9 @@ the manifests differ, or the required checks are not green. It then:
 2. builds two localized MSI packages, obtains their outer signatures and signs
    their final bytes for the Tauri updater;
 3. imports the ephemeral Developer ID identity, builds the macOS app, notarizes
-   and staples the app and DMG, and signs the final updater archive;
+   and staples the app and DMG, restores only validated EULA resources while
+   rebuilding the DMG, verifies its image checksums, and signs the final updater
+   archive;
 4. verifies native identity, architecture, payload, MCPB, runtime and updater
    signatures on each platform; and
 5. creates a private draft prerelease containing the exact installers, updater

@@ -11,12 +11,13 @@ APP="$ROOT/target/packages/macos/AirWiki.app"
 DMG="$ROOT/target/packages/macos/AirWiki_${VERSION}_aarch64.dmg"
 UPDATE_ARCHIVE="$ROOT/target/packages/macos/AirWiki.app.tar.gz"
 NOTARY_ZIP="$ROOT/target/packages/macos/airwiki-notary.zip"
-DMG_RESOURCES="$ROOT/target/packages/macos/airwiki-dmg-resources.plist"
+DMG_ALL_RESOURCES="$ROOT/target/packages/macos/airwiki-dmg-all-resources.plist"
+DMG_LICENSE_RESOURCES="$ROOT/target/packages/macos/airwiki-dmg-license-resources.plist"
 DMG_STAGE=$(mktemp -d "${TMPDIR:-/tmp}/airwiki-dmg.XXXXXX")
 
 cleanup() {
   rm -rf -- "$DMG_STAGE" "$APP"
-  rm -f -- "$NOTARY_ZIP" "$DMG_RESOURCES"
+  rm -f -- "$NOTARY_ZIP" "$DMG_ALL_RESOURCES" "$DMG_LICENSE_RESOURCES"
 }
 trap cleanup EXIT HUP INT TERM
 
@@ -67,19 +68,17 @@ codesign --verify --deep --strict --verbose=2 "$APP"
 spctl --assess --type execute --verbose=4 "$APP"
 
 # Recreate the DMG after stapling so its app payload is byte-for-byte final.
-hdiutil udifderez -xml "$DMG" >"$DMG_RESOURCES"
-if ! grep -q '<key>LPic</key>' "$DMG_RESOURCES" ||
-  ! grep -q '<key>STR#</key>' "$DMG_RESOURCES" ||
-  ! grep -q '<key>TEXT</key>' "$DMG_RESOURCES"; then
-  echo "Tauri DMG does not contain the required license agreement resources" >&2
-  exit 1
-fi
+hdiutil udifderez -xml "$DMG" >"$DMG_ALL_RESOURCES"
+python3 "$ROOT/packaging/macos_dmg_license_resources.py" \
+  --input "$DMG_ALL_RESOURCES" \
+  --output "$DMG_LICENSE_RESOURCES"
 rm -f -- "$DMG"
 ditto "$APP" "$DMG_STAGE/AirWiki.app"
 ln -s /Applications "$DMG_STAGE/Applications"
 hdiutil create -fs HFS+ -format UDZO -volname "AirWiki" \
   -srcfolder "$DMG_STAGE" "$DMG"
-hdiutil udifrez "$DMG" -xml "$DMG_RESOURCES" -replaceall
+hdiutil udifrez -xml "$DMG_LICENSE_RESOURCES" '' -quiet "$DMG"
+hdiutil verify "$DMG"
 codesign --force --sign "$AIRWIKI_SIGNING_IDENTITY" --timestamp "$DMG"
 codesign --verify --strict --verbose=2 "$DMG"
 notarize "$DMG"
@@ -87,13 +86,9 @@ xcrun stapler staple -v "$DMG"
 xcrun stapler validate -v "$DMG"
 hdiutil verify "$DMG"
 spctl --assess --type open --context context:primary-signature --verbose=4 "$DMG"
-FINAL_DMG_RESOURCES=$(hdiutil udifderez -xml "$DMG" 2>/dev/null)
-if ! printf '%s' "$FINAL_DMG_RESOURCES" | grep -q '<key>LPic</key>' ||
-  ! printf '%s' "$FINAL_DMG_RESOURCES" | grep -q '<key>STR#</key>' ||
-  ! printf '%s' "$FINAL_DMG_RESOURCES" | grep -q '<key>TEXT</key>'; then
-  echo "final notarized DMG lost its required license agreement resources" >&2
-  exit 1
-fi
+hdiutil udifderez -xml "$DMG" >"$DMG_ALL_RESOURCES"
+python3 "$ROOT/packaging/macos_dmg_license_resources.py" \
+  --input "$DMG_ALL_RESOURCES"
 
 # Tauri's macOS updater artifact contains the final stapled .app root.
 tar -czf "$UPDATE_ARCHIVE" -C "$(dirname "$APP")" "$(basename "$APP")"

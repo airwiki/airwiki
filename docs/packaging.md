@@ -69,6 +69,12 @@ The internal wrapper:
 7. creates a licensed Tauri DMG and copies the verified `.app` and `.dmg`
    artifacts under `target/packages/macos`.
 
+After stapling the application, the public release wrapper rebuilds the DMG so
+the installer and updater contain identical application bytes. It restores only
+the validated EULA resource entries; image-specific block maps and property
+resources are never copied from the previous DMG. The rebuilt image must pass
+`hdiutil verify` before signing and again after notarization.
+
 The wrapper validates architecture, Mach-O identity, bridge bytes, MCPB layout,
 runtime closure, legal files, and traversal safety. A development ad-hoc seal is
 not Developer ID signing and must never be presented as public trust.

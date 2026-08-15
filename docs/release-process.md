@@ -155,7 +155,8 @@ same version. The workflow:
 2. re-downloads the exact asset allowlist and verifies every SHA-256, provenance
    entry and SBOM identity;
 3. independently re-verifies Developer ID, notarization, stapling and the macOS
-   updater signature;
+   updater signature, explicitly accepts the bundled Apache-2.0 agreement for
+   the noninteractive mount, and compares its application bytes with the updater;
 4. independently re-verifies SignPath identity, nested Windows payload and both
    MSI updater signatures; and
 5. waits at the protected `public-release` environment.

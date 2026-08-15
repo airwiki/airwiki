@@ -7892,7 +7892,7 @@ mod tests {
                 && script.contains("diff -qr")
                 && script.contains("find \"$PACKAGED_RUNTIME_DIR\" -type l")
                 && script.contains("hdiutil udifderez")
-                && script.contains("<key>LPic</key>")
+                && script.contains("macos_dmg_license_resources.py")
         );
         let signing = script.find("export APPLE_SIGNING_IDENTITY").unwrap();
         let bundling = script.find("./ui/node_modules/.bin/tauri build").unwrap();
@@ -8944,6 +8944,7 @@ mod tests {
         assert!(
             package.contains("macos_dmg_license_resources.py")
                 && verify.contains("macos_dmg_license_resources.py")
+                && verify.contains("printf 'Y\\n' |")
         );
     }
 

@@ -115,7 +115,8 @@ if ! hdiutil udifderez -xml "$DMG" 2>/dev/null |
   echo "release DMG does not contain the required license agreement resources" >&2
   exit 1
 fi
-hdiutil attach -nobrowse -readonly -mountpoint "$MOUNT_ROOT" "$DMG" >/dev/null
+printf 'Y\n' |
+  hdiutil attach -nobrowse -readonly -mountpoint "$MOUNT_ROOT" "$DMG" >/dev/null
 MOUNTED=true
 verify_app "$MOUNT_ROOT/AirWiki.app"
 if ! diff -qr "$APP" "$MOUNT_ROOT/AirWiki.app" >/dev/null; then

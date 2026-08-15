@@ -89,6 +89,59 @@ class ReleaseAssetTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "provenance"):
                 self.verify(directory)
 
+    def test_verified_subset_is_bound_to_the_initial_checksum_inventory(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            directory = Path(temporary) / "release"
+            subset = Path(temporary) / "subset"
+            directory.mkdir()
+            subset.mkdir()
+            self.write_base_assets(directory)
+            self.generate(directory)
+            asset = f"AirWiki_{self.version}_aarch64.dmg"
+            (subset / asset).write_bytes((directory / asset).read_bytes())
+            sums = directory / "SHA256SUMS"
+
+            MODULE.verify_subset(
+                Namespace(
+                    directory=subset,
+                    sums=sums,
+                    sums_sha256=MODULE.digest(sums),
+                    asset=[asset],
+                )
+            )
+
+            with self.assertRaisesRegex(ValueError, "checksum inventory changed"):
+                MODULE.verify_subset(
+                    Namespace(
+                        directory=subset,
+                        sums=sums,
+                        sums_sha256="b" * 64,
+                        asset=[asset],
+                    )
+                )
+
+    def test_verified_subset_rejects_modified_platform_bytes(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            directory = Path(temporary) / "release"
+            subset = Path(temporary) / "subset"
+            directory.mkdir()
+            subset.mkdir()
+            self.write_base_assets(directory)
+            self.generate(directory)
+            asset = f"AirWiki_{self.version}_aarch64.dmg"
+            (subset / asset).write_bytes(b"modified")
+            sums = directory / "SHA256SUMS"
+
+            with self.assertRaisesRegex(ValueError, "subset digest mismatch"):
+                MODULE.verify_subset(
+                    Namespace(
+                        directory=subset,
+                        sums=sums,
+                        sums_sha256=MODULE.digest(sums),
+                        asset=[asset],
+                    )
+                )
+
 
 if __name__ == "__main__":
     unittest.main()

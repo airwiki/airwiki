@@ -44,3 +44,20 @@ test("prerelease versions are rejected", async () => {
 
   assert.throws(() => readWorkspaceVersion(root), /stable three-part semver/);
 });
+
+test("mismatched AirWiki path dependencies are rejected", async () => {
+  const root = await workspace(
+    '[workspace.package]\nversion = "1.2.3"\n',
+    { version: "1.2.3" },
+    { version: "1.2.3" },
+  );
+  await mkdir(join(root, "crates/example"), { recursive: true });
+  await writeFile(
+    join(root, "crates/example/Cargo.toml"),
+    '[package]\nname = "airwiki-example"\nversion.workspace = true\n\n[dependencies]\n' +
+      'airwiki-types = { version = "1.2.2", path = "../airwiki-types" }\n',
+    "utf8",
+  );
+
+  assert.throws(() => readWorkspaceVersion(root), /path-dependency versions do not match/);
+});

@@ -82,10 +82,12 @@ notarization. The private key is downloadable only once; preserve it offline.
 
 ## Version preparation
 
-Version changes are normal reviewed pull requests. Update these three sources to
-the same stable `major.minor.patch` value:
+Version changes are normal reviewed pull requests. Update every version-bearing
+source to the same stable `major.minor.patch` value:
 
 - `Cargo.toml` under `[workspace.package]`;
+- every explicit `version` on an internal AirWiki path dependency in workspace
+  `Cargo.toml` files;
 - `apps/desktop/tauri.conf.json`; and
 - `apps/desktop/ui/package.json`.
 
@@ -148,7 +150,13 @@ same version. The workflow:
    MSI updater signatures; and
 5. waits at the protected `public-release` environment.
 
-After approval, it publishes the already verified draft as the latest stable
+The first verification fingerprints the complete `SHA256SUMS` inventory. Both
+native platform jobs require that exact inventory and verify their downloaded
+bytes against it. Immediately before publication, the protected job downloads
+the complete draft again and refuses to continue if the inventory fingerprint
+changed while approval was pending.
+
+After approval, it publishes that same verified draft as the latest stable
 release without changing its assets. Consequently `latest.json` and the
 installers become visible together, the promotion is safe to retry after an
 interruption, and the updater manifest can never point at an unpublished

@@ -67,6 +67,32 @@ def validate_artifact_names(
         raise ValueError("updater inputs do not match the exact stable artifact names")
 
 
+def update_manifest(
+    version: str,
+    published_at: str,
+    base_url: str,
+    macos: Path,
+    macos_signature: Path,
+    windows: Path,
+    windows_signature: Path,
+) -> dict[str, object]:
+    return {
+        "version": version,
+        "notes": "AirWiki stable release. See the release page for details.",
+        "pub_date": published_at,
+        "platforms": {
+            "darwin-aarch64": {
+                "signature": signature(macos_signature),
+                "url": artifact_url(base_url, macos),
+            },
+            "windows-x86_64": {
+                "signature": signature(windows_signature),
+                "url": artifact_url(base_url, windows),
+            },
+        },
+    }
+
+
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--version", required=True)
@@ -96,21 +122,15 @@ def main() -> None:
         args.windows_signature,
     )
 
-    manifest = {
-        "version": args.version,
-        "notes": "AirWiki stable release. See the release page for details.",
-        "pub_date": args.published_at,
-        "platforms": {
-            "macos-aarch64": {
-                "signature": signature(args.macos_signature),
-                "url": artifact_url(args.base_url, args.macos),
-            },
-            "windows-x86_64": {
-                "signature": signature(args.windows_signature),
-                "url": artifact_url(args.base_url, args.windows),
-            },
-        },
-    }
+    manifest = update_manifest(
+        args.version,
+        args.published_at,
+        args.base_url,
+        args.macos,
+        args.macos_signature,
+        args.windows,
+        args.windows_signature,
+    )
 
     output = Path(args.output)
     output.parent.mkdir(parents=True, exist_ok=True)

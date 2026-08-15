@@ -16,6 +16,30 @@ SPEC.loader.exec_module(MODULE)
 
 
 class UpdateManifestTests(unittest.TestCase):
+    def test_tauri_platform_keys_match_the_runtime_targets(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            macos = root / "AirWiki.app.tar.gz"
+            macos_signature = root / "AirWiki.app.tar.gz.sig"
+            windows = root / "AirWiki_1.2.3_x64_en-US.msi"
+            windows_signature = root / "AirWiki_1.2.3_x64_en-US.msi.sig"
+            macos_signature.write_text("mac-signature", encoding="utf-8")
+            windows_signature.write_text("windows-signature", encoding="utf-8")
+
+            manifest = MODULE.update_manifest(
+                "1.2.3",
+                "2026-08-15T12:00:00Z",
+                "https://github.com/airwiki/airwiki/releases/download/v1.2.3",
+                macos,
+                macos_signature,
+                windows,
+                windows_signature,
+            )
+
+        self.assertEqual(
+            set(manifest["platforms"]), {"darwin-aarch64", "windows-x86_64"}
+        )
+
     def test_publication_time_requires_utc(self) -> None:
         with self.assertRaisesRegex(ValueError, "UTC"):
             MODULE.validate_publication_time("2026-08-15T12:00:00+01:00")

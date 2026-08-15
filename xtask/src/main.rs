@@ -8956,6 +8956,9 @@ mod tests {
         assert!(
             promote.contains("environment: public-release")
                 && promote.contains("packaging/release_assets.py verify")
+                && promote.contains("packaging/release_assets.py verify-subset")
+                && promote.contains("release-set-sha256")
+                && promote.contains("Draft assets changed after platform verification.")
                 && promote.contains("verify-macos-release.sh")
                 && promote.contains("verify-signpath-windows-msi.ps1")
                 && promote.contains("--draft=false --prerelease=false --latest")
@@ -8963,6 +8966,16 @@ mod tests {
                 && !promote.contains("gh release upload")
                 && !promote.contains("--clobber")
                 && !promote.contains("git push --force")
+        );
+        let final_set_check = promote
+            .find("Draft assets changed after platform verification.")
+            .unwrap();
+        let publication = promote
+            .find("--draft=false --prerelease=false --latest")
+            .unwrap();
+        assert!(
+            final_set_check < publication,
+            "the protected job must bind publication to the previously verified asset set"
         );
         let manifest_generation = prepare
             .find("packaging/generate-update-manifest.py")

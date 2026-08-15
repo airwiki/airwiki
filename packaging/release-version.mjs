@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 
-import { readFileSync } from "node:fs";
+import { readdirSync, readFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -24,6 +24,49 @@ function cargoWorkspaceVersion(source) {
     }
   }
   throw new Error("release version is missing from Cargo.toml [workspace.package]");
+}
+
+function cargoManifests(root) {
+  const manifests = [];
+  const visit = (directory) => {
+    for (const entry of readdirSync(directory, { withFileTypes: true })) {
+      if (entry.isSymbolicLink()) {
+        continue;
+      }
+      const path = resolve(directory, entry.name);
+      if (entry.isDirectory()) {
+        if (![".git", "node_modules", "target"].includes(entry.name)) {
+          visit(path);
+        }
+      } else if (entry.isFile() && entry.name === "Cargo.toml") {
+        manifests.push(path);
+      }
+    }
+  };
+  visit(root);
+  return manifests.sort();
+}
+
+function validateCargoPathDependencyVersions(root, version) {
+  const mismatches = [];
+  for (const manifest of cargoManifests(root)) {
+    for (const line of readFileSync(manifest, "utf8").split(/\r?\n/)) {
+      const dependency = line.match(/^\s*(airwiki-[a-z0-9-]+)\s*=\s*\{([^}]*)\}\s*$/);
+      if (dependency === null || !/\bpath\s*=/.test(dependency[2])) {
+        continue;
+      }
+      const declared = dependency[2].match(/\bversion\s*=\s*"([^"]+)"/)?.[1];
+      if (declared !== version) {
+        const relative = manifest.slice(root.length + 1);
+        mismatches.push(`${relative}:${dependency[1]}=${declared ?? "missing"}`);
+      }
+    }
+  }
+  if (mismatches.length > 0) {
+    throw new Error(
+      `AirWiki path-dependency versions do not match ${version}: ${mismatches.join(", ")}`,
+    );
+  }
 }
 
 export function readWorkspaceVersion(root) {
@@ -51,6 +94,7 @@ export function readWorkspaceVersion(root) {
   if (!STABLE_SEMVER.test(version)) {
     throw new Error("release version must be a stable three-part semver");
   }
+  validateCargoPathDependencyVersions(root, version);
   return version;
 }
 

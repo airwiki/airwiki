@@ -26,6 +26,7 @@ jobs:
     timeout-minutes: 15
     outputs:
       commit-sha: ${{ steps.release.outputs.commit-sha }}
+      release-set-sha256: ${{ steps.assets.outputs.release_set_sha256 }}
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
         with:
@@ -67,7 +68,8 @@ jobs:
           git checkout --detach "$commit"
           node packaging/release-version.mjs --expect "$AIRWIKI_RELEASE_VERSION"
           echo "commit-sha=$commit" >>"$GITHUB_OUTPUT"
-      - name: Download and verify every draft asset
+      - id: assets
+        name: Download and verify every draft asset
         env:
           GH_TOKEN: ${{ github.token }}
         shell: bash
@@ -80,6 +82,12 @@ jobs:
             --directory target/public-release \
             --version "$AIRWIKI_RELEASE_VERSION" \
             --commit "${{ steps.release.outputs.commit-sha }}"
+          release_set_sha256="$(sha256sum target/public-release/SHA256SUMS | cut -d ' ' -f 1)"
+          if [[ ! "$release_set_sha256" =~ ^[0-9a-f]{64}$ ]]; then
+            echo "Release checksum inventory did not produce a valid SHA-256." >&2
+            exit 1
+          fi
+          echo "release_set_sha256=$release_set_sha256" >>"$GITHUB_OUTPUT"
 
   verify-macos:
     name: Re-verify notarized macOS assets
@@ -89,6 +97,7 @@ jobs:
     env:
       AIRWIKI_UPDATER_PUBLIC_KEY: ${{ vars.AIRWIKI_UPDATER_PUBLIC_KEY }}
       AIRWIKI_MACOS_TEAM_ID: ${{ vars.AIRWIKI_MACOS_TEAM_ID }}
+      AIRWIKI_RELEASE_SET_SHA256: ${{ needs.inspect-draft.outputs.release-set-sha256 }}
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
         with:
@@ -106,14 +115,25 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         shell: bash
         run: |
-          mkdir -p target/public-release
+          mkdir -p target/public-release target/release-metadata
           gh release download "v${AIRWIKI_RELEASE_VERSION}" \
             --dir target/public-release \
             --pattern 'AirWiki_*.dmg' \
             --pattern 'AirWiki.app.tar.gz' \
             --pattern 'AirWiki.app.tar.gz.sig'
+          gh release download "v${AIRWIKI_RELEASE_VERSION}" \
+            --dir target/release-metadata \
+            --pattern 'SHA256SUMS'
       - name: Verify native and updater trust
-        run: ./packaging/verify-macos-release.sh target/public-release
+        run: |
+          python3 packaging/release_assets.py verify-subset \
+            --directory target/public-release \
+            --sums target/release-metadata/SHA256SUMS \
+            --sums-sha256 "$AIRWIKI_RELEASE_SET_SHA256" \
+            --asset "AirWiki_${AIRWIKI_RELEASE_VERSION}_aarch64.dmg" \
+            --asset AirWiki.app.tar.gz \
+            --asset AirWiki.app.tar.gz.sig
+          ./packaging/verify-macos-release.sh target/public-release
 
   verify-windows:
     name: Re-verify signed Windows assets
@@ -123,6 +143,7 @@ jobs:
     env:
       AIRWIKI_UPDATER_PUBLIC_KEY: ${{ vars.AIRWIKI_UPDATER_PUBLIC_KEY }}
       AIRWIKI_WINDOWS_SIGNER_SHA256: ${{ vars.AIRWIKI_WINDOWS_SIGNER_SHA256 }}
+      AIRWIKI_RELEASE_SET_SHA256: ${{ needs.inspect-draft.outputs.release-set-sha256 }}
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
         with:
@@ -141,14 +162,29 @@ jobs:
         shell: powershell
         run: |
           New-Item -ItemType Directory -Force target\public-release | Out-Null
+          New-Item -ItemType Directory -Force target\release-metadata | Out-Null
           gh release download "v${env:AIRWIKI_RELEASE_VERSION}" `
             --dir target\public-release `
             --pattern 'AirWiki_*_x64_*.msi' `
             --pattern 'AirWiki_*_x64_*.msi.sig'
           if ($LASTEXITCODE -ne 0) { throw "Could not download Windows draft assets" }
+          gh release download "v${env:AIRWIKI_RELEASE_VERSION}" `
+            --dir target\release-metadata `
+            --pattern 'SHA256SUMS'
+          if ($LASTEXITCODE -ne 0) { throw "Could not download release checksums" }
       - name: Verify native and updater trust
         shell: powershell
-        run: ./packaging/verify-signpath-windows-msi.ps1 -PackageRoot target\public-release
+        run: |
+          python.exe packaging/release_assets.py verify-subset `
+            --directory target\public-release `
+            --sums target\release-metadata\SHA256SUMS `
+            --sums-sha256 $env:AIRWIKI_RELEASE_SET_SHA256 `
+            --asset "AirWiki_$($env:AIRWIKI_RELEASE_VERSION)_x64_en-US.msi" `
+            --asset "AirWiki_$($env:AIRWIKI_RELEASE_VERSION)_x64_en-US.msi.sig" `
+            --asset "AirWiki_$($env:AIRWIKI_RELEASE_VERSION)_x64_es-ES.msi" `
+            --asset "AirWiki_$($env:AIRWIKI_RELEASE_VERSION)_x64_es-ES.msi.sig"
+          if ($LASTEXITCODE -ne 0) { throw "Windows release set changed after inspection" }
+          ./packaging/verify-signpath-windows-msi.ps1 -PackageRoot target\public-release
 
   publish:
     name: Human-approved stable publication
@@ -158,6 +194,8 @@ jobs:
     environment: public-release
     permissions:
       contents: write
+    env:
+      AIRWIKI_RELEASE_SET_SHA256: ${{ needs.inspect-draft.outputs.release-set-sha256 }}
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
         with:
@@ -171,6 +209,11 @@ jobs:
           set -euo pipefail
           mkdir -p target/public-release
           gh release download "v${AIRWIKI_RELEASE_VERSION}" --dir target/public-release
+          current_release_set_sha256="$(sha256sum target/public-release/SHA256SUMS | cut -d ' ' -f 1)"
+          if [[ "$current_release_set_sha256" != "$AIRWIKI_RELEASE_SET_SHA256" ]]; then
+            echo "Draft assets changed after platform verification." >&2
+            exit 1
+          fi
           python3 packaging/release_assets.py verify \
             --directory target/public-release \
             --version "$AIRWIKI_RELEASE_VERSION" \

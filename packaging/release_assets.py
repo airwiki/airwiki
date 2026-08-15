@@ -301,6 +301,20 @@ def parse_sums(path: Path) -> dict[str, str]:
     return values
 
 
+def verify_subset(args: argparse.Namespace) -> None:
+    expected = set(args.asset)
+    if not expected or len(expected) != len(args.asset):
+        raise ValueError("release subset must name unique assets")
+    files = require_exact_files(args.directory.resolve(), expected)
+    if digest(args.sums) != args.sums_sha256:
+        raise ValueError("release checksum inventory changed after initial verification")
+    sums = parse_sums(args.sums)
+    for name, path in files.items():
+        expected_digest = sums.get(name)
+        if expected_digest is None or digest(path) != expected_digest:
+            raise ValueError(f"release subset digest mismatch: {name}")
+
+
 def verify(args: argparse.Namespace) -> None:
     directory = args.directory.resolve()
     expected = base_asset_names(args.version) | metadata_asset_names(args.version)
@@ -409,6 +423,12 @@ def exact_commit(value: str) -> str:
     return value
 
 
+def exact_sha256(value: str) -> str:
+    if SHA256.fullmatch(value) is None:
+        raise argparse.ArgumentTypeError("digest must be a full lowercase SHA-256")
+    return value
+
+
 def exact_timestamp(value: str) -> str:
     try:
         parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
@@ -430,11 +450,18 @@ def main() -> None:
         if command == "generate":
             subparser.add_argument("--created-at", required=True, type=exact_timestamp)
             subparser.add_argument("--workflow-run", required=True)
+    subset = subparsers.add_parser("verify-subset")
+    subset.add_argument("--directory", required=True, type=Path)
+    subset.add_argument("--sums", required=True, type=Path)
+    subset.add_argument("--sums-sha256", required=True, type=exact_sha256)
+    subset.add_argument("--asset", required=True, action="append")
     args = parser.parse_args()
     if args.command == "generate":
         generate(args)
-    else:
+    elif args.command == "verify":
         verify(args)
+    else:
+        verify_subset(args)
 
 
 if __name__ == "__main__":

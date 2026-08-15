@@ -684,7 +684,7 @@ function Assert-InstalledRelease([string] $CaseId) {
     $UninstallMetadata = Get-ItemProperty -LiteralPath $UninstallRegistryPath
     if ([string]$UninstallMetadata.DisplayName -cne "AirWiki" -or
         [string]$UninstallMetadata.Publisher -cne $ExpectedPublisher -or
-        [string]$UninstallMetadata.DisplayVersion -cne "0.2.0" -or
+        [string]$UninstallMetadata.DisplayVersion -cne $ReleaseVersion -or
         [string]$UninstallMetadata.InstallLocation.Trim('"') -cne $InstallDir -or
         [string]$UninstallMetadata.UninstallString.Trim('"') -cne $InstalledUninstaller -or
         [string]$UninstallMetadata.DisplayIcon.Trim('"') -cne $DesktopExecutable) {
@@ -759,7 +759,7 @@ function Assert-InstalledRelease([string] $CaseId) {
 
 function Restore-VerifiedInstall([string] $CaseId) {
     $script:CurrentCase = $CaseId
-    Set-InstalledVersionFixture "0.2.0"
+    Set-InstalledVersionFixture $ReleaseVersion
     Invoke-Installer @("/S", "/NS", "/D=$InstallDir") 0 $CaseId
     Assert-InstalledRelease $CaseId
 }
@@ -787,6 +787,8 @@ try {
     $LocalAppDataRoot = (Resolve-Path -LiteralPath $env:LOCALAPPDATA).Path
     $ProgramsRoot = Join-Path $LocalAppDataRoot "Programs"
     $Root = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
+    . (Join-Path $PSScriptRoot "windows-release-version.ps1")
+    $ReleaseVersion = Get-AirWikiReleaseVersion $Root $env:AIRWIKI_RELEASE_VERSION
     $ReleaseDir = Join-Path $Root "target\x86_64-pc-windows-msvc\release"
     $Mcpb = Join-Path $Root "target\mcpb\x86_64-pc-windows-msvc\airwiki-claude.mcpb"
     $OutDir = Join-Path $Root "target\packages\windows"
@@ -960,7 +962,7 @@ try {
         }
 
         try {
-            Set-InstalledVersionFixture "0.2.0"
+            Set-InstalledVersionFixture $ReleaseVersion
             Assert-RejectedInstallerPreservedState `
                 @("/P", "/R", "/AIRWIKIUPDATE", "/NS", "/D=$InstallDir") `
                 "/AIRWIKIUPDATE rejects same-version replay"

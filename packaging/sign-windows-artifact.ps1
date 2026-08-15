@@ -8,6 +8,8 @@ Set-StrictMode -Version Latest
 
 $Root = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
 . (Join-Path $PSScriptRoot "windows-signing.ps1")
+. (Join-Path $PSScriptRoot "windows-release-version.ps1")
+$ReleaseVersion = Get-AirWikiReleaseVersion $Root $env:AIRWIKI_RELEASE_VERSION
 
 function Test-PathBelowRoot([string] $Candidate, [string] $AllowedRoot) {
     $Separators = [char[]]@([IO.Path]::DirectorySeparatorChar, [IO.Path]::AltDirectorySeparatorChar)
@@ -41,7 +43,7 @@ $ResolvedPath = $InputItem.FullName
 $PackageRoot = (Resolve-Path -LiteralPath (Join-Path $Root "target\packages\windows")).Path
 $SigningTempRoot = (Resolve-Path -LiteralPath (Join-Path $Root "target\packages\windows-signing-temp")).Path
 $FinalInstaller = [IO.Path]::GetFullPath(
-    (Join-Path $PackageRoot "airwiki_0.2.0_x64-setup.exe")
+    (Join-Path $PackageRoot "airwiki_${ReleaseVersion}_x64-setup.exe")
 )
 $PreSignedMainBinary = [IO.Path]::GetFullPath(
     (Join-Path $Root "target\x86_64-pc-windows-msvc\release\airwiki.exe")

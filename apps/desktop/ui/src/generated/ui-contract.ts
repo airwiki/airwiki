@@ -139,13 +139,19 @@ export type FirewallOperationStatus = "awaitingWindows" | "takingLonger";
 
 export type SystemDestination = "networkSettings" | "advancedFirewall" | "localNetworkPrivacy";
 
-export type IntegrationClient = "chatGptDesktop" | "claudeDesktop" | "geminiCli" | "genericMcp";
+export type IntegrationClient = "chatGptDesktop" | "claudeDesktop" | "claudeCode" | "geminiCli" | "genericMcp";
 
 export type IntegrationStatus = "notInstalled" | "available" | "awaitingClientApproval" | "configured" | "updateAvailable" | "conflict" | "unsupported" | "error";
 
 export type McpStdioSetupDto = { command: string, args: Array<string>, };
 
-export type IntegrationSummary = { client: IntegrationClient, status: IntegrationStatus, detectedVersion: string | null, activityRecent: boolean, restartRequired: boolean, mcpSetup: McpStdioSetupDto | null, };
+export type WorkflowGuideKind = "nativeSkill" | "mcpInstructions";
+
+export type WorkflowGuideStatus = "available" | "installed" | "updateAvailable" | "builtIn" | "conflict" | "unsupported";
+
+export type WorkflowGuideSummary = { kind: WorkflowGuideKind, status: WorkflowGuideStatus, version: string | null, restartRequired: boolean, };
+
+export type IntegrationSummary = { client: IntegrationClient, status: IntegrationStatus, detectedVersion: string | null, activityRecent: boolean, restartRequired: boolean, mcpSetup: McpStdioSetupDto | null, workflowGuide: WorkflowGuideSummary, };
 
 export type IntegrationsSummary = { integrations: Array<IntegrationSummary>, externalAiWikiCount: number, };
 
@@ -163,7 +169,7 @@ export type PendingComputationSummary = { runId: string, wikiId: string, wikiNam
 
 export type CompletedComputationSummary = { runId: string, wikiName: string, logicalPath: string, applicationName: string, verdict: string, expiresAt: string, };
 
-export type IntegrationActionInput = { "kind": "refresh" } | { "kind": "connect", client: IntegrationClient, } | { "kind": "disconnect", client: IntegrationClient, } | { "kind": "confirmClaudeInstalled" } | { "kind": "openClaudeSettings" };
+export type IntegrationActionInput = { "kind": "refresh" } | { "kind": "connect", client: IntegrationClient, } | { "kind": "disconnect", client: IntegrationClient, } | { "kind": "confirmClaudeInstalled" } | { "kind": "openClaudeSettings" } | { "kind": "installWorkflowGuide", client: IntegrationClient, } | { "kind": "removeWorkflowGuide", client: IntegrationClient, };
 
 export type UpdaterStatus = "disabled" | "idle" | "checking" | "upToDate" | "available" | "downloading" | "readyToInstall" | "installing" | "installed";
 

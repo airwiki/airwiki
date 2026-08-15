@@ -20,6 +20,8 @@ STABLE_SEMVER = re.compile(
 )
 REPOSITORY = "airwiki/airwiki"
 SPDX_23_SCHEMA_SHA256 = "3ec6cd5b8ba0c9a3e821da48536fa1b814567dc7e4376efe98d3e7b2a7a8d230"
+UPDATER_SIGNATURE = re.compile(r"^[A-Za-z0-9+/=:\n\r-]+$")
+MAX_UPDATER_SIGNATURE_BYTES = 16 * 1024
 
 
 def base_asset_names(version: str) -> set[str]:
@@ -93,6 +95,68 @@ def atomic_json(path: Path, value: object) -> None:
     except BaseException:
         temporary.unlink(missing_ok=True)
         raise
+
+
+def unique_json_object(pairs: list[tuple[str, object]]) -> dict[str, object]:
+    value: dict[str, object] = {}
+    for name, item in pairs:
+        if name in value:
+            raise ValueError(f"release JSON contains a duplicate field: {name}")
+        value[name] = item
+    return value
+
+
+def read_json(path: Path) -> dict[str, object]:
+    try:
+        value = json.loads(
+            path.read_text(encoding="utf-8"), object_pairs_hook=unique_json_object
+        )
+    except (UnicodeDecodeError, json.JSONDecodeError) as error:
+        raise ValueError(f"release JSON is invalid: {path.name}") from error
+    if not isinstance(value, dict):
+        raise ValueError(f"release JSON root is not an object: {path.name}")
+    return value
+
+
+def updater_signature(path: Path) -> str:
+    if path.stat().st_size > MAX_UPDATER_SIGNATURE_BYTES:
+        raise ValueError(f"updater signature is too large: {path.name}")
+    value = path.read_text(encoding="utf-8").strip()
+    if not value or UPDATER_SIGNATURE.fullmatch(value) is None:
+        raise ValueError(f"updater signature is invalid: {path.name}")
+    return value
+
+
+def expected_update_manifest(
+    files: dict[str, Path], version: str, published_at: str
+) -> dict[str, object]:
+    base_url = f"https://github.com/{REPOSITORY}/releases/download/v{version}"
+    windows = f"AirWiki_{version}_x64_en-US.msi"
+    return {
+        "version": version,
+        "notes": "AirWiki stable release. See the release page for details.",
+        "pub_date": published_at,
+        "platforms": {
+            "darwin-aarch64": {
+                "signature": updater_signature(files["AirWiki.app.tar.gz.sig"]),
+                "url": f"{base_url}/{quote('AirWiki.app.tar.gz', safe='')}",
+            },
+            "windows-x86_64": {
+                "signature": updater_signature(files[f"{windows}.sig"]),
+                "url": f"{base_url}/{quote(windows, safe='')}",
+            },
+        },
+    }
+
+
+def verify_update_manifest(
+    files: dict[str, Path], version: str, published_at: str
+) -> None:
+    manifest = read_json(files["latest.json"])
+    if manifest != expected_update_manifest(files, version, published_at):
+        raise ValueError(
+            "updater manifest does not match the exact release artifacts and signatures"
+        )
 
 
 def parse_inventory(path: Path, ecosystem: str) -> list[dict[str, str]]:
@@ -429,17 +493,21 @@ def verify(args: argparse.Namespace) -> None:
         if not SHA256.fullmatch(expected_digest) or digest(files[name]) != expected_digest:
             raise ValueError(f"release asset digest mismatch: {name}")
 
-    provenance = json.loads(
-        files[f"airwiki-{args.version}.provenance.json"].read_text(encoding="utf-8")
-    )
+    provenance = read_json(files[f"airwiki-{args.version}.provenance.json"])
+    generated_at = provenance.get("generatedAt")
     if (
         provenance.get("schemaVersion") != 1
         or provenance.get("repository") != REPOSITORY
         or provenance.get("commit") != args.commit
         or provenance.get("tag") != f"v{args.version}"
         or provenance.get("version") != args.version
+        or not isinstance(generated_at, str)
     ):
         raise ValueError("release provenance does not match the requested release")
+    try:
+        exact_timestamp(generated_at)
+    except argparse.ArgumentTypeError as error:
+        raise ValueError("release provenance timestamp is invalid") from error
     described = provenance.get("artifacts")
     if not isinstance(described, dict) or set(described) != expected_sums - {
         f"airwiki-{args.version}.provenance.json"
@@ -449,7 +517,9 @@ def verify(args: argparse.Namespace) -> None:
         if not isinstance(record, dict) or record.get("sha256") != digest(files[name]):
             raise ValueError(f"release provenance digest mismatch: {name}")
 
-    spdx = json.loads(files[f"airwiki-{args.version}.spdx.json"].read_text(encoding="utf-8"))
+    verify_update_manifest(files, args.version, generated_at)
+
+    spdx = read_json(files[f"airwiki-{args.version}.spdx.json"])
     validate_spdx_document(Path(__file__).resolve().parent.parent, spdx)
     if (
         spdx.get("spdxVersion") != "SPDX-2.3"

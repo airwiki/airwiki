@@ -21,8 +21,21 @@ class ReleaseAssetTests(unittest.TestCase):
     commit = "a" * 40
 
     def write_base_assets(self, directory: Path) -> None:
-        for name in MODULE.base_asset_names(self.version):
-            (directory / name).write_bytes(f"synthetic {name}\n".encode())
+        for name in MODULE.base_asset_names(self.version) - {"latest.json"}:
+            content = (
+                b"c3ludGhldGljLXNpZ25hdHVyZQ==\n"
+                if name.endswith(".sig")
+                else f"synthetic {name}\n".encode()
+            )
+            (directory / name).write_bytes(content)
+        MODULE.atomic_json(
+            directory / "latest.json",
+            MODULE.expected_update_manifest(
+                MODULE.regular_files(directory),
+                self.version,
+                "2026-08-15T12:00:00Z",
+            ),
+        )
 
     def generate(self, directory: Path) -> None:
         MODULE.generate(
@@ -121,6 +134,23 @@ class ReleaseAssetTests(unittest.TestCase):
             target.write_bytes(b"modified")
 
             with self.assertRaisesRegex(ValueError, "digest mismatch"):
+                self.verify(directory)
+
+    def test_updater_manifest_must_reference_the_exact_release(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            directory = Path(temporary)
+            self.write_base_assets(directory)
+            manifest = json.loads(
+                (directory / "latest.json").read_text(encoding="utf-8")
+            )
+            manifest["platforms"]["darwin-aarch64"]["url"] = (
+                "https://github.com/airwiki/airwiki/releases/download/v0.1.0/"
+                "AirWiki.app.tar.gz"
+            )
+            MODULE.atomic_json(directory / "latest.json", manifest)
+            self.generate(directory)
+
+            with self.assertRaisesRegex(ValueError, "updater manifest"):
                 self.verify(directory)
 
     def test_wrong_provenance_commit_is_rejected(self) -> None:

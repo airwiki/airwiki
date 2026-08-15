@@ -70,6 +70,8 @@ constitute a supported public release.
 - [ ] Embed the reviewed public key and stable endpoint in the exact release build.
 - [ ] Cryptographically verify updater signatures after all native signing and
   notarization.
+- [ ] Verify that `latest.json` names the exact release version, platform keys,
+  artifact URLs and detached signatures in the candidate.
 - [ ] Reject invalid signatures, equal versions, downgrades, replayed historical
   installers, redirects, symlinks, reparse points, and unexpected assets.
 - [ ] Create a draft prerelease tied to the exact audited commit.

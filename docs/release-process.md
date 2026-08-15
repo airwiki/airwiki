@@ -128,7 +128,9 @@ The generated `SHA256SUMS` covers every draft asset except itself. Provenance is
 bound to the repository, full commit, version and workflow run. The SPDX file
 enumerates the final release files and the exact Cargo/npm dependency inventories
 used by the packages. `latest.json` remains private with the draft and its bytes
-are covered by those metadata checks.
+are covered by those metadata checks. Promotion also requires its version,
+publication time, platform keys, artifact URLs and updater signatures to match
+the exact files in that release.
 
 ## Acceptance and promotion
 

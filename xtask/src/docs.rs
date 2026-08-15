@@ -26,10 +26,12 @@ const ADR_REQUIRED_SECTIONS: [&str; 4] = [
     "## Consequences",
     "## Rejected alternatives",
 ];
-const ACTIVE_WORKFLOWS: [&str; 4] = [
+const ACTIVE_WORKFLOWS: [&str; 6] = [
     "ci.yml",
     "dco.yml",
     "package-pilot.yml",
+    "prepare-release.yml",
+    "promote-release.yml",
     "windows-signpath.yml",
 ];
 const ARCHIVED_WORKFLOWS: [&str; 2] = ["README.md", "promote-stable.yml.disabled"];

@@ -1,0 +1,204 @@
+name: Promote verified stable release
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Draft stable version to verify and publish
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: promote-public-release
+  cancel-in-progress: false
+
+env:
+  CARGO_TERM_COLOR: always
+  AIRWIKI_RELEASE_VERSION: ${{ inputs.version }}
+
+jobs:
+  inspect-draft:
+    name: Verify draft identity and hashes
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    outputs:
+      commit-sha: ${{ steps.release.outputs.commit-sha }}
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6.5.0
+        with:
+          node-version: 24.15.0
+          package-manager-cache: false
+      - id: release
+        name: Resolve the private draft
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ "$GITHUB_REPOSITORY" != "airwiki/airwiki" || "$GITHUB_REF" != "refs/heads/main" ]]; then
+            echo "Public promotion can only start from airwiki/airwiki main." >&2
+            exit 1
+          fi
+          release="$(gh release view "v${AIRWIKI_RELEASE_VERSION}" \
+            --json isDraft,isPrerelease,tagName,targetCommitish)"
+          if [[ "$(jq -r '.isDraft' <<<"$release")" != "true" || \
+                "$(jq -r '.isPrerelease' <<<"$release")" != "true" || \
+                "$(jq -r '.tagName' <<<"$release")" != "v${AIRWIKI_RELEASE_VERSION}" ]]; then
+            echo "Promotion requires the exact draft prerelease." >&2
+            exit 1
+          fi
+          commit="$(jq -r '.targetCommitish' <<<"$release")"
+          if [[ ! "$commit" =~ ^[0-9a-f]{40}$ ]]; then
+            echo "Draft target must be an immutable full commit SHA." >&2
+            exit 1
+          fi
+          git cat-file -e "${commit}^{commit}"
+          if ! git merge-base --is-ancestor "$commit" origin/main; then
+            echo "Draft commit is no longer reachable from main." >&2
+            exit 1
+          fi
+          git checkout --detach "$commit"
+          node packaging/release-version.mjs --expect "$AIRWIKI_RELEASE_VERSION"
+          echo "commit-sha=$commit" >>"$GITHUB_OUTPUT"
+      - name: Download and verify every draft asset
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p target/public-release
+          gh release download "v${AIRWIKI_RELEASE_VERSION}" \
+            --dir target/public-release
+          python3 packaging/release_assets.py verify \
+            --directory target/public-release \
+            --version "$AIRWIKI_RELEASE_VERSION" \
+            --commit "${{ steps.release.outputs.commit-sha }}"
+
+  verify-macos:
+    name: Re-verify notarized macOS assets
+    needs: inspect-draft
+    runs-on: macos-14
+    timeout-minutes: 30
+    env:
+      AIRWIKI_UPDATER_PUBLIC_KEY: ${{ vars.AIRWIKI_UPDATER_PUBLIC_KEY }}
+      AIRWIKI_MACOS_TEAM_ID: ${{ vars.AIRWIKI_MACOS_TEAM_ID }}
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        with:
+          ref: ${{ needs.inspect-draft.outputs.commit-sha }}
+          persist-credentials: false
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6.5.0
+        with:
+          node-version: 24.15.0
+          package-manager-cache: false
+      - uses: dtolnay/rust-toolchain@fa04a1451ff1842e2626ccb99004d0195b455a88 # master
+        with:
+          toolchain: 1.96.1
+      - name: Download macOS assets from the draft
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          mkdir -p target/public-release
+          gh release download "v${AIRWIKI_RELEASE_VERSION}" \
+            --dir target/public-release \
+            --pattern 'AirWiki_*.dmg' \
+            --pattern 'AirWiki.app.tar.gz' \
+            --pattern 'AirWiki.app.tar.gz.sig'
+      - name: Verify native and updater trust
+        run: ./packaging/verify-macos-release.sh target/public-release
+
+  verify-windows:
+    name: Re-verify signed Windows assets
+    needs: inspect-draft
+    runs-on: windows-2022
+    timeout-minutes: 45
+    env:
+      AIRWIKI_UPDATER_PUBLIC_KEY: ${{ vars.AIRWIKI_UPDATER_PUBLIC_KEY }}
+      AIRWIKI_WINDOWS_SIGNER_SHA256: ${{ vars.AIRWIKI_WINDOWS_SIGNER_SHA256 }}
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        with:
+          ref: ${{ needs.inspect-draft.outputs.commit-sha }}
+          persist-credentials: false
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6.5.0
+        with:
+          node-version: 24.15.0
+          package-manager-cache: false
+      - uses: dtolnay/rust-toolchain@fa04a1451ff1842e2626ccb99004d0195b455a88 # master
+        with:
+          toolchain: 1.96.1
+      - name: Download Windows assets from the draft
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: powershell
+        run: |
+          New-Item -ItemType Directory -Force target\public-release | Out-Null
+          gh release download "v${env:AIRWIKI_RELEASE_VERSION}" `
+            --dir target\public-release `
+            --pattern 'AirWiki_*_x64_*.msi' `
+            --pattern 'AirWiki_*_x64_*.msi.sig'
+          if ($LASTEXITCODE -ne 0) { throw "Could not download Windows draft assets" }
+      - name: Verify native and updater trust
+        shell: powershell
+        run: ./packaging/verify-signpath-windows-msi.ps1 -PackageRoot target\public-release
+
+  publish:
+    name: Human-approved stable publication
+    needs: [inspect-draft, verify-macos, verify-windows]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    environment: public-release
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        with:
+          ref: ${{ needs.inspect-draft.outputs.commit-sha }}
+          persist-credentials: false
+      - name: Download and re-verify the complete draft
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p target/public-release
+          gh release download "v${AIRWIKI_RELEASE_VERSION}" --dir target/public-release
+          python3 packaging/release_assets.py verify \
+            --directory target/public-release \
+            --version "$AIRWIKI_RELEASE_VERSION" \
+            --commit "${{ needs.inspect-draft.outputs.commit-sha }}"
+      - name: Publish stable updater manifest last
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          version="$AIRWIKI_RELEASE_VERSION"
+          published_at="$(date -u +'%Y-%m-%dT%H:%M:%SZ')"
+          python3 packaging/generate-update-manifest.py \
+            --version "$version" \
+            --published-at "$published_at" \
+            --base-url "https://github.com/airwiki/airwiki/releases/download/v${version}" \
+            --macos target/public-release/AirWiki.app.tar.gz \
+            --macos-signature target/public-release/AirWiki.app.tar.gz.sig \
+            --windows "target/public-release/AirWiki_${version}_x64_en-US.msi" \
+            --windows-signature "target/public-release/AirWiki_${version}_x64_en-US.msi.sig" \
+            --output target/public-release/latest.json
+          gh release upload "v${version}" target/public-release/latest.json
+          gh release edit "v${version}" --draft=false --prerelease=false --latest
+          state="$(gh release view "v${version}" --json isDraft,isPrerelease \
+            --jq '[.isDraft,.isPrerelease] | @tsv')"
+          latest="$(gh release view --json tagName --jq '.tagName')"
+          if [[ "$state" != $'false\tfalse' || "$latest" != "v${version}" ]]; then
+            echo "GitHub did not publish the expected stable latest release." >&2
+            exit 1
+          fi
+          gh release view "v${version}" --json url --jq '.url'

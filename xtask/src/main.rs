@@ -170,6 +170,8 @@ const MCPB_TOOLS: [&str; 8] = [
 ];
 const MAX_UPDATER_KEY_OR_SIGNATURE_BYTES: u64 = 16 * 1024;
 const UPDATER_PUBLIC_KEY_ENV: &str = "AIRWIKI_UPDATER_PUBLIC_KEY";
+const PREPARE_RELEASE_WORKFLOW: &str = ".github/workflows/prepare-release.yml";
+const WINDOWS_SIGNPATH_WORKFLOW_REFERENCE: &str = "./.github/workflows/windows-signpath.yml";
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -1769,11 +1771,14 @@ fn validate_workflow_uses_at(
         "workflow {} `{location}.uses` is empty",
         path.display()
     );
-    ensure!(
-        !reference.starts_with("./"),
-        "workflow {} `{location}.uses` uses local action or workflow `{reference}`; local `uses` is forbidden until its nested action references are audited",
-        path.display()
-    );
+    if reference.starts_with("./") {
+        ensure!(
+            is_audited_local_reusable_workflow(path, location, reference),
+            "workflow {} `{location}.uses` uses local action or workflow `{reference}`; local `uses` is forbidden unless the caller, job, and reusable workflow match the audited release relationship",
+            path.display()
+        );
+        return Ok(());
+    }
     let (action, revision) = reference.rsplit_once('@').with_context(|| {
         format!(
             "workflow {} `{location}.uses` external action `{reference}` is missing an immutable commit",
@@ -1789,6 +1794,12 @@ fn validate_workflow_uses_at(
         path.display()
     );
     Ok(())
+}
+
+fn is_audited_local_reusable_workflow(path: &Path, location: &str, reference: &str) -> bool {
+    path.ends_with(PREPARE_RELEASE_WORKFLOW)
+        && location == "jobs.windows-release"
+        && reference == WINDOWS_SIGNPATH_WORKFLOW_REFERENCE
 }
 
 fn validate_non_cargo_legal_inventory(root: &Path) -> Result<()> {
@@ -3283,8 +3294,11 @@ fn verify_windows_signpath_sources(
             && workflow.contains(
                 "AIRWIKI_WINDOWS_SIGNER_SHA256: ${{ vars.AIRWIKI_WINDOWS_SIGNER_SHA256 }}"
             )
+            && workflow.contains("AIRWIKI_RELEASE_VERSION: ${{ inputs.version }}")
+            && workflow.contains("ref: ${{ inputs.commit_sha }}")
+            && workflow.contains("node.exe packaging/release-version.mjs --expect")
             && workflow
-                .matches("version: \"${{ env.AIRWIKI_SIGNING_VERSION }}\"")
+                .matches("version: \"${{ env.AIRWIKI_RELEASE_VERSION }}\"")
                 .count()
                 == 2,
         "SignPath workflow must use two pinned, origin-verified signing requests on GitHub-hosted Windows"
@@ -3330,7 +3344,10 @@ fn verify_windows_signpath_sources(
             )
             && verify.contains("Assert-ExpectedSignPathSigner")
             && verify.contains("mcpb verify")
-            && verify.contains("localized MSI payloads contain different product bytes"),
+            && verify.contains("localized MSI payloads contain different product bytes")
+            && workflow.contains("Sign final MSI bytes for the Tauri updater")
+            && verify.contains("packaging verify-updater-signature")
+            && verify.contains("Tauri updater signature verification failed"),
         "SignPath preparation, packaging and final verification do not preserve the staged binary identity"
     );
     Ok(())
@@ -4794,13 +4811,13 @@ fn verify_windows_installer_preflight_sources(template: &str) -> Result<()> {
     );
     ensure!(
         template.contains(
-            "!if \"${INSTALLMODE}\" != \"currentUser\"\n  !error \"AirWiki 0.2.0 supports only currentUser Windows installs.\"\n!endif"
+            "!if \"${INSTALLMODE}\" != \"currentUser\"\n  !error \"AirWiki ${VERSION} supports only currentUser Windows installs.\"\n!endif"
         ),
         "NSIS template must reject non-currentUser modes at compile time"
     );
     ensure!(
         template.contains(
-            "!if \"${ALLOWDOWNGRADES}\" != \"false\"\n  !error \"AirWiki 0.2.0 does not support Windows downgrades.\"\n!endif"
+            "!if \"${ALLOWDOWNGRADES}\" != \"false\"\n  !error \"AirWiki ${VERSION} does not support Windows downgrades.\"\n!endif"
         ),
         "NSIS template must reject ALLOWDOWNGRADES=true at compile time"
     );
@@ -7137,13 +7154,13 @@ mod tests {
 
         for (needle, replacement, message) in [
             (
-                "!if \"${INSTALLMODE}\" != \"currentUser\"\n  !error \"AirWiki 0.2.0 supports only currentUser Windows installs.\"\n!endif",
-                "!if \"${INSTALLMODE}\" != \"both\"\n  !error \"AirWiki 0.2.0 supports only currentUser Windows installs.\"\n!endif",
+                "!if \"${INSTALLMODE}\" != \"currentUser\"\n  !error \"AirWiki ${VERSION} supports only currentUser Windows installs.\"\n!endif",
+                "!if \"${INSTALLMODE}\" != \"both\"\n  !error \"AirWiki ${VERSION} supports only currentUser Windows installs.\"\n!endif",
                 "reject non-currentUser modes",
             ),
             (
-                "!if \"${ALLOWDOWNGRADES}\" != \"false\"\n  !error \"AirWiki 0.2.0 does not support Windows downgrades.\"\n!endif",
-                "!if \"${ALLOWDOWNGRADES}\" != \"true\"\n  !error \"AirWiki 0.2.0 does not support Windows downgrades.\"\n!endif",
+                "!if \"${ALLOWDOWNGRADES}\" != \"false\"\n  !error \"AirWiki ${VERSION} does not support Windows downgrades.\"\n!endif",
+                "!if \"${ALLOWDOWNGRADES}\" != \"true\"\n  !error \"AirWiki ${VERSION} does not support Windows downgrades.\"\n!endif",
                 "reject ALLOWDOWNGRADES=true",
             ),
         ] {
@@ -7501,6 +7518,59 @@ mod tests {
         let error = validate_workflow_action_references_in(
             Path::new(".github/workflows/example.yml"),
             "jobs:\n  reused:\n    uses: ./.github/workflows/reused.yml\n",
+        )
+        .unwrap_err();
+
+        assert!(error.to_string().contains("local `uses` is forbidden"));
+    }
+
+    #[test]
+    fn workflow_gate_accepts_the_audited_windows_release_relationship() {
+        validate_workflow_action_references_in(
+            Path::new(PREPARE_RELEASE_WORKFLOW),
+            "jobs:\n  windows-release:\n    uses: ./.github/workflows/windows-signpath.yml\n",
+        )
+        .unwrap();
+    }
+
+    #[test]
+    fn workflow_gate_rejects_another_local_workflow_from_release_preparation() {
+        let error = validate_workflow_action_references_in(
+            Path::new(PREPARE_RELEASE_WORKFLOW),
+            "jobs:\n  windows-release:\n    uses: ./.github/workflows/other.yml\n",
+        )
+        .unwrap_err();
+
+        assert!(error.to_string().contains("local `uses` is forbidden"));
+    }
+
+    #[test]
+    fn workflow_gate_rejects_local_workflow_traversal() {
+        let error = validate_workflow_action_references_in(
+            Path::new(PREPARE_RELEASE_WORKFLOW),
+            "jobs:\n  windows-release:\n    uses: ./.github/workflows/../windows-signpath.yml\n",
+        )
+        .unwrap_err();
+
+        assert!(error.to_string().contains("local `uses` is forbidden"));
+    }
+
+    #[test]
+    fn workflow_gate_rejects_a_local_action_in_the_audited_release_job() {
+        let error = validate_workflow_action_references_in(
+            Path::new(PREPARE_RELEASE_WORKFLOW),
+            "jobs:\n  windows-release:\n    uses: ./.github/actions/windows-signpath\n",
+        )
+        .unwrap_err();
+
+        assert!(error.to_string().contains("local `uses` is forbidden"));
+    }
+
+    #[test]
+    fn workflow_gate_rejects_the_windows_workflow_from_another_caller() {
+        let error = validate_workflow_action_references_in(
+            Path::new(".github/workflows/example.yml"),
+            "jobs:\n  windows-release:\n    uses: ./.github/workflows/windows-signpath.yml\n",
         )
         .unwrap_err();
 
@@ -8809,7 +8879,8 @@ mod tests {
                 && signer.contains("NSIS 3.11 I386 executable")
         );
         assert!(
-            signer.contains("airwiki_0.2.0_x64-setup.exe") && signer.contains("$IsFinalInstaller")
+            signer.contains("airwiki_${ReleaseVersion}_x64-setup.exe")
+                && signer.contains("$IsFinalInstaller")
         );
         assert!(
             signer.contains("$IsPreSignedMainBinary")
@@ -8831,10 +8902,7 @@ mod tests {
         assert!(verify.contains("target\\windows-uninstaller\\airwiki-uninstall.exe"));
         assert!(
             verify.contains("airwiki_${ExpectedVersion}_x64-setup.exe")
-                && verify.contains(&format!(
-                    "$ExpectedVersion = \"{}\"",
-                    env!("CARGO_PKG_VERSION")
-                ))
+                && verify.contains("Get-AirWikiReleaseVersion")
         );
         assert!(verify.contains("Expected only the exact AirWiki NSIS installer"));
         assert!(verify.contains("function Assert-ExactWindowsVersion"));
@@ -8862,6 +8930,43 @@ mod tests {
             release.contains("packaging verify-updater-embedded-key")
                 && release.contains("--binary \"$APP/Contents/MacOS/airwiki\"")
         );
+    }
+
+    #[test]
+    fn public_release_workflows_keep_draft_and_promotion_separate() {
+        let root = workspace_root();
+        let prepare =
+            fs::read_to_string(root.join(".github/workflows/prepare-release.yml")).unwrap();
+        let promote =
+            fs::read_to_string(root.join(".github/workflows/promote-release.yml")).unwrap();
+
+        assert!(
+            prepare.contains("workflow_dispatch:")
+                && prepare.contains("commit_sha:")
+                && prepare.contains("environment: macos-signing")
+                && prepare.contains("uses: ./.github/workflows/windows-signpath.yml")
+                && prepare.contains("--draft")
+                && prepare.contains("--prerelease")
+                && prepare.contains("--target \"$AIRWIKI_RELEASE_COMMIT\"")
+                && prepare.contains("packaging/release_assets.py generate")
+                && !prepare.contains("self-hosted")
+        );
+        assert!(
+            promote.contains("environment: public-release")
+                && promote.contains("packaging/release_assets.py verify")
+                && promote.contains("verify-macos-release.sh")
+                && promote.contains("verify-signpath-windows-msi.ps1")
+                && promote.contains("packaging/generate-update-manifest.py")
+                && promote.contains("gh release upload")
+                && promote.contains("--draft=false --prerelease=false --latest")
+                && !promote.contains("--clobber")
+                && !promote.contains("git push --force")
+        );
+        let manifest_upload = promote.find("gh release upload").unwrap();
+        let publication = promote
+            .find("--draft=false --prerelease=false --latest")
+            .unwrap();
+        assert!(manifest_upload < publication);
     }
 
     #[test]

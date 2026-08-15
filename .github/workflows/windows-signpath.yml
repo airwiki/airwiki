@@ -1,7 +1,26 @@
 name: Windows signed MSI candidate
 
 on:
+  workflow_call:
+    inputs:
+      version:
+        description: Stable version that exactly matches the source manifests
+        required: true
+        type: string
+      commit_sha:
+        description: Full commit SHA at the tip of main
+        required: true
+        type: string
   workflow_dispatch:
+    inputs:
+      version:
+        description: Stable version that exactly matches the source manifests
+        required: true
+        type: string
+      commit_sha:
+        description: Full commit SHA at the tip of main
+        required: true
+        type: string
 
 permissions:
   actions: read
@@ -14,7 +33,8 @@ concurrency:
 env:
   CARGO_TERM_COLOR: always
   AIRWIKI_UPDATE_ENDPOINT: https://github.com/airwiki/airwiki/releases/latest/download/latest.json
-  AIRWIKI_SIGNING_VERSION: 0.2.0
+  AIRWIKI_RELEASE_VERSION: ${{ inputs.version }}
+  AIRWIKI_RELEASE_COMMIT: ${{ inputs.commit_sha }}
 
 jobs:
   build-signing-inputs:
@@ -28,10 +48,27 @@ jobs:
       AIRWIKI_WINDOWS_SIGNER_SHA256: ${{ vars.AIRWIKI_WINDOWS_SIGNER_SHA256 }}
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        with:
+          ref: ${{ inputs.commit_sha }}
+          fetch-depth: 0
+          persist-credentials: false
       - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6.5.0
         with:
           node-version: 24.15.0
           package-manager-cache: false
+      - name: Validate exact release source
+        shell: powershell
+        run: |
+          if ($env:GITHUB_REPOSITORY -cne "airwiki/airwiki") {
+            throw "release signing is restricted to airwiki/airwiki"
+          }
+          $Commit = (git rev-parse HEAD).Trim()
+          $Main = (git rev-parse origin/main).Trim()
+          if ($Commit -cne $env:AIRWIKI_RELEASE_COMMIT -or $Commit -cne $Main) {
+            throw "release commit must be the exact current tip of main"
+          }
+          node.exe packaging/release-version.mjs --expect $env:AIRWIKI_RELEASE_VERSION
+          if ($LASTEXITCODE -ne 0) { throw "release version validation failed" }
       - uses: dtolnay/rust-toolchain@fa04a1451ff1842e2626ccb99004d0195b455a88 # master
         with:
           toolchain: 1.96.1
@@ -66,6 +103,9 @@ jobs:
       AIRWIKI_WINDOWS_SIGNER_SHA256: ${{ vars.AIRWIKI_WINDOWS_SIGNER_SHA256 }}
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        with:
+          ref: ${{ inputs.commit_sha }}
+          persist-credentials: false
       - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6.5.0
         with:
           node-version: 24.15.0
@@ -91,7 +131,7 @@ jobs:
           signing-policy-slug: ${{ vars.SIGNPATH_SIGNING_POLICY_SLUG }}
           artifact-configuration-slug: ${{ vars.SIGNPATH_BINARIES_CONFIGURATION_SLUG }}
           parameters: |
-            version: "${{ env.AIRWIKI_SIGNING_VERSION }}"
+            version: "${{ env.AIRWIKI_RELEASE_VERSION }}"
           github-artifact-id: ${{ needs.build-signing-inputs.outputs.artifact-id }}
           output-artifact-directory: target/signpath/windows-binaries-signed
           wait-for-completion-timeout-in-seconds: "1200"
@@ -116,10 +156,26 @@ jobs:
           signing-policy-slug: ${{ vars.SIGNPATH_SIGNING_POLICY_SLUG }}
           artifact-configuration-slug: ${{ vars.SIGNPATH_MSI_CONFIGURATION_SLUG }}
           parameters: |
-            version: "${{ env.AIRWIKI_SIGNING_VERSION }}"
+            version: "${{ env.AIRWIKI_RELEASE_VERSION }}"
           github-artifact-id: ${{ steps.upload-msi.outputs.artifact-id }}
           output-artifact-directory: target/packages/windows-signed
           wait-for-completion-timeout-in-seconds: "1200"
+      - name: Sign final MSI bytes for the Tauri updater
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        shell: powershell
+        run: |
+          if ([string]::IsNullOrWhiteSpace($env:TAURI_SIGNING_PRIVATE_KEY)) {
+            throw "Tauri updater signing key is missing"
+          }
+          $Tauri = Resolve-Path apps\desktop\ui\node_modules\.bin\tauri.cmd
+          $Installers = @(Get-ChildItem target\packages\windows-signed -File -Filter *.msi)
+          if ($Installers.Count -ne 2) { throw "Expected two signed localized MSI packages" }
+          foreach ($Installer in $Installers) {
+            & $Tauri signer sign $Installer.FullName
+            if ($LASTEXITCODE -ne 0) { throw "Tauri updater signing failed" }
+          }
       - name: Verify signed MSI candidate
         shell: powershell
         run: ./packaging/verify-signpath-windows-msi.ps1 -PackageRoot target/packages/windows-signed

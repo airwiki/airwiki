@@ -76,6 +76,9 @@ constitute a supported public release.
   installers, redirects, symlinks, reparse points, and unexpected assets.
 - [ ] Create a draft prerelease tied to the exact audited commit.
 - [ ] Re-download and verify the complete draft before human promotion.
+- [ ] Match every legal payload and the complete SPDX dependency inventory to
+  the reviewed release commit; match macOS bundle/build metadata and Windows PE
+  metadata to the exact requested version.
 - [ ] Bind both native verification jobs and final publication to the same
   fingerprinted `SHA256SUMS` inventory.
 - [ ] Keep the stable manifest private and verified until the final release

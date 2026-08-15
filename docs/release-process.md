@@ -127,8 +127,11 @@ the manifests differ, or the required checks are not green. It then:
 The generated `SHA256SUMS` covers every draft asset except itself. Provenance is
 bound to the repository, full commit, version and workflow run. The SPDX file
 enumerates the final release files and the exact Cargo/npm dependency inventories
-used by the packages. `latest.json` remains private with the draft and its bytes
-are covered by those metadata checks. Promotion also requires its version,
+used by the packages. Promotion compares every legal payload and the complete
+SBOM dependency model with the files in the checked-out release commit. It also
+requires both copies of the notarized macOS application to carry the exact
+requested bundle and build version. `latest.json` remains private with the draft
+and its bytes are covered by those metadata checks. Promotion also requires its version,
 publication time, platform keys, artifact URLs and updater signatures to match
 the exact files in that release.
 

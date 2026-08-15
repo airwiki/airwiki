@@ -22,6 +22,18 @@ REPOSITORY = "airwiki/airwiki"
 SPDX_23_SCHEMA_SHA256 = "3ec6cd5b8ba0c9a3e821da48536fa1b814567dc7e4376efe98d3e7b2a7a8d230"
 UPDATER_SIGNATURE = re.compile(r"^[A-Za-z0-9+/=:\n\r-]+$")
 MAX_UPDATER_SIGNATURE_BYTES = 16 * 1024
+LEGAL_PAYLOAD_SOURCES = {
+    "LICENSE": Path("LICENSE"),
+    "THIRD_PARTY_NOTICES.md": Path("THIRD_PARTY_NOTICES.md"),
+    "THIRD_PARTY_LICENSES.md": Path("resources/licenses/THIRD_PARTY_LICENSES.md"),
+    "NPM_LICENSES_MACOS_ARM64.md": Path(
+        "resources/licenses/NPM_LICENSES_MACOS_ARM64.md"
+    ),
+    "NPM_LICENSES_WINDOWS_X64.md": Path(
+        "resources/licenses/NPM_LICENSES_WINDOWS_X64.md"
+    ),
+    "NON_CARGO_COMPONENTS.md": Path("resources/licenses/NON_CARGO_COMPONENTS.md"),
+}
 
 
 def base_asset_names(version: str) -> set[str]:
@@ -82,6 +94,16 @@ def require_exact_files(directory: Path, expected: set[str]) -> dict[str, Path]:
         unexpected = ", ".join(sorted(actual - expected)) or "none"
         raise ValueError(f"release asset set differs; missing: {missing}; unexpected: {unexpected}")
     return files
+
+
+def verify_legal_payloads(root: Path, files: dict[str, Path]) -> None:
+    for release_name, source_name in LEGAL_PAYLOAD_SOURCES.items():
+        release_path = files.get(release_name)
+        source_path = root / source_name
+        if release_path is None or digest(release_path) != digest(source_path):
+            raise ValueError(
+                f"release legal payload differs from the reviewed source: {release_name}"
+            )
 
 
 def atomic_json(path: Path, value: object) -> None:
@@ -428,6 +450,7 @@ def generate(args: argparse.Namespace) -> None:
     directory = args.directory.resolve()
     root = Path(__file__).resolve().parent.parent
     base_files = require_exact_files(directory, base_asset_names(args.version))
+    verify_legal_payloads(root, base_files)
     spdx_path = directory / f"airwiki-{args.version}.spdx.json"
     spdx = spdx_document(root, base_files, args.version, args.commit, args.created_at)
     validate_spdx_document(root, spdx)
@@ -483,8 +506,10 @@ def verify_subset(args: argparse.Namespace) -> None:
 
 def verify(args: argparse.Namespace) -> None:
     directory = args.directory.resolve()
+    root = Path(__file__).resolve().parent.parent
     expected = base_asset_names(args.version) | metadata_asset_names(args.version)
     files = require_exact_files(directory, expected)
+    verify_legal_payloads(root, files)
     sums = parse_sums(files["SHA256SUMS"])
     expected_sums = expected - {"SHA256SUMS"}
     if set(sums) != expected_sums:
@@ -520,7 +545,18 @@ def verify(args: argparse.Namespace) -> None:
     verify_update_manifest(files, args.version, generated_at)
 
     spdx = read_json(files[f"airwiki-{args.version}.spdx.json"])
-    validate_spdx_document(Path(__file__).resolve().parent.parent, spdx)
+    validate_spdx_document(root, spdx)
+    expected_spdx = spdx_document(
+        root,
+        {name: files[name] for name in base_asset_names(args.version)},
+        args.version,
+        args.commit,
+        generated_at,
+    )
+    if spdx != expected_spdx:
+        raise ValueError(
+            "release SBOM does not match the reviewed dependency inventories and artifacts"
+        )
     if (
         spdx.get("spdxVersion") != "SPDX-2.3"
         or spdx.get("dataLicense") != "CC0-1.0"

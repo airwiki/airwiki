@@ -84,6 +84,9 @@ fi
 
 verify_app() {
   CANDIDATE=$1
+  python3 "$ROOT/packaging/macos_bundle_metadata.py" \
+    --application "$CANDIDATE" \
+    --version "$VERSION"
   codesign --verify --deep --strict --verbose=2 "$CANDIDATE"
   xcrun stapler validate -v "$CANDIDATE"
   spctl --assess --type execute --verbose=4 "$CANDIDATE"

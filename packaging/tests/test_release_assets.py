@@ -21,12 +21,17 @@ class ReleaseAssetTests(unittest.TestCase):
     commit = "a" * 40
 
     def write_base_assets(self, directory: Path) -> None:
+        root = SCRIPT.parents[1]
         for name in MODULE.base_asset_names(self.version) - {"latest.json"}:
-            content = (
-                b"c3ludGhldGljLXNpZ25hdHVyZQ==\n"
-                if name.endswith(".sig")
-                else f"synthetic {name}\n".encode()
-            )
+            source = MODULE.LEGAL_PAYLOAD_SOURCES.get(name)
+            if source is not None:
+                content = (root / source).read_bytes()
+            else:
+                content = (
+                    b"c3ludGhldGljLXNpZ25hdHVyZQ==\n"
+                    if name.endswith(".sig")
+                    else f"synthetic {name}\n".encode()
+                )
             (directory / name).write_bytes(content)
         MODULE.atomic_json(
             directory / "latest.json",
@@ -134,6 +139,50 @@ class ReleaseAssetTests(unittest.TestCase):
             target.write_bytes(b"modified")
 
             with self.assertRaisesRegex(ValueError, "digest mismatch"):
+                self.verify(directory)
+
+    def test_legal_payload_must_match_the_reviewed_commit(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            directory = Path(temporary)
+            self.write_base_assets(directory)
+            self.generate(directory)
+            (directory / "THIRD_PARTY_NOTICES.md").write_text(
+                "modified legal notice\n", encoding="utf-8"
+            )
+
+            with self.assertRaisesRegex(ValueError, "legal payload"):
+                self.verify(directory)
+
+    def test_sbom_dependencies_must_match_reviewed_inventories(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            directory = Path(temporary)
+            self.write_base_assets(directory)
+            self.generate(directory)
+            spdx_path = directory / f"airwiki-{self.version}.spdx.json"
+            spdx = json.loads(spdx_path.read_text(encoding="utf-8"))
+            spdx["packages"][1]["versionInfo"] = "9.9.9"
+            MODULE.atomic_json(spdx_path, spdx)
+
+            provenance_path = directory / f"airwiki-{self.version}.provenance.json"
+            provenance = json.loads(provenance_path.read_text(encoding="utf-8"))
+            provenance["artifacts"][spdx_path.name]["sha256"] = MODULE.digest(
+                spdx_path
+            )
+            MODULE.atomic_json(provenance_path, provenance)
+            sums = directory / "SHA256SUMS"
+            checksummed = set(MODULE.base_asset_names(self.version)) | {
+                spdx_path.name,
+                provenance_path.name,
+            }
+            sums.write_text(
+                "".join(
+                    f"{MODULE.digest(directory / name)}  {name}\n"
+                    for name in sorted(checksummed)
+                ),
+                encoding="utf-8",
+            )
+
+            with self.assertRaisesRegex(ValueError, "dependency inventories"):
                 self.verify(directory)
 
     def test_updater_manifest_must_reference_the_exact_release(self) -> None:

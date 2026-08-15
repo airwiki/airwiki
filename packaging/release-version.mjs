@@ -6,6 +6,23 @@ import { fileURLToPath } from "node:url";
 
 export const STABLE_SEMVER = /^(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)$/;
 
+export function compareStableVersions(left, right) {
+  if (!STABLE_SEMVER.test(left) || !STABLE_SEMVER.test(right)) {
+    throw new Error("release comparison requires stable three-part semver values");
+  }
+  const leftParts = left.split(".").map(BigInt);
+  const rightParts = right.split(".").map(BigInt);
+  for (let index = 0; index < leftParts.length; index += 1) {
+    if (leftParts[index] > rightParts[index]) {
+      return 1;
+    }
+    if (leftParts[index] < rightParts[index]) {
+      return -1;
+    }
+  }
+  return 0;
+}
+
 function cargoWorkspaceVersion(source) {
   let inWorkspacePackage = false;
   for (const line of source.split(/\r?\n/)) {
@@ -115,11 +132,15 @@ function main() {
   const version = readWorkspaceVersion(root);
   const expected = argument("--expect");
   const tag = argument("--tag");
+  const newerThan = argument("--newer-than");
   if (expected !== undefined && expected !== version) {
     throw new Error(`requested version ${expected} does not match ${version}`);
   }
   if (tag !== undefined && tag !== `v${version}`) {
     throw new Error(`requested tag ${tag} does not match v${version}`);
+  }
+  if (newerThan !== undefined && compareStableVersions(version, newerThan) <= 0) {
+    throw new Error(`requested version ${version} is not newer than ${newerThan}`);
   }
   process.stdout.write(`${version}\n`);
 }

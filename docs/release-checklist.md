@@ -77,6 +77,8 @@ constitute a supported public release.
 - [ ] Create a draft prerelease tied to the exact audited commit.
 - [ ] Protect `v*` tags against update and deletion; resolve the release target
   and final tag to the exact audited commit immediately before publication.
+- [ ] Require a candidate newer than the current stable version; permit recovery
+  only when the candidate is already the stable latest release.
 - [ ] Re-download and verify the complete draft before human promotion.
 - [ ] Match every legal payload and the complete SPDX dependency inventory to
   the reviewed release commit; match macOS bundle/build metadata and Windows PE

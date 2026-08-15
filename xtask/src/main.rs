@@ -8966,6 +8966,9 @@ mod tests {
                 && promote.contains("verify-macos-release.sh")
                 && promote.contains("verify-signpath-windows-msi.ps1")
                 && promote.contains("Release target changed after verification.")
+                && promote
+                    .contains("Stable recovery is allowed only for the current latest release.")
+                && promote.contains("--newer-than \"${latest_tag#v}\"")
                 && promote.contains("Release tag does not resolve to the verified commit.")
                 && promote.contains("gh api --method POST \"repos/$GITHUB_REPOSITORY/git/refs\"")
                 && promote.contains("--target \"$expected_commit\"")

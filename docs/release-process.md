@@ -165,6 +165,11 @@ the complete draft again, revalidates the release target, creates or resolves th
 immutable tag at the verified commit, and refuses to continue if the inventory
 fingerprint or target changed while approval was pending.
 
+A new candidate must be strictly newer than the current stable release. Recovery
+of an interrupted publication is accepted only when that exact release is
+already GitHub's latest stable version; promotion never moves the latest pointer
+backward.
+
 After approval, it publishes that same verified draft as the latest stable
 release without changing its assets. Consequently `latest.json` and the
 installers become visible together, the promotion is safe to retry after an

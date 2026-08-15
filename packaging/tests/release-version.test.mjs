@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 
-import { readWorkspaceVersion } from "../release-version.mjs";
+import { compareStableVersions, readWorkspaceVersion } from "../release-version.mjs";
 
 async function workspace(cargo, tauri, frontend) {
   const root = await mkdtemp(join(tmpdir(), "airwiki-release-version-"));
@@ -60,4 +60,19 @@ test("mismatched AirWiki path dependencies are rejected", async () => {
   );
 
   assert.throws(() => readWorkspaceVersion(root), /path-dependency versions do not match/);
+});
+
+test("stable versions compare numerically without precision loss", () => {
+  assert.equal(compareStableVersions("1.10.0", "1.9.99"), 1);
+  assert.equal(compareStableVersions("2.0.0", "2.0.0"), 0);
+  assert.equal(compareStableVersions("99999999999999999999.0.0", "9.999.999"), 1);
+  assert.equal(compareStableVersions("0.9.9", "1.0.0"), -1);
+});
+
+test("release comparison rejects prerelease and malformed versions", () => {
+  assert.throws(
+    () => compareStableVersions("1.2.3-rc.1", "1.2.2"),
+    /stable three-part semver/,
+  );
+  assert.throws(() => compareStableVersions("1.2", "1.1.0"), /stable three-part semver/);
 });

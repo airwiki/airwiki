@@ -7,9 +7,11 @@ $ErrorActionPreference = "Stop"
 Set-StrictMode -Version Latest
 
 $Root = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
+$ExpectedVersion = ""
+. (Join-Path $PSScriptRoot "windows-release-version.ps1")
+$ExpectedVersion = Get-AirWikiReleaseVersion $Root $env:AIRWIKI_RELEASE_VERSION
 $ReleaseDir = Join-Path $Root "target\x86_64-pc-windows-msvc\release"
 $OutDir = Join-Path $Root "target\packages\windows"
-$ExpectedVersion = "0.2.0"
 $ExpectedWindowsVersion = "$ExpectedVersion.0"
 $Bridge = Join-Path $ReleaseDir "airwiki-mcp-bridge.exe"
 $Desktop = Join-Path $ReleaseDir "airwiki.exe"

@@ -176,5 +176,7 @@ candidate.
 
 The root source license is Apache-2.0. Release artifacts add model and
 third-party terms, native publisher signatures, updater signatures, hashes and
-an SBOM. The stable manifest is published last. See the
+an SBOM. Preparation creates a private draft; an independent two-platform
+verification and protected human approval publish the stable manifest with the
+release. See the [release process](release-process.md) and
 [release checklist](release-checklist.md).

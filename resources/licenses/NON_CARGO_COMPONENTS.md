@@ -6,6 +6,15 @@ or tags listed below, with line endings normalized to LF and a single trailing n
 application, the MCP bridge, and their Rust dependencies are covered by
 `THIRD_PARTY_LICENSES.md`.
 
+## SPDX 2.3 JSON Schema: non-distributed release validator
+
+Release metadata is checked against the official SPDX 2.3 JSON Schema from
+`spdx/spdx-spec` commit `aadf3b0b8dbbabdb4d880b0fc714255fea436ff7` (tag `v2.3`).
+The exact source is `packaging/schemas/spdx-2.3.schema.json`, SHA-256
+`3ec6cd5b8ba0c9a3e821da48536fa1b814567dc7e4376efe98d3e7b2a7a8d230`, under
+CC-BY-3.0. It is a source-tree build validator and is not installed or
+published as a release asset.
+
 ## Bundled interface fonts
 
 The desktop WebView bundles two variable WOFF2 files and never fetches fonts from a CDN or the

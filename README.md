@@ -15,6 +15,7 @@
 <p align="center">
   <a href="#how-it-works">How it works</a> ·
   <a href="#availability">Availability</a> ·
+  <a href="https://github.com/airwiki/airwiki/releases/latest">Downloads</a> ·
   <a href="#run-from-source">Run from source</a> ·
   <a href="CONTRIBUTING.md">Contribute</a>
 </p>
@@ -93,7 +94,7 @@ Read the [threat model](docs/threat-model.md) for the complete trust boundaries 
 | Windows | Windows 10/11 x64 with AVX2 |
 | Linux, web, mobile | Not currently supported |
 
-There are no supported public release artifacts yet. Use only development candidates obtained through an agreed private channel, verify their SHA-256 independently, and do not bypass Gatekeeper, SmartScreen, model hashes, or runtime verification. Public signing, notarization, bundled notices, and clean platform gates must be complete before AirWiki is presented as a supported release.
+There are no supported public release artifacts yet. Once the first release passes the complete acceptance checklist, current signed installers will be available from [GitHub Releases](https://github.com/airwiki/airwiki/releases/latest). Until then, use only development candidates obtained through an agreed private channel, verify their SHA-256 independently, and do not bypass Gatekeeper, SmartScreen, model hashes, or runtime verification.
 
 For current candidate requirements and first-run behavior, read [Installing and running AirWiki](docs/install.md).
 
@@ -162,6 +163,7 @@ See the [architecture overview](docs/architecture.md) and [architecture decision
 - [Threat model](docs/threat-model.md)
 - [Code review](CODE_REVIEW.md)
 - [Development packaging](docs/packaging.md)
+- [Public release process](docs/release-process.md)
 - [Code signing policy](docs/code-signing-policy.md)
 - [Security policy](SECURITY.md)
 - [Changelog](CHANGELOG.md)

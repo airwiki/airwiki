@@ -42,7 +42,7 @@ constitute a supported public release.
 - [ ] Notarize and staple the application, updater archive, and final DMG as
   applicable.
 - [ ] Pass `codesign`, `spctl`, `notarytool`, `stapler`, architecture, runtime
-  closure, MCPB, and legal-payload checks.
+  closure, MCPB, DMG checksum, EULA-resource, and legal-payload checks.
 - [ ] Audit the upstream llama.cpp binary against its linked-source and legal
   closure before public redistribution.
 
@@ -70,11 +70,23 @@ constitute a supported public release.
 - [ ] Embed the reviewed public key and stable endpoint in the exact release build.
 - [ ] Cryptographically verify updater signatures after all native signing and
   notarization.
+- [ ] Verify that `latest.json` names the exact release version, platform keys,
+  artifact URLs and detached signatures in the candidate.
 - [ ] Reject invalid signatures, equal versions, downgrades, replayed historical
   installers, redirects, symlinks, reparse points, and unexpected assets.
 - [ ] Create a draft prerelease tied to the exact audited commit.
+- [ ] Protect `v*` tags against update and deletion; resolve the release target
+  and final tag to the exact audited commit immediately before publication.
+- [ ] Require a candidate newer than the current stable version; permit recovery
+  only when the candidate is already the stable latest release.
 - [ ] Re-download and verify the complete draft before human promotion.
-- [ ] Publish the stable manifest last and never point it at a prerelease.
+- [ ] Match every legal payload and the complete SPDX dependency inventory to
+  the reviewed release commit; match macOS bundle/build metadata and Windows PE
+  metadata to the exact requested version.
+- [ ] Bind both native verification jobs and final publication to the same
+  fingerprinted `SHA256SUMS` inventory.
+- [ ] Keep the stable manifest private and verified until the final release
+  publication; never point it at a prerelease.
 - [ ] Keep the previous stable manifest and artifacts intact on failure.
 
 ## Manual acceptance
@@ -96,6 +108,8 @@ constitute a supported public release.
 ## Current deliberate blockers
 
 The official source repository is [airwiki/airwiki](https://github.com/airwiki/airwiki).
-The development baseline still has no public contact, signing credentials,
-updater key, or active signed-release workflow. Clearing any one blocker does not
-waive the others.
+The repository now contains fail-closed preparation and promotion workflows,
+but no public release exists until the protected environments, credentials,
+updater-key custody, contacts, legal review and complete installed acceptance
+matrix are configured and recorded. Clearing any one blocker does not waive the
+others. Follow the [public release process](release-process.md).

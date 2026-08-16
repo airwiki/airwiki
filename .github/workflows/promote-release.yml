@@ -1,0 +1,308 @@
+name: Promote verified stable release
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Draft stable version to verify and publish
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: promote-public-release
+  cancel-in-progress: false
+
+env:
+  CARGO_TERM_COLOR: always
+  AIRWIKI_RELEASE_VERSION: ${{ inputs.version }}
+
+jobs:
+  inspect-draft:
+    name: Verify draft identity and hashes
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    outputs:
+      commit-sha: ${{ steps.release.outputs.commit-sha }}
+      release-set-sha256: ${{ steps.assets.outputs.release_set_sha256 }}
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6.5.0
+        with:
+          node-version: 24.15.0
+          package-manager-cache: false
+      - id: release
+        name: Resolve the candidate or stable recovery state
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ "$GITHUB_REPOSITORY" != "airwiki/airwiki" || "$GITHUB_REF" != "refs/heads/main" ]]; then
+            echo "Public promotion can only start from airwiki/airwiki main." >&2
+            exit 1
+          fi
+          release="$(gh release view "v${AIRWIKI_RELEASE_VERSION}" \
+            --json isDraft,isPrerelease,tagName,targetCommitish)"
+          is_draft="$(jq -r '.isDraft' <<<"$release")"
+          is_prerelease="$(jq -r '.isPrerelease' <<<"$release")"
+          if [[ "$(jq -r '.tagName' <<<"$release")" != "v${AIRWIKI_RELEASE_VERSION}" ]]; then
+            echo "Promotion requires the exact release tag." >&2
+            exit 1
+          fi
+          if [[ "$is_draft" == "true" && "$is_prerelease" == "true" ]]; then
+            echo "Verifying private draft candidate."
+          elif [[ "$is_draft" == "false" && "$is_prerelease" == "false" ]]; then
+            echo "Recovering an interrupted promotion of the exact stable release."
+          else
+            echo "Release must be either the private draft candidate or its stable recovery state." >&2
+            exit 1
+          fi
+          commit="$(jq -r '.targetCommitish' <<<"$release")"
+          if [[ ! "$commit" =~ ^[0-9a-f]{40}$ ]]; then
+            echo "Draft target must be an immutable full commit SHA." >&2
+            exit 1
+          fi
+          git cat-file -e "${commit}^{commit}"
+          if ! git merge-base --is-ancestor "$commit" origin/main; then
+            echo "Draft commit is no longer reachable from main." >&2
+            exit 1
+          fi
+          git checkout --detach "$commit"
+          node packaging/release-version.mjs --expect "$AIRWIKI_RELEASE_VERSION"
+          echo "commit-sha=$commit" >>"$GITHUB_OUTPUT"
+      - id: assets
+        name: Download and verify every release asset
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p target/public-release
+          gh release download "v${AIRWIKI_RELEASE_VERSION}" \
+            --dir target/public-release
+          python3 packaging/release_assets.py verify \
+            --directory target/public-release \
+            --version "$AIRWIKI_RELEASE_VERSION" \
+            --commit "${{ steps.release.outputs.commit-sha }}"
+          release_set_sha256="$(sha256sum target/public-release/SHA256SUMS | cut -d ' ' -f 1)"
+          if [[ ! "$release_set_sha256" =~ ^[0-9a-f]{64}$ ]]; then
+            echo "Release checksum inventory did not produce a valid SHA-256." >&2
+            exit 1
+          fi
+          echo "release_set_sha256=$release_set_sha256" >>"$GITHUB_OUTPUT"
+
+  verify-macos:
+    name: Re-verify notarized macOS assets
+    needs: inspect-draft
+    runs-on: macos-14
+    timeout-minutes: 30
+    env:
+      AIRWIKI_UPDATER_PUBLIC_KEY: ${{ vars.AIRWIKI_UPDATER_PUBLIC_KEY }}
+      AIRWIKI_MACOS_TEAM_ID: ${{ vars.AIRWIKI_MACOS_TEAM_ID }}
+      AIRWIKI_RELEASE_SET_SHA256: ${{ needs.inspect-draft.outputs.release-set-sha256 }}
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        with:
+          ref: ${{ needs.inspect-draft.outputs.commit-sha }}
+          persist-credentials: false
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6.5.0
+        with:
+          node-version: 24.15.0
+          package-manager-cache: false
+      - uses: dtolnay/rust-toolchain@fa04a1451ff1842e2626ccb99004d0195b455a88 # master
+        with:
+          toolchain: 1.96.1
+      - name: Download macOS assets from the candidate
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          mkdir -p target/public-release target/release-metadata
+          gh release download "v${AIRWIKI_RELEASE_VERSION}" \
+            --dir target/public-release \
+            --pattern 'AirWiki_*.dmg' \
+            --pattern 'AirWiki.app.tar.gz' \
+            --pattern 'AirWiki.app.tar.gz.sig'
+          gh release download "v${AIRWIKI_RELEASE_VERSION}" \
+            --dir target/release-metadata \
+            --pattern 'SHA256SUMS'
+      - name: Verify native and updater trust
+        run: |
+          python3 packaging/release_assets.py verify-subset \
+            --directory target/public-release \
+            --sums target/release-metadata/SHA256SUMS \
+            --sums-sha256 "$AIRWIKI_RELEASE_SET_SHA256" \
+            --asset "AirWiki_${AIRWIKI_RELEASE_VERSION}_aarch64.dmg" \
+            --asset AirWiki.app.tar.gz \
+            --asset AirWiki.app.tar.gz.sig
+          ./packaging/verify-macos-release.sh target/public-release
+
+  verify-windows:
+    name: Re-verify signed Windows assets
+    needs: inspect-draft
+    runs-on: windows-2022
+    timeout-minutes: 45
+    env:
+      AIRWIKI_UPDATER_PUBLIC_KEY: ${{ vars.AIRWIKI_UPDATER_PUBLIC_KEY }}
+      AIRWIKI_WINDOWS_SIGNER_SHA256: ${{ vars.AIRWIKI_WINDOWS_SIGNER_SHA256 }}
+      AIRWIKI_RELEASE_SET_SHA256: ${{ needs.inspect-draft.outputs.release-set-sha256 }}
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        with:
+          ref: ${{ needs.inspect-draft.outputs.commit-sha }}
+          persist-credentials: false
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6.5.0
+        with:
+          node-version: 24.15.0
+          package-manager-cache: false
+      - uses: dtolnay/rust-toolchain@fa04a1451ff1842e2626ccb99004d0195b455a88 # master
+        with:
+          toolchain: 1.96.1
+      - name: Download Windows assets from the candidate
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: powershell
+        run: |
+          New-Item -ItemType Directory -Force target\public-release | Out-Null
+          New-Item -ItemType Directory -Force target\release-metadata | Out-Null
+          gh release download "v${env:AIRWIKI_RELEASE_VERSION}" `
+            --dir target\public-release `
+            --pattern 'AirWiki_*_x64_*.msi' `
+            --pattern 'AirWiki_*_x64_*.msi.sig'
+          if ($LASTEXITCODE -ne 0) { throw "Could not download Windows draft assets" }
+          gh release download "v${env:AIRWIKI_RELEASE_VERSION}" `
+            --dir target\release-metadata `
+            --pattern 'SHA256SUMS'
+          if ($LASTEXITCODE -ne 0) { throw "Could not download release checksums" }
+      - name: Verify native and updater trust
+        shell: powershell
+        run: |
+          python.exe packaging/release_assets.py verify-subset `
+            --directory target\public-release `
+            --sums target\release-metadata\SHA256SUMS `
+            --sums-sha256 $env:AIRWIKI_RELEASE_SET_SHA256 `
+            --asset "AirWiki_$($env:AIRWIKI_RELEASE_VERSION)_x64_en-US.msi" `
+            --asset "AirWiki_$($env:AIRWIKI_RELEASE_VERSION)_x64_en-US.msi.sig" `
+            --asset "AirWiki_$($env:AIRWIKI_RELEASE_VERSION)_x64_es-ES.msi" `
+            --asset "AirWiki_$($env:AIRWIKI_RELEASE_VERSION)_x64_es-ES.msi.sig"
+          if ($LASTEXITCODE -ne 0) { throw "Windows release set changed after inspection" }
+          ./packaging/verify-signpath-windows-msi.ps1 -PackageRoot target\public-release
+
+  publish:
+    name: Human-approved stable publication
+    needs: [inspect-draft, verify-macos, verify-windows]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    environment: public-release
+    permissions:
+      contents: write
+    env:
+      AIRWIKI_RELEASE_SET_SHA256: ${{ needs.inspect-draft.outputs.release-set-sha256 }}
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        with:
+          ref: ${{ needs.inspect-draft.outputs.commit-sha }}
+          persist-credentials: false
+      - name: Re-verify and publish the exact release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p target/public-release
+          gh release download "v${AIRWIKI_RELEASE_VERSION}" --dir target/public-release
+          current_release_set_sha256="$(sha256sum target/public-release/SHA256SUMS | cut -d ' ' -f 1)"
+          if [[ "$current_release_set_sha256" != "$AIRWIKI_RELEASE_SET_SHA256" ]]; then
+            echo "Draft assets changed after platform verification." >&2
+            exit 1
+          fi
+          python3 packaging/release_assets.py verify \
+            --directory target/public-release \
+            --version "$AIRWIKI_RELEASE_VERSION" \
+            --commit "${{ needs.inspect-draft.outputs.commit-sha }}"
+
+          version="$AIRWIKI_RELEASE_VERSION"
+          expected_commit="${{ needs.inspect-draft.outputs.commit-sha }}"
+          release="$(gh release view "v${version}" \
+            --json isDraft,isPrerelease,targetCommitish)"
+          release_state="$(jq -r '[.isDraft,.isPrerelease] | @tsv' <<<"$release")"
+          if [[ "$release_state" != $'true\ttrue' && "$release_state" != $'false\tfalse' ]]; then
+            echo "Release state changed to an invalid promotion state." >&2
+            exit 1
+          fi
+          if [[ "$(jq -r '.targetCommitish' <<<"$release")" != "$expected_commit" ]]; then
+            echo "Release target changed after verification." >&2
+            exit 1
+          fi
+
+          latest_tag=""
+          if latest_release="$(gh release view --json tagName,isDraft,isPrerelease 2>/dev/null)"; then
+            if [[ "$(jq -r '[.isDraft,.isPrerelease] | any' <<<"$latest_release")" != "false" ]]; then
+              echo "GitHub returned a non-stable release as latest." >&2
+              exit 1
+            fi
+            latest_tag="$(jq -r '.tagName' <<<"$latest_release")"
+          elif [[ "$(gh release list --exclude-drafts --exclude-pre-releases \
+            --limit 1 --json tagName --jq 'length')" != "0" ]]; then
+            echo "Could not resolve the current stable latest release." >&2
+            exit 1
+          fi
+          if [[ "$(jq -r '.isDraft' <<<"$release")" == "true" ]]; then
+            if [[ -n "$latest_tag" ]]; then
+              if [[ ! "$latest_tag" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+                echo "Current latest release does not use a stable AirWiki version tag." >&2
+                exit 1
+              fi
+              node packaging/release-version.mjs \
+                --expect "$version" \
+                --newer-than "${latest_tag#v}"
+            fi
+          elif [[ "$latest_tag" != "v${version}" ]]; then
+            echo "Stable recovery is allowed only for the current latest release." >&2
+            exit 1
+          fi
+
+          tag_ref="refs/tags/v${version}"
+          tag_refs="$(git ls-remote --tags origin "$tag_ref" "${tag_ref}^{}")"
+          if [[ -z "$tag_refs" ]]; then
+            gh api --method POST "repos/$GITHUB_REPOSITORY/git/refs" \
+              -f "ref=$tag_ref" \
+              -f "sha=$expected_commit" >/dev/null
+            tag_refs="$(git ls-remote --tags origin "$tag_ref" "${tag_ref}^{}")"
+          fi
+          tag_commit="$(awk -v tag="$tag_ref" '
+            $2 == tag { direct = $1 }
+            $2 == tag "^{}" { peeled = $1 }
+            END { print peeled != "" ? peeled : direct }
+          ' <<<"$tag_refs")"
+          if [[ "$tag_commit" != "$expected_commit" ]]; then
+            echo "Release tag does not resolve to the verified commit." >&2
+            exit 1
+          fi
+
+          gh release edit "v${version}" \
+            --target "$expected_commit" \
+            --verify-tag \
+            --draft=false \
+            --prerelease=false \
+            --latest
+          state="$(gh release view "v${version}" --json isDraft,isPrerelease \
+            --jq '[.isDraft,.isPrerelease] | @tsv')"
+          latest="$(gh release view --json tagName --jq '.tagName')"
+          published_commit="$(git ls-remote --tags origin "$tag_ref" "${tag_ref}^{}" | awk -v tag="$tag_ref" '
+            $2 == tag { direct = $1 }
+            $2 == tag "^{}" { peeled = $1 }
+            END { print peeled != "" ? peeled : direct }
+          ')"
+          if [[ "$state" != $'false\tfalse' || "$latest" != "v${version}" || \
+            "$published_commit" != "$expected_commit" ]]; then
+            echo "GitHub did not publish the expected stable latest release." >&2
+            exit 1
+          fi
+          gh release view "v${version}" --json url --jq '.url'

@@ -11,13 +11,15 @@ remain authoritative.
 
 ## Roles
 
-- Author and committer: [Michael Pintos (`machester4`)](https://github.com/machester4).
-- Reviewer: [Michael Pintos (`machester4`)](https://github.com/machester4). Changes
-  from non-committers require review before merge. Trust-boundary changes also
-  require the independent review process in [CODE_REVIEW.md](../CODE_REVIEW.md).
-- Signing approver: [Michael Pintos (`machester4`)](https://github.com/machester4).
-  Every signing request requires manual approval in the protected
-  `windows-signing` GitHub environment and in SignPath.
+- Authors and committers: [Michael Pintos (`machester4`)](https://github.com/machester4)
+  and [Bryan Techera (`bryanTechera`)](https://github.com/bryanTechera).
+- Reviewers: Michael Pintos and Bryan Techera. Changes from non-committers
+  require review before merge. Trust-boundary changes require review by a
+  maintainer other than the author under [CODE_REVIEW.md](../CODE_REVIEW.md).
+- Signing approvers: Michael Pintos and Bryan Techera. The protected
+  `windows-signing` environment prevents self-review and administrator bypass,
+  so a signing request must be approved by the maintainer who did not initiate
+  it. SignPath requires a separate manual approval for the same request.
 
 All role holders must use multi-factor authentication for GitHub and SignPath.
 Signing approval is separate from authoring a build and is never automated.

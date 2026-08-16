@@ -2,6 +2,12 @@
 
 AirWiki source is licensed under Apache-2.0 and incorporates or downloads third-party components under their own terms. The project license does not replace those terms; distributed artifacts include this notice, the root `LICENSE`, and the generated legal inventory.
 
+The source tree vendors the official SPDX 2.3 JSON Schema from
+`spdx/spdx-spec` commit `aadf3b0b8dbbabdb4d880b0fc714255fea436ff7` under
+CC-BY-3.0 for deterministic release validation. It is not included in the
+installed application or published assets; exact provenance and hash are in
+`resources/licenses/NON_CARGO_COMPONENTS.md`.
+
 ## Distributed or downloaded runtime assets
 
 | Component | Version / revision | Pinned file size | License | Source |

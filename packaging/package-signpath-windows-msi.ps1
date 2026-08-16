@@ -4,7 +4,9 @@ param(
     [ValidateNotNullOrEmpty()]
     [string] $SignedBinaryRoot,
 
-    [string] $OutputDirectory = "target\signpath\windows-msi"
+    [string] $OutputDirectory = "target\signpath\windows-msi",
+
+    [string] $ExpectedVersion = $env:AIRWIKI_RELEASE_VERSION
 )
 
 $ErrorActionPreference = "Stop"
@@ -15,6 +17,8 @@ if ([Environment]::OSVersion.Platform -ne [PlatformID]::Win32NT) {
 }
 
 $Root = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
+. (Join-Path $PSScriptRoot "windows-release-version.ps1")
+$ReleaseVersion = Get-AirWikiReleaseVersion $Root $ExpectedVersion
 $TargetRoot = Join-Path $Root "target"
 $ReleaseRoot = Join-Path $TargetRoot "x86_64-pc-windows-msvc\release"
 $BundleRoot = Join-Path $ReleaseRoot "bundle\msi"
@@ -162,8 +166,13 @@ try {
     Assert-WindowsWixLicenseRtf $ReleaseRoot $BundleStarted
 
     $Installers = @(Get-ChildItem -LiteralPath $BundleRoot -File -Filter *.msi)
-    if ($Installers.Count -ne 2) {
-        throw "Tauri must produce exactly two localized MSI installers"
+    $ExpectedInstallerNames = @(
+        "AirWiki_${ReleaseVersion}_x64_en-US.msi",
+        "AirWiki_${ReleaseVersion}_x64_es-ES.msi"
+    )
+    if ($Installers.Count -ne 2 -or
+        @($Installers | Where-Object { $_.Name -cnotin $ExpectedInstallerNames }).Count -ne 0) {
+        throw "Tauri must produce the exact two versioned localized MSI installers"
     }
     Remove-AirWikiWindowsStagingPath `
         -Path $OutputRoot `

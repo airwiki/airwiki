@@ -3,8 +3,13 @@ set -eu
 
 ROOT=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 cd "$ROOT"
+if [ -n "${AIRWIKI_RELEASE_VERSION:-}" ]; then
+  VERSION=$(node "$ROOT/packaging/release-version.mjs" --expect "$AIRWIKI_RELEASE_VERSION")
+else
+  VERSION=$(node "$ROOT/packaging/release-version.mjs")
+fi
 OUT_DIR="$ROOT/target/packages/macos"
-OUT_NAME="AirWiki_0.2.0_aarch64.dmg"
+OUT_NAME="AirWiki_${VERSION}_aarch64.dmg"
 TAURI_BUNDLE_DIR="$ROOT/target/aarch64-apple-darwin/release/bundle"
 APP="$TAURI_BUNDLE_DIR/macos/AirWiki.app"
 TAURI_DMG="$TAURI_BUNDLE_DIR/dmg/$OUT_NAME"
@@ -287,10 +292,8 @@ if ! hdiutil verify "$OUT_DIR/$OUT_NAME"; then
   echo "packaged DMG failed integrity verification" >&2
   exit 1
 fi
-if ! DMG_RESOURCES=$(hdiutil udifderez -xml "$OUT_DIR/$OUT_NAME" 2>/dev/null) ||
-  ! printf '%s' "$DMG_RESOURCES" | grep -q '<key>LPic</key>' ||
-  ! printf '%s' "$DMG_RESOURCES" | grep -q '<key>STR#</key>' ||
-  ! printf '%s' "$DMG_RESOURCES" | grep -q '<key>TEXT</key>'; then
+if ! hdiutil udifderez -xml "$OUT_DIR/$OUT_NAME" 2>/dev/null |
+  python3 "$ROOT/packaging/macos_dmg_license_resources.py" --input -; then
   echo "packaged DMG does not contain the required license agreement" >&2
   exit 1
 fi

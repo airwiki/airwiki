@@ -97,10 +97,10 @@ Var ManagedValidationPath
 Var ManagedValidationParent
 
 !if "${INSTALLMODE}" != "currentUser"
-  !error "AirWiki 0.2.0 supports only currentUser Windows installs."
+  !error "AirWiki ${VERSION} supports only currentUser Windows installs."
 !endif
 !if "${ALLOWDOWNGRADES}" != "false"
-  !error "AirWiki 0.2.0 does not support Windows downgrades."
+  !error "AirWiki ${VERSION} does not support Windows downgrades."
 !endif
 
 Name "${PRODUCTNAME}"

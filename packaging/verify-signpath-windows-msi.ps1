@@ -2,7 +2,9 @@
 param(
     [Parameter(Mandatory = $true)]
     [ValidateNotNullOrEmpty()]
-    [string] $PackageRoot
+    [string] $PackageRoot,
+
+    [string] $ExpectedVersion = $env:AIRWIKI_RELEASE_VERSION
 )
 
 $ErrorActionPreference = "Stop"
@@ -13,6 +15,9 @@ if ([Environment]::OSVersion.Platform -ne [PlatformID]::Win32NT) {
 }
 
 $Root = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
+. (Join-Path $PSScriptRoot "windows-release-version.ps1")
+$ReleaseVersion = Get-AirWikiReleaseVersion $Root $ExpectedVersion
+$ExpectedWindowsVersion = "$ReleaseVersion.0"
 $TargetRoot = Join-Path $Root "target"
 $LlamaPolicy = Join-Path $Root "packaging\llama-windows-build-policy.json"
 $CandidateRoot = if ([IO.Path]::IsPathRooted($PackageRoot)) {
@@ -42,18 +47,36 @@ function Expand-WindowsMsi([string] $Installer, [string] $Destination) {
     }
 }
 
+function Assert-ExactWindowsVersion([string] $Path, [string] $Label) {
+    $Info = (Get-Item -LiteralPath $Path).VersionInfo
+    $FileVersion = "{0}.{1}.{2}.{3}" -f `
+        $Info.FileMajorPart, $Info.FileMinorPart, $Info.FileBuildPart, $Info.FilePrivatePart
+    $ProductVersion = "{0}.{1}.{2}.{3}" -f `
+        $Info.ProductMajorPart, $Info.ProductMinorPart, $Info.ProductBuildPart, $Info.ProductPrivatePart
+    if ($FileVersion -ne $script:ExpectedWindowsVersion -or
+        $ProductVersion -ne $script:ExpectedWindowsVersion -or
+        $Info.FileVersion -ne $script:ReleaseVersion -or
+        $Info.ProductVersion -ne $script:ReleaseVersion) {
+        throw "$Label version metadata does not exactly match $script:ReleaseVersion"
+    }
+}
+
 if (-not (Test-Path -LiteralPath $CandidateRoot -PathType Container)) {
     throw "signed MSI package root is missing"
 }
 Assert-NoWindowsReparseAncestor $CandidateRoot "signed MSI package root"
 $Installers = @(Get-ChildItem -LiteralPath $CandidateRoot -File -Filter *.msi)
+$ExpectedInstallerNames = @(
+    "AirWiki_${ReleaseVersion}_x64_en-US.msi",
+    "AirWiki_${ReleaseVersion}_x64_es-ES.msi"
+)
 if ($Installers.Count -ne 2 -or
-    @($Installers | Where-Object { $_.Name -like "AirWiki_*_x64_en-US.msi" }).Count -ne 1 -or
-    @($Installers | Where-Object { $_.Name -like "AirWiki_*_x64_es-ES.msi" }).Count -ne 1) {
+    @($Installers | Where-Object { $_.Name -cnotin $ExpectedInstallerNames }).Count -ne 0) {
     throw "signed package must contain exactly the en-US and es-ES AirWiki MSI files"
 }
+$ExpectedFiles = $ExpectedInstallerNames + @($ExpectedInstallerNames | ForEach-Object { "$_.sig" })
 $Unexpected = @(Get-ChildItem -LiteralPath $CandidateRoot -Force | Where-Object {
-    -not $_.PSIsContainer -and $_.Extension -cne ".msi"
+    $_.PSIsContainer -or $_.Name -cnotin $ExpectedFiles
 })
 if ($Unexpected.Count -ne 0) {
     throw "signed MSI package root contains an unexpected file"
@@ -68,6 +91,15 @@ try {
     if ($LASTEXITCODE -ne 0) { throw "Windows MSI policy validation failed" }
 
     foreach ($Installer in $Installers) {
+        $UpdaterSignature = Get-VerifiedWindowsRegularFile `
+            "$($Installer.FullName).sig" `
+            "Tauri updater signature"
+        & cargo run --locked -p xtask -- packaging verify-updater-signature `
+            --artifact $Installer.FullName `
+            --signature $UpdaterSignature
+        if ($LASTEXITCODE -ne 0) {
+            throw "Tauri updater signature verification failed"
+        }
         $MsiSigner = Get-VerifiedSignPathSignature $Installer.FullName "signed AirWiki MSI"
         Assert-ExpectedSignPathSigner $MsiSigner
         if ($null -eq $ReferenceSigner) {
@@ -88,6 +120,7 @@ try {
             throw "signed MSI must contain exactly one AirWiki desktop"
         }
         $Desktop = $DesktopMatches[0].FullName
+        Assert-ExactWindowsVersion $Desktop "signed MSI desktop"
         $PayloadRoot = $DesktopMatches[0].Directory.FullName
         $Bridge = Get-VerifiedWindowsRegularFile `
             (Join-Path $PayloadRoot "integrations\bridge\airwiki-mcp-bridge.exe") `

@@ -330,6 +330,7 @@ impl HostPlatform {
 #[ts(rename_all = "camelCase")]
 enum AppPhase {
     Starting,
+    Failed,
     Ready,
 }
 
@@ -3541,6 +3542,9 @@ impl AppSnapshot {
         }
         self.sequence = self.sequence.saturating_add(1);
         match event {
+            WorkerEvent::StartupFailed => {
+                self.phase = AppPhase::Failed;
+            }
             WorkerEvent::Ready {
                 node_id,
                 mcp_url,
@@ -6218,6 +6222,28 @@ mod tests {
             snapshot.integration_completed_request_id.as_deref(),
             Some(expected_request_id.as_str())
         );
+    }
+
+    #[tokio::test]
+    async fn fatal_startup_event_ends_the_starting_phase_without_exposing_a_cause() {
+        let review_versions = Mutex::new(HashMap::new());
+        let knowledge_fingerprints = Mutex::new(HashMap::new());
+        let guided_repairs = Mutex::new(HashMap::new());
+        let requests = Mutex::new(RequestTracker::default());
+        let mut snapshot = AppSnapshot::starting();
+
+        snapshot
+            .apply(
+                WorkerEvent::StartupFailed,
+                &review_versions,
+                &knowledge_fingerprints,
+                &guided_repairs,
+                &requests,
+            )
+            .await;
+
+        assert!(matches!(snapshot.phase, AppPhase::Failed));
+        assert!(snapshot.notice.is_none());
     }
 
     #[test]

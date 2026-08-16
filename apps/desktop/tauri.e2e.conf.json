@@ -1,4 +1,5 @@
 {
+  "identifier": "io.github.airwiki.AirWiki.e2e",
   "build": {
     "beforeBuildCommand": null
   },

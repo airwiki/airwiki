@@ -20,6 +20,9 @@ status-needs-permission = Necesita permiso
 status-needs-attention = Necesita atención
 status-optional-disabled = Opcional · Desactivado
 
+desktop-startup-failed-title = AirWiki no pudo iniciarse
+desktop-startup-failed-body = Tus datos no se modificaron. Sal de AirWiki y vuelve a abrirlo. Si el problema continúa, reinstala la versión firmada más reciente.
+
 dashboard-title = Tu conocimiento
 dashboard-subtitle = AirWiki mantiene el conocimiento local organizado y muestra únicamente la próxima acción que necesita tu atención.
 dashboard-all-ready = Todo está listo
@@ -490,7 +493,7 @@ knowledge-repair-error-snapshot-large = Los archivos afectados son demasiado gra
 knowledge-repair-error-validation = La reparación no dejó la Wiki coherente. Se restauraron los archivos y el conocimiento afectado permanece retirado.
 knowledge-repair-error-rollback = La recuperación de archivos también requiere atención. Mantén la wiki privada y revisa los detalles técnicos.
 knowledge-repair-error-busy = Ya se está ejecutando otra operación de reparación de Wiki.
-knowledge-repair-error-worker = La tarea de reparación en segundo plano se detuvo inesperadamente. Vuelve a Salud y prepara una vista previa nueva.
+knowledge-repair-error-worker = La tarea de reparación en segundo plano se detuvo inesperadamente. Vuelve a la Wiki y prepara una vista previa nueva.
 knowledge-repair-error-generic = La reparación guiada no pudo completarse de forma segura. No se volvió a publicar conocimiento.
 knowledge-link-internal = interno
 knowledge-link-external = externo

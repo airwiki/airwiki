@@ -20,6 +20,9 @@ status-needs-permission = Needs permission
 status-needs-attention = Needs attention
 status-optional-disabled = Optional · Off
 
+desktop-startup-failed-title = AirWiki could not start
+desktop-startup-failed-body = Your data was not changed. Quit AirWiki, then open it again. If the problem continues, reinstall the latest signed version.
+
 dashboard-title = Your knowledge
 dashboard-subtitle = AirWiki keeps local knowledge organized and shows only the next action that needs you.
 dashboard-all-ready = Everything is ready
@@ -490,7 +493,7 @@ knowledge-repair-error-snapshot-large = The affected files are too large to crea
 knowledge-repair-error-validation = The repair did not leave the Wiki coherent. Files were restored and affected knowledge remains withdrawn.
 knowledge-repair-error-rollback = File recovery also needs attention. Keep the wiki private and inspect the technical details.
 knowledge-repair-error-busy = Another Wiki repair operation is already running.
-knowledge-repair-error-worker = The background repair task stopped unexpectedly. Reopen Health and prepare a fresh preview.
+knowledge-repair-error-worker = The background repair task stopped unexpectedly. Return to the Wiki and prepare a fresh preview.
 knowledge-repair-error-generic = The guided repair could not be completed safely. No knowledge was republished.
 knowledge-link-internal = internal
 knowledge-link-external = external

@@ -1588,6 +1588,8 @@ impl DesktopServices {
             identity,
             public_identity,
             access,
+            blocked_public_publishers,
+            computations,
         ) = tokio::task::spawn_blocking(move || {
             let core_paths = CoreAppPaths::at(&blocking_paths.data);
             core_paths.ensure()?;
@@ -1610,6 +1612,8 @@ impl DesktopServices {
                 NodeIdentity::load_or_create_public_publisher(secret_store.as_ref())
                     .context("no se pudo cargar la identidad pública Ed25519")?;
             let access = restore_access_control(&database)?;
+            let blocked_public_publishers = database.list_blocked_public_publishers()?;
+            let computations = ComputationCoordinator::new(database.clone())?;
             Ok::<_, anyhow::Error>((
                 core_paths,
                 database,
@@ -1619,6 +1623,8 @@ impl DesktopServices {
                 identity,
                 public_identity,
                 access,
+                blocked_public_publishers,
+                computations,
             ))
         })
         .await
@@ -1678,12 +1684,11 @@ impl DesktopServices {
             node_id.clone(),
         ));
         let public_reader = Arc::new(PublicReader::new());
-        for publisher_id in database.list_blocked_public_publishers()? {
+        for publisher_id in blocked_public_publishers {
             public_reader
                 .set_publisher_blocked(publisher_id, true)
                 .await;
         }
-        let computations = ComputationCoordinator::new(database.clone())?;
         let memories =
             airwiki_core::AiMemoryService::new(database.clone(), core_paths.vaults.clone());
         let (application_updates, _) = broadcast::channel(128);
@@ -1695,8 +1700,12 @@ impl DesktopServices {
                 application_updates.clone(),
             );
         let application_backend: Arc<dyn McpApplicationBackend> = Arc::new(application_backend);
+        let mcp_config = McpServerConfig::default();
+        #[cfg(feature = "e2e")]
+        let mcp_config = airwiki_mcp::e2e_mcp_port_from_environment()?
+            .map_or(mcp_config, |port| mcp_config.with_port(port));
         let mcp = match start_with_application_backend(
-            McpServerConfig::default(),
+            mcp_config,
             federated_proxy.clone(),
             Some(application_backend),
         )

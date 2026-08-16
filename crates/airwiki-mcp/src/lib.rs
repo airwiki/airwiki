@@ -71,6 +71,8 @@ const OAUTH_PROTECTED_RESOURCE_MCP_PATH: &str = "/.well-known/oauth-protected-re
 const OAUTH_NOT_CONFIGURED_BODY: &str = "OAuth protected-resource metadata is not available.\n";
 const INVALID_HOST_BODY: &str = "Invalid Host header.\n";
 const MCP_BRIDGE_ENDPOINT: &str = "http://127.0.0.1:43123/mcp";
+#[cfg(feature = "e2e")]
+pub const E2E_MCP_PORT_ENV: &str = "AIRWIKI_E2E_MCP_PORT";
 const MCP_BRIDGE_CONNECT_TIMEOUT: Duration = Duration::from_secs(1);
 const MCP_BRIDGE_REQUEST_TIMEOUT: Duration = Duration::from_secs(5);
 const SEARCH_RATE_LIMIT: usize = 30;
@@ -149,6 +151,29 @@ impl McpServerConfig {
         self.port = port;
         self
     }
+}
+
+#[cfg(feature = "e2e")]
+#[derive(Debug, Error)]
+#[error("the isolated MCP port is invalid")]
+pub struct E2eMcpPortError;
+
+#[cfg(feature = "e2e")]
+pub fn e2e_mcp_port_from_environment() -> Result<Option<u16>, E2eMcpPortError> {
+    let Some(value) = std::env::var_os(E2E_MCP_PORT_ENV) else {
+        return Ok(None);
+    };
+    let value = value.into_string().map_err(|_| E2eMcpPortError)?;
+    parse_e2e_mcp_port(&value).map(Some)
+}
+
+#[cfg(feature = "e2e")]
+fn parse_e2e_mcp_port(value: &str) -> Result<u16, E2eMcpPortError> {
+    value
+        .parse::<u16>()
+        .ok()
+        .filter(|port| *port != 0)
+        .ok_or(E2eMcpPortError)
 }
 
 /// Identifies a supported local chat client for diagnostics only.
@@ -849,6 +874,10 @@ struct BridgeHttpBackend {
 
 impl BridgeHttpBackend {
     fn new(client_kind: McpClientKind) -> Result<Self, McpBridgeError> {
+        #[cfg(feature = "e2e")]
+        if let Some(port) = e2e_mcp_port_from_environment()? {
+            return Self::with_endpoint(client_kind, format!("http://127.0.0.1:{port}/mcp"));
+        }
         Self::with_endpoint(client_kind, MCP_BRIDGE_ENDPOINT)
     }
 
@@ -1205,6 +1234,9 @@ pub async fn run_stdio_bridge(client: McpClientKind) -> Result<(), McpBridgeErro
 
 #[derive(Debug, Error)]
 pub enum McpBridgeError {
+    #[cfg(feature = "e2e")]
+    #[error(transparent)]
+    InvalidE2ePort(#[from] E2eMcpPortError),
     #[error("failed to initialize the local HTTP client")]
     BuildHttpClient(#[source] reqwest::Error),
     #[error("failed to initialize MCP stdio")]
@@ -1735,6 +1767,15 @@ mod tests {
     use uuid::Uuid;
 
     use super::*;
+
+    #[cfg(feature = "e2e")]
+    #[test]
+    fn isolated_mcp_port_accepts_only_nonzero_u16_values() {
+        assert_eq!(parse_e2e_mcp_port("43124").ok(), Some(43_124));
+        for value in ["", "0", "65536", "not-a-port"] {
+            assert!(parse_e2e_mcp_port(value).is_err());
+        }
+    }
 
     #[derive(Default)]
     struct RecordingBackend {

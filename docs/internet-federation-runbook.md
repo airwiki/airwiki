@@ -13,7 +13,7 @@ AirWiki candidates on different NATs. Use synthetic documents only.
    addresses are intentionally separate. A wildcard bind such as `0.0.0.0`
    must never be advertised.
 2. Add that pinned PeerId and address to both desktops under **Public network**.
-3. On the publisher, create a synthetic collection, review and publish one
+3. On the publisher, create a synthetic Wiki, review and publish one
    document, then enable public exposure and accept the disclosure warning.
 4. Confirm index logs contain only bounded counts, duration and error classes;
    they must not contain PeerIds, IPs, queries, snippets or routes.
@@ -128,7 +128,7 @@ later candidate as usable without community indexes.
 ## Acceptance matrix
 
 - Search and browse succeed without LAN pairing or grants.
-- A private collection and a draft never appear.
+- A private Wiki and a draft never appear.
 - Editing a source withdraws its old revision until review and republication.
 - Direct QUIC is preferred when reachable; relay fallback works across NAT.
 - With one or two indexes offline, the reader reports partial state and remains

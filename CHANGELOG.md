@@ -10,6 +10,12 @@ All notable user-visible changes to AirWiki will be documented here. The project
 
 ### Added
 
+- Added first-class folder, imported OKF, and assistant-memory Wiki origins,
+  including continuous/manual indexing, atomic ZIP or directory import, safe
+  deletion, and hierarchical OKF browsing.
+- Added complete OKF v0.2 provenance, lifecycle, freshness, verification,
+  compatibility, open concept types, and constrained `airwiki-wasm` attested
+  computation support while retaining fail-closed v0.1 reading.
 - Added a versioned global AirWiki skill and assisted-memory guide for
   ChatGPT/Codex, Claude Code and Gemini CLI, installed together with MCP after
   one native confirmation. Claude Desktop and generic clients receive the same
@@ -40,12 +46,13 @@ All notable user-visible changes to AirWiki will be documented here. The project
 
 ### Changed
 
-- Reframed the desktop as a local knowledge workspace with grouped navigation,
-  a compact on-device status card, a single next action, a vertical evidence
-  trail from preparation through cited search, and clearer source intake and
-  permission hierarchy for knowledge folders. Review now uses a verification
-  desk that keeps source evidence, proposed knowledge, and the publish decision
-  in one explicit sequence, with a focused layout at narrower widths.
+- Migrated the desktop application, lifecycle, packaging, and updater to Tauri
+  v2 with a typed Svelte frontend while keeping domain and authorization rules
+  in Rust.
+- Reframed the desktop as one familiar, file-oriented Wiki workspace with
+  global search, contextual review and sharing, a compact system-status bar,
+  and advanced diagnostics kept out of the normal path. Review keeps evidence,
+  proposal, and the publish decision in one explicit sequence.
 - Hardened public federation handoff and admission so withdrawal remains
   linearized through transport delivery, remote identity churn is memory-bound,
   and index manifests/tombstones have bounded lifetime and global capacity.

@@ -19,6 +19,7 @@ $OutputRoot = if ([IO.Path]::IsPathRooted($OutputDirectory)) {
     [IO.Path]::GetFullPath((Join-Path $Root $OutputDirectory))
 }
 
+. (Join-Path $PSScriptRoot "windows-runtime.ps1")
 . (Join-Path $PSScriptRoot "windows-payload.ps1")
 . (Join-Path $PSScriptRoot "windows-safe-staging.ps1")
 

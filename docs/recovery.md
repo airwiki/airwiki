@@ -69,7 +69,7 @@ Never open port 43123 in the LAN firewall.
 
 ## A chat client cannot find AirWiki
 
-- Open **Integrations** and select **Refresh**.
+- Open **Connections**, find the client, and select **Refresh**.
 - Treat a same-name entry with different configuration as a conflict; never
   overwrite it manually.
 - Open a new ChatGPT task, use `/mcp reload` in Gemini, or complete the MCPB
@@ -114,7 +114,7 @@ the PeerId through Noise. It never bypasses trust, grants, or policy.
 
 ## Document remains pending or failed
 
-- A collection disables manual rescan while another scan is active. Wait for its
+- A Wiki disables manual update while another scan is active. Wait for its
   final summary.
 - Startup and 15-minute reconciliation recover missed watcher events.
 - Verify supported extension, 50 MiB maximum size, unencrypted PDF, and a text
@@ -142,8 +142,9 @@ approved intent.
 
 ## Guided wiki repair
 
-The Health tab may produce a read-only repair preview describing every affected
-page, selected authority, and effect. Cancelling writes nothing.
+The attention section on the Wiki workspace may produce a read-only repair
+preview describing every affected page, selected authority, and effect.
+Cancelling writes nothing.
 
 On confirmation, AirWiki:
 
@@ -161,7 +162,7 @@ or publication.
 
 ## Watched folder unavailable
 
-Loss of the root or watcher quarantines the collection, removes searchable
+Loss of the root or watcher quarantines the Wiki, removes searchable
 chunks, and withdraws published concepts. The watcher retries periodically.
 
 1. Restore the same root and permissions.
@@ -187,5 +188,5 @@ The current MVP does not promise automatic SQLite recovery.
 
 The private identity lives in Keychain or Credential Manager, not SQLite.
 Restoring only the database creates a different device relationship. Revoke the
-old device from its peers, pair the new identity, and grant collections again.
+old device from its peers, pair the new identity, and grant Wikis again.
 Never copy a private device key between computers.

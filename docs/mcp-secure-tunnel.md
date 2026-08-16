@@ -1,6 +1,6 @@
 # Local MCP and Secure MCP Tunnel (advanced)
 
-> This procedure is not part of normal workstation setup. Use **Integrations**
+> This procedure is not part of normal workstation setup. Use **Connections**
 > and the [local integration guide](chat-integrations.md) for ChatGPT
 > Desktop/Work, Claude Desktop, and Gemini CLI. The tunnel is retained only as
 > an advanced reference for a future remote or web use case. Its credentials
@@ -51,7 +51,7 @@ rechecks the current capability and per-Wiki role.
 
 ## Prerequisites
 
-- a reviewed, published synthetic collection with explicit
+- a reviewed, published synthetic Wiki with explicit
   `allow_external_ai`;
 - a running local MCP endpoint, not merely a ready UI label;
 - a `tunnel_id` from [Platform tunnel settings](https://platform.openai.com/settings/organization/tunnels);
@@ -136,15 +136,16 @@ The UI is loopback-only by default.
 
 4. Confirm that the client is ready and polling.
 5. Confirm that AirWiki responds on loopback.
-6. Confirm that every cloud-enabled collection contains synthetic content.
+6. Confirm that every cloud-enabled Wiki contains synthetic content.
 7. Confirm that each source node enforces its grants.
 
 ## Connect ChatGPT
 
-In ChatGPT, open **Settings → Plugins** or
-[chatgpt.com/plugins](https://chatgpt.com/plugins), create a developer-mode app,
-choose **Tunnel**, and select the tunnel. If it is absent, verify that it belongs
-to the correct ChatGPT workspace rather than only the Platform organization.
+When required by the workspace, enable developer mode under **Settings →
+Security and login**. Then open [ChatGPT Plugins](https://chatgpt.com/plugins),
+select the plus button to create a developer-mode app, choose **Tunnel** under
+Connection, and select the tunnel. If it is absent, verify that it belongs to
+the correct ChatGPT workspace rather than only the Platform organization.
 
 Use a synthetic acceptance question such as:
 
@@ -160,7 +161,7 @@ Before changing `ServerInfo.instructions`, the tool description, or its schema,
 run the synthetic [golden prompt set](mcp-prompt-evals.md). It checks tool
 selection, grounding, citations, missing evidence, contradictions, partial
 coverage, and prompt injection in evidence. It is manual, never uses real
-collections, and never runs in CI.
+Wikis, and never runs in CI.
 
 A tunnel test does not replace two-node acceptance. Missing remote evidence must
 remain missing and must never be inferred by the chat client.
@@ -169,7 +170,7 @@ remain missing and must never be inferred by the chat client.
 
 1. Stop `tunnel-client run`.
 2. Disable the app or tunnel in OpenAI when the test is complete.
-3. Remove `allow_external_ai` from the test collections.
+3. Remove `allow_external_ai` from the test Wikis.
 4. Rotate the API key if it was exposed or persisted in shell history.
 
 The tunnel is transport only. It never replaces review, grants, cloud policy,

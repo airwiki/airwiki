@@ -100,11 +100,11 @@ Before enabling search, startup:
 2. loads embeddings and the relevance classifier;
 3. runs local embedding and relevance smoke tests plus the bounded strict-JSON
    generation health probe; and
-4. reconciles every watched collection.
+4. reconciles every watched folder Wiki.
 
 LAN and MCP remain closed when any required step fails.
 
-## Collection automation and reconciliation
+## Wiki automation and reconciliation
 
 Filesystem watchers reduce latency but are not a source of truth. AirWiki
 runs a complete idempotent scan at startup and every 15 minutes while the process
@@ -112,7 +112,7 @@ and required models remain ready.
 
 - Repeating a scan over unchanged content creates no duplicate revisions, jobs,
   or tombstones.
-- An incomplete traversal quarantines the collection and withdraws it from
+- An incomplete traversal quarantines the Wiki and withdraws it from
   search, but does not interpret uncertain absences as deletions.
 - A changed source withdraws the published revision before processing the new
   content.
@@ -125,15 +125,20 @@ and required models remain ready.
 
 See [recovery](recovery.md) for failure paths.
 
-## Create a synthetic collection
+## Create or import a synthetic Wiki
 
 1. Copy `fixtures/mac` and `fixtures/windows` outside the repository on their
    respective devices.
-2. Create one collection per copied folder.
-3. Keep external chat disabled during the first local test.
-4. Wait for automatic ingestion and review every proposal.
-5. Publish only recognized synthetic content.
-6. Enable peer sharing and grant only the synthetic Atlas collection when the
+2. Select **New Wiki → From a folder** for each copied folder. Leave continuous
+   indexing enabled for this acceptance journey; disabling it stops discovery
+   of new files but keeps manual update available.
+3. To validate portable knowledge separately, use **New Wiki → Import OKF** and
+   review the validation summary before AirWiki copies the bundle. Imported
+   Wikis have no source watcher and remain managed from their OKF content.
+4. Keep external chat disabled during the first local test.
+5. Wait for automatic ingestion and review every proposal.
+6. Publish only recognized synthetic content.
+7. Enable peer sharing and grant only the synthetic Atlas Wiki when the
    two-node test requests it.
 
 Use the [two-node runbook](two-node-runbook.md) for acceptance. A visible screen
@@ -160,12 +165,12 @@ onboarding consent and can be disabled later.
 - macOS registers the bundled per-user agent through `SMAppService`.
 - Windows registers one exact command under the current user's Run key.
 - No service survives logout.
-- Updates require confirmation and never change collections, permissions, or
+- Updates require confirmation and never change Wikis, permissions, or
   models implicitly.
 - Version checks send no documents, queries, PeerIds, or installation identifier.
 - Offline checks are non-blocking; invalid signatures and downgrades fail closed.
 
-If a watched root becomes unavailable, AirWiki quarantines the collection,
+If a watched root becomes unavailable, AirWiki quarantines the Wiki,
 retries the watcher, and performs a new scan when access returns. Recovered
 documents require review before publication.
 

@@ -4,7 +4,7 @@ AirWiki handles private local knowledge. Suspected data exposure, authorization 
 
 ## Supported versions
 
-There is no supported public release. Security fixes currently target the latest development revision in [airwiki/airwiki](https://github.com/airwiki/airwiki) only. A monitored public reporting channel, protected release environments, signing identities, notarization, updater verification, and clean platform gates remain public-release blockers.
+There is no supported public release. Security fixes currently target the latest development revision in [airwiki/airwiki](https://github.com/airwiki/airwiki) only. A monitored public reporting channel, a complete protected cross-platform signing run, Windows public-trust identity, notarization evidence, updater verification, and clean installed-platform gates remain public-release blockers.
 
 ## Reporting a vulnerability
 
@@ -21,4 +21,4 @@ The project will assess a complete report, prepare a fix and tests, and coordina
 
 ## Operational containment
 
-If exposure is suspected, quit AirWiki completely, revoke affected peer access, disable external-chat permission for affected collections, and disconnect local chat integrations. Preserve only sanitized audit records for investigation. See the [threat model](docs/threat-model.md) for the complete containment sequence.
+If exposure is suspected, quit AirWiki completely, revoke affected peer access, disable external-chat permission for affected Wikis, and disconnect local chat integrations. Preserve only sanitized audit records for investigation. See the [threat model](docs/threat-model.md) for the complete containment sequence.

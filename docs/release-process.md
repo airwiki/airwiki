@@ -19,6 +19,14 @@ Drafts and prereleases are not updater channels. The Windows updater uses the
 payloads and updates run without the installer UI. Both MSI files remain
 available for first installation.
 
+GitHub Releases may redirect manifest and artifact requests to GitHub-managed
+object storage. A redirect is transport, never authority: the client still
+accepts only a strictly newer stable version and verifies the downloaded bytes
+with the embedded Tauri updater key before native package verification and an
+explicit installation confirmation. Release verification binds the manifest
+URLs and signatures to the exact allowlisted assets; no redirect or hosting URL
+can substitute unsigned bytes.
+
 ## One-time repository configuration
 
 Create protected GitHub environments named `macos-signing`, `windows-signing`

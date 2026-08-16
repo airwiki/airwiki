@@ -972,6 +972,8 @@ describe('AirWiki wiki workspace', () => {
 
     expect(graphButton).toHaveClass('active');
     expect(loadWikiPage).toHaveBeenCalledWith(wiki.id, { kind: 'concept', path: 'architecture/atlas.md' });
+    await fireEvent.click(screen.getByRole('button', { name: 'Configuración' }));
+    expect(await screen.findByRole('button', { name: 'Guardar preferencias' })).toBeEnabled();
   });
 
   it('offers human verification only for editable managed OKF revisions', async () => {
@@ -1065,9 +1067,11 @@ describe('AirWiki wiki workspace', () => {
 
     const networkPreference = await screen.findByRole('combobox', { name: 'Red local' });
     await fireEvent.change(networkPreference, { target: { value: 'enabled' } });
-    await fireEvent.click(screen.getByRole('button', { name: 'Guardar preferencias' }));
+    const savePreferencesButton = screen.getByRole('button', { name: 'Guardar preferencias' });
+    await fireEvent.click(savePreferencesButton);
 
     expect(updatePreferences).toHaveBeenCalledWith(expect.objectContaining({ lanPreference: 'enabled' }));
+    await waitFor(() => expect(savePreferencesButton).toBeEnabled());
   });
 
   it('preserves unsaved preferences while background snapshots arrive', async () => {

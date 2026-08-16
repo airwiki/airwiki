@@ -2,7 +2,7 @@ import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testi
 import axe from 'axe-core';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import App from './App.svelte';
-import { allowPeerPairingAgain, approveReview, browsePublicWiki, configureFirewall, connect, loadWikiBundle, loadWikiPage, manageIntegration, openSystemDestination, pickOkfImport, prepareGuidedWikiRepair, quitCompletely, reanalyzeReview, rejectReview, searchKnowledge, updatePreferences, validateOkfImport, verifyWikiConcept } from './api';
+import { allowPeerPairingAgain, approveReview, browsePublicWiki, configureFirewall, connect, loadWikiBundle, loadWikiPage, manageIntegration, openSystemDestination, pickOkfImport, prepareGuidedWikiRepair, quitCompletely, reanalyzeReview, refreshWikiHealth, rejectReview, searchKnowledge, updatePreferences, validateOkfImport, verifyWikiConcept } from './api';
 import type { UiEventEnvelope } from './generated/ui-contract';
 import { readySnapshot } from './test/fixtures';
 
@@ -95,9 +95,22 @@ describe('AirWiki wiki workspace', () => {
     expect((await screen.findAllByText('Atlas')).length).toBeGreaterThan(0);
     expect(screen.getByRole('heading', { name: 'Wikis' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Configuración' })).toBeInTheDocument();
-    expect(screen.getByRole('search')).toBeInTheDocument();
+    const search = screen.getByRole('search');
+    expect(search).toBeInTheDocument();
+    expect(search.querySelector('input')).toHaveAttribute('autocomplete', 'off');
     expect(screen.getByRole('button', { name: 'Nueva wiki' })).toBeInTheDocument();
     expect(screen.queryByRole('complementary')).not.toBeInTheDocument();
+  });
+
+  it('returns from a wiki detail to the top-level workspace through the AirWiki brand', async () => {
+    render(App);
+
+    await fireEvent.click(await screen.findByRole('row', { name: /Atlas 2 publicados/ }));
+    expect(await screen.findByRole('heading', { name: 'Atlas' })).toBeInTheDocument();
+    await fireEvent.click(screen.getAllByRole('button', { name: 'Wikis' })[0]);
+
+    expect(await screen.findByRole('heading', { name: 'Wikis' })).toBeInTheDocument();
+    expect(screen.queryByRole('heading', { name: 'Atlas' })).not.toBeInTheDocument();
   });
 
   it('does not let a stale connect response replace a newer channel snapshot', async () => {
@@ -157,6 +170,25 @@ describe('AirWiki wiki workspace', () => {
 
     expect(await screen.findByRole('button', { name: 'Conocimiento local: Listo para buscar' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Conexiones: Cercana y pública' })).toBeInTheDocument();
+  });
+
+  it('does not ask for action when the active model already uses a safe hardware fallback', async () => {
+    activateLocalSearch();
+    snapshot.model!.degraded = true;
+    render(App);
+
+    expect(await screen.findByRole('button', { name: 'Conocimiento local: Listo para buscar' })).toBeInTheDocument();
+  });
+
+  it('explains a global Wiki health failure and offers a direct retry', async () => {
+    activateLocalSearch();
+    snapshot.wikiHealth = { generation: 2, status: 'failed', errorCount: 1, warningCount: 0, updatingCount: 0, attentionWikiId: null, checked: true };
+    render(App);
+
+    expect(await screen.findByRole('alert')).toHaveTextContent('AirWiki no pudo terminar de comprobar tus wikis');
+    const retry = screen.getByRole('button', { name: 'Comprobar ahora' });
+    await fireEvent.click(retry);
+    expect(refreshWikiHealth).toHaveBeenCalledOnce();
   });
 
   it('keeps connections pending until nearby discovery is active', async () => {
@@ -632,7 +664,9 @@ describe('AirWiki wiki workspace', () => {
     wiki.restrictions = ['legacyReadOnly'];
     render(App);
 
-    await fireEvent.click(await screen.findByRole('row', { name: /Atlas 2 publicados/ }));
+    const legacyRow = await screen.findByRole('row', { name: /Atlas 2 publicados.*OKF v0\.1 heredado/ });
+    expect(screen.getByRole('button', { name: /Atlas.*OKF v0\.1 heredado.*Ver qué hacer/ })).toBeInTheDocument();
+    await fireEvent.click(legacyRow);
 
     expect(screen.getByText(/AirWiki detuvo su indexación y uso compartido/)).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Actualizar' })).not.toBeInTheDocument();

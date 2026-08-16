@@ -274,17 +274,21 @@
 
   let t = translate;
   $: t = translatorFor(locale);
+
+  function wikiNeedsAttention(wiki: WikiSummary): boolean {
+    return wiki.failedCount > 0
+      || wiki.maintenanceRequired
+      || wiki.needsReviewCount > 0
+      || wiki.okfCompatibility.kind === 'legacyV01'
+      || (snapshot?.sourceIssues.some((issue) => issue.wikiId === wiki.id) ?? false);
+  }
+
   $: orderedWikis = [...(snapshot?.wikis ?? [])].sort((left, right) => {
-    const leftAttention = Number(left.failedCount > 0 || left.maintenanceRequired || left.needsReviewCount > 0);
-    const rightAttention = Number(right.failedCount > 0 || right.maintenanceRequired || right.needsReviewCount > 0);
+    const leftAttention = Number(wikiNeedsAttention(left));
+    const rightAttention = Number(wikiNeedsAttention(right));
     return rightAttention - leftAttention || left.name.localeCompare(right.name, resolveLocale(locale));
   });
-  $: attentionWikis = orderedWikis.filter((wiki) =>
-    wiki.failedCount > 0
-    || wiki.maintenanceRequired
-    || wiki.needsReviewCount > 0
-    || (snapshot?.sourceIssues.some((issue) => issue.wikiId === wiki.id) ?? false)
-  );
+  $: attentionWikis = orderedWikis.filter(wikiNeedsAttention);
   $: selectedWiki = snapshot?.wikis.find((wiki) => wiki.id === selectedWikiId) ?? null;
   $: selectedWikiReviews = snapshot?.reviews.filter((review) => review.wikiId === selectedWikiId) ?? [];
   $: sharedWikis = orderedWikis.filter((wiki) => wiki.peerShareable || wiki.allowExternalAi || wiki.internetPublic);
@@ -331,6 +335,7 @@
     if (failedCount > 0) summaries.push(t('desktop-attention-files-summary', { count: failedCount }));
     if (wiki.maintenanceRequired) summaries.push(t('desktop-attention-maintenance-summary'));
     if (wiki.needsReviewCount > 0) summaries.push(t('desktop-wiki-review-count', { count: wiki.needsReviewCount }));
+    if (wiki.okfCompatibility.kind === 'legacyV01') summaries.push(t('desktop-okf-compatibility-legacyV01'));
     return summaries.join(' · ');
   }
 
@@ -515,6 +520,7 @@
   function select(next: Destination) {
     actionMessage = '';
     destination = next;
+    selectedWikiId = null;
     if (next !== 'search') {
       publicBrowseOpen = false;
       publicBrowseLoading = false;
@@ -534,7 +540,7 @@
 
   function openServiceStatus(target: ServiceTarget) {
     actionMessage = '';
-    if (target === 'knowledge' && (!snapshot?.model?.active || snapshot.model.degraded || snapshot.modelInstall)) {
+    if (target === 'knowledge' && (!snapshot?.model?.active || snapshot.modelInstall)) {
       destination = 'system';
       systemSection = 'models';
       pushHash('#system/models');
@@ -1444,7 +1450,7 @@
                 <div class="attention-list">
                   {#each attentionWikis as wiki (wiki.id)}
                     <button onclick={() => openWiki(wiki.id, !wiki.maintenanceRequired && wiki.failedCount === 0 && wiki.needsReviewCount > 0 ? 'pending' : 'content')}>
-                      <span class:warning={wiki.failedCount > 0 || wiki.maintenanceRequired} class="attention-icon"><AlertTriangle size={18} aria-hidden="true" /></span>
+                      <span class:warning={wiki.failedCount > 0 || wiki.maintenanceRequired || wiki.okfCompatibility.kind === 'legacyV01'} class="attention-icon"><AlertTriangle size={18} aria-hidden="true" /></span>
                       <span><strong>{wiki.name}</strong><small>{wikiAttentionSummary(wiki)}</small></span>
                       <span>{t('desktop-attention-see-actions')}</span>
                     </button>
@@ -1472,6 +1478,12 @@
             <header class="page-heading">
               <div><h1>{t('desktop-page-wikis-title')}</h1><p>{t('desktop-page-wikis-body')}</p></div>
             </header>
+            {#if (snapshot.wikiHealth?.status === 'failed' || (snapshot.wikiHealth?.errorCount ?? 0) > 0) && attentionWikis.length === 0}
+              <div class="repair-summary" role="alert">
+                <div><strong>{t('desktop-health-check-failed-title')}</strong><p>{t('desktop-health-check-failed-body')}</p></div>
+                <button class="secondary" onclick={refreshHealth} disabled={wikiHealthRequestId !== null}>{wikiHealthRequestId ? t('home-wiki-checking') : t('updates-check-now')}</button>
+              </div>
+            {/if}
             <WikiTable wikis={orderedWikis} scans={snapshot.wikiScans} {t} onopen={openWiki} />
             {#if snapshot.pendingComputations.length > 0}
               <section class="workspace-section" aria-labelledby="computations-title">
@@ -1512,7 +1524,7 @@
               <section class="workspace-section" aria-labelledby="attention-title">
                 <div class="section-heading"><div><h2 id="attention-title">{t('desktop-home-attention')}</h2><p>{t('desktop-home-attention-body')}</p></div><button class="text-action" onclick={refreshHealth} disabled={wikiHealthRequestId !== null}>{wikiHealthRequestId ? t('home-wiki-checking') : t('updates-check-now')}</button></div>
                 <div class="attention-list">
-                  {#each attentionWikis as wiki (wiki.id)}<button onclick={() => openWiki(wiki.id, !wiki.maintenanceRequired && wiki.failedCount === 0 && wiki.needsReviewCount > 0 ? 'pending' : 'content')}><span class:warning={wiki.failedCount > 0 || wiki.maintenanceRequired} class="attention-icon"><AlertTriangle size={18} aria-hidden="true" /></span><span><strong>{wiki.name}</strong><small>{wikiAttentionSummary(wiki)}</small></span><span>{t('desktop-attention-see-actions')}</span></button>{/each}
+                  {#each attentionWikis as wiki (wiki.id)}<button onclick={() => openWiki(wiki.id, !wiki.maintenanceRequired && wiki.failedCount === 0 && wiki.needsReviewCount > 0 ? 'pending' : 'content')}><span class:warning={wiki.failedCount > 0 || wiki.maintenanceRequired || wiki.okfCompatibility.kind === 'legacyV01'} class="attention-icon"><AlertTriangle size={18} aria-hidden="true" /></span><span><strong>{wiki.name}</strong><small>{wikiAttentionSummary(wiki)}</small></span><span>{t('desktop-attention-see-actions')}</span></button>{/each}
                 </div>
                 {#if snapshot.wikiHealth?.attentionWikiId}
                   <div class="repair-summary">

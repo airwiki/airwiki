@@ -356,14 +356,14 @@ button:active:not(:disabled) { transform: scale(.985); }
 }
 
 @media (prefers-reduced-motion: no-preference) {
-  .route-page, .onboarding-page { animation: native-enter var(--motion-base) var(--ease-native) both; }
+  .onboarding-page { animation: native-enter var(--motion-base) var(--ease-native) both; }
   .atlas-list li { animation: native-fade var(--motion-slow) var(--ease-native) both; }
   @keyframes native-enter { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: translateY(0); } }
   @keyframes native-fade { from { opacity: 0; } to { opacity: 1; } }
 }
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { scroll-behavior: auto !important; animation-duration: 80ms !important; animation-iteration-count: 1 !important; transition-duration: 80ms !important; }
-  .route-page, .onboarding-page { animation: reduced-fade 80ms linear both; }
+  .onboarding-page { animation: reduced-fade 80ms linear both; }
   @keyframes reduced-fade { from { opacity: 0; } to { opacity: 1; } }
 }
 

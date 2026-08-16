@@ -14,7 +14,7 @@
     const indexingFailed = current.wikiHealth?.status === 'failed' || (current.wikiHealth?.errorCount ?? 0) > 0;
     const knowledge: ServiceStatus = current.modelInstall
       ? { id: 'knowledge', label: translate('desktop-status-knowledge'), detail: translate('desktop-status-knowledge-preparing'), tone: 'working' }
-      : current.model?.degraded || indexingFailed
+      : indexingFailed
         ? { id: 'knowledge', label: translate('desktop-status-knowledge'), detail: translate('status-needs-attention'), tone: 'attention' }
         : !current.model?.active
           ? { id: 'knowledge', label: translate('desktop-status-knowledge'), detail: translate('desktop-status-knowledge-needs-setup'), tone: 'off' }

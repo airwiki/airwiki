@@ -14,6 +14,7 @@ use uuid::Uuid;
 
 use crate::chunk_identity::public_chunk_id;
 use crate::inference::EmbeddingProvider;
+use crate::ingest::SourceFormat;
 use crate::storage::{Database, RankedChunk};
 
 const RRF_K: f64 = 60.0;
@@ -520,7 +521,7 @@ fn prepare_candidates(
 
     let visible_snippets = deduplicated_candidates
         .iter()
-        .map(|candidate| relevant_snippet(&candidate.chunk.text, &query))
+        .map(|candidate| relevant_snippet(&candidate.chunk.text, &query, candidate.source_format))
         .collect::<Vec<_>>();
     let relevance_inputs = deduplicated_candidates
         .iter()
@@ -636,8 +637,14 @@ fn normalized_terms(text: &str) -> HashSet<String> {
         .collect()
 }
 
-fn relevant_snippet(text: &str, query: &str) -> String {
-    let text = markdown_plain_text(text);
+fn relevant_snippet(text: &str, query: &str, source_format: SourceFormat) -> String {
+    let plain_text;
+    let text = if source_format == SourceFormat::Markdown {
+        plain_text = markdown_plain_text(text);
+        plain_text.as_str()
+    } else {
+        text
+    };
     let query_words = query
         .split(|character: char| !character.is_alphanumeric())
         .filter(|word| word.len() >= 3)
@@ -1895,13 +1902,13 @@ mod tests {
     #[test]
     fn snippets_respect_unicode_character_limit() {
         let text = "á".repeat(MAX_SNIPPET_CHARS + 100);
-        let snippet = relevant_snippet(&text, "nada");
+        let snippet = relevant_snippet(&text, "nada", SourceFormat::Markdown);
         assert!(snippet.chars().count() <= MAX_SNIPPET_CHARS);
     }
 
     #[test]
     fn snippets_handle_unicode_lowercase_that_changes_utf8_byte_length() {
-        let snippet = relevant_snippet("İ área de pagos", "área");
+        let snippet = relevant_snippet("İ área de pagos", "área", SourceFormat::Markdown);
 
         assert!(snippet.contains("área"));
     }
@@ -1911,6 +1918,7 @@ mod tests {
         let snippet = relevant_snippet(
             "> Documento **aprobado** con `evidencia` verificable.",
             "aprobado",
+            SourceFormat::Markdown,
         );
 
         assert_eq!(snippet, "Documento aprobado con evidencia verificable.");
@@ -1919,5 +1927,19 @@ mod tests {
     #[test]
     fn markdown_plain_text_preserves_adjacent_inline_fragments() {
         assert_eq!(markdown_plain_text("co**or**dinación"), "coordinación");
+    }
+
+    #[test]
+    fn snippets_preserve_plain_pdf_text() {
+        let snippet = relevant_snippet(
+            "El identificador <account-id> usa **asteriscos** literales.",
+            "identificador",
+            SourceFormat::Pdf,
+        );
+
+        assert_eq!(
+            snippet,
+            "El identificador <account-id> usa **asteriscos** literales."
+        );
     }
 }

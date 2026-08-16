@@ -100,7 +100,7 @@
   let selectedWiki: WikiSummary | null;
   let selectedWikiReviews: ReviewSummary[];
   let sharedWikis: WikiSummary[];
-  type DialogId = 'create-wiki' | 'wiki-details' | 'wiki-access' | 'review' | 'connections' | 'close-choice' | null;
+  type DialogId = 'new-wiki-source' | 'create-wiki' | 'import-okf' | 'wiki-details' | 'wiki-access' | 'review' | 'connections' | 'close-choice' | null;
   let activeDialogId: DialogId;
   let dialogFocusGeneration = 0;
   const dialogFocusState: { activeId: DialogId; returnTarget: HTMLElement | null } = { activeId: null, returnTarget: null };
@@ -178,7 +178,9 @@
 
   function dialogElement(dialogId: Exclude<DialogId, null>): HTMLElement | null {
     const labelIds: Record<Exclude<DialogId, null>, string> = {
+      'new-wiki-source': 'new-wiki-source-title',
       'create-wiki': 'create-wiki-title',
+      'import-okf': 'import-okf-title',
       'wiki-details': 'details-title',
       'wiki-access': 'share-title',
       review: 'review-title',
@@ -201,9 +203,52 @@
       const dialog = dialogElement(dialogId);
       const preferredTarget = dialogId === 'close-choice'
         ? dialog?.querySelector<HTMLElement>('.primary')
-        : dialog?.querySelector<HTMLElement>('.icon-button');
+        : dialogId === 'new-wiki-source'
+          ? dialog?.querySelector<HTMLElement>('.source-choice-item')
+          : dialogId === 'create-wiki' || dialogId === 'import-okf'
+            ? dialog?.querySelector<HTMLElement>('input:not([disabled])')
+            : dialog?.querySelector<HTMLElement>('.icon-button');
       (preferredTarget ?? dialogFocusableElements(dialog).at(0))?.focus();
     });
+  }
+
+  function dismissActiveDialog() {
+    switch (activeDialogId) {
+      case 'close-choice':
+        closeChoiceRequired = false;
+        break;
+      case 'review':
+        selectedReview = null;
+        editDraft = null;
+        break;
+      case 'wiki-access':
+        editingWikiId = null;
+        break;
+      case 'wiki-details':
+        detailsWikiId = null;
+        relinkSelection = null;
+        break;
+      case 'create-wiki':
+        createWikiOpen = false;
+        folderSelection = null;
+        continuousIndexing = true;
+        wikiName = '';
+        break;
+      case 'import-okf':
+        okfImportSelection = null;
+        okfImportSummary = null;
+        wikiName = '';
+        break;
+      case 'new-wiki-source':
+        newWikiMenuOpen = false;
+        break;
+      case 'connections':
+        connectionsOpen = false;
+        break;
+      case null:
+        confirmUpdateInstall = false;
+        break;
+    }
   }
 
   function pushHash(hash: string) {
@@ -299,9 +344,11 @@
     : selectedReview !== null ? 'review'
       : editingWikiId !== null ? 'wiki-access'
         : detailsWikiId !== null ? 'wiki-details'
-          : createWikiOpen ? 'create-wiki'
-            : connectionsOpen ? 'connections'
-              : null;
+          : okfImportSelection !== null && okfImportSummary !== null ? 'import-okf'
+            : createWikiOpen && folderSelection !== null ? 'create-wiki'
+              : newWikiMenuOpen ? 'new-wiki-source'
+                : connectionsOpen ? 'connections'
+                  : null;
 
   $: {
     const dialogId = activeDialogId;
@@ -398,14 +445,7 @@
         event.preventDefault();
         select('system');
       } else if (event.key === 'Escape') {
-        confirmUpdateInstall = false;
-        editingWikiId = null;
-        detailsWikiId = null;
-        relinkSelection = null;
-        createWikiOpen = false;
-        connectionsOpen = false;
-        selectedReview = null;
-        if (closeChoiceRequired) closeChoiceRequired = false;
+        dismissActiveDialog();
       }
     };
     window.addEventListener('keydown', handleShortcut);
@@ -1332,7 +1372,15 @@
 
 <svelte:head><meta name="theme-color" content="#0b1118" /></svelte:head>
 
-{#if !snapshot || snapshot.phase !== 'ready' || !snapshot.preferences}
+{#if snapshot?.phase === 'failed'}
+  <main class="onboarding startup startup-failed" role="alert">
+    <div class="onboarding-mark">A</div>
+    <p class="eyebrow">AirWiki</p>
+    <h1>{t('desktop-startup-failed-title')}</h1>
+    <p class="lede">{t('desktop-startup-failed-body')}</p>
+    <button class="primary" onclick={() => quitCompletely()}>{t('desktop-quit')}</button>
+  </main>
+{:else if !snapshot || snapshot.phase !== 'ready' || !snapshot.preferences}
   <main class="onboarding startup" aria-busy="true">
     <div class="onboarding-mark">A</div>
     <p class="eyebrow">AirWiki</p>

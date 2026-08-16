@@ -11,7 +11,7 @@ use anyhow::{Context, Result, bail};
 use rand::RngCore;
 use tokio::{
     process::{Child, Command},
-    sync::Mutex,
+    sync::{Mutex, Semaphore},
 };
 use tracing::{info, warn};
 
@@ -246,6 +246,7 @@ struct SpawnedServer {
 
 struct Inner {
     config: SupervisorConfig,
+    operation: Semaphore,
     state: Mutex<Option<RunningServer>>,
     http: reqwest::Client,
 }
@@ -260,6 +261,7 @@ impl LlamaSupervisor {
         let this = Self {
             inner: Arc::new(Inner {
                 config,
+                operation: Semaphore::new(1),
                 state: Mutex::new(None),
                 http: reqwest::Client::new(),
             }),
@@ -269,19 +271,27 @@ impl LlamaSupervisor {
     }
 
     pub async fn ensure_running(&self) -> Result<LlamaEndpoint> {
-        let mut state = self.inner.state.lock().await;
-        if let Some(server) = state.as_mut() {
-            let status = server.child.try_wait().map_err(|error| {
-                anyhow::Error::new(error).context(LlamaSupervisorFailure::new(
-                    LlamaSupervisorFailureKind::RuntimeState,
-                    RuntimeExitClass::Unknown,
-                ))
-            })?;
-            if status.is_none() {
-                server.last_used = Instant::now();
-                return Ok(server.endpoint.clone());
+        let _operation = self
+            .inner
+            .operation
+            .acquire()
+            .await
+            .context("llama-server operation coordinator closed")?;
+        {
+            let mut state = self.inner.state.lock().await;
+            if let Some(server) = state.as_mut() {
+                let status = server.child.try_wait().map_err(|error| {
+                    anyhow::Error::new(error).context(LlamaSupervisorFailure::new(
+                        LlamaSupervisorFailureKind::RuntimeState,
+                        RuntimeExitClass::Unknown,
+                    ))
+                })?;
+                if status.is_none() {
+                    server.last_used = Instant::now();
+                    return Ok(server.endpoint.clone());
+                }
+                *state = None;
             }
-            *state = None;
         }
 
         let mut spawned = spawn_server(&self.inner.config).await.map_err(|error| {
@@ -302,7 +312,7 @@ impl LlamaSupervisor {
             endpoint,
         } = spawned;
         info!("llama-server is ready on loopback");
-        *state = Some(RunningServer {
+        *self.inner.state.lock().await = Some(RunningServer {
             child,
             _process_guard: process_guard,
             endpoint: endpoint.clone(),
@@ -318,8 +328,14 @@ impl LlamaSupervisor {
     }
 
     pub async fn stop(&self) -> Result<()> {
-        let mut state = self.inner.state.lock().await;
-        if let Some(mut server) = state.take() {
+        let _operation = self
+            .inner
+            .operation
+            .acquire()
+            .await
+            .context("llama-server operation coordinator closed")?;
+        let server = self.inner.state.lock().await.take();
+        if let Some(mut server) = server {
             server.child.kill().await.ok();
             server.child.wait().await.ok();
             info!("llama-server stopped");
@@ -334,11 +350,17 @@ impl LlamaSupervisor {
             loop {
                 timer.tick().await;
                 let Some(inner) = weak.upgrade() else { break };
-                let mut state = inner.state.lock().await;
-                let should_stop = state
-                    .as_ref()
-                    .is_some_and(|server| server.last_used.elapsed() >= inner.config.idle_timeout);
-                if should_stop && let Some(mut server) = state.take() {
+                let Ok(_operation) = inner.operation.acquire().await else {
+                    break;
+                };
+                let server = {
+                    let mut state = inner.state.lock().await;
+                    let should_stop = state.as_ref().is_some_and(|server| {
+                        server.last_used.elapsed() >= inner.config.idle_timeout
+                    });
+                    if should_stop { state.take() } else { None }
+                };
+                if let Some(mut server) = server {
                     warn!("stopping idle llama-server");
                     server.child.kill().await.ok();
                     server.child.wait().await.ok();
@@ -654,6 +676,53 @@ mod tests {
             .await
             .expect("synthetic health listener should stop")
             .expect("synthetic health listener task should finish");
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn runtime_startup_does_not_hold_the_shared_state_lock() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let temporary = tempfile::tempdir().expect("temporary runtime directory");
+        let marker = temporary.path().join("started");
+        let server = temporary.path().join("synthetic-llama-server");
+        let model = temporary.path().join("synthetic-model.gguf");
+        std::fs::write(
+            &server,
+            format!("#!/bin/sh\n: > \"{}\"\nsleep 30\n", marker.display()),
+        )
+        .expect("synthetic runtime script");
+        let mut permissions = std::fs::metadata(&server)
+            .expect("synthetic runtime metadata")
+            .permissions();
+        permissions.set_mode(0o700);
+        std::fs::set_permissions(&server, permissions)
+            .expect("synthetic runtime executable permission");
+        std::fs::write(&model, b"synthetic").expect("synthetic model");
+
+        let mut config = SupervisorConfig::bundled(server, model);
+        config.startup_timeout = Duration::from_secs(10);
+        let supervisor = LlamaSupervisor::new(config);
+        let startup_supervisor = supervisor.clone();
+        let startup = tokio::spawn(async move { startup_supervisor.ensure_running().await });
+
+        tokio::time::timeout(Duration::from_secs(5), async {
+            while !marker.is_file() {
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+        })
+        .await
+        .expect("synthetic runtime should start");
+        tokio::time::timeout(Duration::from_millis(250), supervisor.mark_activity())
+            .await
+            .expect("runtime startup must not retain the shared state lock");
+
+        startup.abort();
+        let _ = startup.await;
+        supervisor
+            .stop()
+            .await
+            .expect("aborted startup should release the operation coordinator");
     }
 
     #[test]

@@ -578,6 +578,7 @@ pub(crate) struct WorkerIntent {
 
 #[derive(Debug, Clone)]
 pub enum WorkerEvent {
+    StartupFailed,
     Ready {
         node_id: String,
         mcp_url: String,
@@ -699,6 +700,30 @@ pub enum WorkerEvent {
 }
 
 const WORKER_EVENT_CAPACITY: usize = 256;
+
+#[derive(Clone, Copy)]
+enum StartupFailureKind {
+    HardwareDiagnosis,
+    DesktopConfiguration,
+    AssetManager,
+    PrivateServices,
+}
+
+impl StartupFailureKind {
+    const fn as_str(self) -> &'static str {
+        match self {
+            Self::HardwareDiagnosis => "hardware_diagnosis_failed",
+            Self::DesktopConfiguration => "desktop_configuration_failed",
+            Self::AssetManager => "asset_manager_start_failed",
+            Self::PrivateServices => "private_services_start_failed",
+        }
+    }
+}
+
+async fn fail_startup(events: &Sender<WorkerEvent>, kind: StartupFailureKind) {
+    tracing::error!(error_kind = kind.as_str(), "desktop runtime startup failed");
+    send(events, WorkerEvent::StartupFailed).await;
+}
 
 enum InternalEvent {
     VerificationFinished(Result<InstallOutcome, String>),
@@ -1043,33 +1068,26 @@ pub(crate) async fn run_worker(
     cancellation: CancellationToken,
     updater_backend: Result<Box<dyn UpdateBackend>, UpdaterDisabledReason>,
 ) {
-    let hardware = match diagnose_hardware(&paths.data) {
+    let diagnostic_data = paths.data.clone();
+    let hardware = match run_blocking(move || diagnose_hardware(&diagnostic_data)).await {
         Ok(report) => {
             send(&events, WorkerEvent::Hardware(report.clone())).await;
             report
         }
-        Err(error) => {
-            send(
-                &events,
-                WorkerEvent::Error(format!("Falló el diagnóstico: {error:#}")),
-            )
-            .await;
+        Err(_) => {
+            fail_startup(&events, StartupFailureKind::HardwareDiagnosis).await;
             return;
         }
     };
-    let loaded_config = match DesktopConfig::load_or_default(&paths.config) {
-        Ok(loaded) => loaded,
-        Err(error) => {
-            send(
-                &events,
-                WorkerEvent::Error(format!(
-                    "No se pudo cargar la configuración de modelos: {error:#}"
-                )),
-            )
-            .await;
-            return;
-        }
-    };
+    let config_path = paths.config.clone();
+    let loaded_config =
+        match run_blocking(move || DesktopConfig::load_or_default(&config_path)).await {
+            Ok(loaded) => loaded,
+            Err(_) => {
+                fail_startup(&events, StartupFailureKind::DesktopConfiguration).await;
+                return;
+            }
+        };
     if let Some(warning) = loaded_config.warning {
         send(&events, WorkerEvent::Error(warning)).await;
     }
@@ -1106,14 +1124,8 @@ pub(crate) async fn run_worker(
 
     let asset_manager = match AssetManager::new(paths.data.clone()) {
         Ok(manager) => manager.with_bundled_runtime(paths.bundled_llama_server()),
-        Err(error) => {
-            send(
-                &events,
-                WorkerEvent::Error(format!(
-                    "No se pudo iniciar el gestor de modelos: {error:#}"
-                )),
-            )
-            .await;
+        Err(_) => {
+            fail_startup(&events, StartupFailureKind::AssetManager).await;
             return;
         }
     };
@@ -1136,14 +1148,8 @@ pub(crate) async fn run_worker(
     // the platform diagnostic has proved its prerequisites.
     let services = match DesktopServices::start(&paths, false).await {
         Ok(services) => Arc::new(services),
-        Err(error) => {
-            send(
-                &events,
-                WorkerEvent::Error(format!(
-                    "No se pudieron iniciar los servicios privados: {error:#}"
-                )),
-            )
-            .await;
+        Err(_) => {
+            fail_startup(&events, StartupFailureKind::PrivateServices).await;
             return;
         }
     };
@@ -1153,16 +1159,21 @@ pub(crate) async fn run_worker(
     let mut computation_updates_open = true;
     let mut application_updates = services.subscribe_application_updates();
     let mut application_updates_open = true;
-    let (integration_manager, integration_manager_error) =
-        match ChatIntegrationManager::new(paths.clone(), services.database().clone()) {
-            Ok(manager) => (Some(manager), None),
-            Err(error) => (
-                None,
-                Some(format!(
-                    "No se pudo preparar la administración de integraciones: {error:#}"
-                )),
-            ),
-        };
+    let integration_paths = paths.clone();
+    let integration_database = services.database().clone();
+    let (integration_manager, integration_manager_error) = match run_blocking(move || {
+        ChatIntegrationManager::new(integration_paths, integration_database)
+    })
+    .await
+    {
+        Ok(manager) => (Some(manager), None),
+        Err(error) => (
+            None,
+            Some(format!(
+                "No se pudo preparar la administración de integraciones: {error:#}"
+            )),
+        ),
+    };
     let mut network_events = services.subscribe_network_events();
     let mut network_open = true;
     let mut lan_runtime_enabled = false;
@@ -1194,7 +1205,8 @@ pub(crate) async fn run_worker(
         &mut wiki_health_generation,
         Uuid::nil(),
     );
-    if let Ok(collections) = services.collection_views() {
+    let startup_collections = run_service_io(&services, DesktopServices::collection_views).await;
+    if let Ok(collections) = startup_collections.as_ref() {
         for collection in collections {
             if collection.origin == WikiOrigin::Folder {
                 spawn_wiki_maintenance(&services, &mut background, collection.id);
@@ -1214,29 +1226,33 @@ pub(crate) async fn run_worker(
     let mut firewall_operation = None;
     let mut active_guided_repair_request = None;
     let mut claude_approval_state = ClaudeApprovalState::NotRequested;
-    match ensure_watchers(&services, &mut watchers, &watch_tx) {
-        Ok(WatcherSetup { failures, .. }) if !failures.is_empty() => {
-            for (collection_id, _) in &failures {
-                request_quarantine(
-                    &services,
-                    &mut background,
-                    &mut watcher_quarantined,
-                    *collection_id,
-                    "no se pudo crear el watcher de la colección",
-                );
-                tracing::warn!(
-                    error_kind = "collection_watcher_start_failed",
-                    "collection watcher could not start"
-                );
+    match startup_collections {
+        Ok(collections) => {
+            let WatcherSetup { failures, .. } =
+                ensure_watchers(collections, &mut watchers, &watch_tx);
+            if !failures.is_empty() {
+                for (collection_id, _) in &failures {
+                    request_quarantine(
+                        &services,
+                        &mut background,
+                        &mut watcher_quarantined,
+                        *collection_id,
+                        "no se pudo crear el watcher de la colección",
+                    );
+                    tracing::warn!(
+                        error_kind = "collection_watcher_start_failed",
+                        "collection watcher could not start"
+                    );
+                }
+                send(
+                    &events,
+                    WorkerEvent::Error(format!(
+                        "No se pudo observar una colección: {}",
+                        watcher_failure_summary(&failures)
+                    )),
+                )
+                .await;
             }
-            send(
-                &events,
-                WorkerEvent::Error(format!(
-                    "No se pudo observar una colección: {}",
-                    watcher_failure_summary(&failures)
-                )),
-            )
-            .await;
         }
         Err(error) => {
             send(
@@ -1245,7 +1261,6 @@ pub(crate) async fn run_worker(
             )
             .await
         }
-        Ok(_) => {}
     }
     let mut watcher_retry = tokio::time::interval(Duration::from_secs(5));
     watcher_retry.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
@@ -1432,7 +1447,10 @@ pub(crate) async fn run_worker(
                         refresh_application_access(&services, &events).await;
                     }
                     WorkerCommand::SetApplicationWikiRole { app_id, wiki_id, role } => {
-                        let result = services.set_application_wiki_role(app_id, wiki_id, role);
+                        let result = run_service_io(&services, move |services| {
+                            services.set_application_wiki_role(app_id, wiki_id, role)
+                        })
+                        .await;
                         if let Err(error) = result {
                             send(
                                 &events,
@@ -1445,7 +1463,11 @@ pub(crate) async fn run_worker(
                         refresh_application_access(&services, &events).await;
                     }
                     WorkerCommand::RejectComputation { run_id } => {
-                        if let Err(error) = services.reject_computation(run_id) {
+                        if let Err(error) = run_service_io(&services, move |services| {
+                            services.reject_computation(run_id)
+                        })
+                        .await
+                        {
                             send(
                                 &events,
                                 WorkerEvent::Error(format!(
@@ -1904,10 +1926,15 @@ pub(crate) async fn run_worker(
                         }
                     }
                     WorkerCommand::AddCollection { name, folder, indexing_mode } => {
-                        match services.add_folder_wiki(name, &folder, indexing_mode) {
+                        let watcher_folder = folder.clone();
+                        match run_service_io(&services, move |services| {
+                            services.add_folder_wiki(name, &folder, indexing_mode)
+                        })
+                        .await
+                        {
                             Ok(collection) => {
                                 if indexing_mode == IndexingMode::Continuous {
-                                match CollectionWatcherHandle::spawn(collection.id, folder, watch_tx.clone()) {
+                                match CollectionWatcherHandle::spawn(collection.id, watcher_folder, watch_tx.clone()) {
                                     Ok(watcher) => {
                                         watchers.insert(collection.id, watcher);
                                         if services.models_ready() {
@@ -1992,7 +2019,9 @@ pub(crate) async fn run_worker(
                                 },
                             ).await;
                         } else if !matches!(
-                            services.collection_indexing_mode(collection_id),
+                            run_service_io(&services, move |services| {
+                                services.collection_indexing_mode(collection_id)
+                            }).await,
                             Ok(IndexingMode::Continuous | IndexingMode::Manual)
                         ) {
                             send(&events, WorkerEvent::Error(
@@ -2017,22 +2046,33 @@ pub(crate) async fn run_worker(
                         }
                     }
                     WorkerCommand::SetCollectionIndexing { collection_id, indexing_mode } => {
-                        if let Err(error) = services
-                            .database()
-                            .update_collection_indexing_mode(collection_id, indexing_mode)
-                        {
-                            send(&events, WorkerEvent::Error(format!(
-                                "No se pudo cambiar la indexación: {error:#}"
-                            ))).await;
-                        } else {
-                            watchers.remove(&collection_id);
+                        let update = run_service_io(&services, move |services| {
+                            services
+                                .database()
+                                .update_collection_indexing_mode(collection_id, indexing_mode)?;
                             if indexing_mode == IndexingMode::Continuous {
-                                match services.collection_views()
-                                    .ok()
-                                    .and_then(|views| views.into_iter().find(|view| view.id == collection_id))
-                                    .map(|view| CollectionWatcherHandle::spawn(collection_id, view.folder, watch_tx.clone()))
-                                {
-                                    Some(Ok(watcher)) => {
+                                services
+                                    .collection_views()?
+                                    .into_iter()
+                                    .find(|view| view.id == collection_id)
+                                    .map(|view| Some(view.folder))
+                                    .ok_or_else(|| anyhow::anyhow!("wiki is unavailable"))
+                            } else {
+                                Ok(None)
+                            }
+                        })
+                        .await;
+                        match update {
+                            Err(error) => {
+                                send(&events, WorkerEvent::Error(format!(
+                                    "No se pudo cambiar la indexación: {error:#}"
+                                ))).await;
+                            }
+                            Ok(folder) => {
+                            watchers.remove(&collection_id);
+                            if let Some(folder) = folder {
+                                match CollectionWatcherHandle::spawn(collection_id, folder, watch_tx.clone()) {
+                                    Ok(watcher) => {
                                         watchers.insert(collection_id, watcher);
                                         if services.models_ready() {
                                             request_scan(&services, &mut scan_scheduler, &mut background, &events, collection_id).await;
@@ -2045,11 +2085,14 @@ pub(crate) async fn run_worker(
                                 }
                             }
                             refresh_content_views(&services, &events).await;
+                            }
                         }
                     }
                     WorkerCommand::UpdateCollectionPolicy { collection_id, local_only, peer_shareable, allow_external_ai, internet_public } => {
                         let policy = CollectionPolicy { local_only, peer_shareable, allow_external_ai, internet_public };
-                        if let Err(error) = services.update_collection_policy(collection_id, policy) {
+                        if let Err(error) = run_service_io(&services, move |services| {
+                            services.update_collection_policy(collection_id, policy)
+                        }).await {
                             send(&events, WorkerEvent::Error(format!("No se pudo actualizar la política: {error:#}"))).await;
                         } else if let Err(error) = services.reconcile_public_network().await {
                             send(&events, WorkerEvent::Error(format!("No se pudo actualizar la red pública: {error:#}"))).await;
@@ -2104,7 +2147,9 @@ pub(crate) async fn run_worker(
                         }
                     }
                     WorkerCommand::Reject { concept_id } => {
-                        if let Err(error) = services.reject_review(concept_id) {
+                        if let Err(error) = run_service_io(&services, move |services| {
+                            services.reject_review(concept_id)
+                        }).await {
                             send(&events, WorkerEvent::Error(format!("No se pudo rechazar el borrador: {error:#}"))).await;
                         } else {
                             send(&events, WorkerEvent::Notice("Borrador rechazado; permanece fuera de publicación".into())).await;
@@ -2214,7 +2259,9 @@ pub(crate) async fn run_worker(
                         );
                     }
                     WorkerCommand::AddFederationIndex { peer_id, address } => {
-                        match services.add_federation_index(&peer_id, &address) {
+                        match run_service_io(&services, move |services| {
+                            services.add_federation_index(&peer_id, &address)
+                        }).await {
                             Ok(()) => match services.restart_public_network().await {
                                 Ok(()) => match services.sync_all_public_collections().await {
                                     Ok(()) => send(&events, WorkerEvent::Notice("Índice comunitario agregado".into())).await,
@@ -2226,7 +2273,9 @@ pub(crate) async fn run_worker(
                         }
                     }
                     WorkerCommand::RemoveFederationIndex { peer_id } => {
-                        match services.remove_federation_index(&peer_id) {
+                        match run_service_io(&services, move |services| {
+                            services.remove_federation_index(&peer_id)
+                        }).await {
                             Ok(()) => match services.restart_public_network().await {
                                 Ok(()) => send(&events, WorkerEvent::Notice("Índice comunitario desactivado".into())).await,
                                 Err(error) => send(&events, WorkerEvent::Error(format!("El índice se desactivó, pero no se pudo reiniciar la red pública: {error:#}"))).await,
@@ -2235,7 +2284,9 @@ pub(crate) async fn run_worker(
                         }
                     }
                     WorkerCommand::UpdatePublicCollectionProfile { collection_id, description, languages } => {
-                        match services.update_public_collection_profile(collection_id, &description, &languages) {
+                        match run_service_io(&services, move |services| {
+                            services.update_public_collection_profile(collection_id, &description, &languages)
+                        }).await {
                             Ok(()) => match services.sync_public_collection(collection_id).await {
                                 Ok(()) => send(&events, WorkerEvent::Notice("Perfil público actualizado".into())).await,
                                 Err(error) => send(&events, WorkerEvent::Error(format!("El perfil se guardó, pero no se pudo anunciar: {error:#}"))).await,
@@ -2336,7 +2387,9 @@ pub(crate) async fn run_worker(
                         refresh_peers(&services, &events).await;
                     }
                     WorkerCommand::AllowPeerPairingAgain { peer_id } => {
-                        if let Err(error) = services.allow_peer_pairing_again(&peer_id) {
+                        if let Err(error) = run_service_io(&services, move |services| {
+                            services.allow_peer_pairing_again(&peer_id)
+                        }).await {
                             send(&events, WorkerEvent::Error(format!("No se pudo permitir un nuevo emparejamiento: {error:#}"))).await;
                         }
                         refresh_peers(&services, &events).await;
@@ -2650,11 +2703,18 @@ pub(crate) async fn run_worker(
                 match watch {
                     Some(CollectionWatchEvent::Changed { collection_id, paths })
                         if services.models_ready()
-                            && watchers.contains_key(&collection_id)
-                            && services
-                                .startup_preflight_blocks_automatic_scan(collection_id)
-                                .is_ok_and(|blocked| !blocked) =>
+                            && watchers.contains_key(&collection_id) =>
                     {
+                        let scan_allowed = run_service_io(&services, move |services| {
+                            services
+                                .startup_preflight_blocks_automatic_scan(collection_id)
+                                .map(|blocked| !blocked)
+                        })
+                        .await
+                        .unwrap_or(false);
+                        if !scan_allowed {
+                            continue 'running;
+                        }
                         let _changed_path_count = paths.len();
                         let scan_started = request_scan(
                             &services,
@@ -2704,8 +2764,10 @@ pub(crate) async fn run_worker(
                 }
             }
             _ = watcher_retry.tick() => {
-                match ensure_watchers(&services, &mut watchers, &watch_tx) {
-                    Ok(WatcherSetup { started, failures }) => {
+                match run_service_io(&services, DesktopServices::collection_views).await {
+                    Ok(collections) => {
+                        let WatcherSetup { started, failures } =
+                            ensure_watchers(collections, &mut watchers, &watch_tx);
                         if !failures.is_empty() {
                             tracing::warn!(
                                 error_kind = "watcher_restart",
@@ -2726,10 +2788,14 @@ pub(crate) async fn run_worker(
                             continue;
                         }
                         for collection_id in started {
-                            if !services
-                                .startup_preflight_blocks_automatic_scan(collection_id)
-                                .is_ok_and(|blocked| !blocked)
-                            {
+                            let scan_allowed = run_service_io(&services, move |services| {
+                                services
+                                    .startup_preflight_blocks_automatic_scan(collection_id)
+                                    .map(|blocked| !blocked)
+                            })
+                            .await
+                            .unwrap_or(false);
+                            if !scan_allowed {
                                 continue;
                             }
                             request_scan(
@@ -2741,7 +2807,7 @@ pub(crate) async fn run_worker(
                             ).await;
                         }
                     }
-                    Err(_error) => tracing::warn!(
+                    Err(_) => tracing::warn!(
                         error_kind = "watcher_restart",
                         "could not inspect collections while retrying watchers"
                     ),
@@ -2916,7 +2982,10 @@ pub(crate) async fn run_worker(
                                 "falló la prevalidación del filesystem observado",
                             );
                         }
-                        let indexing_mode = services.collection_indexing_mode(collection_id);
+                        let indexing_mode = run_service_io(&services, move |services| {
+                            services.collection_indexing_mode(collection_id)
+                        })
+                        .await;
                         if matches!(indexing_mode, Ok(IndexingMode::Continuous))
                             && watchers.contains_key(&collection_id)
                         {
@@ -2946,7 +3015,10 @@ pub(crate) async fn run_worker(
                     }
                     Some(Ok(BackgroundCompletion::Scan { collection_id, result })) => {
                         let mut successful_manual_summary = None;
-                        let indexing_mode = services.collection_indexing_mode(collection_id);
+                        let indexing_mode = run_service_io(&services, move |services| {
+                            services.collection_indexing_mode(collection_id)
+                        })
+                        .await;
                         if matches!(indexing_mode, Ok(IndexingMode::Continuous))
                             && !watchers.contains_key(&collection_id)
                         {
@@ -3141,34 +3213,42 @@ pub(crate) async fn run_worker(
                                 action,
                             );
                         }
-                        let result = result.and_then(|mut integrations| {
-                            let now = SystemTime::now();
-                            let activities = services.latest_mcp_client_activities();
-                            let claude_activity_recent = apply_recent_mcp_activities(
-                                &mut integrations,
-                                activities.iter(),
-                                now,
-                            );
-                            apply_claude_approval_state(
-                                &mut integrations,
-                                &mut claude_approval_state,
-                                claude_activity_recent,
-                            );
-                            services
-                                .collection_views()
-                                .map(|collections| ChatIntegrationsSnapshot {
-                                    integrations,
-                                    external_ai_collection_count: collections
+                        let result = match result {
+                            Ok(mut integrations) => {
+                                match run_service_io(&services, |services| {
+                                    let activities = services.latest_mcp_client_activities();
+                                    let external_ai_collection_count = services
+                                        .collection_views()?
                                         .iter()
                                         .filter(|collection| collection.allow_external_ai)
-                                        .count(),
+                                        .count();
+                                    Ok((activities, external_ai_collection_count))
                                 })
-                                .map_err(|error| {
-                                    format!(
+                                .await
+                                {
+                                    Ok((activities, external_ai_collection_count)) => {
+                                        let claude_activity_recent = apply_recent_mcp_activities(
+                                            &mut integrations,
+                                            activities.iter(),
+                                            SystemTime::now(),
+                                        );
+                                        apply_claude_approval_state(
+                                            &mut integrations,
+                                            &mut claude_approval_state,
+                                            claude_activity_recent,
+                                        );
+                                        Ok(ChatIntegrationsSnapshot {
+                                            integrations,
+                                            external_ai_collection_count,
+                                        })
+                                    }
+                                    Err(error) => Err(format!(
                                         "No se pudo comprobar la política de colecciones: {error:#}"
-                                    )
-                                })
-                        });
+                                    )),
+                                }
+                            }
+                            Err(error) => Err(error),
+                        };
                         refresh_application_access(&services, &events).await;
                         send(
                             &events,
@@ -3239,11 +3319,17 @@ pub(crate) async fn run_worker(
                         folder,
                         result,
                     })) => {
+                        let continuous = if result.is_ok() {
+                            run_service_io(&services, move |services| {
+                                services.collection_indexing_mode(collection_id)
+                            })
+                            .await
+                            .is_ok_and(|mode| mode == IndexingMode::Continuous)
+                        } else {
+                            false
+                        };
                         match result {
-                            Ok(()) if matches!(
-                                services.collection_indexing_mode(collection_id),
-                                Ok(IndexingMode::Continuous)
-                            ) => match CollectionWatcherHandle::spawn(
+                            Ok(()) if continuous => match CollectionWatcherHandle::spawn(
                                 collection_id,
                                 folder,
                                 watch_tx.clone(),
@@ -3762,7 +3848,11 @@ pub(crate) async fn run_worker(
                                 &lan_local_addresses,
                             ).await;
                         }
-                        match services.handle_network_event(event) {
+                        match run_service_io(&services, move |services| {
+                            services.handle_network_event(event)
+                        })
+                        .await
+                        {
                             Ok(effect) => {
                                 if let Some(notice) = effect.notice { send(&events, WorkerEvent::Notice(notice)).await; }
                                 if let Some(warning) = effect.warning { send(&events, WorkerEvent::Error(warning)).await; }
@@ -3839,19 +3929,44 @@ pub(crate) async fn run_worker(
     }
 }
 
-async fn send_ready(services: &DesktopServices, events: &Sender<WorkerEvent>) {
-    match (
-        services.collection_views(),
-        services.review_views(),
-        services.source_issue_views(),
-        services.blocked_public_publishers(),
-    ) {
-        (Ok(collections), Ok(reviews), Ok(source_issues), Ok(blocked_public_publishers)) => {
+async fn run_blocking<T, F>(operation: F) -> Result<T, String>
+where
+    T: Send + 'static,
+    F: FnOnce() -> anyhow::Result<T> + Send + 'static,
+{
+    tokio::task::spawn_blocking(move || operation().map_err(|error| format!("{error:#}")))
+        .await
+        .map_err(|_| "la operación local terminó inesperadamente".to_owned())?
+}
+
+async fn run_service_io<T, F>(services: &Arc<DesktopServices>, operation: F) -> Result<T, String>
+where
+    T: Send + 'static,
+    F: FnOnce(&DesktopServices) -> anyhow::Result<T> + Send + 'static,
+{
+    let services = Arc::clone(services);
+    run_blocking(move || operation(&services)).await
+}
+
+async fn send_ready(services: &Arc<DesktopServices>, events: &Sender<WorkerEvent>) {
+    let node_id = services.node_id().to_owned();
+    let mcp_url = services.mcp_endpoint().to_owned();
+    match run_service_io(services, |services| {
+        Ok((
+            services.collection_views()?,
+            services.review_views()?,
+            services.source_issue_views()?,
+            services.blocked_public_publishers()?,
+        ))
+    })
+    .await
+    {
+        Ok((collections, reviews, source_issues, blocked_public_publishers)) => {
             send(
                 events,
                 WorkerEvent::Ready {
-                    node_id: services.node_id().to_owned(),
-                    mcp_url: services.mcp_endpoint().to_owned(),
+                    node_id,
+                    mcp_url,
                     collections,
                     reviews,
                     source_issues,
@@ -3860,10 +3975,7 @@ async fn send_ready(services: &DesktopServices, events: &Sender<WorkerEvent>) {
             )
             .await
         }
-        (Err(error), _, _, _)
-        | (_, Err(error), _, _)
-        | (_, _, Err(error), _)
-        | (_, _, _, Err(error)) => {
+        Err(error) => {
             send(
                 events,
                 WorkerEvent::Error(format!("No se pudo cargar el estado local: {error:#}")),
@@ -3873,19 +3985,23 @@ async fn send_ready(services: &DesktopServices, events: &Sender<WorkerEvent>) {
     }
 }
 
-async fn refresh_computations(services: &DesktopServices, events: &Sender<WorkerEvent>) {
-    match (
-        services.pending_computations(),
-        services.completed_computations(),
-    ) {
-        (Ok(pending), Ok(completed)) => {
+async fn refresh_computations(services: &Arc<DesktopServices>, events: &Sender<WorkerEvent>) {
+    match run_service_io(services, |services| {
+        Ok((
+            services.pending_computations()?,
+            services.completed_computations()?,
+        ))
+    })
+    .await
+    {
+        Ok((pending, completed)) => {
             send(
                 events,
                 WorkerEvent::ComputationsUpdated { pending, completed },
             )
             .await
         }
-        (Err(_), _) | (_, Err(_)) => {
+        Err(_) => {
             tracing::warn!(
                 error_kind = "computation_queue_refresh",
                 "pending computations could not be refreshed"
@@ -3894,8 +4010,8 @@ async fn refresh_computations(services: &DesktopServices, events: &Sender<Worker
     }
 }
 
-async fn refresh_application_access(services: &DesktopServices, events: &Sender<WorkerEvent>) {
-    match services.application_access_views() {
+async fn refresh_application_access(services: &Arc<DesktopServices>, events: &Sender<WorkerEvent>) {
+    match run_service_io(services, DesktopServices::application_access_views).await {
         Ok(applications) => send(events, WorkerEvent::ApplicationAccessUpdated(applications)).await,
         Err(_) => {
             send(
@@ -4356,7 +4472,14 @@ async fn persist_config(
     paths: &AppPaths,
     events: &Sender<WorkerEvent>,
 ) -> bool {
-    if let Err(error) = config.save_atomic(&paths.config) {
+    let config = config.clone();
+    let path = paths.config.clone();
+    let result = tokio::task::spawn_blocking(move || config.save_atomic(&path)).await;
+    let result = match result {
+        Ok(result) => result,
+        Err(_) => Err(anyhow::anyhow!("config persistence task failed")),
+    };
+    if let Err(error) = result {
         send(
             events,
             WorkerEvent::Error(format!(
@@ -4481,25 +4604,26 @@ fn matching_known_install_plan(
     known_plan.filter(|plan| plan.selection.model_id == recommended)
 }
 
-async fn refresh_content_views(services: &DesktopServices, events: &Sender<WorkerEvent>) {
-    refresh_collection_views(services, events).await;
-    match services.review_views() {
-        Ok(reviews) => send(events, WorkerEvent::Reviews(reviews)).await,
-        Err(error) => {
-            send(
-                events,
-                WorkerEvent::Error(format!("No se pudo refrescar la revisión: {error:#}")),
-            )
-            .await
+async fn refresh_content_views(services: &Arc<DesktopServices>, events: &Sender<WorkerEvent>) {
+    match run_service_io(services, |services| {
+        Ok((
+            services.collection_views()?,
+            services.review_views()?,
+            services.source_issue_views()?,
+        ))
+    })
+    .await
+    {
+        Ok((collections, reviews, issues)) => {
+            send(events, WorkerEvent::Collections(collections)).await;
+            send(events, WorkerEvent::Reviews(reviews)).await;
+            send(events, WorkerEvent::SourceIssues(issues)).await;
         }
-    }
-    match services.source_issue_views() {
-        Ok(issues) => send(events, WorkerEvent::SourceIssues(issues)).await,
         Err(error) => {
             send(
                 events,
                 WorkerEvent::Error(format!(
-                    "No se pudieron refrescar los archivos pendientes: {error:#}"
+                    "No se pudo refrescar el contenido local: {error:#}"
                 )),
             )
             .await
@@ -4507,8 +4631,8 @@ async fn refresh_content_views(services: &DesktopServices, events: &Sender<Worke
     }
 }
 
-async fn refresh_collection_views(services: &DesktopServices, events: &Sender<WorkerEvent>) {
-    match services.collection_views() {
+async fn refresh_collection_views(services: &Arc<DesktopServices>, events: &Sender<WorkerEvent>) {
+    match run_service_io(services, DesktopServices::collection_views).await {
         Ok(collections) => send(events, WorkerEvent::Collections(collections)).await,
         Err(error) => {
             send(
@@ -4522,8 +4646,8 @@ async fn refresh_collection_views(services: &DesktopServices, events: &Sender<Wo
     }
 }
 
-async fn refresh_peers(services: &DesktopServices, events: &Sender<WorkerEvent>) {
-    match services.peer_views() {
+async fn refresh_peers(services: &Arc<DesktopServices>, events: &Sender<WorkerEvent>) {
+    match run_service_io(services, DesktopServices::peer_views).await {
         Ok(peers) => send(events, WorkerEvent::Peers(peers)).await,
         Err(error) => {
             send(
@@ -4536,13 +4660,13 @@ async fn refresh_peers(services: &DesktopServices, events: &Sender<WorkerEvent>)
 }
 
 fn ensure_watchers(
-    services: &DesktopServices,
+    collections: Vec<CollectionView>,
     watchers: &mut HashMap<Uuid, CollectionWatcherHandle>,
     watch_tx: &AsyncSender<CollectionWatchEvent>,
-) -> anyhow::Result<WatcherSetup> {
+) -> WatcherSetup {
     let mut started = Vec::new();
     let mut failures = Vec::new();
-    for collection in services.collection_views()? {
+    for collection in collections {
         if collection.indexing_mode == IndexingMode::Continuous
             && let std::collections::hash_map::Entry::Vacant(entry) = watchers.entry(collection.id)
         {
@@ -4556,7 +4680,7 @@ fn ensure_watchers(
             }
         }
     }
-    Ok(WatcherSetup { started, failures })
+    WatcherSetup { started, failures }
 }
 
 fn watcher_failure_summary(failures: &[(Uuid, String)]) -> String {
@@ -4906,12 +5030,22 @@ async fn schedule_all_scans(
     background: &mut JoinSet<BackgroundCompletion>,
     events: &Sender<WorkerEvent>,
 ) -> anyhow::Result<()> {
-    for collection in services.collection_views()? {
-        if watchers.contains_key(&collection.id)
-            && !services.startup_preflight_blocks_automatic_scan(collection.id)?
-        {
-            request_scan(services, scheduler, background, events, collection.id).await;
+    let watched = watchers.keys().copied().collect::<HashSet<_>>();
+    let collection_ids = run_service_io(services, move |services| {
+        let mut collection_ids = Vec::new();
+        for collection in services.collection_views()? {
+            if watched.contains(&collection.id)
+                && !services.startup_preflight_blocks_automatic_scan(collection.id)?
+            {
+                collection_ids.push(collection.id);
+            }
         }
+        Ok(collection_ids)
+    })
+    .await
+    .map_err(anyhow::Error::msg)?;
+    for collection_id in collection_ids {
+        request_scan(services, scheduler, background, events, collection_id).await;
     }
     Ok(())
 }
@@ -4933,14 +5067,20 @@ async fn schedule_idle_scans(
     background: &mut JoinSet<BackgroundCompletion>,
     events: &Sender<WorkerEvent>,
 ) -> anyhow::Result<PeriodicScanSummary> {
-    let mut collection_ids = Vec::new();
-    for collection in services.collection_views()? {
-        if watchers.contains_key(&collection.id)
-            && !services.startup_preflight_blocks_automatic_scan(collection.id)?
-        {
-            collection_ids.push(collection.id);
+    let watched = watchers.keys().copied().collect::<HashSet<_>>();
+    let mut collection_ids = run_service_io(services, move |services| {
+        let mut collection_ids = Vec::new();
+        for collection in services.collection_views()? {
+            if watched.contains(&collection.id)
+                && !services.startup_preflight_blocks_automatic_scan(collection.id)?
+            {
+                collection_ids.push(collection.id);
+            }
         }
-    }
+        Ok(collection_ids)
+    })
+    .await
+    .map_err(anyhow::Error::msg)?;
     collection_ids.sort_unstable();
 
     let mut summary = PeriodicScanSummary {

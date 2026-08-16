@@ -1,5 +1,6 @@
 import { spawn, spawnSync } from 'node:child_process';
 import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
+import { createServer } from 'node:net';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -18,6 +19,25 @@ const okfFixture = join(testRoot, 'fixtures', 'okf-v02');
 const freshnessDeadline = new Date();
 freshnessDeadline.setUTCFullYear(freshnessDeadline.getUTCFullYear() + 1);
 const staleAfter = freshnessDeadline.toISOString().slice(0, 10);
+
+async function availableLoopbackPort() {
+  const server = createServer();
+  await new Promise((resolveListen, rejectListen) => {
+    server.once('error', rejectListen);
+    server.listen(0, '127.0.0.1', resolveListen);
+  });
+  const address = server.address();
+  if (!address || typeof address === 'string') {
+    server.close();
+    throw new Error('the E2E runner could not reserve a loopback MCP port');
+  }
+  await new Promise((resolveClose, rejectClose) => {
+    server.close((error) => error ? rejectClose(error) : resolveClose());
+  });
+  return address.port;
+}
+
+const e2eMcpPort = await availableLoopbackPort();
 mkdirSync(sourceFixture, { recursive: true });
 mkdirSync(join(okfFixture, 'architecture'), { recursive: true });
 writeFileSync(join(sourceFixture, 'synthetic-source.md'), [
@@ -155,6 +175,7 @@ const app = spawn(appBinaryPath, [], {
     AIRWIKI_E2E_CONFIRMATIONS: 'allow',
     AIRWIKI_E2E_WIKI_FOLDER: sourceFixture,
     AIRWIKI_E2E_OKF_FOLDER: okfFixture,
+    AIRWIKI_E2E_MCP_PORT: String(e2eMcpPort),
     TAURI_WEBDRIVER_PORT: '4445'
   },
   stdio: 'inherit'
@@ -166,7 +187,11 @@ try {
   const wdioCli = resolve(dirname(wdioEntry), '..', 'bin', 'wdio.js');
   const result = spawnSync(process.execPath, [wdioCli, 'run', 'wdio.conf.ts'], {
     cwd: uiRoot,
-    env: { ...process.env, AIRWIKI_E2E_DATA_ROOT: testRoot },
+    env: {
+      ...process.env,
+      AIRWIKI_E2E_DATA_ROOT: testRoot,
+      AIRWIKI_E2E_MCP_PORT: String(e2eMcpPort)
+    },
     stdio: 'inherit'
   });
   if (result.error) throw result.error;

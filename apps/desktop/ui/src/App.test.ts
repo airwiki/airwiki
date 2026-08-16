@@ -2,7 +2,7 @@ import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testi
 import axe from 'axe-core';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import App from './App.svelte';
-import { allowPeerPairingAgain, approveReview, browsePublicWiki, configureFirewall, connect, loadWikiBundle, loadWikiPage, manageIntegration, openSystemDestination, prepareGuidedWikiRepair, reanalyzeReview, rejectReview, updatePreferences, verifyWikiConcept } from './api';
+import { allowPeerPairingAgain, approveReview, browsePublicWiki, configureFirewall, connect, loadWikiBundle, loadWikiPage, manageIntegration, openSystemDestination, pickOkfImport, prepareGuidedWikiRepair, quitCompletely, reanalyzeReview, rejectReview, updatePreferences, validateOkfImport, verifyWikiConcept } from './api';
 import type { UiEventEnvelope } from './generated/ui-contract';
 import { readySnapshot } from './test/fixtures';
 
@@ -43,12 +43,15 @@ vi.mock('./api', async (importOriginal) => {
     manageIntegration: vi.fn(async () => undefined),
     allowPeerPairingAgain: vi.fn(async () => undefined),
     browsePublicWiki: vi.fn(async () => 'public-browse-request'),
+    pickOkfImport: vi.fn(async () => null),
+    validateOkfImport: vi.fn(),
     loadWikiBundle: vi.fn(async () => undefined),
     loadWikiPage: vi.fn(async () => undefined),
     verifyWikiConcept: vi.fn(async () => undefined),
     approveReview: vi.fn(async () => undefined),
     rejectReview: vi.fn(async () => undefined),
-    reanalyzeReview: vi.fn(async () => undefined)
+    reanalyzeReview: vi.fn(async () => undefined),
+    quitCompletely: vi.fn(async () => undefined)
   };
 });
 
@@ -109,6 +112,21 @@ describe('AirWiki wiki workspace', () => {
 
     expect(await screen.findByRole('heading', { name: 'Wikis' })).toBeInTheDocument();
     expect(screen.queryByText('Trabajando')).not.toBeInTheDocument();
+  });
+
+  it('replaces an unrecoverable startup wait with a safe localized exit', async () => {
+    snapshot.phase = 'failed';
+    snapshot.preferences = null;
+
+    const { container } = render(App);
+
+    expect(await screen.findByRole('heading', { name: 'AirWiki could not start' })).toBeInTheDocument();
+    expect(screen.queryByText('Working')).not.toBeInTheDocument();
+    const quit = screen.getByRole('button', { name: 'Quit completely' });
+    await fireEvent.click(quit);
+    expect(quitCompletely).toHaveBeenCalledOnce();
+    const results = await axe.run(container, { rules: { region: { enabled: false } } });
+    expect(results.violations.filter((violation) => ['critical', 'serious'].includes(violation.impact ?? ''))).toHaveLength(0);
   });
 
   it('groups technical services into clear user-facing system states', async () => {
@@ -369,6 +387,50 @@ describe('AirWiki wiki workspace', () => {
     expect(shell).not.toHaveAttribute('aria-hidden');
   });
 
+  it('makes the wiki source chooser modal and restores focus when Escape closes it', async () => {
+    const { container } = render(App);
+    const newWikiButton = await screen.findByRole('button', { name: 'Nueva wiki' });
+    newWikiButton.focus();
+    await fireEvent.click(newWikiButton);
+
+    const shell = container.querySelector('.drive-shell');
+    const folderChoice = screen.getByRole('button', { name: /Desde una carpeta/ });
+    expect((shell as HTMLElement & { inert: boolean }).inert).toBe(true);
+    await waitFor(() => expect(folderChoice).toHaveFocus());
+    await fireEvent.keyDown(window, { key: 'Escape' });
+
+    expect(screen.queryByRole('dialog', { name: '¿De dónde viene esta wiki?' })).not.toBeInTheDocument();
+    expect((shell as HTMLElement & { inert: boolean }).inert).toBe(false);
+    await waitFor(() => expect(newWikiButton).toHaveFocus());
+  });
+
+  it('keeps the OKF import confirmation modal and focuses its name field', async () => {
+    vi.mocked(pickOkfImport).mockResolvedValue({ token: 'okf-selection', displayName: 'Portable OKF' });
+    vi.mocked(validateOkfImport).mockResolvedValue({
+      entryCount: 2,
+      conceptCount: 1,
+      uncompressedBytes: 1024,
+      declaredOkfVersion: '0.2',
+      compatibility: { kind: 'declaredV02' },
+      warningCount: 0,
+      warnings: [],
+      restrictions: []
+    });
+    const { container } = render(App);
+    await fireEvent.click(await screen.findByRole('button', { name: 'Nueva wiki' }));
+    await fireEvent.click(screen.getByRole('button', { name: /Importar carpeta OKF/ }));
+
+    const dialog = await screen.findByRole('dialog', { name: 'Revisa el bundle antes de importarlo' });
+    const nameField = within(dialog).getByRole('textbox', { name: 'Nombre de la wiki' });
+    const shell = container.querySelector('.drive-shell');
+    expect((shell as HTMLElement & { inert: boolean }).inert).toBe(true);
+    await waitFor(() => expect(nameField).toHaveFocus());
+    await fireEvent.keyDown(window, { key: 'Escape' });
+
+    expect(screen.queryByRole('dialog', { name: 'Revisa el bundle antes de importarlo' })).not.toBeInTheDocument();
+    expect((shell as HTMLElement & { inert: boolean }).inert).toBe(false);
+  });
+
   it('moves the focus trap to the close confirmation above an open drawer', async () => {
     Object.defineProperty(window, '__TAURI_INTERNALS__', { configurable: true, value: {} });
     render(App);
@@ -383,6 +445,10 @@ describe('AirWiki wiki workspace', () => {
     await waitFor(() => expect(hideButton).toHaveFocus());
     expect(screen.getByRole('dialog', { name: 'Conexiones', hidden: true })).toHaveAttribute('aria-modal', 'true');
     expect(hideButton.closest('.close-confirmation-backdrop')).not.toBeNull();
+
+    await fireEvent.keyDown(window, { key: 'Escape' });
+    expect(screen.queryByRole('dialog', { name: '¿Qué debe pasar al cerrar?' })).not.toBeInTheDocument();
+    expect(screen.getByRole('dialog', { name: 'Conexiones' })).toBeInTheDocument();
   });
 
   it('restores focus after cancelling a standalone close confirmation', async () => {

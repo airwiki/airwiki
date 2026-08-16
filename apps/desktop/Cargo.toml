@@ -15,7 +15,7 @@ name = "airwiki"
 path = "src/main.rs"
 
 [features]
-e2e = ["dep:tauri-plugin-wdio-webdriver"]
+e2e = ["dep:tauri-plugin-wdio-webdriver", "airwiki-mcp/e2e"]
 
 [dependencies]
 anyhow.workspace = true

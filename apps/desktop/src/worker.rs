@@ -35,6 +35,19 @@ use uuid::Uuid;
 type Sender<T> = tokio::sync::mpsc::Sender<T>;
 type ProgressSender<T> = tokio::sync::broadcast::Sender<T>;
 
+#[derive(Debug, PartialEq, Eq)]
+enum ContinuousWatcherPlan {
+    Start(PathBuf),
+    Quarantine,
+}
+
+fn continuous_watcher_plan<E>(folder: Result<Option<PathBuf>, E>) -> ContinuousWatcherPlan {
+    match folder {
+        Ok(Some(folder)) => ContinuousWatcherPlan::Start(folder),
+        Ok(None) | Err(_) => ContinuousWatcherPlan::Quarantine,
+    }
+}
+
 #[derive(Clone, Copy)]
 struct InstallEventSenders<'a> {
     durable: &'a Sender<WorkerEvent>,
@@ -2049,42 +2062,91 @@ pub(crate) async fn run_worker(
                         let update = run_service_io(&services, move |services| {
                             services
                                 .database()
-                                .update_collection_indexing_mode(collection_id, indexing_mode)?;
-                            if indexing_mode == IndexingMode::Continuous {
-                                services
-                                    .collection_views()?
-                                    .into_iter()
-                                    .find(|view| view.id == collection_id)
-                                    .map(|view| Some(view.folder))
-                                    .ok_or_else(|| anyhow::anyhow!("wiki is unavailable"))
-                            } else {
-                                Ok(None)
-                            }
+                                .update_collection_indexing_mode(collection_id, indexing_mode)
                         })
                         .await;
                         match update {
-                            Err(error) => {
-                                send(&events, WorkerEvent::Error(format!(
-                                    "No se pudo cambiar la indexación: {error:#}"
-                                ))).await;
+                            Err(_) => {
+                                tracing::warn!(
+                                    error_kind = "indexing_mode_update",
+                                    "wiki indexing mode could not be updated"
+                                );
+                                send(
+                                    &events,
+                                    WorkerEvent::Error(
+                                        "No se pudo cambiar la indexación".into(),
+                                    ),
+                                )
+                                .await;
                             }
-                            Ok(folder) => {
-                            watchers.remove(&collection_id);
-                            if let Some(folder) = folder {
-                                match CollectionWatcherHandle::spawn(collection_id, folder, watch_tx.clone()) {
-                                    Ok(watcher) => {
-                                        watchers.insert(collection_id, watcher);
-                                        if services.models_ready() {
-                                            request_scan(&services, &mut scan_scheduler, &mut background, &events, collection_id).await;
+                            Ok(()) => {
+                                watchers.remove(&collection_id);
+                                if indexing_mode == IndexingMode::Continuous {
+                                    let folder = run_service_io(&services, move |services| {
+                                        Ok(services
+                                            .collection_views()?
+                                            .into_iter()
+                                            .find(|view| view.id == collection_id)
+                                            .map(|view| view.folder))
+                                    })
+                                    .await;
+                                    match continuous_watcher_plan(folder) {
+                                        ContinuousWatcherPlan::Start(folder) => {
+                                            match CollectionWatcherHandle::spawn(
+                                                collection_id,
+                                                folder,
+                                                watch_tx.clone(),
+                                            ) {
+                                                Ok(watcher) => {
+                                                    watchers.insert(collection_id, watcher);
+                                                    if services.models_ready() {
+                                                        request_scan(
+                                                            &services,
+                                                            &mut scan_scheduler,
+                                                            &mut background,
+                                                            &events,
+                                                            collection_id,
+                                                        )
+                                                        .await;
+                                                    }
+                                                }
+                                                Err(_) => {
+                                                    request_quarantine(
+                                                        &services,
+                                                        &mut background,
+                                                        &mut watcher_quarantined,
+                                                        collection_id,
+                                                        "no se pudo activar el watcher solicitado",
+                                                    );
+                                                    tracing::warn!(
+                                                        error_kind = "collection_watcher_start_failed",
+                                                        "requested collection watcher could not start"
+                                                    );
+                                                    send(&events, WorkerEvent::Error(
+                                                        "No se pudo activar la actualización automática".into(),
+                                                    )).await;
+                                                }
+                                            }
+                                        }
+                                        ContinuousWatcherPlan::Quarantine => {
+                                            request_quarantine(
+                                                &services,
+                                                &mut background,
+                                                &mut watcher_quarantined,
+                                                collection_id,
+                                                "no se pudo reconciliar el watcher solicitado",
+                                            );
+                                            tracing::warn!(
+                                                error_kind = "collection_watcher_reconciliation_failed",
+                                                "requested collection watcher could not be reconciled"
+                                            );
+                                            send(&events, WorkerEvent::Error(
+                                                "No se pudo activar la actualización automática".into(),
+                                            )).await;
                                         }
                                     }
-                                    _ => {
-                                        request_quarantine(&services, &mut background, &mut watcher_quarantined, collection_id, "no se pudo activar el watcher solicitado");
-                                        send(&events, WorkerEvent::Error("No se pudo activar la actualización automática".into())).await;
-                                    }
                                 }
-                            }
-                            refresh_content_views(&services, &events).await;
+                                refresh_content_views(&services, &events).await;
                             }
                         }
                     }
@@ -4607,26 +4669,76 @@ fn matching_known_install_plan(
 async fn refresh_content_views(services: &Arc<DesktopServices>, events: &Sender<WorkerEvent>) {
     match run_service_io(services, |services| {
         Ok((
-            services.collection_views()?,
-            services.review_views()?,
-            services.source_issue_views()?,
+            services.collection_views(),
+            services.review_views(),
+            services.source_issue_views(),
         ))
     })
     .await
     {
         Ok((collections, reviews, issues)) => {
-            send(events, WorkerEvent::Collections(collections)).await;
-            send(events, WorkerEvent::Reviews(reviews)).await;
-            send(events, WorkerEvent::SourceIssues(issues)).await;
+            publish_content_view_results(events, collections, reviews, issues).await
         }
-        Err(error) => {
+        Err(_) => {
+            tracing::warn!(
+                error_kind = "content_view_refresh_task",
+                "content view refresh task could not finish"
+            );
             send(
                 events,
-                WorkerEvent::Error(format!(
-                    "No se pudo refrescar el contenido local: {error:#}"
-                )),
+                WorkerEvent::Error("No se pudo refrescar el contenido local".into()),
             )
             .await
+        }
+    }
+}
+
+async fn publish_content_view_results(
+    events: &Sender<WorkerEvent>,
+    collections: anyhow::Result<Vec<CollectionView>>,
+    reviews: anyhow::Result<Vec<ReviewItemView>>,
+    issues: anyhow::Result<Vec<SourceIssueView>>,
+) {
+    match collections {
+        Ok(collections) => send(events, WorkerEvent::Collections(collections)).await,
+        Err(_) => {
+            tracing::warn!(
+                error_kind = "collection_view_refresh",
+                "collection views could not be refreshed"
+            );
+            send(
+                events,
+                WorkerEvent::Error("No se pudieron refrescar las wikis".into()),
+            )
+            .await;
+        }
+    }
+    match reviews {
+        Ok(reviews) => send(events, WorkerEvent::Reviews(reviews)).await,
+        Err(_) => {
+            tracing::warn!(
+                error_kind = "review_view_refresh",
+                "review views could not be refreshed"
+            );
+            send(
+                events,
+                WorkerEvent::Error("No se pudo refrescar la revisión".into()),
+            )
+            .await;
+        }
+    }
+    match issues {
+        Ok(issues) => send(events, WorkerEvent::SourceIssues(issues)).await,
+        Err(_) => {
+            tracing::warn!(
+                error_kind = "source_issue_view_refresh",
+                "source issue views could not be refreshed"
+            );
+            send(
+                events,
+                WorkerEvent::Error("No se pudieron refrescar los archivos pendientes".into()),
+            )
+            .await;
         }
     }
 }
@@ -5671,6 +5783,51 @@ mod tests {
             receiver.recv().await,
             Some(WorkerEvent::Notice(message)) if message == "second"
         ));
+    }
+
+    #[test]
+    fn continuous_indexing_quarantines_when_its_folder_cannot_be_reconciled() {
+        let folder = PathBuf::from("synthetic-wiki");
+        assert_eq!(
+            continuous_watcher_plan(Ok::<_, String>(Some(folder.clone()))),
+            ContinuousWatcherPlan::Start(folder)
+        );
+        assert_eq!(
+            continuous_watcher_plan(Ok::<_, String>(None)),
+            ContinuousWatcherPlan::Quarantine
+        );
+        assert_eq!(
+            continuous_watcher_plan(Err::<Option<PathBuf>, _>("synthetic lookup failure")),
+            ContinuousWatcherPlan::Quarantine
+        );
+    }
+
+    #[tokio::test]
+    async fn content_refresh_preserves_independent_successful_views() {
+        let (sender, mut receiver) = tokio::sync::mpsc::channel(4);
+
+        publish_content_view_results(
+            &sender,
+            Ok(Vec::new()),
+            Ok(Vec::new()),
+            Err(anyhow::anyhow!("synthetic source issue failure")),
+        )
+        .await;
+
+        assert!(matches!(
+            receiver.recv().await,
+            Some(WorkerEvent::Collections(collections)) if collections.is_empty()
+        ));
+        assert!(matches!(
+            receiver.recv().await,
+            Some(WorkerEvent::Reviews(reviews)) if reviews.is_empty()
+        ));
+        assert!(matches!(
+            receiver.recv().await,
+            Some(WorkerEvent::Error(message))
+                if message == "No se pudieron refrescar los archivos pendientes"
+        ));
+        assert!(receiver.try_recv().is_err());
     }
 
     #[test]

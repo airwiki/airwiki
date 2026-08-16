@@ -863,6 +863,89 @@ describe('AirWiki wiki workspace', () => {
     expect(screen.getByRole('heading', { name: 'Busca en todas tus wikis' })).toBeInTheDocument();
   });
 
+  it('keeps the newer search active when an older dispatch resolves last', async () => {
+    activateLocalSearch();
+    let resolveFirstSearch!: (requestId: string) => void;
+    vi.mocked(searchKnowledge).mockImplementationOnce(() => new Promise((resolve) => {
+      resolveFirstSearch = resolve;
+    })).mockResolvedValueOnce('newer-search');
+    window.location.hash = '#search';
+    render(App);
+    const form = await screen.findByRole('search');
+    const input = form.querySelector('input');
+    expect(input).not.toBeNull();
+    await fireEvent.input(input!, { target: { value: 'consulta anterior' } });
+
+    const firstSubmission = fireEvent.submit(form);
+    await waitFor(() => expect(searchKnowledge).toHaveBeenCalledTimes(1));
+    await fireEvent.input(input!, { target: { value: 'consulta nueva' } });
+    await fireEvent.submit(form);
+    await waitFor(() => expect(searchKnowledge).toHaveBeenCalledTimes(2));
+    snapshot = {
+      ...snapshot,
+      sequence: snapshot.sequence + 1,
+      search: { requestId: 'newer-search', status: 'complete', coverage: 'complete', hits: [] }
+    };
+    await act(() => {
+      snapshotListener?.({ schemaVersion: snapshot.schemaVersion, sequence: snapshot.sequence, requestId: 'newer-search', kind: 'stateChanged', snapshot });
+    });
+    expect(await screen.findByText('No encontramos evidencia coincidente')).toBeInTheDocument();
+
+    resolveFirstSearch('older-search');
+    await firstSubmission;
+    expect(screen.getByText('No encontramos evidencia coincidente')).toBeInTheDocument();
+  });
+
+  it('keeps the active search locked through unrelated snapshots', async () => {
+    activateLocalSearch();
+    vi.mocked(searchKnowledge).mockResolvedValueOnce('active-search');
+    window.location.hash = '#search';
+    render(App);
+    const form = await screen.findByRole('search');
+    const input = form.querySelector('input');
+    expect(input).not.toBeNull();
+    await fireEvent.input(input!, { target: { value: 'consulta activa' } });
+    await fireEvent.submit(form);
+    await waitFor(() => expect(searchKnowledge).toHaveBeenCalledTimes(1));
+
+    snapshot = { ...snapshot, sequence: snapshot.sequence + 1, search: null };
+    await act(() => {
+      snapshotListener?.({ schemaVersion: snapshot.schemaVersion, sequence: snapshot.sequence, requestId: null, kind: 'stateChanged', snapshot });
+    });
+    await fireEvent.submit(form);
+
+    expect(searchKnowledge).toHaveBeenCalledTimes(1);
+  });
+
+  it('allows an edited query to replace a search with partial results', async () => {
+    activateLocalSearch();
+    vi.mocked(searchKnowledge)
+      .mockResolvedValueOnce('older-search')
+      .mockResolvedValueOnce('replacement-search');
+    window.location.hash = '#search';
+    render(App);
+    const form = await screen.findByRole('search');
+    const input = form.querySelector('input');
+    expect(input).not.toBeNull();
+    await fireEvent.input(input!, { target: { value: 'consulta lenta' } });
+    await fireEvent.submit(form);
+    await waitFor(() => expect(searchKnowledge).toHaveBeenCalledTimes(1));
+
+    snapshot = {
+      ...snapshot,
+      sequence: snapshot.sequence + 1,
+      search: { requestId: 'older-search', status: 'searching', coverage: 'partial', hits: [] }
+    };
+    await act(() => {
+      snapshotListener?.({ schemaVersion: snapshot.schemaVersion, sequence: snapshot.sequence, requestId: 'older-search', kind: 'stateChanged', snapshot });
+    });
+    await fireEvent.input(input!, { target: { value: 'consulta nueva' } });
+    await fireEvent.submit(form);
+
+    await waitFor(() => expect(searchKnowledge).toHaveBeenCalledTimes(2));
+    expect(searchKnowledge).toHaveBeenLastCalledWith('consulta nueva', false);
+  });
+
   it('keeps search visible but explains why it cannot run before local AI is ready', async () => {
     window.location.hash = '#search';
     render(App);

@@ -15,7 +15,7 @@
   export let onopen: () => void;
 </script>
 
-<form class:preparing={!ready} class="global-search" role="search" onsubmit={(event) => { event.preventDefault(); if (ready) onsearch(); }}>
+<form class:preparing={!ready} class="global-search" role="search" onsubmit={(event) => { event.preventDefault(); if (ready && !busy) onsearch(); }}>
   <Search size={18} aria-hidden="true" />
   <TextField id="global-search" label={t('desktop-search-question')} value={question} oninput={onquestion} onfocus={onopen} maxlength={4096} describedby={!ready ? 'global-search-readiness' : undefined} placeholder={ready ? t('desktop-search-placeholder') : t('desktop-search-preparing-placeholder')} variant="search" />
   {#if !ready}<span id="global-search-readiness" class="sr-only">{t('desktop-search-preparing-body')}</span>{/if}

@@ -1298,9 +1298,9 @@
     actionMessage = t('review-evidence-loading');
     try {
       await loadReviewEvidence(review);
-      actionBusy = false;
     } catch {
       actionMessage = t('review-evidence-approval-blocked');
+    } finally {
       actionBusy = false;
     }
   }
@@ -1312,6 +1312,7 @@
       await loadReviewEvidence(selectedReview, snapshot.reviewEvidence.nextOrdinal);
     } catch {
       actionMessage = t('review-evidence-unavailable');
+    } finally {
       actionBusy = false;
     }
   }
@@ -1357,6 +1358,7 @@
       await loadWikiBundle(wikiId);
     } catch {
       actionMessage = t('home-wiki-failed');
+    } finally {
       actionBusy = false;
     }
   }
@@ -1368,6 +1370,7 @@
       await loadWikiPage(selectedWikiId, page);
     } catch {
       actionMessage = t('search-local-unavailable');
+    } finally {
       actionBusy = false;
     }
   }
@@ -1383,6 +1386,7 @@
       showOperationComplete();
     } catch {
       actionMessage = t('error-generic');
+    } finally {
       actionBusy = false;
     }
   }
@@ -1400,6 +1404,7 @@
       actionMessage = t('models-downloading', { artifact: snapshot?.model?.displayName ?? t('component-local-ai') });
     } catch {
       actionMessage = t('error-local-ai');
+    } finally {
       actionBusy = false;
     }
   }

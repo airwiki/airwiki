@@ -12,6 +12,7 @@
   let container: HTMLDivElement;
   let graph: Core | null = null;
   let resizeObserver: ResizeObserver | null = null;
+  let layoutReady = false;
   let loadFailed = false;
 
   const t = (id: string, args?: Record<string, string | number>) => message(locale, id, args);
@@ -66,6 +67,26 @@
     onselect(page);
   }
 
+  function renderGraph() {
+    if (!graph || container.clientWidth === 0 || container.clientHeight === 0) return;
+    graph.resize();
+    if (!layoutReady) {
+      graph.layout({
+        name: 'breadthfirst',
+        roots: graphRoots(),
+        directed: true,
+        padding: 42,
+        spacingFactor: 1.35,
+        avoidOverlap: true,
+        nodeDimensionsIncludeLabels: true,
+        animate: false,
+        transform: (_node, position) => ({ x: position.y, y: position.x })
+      }).run();
+      layoutReady = true;
+    }
+    graph.fit(undefined, 24);
+  }
+
   onMount(() => {
     let disposed = false;
     void import('cytoscape').then(({ default: cytoscape }) => {
@@ -92,27 +113,13 @@
           { selector: 'edge.related[label != ""]', style: { label: 'data(label)', color: muted, 'font-family': 'Atkinson, sans-serif', 'font-size': '9px', 'text-background-color': surface, 'text-background-opacity': 0.96, 'text-background-padding': '3px', 'text-margin-y': -9, 'text-rotation': 'autorotate' } },
           { selector: 'node:selected', style: { 'border-color': verify, 'border-width': 3, 'overlay-opacity': 0 } }
         ],
-        layout: {
-          name: 'breadthfirst',
-          roots: graphRoots(),
-          directed: true,
-          padding: 42,
-          spacingFactor: 1.35,
-          avoidOverlap: true,
-          nodeDimensionsIncludeLabels: true,
-          animate: false,
-          transform: (_node, position) => ({ x: position.y, y: position.x })
-        }
+        // The graph can mount while its routed panel still has zero dimensions.
+        // Defer the real layout until ResizeObserver reports a measurable canvas.
+        layout: { name: 'preset', fit: false }
       });
-      resizeObserver = new ResizeObserver(() => {
-        graph?.resize();
-        graph?.fit(undefined, 24);
-      });
+      resizeObserver = new ResizeObserver(renderGraph);
       resizeObserver.observe(container);
-      requestAnimationFrame(() => {
-        graph?.resize();
-        graph?.fit(undefined, 24);
-      });
+      requestAnimationFrame(renderGraph);
       graph.on('tap', 'node', (event) => {
         const page = event.target.data('page') as KnowledgePageInput | undefined;
         if (page) selectPage(page);
@@ -125,6 +132,7 @@
       resizeObserver = null;
       graph?.destroy();
       graph = null;
+      layoutReady = false;
     };
   });
 </script>

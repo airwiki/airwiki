@@ -16,6 +16,13 @@ describe('Fluent UI localization', () => {
       .toBe('3 documents · 2 published');
   });
 
+  it('uses singular and plural device counts in both locales', () => {
+    expect(message('es', 'desktop-known-devices', { count: 1 })).toBe('1 equipo conocido');
+    expect(message('es', 'desktop-known-devices', { count: 2 })).toBe('2 equipos conocidos');
+    expect(message('en', 'desktop-known-devices', { count: 1 })).toBe('1 known device');
+    expect(message('en', 'desktop-known-devices', { count: 2 })).toBe('2 known devices');
+  });
+
   it('fails visibly for an unknown key', () => {
     expect(message('en', 'missing-synthetic-message')).toBe('missing-synthetic-message');
   });

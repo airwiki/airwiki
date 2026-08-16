@@ -231,8 +231,18 @@ active implementation path. A later experiment must use a materially different
 hypothesis and fresh promotion evidence; this observed corpus remains diagnostic
 only.
 
-Windows real-model evaluation is pending. A macOS result must never be used to
-infer the behavior of the Windows artifacts.
+The exact schema-v3 evaluation was repeated on Windows x64 on 2026-08-16 with
+the same pinned model revisions. It reproduced Recall@5 `0.7222`, MRR@5
+`0.9167`, two unexpected facts and zero forbidden, provenance, duplicate,
+stability or audit errors. The Windows observation therefore confirms the same
+selector failure; it does not turn the gate green or permit inferring future
+artifact behavior across platforms.
+
+The next hypothesis is the still-unobserved
+[typed-evidence coverage v3](typed-evidence-coverage-v3.md) experiment. Its
+contract uses fresh development and human-reviewed promotion domains. The
+observed retrieval-v3 fixture remains regression evidence and is not available
+for candidate tuning or promotion.
 
 Rejected or inconclusive candidate mechanisms are summarized in the
 [retrieval research ledger](retrieval-research-ledger.md). Their implementation

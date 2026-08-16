@@ -194,7 +194,7 @@ fn navigation_guard() -> tauri::plugin::TauriPlugin<tauri::Wry> {
         .build()
 }
 
-const DEFAULT_LOG_FILTER: &str = "airwiki=info,airwiki_=info";
+const DEFAULT_LOG_FILTER: &str = "off,airwiki=info,airwiki_=info";
 
 fn sanitized_log_filter() -> Result<tracing_subscriber::EnvFilter> {
     tracing_subscriber::EnvFilter::try_new(DEFAULT_LOG_FILTER)
@@ -5539,7 +5539,9 @@ mod tests {
 
     #[test]
     fn default_logging_does_not_enable_dependency_events() {
-        assert!(DEFAULT_LOG_FILTER.split(',').all(|directive| {
+        let mut directives = DEFAULT_LOG_FILTER.split(',');
+        assert_eq!(directives.next(), Some("off"));
+        assert!(directives.all(|directive| {
             directive
                 .split_once('=')
                 .is_some_and(|(target, _)| target.starts_with("airwiki"))
@@ -5548,6 +5550,8 @@ mod tests {
 
     #[test]
     fn configured_logging_uses_only_the_sanitized_allowlist() -> Result<()> {
+        use tracing_subscriber::prelude::*;
+
         let configured = sanitized_log_filter()?.to_string();
         let configured_directives = configured
             .split(',')
@@ -5556,6 +5560,18 @@ mod tests {
             .split(',')
             .collect::<std::collections::BTreeSet<_>>();
         assert_eq!(configured_directives, expected_directives);
+
+        let subscriber = tracing_subscriber::registry().with(sanitized_log_filter()?);
+        tracing::subscriber::with_default(subscriber, || {
+            assert!(tracing::enabled!(
+                target: "airwiki::logging_test",
+                tracing::Level::INFO
+            ));
+            assert!(!tracing::enabled!(
+                target: "libp2p_mdns::behaviour::iface",
+                tracing::Level::ERROR
+            ));
+        });
         Ok(())
     }
 

@@ -73,7 +73,9 @@ constitute a supported public release.
 - [ ] Verify that `latest.json` names the exact release version, platform keys,
   artifact URLs and detached signatures in the candidate.
 - [ ] Reject invalid signatures, equal versions, downgrades, replayed historical
-  installers, redirects, symlinks, reparse points, and unexpected assets.
+  installers, symlinks, reparse points, and unexpected assets. Treat hosting
+  redirects as untrusted transport and verify the final downloaded bytes with
+  both the updater signature and native platform trust.
 - [ ] Create a draft prerelease tied to the exact audited commit.
 - [ ] Protect `v*` tags against update and deletion; resolve the release target
   and final tag to the exact audited commit immediately before publication.
@@ -99,7 +101,7 @@ constitute a supported public release.
   fixtures and sanitized evidence.
 - [ ] Wiki repair cancellation writes nothing, confirmed repair withdraws before
   mutation, stale preview is rejected, and ambiguous history remains blocked.
-- [ ] At least five nontechnical participants complete onboarding, collection
+- [ ] At least five nontechnical participants complete onboarding, Wiki
   review, pairing, background recovery, and permission recovery without a terminal
   or internal identifiers.
 - [ ] A human owner approves public promotion after reviewing final hashes,

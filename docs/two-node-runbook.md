@@ -29,9 +29,9 @@ must follow the [Internet federation acceptance runbook](internet-federation-run
 
 ## Scenario
 
-1. **Create isolated collections.** Create one Atlas collection on each node and
-   one private Windows collection. Enable peer sharing and external chat only on
-   the two Atlas collections. Keep both policies disabled on the private one.
+1. **Create isolated Wikis.** Create one Atlas Wiki on each node and one private
+   Windows Wiki. Enable peer sharing and external chat only on the two Atlas
+   Wikis. Keep both policies disabled on the private one.
 2. **Automatic ingestion.** Wait for the startup scan or watcher. Do not force a
    manual rescan first. Each Atlas document must reach human review exactly once.
 3. **Human publication.** Review the proposed metadata and publish the synthetic
@@ -44,8 +44,8 @@ must follow the [Internet federation acceptance runbook](internet-federation-run
    ten seconds; do not use manual addresses.
 6. **Pairing.** Start pairing from one node. Compare the same six SAS words on
    both screens and confirm on both devices before the deadline.
-7. **Grants.** Grant only the remote Atlas collection in each direction. The
-   private collection must not appear as an eligible grant.
+7. **Grants.** Grant only the remote Atlas Wiki in each direction. The private
+   Wiki must not appear as an eligible grant.
 8. **Federated search.** Ask how Atlas is recovered, who is responsible, and the
    target date. Evidence must combine the Mac procedure with Windows ownership
    and date, and every hit must contain the node, heading or page, revision, and
@@ -65,8 +65,8 @@ must follow the [Internet federation acceptance runbook](internet-federation-run
     stop receiving Windows evidence. Rediscovery alone must not restore trust or
     grants.
 14. **Chat integration.** Pair again explicitly, grant only the Windows Atlas
-    collection, and connect one supported desktop chat client from
-    **Integrations**. The final answer must use `search_airwiki`, cite
+    Wiki, and connect one supported desktop chat client from **Connections**.
+    The final answer must use `search_airwiki`, cite
     evidence from both nodes, declare partial coverage when applicable, and
     return no evidence for the private canary.
 
@@ -77,7 +77,7 @@ must follow the [Internet federation acceptance runbook](internet-federation-run
 - Federated search completes in under three seconds when both nodes are online.
 - An offline or partial MCP response completes in under five seconds.
 - Discovery or reconnection completes in under ten seconds on the private LAN.
-- No original, full document, index, embedding, path, or collection listing
+- No original, full document, index, embedding, path, or Wiki listing
   crosses the LAN.
 - Publication, SAS confirmation, grants, external-chat policy, and re-publication
   always remain explicit human actions.

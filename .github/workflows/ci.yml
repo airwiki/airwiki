@@ -129,6 +129,8 @@ jobs:
         run: cargo clippy --workspace --all-targets --all-features --locked -- -D warnings
       - name: Tests
         run: cargo test --workspace --all-features --locked
+      - name: Rust documentation
+        run: cargo doc --workspace --all-features --no-deps --locked
       - name: Generated UI contract
         run: cargo run --locked -p xtask -- ui-bindings check
       - name: Synthetic relevance fixture

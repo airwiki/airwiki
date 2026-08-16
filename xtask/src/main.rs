@@ -3280,6 +3280,19 @@ fn verify_windows_signpath_sources(
     package: &str,
     verify: &str,
 ) -> Result<()> {
+    let prepare_runtime_import = ". (Join-Path $PSScriptRoot \"windows-runtime.ps1\")";
+    let prepare_payload_import = ". (Join-Path $PSScriptRoot \"windows-payload.ps1\")";
+    let prepare_runtime_position = prepare
+        .find(prepare_runtime_import)
+        .context("SignPath binary preparation must import Windows runtime helpers")?;
+    let prepare_payload_position = prepare
+        .find(prepare_payload_import)
+        .context("SignPath binary preparation must import Windows payload helpers")?;
+    ensure!(
+        prepare_runtime_position < prepare_payload_position,
+        "SignPath binary preparation must import Windows runtime helpers before payload helpers"
+    );
+
     let pinned_action =
         "signpath/github-action-submit-signing-request@b9d91eadd323de506c0c81cf0c7fe7438f3360fd";
     ensure!(

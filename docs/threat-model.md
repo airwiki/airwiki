@@ -119,8 +119,8 @@ Controls are not considered effective end to end until the
 | Release dependency captures credentials | Secret-free build, isolated signing/verification, protected environments, scoped credentials | Actions, scripts, and signing services remain in the TCB |
 | Elevated helper opens broad rules | Closed arguments, sibling app, same-publisher validation, Firewall COM API, Private/Domain `LocalSubnet`, no edge traversal | Admin or domain policy can override; conflict and cancellation keep local-only mode |
 | Untrusted executable invokes helper | Helper derives its sibling desktop and requires the same valid publisher | Compromised publisher key or build host breaks the guarantee |
-| Update metadata or artifact is substituted | HTTPS transport plus updater and native signatures, protected file handles, signed version checks, explicit upgrade-only install | Public updater remains deferred; compromised signing keys require incident response |
-| One target is promoted before another passes | Stable metadata is intended to be published only after both target gates and human approval | Promotion automation is archived and must be re-reviewed before use |
+| Update metadata or artifact is substituted | Fixed HTTPS manifest endpoint; hosting redirects remain untrusted; updater and native signatures, protected file handles, strict version increase and explicit installation confirmation protect the final bytes | Hosting still observes request metadata; compromised signing keys require incident response |
+| One target is promoted before another passes | Draft assembly depends on both native signing jobs; promotion re-downloads and independently verifies macOS and Windows against one fingerprinted `SHA256SUMS` inventory before protected human approval | A compromised CI or signing service remains in the release TCB; never bypass protected environments |
 | Update check leaks knowledge | No installation ID, PeerId, query, or content | Hosting provider still observes IP, user agent, and requested version |
 | Device is stolen | Secrets remain in OS credential storage; originals are not replicated | Disk and session protection are OS responsibilities |
 | Paired peer causes denial of service | Bounded payloads, deadlines, rate limits, one relevance inference per node | A trusted peer can consume bounded resources; revoke and block it |
@@ -174,8 +174,10 @@ Controls are not considered effective end to end until the
 
 ## Current development blockers and residual risks
 
-- No public security contact, public signing identity, or
-  active protected release workflow exists.
+- No complete cross-platform public candidate has passed the protected release
+  workflows and installed acceptance matrix. Windows public-trust enrollment,
+  final SignPath configuration and native verification remain required before
+  any public release.
 - Trust and grants are per device, not per individual user.
 - LAN assumes one private subnet and cannot overcome router multicast policy.
 - OCR and advanced malicious-file analysis are out of scope.

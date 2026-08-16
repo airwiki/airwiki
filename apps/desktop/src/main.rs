@@ -196,15 +196,17 @@ fn navigation_guard() -> tauri::plugin::TauriPlugin<tauri::Wry> {
 
 const DEFAULT_LOG_FILTER: &str = "airwiki=info,airwiki_=info";
 
+fn sanitized_log_filter() -> Result<tracing_subscriber::EnvFilter> {
+    tracing_subscriber::EnvFilter::try_new(DEFAULT_LOG_FILTER)
+        .context("invalid built-in sanitized log filter")
+}
+
 fn init_logging(paths: &AppPaths) -> Result<tracing_appender::non_blocking::WorkerGuard> {
     std::fs::create_dir_all(&paths.logs).context("failed to create the sanitized log directory")?;
     let file = tracing_appender::rolling::daily(&paths.logs, "airwiki.log");
     let (writer, guard) = tracing_appender::non_blocking(file);
     tracing_subscriber::fmt()
-        .with_env_filter(
-            tracing_subscriber::EnvFilter::try_from_default_env()
-                .unwrap_or_else(|_| DEFAULT_LOG_FILTER.into()),
-        )
+        .with_env_filter(sanitized_log_filter()?)
         .with_writer(writer)
         .with_ansi(false)
         .with_target(true)
@@ -5542,6 +5544,19 @@ mod tests {
                 .split_once('=')
                 .is_some_and(|(target, _)| target.starts_with("airwiki"))
         }));
+    }
+
+    #[test]
+    fn configured_logging_uses_only_the_sanitized_allowlist() -> Result<()> {
+        let configured = sanitized_log_filter()?.to_string();
+        let configured_directives = configured
+            .split(',')
+            .collect::<std::collections::BTreeSet<_>>();
+        let expected_directives = DEFAULT_LOG_FILTER
+            .split(',')
+            .collect::<std::collections::BTreeSet<_>>();
+        assert_eq!(configured_directives, expected_directives);
+        Ok(())
     }
 
     #[test]

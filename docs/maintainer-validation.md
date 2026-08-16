@@ -47,6 +47,7 @@ cargo run --locked -p xtask -- retrieval validate
 cargo run --locked -p xtask -- retrieval evaluate \
   --embedding-snapshot <verified-e5-snapshot> \
   --relevance-snapshot <verified-mmarco-snapshot>
+cargo run --locked -p xtask -- typed-evidence-v3 validate-contract
 ```
 
 The generated reports stay under `target/evals/`. Persist only their fixture
@@ -54,7 +55,10 @@ hash, artifact revisions, platform, aggregate result, and SHA-256 when a
 candidate requires that evidence. A real-model failure is a measured product
 quality result; do not alter fixtures or thresholds solely to make a candidate
 appear green. See the [retrieval-quality profile](retrieval-quality-evaluation.md)
-for the pipeline scope and current platform observation.
+for the pipeline scope and current platform observation. The typed-evidence
+command validates only the frozen public experiment contract; private inputs,
+annotations, receipts, scoring keys and reports must remain outside the
+repository.
 
 Manual platform gates must use installed applications in interactive desktop
 sessions. A macOS build cannot certify Windows behavior, and an SSH-launched

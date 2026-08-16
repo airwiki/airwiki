@@ -60,6 +60,14 @@ Manual platform gates must use installed applications in interactive desktop
 sessions. A macOS build cannot certify Windows behavior, and an SSH-launched
 process cannot substitute for the real Windows user session.
 
+Before a silent Windows uninstall or upgrade probe, request **Quit completely**
+through the installed application and assert that no AirWiki process remains.
+`msiexec /qn` cannot present the normal files-in-use interaction; leaving the
+process alive would test that suppressed-interaction edge case instead of the
+supported installed-candidate lifecycle. The in-app updater remains a separate
+journey and must prove that its coordinated shutdown completes after launching
+Windows Installer.
+
 Before starting Windows LAN acceptance, verify that Windows Application Control
 allows the exact installer and that the installed desktop, MCP bridge and
 firewall helper have valid Authenticode signatures from the same publisher.

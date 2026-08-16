@@ -176,6 +176,10 @@ documents require review before publication.
 
 ## Windows uninstall
 
+Select **Quit completely** from the AirWiki tray menu before starting the
+uninstall. Closing only the window may leave AirWiki running in the tray so it
+can continue serving approved local integrations and network requests.
+
 Windows Installer removes the fixed per-user program and Start-menu entry. The
 application removes autostart only when the stored command exactly matches the
 AirWiki entry. Disable LAN sharing in AirWiki before uninstalling to request

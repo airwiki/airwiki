@@ -22,6 +22,7 @@ use uuid::Uuid;
 
 use crate::EMBEDDING_DIMENSIONS;
 use crate::chunk_identity::public_chunk_id;
+use crate::ingest::SourceFormat;
 
 const MIGRATION_1: &str = include_str!("../migrations/0001_initial.sql");
 const MIGRATION_2: &str = include_str!("../migrations/0002_publication_claims.sql");
@@ -692,6 +693,7 @@ pub(crate) struct RankedChunk {
     pub chunk: StoredChunk,
     pub title: String,
     pub source_sha256: String,
+    pub source_format: SourceFormat,
     pub updated_at: DateTime<Utc>,
     pub assurance: Option<ConceptAssurance>,
     pub lifecycle_status: Option<String>,
@@ -5116,7 +5118,8 @@ impl Database {
         let sql = format!(
             "SELECT ch.id,ch.concept_id,ch.source_document_id,ch.collection_id,ch.ordinal,
              ch.heading_or_page,ch.text,ch.text_sha256,ch.embedding,ch.source_revision,
-             co.title,co.logical_resource_uri,sd.source_sha256,co.updated_at,bm25(chunk_fts)
+             co.title,co.logical_resource_uri,sd.source_sha256,sd.source_format,co.updated_at,
+             bm25(chunk_fts)
              FROM chunk_fts JOIN chunks ch ON ch.id=chunk_fts.chunk_id
              JOIN concepts co ON co.id=ch.concept_id
              JOIN source_documents sd ON sd.id=ch.source_document_id
@@ -5203,6 +5206,7 @@ impl Database {
                 },
                 title,
                 source_sha256: fingerprint,
+                source_format: SourceFormat::Markdown,
                 updated_at: datetime_sql(row.get(6)?)?,
                 assurance: Some(ConceptAssurance {
                     trust: trust_tier_sql(row.get(7)?)?,
@@ -5287,7 +5291,7 @@ impl Database {
         let sql = format!(
             "SELECT ch.id,ch.concept_id,ch.source_document_id,ch.collection_id,ch.ordinal,
              ch.heading_or_page,ch.text,ch.text_sha256,ch.embedding,ch.source_revision,
-             co.title,co.logical_resource_uri,sd.source_sha256,co.updated_at,NULL
+             co.title,co.logical_resource_uri,sd.source_sha256,sd.source_format,co.updated_at,NULL
              FROM chunks ch JOIN concepts co ON co.id=ch.concept_id
              JOIN source_documents sd ON sd.id=ch.source_document_id
              JOIN collections col ON col.id=ch.collection_id
@@ -5787,15 +5791,28 @@ fn ranked_chunk_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<RankedChun
         chunk,
         title: row.get(10)?,
         source_sha256: row.get(12)?,
-        updated_at: datetime_sql(row.get::<_, String>(13)?)?,
+        source_format: source_format_sql(row.get::<_, String>(13)?)?,
+        updated_at: datetime_sql(row.get::<_, String>(14)?)?,
         assurance: Some(ConceptAssurance {
             trust: TrustTier::HumanReviewed,
             freshness: FreshnessState::NotDeclared,
             verification_outdated: false,
         }),
         lifecycle_status: Some("stable".to_owned()),
-        lexical_score: row.get(14)?,
+        lexical_score: row.get(15)?,
     })
+}
+
+fn source_format_sql(value: String) -> rusqlite::Result<SourceFormat> {
+    match value.as_str() {
+        "markdown" => Ok(SourceFormat::Markdown),
+        "pdf" => Ok(SourceFormat::Pdf),
+        _ => Err(rusqlite::Error::FromSqlConversionFailure(
+            13,
+            rusqlite::types::Type::Text,
+            format!("unknown source format: {value}").into(),
+        )),
+    }
 }
 
 fn publication_claim_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<PublicationClaim> {

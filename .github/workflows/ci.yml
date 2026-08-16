@@ -137,6 +137,8 @@ jobs:
         run: cargo run --locked -p xtask -- relevance validate
       - name: Synthetic retrieval pipeline
         run: cargo run --locked -p xtask -- retrieval validate
+      - name: Frozen typed-evidence experiment contract
+        run: cargo run --locked -p xtask -- typed-evidence-v3 validate-contract
       - name: Activate pinned pnpm
         shell: bash
         run: |

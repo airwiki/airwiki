@@ -4,7 +4,7 @@ use airwiki_mcp::McpClientKind;
 
 const USAGE: &str = concat!(
     "usage: airwiki-mcp-bridge --client ",
-    "<chatgpt-desktop|claude-desktop|gemini-cli|generic-mcp>"
+    "<chatgpt-desktop|claude-desktop|claude-code|gemini-cli|generic-mcp>"
 );
 
 #[tokio::main]
@@ -57,6 +57,7 @@ mod tests {
             ("gemini-cli", McpClientKind::GeminiCli),
             ("generic-mcp", McpClientKind::GenericMcp),
         ] {
+            assert!(USAGE.contains(value));
             let parsed = parse_client([OsString::from("--client"), OsString::from(value)])
                 .expect("supported client");
             assert_eq!(parsed, expected);

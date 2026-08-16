@@ -688,6 +688,9 @@ fn markdown_plain_text(markdown: &str) -> String {
             Event::End(tag) if markdown_block_ended(tag) => {
                 push_text_separator(&mut extracted);
             }
+            // Match the safe viewer contract: raw HTML blocks and tags are
+            // excluded rather than interpreted. Text emitted separately by
+            // pulldown-cmark remains ordinary visible text.
             Event::Start(_)
             | Event::End(_)
             | Event::Html(_)
@@ -1927,6 +1930,20 @@ mod tests {
     #[test]
     fn markdown_plain_text_preserves_adjacent_inline_fragments() {
         assert_eq!(markdown_plain_text("co**or**dinación"), "coordinación");
+    }
+
+    #[test]
+    fn markdown_plain_text_excludes_raw_html_blocks_like_the_safe_viewer() {
+        let markdown = "<div>PRIVATE_BLOCK</div>\n\nVisible Markdown";
+
+        assert_eq!(markdown_plain_text(markdown), "Visible Markdown");
+    }
+
+    #[test]
+    fn markdown_plain_text_preserves_inline_text_exposed_by_the_safe_viewer() {
+        let markdown = "Visible <span data-detail=\"ignored\">inline text</span> after";
+
+        assert_eq!(markdown_plain_text(markdown), "Visible inline text after");
     }
 
     #[test]

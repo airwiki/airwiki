@@ -60,6 +60,7 @@
   let actionMessage = '';
   let actionMessageTimeout: number | null = null;
   let actionBusy = false;
+  let searchBusy = false;
   let selectedReview: ReviewSummary | null = null;
   let editDraft: EnrichmentDraft | null = null;
   let selectedWikiId: string | null = null;
@@ -90,6 +91,7 @@
   let publicBrowseOpen = false;
   let publicBrowseLoading = false;
   let activeSearchRequestId: string | null = null;
+  let searchSubmissionSequence = 0;
   let pendingSearchConcept: { wikiId: string; conceptId: string } | null = null;
   let guidedRepairRequestId: string | null = null;
   let guidedRepairConfirmed = false;
@@ -470,7 +472,13 @@
           editDraft = null;
         }
       }
-      if (event.snapshot.search?.status !== 'searching') actionBusy = false;
+      if (
+        activeSearchRequestId !== null
+        && event.snapshot.search?.requestId === activeSearchRequestId
+        && event.snapshot.search.status !== 'searching'
+      ) {
+        searchBusy = false;
+      }
       if (event.requestId && event.requestId === autostartRequestId) {
         autostartBusy = false;
         autostartRequestId = null;
@@ -1133,25 +1141,33 @@
   async function submitSearch() {
     actionMessage = '';
     if (!snapshot?.model?.active || !question.trim()) return;
+    const submissionSequence = ++searchSubmissionSequence;
     publicBrowseOpen = false;
     publicBrowseLoading = false;
     activeSearchRequestId = null;
-    actionBusy = true;
+    searchBusy = true;
     const submittedQuestion = question;
     const submittedPublicScope = includePublic;
     try {
       const requestId = await searchKnowledge(submittedQuestion, submittedPublicScope);
-      if (question === submittedQuestion && includePublic === submittedPublicScope) {
+      if (submissionSequence === searchSubmissionSequence && question === submittedQuestion && includePublic === submittedPublicScope) {
         activeSearchRequestId = requestId;
+        if (snapshot?.search?.requestId === requestId && snapshot.search.status !== 'searching') {
+          searchBusy = false;
+        }
       }
     } catch {
-      actionMessage = t('search-error-title');
-      actionBusy = false;
+      if (submissionSequence === searchSubmissionSequence) {
+        actionMessage = t('search-error-title');
+        searchBusy = false;
+      }
     }
   }
 
   function updateSearchQuestion(value: string) {
     question = value;
+    searchSubmissionSequence += 1;
+    searchBusy = false;
     activeSearchRequestId = null;
     publicBrowseOpen = false;
     publicBrowseLoading = false;
@@ -1159,6 +1175,8 @@
 
   function updatePublicSearch(value: boolean) {
     includePublic = value;
+    searchSubmissionSequence += 1;
+    searchBusy = false;
     activeSearchRequestId = null;
     publicBrowseOpen = false;
     publicBrowseLoading = false;
@@ -1414,7 +1432,7 @@
       <GlobalSearch
         {question}
         {includePublic}
-        busy={actionBusy}
+        busy={searchBusy}
         ready={snapshot.model?.active === true}
         platform={snapshot.platform}
         {t}

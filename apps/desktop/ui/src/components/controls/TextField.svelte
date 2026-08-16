@@ -16,6 +16,7 @@
   export let error: string | undefined = undefined;
   export let describedby: string | undefined = undefined;
   export let placeholder = '';
+  export let autocomplete: 'off' | 'on' = 'off';
   export let maxlength: number | undefined = undefined;
   export let rows = 3;
   export let required = false;
@@ -44,6 +45,7 @@
       id={controlId}
       value={value}
       {placeholder}
+      {autocomplete}
       {maxlength}
       {rows}
       {required}
@@ -58,6 +60,7 @@
       id={controlId}
       value={value}
       {placeholder}
+      {autocomplete}
       {maxlength}
       {required}
       {disabled}

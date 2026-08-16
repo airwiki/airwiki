@@ -27,6 +27,7 @@
   }
 
   function trustLabel(wiki: WikiSummary): string {
+    if (wiki.okfCompatibility.kind === 'legacyV01') return t('desktop-okf-compatibility-legacyV01');
     if (wiki.okfCompatibility.kind === 'futureRestricted') return t('desktop-okf-local-only');
     if (wiki.outdatedVerificationCount > 0) return t('desktop-assurance-outdated');
     if (wiki.staleConceptCount > 0) return t('desktop-freshness-stale');
@@ -58,7 +59,7 @@
       <span class="wiki-name" role="cell"><span class="wiki-icon"><BookOpen size={18} aria-hidden="true" /></span><span><strong>{wiki.name}</strong><small>{originLabel(wiki)}</small></span></span>
       <span role="cell">{t('desktop-wiki-content-count', { published: wiki.publishedCount, pending: wiki.needsReviewCount })}</span>
       <span role="cell">{accessLabel(wiki)}</span>
-      <span role="cell" class:attention={wiki.failedCount > 0 || wiki.maintenanceRequired || wiki.needsReviewCount > 0 || wiki.staleConceptCount > 0 || wiki.outdatedVerificationCount > 0 || wiki.metadataWarningCount > 0 || wiki.okfCompatibility.kind === 'futureRestricted'}>{scanState(wiki.id) ? t('status-working') : wiki.failedCount > 0 || wiki.maintenanceRequired ? t('status-needs-attention') : wiki.needsReviewCount > 0 ? t('desktop-wiki-pending-status') : trustLabel(wiki)}</span>
+      <span role="cell" class:attention={wiki.failedCount > 0 || wiki.maintenanceRequired || wiki.needsReviewCount > 0 || wiki.staleConceptCount > 0 || wiki.outdatedVerificationCount > 0 || wiki.metadataWarningCount > 0 || wiki.okfCompatibility.kind === 'legacyV01' || wiki.okfCompatibility.kind === 'futureRestricted'}>{scanState(wiki.id) ? t('status-working') : wiki.failedCount > 0 || wiki.maintenanceRequired ? t('status-needs-attention') : wiki.needsReviewCount > 0 ? t('desktop-wiki-pending-status') : trustLabel(wiki)}</span>
       <ChevronRight size={17} aria-hidden="true" />
     </button>
   {:else}

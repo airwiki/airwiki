@@ -204,8 +204,17 @@ async function navigateToDestination(index: number): Promise<void> {
   await required(navigation[index], `destination ${index}`).click();
   const expected = ['wikis', 'system'][index];
   await browser.waitUntil(
-    () => browser.execute((route) => document.querySelector('.route-page')?.getAttribute('data-route') === route, expected),
-    { timeout: 10_000, timeoutMsg: `destination ${expected} did not become interactive` }
+    () => browser.execute((route) => {
+      const page = document.querySelector<HTMLElement>('.route-page');
+      if (!page || page.dataset.route !== route) return false;
+      const style = getComputedStyle(page);
+      const bounds = page.getBoundingClientRect();
+      return Number.parseFloat(style.opacity) >= 0.99
+        && style.visibility === 'visible'
+        && bounds.width > 0
+        && bounds.height > 0;
+    }, expected),
+    { timeout: 10_000, timeoutMsg: `destination ${expected} did not become visibly interactive` }
   );
   await browser.waitUntil(
     () => browser.execute(() => document.querySelector<HTMLElement>('.drive-page')?.scrollTop === 0),
@@ -761,8 +770,13 @@ describe('AirWiki real IPC journey', () => {
     await importOkfWiki();
     await $('button*=AirWiki').click();
     await browser.waitUntil(
-      () => browser.execute(() => document.querySelector('.route-page')?.getAttribute('data-route') === 'wikis'),
-      { timeout: 10_000, timeoutMsg: 'wiki list did not restore after the OKF journey' }
+      () => browser.execute(() => {
+        const page = document.querySelector<HTMLElement>('.route-page');
+        if (!page || page.dataset.route !== 'wikis') return false;
+        const style = getComputedStyle(page);
+        return Number.parseFloat(style.opacity) >= 0.99 && style.visibility === 'visible';
+      }),
+      { timeout: 10_000, timeoutMsg: 'visible wiki list did not restore after the OKF journey' }
     );
   });
 });

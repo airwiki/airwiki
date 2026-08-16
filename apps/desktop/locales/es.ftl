@@ -809,7 +809,11 @@ desktop-update-privacy = No se envían identificadores del dispositivo y un fall
 desktop-sign-in = Inicio de sesión
 desktop-autostart = Inicio automático
 desktop-connectivity = Conectividad
-desktop-known-devices = { $count } equipos conocidos
+desktop-known-devices =
+    { $count ->
+        [one] { $count } equipo conocido
+       *[other] { $count } equipos conocidos
+    }
 desktop-listener = Listener
 desktop-discovery = Descubrimiento
 desktop-interfaces = Interfaces

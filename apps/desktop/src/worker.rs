@@ -2084,10 +2084,9 @@ pub(crate) async fn run_worker(
                                 if indexing_mode == IndexingMode::Continuous {
                                     let folder = run_service_io(&services, move |services| {
                                         Ok(services
-                                            .collection_views()?
-                                            .into_iter()
-                                            .find(|view| view.id == collection_id)
-                                            .map(|view| view.folder))
+                                            .database()
+                                            .collection(collection_id)?
+                                            .map(|collection| collection.source_folder))
                                     })
                                     .await;
                                     match continuous_watcher_plan(folder) {

@@ -25,7 +25,7 @@
   import TextField from './components/controls/TextField.svelte';
   import { message, resolveLocale, type MessageArgs } from './i18n';
 
-  type Destination = 'home' | 'wikis' | 'shared' | 'search' | 'system';
+  type Destination = 'wikis' | 'search' | 'system';
   type SystemSection = 'models' | 'preferences' | 'updates' | 'connectivity' | 'devices' | 'integrations';
   type ServiceTarget = 'knowledge' | 'connections' | 'apps';
 
@@ -65,7 +65,6 @@
   let selectedWikiId: string | null = null;
   let knowledgeMode: 'document' | 'graph' = 'document';
   let wikiTab: 'content' | 'pending' = 'content';
-  let sharedTab: 'owned' | 'public' = 'owned';
   let createWikiOpen = false;
   let connectionsOpen = false;
   let locale: LocalePreference = 'system';
@@ -100,7 +99,6 @@
   let attentionWikis: WikiSummary[];
   let selectedWiki: WikiSummary | null;
   let selectedWikiReviews: ReviewSummary[];
-  let sharedWikis: WikiSummary[];
   type DialogId = 'new-wiki-source' | 'create-wiki' | 'import-okf' | 'wiki-details' | 'wiki-access' | 'review' | 'connections' | 'close-choice' | null;
   let activeDialogId: DialogId;
   let dialogFocusGeneration = 0;
@@ -291,7 +289,6 @@
   $: attentionWikis = orderedWikis.filter(wikiNeedsAttention);
   $: selectedWiki = snapshot?.wikis.find((wiki) => wiki.id === selectedWikiId) ?? null;
   $: selectedWikiReviews = snapshot?.reviews.filter((review) => review.wikiId === selectedWikiId) ?? [];
-  $: sharedWikis = orderedWikis.filter((wiki) => wiki.peerShareable || wiki.allowExternalAi || wiki.internetPublic);
 
   const sourceIssueCodes: Record<string, string> = {
     FileTooLarge: 'file-too-large',
@@ -573,13 +570,6 @@
   async function submitGlobalSearch() {
     openGlobalSearch();
     await submitSearch();
-  }
-
-  function openSharedTab(tab: 'owned' | 'public') {
-    sharedTab = tab;
-    pushHash(`#shared/${tab}`);
-    if (tab === 'public') includePublic = true;
-    scrollMainTo(0);
   }
 
   function openWikiTab(tab: 'content' | 'pending') {
@@ -1437,44 +1427,9 @@
     </header>
 
     <section class="drive-page" aria-live="polite" bind:this={mainScrollRegion}>
-      {#key `${destination}:${selectedWikiId ?? ''}:${wikiTab}:${sharedTab}:${systemSection}`}
+      {#key `${destination}:${selectedWikiId ?? ''}:${wikiTab}:${systemSection}`}
         <div class="route-page drive-route" data-route={destination}>
-          {#if destination === 'home'}
-            <header class="page-heading">
-              <div><h1>{t('desktop-page-home-title')}</h1><p>{t('desktop-page-home-body')}</p></div>
-            </header>
-
-            <section class="home-section" aria-labelledby="attention-title">
-              <div class="section-heading"><div><h2 id="attention-title">{t('desktop-home-attention')}</h2><p>{t('desktop-home-attention-body')}</p></div><button class="text-action" onclick={refreshHealth} disabled={wikiHealthRequestId !== null}>{wikiHealthRequestId ? t('home-wiki-checking') : t('updates-check-now')}</button></div>
-              {#if attentionWikis.length}
-                <div class="attention-list">
-                  {#each attentionWikis as wiki (wiki.id)}
-                    <button onclick={() => openWiki(wiki.id, !wiki.maintenanceRequired && wiki.failedCount === 0 && wiki.needsReviewCount > 0 ? 'pending' : 'content')}>
-                      <span class:warning={wiki.failedCount > 0 || wiki.maintenanceRequired || wiki.okfCompatibility.kind === 'legacyV01'} class="attention-icon"><AlertTriangle size={18} aria-hidden="true" /></span>
-                      <span><strong>{wiki.name}</strong><small>{wikiAttentionSummary(wiki)}</small></span>
-                      <span>{t('desktop-attention-see-actions')}</span>
-                    </button>
-                  {/each}
-                </div>
-              {:else}
-                <div class="all-clear"><CheckCircle2 size={22} aria-hidden="true" /><div><strong>{t('desktop-home-clear-title')}</strong><p>{t('desktop-home-clear-body')}</p></div></div>
-              {/if}
-              {#if snapshot.wikiHealth?.attentionWikiId}
-                <div class="repair-summary">
-                  <div><strong>{t('knowledge-recovery-guided')}</strong><p>{t('knowledge-repair-review-help')}</p></div>
-                  <div class="row-actions"><button class="text-action" onclick={openAttentionWiki}>{t('action-open')}</button><button class="secondary" onclick={() => prepareRepair(snapshot!.wikiHealth!.attentionWikiId!)} disabled={guidedRepairRequestId !== null}>{t('knowledge-repair-review-action')}</button></div>
-                  {#if snapshot.guidedRepair?.wikiId === snapshot.wikiHealth.attentionWikiId && snapshot.guidedRepair.status === 'prepared'}
-                    <div class="repair-preview"><ul>{#each snapshot.guidedRepair.files as file, fileIndex (fileIndex)}<li><code>{file.page.kind}</code><span>{repairChangeLabel(file.change)}</span></li>{/each}</ul><Checkbox label={t('knowledge-repair-confirm-warning')} bind:checked={guidedRepairConfirmed} /><button class="danger" onclick={() => executeRepair(snapshot!.guidedRepair!.wikiId)} disabled={!guidedRepairConfirmed}>{t('knowledge-repair-confirm-action')}</button></div>
-                  {/if}
-                </div>
-              {/if}
-            </section>
-
-            <section class="home-section" aria-labelledby="your-wikis-title">
-              <div class="section-heading"><h2 id="your-wikis-title">{t('desktop-home-your-wikis')}</h2><button class="text-action" onclick={() => select('wikis')}>{t('desktop-view-all')}</button></div>
-              <WikiTable wikis={orderedWikis.slice(0, 6)} scans={snapshot.wikiScans} {t} onopen={openWiki} />
-            </section>
-          {:else if destination === 'wikis' && !selectedWiki}
+          {#if destination === 'wikis' && !selectedWiki}
             <header class="page-heading">
               <div><h1>{t('desktop-page-wikis-title')}</h1><p>{t('desktop-page-wikis-body')}</p></div>
             </header>
@@ -1648,14 +1603,6 @@
               <section class="pending-list" aria-label={t('desktop-wiki-pending-tab')}>
                 {#each selectedWikiReviews as review (`${review.conceptId}:${review.sourceRevision}`)}<button onclick={() => openReview(review)}><span class="pending-icon"><Sparkles size={17} aria-hidden="true" /></span><span><strong>{review.sourceName}</strong><small>{review.draft.summary}</small></span><span>{t('review-revision', { revision: review.sourceRevision })}</span></button>{:else}<div class="table-empty"><CheckCircle2 size={28} aria-hidden="true" /><strong>{t('review-empty-title')}</strong><p>{t('review-empty-body')}</p></div>{/each}
               </section>
-            {/if}
-          {:else if destination === 'shared'}
-            <header class="page-heading"><div><h1>{t('desktop-page-shared-title')}</h1><p>{t('desktop-page-shared-body')}</p></div><button class="secondary" onclick={openConnectionsPanel}>{t('desktop-connections')}</button></header>
-            <div class="content-tabs" role="tablist" aria-label={t('desktop-page-shared-title')}><button role="tab" aria-selected={sharedTab === 'owned'} class:active={sharedTab === 'owned'} onclick={() => openSharedTab('owned')}>{t('desktop-shared-by-you')}</button><button role="tab" aria-selected={sharedTab === 'public'} class:active={sharedTab === 'public'} onclick={() => openSharedTab('public')}>{t('desktop-public-network')}</button></div>
-            {#if sharedTab === 'owned'}
-              <section class="shared-section"><div class="section-heading"><div><h2>{t('desktop-shared-owned-title')}</h2><p>{t('desktop-shared-owned-body')}</p></div></div><WikiTable wikis={sharedWikis} scans={snapshot!.wikiScans} {t} onopen={(wikiId) => { const wiki = snapshot?.wikis.find((item) => item.id === wikiId); if (wiki) editWiki(wiki); }} /></section>
-            {:else}
-              <section class="public-discovery"><header><h2>{t('desktop-public-discover-title')}</h2><p>{t('desktop-public-discover-body')}</p></header><p>{t('desktop-public-search-help')}</p>{#if snapshot?.search?.hits.some(isPublicSearchHit)}<div class="search-results">{#each snapshot.search.hits.filter(isPublicSearchHit) as hit (`${hit.nodeId}:${hit.wikiId}:${hit.conceptId}:${hit.rank}`)}<article><small>{searchOriginFor(hit)}</small><h3>{hit.title}</h3><p>{hit.snippet}</p><button class="text-action" onclick={() => openSearchHit(hit)}>{t('action-open')}</button></article>{/each}</div>{/if}{#if snapshot.publicBrowse}<div class="public-browse-detail"><div class="section-heading"><div><h3>{snapshot.publicBrowse.wikiName ?? t('desktop-public-origin-missing')}</h3><p>{snapshot.publicBrowse.description ?? ''}</p><small>{snapshot.publicBrowse.okfCompatibility ? t(`desktop-okf-compatibility-${snapshot.publicBrowse.okfCompatibility.kind}`) : t('desktop-public-metadata-unavailable')}</small></div>{#if snapshot.publicBrowse.publisherId}<button class="danger" onclick={() => changePublisherBlock(snapshot!.publicBrowse!.publisherId!, true)}>{t('search-public-block-publisher')}</button>{/if}</div>{#each snapshot.publicBrowse.concepts as concept (`${concept.conceptId}:${concept.sourceRevision}`)}<article><small>{concept.conceptType} · {concept.language}</small><h3>{concept.title}</h3><p>{concept.summary}</p><span>{publicConceptMetadata(concept)}</span></article>{/each}{#if snapshot.publicBrowse.nextCursor}<button class="secondary" onclick={loadMorePublicConcepts}>{t('search-public-browse-more')}</button>{/if}</div>{/if}</section>
             {/if}
           {:else if destination === 'search'}
             <header class="page-heading"><div><h1>{t('desktop-page-search-title')}</h1><p>{t('desktop-page-search-body')}</p></div></header>

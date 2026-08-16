@@ -849,6 +849,20 @@ describe('AirWiki wiki workspace', () => {
     expect(screen.getByRole('heading', { name: 'Busca en todas tus wikis' })).toBeInTheDocument();
   });
 
+  it('hides local-only results when the public search scope changes', async () => {
+    activateLocalSearch();
+    snapshot.search = { requestId: 'local-only-search', status: 'complete', coverage: 'complete', hits: [] };
+    window.location.hash = '#search';
+    render(App);
+    await submitVisibleSearch('consulta local');
+
+    expect(await screen.findByText('No encontramos evidencia coincidente')).toBeInTheDocument();
+    await fireEvent.click(screen.getByRole('checkbox', { name: 'Red pública' }));
+
+    expect(screen.queryByText('No encontramos evidencia coincidente')).not.toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Busca en todas tus wikis' })).toBeInTheDocument();
+  });
+
   it('keeps search visible but explains why it cannot run before local AI is ready', async () => {
     window.location.hash = '#search';
     render(App);
@@ -1006,13 +1020,13 @@ describe('AirWiki wiki workspace', () => {
   });
 
   it('redirects previous top-level routes without retaining the old UI', async () => {
-    window.location.hash = '#library';
-    render(App);
-    expect(await screen.findByRole('heading', { name: 'Wikis' })).toBeInTheDocument();
-    cleanup();
-    window.location.hash = '#review';
-    render(App);
-    expect(await screen.findByRole('heading', { name: 'Wikis' })).toBeInTheDocument();
+    for (const route of ['#library', '#review', '#home', '#shared/public']) {
+      window.location.hash = route;
+      render(App);
+      expect(await screen.findByRole('heading', { name: 'Wikis' })).toBeInTheDocument();
+      expect(screen.getByRole('checkbox', { name: 'Red pública' })).not.toBeChecked();
+      cleanup();
+    }
   });
 
   it('supports local navigation shortcuts and platform theming', async () => {

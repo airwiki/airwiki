@@ -507,49 +507,17 @@ impl DynamicAuthorizedSearchBackend {
     /// Intersects the runtime authorization snapshot with the durable trust
     /// store. Any malformed/unknown/untrusted/blocked caller is denied; missing
     /// or stale grants simply produce no authorized collections.
-    fn durable_authorized_collections(
+    async fn durable_authorized_collections_async(
         &self,
-        authorization: &SearchAuthorization,
+        authorization: SearchAuthorization,
         purpose: SearchPurpose,
     ) -> std::result::Result<Vec<Uuid>, SearchContractError> {
-        let caller = authorization.caller_node_id.trim();
-        let peer_id = PeerId::from_str(caller).map_err(|_| SearchContractError::Unauthorized)?;
-        if peer_id.to_string() != caller {
-            return Err(SearchContractError::Unauthorized);
-        }
-        let live_access = self.access.state(&peer_id);
-        if !live_access.trusted || live_access.blocked {
-            return Err(SearchContractError::Unauthorized);
-        }
-        let peer = self
-            .database
-            .peer(caller)
-            .map_err(|error| SearchContractError::Backend(error.to_string()))?
-            .ok_or(SearchContractError::Unauthorized)?;
-        if !peer.trusted || peer.blocked {
-            return Err(SearchContractError::Unauthorized);
-        }
-
-        let runtime_grants = authorization
-            .allowed_collections
-            .iter()
-            .copied()
-            .filter(|collection| live_access.grants.contains(collection))
-            .collect::<HashSet<_>>();
-        let durable_grants = self
-            .database
-            .granted_collections_for_search(caller, purpose)
-            .map_err(|error| SearchContractError::Backend(error.to_string()))?;
-        let mut allowed = Vec::new();
-        for collection_id in durable_grants {
-            if !runtime_grants.contains(&collection_id) {
-                continue;
-            }
-            allowed.push(collection_id);
-        }
-        allowed.sort_unstable();
-        allowed.dedup();
-        Ok(allowed)
+        let database = self.database.clone();
+        let access = self.access.clone();
+        run_search_storage("authorized search policy worker stopped", move || {
+            durable_authorized_collections_blocking(&database, &access, &authorization, purpose)
+        })
+        .await
     }
 
     async fn finalize_authorized_response(
@@ -595,8 +563,9 @@ impl AuthorizedSearchBackend for DynamicAuthorizedSearchBackend {
             })?;
         // The AccessControl value is only a runtime snapshot. SQLite is the
         // durable authority for device trust, grants and collection policy.
-        let allowed_collections =
-            self.durable_authorized_collections(&authorization, request.purpose)?;
+        let allowed_collections = self
+            .durable_authorized_collections_async(authorization.clone(), request.purpose)
+            .await?;
         if allowed_collections.is_empty() {
             return self
                 .finalize_authorized_response(
@@ -617,6 +586,47 @@ impl AuthorizedSearchBackend for DynamicAuthorizedSearchBackend {
         self.finalize_authorized_response(response, authorization, purpose)
             .await
     }
+}
+
+fn durable_authorized_collections_blocking(
+    database: &Database,
+    access: &AccessControl,
+    authorization: &SearchAuthorization,
+    purpose: SearchPurpose,
+) -> std::result::Result<Vec<Uuid>, SearchContractError> {
+    let caller = authorization.caller_node_id.trim();
+    let peer_id = PeerId::from_str(caller).map_err(|_| SearchContractError::Unauthorized)?;
+    if peer_id.to_string() != caller {
+        return Err(SearchContractError::Unauthorized);
+    }
+    let live_access = access.state(&peer_id);
+    if !live_access.trusted || live_access.blocked {
+        return Err(SearchContractError::Unauthorized);
+    }
+    let peer = database
+        .peer(caller)
+        .map_err(|error| SearchContractError::Backend(error.to_string()))?
+        .ok_or(SearchContractError::Unauthorized)?;
+    if !peer.trusted || peer.blocked {
+        return Err(SearchContractError::Unauthorized);
+    }
+
+    let runtime_grants = authorization
+        .allowed_collections
+        .iter()
+        .copied()
+        .filter(|collection| live_access.grants.contains(collection))
+        .collect::<HashSet<_>>();
+    let durable_grants = database
+        .granted_collections_for_search(caller, purpose)
+        .map_err(|error| SearchContractError::Backend(error.to_string()))?;
+    let mut allowed = durable_grants
+        .into_iter()
+        .filter(|collection_id| runtime_grants.contains(collection_id))
+        .collect::<Vec<_>>();
+    allowed.sort_unstable();
+    allowed.dedup();
+    Ok(allowed)
 }
 
 fn finalize_authorized_response_blocking(
@@ -899,63 +909,90 @@ impl DynamicFederatedSearch {
         Ok(())
     }
 
-    fn revalidate_federated_hits(
+    async fn revalidate_federated_hits(
         &self,
         hits: Vec<SearchHit>,
         purpose: SearchPurpose,
     ) -> std::result::Result<Vec<SearchHit>, SearchContractError> {
-        let mut current = Vec::with_capacity(hits.len());
-        for hit in hits {
-            let keep = if hit.node_id == self.local_node_id {
-                self.database
-                    .hit_is_current(&hit, purpose)
-                    .map_err(|error| SearchContractError::Backend(error.to_string()))?
-            } else {
-                PeerId::from_str(&hit.node_id).is_ok_and(|peer| {
-                    let access = self.access.state(&peer);
-                    access.trusted && !access.blocked
-                })
-            };
-            if keep {
-                current.push(hit);
-            }
-        }
-        renumber_search_hits(&mut current);
-        Ok(current)
+        let database = self.database.clone();
+        let access = self.access.clone();
+        let local_node_id = self.local_node_id.clone();
+        run_search_storage("federated result revalidation worker stopped", move || {
+            revalidate_federated_hits_blocking(&database, &access, &local_node_id, hits, purpose)
+        })
+        .await
     }
 
     /// SQLite remains the authority for peers contacted by an outbound search.
     /// This closes the small window where a lossy presentation event could leave
     /// runtime trust broader than the state successfully persisted to disk.
-    fn reconcile_access(&self) -> Result<()> {
-        let stored = self
-            .database
-            .list_peers()?
+    async fn reconcile_access(&self) -> std::result::Result<(), SearchContractError> {
+        let database = self.database.clone();
+        let access = self.access.clone();
+        run_search_storage(
+            "federated access reconciliation worker stopped",
+            move || {
+                reconcile_federated_access_blocking(&database, &access)
+                    .map_err(|error| SearchContractError::Backend(error.to_string()))
+            },
+        )
+        .await
+    }
+}
+
+fn revalidate_federated_hits_blocking(
+    database: &Database,
+    access: &AccessControl,
+    local_node_id: &str,
+    hits: Vec<SearchHit>,
+    purpose: SearchPurpose,
+) -> std::result::Result<Vec<SearchHit>, SearchContractError> {
+    let mut current = Vec::with_capacity(hits.len());
+    for hit in hits {
+        let keep = if hit.node_id == local_node_id {
+            database
+                .hit_is_current(&hit, purpose)
+                .map_err(|error| SearchContractError::Backend(error.to_string()))?
+        } else {
+            PeerId::from_str(&hit.node_id).is_ok_and(|peer| {
+                let peer_access = access.state(&peer);
+                peer_access.trusted && !peer_access.blocked
+            })
+        };
+        if keep {
+            current.push(hit);
+        }
+    }
+    renumber_search_hits(&mut current);
+    Ok(current)
+}
+
+fn reconcile_federated_access_blocking(database: &Database, access: &AccessControl) -> Result<()> {
+    let stored = database
+        .list_peers()?
+        .into_iter()
+        .map(|peer| (peer.peer_id.clone(), peer))
+        .collect::<HashMap<_, _>>();
+    for peer in access.trusted_peers() {
+        let peer_id = peer.to_string();
+        let Some(durable) = stored
+            .get(&peer_id)
+            .filter(|stored| stored.trusted && !stored.blocked)
+        else {
+            access.block(peer);
+            continue;
+        };
+        let durable_grants = database
+            .granted_collections(&durable.peer_id)?
             .into_iter()
-            .map(|peer| (peer.peer_id.clone(), peer))
-            .collect::<HashMap<_, _>>();
-        for peer in self.access.trusted_peers() {
-            let peer_id = peer.to_string();
-            let Some(durable) = stored
-                .get(&peer_id)
-                .filter(|stored| stored.trusted && !stored.blocked)
-            else {
-                self.access.block(peer);
-                continue;
-            };
-            let durable_grants = self
-                .database
-                .granted_collections(&durable.peer_id)?
-                .into_iter()
-                .collect::<HashSet<_>>();
-            for runtime_grant in self.access.state(&peer).grants {
-                if !durable_grants.contains(&runtime_grant) {
-                    self.access.remove_grant(peer, runtime_grant);
-                }
+            .collect::<HashSet<_>>();
+        for runtime_grant in access.state(&peer).grants {
+            if !durable_grants.contains(&runtime_grant) {
+                access.remove_grant(peer, runtime_grant);
             }
         }
-        Ok(())
     }
+    Ok(())
 }
 
 #[async_trait]
@@ -965,8 +1002,7 @@ impl FederatedSearch for DynamicFederatedSearch {
         request: SearchRequest,
     ) -> std::result::Result<SearchResponse, SearchContractError> {
         request.validate()?;
-        self.reconcile_access()
-            .map_err(|error| SearchContractError::Backend(error.to_string()))?;
+        self.reconcile_access().await?;
         let backend = read_lock(&self.backend, "federated search proxy")
             .map_err(|error| SearchContractError::Unavailable(error.to_string()))?
             .clone()
@@ -979,9 +1015,12 @@ impl FederatedSearch for DynamicFederatedSearch {
             .hits
             .len()
             .saturating_add(response.authorized_candidates.len());
-        response.hits = self.revalidate_federated_hits(response.hits, purpose)?;
+        response.hits = self
+            .revalidate_federated_hits(response.hits, purpose)
+            .await?;
         response.authorized_candidates = if purpose == SearchPurpose::ExternalAi {
-            self.revalidate_federated_hits(response.authorized_candidates, purpose)?
+            self.revalidate_federated_hits(response.authorized_candidates, purpose)
+                .await?
         } else {
             Vec::new()
         };
@@ -1017,18 +1056,33 @@ impl FederatedSearch for LocalOnlyFederatedSearch {
         request: SearchRequest,
     ) -> std::result::Result<SearchResponse, SearchContractError> {
         let mut response = self.local.search(request).await?;
-        let has_trusted_peers = self
-            .database
-            .list_peers()
-            .map_err(|error| SearchContractError::Backend(error.to_string()))?
-            .into_iter()
-            .any(|peer| peer.trusted && !peer.blocked);
+        let database = self.database.clone();
+        let has_trusted_peers =
+            run_search_storage("local search topology worker stopped", move || {
+                database
+                    .list_peers()
+                    .map(|peers| peers.into_iter().any(|peer| peer.trusted && !peer.blocked))
+                    .map_err(|error| SearchContractError::Backend(error.to_string()))
+            })
+            .await?;
         if has_trusted_peers {
             response.partial = true;
             response.warnings.push("federation_disabled".to_owned());
         }
         Ok(response)
     }
+}
+
+async fn run_search_storage<T>(
+    failure: &'static str,
+    operation: impl FnOnce() -> std::result::Result<T, SearchContractError> + Send + 'static,
+) -> std::result::Result<T, SearchContractError>
+where
+    T: Send + 'static,
+{
+    tokio::task::spawn_blocking(operation)
+        .await
+        .map_err(|_| SearchContractError::Unavailable(failure.to_owned()))?
 }
 
 /// Generation provider that starts the bundled llama.cpp sidecar on first use
@@ -2624,10 +2678,6 @@ impl DesktopServices {
             .unwrap_or_default())
     }
 
-    fn public_index_endpoints(&self) -> Result<Vec<PublicIndexEndpoint>> {
-        federation_index_endpoints(&self.database)
-    }
-
     pub async fn scan_collection(&self, collection_id: Uuid) -> Result<Vec<IngestOutcome>> {
         let collection = self
             .database
@@ -2742,9 +2792,12 @@ impl DesktopServices {
         purpose: SearchPurpose,
         partials: mpsc::Sender<SearchResponse>,
     ) -> std::result::Result<(SearchResponse, PublicRouteKind), SearchContractError> {
-        let endpoints = self
-            .public_index_endpoints()
-            .map_err(|error| SearchContractError::Backend(error.to_string()))?;
+        let database = self.database.clone();
+        let endpoints = run_search_storage("public index lookup worker stopped", move || {
+            federation_index_endpoints(&database)
+                .map_err(|error| SearchContractError::Backend(error.to_string()))
+        })
+        .await?;
         let request = SearchRequest::new(question, purpose, top_k);
         let (trusted, public) = tokio::join!(
             self.federated_proxy.search(request.clone()),
@@ -4833,6 +4886,38 @@ mod tests {
 
     use super::*;
 
+    #[tokio::test(flavor = "current_thread")]
+    async fn search_storage_work_does_not_block_the_async_runtime() {
+        let (started_sender, started_receiver) = oneshot::channel();
+        let (release_sender, release_receiver) = std::sync::mpsc::channel();
+        let operation = tokio::spawn(async move {
+            run_search_storage("synthetic storage worker stopped", move || {
+                let _ = started_sender.send(());
+                release_receiver
+                    .recv_timeout(Duration::from_secs(2))
+                    .map_err(|_| {
+                        SearchContractError::Unavailable("synthetic release closed".into())
+                    })?;
+                Ok(())
+            })
+            .await
+        });
+
+        let started = tokio::time::timeout(Duration::from_secs(1), started_receiver).await;
+        let responsive =
+            tokio::time::timeout(Duration::from_millis(100), tokio::task::yield_now()).await;
+        let released = release_sender.send(());
+        started
+            .expect("blocking storage operation should start off the runtime")
+            .expect("blocking storage operation should report startup");
+        responsive.expect("the current-thread runtime must remain responsive");
+        released.expect("blocking storage operation should still be waiting");
+        operation
+            .await
+            .expect("search storage task should join")
+            .expect("search storage task should succeed");
+    }
+
     #[test]
     fn memory_mutations_identify_the_wiki_to_refresh() {
         let wiki_id = Uuid::new_v4();
@@ -6225,6 +6310,19 @@ mod tests {
         (database, proxy, peer_id, collection.id)
     }
 
+    fn durable_authorized_collections(
+        proxy: &DynamicAuthorizedSearchBackend,
+        authorization: &SearchAuthorization,
+        purpose: SearchPurpose,
+    ) -> std::result::Result<Vec<Uuid>, SearchContractError> {
+        durable_authorized_collections_blocking(
+            &proxy.database,
+            &proxy.access,
+            authorization,
+            purpose,
+        )
+    }
+
     #[test]
     fn durable_peer_grant_and_policy_are_all_required() {
         let (database, proxy, peer_id, collection_id) = durable_fixture();
@@ -6235,8 +6333,7 @@ mod tests {
             database.disclosure_gate(),
         );
         assert_eq!(
-            proxy
-                .durable_authorized_collections(&authorization, SearchPurpose::LocalAssistant)
+            durable_authorized_collections(&proxy, &authorization, SearchPurpose::LocalAssistant,)
                 .unwrap(),
             vec![collection_id]
         );
@@ -6246,8 +6343,7 @@ mod tests {
             .set_grant(&peer_id.to_string(), collection_id, false)
             .unwrap();
         assert!(
-            proxy
-                .durable_authorized_collections(&authorization, SearchPurpose::LocalAssistant)
+            durable_authorized_collections(&proxy, &authorization, SearchPurpose::LocalAssistant,)
                 .unwrap()
                 .is_empty()
         );
@@ -6259,8 +6355,7 @@ mod tests {
         // broadened into the current request.
         authorization.allowed_collections.clear();
         assert!(
-            proxy
-                .durable_authorized_collections(&authorization, SearchPurpose::LocalAssistant)
+            durable_authorized_collections(&proxy, &authorization, SearchPurpose::LocalAssistant,)
                 .unwrap()
                 .is_empty()
         );
@@ -6268,8 +6363,7 @@ mod tests {
 
         // Peer sharing does not imply permission to disclose to external AI.
         assert!(
-            proxy
-                .durable_authorized_collections(&authorization, SearchPurpose::ExternalAi)
+            durable_authorized_collections(&proxy, &authorization, SearchPurpose::ExternalAi)
                 .unwrap()
                 .is_empty()
         );
@@ -6285,14 +6379,12 @@ mod tests {
             )
             .unwrap();
         assert!(
-            proxy
-                .durable_authorized_collections(&authorization, SearchPurpose::LocalAssistant)
+            durable_authorized_collections(&proxy, &authorization, SearchPurpose::LocalAssistant,)
                 .unwrap()
                 .is_empty()
         );
         assert!(
-            proxy
-                .durable_authorized_collections(&authorization, SearchPurpose::ExternalAi)
+            durable_authorized_collections(&proxy, &authorization, SearchPurpose::ExternalAi)
                 .unwrap()
                 .is_empty()
         );
@@ -6308,8 +6400,7 @@ mod tests {
             )
             .unwrap();
         assert_eq!(
-            proxy
-                .durable_authorized_collections(&authorization, SearchPurpose::ExternalAi)
+            durable_authorized_collections(&proxy, &authorization, SearchPurpose::ExternalAi)
                 .unwrap(),
             vec![collection_id]
         );
@@ -6318,7 +6409,7 @@ mod tests {
         // completes; the final authorization check must honor it immediately.
         proxy.access.revoke_and_block(peer_id);
         assert!(matches!(
-            proxy.durable_authorized_collections(&authorization, SearchPurpose::LocalAssistant),
+            durable_authorized_collections(&proxy, &authorization, SearchPurpose::LocalAssistant,),
             Err(SearchContractError::Unauthorized)
         ));
         proxy.access.mark_trusted(peer_id);
@@ -6326,7 +6417,7 @@ mod tests {
 
         database.revoke_peer(&peer_id.to_string()).unwrap();
         assert!(matches!(
-            proxy.durable_authorized_collections(&authorization, SearchPurpose::LocalAssistant),
+            durable_authorized_collections(&proxy, &authorization, SearchPurpose::LocalAssistant,),
             Err(SearchContractError::Unauthorized)
         ));
     }
@@ -6447,7 +6538,11 @@ mod tests {
                 proxy.database.disclosure_gate(),
             );
             assert!(matches!(
-                proxy.durable_authorized_collections(&authorization, SearchPurpose::LocalAssistant),
+                durable_authorized_collections(
+                    &proxy,
+                    &authorization,
+                    SearchPurpose::LocalAssistant,
+                ),
                 Err(SearchContractError::Unauthorized)
             ));
         }
@@ -6462,7 +6557,7 @@ mod tests {
             proxy.database.disclosure_gate(),
         );
         assert!(matches!(
-            proxy.durable_authorized_collections(&authorization, SearchPurpose::LocalAssistant),
+            durable_authorized_collections(&proxy, &authorization, SearchPurpose::LocalAssistant,),
             Err(SearchContractError::Unauthorized)
         ));
     }

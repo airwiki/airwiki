@@ -8,6 +8,7 @@ use airwiki_types::{
 };
 use anyhow::{Context, Result, bail};
 use async_trait::async_trait;
+use pulldown_cmark::{Event, Parser, TagEnd};
 use thiserror::Error;
 use uuid::Uuid;
 
@@ -636,6 +637,7 @@ fn normalized_terms(text: &str) -> HashSet<String> {
 }
 
 fn relevant_snippet(text: &str, query: &str) -> String {
+    let text = markdown_plain_text(text);
     let query_words = query
         .split(|character: char| !character.is_alphanumeric())
         .filter(|word| word.len() >= 3)
@@ -663,6 +665,67 @@ fn relevant_snippet(text: &str, query: &str) -> String {
         snippet.push('…');
     }
     snippet.chars().take(MAX_SNIPPET_CHARS).collect()
+}
+
+fn markdown_plain_text(markdown: &str) -> String {
+    let mut extracted = String::with_capacity(markdown.len());
+    for event in Parser::new(markdown) {
+        match event {
+            Event::Text(text)
+            | Event::Code(text)
+            | Event::InlineMath(text)
+            | Event::DisplayMath(text) => extracted.push_str(&text),
+            Event::SoftBreak | Event::HardBreak | Event::Rule => {
+                push_text_separator(&mut extracted);
+            }
+            Event::End(tag) if markdown_block_ended(tag) => {
+                push_text_separator(&mut extracted);
+            }
+            Event::Start(_)
+            | Event::End(_)
+            | Event::Html(_)
+            | Event::InlineHtml(_)
+            | Event::FootnoteReference(_)
+            | Event::TaskListMarker(_) => {}
+        }
+    }
+
+    let mut normalized = String::with_capacity(extracted.len());
+    for word in extracted.split_whitespace() {
+        if !normalized.is_empty() {
+            normalized.push(' ');
+        }
+        normalized.push_str(word);
+    }
+    normalized
+}
+
+fn push_text_separator(text: &mut String) {
+    if !text.is_empty() && !text.ends_with(char::is_whitespace) {
+        text.push(' ');
+    }
+}
+
+const fn markdown_block_ended(tag: TagEnd) -> bool {
+    matches!(
+        tag,
+        TagEnd::Paragraph
+            | TagEnd::Heading(_)
+            | TagEnd::BlockQuote(_)
+            | TagEnd::CodeBlock
+            | TagEnd::HtmlBlock
+            | TagEnd::List(_)
+            | TagEnd::Item
+            | TagEnd::FootnoteDefinition
+            | TagEnd::DefinitionList
+            | TagEnd::DefinitionListTitle
+            | TagEnd::DefinitionListDefinition
+            | TagEnd::Table
+            | TagEnd::TableHead
+            | TagEnd::TableRow
+            | TagEnd::TableCell
+            | TagEnd::MetadataBlock(_)
+    )
 }
 
 #[cfg(test)]
@@ -1841,5 +1904,20 @@ mod tests {
         let snippet = relevant_snippet("İ área de pagos", "área");
 
         assert!(snippet.contains("área"));
+    }
+
+    #[test]
+    fn snippets_render_markdown_evidence_as_plain_text() {
+        let snippet = relevant_snippet(
+            "> Documento **aprobado** con `evidencia` verificable.",
+            "aprobado",
+        );
+
+        assert_eq!(snippet, "Documento aprobado con evidencia verificable.");
+    }
+
+    #[test]
+    fn markdown_plain_text_preserves_adjacent_inline_fragments() {
+        assert_eq!(markdown_plain_text("co**or**dinación"), "coordinación");
     }
 }

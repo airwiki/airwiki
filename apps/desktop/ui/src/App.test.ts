@@ -2,7 +2,7 @@ import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testi
 import axe from 'axe-core';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import App from './App.svelte';
-import { allowPeerPairingAgain, approveReview, browsePublicWiki, configureFirewall, connect, loadWikiBundle, loadWikiPage, manageIntegration, openSystemDestination, pickOkfImport, prepareGuidedWikiRepair, quitCompletely, reanalyzeReview, rejectReview, updatePreferences, validateOkfImport, verifyWikiConcept } from './api';
+import { allowPeerPairingAgain, approveReview, browsePublicWiki, configureFirewall, connect, loadWikiBundle, loadWikiPage, manageIntegration, openSystemDestination, pickOkfImport, prepareGuidedWikiRepair, quitCompletely, reanalyzeReview, rejectReview, searchKnowledge, updatePreferences, validateOkfImport, verifyWikiConcept } from './api';
 import type { UiEventEnvelope } from './generated/ui-contract';
 import { readySnapshot } from './test/fixtures';
 
@@ -17,6 +17,15 @@ function activateLocalSearch() {
     downloadBytes: 0, requiredFreeBytes: 0, fitsAvailableDisk: true,
     licenseAccepted: true, license: null, licenseUrl: null, revision: 'fixture'
   };
+}
+
+async function submitVisibleSearch(query = 'fixture search') {
+  const form = await screen.findByRole('search');
+  const input = form.querySelector('input');
+  expect(input).not.toBeNull();
+  await fireEvent.input(input!, { target: { value: query } });
+  await fireEvent.submit(form);
+  await waitFor(() => expect(searchKnowledge).toHaveBeenCalled());
 }
 const accessibilityCases = (['es', 'en'] as const).flatMap((locale) =>
   (['light', 'dark'] as const).flatMap((theme) =>
@@ -43,6 +52,7 @@ vi.mock('./api', async (importOriginal) => {
     manageIntegration: vi.fn(async () => undefined),
     allowPeerPairingAgain: vi.fn(async () => undefined),
     browsePublicWiki: vi.fn(async () => 'public-browse-request'),
+    searchKnowledge: vi.fn(async () => snapshot.search?.requestId ?? 'search-request'),
     pickOkfImport: vi.fn(async () => null),
     validateOkfImport: vi.fn(),
     loadWikiBundle: vi.fn(async () => undefined),
@@ -659,6 +669,7 @@ describe('AirWiki wiki workspace', () => {
     };
     window.location.hash = '#search';
     render(App);
+    await submitVisibleSearch('Evidencia Atlas');
     expect(await screen.findByText('Revisado por una persona')).toBeInTheDocument();
     await fireEvent.click((await screen.findAllByRole('button', { name: 'Abrir' }))[0]);
 
@@ -681,6 +692,7 @@ describe('AirWiki wiki workspace', () => {
     };
     window.location.hash = '#search';
     render(App);
+    await submitVisibleSearch('Evidencia cercana');
 
     const article = (await screen.findByRole('heading', { name: 'Evidencia cercana' })).closest('article');
     expect(article).not.toBeNull();
@@ -696,6 +708,7 @@ describe('AirWiki wiki workspace', () => {
     snapshot.search = { requestId: 'empty-search', status: 'complete', coverage: 'complete', hits: [] };
     window.location.hash = '#search';
     render(App);
+    await submitVisibleSearch('sin coincidencias');
 
     expect(await screen.findByText('No encontramos evidencia coincidente')).toBeInTheDocument();
     expect(screen.getByText('Buscamos en este equipo y en los equipos autorizados disponibles. Prueba palabras que aparezcan en el contenido publicado.')).toBeInTheDocument();
@@ -708,6 +721,7 @@ describe('AirWiki wiki workspace', () => {
     window.location.hash = '#search';
     render(App);
     await fireEvent.click(await screen.findByRole('checkbox', { name: 'Red pública' }));
+    await submitVisibleSearch('sin coincidencias públicas');
 
     expect(screen.getByText('Buscamos en este equipo, en los equipos autorizados disponibles y en la red pública. Prueba palabras que aparezcan en el contenido publicado.')).toBeInTheDocument();
   });
@@ -717,6 +731,8 @@ describe('AirWiki wiki workspace', () => {
     snapshot.search = { requestId: 'offline-public-search', status: 'complete', coverage: 'publicNetworkOffline', hits: [] };
     window.location.hash = '#search';
     render(App);
+    await fireEvent.click(await screen.findByRole('checkbox', { name: 'Red pública' }));
+    await submitVisibleSearch('red pública offline');
 
     expect(await screen.findByText('No se pudieron consultar todas las fuentes')).toBeInTheDocument();
     expect(screen.getByText('La red pública está offline. La búsqueda local y en equipos emparejados sigue disponible.')).toBeInTheDocument();
@@ -753,6 +769,8 @@ describe('AirWiki wiki workspace', () => {
     };
     window.location.hash = '#search';
     const { container } = render(App);
+    await fireEvent.click(await screen.findByRole('checkbox', { name: 'Red pública' }));
+    await submitVisibleSearch('Resultado público');
 
     await fireEvent.click(await screen.findByRole('button', { name: 'Abrir' }));
     expect(browsePublicWiki).toHaveBeenCalledWith('12D3KooPublicPublisher', 'public-wiki');
@@ -778,6 +796,23 @@ describe('AirWiki wiki workspace', () => {
     expect(accessibility.violations.filter((violation) => ['critical', 'serious'].includes(violation.impact ?? ''))).toEqual([]);
     await fireEvent.click(screen.getByRole('button', { name: 'Volver a los resultados' }));
     expect(screen.getByRole('heading', { name: 'Resultado público' })).toBeInTheDocument();
+  });
+
+  it('hides stale search results as soon as the query is edited or cleared', async () => {
+    activateLocalSearch();
+    snapshot.search = { requestId: 'stale-search', status: 'complete', coverage: 'complete', hits: [] };
+    window.location.hash = '#search';
+    render(App);
+    await submitVisibleSearch('consulta anterior');
+
+    expect(await screen.findByText('No encontramos evidencia coincidente')).toBeInTheDocument();
+    const form = screen.getByRole('search');
+    const input = form.querySelector('input');
+    expect(input).not.toBeNull();
+    await fireEvent.input(input!, { target: { value: '' } });
+
+    expect(screen.queryByText('No encontramos evidencia coincidente')).not.toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Busca en todas tus wikis' })).toBeInTheDocument();
   });
 
   it('keeps search visible but explains why it cannot run before local AI is ready', async () => {

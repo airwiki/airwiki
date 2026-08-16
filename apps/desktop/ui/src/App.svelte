@@ -90,6 +90,7 @@
   let publicBrowseRequestId: string | null = null;
   let publicBrowseOpen = false;
   let publicBrowseLoading = false;
+  let activeSearchRequestId: string | null = null;
   let pendingSearchConcept: { wikiId: string; conceptId: string } | null = null;
   let guidedRepairRequestId: string | null = null;
   let guidedRepairConfirmed = false;
@@ -1135,16 +1136,36 @@
 
   async function submitSearch() {
     actionMessage = '';
-    if (!snapshot?.model?.active) return;
+    if (!snapshot?.model?.active || !question.trim()) return;
     publicBrowseOpen = false;
     publicBrowseLoading = false;
+    activeSearchRequestId = null;
     actionBusy = true;
+    const submittedQuestion = question;
+    const submittedPublicScope = includePublic;
     try {
-      await searchKnowledge(question, includePublic);
+      const requestId = await searchKnowledge(submittedQuestion, submittedPublicScope);
+      if (question === submittedQuestion && includePublic === submittedPublicScope) {
+        activeSearchRequestId = requestId;
+      }
     } catch {
       actionMessage = t('search-error-title');
       actionBusy = false;
     }
+  }
+
+  function updateSearchQuestion(value: string) {
+    question = value;
+    activeSearchRequestId = null;
+    publicBrowseOpen = false;
+    publicBrowseLoading = false;
+  }
+
+  function updatePublicSearch(value: boolean) {
+    includePublic = value;
+    activeSearchRequestId = null;
+    publicBrowseOpen = false;
+    publicBrowseLoading = false;
   }
 
   async function openSearchHit(hit: SearchHitSummary) {
@@ -1401,8 +1422,8 @@
         ready={snapshot.model?.active === true}
         platform={snapshot.platform}
         {t}
-        onquestion={(value) => { question = value; }}
-        onpublic={(value) => { includePublic = value; }}
+        onquestion={updateSearchQuestion}
+        onpublic={updatePublicSearch}
         onsearch={submitGlobalSearch}
         onopen={openGlobalSearch}
       />
@@ -1626,7 +1647,7 @@
             {/if}
           {:else if destination === 'search'}
             <header class="page-heading"><div><h1>{t('desktop-page-search-title')}</h1><p>{t('desktop-page-search-body')}</p></div></header>
-            {#if publicBrowseOpen}<PublicWikiViewer browse={publicBrowseLoading ? null : snapshot.publicBrowse} loading={publicBrowseLoading} {t} metadata={publicConceptMetadata} onback={closePublicBrowse} onmore={loadMorePublicConcepts} onblock={(publisherId) => changePublisherBlock(publisherId, true)} />{:else if !snapshot.model?.active}<div class="search-welcome" role="status"><Sparkles size={32} aria-hidden="true" /><h2>{t('desktop-search-preparing-title')}</h2><p>{t('desktop-search-preparing-body')}</p><button class="secondary" onclick={() => openServiceStatus('knowledge')}>{t('desktop-search-preparing-action')}</button></div>{:else if snapshot.search}<div class="search-results" aria-live="polite">{#if snapshot.search.status === 'searching'}<div class="search-state working" role="status"><span class="status-dot working" aria-hidden="true"></span><span>{t('search-running')}</span></div>{:else if snapshot.search.status === 'failed'}<div class="search-state error" role="alert"><AlertTriangle size={17} aria-hidden="true" /><span>{t('search-error-title')}</span></div>{:else if snapshot.search.hits.length > 0}<p class="section-label">{t('desktop-search-found')}</p>{/if}{#if snapshot.search.status === 'complete' && snapshot.search.coverage !== 'complete' && snapshot.search.hits.length > 0}<div class="search-state warning" role="status"><AlertTriangle size={17} aria-hidden="true" /><span>{searchCoverageMessage(snapshot.search.coverage)}</span></div>{/if}{#each snapshot.search.hits as hit (`${hit.nodeId}:${hit.wikiId}:${hit.conceptId}:${hit.rank}`)}<article><small>{searchOriginFor(hit)} · {hit.headingOrPage}</small><h3>{hit.title}</h3><p>{hit.snippet}</p><div class="citation-row"><span>{searchSourceFor(hit)}</span><span>{t('search-revision', { revision: hit.sourceRevision })}</span>{#if searchAssuranceLabel(hit)}<span>{searchAssuranceLabel(hit)}</span>{/if}</div>{#if hit.nodeId === snapshot.nodeId || isPublicSearchHit(hit)}<button class="text-action" onclick={() => openSearchHit(hit)} disabled={publicBrowseRequestId !== null}>{t('action-open')}</button>{/if}</article>{:else}{#if snapshot.search.status === 'complete'}<div class="table-empty"><strong>{snapshot.search.coverage === 'complete' ? t('search-empty-title') : t('search-coverage-incomplete-title')}</strong><p>{snapshot.search.coverage === 'complete' ? t(includePublic ? 'search-empty-public-body' : 'search-empty-local-body') : searchCoverageMessage(snapshot.search.coverage)}</p></div>{/if}{/each}</div>{:else}<div class="search-welcome"><BookOpen size={32} aria-hidden="true" /><h2>{t('desktop-search-welcome-title')}</h2><p>{t('desktop-search-welcome-body')}</p></div>{/if}
+            {#if publicBrowseOpen}<PublicWikiViewer browse={publicBrowseLoading ? null : snapshot.publicBrowse} loading={publicBrowseLoading} {t} metadata={publicConceptMetadata} onback={closePublicBrowse} onmore={loadMorePublicConcepts} onblock={(publisherId) => changePublisherBlock(publisherId, true)} />{:else if !snapshot.model?.active}<div class="search-welcome" role="status"><Sparkles size={32} aria-hidden="true" /><h2>{t('desktop-search-preparing-title')}</h2><p>{t('desktop-search-preparing-body')}</p><button class="secondary" onclick={() => openServiceStatus('knowledge')}>{t('desktop-search-preparing-action')}</button></div>{:else if snapshot.search && snapshot.search.requestId === activeSearchRequestId}<div class="search-results" aria-live="polite">{#if snapshot.search.status === 'searching'}<div class="search-state working" role="status"><span class="status-dot working" aria-hidden="true"></span><span>{t('search-running')}</span></div>{:else if snapshot.search.status === 'failed'}<div class="search-state error" role="alert"><AlertTriangle size={17} aria-hidden="true" /><span>{t('search-error-title')}</span></div>{:else if snapshot.search.hits.length > 0}<p class="section-label">{t('desktop-search-found')}</p>{/if}{#if snapshot.search.status === 'complete' && snapshot.search.coverage !== 'complete' && snapshot.search.hits.length > 0}<div class="search-state warning" role="status"><AlertTriangle size={17} aria-hidden="true" /><span>{searchCoverageMessage(snapshot.search.coverage)}</span></div>{/if}{#each snapshot.search.hits as hit (`${hit.nodeId}:${hit.wikiId}:${hit.conceptId}:${hit.rank}`)}<article><small>{searchOriginFor(hit)} · {hit.headingOrPage}</small><h3>{hit.title}</h3><p>{hit.snippet}</p><div class="citation-row"><span>{searchSourceFor(hit)}</span><span>{t('search-revision', { revision: hit.sourceRevision })}</span>{#if searchAssuranceLabel(hit)}<span>{searchAssuranceLabel(hit)}</span>{/if}</div>{#if hit.nodeId === snapshot.nodeId || isPublicSearchHit(hit)}<button class="text-action" onclick={() => openSearchHit(hit)} disabled={publicBrowseRequestId !== null}>{t('action-open')}</button>{/if}</article>{:else}{#if snapshot.search.status === 'complete'}<div class="table-empty"><strong>{snapshot.search.coverage === 'complete' ? t('search-empty-title') : t('search-coverage-incomplete-title')}</strong><p>{snapshot.search.coverage === 'complete' ? t(includePublic ? 'search-empty-public-body' : 'search-empty-local-body') : searchCoverageMessage(snapshot.search.coverage)}</p></div>{/if}{/each}</div>{:else}<div class="search-welcome"><BookOpen size={32} aria-hidden="true" /><h2>{t('desktop-search-welcome-title')}</h2><p>{t('desktop-search-welcome-body')}</p></div>{/if}
           {:else if destination === 'system'}
             <header class="page-heading"><div><h1>{t('desktop-page-system-title')}</h1><p>{t('desktop-page-system-body')}</p></div></header>
             <nav class="settings-nav" aria-label={t('desktop-page-system-title')}>{#each systemSections.slice(0, 3) as section (section.id)}<a href={`#system/${section.id}`} class:active={systemSection === section.id} onclick={(event) => openSystemSection(event, section.id)}>{t(section.labelId)}</a>{/each}</nav>

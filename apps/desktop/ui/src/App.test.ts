@@ -108,15 +108,19 @@ describe('AirWiki wiki workspace', () => {
   });
 
   it('returns from a wiki detail to the top-level workspace through the AirWiki brand', async () => {
-    render(App);
+    const { container } = render(App);
 
     await fireEvent.click(await screen.findByRole('button', { name: /Atlas 2 publicados/ }));
     const wikiHeading = await screen.findByRole('heading', { name: 'Atlas' });
     await waitFor(() => expect(wikiHeading).toHaveFocus());
+    expect(container.querySelector('.drive-page')).toHaveClass('wiki-open');
+    expect(wikiHeading.closest('.drive-route')).toHaveClass('wiki-route');
+    expect(wikiHeading.closest('.wiki-heading')?.nextElementSibling).toHaveClass('wiki-detail-body');
     await fireEvent.click(screen.getAllByRole('button', { name: 'Wikis' })[0]);
 
     const workspaceHeading = await screen.findByRole('heading', { name: 'Wikis' });
     await waitFor(() => expect(workspaceHeading).toHaveFocus());
+    expect(container.querySelector('.drive-page')).not.toHaveClass('wiki-open');
     expect(screen.queryByRole('heading', { name: 'Atlas' })).not.toBeInTheDocument();
   });
 
@@ -775,6 +779,8 @@ describe('AirWiki wiki workspace', () => {
     const sharedWikiHeading = screen.getByRole('heading', { name: 'Guía del equipo' });
     expect(sharedWikiHeading).toBeInTheDocument();
     await waitFor(() => expect(sharedWikiHeading).toHaveFocus());
+    expect(container.querySelector('.drive-page')).toHaveClass('shared-wiki-open');
+    expect(sharedWikiHeading.closest('.drive-route')).toHaveClass('shared-wiki-route');
     const sharedConcept = screen.getByRole('button', { name: /Evidencia cercana/ });
     const sharedConceptFocus = vi.spyOn(sharedConcept, 'focus');
     await fireEvent.mouseDown(sharedConcept);

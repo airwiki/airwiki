@@ -21,8 +21,25 @@ access.
 Each installation generates one persistent Ed25519 libp2p identity. Production
 stores the private key in the operating-system credential store, never in
 SQLite or logs. Its public key derives the stable PeerId. Noise authenticates
-the key used by each transport connection; mDNS and manual addresses are only
-ways to locate that PeerId.
+the key used by each transport connection. mDNS and manual addresses locate a
+PeerId before connection. After the dynamic listener port is known, the desktop
+registers a bounded set of its active, OS-inspected private or on-link IPv4
+endpoints across non-point-to-point interfaces; the wildcard listener is never
+announced. This covers Wi-Fi and Ethernet concurrently without treating a VPN
+default route as the only LAN. AirWiki exchanges those endpoints through
+`/airwiki/lan-address-exchange/1.0.0` only after the Noise-authenticated peer is
+already durably trusted. The exchange is repeated when concrete endpoints change
+and whenever a trusted search connection is established, so a result remains
+openable after that short-lived connection closes. Unknown and merely paired-in-
+progress peers receive an empty response. An announced address never creates
+trust or a grant. A receiver accepts only listener addresses whose IP equals the
+remote IP observed on that exact Noise-authenticated connection, preventing a
+peer from steering probes toward another private host. Each runtime session adds
+a monotonic revision, and receivers reject an older revision or a retired
+session arriving on an older connection, so delayed exchanges cannot restore a
+withdrawn endpoint. A browse retry reuses an existing authenticated connection
+immediately; only a disconnected peer enters the redial queue. Every redial must
+still complete Noise authentication for the expected PeerId.
 
 New trust requires an explicit pairing session over Noise. Both devices exchange
 fresh 32-byte nonces and derive the same six-word short authentication string
@@ -41,6 +58,14 @@ true immediately before handoff:
 - for an `external_ai` request, the collection is also
   `allow_external_ai`;
 - the requested revision remains published and passed the answerability gate.
+
+After an authorized search identifies a specific Wiki, the reader may request
+one bounded page of its published concept summaries over
+`/airwiki/shared-wiki-browse/1.0.0`. The source revalidates the same trusted
+identity, exact per-Wiki grant, `peer_shareable` policy, OKF compatibility and
+publication state under a disclosure lease immediately before handoff. This is
+not a catalog API: it accepts one explicit Wiki ID and returns neither other
+Wiki names, complete documents, source paths, chunks, embeddings nor indexes.
 
 Runtime access is only a cache of durable state. Authorization intersects the
 runtime snapshot with SQLite and fails closed on missing, stale, malformed or
@@ -64,6 +89,10 @@ previous collection grants.
 - Users must perform a two-device SAS comparison and grant collections
   separately.
 - Revocation takes effect without waiting for mDNS expiry or a process restart.
+- Authorized LAN results can reuse the local file-oriented Wiki workspace in a
+  bounded read-only mode without replicating source documents.
+- Either endpoint can reopen an authorized result after an idle connection
+  closes, including the endpoint that originally accepted the connection.
 - Keychain or credential-store failure disables the trusted LAN identity rather
   than falling back to an unprotected production key.
 

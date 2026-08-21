@@ -68,6 +68,8 @@ Folder Wikis can watch for new files or update manually. Imported OKF Wikis have
 - Review local-AI proposals against revision-bound source evidence before publishing.
 - Search with local lexical and vector retrieval, including provenance and assurance state.
 - Pair devices on a private LAN and grant access per Wiki.
+- Open an authorized LAN or public result in the same read-only, file-oriented
+  Wiki workspace used for local knowledge.
 - Opt selected, reviewed Wikis into experimental public search and browse.
 - Connect ChatGPT/Codex, Claude, Gemini, and generic MCP clients without storing provider API keys.
 - Create isolated assistant-memory Wikis with fingerprint-based updates and revocable capabilities.
@@ -81,7 +83,9 @@ Folder Wikis can watch for new files or update manually. Imported OKF Wikis have
 - Publication, peer sharing, public discovery, and external AI access require independent human decisions.
 - Changed source knowledge is withdrawn until its new revision is reviewed.
 - The local model cannot publish, grant access, or decide whether content may leave the device.
-- The Wiki viewer does not load remote resources or request complete documents from peers.
+- The remote Wiki workspace requests only bounded summaries for published
+  concepts. It never loads remote resources, source paths, indexes or complete
+  documents from peers.
 - Default logs omit documents, queries, snippets, credentials, local paths, and network identities.
 
 Read the [threat model](docs/threat-model.md) for the complete trust boundaries and failure behavior.

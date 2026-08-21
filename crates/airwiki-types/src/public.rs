@@ -5,9 +5,9 @@ use uuid::Uuid;
 
 use crate::{
     ConceptType, MAX_QUERY_BYTES, MAX_SNIPPET_CHARS, MAX_TOP_K, MIN_TOP_K, OkfCompatibility,
-    PUBLIC_BROWSE_PROTOCOL, PUBLIC_BROWSE_PROTOCOL_V2, PUBLIC_CATALOG_PROTOCOL,
-    PUBLIC_CATALOG_PROTOCOL_V2, PUBLIC_SEARCH_PROTOCOL, PUBLIC_SEARCH_PROTOCOL_V2, SearchPurpose,
-    SearchResponse,
+    PUBLIC_BROWSE_PROTOCOL, PUBLIC_BROWSE_PROTOCOL_V2, PUBLIC_BROWSE_PROTOCOL_V3,
+    PUBLIC_CATALOG_PROTOCOL, PUBLIC_CATALOG_PROTOCOL_V2, PUBLIC_SEARCH_PROTOCOL,
+    PUBLIC_SEARCH_PROTOCOL_V2, SearchPurpose, SearchResponse,
 };
 
 pub const MAX_PUBLIC_PAGE_SIZE: u8 = 50;
@@ -258,19 +258,50 @@ pub struct PublicBrowseRequest {
     pub request_id: Uuid,
     pub collection_id: Uuid,
     pub cursor: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub target_concept_id: Option<Uuid>,
     pub limit: u8,
 }
 
 impl PublicBrowseRequest {
+    /// Adapts the anchored v3 request to the cursor-only v1/v2 contract.
+    ///
+    /// Concept UUIDs are stored and paged in canonical lexical order. The
+    /// immediately preceding UUID therefore makes the selected concept the
+    /// first item returned by an older AirWiki peer without changing either
+    /// legacy wire shape.
+    pub fn prepare_for_protocol(&mut self, protocol: &str) -> Result<(), PublicContractError> {
+        if self.cursor.is_some() && self.target_concept_id.is_some() {
+            return Err(PublicContractError::InvalidLimit);
+        }
+        match protocol {
+            PUBLIC_BROWSE_PROTOCOL_V3 => {}
+            PUBLIC_BROWSE_PROTOCOL | PUBLIC_BROWSE_PROTOCOL_V2 => {
+                if let Some(target) = self.target_concept_id.take() {
+                    self.cursor = target
+                        .as_u128()
+                        .checked_sub(1)
+                        .map(Uuid::from_u128)
+                        .map(|cursor| cursor.to_string());
+                }
+            }
+            _ => return Err(PublicContractError::UnsupportedProtocol),
+        }
+        self.protocol_version = protocol.to_owned();
+        Ok(())
+    }
+
     pub fn validate(&self) -> Result<(), PublicContractError> {
-        if !protocol_is_supported(
-            &self.protocol_version,
-            PUBLIC_BROWSE_PROTOCOL,
-            PUBLIC_BROWSE_PROTOCOL_V2,
+        if !matches!(
+            self.protocol_version.as_str(),
+            PUBLIC_BROWSE_PROTOCOL | PUBLIC_BROWSE_PROTOCOL_V2 | PUBLIC_BROWSE_PROTOCOL_V3
         ) {
             return Err(PublicContractError::UnsupportedProtocol);
         }
         if !(1..=MAX_PUBLIC_PAGE_SIZE).contains(&self.limit)
+            || (self.cursor.is_some() && self.target_concept_id.is_some())
+            || (self.target_concept_id.is_some()
+                && self.protocol_version != PUBLIC_BROWSE_PROTOCOL_V3)
             || self
                 .cursor
                 .as_ref()
@@ -300,6 +331,9 @@ impl PublicBrowsePage {
         if self.protocol_version != request.protocol_version
             || self.request_id != request.request_id
             || self.concepts.len() > usize::from(request.limit)
+            || request.target_concept_id.is_some_and(|target| {
+                self.concepts.first().map(|concept| concept.concept_id) != Some(target)
+            })
         {
             return Err(PublicContractError::InvalidLimit);
         }
@@ -317,6 +351,7 @@ impl PublicBrowsePage {
             {
                 return Err(PublicContractError::TooManyItems);
             }
+            validate_text(&concept.concept_type.to_string(), 120)?;
             validate_text(&concept.title, 240)?;
             validate_optional_text(&concept.description, 1_000)?;
             validate_text(&concept.language, 16)?;
@@ -464,6 +499,7 @@ mod tests {
             request_id: Uuid::new_v4(),
             collection_id: Uuid::new_v4(),
             cursor: Some("x".repeat(129)),
+            target_concept_id: None,
             limit: MAX_PUBLIC_PAGE_SIZE,
         };
         assert!(browse.validate().is_err());
@@ -478,6 +514,7 @@ mod tests {
             request_id: Uuid::new_v4(),
             collection_id,
             cursor: None,
+            target_concept_id: None,
             limit: 1,
         };
         let concept = PublicConceptSummary {
@@ -508,5 +545,105 @@ mod tests {
         page.concepts.truncate(1);
         page.concepts[0].collection_id = Uuid::new_v4();
         assert!(page.validate_for(&request, publisher_id).is_err());
+    }
+
+    #[test]
+    fn public_browse_anchor_must_be_the_first_returned_concept() {
+        let publisher_id = "publisher";
+        let collection_id = Uuid::new_v4();
+        let target = Uuid::new_v4();
+        let request = PublicBrowseRequest {
+            protocol_version: PUBLIC_BROWSE_PROTOCOL_V3.to_owned(),
+            request_id: Uuid::new_v4(),
+            collection_id,
+            cursor: None,
+            target_concept_id: Some(target),
+            limit: 1,
+        };
+        let concept = PublicConceptSummary {
+            publisher_id: publisher_id.to_owned(),
+            collection_id,
+            concept_id: target,
+            concept_type: ConceptType::Document,
+            title: "Anchored concept".to_owned(),
+            description: String::new(),
+            language: "en".to_owned(),
+            tags: Vec::new(),
+            summary: "Bounded summary".to_owned(),
+            logical_resource_uri: "urn:airwiki:anchor".to_owned(),
+            source_revision: 1,
+            updated_at: Utc::now(),
+            lifecycle_status: Some("stable".to_owned()),
+            assurance: Some(crate::ConceptAssurance::default()),
+        };
+        let mut page = PublicBrowsePage {
+            protocol_version: request.protocol_version.clone(),
+            request_id: request.request_id,
+            manifest_sequence: 1,
+            concepts: vec![concept],
+            next_cursor: None,
+        };
+        assert!(page.validate_for(&request, publisher_id).is_ok());
+
+        page.concepts[0].concept_id = Uuid::new_v4();
+        assert!(page.validate_for(&request, publisher_id).is_err());
+    }
+
+    #[test]
+    fn public_browse_anchor_adapts_to_legacy_cursor_without_losing_exactness() {
+        let target = Uuid::parse_str("10000000-0000-4000-8000-000000000001").unwrap();
+        let mut request = PublicBrowseRequest {
+            protocol_version: PUBLIC_BROWSE_PROTOCOL_V3.to_owned(),
+            request_id: Uuid::new_v4(),
+            collection_id: Uuid::new_v4(),
+            cursor: None,
+            target_concept_id: Some(target),
+            limit: 50,
+        };
+
+        request
+            .prepare_for_protocol(PUBLIC_BROWSE_PROTOCOL_V2)
+            .unwrap();
+
+        assert_eq!(request.protocol_version, PUBLIC_BROWSE_PROTOCOL_V2);
+        assert_eq!(request.target_concept_id, None);
+        assert_eq!(
+            request.cursor.as_deref(),
+            Some("10000000-0000-4000-8000-000000000000")
+        );
+        assert!(request.validate().is_ok());
+    }
+
+    #[test]
+    fn zero_public_browse_anchor_adapts_to_the_first_legacy_page() {
+        let mut request = PublicBrowseRequest {
+            protocol_version: PUBLIC_BROWSE_PROTOCOL_V3.to_owned(),
+            request_id: Uuid::new_v4(),
+            collection_id: Uuid::new_v4(),
+            cursor: None,
+            target_concept_id: Some(Uuid::nil()),
+            limit: 1,
+        };
+
+        request
+            .prepare_for_protocol(PUBLIC_BROWSE_PROTOCOL)
+            .unwrap();
+
+        assert_eq!(request.cursor, None);
+        assert_eq!(request.target_concept_id, None);
+    }
+
+    #[test]
+    fn legacy_public_browse_contract_rejects_an_unadapted_anchor() {
+        let request = PublicBrowseRequest {
+            protocol_version: PUBLIC_BROWSE_PROTOCOL_V2.to_owned(),
+            request_id: Uuid::new_v4(),
+            collection_id: Uuid::new_v4(),
+            cursor: None,
+            target_concept_id: Some(Uuid::new_v4()),
+            limit: 1,
+        };
+
+        assert!(request.validate().is_err());
     }
 }

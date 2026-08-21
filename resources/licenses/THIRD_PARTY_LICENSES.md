@@ -6,7 +6,7 @@ Scope: the union of the transitive dependency closures of `airwiki-desktop`, `ai
 
 If a crate declares an SPDX expression but does not include a separate legal file, the inventory assigns the standard MIT/Apache text bundled by the project or an identical text found in another crate with the same expression. Each text lists its origin explicitly.
 
-Third-party packages: **697**. Unique legal texts: **388**.
+Third-party packages: **698**. Unique legal texts: **388**.
 
 ## Packages
 
@@ -216,7 +216,7 @@ Third-party packages: **697**. Unique legal texts: **388**.
 | ghash | 0.5.1 | Apache-2.0 OR MIT | [upstream](https://github.com/RustCrypto/universal-hashes) | [a9040321c371](#sha256-a9040321c3712d8fd0b09cf52b17445de04a23a10165049ae187cd39e5c86be5), [c0fabcc308b4](#sha256-c0fabcc308b450cb6fe62c9f56fae6abbeb9768eb80d992484c857d744846c2e) |
 | gimli | 0.33.0 | MIT OR Apache-2.0 | [upstream](https://github.com/gimli-rs/gimli) | [7b63ecd5f190](#sha256-7b63ecd5f1902af1b63729947373683c32745c16a10e8e6292e2e2dcd7e90ae0), [a60eea817514](#sha256-a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2) |
 | glob | 0.3.4 | MIT OR Apache-2.0 | [upstream](https://github.com/rust-lang/glob) | [6485b8ed310d](#sha256-6485b8ed310d3f0340bf1ad1f47645069ce4069dcc6bb46c7d5c6faf41de1fdb), [a60eea817514](#sha256-a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2) |
-| h2 | 0.4.15 | MIT | [upstream](https://github.com/hyperium/h2) | [b21623012e6c](#sha256-b21623012e6c453d944b0342c515b631cfcbf30704c2621b291526b69c10724d) |
+| h2 | 0.4.16 | MIT | [upstream](https://github.com/hyperium/h2) | [b21623012e6c](#sha256-b21623012e6c453d944b0342c515b631cfcbf30704c2621b291526b69c10724d) |
 | half | 2.7.1 | MIT OR Apache-2.0 | [upstream](https://github.com/VoidStarKat/half-rs) | [508a77d2e7b5](#sha256-508a77d2e7b51d98adeed32648ad124b7b30241a8e70b2e72c99f92d8e5874d1), [a6cba85bc92e](#sha256-a6cba85bc92e0cff7a450b1d873c0eaa2e9fc96bf472df0247a26bec77bf3ff9) |
 | hashbrown | 0.12.3 | MIT OR Apache-2.0 | [upstream](https://github.com/rust-lang/hashbrown) | [a60eea817514](#sha256-a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2), [ff8f68cb076c](#sha256-ff8f68cb076caf8cefe7a6430d4ac086ce6af2ca8ce2c4e5a2004d4552ef52a2) |
 | hashbrown | 0.15.5 | MIT OR Apache-2.0 | [upstream](https://github.com/rust-lang/hashbrown) | [a60eea817514](#sha256-a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2), [ff8f68cb076c](#sha256-ff8f68cb076caf8cefe7a6430d4ac086ce6af2ca8ce2c4e5a2004d4552ef52a2) |
@@ -520,6 +520,7 @@ Third-party packages: **697**. Unique legal texts: **388**.
 | subtle | 2.6.1 | BSD-3-Clause | [upstream](https://github.com/dalek-cryptography/subtle) | [cc0332a88c2e](#sha256-cc0332a88c2ea21d5f3c1298f966120f4c95196871c3f6bb4fcf615508b93fa1) |
 | swift-rs | 1.0.7 | MIT OR Apache-2.0 | [upstream](https://github.com/Brendonovich/swift-rs) | [908a661cf763](#sha256-908a661cf763bddfa04f2739bea561be62a246f03ad53fcb2272d3ddbd1d943f), [f3c3e9f4febe](#sha256-f3c3e9f4febe81ff14ccc233c344e6e60051290d1c1e5a2c670d63cc3608a5bb) |
 | symlink | 0.1.0 | MIT/Apache-2.0 | [upstream](https://gitlab.com/chris-morgan/symlink) | [a60eea817514](#sha256-a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2), [b85cb7b51c3f](#sha256-b85cb7b51c3f8d600bbac3fb8dbbfe64cde697e460a55fc80978eb0804ca1427), [edb9885b41e4](#sha256-edb9885b41e4851740dcdcde4d2419c60104e1f3473f7bea6293a82729a32068) |
+| syn | 1.0.109 | MIT OR Apache-2.0 | [upstream](https://github.com/dtolnay/syn) | [23f18e03dc49](#sha256-23f18e03dc49df91622fe2a76176497404e46ced8a715d9d2b67a7446571cca3), [a60eea817514](#sha256-a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2) |
 | syn | 2.0.118 | MIT OR Apache-2.0 | [upstream](https://github.com/dtolnay/syn) | [23f18e03dc49](#sha256-23f18e03dc49df91622fe2a76176497404e46ced8a715d9d2b67a7446571cca3), [62c7a1e35f56](#sha256-62c7a1e35f56406896d7aa7ca52d0cc0d272ac022b5d2796e7d6905db8a3636a) |
 | sync_wrapper | 1.0.2 | Apache-2.0 | [upstream](https://github.com/Actyx/sync_wrapper) | [0d542e0c8804](#sha256-0d542e0c8804e39aa7f37eb00da5a762149dc682d7829451287e11b938e94594) |
 | synstructure | 0.13.2 | MIT | [upstream](https://github.com/mystor/synstructure) | [219920e865ee](#sha256-219920e865eee70b7dcfc948a86b099e7f4fe2de01bcca2ca9a20c0a033f2b59) |
@@ -5136,6 +5137,7 @@ Used by:
 - `serde_path_to_error 0.1.20 / LICENSE-MIT`
 - `serde_repr 0.1.20 / LICENSE-MIT`
 - `servo_arc 0.4.3 / LICENSE-MIT`
+- `syn 1.0.109 / LICENSE-MIT`
 - `syn 2.0.118 / LICENSE-MIT`
 - `thiserror 1.0.69 / LICENSE-MIT`
 - `thiserror 2.0.18 / LICENSE-MIT`
@@ -18122,6 +18124,7 @@ Used by:
 - `string_cache 0.9.0 / LICENSE-APACHE`
 - `string_cache_codegen 0.6.1 / LICENSE-APACHE`
 - `symlink 0.1.0 / LICENSE-APACHE`
+- `syn 1.0.109 / LICENSE-APACHE`
 - `system-configuration 0.7.0 / LICENSE-APACHE`
 - `system-configuration-sys 0.6.0 / LICENSE-APACHE`
 - `tar 0.4.46 / LICENSE-APACHE`
@@ -20307,7 +20310,7 @@ limitations under the License.
 
 Used by:
 
-- `h2 0.4.15 / LICENSE`
+- `h2 0.4.16 / LICENSE`
 
 ```text
 Copyright (c) 2017 h2 authors

@@ -2,7 +2,10 @@
 
 use std::io;
 
-use airwiki_types::{MAX_RESPONSE_BYTES, SearchRequest, SearchResponse};
+use airwiki_types::{
+    MAX_RESPONSE_BYTES, SearchRequest, SearchResponse, SharedWikiBrowsePage,
+    SharedWikiBrowseRequest,
+};
 use async_trait::async_trait;
 use futures::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 use libp2p::StreamProtocol;
@@ -11,10 +14,17 @@ use serde::{Deserialize, Serialize, de::DeserializeOwned};
 
 /// CBOR overhead plus the fixed request fields. The query itself is separately capped at 2 KiB.
 pub const MAX_SEARCH_REQUEST_BYTES: usize = 4 * 1024;
+pub const MAX_SHARED_WIKI_REQUEST_BYTES: usize = 2 * 1024;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum SearchWireResponse {
     Success(SearchResponse),
+    Error(SearchWireError),
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum SharedWikiWireResponse {
+    Success(SharedWikiBrowsePage),
     Error(SearchWireError),
 }
 
@@ -45,6 +55,9 @@ impl SearchWireError {
 
 #[derive(Debug, Clone, Default)]
 pub struct BoundedSearchCodec;
+
+#[derive(Debug, Clone, Default)]
+pub struct BoundedSharedWikiCodec;
 
 fn encode_bounded<T: Serialize>(value: &T, limit: usize) -> io::Result<Vec<u8>> {
     let mut encoded = Vec::new();
@@ -137,6 +150,65 @@ impl Codec for BoundedSearchCodec {
     }
 }
 
+#[async_trait]
+impl Codec for BoundedSharedWikiCodec {
+    type Protocol = StreamProtocol;
+    type Request = SharedWikiBrowseRequest;
+    type Response = SharedWikiWireResponse;
+
+    async fn read_request<T>(&mut self, _: &Self::Protocol, io: &mut T) -> io::Result<Self::Request>
+    where
+        T: AsyncRead + Unpin + Send,
+    {
+        let request: SharedWikiBrowseRequest =
+            decode_bounded(io, MAX_SHARED_WIKI_REQUEST_BYTES).await?;
+        request.validate().map_err(|_| {
+            io::Error::new(io::ErrorKind::InvalidData, "shared Wiki request is invalid")
+        })?;
+        Ok(request)
+    }
+
+    async fn read_response<T>(
+        &mut self,
+        _: &Self::Protocol,
+        io: &mut T,
+    ) -> io::Result<Self::Response>
+    where
+        T: AsyncRead + Unpin + Send,
+    {
+        decode_bounded(io, MAX_RESPONSE_BYTES).await
+    }
+
+    async fn write_request<T>(
+        &mut self,
+        _: &Self::Protocol,
+        io: &mut T,
+        request: Self::Request,
+    ) -> io::Result<()>
+    where
+        T: AsyncWrite + Unpin + Send,
+    {
+        request
+            .validate()
+            .map_err(|error| io::Error::new(io::ErrorKind::InvalidInput, error))?;
+        let encoded = encode_bounded(&request, MAX_SHARED_WIKI_REQUEST_BYTES)?;
+        io.write_all(&encoded).await
+    }
+
+    async fn write_response<T>(
+        &mut self,
+        _: &Self::Protocol,
+        io: &mut T,
+        response: Self::Response,
+    ) -> io::Result<()>
+    where
+        T: AsyncWrite + Unpin + Send,
+    {
+        let encoded = encode_bounded(&response, MAX_RESPONSE_BYTES)?;
+        io.write_all(&encoded).await
+    }
+}
+
 fn inbound_contract_error(error: airwiki_types::SearchContractError) -> io::Error {
     let message = match error {
         airwiki_types::SearchContractError::EmptyQuery => "search query is empty",
@@ -153,6 +225,10 @@ fn inbound_contract_error(error: airwiki_types::SearchContractError) -> io::Erro
 }
 
 pub fn response_fits(response: &SearchWireResponse) -> bool {
+    encode_bounded(response, MAX_RESPONSE_BYTES).is_ok()
+}
+
+pub fn shared_wiki_response_fits(response: &SharedWikiWireResponse) -> bool {
     encode_bounded(response, MAX_RESPONSE_BYTES).is_ok()
 }
 

@@ -77,11 +77,13 @@ export type ModelInstallStatus = "queued" | "downloading" | "verifying" | "extra
 
 export type ModelInstallSummary = { status: ModelInstallStatus, downloaded: number, totalBytes: number, };
 
-export type SearchHitSummary = { conceptId: string, wikiId: string, title: string, snippet: string, headingOrPage: string, logicalResourceUri: string, sourceRevision: number, sourceSha256: string, rank: number, nodeId: string, assurance: ConceptAssuranceSummary | null, lifecycle: string | null, };
+export type SearchHitSummary = { conceptId: string, wikiId: string, title: string, snippet: string, headingOrPage: string, logicalResourceUri: string, sourceRevision: number, sourceSha256: string, rank: number, nodeId: string, route: SearchHitRoute, assurance: ConceptAssuranceSummary | null, lifecycle: string | null, };
 
 export type SearchStatus = "searching" | "complete" | "failed";
 
 export type SearchCoverage = "complete" | "federationDisabled" | "offlineDevices" | "publicNetworkOffline" | "partial";
+
+export type SearchHitRoute = "deviceNetwork" | "publicNetwork";
 
 export type SearchSummary = { requestId: string, status: SearchStatus, hits: Array<SearchHitSummary>, coverage: SearchCoverage, };
 
@@ -89,7 +91,11 @@ export type PublicBrowseStatus = "direct" | "relay" | "expired" | "offline" | "f
 
 export type PublicConceptSummaryDto = { conceptId: string, conceptType: ConceptType, title: string, description: string, language: string, tags: Array<string>, summary: string, sourceRevision: number, lifecycle: string | null, assurance: ConceptAssuranceSummary | null, };
 
-export type PublicBrowseSummary = { requestId: string, status: PublicBrowseStatus, publisherId: string | null, wikiId: string | null, wikiName: string | null, description: string | null, languages: Array<string>, okfCompatibility: OkfCompatibilityDto | null, concepts: Array<PublicConceptSummaryDto>, nextCursor: string | null, };
+export type PublicBrowseSummary = { requestId: string, status: PublicBrowseStatus, publisherId: string | null, wikiId: string | null, wikiName: string | null, description: string | null, languages: Array<string>, okfCompatibility: OkfCompatibilityDto | null, concepts: Array<PublicConceptSummaryDto>, nextCursor: string | null, appendFailed: boolean, };
+
+export type NearbyBrowseStatus = "available" | "unavailable";
+
+export type NearbyBrowseSummary = { requestId: string, status: NearbyBrowseStatus, peerId: string | null, wikiId: string | null, wikiName: string | null, okfCompatibility: OkfCompatibilityDto | null, concepts: Array<PublicConceptSummaryDto>, nextCursor: string | null, appendFailed: boolean, };
 
 export type NoticeLevel = "notice" | "warning" | "error";
 
@@ -185,7 +191,7 @@ export type HostPlatform = "macOs" | "windows";
 
 export type AppPhase = "starting" | "failed" | "ready";
 
-export type AppSnapshot = { schemaVersion: number, sequence: number, platform: HostPlatform, phase: AppPhase, nodeId: string | null, mcpUrl: string | null, blockedPublicPublishers: Array<string>, hardware: HardwareSummary | null, wikis: Array<WikiSummary>, wikiScans: Array<WikiScanSummary>, reviews: Array<ReviewSummary>, reanalyzingReviewIds: Array<string>, sourceIssues: Array<SourceIssueSummary>, peers: Array<PeerSummary>, model: ModelSummary | null, modelInstall: ModelInstallSummary | null, search: SearchSummary | null, publicBrowse: PublicBrowseSummary | null, reviewEvidence: ReviewEvidenceSummary | null, knowledge: KnowledgeBundleSummary | null, knowledgePage: KnowledgePageSummary | null, preferences: PreferencesSummary | null, autostart: AutostartStatus | null, wikiHealth: WikiHealthSummary | null, guidedRepair: GuidedRepairSummary | null, connectivity: ConnectivitySummary | null, lanRuntime: LanRuntimeSummary | null, firewallOperation: FirewallOperationStatus | null, integrations: IntegrationsSummary | null, integrationRequestId: string | null, integrationCompletedRequestId: string | null, applicationAccess: Array<ApplicationAccessSummary>, pendingComputations: Array<PendingComputationSummary>, completedComputations: Array<CompletedComputationSummary>, updater: UpdaterSummary | null, notice: NoticeSummary | null, };
+export type AppSnapshot = { schemaVersion: number, sequence: number, platform: HostPlatform, phase: AppPhase, nodeId: string | null, mcpUrl: string | null, blockedPublicPublishers: Array<string>, hardware: HardwareSummary | null, wikis: Array<WikiSummary>, wikiScans: Array<WikiScanSummary>, reviews: Array<ReviewSummary>, reanalyzingReviewIds: Array<string>, sourceIssues: Array<SourceIssueSummary>, peers: Array<PeerSummary>, model: ModelSummary | null, modelInstall: ModelInstallSummary | null, search: SearchSummary | null, publicBrowse: PublicBrowseSummary | null, nearbyBrowse: NearbyBrowseSummary | null, reviewEvidence: ReviewEvidenceSummary | null, knowledge: KnowledgeBundleSummary | null, knowledgePage: KnowledgePageSummary | null, preferences: PreferencesSummary | null, autostart: AutostartStatus | null, wikiHealth: WikiHealthSummary | null, guidedRepair: GuidedRepairSummary | null, connectivity: ConnectivitySummary | null, lanRuntime: LanRuntimeSummary | null, firewallOperation: FirewallOperationStatus | null, integrations: IntegrationsSummary | null, integrationRequestId: string | null, integrationCompletedRequestId: string | null, applicationAccess: Array<ApplicationAccessSummary>, pendingComputations: Array<PendingComputationSummary>, completedComputations: Array<CompletedComputationSummary>, updater: UpdaterSummary | null, notice: NoticeSummary | null, };
 
 export type UiEventKind = "stateChanged";
 

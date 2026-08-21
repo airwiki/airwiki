@@ -3,11 +3,12 @@ use std::str::FromStr;
 use std::time::Duration;
 
 use airwiki_types::{
-    PUBLIC_BROWSE_PROTOCOL, PUBLIC_BROWSE_PROTOCOL_V2, PUBLIC_CATALOG_PROTOCOL,
-    PUBLIC_CATALOG_PROTOCOL_V2, PUBLIC_SEARCH_PROTOCOL, PUBLIC_SEARCH_PROTOCOL_V2,
-    PublicBrowsePage, PublicBrowseRequest, PublicCatalogQuery, PublicCollectionSummary,
-    PublicCollectionTarget, PublicSearchRequest, SearchContractError, SearchHit, SearchRequest,
-    SearchResponse, SignedPublicCollectionManifest, SignedPublicCollectionTombstone,
+    PUBLIC_BROWSE_PROTOCOL, PUBLIC_BROWSE_PROTOCOL_V2, PUBLIC_BROWSE_PROTOCOL_V3,
+    PUBLIC_CATALOG_PROTOCOL, PUBLIC_CATALOG_PROTOCOL_V2, PUBLIC_SEARCH_PROTOCOL,
+    PUBLIC_SEARCH_PROTOCOL_V2, PublicBrowsePage, PublicBrowseRequest, PublicCatalogQuery,
+    PublicCollectionSummary, PublicCollectionTarget, PublicSearchRequest, SearchContractError,
+    SearchHit, SearchRequest, SearchResponse, SignedPublicCollectionManifest,
+    SignedPublicCollectionTombstone,
 };
 use libp2p::identity::Keypair;
 use libp2p::request_response::{self, OutboundRequestId, ProtocolSupport};
@@ -379,9 +380,12 @@ impl PublicReader {
         &self,
         manifest: &SignedPublicCollectionManifest,
         cursor: Option<String>,
+        target_concept_id: Option<uuid::Uuid>,
         limit: u8,
     ) -> Result<PublicBrowsePage, SearchContractError> {
-        let result = self.browse_with_route(manifest, cursor, limit).await?;
+        let result = self
+            .browse_with_route(manifest, cursor, target_concept_id, limit)
+            .await?;
         let blocked = self.blocked_publishers.read().await;
         if blocked.contains(&manifest.manifest.publisher_id) {
             return Err(SearchContractError::Unauthorized);
@@ -393,6 +397,7 @@ impl PublicReader {
         &self,
         manifest: &SignedPublicCollectionManifest,
         cursor: Option<String>,
+        target_concept_id: Option<uuid::Uuid>,
         limit: u8,
     ) -> Result<RoutedPublicBrowsePage, SearchContractError> {
         if self
@@ -415,10 +420,11 @@ impl PublicReader {
             }
         }
         let request = PublicBrowseRequest {
-            protocol_version: PUBLIC_BROWSE_PROTOCOL_V2.to_owned(),
+            protocol_version: PUBLIC_BROWSE_PROTOCOL_V3.to_owned(),
             request_id: uuid::Uuid::new_v4(),
             collection_id: manifest.manifest.collection_id,
             cursor,
+            target_concept_id,
             limit,
         };
         request
@@ -467,10 +473,18 @@ impl PublicReader {
                                 return Err(SearchContractError::Unauthorized);
                             }
                             let mut negotiated_request = request.clone();
-                            negotiated_request
-                                .protocol_version
-                                .clone_from(&page.protocol_version);
+                            if negotiated_request
+                                .prepare_for_protocol(&page.protocol_version)
+                                .is_err()
+                            {
+                                return Err(SearchContractError::Unauthorized);
+                            }
+                            let target_matches = request.target_concept_id.is_none_or(|target| {
+                                page.concepts.first().map(|concept| concept.concept_id)
+                                    == Some(target)
+                            });
                             if page.manifest_sequence < manifest.manifest.sequence
+                                || !target_matches
                                 || page
                                     .validate_for(
                                         &negotiated_request,
@@ -529,6 +543,7 @@ impl PublicReader {
         publisher_id: &str,
         collection_id: uuid::Uuid,
         cursor: Option<String>,
+        target_concept_id: Option<uuid::Uuid>,
         limit: u8,
     ) -> Result<PublicBrowseResult, SearchContractError> {
         let manifest = self
@@ -562,7 +577,9 @@ impl PublicReader {
                 availability: PublicCollectionAvailability::Expired,
             });
         }
-        let result = self.browse_with_route(&manifest, cursor, limit).await;
+        let result = self
+            .browse_with_route(&manifest, cursor, target_concept_id, limit)
+            .await;
         let blocked = self.blocked_publishers.read().await;
         if blocked.contains(&manifest.manifest.publisher_id) {
             return Err(SearchContractError::Unauthorized);
@@ -849,8 +866,7 @@ fn reader_swarm(
     let local_peer = identity.public().to_peer_id();
     let catalog = match catalog_mode {
         CatalogProtocolMode::CurrentFirst => versioned_outbound_behaviour(
-            PUBLIC_CATALOG_PROTOCOL_V2,
-            PUBLIC_CATALOG_PROTOCOL,
+            &[PUBLIC_CATALOG_PROTOCOL_V2, PUBLIC_CATALOG_PROTOCOL],
             128 * 1024,
             512 * 1024,
             INDEX_DEADLINE,
@@ -863,15 +879,17 @@ fn reader_swarm(
         )?,
     };
     let search = versioned_outbound_behaviour(
-        PUBLIC_SEARCH_PROTOCOL_V2,
-        PUBLIC_SEARCH_PROTOCOL,
+        &[PUBLIC_SEARCH_PROTOCOL_V2, PUBLIC_SEARCH_PROTOCOL],
         16 * 1024,
         256 * 1024,
         OWNER_RESPONSE_BUDGET,
     )?;
     let browse = versioned_outbound_behaviour(
-        PUBLIC_BROWSE_PROTOCOL_V2,
-        PUBLIC_BROWSE_PROTOCOL,
+        &[
+            PUBLIC_BROWSE_PROTOCOL_V3,
+            PUBLIC_BROWSE_PROTOCOL_V2,
+            PUBLIC_BROWSE_PROTOCOL,
+        ],
         16 * 1024,
         256 * 1024,
         OWNER_RESPONSE_BUDGET,
@@ -939,8 +957,7 @@ where
 }
 
 fn versioned_outbound_behaviour<Request, Response>(
-    current_protocol: &'static str,
-    legacy_protocol: &'static str,
+    protocols: &[&'static str],
     request_bytes: u64,
     response_bytes: u64,
     request_timeout: Duration,
@@ -961,16 +978,17 @@ where
         + Sync
         + 'static,
 {
-    let current = StreamProtocol::try_from_owned(current_protocol.to_owned())
-        .map_err(|error| NetworkError::Transport(error.to_string()))?;
-    let legacy = StreamProtocol::try_from_owned(legacy_protocol.to_owned())
-        .map_err(|error| NetworkError::Transport(error.to_string()))?;
+    let protocols = protocols
+        .iter()
+        .map(|protocol| {
+            StreamProtocol::try_from_owned((*protocol).to_owned())
+                .map(|protocol| (protocol, ProtocolSupport::Outbound))
+                .map_err(|error| NetworkError::Transport(error.to_string()))
+        })
+        .collect::<Result<Vec<_>, _>>()?;
     Ok(request_response::Behaviour::with_codec(
         VersionedCborCodec::new(request_bytes, response_bytes),
-        [
-            (current, ProtocolSupport::Outbound),
-            (legacy, ProtocolSupport::Outbound),
-        ],
+        protocols,
         request_response::Config::default()
             .with_request_timeout(request_timeout)
             .with_max_concurrent_streams(32),
@@ -1666,7 +1684,7 @@ mod tests {
         reader.set_publisher_blocked(publisher_id, true).await;
 
         assert!(matches!(
-            reader.browse(&manifest, None, 1).await,
+            reader.browse(&manifest, None, None, 1).await,
             Err(SearchContractError::Unauthorized)
         ));
     }

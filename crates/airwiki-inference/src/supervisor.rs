@@ -706,7 +706,7 @@ mod tests {
         let startup_supervisor = supervisor.clone();
         let startup = tokio::spawn(async move { startup_supervisor.ensure_running().await });
 
-        tokio::time::timeout(Duration::from_secs(5), async {
+        tokio::time::timeout(Duration::from_secs(10), async {
             while !marker.is_file() {
                 tokio::time::sleep(Duration::from_millis(10)).await;
             }

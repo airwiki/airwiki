@@ -11,6 +11,9 @@ const locale = parameters.get('locale') === 'en' ? 'en' : 'es';
 const theme = parameters.get('theme') === 'light' ? 'light' : 'dark';
 const platform = parameters.get('platform') === 'windows' ? 'windows' : 'macOs';
 const destination = parameters.get('destination') ?? 'home';
+const sharedPeerId = '12D3KooSyntheticNearbyNode';
+const sharedWikiId = '20000000-0000-4000-8000-000000000001';
+const sharedConceptId = '30000000-0000-4000-8000-000000000001';
 const snapshot = readySnapshot();
 snapshot.platform = platform;
 if (snapshot.preferences) {
@@ -49,10 +52,23 @@ if (destination === 'search') {
       conceptId: 'synthetic-result', wikiId: snapshot.wikis[0].id,
       title: 'Safe maintenance window', snippet: 'Back up local state and verify integrity before applying a change.',
       headingOrPage: 'Preparation', logicalResourceUri: 'okf://atlas/concepts/safe-maintenance',
-      sourceRevision: 4, sourceSha256: 'a'.repeat(64), rank: 0.98, nodeId: snapshot.nodeId ?? 'local',
+      sourceRevision: 4, sourceSha256: 'a'.repeat(64), rank: 0.98, nodeId: snapshot.nodeId ?? 'local', route: 'deviceNetwork',
       assurance: { trust: 'humanReviewed', freshness: 'fresh', verificationOutdated: false }, lifecycle: 'stable'
     }]
   };
+}
+if (destination === 'shared') {
+  snapshot.model = {
+    stateSequence: 3, profile: 'balanced', recommendedModelId: 'synthetic-local-model',
+    displayName: 'Local knowledge model', recommendationReason: 'Balanced for this device',
+    active: true, installed: true, degraded: false, issues: [], pendingModelId: null,
+    downloadBytes: 0, requiredFreeBytes: 0, fitsAvailableDisk: true, licenseAccepted: true,
+    license: 'Apache-2.0', licenseUrl: null, revision: 'synthetic'
+  };
+  snapshot.peers = [{
+    peerId: sharedPeerId, deviceName: 'RUSTICO', address: '/ip4/192.0.2.1/tcp/4242',
+    trust: 'trusted', activity: 'connected', sasWords: null, grantedWikiIds: [sharedWikiId]
+  }];
 }
 if (destination === 'graph') {
   const wiki = snapshot.wikis[0];
@@ -81,6 +97,7 @@ if (destination === 'system') {
 window.location.hash = destination === 'review'
   ? `wikis/${snapshot.wikis[0].id}/pending`
   : destination === 'graph' ? `wikis/${snapshot.wikis[0].id}`
+  : destination === 'shared' ? 'search'
   : destination === 'library' ? 'wikis' : destination;
 
 let eventSink: ((event: UiEventEnvelope) => void) | null = null;
@@ -91,6 +108,39 @@ const bridge: DevelopmentBridge = {
   },
   async invoke(_command, arguments_) {
     const requestId = typeof arguments_?.requestId === 'string' ? arguments_.requestId : null;
+    if (destination === 'shared' && _command === 'search' && requestId) {
+      snapshot.search = {
+        requestId, status: 'complete', coverage: 'complete',
+        hits: [{
+          conceptId: sharedConceptId, wikiId: sharedWikiId,
+          title: 'Ventana de mantenimiento segura',
+          snippet: 'Respalda el estado local y verifica su integridad antes de aplicar cambios.',
+          headingOrPage: 'Preparación', logicalResourceUri: 'urn:airwiki:shared:maintenance',
+          sourceRevision: 4, sourceSha256: 'c'.repeat(64), rank: 1, nodeId: sharedPeerId, route: 'deviceNetwork',
+          assurance: { trust: 'humanReviewed', freshness: 'fresh', verificationOutdated: false }, lifecycle: 'stable'
+        }]
+      };
+    }
+    if (destination === 'shared' && _command === 'browse_nearby_wiki' && requestId) {
+      snapshot.nearbyBrowse = {
+        requestId, status: 'available', peerId: sharedPeerId, wikiId: sharedWikiId,
+        wikiName: 'Guía operativa compartida', okfCompatibility: { kind: 'declaredV02' }, nextCursor: null,
+        appendFailed: false,
+        concepts: [{
+          conceptId: sharedConceptId, conceptType: 'Procedure', title: 'Ventana de mantenimiento segura',
+          description: 'Procedimiento validado para mantener el servicio recuperable.', language: 'es',
+          tags: ['operaciones', 'recuperación'], summary: 'Respalda el estado local, verifica su integridad, aplica el cambio y confirma la recuperación.',
+          sourceRevision: 4, lifecycle: 'stable',
+          assurance: { trust: 'humanReviewed', freshness: 'fresh', verificationOutdated: false }
+        }, {
+          conceptId: '30000000-0000-4000-8000-000000000002', conceptType: 'Runbook', title: 'Recuperación',
+          description: 'Pasos para volver al estado anterior cuando falla la validación.', language: 'es',
+          tags: ['recuperación'], summary: 'Restaura el respaldo, valida el resultado y registra el estado observado.',
+          sourceRevision: 2, lifecycle: 'stable',
+          assurance: { trust: 'machineConfirmed', freshness: 'fresh', verificationOutdated: false }
+        }]
+      };
+    }
     if (_command === 'manage_integration' && requestId) {
       snapshot.integrationRequestId = null;
       snapshot.integrationCompletedRequestId = requestId;

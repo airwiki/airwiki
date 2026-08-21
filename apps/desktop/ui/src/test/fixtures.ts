@@ -25,7 +25,7 @@ export function readySnapshot(): AppSnapshot {
       trustSummary: 'humanReviewed', restrictions: []
     }],
     wikiScans: [], reviews: [], reanalyzingReviewIds: [], sourceIssues: [], peers: [],
-    model: null, modelInstall: null, search: null, publicBrowse: null, reviewEvidence: null,
+    model: null, modelInstall: null, search: null, publicBrowse: null, nearbyBrowse: null, reviewEvidence: null,
     knowledge: null, knowledgePage: null,
     preferences: { completedOnboardingVersion: 1, locale: 'es', theme: 'system', lanPreference: 'disabled', closeBehavior: 'ask', automaticUpdateChecks: false },
     autostart: 'disabled',

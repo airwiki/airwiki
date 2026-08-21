@@ -12,14 +12,17 @@ use thiserror::Error;
 /// Maximum accepted size for an address pasted into the advanced LAN UI.
 pub const MAX_MANUAL_LAN_ADDRESS_BYTES: usize = 512;
 
-/// Maximum number of volatile peer identities retained from LAN discovery.
+/// Maximum number of peer identities retained in the volatile LAN address cache.
 ///
 /// Trusted identities remain durable in SQLite; this limit applies only to the
-/// unauthenticated, runtime-only address cache.
+/// runtime-only addresses learned from discovery or authenticated connections.
 pub const MAX_VOLATILE_LAN_PEERS: usize = 256;
 
 /// Maximum current mDNS observations retained for one peer identity.
 pub const MAX_MDNS_ADDRESSES_PER_PEER: usize = 8;
+
+/// Maximum Noise-authenticated listener addresses retained for one peer identity.
+pub const MAX_AUTHENTICATED_LISTENERS_PER_PEER: usize = 8;
 
 /// A manually supplied, canonical TCP address that cannot leave the local network.
 ///
@@ -206,6 +209,8 @@ pub enum LanAddressError {
     InvalidListener,
     #[error("address belongs to a different PeerId")]
     PeerMismatch,
+    #[error("advertised listener does not belong to the authenticated connection endpoint")]
+    EndpointMismatch,
     #[error("volatile LAN address capacity is exhausted")]
     CapacityExceeded,
 }
@@ -254,13 +259,16 @@ struct PeerAddresses {
     mdns: Vec<Multiaddr>,
     /// Last address that completed an outbound Noise handshake.
     authenticated_outbound: Option<Multiaddr>,
+    /// Listener addresses announced through AirWiki's post-trust exchange.
+    authenticated_listeners: Vec<Multiaddr>,
 }
 
 /// In-memory LAN address source used for explicit, bounded redials.
 ///
 /// mDNS addresses are current observations and therefore take precedence over
-/// the last authenticated outbound address. Nothing in this type is serializable
-/// or persisted; callers must clear a peer immediately when revoking it.
+/// authenticated outbound and advertised listener fallbacks. Nothing in this
+/// type is serializable or persisted; callers must clear a peer immediately when
+/// revoking it.
 #[derive(Debug, Default)]
 pub struct PeerAddressBook {
     peers: HashMap<PeerId, PeerAddresses>,
@@ -315,7 +323,10 @@ impl PeerAddressBook {
             let eviction = self
                 .peers
                 .iter()
-                .filter(|(_, addresses)| addresses.authenticated_outbound.is_none())
+                .filter(|(_, addresses)| {
+                    addresses.authenticated_outbound.is_none()
+                        && addresses.authenticated_listeners.is_empty()
+                })
                 .map(|(candidate, _)| *candidate)
                 .min_by(|left, right| left.to_bytes().cmp(&right.to_bytes()));
             if let Some(eviction) = eviction {
@@ -328,7 +339,116 @@ impl PeerAddressBook {
         Ok(address)
     }
 
-    /// Returns current mDNS addresses followed by a distinct authenticated fallback.
+    /// Records a listener address announced over a Noise-authenticated connection.
+    pub fn record_authenticated_listener(
+        &mut self,
+        peer: PeerId,
+        address: Multiaddr,
+    ) -> Result<Multiaddr, LanAddressError> {
+        let address = normalize_for_peer(peer, address)?;
+        if !self.peers.contains_key(&peer) && self.peers.len() >= MAX_VOLATILE_LAN_PEERS {
+            let eviction = self
+                .peers
+                .iter()
+                .filter(|(_, addresses)| {
+                    addresses.authenticated_outbound.is_none()
+                        && addresses.authenticated_listeners.is_empty()
+                })
+                .map(|(candidate, _)| *candidate)
+                .min_by(|left, right| left.to_bytes().cmp(&right.to_bytes()));
+            if let Some(eviction) = eviction {
+                self.peers.remove(&eviction);
+            } else {
+                return Err(LanAddressError::CapacityExceeded);
+            }
+        }
+        let listeners = &mut self.peers.entry(peer).or_default().authenticated_listeners;
+        listeners.retain(|candidate| candidate != &address);
+        listeners.insert(0, address.clone());
+        listeners.truncate(MAX_AUTHENTICATED_LISTENERS_PER_PEER);
+        Ok(address)
+    }
+
+    /// Atomically reconciles the complete listener set announced by a trusted peer.
+    ///
+    /// Every address is validated before the existing set is changed. Only the
+    /// listener matching this Noise-authenticated connection is newly trusted;
+    /// listeners authenticated through another interface are retained only while
+    /// the peer continues to announce their exact address. An empty set is an
+    /// explicit withdrawal.
+    pub fn replace_authenticated_listeners(
+        &mut self,
+        peer: PeerId,
+        observed_remote_ip: IpAddr,
+        addresses: Vec<Multiaddr>,
+    ) -> Result<(), LanAddressError> {
+        if addresses.len() > MAX_AUTHENTICATED_LISTENERS_PER_PEER {
+            return Err(LanAddressError::CapacityExceeded);
+        }
+        let explicit_withdrawal = addresses.is_empty();
+        let mut announced = Vec::with_capacity(addresses.len());
+        let mut validated = Vec::with_capacity(addresses.len());
+        for address in addresses {
+            let parsed = ManualLanAddress::from_str(&address.to_string())?;
+            if parsed
+                .peer_id()
+                .is_some_and(|address_peer| address_peer != peer)
+            {
+                return Err(LanAddressError::PeerMismatch);
+            }
+            let address = parsed.transport_address();
+            if !announced.contains(&address) {
+                announced.push(address.clone());
+            }
+            if parsed.ip_addr() == observed_remote_ip && !validated.contains(&address) {
+                validated.push(address);
+            }
+        }
+        if validated.is_empty() && !explicit_withdrawal {
+            return Err(LanAddressError::EndpointMismatch);
+        }
+        if explicit_withdrawal {
+            if let Some(addresses) = self.peers.get_mut(&peer) {
+                addresses.authenticated_listeners.clear();
+            }
+            self.remove_empty_peer(peer);
+            return Ok(());
+        }
+        if !self.peers.contains_key(&peer) && self.peers.len() >= MAX_VOLATILE_LAN_PEERS {
+            let eviction = self
+                .peers
+                .iter()
+                .filter(|(_, addresses)| {
+                    addresses.authenticated_outbound.is_none()
+                        && addresses.authenticated_listeners.is_empty()
+                })
+                .map(|(candidate, _)| *candidate)
+                .min_by(|left, right| left.to_bytes().cmp(&right.to_bytes()));
+            if let Some(eviction) = eviction {
+                self.peers.remove(&eviction);
+            } else {
+                return Err(LanAddressError::CapacityExceeded);
+            }
+        }
+        let mut reconciled = validated;
+        if let Some(existing) = self.peers.get(&peer) {
+            for address in &existing.authenticated_listeners {
+                let belongs_to_other_authenticated_interface =
+                    ManualLanAddress::from_str(&address.to_string())
+                        .is_ok_and(|parsed| parsed.ip_addr() != observed_remote_ip);
+                if belongs_to_other_authenticated_interface
+                    && announced.contains(address)
+                    && !reconciled.contains(address)
+                {
+                    reconciled.push(address.clone());
+                }
+            }
+        }
+        self.peers.entry(peer).or_default().authenticated_listeners = reconciled;
+        Ok(())
+    }
+
+    /// Returns current mDNS addresses followed by authenticated dial fallbacks.
     pub fn dial_addresses(&self, peer: &PeerId) -> Vec<Multiaddr> {
         let Some(addresses) = self.peers.get(peer) else {
             return Vec::new();
@@ -338,6 +458,11 @@ impl PeerAddressBook {
             && !ordered.contains(authenticated)
         {
             ordered.push(authenticated.clone());
+        }
+        for listener in &addresses.authenticated_listeners {
+            if !ordered.contains(listener) {
+                ordered.push(listener.clone());
+            }
         }
         ordered
     }
@@ -353,7 +478,9 @@ impl PeerAddressBook {
 
     fn remove_empty_peer(&mut self, peer: PeerId) {
         let should_remove = self.peers.get(&peer).is_some_and(|addresses| {
-            addresses.mdns.is_empty() && addresses.authenticated_outbound.is_none()
+            addresses.mdns.is_empty()
+                && addresses.authenticated_outbound.is_none()
+                && addresses.authenticated_listeners.is_empty()
         });
         if should_remove {
             self.peers.remove(&peer);
@@ -568,6 +695,147 @@ mod tests {
     }
 
     #[test]
+    fn address_book_uses_authenticated_listener_for_inbound_peer() {
+        let peer = PeerId::random();
+        let mut book = PeerAddressBook::default();
+        let listener = address("/ip4/10.0.0.7/tcp/43000");
+
+        book.record_authenticated_listener(peer, listener.clone())
+            .unwrap();
+
+        assert_eq!(book.dial_addresses(&peer), [listener]);
+    }
+
+    #[test]
+    fn address_book_bounds_authenticated_listeners_per_peer() {
+        let peer = PeerId::random();
+        let mut book = PeerAddressBook::default();
+        for offset in 0..=MAX_AUTHENTICATED_LISTENERS_PER_PEER {
+            let port = 43_000 + u16::try_from(offset).unwrap();
+            book.record_authenticated_listener(peer, address(&format!("/ip4/10.0.0.7/tcp/{port}")))
+                .unwrap();
+        }
+
+        let retained = book.dial_addresses(&peer);
+
+        assert_eq!(retained.len(), MAX_AUTHENTICATED_LISTENERS_PER_PEER);
+        assert_eq!(
+            retained[0],
+            address(&format!(
+                "/ip4/10.0.0.7/tcp/{}",
+                43_000 + u16::try_from(MAX_AUTHENTICATED_LISTENERS_PER_PEER).unwrap()
+            ))
+        );
+    }
+
+    #[test]
+    fn address_book_atomically_replaces_and_withdraws_authenticated_listeners() {
+        let peer = PeerId::random();
+        let mut book = PeerAddressBook::default();
+        let old = address("/ip4/10.0.0.7/tcp/43000");
+        let current = address("/ip4/10.0.0.8/tcp/43001");
+        book.record_authenticated_listener(peer, old.clone())
+            .unwrap();
+
+        book.replace_authenticated_listeners(
+            peer,
+            IpAddr::V4(Ipv4Addr::new(10, 0, 0, 8)),
+            vec![current.clone()],
+        )
+        .unwrap();
+        assert_eq!(book.dial_addresses(&peer), [current]);
+
+        let invalid = address("/ip4/8.8.8.8/tcp/443");
+        assert!(
+            book.replace_authenticated_listeners(
+                peer,
+                IpAddr::V4(Ipv4Addr::new(10, 0, 0, 8)),
+                vec![invalid],
+            )
+            .is_err()
+        );
+        assert_eq!(
+            book.dial_addresses(&peer),
+            [address("/ip4/10.0.0.8/tcp/43001")],
+            "an invalid refresh must preserve the previous complete set"
+        );
+
+        let steered = address("/ip4/10.0.0.9/tcp/43001");
+        assert_eq!(
+            book.replace_authenticated_listeners(
+                peer,
+                IpAddr::V4(Ipv4Addr::new(10, 0, 0, 8)),
+                vec![steered],
+            ),
+            Err(LanAddressError::EndpointMismatch)
+        );
+        assert_eq!(
+            book.dial_addresses(&peer),
+            [address("/ip4/10.0.0.8/tcp/43001")],
+            "a peer cannot steer redials toward another private host"
+        );
+        let matching = address("/ip4/10.0.0.8/tcp/43002");
+        book.replace_authenticated_listeners(
+            peer,
+            IpAddr::V4(Ipv4Addr::new(10, 0, 0, 8)),
+            vec![matching.clone(), address("/ip4/192.168.50.9/tcp/43002")],
+        )
+        .unwrap();
+        assert_eq!(
+            book.dial_addresses(&peer),
+            [matching],
+            "listeners for other peer interfaces are ignored rather than dialed"
+        );
+
+        book.replace_authenticated_listeners(
+            peer,
+            IpAddr::V4(Ipv4Addr::new(10, 0, 0, 8)),
+            Vec::new(),
+        )
+        .unwrap();
+        assert!(book.dial_addresses(&peer).is_empty());
+    }
+
+    #[test]
+    fn address_book_merges_authenticated_interfaces_and_prunes_retired_routes() {
+        let peer = PeerId::random();
+        let mut book = PeerAddressBook::default();
+        let wifi = address("/ip4/10.0.0.8/tcp/43000");
+        let ethernet = address("/ip4/192.168.50.9/tcp/43000");
+        let complete_announcement = vec![wifi.clone(), ethernet.clone()];
+
+        book.replace_authenticated_listeners(
+            peer,
+            IpAddr::V4(Ipv4Addr::new(10, 0, 0, 8)),
+            complete_announcement.clone(),
+        )
+        .unwrap();
+        assert_eq!(book.dial_addresses(&peer), std::slice::from_ref(&wifi));
+
+        book.replace_authenticated_listeners(
+            peer,
+            IpAddr::V4(Ipv4Addr::new(192, 168, 50, 9)),
+            complete_announcement,
+        )
+        .unwrap();
+        assert_eq!(book.dial_addresses(&peer), [ethernet.clone(), wifi.clone()]);
+
+        let changed_wifi = address("/ip4/10.0.0.8/tcp/43001");
+        let changed_ethernet = address("/ip4/192.168.50.9/tcp/43001");
+        book.replace_authenticated_listeners(
+            peer,
+            IpAddr::V4(Ipv4Addr::new(10, 0, 0, 8)),
+            vec![changed_wifi.clone(), changed_ethernet],
+        )
+        .unwrap();
+        assert_eq!(
+            book.dial_addresses(&peer),
+            [changed_wifi],
+            "an unobserved replacement and a withdrawn exact route must not remain dialable"
+        );
+    }
+
+    #[test]
     fn address_book_expiry_preserves_authenticated_fallback() {
         let peer = PeerId::random();
         let current = address("/ip4/10.0.0.5/tcp/41000");
@@ -627,6 +895,8 @@ mod tests {
         book.record_mdns(peer, address("/ip4/192.168.1.25/tcp/41000"))
             .unwrap();
         book.record_authenticated_outbound(peer, address("/ip4/192.168.1.25/tcp/40000"))
+            .unwrap();
+        book.record_authenticated_listener(peer, address("/ip4/192.168.1.25/tcp/43000"))
             .unwrap();
 
         let removed = book.clear_peer(&peer);

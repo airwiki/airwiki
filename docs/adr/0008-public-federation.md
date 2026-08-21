@@ -34,11 +34,18 @@ admission ceilings.
 The in-memory peer rate limiter tracks at most 1,024 active identities per
 window and rejects new identities while that bounded window is full.
 
-The wire protocols are separate:
+The wire protocols are separate. Catalog and search advertise v2 with v1
+fallback. Browse advertises v3, then v2 and v1: v3 adds an exact concept anchor
+for opening a search result, while the reader translates that anchor to the
+existing UUID cursor contract when an older publisher is negotiated.
 
 - `/airwiki/public-catalog/1.0.0`
+- `/airwiki/public-catalog/2.0.0`
 - `/airwiki/public-search/1.0.0`
+- `/airwiki/public-search/2.0.0`
 - `/airwiki/public-browse/1.0.0`
+- `/airwiki/public-browse/2.0.0`
+- `/airwiki/public-browse/3.0.0`
 
 Indexes select at most 64 collections. A reader contacts at most three indexes
 and twelve publisher peers, with two collections per peer, bounded concurrency,

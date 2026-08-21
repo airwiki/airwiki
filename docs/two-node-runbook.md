@@ -49,7 +49,14 @@ must follow the [Internet federation acceptance runbook](internet-federation-run
 8. **Federated search.** Ask how Atlas is recovered, who is responsible, and the
    target date. Evidence must combine the Mac procedure with Windows ownership
    and date, and every hit must contain the node, heading or page, revision, and
-   source hash shown by the UI.
+   source hash shown by the UI. Run this first with public search disabled and
+   confirm the authorized nearby result remains visible. Open it and confirm it
+   uses the same file-oriented Wiki workspace as local knowledge, clearly marked
+   as a read-only nearby Wiki, then return to the unchanged result list. Repeat
+   the search and open journey in the opposite direction after disconnecting the
+   initial transport; the authenticated concrete-listener redial must be
+   transparent. A wildcard `0.0.0.0` listener must never be the advertised
+   fallback.
 9. **Non-disclosure.** Search for the synthetic private canary
    `ORION-PRIVATE-731` from the Mac. No remote title, metadata, or snippet may be
    returned.
@@ -77,8 +84,9 @@ must follow the [Internet federation acceptance runbook](internet-federation-run
 - Federated search completes in under three seconds when both nodes are online.
 - An offline or partial MCP response completes in under five seconds.
 - Discovery or reconnection completes in under ten seconds on the private LAN.
-- No original, full document, index, embedding, path, or Wiki listing
-  crosses the LAN.
+- No original, full document, index, embedding, path, or peer-wide Wiki listing
+  crosses the LAN. Opening one authorized result may retrieve only bounded
+  published concept summaries for that exact Wiki.
 - Publication, SAS confirmation, grants, external-chat policy, and re-publication
   always remain explicit human actions.
 

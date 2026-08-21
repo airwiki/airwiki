@@ -41,7 +41,7 @@ impl PublicSourceBackend for PublicFixtureBackend {
             .ok_or(PublicSourceBackendError::Invalid)?;
         let now = Utc::now();
         let hit = SearchHit {
-            concept_id: Uuid::new_v4(),
+            concept_id: collection.collection_id,
             collection_id: collection.collection_id,
             chunk_id: Uuid::new_v4(),
             title: "Atlas recovery".to_owned(),
@@ -89,7 +89,7 @@ impl PublicSourceBackend for PublicFixtureBackend {
                 concepts: vec![airwiki_types::PublicConceptSummary {
                     publisher_id: self.publisher_id.clone(),
                     collection_id: request.collection_id,
-                    concept_id: Uuid::new_v4(),
+                    concept_id: request.collection_id,
                     concept_type: ConceptType::Procedure,
                     title: "Atlas recovery".to_owned(),
                     description: "Synthetic procedure".to_owned(),
@@ -237,7 +237,15 @@ async fn public_search_round_trip_needs_no_lan_pairing_or_grant() {
         .unwrap();
     assert_eq!(response.hits.len(), 1);
     assert_eq!(response.hits[0].collection_id, collection_id);
-    let page = reader.browse(&manifest, None, 50).await.unwrap();
+    let page = reader
+        .browse(
+            &manifest,
+            None,
+            response.hits.first().map(|hit| hit.concept_id),
+            50,
+        )
+        .await
+        .unwrap();
     assert_eq!(page.concepts.len(), 1);
     assert_eq!(page.concepts[0].collection_id, collection_id);
 
@@ -594,6 +602,7 @@ async fn public_search_and_browse_use_outbound_relay_reservation() {
             &source_identity.peer_id().to_string(),
             collection_id,
             None,
+            result.response.hits.first().map(|hit| hit.concept_id),
             50,
         )
         .await
@@ -860,6 +869,7 @@ async fn public_search_and_browse_fail_over_to_second_outbound_relay_reservation
             &source_identity.peer_id().to_string(),
             collection_id,
             None,
+            result.response.hits.first().map(|hit| hit.concept_id),
             50,
         )
         .await

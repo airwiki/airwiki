@@ -17,8 +17,9 @@ would contradict the goal of a simple local installation.
 Relevant contracts are the official [Codex MCP documentation], [Codex skills
 documentation], [Claude Code memory documentation], [Gemini CLI skills
 documentation], [Gemini CLI MCP server documentation], the normative [MCP
-2026-07-28 specification], Anthropic's [MCP guidance] and [security guidance],
-and [MCPB manifest v0.3].
+2026-07-28 specification], Anthropic's [MCP guidance], [security guidance] and
+[tool design guidance], the [Agent Skills best practices], and [MCPB manifest
+v0.3].
 
 [Codex MCP documentation]: https://developers.openai.com/codex/mcp/
 [Codex skills documentation]: https://developers.openai.com/codex/skills/
@@ -28,6 +29,8 @@ and [MCPB manifest v0.3].
 [MCP 2026-07-28 specification]: https://modelcontextprotocol.io/specification/2026-07-28
 [MCP guidance]: https://code.claude.com/docs/en/mcp
 [security guidance]: https://code.claude.com/docs/en/security
+[tool design guidance]: https://www.anthropic.com/engineering/writing-tools-for-agents
+[Agent Skills best practices]: https://agentskills.io/skill-creation/best-practices
 [MCPB manifest v0.3]: https://github.com/modelcontextprotocol/mcpb/blob/70fe3b34cd6dff1b3bba046638edc72a6467a4fb/MANIFEST.md
 
 ## Decision

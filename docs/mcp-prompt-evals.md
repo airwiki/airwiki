@@ -2,7 +2,11 @@
 
 This document defines a **synthetic golden prompt set** for evaluating AirWiki MCP server metadata and instructions in ChatGPT developer mode. It tests
 when `search_airwiki` is selected, how returned evidence is used, and
-whether the response respects privacy boundaries.
+whether the response respects privacy boundaries. Its realistic multi-call
+cases, verifiable outcomes and tool-call metrics follow Anthropic's
+[tool-evaluation guidance].
+
+[tool-evaluation guidance]: https://www.anthropic.com/engineering/writing-tools-for-agents
 
 > This is a manual suite and does not run in CI. Use only a disposable profile,
 > synthetic fixtures, and test peers. Do not connect collections, databases,

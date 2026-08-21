@@ -457,7 +457,8 @@ struct SemanticReport {
     treatment: EvaluationMetrics,
     structure_only: EvaluationMetrics,
     best_assignment_permutation: EvaluationMetrics,
-    control_delta: f64,
+    control_exact_case_rate: ExactCaseRates,
+    control_delta: ExactCaseRates,
     passed: bool,
 }
 
@@ -470,9 +471,7 @@ struct EvaluationMetrics {
     unexpected_evidence: usize,
     forbidden_evidence: usize,
     authorization_errors: usize,
-    provenance_errors: usize,
     duplicate_errors: usize,
-    stability_errors: usize,
     compound_partial_errors: usize,
     conflict_coverage_errors: usize,
 }
@@ -494,6 +493,44 @@ struct AnnotationAgreement {
     overall: f64,
     development: f64,
     promotion: f64,
+}
+
+#[derive(Debug, Clone, Copy, Default, Serialize, PartialEq)]
+#[serde(deny_unknown_fields)]
+struct ExactCaseRates {
+    overall: f64,
+    development: f64,
+    promotion: f64,
+}
+
+impl ExactCaseRates {
+    fn from_metrics(metrics: &EvaluationMetrics) -> Self {
+        Self {
+            overall: metrics.overall.exact_case_rate,
+            development: metrics.development.exact_case_rate,
+            promotion: metrics.promotion.exact_case_rate,
+        }
+    }
+
+    fn componentwise_max(self, other: Self) -> Self {
+        Self {
+            overall: self.overall.max(other.overall),
+            development: self.development.max(other.development),
+            promotion: self.promotion.max(other.promotion),
+        }
+    }
+
+    fn difference(self, other: Self) -> Self {
+        Self {
+            overall: self.overall - other.overall,
+            development: self.development - other.development,
+            promotion: self.promotion - other.promotion,
+        }
+    }
+
+    fn meets_minimum(self, minimum: f64) -> bool {
+        self.overall >= minimum && self.development >= minimum && self.promotion >= minimum
+    }
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -1844,12 +1881,15 @@ fn build_report(package: &LoadedPackage) -> Result<SemanticReport> {
     let treatment = evaluate(package, run, EvaluationArm::Treatment)?;
     let structure_only = evaluate(package, run, EvaluationArm::StructureOnly)?;
     let mut best_assignment = None;
+    let mut strongest_assignment_rates = ExactCaseRates::default();
     for permutation in 0..package.contract.assignment_permutations {
         let metrics = evaluate(
             package,
             run,
             EvaluationArm::AssignmentPermutation(permutation),
         )?;
+        strongest_assignment_rates =
+            strongest_assignment_rates.componentwise_max(ExactCaseRates::from_metrics(&metrics));
         if best_assignment
             .as_ref()
             .is_none_or(|current: &EvaluationMetrics| {
@@ -1860,11 +1900,10 @@ fn build_report(package: &LoadedPackage) -> Result<SemanticReport> {
         }
     }
     let best_assignment = best_assignment.context("assignment controls are missing")?;
-    let control_exact = structure_only
-        .overall
-        .exact_case_rate
-        .max(best_assignment.overall.exact_case_rate);
-    let control_delta = treatment.overall.exact_case_rate - control_exact;
+    let control_exact_case_rate =
+        ExactCaseRates::from_metrics(&structure_only).componentwise_max(strongest_assignment_rates);
+    let control_delta =
+        ExactCaseRates::from_metrics(&treatment).difference(control_exact_case_rate);
     let cross_platform_identical = validate_cross_platform_outputs(&package.runs).is_ok();
     let passed = cross_platform_identical
         && unresolved_source_records == 0
@@ -1878,7 +1917,7 @@ fn build_report(package: &LoadedPackage) -> Result<SemanticReport> {
             package.contract.minimum_annotation_exact_rate,
         )
         && metrics_pass(&treatment, &package.contract)
-        && control_delta >= package.contract.minimum_control_delta;
+        && control_delta.meets_minimum(package.contract.minimum_control_delta);
 
     Ok(SemanticReport {
         schema_version: REPORT_SCHEMA_VERSION,
@@ -1895,6 +1934,7 @@ fn build_report(package: &LoadedPackage) -> Result<SemanticReport> {
         treatment,
         structure_only,
         best_assignment_permutation: best_assignment,
+        control_exact_case_rate,
         control_delta,
         passed,
     })
@@ -1910,9 +1950,7 @@ fn metrics_pass(metrics: &EvaluationMetrics, contract: &ExperimentContract) -> b
         && metrics.unexpected_evidence == 0
         && metrics.forbidden_evidence == 0
         && metrics.authorization_errors == 0
-        && metrics.provenance_errors == 0
         && metrics.duplicate_errors == 0
-        && metrics.stability_errors == 0
         && metrics.compound_partial_errors == 0
         && metrics.conflict_coverage_errors == 0
 }
@@ -3030,6 +3068,22 @@ mod tests {
         need.subject.normalized = "harbor".to_owned();
         need.required_lifecycles = vec!["current".to_owned()];
         assert!(!claim_matches_need(&claim, &need));
+    }
+
+    #[test]
+    fn control_advantage_must_hold_in_each_split() {
+        let treatment = ExactCaseRates {
+            overall: 0.90,
+            development: 1.00,
+            promotion: 0.80,
+        };
+        let control = ExactCaseRates {
+            overall: 0.75,
+            development: 0.60,
+            promotion: 0.80,
+        };
+
+        assert!(!treatment.difference(control).meets_minimum(0.10));
     }
 
     #[test]

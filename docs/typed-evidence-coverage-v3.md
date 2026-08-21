@@ -154,8 +154,9 @@ development and promotion:
 - exact-case success is at least `0.85`;
 - exact source-record and question-record agreement with blind human gold are
   each at least `0.85`;
-- unexpected, forbidden, authorization, provenance, duplicate and stability
-  errors are zero;
+- unexpected, forbidden, authorization and duplicate errors are zero;
+- package provenance, deterministic replay and cross-platform stability pass as
+  validation preconditions before scoring;
 - compound cases return all expected groups or abstain completely;
 - conflict cases retain every expected value;
 - no annotation remains unresolved;

@@ -103,7 +103,6 @@
         elements: graphElements(),
         minZoom: 0.45,
         maxZoom: 2.2,
-        wheelSensitivity: 0.18,
         style: [
           { selector: 'node', style: { 'background-color': surface, 'border-color': cyan, 'border-width': 1.5, color: strong, label: 'data(label)', 'font-family': 'Atkinson, sans-serif', 'font-size': '11px', 'text-background-color': surface, 'text-background-opacity': 0.92, 'text-background-padding': '2px', 'text-max-width': '120px', 'text-wrap': 'ellipsis', 'text-valign': 'bottom', 'text-margin-y': 8, height: 22, width: 22 } },
           { selector: 'node[kind = "index"]', style: { 'background-color': cyan, 'border-width': 0, height: 30, width: 30 } },

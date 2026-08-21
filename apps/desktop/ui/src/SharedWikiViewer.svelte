@@ -4,6 +4,7 @@
   import BookOpen from '@lucide/svelte/icons/book-open';
   import FileText from '@lucide/svelte/icons/file-text';
   import LockKeyhole from '@lucide/svelte/icons/lock-keyhole';
+  import { tick } from 'svelte';
   import type { NearbyBrowseSummary, PublicBrowseSummary, PublicConceptSummaryDto } from './api';
   import type { MessageArgs } from './i18n';
 
@@ -21,6 +22,7 @@
   export let onblock: ((publisherId: string) => void) | null = null;
 
   let selectedConceptId: string | null = null;
+  let headingElement: HTMLHeadingElement | null = null;
 
   $: selectedConcept = browse?.concepts.find((concept) => concept.conceptId === selectedConceptId)
     ?? browse?.concepts.find((concept) => concept.conceptId === initialConceptId)
@@ -31,6 +33,14 @@
     && initialConceptId
     && !browse.concepts.some((concept) => concept.conceptId === initialConceptId)
   );
+  $: if (!loading && browse && !unavailable()) {
+    const wikiKey = `${source}:${browse.wikiName ?? ''}`;
+    void tick().then(() => {
+      if (!headingElement || headingElement.dataset.focusedWiki === wikiKey) return;
+      headingElement.dataset.focusedWiki = wikiKey;
+      headingElement.focus({ preventScroll: true });
+    });
+  }
 
   function unavailable(): boolean {
     if (!browse) return false;
@@ -61,7 +71,7 @@
   }
 </script>
 
-<section class="shared-wiki-viewer" aria-live="polite" aria-busy={loading}>
+<section class="shared-wiki-viewer" aria-busy={loading}>
   {#if loading}
     <button class="shared-wiki-back" onclick={onback}>
       <ArrowLeft size={16} aria-hidden="true" />
@@ -88,7 +98,7 @@
           <span aria-hidden="true">/</span>
           <span>{browse.wikiName ?? t('desktop-public-origin-missing')}</span>
         </nav>
-        <h1>{browse.wikiName ?? t('desktop-public-origin-missing')}</h1>
+        <h1 bind:this={headingElement} tabindex="-1">{browse.wikiName ?? t('desktop-public-origin-missing')}</h1>
         {#if source === 'public' && (browse as PublicBrowseSummary).description}<p>{(browse as PublicBrowseSummary).description}</p>{/if}
       </div>
     </header>
@@ -104,8 +114,8 @@
     </section>
 
     <div class="content-tabs-bar shared-content-tabs">
-      <div class="content-tabs" role="tablist" aria-label={t('desktop-wiki-sections')}>
-        <button role="tab" aria-selected="true" class="active">{t('desktop-wiki-content-tab')}<span>{browse.concepts.length}</span></button>
+      <div class="content-tabs" aria-label={t('desktop-wiki-sections')}>
+        <span class="content-tab-label active">{t('desktop-wiki-content-tab')}<span>{browse.concepts.length}</span></span>
       </div>
       <span class="shared-format">{browse.okfCompatibility ? t(`desktop-okf-compatibility-${browse.okfCompatibility.kind}`) : t('desktop-public-format-unavailable')}</span>
     </div>
@@ -128,7 +138,7 @@
         {/if}
         {#if browse.nextCursor}<button class="shared-wiki-more" onclick={onmore}>{t('search-public-browse-more')}</button>{/if}
       </aside>
-      <section class="file-preview shared-file-preview" aria-live="polite">
+      <section class="file-preview shared-file-preview">
         {#if requestedConceptUnavailable}
           <div class="table-empty shared-target-unavailable" role="alert">
             <AlertTriangle size={20} aria-hidden="true" />

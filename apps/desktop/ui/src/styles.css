@@ -432,6 +432,7 @@ button:active:not(:disabled) { transform: scale(.985); }
 .drive-route { width: min(1180px, 100%); margin: 0 auto; }
 .page-heading { align-items: center; padding: 0 0 24px; border-bottom: 1px solid var(--line); }
 .page-heading h1 { max-width: none; font: 650 clamp(27px, 3vw, 34px)/1.15 system-ui, sans-serif; letter-spacing: -.025em; }
+.page-heading h1[tabindex="-1"]:focus { outline: none; }
 .page-heading p { margin: 7px 0 0; color: var(--muted); line-height: 1.45; }
 .page-heading .primary, .page-heading .secondary, .heading-actions button { display: inline-flex; align-items: center; gap: 7px; }
 .section-heading { display: flex; align-items: center; justify-content: space-between; gap: 24px; }
@@ -460,8 +461,9 @@ button:active:not(:disabled) { transform: scale(.985); }
 .wiki-table { margin-top: 14px; background: var(--slate); border: 1px solid var(--line); border-radius: var(--panel-radius); overflow: hidden; }
 .wiki-table-head, .wiki-row { display: grid; grid-template-columns: minmax(210px, 1.5fr) minmax(150px, .8fr) minmax(190px, 1fr) minmax(130px, .7fr) 20px; align-items: center; gap: 16px; }
 .wiki-table-head { min-height: 38px; padding: 0 18px; color: var(--muted); background: var(--ink); border-bottom: 1px solid var(--line); font-size: 11px; font-weight: 650; text-transform: uppercase; letter-spacing: .045em; }
-.wiki-row { width: 100%; min-height: 62px; padding: 9px 18px; color: var(--strong); background: transparent; border: 0; border-bottom: 1px solid var(--line); text-align: left; cursor: pointer; }
-.wiki-row:last-of-type { border-bottom: 0; }
+.wiki-row-item { border-bottom: 1px solid var(--line); }
+.wiki-row-item:last-child { border-bottom: 0; }
+.wiki-row { width: 100%; min-height: 62px; padding: 9px 18px; color: var(--strong); background: transparent; border: 0; text-align: left; cursor: pointer; }
 .wiki-row:hover { background: var(--surface-raised); }
 .wiki-row > span:not(.wiki-name) { color: var(--muted); font-size: 13px; }
 .wiki-row > span.attention { color: var(--amber); }
@@ -506,7 +508,7 @@ button:active:not(:disabled) { transform: scale(.985); }
 .shared-wiki-state.warning { color: var(--amber); border-color: color-mix(in srgb, var(--amber) 45%, var(--line)); }
 .shared-wiki-state strong { color: var(--strong); }
 .shared-wiki-state p { margin: 5px 0 0; color: var(--muted); line-height: 1.45; }
-.action-message { position: fixed; z-index: 15; right: 24px; bottom: 24px; max-width: 440px; margin: 0; padding: 11px 14px; color: var(--strong); background: var(--slate); border: 1px solid var(--line); border-radius: var(--control-radius); box-shadow: 0 8px 30px #0003; }
+.action-message { position: fixed; z-index: 15; right: 24px; bottom: 70px; max-width: 440px; margin: 0; padding: 11px 14px; color: var(--strong); background: var(--slate); border: 1px solid var(--line); border-radius: var(--control-radius); box-shadow: 0 8px 30px #0003; }
 .action-message.success { color: var(--verify); border-color: color-mix(in srgb, var(--verify) 45%, var(--line)); }
 .action-message.progress { color: var(--violet); border-color: color-mix(in srgb, var(--violet) 45%, var(--line)); }
 .action-message.error { color: var(--coral); border-color: color-mix(in srgb, var(--coral) 45%, var(--line)); }
@@ -515,9 +517,10 @@ button:active:not(:disabled) { transform: scale(.985); }
 .breadcrumb button:hover { color: var(--strong); background: transparent; }
 .heading-actions { display: flex; gap: 9px; }
 .content-tabs { display: flex; align-items: center; gap: 24px; height: 54px; border-bottom: 1px solid var(--line); }
-.content-tabs button { display: flex; align-items: center; gap: 7px; height: 100%; padding: 0 2px; color: var(--muted); background: transparent; border: 0; border-bottom: 2px solid transparent; cursor: pointer; }
-.content-tabs button.active { color: var(--strong); border-bottom-color: var(--cyan); }
-.content-tabs button span { min-width: 22px; padding: 2px 6px; color: var(--muted); background: var(--surface-raised); border-radius: 10px; font-size: 11px; text-align: center; }
+.content-tabs button, .content-tab-label { display: flex; align-items: center; gap: 7px; height: 100%; padding: 0 2px; color: var(--muted); background: transparent; border: 0; border-bottom: 2px solid transparent; }
+.content-tabs button { cursor: pointer; }
+.content-tabs button.active, .content-tab-label.active { color: var(--strong); border-bottom-color: var(--cyan); }
+.content-tabs button span, .content-tab-label > span { min-width: 22px; padding: 2px 6px; color: var(--muted); background: var(--surface-raised); border-radius: 10px; font-size: 11px; text-align: center; }
 .content-tabs-bar { display: flex; align-items: stretch; height: 54px; border-bottom: 1px solid var(--line); }
 .content-tabs-bar .content-tabs { flex: 1; height: auto; border-bottom: 0; }
 .content-tabs-bar > .details-tab { padding: 0 2px; color: var(--cyan); background: transparent; border: 0; cursor: pointer; }
@@ -732,16 +735,16 @@ button:active:not(:disabled) { transform: scale(.985); }
 .wiki-intervention-list p { max-width: 720px; margin: 4px 0 0; color: var(--muted); font-size: 13px; line-height: 1.45; }
 .wiki-intervention-list button { flex: none; white-space: nowrap; }
 .wiki-interventions > .repair-preview { margin: 0 18px 18px; }
-.system-status-bar { grid-column: 1; grid-row: 2; display: grid; grid-template-columns: auto minmax(0, 1fr); align-items: center; gap: 20px; min-height: 48px; padding: 6px 22px; background: var(--slate); border-top: 1px solid var(--line); }
-.system-status-bar > strong { color: var(--muted); font-size: 10px; letter-spacing: .045em; text-transform: uppercase; }
+.system-status-bar { grid-column: 1; grid-row: 2; display: grid; grid-template-columns: auto minmax(0, 1fr); align-items: center; gap: 20px; min-height: 54px; padding: 6px 22px; background: var(--slate); border-top: 1px solid var(--line); }
+.system-status-bar > strong { color: var(--muted); font-size: 10.5px; letter-spacing: .045em; text-transform: uppercase; }
 .system-status-bar > div { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 0; }
-.system-status-bar button { display: grid; grid-template-columns: 8px minmax(0, 1fr); grid-template-rows: auto auto; align-items: center; column-gap: 8px; min-width: 0; padding: 4px 16px; color: var(--muted); background: transparent; border: 0; border-left: 1px solid var(--line); border-radius: 0; text-align: left; cursor: pointer; }
+.system-status-bar button { display: grid; grid-template-columns: 8px minmax(0, 1fr); grid-template-rows: auto auto; align-items: center; column-gap: 8px; min-width: 0; min-height: 42px; padding: 4px 16px; color: var(--muted); background: transparent; border: 0; border-left: 1px solid var(--line); border-radius: 0; text-align: left; cursor: pointer; }
 .system-status-bar button:first-child { border-left: 0; }
 .system-status-bar button:hover { color: var(--strong); background: var(--surface-raised); }
 .system-status-bar button > .status-dot { grid-row: 1 / 3; }
 .system-status-bar button > span:nth-child(2), .system-status-bar small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.system-status-bar button > span:nth-child(2) { color: var(--strong); font-size: 11px; font-weight: 600; }
-.system-status-bar small { grid-column: 2; font-size: 10px; }
+.system-status-bar button > span:nth-child(2) { color: var(--strong); font-size: 12px; font-weight: 600; }
+.system-status-bar small { grid-column: 2; font-size: 11px; }
 .side-drawer { width: min(540px, 100vw); }
 
 @media (max-width: 1120px) {

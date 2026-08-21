@@ -170,6 +170,14 @@
     });
   }
 
+  function focusRouteHeading() {
+    void tick().then(() => {
+      mainScrollRegion
+        ?.querySelector<HTMLElement>('.route-page h1[tabindex="-1"]')
+        ?.focus({ preventScroll: true });
+    });
+  }
+
   function dialogFocusableElements(node: HTMLElement | null): HTMLElement[] {
     if (!node) return [];
     return Array.from(node.querySelectorAll<HTMLElement>(
@@ -544,6 +552,7 @@
       pushHash(`#${next}`);
     }
     if (next === 'wikis') void refreshHealth();
+    focusRouteHeading();
   }
 
   function openServiceStatus(target: ServiceTarget) {
@@ -553,6 +562,7 @@
       systemSection = 'models';
       pushHash('#system/models');
       scrollMainTo(0);
+      focusRouteHeading();
       return;
     }
     destination = 'wikis';
@@ -561,6 +571,7 @@
     if (target === 'connections' || target === 'apps') openConnectionsPanel();
     pushHash('#wikis');
     scrollMainTo(0);
+    focusRouteHeading();
     if (target === 'connections') void runConnectivityAction('refresh');
     if (target === 'knowledge') void refreshHealth();
   }
@@ -1194,6 +1205,8 @@
       selectedWikiId = hit.wikiId;
       pushHash(`#wikis/${hit.wikiId}`);
       knowledgeMode = 'document';
+      scrollMainTo(0);
+      focusRouteHeading();
       pendingSearchConcept = { wikiId: hit.wikiId, conceptId: hit.conceptId };
       await loadWikiBundle(hit.wikiId);
       await openPendingSearchConcept(snapshot);
@@ -1246,6 +1259,7 @@
   function closeSharedBrowse() {
     dismissSharedBrowse();
     scrollMainTo(0);
+    focusRouteHeading();
   }
 
   async function openPendingSearchConcept(current: AppSnapshot | null) {
@@ -1409,6 +1423,8 @@
     wikiTab = tab;
     pushHash(`#wikis/${wikiId}${tab === 'pending' ? '/pending' : ''}`);
     knowledgeMode = 'document';
+    scrollMainTo(0);
+    focusRouteHeading();
     actionBusy = true;
     actionMessage = '';
     try {
@@ -1509,12 +1525,12 @@
       <div class="top-actions"><button class="secondary" aria-expanded={newWikiMenuOpen} onclick={() => { newWikiMenuOpen = !newWikiMenuOpen; }}><Plus size={17} aria-hidden="true" />{t('desktop-new-wiki')}</button><button class="icon-button" class:active={destination === 'system'} aria-label={t('desktop-nav-system')} onclick={() => select('system')}><Settings2 size={19} aria-hidden="true" /></button></div>
     </header>
 
-    <section class="drive-page" aria-live="polite" bind:this={mainScrollRegion}>
+    <section class="drive-page" bind:this={mainScrollRegion}>
       {#key `${destination}:${selectedWikiId ?? ''}:${wikiTab}:${systemSection}`}
         <div class="route-page drive-route" data-route={destination}>
           {#if destination === 'wikis' && !selectedWiki}
             <header class="page-heading">
-              <div><h1>{t('desktop-page-wikis-title')}</h1><p>{t('desktop-page-wikis-body')}</p></div>
+              <div><h1 tabindex="-1">{t('desktop-page-wikis-title')}</h1><p>{t('desktop-page-wikis-body')}</p></div>
             </header>
             {#if (snapshot.wikiHealth?.status === 'failed' || (snapshot.wikiHealth?.errorCount ?? 0) > 0) && attentionWikis.length === 0}
               <div class="repair-summary" role="alert">
@@ -1582,7 +1598,7 @@
           {:else if destination === 'wikis' && selectedWiki}
             {@const selectedWikiIssues = snapshot.sourceIssues.filter((issue) => issue.wikiId === selectedWiki.id)}
             <header class="page-heading wiki-heading">
-              <div><nav class="breadcrumb" aria-label={t('desktop-nav-wikis')}><button onclick={() => { selectedWikiId = null; pushHash('#wikis'); }}>{t('desktop-nav-wikis')}</button><span aria-hidden="true">/</span><span>{selectedWiki.name}</span></nav><h1>{selectedWiki.name}</h1><p>{t('desktop-wiki-detail-body', { published: selectedWiki.publishedCount })}</p></div>
+              <div><nav class="breadcrumb" aria-label={t('desktop-nav-wikis')}><button onclick={() => select('wikis')}>{t('desktop-nav-wikis')}</button><span aria-hidden="true">/</span><span>{selectedWiki.name}</span></nav><h1 tabindex="-1">{selectedWiki.name}</h1><p>{t('desktop-wiki-detail-body', { published: selectedWiki.publishedCount })}</p></div>
               <div class="heading-actions">{#if selectedWiki.origin === 'folder' && selectedWiki.restrictions.length === 0}<button class="secondary" onclick={() => scanWiki(selectedWiki.id)} disabled={wikiScanState(selectedWiki.id) !== null}><RefreshCw size={16} aria-hidden="true" />{t('action-refresh')}</button>{/if}{#if selectedWiki.restrictions.length === 0}<button class="primary" onclick={() => editWiki(selectedWiki)}>{t('desktop-share-action')}</button>{/if}</div>
             </header>
 
@@ -1638,9 +1654,9 @@
             {/if}
 
             <div class="content-tabs-bar">
-              <div class="content-tabs" role="tablist" aria-label={t('desktop-wiki-sections')}>
-                <button role="tab" aria-selected={wikiTab === 'content'} class:active={wikiTab === 'content'} onclick={() => openWikiTab('content')}>{t('desktop-wiki-content-tab')}</button>
-                <button role="tab" aria-selected={wikiTab === 'pending'} class:active={wikiTab === 'pending'} onclick={() => openWikiTab('pending')}>{t('desktop-wiki-pending-tab')}<span>{selectedWikiReviews.length}</span></button>
+              <div class="content-tabs" aria-label={t('desktop-wiki-sections')}>
+                <button aria-pressed={wikiTab === 'content'} class:active={wikiTab === 'content'} onclick={() => openWikiTab('content')}>{t('desktop-wiki-content-tab')}</button>
+                <button aria-pressed={wikiTab === 'pending'} class:active={wikiTab === 'pending'} onclick={() => openWikiTab('pending')}>{t('desktop-wiki-pending-tab')}<span>{selectedWikiReviews.length}</span></button>
               </div>
               <button class="details-tab" onclick={() => showWikiDetails(selectedWiki.id)}>{t('desktop-details')}</button>
             </div>
@@ -1690,11 +1706,11 @@
             {#if sharedBrowseOpen}
               <SharedWikiViewer source={sharedBrowseSource} sourceName={sharedBrowseSourceName} browse={sharedBrowseLoading ? null : sharedBrowseSource === 'nearby' ? snapshot.nearbyBrowse : snapshot.publicBrowse} loading={sharedBrowseLoading} initialConceptId={sharedBrowseInitialConceptId} {t} metadata={publicConceptMetadata} onback={closeSharedBrowse} onmore={loadMoreSharedConcepts} onblock={sharedBrowseSource === 'public' ? (publisherId) => changePublisherBlock(publisherId, true) : null} />
             {:else}
-              <header class="page-heading"><div><h1>{t('desktop-page-search-title')}</h1><p>{t('desktop-page-search-body')}</p></div></header>
+              <header class="page-heading"><div><h1 tabindex="-1">{t('desktop-page-search-title')}</h1><p>{t('desktop-page-search-body')}</p></div></header>
               {#if !snapshot.model?.active}<div class="search-welcome" role="status"><Sparkles size={32} aria-hidden="true" /><h2>{t('desktop-search-preparing-title')}</h2><p>{t('desktop-search-preparing-body')}</p><button class="secondary" onclick={() => openServiceStatus('knowledge')}>{t('desktop-search-preparing-action')}</button></div>{:else if snapshot.search && snapshot.search.requestId === activeSearchRequestId}<div class="search-results" aria-live="polite">{#if snapshot.search.status === 'searching'}<div class="search-state working" role="status"><span class="status-dot working" aria-hidden="true"></span><span>{t('search-running')}</span></div>{:else if snapshot.search.status === 'failed'}<div class="search-state error" role="alert"><AlertTriangle size={17} aria-hidden="true" /><span>{t('search-error-title')}</span></div>{:else if snapshot.search.hits.length > 0}<p class="section-label">{t('desktop-search-found')}</p>{/if}{#if snapshot.search.status === 'complete' && snapshot.search.coverage !== 'complete' && snapshot.search.hits.length > 0}<div class="search-state warning" role="status"><AlertTriangle size={17} aria-hidden="true" /><span>{searchCoverageMessage(snapshot.search.coverage)}</span></div>{/if}{#each snapshot.search.hits as hit (`${hit.nodeId}:${hit.wikiId}:${hit.conceptId}:${hit.rank}`)}<article><small>{searchOriginFor(hit)} · {hit.headingOrPage}</small><h3>{hit.title}</h3><p>{hit.snippet}</p><div class="citation-row"><span>{searchSourceFor(hit)}</span><span>{t('search-revision', { revision: hit.sourceRevision })}</span>{#if searchAssuranceLabel(hit)}<span>{searchAssuranceLabel(hit)}</span>{/if}</div><button class="text-action" onclick={() => openSearchHit(hit)} disabled={sharedBrowseRequestId !== null}>{t('action-open')}</button></article>{:else}{#if snapshot.search.status === 'complete'}<div class="table-empty"><strong>{snapshot.search.coverage === 'complete' ? t('search-empty-title') : t('search-coverage-incomplete-title')}</strong><p>{snapshot.search.coverage === 'complete' ? t(includePublic ? 'search-empty-public-body' : 'search-empty-local-body') : searchCoverageMessage(snapshot.search.coverage)}</p></div>{/if}{/each}</div>{:else}<div class="search-welcome"><BookOpen size={32} aria-hidden="true" /><h2>{t('desktop-search-welcome-title')}</h2><p>{t('desktop-search-welcome-body')}</p></div>{/if}
             {/if}
           {:else if destination === 'system'}
-            <header class="page-heading"><div><h1>{t('desktop-page-system-title')}</h1><p>{t('desktop-page-system-body')}</p></div></header>
+            <header class="page-heading"><div><h1 tabindex="-1">{t('desktop-page-system-title')}</h1><p>{t('desktop-page-system-body')}</p></div></header>
             <nav class="settings-nav" aria-label={t('desktop-page-system-title')}>{#each systemSections.slice(0, 3) as section (section.id)}<a href={`#system/${section.id}`} class:active={systemSection === section.id} onclick={(event) => openSystemSection(event, section.id)}>{t(section.labelId)}</a>{/each}</nav>
             <div class="settings-page">
               {#if systemSection === 'models'}<section id="system-models"><p class="section-label">{t('settings-local-ai')}</p><h2>{snapshot.model?.displayName ?? t('component-local-ai')}</h2><p>{snapshot.model?.active ? t('desktop-model-ready') : t('desktop-model-needs-setup')}</p>{#if snapshot.modelInstall}<progress max={snapshot.modelInstall.totalBytes} value={snapshot.modelInstall.downloaded}></progress><p>{modelInstallLabel(locale)}</p><button class="secondary" onclick={cancelModelInstall}>{t('action-cancel')}</button>{:else if !snapshot.model?.active}<button class="primary" onclick={prepareLocalModel} disabled={actionBusy}>{t('models-install')}</button>{/if}{#if snapshot.model?.licenseUrl}<button class="text-action" onclick={() => openVerifiedExternalLink(snapshot!.model!.licenseUrl!)}>{t('models-license-open')}</button>{/if}</section>{/if}

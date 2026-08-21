@@ -289,6 +289,10 @@ async function assertVisualMatrix(): Promise<void> {
             const style = document.createElement('style');
             style.id = 'visual-capture-styles';
             style.textContent = `
+              .secondary:hover:not(:disabled) {
+                background: transparent !important;
+                border-color: var(--line) !important;
+              }
               .system-status-bar button:hover { color: var(--muted) !important; background: transparent !important; }
               .select-control select:hover:not(:disabled),
               .select-control select:focus-visible {

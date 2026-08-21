@@ -2,6 +2,7 @@
   import { onMount } from 'svelte';
   import type { Core, ElementDefinition } from 'cytoscape';
   import type { KnowledgeBundleSummary, KnowledgePageInput } from './api';
+  import { focusChoiceWithoutScroll } from './focus';
   import { message } from './i18n';
   import type { LocalePreference } from './generated/ui-contract';
 
@@ -147,10 +148,10 @@
     <div class="graph-canvas" bind:this={container} role="img" aria-label={t('desktop-graph-map-label', { wiki: bundle.wikiName })}></div>
   {/if}
   <div class="graph-index" aria-label={t('desktop-graph-pages-label')}>
-    <button onclick={() => selectPage({ kind: 'index' })}>{t('knowledge-index-title')}</button>
-    <button onclick={() => selectPage({ kind: 'log' })}>{t('knowledge-recovery-history')}</button>
+    <button onmousedown={focusChoiceWithoutScroll} onclick={() => selectPage({ kind: 'index' })}>{t('knowledge-index-title')}</button>
+    <button onmousedown={focusChoiceWithoutScroll} onclick={() => selectPage({ kind: 'log' })}>{t('knowledge-recovery-history')}</button>
     {#each bundle.concepts as concept (concept.title)}
-      <button onclick={() => selectPage(concept.page)}>{concept.title}</button>
+      <button onmousedown={focusChoiceWithoutScroll} onclick={() => selectPage(concept.page)}>{concept.title}</button>
     {/each}
   </div>
 </div>

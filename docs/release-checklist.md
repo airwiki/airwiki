@@ -21,6 +21,10 @@ constitute a supported public release.
 - [x] Document proportional review and add read-only DCO validation for pull
   requests.
 - [x] Require DCO and CI checks through branch protection or repository rulesets.
+- [x] Require immutable commit SHAs for external GitHub Actions and make both
+  platform frontend checks mandatory on `main`.
+- [x] Enable secret scanning with push protection, Dependabot security updates,
+  and GitHub CodeQL default setup.
 - [ ] Review Apache-2.0, model terms, third-party notices, package metadata, and
   distribution terms with the project owner.
 

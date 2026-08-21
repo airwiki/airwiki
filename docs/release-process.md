@@ -37,6 +37,12 @@ Protect tags matching `v*` against updates and deletion. The promotion workflow
 creates the exact release tag only after approval and never moves an existing
 tag.
 
+Keep the default workflow token read-only, require every external GitHub Action
+to use an immutable commit SHA, and require the macOS and Windows frontend,
+Rust, supply-chain and DCO checks on `main`. Enable private vulnerability
+reporting, secret scanning with push protection, Dependabot security updates
+and GitHub CodeQL default setup before accepting a public candidate.
+
 Configure these non-secret repository variables so verification jobs can use
 them without entering a signing environment:
 

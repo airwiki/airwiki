@@ -9252,6 +9252,18 @@ policy:
                 && verify.contains("macos_dmg_license_resources.py")
                 && verify.contains("printf 'Y\\n' |")
         );
+        assert!(
+            package.contains("sign_release_runtime \"$STAGED_RUNTIME_DIR\"")
+                && package.contains(
+                    "codesign --force --sign \"$SIGNING_IDENTITY\" --options runtime --timestamp"
+                )
+                && package.contains("RUNTIME_EXPECTED_DIR=\"$STAGED_RUNTIME_DIR\"")
+        );
+        assert!(
+            verify.contains("verify_nested_runtime_signatures")
+                && verify.contains("macOS llama.cpp runtime item")
+                && verify.contains("Timestamp=")
+        );
     }
 
     #[test]

@@ -26,6 +26,7 @@ PACKAGED_WORKFLOW_GUIDE="$APP/Contents/Resources/integrations/workflow"
 SOURCE_ICON="$ROOT/resources/branding/airwiki.icns"
 PACKAGED_ICON="$APP/Contents/Resources/airwiki.icns"
 READY_STAMP="$ROOT/target/packaging-macos-ready.stamp"
+RUNTIME_MACHO_LIST="$ROOT/target/packaging-macos-runtime-machos.txt"
 SOURCE_RUNTIME_DIR="$ROOT/resources/llama/macos-aarch64"
 STAGED_RUNTIME_DIR="$ROOT/target/packaging-resources/macos/llama"
 PACKAGED_RUNTIME_DIR="$APP/Contents/Resources/llama"
@@ -68,13 +69,61 @@ case "$SIGNING_PURPOSE" in
     ;;
 esac
 
+runtime_macho_paths() {
+  find "$1" -type f -exec sh -c '
+    for candidate do
+      if xcrun lipo -archs "$candidate" >/dev/null 2>&1; then
+        printf "%s\n" "$candidate"
+      fi
+    done
+  ' sh {} +
+}
+
+verify_release_runtime_signature() {
+  CANDIDATE=$1
+  if ! codesign --verify --strict --verbose=2 "$CANDIDATE"; then
+    echo "signed llama.cpp runtime item failed code-signature verification" >&2
+    exit 1
+  fi
+  if ! DETAILS=$(codesign -dv --verbose=4 "$CANDIDATE" 2>&1); then
+    echo "could not inspect signed llama.cpp runtime item" >&2
+    exit 1
+  fi
+  case "$DETAILS" in
+    *"Authority=Developer ID Application:"*"Timestamp="*"TeamIdentifier="*"Runtime Version="*) ;;
+    *)
+      echo "llama.cpp runtime item lacks Developer ID, timestamp or Hardened Runtime" >&2
+      exit 1
+      ;;
+  esac
+  if ! ARCHS=$(xcrun lipo -archs "$CANDIDATE") || [ "$ARCHS" != "arm64" ]; then
+    echo "signed llama.cpp runtime item is not arm64-only" >&2
+    exit 1
+  fi
+}
+
+sign_release_runtime() {
+  RUNTIME_ROOT=$1
+  rm -f -- "$RUNTIME_MACHO_LIST"
+  runtime_macho_paths "$RUNTIME_ROOT" >"$RUNTIME_MACHO_LIST"
+  if [ ! -s "$RUNTIME_MACHO_LIST" ]; then
+    echo "verified llama.cpp runtime contains no Mach-O files" >&2
+    exit 1
+  fi
+  while IFS= read -r CANDIDATE; do
+    codesign --force --sign "$SIGNING_IDENTITY" --options runtime --timestamp "$CANDIDATE"
+    verify_release_runtime_signature "$CANDIDATE"
+  done <"$RUNTIME_MACHO_LIST"
+  rm -f -- "$RUNTIME_MACHO_LIST"
+}
+
 # A failed build must never cause an older bundle or staged payload to survive.
 rm -rf -- "$APP" "$FINAL_APP" "$STAGED_RUNTIME_DIR"
 rm -f -- "$TAURI_DMG" "$TAURI_DMG_WORK" "$OUT_DIR/$OUT_NAME" "$OUT_DIR/rw.$OUT_NAME"
 if [ -d "$TAURI_BUNDLE_DIR/macos" ]; then
   find "$TAURI_BUNDLE_DIR/macos" -maxdepth 1 -type f -name "rw.*.$OUT_NAME" -exec rm -f -- {} +
 fi
-rm -f -- "$SOURCE_MCPB" "$READY_STAMP"
+rm -f -- "$SOURCE_MCPB" "$READY_STAMP" "$RUNTIME_MACHO_LIST"
 
 cargo run --locked -p xtask -- workflow-guide check
 cargo run --locked -p xtask -- licenses check
@@ -85,6 +134,13 @@ if [ -n "$(find "$STAGED_RUNTIME_DIR" -type l -print -quit)" ] ||
   ! diff -qr "$SOURCE_RUNTIME_DIR" "$STAGED_RUNTIME_DIR" >/dev/null; then
   echo "staged llama.cpp runtime differs from the verified source payload" >&2
   exit 1
+fi
+RUNTIME_EXPECTED_DIR="$SOURCE_RUNTIME_DIR"
+if [ "$SIGNING_PURPOSE" = release ]; then
+  # The source cache remains byte-for-byte upstream. Only the already verified
+  # staging copy is transformed into the Developer ID distribution payload.
+  sign_release_runtime "$STAGED_RUNTIME_DIR"
+  RUNTIME_EXPECTED_DIR="$STAGED_RUNTIME_DIR"
 fi
 cargo build --locked --release --target aarch64-apple-darwin -p airwiki-mcp-bridge
 ./packaging/sign-macos-bridge.sh
@@ -216,20 +272,29 @@ fi
 
 runtime_bytes_match() {
   # The pinned upstream archive contains dylib aliases as symlinks. Packager
-  # materializes those aliases as regular files; diff compares their resolved
-  # bytes while the packaged side remains symlink-free.
-  [ -d "$SOURCE_RUNTIME_DIR" ] &&
+  # materializes those aliases as regular files. Internal builds compare the
+  # resolved upstream bytes. Public builds compare the separately signed
+  # staging payload after its source bytes were verified above.
+  [ -d "$RUNTIME_EXPECTED_DIR" ] &&
     [ -d "$PACKAGED_RUNTIME_DIR" ] &&
     [ -z "$(find "$PACKAGED_RUNTIME_DIR" -type l -print -quit)" ] &&
-    diff -qr "$SOURCE_RUNTIME_DIR" "$PACKAGED_RUNTIME_DIR" >/dev/null
+    diff -qr "$RUNTIME_EXPECTED_DIR" "$PACKAGED_RUNTIME_DIR" >/dev/null
 }
 
-# AssetManager verifies the pinned upstream hashes at runtime. Tauri signs only
-# owned binaries and the outer application; the llama.cpp tree remains a
-# resource whose exact upstream bytes must survive bundling.
 if ! runtime_bytes_match; then
-  echo "packaged llama.cpp runtime differs from the verified source payload" >&2
+  echo "packaged llama.cpp runtime differs from its verified staging payload" >&2
   exit 1
+fi
+if [ "$SIGNING_PURPOSE" = release ]; then
+  runtime_macho_paths "$PACKAGED_RUNTIME_DIR" >"$RUNTIME_MACHO_LIST"
+  if [ ! -s "$RUNTIME_MACHO_LIST" ]; then
+    echo "packaged llama.cpp runtime contains no Mach-O files" >&2
+    exit 1
+  fi
+  while IFS= read -r CANDIDATE; do
+    verify_release_runtime_signature "$CANDIDATE"
+  done <"$RUNTIME_MACHO_LIST"
+  rm -f -- "$RUNTIME_MACHO_LIST"
 fi
 
 if [ ! -f "$APP/Contents/_CodeSignature/CodeResources" ]; then

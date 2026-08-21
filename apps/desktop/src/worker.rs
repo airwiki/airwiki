@@ -907,6 +907,16 @@ enum UpdaterOperation {
     Install,
 }
 
+impl UpdaterOperation {
+    const fn log_code(self) -> &'static str {
+        match self {
+            Self::Check => "check",
+            Self::Download => "download",
+            Self::Install => "install",
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum ModelLifecycle {
     Verifying,
@@ -4649,12 +4659,30 @@ async fn queue_updater_operation(
     };
     *active_request = Some(request_id);
     background.spawn(async move {
-        let result = AssertUnwindSafe(run_updater_operation(&mut updater, operation))
+        let result = match AssertUnwindSafe(run_updater_operation(&mut updater, operation))
             .catch_unwind()
             .await
-            .map_err(|_| "La operación de actualización terminó inesperadamente".to_owned())
-            .and_then(|result| result)
-            .map(|()| updater.view().clone());
+        {
+            Ok(Ok(())) => Ok(updater.view().clone()),
+            Ok(Err(_)) => {
+                tracing::warn!(
+                    operation = operation.log_code(),
+                    error_kind = "updater_invalid_state",
+                    "updater operation returned an unexpected internal state"
+                );
+                updater.recover_after_unexpected_failure();
+                Ok(updater.view().clone())
+            }
+            Err(_) => {
+                tracing::warn!(
+                    operation = operation.log_code(),
+                    error_kind = "updater_task_panic",
+                    "updater operation terminated unexpectedly"
+                );
+                updater.recover_after_unexpected_failure();
+                Ok(updater.view().clone())
+            }
+        };
         BackgroundCompletion::Updater {
             request_id,
             service: updater,

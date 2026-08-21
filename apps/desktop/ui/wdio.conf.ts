@@ -30,7 +30,7 @@ export const config: WebdriverIO.Config = {
       screenshotPath: join(uiRoot, '.artifacts', 'visual'),
       formatImageName: '{tag}-{width}x{height}',
       autoSaveBaseline: process.env.UPDATE_VISUAL_BASELINES === '1',
-      alwaysSaveActualImage: false,
+      alwaysSaveActualImage: true,
       clearRuntimeFolder: true,
       disableBlinkingCursor: true,
       disableCSSAnimation: true,

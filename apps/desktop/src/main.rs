@@ -251,6 +251,7 @@ struct RequestTracker {
     knowledge_page: HashMap<Uuid, Uuid>,
     guided_repair: HashMap<Uuid, Uuid>,
     public_browse: Option<Uuid>,
+    nearby_browse: Option<Uuid>,
     preferences: Option<Uuid>,
     autostart: Option<Uuid>,
     wiki_health: Option<Uuid>,
@@ -287,6 +288,7 @@ struct AppSnapshot {
     model_install: Option<ModelInstallSummary>,
     search: Option<SearchSummary>,
     public_browse: Option<PublicBrowseSummary>,
+    nearby_browse: Option<NearbyBrowseSummary>,
     review_evidence: Option<ReviewEvidenceSummary>,
     knowledge: Option<KnowledgeBundleSummary>,
     knowledge_page: Option<KnowledgePageSummary>,
@@ -882,6 +884,29 @@ struct PublicBrowseSummary {
     okf_compatibility: Option<OkfCompatibilityDto>,
     concepts: Vec<PublicConceptSummaryDto>,
     next_cursor: Option<String>,
+    append_failed: bool,
+}
+
+#[derive(Clone, Debug, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+struct NearbyBrowseSummary {
+    request_id: String,
+    status: NearbyBrowseStatus,
+    peer_id: Option<String>,
+    wiki_id: Option<String>,
+    wiki_name: Option<String>,
+    okf_compatibility: Option<OkfCompatibilityDto>,
+    concepts: Vec<PublicConceptSummaryDto>,
+    next_cursor: Option<String>,
+    append_failed: bool,
+}
+
+#[derive(Clone, Copy, Debug, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(rename_all = "camelCase")]
+enum NearbyBrowseStatus {
+    Available,
+    Unavailable,
 }
 
 #[derive(Clone, Copy, Debug, Serialize, TS)]
@@ -930,6 +955,14 @@ enum SearchCoverage {
     Partial,
 }
 
+#[derive(Clone, Copy, Debug, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(rename_all = "camelCase")]
+enum SearchHitRoute {
+    DeviceNetwork,
+    PublicNetwork,
+}
+
 #[derive(Clone, Debug, Serialize, TS)]
 #[serde(rename_all = "camelCase")]
 struct SearchHitSummary {
@@ -943,6 +976,7 @@ struct SearchHitSummary {
     source_sha256: String,
     rank: u32,
     node_id: String,
+    route: SearchHitRoute,
     assurance: Option<ConceptAssuranceSummary>,
     lifecycle: Option<String>,
 }
@@ -2248,11 +2282,18 @@ async fn browse_public_wiki(
     publisher_id: String,
     wiki_id: String,
     cursor: Option<String>,
+    target_concept_id: Option<String>,
 ) -> Result<(), UiError> {
     if cursor
         .as_ref()
         .is_some_and(|value| value.len() > 128 || value.chars().any(char::is_control))
     {
+        return Err(UiError::invalid("invalidPublicBrowseCursor"));
+    }
+    let target_concept_id = target_concept_id
+        .map(|value| parse_uuid(&value))
+        .transpose()?;
+    if cursor.is_some() && target_concept_id.is_some() {
         return Err(UiError::invalid("invalidPublicBrowseCursor"));
     }
     let request_id = parse_uuid(&request_id)?;
@@ -2268,6 +2309,7 @@ async fn browse_public_wiki(
             publisher_id: validate_peer_id(publisher_id)?,
             collection_id: parse_uuid(&wiki_id)?,
             cursor,
+            target_concept_id,
         },
     )
     .await
@@ -2276,6 +2318,55 @@ async fn browse_public_wiki(
             && requests.public_browse == Some(request_id)
         {
             requests.public_browse = None;
+        }
+        return Err(error);
+    }
+    Ok(())
+}
+
+#[tauri::command]
+async fn browse_nearby_wiki(
+    runtime: tauri::State<'_, AppRuntime>,
+    request_id: String,
+    peer_id: String,
+    wiki_id: String,
+    cursor: Option<String>,
+    target_concept_id: Option<String>,
+) -> Result<(), UiError> {
+    if cursor
+        .as_deref()
+        .is_some_and(|value| Uuid::parse_str(value).is_err())
+    {
+        return Err(UiError::invalid("invalidNearbyBrowseCursor"));
+    }
+    let target_concept_id = target_concept_id
+        .map(|value| parse_uuid(&value))
+        .transpose()?;
+    if cursor.is_some() && target_concept_id.is_some() {
+        return Err(UiError::invalid("invalidNearbyBrowseCursor"));
+    }
+    let request_id = parse_uuid(&request_id)?;
+    runtime
+        .requests
+        .lock()
+        .map_err(|_| UiError::internal())?
+        .nearby_browse = Some(request_id);
+    if let Err(error) = send_command(
+        &runtime,
+        WorkerCommand::BrowseNearbyWiki {
+            request_id,
+            peer_id: validate_peer_id(peer_id)?,
+            collection_id: parse_uuid(&wiki_id)?,
+            cursor,
+            target_concept_id,
+        },
+    )
+    .await
+    {
+        if let Ok(mut requests) = runtime.requests.lock()
+            && requests.nearby_browse == Some(request_id)
+        {
+            requests.nearby_browse = None;
         }
         return Err(error);
     }
@@ -3508,6 +3599,7 @@ impl AppSnapshot {
             model_install: None,
             search: None,
             public_browse: None,
+            nearby_browse: None,
             review_evidence: None,
             knowledge: None,
             knowledge_page: None,
@@ -4099,6 +4191,15 @@ impl AppSnapshot {
                 append,
                 result,
             } => {
+                if append
+                    && result.is_err()
+                    && let Some(mut previous) = self.public_browse.take()
+                {
+                    previous.request_id = request_id.to_string();
+                    previous.append_failed = true;
+                    self.public_browse = Some(previous);
+                    return;
+                }
                 let mut summary = match result {
                     Ok(result) => {
                         let status = match result.availability {
@@ -4157,6 +4258,7 @@ impl AppSnapshot {
                                 .map(OkfCompatibilityDto::from),
                             concepts,
                             next_cursor,
+                            append_failed: false,
                         }
                     }
                     Err(_) => PublicBrowseSummary {
@@ -4170,6 +4272,7 @@ impl AppSnapshot {
                         okf_compatibility: None,
                         concepts: Vec::new(),
                         next_cursor: None,
+                        append_failed: false,
                     },
                 };
                 if append
@@ -4180,8 +4283,81 @@ impl AppSnapshot {
                     let mut concepts = previous.concepts;
                     concepts.extend(summary.concepts);
                     summary.concepts = concepts;
+                    summary.append_failed = false;
                 }
                 self.public_browse = Some(summary);
+            }
+            WorkerEvent::NearbyWikiBrowseFinished {
+                request_id,
+                peer_id,
+                collection_id,
+                append,
+                result,
+            } => {
+                let requested_wiki_id = collection_id.to_string();
+                if append
+                    && result.is_err()
+                    && let Some(mut previous) = self.nearby_browse.take()
+                    && previous.peer_id.as_deref() == Some(peer_id.as_str())
+                    && previous.wiki_id.as_deref() == Some(requested_wiki_id.as_str())
+                {
+                    previous.request_id = request_id.to_string();
+                    previous.append_failed = true;
+                    self.nearby_browse = Some(previous);
+                    return;
+                }
+                let mut summary = match result {
+                    Ok(page) => NearbyBrowseSummary {
+                        request_id: request_id.to_string(),
+                        status: NearbyBrowseStatus::Available,
+                        peer_id: Some(peer_id),
+                        wiki_id: Some(page.wiki.collection_id.to_string()),
+                        wiki_name: Some(page.wiki.name),
+                        okf_compatibility: Some(OkfCompatibilityDto::from(
+                            page.wiki.okf_compatibility,
+                        )),
+                        concepts: page
+                            .concepts
+                            .into_iter()
+                            .map(|concept| PublicConceptSummaryDto {
+                                concept_id: concept.concept_id.to_string(),
+                                concept_type: concept.concept_type.into(),
+                                title: concept.title,
+                                description: concept.description,
+                                language: concept.language,
+                                tags: concept.tags,
+                                summary: concept.summary,
+                                source_revision: concept.source_revision,
+                                lifecycle: concept.lifecycle_status,
+                                assurance: concept.assurance.map(ConceptAssuranceSummary::from),
+                            })
+                            .collect(),
+                        next_cursor: page.next_cursor,
+                        append_failed: false,
+                    },
+                    Err(_) => NearbyBrowseSummary {
+                        request_id: request_id.to_string(),
+                        status: NearbyBrowseStatus::Unavailable,
+                        peer_id: Some(peer_id),
+                        wiki_id: Some(requested_wiki_id),
+                        wiki_name: None,
+                        okf_compatibility: None,
+                        concepts: Vec::new(),
+                        next_cursor: None,
+                        append_failed: false,
+                    },
+                };
+                if append
+                    && let Some(previous) = self.nearby_browse.take()
+                    && previous.peer_id == summary.peer_id
+                    && previous.wiki_id == summary.wiki_id
+                {
+                    let mut concepts = previous.concepts;
+                    concepts.extend(summary.concepts);
+                    summary.concepts = concepts;
+                    summary.append_failed = false;
+                }
+                self.nearby_browse = Some(summary);
             }
             WorkerEvent::Notice(message) => {
                 self.notice = Some(NoticeSummary {
@@ -4425,6 +4601,7 @@ const fn worker_event_request_id(event: &WorkerEvent) -> Option<Uuid> {
         | WorkerEvent::SearchFinished { request_id, .. }
         | WorkerEvent::SearchPartial { request_id, .. }
         | WorkerEvent::PublicBrowseFinished { request_id, .. }
+        | WorkerEvent::NearbyWikiBrowseFinished { request_id, .. }
         | WorkerEvent::ChatIntegrationsUpdated { request_id, .. } => Some(*request_id),
         _ => None,
     }
@@ -4472,6 +4649,14 @@ fn request_is_current(event: &WorkerEvent, requests: &Mutex<RequestTracker>) -> 
         WorkerEvent::PublicBrowseFinished { request_id, .. } => {
             if requests.public_browse == Some(*request_id) {
                 requests.public_browse = None;
+                true
+            } else {
+                false
+            }
+        }
+        WorkerEvent::NearbyWikiBrowseFinished { request_id, .. } => {
+            if requests.nearby_browse == Some(*request_id) {
+                requests.nearby_browse = None;
                 true
             } else {
                 false
@@ -5058,10 +5243,13 @@ fn ui_bindings_source() -> String {
         exported_declaration::<SearchHitSummary>(&config),
         exported_declaration::<SearchStatus>(&config),
         exported_declaration::<SearchCoverage>(&config),
+        exported_declaration::<SearchHitRoute>(&config),
         exported_declaration::<SearchSummary>(&config),
         exported_declaration::<PublicBrowseStatus>(&config),
         exported_declaration::<PublicConceptSummaryDto>(&config),
         exported_declaration::<PublicBrowseSummary>(&config),
+        exported_declaration::<NearbyBrowseStatus>(&config),
+        exported_declaration::<NearbyBrowseSummary>(&config),
         exported_declaration::<NoticeLevel>(&config),
         exported_declaration::<NoticeSummary>(&config),
         exported_declaration::<LocalePreferenceDto>(&config),
@@ -5260,21 +5448,26 @@ impl From<worker::ModelStateView> for ModelSummary {
     }
 }
 
-impl From<airwiki_types::SearchHit> for SearchHitSummary {
-    fn from(value: airwiki_types::SearchHit) -> Self {
+impl From<worker::RoutedSearchHit> for SearchHitSummary {
+    fn from(value: worker::RoutedSearchHit) -> Self {
+        let worker::RoutedSearchHit { hit, route } = value;
         Self {
-            concept_id: value.concept_id.to_string(),
-            wiki_id: value.collection_id.to_string(),
-            title: value.title,
-            snippet: value.snippet,
-            heading_or_page: value.heading_or_page,
-            logical_resource_uri: value.logical_resource_uri,
-            source_revision: value.source_revision,
-            source_sha256: value.source_sha256,
-            rank: value.rank,
-            node_id: value.node_id,
-            assurance: value.assurance.map(ConceptAssuranceSummary::from),
-            lifecycle: value.lifecycle_status,
+            concept_id: hit.concept_id.to_string(),
+            wiki_id: hit.collection_id.to_string(),
+            title: hit.title,
+            snippet: hit.snippet,
+            heading_or_page: hit.heading_or_page,
+            logical_resource_uri: hit.logical_resource_uri,
+            source_revision: hit.source_revision,
+            source_sha256: hit.source_sha256,
+            rank: hit.rank,
+            node_id: hit.node_id,
+            route: match route {
+                worker::SearchHitRouteView::DeviceNetwork => SearchHitRoute::DeviceNetwork,
+                worker::SearchHitRouteView::PublicNetwork => SearchHitRoute::PublicNetwork,
+            },
+            assurance: hit.assurance.map(ConceptAssuranceSummary::from),
+            lifecycle: hit.lifecycle_status,
         }
     }
 }
@@ -5478,6 +5671,7 @@ fn main() -> Result<()> {
             remove_federation_index,
             update_public_wiki_profile,
             browse_public_wiki,
+            browse_nearby_wiki,
             set_public_publisher_blocked,
             dial_peer,
             pair_peer,
@@ -5716,6 +5910,126 @@ mod tests {
                 ..
             })
         ));
+    }
+
+    #[tokio::test]
+    async fn failed_nearby_append_preserves_the_visible_page_and_retry_cursor() {
+        let request_id = Uuid::new_v4();
+        let collection_id = Uuid::new_v4();
+        let peer_id = "synthetic-peer".to_owned();
+        let mut snapshot = AppSnapshot::starting();
+        snapshot.nearby_browse = Some(NearbyBrowseSummary {
+            request_id: Uuid::new_v4().to_string(),
+            status: NearbyBrowseStatus::Available,
+            peer_id: Some(peer_id.clone()),
+            wiki_id: Some(collection_id.to_string()),
+            wiki_name: Some("Shared runbook".to_owned()),
+            okf_compatibility: Some(OkfCompatibilityDto::from(
+                airwiki_types::OkfCompatibility::DeclaredV02,
+            )),
+            concepts: vec![PublicConceptSummaryDto {
+                concept_id: Uuid::new_v4().to_string(),
+                concept_type: ConceptType::Document.into(),
+                title: "Recovery".to_owned(),
+                description: String::new(),
+                language: "en".to_owned(),
+                tags: Vec::new(),
+                summary: "Keep this visible".to_owned(),
+                source_revision: 1,
+                lifecycle: Some("stable".to_owned()),
+                assurance: None,
+            }],
+            next_cursor: Some(Uuid::new_v4().to_string()),
+            append_failed: false,
+        });
+        let requests = Mutex::new(RequestTracker {
+            nearby_browse: Some(request_id),
+            ..RequestTracker::default()
+        });
+
+        snapshot
+            .apply(
+                WorkerEvent::NearbyWikiBrowseFinished {
+                    request_id,
+                    peer_id,
+                    collection_id,
+                    append: true,
+                    result: Err("synthetic failure".to_owned()),
+                },
+                &Mutex::new(HashMap::new()),
+                &Mutex::new(HashMap::new()),
+                &Mutex::new(HashMap::new()),
+                &requests,
+            )
+            .await;
+
+        let browse = snapshot
+            .nearby_browse
+            .as_ref()
+            .expect("the visible shared Wiki should be preserved");
+        assert_eq!(browse.concepts.len(), 1);
+        assert_eq!(browse.concepts[0].summary, "Keep this visible");
+        assert!(browse.next_cursor.is_some());
+        assert!(browse.append_failed);
+    }
+
+    #[tokio::test]
+    async fn failed_public_append_preserves_the_visible_page_and_retry_cursor() {
+        let request_id = Uuid::new_v4();
+        let mut snapshot = AppSnapshot::starting();
+        snapshot.public_browse = Some(PublicBrowseSummary {
+            request_id: Uuid::new_v4().to_string(),
+            status: PublicBrowseStatus::Direct,
+            publisher_id: Some("synthetic-publisher".to_owned()),
+            wiki_id: Some(Uuid::new_v4().to_string()),
+            wiki_name: Some("Public runbook".to_owned()),
+            description: Some("Synthetic public Wiki".to_owned()),
+            languages: vec!["en".to_owned()],
+            okf_compatibility: Some(OkfCompatibilityDto::from(
+                airwiki_types::OkfCompatibility::DeclaredV02,
+            )),
+            concepts: vec![PublicConceptSummaryDto {
+                concept_id: Uuid::new_v4().to_string(),
+                concept_type: ConceptType::Document.into(),
+                title: "Recovery".to_owned(),
+                description: String::new(),
+                language: "en".to_owned(),
+                tags: Vec::new(),
+                summary: "Keep this public page visible".to_owned(),
+                source_revision: 1,
+                lifecycle: Some("stable".to_owned()),
+                assurance: None,
+            }],
+            next_cursor: Some(Uuid::new_v4().to_string()),
+            append_failed: false,
+        });
+        let requests = Mutex::new(RequestTracker {
+            public_browse: Some(request_id),
+            ..RequestTracker::default()
+        });
+
+        snapshot
+            .apply(
+                WorkerEvent::PublicBrowseFinished {
+                    request_id,
+                    append: true,
+                    result: Err("synthetic failure".to_owned()),
+                },
+                &Mutex::new(HashMap::new()),
+                &Mutex::new(HashMap::new()),
+                &Mutex::new(HashMap::new()),
+                &requests,
+            )
+            .await;
+
+        let browse = snapshot
+            .public_browse
+            .as_ref()
+            .expect("the visible public Wiki should be preserved");
+        assert_eq!(browse.concepts.len(), 1);
+        assert_eq!(browse.concepts[0].summary, "Keep this public page visible");
+        assert!(browse.next_cursor.is_some());
+        assert!(browse.append_failed);
     }
 
     #[test]

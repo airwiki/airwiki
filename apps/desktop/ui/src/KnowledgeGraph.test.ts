@@ -1,4 +1,4 @@
-import { cleanup, render, waitFor } from '@testing-library/svelte';
+import { cleanup, render, screen, waitFor } from '@testing-library/svelte';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import KnowledgeGraph from './KnowledgeGraph.svelte';
 import type { KnowledgeBundleSummary } from './api';
@@ -74,6 +74,7 @@ describe('KnowledgeGraph', () => {
     render(KnowledgeGraph, { bundle, locale: 'en', onselect: vi.fn() });
 
     await waitFor(() => expect(cytoscapeMocks.create).toHaveBeenCalledOnce());
+    expect(screen.getByRole('img', { name: 'Relationship map for Layout fixture' })).toBeInTheDocument();
     expect(cytoscapeMocks.graph.layout).not.toHaveBeenCalled();
 
     canvasWidth = 640;

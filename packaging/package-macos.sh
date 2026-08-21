@@ -13,6 +13,7 @@ OUT_NAME="AirWiki_${VERSION}_aarch64.dmg"
 TAURI_BUNDLE_DIR="$ROOT/target/aarch64-apple-darwin/release/bundle"
 APP="$TAURI_BUNDLE_DIR/macos/AirWiki.app"
 TAURI_DMG="$TAURI_BUNDLE_DIR/dmg/$OUT_NAME"
+TAURI_DMG_WORK="$TAURI_BUNDLE_DIR/macos/$OUT_NAME"
 FINAL_APP="$OUT_DIR/AirWiki.app"
 RELEASE_BINARY="$ROOT/target/aarch64-apple-darwin/release/airwiki"
 PACKAGED_BINARY="$APP/Contents/MacOS/airwiki"
@@ -69,7 +70,10 @@ esac
 
 # A failed build must never cause an older bundle or staged payload to survive.
 rm -rf -- "$APP" "$FINAL_APP" "$STAGED_RUNTIME_DIR"
-rm -f -- "$TAURI_DMG" "$OUT_DIR/$OUT_NAME" "$OUT_DIR/rw.$OUT_NAME"
+rm -f -- "$TAURI_DMG" "$TAURI_DMG_WORK" "$OUT_DIR/$OUT_NAME" "$OUT_DIR/rw.$OUT_NAME"
+if [ -d "$TAURI_BUNDLE_DIR/macos" ]; then
+  find "$TAURI_BUNDLE_DIR/macos" -maxdepth 1 -type f -name "rw.*.$OUT_NAME" -exec rm -f -- {} +
+fi
 rm -f -- "$SOURCE_MCPB" "$READY_STAMP"
 
 cargo run --locked -p xtask -- workflow-guide check

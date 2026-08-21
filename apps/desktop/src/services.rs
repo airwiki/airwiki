@@ -46,9 +46,9 @@ use airwiki_network::FileSecretStore;
 #[cfg(not(feature = "e2e"))]
 use airwiki_network::KeyringSecretStore;
 use airwiki_network::{
-    AccessControl, AuthorizedSearchBackend, AuthorizedSearchResult, FederatedCoordinator,
-    MAX_MDNS_ADDRESSES_PER_PEER, MAX_VOLATILE_LAN_PEERS, ManualLanAddress, Multiaddr,
-    NetworkConfig, NetworkEvent, NetworkHandle, NetworkWarningKind, NodeIdentity,
+    AccessControl, AuthorizedSearchBackend, AuthorizedSearchResult, AuthorizedWikiBrowseResult,
+    FederatedCoordinator, MAX_MDNS_ADDRESSES_PER_PEER, MAX_VOLATILE_LAN_PEERS, ManualLanAddress,
+    Multiaddr, NetworkConfig, NetworkEvent, NetworkHandle, NetworkWarningKind, NodeIdentity,
     PairingFailureReason, PeerAccess, PeerId, PublicBrowseDelivery, PublicBrowseResult,
     PublicIndexEndpoint, PublicReader, PublicRelayReadiness, PublicRouteKind, PublicSearchDelivery,
     PublicSearchResult, PublicSourceBackend, PublicSourceBackendError, PublicSourceServerConfig,
@@ -60,7 +60,7 @@ use airwiki_types::{
     PUBLIC_CATALOG_PROTOCOL, PublicBrowsePage, PublicBrowseRequest, PublicCollectionManifest,
     PublicCollectionRevision, PublicCollectionTombstone, PublicSearchRequest, PublicSearchResponse,
     SearchAuthorization, SearchContractError, SearchHit, SearchPurpose, SearchRequest,
-    SearchResponse,
+    SearchResponse, SharedWikiBrowsePage, SharedWikiBrowseRequest,
 };
 use anyhow::{Context, Result, anyhow, bail};
 use async_trait::async_trait;
@@ -586,6 +586,83 @@ impl AuthorizedSearchBackend for DynamicAuthorizedSearchBackend {
         self.finalize_authorized_response(response, authorization, purpose)
             .await
     }
+
+    async fn browse_authorized(
+        &self,
+        request: SharedWikiBrowseRequest,
+        authorization: SearchAuthorization,
+    ) -> std::result::Result<AuthorizedWikiBrowseResult, SearchContractError> {
+        request
+            .validate()
+            .map_err(|error| SearchContractError::Backend(error.to_string()))?;
+        if authorization.purpose != SearchPurpose::LocalAssistant
+            || !authorization
+                .allowed_collections
+                .contains(&request.collection_id)
+        {
+            return Err(SearchContractError::Unauthorized);
+        }
+        let cursor = request
+            .cursor
+            .as_deref()
+            .map(Uuid::parse_str)
+            .transpose()
+            .map_err(|_| SearchContractError::Backend("invalid browse cursor".to_owned()))?;
+        let database = self.database.clone();
+        let access = self.access.clone();
+        tokio::task::spawn_blocking(move || {
+            let peer = PeerId::from_str(&authorization.caller_node_id)
+                .map_err(|_| SearchContractError::Unauthorized)?;
+            let live_access = access.state(&peer);
+            if !live_access.trusted
+                || live_access.blocked
+                || !live_access.grants.contains(&request.collection_id)
+            {
+                return Err(SearchContractError::Unauthorized);
+            }
+            let lease = authorization.acquire_disclosure_lease();
+            let (wiki, concepts) = database
+                .shared_wiki_page_under_disclosure(
+                    &lease,
+                    &authorization.caller_node_id,
+                    request.collection_id,
+                    cursor,
+                    request.target_concept_id,
+                    request.limit,
+                )
+                .map_err(|_| SearchContractError::Unauthorized)?;
+            let next_cursor = if concepts.len() == usize::from(request.limit) {
+                let last = concepts.last().map(|concept| concept.concept_id);
+                let (_, next) = database
+                    .shared_wiki_page_under_disclosure(
+                        &lease,
+                        &authorization.caller_node_id,
+                        request.collection_id,
+                        last,
+                        None,
+                        1,
+                    )
+                    .map_err(|_| SearchContractError::Unauthorized)?;
+                (!next.is_empty())
+                    .then(|| last.map(|concept_id| concept_id.to_string()))
+                    .flatten()
+            } else {
+                None
+            };
+            let page = SharedWikiBrowsePage {
+                protocol_version: airwiki_types::SHARED_WIKI_BROWSE_PROTOCOL.to_owned(),
+                request_id: request.request_id,
+                wiki,
+                concepts,
+                next_cursor,
+            };
+            page.validate_for(&request)
+                .map_err(|error| SearchContractError::Backend(error.to_string()))?;
+            Ok(AuthorizedWikiBrowseResult::new(page, lease))
+        })
+        .await
+        .map_err(|_| SearchContractError::Unavailable("browse worker stopped".to_owned()))?
+    }
 }
 
 fn durable_authorized_collections_blocking(
@@ -839,6 +916,7 @@ impl PublicSourceBackend for DynamicPublicSourceBackend {
                     &publisher_id,
                     request.collection_id,
                     cursor,
+                    request.target_concept_id,
                     request.limit,
                 )
                 .map_err(|_| PublicSourceBackendError::NotPublic)?;
@@ -857,6 +935,7 @@ impl PublicSourceBackend for DynamicPublicSourceBackend {
                         &publisher_id,
                         request.collection_id,
                         last_concept_id,
+                        None,
                         1,
                     )
                     .map_err(|_| PublicSourceBackendError::Unavailable)?
@@ -1264,6 +1343,7 @@ pub struct NetworkEventEffect {
     pub peers_changed: bool,
     pub notice: Option<String>,
     pub warning: Option<String>,
+    pub persisted_trusted_peer: Option<PeerId>,
 }
 
 /// Complete background service graph for one workstation.
@@ -1829,6 +1909,28 @@ impl DesktopServices {
     pub fn advertised_lan_addresses(&self, listener: &Multiaddr) -> Result<Vec<String>> {
         manual_lan_route::advertised_addresses(listener, self.identity.peer_id())
             .context("no se pudo preparar la dirección LAN manual")
+    }
+
+    pub async fn announce_lan_addresses(&self, addresses: &[String]) -> Result<()> {
+        let addresses = addresses
+            .iter()
+            .map(|address| {
+                address
+                    .parse::<Multiaddr>()
+                    .map_err(|_| anyhow!("la dirección LAN resuelta no es válida"))
+            })
+            .collect::<Result<Vec<_>>>()?;
+        self.required_network()?
+            .set_advertised_lan_addresses(addresses)
+            .await
+            .context("no se pudieron anunciar las direcciones LAN validadas")
+    }
+
+    pub async fn acknowledge_persisted_peer_trust(&self, peer: PeerId) -> Result<()> {
+        self.required_network()?
+            .acknowledge_persisted_trust(peer)
+            .await
+            .context("no se pudo completar el emparejamiento LAN persistido")
     }
 
     /// Returns the latest informational bridge activity. This value is
@@ -2791,7 +2893,10 @@ impl DesktopServices {
         top_k: u8,
         purpose: SearchPurpose,
         partials: mpsc::Sender<SearchResponse>,
-    ) -> std::result::Result<(SearchResponse, PublicRouteKind), SearchContractError> {
+    ) -> std::result::Result<
+        (SearchResponse, PublicRouteKind, HashSet<(String, Uuid)>),
+        SearchContractError,
+    > {
         let database = self.database.clone();
         let endpoints = run_search_storage("public index lookup worker stopped", move || {
             federation_index_endpoints(&database)
@@ -2811,16 +2916,17 @@ impl DesktopServices {
                     response,
                     route_kind,
                 }),
-            ) => Ok((
-                merge_public_search_responses(trusted, response, usize::from(top_k)),
-                route_kind,
-            )),
+            ) => {
+                let (response, public_hits) =
+                    merge_public_search_responses(trusted, response, usize::from(top_k));
+                Ok((response, route_kind, public_hits))
+            }
             (Ok(mut trusted), Err(_)) => {
                 trusted.partial = true;
                 trusted
                     .warnings
                     .push(PUBLIC_NETWORK_OFFLINE_WARNING.to_owned());
-                Ok((trusted, PublicRouteKind::Offline))
+                Ok((trusted, PublicRouteKind::Offline, HashSet::new()))
             }
             (
                 Err(_),
@@ -2833,7 +2939,8 @@ impl DesktopServices {
                 response
                     .warnings
                     .push("local or LAN search is unavailable".to_owned());
-                Ok((response, route_kind))
+                let public_hits = search_hit_keys(&response.hits);
+                Ok((response, route_kind, public_hits))
             }
             (Err(error), Err(_)) => Err(error),
         }
@@ -2908,10 +3015,35 @@ impl DesktopServices {
         publisher_id: &str,
         collection_id: Uuid,
         cursor: Option<String>,
+        target_concept_id: Option<Uuid>,
     ) -> std::result::Result<PublicBrowseResult, SearchContractError> {
         self.public_reader
-            .browse_collection(publisher_id, collection_id, cursor, 50)
+            .browse_collection(publisher_id, collection_id, cursor, target_concept_id, 50)
             .await
+    }
+
+    pub async fn browse_shared_wiki(
+        &self,
+        request_id: Uuid,
+        peer_id: &str,
+        collection_id: Uuid,
+        cursor: Option<String>,
+        target_concept_id: Option<Uuid>,
+    ) -> std::result::Result<SharedWikiBrowsePage, SearchContractError> {
+        let peer = PeerId::from_str(peer_id).map_err(|_| SearchContractError::Unauthorized)?;
+        let request = SharedWikiBrowseRequest {
+            protocol_version: airwiki_types::SHARED_WIKI_BROWSE_PROTOCOL.to_owned(),
+            request_id,
+            collection_id,
+            cursor,
+            target_concept_id,
+            limit: 50,
+        };
+        self.required_network()
+            .map_err(|_| SearchContractError::Unavailable("LAN is disabled".to_owned()))?
+            .browse_shared_wiki(peer, request)
+            .await
+            .map_err(|error| SearchContractError::Unavailable(error.to_string()))
     }
 
     /// Reports whether both tasks that constitute the optional LAN runtime are
@@ -3694,6 +3826,7 @@ impl DesktopServices {
                     return Err(error).context("no se pudo persistir el emparejamiento");
                 }
                 self.access.mark_trusted(peer);
+                effect.persisted_trusted_peer = Some(peer);
                 self.audit(
                     "peer_paired",
                     "peer",
@@ -4040,8 +4173,10 @@ fn merge_public_search_responses(
     mut trusted: SearchResponse,
     public: SearchResponse,
     top_k: usize,
-) -> SearchResponse {
+) -> (SearchResponse, HashSet<(String, Uuid)>) {
     const RRF_K: f64 = 60.0;
+    let trusted_hits = search_hit_keys(&trusted.hits);
+    let public_hits = search_hit_keys(&public.hits);
     let mut fused = HashMap::<(String, Uuid), (SearchHit, f64)>::new();
     for hits in [std::mem::take(&mut trusted.hits), public.hits] {
         for (position, hit) in hits.into_iter().enumerate() {
@@ -4079,7 +4214,21 @@ fn merge_public_search_responses(
     trusted.offline_nodes.dedup();
     trusted.warnings.extend(public.warnings);
     trusted.partial |= public.partial;
-    trusted
+    let retained_public_hits = trusted
+        .hits
+        .iter()
+        .map(search_hit_key)
+        .filter(|key| public_hits.contains(key) && !trusted_hits.contains(key))
+        .collect();
+    (trusted, retained_public_hits)
+}
+
+fn search_hit_keys(hits: &[SearchHit]) -> HashSet<(String, Uuid)> {
+    hits.iter().map(search_hit_key).collect()
+}
+
+fn search_hit_key(hit: &SearchHit) -> (String, Uuid) {
+    (hit.source_sha256.clone(), hit.chunk_id)
 }
 
 fn federation_index_is_active(index: &airwiki_core::FederationIndexRecord) -> bool {
@@ -4885,6 +5034,64 @@ mod tests {
     use tokio::sync::{Notify, oneshot};
 
     use super::*;
+
+    fn routed_search_hit(title: &str, source_sha256: &str, chunk_id: Uuid, rank: u32) -> SearchHit {
+        SearchHit {
+            concept_id: Uuid::new_v4(),
+            collection_id: Uuid::new_v4(),
+            chunk_id,
+            title: title.to_owned(),
+            snippet: "Synthetic evidence".to_owned(),
+            heading_or_page: "Fixture".to_owned(),
+            logical_resource_uri: "urn:airwiki:fixture".to_owned(),
+            source_revision: 1,
+            source_sha256: source_sha256.to_owned(),
+            updated_at: Utc::now(),
+            rank,
+            node_id: "synthetic-node".to_owned(),
+            assurance: None,
+            lifecycle_status: Some("stable".to_owned()),
+        }
+    }
+
+    #[test]
+    fn merged_search_preserves_public_only_provenance() {
+        let request_id = Uuid::new_v4();
+        let duplicate_chunk = Uuid::new_v4();
+        let public_chunk = Uuid::new_v4();
+        let mut trusted = SearchResponse::empty(request_id);
+        trusted.hits.push(routed_search_hit(
+            "Trusted duplicate",
+            "shared-source",
+            duplicate_chunk,
+            1,
+        ));
+        let mut public = SearchResponse::empty(request_id);
+        public.hits.push(routed_search_hit(
+            "Public duplicate",
+            "shared-source",
+            duplicate_chunk,
+            1,
+        ));
+        public.hits.push(routed_search_hit(
+            "Public only",
+            "public-source",
+            public_chunk,
+            2,
+        ));
+
+        let (merged, public_hits) = merge_public_search_responses(trusted, public, 10);
+
+        assert_eq!(merged.hits.len(), 2);
+        assert!(
+            merged
+                .hits
+                .iter()
+                .any(|hit| hit.title == "Trusted duplicate")
+        );
+        assert!(!public_hits.contains(&("shared-source".to_owned(), duplicate_chunk)));
+        assert!(public_hits.contains(&("public-source".to_owned(), public_chunk)));
+    }
 
     #[tokio::test(flavor = "current_thread")]
     async fn search_storage_work_does_not_block_the_async_runtime() {
@@ -6638,6 +6845,7 @@ mod tests {
                     request_id: Uuid::new_v4(),
                     collection_id,
                     cursor: None,
+                    target_concept_id: None,
                     limit: 50,
                 })
                 .await;
@@ -6702,6 +6910,7 @@ mod tests {
                     &backend.publisher_id,
                     public.id,
                     None,
+                    None,
                     1,
                 )
                 .unwrap();
@@ -6712,6 +6921,7 @@ mod tests {
                     &backend.publisher_id,
                     public.id,
                     Some(concepts[0].concept_id),
+                    None,
                     1,
                 )
                 .unwrap()
@@ -6729,6 +6939,7 @@ mod tests {
                 request_id: Uuid::new_v4(),
                 collection_id: public.id,
                 cursor: None,
+                target_concept_id: None,
                 limit: 1,
             })
             .await;
@@ -6783,6 +6994,7 @@ mod tests {
                 request_id: Uuid::new_v4(),
                 collection_id: public.id,
                 cursor: None,
+                target_concept_id: None,
                 limit: 50,
             })
             .await;

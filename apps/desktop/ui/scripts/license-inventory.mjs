@@ -19,7 +19,9 @@ const allowedLicenses = new Set([
 const reviewedMetadataOverrides = new Map([
   ['css-value@0.0.1', { reportedLicense: 'Unknown', license: 'MIT', legalFile: 'Readme.md' }]
 ]);
-const [mode, targetName] = process.argv.slice(2);
+const [mode, requestedTargetName] = process.argv.slice(2);
+const targetName = requestedTargetName ?? Object.entries(targets)
+  .find(([, candidate]) => candidate.platform === process.platform && candidate.arch === process.arch)?.[0];
 const target = targets[targetName];
 
 if (!['--check', '--generate'].includes(mode) || !target) {

@@ -72,6 +72,11 @@ All notable user-visible changes to AirWiki will be documented here. The project
 
 ### Fixed
 
+- Made the normal search scope explicitly include the current device and
+  authorized nearby devices, with public search as a separate opt-in. LAN and
+  public results now open in one consistent, read-only Wiki workspace instead
+  of using disconnected result and public-card experiences. Result provenance
+  remains explicit even when a public publisher is also a paired device.
 - Kept unsaved device preferences stable while background connectivity and
   status snapshots arrive, so a user's selection is never reverted before
   they can save it.

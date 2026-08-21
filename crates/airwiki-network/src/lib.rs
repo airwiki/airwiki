@@ -24,8 +24,8 @@ pub mod runtime;
 
 pub use access::{AccessControl, AccessError, PeerAccess};
 pub use address::{
-    LanAddressError, MAX_MANUAL_LAN_ADDRESS_BYTES, MAX_MDNS_ADDRESSES_PER_PEER,
-    MAX_VOLATILE_LAN_PEERS, ManualLanAddress, PeerAddressBook,
+    LanAddressError, MAX_AUTHENTICATED_LISTENERS_PER_PEER, MAX_MANUAL_LAN_ADDRESS_BYTES,
+    MAX_MDNS_ADDRESSES_PER_PEER, MAX_VOLATILE_LAN_PEERS, ManualLanAddress, PeerAddressBook,
 };
 pub use coordinator::FederatedCoordinator;
 #[cfg(feature = "os-keyring")]
@@ -53,8 +53,8 @@ pub use public_source::{
 };
 pub use rate_limit::PeerRateLimiter;
 pub use runtime::{
-    AuthorizedSearchBackend, AuthorizedSearchResult, NetworkConfig, NetworkEvent, NetworkHandle,
-    NetworkWarningKind, PairingFailureReason, spawn_network,
+    AuthorizedSearchBackend, AuthorizedSearchResult, AuthorizedWikiBrowseResult, NetworkConfig,
+    NetworkEvent, NetworkHandle, NetworkWarningKind, PairingFailureReason, spawn_network,
 };
 
 pub const SEARCH_DEADLINE: Duration = Duration::from_secs(3);
@@ -91,6 +91,8 @@ pub enum NetworkError {
     Address(#[from] LanAddressError),
     #[error(transparent)]
     Contract(#[from] airwiki_types::SearchContractError),
+    #[error(transparent)]
+    SharedWikiContract(#[from] airwiki_types::SharedWikiContractError),
     #[error("LAN runtime is not running")]
     RuntimeStopped,
     #[error("transport setup failed: {0}")]
@@ -101,4 +103,6 @@ pub enum NetworkError {
     Listen(String),
     #[error("peer access denied: {0}")]
     Access(String),
+    #[error("peer is unavailable")]
+    Unavailable,
 }

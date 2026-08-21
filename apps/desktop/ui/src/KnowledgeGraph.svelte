@@ -145,7 +145,7 @@
   {#if loadFailed}
     <p class="graph-error" role="status">{t('desktop-graph-error')}</p>
   {:else}
-    <div class="graph-canvas" bind:this={container} role="img" aria-label={t('desktop-graph-map-label', { collection: bundle.wikiName })}></div>
+    <div class="graph-canvas" bind:this={container} role="img" aria-label={t('desktop-graph-map-label', { wiki: bundle.wikiName })}></div>
   {/if}
   <div class="graph-index" aria-label={t('desktop-graph-pages-label')}>
     <button onclick={() => selectPage({ kind: 'index' })}>{t('knowledge-index-title')}</button>

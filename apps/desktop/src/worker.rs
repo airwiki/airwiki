@@ -22,7 +22,10 @@ use airwiki_inference::{
 };
 use airwiki_mcp::{McpClientActivity, McpClientKind};
 use airwiki_network::{NetworkEvent, PublicBrowseResult, PublicRouteKind};
-use airwiki_types::{CollectionPolicy, EnrichmentDraft, SearchHit, SearchPurpose, SearchResponse};
+use airwiki_types::{
+    CollectionPolicy, EnrichmentDraft, SearchHit, SearchPurpose, SearchResponse,
+    SharedWikiBrowsePage,
+};
 use futures::FutureExt;
 use tokio::sync::{
     mpsc::{Receiver as AsyncReceiver, Sender as AsyncSender},
@@ -534,6 +537,14 @@ pub enum WorkerCommand {
         publisher_id: String,
         collection_id: Uuid,
         cursor: Option<String>,
+        target_concept_id: Option<Uuid>,
+    },
+    BrowseNearbyWiki {
+        request_id: Uuid,
+        peer_id: String,
+        collection_id: Uuid,
+        cursor: Option<String>,
+        target_concept_id: Option<Uuid>,
     },
     SetPublicPublisherBlocked {
         publisher_id: String,
@@ -686,16 +697,23 @@ pub enum WorkerEvent {
     },
     SearchFinished {
         request_id: Uuid,
-        result: Result<(Vec<SearchHit>, SearchCoverageView, PublicRouteKind), String>,
+        result: Result<(Vec<RoutedSearchHit>, SearchCoverageView, PublicRouteKind), String>,
     },
     SearchPartial {
         request_id: Uuid,
-        hits: Vec<SearchHit>,
+        hits: Vec<RoutedSearchHit>,
     },
     PublicBrowseFinished {
         request_id: Uuid,
         append: bool,
         result: Result<PublicBrowseResult, String>,
+    },
+    NearbyWikiBrowseFinished {
+        request_id: Uuid,
+        peer_id: String,
+        collection_id: Uuid,
+        append: bool,
+        result: Result<SharedWikiBrowsePage, String>,
     },
     ChatIntegrationsUpdated {
         request_id: Uuid,
@@ -710,6 +728,18 @@ pub enum WorkerEvent {
     Peers(Vec<PeerView>),
     Notice(String),
     Error(String),
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum SearchHitRouteView {
+    DeviceNetwork,
+    PublicNetwork,
+}
+
+#[derive(Clone, Debug)]
+pub struct RoutedSearchHit {
+    pub hit: SearchHit,
+    pub route: SearchHitRouteView,
 }
 
 const WORKER_EVENT_CAPACITY: usize = 256;
@@ -795,13 +825,20 @@ enum BackgroundCompletion {
     },
     Search {
         request_id: Uuid,
-        result: Result<SearchResponse, String>,
+        result: Result<(SearchResponse, HashSet<(String, Uuid)>), String>,
         route_kind: PublicRouteKind,
     },
     PublicBrowse {
         request_id: Uuid,
         append: bool,
         result: Result<PublicBrowseResult, String>,
+    },
+    NearbyWikiBrowse {
+        request_id: Uuid,
+        peer_id: String,
+        collection_id: Uuid,
+        append: bool,
+        result: Result<SharedWikiBrowsePage, String>,
     },
     ChatIntegrations {
         request_id: Uuid,
@@ -1202,6 +1239,9 @@ pub(crate) async fn run_worker(
     };
     let mut lan_local_addresses = Vec::new();
     let mut current_lan_listener = None;
+    let mut current_lan_generation = None;
+    let mut lan_address_resolution_pending = false;
+    let mut lan_address_resolution_failed = false;
     send_lan_runtime(&events, lan_listener, lan_discovery, &lan_local_addresses).await;
     refresh_peers(&services, &events).await;
 
@@ -2356,15 +2396,43 @@ pub(crate) async fn run_worker(
                         }
                         refresh_content_views(&services, &events).await;
                     }
-                    WorkerCommand::BrowsePublicCollection { request_id, publisher_id, collection_id, cursor } => {
+                    WorkerCommand::BrowsePublicCollection { request_id, publisher_id, collection_id, cursor, target_concept_id } => {
                         let services = Arc::clone(&services);
                         let append = cursor.is_some();
                         background.spawn(async move {
                             let result = services
-                                .browse_public_collection(&publisher_id, collection_id, cursor)
+                                .browse_public_collection(
+                                    &publisher_id,
+                                    collection_id,
+                                    cursor,
+                                    target_concept_id,
+                                )
                                 .await
                                 .map_err(|error| error.to_string());
                             BackgroundCompletion::PublicBrowse { request_id, append, result }
+                        });
+                    }
+                    WorkerCommand::BrowseNearbyWiki { request_id, peer_id, collection_id, cursor, target_concept_id } => {
+                        let services = Arc::clone(&services);
+                        let append = cursor.is_some();
+                        background.spawn(async move {
+                            let result = services
+                                .browse_shared_wiki(
+                                    request_id,
+                                    &peer_id,
+                                    collection_id,
+                                    cursor,
+                                    target_concept_id,
+                                )
+                                .await
+                                .map_err(|error| error.to_string());
+                            BackgroundCompletion::NearbyWikiBrowse {
+                                request_id,
+                                peer_id,
+                                collection_id,
+                                append,
+                                result,
+                            }
                         });
                     }
                     WorkerCommand::SetPublicPublisherBlocked { publisher_id, blocked } => {
@@ -2875,6 +2943,20 @@ pub(crate) async fn run_worker(
                 }
             }
             _ = connectivity_tick.tick() => {
+                if let Some((generation, listener)) = lan_address_refresh_candidate(
+                    lan_runtime_enabled,
+                    lan_address_resolution_pending,
+                    current_lan_generation,
+                    current_lan_listener.as_ref(),
+                ) {
+                    lan_address_resolution_pending = true;
+                    spawn_lan_address_resolution(
+                        &services,
+                        &mut background,
+                        generation,
+                        listener,
+                    );
+                }
                 if let Some(operation) = firewall_operation.as_mut()
                     && slow_notice_is_due(
                         operation.started_at.elapsed(),
@@ -3245,9 +3327,24 @@ pub(crate) async fn run_worker(
                     ).await,
                     Some(Ok(BackgroundCompletion::Search { request_id, result, route_kind })) => {
                         let result = result
-                            .map(|response| {
+                            .map(|(response, public_hits)| {
                                 let coverage = search_coverage_view(&response);
-                                (response.hits, coverage, route_kind)
+                                let hits = response
+                                    .hits
+                                    .into_iter()
+                                    .map(|hit| {
+                                        let key = (hit.source_sha256.clone(), hit.chunk_id);
+                                        RoutedSearchHit {
+                                            hit,
+                                            route: if public_hits.contains(&key) {
+                                                SearchHitRouteView::PublicNetwork
+                                            } else {
+                                                SearchHitRouteView::DeviceNetwork
+                                            },
+                                        }
+                                    })
+                                    .collect();
+                                (hits, coverage, route_kind)
                             })
                             .map_err(|error| format!("Falló la búsqueda: {error}"));
                         send(
@@ -3259,6 +3356,20 @@ pub(crate) async fn run_worker(
                         let result = result
                             .map_err(|error| format!("Falló la navegación pública: {error}"));
                         send(&events, WorkerEvent::PublicBrowseFinished { request_id, append, result }).await;
+                    }
+                    Some(Ok(BackgroundCompletion::NearbyWikiBrowse { request_id, peer_id, collection_id, append, result })) => {
+                        let result = result
+                            .map_err(|error| format!("Falló la navegación LAN: {error}"));
+                        send(
+                            &events,
+                            WorkerEvent::NearbyWikiBrowseFinished {
+                                request_id,
+                                peer_id,
+                                collection_id,
+                                append,
+                                result,
+                            },
+                        ).await;
                     }
                     Some(Ok(BackgroundCompletion::ChatIntegrations {
                         request_id,
@@ -3472,6 +3583,7 @@ pub(crate) async fn run_worker(
                         listener,
                         result,
                     })) => {
+                        lan_address_resolution_pending = false;
                         if lan_address_resolution_is_current(
                             services.network_event_is_current(generation),
                             current_lan_listener.as_ref(),
@@ -3479,13 +3591,38 @@ pub(crate) async fn run_worker(
                             lan_runtime_enabled,
                         ) {
                             match result {
-                                Ok(addresses) => lan_local_addresses = addresses,
+                                Ok(addresses) => {
+                                    lan_address_resolution_failed = false;
+                                    if addresses != lan_local_addresses {
+                                        match services.announce_lan_addresses(&addresses).await {
+                                            Ok(()) => lan_local_addresses = addresses,
+                                            Err(_) => {
+                                                lan_local_addresses.clear();
+                                                tracing::warn!(
+                                                    error_kind = "lan_address_announcement",
+                                                    "validated LAN addresses could not be announced"
+                                                );
+                                            }
+                                        }
+                                    }
+                                }
                                 Err(_) => {
-                                    lan_local_addresses.clear();
-                                    tracing::warn!(
-                                        error_kind = "lan_manual_fallback_resolution",
-                                        "advanced LAN fallback address is unavailable"
-                                    );
+                                    if !lan_local_addresses.is_empty() {
+                                        lan_local_addresses.clear();
+                                        if services.announce_lan_addresses(&[]).await.is_err() {
+                                            tracing::warn!(
+                                                error_kind = "lan_address_withdrawal",
+                                                "stale LAN address announcements could not be withdrawn"
+                                            );
+                                        }
+                                    }
+                                    if !lan_address_resolution_failed {
+                                        tracing::warn!(
+                                            error_kind = "lan_manual_fallback_resolution",
+                                            "advanced LAN fallback address is unavailable"
+                                        );
+                                    }
+                                    lan_address_resolution_failed = true;
                                 }
                             }
                             send_lan_runtime(
@@ -3874,17 +4011,23 @@ pub(crate) async fn run_worker(
                                 lan_listener = LanListenerView::Listening;
                                 lan_local_addresses.clear();
                                 current_lan_listener = Some(address.clone());
-                                spawn_lan_address_resolution(
-                                    &services,
-                                    &mut background,
-                                    generation,
-                                    address.clone(),
-                                );
+                                current_lan_generation = Some(generation);
+                                lan_address_resolution_failed = false;
+                                if !lan_address_resolution_pending {
+                                    lan_address_resolution_pending = true;
+                                    spawn_lan_address_resolution(
+                                        &services,
+                                        &mut background,
+                                        generation,
+                                        address.clone(),
+                                    );
+                                }
                                 true
                             }
                             NetworkEvent::ListenerUnavailable => {
                                 lan_listener = LanListenerView::Failed;
                                 invalidate_lan_address_resolution(
+                                    &mut current_lan_generation,
                                     &mut current_lan_listener,
                                     &mut lan_local_addresses,
                                 );
@@ -3917,6 +4060,11 @@ pub(crate) async fn run_worker(
                             Ok(effect) => {
                                 if let Some(notice) = effect.notice { send(&events, WorkerEvent::Notice(notice)).await; }
                                 if let Some(warning) = effect.warning { send(&events, WorkerEvent::Error(warning)).await; }
+                                if let Some(peer) = effect.persisted_trusted_peer
+                                    && let Err(error) = services.acknowledge_persisted_peer_trust(peer).await
+                                {
+                                    send(&events, WorkerEvent::Error(format!("No se pudo completar el emparejamiento LAN: {error:#}"))).await;
+                                }
                                 if effect.peers_changed { refresh_peers(&services, &events).await; }
                             }
                             Err(error) => send(&events, WorkerEvent::Error(format!("No se pudo persistir el evento LAN: {error:#}"))).await,
@@ -3928,6 +4076,7 @@ pub(crate) async fn run_worker(
                         lan_listener = LanListenerView::Starting;
                         lan_discovery = LanDiscoveryView::Starting;
                         invalidate_lan_address_resolution(
+                            &mut current_lan_generation,
                             &mut current_lan_listener,
                             &mut lan_local_addresses,
                         );
@@ -3949,6 +4098,7 @@ pub(crate) async fn run_worker(
                         lan_listener = LanListenerView::Failed;
                         lan_discovery = LanDiscoveryView::Failed;
                         invalidate_lan_address_resolution(
+                            &mut current_lan_generation,
                             &mut current_lan_listener,
                             &mut lan_local_addresses,
                         );
@@ -4248,11 +4398,25 @@ fn schedule_lan_runtime_restart(
 }
 
 fn invalidate_lan_address_resolution(
+    current_generation: &mut Option<u64>,
     current_listener: &mut Option<airwiki_network::Multiaddr>,
     local_addresses: &mut Vec<String>,
 ) {
+    *current_generation = None;
     *current_listener = None;
     local_addresses.clear();
+}
+
+fn lan_address_refresh_candidate(
+    runtime_enabled: bool,
+    resolution_pending: bool,
+    current_generation: Option<u64>,
+    current_listener: Option<&airwiki_network::Multiaddr>,
+) -> Option<(u64, airwiki_network::Multiaddr)> {
+    if !runtime_enabled || resolution_pending {
+        return None;
+    }
+    current_generation.zip(current_listener.cloned())
 }
 
 fn lan_address_resolution_is_current(
@@ -5539,7 +5703,14 @@ fn spawn_search(
                             if let Some(partial) = partial {
                                 send(&events, WorkerEvent::SearchPartial {
                                     request_id,
-                                    hits: partial.hits,
+                                    hits: partial
+                                        .hits
+                                        .into_iter()
+                                        .map(|hit| RoutedSearchHit {
+                                            hit,
+                                            route: SearchHitRouteView::PublicNetwork,
+                                        })
+                                        .collect(),
                                 }).await;
                             }
                         }
@@ -5549,7 +5720,7 @@ fn spawn_search(
                 services
                     .search(question, top_k, purpose)
                     .await
-                    .map(|response| (response, PublicRouteKind::Offline))
+                    .map(|response| (response, PublicRouteKind::Offline, HashSet::new()))
             }
         };
         let result = AssertUnwindSafe(search)
@@ -5557,9 +5728,9 @@ fn spawn_search(
             .await
             .map_err(panic_message)
             .and_then(|result| result.map_err(|error| error.to_string()))
-            .map(|(response, route_kind)| {
+            .map(|(response, route_kind, public_hits)| {
                 (
-                    response,
+                    (response, public_hits),
                     if public_network {
                         route_kind
                     } else {
@@ -6122,6 +6293,7 @@ mod tests {
     #[test]
     fn stale_lan_address_resolution_is_rejected_after_restart_invalidation() {
         let listener: airwiki_network::Multiaddr = "/ip4/192.168.1.25/tcp/61743".parse().unwrap();
+        let mut current_generation = Some(7);
         let mut current_listener = Some(listener.clone());
         let mut local_addresses = vec!["/ip4/192.168.1.25/tcp/61743/p2p/test".to_owned()];
         assert!(lan_address_resolution_is_current(
@@ -6131,8 +6303,13 @@ mod tests {
             true,
         ));
 
-        invalidate_lan_address_resolution(&mut current_listener, &mut local_addresses);
+        invalidate_lan_address_resolution(
+            &mut current_generation,
+            &mut current_listener,
+            &mut local_addresses,
+        );
 
+        assert!(current_generation.is_none());
         assert!(current_listener.is_none());
         assert!(local_addresses.is_empty());
         assert!(!lan_address_resolution_is_current(
@@ -6141,6 +6318,20 @@ mod tests {
             &listener,
             true,
         ));
+    }
+
+    #[test]
+    fn healthy_lan_runtime_refreshes_addresses_only_with_one_current_request() {
+        let listener: airwiki_network::Multiaddr = "/ip4/0.0.0.0/tcp/61743".parse().unwrap();
+
+        assert_eq!(
+            lan_address_refresh_candidate(true, false, Some(7), Some(&listener)),
+            Some((7, listener.clone()))
+        );
+        assert!(lan_address_refresh_candidate(true, true, Some(7), Some(&listener)).is_none());
+        assert!(lan_address_refresh_candidate(false, false, Some(7), Some(&listener)).is_none());
+        assert!(lan_address_refresh_candidate(true, false, None, Some(&listener)).is_none());
+        assert!(lan_address_refresh_candidate(true, false, Some(7), None).is_none());
     }
 
     #[test]

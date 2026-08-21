@@ -2,7 +2,7 @@ import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testi
 import axe from 'axe-core';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import App from './App.svelte';
-import { allowPeerPairingAgain, approveReview, browsePublicWiki, configureFirewall, connect, loadWikiBundle, loadWikiPage, manageIntegration, openSystemDestination, pickOkfImport, prepareGuidedWikiRepair, quitCompletely, reanalyzeReview, refreshWikiHealth, rejectReview, searchKnowledge, updatePreferences, validateOkfImport, verifyWikiConcept } from './api';
+import { allowPeerPairingAgain, approveReview, browseNearbyWiki, browsePublicWiki, configureFirewall, connect, installModels, loadWikiBundle, loadWikiPage, manageIntegration, openSystemDestination, pickOkfImport, prepareGuidedWikiRepair, quitCompletely, reanalyzeReview, refreshWikiHealth, rejectReview, searchKnowledge, updatePreferences, validateOkfImport, verifyWikiConcept } from './api';
 import type { UiEventEnvelope } from './generated/ui-contract';
 import { readySnapshot } from './test/fixtures';
 
@@ -48,10 +48,12 @@ vi.mock('./api', async (importOriginal) => {
     prepareGuidedWikiRepair: vi.fn(async () => 'repair-request'),
     updatePreferences: vi.fn(async () => undefined),
     configureFirewall: vi.fn(async () => undefined),
+    installModels: vi.fn(async () => undefined),
     openSystemDestination: vi.fn(async () => undefined),
     manageIntegration: vi.fn(async () => undefined),
     allowPeerPairingAgain: vi.fn(async () => undefined),
     browsePublicWiki: vi.fn(async () => 'public-browse-request'),
+    browseNearbyWiki: vi.fn(async () => 'nearby-browse-request'),
     searchKnowledge: vi.fn(async () => snapshot.search?.requestId ?? 'search-request'),
     pickOkfImport: vi.fn(async () => null),
     validateOkfImport: vi.fn(),
@@ -529,6 +531,16 @@ describe('AirWiki wiki workspace', () => {
     expect(screen.queryByRole('dialog', { name: 'Atlas' })).not.toBeInTheDocument();
   });
 
+  it('distinguishes an enabled LAN channel from a granted device', async () => {
+    snapshot.wikis[0].localOnly = false;
+    snapshot.wikis[0].peerShareable = true;
+    render(App);
+    await fireEvent.click(await screen.findByRole('row', { name: /Atlas 2 publicados/ }));
+
+    expect(screen.getByText('Compartición por LAN habilitada')).toBeInTheDocument();
+    expect(screen.getByText('Aún no diste acceso a esta wiki a ningún equipo verificado')).toBeInTheDocument();
+  });
+
   it('keeps wiki details and sharing as separate actions', async () => {
     const { container } = render(App);
     await fireEvent.click(await screen.findByRole('row', { name: /Atlas 2 publicados/ }));
@@ -694,7 +706,7 @@ describe('AirWiki wiki workspace', () => {
     activateLocalSearch();
     snapshot.search = {
       requestId: 'search-fixture', status: 'complete', coverage: 'complete',
-      hits: [{ conceptId, wikiId: wiki.id, title: 'Evidencia Atlas', snippet: 'Contenido verificado.', headingOrPage: 'Atlas', logicalResourceUri: 'urn:airwiki:fixture', sourceRevision: 1, sourceSha256: '0123456789abcdef', rank: 1, nodeId: snapshot.nodeId!, assurance: { trust: 'humanReviewed', freshness: 'fresh', verificationOutdated: false }, lifecycle: 'stable' }]
+      hits: [{ conceptId, wikiId: wiki.id, title: 'Evidencia Atlas', snippet: 'Contenido verificado.', headingOrPage: 'Atlas', logicalResourceUri: 'urn:airwiki:fixture', sourceRevision: 1, sourceSha256: '0123456789abcdef', rank: 1, nodeId: snapshot.nodeId!, route: 'deviceNetwork', assurance: { trust: 'humanReviewed', freshness: 'fresh', verificationOutdated: false }, lifecycle: 'stable' }]
     };
     snapshot.knowledge = {
       wikiId: wiki.id, wikiName: wiki.name, version: 'search-fixture', status: 'ready', errorCount: 0, warningCount: 0,
@@ -713,7 +725,7 @@ describe('AirWiki wiki workspace', () => {
     expect(window.location.hash).not.toContain('Evidencia');
   });
 
-  it('labels a trusted peer result as nearby instead of public', async () => {
+  it('opens a trusted LAN result with the same read-only Wiki workspace', async () => {
     const peerId = '12D3KooSyntheticNearbyNode';
     activateLocalSearch();
     snapshot.peers = [{
@@ -722,11 +734,12 @@ describe('AirWiki wiki workspace', () => {
     }];
     snapshot.search = {
       requestId: 'nearby-search', status: 'complete', coverage: 'complete',
-      hits: [{ conceptId: 'nearby-concept', wikiId: 'nearby-wiki', title: 'Evidencia cercana', snippet: 'Contenido autorizado.', headingOrPage: 'Responsable', logicalResourceUri: 'urn:airwiki:nearby', sourceRevision: 1, sourceSha256: '0123456789abcdef', rank: 1, nodeId: peerId, assurance: null, lifecycle: null }]
+      hits: [{ conceptId: 'nearby-concept', wikiId: 'nearby-wiki', title: 'Evidencia cercana', snippet: 'Contenido autorizado.', headingOrPage: 'Responsable', logicalResourceUri: 'urn:airwiki:nearby', sourceRevision: 1, sourceSha256: '0123456789abcdef', rank: 1, nodeId: peerId, route: 'deviceNetwork', assurance: null, lifecycle: null }]
     };
     window.location.hash = '#search';
-    render(App);
+    const { container } = render(App);
     await submitVisibleSearch('Evidencia cercana');
+    expect(searchKnowledge).toHaveBeenLastCalledWith('Evidencia cercana', false);
 
     const article = (await screen.findByRole('heading', { name: 'Evidencia cercana' })).closest('article');
     expect(article).not.toBeNull();
@@ -734,7 +747,236 @@ describe('AirWiki wiki workspace', () => {
     expect(nearbyResult.getByText('RUSTICO · Responsable')).toBeInTheDocument();
     expect(nearbyResult.getByText('Equipo cercano')).toBeInTheDocument();
     expect(nearbyResult.queryByText('Red pública')).not.toBeInTheDocument();
-    expect(nearbyResult.queryByRole('button', { name: 'Abrir' })).not.toBeInTheDocument();
+    await fireEvent.click(nearbyResult.getByRole('button', { name: 'Abrir' }));
+    expect(browseNearbyWiki).toHaveBeenCalledWith(peerId, 'nearby-wiki', {
+      targetConceptId: 'nearby-concept'
+    });
+    expect(screen.getByText('Abriendo wiki compartida')).toBeInTheDocument();
+
+    snapshot = {
+      ...snapshot,
+      sequence: snapshot.sequence + 1,
+      nearbyBrowse: {
+        requestId: 'nearby-browse-request', status: 'available', peerId, wikiId: 'nearby-wiki',
+        wikiName: 'Guía del equipo', okfCompatibility: { kind: 'declaredV02' }, nextCursor: null,
+        appendFailed: false,
+        concepts: [{ conceptId: 'nearby-concept', conceptType: 'Guide', title: 'Evidencia cercana', description: 'Contenido publicado por el equipo.', language: 'es', tags: ['operaciones'], summary: 'Contenido autorizado.', sourceRevision: 1, lifecycle: 'stable', assurance: { trust: 'humanReviewed', freshness: 'fresh', verificationOutdated: false } }]
+      }
+    };
+    await act(() => {
+      snapshotListener?.({ schemaVersion: snapshot.schemaVersion, sequence: snapshot.sequence, requestId: 'nearby-browse-request', kind: 'stateChanged', snapshot });
+    });
+
+    expect(screen.getByRole('heading', { name: 'Guía del equipo' })).toBeInTheDocument();
+    expect(screen.queryByRole('heading', { name: 'Buscar evidencia' })).not.toBeInTheDocument();
+    expect(screen.getByText('Solo lectura')).toBeInTheDocument();
+    expect(screen.getAllByText('RUSTICO').length).toBeGreaterThan(0);
+    expect(screen.getByText('Contenido autorizado.')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Bloquear este publicador' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Actualizar' })).not.toBeInTheDocument();
+    const accessibility = await axe.run(container, { rules: { region: { enabled: false } } });
+    expect(accessibility.violations.filter((violation) => ['critical', 'serious'].includes(violation.impact ?? ''))).toEqual([]);
+
+    snapshot = {
+      ...snapshot,
+      sequence: snapshot.sequence + 1,
+      nearbyBrowse: snapshot.nearbyBrowse ? {
+        ...snapshot.nearbyBrowse,
+        nextCursor: 'nearby-next-page',
+        appendFailed: true
+      } : null
+    };
+    await act(() => {
+      snapshotListener?.({ schemaVersion: snapshot.schemaVersion, sequence: snapshot.sequence, requestId: null, kind: 'stateChanged', snapshot });
+    });
+    expect(screen.getByText('No se pudo cargar más contenido. Conservamos las páginas visibles; inténtalo de nuevo.')).toBeInTheDocument();
+    expect(screen.getByText('Contenido autorizado.')).toBeInTheDocument();
+    await fireEvent.click(screen.getByRole('button', { name: 'Cargar más' }));
+    expect(browseNearbyWiki).toHaveBeenLastCalledWith(peerId, 'nearby-wiki', { cursor: 'nearby-next-page' });
+
+    snapshot = {
+      ...snapshot,
+      sequence: snapshot.sequence + 1,
+      nearbyBrowse: snapshot.nearbyBrowse ? {
+        ...snapshot.nearbyBrowse,
+        concepts: [{
+          conceptId: 'different-concept', conceptType: 'Guide', title: 'Otro contenido',
+          description: '', language: 'es', tags: [], summary: 'No debe abrirse por accidente.',
+          sourceRevision: 1, lifecycle: 'stable', assurance: null
+        }]
+      } : null
+    };
+    await act(() => {
+      snapshotListener?.({ schemaVersion: snapshot.schemaVersion, sequence: snapshot.sequence, requestId: null, kind: 'stateChanged', snapshot });
+    });
+    expect(screen.getByText('Este resultado ya no está disponible')).toBeInTheDocument();
+    expect(screen.queryByText('No debe abrirse por accidente.')).not.toBeInTheDocument();
+
+    await fireEvent.click(screen.getByRole('button', { name: 'Volver a los resultados' }));
+    expect(screen.getByRole('heading', { name: 'Evidencia cercana' })).toBeInTheDocument();
+  });
+
+  it('ignores a stale load-more continuation after another shared Wiki is opened', async () => {
+    const peerId = '12D3KooSyntheticNearbyNode';
+    activateLocalSearch();
+    snapshot.peers = [{
+      peerId, deviceName: 'RUSTICO', address: '/ip4/192.0.2.1/tcp/4242',
+      trust: 'trusted', activity: 'connected', sasWords: null, grantedWikiIds: []
+    }];
+    snapshot.search = {
+      requestId: 'nearby-search', status: 'complete', coverage: 'complete',
+      hits: [
+        { conceptId: 'concept-a', wikiId: 'wiki-a', title: 'Wiki remota A', snippet: 'Primer contenido.', headingOrPage: 'Guía A', logicalResourceUri: 'urn:airwiki:a', sourceRevision: 1, sourceSha256: 'a'.repeat(64), rank: 1, nodeId: peerId, route: 'deviceNetwork', assurance: null, lifecycle: 'stable' },
+        { conceptId: 'concept-b', wikiId: 'wiki-b', title: 'Wiki remota B', snippet: 'Segundo contenido.', headingOrPage: 'Guía B', logicalResourceUri: 'urn:airwiki:b', sourceRevision: 1, sourceSha256: 'b'.repeat(64), rank: 2, nodeId: peerId, route: 'deviceNetwork', assurance: null, lifecycle: 'stable' }
+      ]
+    };
+    window.location.hash = '#search';
+    render(App);
+    await submitVisibleSearch('Wiki remota');
+
+    const firstResult = (await screen.findByRole('heading', { name: 'Wiki remota A' })).closest('article');
+    expect(firstResult).not.toBeNull();
+    await fireEvent.click(within(firstResult as HTMLElement).getByRole('button', { name: 'Abrir' }));
+    snapshot = {
+      ...snapshot,
+      sequence: snapshot.sequence + 1,
+      nearbyBrowse: {
+        requestId: 'nearby-browse-request', status: 'available', peerId, wikiId: 'wiki-a',
+        wikiName: 'Wiki remota A', okfCompatibility: { kind: 'declaredV02' },
+        nextCursor: 'next-a', appendFailed: false,
+        concepts: [{ conceptId: 'concept-a', conceptType: 'Guide', title: 'Concepto A', description: '', language: 'es', tags: [], summary: 'Primer contenido.', sourceRevision: 1, lifecycle: 'stable', assurance: null }]
+      }
+    };
+    await act(() => {
+      snapshotListener?.({ schemaVersion: snapshot.schemaVersion, sequence: snapshot.sequence, requestId: 'nearby-browse-request', kind: 'stateChanged', snapshot });
+    });
+
+    let resolveStaleLoad: (requestId: string) => void = vi.fn();
+    const staleLoad = new Promise<string>((resolve) => { resolveStaleLoad = resolve; });
+    vi.mocked(browseNearbyWiki).mockImplementationOnce(() => staleLoad);
+    await fireEvent.click(screen.getByRole('button', { name: 'Cargar más' }));
+    await fireEvent.click(screen.getByRole('button', { name: 'Volver a los resultados' }));
+
+    const secondResult = (await screen.findByRole('heading', { name: 'Wiki remota B' })).closest('article');
+    expect(secondResult).not.toBeNull();
+    await fireEvent.click(within(secondResult as HTMLElement).getByRole('button', { name: 'Abrir' }));
+    await act(async () => {
+      resolveStaleLoad('stale-load-more-request');
+      await staleLoad;
+    });
+
+    snapshot = {
+      ...snapshot,
+      sequence: snapshot.sequence + 1,
+      nearbyBrowse: {
+        requestId: 'nearby-browse-request', status: 'available', peerId, wikiId: 'wiki-b',
+        wikiName: 'Wiki remota B', okfCompatibility: { kind: 'declaredV02' },
+        nextCursor: null, appendFailed: false,
+        concepts: [{ conceptId: 'concept-b', conceptType: 'Guide', title: 'Concepto B', description: '', language: 'es', tags: [], summary: 'Segundo contenido.', sourceRevision: 1, lifecycle: 'stable', assurance: null }]
+      }
+    };
+    await act(() => {
+      snapshotListener?.({ schemaVersion: snapshot.schemaVersion, sequence: snapshot.sequence, requestId: 'nearby-browse-request', kind: 'stateChanged', snapshot });
+    });
+
+    expect(screen.getByRole('heading', { name: 'Wiki remota B' })).toBeInTheDocument();
+    expect(screen.queryByText('Abriendo wiki compartida')).not.toBeInTheDocument();
+  });
+
+  it('does not retain a completed load-more request when its event wins the invoke race', async () => {
+    const peerId = '12D3KooSyntheticFastNearbyNode';
+    activateLocalSearch();
+    snapshot.peers = [{
+      peerId, deviceName: 'RUSTICO', address: '/ip4/192.0.2.1/tcp/4242',
+      trust: 'trusted', activity: 'connected', sasWords: null, grantedWikiIds: []
+    }];
+    snapshot.search = {
+      requestId: 'nearby-fast-search', status: 'complete', coverage: 'complete',
+      hits: [{ conceptId: 'concept-a', wikiId: 'wiki-a', title: 'Wiki remota rápida', snippet: 'Primer contenido.', headingOrPage: 'Guía A', logicalResourceUri: 'urn:airwiki:fast-a', sourceRevision: 1, sourceSha256: 'a'.repeat(64), rank: 1, nodeId: peerId, route: 'deviceNetwork', assurance: null, lifecycle: 'stable' }]
+    };
+    window.location.hash = '#search';
+    render(App);
+    await submitVisibleSearch('Wiki remota rápida');
+
+    const result = (await screen.findByRole('heading', { name: 'Wiki remota rápida' })).closest('article');
+    expect(result).not.toBeNull();
+    await fireEvent.click(within(result as HTMLElement).getByRole('button', { name: 'Abrir' }));
+    snapshot = {
+      ...snapshot,
+      sequence: snapshot.sequence + 1,
+      nearbyBrowse: {
+        requestId: 'nearby-browse-request', status: 'available', peerId, wikiId: 'wiki-a',
+        wikiName: 'Wiki remota rápida', okfCompatibility: { kind: 'declaredV02' },
+        nextCursor: 'next-a', appendFailed: false,
+        concepts: [{ conceptId: 'concept-a', conceptType: 'Guide', title: 'Concepto A', description: '', language: 'es', tags: [], summary: 'Primer contenido.', sourceRevision: 1, lifecycle: 'stable', assurance: null }]
+      }
+    };
+    await act(() => {
+      snapshotListener?.({ schemaVersion: snapshot.schemaVersion, sequence: snapshot.sequence, requestId: 'nearby-browse-request', kind: 'stateChanged', snapshot });
+    });
+
+    let resolveFastLoad: (requestId: string) => void = vi.fn();
+    const fastLoad = new Promise<string>((resolve) => { resolveFastLoad = resolve; });
+    vi.mocked(browseNearbyWiki).mockImplementationOnce(() => fastLoad);
+    await fireEvent.click(screen.getByRole('button', { name: 'Cargar más' }));
+    snapshot = {
+      ...snapshot,
+      sequence: snapshot.sequence + 1,
+      nearbyBrowse: snapshot.nearbyBrowse ? {
+        ...snapshot.nearbyBrowse,
+        requestId: 'fast-load-more-request',
+        nextCursor: null
+      } : null
+    };
+    await act(() => {
+      snapshotListener?.({ schemaVersion: snapshot.schemaVersion, sequence: snapshot.sequence, requestId: 'fast-load-more-request', kind: 'stateChanged', snapshot });
+    });
+    await act(async () => {
+      resolveFastLoad('fast-load-more-request');
+      await fastLoad;
+    });
+
+    await submitVisibleSearch('Wiki remota rápida');
+    const refreshedResult = (await screen.findByRole('heading', { name: 'Wiki remota rápida' })).closest('article');
+    expect(refreshedResult).not.toBeNull();
+    expect(within(refreshedResult as HTMLElement).getByRole('button', { name: 'Abrir' })).toBeEnabled();
+  });
+
+  it('keeps a device-network result labeled as nearby when peer details disappear', async () => {
+    activateLocalSearch();
+    snapshot.peers = [];
+    snapshot.search = {
+      requestId: 'departed-peer-search', status: 'complete', coverage: 'partial',
+      hits: [{ conceptId: 'nearby-concept', wikiId: 'nearby-wiki', title: 'Resultado conservado', snippet: 'Contenido autorizado.', headingOrPage: 'Guía', logicalResourceUri: 'urn:airwiki:nearby', sourceRevision: 1, sourceSha256: '0123456789abcdef', rank: 1, nodeId: '12D3KooDepartedPeer', route: 'deviceNetwork', assurance: null, lifecycle: null }]
+    };
+    window.location.hash = '#search';
+    render(App);
+    await submitVisibleSearch('Resultado conservado');
+
+    const article = (await screen.findByRole('heading', { name: 'Resultado conservado' })).closest('article');
+    expect(article).not.toBeNull();
+    const result = within(article as HTMLElement);
+    expect(result.getByText('Equipo cercano · Guía')).toBeInTheDocument();
+    expect(result.getByText('Equipo cercano')).toBeInTheDocument();
+    expect(result.queryByText('Red pública')).not.toBeInTheDocument();
+
+    await fireEvent.click(result.getByRole('button', { name: 'Abrir' }));
+    snapshot = {
+      ...snapshot,
+      sequence: snapshot.sequence + 1,
+      nearbyBrowse: {
+        requestId: 'nearby-browse-request', status: 'available', peerId: '12D3KooDepartedPeer',
+        wikiId: 'nearby-wiki', wikiName: 'Wiki conservada',
+        okfCompatibility: { kind: 'declaredV02' }, nextCursor: null, appendFailed: false,
+        concepts: [{ conceptId: 'nearby-concept', conceptType: 'Guide', title: 'Resultado conservado', description: '', language: 'es', tags: [], summary: 'Contenido autorizado.', sourceRevision: 1, lifecycle: 'stable', assurance: null }]
+      }
+    };
+    await act(() => {
+      snapshotListener?.({ schemaVersion: snapshot.schemaVersion, sequence: snapshot.sequence, requestId: 'nearby-browse-request', kind: 'stateChanged', snapshot });
+    });
+    expect(screen.getByRole('heading', { name: 'Wiki conservada' })).toBeInTheDocument();
+    expect(screen.getAllByText('Equipo cercano').length).toBeGreaterThan(0);
+    expect(screen.queryByText('Red pública')).not.toBeInTheDocument();
   });
 
   it('never shows a completed empty search together with a stale progress message', async () => {
@@ -754,7 +996,7 @@ describe('AirWiki wiki workspace', () => {
     snapshot.search = { requestId: 'empty-public-search', status: 'complete', coverage: 'complete', hits: [] };
     window.location.hash = '#search';
     render(App);
-    await fireEvent.click(await screen.findByRole('checkbox', { name: 'Red pública' }));
+    await fireEvent.click(await screen.findByRole('checkbox', { name: 'Incluir pública' }));
     await submitVisibleSearch('sin coincidencias públicas');
 
     expect(screen.getByText('Buscamos en este equipo, en los equipos autorizados disponibles y en la red pública. Prueba palabras que aparezcan en el contenido publicado.')).toBeInTheDocument();
@@ -765,7 +1007,7 @@ describe('AirWiki wiki workspace', () => {
     snapshot.search = { requestId: 'offline-public-search', status: 'complete', coverage: 'publicNetworkOffline', hits: [] };
     window.location.hash = '#search';
     render(App);
-    await fireEvent.click(await screen.findByRole('checkbox', { name: 'Red pública' }));
+    await fireEvent.click(await screen.findByRole('checkbox', { name: 'Incluir pública' }));
     await submitVisibleSearch('red pública offline');
 
     expect(await screen.findByText('No se pudieron consultar todas las fuentes')).toBeInTheDocument();
@@ -774,10 +1016,20 @@ describe('AirWiki wiki workspace', () => {
   });
 
   it('shows public v2 assurance and labels legacy metadata as unavailable', async () => {
+    activateLocalSearch();
+    snapshot.search = {
+      requestId: 'public-assurance-search', status: 'complete', coverage: 'complete',
+      hits: [{ conceptId: 'public-v2', wikiId: 'public-wiki', title: 'Concepto v2', snippet: 'Resumen público', headingOrPage: 'Guía', logicalResourceUri: 'urn:airwiki:public', sourceRevision: 1, sourceSha256: '0123456789abcdef', rank: 1, nodeId: '12D3KooPublicPublisher', route: 'publicNetwork', assurance: null, lifecycle: 'stable' }]
+    };
+    window.location.hash = '#search';
+    render(App);
+    await fireEvent.click(await screen.findByRole('checkbox', { name: 'Incluir pública' }));
+    await submitVisibleSearch('Concepto v2');
+    await fireEvent.click(await screen.findByRole('button', { name: 'Abrir' }));
     snapshot.publicBrowse = {
-      requestId: 'browse-v2', status: 'direct', publisherId: 'publisher', wikiId: 'public-wiki',
+      requestId: 'public-browse-request', status: 'direct', publisherId: 'publisher', wikiId: 'public-wiki',
       wikiName: 'Wiki pública', description: 'Conocimiento compartido', languages: ['es'],
-      okfCompatibility: { kind: 'declaredV02' }, nextCursor: null,
+      okfCompatibility: { kind: 'declaredV02' }, nextCursor: null, appendFailed: false,
       concepts: [{
         conceptId: 'public-v2', conceptType: 'Reference', title: 'Concepto v2',
         description: '', language: 'es', tags: [], summary: 'Resumen público', sourceRevision: 1,
@@ -788,27 +1040,49 @@ describe('AirWiki wiki workspace', () => {
         lifecycle: null, assurance: null
       }]
     };
-    render(App);
+    snapshot = { ...snapshot, sequence: snapshot.sequence + 1 };
+    await act(() => {
+      snapshotListener?.({ schemaVersion: snapshot.schemaVersion, sequence: snapshot.sequence, requestId: 'public-browse-request', kind: 'stateChanged', snapshot });
+    });
 
     expect(await screen.findByText('OKF v0.2')).toBeInTheDocument();
     expect(screen.getByText('Confirmado por proceso · Necesita revalidación · stable')).toBeInTheDocument();
+    await fireEvent.click(screen.getByRole('button', { name: /Concepto anterior/ }));
     expect(screen.getByText('Metadata de confianza no disponible (nodo anterior)')).toBeInTheDocument();
+
+    snapshot = {
+      ...snapshot,
+      sequence: snapshot.sequence + 1,
+      publicBrowse: snapshot.publicBrowse ? { ...snapshot.publicBrowse, okfCompatibility: null } : null
+    };
+    await act(() => {
+      snapshotListener?.({ schemaVersion: snapshot.schemaVersion, sequence: snapshot.sequence, requestId: 'public-browse-request', kind: 'stateChanged', snapshot });
+    });
+    expect(screen.getByText('Compatibilidad OKF no informada (nodo anterior)')).toBeInTheDocument();
   });
 
   it('opens a public search result in a dedicated viewer and returns to the results', async () => {
     activateLocalSearch();
+    snapshot.peers = [{
+      peerId: '12D3KooPublicPublisher', deviceName: 'Known publisher',
+      address: '/ip4/192.0.2.9/tcp/4242', trust: 'trusted', activity: 'connected',
+      sasWords: null, grantedWikiIds: []
+    }];
     snapshot.search = {
       requestId: 'public-search', status: 'complete', coverage: 'complete',
-      hits: [{ conceptId: 'public-concept', wikiId: 'public-wiki', title: 'Resultado público', snippet: 'Evidencia pública.', headingOrPage: 'Guía', logicalResourceUri: 'urn:airwiki:public', sourceRevision: 1, sourceSha256: '0123456789abcdef', rank: 1, nodeId: '12D3KooPublicPublisher', assurance: null, lifecycle: 'stable' }]
+      hits: [{ conceptId: 'public-concept', wikiId: 'public-wiki', title: 'Resultado público', snippet: 'Evidencia pública.', headingOrPage: 'Guía', logicalResourceUri: 'urn:airwiki:public', sourceRevision: 1, sourceSha256: '0123456789abcdef', rank: 1, nodeId: '12D3KooPublicPublisher', route: 'publicNetwork', assurance: null, lifecycle: 'stable' }]
     };
     window.location.hash = '#search';
     const { container } = render(App);
-    await fireEvent.click(await screen.findByRole('checkbox', { name: 'Red pública' }));
+    await fireEvent.click(await screen.findByRole('checkbox', { name: 'Incluir pública' }));
     await submitVisibleSearch('Resultado público');
 
+    expect(screen.getAllByText('Red pública').length).toBeGreaterThan(0);
     await fireEvent.click(await screen.findByRole('button', { name: 'Abrir' }));
-    expect(browsePublicWiki).toHaveBeenCalledWith('12D3KooPublicPublisher', 'public-wiki');
-    expect(screen.getByText('Abriendo wiki pública')).toBeInTheDocument();
+    expect(browsePublicWiki).toHaveBeenCalledWith('12D3KooPublicPublisher', 'public-wiki', {
+      targetConceptId: 'public-concept'
+    });
+    expect(screen.getByText('Abriendo wiki compartida')).toBeInTheDocument();
 
     snapshot = {
       ...snapshot,
@@ -816,6 +1090,7 @@ describe('AirWiki wiki workspace', () => {
       publicBrowse: {
         requestId: 'public-browse-request', status: 'direct', publisherId: '12D3KooPublicPublisher', wikiId: 'public-wiki',
         wikiName: 'Wiki pública', description: 'Bundle validado', languages: ['es'], okfCompatibility: { kind: 'declaredV02' }, nextCursor: null,
+        appendFailed: false,
         concepts: [{ conceptId: 'public-concept', conceptType: 'Guide', title: 'Concepto público', description: '', language: 'es', tags: [], summary: 'Resumen visible', sourceRevision: 1, lifecycle: 'stable', assurance: { trust: 'humanReviewed', freshness: 'fresh', verificationOutdated: false } }]
       }
     };
@@ -824,6 +1099,7 @@ describe('AirWiki wiki workspace', () => {
     });
 
     expect(screen.getByRole('heading', { name: 'Wiki pública' })).toBeInTheDocument();
+    expect(screen.queryByRole('heading', { name: 'Buscar evidencia' })).not.toBeInTheDocument();
     expect(screen.getByRole('heading', { name: 'Concepto público' })).toBeInTheDocument();
     expect(screen.getByText('Conexión directa autenticada')).toBeInTheDocument();
     const accessibility = await axe.run(container, { rules: { region: { enabled: false } } });
@@ -857,7 +1133,7 @@ describe('AirWiki wiki workspace', () => {
     await submitVisibleSearch('consulta local');
 
     expect(await screen.findByText('No encontramos evidencia coincidente')).toBeInTheDocument();
-    await fireEvent.click(screen.getByRole('checkbox', { name: 'Red pública' }));
+    await fireEvent.click(screen.getByRole('checkbox', { name: 'Incluir pública' }));
 
     expect(screen.queryByText('No encontramos evidencia coincidente')).not.toBeInTheDocument();
     expect(screen.getByRole('heading', { name: 'Busca en todas tus wikis' })).toBeInTheDocument();
@@ -954,6 +1230,21 @@ describe('AirWiki wiki workspace', () => {
     expect(screen.getByRole('button', { name: 'Preparando la búsqueda local' })).toBeDisabled();
     await fireEvent.click(screen.getByRole('button', { name: 'Ver estado de la IA local' }));
     expect(window.location.hash).toBe('#system/models');
+  });
+
+  it('does not report a model failure when the user cancels the native license confirmation', async () => {
+    window.location.hash = '#system/models';
+    vi.mocked(installModels).mockRejectedValueOnce({
+      code: 'invalidInput',
+      messageKey: 'humanConfirmationRequired',
+      retryable: false
+    });
+    render(App);
+
+    await fireEvent.click(await screen.findByRole('button', { name: 'Instalar IA local' }));
+
+    await waitFor(() => expect(installModels).toHaveBeenCalledOnce());
+    expect(screen.queryByText('La IA local necesita atención.')).not.toBeInTheDocument();
   });
 
   it('keeps graph view selected when opening a graph node', async () => {
@@ -1111,7 +1402,7 @@ describe('AirWiki wiki workspace', () => {
       window.location.hash = route;
       render(App);
       expect(await screen.findByRole('heading', { name: 'Wikis' })).toBeInTheDocument();
-      expect(screen.getByRole('checkbox', { name: 'Red pública' })).not.toBeChecked();
+      expect(screen.getByRole('checkbox', { name: 'Incluir pública' })).not.toBeChecked();
       cleanup();
     }
   });

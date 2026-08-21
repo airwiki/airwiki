@@ -104,13 +104,40 @@ export async function removeFederationIndex(peerId: string): Promise<void> {
   return invoke('remove_federation_index', { peerId });
 }
 
+type SharedWikiBrowseOptions = {
+  cursor?: string | null;
+  targetConceptId?: string | null;
+};
+
 export async function browsePublicWiki(
   publisherId: string,
   wikiId: string,
-  cursor: string | null = null
+  options: SharedWikiBrowseOptions = {}
 ): Promise<string> {
   const requestId = crypto.randomUUID();
-  await invoke('browse_public_wiki', { requestId, publisherId, wikiId, cursor });
+  await invoke('browse_public_wiki', {
+    requestId,
+    publisherId,
+    wikiId,
+    cursor: options.cursor ?? null,
+    targetConceptId: options.targetConceptId ?? null
+  });
+  return requestId;
+}
+
+export async function browseNearbyWiki(
+  peerId: string,
+  wikiId: string,
+  options: SharedWikiBrowseOptions = {}
+): Promise<string> {
+  const requestId = crypto.randomUUID();
+  await invoke('browse_nearby_wiki', {
+    requestId,
+    peerId,
+    wikiId,
+    cursor: options.cursor ?? null,
+    targetConceptId: options.targetConceptId ?? null
+  });
   return requestId;
 }
 

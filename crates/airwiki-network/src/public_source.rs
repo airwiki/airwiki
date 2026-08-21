@@ -6,8 +6,8 @@ use std::time::Duration;
 
 use airwiki_types::{
     ConceptType, DisclosureLease, PUBLIC_BROWSE_PROTOCOL, PUBLIC_BROWSE_PROTOCOL_V2,
-    PUBLIC_SEARCH_PROTOCOL, PUBLIC_SEARCH_PROTOCOL_V2, PublicBrowsePage, PublicBrowseRequest,
-    PublicSearchRequest, PublicSearchResponse,
+    PUBLIC_BROWSE_PROTOCOL_V3, PUBLIC_SEARCH_PROTOCOL, PUBLIC_SEARCH_PROTOCOL_V2, PublicBrowsePage,
+    PublicBrowseRequest, PublicSearchRequest, PublicSearchResponse,
 };
 use async_trait::async_trait;
 use libp2p::core::transport::ListenerId;
@@ -97,13 +97,8 @@ impl ProtocolPayload for PublicSearchWireResponse {
 
 impl ProtocolPayload for PublicBrowseRequest {
     fn prepare_for_protocol(&mut self, protocol: &str) -> std::io::Result<()> {
-        self.protocol_version = match protocol {
-            PUBLIC_BROWSE_PROTOCOL => PUBLIC_BROWSE_PROTOCOL,
-            PUBLIC_BROWSE_PROTOCOL_V2 => PUBLIC_BROWSE_PROTOCOL_V2,
-            _ => return Err(unsupported_public_protocol()),
-        }
-        .to_owned();
-        Ok(())
+        PublicBrowseRequest::prepare_for_protocol(self, protocol)
+            .map_err(|_| unsupported_public_protocol())
     }
 
     fn validate_protocol(&self, protocol: &str) -> std::io::Result<()> {
@@ -117,6 +112,7 @@ impl ProtocolPayload for PublicBrowseWireResponse {
             page.protocol_version = match protocol {
                 PUBLIC_BROWSE_PROTOCOL => PUBLIC_BROWSE_PROTOCOL,
                 PUBLIC_BROWSE_PROTOCOL_V2 => PUBLIC_BROWSE_PROTOCOL_V2,
+                PUBLIC_BROWSE_PROTOCOL_V3 => PUBLIC_BROWSE_PROTOCOL_V3,
                 _ => return Err(unsupported_public_protocol()),
             }
             .to_owned();
@@ -736,13 +732,15 @@ fn public_source_swarm(
     request_timeout: Duration,
 ) -> Result<libp2p::Swarm<SourceBehaviour>, NetworkError> {
     let search = public_behaviour(
-        PUBLIC_SEARCH_PROTOCOL_V2,
-        PUBLIC_SEARCH_PROTOCOL,
+        &[PUBLIC_SEARCH_PROTOCOL_V2, PUBLIC_SEARCH_PROTOCOL],
         request_timeout,
     )?;
     let browse = public_behaviour(
-        PUBLIC_BROWSE_PROTOCOL_V2,
-        PUBLIC_BROWSE_PROTOCOL,
+        &[
+            PUBLIC_BROWSE_PROTOCOL_V3,
+            PUBLIC_BROWSE_PROTOCOL_V2,
+            PUBLIC_BROWSE_PROTOCOL,
+        ],
         request_timeout,
     )?;
     let local_peer = identity.peer_id();
@@ -815,8 +813,7 @@ fn probe_listener_address(address: &Multiaddr) -> Option<std::io::Result<()>> {
 }
 
 fn public_behaviour<Request, Response>(
-    current_protocol: &'static str,
-    legacy_protocol: &'static str,
+    protocols: &[&'static str],
     timeout: Duration,
 ) -> Result<request_response::Behaviour<VersionedCborCodec<Request, Response>>, NetworkError>
 where
@@ -835,17 +832,18 @@ where
         + Sync
         + 'static,
 {
-    let current = StreamProtocol::try_from_owned(current_protocol.to_owned())
-        .map_err(|error| NetworkError::Transport(error.to_string()))?;
-    let legacy = StreamProtocol::try_from_owned(legacy_protocol.to_owned())
-        .map_err(|error| NetworkError::Transport(error.to_string()))?;
+    let protocols = protocols
+        .iter()
+        .map(|protocol| {
+            StreamProtocol::try_from_owned((*protocol).to_owned())
+                .map(|protocol| (protocol, ProtocolSupport::Full))
+                .map_err(|error| NetworkError::Transport(error.to_string()))
+        })
+        .collect::<Result<Vec<_>, _>>()?;
     let codec = VersionedCborCodec::new(PUBLIC_REQUEST_BYTES, PUBLIC_RESPONSE_BYTES);
     Ok(request_response::Behaviour::with_codec(
         codec,
-        [
-            (current, ProtocolSupport::Full),
-            (legacy, ProtocolSupport::Full),
-        ],
+        protocols,
         request_response::Config::default()
             .with_request_timeout(timeout)
             .with_max_concurrent_streams(PUBLIC_CONCURRENT_STREAMS),

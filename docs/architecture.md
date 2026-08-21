@@ -143,8 +143,23 @@ tray is known to be operational; all foreground launches start visible.
 ## Trust and authorization
 
 - Local publication always requires review.
-- LAN search requires authenticated pairing, collection policy and a grant at
-  the source node.
+- LAN search and read-only Wiki browsing require authenticated pairing,
+  collection policy and a grant at the source node. Search returns bounded
+  evidence; browsing a Wiki identified by one of those results returns bounded
+  published concept summaries over `/airwiki/shared-wiki-browse/1.0.0`. Neither
+  path returns a peer-wide Wiki catalog, source paths or complete documents.
+  After the dynamic TCP port is known, the desktop registers only concrete
+  private/on-link IPv4 endpoints from active OS-inspected non-point-to-point
+  interfaces and hides the wildcard listener. Multiple active LAN interfaces
+  are bounded and announced together. A dedicated address exchange runs only after
+  the Noise-authenticated peer is durably trusted and retains those addresses in
+  a volatile cache so either endpoint can reconnect. The exchange repeats when
+  endpoints change and on trusted search connections; unknown peers receive no
+  listener addresses. Advertised listeners are accepted only for the remote IP
+  observed on the exact authenticated connection. Session-scoped monotonic
+  revisions reject delayed endpoint updates and withdrawals; an already
+  connected retry is sent immediately instead of waiting for another connection
+  event. Addresses remain discovery data and confer no authority.
 - Public federation is a separate opt-in. Discovery needs no pairing or grant,
   but the owner revalidates current publication, sequence and fingerprint under
   a disclosure lease before every response. See [ADR 0008](adr/0008-public-federation.md).

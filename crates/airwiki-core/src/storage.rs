@@ -9,7 +9,7 @@ use airwiki_types::{
     ConceptAssurance, ConceptType, DisclosureGate, DisclosureLease, DisclosureMutationGuard,
     DocumentStatus, EnrichmentDraft, FreshnessState, MAX_COMPUTATION_REQUESTS_PER_MINUTE,
     MAX_PENDING_COMPUTATIONS_PER_APPLICATION, OkfCompatibility, OkfWarning, PublicConceptSummary,
-    SearchHit, SearchPurpose, TrustTier,
+    SearchHit, SearchPurpose, SharedWikiConceptSummary, SharedWikiDescriptor, TrustTier,
 };
 use anyhow::{Context, Result, anyhow, bail};
 use chrono::{DateTime, Duration, Utc};
@@ -3584,6 +3584,7 @@ impl Database {
             publisher_id,
             collection_id,
             after_concept_id,
+            None,
             limit,
         )
     }
@@ -3594,6 +3595,7 @@ impl Database {
         publisher_id: &str,
         collection_id: Uuid,
         after_concept_id: Option<Uuid>,
+        target_concept_id: Option<Uuid>,
         limit: u8,
     ) -> Result<Vec<PublicConceptSummary>> {
         let connection = self.connection_under_disclosure(lease)?;
@@ -3602,6 +3604,7 @@ impl Database {
             publisher_id,
             collection_id,
             after_concept_id,
+            target_concept_id,
             limit,
         )
     }
@@ -3611,8 +3614,12 @@ impl Database {
         publisher_id: &str,
         collection_id: Uuid,
         after_concept_id: Option<Uuid>,
+        target_concept_id: Option<Uuid>,
         limit: u8,
     ) -> Result<Vec<PublicConceptSummary>> {
+        if after_concept_id.is_some() && target_concept_id.is_some() {
+            bail!("public browse cannot combine a cursor with a target");
+        }
         let public_origin = connection
             .query_row(
                 "SELECT origin FROM collections
@@ -3627,56 +3634,62 @@ impl Database {
         let Some(public_origin) = public_origin else {
             bail!("collection is not publicly accessible");
         };
-        let after = after_concept_id
+        let lower_bound = target_concept_id
+            .or(after_concept_id)
             .map(|id| id.to_string())
             .unwrap_or_default();
+        let inclusive_lower_bound = i64::from(target_concept_id.is_some());
         if public_origin != WikiOrigin::Folder.as_str() {
             let mut statement = connection.prepare(
                 "SELECT p.concept_id,p.concept_type,p.title,p.description,p.tags_json,
-                        f.text,p.indexed_at,p.lifecycle_status,p.trust_tier,p.freshness_state,
+                        p.indexed_at,p.lifecycle_status,p.trust_tier,p.freshness_state,
                         p.verification_outdated
                  FROM okf_concept_projection p
-                 JOIN okf_projection_fts f
-                   ON f.collection_id=p.collection_id AND f.concept_id=p.concept_id
-                 WHERE p.collection_id=?1 AND p.lifecycle_status='stable' AND p.concept_id>?2
-                 ORDER BY p.concept_id LIMIT ?3",
+                 WHERE p.collection_id=?1 AND p.lifecycle_status='stable'
+                   AND ((?3=1 AND p.concept_id>=?2) OR (?3=0 AND p.concept_id>?2))
+                 ORDER BY p.concept_id LIMIT ?4",
             )?;
-            return statement
+            let concepts = statement
                 .query_map(
-                    params![collection_id.to_string(), after, i64::from(limit)],
+                    params![
+                        collection_id.to_string(),
+                        lower_bound,
+                        inclusive_lower_bound,
+                        i64::from(limit)
+                    ],
                     |row| {
                         let concept_id = uuid_sql(row.get::<_, String>(0)?)?;
-                        let summary = row
-                            .get::<_, String>(5)?
-                            .chars()
-                            .take(airwiki_types::MAX_SNIPPET_CHARS)
-                            .collect();
+                        let description = row.get::<_, String>(3)?;
+                        let summary = network_safe_summary(&description);
+                        let tags = json_sql::<Vec<String>>(row.get::<_, String>(4)?)?;
                         Ok(PublicConceptSummary {
                             publisher_id: publisher_id.to_owned(),
                             collection_id,
                             concept_id,
-                            concept_type: concept_type_sql(row.get::<_, String>(1)?)?,
-                            title: row.get(2)?,
-                            description: row.get(3)?,
+                            concept_type: network_safe_concept_type(&row.get::<_, String>(1)?),
+                            title: network_safe_title(&row.get::<_, String>(2)?),
+                            description: network_safe_line(&description, 1_000),
                             language: "und".to_owned(),
-                            tags: json_sql(row.get::<_, String>(4)?)?,
+                            tags: network_safe_tags(tags),
                             summary,
                             logical_resource_uri: format!(
                                 "urn:airwiki:{publisher_id}:{concept_id}"
                             ),
                             source_revision: 1,
-                            updated_at: datetime_sql(row.get::<_, String>(6)?)?,
-                            lifecycle_status: Some(row.get(7)?),
+                            updated_at: datetime_sql(row.get::<_, String>(5)?)?,
+                            lifecycle_status: Some(row.get(6)?),
                             assurance: Some(ConceptAssurance {
-                                trust: trust_tier_sql(row.get(8)?)?,
-                                freshness: freshness_state_sql(row.get(9)?)?,
-                                verification_outdated: row.get(10)?,
+                                trust: trust_tier_sql(row.get(7)?)?,
+                                freshness: freshness_state_sql(row.get(8)?)?,
+                                verification_outdated: row.get(9)?,
                             }),
                         })
                     },
                 )?
-                .collect::<rusqlite::Result<_>>()
-                .map_err(Into::into);
+                .collect::<rusqlite::Result<Vec<PublicConceptSummary>>>()
+                .map_err(anyhow::Error::from)?;
+            ensure_target_is_first(&concepts, target_concept_id, |concept| concept.concept_id)?;
+            return Ok(concepts);
         }
         let mut statement = connection.prepare(
             "SELECT co.id,co.concept_type,co.title,co.description,co.language,co.tags_json,
@@ -3688,24 +3701,38 @@ impl Database {
                AND col.internet_public=1
                AND NOT EXISTS(SELECT 1 FROM managed_bundle_mutations m
                               WHERE m.collection_id=col.id AND m.state!='committed')
-               AND co.id>?2
-             ORDER BY co.id LIMIT ?3",
+               AND ((?3=1 AND co.id>=?2) OR (?3=0 AND co.id>?2))
+             ORDER BY co.id LIMIT ?4",
         )?;
-        statement
+        let concepts = statement
             .query_map(
-                params![collection_id.to_string(), after, i64::from(limit)],
+                params![
+                    collection_id.to_string(),
+                    lower_bound,
+                    inclusive_lower_bound,
+                    i64::from(limit)
+                ],
                 |row| {
+                    let concept_id = uuid_sql(row.get::<_, String>(0)?)?;
+                    let description = row.get::<_, String>(3)?;
+                    let language = row.get::<_, String>(4)?;
+                    let tags = json_sql::<Vec<String>>(row.get::<_, String>(5)?)?;
+                    let logical_resource_uri = row.get::<_, String>(7)?;
                     Ok(PublicConceptSummary {
                         publisher_id: publisher_id.to_owned(),
                         collection_id,
-                        concept_id: uuid_sql(row.get::<_, String>(0)?)?,
-                        concept_type: concept_type_sql(row.get::<_, String>(1)?)?,
-                        title: row.get(2)?,
-                        description: row.get(3)?,
-                        language: row.get(4)?,
-                        tags: json_sql(row.get::<_, String>(5)?)?,
-                        summary: row.get(6)?,
-                        logical_resource_uri: row.get(7)?,
+                        concept_id,
+                        concept_type: network_safe_concept_type(&row.get::<_, String>(1)?),
+                        title: network_safe_title(&row.get::<_, String>(2)?),
+                        description: network_safe_line(&description, 1_000),
+                        language: network_safe_required_line(&language, 16, "und"),
+                        tags: network_safe_tags(tags),
+                        summary: network_safe_summary(&row.get::<_, String>(6)?),
+                        logical_resource_uri: network_safe_required_line(
+                            &logical_resource_uri,
+                            2_048,
+                            &format!("urn:airwiki:{publisher_id}:{concept_id}"),
+                        ),
                         source_revision: row.get(8)?,
                         updated_at: datetime_sql(row.get::<_, String>(9)?)?,
                         lifecycle_status: Some("stable".to_owned()),
@@ -3717,8 +3744,167 @@ impl Database {
                     })
                 },
             )?
-            .collect::<rusqlite::Result<_>>()
-            .map_err(Into::into)
+            .collect::<rusqlite::Result<Vec<PublicConceptSummary>>>()
+            .map_err(anyhow::Error::from)?;
+        ensure_target_is_first(&concepts, target_concept_id, |concept| concept.concept_id)?;
+        Ok(concepts)
+    }
+
+    /// Returns only stable, published summaries from a Wiki explicitly granted
+    /// to the authenticated LAN peer. Source paths and complete documents never
+    /// cross this boundary.
+    pub fn shared_wiki_page_under_disclosure(
+        &self,
+        lease: &DisclosureLease,
+        peer_id: &str,
+        collection_id: Uuid,
+        after_concept_id: Option<Uuid>,
+        target_concept_id: Option<Uuid>,
+        limit: u8,
+    ) -> Result<(SharedWikiDescriptor, Vec<SharedWikiConceptSummary>)> {
+        if !(1..=airwiki_types::MAX_SHARED_WIKI_PAGE_SIZE).contains(&limit) {
+            bail!("shared Wiki browse limit is invalid");
+        }
+        if after_concept_id.is_some() && target_concept_id.is_some() {
+            bail!("shared Wiki browse cannot combine a cursor with a target");
+        }
+        let connection = self.connection_under_disclosure(lease)?;
+        let descriptor = connection
+            .query_row(
+                "SELECT c.name,c.origin,c.okf_compatibility,c.declared_okf_version
+                 FROM collections c
+                 JOIN grants g ON g.collection_id=c.id
+                 JOIN peers p ON p.peer_id=g.peer_id
+                 WHERE g.peer_id=?1 AND c.id=?2 AND p.trusted=1 AND p.blocked=0
+                   AND c.peer_shareable=1
+                   AND c.okf_compatibility IN ('declared_v02','undeclared_v02_compatible')
+                   AND NOT EXISTS(SELECT 1 FROM managed_bundle_mutations m
+                                  WHERE m.collection_id=c.id AND m.state!='committed')",
+                params![peer_id, collection_id.to_string()],
+                |row| {
+                    let declared_version = row.get::<_, Option<String>>(3)?;
+                    Ok((
+                        SharedWikiDescriptor {
+                            collection_id,
+                            name: network_safe_required_line(
+                                &row.get::<_, String>(0)?,
+                                240,
+                                "Untitled Wiki",
+                            ),
+                            okf_compatibility: okf_compatibility_sql(
+                                row.get(2)?,
+                                declared_version.as_deref(),
+                            )?,
+                        },
+                        wiki_origin_sql(row.get(1)?)?,
+                    ))
+                },
+            )
+            .optional()?
+            .context("Wiki is not granted for LAN browsing")?;
+        let lower_bound = target_concept_id
+            .or(after_concept_id)
+            .map(|id| id.to_string())
+            .unwrap_or_default();
+        let inclusive_lower_bound = i64::from(target_concept_id.is_some());
+        let concepts = if descriptor.1 == WikiOrigin::Folder {
+            let mut statement = connection.prepare(
+                "SELECT co.id,co.concept_type,co.title,co.description,co.language,co.tags_json,
+                        co.summary,co.logical_resource_uri,sd.revision,co.updated_at
+                 FROM concepts co
+                 JOIN source_documents sd ON sd.id=co.source_document_id
+                 WHERE co.collection_id=?1 AND co.status='published' AND sd.status='published'
+                   AND ((?3=1 AND co.id>=?2) OR (?3=0 AND co.id>?2))
+                 ORDER BY co.id LIMIT ?4",
+            )?;
+            statement
+                .query_map(
+                    params![
+                        collection_id.to_string(),
+                        lower_bound,
+                        inclusive_lower_bound,
+                        i64::from(limit)
+                    ],
+                    |row| {
+                        let concept_id = uuid_sql(row.get::<_, String>(0)?)?;
+                        let description = row.get::<_, String>(3)?;
+                        let language = row.get::<_, String>(4)?;
+                        let tags = json_sql::<Vec<String>>(row.get::<_, String>(5)?)?;
+                        let logical_resource_uri = row.get::<_, String>(7)?;
+                        Ok(SharedWikiConceptSummary {
+                            concept_id,
+                            concept_type: network_safe_concept_type(&row.get::<_, String>(1)?),
+                            title: network_safe_title(&row.get::<_, String>(2)?),
+                            description: network_safe_line(&description, 1_000),
+                            language: network_safe_required_line(&language, 16, "und"),
+                            tags: network_safe_tags(tags),
+                            summary: network_safe_summary(&row.get::<_, String>(6)?),
+                            logical_resource_uri: network_safe_required_line(
+                                &logical_resource_uri,
+                                2_048,
+                                &format!("urn:airwiki:{collection_id}:{concept_id}"),
+                            ),
+                            source_revision: row.get(8)?,
+                            updated_at: datetime_sql(row.get::<_, String>(9)?)?,
+                            lifecycle_status: Some("stable".to_owned()),
+                            assurance: Some(ConceptAssurance {
+                                trust: TrustTier::HumanReviewed,
+                                freshness: FreshnessState::NotDeclared,
+                                verification_outdated: false,
+                            }),
+                        })
+                    },
+                )?
+                .collect::<rusqlite::Result<Vec<_>>>()?
+        } else {
+            let mut statement = connection.prepare(
+                "SELECT p.concept_id,p.concept_type,p.title,p.description,p.tags_json,
+                        p.indexed_at,p.lifecycle_status,p.trust_tier,
+                        p.freshness_state,p.verification_outdated
+                 FROM okf_concept_projection p
+                 WHERE p.collection_id=?1 AND p.lifecycle_status='stable'
+                   AND ((?3=1 AND p.concept_id>=?2) OR (?3=0 AND p.concept_id>?2))
+                 ORDER BY p.concept_id LIMIT ?4",
+            )?;
+            statement
+                .query_map(
+                    params![
+                        collection_id.to_string(),
+                        lower_bound,
+                        inclusive_lower_bound,
+                        i64::from(limit)
+                    ],
+                    |row| {
+                        let concept_id = uuid_sql(row.get::<_, String>(0)?)?;
+                        let description = row.get::<_, String>(3)?;
+                        let summary = network_safe_summary(&description);
+                        let tags = json_sql::<Vec<String>>(row.get::<_, String>(4)?)?;
+                        Ok(SharedWikiConceptSummary {
+                            concept_id,
+                            concept_type: network_safe_concept_type(&row.get::<_, String>(1)?),
+                            title: network_safe_title(&row.get::<_, String>(2)?),
+                            description: network_safe_line(&description, 1_000),
+                            language: "und".to_owned(),
+                            tags: network_safe_tags(tags),
+                            summary,
+                            logical_resource_uri: format!(
+                                "urn:airwiki:{collection_id}:{concept_id}"
+                            ),
+                            source_revision: 1,
+                            updated_at: datetime_sql(row.get::<_, String>(5)?)?,
+                            lifecycle_status: Some(row.get(6)?),
+                            assurance: Some(ConceptAssurance {
+                                trust: trust_tier_sql(row.get(7)?)?,
+                                freshness: freshness_state_sql(row.get(8)?)?,
+                                verification_outdated: row.get(9)?,
+                            }),
+                        })
+                    },
+                )?
+                .collect::<rusqlite::Result<Vec<_>>>()?
+        };
+        ensure_target_is_first(&concepts, target_concept_id, |concept| concept.concept_id)?;
+        Ok((descriptor.0, concepts))
     }
 
     pub fn public_manifest_sequence_under_disclosure(
@@ -6007,6 +6193,91 @@ fn insert_collection(connection: &Connection, record: &CollectionRecord) -> Resu
             record.updated_at.to_rfc3339(),
         ],
     )?;
+    Ok(())
+}
+
+/// Produces the bounded, single-line summary required by the public and LAN
+/// browse contracts. Imported OKF search text intentionally retains Markdown
+/// line breaks for local indexing; those control characters must not make the
+/// complete remote page fail validation.
+fn network_safe_summary(value: &str) -> String {
+    network_safe_line(value, airwiki_types::MAX_SNIPPET_CHARS)
+}
+
+fn network_safe_line(value: &str, maximum_size: usize) -> String {
+    let mut summary = String::with_capacity(value.len().min(maximum_size));
+    let mut char_count = 0_usize;
+    let mut byte_count = 0_usize;
+    let mut pending_separator = false;
+
+    for character in value.chars() {
+        if character.is_whitespace() || character.is_control() {
+            pending_separator = !summary.is_empty();
+            continue;
+        }
+        if pending_separator {
+            if char_count.saturating_add(1) > maximum_size
+                || byte_count.saturating_add(1) > maximum_size
+            {
+                break;
+            }
+            summary.push(' ');
+            char_count += 1;
+            byte_count += 1;
+            pending_separator = false;
+        }
+        let character_bytes = character.len_utf8();
+        if char_count >= maximum_size || byte_count.saturating_add(character_bytes) > maximum_size {
+            break;
+        }
+        summary.push(character);
+        char_count += 1;
+        byte_count += character_bytes;
+    }
+
+    summary
+}
+
+fn network_safe_concept_type(value: &str) -> ConceptType {
+    ConceptType::parse(network_safe_line(value, 120))
+        .unwrap_or_else(|| ConceptType::Other("Unknown".to_owned()))
+}
+
+fn network_safe_title(value: &str) -> String {
+    network_safe_required_line(value, 240, "Untitled concept")
+}
+
+fn network_safe_required_line(value: &str, maximum_size: usize, fallback: &str) -> String {
+    let value = network_safe_line(value, maximum_size);
+    if value.is_empty() {
+        fallback.to_owned()
+    } else {
+        value
+    }
+}
+
+fn network_safe_tags(tags: Vec<String>) -> Vec<String> {
+    let mut safe = Vec::with_capacity(tags.len().min(64));
+    for tag in tags {
+        let tag = network_safe_line(&tag, 64);
+        if !tag.is_empty() && !safe.contains(&tag) {
+            safe.push(tag);
+            if safe.len() == 64 {
+                break;
+            }
+        }
+    }
+    safe
+}
+
+fn ensure_target_is_first<T>(
+    concepts: &[T],
+    target_concept_id: Option<Uuid>,
+    concept_id: impl Fn(&T) -> Uuid,
+) -> Result<()> {
+    if target_concept_id.is_some_and(|target| concepts.first().map(concept_id) != Some(target)) {
+        bail!("requested concept is unavailable");
+    }
     Ok(())
 }
 
@@ -8305,6 +8576,330 @@ mod tests {
         assert!(!peer.trusted);
         assert!(!peer.blocked);
         assert!(db.granted_collections("peer-b").unwrap().is_empty());
+    }
+
+    #[test]
+    fn shared_wiki_browse_returns_only_published_content_for_a_current_grant() {
+        let (_temp, db, collection, source_id, concept_id) = setup_review_evidence(1);
+        db.connection()
+            .unwrap()
+            .execute(
+                "UPDATE source_documents SET status='published' WHERE id=?1",
+                [source_id.to_string()],
+            )
+            .unwrap();
+        db.connection()
+            .unwrap()
+            .execute(
+                "UPDATE concepts SET status='published' WHERE id=?1",
+                [concept_id.to_string()],
+            )
+            .unwrap();
+        db.upsert_peer(&PeerRecord {
+            peer_id: "peer-reader".into(),
+            display_name: Some("Reader".into()),
+            trusted: true,
+            blocked: false,
+            paired_at: Some(Utc::now()),
+            last_seen_at: None,
+        })
+        .unwrap();
+        db.set_grant("peer-reader", collection.id, true).unwrap();
+
+        let lease = db.disclosure_gate().acquire_disclosure();
+        let (descriptor, concepts) = db
+            .shared_wiki_page_under_disclosure(&lease, "peer-reader", collection.id, None, None, 50)
+            .unwrap();
+        drop(lease);
+
+        assert_eq!(descriptor.collection_id, collection.id);
+        assert_eq!(descriptor.name, collection.name);
+        assert_eq!(concepts.len(), 1);
+        assert_eq!(concepts[0].concept_id, concept_id);
+        assert_eq!(concepts[0].summary, "Restaurar el servicio.");
+        assert_eq!(
+            concepts[0].assurance.as_ref().map(|value| value.trust),
+            Some(TrustTier::HumanReviewed)
+        );
+
+        let lease = db.disclosure_gate().acquire_disclosure();
+        let (_, anchored) = db
+            .shared_wiki_page_under_disclosure(
+                &lease,
+                "peer-reader",
+                collection.id,
+                None,
+                Some(concept_id),
+                50,
+            )
+            .unwrap();
+        assert_eq!(
+            anchored.first().map(|concept| concept.concept_id),
+            Some(concept_id)
+        );
+        assert!(
+            db.shared_wiki_page_under_disclosure(
+                &lease,
+                "peer-reader",
+                collection.id,
+                None,
+                Some(Uuid::new_v4()),
+                50,
+            )
+            .is_err()
+        );
+        drop(lease);
+
+        db.set_grant("peer-reader", collection.id, false).unwrap();
+        let lease = db.disclosure_gate().acquire_disclosure();
+        assert!(
+            db.shared_wiki_page_under_disclosure(
+                &lease,
+                "peer-reader",
+                collection.id,
+                None,
+                None,
+                50,
+            )
+            .is_err()
+        );
+    }
+
+    #[test]
+    fn folder_browse_normalizes_remote_metadata_without_rewriting_local_state() {
+        let (_temp, db, collection, source_id, concept_id) = setup_review_evidence(1);
+        let hostile_name = format!("Atlas\n{}", "界".repeat(240));
+        let hostile_type = format!("Guide\n{}", "é".repeat(120));
+        let hostile_title = format!("Setup\n{}", "界".repeat(240));
+        let hostile_description = format!("Safe overview.\r\n{}", "é".repeat(1_000));
+        let hostile_language = "es\nregional-language-that-is-too-long";
+        let hostile_tags = serde_json::to_string(
+            &(0..70)
+                .map(|index| format!("tag-{index}\n{}", "é".repeat(64)))
+                .collect::<Vec<_>>(),
+        )
+        .unwrap();
+        let hostile_uri = format!("urn:airwiki\n{}", "界".repeat(2_048));
+        let connection = db.connection().unwrap();
+        connection
+            .execute(
+                "UPDATE collections
+                 SET name=?1,internet_public=1,
+                     okf_compatibility='declared_v02',declared_okf_version='0.2'
+                 WHERE id=?2",
+                params![hostile_name, collection.id.to_string()],
+            )
+            .unwrap();
+        connection
+            .execute(
+                "UPDATE source_documents SET status='published' WHERE id=?1",
+                [source_id.to_string()],
+            )
+            .unwrap();
+        connection
+            .execute(
+                "UPDATE concepts
+                 SET status='published',concept_type=?1,title=?2,description=?3,language=?4,
+                     tags_json=?5,logical_resource_uri=?6
+                 WHERE id=?7",
+                params![
+                    hostile_type,
+                    hostile_title,
+                    hostile_description,
+                    hostile_language,
+                    hostile_tags,
+                    hostile_uri,
+                    concept_id.to_string()
+                ],
+            )
+            .unwrap();
+        drop(connection);
+        db.upsert_peer(&PeerRecord {
+            peer_id: "peer-reader".into(),
+            display_name: Some("Reader".into()),
+            trusted: true,
+            blocked: false,
+            paired_at: Some(Utc::now()),
+            last_seen_at: None,
+        })
+        .unwrap();
+        db.set_grant("peer-reader", collection.id, true).unwrap();
+
+        let shared_request = airwiki_types::SharedWikiBrowseRequest::new(collection.id, None, 50);
+        let lease = db.disclosure_gate().acquire_disclosure();
+        let (descriptor, shared_concepts) = db
+            .shared_wiki_page_under_disclosure(&lease, "peer-reader", collection.id, None, None, 50)
+            .unwrap();
+        drop(lease);
+        let shared_page = airwiki_types::SharedWikiBrowsePage {
+            protocol_version: shared_request.protocol_version.clone(),
+            request_id: shared_request.request_id,
+            wiki: descriptor,
+            concepts: shared_concepts,
+            next_cursor: None,
+        };
+        assert!(shared_page.validate_for(&shared_request).is_ok());
+
+        let public_request = airwiki_types::PublicBrowseRequest {
+            protocol_version: airwiki_types::PUBLIC_BROWSE_PROTOCOL_V3.to_owned(),
+            request_id: Uuid::new_v4(),
+            collection_id: collection.id,
+            cursor: None,
+            target_concept_id: None,
+            limit: 50,
+        };
+        let public_concepts = db
+            .public_concept_page("publisher", collection.id, None, 50)
+            .unwrap();
+        let public_page = airwiki_types::PublicBrowsePage {
+            protocol_version: public_request.protocol_version.clone(),
+            request_id: public_request.request_id,
+            manifest_sequence: 1,
+            concepts: public_concepts,
+            next_cursor: None,
+        };
+        assert!(
+            public_page
+                .validate_for(&public_request, "publisher")
+                .is_ok()
+        );
+
+        let local_title = db
+            .connection()
+            .unwrap()
+            .query_row(
+                "SELECT title FROM concepts WHERE id=?1",
+                [concept_id.to_string()],
+                |row| row.get::<_, String>(0),
+            )
+            .unwrap();
+        assert!(local_title.contains('\n'));
+    }
+
+    #[test]
+    fn imported_okf_browse_uses_declared_description_instead_of_document_body() {
+        let (_temp, db, collection) = setup();
+        let concept_id = Uuid::new_v4();
+        let now = Utc::now().to_rfc3339();
+        let imported_type = format!("Guide\n{}", "T".repeat(140));
+        let imported_title = format!("Setup\n{}", "S".repeat(300));
+        let imported_description = format!("Safe setup overview.\n{}", "D".repeat(1_200));
+        let imported_tags = serde_json::to_string(
+            &(0..70)
+                .map(|index| format!("tag {index}\n{}", "x".repeat(80)))
+                .collect::<Vec<_>>(),
+        )
+        .unwrap();
+        let connection = db.connection().unwrap();
+        connection
+            .execute(
+                "UPDATE collections
+                 SET origin='imported_okf',indexing_mode='not_applicable',
+                     okf_compatibility='declared_v02',declared_okf_version='0.2',
+                     peer_shareable=1,internet_public=1
+                 WHERE id=?1",
+                [collection.id.to_string()],
+            )
+            .unwrap();
+        connection
+            .execute(
+                "INSERT INTO okf_concept_projection
+                 (collection_id,concept_id,logical_path,concept_type,title,description,tags_json,
+                  lifecycle_status,fingerprint,indexed_at,trust_tier,freshness_state,
+                  verification_outdated,warnings_json)
+                 VALUES (?1,?2,'guides/setup.md',?3,?4,?5,?6,'stable',?7,?8,
+                         'human_reviewed','not_declared',0,'[]')",
+                params![
+                    collection.id.to_string(),
+                    concept_id.to_string(),
+                    imported_type,
+                    imported_title,
+                    imported_description,
+                    imported_tags,
+                    "f".repeat(64),
+                    now
+                ],
+            )
+            .unwrap();
+        connection
+            .execute(
+                "INSERT INTO okf_projection_fts
+                 (collection_id,concept_id,logical_path,title,description,tags,text,fingerprint,
+                  lifecycle_status)
+                 VALUES (?1,?2,'guides/setup.md','Setup','','',?3,?4,'stable')",
+                params![
+                    collection.id.to_string(),
+                    concept_id.to_string(),
+                    "PRIVATE COMPLETE BODY\n\nFirst step\tthen continue.\r\n",
+                    "f".repeat(64)
+                ],
+            )
+            .unwrap();
+        drop(connection);
+        db.upsert_peer(&PeerRecord {
+            peer_id: "peer-reader".into(),
+            display_name: Some("Reader".into()),
+            trusted: true,
+            blocked: false,
+            paired_at: Some(Utc::now()),
+            last_seen_at: None,
+        })
+        .unwrap();
+        db.set_grant("peer-reader", collection.id, true).unwrap();
+
+        let lease = db.disclosure_gate().acquire_disclosure();
+        let (_, shared_concepts) = db
+            .shared_wiki_page_under_disclosure(&lease, "peer-reader", collection.id, None, None, 50)
+            .unwrap();
+        drop(lease);
+        let public_concepts = db
+            .public_concept_page("publisher", collection.id, None, 50)
+            .unwrap();
+
+        assert_eq!(shared_concepts.len(), 1);
+        assert_eq!(public_concepts.len(), 1);
+        assert!(
+            shared_concepts[0]
+                .summary
+                .starts_with("Safe setup overview.")
+        );
+        assert_eq!(public_concepts[0].summary, shared_concepts[0].summary);
+        assert!(!shared_concepts[0].summary.contains("PRIVATE COMPLETE BODY"));
+        assert_eq!(
+            shared_concepts[0].logical_resource_uri,
+            format!("urn:airwiki:{}:{concept_id}", collection.id)
+        );
+        assert!(
+            !shared_concepts[0]
+                .logical_resource_uri
+                .contains("guides/setup.md")
+        );
+        assert!(!shared_concepts[0].summary.chars().any(char::is_control));
+        let assert_safe_metadata =
+            |concept_type: &ConceptType, title: &str, description: &str, tags: &[String]| {
+                assert!(concept_type.to_string().chars().count() <= 120);
+                assert!(!concept_type.to_string().chars().any(char::is_control));
+                assert!(title.chars().count() <= 240);
+                assert!(!title.chars().any(char::is_control));
+                assert!(description.chars().count() <= 1_000);
+                assert!(!description.chars().any(char::is_control));
+                assert_eq!(tags.len(), 64);
+                assert!(tags.iter().all(|tag| {
+                    tag.chars().count() <= 64 && !tag.chars().any(char::is_control)
+                }));
+            };
+        assert_safe_metadata(
+            &shared_concepts[0].concept_type,
+            &shared_concepts[0].title,
+            &shared_concepts[0].description,
+            &shared_concepts[0].tags,
+        );
+        assert_safe_metadata(
+            &public_concepts[0].concept_type,
+            &public_concepts[0].title,
+            &public_concepts[0].description,
+            &public_concepts[0].tags,
+        );
     }
 
     #[test]

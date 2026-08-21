@@ -292,7 +292,7 @@ async fn publisher_block_linearizes_in_flight_search_and_cached_browse() {
         let publisher_id = publisher_id.clone();
         tokio::spawn(async move {
             reader
-                .browse_collection(&publisher_id, collection_id, None, 10)
+                .browse_collection(&publisher_id, collection_id, None, None, 10)
                 .await
         })
     };
@@ -316,7 +316,7 @@ async fn publisher_block_linearizes_in_flight_search_and_cached_browse() {
         let publisher_id = publisher_id.clone();
         tokio::spawn(async move {
             reader
-                .browse_collection(&publisher_id, collection_id, None, 10)
+                .browse_collection(&publisher_id, collection_id, None, None, 10)
                 .await
         })
     };
@@ -333,7 +333,7 @@ async fn publisher_block_linearizes_in_flight_search_and_cached_browse() {
             .expect("the unavailable blocked browse completes within its budget")
             .expect("the unavailable public browse task does not panic");
     let cached_browse_after_block = reader
-        .browse_collection(&publisher_id, collection_id, None, 10)
+        .browse_collection(&publisher_id, collection_id, None, None, 10)
         .await;
 
     catalog_cancellation.cancel();

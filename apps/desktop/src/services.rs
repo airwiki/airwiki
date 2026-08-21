@@ -22,15 +22,15 @@ use std::os::windows::fs::MetadataExt;
 
 use airwiki_core::inference::{GenerationExecutionClass, GenerationFailure, GenerationFailureKind};
 use airwiki_core::{
-    AppPaths as CoreAppPaths, AuditEvent, BootstrapFederationIndexEntry, CollectionRecord,
-    Database, E5Tokenizer, EmbeddingProvider, EvidenceDecision, EvidenceRelevanceProvider,
-    FastEmbedE5Small, FastEmbedMmarcoReranker, FolderWatcher, GenerationProvider,
-    GenerationRuntimeConfig, GuidedRepairPreview, GuidedRepairResult, HybridSearchEngine,
-    IngestOutcome, IngestPipeline, KnowledgeBundleState, KnowledgeBundleView, KnowledgePageId,
-    KnowledgePageView, LlamaServerProvider, OkfBundleInspector, OkfPublicationMaterializer,
-    PinnedE5Snapshot, PinnedMmarcoRerankerSnapshot, RelevanceInput, ReviewEdits,
-    ReviewVersionToken, SourceIssueCode, Tokenizer, WikiOrigin, WikiRepairExecutor,
-    WikiRepairPlanner,
+    AiMemoryError, AppPaths as CoreAppPaths, ApplicationLimitError, AuditEvent,
+    BootstrapFederationIndexEntry, CollectionRecord, Database, E5Tokenizer, EmbeddingProvider,
+    EvidenceDecision, EvidenceRelevanceProvider, FastEmbedE5Small, FastEmbedMmarcoReranker,
+    FolderWatcher, GenerationProvider, GenerationRuntimeConfig, GuidedRepairPreview,
+    GuidedRepairResult, HybridSearchEngine, IngestOutcome, IngestPipeline, KnowledgeBundleState,
+    KnowledgeBundleView, KnowledgePageId, KnowledgePageView, LlamaServerProvider,
+    OkfBundleInspector, OkfPublicationMaterializer, PinnedE5Snapshot, PinnedMmarcoRerankerSnapshot,
+    RelevanceInput, ReviewEdits, ReviewVersionToken, SourceIssueCode, Tokenizer, WikiOrigin,
+    WikiRepairExecutor, WikiRepairPlanner,
 };
 use airwiki_inference::{
     GenerationSettings, InstallOutcome, LlamaSupervisor, LlamaSupervisorFailure,
@@ -1223,7 +1223,7 @@ impl GenerationProvider for SupervisedGenerationProvider {
         });
         let result = provider.enrich(document_text).await;
         lease_cancel.cancel();
-        let _ = lease_task.await;
+        log_task_join("model_activity_lease", lease_task.await);
         self.supervisor.mark_activity().await;
         result
     }
@@ -1383,6 +1383,8 @@ struct DesktopMcpApplicationBackend {
     requests: mpsc::Sender<McpApplicationRequest>,
 }
 
+const MCP_APPLICATION_RESPONSE_TIMEOUT: Duration = Duration::from_secs(5);
+
 struct McpApplicationRequest {
     identity: McpApplicationIdentity,
     tool: &'static str,
@@ -1407,9 +1409,20 @@ impl McpApplicationBackend for DesktopMcpApplicationBackend {
                 response,
             })
             .map_err(|_| McpApplicationError::Unavailable)?;
-        receiver
+        tokio::time::timeout(MCP_APPLICATION_RESPONSE_TIMEOUT, receiver)
             .await
+            .map_err(|_| mcp_application_timeout_error(tool))?
             .map_err(|_| McpApplicationError::Unavailable)?
+    }
+}
+
+fn mcp_application_timeout_error(tool: &str) -> McpApplicationError {
+    match tool {
+        "create_airwiki_memory"
+        | "write_airwiki_memory"
+        | "deprecate_airwiki_memory"
+        | "request_airwiki_computation" => McpApplicationError::OutcomeUnknown,
+        _ => McpApplicationError::Unavailable,
     }
 }
 
@@ -1454,8 +1467,18 @@ fn spawn_mcp_application_backend(
                     .ok_or(McpApplicationError::Unauthorized)?;
                 call_memory_tool(&memories, &computations, &capability, tool, arguments)
             })
-            .await
-            .unwrap_or(Err(McpApplicationError::Unavailable));
+            .await;
+            let result = match result {
+                Ok(result) => result,
+                Err(error) => {
+                    tracing::error!(
+                        task_cancelled = error.is_cancelled(),
+                        task_panicked = error.is_panic(),
+                        "MCP application worker stopped unexpectedly"
+                    );
+                    Err(McpApplicationError::Unavailable)
+                }
+            };
             if let Ok(value) = &result
                 && let Some(wiki_id) = application_update_wiki_id(tool, value)
             {
@@ -1502,7 +1525,7 @@ fn call_memory_tool(
                 serde_json::from_value(arguments).map_err(|_| McpApplicationError::Invalid)?;
             let wiki = memories
                 .create(app_id, &input.name)
-                .map_err(|_| McpApplicationError::Invalid)?;
+                .map_err(classify_application_mutation_error)?;
             Ok(serde_json::json!({"wikiId": wiki.id, "name": wiki.name}))
         }
         "get_airwiki_memory" => {
@@ -1544,7 +1567,7 @@ fn call_memory_tool(
                         body_markdown: input.body_markdown,
                     },
                 )
-                .map_err(|_| McpApplicationError::Invalid)?;
+                .map_err(classify_application_mutation_error)?;
             Ok(memory_concept_json(stored))
         }
         "deprecate_airwiki_memory" => {
@@ -1556,7 +1579,7 @@ fn call_memory_tool(
                 Uuid::parse_str(&input.concept_id).map_err(|_| McpApplicationError::Invalid)?;
             let stored = memories
                 .deprecate(app_id, wiki_id, concept_id, &input.expected_fingerprint)
-                .map_err(|_| McpApplicationError::Invalid)?;
+                .map_err(classify_application_mutation_error)?;
             Ok(memory_concept_json(stored))
         }
         "request_airwiki_computation" => {
@@ -1571,7 +1594,7 @@ fn call_memory_tool(
                     &input.logical_path,
                     serde_json::Value::Object(input.parameters),
                 )
-                .map_err(|_| McpApplicationError::Invalid)?;
+                .map_err(classify_application_mutation_error)?;
             Ok(serde_json::json!({
                 "runId": pending.run_id,
                 "state": "awaiting_confirmation",
@@ -1589,6 +1612,21 @@ fn call_memory_tool(
         }
         _ => Err(McpApplicationError::Invalid),
     }
+}
+
+fn classify_application_mutation_error(error: anyhow::Error) -> McpApplicationError {
+    if error.downcast_ref::<AiMemoryError>() == Some(&AiMemoryError::FingerprintConflict) {
+        return McpApplicationError::Conflict;
+    }
+    if let Some(limit) = error.downcast_ref::<ApplicationLimitError>() {
+        return match limit.retry_after_seconds() {
+            Some(retry_after_seconds) => McpApplicationError::RateLimited {
+                retry_after_seconds,
+            },
+            None => McpApplicationError::QuotaExceeded,
+        };
+    }
+    McpApplicationError::Invalid
 }
 
 fn memory_concept_json(concept: airwiki_core::OkfConceptProjectionRecord) -> serde_json::Value {
@@ -1853,7 +1891,7 @@ impl DesktopServices {
                     runtime.event_forwarder.abort();
                 }
                 application_backend_cancellation.cancel();
-                let _ = application_backend_task.await;
+                log_task_join("mcp_application_backend", application_backend_task.await);
                 return Err(error).context("no se pudo iniciar el MCP local");
             }
         };
@@ -2612,8 +2650,8 @@ impl DesktopServices {
         };
         if let Some(runtime) = current {
             runtime.cancellation.cancel();
-            let _ = runtime.source_task.await;
-            let _ = runtime.renewal_task.await;
+            log_task_join("public_source", runtime.source_task.await);
+            log_task_join("public_manifest_renewal", runtime.renewal_task.await);
         }
         Ok(())
     }
@@ -2666,8 +2704,8 @@ impl DesktopServices {
         let runtime = mutex_lock(&self.public_network, "public network runtime")?.take();
         if let Some(runtime) = runtime {
             runtime.cancellation.cancel();
-            let _ = runtime.source_task.await;
-            let _ = runtime.renewal_task.await;
+            log_task_join("public_source", runtime.source_task.await);
+            log_task_join("public_manifest_renewal", runtime.renewal_task.await);
         }
         self.reconcile_public_network().await
     }
@@ -3896,7 +3934,7 @@ impl DesktopServices {
         }
         self.application_backend_cancellation.cancel();
         if let Some(task) = self.application_backend_task.take() {
-            let _ = task.await;
+            log_task_join("mcp_application_backend", task.await);
         }
         let network = self
             .network
@@ -3915,8 +3953,8 @@ impl DesktopServices {
             .take();
         if let Some(runtime) = public_network {
             runtime.cancellation.cancel();
-            let _ = runtime.source_task.await;
-            let _ = runtime.renewal_task.await;
+            log_task_join("public_source", runtime.source_task.await);
+            log_task_join("public_manifest_renewal", runtime.renewal_task.await);
         }
         Ok(())
     }
@@ -4872,7 +4910,9 @@ where
     F: FnMut() -> Result<T>,
     P: FnMut(&T) -> bool,
 {
-    assert!(attempts > 0, "knowledge read attempts must be positive");
+    if attempts == 0 {
+        bail!("knowledge read attempts must be positive");
+    }
     let mut last_updating = None;
     let mut last_error = None;
     for attempt in 0..attempts {
@@ -4885,10 +4925,10 @@ where
             std::thread::sleep(delay);
         }
     }
-    if let Some(value) = last_updating {
-        Ok(value)
-    } else {
-        Err(last_error.unwrap_or_else(|| anyhow!("knowledge bundle inspection did not complete")))
+    match (last_updating, last_error) {
+        (Some(value), _) => Ok(value),
+        (None, Some(error)) => Err(error),
+        (None, None) => bail!("knowledge bundle inspection did not complete"),
     }
 }
 
@@ -5003,6 +5043,17 @@ fn network_generation_is_current(active: &AtomicU64, event_generation: u64) -> b
     active.load(Ordering::Acquire) == event_generation
 }
 
+fn log_task_join(task_kind: &'static str, result: std::result::Result<(), tokio::task::JoinError>) {
+    if let Err(error) = result {
+        tracing::error!(
+            task_kind,
+            task_cancelled = error.is_cancelled(),
+            task_panicked = error.is_panic(),
+            "background task stopped unexpectedly"
+        );
+    }
+}
+
 fn read_lock<'a, T>(lock: &'a RwLock<T>, label: &str) -> Result<std::sync::RwLockReadGuard<'a, T>> {
     lock.read()
         .map_err(|_| anyhow!("{label} lock está envenenado"))
@@ -5034,6 +5085,67 @@ mod tests {
     use tokio::sync::{Notify, oneshot};
 
     use super::*;
+
+    #[test]
+    fn mcp_application_errors_preserve_conflicts_and_limits() {
+        assert_eq!(
+            classify_application_mutation_error(AiMemoryError::FingerprintConflict.into()),
+            McpApplicationError::Conflict
+        );
+        assert_eq!(
+            classify_application_mutation_error(ApplicationLimitError::MutationRate.into()),
+            McpApplicationError::RateLimited {
+                retry_after_seconds: 60,
+            }
+        );
+        assert_eq!(
+            classify_application_mutation_error(ApplicationLimitError::WikiCreationRate.into()),
+            McpApplicationError::RateLimited {
+                retry_after_seconds: 3_600,
+            }
+        );
+        assert_eq!(
+            classify_application_mutation_error(ApplicationLimitError::WikiCount.into()),
+            McpApplicationError::QuotaExceeded
+        );
+        assert_eq!(
+            mcp_application_timeout_error("write_airwiki_memory"),
+            McpApplicationError::OutcomeUnknown
+        );
+        assert_eq!(
+            mcp_application_timeout_error("get_airwiki_memory"),
+            McpApplicationError::Unavailable
+        );
+    }
+
+    #[tokio::test]
+    async fn mcp_application_backend_fails_closed_when_its_queue_is_full() {
+        let (sender, _receiver) = mpsc::channel(1);
+        let (response, _result) = oneshot::channel();
+        sender
+            .try_send(McpApplicationRequest {
+                identity: McpApplicationIdentity {
+                    capability: "fixture".to_owned(),
+                },
+                tool: "list_airwiki_memories",
+                arguments: serde_json::json!({}),
+                response,
+            })
+            .expect("fill request queue");
+        let backend = DesktopMcpApplicationBackend { requests: sender };
+
+        let result = backend
+            .call(
+                McpApplicationIdentity {
+                    capability: "fixture".to_owned(),
+                },
+                "list_airwiki_memories",
+                serde_json::json!({}),
+            )
+            .await;
+
+        assert_eq!(result, Err(McpApplicationError::Unavailable));
+    }
 
     fn routed_search_hit(title: &str, source_sha256: &str, chunk_id: Uuid, rank: u32) -> SearchHit {
         SearchHit {

@@ -10,6 +10,7 @@ use anyhow::{Context, Result, bail};
 use chrono::Utc;
 use serde::Serialize;
 use sha2::{Digest, Sha256};
+use thiserror::Error;
 use uuid::Uuid;
 
 use crate::okf::atomic_write;
@@ -22,6 +23,12 @@ use crate::{
 
 pub const AI_MEMORY_CONCEPT_MAX_BYTES: usize = 48 * 1024;
 const PROCESS_RESULT_CONCEPT_MAX_BYTES: usize = 1024 * 1024;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Error)]
+pub enum AiMemoryError {
+    #[error("AI memory concept fingerprint is stale")]
+    FingerprintConflict,
+}
 
 #[cfg(windows)]
 const FILE_ATTRIBUTE_REPARSE_POINT: u32 = 0x0400;
@@ -369,7 +376,7 @@ impl AiMemoryService {
             .transpose()?;
         match (&existing, expected_fingerprint) {
             (Some(existing), Some(expected)) if existing.fingerprint == expected => {}
-            (Some(_), _) => bail!("AI memory concept fingerprint is stale"),
+            (Some(_), _) => return Err(AiMemoryError::FingerprintConflict.into()),
             (None, Some(_)) => bail!("new AI memory concepts cannot have an expected fingerprint"),
             (None, None) => {}
         }
@@ -468,7 +475,7 @@ impl AiMemoryService {
             .find(|concept| concept.concept_id == concept_id)
             .context("AI memory concept does not exist")?;
         if concept.fingerprint != expected_fingerprint {
-            bail!("AI memory concept fingerprint is stale");
+            return Err(AiMemoryError::FingerprintConflict.into());
         }
         let wiki = self
             .database
@@ -962,12 +969,9 @@ fn metadata_is_link_or_reparse(metadata: &std::fs::Metadata) -> bool {
 fn ensure_managed_write_target_is_current(path: &Path, expected: Option<&str>) -> Result<()> {
     match (std::fs::read(path), expected) {
         (Ok(bytes), Some(expected)) if hex::encode(Sha256::digest(&bytes)) == expected => Ok(()),
-        (Ok(_), Some(_)) => bail!("AI memory concept changed outside the current snapshot"),
-        (Ok(_), None) => {
-            bail!("AI memory concept path already exists outside the current snapshot")
-        }
+        (Ok(_), Some(_) | None) => Err(AiMemoryError::FingerprintConflict.into()),
         (Err(error), Some(_)) if error.kind() == std::io::ErrorKind::NotFound => {
-            bail!("AI memory concept disappeared outside the current snapshot")
+            Err(AiMemoryError::FingerprintConflict.into())
         }
         (Err(error), None) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
         (Err(error), _) => Err(error).context("AI memory concept could not be inspected"),
@@ -977,7 +981,7 @@ fn ensure_managed_write_target_is_current(path: &Path, expected: Option<&str>) -
 fn read_current_managed_concept(path: &Path, expected_fingerprint: &str) -> Result<String> {
     let bytes = std::fs::read(path).context("could not read AI memory concept")?;
     if hex::encode(Sha256::digest(&bytes)) != expected_fingerprint {
-        bail!("AI memory concept changed outside the current snapshot");
+        return Err(AiMemoryError::FingerprintConflict.into());
     }
     String::from_utf8(bytes).context("AI memory concept must be UTF-8")
 }
@@ -1240,16 +1244,18 @@ mod tests {
             body_markdown: "Private fact".to_owned(),
         };
         let created = service.write(app_id, wiki.id, None, None, &input).unwrap();
-        assert!(
-            service
-                .write(
-                    app_id,
-                    wiki.id,
-                    Some(created.concept_id),
-                    Some("stale"),
-                    &input,
-                )
-                .is_err()
+        let conflict = service
+            .write(
+                app_id,
+                wiki.id,
+                Some(created.concept_id),
+                Some("stale"),
+                &input,
+            )
+            .expect_err("stale fingerprint must fail");
+        assert_eq!(
+            conflict.downcast_ref::<AiMemoryError>(),
+            Some(&AiMemoryError::FingerprintConflict)
         );
         let other = Uuid::new_v4();
         database

@@ -2661,12 +2661,46 @@ mod tests {
     fn tools_list_output() -> Vec<u8> {
         let tools = MANAGED_TOOLS
             .iter()
-            .map(|name| serde_json::json!({ "name": name }))
+            .map(|name| {
+                let (read_only, destructive, idempotent) =
+                    expected_tool_hints(name).expect("managed tool hints");
+                serde_json::json!({
+                    "name": name,
+                    "title": format!("Fixture {name}"),
+                    "description": format!("Synthetic contract for {name}"),
+                    "inputSchema": { "type": "object" },
+                    "outputSchema": { "type": "object" },
+                    "annotations": {
+                        "readOnlyHint": read_only,
+                        "destructiveHint": destructive,
+                        "idempotentHint": idempotent,
+                        "openWorldHint": false,
+                    },
+                })
+            })
             .collect::<Vec<_>>();
         format!(
             "{}\n{}\n",
-            serde_json::json!({ "jsonrpc": "2.0", "id": 1, "result": {} }),
-            serde_json::json!({ "jsonrpc": "2.0", "id": 2, "result": { "tools": tools } })
+            serde_json::json!({
+                "jsonrpc": "2.0",
+                "id": 1,
+                "result": {
+                    "resultType": "complete",
+                    "supportedVersions": [MCP_PROTOCOL_VERSION],
+                    "ttlMs": 0,
+                    "cacheScope": "private",
+                }
+            }),
+            serde_json::json!({
+                "jsonrpc": "2.0",
+                "id": 2,
+                "result": {
+                    "resultType": "complete",
+                    "tools": tools,
+                    "ttlMs": 0,
+                    "cacheScope": "private",
+                }
+            })
         )
         .into_bytes()
     }

@@ -1,4 +1,4 @@
-use std::collections::{BTreeSet, HashSet};
+use std::collections::{BTreeMap, BTreeSet, HashSet};
 use std::ops::{Deref, DerefMut};
 use std::path::{Path, PathBuf};
 use std::str::FromStr;
@@ -260,6 +260,20 @@ pub struct OkfConceptProjectionRecord {
     pub unknown_frontmatter: serde_json::Value,
     pub attested_computation: Option<AttestedComputationContract>,
     pub indexed_at: DateTime<Utc>,
+}
+
+/// Database material required to inspect a published OKF bundle.
+///
+/// Keeping these records together lets disclosure-sensitive readers capture
+/// one SQLite snapshot without reacquiring the mutation barrier while a
+/// disclosure lease is active.
+#[derive(Debug)]
+pub(crate) struct PublishedBundleDatabaseRecords {
+    pub collection: CollectionRecord,
+    pub published: Vec<ConceptRecord>,
+    pub sources: BTreeMap<Uuid, Option<SourceDocumentRecord>>,
+    pub publication_pending: bool,
+    pub projection: Vec<OkfConceptProjectionRecord>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -1478,6 +1492,13 @@ impl Database {
         collection_id: Uuid,
     ) -> Result<Vec<OkfConceptProjectionRecord>> {
         let connection = self.connection()?;
+        Self::list_okf_concept_projection_on(&connection, collection_id)
+    }
+
+    fn list_okf_concept_projection_on(
+        connection: &Connection,
+        collection_id: Uuid,
+    ) -> Result<Vec<OkfConceptProjectionRecord>> {
         let mut statement = connection.prepare(
             "SELECT collection_id,concept_id,logical_path,concept_type,title,description,tags_json,
              lifecycle_status,generation_json,verifications_json,provenance_json,version,fingerprint,
@@ -2516,7 +2537,12 @@ impl Database {
     }
 
     pub fn collection(&self, id: Uuid) -> Result<Option<CollectionRecord>> {
-        self.connection()?
+        let connection = self.connection()?;
+        Self::collection_on(&connection, id)
+    }
+
+    fn collection_on(connection: &Connection, id: Uuid) -> Result<Option<CollectionRecord>> {
+        connection
             .query_row(
                 "SELECT id,name,source_folder,wiki_folder,local_only,peer_shareable,
                  allow_external_ai,internet_public,origin,indexing_mode,okf_version,declared_okf_version,
@@ -2948,7 +2974,15 @@ impl Database {
     }
 
     pub fn source_document(&self, id: Uuid) -> Result<Option<SourceDocumentRecord>> {
-        self.connection()?
+        let connection = self.connection()?;
+        Self::source_document_on(&connection, id)
+    }
+
+    fn source_document_on(
+        connection: &Connection,
+        id: Uuid,
+    ) -> Result<Option<SourceDocumentRecord>> {
+        connection
             .query_row(
                 "SELECT id,collection_id,source_path,source_sha256,source_format,byte_size,
                  page_count,character_count,status,revision,concept_id,last_error,discovered_at,
@@ -3582,6 +3616,13 @@ impl Database {
 
     pub fn list_published_concepts(&self, collection_id: Uuid) -> Result<Vec<ConceptRecord>> {
         let connection = self.connection()?;
+        Self::list_published_concepts_on(&connection, collection_id)
+    }
+
+    fn list_published_concepts_on(
+        connection: &Connection,
+        collection_id: Uuid,
+    ) -> Result<Vec<ConceptRecord>> {
         let mut statement = connection.prepare(
             "SELECT id,source_document_id,collection_id,concept_type,title,description,language,
              tags_json,entities_json,links_json,summary,classification_confidence,
@@ -3775,9 +3816,10 @@ impl Database {
         Ok(concepts)
     }
 
-    /// Returns only stable, published summaries from a Wiki explicitly granted
-    /// to the authenticated LAN peer. Source paths and complete documents never
-    /// cross this boundary.
+    /// Returns only stable, published concept records from a Wiki explicitly
+    /// granted to the authenticated LAN peer. The caller may use those records
+    /// to build the published OKF workspace, but source paths, chunks, embeddings
+    /// and operational index state never cross this boundary.
     pub fn shared_wiki_page_under_disclosure(
         &self,
         lease: &DisclosureLease,
@@ -4449,14 +4491,64 @@ impl Database {
         rows.collect::<rusqlite::Result<_>>().map_err(Into::into)
     }
 
-    pub(crate) fn collection_has_publication_claim(&self, collection_id: Uuid) -> Result<bool> {
-        self.connection()?
+    fn collection_has_publication_claim_on(
+        connection: &Connection,
+        collection_id: Uuid,
+    ) -> Result<bool> {
+        connection
             .query_row(
                 "SELECT EXISTS(SELECT 1 FROM publication_claims WHERE collection_id=?1)",
                 [collection_id.to_string()],
                 |row| row.get(0),
             )
             .map_err(Into::into)
+    }
+
+    pub(crate) fn published_bundle_database_records(
+        &self,
+        collection_id: Uuid,
+    ) -> Result<PublishedBundleDatabaseRecords> {
+        let connection = self.connection()?;
+        Self::published_bundle_database_records_on(&connection, collection_id)
+    }
+
+    pub(crate) fn published_bundle_database_records_under_disclosure(
+        &self,
+        lease: &DisclosureLease,
+        collection_id: Uuid,
+    ) -> Result<PublishedBundleDatabaseRecords> {
+        let connection = self.connection_under_disclosure(lease)?;
+        Self::published_bundle_database_records_on(&connection, collection_id)
+    }
+
+    fn published_bundle_database_records_on(
+        connection: &Connection,
+        collection_id: Uuid,
+    ) -> Result<PublishedBundleDatabaseRecords> {
+        let collection = Self::collection_on(connection, collection_id)?
+            .with_context(|| format!("collection {collection_id} does not exist"))?;
+        let published = Self::list_published_concepts_on(connection, collection_id)?;
+        let mut sources = BTreeMap::new();
+        for concept in &published {
+            if let std::collections::btree_map::Entry::Vacant(entry) =
+                sources.entry(concept.source_document_id)
+            {
+                entry.insert(Self::source_document_on(
+                    connection,
+                    concept.source_document_id,
+                )?);
+            }
+        }
+        let publication_pending =
+            Self::collection_has_publication_claim_on(connection, collection_id)?;
+        let projection = Self::list_okf_concept_projection_on(connection, collection_id)?;
+        Ok(PublishedBundleDatabaseRecords {
+            collection,
+            published,
+            sources,
+            publication_pending,
+            projection,
+        })
     }
 
     pub(crate) fn publication_snapshot(
@@ -8754,7 +8846,11 @@ mod tests {
         .unwrap();
         db.set_grant("peer-reader", collection.id, true).unwrap();
 
-        let shared_request = airwiki_types::SharedWikiBrowseRequest::new(collection.id, None, 50);
+        let mut shared_request =
+            airwiki_types::SharedWikiBrowseRequest::new(collection.id, None, 50);
+        shared_request
+            .prepare_for_protocol(airwiki_types::SHARED_WIKI_BROWSE_PROTOCOL)
+            .unwrap();
         let lease = db.disclosure_gate().acquire_disclosure();
         let (descriptor, shared_concepts) = db
             .shared_wiki_page_under_disclosure(&lease, "peer-reader", collection.id, None, None, 50)
@@ -8766,6 +8862,8 @@ mod tests {
             wiki: descriptor,
             concepts: shared_concepts,
             next_cursor: None,
+            workspace: None,
+            document: None,
         };
         assert!(shared_page.validate_for(&shared_request).is_ok());
 
@@ -8775,6 +8873,8 @@ mod tests {
             collection_id: collection.id,
             cursor: None,
             target_concept_id: None,
+            graph_cursor: None,
+            page: None,
             limit: 50,
         };
         let public_concepts = db
@@ -8786,6 +8886,8 @@ mod tests {
             manifest_sequence: 1,
             concepts: public_concepts,
             next_cursor: None,
+            workspace: None,
+            document: None,
         };
         assert!(
             public_page

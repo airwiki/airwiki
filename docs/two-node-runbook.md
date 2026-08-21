@@ -84,9 +84,11 @@ must follow the [Internet federation acceptance runbook](internet-federation-run
 - Federated search completes in under three seconds when both nodes are online.
 - An offline or partial MCP response completes in under five seconds.
 - Discovery or reconnection completes in under ten seconds on the private LAN.
-- No original, full document, index, embedding, path, or peer-wide Wiki listing
-  crosses the LAN. Opening one authorized result may retrieve only bounded
-  published concept summaries for that exact Wiki.
+- No original source file, source path, chunk, embedding, operational search
+  index, or peer-wide Wiki listing crosses the LAN. Opening one authorized
+  result automatically retrieves the complete published OKF workspace for that
+  exact Wiki, including root index/history, stable pages, metadata and graph.
+  Verify that no pagination control or silent page truncation is visible.
 - Publication, SAS confirmation, grants, external-chat policy, and re-publication
   always remain explicit human actions.
 

@@ -7,6 +7,7 @@ import type {
   IntegrationActionInput,
   ApplicationWikiRoleInput,
   KnowledgePageInput,
+  RemoteWikiPageRequestInput,
   OkfImportSummary,
   PreferencesInput,
   ReviewSummary,
@@ -107,6 +108,8 @@ export async function removeFederationIndex(peerId: string): Promise<void> {
 type SharedWikiBrowseOptions = {
   cursor?: string | null;
   targetConceptId?: string | null;
+  graphCursor?: number | null;
+  page?: RemoteWikiPageRequestInput | null;
 };
 
 export async function browsePublicWiki(
@@ -119,8 +122,12 @@ export async function browsePublicWiki(
     requestId,
     publisherId,
     wikiId,
-    cursor: options.cursor ?? null,
-    targetConceptId: options.targetConceptId ?? null
+    browse: {
+      cursor: options.cursor ?? null,
+      targetConceptId: options.targetConceptId ?? null,
+      graphCursor: options.graphCursor ?? null,
+      page: options.page ?? null
+    }
   });
   return requestId;
 }
@@ -135,8 +142,12 @@ export async function browseNearbyWiki(
     requestId,
     peerId,
     wikiId,
-    cursor: options.cursor ?? null,
-    targetConceptId: options.targetConceptId ?? null
+    browse: {
+      cursor: options.cursor ?? null,
+      targetConceptId: options.targetConceptId ?? null,
+      graphCursor: options.graphCursor ?? null,
+      page: options.page ?? null
+    }
   });
   return requestId;
 }

@@ -7,7 +7,7 @@
 //! [`DesktopServices::enable_models`] installs the real search engines.
 
 use std::{
-    collections::{HashMap, HashSet, VecDeque},
+    collections::{BTreeSet, HashMap, HashSet, VecDeque},
     path::{Path, PathBuf},
     str::FromStr,
     sync::{
@@ -27,10 +27,10 @@ use airwiki_core::{
     EvidenceDecision, EvidenceRelevanceProvider, FastEmbedE5Small, FastEmbedMmarcoReranker,
     FolderWatcher, GenerationProvider, GenerationRuntimeConfig, GuidedRepairPreview,
     GuidedRepairResult, HybridSearchEngine, IngestOutcome, IngestPipeline, KnowledgeBundleState,
-    KnowledgeBundleView, KnowledgePageId, KnowledgePageView, LlamaServerProvider,
-    OkfBundleInspector, OkfPublicationMaterializer, PinnedE5Snapshot, PinnedMmarcoRerankerSnapshot,
-    RelevanceInput, ReviewEdits, ReviewVersionToken, SourceIssueCode, Tokenizer, WikiOrigin,
-    WikiRepairExecutor, WikiRepairPlanner,
+    KnowledgeBundleView, KnowledgeLinkDisposition, KnowledgePageId, KnowledgePageView,
+    LlamaServerProvider, OkfBundleInspector, OkfPublicationMaterializer, PinnedE5Snapshot,
+    PinnedMmarcoRerankerSnapshot, RelevanceInput, ReviewEdits, ReviewVersionToken, SourceIssueCode,
+    Tokenizer, WikiOrigin, WikiRepairExecutor, WikiRepairPlanner,
 };
 use airwiki_inference::{
     GenerationSettings, InstallOutcome, LlamaSupervisor, LlamaSupervisorFailure,
@@ -49,18 +49,21 @@ use airwiki_network::{
     AccessControl, AuthorizedSearchBackend, AuthorizedSearchResult, AuthorizedWikiBrowseResult,
     FederatedCoordinator, MAX_MDNS_ADDRESSES_PER_PEER, MAX_VOLATILE_LAN_PEERS, ManualLanAddress,
     Multiaddr, NetworkConfig, NetworkEvent, NetworkHandle, NetworkWarningKind, NodeIdentity,
-    PairingFailureReason, PeerAccess, PeerId, PublicBrowseDelivery, PublicBrowseResult,
-    PublicIndexEndpoint, PublicReader, PublicRelayReadiness, PublicRouteKind, PublicSearchDelivery,
-    PublicSearchResult, PublicSourceBackend, PublicSourceBackendError, PublicSourceServerConfig,
-    SecretStore, relay_circuit_address, relayed_peer_address, run_public_source_server,
-    sign_manifest, sign_tombstone, spawn_network,
+    PairingFailureReason, PeerAccess, PeerId, PublicBrowseDelivery, PublicBrowseOptions,
+    PublicBrowseResult, PublicIndexEndpoint, PublicReader, PublicRelayReadiness, PublicRouteKind,
+    PublicSearchDelivery, PublicSearchResult, PublicSourceBackend, PublicSourceBackendError,
+    PublicSourceServerConfig, SecretStore, relay_circuit_address, relayed_peer_address,
+    run_public_source_server, sign_manifest, sign_tombstone, spawn_network,
 };
 use airwiki_types::{
     CollectionPolicy, DisclosureLease, DocumentStatus, EnrichmentDraft, FederatedSearch,
-    PUBLIC_CATALOG_PROTOCOL, PublicBrowsePage, PublicBrowseRequest, PublicCollectionManifest,
-    PublicCollectionRevision, PublicCollectionTombstone, PublicSearchRequest, PublicSearchResponse,
-    SearchAuthorization, SearchContractError, SearchHit, SearchPurpose, SearchRequest,
-    SearchResponse, SharedWikiBrowsePage, SharedWikiBrowseRequest,
+    PUBLIC_BROWSE_PROTOCOL_V4, PUBLIC_CATALOG_PROTOCOL, PublicBrowsePage, PublicBrowseRequest,
+    PublicCollectionManifest, PublicCollectionRevision, PublicCollectionTombstone,
+    PublicSearchRequest, PublicSearchResponse, PublishedWikiDocument, PublishedWikiGraphLink,
+    PublishedWikiPageDescriptor, PublishedWikiPageId, PublishedWikiPageRequest,
+    PublishedWikiWorkspacePage, SHARED_WIKI_BROWSE_PROTOCOL_V2, SearchAuthorization,
+    SearchContractError, SearchHit, SearchPurpose, SearchRequest, SearchResponse,
+    SharedWikiBrowsePage, SharedWikiBrowseRequest,
 };
 use anyhow::{Context, Result, anyhow, bail};
 use async_trait::async_trait;
@@ -84,10 +87,10 @@ use crate::{
     },
     paths::AppPaths,
     worker::{
-        ApplicationAccessView, ApplicationWikiGrantView, ApplicationWikiRoleView, CollectionView,
-        PeerActivityState, PeerTrustState, PeerView, PublicAnnouncementStatusView,
-        ReviewEvidenceErrorView, ReviewEvidenceExcerptView, ReviewEvidencePageView, ReviewItemView,
-        SourceIssueView,
+        ApplicationAccessView, ApplicationWikiGrantView, ApplicationWikiRoleView,
+        BrowseWorkspaceSelection, CollectionView, PeerActivityState, PeerTrustState, PeerView,
+        PublicAnnouncementStatusView, ReviewEvidenceErrorView, ReviewEvidenceExcerptView,
+        ReviewEvidencePageView, ReviewItemView, SourceIssueView,
     },
 };
 
@@ -621,16 +624,40 @@ impl AuthorizedSearchBackend for DynamicAuthorizedSearchBackend {
                 return Err(SearchContractError::Unauthorized);
             }
             let lease = authorization.acquire_disclosure_lease();
+            let outline_target = (request.protocol_version
+                != airwiki_types::SHARED_WIKI_BROWSE_PROTOCOL_V2
+                || request.page.is_none())
+            .then_some(request.target_concept_id)
+            .flatten();
             let (wiki, concepts) = database
                 .shared_wiki_page_under_disclosure(
                     &lease,
                     &authorization.caller_node_id,
                     request.collection_id,
                     cursor,
-                    request.target_concept_id,
+                    outline_target,
                     request.limit,
                 )
                 .map_err(|_| SearchContractError::Unauthorized)?;
+            if let Some(PublishedWikiPageRequest {
+                page: PublishedWikiPageId::Concept { concept_id },
+                ..
+            }) = request.page.as_ref()
+            {
+                let (_, authorized) = database
+                    .shared_wiki_page_under_disclosure(
+                        &lease,
+                        &authorization.caller_node_id,
+                        request.collection_id,
+                        None,
+                        Some(*concept_id),
+                        1,
+                    )
+                    .map_err(|_| SearchContractError::Unauthorized)?;
+                if authorized.first().map(|concept| concept.concept_id) != Some(*concept_id) {
+                    return Err(SearchContractError::Unauthorized);
+                }
+            }
             let next_cursor = if concepts.len() == usize::from(request.limit) {
                 let last = concepts.last().map(|concept| concept.concept_id);
                 let (_, next) = database
@@ -649,12 +676,37 @@ impl AuthorizedSearchBackend for DynamicAuthorizedSearchBackend {
             } else {
                 None
             };
+            let (workspace, document) =
+                if request.protocol_version == airwiki_types::SHARED_WIKI_BROWSE_PROTOCOL_V2 {
+                    let concept_ids = concepts
+                        .iter()
+                        .map(|concept| concept.concept_id)
+                        .collect::<Vec<_>>();
+                    let (workspace, document) = published_workspace_page(
+                        &database,
+                        &lease,
+                        request.collection_id,
+                        &concept_ids,
+                        request.graph_cursor,
+                        request.page.as_ref(),
+                    )
+                    .map_err(|_| {
+                        SearchContractError::Unavailable(
+                            "the published Wiki is temporarily unavailable".to_owned(),
+                        )
+                    })?;
+                    (Some(workspace), document)
+                } else {
+                    (None, None)
+                };
             let page = SharedWikiBrowsePage {
-                protocol_version: airwiki_types::SHARED_WIKI_BROWSE_PROTOCOL.to_owned(),
+                protocol_version: request.protocol_version.clone(),
                 request_id: request.request_id,
                 wiki,
                 concepts,
                 next_cursor,
+                workspace,
+                document,
             };
             page.validate_for(&request)
                 .map_err(|error| SearchContractError::Backend(error.to_string()))?;
@@ -817,6 +869,191 @@ fn public_page_next_cursor(
     }
 }
 
+fn published_page_id(page_id: KnowledgePageId) -> PublishedWikiPageId {
+    match page_id {
+        KnowledgePageId::Index => PublishedWikiPageId::Index,
+        KnowledgePageId::Log => PublishedWikiPageId::Log,
+        KnowledgePageId::Concept(concept_id) => PublishedWikiPageId::Concept { concept_id },
+    }
+}
+
+fn knowledge_page_id(page_id: PublishedWikiPageId) -> KnowledgePageId {
+    match page_id {
+        PublishedWikiPageId::Index => KnowledgePageId::Index,
+        PublishedWikiPageId::Log => KnowledgePageId::Log,
+        PublishedWikiPageId::Concept { concept_id } => KnowledgePageId::Concept(concept_id),
+    }
+}
+
+fn published_page_descriptor(
+    bundle: &KnowledgeBundleView,
+    page_id: KnowledgePageId,
+) -> Option<PublishedWikiPageDescriptor> {
+    let (logical_path, title) = match page_id {
+        KnowledgePageId::Index => ("index.md".to_owned(), "Wiki index".to_owned()),
+        KnowledgePageId::Log => ("log.md".to_owned(), "Change log".to_owned()),
+        KnowledgePageId::Concept(concept_id) => {
+            let concept = bundle
+                .concepts
+                .iter()
+                .find(|concept| concept.id == concept_id && concept.lifecycle_status == "stable")?;
+            (concept.relative_path.clone(), concept.title.clone())
+        }
+    };
+    let fingerprint = bundle.page_fingerprint(page_id)?.to_owned();
+    Some(PublishedWikiPageDescriptor {
+        page: published_page_id(page_id),
+        logical_path,
+        title,
+        fingerprint,
+    })
+}
+
+/// Builds the read-only, published OKF workspace sent to an already-authorized
+/// remote reader. The inspector is the same authority used by the owner's
+/// local viewer; source folders and operational SQLite fields never enter the
+/// wire contract.
+fn published_workspace_page(
+    database: &Database,
+    lease: &DisclosureLease,
+    collection_id: Uuid,
+    concept_ids: &[Uuid],
+    graph_cursor: Option<u32>,
+    requested_page: Option<&PublishedWikiPageRequest>,
+) -> Result<(PublishedWikiWorkspacePage, Option<PublishedWikiDocument>)> {
+    let inspector = OkfBundleInspector::new(database.clone());
+    let bundle = inspector.inspect_bundle_under_disclosure(lease, collection_id)?;
+    if bundle.state != KnowledgeBundleState::Ready || !bundle.health.is_healthy() {
+        bail!("the published OKF bundle is not ready for external browsing");
+    }
+
+    let stable_concepts = bundle
+        .concepts
+        .iter()
+        .filter(|concept| concept.lifecycle_status == "stable")
+        .map(|concept| concept.id)
+        .collect::<BTreeSet<_>>();
+    let mut allowed_pages = stable_concepts
+        .iter()
+        .copied()
+        .map(KnowledgePageId::Concept)
+        .collect::<BTreeSet<_>>();
+    let mut reserved_pages = Vec::new();
+    for page_id in [KnowledgePageId::Index, KnowledgePageId::Log] {
+        if let Some(descriptor) = published_page_descriptor(&bundle, page_id) {
+            allowed_pages.insert(page_id);
+            reserved_pages.push(descriptor);
+        }
+    }
+
+    let documents = concept_ids
+        .iter()
+        .map(|concept_id| {
+            if !stable_concepts.contains(concept_id) {
+                bail!("the requested concept is not externally publishable");
+            }
+            published_page_descriptor(&bundle, KnowledgePageId::Concept(*concept_id))
+                .context("the published concept is missing from its OKF bundle")
+        })
+        .collect::<Result<Vec<_>>>()?;
+
+    let mut graph_links = bundle
+        .links
+        .iter()
+        .filter_map(|link| {
+            let KnowledgeLinkDisposition::Internal(target) = link.disposition else {
+                return None;
+            };
+            if !allowed_pages.contains(&link.source) || !allowed_pages.contains(&target) {
+                return None;
+            }
+            let label = link
+                .label
+                .chars()
+                .filter(|character| !character.is_control())
+                .take(300)
+                .collect::<String>();
+            Some(PublishedWikiGraphLink {
+                source: published_page_id(link.source),
+                target: published_page_id(target),
+                label,
+            })
+        })
+        .collect::<Vec<_>>();
+    graph_links.sort_by(|left, right| {
+        left.source
+            .cmp(&right.source)
+            .then_with(|| left.target.cmp(&right.target))
+            .then_with(|| left.label.cmp(&right.label))
+    });
+    graph_links.dedup();
+    let (links, next_graph_cursor) = if let Some(graph_cursor) = graph_cursor {
+        let graph_start = usize::try_from(graph_cursor)
+            .context("the graph cursor is not supported on this platform")?;
+        if graph_start > graph_links.len() {
+            bail!("the graph cursor is outside the published Wiki");
+        }
+        let graph_end = graph_start
+            .saturating_add(airwiki_types::MAX_SHARED_WIKI_GRAPH_PAGE_SIZE)
+            .min(graph_links.len());
+        let next_graph_cursor = if graph_end < graph_links.len() {
+            Some(u32::try_from(graph_end).context("the published Wiki graph is too large")?)
+        } else {
+            None
+        };
+        (
+            graph_links[graph_start..graph_end].to_vec(),
+            next_graph_cursor,
+        )
+    } else {
+        (Vec::new(), None)
+    };
+
+    let document = requested_page
+        .map(|request| {
+            let page_id = knowledge_page_id(request.page);
+            if !allowed_pages.contains(&page_id) {
+                bail!("the requested page is not externally publishable");
+            }
+            let page = inspector.load_page_under_disclosure(
+                lease,
+                collection_id,
+                page_id,
+                request.expected_fingerprint.as_deref(),
+                airwiki_types::MAX_SHARED_WIKI_DOCUMENT_BYTES,
+            )?;
+            if page.truncated {
+                bail!("the published OKF page exceeds the supported document size");
+            }
+            let descriptor = published_page_descriptor(&bundle, page_id)
+                .context("the requested published page is missing from its OKF bundle")?;
+            let backlinks = page
+                .backlinks
+                .into_iter()
+                .filter(|backlink| allowed_pages.contains(backlink))
+                .map(published_page_id)
+                .collect();
+            Ok(PublishedWikiDocument {
+                descriptor,
+                body_markdown: page.body_markdown,
+                metadata: page.metadata,
+                backlinks,
+                truncated: false,
+            })
+        })
+        .transpose()?;
+
+    Ok((
+        PublishedWikiWorkspacePage {
+            reserved_pages,
+            documents,
+            links,
+            next_graph_cursor,
+        },
+        document,
+    ))
+}
+
 pub struct DynamicPublicSourceBackend {
     database: Database,
     engine: Arc<DynamicAuthorizedSearchBackend>,
@@ -910,13 +1147,17 @@ impl PublicSourceBackend for DynamicPublicSourceBackend {
         let publisher_id = self.publisher_id.clone();
         tokio::task::spawn_blocking(move || {
             let lease = database.disclosure_gate().acquire_disclosure();
+            let outline_target = (request.protocol_version != PUBLIC_BROWSE_PROTOCOL_V4
+                || request.page.is_none())
+            .then_some(request.target_concept_id)
+            .flatten();
             let concepts = database
                 .public_concept_page_under_disclosure(
                     &lease,
                     &publisher_id,
                     request.collection_id,
                     cursor,
-                    request.target_concept_id,
+                    outline_target,
                     request.limit,
                 )
                 .map_err(|_| PublicSourceBackendError::NotPublic)?;
@@ -927,6 +1168,25 @@ impl PublicSourceBackend for DynamicPublicSourceBackend {
                 .public_manifest_sequence_under_disclosure(&lease, request.collection_id)
                 .map_err(|_| PublicSourceBackendError::Unavailable)?
                 .ok_or(PublicSourceBackendError::NotPublic)?;
+            if let Some(PublishedWikiPageRequest {
+                page: PublishedWikiPageId::Concept { concept_id },
+                ..
+            }) = request.page.as_ref()
+            {
+                let authorized = database
+                    .public_concept_page_under_disclosure(
+                        &lease,
+                        &publisher_id,
+                        request.collection_id,
+                        None,
+                        Some(*concept_id),
+                        1,
+                    )
+                    .map_err(|_| PublicSourceBackendError::NotPublic)?;
+                if authorized.first().map(|concept| concept.concept_id) != Some(*concept_id) {
+                    return Err(PublicSourceBackendError::NotPublic);
+                }
+            }
             let last_concept_id = concepts.last().map(|concept| concept.concept_id);
             let has_more = if concepts.len() == usize::from(request.limit) {
                 !database
@@ -944,13 +1204,33 @@ impl PublicSourceBackend for DynamicPublicSourceBackend {
                 false
             };
             let next_cursor = public_page_next_cursor(&concepts, has_more);
+            let (workspace, document) = if request.protocol_version == PUBLIC_BROWSE_PROTOCOL_V4 {
+                let concept_ids = concepts
+                    .iter()
+                    .map(|concept| concept.concept_id)
+                    .collect::<Vec<_>>();
+                let (workspace, document) = published_workspace_page(
+                    &database,
+                    &lease,
+                    request.collection_id,
+                    &concept_ids,
+                    request.graph_cursor,
+                    request.page.as_ref(),
+                )
+                .map_err(|_| PublicSourceBackendError::Unavailable)?;
+                (Some(workspace), document)
+            } else {
+                (None, None)
+            };
             Ok(PublicBrowseDelivery::new(
                 PublicBrowsePage {
-                    protocol_version: airwiki_types::PUBLIC_BROWSE_PROTOCOL.to_owned(),
+                    protocol_version: request.protocol_version.clone(),
                     request_id: request.request_id,
                     manifest_sequence,
                     concepts,
                     next_cursor,
+                    workspace,
+                    document,
                 },
                 lease,
             ))
@@ -3127,9 +3407,21 @@ impl DesktopServices {
         collection_id: Uuid,
         cursor: Option<String>,
         target_concept_id: Option<Uuid>,
+        graph_cursor: Option<u32>,
+        page: Option<PublishedWikiPageRequest>,
     ) -> std::result::Result<PublicBrowseResult, SearchContractError> {
         self.public_reader
-            .browse_collection(publisher_id, collection_id, cursor, target_concept_id, 50)
+            .browse_collection(
+                publisher_id,
+                collection_id,
+                PublicBrowseOptions {
+                    cursor,
+                    target_concept_id,
+                    graph_cursor,
+                    page,
+                    limit: 50,
+                },
+            )
             .await
     }
 
@@ -3138,16 +3430,17 @@ impl DesktopServices {
         request_id: Uuid,
         peer_id: &str,
         collection_id: Uuid,
-        cursor: Option<String>,
-        target_concept_id: Option<Uuid>,
+        selection: BrowseWorkspaceSelection,
     ) -> std::result::Result<SharedWikiBrowsePage, SearchContractError> {
         let peer = PeerId::from_str(peer_id).map_err(|_| SearchContractError::Unauthorized)?;
         let request = SharedWikiBrowseRequest {
-            protocol_version: airwiki_types::SHARED_WIKI_BROWSE_PROTOCOL.to_owned(),
+            protocol_version: SHARED_WIKI_BROWSE_PROTOCOL_V2.to_owned(),
             request_id,
             collection_id,
-            cursor,
-            target_concept_id,
+            cursor: selection.cursor,
+            target_concept_id: selection.target_concept_id,
+            graph_cursor: selection.graph_cursor,
+            page: selection.page,
             limit: 50,
         };
         self.required_network()
@@ -7069,8 +7362,11 @@ mod tests {
             database.clone(),
             access,
         ));
-        let backend =
-            DynamicPublicSourceBackend::new(database.clone(), engine, test_public_peer_id());
+        let backend = DynamicPublicSourceBackend::new(
+            database.clone(),
+            Arc::clone(&engine),
+            test_public_peer_id(),
+        );
 
         for collection_id in [private.id, public.id] {
             let result = backend
@@ -7080,6 +7376,8 @@ mod tests {
                     collection_id,
                     cursor: None,
                     target_concept_id: None,
+                    graph_cursor: None,
+                    page: None,
                     limit: 50,
                 })
                 .await;
@@ -7174,6 +7472,8 @@ mod tests {
                 collection_id: public.id,
                 cursor: None,
                 target_concept_id: None,
+                graph_cursor: None,
+                page: None,
                 limit: 1,
             })
             .await;
@@ -7183,6 +7483,138 @@ mod tests {
             published.as_ref().err()
         );
         drop(published);
+
+        let bundle = OkfBundleInspector::new(database.clone())
+            .inspect_bundle(public.id)
+            .unwrap();
+        let page_fingerprint = bundle
+            .page_fingerprint(KnowledgePageId::Concept(concept.id))
+            .unwrap()
+            .to_owned();
+        let page_request = PublishedWikiPageRequest {
+            page: PublishedWikiPageId::Concept {
+                concept_id: concept.id,
+            },
+            expected_fingerprint: Some(page_fingerprint.clone()),
+        };
+        let complete_public = backend
+            .browse(PublicBrowseRequest {
+                protocol_version: PUBLIC_BROWSE_PROTOCOL_V4.to_owned(),
+                request_id: Uuid::new_v4(),
+                collection_id: public.id,
+                cursor: None,
+                target_concept_id: Some(concept.id),
+                graph_cursor: Some(0),
+                page: Some(page_request.clone()),
+                limit: 1,
+            })
+            .await
+            .unwrap();
+        let public_page = complete_public.page();
+        let public_workspace = public_page.workspace.as_ref().unwrap();
+        assert!(
+            public_workspace
+                .reserved_pages
+                .iter()
+                .any(|page| page.page == PublishedWikiPageId::Index)
+        );
+        assert_eq!(public_workspace.documents.len(), 1);
+        let public_document = public_page.document.as_ref().unwrap();
+        assert_eq!(public_document.descriptor.fingerprint, page_fingerprint);
+        assert!(!public_document.body_markdown.is_empty());
+        assert!(
+            !public_document
+                .body_markdown
+                .contains(&source_path.display().to_string())
+        );
+        assert!(!public_document.truncated);
+        let public_body = public_document.body_markdown.clone();
+        let public_workspace_snapshot = public_workspace.clone();
+        drop(complete_public);
+
+        let stale_page = backend
+            .browse(PublicBrowseRequest {
+                protocol_version: PUBLIC_BROWSE_PROTOCOL_V4.to_owned(),
+                request_id: Uuid::new_v4(),
+                collection_id: public.id,
+                cursor: None,
+                target_concept_id: Some(concept.id),
+                graph_cursor: None,
+                page: Some(PublishedWikiPageRequest {
+                    page: PublishedWikiPageId::Concept {
+                        concept_id: concept.id,
+                    },
+                    expected_fingerprint: Some("0".repeat(64)),
+                }),
+                limit: 1,
+            })
+            .await;
+        assert!(matches!(
+            stale_page,
+            Err(PublicSourceBackendError::Unavailable)
+        ));
+
+        database
+            .update_collection_policy(
+                public.id,
+                CollectionPolicy {
+                    local_only: false,
+                    peer_shareable: true,
+                    allow_external_ai: false,
+                    internet_public: true,
+                },
+            )
+            .unwrap();
+        let lan_identity = NodeIdentity::load_or_create(&MemorySecretStore::default()).unwrap();
+        let lan_peer = lan_identity.peer_id();
+        database
+            .upsert_peer(&airwiki_core::PeerRecord {
+                peer_id: lan_peer.to_string(),
+                display_name: Some("LAN reader".to_owned()),
+                trusted: true,
+                blocked: false,
+                paired_at: Some(Utc::now()),
+                last_seen_at: Some(Utc::now()),
+            })
+            .unwrap();
+        database
+            .set_grant(&lan_peer.to_string(), public.id, true)
+            .unwrap();
+        engine.access.mark_trusted(lan_peer);
+        engine.access.grant(lan_peer, public.id).unwrap();
+        let authorization = engine
+            .access
+            .authorize(&lan_peer, SearchPurpose::LocalAssistant)
+            .unwrap();
+        let complete_lan = engine
+            .browse_authorized(
+                SharedWikiBrowseRequest {
+                    protocol_version: SHARED_WIKI_BROWSE_PROTOCOL_V2.to_owned(),
+                    request_id: Uuid::new_v4(),
+                    collection_id: public.id,
+                    cursor: None,
+                    target_concept_id: Some(concept.id),
+                    graph_cursor: Some(0),
+                    page: Some(page_request),
+                    limit: 1,
+                },
+                authorization,
+            )
+            .await
+            .unwrap();
+        let lan_page = complete_lan.page();
+        assert_eq!(
+            lan_page
+                .document
+                .as_ref()
+                .map(|document| document.body_markdown.as_str()),
+            Some(public_body.as_str())
+        );
+        assert_eq!(
+            lan_page.workspace.as_ref(),
+            Some(&public_workspace_snapshot)
+        );
+        drop(complete_lan);
 
         {
             let lease = database.disclosure_gate().acquire_disclosure();
@@ -7229,6 +7661,8 @@ mod tests {
                 collection_id: public.id,
                 cursor: None,
                 target_concept_id: None,
+                graph_cursor: None,
+                page: None,
                 limit: 50,
             })
             .await;

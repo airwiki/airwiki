@@ -34,7 +34,11 @@ use airwiki_core::{
     RepairAuthority, ReviewVersionToken,
 };
 use airwiki_inference::ModelProfile;
-use airwiki_types::{ConceptType, EnrichmentDraft, SearchPurpose, SuggestedEntity, SuggestedLink};
+use airwiki_types::{
+    ConceptType, EnrichmentDraft, PublishedWikiDocument, PublishedWikiPageDescriptor,
+    PublishedWikiPageId, PublishedWikiPageRequest, PublishedWikiWorkspacePage, SearchPurpose,
+    SuggestedEntity, SuggestedLink,
+};
 use anyhow::{Context, Result};
 use pulldown_cmark::{CodeBlockKind, Event as MarkdownEvent, HeadingLevel, Parser, Tag, TagEnd};
 use serde::{Deserialize, Serialize};
@@ -59,7 +63,10 @@ use crate::{
         TauriUpdateBackend, UpdateBackend, UpdateIssueCode, UpdateSummary, UpdaterBuildConfig,
         UpdaterDisabledReason, UpdaterStatus, UpdaterView,
     },
-    worker::{DesktopPreferencesUpdate, WorkerCommand, WorkerEvent, WorkerIntent, run_worker},
+    worker::{
+        BrowseWorkspaceSelection, DesktopPreferencesUpdate, WorkerCommand, WorkerEvent,
+        WorkerIntent, run_worker,
+    },
 };
 
 const COMMAND_CAPACITY: usize = 64;
@@ -746,6 +753,35 @@ enum KnowledgePageInput {
     Concept { path: String },
 }
 
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq, PartialOrd, Ord, TS)]
+#[serde(tag = "kind", rename_all = "camelCase", deny_unknown_fields)]
+enum RemoteWikiPageInput {
+    Index,
+    Log,
+    Concept {
+        #[serde(rename = "conceptId")]
+        #[ts(rename = "conceptId")]
+        concept_id: String,
+    },
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq, TS)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct RemoteWikiPageRequestInput {
+    page: RemoteWikiPageInput,
+    expected_fingerprint: Option<String>,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq, TS)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+#[ts(rename_all = "camelCase")]
+struct RemoteWikiBrowseInput {
+    cursor: Option<String>,
+    target_concept_id: Option<String>,
+    graph_cursor: Option<u32>,
+    page: Option<RemoteWikiPageRequestInput>,
+}
+
 #[derive(Clone)]
 struct CachedKnowledgePage {
     page_id: KnowledgePageId,
@@ -884,6 +920,12 @@ struct PublicBrowseSummary {
     okf_compatibility: Option<OkfCompatibilityDto>,
     concepts: Vec<PublicConceptSummaryDto>,
     next_cursor: Option<String>,
+    workspace_supported: bool,
+    reserved_pages: Vec<RemoteWikiPageDescriptorSummary>,
+    documents: Vec<RemoteWikiPageDescriptorSummary>,
+    links: Vec<RemoteWikiGraphLinkSummary>,
+    next_graph_cursor: Option<u32>,
+    page: Option<RemoteWikiDocumentSummary>,
     append_failed: bool,
 }
 
@@ -898,6 +940,12 @@ struct NearbyBrowseSummary {
     okf_compatibility: Option<OkfCompatibilityDto>,
     concepts: Vec<PublicConceptSummaryDto>,
     next_cursor: Option<String>,
+    workspace_supported: bool,
+    reserved_pages: Vec<RemoteWikiPageDescriptorSummary>,
+    documents: Vec<RemoteWikiPageDescriptorSummary>,
+    links: Vec<RemoteWikiGraphLinkSummary>,
+    next_graph_cursor: Option<u32>,
+    page: Option<RemoteWikiDocumentSummary>,
     append_failed: bool,
 }
 
@@ -933,6 +981,33 @@ struct PublicConceptSummaryDto {
     source_revision: u32,
     lifecycle: Option<String>,
     assurance: Option<ConceptAssuranceSummary>,
+}
+
+#[derive(Clone, Debug, Serialize, PartialEq, Eq, TS)]
+#[serde(rename_all = "camelCase")]
+struct RemoteWikiPageDescriptorSummary {
+    page: RemoteWikiPageInput,
+    logical_path: String,
+    title: String,
+    fingerprint: String,
+}
+
+#[derive(Clone, Debug, Serialize, PartialEq, Eq, TS)]
+#[serde(rename_all = "camelCase")]
+struct RemoteWikiGraphLinkSummary {
+    source: RemoteWikiPageInput,
+    target: RemoteWikiPageInput,
+    label: String,
+}
+
+#[derive(Clone, Debug, Serialize, PartialEq, Eq, TS)]
+#[serde(rename_all = "camelCase")]
+struct RemoteWikiDocumentSummary {
+    descriptor: RemoteWikiPageDescriptorSummary,
+    blocks: Vec<KnowledgeBlock>,
+    metadata: Vec<(String, String)>,
+    backlinks: Vec<RemoteWikiPageInput>,
+    truncated: bool,
 }
 
 #[derive(Clone, Copy, Debug, Serialize, TS)]
@@ -2281,21 +2356,13 @@ async fn browse_public_wiki(
     request_id: String,
     publisher_id: String,
     wiki_id: String,
-    cursor: Option<String>,
-    target_concept_id: Option<String>,
+    browse: RemoteWikiBrowseInput,
 ) -> Result<(), UiError> {
-    if cursor
-        .as_ref()
-        .is_some_and(|value| value.len() > 128 || value.chars().any(char::is_control))
-    {
-        return Err(UiError::invalid("invalidPublicBrowseCursor"));
-    }
-    let target_concept_id = target_concept_id
-        .map(|value| parse_uuid(&value))
-        .transpose()?;
-    if cursor.is_some() && target_concept_id.is_some() {
-        return Err(UiError::invalid("invalidPublicBrowseCursor"));
-    }
+    let selection = remote_browse_selection(
+        browse,
+        "invalidPublicBrowseCursor",
+        "invalidPublicBrowsePage",
+    )?;
     let request_id = parse_uuid(&request_id)?;
     runtime
         .requests
@@ -2308,8 +2375,7 @@ async fn browse_public_wiki(
             request_id,
             publisher_id: validate_peer_id(publisher_id)?,
             collection_id: parse_uuid(&wiki_id)?,
-            cursor,
-            target_concept_id,
+            selection,
         },
     )
     .await
@@ -2330,21 +2396,13 @@ async fn browse_nearby_wiki(
     request_id: String,
     peer_id: String,
     wiki_id: String,
-    cursor: Option<String>,
-    target_concept_id: Option<String>,
+    browse: RemoteWikiBrowseInput,
 ) -> Result<(), UiError> {
-    if cursor
-        .as_deref()
-        .is_some_and(|value| Uuid::parse_str(value).is_err())
-    {
-        return Err(UiError::invalid("invalidNearbyBrowseCursor"));
-    }
-    let target_concept_id = target_concept_id
-        .map(|value| parse_uuid(&value))
-        .transpose()?;
-    if cursor.is_some() && target_concept_id.is_some() {
-        return Err(UiError::invalid("invalidNearbyBrowseCursor"));
-    }
+    let selection = remote_browse_selection(
+        browse,
+        "invalidNearbyBrowseCursor",
+        "invalidNearbyBrowsePage",
+    )?;
     let request_id = parse_uuid(&request_id)?;
     runtime
         .requests
@@ -2357,8 +2415,7 @@ async fn browse_nearby_wiki(
             request_id,
             peer_id: validate_peer_id(peer_id)?,
             collection_id: parse_uuid(&wiki_id)?,
-            cursor,
-            target_concept_id,
+            selection,
         },
     )
     .await
@@ -3509,6 +3566,66 @@ fn parse_uuid(value: &str) -> Result<Uuid, UiError> {
     Uuid::parse_str(value).map_err(|_| UiError::invalid("invalidIdentifier"))
 }
 
+fn remote_page_request(
+    input: RemoteWikiPageRequestInput,
+) -> Result<PublishedWikiPageRequest, UiError> {
+    if input.expected_fingerprint.as_deref().is_some_and(|value| {
+        value.len() != 64 || !value.bytes().all(|byte| byte.is_ascii_hexdigit())
+    }) {
+        return Err(UiError::invalid("invalidRemoteWikiFingerprint"));
+    }
+    let page = match input.page {
+        RemoteWikiPageInput::Index => PublishedWikiPageId::Index,
+        RemoteWikiPageInput::Log => PublishedWikiPageId::Log,
+        RemoteWikiPageInput::Concept { concept_id } => PublishedWikiPageId::Concept {
+            concept_id: parse_uuid(&concept_id)?,
+        },
+    };
+    Ok(PublishedWikiPageRequest {
+        page,
+        expected_fingerprint: input.expected_fingerprint,
+    })
+}
+
+fn remote_browse_selection(
+    input: RemoteWikiBrowseInput,
+    invalid_cursor_code: &'static str,
+    invalid_page_code: &'static str,
+) -> Result<BrowseWorkspaceSelection, UiError> {
+    if input
+        .cursor
+        .as_deref()
+        .is_some_and(|value| Uuid::parse_str(value).is_err())
+    {
+        return Err(UiError::invalid(invalid_cursor_code));
+    }
+    let target_concept_id = input
+        .target_concept_id
+        .map(|value| parse_uuid(&value))
+        .transpose()?;
+    let page = input.page.map(remote_page_request).transpose()?;
+    if input.cursor.is_some() && target_concept_id.is_some() {
+        return Err(UiError::invalid(invalid_cursor_code));
+    }
+    if let (
+        Some(target),
+        Some(PublishedWikiPageRequest {
+            page: PublishedWikiPageId::Concept { concept_id },
+            ..
+        }),
+    ) = (target_concept_id, page.as_ref())
+        && target != *concept_id
+    {
+        return Err(UiError::invalid(invalid_page_code));
+    }
+    Ok(BrowseWorkspaceSelection {
+        cursor: input.cursor,
+        target_concept_id,
+        graph_cursor: input.graph_cursor,
+        page,
+    })
+}
+
 fn validate_peer_id(value: String) -> Result<String, UiError> {
     if value.is_empty()
         || value.len() > 256
@@ -4203,10 +4320,10 @@ impl AppSnapshot {
             }
             WorkerEvent::PublicBrowseFinished {
                 request_id,
-                append,
+                update,
                 result,
             } => {
-                if append
+                if update.kind != worker::BrowseUpdateKind::Replace
                     && result.is_err()
                     && let Some(mut previous) = self.public_browse.take()
                 {
@@ -4234,31 +4351,33 @@ impl AppSnapshot {
                                 PublicBrowseStatus::Expired
                             }
                         };
-                        let (concepts, next_cursor) = result.page.map_or_else(
-                            || (Vec::new(), None),
-                            |page| {
-                                (
-                                    page.concepts
-                                        .into_iter()
-                                        .map(|concept| PublicConceptSummaryDto {
-                                            concept_id: concept.concept_id.to_string(),
-                                            concept_type: concept.concept_type.into(),
-                                            title: concept.title,
-                                            description: concept.description,
-                                            language: concept.language,
-                                            tags: concept.tags,
-                                            summary: concept.summary,
-                                            source_revision: concept.source_revision,
-                                            lifecycle: concept.lifecycle_status,
-                                            assurance: concept
-                                                .assurance
-                                                .map(ConceptAssuranceSummary::from),
-                                        })
-                                        .collect(),
-                                    page.next_cursor,
-                                )
-                            },
-                        );
+                        let (concepts, next_cursor, workspace) = if let Some(page) = result.page {
+                            let workspace =
+                                remote_workspace_parts(page.workspace, page.document).await;
+                            (
+                                page.concepts
+                                    .into_iter()
+                                    .map(|concept| PublicConceptSummaryDto {
+                                        concept_id: concept.concept_id.to_string(),
+                                        concept_type: concept.concept_type.into(),
+                                        title: concept.title,
+                                        description: concept.description,
+                                        language: concept.language,
+                                        tags: concept.tags,
+                                        summary: concept.summary,
+                                        source_revision: concept.source_revision,
+                                        lifecycle: concept.lifecycle_status,
+                                        assurance: concept
+                                            .assurance
+                                            .map(ConceptAssuranceSummary::from),
+                                    })
+                                    .collect(),
+                                page.next_cursor,
+                                workspace,
+                            )
+                        } else {
+                            (Vec::new(), None, remote_workspace_parts(None, None).await)
+                        };
                         PublicBrowseSummary {
                             request_id: request_id.to_string(),
                             status,
@@ -4273,7 +4392,13 @@ impl AppSnapshot {
                                 .map(OkfCompatibilityDto::from),
                             concepts,
                             next_cursor,
-                            append_failed: false,
+                            workspace_supported: workspace.workspace_supported,
+                            reserved_pages: workspace.reserved_pages,
+                            documents: workspace.documents,
+                            links: workspace.links,
+                            next_graph_cursor: workspace.next_graph_cursor,
+                            page: workspace.page,
+                            append_failed: workspace.conversion_failed,
                         }
                     }
                     Err(_) => PublicBrowseSummary {
@@ -4287,18 +4412,41 @@ impl AppSnapshot {
                         okf_compatibility: None,
                         concepts: Vec::new(),
                         next_cursor: None,
+                        workspace_supported: false,
+                        reserved_pages: Vec::new(),
+                        documents: Vec::new(),
+                        links: Vec::new(),
+                        next_graph_cursor: None,
+                        page: None,
                         append_failed: false,
                     },
                 };
-                if append
+                if update.kind != worker::BrowseUpdateKind::Replace
                     && let Some(previous) = self.public_browse.take()
                     && previous.publisher_id == summary.publisher_id
                     && previous.wiki_id == summary.wiki_id
                 {
+                    merge_remote_workspace(
+                        &previous,
+                        &mut summary.reserved_pages,
+                        &mut summary.documents,
+                        &mut summary.links,
+                    );
                     let mut concepts = previous.concepts;
                     concepts.extend(summary.concepts);
+                    concepts.sort_by(|left, right| left.concept_id.cmp(&right.concept_id));
+                    concepts.dedup_by(|left, right| left.concept_id == right.concept_id);
                     summary.concepts = concepts;
-                    summary.append_failed = false;
+                    summary.workspace_supported |= previous.workspace_supported;
+                    if summary.page.is_none() {
+                        summary.page = previous.page;
+                    }
+                    if !update.concepts_requested {
+                        summary.next_cursor = previous.next_cursor;
+                    }
+                    if !update.graph_requested {
+                        summary.next_graph_cursor = previous.next_graph_cursor;
+                    }
                 }
                 self.public_browse = Some(summary);
             }
@@ -4306,11 +4454,11 @@ impl AppSnapshot {
                 request_id,
                 peer_id,
                 collection_id,
-                append,
+                update,
                 result,
             } => {
                 let requested_wiki_id = collection_id.to_string();
-                if append
+                if update.kind != worker::BrowseUpdateKind::Replace
                     && result.is_err()
                     && let Some(mut previous) = self.nearby_browse.take()
                     && previous.peer_id.as_deref() == Some(peer_id.as_str())
@@ -4322,34 +4470,43 @@ impl AppSnapshot {
                     return;
                 }
                 let mut summary = match result {
-                    Ok(page) => NearbyBrowseSummary {
-                        request_id: request_id.to_string(),
-                        status: NearbyBrowseStatus::Available,
-                        peer_id: Some(peer_id),
-                        wiki_id: Some(page.wiki.collection_id.to_string()),
-                        wiki_name: Some(page.wiki.name),
-                        okf_compatibility: Some(OkfCompatibilityDto::from(
-                            page.wiki.okf_compatibility,
-                        )),
-                        concepts: page
-                            .concepts
-                            .into_iter()
-                            .map(|concept| PublicConceptSummaryDto {
-                                concept_id: concept.concept_id.to_string(),
-                                concept_type: concept.concept_type.into(),
-                                title: concept.title,
-                                description: concept.description,
-                                language: concept.language,
-                                tags: concept.tags,
-                                summary: concept.summary,
-                                source_revision: concept.source_revision,
-                                lifecycle: concept.lifecycle_status,
-                                assurance: concept.assurance.map(ConceptAssuranceSummary::from),
-                            })
-                            .collect(),
-                        next_cursor: page.next_cursor,
-                        append_failed: false,
-                    },
+                    Ok(page) => {
+                        let workspace = remote_workspace_parts(page.workspace, page.document).await;
+                        NearbyBrowseSummary {
+                            request_id: request_id.to_string(),
+                            status: NearbyBrowseStatus::Available,
+                            peer_id: Some(peer_id),
+                            wiki_id: Some(page.wiki.collection_id.to_string()),
+                            wiki_name: Some(page.wiki.name),
+                            okf_compatibility: Some(OkfCompatibilityDto::from(
+                                page.wiki.okf_compatibility,
+                            )),
+                            concepts: page
+                                .concepts
+                                .into_iter()
+                                .map(|concept| PublicConceptSummaryDto {
+                                    concept_id: concept.concept_id.to_string(),
+                                    concept_type: concept.concept_type.into(),
+                                    title: concept.title,
+                                    description: concept.description,
+                                    language: concept.language,
+                                    tags: concept.tags,
+                                    summary: concept.summary,
+                                    source_revision: concept.source_revision,
+                                    lifecycle: concept.lifecycle_status,
+                                    assurance: concept.assurance.map(ConceptAssuranceSummary::from),
+                                })
+                                .collect(),
+                            next_cursor: page.next_cursor,
+                            workspace_supported: workspace.workspace_supported,
+                            reserved_pages: workspace.reserved_pages,
+                            documents: workspace.documents,
+                            links: workspace.links,
+                            next_graph_cursor: workspace.next_graph_cursor,
+                            page: workspace.page,
+                            append_failed: workspace.conversion_failed,
+                        }
+                    }
                     Err(_) => NearbyBrowseSummary {
                         request_id: request_id.to_string(),
                         status: NearbyBrowseStatus::Unavailable,
@@ -4359,18 +4516,41 @@ impl AppSnapshot {
                         okf_compatibility: None,
                         concepts: Vec::new(),
                         next_cursor: None,
+                        workspace_supported: false,
+                        reserved_pages: Vec::new(),
+                        documents: Vec::new(),
+                        links: Vec::new(),
+                        next_graph_cursor: None,
+                        page: None,
                         append_failed: false,
                     },
                 };
-                if append
+                if update.kind != worker::BrowseUpdateKind::Replace
                     && let Some(previous) = self.nearby_browse.take()
                     && previous.peer_id == summary.peer_id
                     && previous.wiki_id == summary.wiki_id
                 {
+                    merge_remote_workspace(
+                        &previous,
+                        &mut summary.reserved_pages,
+                        &mut summary.documents,
+                        &mut summary.links,
+                    );
                     let mut concepts = previous.concepts;
                     concepts.extend(summary.concepts);
+                    concepts.sort_by(|left, right| left.concept_id.cmp(&right.concept_id));
+                    concepts.dedup_by(|left, right| left.concept_id == right.concept_id);
                     summary.concepts = concepts;
-                    summary.append_failed = false;
+                    summary.workspace_supported |= previous.workspace_supported;
+                    if summary.page.is_none() {
+                        summary.page = previous.page;
+                    }
+                    if !update.concepts_requested {
+                        summary.next_cursor = previous.next_cursor;
+                    }
+                    if !update.graph_requested {
+                        summary.next_graph_cursor = previous.next_graph_cursor;
+                    }
                 }
                 self.nearby_browse = Some(summary);
             }
@@ -5022,6 +5202,164 @@ fn knowledge_page_summary(
     }
 }
 
+struct RemoteWorkspaceParts {
+    workspace_supported: bool,
+    reserved_pages: Vec<RemoteWikiPageDescriptorSummary>,
+    documents: Vec<RemoteWikiPageDescriptorSummary>,
+    links: Vec<RemoteWikiGraphLinkSummary>,
+    next_graph_cursor: Option<u32>,
+    page: Option<RemoteWikiDocumentSummary>,
+    conversion_failed: bool,
+}
+
+fn remote_page_input(page: PublishedWikiPageId) -> RemoteWikiPageInput {
+    match page {
+        PublishedWikiPageId::Index => RemoteWikiPageInput::Index,
+        PublishedWikiPageId::Log => RemoteWikiPageInput::Log,
+        PublishedWikiPageId::Concept { concept_id } => RemoteWikiPageInput::Concept {
+            concept_id: concept_id.to_string(),
+        },
+    }
+}
+
+fn remote_page_descriptor(
+    descriptor: PublishedWikiPageDescriptor,
+) -> RemoteWikiPageDescriptorSummary {
+    RemoteWikiPageDescriptorSummary {
+        page: remote_page_input(descriptor.page),
+        logical_path: descriptor.logical_path,
+        title: descriptor.title,
+        fingerprint: descriptor.fingerprint,
+    }
+}
+
+async fn remote_workspace_parts(
+    workspace: Option<PublishedWikiWorkspacePage>,
+    document: Option<PublishedWikiDocument>,
+) -> RemoteWorkspaceParts {
+    let workspace_supported = workspace.is_some();
+    let (reserved_pages, documents, links, next_graph_cursor) = workspace.map_or_else(
+        || (Vec::new(), Vec::new(), Vec::new(), None),
+        |workspace| {
+            (
+                workspace
+                    .reserved_pages
+                    .into_iter()
+                    .map(remote_page_descriptor)
+                    .collect(),
+                workspace
+                    .documents
+                    .into_iter()
+                    .map(remote_page_descriptor)
+                    .collect(),
+                workspace
+                    .links
+                    .into_iter()
+                    .map(|link| RemoteWikiGraphLinkSummary {
+                        source: remote_page_input(link.source),
+                        target: remote_page_input(link.target),
+                        label: link.label,
+                    })
+                    .collect(),
+                workspace.next_graph_cursor,
+            )
+        },
+    );
+    let (page, conversion_failed) = if let Some(document) = document {
+        let PublishedWikiDocument {
+            descriptor,
+            body_markdown,
+            metadata,
+            backlinks,
+            truncated,
+        } = document;
+        match tokio::task::spawn_blocking(move || parse_knowledge_blocks(&body_markdown)).await {
+            Ok(blocks) => (
+                Some(RemoteWikiDocumentSummary {
+                    descriptor: remote_page_descriptor(descriptor),
+                    blocks,
+                    metadata,
+                    backlinks: backlinks.into_iter().map(remote_page_input).collect(),
+                    truncated,
+                }),
+                false,
+            ),
+            Err(_) => (None, true),
+        }
+    } else {
+        (None, false)
+    };
+    RemoteWorkspaceParts {
+        workspace_supported,
+        reserved_pages,
+        documents,
+        links,
+        next_graph_cursor,
+        page,
+        conversion_failed,
+    }
+}
+
+fn merge_remote_workspace<Summary>(
+    previous: &Summary,
+    reserved_pages: &mut Vec<RemoteWikiPageDescriptorSummary>,
+    documents: &mut Vec<RemoteWikiPageDescriptorSummary>,
+    links: &mut Vec<RemoteWikiGraphLinkSummary>,
+) where
+    Summary: RemoteWorkspaceSnapshot,
+{
+    reserved_pages.extend(previous.remote_reserved_pages().iter().cloned());
+    reserved_pages.sort_by(|left, right| left.logical_path.cmp(&right.logical_path));
+    reserved_pages.dedup_by(|left, right| left.page == right.page);
+
+    documents.extend(previous.remote_documents().iter().cloned());
+    documents.sort_by(|left, right| left.logical_path.cmp(&right.logical_path));
+    documents.dedup_by(|left, right| left.page == right.page);
+
+    links.extend(previous.remote_links().iter().cloned());
+    links.sort_by(|left, right| {
+        left.source
+            .cmp(&right.source)
+            .then_with(|| left.target.cmp(&right.target))
+            .then_with(|| left.label.cmp(&right.label))
+    });
+    links.dedup();
+}
+
+trait RemoteWorkspaceSnapshot {
+    fn remote_reserved_pages(&self) -> &[RemoteWikiPageDescriptorSummary];
+    fn remote_documents(&self) -> &[RemoteWikiPageDescriptorSummary];
+    fn remote_links(&self) -> &[RemoteWikiGraphLinkSummary];
+}
+
+impl RemoteWorkspaceSnapshot for PublicBrowseSummary {
+    fn remote_reserved_pages(&self) -> &[RemoteWikiPageDescriptorSummary] {
+        &self.reserved_pages
+    }
+
+    fn remote_documents(&self) -> &[RemoteWikiPageDescriptorSummary] {
+        &self.documents
+    }
+
+    fn remote_links(&self) -> &[RemoteWikiGraphLinkSummary] {
+        &self.links
+    }
+}
+
+impl RemoteWorkspaceSnapshot for NearbyBrowseSummary {
+    fn remote_reserved_pages(&self) -> &[RemoteWikiPageDescriptorSummary] {
+        &self.reserved_pages
+    }
+
+    fn remote_documents(&self) -> &[RemoteWikiPageDescriptorSummary] {
+        &self.documents
+    }
+
+    fn remote_links(&self) -> &[RemoteWikiGraphLinkSummary] {
+        &self.links
+    }
+}
+
 fn page_input_for(
     page: KnowledgePageId,
     concepts: &[airwiki_core::KnowledgeConceptView],
@@ -5260,6 +5598,12 @@ fn ui_bindings_source() -> String {
         exported_declaration::<SearchCoverage>(&config),
         exported_declaration::<SearchHitRoute>(&config),
         exported_declaration::<SearchSummary>(&config),
+        exported_declaration::<RemoteWikiPageInput>(&config),
+        exported_declaration::<RemoteWikiPageRequestInput>(&config),
+        exported_declaration::<RemoteWikiBrowseInput>(&config),
+        exported_declaration::<RemoteWikiPageDescriptorSummary>(&config),
+        exported_declaration::<RemoteWikiGraphLinkSummary>(&config),
+        exported_declaration::<RemoteWikiDocumentSummary>(&config),
         exported_declaration::<PublicBrowseStatus>(&config),
         exported_declaration::<PublicConceptSummaryDto>(&config),
         exported_declaration::<PublicBrowseSummary>(&config),
@@ -5955,6 +6299,12 @@ mod tests {
                 assurance: None,
             }],
             next_cursor: Some(Uuid::new_v4().to_string()),
+            workspace_supported: true,
+            reserved_pages: Vec::new(),
+            documents: Vec::new(),
+            links: Vec::new(),
+            next_graph_cursor: None,
+            page: None,
             append_failed: false,
         });
         let requests = Mutex::new(RequestTracker {
@@ -5968,7 +6318,11 @@ mod tests {
                     request_id,
                     peer_id,
                     collection_id,
-                    append: true,
+                    update: worker::BrowseUpdate {
+                        kind: worker::BrowseUpdateKind::Append,
+                        concepts_requested: true,
+                        graph_requested: false,
+                    },
                     result: Err("synthetic failure".to_owned()),
                 },
                 &Mutex::new(HashMap::new()),
@@ -6016,6 +6370,12 @@ mod tests {
                 assurance: None,
             }],
             next_cursor: Some(Uuid::new_v4().to_string()),
+            workspace_supported: true,
+            reserved_pages: Vec::new(),
+            documents: Vec::new(),
+            links: Vec::new(),
+            next_graph_cursor: None,
+            page: None,
             append_failed: false,
         });
         let requests = Mutex::new(RequestTracker {
@@ -6027,7 +6387,11 @@ mod tests {
             .apply(
                 WorkerEvent::PublicBrowseFinished {
                     request_id,
-                    append: true,
+                    update: worker::BrowseUpdate {
+                        kind: worker::BrowseUpdateKind::Append,
+                        concepts_requested: true,
+                        graph_requested: false,
+                    },
                     result: Err("synthetic failure".to_owned()),
                 },
                 &Mutex::new(HashMap::new()),

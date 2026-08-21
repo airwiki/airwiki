@@ -83,9 +83,12 @@ Folder Wikis can watch for new files or update manually. Imported OKF Wikis have
 - Publication, peer sharing, public discovery, and external AI access require independent human decisions.
 - Changed source knowledge is withdrawn until its new revision is reviewed.
 - The local model cannot publish, grant access, or decide whether content may leave the device.
-- The remote Wiki workspace requests only bounded summaries for published
-  concepts. It never loads remote resources, source paths, indexes or complete
-  documents from peers.
+- Search results use bounded summaries. Opening an authorized LAN or public
+  result loads the complete published OKF Wiki automatically: its hierarchy,
+  `index.md`, `log.md`, stable concept pages, metadata, and relationship graph.
+  Internal frames remain bounded, but there is no user-visible pagination or
+  silent truncation. Original source files, source paths, chunks, embeddings,
+  and operational search indexes never leave the owner's device.
 - Default logs omit documents, queries, snippets, credentials, local paths, and network identities.
 
 Read the [threat model](docs/threat-model.md) for the complete trust boundaries and failure behavior.

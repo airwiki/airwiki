@@ -4,11 +4,11 @@ use std::time::Duration;
 
 use airwiki_types::{
     PUBLIC_BROWSE_PROTOCOL, PUBLIC_BROWSE_PROTOCOL_V2, PUBLIC_BROWSE_PROTOCOL_V3,
-    PUBLIC_CATALOG_PROTOCOL, PUBLIC_CATALOG_PROTOCOL_V2, PUBLIC_SEARCH_PROTOCOL,
-    PUBLIC_SEARCH_PROTOCOL_V2, PublicBrowsePage, PublicBrowseRequest, PublicCatalogQuery,
-    PublicCollectionSummary, PublicCollectionTarget, PublicSearchRequest, SearchContractError,
-    SearchHit, SearchRequest, SearchResponse, SignedPublicCollectionManifest,
-    SignedPublicCollectionTombstone,
+    PUBLIC_BROWSE_PROTOCOL_V4, PUBLIC_CATALOG_PROTOCOL, PUBLIC_CATALOG_PROTOCOL_V2,
+    PUBLIC_SEARCH_PROTOCOL, PUBLIC_SEARCH_PROTOCOL_V2, PublicBrowsePage, PublicBrowseRequest,
+    PublicCatalogQuery, PublicCollectionSummary, PublicCollectionTarget, PublicSearchRequest,
+    PublishedWikiPageRequest, SearchContractError, SearchHit, SearchRequest, SearchResponse,
+    SignedPublicCollectionManifest, SignedPublicCollectionTombstone,
 };
 use libp2p::identity::Keypair;
 use libp2p::request_response::{self, OutboundRequestId, ProtocolSupport};
@@ -116,6 +116,31 @@ pub struct PublicBrowseResult {
     pub page: Option<PublicBrowsePage>,
     /// Availability observed while resolving this page.
     pub availability: PublicCollectionAvailability,
+}
+
+/// Selection requested while opening one public Wiki.
+///
+/// The reader owns protocol negotiation and request identifiers; callers only
+/// describe the next portion of the published workspace they need.
+#[derive(Debug, Clone)]
+pub struct PublicBrowseOptions {
+    pub cursor: Option<String>,
+    pub target_concept_id: Option<uuid::Uuid>,
+    pub graph_cursor: Option<u32>,
+    pub page: Option<PublishedWikiPageRequest>,
+    pub limit: u8,
+}
+
+impl PublicBrowseOptions {
+    pub fn new(limit: u8) -> Self {
+        Self {
+            cursor: None,
+            target_concept_id: None,
+            graph_cursor: None,
+            page: None,
+            limit,
+        }
+    }
 }
 
 impl Default for PublicReader {
@@ -381,10 +406,19 @@ impl PublicReader {
         manifest: &SignedPublicCollectionManifest,
         cursor: Option<String>,
         target_concept_id: Option<uuid::Uuid>,
+        graph_cursor: Option<u32>,
+        page: Option<PublishedWikiPageRequest>,
         limit: u8,
     ) -> Result<PublicBrowsePage, SearchContractError> {
         let result = self
-            .browse_with_route(manifest, cursor, target_concept_id, limit)
+            .browse_with_route(
+                manifest,
+                cursor,
+                target_concept_id,
+                graph_cursor,
+                page,
+                limit,
+            )
             .await?;
         let blocked = self.blocked_publishers.read().await;
         if blocked.contains(&manifest.manifest.publisher_id) {
@@ -398,6 +432,8 @@ impl PublicReader {
         manifest: &SignedPublicCollectionManifest,
         cursor: Option<String>,
         target_concept_id: Option<uuid::Uuid>,
+        graph_cursor: Option<u32>,
+        page: Option<PublishedWikiPageRequest>,
         limit: u8,
     ) -> Result<RoutedPublicBrowsePage, SearchContractError> {
         if self
@@ -420,11 +456,13 @@ impl PublicReader {
             }
         }
         let request = PublicBrowseRequest {
-            protocol_version: PUBLIC_BROWSE_PROTOCOL_V3.to_owned(),
+            protocol_version: PUBLIC_BROWSE_PROTOCOL_V4.to_owned(),
             request_id: uuid::Uuid::new_v4(),
             collection_id: manifest.manifest.collection_id,
             cursor,
             target_concept_id,
+            graph_cursor,
+            page,
             limit,
         };
         request
@@ -511,7 +549,10 @@ impl PublicReader {
                                     ));
                                 }
                             };
-                            Ok(RoutedPublicBrowsePage { page, route_kind })
+                            Ok(RoutedPublicBrowsePage {
+                                page: *page,
+                                route_kind,
+                            })
                         }
                         PublicBrowseWireResponse::Rejected(
                             PublicSourceRejection::Invalid | PublicSourceRejection::NotPublic,
@@ -542,10 +583,15 @@ impl PublicReader {
         &self,
         publisher_id: &str,
         collection_id: uuid::Uuid,
-        cursor: Option<String>,
-        target_concept_id: Option<uuid::Uuid>,
-        limit: u8,
+        options: PublicBrowseOptions,
     ) -> Result<PublicBrowseResult, SearchContractError> {
+        let PublicBrowseOptions {
+            cursor,
+            target_concept_id,
+            graph_cursor,
+            page,
+            limit,
+        } = options;
         let manifest = self
             .manifests
             .read()
@@ -578,7 +624,14 @@ impl PublicReader {
             });
         }
         let result = self
-            .browse_with_route(&manifest, cursor, target_concept_id, limit)
+            .browse_with_route(
+                &manifest,
+                cursor,
+                target_concept_id,
+                graph_cursor,
+                page,
+                limit,
+            )
             .await;
         let blocked = self.blocked_publishers.read().await;
         if blocked.contains(&manifest.manifest.publisher_id) {
@@ -886,12 +939,13 @@ fn reader_swarm(
     )?;
     let browse = versioned_outbound_behaviour(
         &[
+            PUBLIC_BROWSE_PROTOCOL_V4,
             PUBLIC_BROWSE_PROTOCOL_V3,
             PUBLIC_BROWSE_PROTOCOL_V2,
             PUBLIC_BROWSE_PROTOCOL,
         ],
         16 * 1024,
-        256 * 1024,
+        airwiki_types::MAX_SHARED_WIKI_RESPONSE_BYTES as u64,
         OWNER_RESPONSE_BUDGET,
     )?;
     SwarmBuilder::with_existing_identity(identity)
@@ -1684,7 +1738,7 @@ mod tests {
         reader.set_publisher_blocked(publisher_id, true).await;
 
         assert!(matches!(
-            reader.browse(&manifest, None, None, 1).await,
+            reader.browse(&manifest, None, None, None, None, 1).await,
             Err(SearchContractError::Unauthorized)
         ));
     }

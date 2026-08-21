@@ -6,8 +6,9 @@ use std::time::Duration;
 
 use airwiki_types::{
     ConceptType, DisclosureLease, PUBLIC_BROWSE_PROTOCOL, PUBLIC_BROWSE_PROTOCOL_V2,
-    PUBLIC_BROWSE_PROTOCOL_V3, PUBLIC_SEARCH_PROTOCOL, PUBLIC_SEARCH_PROTOCOL_V2, PublicBrowsePage,
-    PublicBrowseRequest, PublicSearchRequest, PublicSearchResponse,
+    PUBLIC_BROWSE_PROTOCOL_V3, PUBLIC_BROWSE_PROTOCOL_V4, PUBLIC_SEARCH_PROTOCOL,
+    PUBLIC_SEARCH_PROTOCOL_V2, PublicBrowsePage, PublicBrowseRequest, PublicSearchRequest,
+    PublicSearchResponse,
 };
 use async_trait::async_trait;
 use libp2p::core::transport::ListenerId;
@@ -26,6 +27,7 @@ use crate::{NetworkError, NodeIdentity, PeerRateLimiter};
 
 const PUBLIC_REQUEST_BYTES: u64 = 16 * 1024;
 const PUBLIC_RESPONSE_BYTES: u64 = 256 * 1024;
+const PUBLIC_BROWSE_RESPONSE_BYTES: u64 = airwiki_types::MAX_SHARED_WIKI_RESPONSE_BYTES as u64;
 const PUBLIC_CONCURRENT_STREAMS: usize = 64;
 const PUBLIC_INBOUND_TASKS: usize = 32;
 const PUBLIC_LISTEN_RETRY: Duration = Duration::from_millis(250);
@@ -41,7 +43,7 @@ pub enum PublicSearchWireResponse {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum PublicBrowseWireResponse {
-    Success(PublicBrowsePage),
+    Success(Box<PublicBrowsePage>),
     Rejected(PublicSourceRejection),
 }
 
@@ -113,9 +115,14 @@ impl ProtocolPayload for PublicBrowseWireResponse {
                 PUBLIC_BROWSE_PROTOCOL => PUBLIC_BROWSE_PROTOCOL,
                 PUBLIC_BROWSE_PROTOCOL_V2 => PUBLIC_BROWSE_PROTOCOL_V2,
                 PUBLIC_BROWSE_PROTOCOL_V3 => PUBLIC_BROWSE_PROTOCOL_V3,
+                PUBLIC_BROWSE_PROTOCOL_V4 => PUBLIC_BROWSE_PROTOCOL_V4,
                 _ => return Err(unsupported_public_protocol()),
             }
             .to_owned();
+            if protocol != PUBLIC_BROWSE_PROTOCOL_V4 {
+                page.workspace = None;
+                page.document = None;
+            }
             if protocol == PUBLIC_BROWSE_PROTOCOL {
                 page.concepts
                     .retain(|concept| !matches!(concept.concept_type, ConceptType::Other(_)));
@@ -211,6 +218,11 @@ impl PublicBrowseDelivery {
             page,
             _lease: lease,
         }
+    }
+
+    /// Returns the validated browse page while retaining the disclosure lease.
+    pub fn page(&self) -> &PublicBrowsePage {
+        &self.page
     }
 }
 
@@ -734,14 +746,17 @@ fn public_source_swarm(
     let search = public_behaviour(
         &[PUBLIC_SEARCH_PROTOCOL_V2, PUBLIC_SEARCH_PROTOCOL],
         request_timeout,
+        PUBLIC_RESPONSE_BYTES,
     )?;
     let browse = public_behaviour(
         &[
+            PUBLIC_BROWSE_PROTOCOL_V4,
             PUBLIC_BROWSE_PROTOCOL_V3,
             PUBLIC_BROWSE_PROTOCOL_V2,
             PUBLIC_BROWSE_PROTOCOL,
         ],
         request_timeout,
+        PUBLIC_BROWSE_RESPONSE_BYTES,
     )?;
     let local_peer = identity.peer_id();
     let swarm = SwarmBuilder::with_existing_identity(identity.keypair().clone())
@@ -815,6 +830,7 @@ fn probe_listener_address(address: &Multiaddr) -> Option<std::io::Result<()>> {
 fn public_behaviour<Request, Response>(
     protocols: &[&'static str],
     timeout: Duration,
+    response_limit: u64,
 ) -> Result<request_response::Behaviour<VersionedCborCodec<Request, Response>>, NetworkError>
 where
     Request: Clone
@@ -840,7 +856,7 @@ where
                 .map_err(|error| NetworkError::Transport(error.to_string()))
         })
         .collect::<Result<Vec<_>, _>>()?;
-    let codec = VersionedCborCodec::new(PUBLIC_REQUEST_BYTES, PUBLIC_RESPONSE_BYTES);
+    let codec = VersionedCborCodec::new(PUBLIC_REQUEST_BYTES, response_limit);
     Ok(request_response::Behaviour::with_codec(
         codec,
         protocols,
@@ -872,7 +888,7 @@ fn send_completion(behaviour: &mut SourceBehaviour, completion: Completion) {
                 handoff_public_payload(page, _lease, |page| {
                     let _ = behaviour
                         .browse
-                        .send_response(channel, PublicBrowseWireResponse::Success(page));
+                        .send_response(channel, PublicBrowseWireResponse::Success(Box::new(page)));
                 });
             }
             Err(error) => {

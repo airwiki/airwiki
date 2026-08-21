@@ -477,19 +477,29 @@ button:active:not(:disabled) { transform: scale(.985); }
 .shared-content-tabs { justify-content: space-between; }
 .shared-format { align-self: center; color: var(--muted); font-size: 11px; }
 .shared-file-browser { margin-top: 14px; }
+.shared-wiki-toolbar { align-items: center; justify-content: space-between; min-height: 58px; padding: 10px 0; }
+.shared-wiki-toolbar > .loading-state { margin-right: auto; }
+.shared-wiki-toolbar .view-switch { margin-left: auto; }
+.shared-wiki-toolbar .view-switch button { display: inline-flex; align-items: center; gap: 6px; }
+.shared-graph-view { min-height: 0; overflow: auto; }
 .file-list button.active { color: var(--strong); background: color-mix(in srgb, var(--cyan) 9%, var(--surface-raised)); box-shadow: inset 2px 0 0 var(--cyan); }
+.shared-file-browser .file-list button:disabled { opacity: .7; cursor: wait; }
+.shared-file-browser .file-list > .loading-state { padding: 8px 10px; }
 .shared-file-empty { display: flex; align-items: center; gap: 9px; min-height: 74px; padding: 12px; color: var(--muted); font-size: 13px; }
 .shared-more-warning { display: flex; align-items: flex-start; gap: 7px; margin: 8px 10px 0; padding: 9px 10px; border-radius: 6px; color: var(--amber); background: color-mix(in srgb, var(--amber) 9%, transparent); font-size: 12px; line-height: 1.35; }
 .shared-more-warning svg { flex: 0 0 auto; margin-top: 1px; }
-.shared-wiki-more { margin-top: 8px; color: var(--cyan) !important; border-top: 1px solid var(--line) !important; border-radius: 0 !important; }
 .shared-file-preview .knowledge-body { font: 400 17px/1.65 Atkinson, system-ui, sans-serif; }
 .shared-target-unavailable { gap: 10px; }
 .shared-target-unavailable strong { margin-top: 0; }
 .shared-concept-assurance { grid-template-columns: repeat(3, minmax(0, 1fr)); }
-.shared-concept-description { margin: 0 0 16px; color: var(--muted); line-height: 1.5; }
-.shared-tags { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 20px; }
-.shared-tags span { padding: 4px 8px; color: var(--muted); background: var(--surface-raised); border: 1px solid var(--line); border-radius: 999px; font-size: 11px; }
-.shared-summary-note { display: flex; align-items: center; gap: 7px; margin-top: 26px; padding-top: 14px; color: var(--muted); border-top: 1px solid var(--line); font-size: 11px; line-height: 1.4; }
+.shared-metadata { margin-top: 28px; }
+.shared-metadata dl { display: grid; margin: 12px 0 0; border-top: 1px solid var(--line); }
+.shared-metadata dl > div { display: grid; grid-template-columns: minmax(130px, 30%) minmax(0, 1fr); gap: 12px; padding: 9px 0; border-bottom: 1px solid var(--line); }
+.shared-metadata dt { color: var(--muted); font: 600 11px system-ui; overflow-wrap: anywhere; }
+.shared-metadata dd { margin: 0; color: var(--body-copy); font: 12px/1.45 ui-monospace, SFMono-Regular, Consolas, monospace; overflow-wrap: anywhere; white-space: pre-wrap; }
+.shared-legacy { display: flex; align-items: flex-start; gap: 10px; margin: 14px 0; padding: 13px 15px; color: var(--amber); background: color-mix(in srgb, var(--amber) 8%, var(--slate)); border: 1px solid color-mix(in srgb, var(--amber) 35%, var(--line)); border-radius: var(--control-radius); }
+.shared-legacy strong { color: var(--strong); }
+.shared-legacy p { margin: 4px 0 0; color: var(--muted); font-size: 13px; line-height: 1.45; }
 .shared-wiki-state { display: flex; align-items: flex-start; gap: 12px; min-height: 96px; margin-top: 18px; padding: 22px; color: var(--muted); background: var(--slate); border: 1px solid var(--line); border-radius: var(--panel-radius); }
 .shared-wiki-state.warning { color: var(--amber); border-color: color-mix(in srgb, var(--amber) 45%, var(--line)); }
 .shared-wiki-state strong { color: var(--strong); }

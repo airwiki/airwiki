@@ -18,6 +18,7 @@ use uuid::Uuid;
 
 pub const SEARCH_PROTOCOL: &str = "/airwiki/search/2.0.0";
 pub const SHARED_WIKI_BROWSE_PROTOCOL: &str = "/airwiki/shared-wiki-browse/1.0.0";
+pub const SHARED_WIKI_BROWSE_PROTOCOL_V2: &str = "/airwiki/shared-wiki-browse/2.0.0";
 pub const PUBLIC_CATALOG_PROTOCOL: &str = "/airwiki/public-catalog/1.0.0";
 pub const PUBLIC_SEARCH_PROTOCOL: &str = "/airwiki/public-search/1.0.0";
 pub const PUBLIC_BROWSE_PROTOCOL: &str = "/airwiki/public-browse/1.0.0";
@@ -25,6 +26,7 @@ pub const PUBLIC_CATALOG_PROTOCOL_V2: &str = "/airwiki/public-catalog/2.0.0";
 pub const PUBLIC_SEARCH_PROTOCOL_V2: &str = "/airwiki/public-search/2.0.0";
 pub const PUBLIC_BROWSE_PROTOCOL_V2: &str = "/airwiki/public-browse/2.0.0";
 pub const PUBLIC_BROWSE_PROTOCOL_V3: &str = "/airwiki/public-browse/3.0.0";
+pub const PUBLIC_BROWSE_PROTOCOL_V4: &str = "/airwiki/public-browse/4.0.0";
 pub const MAX_QUERY_BYTES: usize = 2 * 1024;
 pub const MAX_SNIPPET_CHARS: usize = 1_200;
 pub const MAX_HEADING_OR_PAGE_CHARS: usize = 300;

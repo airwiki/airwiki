@@ -16,7 +16,8 @@ use std::path::{Path, PathBuf};
 use std::os::windows::fs::MetadataExt;
 
 use airwiki_types::{
-    CollectionPolicy, ConceptAssurance, DocumentStatus, FreshnessState, OkfWarning, TrustTier,
+    CollectionPolicy, ConceptAssurance, DisclosureLease, DocumentStatus, FreshnessState,
+    OkfWarning, TrustTier,
 };
 use anyhow::{Context, Result, bail};
 use chrono::{DateTime, NaiveDate, Utc};
@@ -28,8 +29,8 @@ use uuid::Uuid;
 use walkdir::WalkDir;
 
 use crate::storage::{
-    CollectionRecord, ConceptRecord, Database, OkfConceptProjectionRecord, SourceDocumentRecord,
-    WikiOrigin,
+    CollectionRecord, ConceptRecord, Database, OkfConceptProjectionRecord,
+    PublishedBundleDatabaseRecords, SourceDocumentRecord, WikiOrigin,
 };
 
 #[cfg(windows)]
@@ -364,7 +365,29 @@ impl OkfBundleInspector {
     }
 
     pub fn inspect_bundle(&self, collection_id: Uuid) -> Result<KnowledgeBundleView> {
-        let before = self.database_snapshot(collection_id)?;
+        self.inspect_bundle_with(|| self.database_snapshot(collection_id))
+    }
+
+    /// Inspects a published bundle while the caller retains the disclosure
+    /// lease that authorized returning its bytes to another device.
+    ///
+    /// This is intentionally separate from [`Self::inspect_bundle`]: normal
+    /// database reads acquire the mutation barrier and would deadlock while a
+    /// disclosure lease is active. Every SQLite snapshot in this path is
+    /// instead validated against the caller's lease.
+    pub fn inspect_bundle_under_disclosure(
+        &self,
+        lease: &DisclosureLease,
+        collection_id: Uuid,
+    ) -> Result<KnowledgeBundleView> {
+        self.inspect_bundle_with(|| self.database_snapshot_under_disclosure(lease, collection_id))
+    }
+
+    fn inspect_bundle_with<F>(&self, mut database_snapshot: F) -> Result<KnowledgeBundleView>
+    where
+        F: FnMut() -> Result<DatabaseBundleSnapshot>,
+    {
+        let before = database_snapshot()?;
         let files_before = bundle_tree_fingerprint(&before.collection.wiki_folder);
         let mut view = if before.collection.origin == WikiOrigin::Folder {
             self.inspect_collection(&before)?
@@ -372,7 +395,7 @@ impl OkfBundleInspector {
             self.inspect_projected_collection(&before)?
         };
         let files_after = bundle_tree_fingerprint(&before.collection.wiki_folder);
-        let after = self.database_snapshot(collection_id)?;
+        let after = database_snapshot()?;
 
         if before.publication_pending || after.publication_pending {
             mark_bundle_updating(
@@ -406,19 +429,58 @@ impl OkfBundleInspector {
         expected_fingerprint: Option<&str>,
         max_bytes: usize,
     ) -> Result<KnowledgePageView> {
+        self.load_page_with(
+            collection_id,
+            page_id,
+            expected_fingerprint,
+            max_bytes,
+            || self.database_snapshot(collection_id),
+        )
+    }
+
+    /// Loads one already-authorized published page without releasing the
+    /// disclosure lease between database revalidation and filesystem reads.
+    pub fn load_page_under_disclosure(
+        &self,
+        lease: &DisclosureLease,
+        collection_id: Uuid,
+        page_id: KnowledgePageId,
+        expected_fingerprint: Option<&str>,
+        max_bytes: usize,
+    ) -> Result<KnowledgePageView> {
+        self.load_page_with(
+            collection_id,
+            page_id,
+            expected_fingerprint,
+            max_bytes,
+            || self.database_snapshot_under_disclosure(lease, collection_id),
+        )
+    }
+
+    fn load_page_with<F>(
+        &self,
+        collection_id: Uuid,
+        page_id: KnowledgePageId,
+        expected_fingerprint: Option<&str>,
+        max_bytes: usize,
+        mut database_snapshot: F,
+    ) -> Result<KnowledgePageView>
+    where
+        F: FnMut() -> Result<DatabaseBundleSnapshot>,
+    {
         if max_bytes == 0 {
             bail!("El límite de la página de conocimiento debe ser mayor que cero");
         }
-        let database_before = self.database_snapshot(collection_id)?;
+        let database_before = database_snapshot()?;
         Self::authorize_page(&database_before, page_id)?;
 
         // Inspect first so backlinks and internal-link resolution are derived
         // from the same fail-closed set of database-published concepts.
-        let bundle = self.inspect_bundle(collection_id)?;
+        let bundle = self.inspect_bundle_with(&mut database_snapshot)?;
         if bundle.state == KnowledgeBundleState::Updating {
             bail!("El bundle OKF se está actualizando; vuelva a cargarlo antes de abrir la página");
         }
-        let database_after_inspection = self.database_snapshot(collection_id)?;
+        let database_after_inspection = database_snapshot()?;
         if database_before.fingerprint != database_after_inspection.fingerprint {
             bail!("La autorización o publicación cambió mientras se cargaba la página");
         }
@@ -443,7 +505,7 @@ impl OkfBundleInspector {
         // Authorization and both backing snapshots are checked again after
         // parsing. This prevents a withdrawal/republication race from
         // returning bytes that were authorized only at the beginning.
-        let database_after = self.database_snapshot(collection_id)?;
+        let database_after = database_snapshot()?;
         Self::authorize_page(&database_after, page_id)?;
         if database_before.fingerprint != database_after.fingerprint {
             bail!("La autorización o publicación cambió mientras se cargaba la página");
@@ -507,21 +569,33 @@ impl OkfBundleInspector {
     }
 
     fn database_snapshot(&self, collection_id: Uuid) -> Result<DatabaseBundleSnapshot> {
-        let collection = self
+        let records = self
             .database
-            .collection(collection_id)?
-            .with_context(|| format!("La colección {collection_id} no existe"))?;
-        let published = self.database.list_published_concepts(collection_id)?;
-        let mut sources = BTreeMap::new();
-        for concept in &published {
-            sources
-                .entry(concept.source_document_id)
-                .or_insert(self.database.source_document(concept.source_document_id)?);
-        }
-        let publication_pending = self
+            .published_bundle_database_records(collection_id)?;
+        Self::database_snapshot_from_records(records)
+    }
+
+    fn database_snapshot_under_disclosure(
+        &self,
+        lease: &DisclosureLease,
+        collection_id: Uuid,
+    ) -> Result<DatabaseBundleSnapshot> {
+        let records = self
             .database
-            .collection_has_publication_claim(collection_id)?;
-        let projection = self.database.list_okf_concept_projection(collection_id)?;
+            .published_bundle_database_records_under_disclosure(lease, collection_id)?;
+        Self::database_snapshot_from_records(records)
+    }
+
+    fn database_snapshot_from_records(
+        records: PublishedBundleDatabaseRecords,
+    ) -> Result<DatabaseBundleSnapshot> {
+        let PublishedBundleDatabaseRecords {
+            collection,
+            published,
+            sources,
+            publication_pending,
+            projection,
+        } = records;
         let fingerprint =
             database_snapshot_fingerprint(&collection, &published, &sources, publication_pending)?;
         Ok(DatabaseBundleSnapshot {
@@ -3004,6 +3078,47 @@ mod tests {
         assert!(bundle.concepts.is_empty());
         assert!(bundle.health.is_healthy());
         assert_eq!(bundle.fingerprint.len(), 64);
+    }
+
+    #[test]
+    fn disclosure_lease_inspects_and_loads_a_published_page() {
+        let fixture = Fixture::new();
+        let concept = fixture.publish("published.md", "Conocimiento publicado");
+        let inspector = fixture.inspector();
+        let lease = fixture.database.disclosure_gate().acquire_disclosure();
+
+        let bundle = inspector
+            .inspect_bundle_under_disclosure(&lease, fixture.collection.id)
+            .unwrap();
+        let fingerprint = bundle
+            .page_fingerprint(KnowledgePageId::Concept(concept.id))
+            .unwrap();
+        let page = inspector
+            .load_page_under_disclosure(
+                &lease,
+                fixture.collection.id,
+                KnowledgePageId::Concept(concept.id),
+                Some(fingerprint),
+                MAX_KNOWLEDGE_PAGE_BYTES,
+            )
+            .unwrap();
+
+        assert_eq!(page.page_id, KnowledgePageId::Concept(concept.id));
+        assert!(page.body_markdown.contains("Conocimiento publicado"));
+        assert!(!page.truncated);
+    }
+
+    #[test]
+    fn disclosure_lease_from_another_database_is_rejected() {
+        let fixture = Fixture::new();
+        let foreign_database = Database::in_memory().unwrap();
+        let foreign_lease = foreign_database.disclosure_gate().acquire_disclosure();
+
+        let result = fixture
+            .inspector()
+            .inspect_bundle_under_disclosure(&foreign_lease, fixture.collection.id);
+
+        assert!(result.is_err());
     }
 
     #[test]

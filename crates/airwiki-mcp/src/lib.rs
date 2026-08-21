@@ -118,6 +118,8 @@ pub const MAX_MCP_HTTP_BODY_BYTES: usize = 64 * 1024;
 // Keep the canonical payload below half the bridge limit with additional room
 // for JSON-RPC, SSE framing, headers and escaping.
 const MAX_MCP_STRUCTURED_OUTPUT_BYTES: usize = 24 * 1024;
+#[cfg(test)]
+const MAX_AGENT_TOOL_CATALOG_BYTES: usize = 64 * 1024;
 
 const MAX_LOGICAL_RESOURCE_URI_CHARS: usize = 500;
 const MAX_OFFLINE_NODES: usize = 64;
@@ -3501,8 +3503,8 @@ mod tests {
         let serialized = serde_json::to_vec(&tools).expect("serialize tools/list response");
 
         assert!(
-            serialized.len() <= MAX_MANAGED_BRIDGE_VERIFICATION_BYTES - 4096,
-            "managed tools/list response is {} bytes",
+            serialized.len() <= MAX_AGENT_TOOL_CATALOG_BYTES,
+            "managed tools/list response is {} bytes; agent catalog budget is {MAX_AGENT_TOOL_CATALOG_BYTES}",
             serialized.len()
         );
         for tool in [

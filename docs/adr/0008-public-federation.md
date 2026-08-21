@@ -35,9 +35,12 @@ The in-memory peer rate limiter tracks at most 1,024 active identities per
 window and rejects new identities while that bounded window is full.
 
 The wire protocols are separate. Catalog and search advertise v2 with v1
-fallback. Browse advertises v3, then v2 and v1: v3 adds an exact concept anchor
-for opening a search result, while the reader translates that anchor to the
-existing UUID cursor contract when an older publisher is negotiated.
+fallback. Browse advertises v4, then v3, v2 and v1. Version 4 adds the complete
+published OKF workspace and fingerprint-bound page reads. Its bounded concept
+and graph frames are drained automatically; pagination is an internal transport
+detail. Version 3 adds an exact concept anchor for opening a search result,
+while the reader translates that anchor to the existing UUID cursor contract
+when an older publisher is negotiated.
 
 - `/airwiki/public-catalog/1.0.0`
 - `/airwiki/public-catalog/2.0.0`
@@ -46,6 +49,7 @@ existing UUID cursor contract when an older publisher is negotiated.
 - `/airwiki/public-browse/1.0.0`
 - `/airwiki/public-browse/2.0.0`
 - `/airwiki/public-browse/3.0.0`
+- `/airwiki/public-browse/4.0.0`
 
 Indexes select at most 64 collections. A reader contacts at most three indexes
 and twelve publisher peers, with two collections per peer, bounded concurrency,
@@ -71,8 +75,9 @@ remain unchanged.
 ## Consequences
 
 Public availability depends on the owner being online. Third parties may retain
-metadata and returned snippets after revocation. Index entries may remain stale
-until expiry, but owners fail closed and stop serving immediately. There is no
+search snippets and any published OKF Wiki content they opened before revocation.
+Index entries may remain stale until expiry, but owners fail closed and stop
+serving immediately. There is no
 offline replication, remote editing, account system, DHT, gossip, global
 reputation or automated moderation in v1.
 

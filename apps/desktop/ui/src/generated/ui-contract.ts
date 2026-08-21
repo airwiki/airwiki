@@ -87,15 +87,27 @@ export type SearchHitRoute = "deviceNetwork" | "publicNetwork";
 
 export type SearchSummary = { requestId: string, status: SearchStatus, hits: Array<SearchHitSummary>, coverage: SearchCoverage, };
 
+export type RemoteWikiPageInput = { "kind": "index" } | { "kind": "log" } | { "kind": "concept", conceptId: string, };
+
+export type RemoteWikiPageRequestInput = { page: RemoteWikiPageInput, expectedFingerprint: string | null, };
+
+export type RemoteWikiBrowseInput = { cursor: string | null, targetConceptId: string | null, graphCursor: number | null, page: RemoteWikiPageRequestInput | null, };
+
+export type RemoteWikiPageDescriptorSummary = { page: RemoteWikiPageInput, logicalPath: string, title: string, fingerprint: string, };
+
+export type RemoteWikiGraphLinkSummary = { source: RemoteWikiPageInput, target: RemoteWikiPageInput, label: string, };
+
+export type RemoteWikiDocumentSummary = { descriptor: RemoteWikiPageDescriptorSummary, blocks: Array<KnowledgeBlock>, metadata: Array<[string, string]>, backlinks: Array<RemoteWikiPageInput>, truncated: boolean, };
+
 export type PublicBrowseStatus = "direct" | "relay" | "expired" | "offline" | "failed";
 
 export type PublicConceptSummaryDto = { conceptId: string, conceptType: ConceptType, title: string, description: string, language: string, tags: Array<string>, summary: string, sourceRevision: number, lifecycle: string | null, assurance: ConceptAssuranceSummary | null, };
 
-export type PublicBrowseSummary = { requestId: string, status: PublicBrowseStatus, publisherId: string | null, wikiId: string | null, wikiName: string | null, description: string | null, languages: Array<string>, okfCompatibility: OkfCompatibilityDto | null, concepts: Array<PublicConceptSummaryDto>, nextCursor: string | null, appendFailed: boolean, };
+export type PublicBrowseSummary = { requestId: string, status: PublicBrowseStatus, publisherId: string | null, wikiId: string | null, wikiName: string | null, description: string | null, languages: Array<string>, okfCompatibility: OkfCompatibilityDto | null, concepts: Array<PublicConceptSummaryDto>, nextCursor: string | null, workspaceSupported: boolean, reservedPages: Array<RemoteWikiPageDescriptorSummary>, documents: Array<RemoteWikiPageDescriptorSummary>, links: Array<RemoteWikiGraphLinkSummary>, nextGraphCursor: number | null, page: RemoteWikiDocumentSummary | null, appendFailed: boolean, };
 
 export type NearbyBrowseStatus = "available" | "unavailable";
 
-export type NearbyBrowseSummary = { requestId: string, status: NearbyBrowseStatus, peerId: string | null, wikiId: string | null, wikiName: string | null, okfCompatibility: OkfCompatibilityDto | null, concepts: Array<PublicConceptSummaryDto>, nextCursor: string | null, appendFailed: boolean, };
+export type NearbyBrowseSummary = { requestId: string, status: NearbyBrowseStatus, peerId: string | null, wikiId: string | null, wikiName: string | null, okfCompatibility: OkfCompatibilityDto | null, concepts: Array<PublicConceptSummaryDto>, nextCursor: string | null, workspaceSupported: boolean, reservedPages: Array<RemoteWikiPageDescriptorSummary>, documents: Array<RemoteWikiPageDescriptorSummary>, links: Array<RemoteWikiGraphLinkSummary>, nextGraphCursor: number | null, page: RemoteWikiDocumentSummary | null, appendFailed: boolean, };
 
 export type NoticeLevel = "notice" | "warning" | "error";
 

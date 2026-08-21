@@ -4,10 +4,10 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::Duration;
 
 use airwiki_network::{
-    MemorySecretStore, Multiaddr, NodeIdentity, PublicBrowseDelivery, PublicCatalogBackend,
-    PublicCatalogBackendError, PublicIndexEndpoint, PublicReader, PublicRouteKind,
-    PublicSearchDelivery, PublicSourceBackend, PublicSourceBackendError, PublicSourceServerConfig,
-    run_public_catalog_server, run_public_source_server, sign_manifest,
+    MemorySecretStore, Multiaddr, NodeIdentity, PublicBrowseDelivery, PublicBrowseOptions,
+    PublicCatalogBackend, PublicCatalogBackendError, PublicIndexEndpoint, PublicReader,
+    PublicRouteKind, PublicSearchDelivery, PublicSourceBackend, PublicSourceBackendError,
+    PublicSourceServerConfig, run_public_catalog_server, run_public_source_server, sign_manifest,
 };
 use airwiki_types::{
     ConceptType, DisclosureGate, PUBLIC_BROWSE_PROTOCOL, PUBLIC_CATALOG_PROTOCOL,
@@ -168,6 +168,8 @@ impl PublicSourceBackend for ControlledPublicSourceBackend {
                     assurance: None,
                 }],
                 next_cursor: None,
+                workspace: None,
+                document: None,
             },
             self.disclosure.acquire_disclosure(),
         ))
@@ -292,7 +294,7 @@ async fn publisher_block_linearizes_in_flight_search_and_cached_browse() {
         let publisher_id = publisher_id.clone();
         tokio::spawn(async move {
             reader
-                .browse_collection(&publisher_id, collection_id, None, None, 10)
+                .browse_collection(&publisher_id, collection_id, PublicBrowseOptions::new(10))
                 .await
         })
     };
@@ -316,7 +318,7 @@ async fn publisher_block_linearizes_in_flight_search_and_cached_browse() {
         let publisher_id = publisher_id.clone();
         tokio::spawn(async move {
             reader
-                .browse_collection(&publisher_id, collection_id, None, None, 10)
+                .browse_collection(&publisher_id, collection_id, PublicBrowseOptions::new(10))
                 .await
         })
     };
@@ -333,7 +335,7 @@ async fn publisher_block_linearizes_in_flight_search_and_cached_browse() {
             .expect("the unavailable blocked browse completes within its budget")
             .expect("the unavailable public browse task does not panic");
     let cached_browse_after_block = reader
-        .browse_collection(&publisher_id, collection_id, None, None, 10)
+        .browse_collection(&publisher_id, collection_id, PublicBrowseOptions::new(10))
         .await;
 
     catalog_cancellation.cancel();

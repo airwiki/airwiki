@@ -125,6 +125,32 @@ const bridge: DevelopmentBridge = {
       snapshot.nearbyBrowse = {
         requestId, status: 'available', peerId: sharedPeerId, wikiId: sharedWikiId,
         wikiName: 'Guía operativa compartida', okfCompatibility: { kind: 'declaredV02' }, nextCursor: null,
+        workspaceSupported: true,
+        reservedPages: [
+          { page: { kind: 'index' }, logicalPath: 'index.md', title: 'Índice', fingerprint: 'a'.repeat(64) },
+          { page: { kind: 'log' }, logicalPath: 'log.md', title: 'Historial', fingerprint: 'b'.repeat(64) }
+        ],
+        documents: [
+          { page: { kind: 'concept', conceptId: sharedConceptId }, logicalPath: 'operations/maintenance.md', title: 'Ventana de mantenimiento segura', fingerprint: 'c'.repeat(64) },
+          { page: { kind: 'concept', conceptId: '30000000-0000-4000-8000-000000000002' }, logicalPath: 'operations/recovery.md', title: 'Recuperación', fingerprint: 'd'.repeat(64) }
+        ],
+        links: [
+          { source: { kind: 'index' }, target: { kind: 'concept', conceptId: sharedConceptId }, label: 'Mantenimiento' },
+          { source: { kind: 'concept', conceptId: sharedConceptId }, target: { kind: 'concept', conceptId: '30000000-0000-4000-8000-000000000002' }, label: 'Recuperación' }
+        ],
+        nextGraphCursor: null,
+        page: {
+          descriptor: { page: { kind: 'concept', conceptId: sharedConceptId }, logicalPath: 'operations/maintenance.md', title: 'Ventana de mantenimiento segura', fingerprint: 'c'.repeat(64) },
+          blocks: [
+            { kind: 'heading', level: 1, text: 'Ventana de mantenimiento segura' },
+            { kind: 'paragraph', text: 'Respalda el estado local y verifica su integridad antes de aplicar cambios.' },
+            { kind: 'listItem', ordered: true, text: 'Crea un respaldo local verificable.' },
+            { kind: 'listItem', ordered: true, text: 'Aplica el cambio y confirma la recuperación.' }
+          ],
+          metadata: [['type', 'Procedure'], ['status', 'stable']],
+          backlinks: [{ kind: 'index' }],
+          truncated: false
+        },
         appendFailed: false,
         concepts: [{
           conceptId: sharedConceptId, conceptType: 'Procedure', title: 'Ventana de mantenimiento segura',

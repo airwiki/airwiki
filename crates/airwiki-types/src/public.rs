@@ -6,8 +6,10 @@ use uuid::Uuid;
 use crate::{
     ConceptType, MAX_QUERY_BYTES, MAX_SNIPPET_CHARS, MAX_TOP_K, MIN_TOP_K, OkfCompatibility,
     PUBLIC_BROWSE_PROTOCOL, PUBLIC_BROWSE_PROTOCOL_V2, PUBLIC_BROWSE_PROTOCOL_V3,
-    PUBLIC_CATALOG_PROTOCOL, PUBLIC_CATALOG_PROTOCOL_V2, PUBLIC_SEARCH_PROTOCOL,
-    PUBLIC_SEARCH_PROTOCOL_V2, SearchPurpose, SearchResponse,
+    PUBLIC_BROWSE_PROTOCOL_V4, PUBLIC_CATALOG_PROTOCOL, PUBLIC_CATALOG_PROTOCOL_V2,
+    PUBLIC_SEARCH_PROTOCOL, PUBLIC_SEARCH_PROTOCOL_V2, PublishedConceptId, PublishedWikiDocument,
+    PublishedWikiPageId, PublishedWikiPageRequest, PublishedWikiWorkspacePage, SearchPurpose,
+    SearchResponse,
 };
 
 pub const MAX_PUBLIC_PAGE_SIZE: u8 = 50;
@@ -260,6 +262,10 @@ pub struct PublicBrowseRequest {
     pub cursor: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub target_concept_id: Option<Uuid>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub graph_cursor: Option<u32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub page: Option<PublishedWikiPageRequest>,
     pub limit: u8,
 }
 
@@ -275,8 +281,28 @@ impl PublicBrowseRequest {
             return Err(PublicContractError::InvalidLimit);
         }
         match protocol {
-            PUBLIC_BROWSE_PROTOCOL_V3 => {}
+            PUBLIC_BROWSE_PROTOCOL_V4 => {}
+            PUBLIC_BROWSE_PROTOCOL_V3 => {
+                if self.target_concept_id.is_none()
+                    && let Some(PublishedWikiPageRequest {
+                        page: PublishedWikiPageId::Concept { concept_id },
+                        ..
+                    }) = self.page.as_ref()
+                {
+                    self.target_concept_id = Some(*concept_id);
+                }
+                self.graph_cursor = None;
+                self.page = None;
+            }
             PUBLIC_BROWSE_PROTOCOL | PUBLIC_BROWSE_PROTOCOL_V2 => {
+                if self.target_concept_id.is_none()
+                    && let Some(PublishedWikiPageRequest {
+                        page: PublishedWikiPageId::Concept { concept_id },
+                        ..
+                    }) = self.page.as_ref()
+                {
+                    self.target_concept_id = Some(*concept_id);
+                }
                 if let Some(target) = self.target_concept_id.take() {
                     self.cursor = target
                         .as_u128()
@@ -284,6 +310,8 @@ impl PublicBrowseRequest {
                         .map(Uuid::from_u128)
                         .map(|cursor| cursor.to_string());
                 }
+                self.graph_cursor = None;
+                self.page = None;
             }
             _ => return Err(PublicContractError::UnsupportedProtocol),
         }
@@ -294,20 +322,38 @@ impl PublicBrowseRequest {
     pub fn validate(&self) -> Result<(), PublicContractError> {
         if !matches!(
             self.protocol_version.as_str(),
-            PUBLIC_BROWSE_PROTOCOL | PUBLIC_BROWSE_PROTOCOL_V2 | PUBLIC_BROWSE_PROTOCOL_V3
+            PUBLIC_BROWSE_PROTOCOL
+                | PUBLIC_BROWSE_PROTOCOL_V2
+                | PUBLIC_BROWSE_PROTOCOL_V3
+                | PUBLIC_BROWSE_PROTOCOL_V4
         ) {
             return Err(PublicContractError::UnsupportedProtocol);
         }
         if !(1..=MAX_PUBLIC_PAGE_SIZE).contains(&self.limit)
             || (self.cursor.is_some() && self.target_concept_id.is_some())
             || (self.target_concept_id.is_some()
-                && self.protocol_version != PUBLIC_BROWSE_PROTOCOL_V3)
+                && !matches!(
+                    self.protocol_version.as_str(),
+                    PUBLIC_BROWSE_PROTOCOL_V3 | PUBLIC_BROWSE_PROTOCOL_V4
+                ))
+            || (self.protocol_version != PUBLIC_BROWSE_PROTOCOL_V4
+                && (self.graph_cursor.is_some() || self.page.is_some()))
             || self
                 .cursor
                 .as_ref()
-                .is_some_and(|cursor| cursor.len() > 128 || cursor.chars().any(char::is_control))
+                .is_some_and(|cursor| Uuid::parse_str(cursor).is_err())
         {
             return Err(PublicContractError::InvalidLimit);
+        }
+        if let Some(page) = &self.page
+            && (page
+                .expected_fingerprint
+                .as_deref()
+                .is_some_and(|fingerprint| !valid_fingerprint(fingerprint))
+                || matches!(page.page, PublishedWikiPageId::Concept { concept_id }
+                    if self.target_concept_id.is_some_and(|target| target != concept_id)))
+        {
+            return Err(PublicContractError::InvalidFingerprint);
         }
         Ok(())
     }
@@ -320,6 +366,10 @@ pub struct PublicBrowsePage {
     pub manifest_sequence: u64,
     pub concepts: Vec<PublicConceptSummary>,
     pub next_cursor: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub workspace: Option<PublishedWikiWorkspacePage>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub document: Option<PublishedWikiDocument>,
 }
 
 impl PublicBrowsePage {
@@ -328,29 +378,39 @@ impl PublicBrowsePage {
         request: &PublicBrowseRequest,
         publisher_id: &str,
     ) -> Result<(), PublicContractError> {
+        let requested_after = request
+            .cursor
+            .as_deref()
+            .map(Uuid::parse_str)
+            .transpose()
+            .map_err(|_| PublicContractError::InvalidLimit)?;
+        let next_cursor = self
+            .next_cursor
+            .as_deref()
+            .map(Uuid::parse_str)
+            .transpose()
+            .map_err(|_| PublicContractError::InvalidLimit)?;
         if self.protocol_version != request.protocol_version
             || self.request_id != request.request_id
             || self.concepts.len() > usize::from(request.limit)
-            || request.target_concept_id.is_some_and(|target| {
-                self.concepts.first().map(|concept| concept.concept_id) != Some(target)
-            })
+            || (request.page.is_none()
+                && request.target_concept_id.is_some_and(|target| {
+                    self.concepts.first().map(|concept| concept.concept_id) != Some(target)
+                }))
         {
             return Err(PublicContractError::InvalidLimit);
         }
-        if self
-            .next_cursor
-            .as_ref()
-            .is_some_and(|cursor| cursor.len() > 128 || cursor.chars().any(char::is_control))
-        {
-            return Err(PublicContractError::InvalidLimit);
-        }
+        let mut previous_concept = requested_after;
         for concept in &self.concepts {
             if concept.publisher_id != publisher_id
                 || concept.collection_id != request.collection_id
                 || concept.tags.len() > 64
+                || previous_concept.is_some_and(|previous| concept.concept_id <= previous)
+                || concept.lifecycle_status.as_deref() != Some("stable")
             {
                 return Err(PublicContractError::TooManyItems);
             }
+            previous_concept = Some(concept.concept_id);
             validate_text(&concept.concept_type.to_string(), 120)?;
             validate_text(&concept.title, 240)?;
             validate_optional_text(&concept.description, 1_000)?;
@@ -365,8 +425,33 @@ impl PublicBrowsePage {
                 validate_text(tag, 64)?;
             }
         }
+        if next_cursor.is_some()
+            && (self.concepts.is_empty()
+                || next_cursor != self.concepts.last().map(|concept| concept.concept_id))
+        {
+            return Err(PublicContractError::InvalidLimit);
+        }
+        crate::shared_wiki::validate_workspace_response(
+            request.protocol_version == PUBLIC_BROWSE_PROTOCOL_V4,
+            request.graph_cursor,
+            request.page.as_ref(),
+            &self.concepts,
+            self.workspace.as_ref(),
+            self.document.as_ref(),
+        )
+        .map_err(|_| PublicContractError::InvalidText)?;
         Ok(())
     }
+}
+
+impl PublishedConceptId for PublicConceptSummary {
+    fn published_concept_id(&self) -> Uuid {
+        self.concept_id
+    }
+}
+
+fn valid_fingerprint(value: &str) -> bool {
+    value.len() == 64 && value.bytes().all(|byte| byte.is_ascii_hexdigit())
 }
 
 fn protocol_is_supported(value: &str, legacy: &str, current: &str) -> bool {
@@ -500,6 +585,8 @@ mod tests {
             collection_id: Uuid::new_v4(),
             cursor: Some("x".repeat(129)),
             target_concept_id: None,
+            graph_cursor: None,
+            page: None,
             limit: MAX_PUBLIC_PAGE_SIZE,
         };
         assert!(browse.validate().is_err());
@@ -515,6 +602,8 @@ mod tests {
             collection_id,
             cursor: None,
             target_concept_id: None,
+            graph_cursor: None,
+            page: None,
             limit: 1,
         };
         let concept = PublicConceptSummary {
@@ -539,6 +628,8 @@ mod tests {
             manifest_sequence: 1,
             concepts: vec![concept.clone(), concept],
             next_cursor: None,
+            workspace: None,
+            document: None,
         };
         assert!(page.validate_for(&request, publisher_id).is_err());
 
@@ -558,6 +649,8 @@ mod tests {
             collection_id,
             cursor: None,
             target_concept_id: Some(target),
+            graph_cursor: None,
+            page: None,
             limit: 1,
         };
         let concept = PublicConceptSummary {
@@ -582,6 +675,8 @@ mod tests {
             manifest_sequence: 1,
             concepts: vec![concept],
             next_cursor: None,
+            workspace: None,
+            document: None,
         };
         assert!(page.validate_for(&request, publisher_id).is_ok());
 
@@ -598,6 +693,8 @@ mod tests {
             collection_id: Uuid::new_v4(),
             cursor: None,
             target_concept_id: Some(target),
+            graph_cursor: None,
+            page: None,
             limit: 50,
         };
 
@@ -622,6 +719,8 @@ mod tests {
             collection_id: Uuid::new_v4(),
             cursor: None,
             target_concept_id: Some(Uuid::nil()),
+            graph_cursor: None,
+            page: None,
             limit: 1,
         };
 
@@ -641,6 +740,8 @@ mod tests {
             collection_id: Uuid::new_v4(),
             cursor: None,
             target_concept_id: Some(Uuid::new_v4()),
+            graph_cursor: None,
+            page: None,
             limit: 1,
         };
 

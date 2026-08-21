@@ -23,8 +23,8 @@ use airwiki_inference::{
 use airwiki_mcp::{McpClientActivity, McpClientKind};
 use airwiki_network::{NetworkEvent, PublicBrowseResult, PublicRouteKind};
 use airwiki_types::{
-    CollectionPolicy, EnrichmentDraft, SearchHit, SearchPurpose, SearchResponse,
-    SharedWikiBrowsePage,
+    CollectionPolicy, EnrichmentDraft, PublishedWikiPageRequest, SearchHit, SearchPurpose,
+    SearchResponse, SharedWikiBrowsePage,
 };
 use futures::FutureExt;
 use tokio::sync::{
@@ -37,6 +37,14 @@ use uuid::Uuid;
 
 type Sender<T> = tokio::sync::mpsc::Sender<T>;
 type ProgressSender<T> = tokio::sync::broadcast::Sender<T>;
+
+#[derive(Debug)]
+pub struct BrowseWorkspaceSelection {
+    pub cursor: Option<String>,
+    pub target_concept_id: Option<Uuid>,
+    pub graph_cursor: Option<u32>,
+    pub page: Option<PublishedWikiPageRequest>,
+}
 
 #[derive(Debug, PartialEq, Eq)]
 enum ContinuousWatcherPlan {
@@ -536,15 +544,13 @@ pub enum WorkerCommand {
         request_id: Uuid,
         publisher_id: String,
         collection_id: Uuid,
-        cursor: Option<String>,
-        target_concept_id: Option<Uuid>,
+        selection: BrowseWorkspaceSelection,
     },
     BrowseNearbyWiki {
         request_id: Uuid,
         peer_id: String,
         collection_id: Uuid,
-        cursor: Option<String>,
-        target_concept_id: Option<Uuid>,
+        selection: BrowseWorkspaceSelection,
     },
     SetPublicPublisherBlocked {
         publisher_id: String,
@@ -705,14 +711,14 @@ pub enum WorkerEvent {
     },
     PublicBrowseFinished {
         request_id: Uuid,
-        append: bool,
+        update: BrowseUpdate,
         result: Result<PublicBrowseResult, String>,
     },
     NearbyWikiBrowseFinished {
         request_id: Uuid,
         peer_id: String,
         collection_id: Uuid,
-        append: bool,
+        update: BrowseUpdate,
         result: Result<SharedWikiBrowsePage, String>,
     },
     ChatIntegrationsUpdated {
@@ -728,6 +734,41 @@ pub enum WorkerEvent {
     Peers(Vec<PeerView>),
     Notice(String),
     Error(String),
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum BrowseUpdateKind {
+    Replace,
+    Append,
+    Page,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct BrowseUpdate {
+    pub kind: BrowseUpdateKind,
+    pub concepts_requested: bool,
+    pub graph_requested: bool,
+}
+
+impl BrowseUpdate {
+    fn from_request(
+        cursor: Option<&str>,
+        graph_cursor: Option<u32>,
+        page: Option<&PublishedWikiPageRequest>,
+    ) -> Self {
+        let kind = if cursor.is_some() || graph_cursor.is_some_and(|cursor| cursor > 0) {
+            BrowseUpdateKind::Append
+        } else if graph_cursor == Some(0) || page.is_none() {
+            BrowseUpdateKind::Replace
+        } else {
+            BrowseUpdateKind::Page
+        };
+        Self {
+            kind,
+            concepts_requested: kind == BrowseUpdateKind::Replace || cursor.is_some(),
+            graph_requested: graph_cursor.is_some(),
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -830,14 +871,14 @@ enum BackgroundCompletion {
     },
     PublicBrowse {
         request_id: Uuid,
-        append: bool,
+        update: BrowseUpdate,
         result: Result<PublicBrowseResult, String>,
     },
     NearbyWikiBrowse {
         request_id: Uuid,
         peer_id: String,
         collection_id: Uuid,
-        append: bool,
+        update: BrowseUpdate,
         result: Result<SharedWikiBrowsePage, String>,
     },
     ChatIntegrations {
@@ -2408,33 +2449,52 @@ pub(crate) async fn run_worker(
                         }
                         refresh_content_views(&services, &events).await;
                     }
-                    WorkerCommand::BrowsePublicCollection { request_id, publisher_id, collection_id, cursor, target_concept_id } => {
+                    WorkerCommand::BrowsePublicCollection {
+                        request_id,
+                        publisher_id,
+                        collection_id,
+                        selection,
+                    } => {
                         let services = Arc::clone(&services);
-                        let append = cursor.is_some();
+                        let update = BrowseUpdate::from_request(
+                            selection.cursor.as_deref(),
+                            selection.graph_cursor,
+                            selection.page.as_ref(),
+                        );
                         background.spawn(async move {
                             let result = services
                                 .browse_public_collection(
                                     &publisher_id,
                                     collection_id,
-                                    cursor,
-                                    target_concept_id,
+                                    selection.cursor,
+                                    selection.target_concept_id,
+                                    selection.graph_cursor,
+                                    selection.page,
                                 )
                                 .await
                                 .map_err(|error| error.to_string());
-                            BackgroundCompletion::PublicBrowse { request_id, append, result }
+                            BackgroundCompletion::PublicBrowse { request_id, update, result }
                         });
                     }
-                    WorkerCommand::BrowseNearbyWiki { request_id, peer_id, collection_id, cursor, target_concept_id } => {
+                    WorkerCommand::BrowseNearbyWiki {
+                        request_id,
+                        peer_id,
+                        collection_id,
+                        selection,
+                    } => {
                         let services = Arc::clone(&services);
-                        let append = cursor.is_some();
+                        let update = BrowseUpdate::from_request(
+                            selection.cursor.as_deref(),
+                            selection.graph_cursor,
+                            selection.page.as_ref(),
+                        );
                         background.spawn(async move {
                             let result = services
                                 .browse_shared_wiki(
                                     request_id,
                                     &peer_id,
                                     collection_id,
-                                    cursor,
-                                    target_concept_id,
+                                    selection,
                                 )
                                 .await
                                 .map_err(|error| error.to_string());
@@ -2442,7 +2502,7 @@ pub(crate) async fn run_worker(
                                 request_id,
                                 peer_id,
                                 collection_id,
-                                append,
+                                update,
                                 result,
                             }
                         });
@@ -3364,12 +3424,12 @@ pub(crate) async fn run_worker(
                             WorkerEvent::SearchFinished { request_id, result },
                         ).await;
                     }
-                    Some(Ok(BackgroundCompletion::PublicBrowse { request_id, append, result })) => {
+                    Some(Ok(BackgroundCompletion::PublicBrowse { request_id, update, result })) => {
                         let result = result
                             .map_err(|error| format!("Falló la navegación pública: {error}"));
-                        send(&events, WorkerEvent::PublicBrowseFinished { request_id, append, result }).await;
+                        send(&events, WorkerEvent::PublicBrowseFinished { request_id, update, result }).await;
                     }
-                    Some(Ok(BackgroundCompletion::NearbyWikiBrowse { request_id, peer_id, collection_id, append, result })) => {
+                    Some(Ok(BackgroundCompletion::NearbyWikiBrowse { request_id, peer_id, collection_id, update, result })) => {
                         let result = result
                             .map_err(|error| format!("Falló la navegación LAN: {error}"));
                         send(
@@ -3378,7 +3438,7 @@ pub(crate) async fn run_worker(
                                 request_id,
                                 peer_id,
                                 collection_id,
-                                append,
+                                update,
                                 result,
                             },
                         ).await;

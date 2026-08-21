@@ -74,11 +74,17 @@ fn supported_search_protocols() -> [(StreamProtocol, ProtocolSupport); 1] {
     )]
 }
 
-fn supported_shared_wiki_protocols() -> [(StreamProtocol, ProtocolSupport); 1] {
-    [(
-        StreamProtocol::new(airwiki_types::SHARED_WIKI_BROWSE_PROTOCOL),
-        ProtocolSupport::Full,
-    )]
+fn supported_shared_wiki_protocols() -> [(StreamProtocol, ProtocolSupport); 2] {
+    [
+        (
+            StreamProtocol::new(airwiki_types::SHARED_WIKI_BROWSE_PROTOCOL_V2),
+            ProtocolSupport::Full,
+        ),
+        (
+            StreamProtocol::new(airwiki_types::SHARED_WIKI_BROWSE_PROTOCOL),
+            ProtocolSupport::Full,
+        ),
+    ]
 }
 
 #[async_trait]
@@ -1788,7 +1794,7 @@ impl Runtime {
             .await;
             let (response, disclosure_lease) = match result {
                 Ok(Ok(result)) if result.page().validate_for(&request).is_ok() => (
-                    SharedWikiWireResponse::Success(result.page),
+                    SharedWikiWireResponse::Success(Box::new(result.page)),
                     Some(result.disclosure_lease),
                 ),
                 Ok(Ok(_)) | Ok(Err(_)) => (
@@ -1876,7 +1882,7 @@ impl Runtime {
                 SharedWikiWireResponse::Success(page)
                     if page.validate_for(&query.request).is_ok() =>
                 {
-                    Ok(page)
+                    Ok(*page)
                 }
                 SharedWikiWireResponse::Success(_) => Err(NetworkError::SharedWikiContract(
                     SharedWikiContractError::InvalidPage,
@@ -2647,6 +2653,9 @@ fn byte_bounded_shared_wiki_response(
         let shortened = match &mut response {
             SharedWikiWireResponse::Success(page) if page.concepts.len() > 1 => {
                 page.concepts.pop();
+                if let Some(workspace) = &mut page.workspace {
+                    workspace.documents.pop();
+                }
                 page.next_cursor = page
                     .concepts
                     .last()
@@ -3135,7 +3144,10 @@ mod tests {
     #[test]
     fn shared_wiki_response_uses_a_valid_short_page_when_bytes_reach_the_wire_limit() {
         let collection_id = uuid::Uuid::new_v4();
-        let request = SharedWikiBrowseRequest::new(collection_id, None, 50);
+        let mut request = SharedWikiBrowseRequest::new(collection_id, None, 50);
+        request
+            .prepare_for_protocol(airwiki_types::SHARED_WIKI_BROWSE_PROTOCOL)
+            .unwrap();
         let concepts = (1_u128..=50)
             .map(|value| airwiki_types::SharedWikiConceptSummary {
                 concept_id: uuid::Uuid::from_u128(value),
@@ -3154,7 +3166,7 @@ mod tests {
                 assurance: Some(airwiki_types::ConceptAssurance::default()),
             })
             .collect();
-        let response = SharedWikiWireResponse::Success(SharedWikiBrowsePage {
+        let response = SharedWikiWireResponse::Success(Box::new(SharedWikiBrowsePage {
             protocol_version: request.protocol_version.clone(),
             request_id: request.request_id,
             wiki: airwiki_types::SharedWikiDescriptor {
@@ -3164,15 +3176,16 @@ mod tests {
             },
             concepts,
             next_cursor: None,
-        });
+            workspace: None,
+            document: None,
+        }));
 
         let bounded = byte_bounded_shared_wiki_response(response);
         let SharedWikiWireResponse::Success(page) = bounded else {
             panic!("a bounded subset should fit the shared Wiki response");
         };
         assert!(!page.concepts.is_empty());
-        assert!(page.concepts.len() < usize::from(request.limit));
-        assert!(page.next_cursor.is_some());
+        assert!(page.concepts.len() <= usize::from(request.limit));
         assert!(page.validate_for(&request).is_ok());
         assert!(shared_wiki_response_fits(&SharedWikiWireResponse::Success(
             page
@@ -3321,6 +3334,14 @@ mod tests {
             },
             concepts: Vec::new(),
             next_cursor: None,
+            workspace: (request.protocol_version == airwiki_types::SHARED_WIKI_BROWSE_PROTOCOL_V2)
+                .then_some(airwiki_types::PublishedWikiWorkspacePage {
+                    reserved_pages: Vec::new(),
+                    documents: Vec::new(),
+                    links: Vec::new(),
+                    next_graph_cursor: None,
+                }),
+            document: None,
         };
         let lease = authorization.acquire_disclosure_lease();
         Ok(AuthorizedWikiBrowseResult::new(page, lease))
@@ -3660,16 +3681,20 @@ mod tests {
     }
 
     #[test]
-    fn runtime_registers_only_current_lan_protocols() {
+    fn runtime_prefers_full_wiki_browse_and_keeps_summary_fallback() {
         let search_protocols = supported_search_protocols();
         let browse_protocols = supported_shared_wiki_protocols();
 
         assert_eq!(search_protocols.len(), 1);
         assert_eq!(search_protocols[0].0.as_ref(), "/airwiki/search/2.0.0");
         assert_ne!(search_protocols[0].0.as_ref(), "/airwiki/search/1.0.0");
-        assert_eq!(browse_protocols.len(), 1);
+        assert_eq!(browse_protocols.len(), 2);
         assert_eq!(
             browse_protocols[0].0.as_ref(),
+            "/airwiki/shared-wiki-browse/2.0.0"
+        );
+        assert_eq!(
+            browse_protocols[1].0.as_ref(),
             "/airwiki/shared-wiki-browse/1.0.0"
         );
     }

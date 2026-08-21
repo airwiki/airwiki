@@ -21,7 +21,8 @@ Controls are not considered effective end to end until the
 - application capability secrets, per-memory grants and managed OKF bundles;
 - pending attested-computation parameters and ephemeral receipts;
 - local models, runtime, and pinned artifact identities;
-- snippets and published concept summaries returned through LAN or MCP;
+- search snippets, MCP concept summaries, and complete published OKF pages
+  returned to authorized LAN or public readers;
 - client-owned ChatGPT, Claude, and Gemini configuration;
 - per-user background, autostart, and update configuration; and
 - integrity of the desktop, bridge, firewall helper, installer, and update data.
@@ -50,9 +51,10 @@ Controls are not considered effective end to end until the
    until updater and native signatures pass. Public update distribution is not
    active in the current baseline.
 10. **Publisher → public federation.** Replaceable indexes receive signed,
-    expiring routing metadata only. Unpaired readers receive bounded snippets or
-    concept summaries directly from the owner over Noise-authenticated QUIC or
-    relay routes. The owner remains the authorization authority.
+    expiring routing metadata only. Unpaired readers receive bounded search
+    snippets and, after opening one result, the complete published OKF Wiki
+    directly from the owner over Noise-authenticated QUIC or relay routes. The
+    owner remains the authorization authority.
 11. **Managed MCP application → memory backend.** The bridge authenticates with
     a private capability resolved from a public integration identifier. The
     backend uses bounded channels, per-Wiki grants, optimistic fingerprints,
@@ -70,8 +72,8 @@ Controls are not considered effective end to end until the
 | Threat | Design control | Residual risk / validation |
 | --- | --- | --- |
 | Unauthorized LAN peer queries data, learns listener endpoints, restores stale endpoints or steers private-network probes | Noise, SAS pairing, trust state, per-collection grants and rate limits; the wildcard listener is never announced, a dedicated bounded exchange sends OS-inspected private/on-link endpoints from active non-point-to-point interfaces only after durable trust, receivers accept only the IP observed on that exact authenticated connection, and session-scoped monotonic revisions reject delayed state | Excessive grants still disclose data; an endpoint is discovery data only and every redial authenticates the expected PeerId; test pre-trust non-disclosure, multi-interface selection, stale revision and cross-host endpoint rejection, interrupted retry, and the full grant and revocation matrix |
-| LAN browsing enumerates more knowledge than the selected result authorized | Browsing accepts one Wiki ID obtained from an authorized result, revalidates trust, the exact per-Wiki grant, policy, OKF compatibility and publication under a disclosure lease, and returns a bounded page of summaries | Repeated browsing can reconstruct the published summaries of a granted Wiki; grant only Wikis intended for that device |
-| Private or stale content reaches a public reader | Separate opt-in, reviewed-publication checks, signed sequence and fingerprint, final disclosure lease, immediate owner-side revocation | A third party can retain previously returned metadata or snippets |
+| LAN browsing enumerates more knowledge than the selected result authorized | Browsing accepts one Wiki ID obtained from an authorized result, revalidates trust, the exact per-Wiki grant, policy, OKF compatibility and publication under a disclosure lease before every bounded frame or page, and exposes only that Wiki's complete published OKF workspace | A reader can retain the complete published knowledge of a granted Wiki; grant only Wikis intended for that device |
+| Private or stale content reaches a public reader | Separate opt-in, stable reviewed-publication checks, fingerprint-bound page reads, signed sequence and fingerprint, final disclosure lease, immediate owner-side revocation | A third party can retain previously returned search metadata or published OKF content |
 | Malicious index redirects or ranks content | Expected index PeerId is pinned; owner manifests are independently signed; index rank selects routes but never final ranking | An index can omit publishers, delay tombstones, or degrade availability until replaced |
 | Public queries exhaust an owner | Three-index, 64-candidate, 12-peer and two-collection caps; bounded payloads, semaphores, per-peer rate limits with a 1,024-identity window cap, a 1 s index stage, a 3 s cold owner-connection budget and a separate 800 ms owner-response budget | Bounded connection setup, local verification and ranking add work after catalog selection; distributed abuse can still consume bounded relay and inference capacity |
 | Public registrations exhaust an index | Manifest remaining and signed lifetimes are at most 24 hours with bounded future skew; each SQLite catalog admits at most 100,000 total rows and 1,000 per publisher; expiry removes payload/FTS data but retains a compact sequence high-water mark, as do tombstones; compact rows remain for the node lifetime and count against both ceilings | An attacker can consume the bounded shared capacity and deny new registrations; operators monitor sanitized database and disk consumption and may replace or retire the index |
@@ -136,20 +138,25 @@ Controls are not considered effective end to end until the
 - The source node authorizes every disclosed search item and gates the evidence
   lane by answerability. Rejected items may appear only as separately typed
   `external_ai` candidates.
-- LAN accepts only `/airwiki/search/2.0.0` for search and
-  `/airwiki/shared-wiki-browse/1.0.0` for bounded read-only browsing; neither
-  protocol has a legacy fallback.
+- LAN accepts `/airwiki/search/2.0.0` for search and prefers
+  `/airwiki/shared-wiki-browse/2.0.0` for the complete published, read-only OKF
+  workspace. Browse v1 remains a summary-only compatibility fallback during
+  rollout; neither version broadens the Wiki grant.
 - Public catalog and search advertise v2 assurance metadata and fall back to
-  v1 during rollout. Public browse advertises v3 for exact result anchors and
-  falls back through the cursor-compatible v2 and v1 contracts; the selected
-  concept is revalidated after either adaptation. Absent legacy metadata is
-  unknown, never verified. No version bypasses stable publication. Public
-  browse cannot return originals, paths, chunks, embeddings or edit operations.
+  v1 during rollout. Public browse advertises v4 for the complete published OKF
+  workspace and fingerprint-bound pages, then falls back through v3 exact-result
+  anchors and the cursor-compatible v2 and v1 contracts. The selected concept is
+  revalidated after every adaptation. Absent legacy metadata is unknown, never
+  verified. No version bypasses stable publication. Public browse cannot return
+  original source files or paths, chunks, embeddings, the operational index, or
+  edit operations.
 - `external_ai` is never inferred from tags, classification, or model output.
-- Originals, local paths, embeddings, indexes and peer-wide Wiki listings do
-  not cross LAN. A browse request may return only bounded published concept
-  summaries for its exact currently granted Wiki.
-- Bundle visualization is local, read-only, and causes no network traffic.
+- Original source files, local paths, embeddings, chunks, operational search
+  indexes and peer-wide Wiki listings do not cross LAN. Opening a result may
+  retrieve the complete published OKF workspace for only its exact currently
+  granted Wiki; bounded transport frames are drained automatically.
+- Bundle visualization is read-only. Graph layout and interaction are local and
+  cause no polling after the bounded published graph has loaded.
 - Unknown OKF fields/types are preserved; invalid optional metadata cannot raise
   trust, authorize disclosure or enable execution.
 - Future OKF versions remain local-only. Legacy v0.1 remains readable but cannot

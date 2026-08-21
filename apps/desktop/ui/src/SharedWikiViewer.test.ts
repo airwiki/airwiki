@@ -26,9 +26,48 @@ function publicWiki(overrides: Partial<PublicBrowseSummary> = {}): PublicBrowseS
       assurance: null
     }],
     nextCursor: null,
+    workspaceSupported: false,
+    reservedPages: [],
+    documents: [],
+    links: [],
+    nextGraphCursor: null,
+    page: null,
     appendFailed: false,
     ...overrides
   };
+}
+
+function completePublicWiki(): PublicBrowseSummary {
+  const conceptPage = { kind: 'concept' as const, conceptId: 'concept-a' };
+  const conceptFingerprint = '3'.repeat(64);
+  return publicWiki({
+    workspaceSupported: true,
+    reservedPages: [{
+      page: { kind: 'index' }, logicalPath: 'index.md', title: 'Index',
+      fingerprint: '1'.repeat(64)
+    }, {
+      page: { kind: 'log' }, logicalPath: 'log.md', title: 'Log',
+      fingerprint: '2'.repeat(64)
+    }],
+    documents: [{
+      page: conceptPage, logicalPath: 'guides/first.md', title: 'First concept',
+      fingerprint: conceptFingerprint
+    }],
+    links: [{ source: { kind: 'index' }, target: conceptPage, label: 'First concept' }],
+    page: {
+      descriptor: {
+        page: conceptPage, logicalPath: 'guides/first.md', title: 'First concept',
+        fingerprint: conceptFingerprint
+      },
+      blocks: [
+        { kind: 'heading', level: 1, text: 'Published guide' },
+        { kind: 'paragraph', text: 'The complete published OKF page is visible.' }
+      ],
+      metadata: [['generated.by', 'human:owner']],
+      backlinks: [{ kind: 'index' }],
+      truncated: false
+    }
+  });
 }
 
 const labels: Record<string, string> = {
@@ -41,13 +80,17 @@ const labels: Record<string, string> = {
   'desktop-wiki-content-tab': 'Content',
   'desktop-okf-compatibility-declaredV02': 'OKF 0.2',
   'knowledge-pages': 'Pages',
+  'knowledge-index-title': 'Index',
+  'knowledge-recovery-history': 'History',
+  'desktop-wiki-view': 'View',
+  'desktop-view-list': 'List',
+  'desktop-view-graph': 'Graph',
+  'desktop-shared-published-metadata': 'Published metadata',
   'desktop-shared-summary-label': 'Summary',
   'desktop-concept-assurance-title': 'Assurance',
   'desktop-concept-type': 'Type',
   'desktop-concept-trust': 'Trust',
   'desktop-shared-source': 'Source',
-  'desktop-shared-summary-note': 'Published summary',
-  'desktop-shared-tags': 'Tags',
   'search-public-block-publisher': 'Block publisher'
 };
 
@@ -58,6 +101,41 @@ function translate(id: string): string {
 describe('SharedWikiViewer', () => {
   afterEach(cleanup);
 
+  it('renders the complete published workspace without visible pagination', async () => {
+    const onopenpage = vi.fn();
+    render(SharedWikiViewer, {
+      source: 'public',
+      sourceName: 'Public network',
+      browse: completePublicWiki(),
+      loading: false,
+      structureLoading: false,
+      pageLoading: false,
+      initialConceptId: 'concept-a',
+      t: translate,
+      metadata: () => 'Human reviewed',
+      onback: vi.fn(),
+      onopenpage
+    });
+
+    expect(await screen.findByText('The complete published OKF page is visible.')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /index\.md/ })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /log\.md/ })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'List' })).toHaveAttribute('aria-pressed', 'true');
+    expect(screen.getByRole('button', { name: 'Graph' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /load more/i })).not.toBeInTheDocument();
+
+    await fireEvent.click(screen.getByRole('button', { name: /index\.md/ }));
+    expect(onopenpage).toHaveBeenCalledWith({ kind: 'index' }, '1'.repeat(64));
+
+    await fireEvent.click(screen.getByRole('button', { name: 'Graph' }));
+    await fireEvent.click(await screen.findByRole('button', { name: 'First concept' }));
+    expect(screen.getByRole('button', { name: 'Graph' })).toHaveAttribute('aria-pressed', 'true');
+    expect(onopenpage).toHaveBeenLastCalledWith(
+      { kind: 'concept', conceptId: 'concept-a' },
+      '3'.repeat(64)
+    );
+  });
+
   it('treats publisher and Wiki IDs as part of the page identity', async () => {
     const firstWiki = publicWiki();
     const { rerender } = render(SharedWikiViewer, {
@@ -65,10 +143,12 @@ describe('SharedWikiViewer', () => {
       sourceName: 'Public network',
       browse: firstWiki,
       loading: false,
+      structureLoading: false,
+      pageLoading: false,
       t: translate,
       metadata: () => 'Unverified',
       onback: vi.fn(),
-      onmore: vi.fn()
+      onopenpage: vi.fn()
     });
 
     const heading = screen.getByRole('heading', { name: 'Shared name' });
@@ -97,10 +177,12 @@ describe('SharedWikiViewer', () => {
         }]
       }),
       loading: false,
+      structureLoading: false,
+      pageLoading: false,
       t: translate,
       metadata: () => 'Unverified',
       onback: vi.fn(),
-      onmore: vi.fn()
+      onopenpage: vi.fn()
     });
 
     await waitFor(() => expect(heading).toHaveFocus());
@@ -115,10 +197,12 @@ describe('SharedWikiViewer', () => {
       sourceName: 'Public network',
       browse: publicWiki(),
       loading: false,
+      structureLoading: false,
+      pageLoading: false,
       t: translate,
       metadata: () => 'Unverified',
       onback: vi.fn(),
-      onmore: vi.fn(),
+      onopenpage: vi.fn(),
       onblock
     });
 

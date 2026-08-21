@@ -4,11 +4,11 @@ use std::time::Duration;
 
 use airwiki_federation_index::{CatalogBackend, CatalogStore};
 use airwiki_network::{
-    MemorySecretStore, Multiaddr, NodeIdentity, PublicBrowseDelivery, PublicCatalogBackend,
-    PublicCatalogBackendError, PublicIndexEndpoint, PublicReader, PublicRouteKind,
-    PublicSearchDelivery, PublicSourceBackend, PublicSourceBackendError, PublicSourceServerConfig,
-    relay_circuit_address, relayed_peer_address, run_public_catalog_server,
-    run_public_source_server, sign_manifest,
+    MemorySecretStore, Multiaddr, NodeIdentity, PublicBrowseDelivery, PublicBrowseOptions,
+    PublicCatalogBackend, PublicCatalogBackendError, PublicIndexEndpoint, PublicReader,
+    PublicRouteKind, PublicSearchDelivery, PublicSourceBackend, PublicSourceBackendError,
+    PublicSourceServerConfig, relay_circuit_address, relayed_peer_address,
+    run_public_catalog_server, run_public_source_server, sign_manifest,
 };
 use airwiki_types::{
     ConceptType, DisclosureGate, PUBLIC_BROWSE_PROTOCOL, PUBLIC_CATALOG_PROTOCOL,
@@ -103,6 +103,20 @@ impl PublicSourceBackend for PublicFixtureBackend {
                     assurance: None,
                 }],
                 next_cursor: None,
+                workspace: Some(airwiki_types::PublishedWikiWorkspacePage {
+                    reserved_pages: Vec::new(),
+                    documents: vec![airwiki_types::PublishedWikiPageDescriptor {
+                        page: airwiki_types::PublishedWikiPageId::Concept {
+                            concept_id: request.collection_id,
+                        },
+                        logical_path: format!("concepts/{}.md", request.collection_id),
+                        title: "Atlas recovery".to_owned(),
+                        fingerprint: "c".repeat(64),
+                    }],
+                    links: Vec::new(),
+                    next_graph_cursor: None,
+                }),
+                document: None,
             },
             self.gate.acquire_disclosure(),
         ))
@@ -242,6 +256,8 @@ async fn public_search_round_trip_needs_no_lan_pairing_or_grant() {
             &manifest,
             None,
             response.hits.first().map(|hit| hit.concept_id),
+            None,
+            None,
             50,
         )
         .await
@@ -601,9 +617,13 @@ async fn public_search_and_browse_use_outbound_relay_reservation() {
         .browse_collection(
             &source_identity.peer_id().to_string(),
             collection_id,
-            None,
-            result.response.hits.first().map(|hit| hit.concept_id),
-            50,
+            PublicBrowseOptions {
+                cursor: None,
+                target_concept_id: result.response.hits.first().map(|hit| hit.concept_id),
+                graph_cursor: None,
+                page: None,
+                limit: 50,
+            },
         )
         .await
         .unwrap();
@@ -868,9 +888,13 @@ async fn public_search_and_browse_fail_over_to_second_outbound_relay_reservation
         .browse_collection(
             &source_identity.peer_id().to_string(),
             collection_id,
-            None,
-            result.response.hits.first().map(|hit| hit.concept_id),
-            50,
+            PublicBrowseOptions {
+                cursor: None,
+                target_concept_id: result.response.hits.first().map(|hit| hit.concept_id),
+                graph_cursor: None,
+                page: None,
+                limit: 50,
+            },
         )
         .await
         .unwrap();

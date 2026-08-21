@@ -59,13 +59,19 @@ true immediately before handoff:
   `allow_external_ai`;
 - the requested revision remains published and passed the answerability gate.
 
-After an authorized search identifies a specific Wiki, the reader may request
-one bounded page of its published concept summaries over
-`/airwiki/shared-wiki-browse/1.0.0`. The source revalidates the same trusted
-identity, exact per-Wiki grant, `peer_shareable` policy, OKF compatibility and
-publication state under a disclosure lease immediately before handoff. This is
-not a catalog API: it accepts one explicit Wiki ID and returns neither other
-Wiki names, complete documents, source paths, chunks, embeddings nor indexes.
+After an authorized search identifies a specific Wiki, the reader may open its
+complete published OKF workspace over `/airwiki/shared-wiki-browse/2.0.0`.
+AirWiki retrieves bounded concept and graph frames automatically and individual
+published pages by fingerprint; there is no user-visible pagination and no
+silent preview truncation. The workspace includes the published hierarchy,
+root `index.md`, root `log.md`, stable concept pages, metadata, backlinks and
+internal graph edges. Version 1 remains a summary-only fallback for older peers.
+
+The source revalidates the same trusted identity, exact per-Wiki grant,
+`peer_shareable` policy, OKF compatibility and publication state under a
+disclosure lease immediately before every handoff. This is not a catalog API:
+it accepts one explicit Wiki ID and returns neither other Wiki names, original
+source files or paths, chunks, embeddings nor the operational search index.
 
 Runtime access is only a cache of durable state. Authorization intersects the
 runtime snapshot with SQLite and fails closed on missing, stale, malformed or

@@ -145,9 +145,13 @@ tray is known to be operational; all foreground launches start visible.
 - Local publication always requires review.
 - LAN search and read-only Wiki browsing require authenticated pairing,
   collection policy and a grant at the source node. Search returns bounded
-  evidence; browsing a Wiki identified by one of those results returns bounded
-  published concept summaries over `/airwiki/shared-wiki-browse/1.0.0`. Neither
-  path returns a peer-wide Wiki catalog, source paths or complete documents.
+  evidence. Browsing a Wiki identified by one of those results negotiates
+  `/airwiki/shared-wiki-browse/2.0.0` and automatically reconstructs the complete
+  published OKF workspace from bounded frames: hierarchy, root `index.md` and
+  `log.md`, stable concept pages, metadata, and verified internal graph edges.
+  Version 1 remains a summary-only compatibility fallback. Neither path returns
+  a peer-wide Wiki catalog, original source files or paths, chunks, embeddings,
+  or the owner's operational search index.
   After the dynamic TCP port is known, the desktop registers only concrete
   private/on-link IPv4 endpoints from active OS-inspected non-point-to-point
   interfaces and hides the wildcard listener. Multiple active LAN interfaces

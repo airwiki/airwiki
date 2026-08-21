@@ -43,8 +43,8 @@ pub use public_manifest::{
     PublicManifestError, sign_manifest, sign_tombstone, verify_manifest, verify_tombstone,
 };
 pub use public_reader::{
-    PublicBrowseResult, PublicCollectionAvailability, PublicIndexEndpoint, PublicReader,
-    PublicRouteKind, PublicSearchResult,
+    PublicBrowseOptions, PublicBrowseResult, PublicCollectionAvailability, PublicIndexEndpoint,
+    PublicReader, PublicRouteKind, PublicSearchResult,
 };
 pub use public_source::{
     PublicBrowseDelivery, PublicBrowseWireResponse, PublicRelayReadiness, PublicSearchDelivery,

@@ -10,13 +10,14 @@
   import Sparkles from '@lucide/svelte/icons/sparkles';
   import { listen } from '@tauri-apps/api/event';
   import { onMount, tick } from 'svelte';
-  import { addFederationIndex, addWiki, allowPeerPairingAgain, approveReview, browseNearbyWiki, browsePublicWiki, cancelModelInstall, checkUpdates, configureFirewall, confirmPairing, connect, deleteWiki, dialPeer, downloadUpdate, executeComputation, executeGuidedWikiRepair, hideToTray, importOkf, installModels, installUpdate, loadReviewEvidence, loadWikiBundle, loadWikiPage, manageIntegration, openExternalLink, openSystemDestination, pairPeer, pickOkfImport, pickWikiFolder, prepareGuidedWikiRepair, quitCompletely, reanalyzeReview, refreshApplicationAccess, refreshAutostart, refreshComputations, refreshConnectivity, refreshWikiHealth, rejectComputation, rejectReview, relinkWiki, removeFederationIndex, rescanWiki, revokePeer, saveComputationResult, searchKnowledge, setApplicationWikiRole, setAutostart, setPublicPublisherBlocked, setWikiGrant, setWikiIndexing, updatePreferences, updatePublicWikiProfile, updateWikiPolicy, validateOkfImport, verifyWikiConcept, type AppSnapshot, type ApplicationWikiRoleInput, type CloseBehavior, type EnrichmentDraft, type FolderSelection, type IntegrationActionInput, type KnowledgeConceptSummary, type KnowledgePageInput, type LanPreference, type LocalePreference, type OkfImportSummary, type PublicConceptSummaryDto, type ReviewSummary, type SearchCoverage, type SearchHitSummary, type SourceIssueSummary, type SystemDestination, type ThemePreference, type UpdaterIssue, type WikiPolicyInput, type WikiSummary } from './api';
+  import { addFederationIndex, addWiki, allowPeerPairingAgain, approveReview, browseNearbyWiki, browsePublicWiki, cancelModelInstall, checkUpdates, configureFirewall, confirmPairing, connect, deleteWiki, dialPeer, downloadUpdate, executeComputation, executeGuidedWikiRepair, hideToTray, importOkf, installModels, installUpdate, loadReviewEvidence, loadWikiBundle, loadWikiPage, manageIntegration, openExternalLink, openSystemDestination, pairPeer, pickOkfImport, pickWikiFolder, prepareGuidedWikiRepair, quitCompletely, reanalyzeReview, refreshApplicationAccess, refreshAutostart, refreshComputations, refreshConnectivity, refreshWikiHealth, rejectComputation, rejectReview, relinkWiki, removeFederationIndex, rescanWiki, revokePeer, saveComputationResult, searchKnowledge, setApplicationWikiRole, setAutostart, setPublicPublisherBlocked, setWikiGrant, setWikiIndexing, updatePreferences, updatePublicWikiProfile, updateWikiPolicy, validateOkfImport, verifyWikiConcept, type AppSnapshot, type ApplicationWikiRoleInput, type CloseBehavior, type EnrichmentDraft, type FolderSelection, type IntegrationActionInput, type KnowledgeConceptSummary, type KnowledgePageInput, type LanPreference, type LocalePreference, type OkfImportSummary, type PublicConceptSummaryDto, type RemoteWikiPageInput, type ReviewSummary, type SearchCoverage, type SearchHitSummary, type SourceIssueSummary, type SystemDestination, type ThemePreference, type UpdaterIssue, type WikiPolicyInput, type WikiSummary } from './api';
   import KnowledgeGraph from './KnowledgeGraph.svelte';
   import ConnectionAdvanced from './ConnectionAdvanced.svelte';
   import GlobalSearch from './GlobalSearch.svelte';
   import IntegrationList from './IntegrationList.svelte';
   import OnboardingFlow from './OnboardingFlow.svelte';
   import SharedWikiViewer from './SharedWikiViewer.svelte';
+  import LoadingState from './components/LoadingState.svelte';
   import SystemStatusBar from './SystemStatusBar.svelte';
   import WikiTable from './WikiTable.svelte';
   import Checkbox from './components/controls/Checkbox.svelte';
@@ -91,9 +92,13 @@
   let federationAddress = '';
   let manualPeerAddress = '';
   let sharedBrowseRequestId: string | null = null;
+  let sharedBrowseRequestKind: 'initial' | 'structure' | 'page' | null = null;
+  let sharedBrowsePendingPage: { page: RemoteWikiPageInput; expectedFingerprint: string } | null = null;
   let sharedBrowseGeneration = 0;
   let sharedBrowseOpen = false;
   let sharedBrowseLoading = false;
+  let sharedBrowseStructureLoading = false;
+  let sharedBrowsePageLoading = false;
   let sharedBrowseSource: SharedWikiSource = 'public';
   let sharedBrowseSourceName = '';
   let sharedBrowseInitialConceptId: string | null = null;
@@ -508,8 +513,7 @@
         updaterAction = null;
       }
       if (event.requestId && event.requestId === sharedBrowseRequestId) {
-        sharedBrowseRequestId = null;
-        sharedBrowseLoading = false;
+        void completeSharedBrowseRequest(event.snapshot);
       }
       if (event.requestId && event.requestId === guidedRepairRequestId) guidedRepairRequestId = null;
       runtimeMessageId = event.snapshot.phase === 'ready' ? 'status-ready' : 'status-working';
@@ -1256,24 +1260,37 @@
     sharedBrowseInitialConceptId = hit.conceptId;
     sharedBrowseOpen = true;
     sharedBrowseLoading = true;
+    sharedBrowseStructureLoading = true;
+    sharedBrowsePageLoading = false;
+    sharedBrowsePendingPage = null;
+    sharedBrowseRequestKind = 'initial';
     actionMessage = '';
     try {
+      const options = {
+        targetConceptId: hit.conceptId,
+        graphCursor: 0,
+        page: {
+          page: { kind: 'concept' as const, conceptId: hit.conceptId },
+          expectedFingerprint: null
+        }
+      };
       const requestId = browseSource === 'nearby'
-        ? await browseNearbyWiki(hit.nodeId, hit.wikiId, { targetConceptId: hit.conceptId })
-        : await browsePublicWiki(hit.nodeId, hit.wikiId, { targetConceptId: hit.conceptId });
+        ? await browseNearbyWiki(hit.nodeId, hit.wikiId, options)
+        : await browsePublicWiki(hit.nodeId, hit.wikiId, options);
       if (browseGeneration !== sharedBrowseGeneration || !sharedBrowseOpen) return;
       sharedBrowseRequestId = requestId;
       const completedRequestId = browseSource === 'nearby'
         ? snapshot?.nearbyBrowse?.requestId
         : snapshot?.publicBrowse?.requestId;
       if (completedRequestId === requestId) {
-        sharedBrowseRequestId = null;
-        sharedBrowseLoading = false;
+        await completeSharedBrowseRequest(snapshot);
       }
     } catch {
       if (browseGeneration !== sharedBrowseGeneration || !sharedBrowseOpen) return;
       sharedBrowseRequestId = null;
+      sharedBrowseRequestKind = null;
       sharedBrowseLoading = false;
+      sharedBrowseStructureLoading = false;
       actionMessage = t(browseSource === 'nearby'
         ? 'desktop-shared-nearby-unavailable'
         : 'search-coverage-public-offline');
@@ -1284,7 +1301,11 @@
     sharedBrowseGeneration += 1;
     sharedBrowseOpen = false;
     sharedBrowseLoading = false;
+    sharedBrowseStructureLoading = false;
+    sharedBrowsePageLoading = false;
     sharedBrowseRequestId = null;
+    sharedBrowseRequestKind = null;
+    sharedBrowsePendingPage = null;
     sharedBrowseInitialConceptId = null;
   }
 
@@ -1307,23 +1328,49 @@
     await loadWikiPage(pending.wikiId, concept.page);
   }
 
-  async function loadMoreSharedConcepts() {
+  async function continueSharedBrowse(current: AppSnapshot | null) {
+    if (!sharedBrowseOpen || sharedBrowseRequestId !== null || sharedBrowseRequestKind !== null) return;
+    if (sharedBrowsePendingPage) {
+      const pendingPage = sharedBrowsePendingPage;
+      sharedBrowsePendingPage = null;
+      await requestSharedWikiPage(pendingPage);
+      return;
+    }
+    if (sharedBrowsePageLoading) return;
     const browseGeneration = sharedBrowseGeneration;
     const browseSource = sharedBrowseSource;
+    const browse = browseSource === 'nearby' ? current?.nearbyBrowse : current?.publicBrowse;
+    if (!browse || browse.appendFailed || !browse.workspaceSupported) {
+      sharedBrowseStructureLoading = false;
+      return;
+    }
+    if (!browse.nextCursor && browse.nextGraphCursor === null) {
+      sharedBrowseStructureLoading = false;
+      return;
+    }
+    sharedBrowseStructureLoading = true;
     try {
-      let request: Promise<string> | null = null;
+      let request: Promise<string>;
+      const options = {
+        cursor: browse.nextCursor,
+        graphCursor: browse.nextGraphCursor
+      };
       if (browseSource === 'nearby') {
-        const browse = snapshot?.nearbyBrowse;
-        if (browse?.peerId && browse.wikiId && browse.nextCursor) {
-          request = browseNearbyWiki(browse.peerId, browse.wikiId, { cursor: browse.nextCursor });
+        const nearbyBrowse = browse as NonNullable<AppSnapshot['nearbyBrowse']>;
+        if (!nearbyBrowse.peerId || !nearbyBrowse.wikiId) {
+          sharedBrowseStructureLoading = false;
+          return;
         }
+        request = browseNearbyWiki(nearbyBrowse.peerId, nearbyBrowse.wikiId, options);
       } else {
-        const browse = snapshot?.publicBrowse;
-        if (browse?.publisherId && browse.wikiId && browse.nextCursor) {
-          request = browsePublicWiki(browse.publisherId, browse.wikiId, { cursor: browse.nextCursor });
+        const publicBrowse = browse as NonNullable<AppSnapshot['publicBrowse']>;
+        if (!publicBrowse.publisherId || !publicBrowse.wikiId) {
+          sharedBrowseStructureLoading = false;
+          return;
         }
+        request = browsePublicWiki(publicBrowse.publisherId, publicBrowse.wikiId, options);
       }
-      if (!request) return;
+      sharedBrowseRequestKind = 'structure';
       const completedRequestId = await request;
       if (
         browseGeneration !== sharedBrowseGeneration
@@ -1336,6 +1383,7 @@
       sharedBrowseRequestId = snapshotRequestId === completedRequestId
         ? null
         : completedRequestId;
+      if (snapshotRequestId === completedRequestId) await completeSharedBrowseRequest(snapshot);
     } catch {
       if (
         browseGeneration !== sharedBrowseGeneration
@@ -1343,8 +1391,85 @@
         || !sharedBrowseOpen
       ) return;
       sharedBrowseRequestId = null;
+      sharedBrowseRequestKind = null;
+      sharedBrowsePendingPage = null;
+      sharedBrowseStructureLoading = false;
+      sharedBrowsePageLoading = false;
       actionMessage = t('search-error-title');
     }
+  }
+
+  async function openSharedWikiPage(
+    page: RemoteWikiPageInput,
+    expectedFingerprint: string
+  ) {
+    if (!sharedBrowseOpen) return;
+    const pendingPage = { page, expectedFingerprint };
+    if (sharedBrowseRequestId !== null || sharedBrowseRequestKind !== null) {
+      sharedBrowsePendingPage = pendingPage;
+      sharedBrowsePageLoading = true;
+      return;
+    }
+    await requestSharedWikiPage(pendingPage);
+  }
+
+  async function requestSharedWikiPage(
+    pendingPage: { page: RemoteWikiPageInput; expectedFingerprint: string }
+  ) {
+    const browseGeneration = sharedBrowseGeneration;
+    const browseSource = sharedBrowseSource;
+    const browse = browseSource === 'nearby' ? snapshot?.nearbyBrowse : snapshot?.publicBrowse;
+    if (!browse?.wikiId) {
+      sharedBrowsePageLoading = false;
+      return;
+    }
+    sharedBrowsePageLoading = true;
+    sharedBrowseRequestKind = 'page';
+    try {
+      const options = { page: pendingPage };
+      const ownerId = browseSource === 'nearby'
+        ? (browse as NonNullable<AppSnapshot['nearbyBrowse']>).peerId
+        : (browse as NonNullable<AppSnapshot['publicBrowse']>).publisherId;
+      const requestId = !ownerId
+        ? null
+        : browseSource === 'nearby'
+          ? await browseNearbyWiki(ownerId, browse.wikiId, options)
+          : await browsePublicWiki(ownerId, browse.wikiId, options);
+      if (!requestId || browseGeneration !== sharedBrowseGeneration || !sharedBrowseOpen) {
+        sharedBrowsePageLoading = false;
+        return;
+      }
+      sharedBrowseRequestId = requestId;
+      const snapshotRequestId = browseSource === 'nearby'
+        ? snapshot?.nearbyBrowse?.requestId
+        : snapshot?.publicBrowse?.requestId;
+      if (snapshotRequestId === requestId) {
+        await completeSharedBrowseRequest(snapshot);
+      }
+    } catch {
+      if (browseGeneration !== sharedBrowseGeneration || !sharedBrowseOpen) return;
+      sharedBrowseRequestId = null;
+      sharedBrowseRequestKind = null;
+      sharedBrowsePendingPage = null;
+      sharedBrowsePageLoading = false;
+      actionMessage = t('search-error-title');
+    }
+  }
+
+  async function completeSharedBrowseRequest(current: AppSnapshot | null) {
+    const completedKind = sharedBrowseRequestKind;
+    sharedBrowseRequestId = null;
+    sharedBrowseRequestKind = null;
+    sharedBrowseLoading = false;
+    if (completedKind === 'page') sharedBrowsePageLoading = false;
+    if (!sharedBrowseOpen) return;
+    if (sharedBrowsePendingPage) {
+      const pendingPage = sharedBrowsePendingPage;
+      sharedBrowsePendingPage = null;
+      await requestSharedWikiPage(pendingPage);
+      return;
+    }
+    await continueSharedBrowse(current);
   }
 
   async function changePublisherBlock(publisherId: string, blocked: boolean) {
@@ -1748,10 +1873,10 @@
             </div>
           {:else if destination === 'search'}
             {#if sharedBrowseOpen}
-              <SharedWikiViewer source={sharedBrowseSource} sourceName={sharedBrowseSourceName} browse={sharedBrowseLoading ? null : sharedBrowseSource === 'nearby' ? snapshot.nearbyBrowse : snapshot.publicBrowse} loading={sharedBrowseLoading} initialConceptId={sharedBrowseInitialConceptId} {t} metadata={publicConceptMetadata} onback={closeSharedBrowse} onmore={loadMoreSharedConcepts} onblock={sharedBrowseSource === 'public' ? (publisherId) => changePublisherBlock(publisherId, true) : null} />
+              <SharedWikiViewer source={sharedBrowseSource} sourceName={sharedBrowseSourceName} browse={sharedBrowseLoading ? null : sharedBrowseSource === 'nearby' ? snapshot.nearbyBrowse : snapshot.publicBrowse} loading={sharedBrowseLoading} structureLoading={sharedBrowseStructureLoading} pageLoading={sharedBrowsePageLoading} initialConceptId={sharedBrowseInitialConceptId} {t} metadata={publicConceptMetadata} onback={closeSharedBrowse} onopenpage={openSharedWikiPage} onblock={sharedBrowseSource === 'public' ? (publisherId) => changePublisherBlock(publisherId, true) : null} />
             {:else}
               <header class="page-heading"><div><h1 tabindex="-1">{t('desktop-page-search-title')}</h1><p>{t('desktop-page-search-body')}</p></div></header>
-              {#if !snapshot.model?.active}<div class="search-welcome" role="status"><Sparkles size={32} aria-hidden="true" /><h2>{t('desktop-search-preparing-title')}</h2><p>{t('desktop-search-preparing-body')}</p><button class="secondary" onclick={() => openServiceStatus('knowledge')}>{t('desktop-search-preparing-action')}</button></div>{:else if snapshot.search && snapshot.search.requestId === activeSearchRequestId}<div class="search-results" aria-live="polite">{#if snapshot.search.status === 'searching'}<div class="search-state working" role="status"><span class="status-dot working" aria-hidden="true"></span><span>{t('search-running')}</span></div>{:else if snapshot.search.status === 'failed'}<div class="search-state error" role="alert"><AlertTriangle size={17} aria-hidden="true" /><span>{t('search-error-title')}</span></div>{:else if snapshot.search.hits.length > 0}<p class="section-label">{t('desktop-search-found')}</p>{/if}{#if snapshot.search.status === 'complete' && snapshot.search.coverage !== 'complete' && snapshot.search.hits.length > 0}<div class="search-state warning" role="status"><AlertTriangle size={17} aria-hidden="true" /><span>{searchCoverageMessage(snapshot.search.coverage)}</span></div>{/if}{#each snapshot.search.hits as hit (`${hit.nodeId}:${hit.wikiId}:${hit.conceptId}:${hit.rank}`)}<article><small>{searchOriginFor(hit)} · {hit.headingOrPage}</small><h3>{hit.title}</h3><p>{hit.snippet}</p><div class="citation-row"><span>{searchSourceFor(hit)}</span><span>{t('search-revision', { revision: hit.sourceRevision })}</span>{#if searchAssuranceLabel(hit)}<span>{searchAssuranceLabel(hit)}</span>{/if}</div><button class="text-action" onclick={() => openSearchHit(hit)} disabled={sharedBrowseRequestId !== null}>{t('action-open')}</button></article>{:else}{#if snapshot.search.status === 'complete'}<div class="table-empty"><strong>{snapshot.search.coverage === 'complete' ? t('search-empty-title') : t('search-coverage-incomplete-title')}</strong><p>{snapshot.search.coverage === 'complete' ? t(includePublic ? 'search-empty-public-body' : 'search-empty-local-body') : searchCoverageMessage(snapshot.search.coverage)}</p></div>{/if}{/each}</div>{:else}<div class="search-welcome"><BookOpen size={32} aria-hidden="true" /><h2>{t('desktop-search-welcome-title')}</h2><p>{t('desktop-search-welcome-body')}</p></div>{/if}
+              {#if !snapshot.model?.active}<div class="search-welcome" role="status"><Sparkles size={32} aria-hidden="true" /><h2>{t('desktop-search-preparing-title')}</h2><p>{t('desktop-search-preparing-body')}</p><button class="secondary" onclick={() => openServiceStatus('knowledge')}>{t('desktop-search-preparing-action')}</button></div>{:else if searchBusy && (!snapshot.search || snapshot.search.requestId !== activeSearchRequestId)}<div class="search-results"><LoadingState label={t('search-running')} detail={t('desktop-search-loading-detail')} /></div>{:else if snapshot.search && snapshot.search.requestId === activeSearchRequestId}<div class="search-results" aria-live="polite">{#if snapshot.search.status === 'searching'}<LoadingState label={t('search-running')} detail={snapshot.search.hits.length > 0 ? t('desktop-search-loading-partial') : t('desktop-search-loading-detail')} compact />{:else if snapshot.search.status === 'failed'}<div class="search-state error" role="alert"><AlertTriangle size={17} aria-hidden="true" /><span>{t('search-error-title')}</span></div>{:else if snapshot.search.hits.length > 0}<p class="section-label">{t('desktop-search-found')}</p>{/if}{#if snapshot.search.status === 'complete' && snapshot.search.coverage !== 'complete' && snapshot.search.hits.length > 0}<div class="search-state warning" role="status"><AlertTriangle size={17} aria-hidden="true" /><span>{searchCoverageMessage(snapshot.search.coverage)}</span></div>{/if}{#each snapshot.search.hits as hit (`${hit.nodeId}:${hit.wikiId}:${hit.conceptId}:${hit.rank}`)}<article><small>{searchOriginFor(hit)} · {hit.headingOrPage}</small><h3>{hit.title}</h3><p>{hit.snippet}</p><div class="citation-row"><span>{searchSourceFor(hit)}</span><span>{t('search-revision', { revision: hit.sourceRevision })}</span>{#if searchAssuranceLabel(hit)}<span>{searchAssuranceLabel(hit)}</span>{/if}</div><button class="text-action" onclick={() => openSearchHit(hit)} disabled={sharedBrowseRequestId !== null}>{t('action-open')}</button></article>{:else}{#if snapshot.search.status === 'complete'}<div class="table-empty"><strong>{snapshot.search.coverage === 'complete' ? t('search-empty-title') : t('search-coverage-incomplete-title')}</strong><p>{snapshot.search.coverage === 'complete' ? t(includePublic ? 'search-empty-public-body' : 'search-empty-local-body') : searchCoverageMessage(snapshot.search.coverage)}</p></div>{/if}{/each}</div>{:else}<div class="search-welcome"><BookOpen size={32} aria-hidden="true" /><h2>{t('desktop-search-welcome-title')}</h2><p>{t('desktop-search-welcome-body')}</p></div>{/if}
             {/if}
           {:else if destination === 'system'}
             <header class="page-heading"><div><h1 tabindex="-1">{t('desktop-page-system-title')}</h1><p>{t('desktop-page-system-body')}</p></div></header>

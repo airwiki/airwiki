@@ -24,7 +24,7 @@ pub enum SearchWireResponse {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum SharedWikiWireResponse {
-    Success(SharedWikiBrowsePage),
+    Success(Box<SharedWikiBrowsePage>),
     Error(SearchWireError),
 }
 
@@ -156,12 +156,22 @@ impl Codec for BoundedSharedWikiCodec {
     type Request = SharedWikiBrowseRequest;
     type Response = SharedWikiWireResponse;
 
-    async fn read_request<T>(&mut self, _: &Self::Protocol, io: &mut T) -> io::Result<Self::Request>
+    async fn read_request<T>(
+        &mut self,
+        protocol: &Self::Protocol,
+        io: &mut T,
+    ) -> io::Result<Self::Request>
     where
         T: AsyncRead + Unpin + Send,
     {
         let request: SharedWikiBrowseRequest =
             decode_bounded(io, MAX_SHARED_WIKI_REQUEST_BYTES).await?;
+        if request.protocol_version != protocol.as_ref() {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                "shared Wiki protocol does not match the negotiated protocol",
+            ));
+        }
         request.validate().map_err(|_| {
             io::Error::new(io::ErrorKind::InvalidData, "shared Wiki request is invalid")
         })?;
@@ -170,24 +180,37 @@ impl Codec for BoundedSharedWikiCodec {
 
     async fn read_response<T>(
         &mut self,
-        _: &Self::Protocol,
+        protocol: &Self::Protocol,
         io: &mut T,
     ) -> io::Result<Self::Response>
     where
         T: AsyncRead + Unpin + Send,
     {
-        decode_bounded(io, MAX_RESPONSE_BYTES).await
+        let response: SharedWikiWireResponse =
+            decode_bounded(io, airwiki_types::MAX_SHARED_WIKI_RESPONSE_BYTES).await?;
+        if let SharedWikiWireResponse::Success(page) = &response
+            && page.protocol_version != protocol.as_ref()
+        {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                "shared Wiki protocol does not match the negotiated protocol",
+            ));
+        }
+        Ok(response)
     }
 
     async fn write_request<T>(
         &mut self,
-        _: &Self::Protocol,
+        protocol: &Self::Protocol,
         io: &mut T,
-        request: Self::Request,
+        mut request: Self::Request,
     ) -> io::Result<()>
     where
         T: AsyncWrite + Unpin + Send,
     {
+        request
+            .prepare_for_protocol(protocol.as_ref())
+            .map_err(|error| io::Error::new(io::ErrorKind::InvalidInput, error))?;
         request
             .validate()
             .map_err(|error| io::Error::new(io::ErrorKind::InvalidInput, error))?;
@@ -197,14 +220,18 @@ impl Codec for BoundedSharedWikiCodec {
 
     async fn write_response<T>(
         &mut self,
-        _: &Self::Protocol,
+        protocol: &Self::Protocol,
         io: &mut T,
-        response: Self::Response,
+        mut response: Self::Response,
     ) -> io::Result<()>
     where
         T: AsyncWrite + Unpin + Send,
     {
-        let encoded = encode_bounded(&response, MAX_RESPONSE_BYTES)?;
+        if let SharedWikiWireResponse::Success(page) = &mut response {
+            page.prepare_for_protocol(protocol.as_ref())
+                .map_err(|error| io::Error::new(io::ErrorKind::InvalidInput, error))?;
+        }
+        let encoded = encode_bounded(&response, airwiki_types::MAX_SHARED_WIKI_RESPONSE_BYTES)?;
         io.write_all(&encoded).await
     }
 }
@@ -229,12 +256,17 @@ pub fn response_fits(response: &SearchWireResponse) -> bool {
 }
 
 pub fn shared_wiki_response_fits(response: &SharedWikiWireResponse) -> bool {
-    encode_bounded(response, MAX_RESPONSE_BYTES).is_ok()
+    encode_bounded(response, airwiki_types::MAX_SHARED_WIKI_RESPONSE_BYTES).is_ok()
 }
 
 #[cfg(test)]
 mod tests {
-    use airwiki_types::{DEFAULT_TOP_K, SearchHit, SearchPurpose};
+    use airwiki_types::{
+        DEFAULT_TOP_K, MAX_SHARED_WIKI_DOCUMENT_BYTES, OkfCompatibility, PublishedWikiDocument,
+        PublishedWikiPageDescriptor, PublishedWikiPageId, PublishedWikiPageRequest,
+        PublishedWikiWorkspacePage, SHARED_WIKI_BROWSE_PROTOCOL_V2, SearchHit, SearchPurpose,
+        SharedWikiDescriptor,
+    };
     use chrono::Utc;
     use futures::io::Cursor;
     use libp2p::request_response::Codec as _;
@@ -379,6 +411,71 @@ mod tests {
             panic!("expected success response");
         };
         assert_eq!(decoded.authorized_candidates.len(), 1);
+    }
+
+    #[tokio::test]
+    async fn shared_wiki_codec_transfers_a_complete_maximum_size_page() {
+        let collection_id = uuid::Uuid::new_v4();
+        let mut request = SharedWikiBrowseRequest::new(collection_id, None, 1);
+        let descriptor = PublishedWikiPageDescriptor {
+            page: PublishedWikiPageId::Index,
+            logical_path: "index.md".to_owned(),
+            title: "Index".to_owned(),
+            fingerprint: "a".repeat(64),
+        };
+        request.page = Some(PublishedWikiPageRequest {
+            page: PublishedWikiPageId::Index,
+            expected_fingerprint: Some(descriptor.fingerprint.clone()),
+        });
+        let page = SharedWikiBrowsePage {
+            protocol_version: SHARED_WIKI_BROWSE_PROTOCOL_V2.to_owned(),
+            request_id: request.request_id,
+            wiki: SharedWikiDescriptor {
+                collection_id,
+                name: "Complete published Wiki".to_owned(),
+                okf_compatibility: OkfCompatibility::DeclaredV02,
+            },
+            concepts: Vec::new(),
+            next_cursor: None,
+            workspace: Some(PublishedWikiWorkspacePage {
+                reserved_pages: vec![descriptor.clone()],
+                documents: Vec::new(),
+                links: Vec::new(),
+                next_graph_cursor: None,
+            }),
+            document: Some(PublishedWikiDocument {
+                descriptor,
+                body_markdown: "x".repeat(MAX_SHARED_WIKI_DOCUMENT_BYTES),
+                metadata: Vec::new(),
+                backlinks: Vec::new(),
+                truncated: false,
+            }),
+        };
+        assert!(page.validate_for(&request).is_ok());
+        let response = SharedWikiWireResponse::Success(Box::new(page));
+        assert!(shared_wiki_response_fits(&response));
+
+        let protocol = StreamProtocol::new(SHARED_WIKI_BROWSE_PROTOCOL_V2);
+        let mut bytes = Cursor::new(Vec::new());
+        BoundedSharedWikiCodec
+            .write_response(&protocol, &mut bytes, response)
+            .await
+            .unwrap();
+        bytes.set_position(0);
+        let decoded = BoundedSharedWikiCodec
+            .read_response(&protocol, &mut bytes)
+            .await
+            .unwrap();
+        let SharedWikiWireResponse::Success(decoded) = decoded else {
+            panic!("expected complete shared Wiki response");
+        };
+        assert_eq!(
+            decoded
+                .document
+                .as_ref()
+                .map(|document| document.body_markdown.len()),
+            Some(MAX_SHARED_WIKI_DOCUMENT_BYTES)
+        );
     }
 
     #[tokio::test]

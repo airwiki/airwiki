@@ -10,7 +10,7 @@
   import Sparkles from '@lucide/svelte/icons/sparkles';
   import { listen } from '@tauri-apps/api/event';
   import { onMount, tick } from 'svelte';
-  import { addFederationIndex, addWiki, allowPeerPairingAgain, approveReview, browseNearbyWiki, browsePublicWiki, cancelModelInstall, checkUpdates, configureFirewall, confirmPairing, connect, deleteWiki, dialPeer, downloadUpdate, executeComputation, executeGuidedWikiRepair, hideToTray, importOkf, installModels, installUpdate, loadReviewEvidence, loadWikiBundle, loadWikiPage, manageIntegration, openExternalLink, openSystemDestination, pairPeer, pickOkfImport, pickWikiFolder, prepareGuidedWikiRepair, quitCompletely, reanalyzeReview, refreshApplicationAccess, refreshAutostart, refreshComputations, refreshConnectivity, refreshWikiHealth, rejectComputation, rejectReview, relinkWiki, removeFederationIndex, rescanWiki, revokePeer, saveComputationResult, searchKnowledge, setApplicationWikiRole, setAutostart, setPublicPublisherBlocked, setWikiGrant, setWikiIndexing, updatePreferences, updatePublicWikiProfile, updateWikiPolicy, validateOkfImport, verifyWikiConcept, type AppSnapshot, type ApplicationWikiRoleInput, type CloseBehavior, type EnrichmentDraft, type FolderSelection, type IntegrationActionInput, type KnowledgeConceptSummary, type KnowledgePageInput, type LanPreference, type LocalePreference, type OkfImportSummary, type PublicConceptSummaryDto, type ReviewSummary, type SearchCoverage, type SearchHitSummary, type SourceIssueSummary, type SystemDestination, type ThemePreference, type WikiPolicyInput, type WikiSummary } from './api';
+  import { addFederationIndex, addWiki, allowPeerPairingAgain, approveReview, browseNearbyWiki, browsePublicWiki, cancelModelInstall, checkUpdates, configureFirewall, confirmPairing, connect, deleteWiki, dialPeer, downloadUpdate, executeComputation, executeGuidedWikiRepair, hideToTray, importOkf, installModels, installUpdate, loadReviewEvidence, loadWikiBundle, loadWikiPage, manageIntegration, openExternalLink, openSystemDestination, pairPeer, pickOkfImport, pickWikiFolder, prepareGuidedWikiRepair, quitCompletely, reanalyzeReview, refreshApplicationAccess, refreshAutostart, refreshComputations, refreshConnectivity, refreshWikiHealth, rejectComputation, rejectReview, relinkWiki, removeFederationIndex, rescanWiki, revokePeer, saveComputationResult, searchKnowledge, setApplicationWikiRole, setAutostart, setPublicPublisherBlocked, setWikiGrant, setWikiIndexing, updatePreferences, updatePublicWikiProfile, updateWikiPolicy, validateOkfImport, verifyWikiConcept, type AppSnapshot, type ApplicationWikiRoleInput, type CloseBehavior, type EnrichmentDraft, type FolderSelection, type IntegrationActionInput, type KnowledgeConceptSummary, type KnowledgePageInput, type LanPreference, type LocalePreference, type OkfImportSummary, type PublicConceptSummaryDto, type ReviewSummary, type SearchCoverage, type SearchHitSummary, type SourceIssueSummary, type SystemDestination, type ThemePreference, type UpdaterIssue, type WikiPolicyInput, type WikiSummary } from './api';
   import KnowledgeGraph from './KnowledgeGraph.svelte';
   import ConnectionAdvanced from './ConnectionAdvanced.svelte';
   import GlobalSearch from './GlobalSearch.svelte';
@@ -691,10 +691,23 @@
     const localize = (id: string, args?: MessageArgs) => message(currentLocale, id, args);
     const updater = snapshot?.updater;
     if (!updater) return localize('updates-loading');
-    if (updater.issue === 'offline') return localize('updates-issue-offline');
-    if (updater.issue === 'invalidSignature') return localize('updates-issue-signature');
-    if (updater.issue === 'invalidManifest') return localize('updates-issue-manifest');
-    if (updater.status === 'disabled') return localize(updater.issue === 'notConfigured' ? 'updates-disabled-not-configured' : 'updates-disabled-platform');
+    if (updater.status === 'disabled') {
+      if (updater.issue === 'notConfigured') return localize('updates-disabled-not-configured');
+      if (updater.issue === 'unsupported') return localize('updates-disabled-platform');
+      return localize('updates-disabled-configuration');
+    }
+    if (updater.issue) {
+      const issueLabels: Record<UpdaterIssue, string> = {
+        notConfigured: 'updates-disabled-not-configured',
+        invalidConfiguration: 'updates-disabled-configuration',
+        unsupported: 'updates-issue-unsupported',
+        offline: 'updates-issue-offline',
+        invalidManifest: 'updates-issue-manifest',
+        invalidSignature: 'updates-issue-signature',
+        internal: 'updates-issue-internal'
+      };
+      return localize(issueLabels[updater.issue]);
+    }
     if (updater.status === 'available') return localize('updates-available', { version: updater.version ?? '' });
     if (updater.status === 'downloading') return localize('updates-downloading', { version: updater.version ?? '' });
     if (updater.status === 'readyToInstall') return localize('updates-ready-install', { version: updater.version ?? '' });

@@ -731,6 +731,7 @@ updates-confirm-install = Confirm installation
 updates-confirm-download-body = The download is signed and will not be installed automatically.
 updates-confirm-install-body = The current version remains available if installation cannot finish.
 updates-disabled-not-configured = Signed updates are not configured in this build.
+updates-disabled-configuration = Signed updates are unavailable because this build has an invalid update configuration.
 updates-disabled-endpoint = The configured update channel is not secure.
 updates-disabled-key = The updater public key is invalid.
 updates-disabled-version = This version cannot be compared with the update channel.

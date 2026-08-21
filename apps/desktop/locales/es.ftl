@@ -731,6 +731,7 @@ updates-confirm-install = Confirmar instalación
 updates-confirm-download-body = La descarga está firmada y no se instalará automáticamente.
 updates-confirm-install-body = La versión actual seguirá disponible si la instalación no puede completarse.
 updates-disabled-not-configured = Las actualizaciones firmadas no están configuradas en esta compilación.
+updates-disabled-configuration = Las actualizaciones firmadas no están disponibles porque esta compilación tiene una configuración de actualización no válida.
 updates-disabled-endpoint = El canal de actualizaciones configurado no es seguro.
 updates-disabled-key = La clave pública del actualizador no es válida.
 updates-disabled-version = Esta versión no puede compararse con el canal de actualizaciones.

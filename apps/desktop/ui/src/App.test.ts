@@ -1363,6 +1363,28 @@ describe('AirWiki wiki workspace', () => {
     await waitFor(() => expect(scrollTo).toHaveBeenCalledWith({ top: 0, left: 0, behavior: 'auto' }));
   });
 
+  it('shows sanitized updater failures instead of reverting to idle copy', async () => {
+    snapshot.updater = {
+      status: 'idle', version: null, releaseNotes: null, issue: 'internal', retryable: true
+    };
+    window.location.hash = '#system/updates';
+    render(App);
+
+    expect(await screen.findByText('No se pudo completar la comprobación de actualización.')).toBeInTheDocument();
+    expect(screen.queryByText('Listo para comprobar.')).not.toBeInTheDocument();
+  });
+
+  it('explains an invalid updater configuration without calling it unsupported', async () => {
+    snapshot.updater = {
+      status: 'disabled', version: null, releaseNotes: null, issue: 'invalidConfiguration', retryable: false
+    };
+    window.location.hash = '#system/updates';
+    render(App);
+
+    expect(await screen.findByText(/configuración de actualización no válida/)).toBeInTheDocument();
+    expect(screen.queryByText('Las actualizaciones no están disponibles en este sistema.')).not.toBeInTheDocument();
+  });
+
   it('lets users change the local-network preference after onboarding', async () => {
     window.location.hash = '#system/preferences';
     render(App);

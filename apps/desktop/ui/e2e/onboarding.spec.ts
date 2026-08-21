@@ -231,6 +231,23 @@ async function navigateToDestination(index: number): Promise<void> {
     () => browser.execute(() => document.querySelector<HTMLElement>('.drive-page')?.scrollTop === 0),
     { timeout: 10_000, timeoutMsg: `destination ${expected} did not start at the top` }
   );
+  const persistentChrome = await browser.execute(() => Array.from(
+    document.querySelectorAll<HTMLElement>('.top-brand, .global-search, .top-actions')
+  ).map((element) => {
+    const bounds = element.getBoundingClientRect();
+    const style = getComputedStyle(element);
+    return {
+      visible: style.display !== 'none' && style.visibility === 'visible' && Number.parseFloat(style.opacity) > 0,
+      width: bounds.width,
+      left: bounds.left,
+      right: bounds.right,
+      viewportWidth: document.documentElement.clientWidth
+    };
+  }));
+  expect(persistentChrome).toHaveLength(3);
+  expect(persistentChrome.every((item) => (
+    item.visible && item.width > 0 && item.left >= 0 && item.right <= item.viewportWidth
+  ))).toBe(true);
 }
 
 async function waitForVisualPaint(route: 'wikis' | 'system'): Promise<void> {

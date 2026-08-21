@@ -47,7 +47,7 @@ jobs:
       AIRWIKI_UPDATER_PUBLIC_KEY: ${{ vars.AIRWIKI_UPDATER_PUBLIC_KEY }}
       AIRWIKI_WINDOWS_SIGNER_SHA256: ${{ vars.AIRWIKI_WINDOWS_SIGNER_SHA256 }}
     steps:
-      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ inputs.commit_sha }}
           fetch-depth: 0
@@ -102,7 +102,7 @@ jobs:
       AIRWIKI_UPDATER_PUBLIC_KEY: ${{ vars.AIRWIKI_UPDATER_PUBLIC_KEY }}
       AIRWIKI_WINDOWS_SIGNER_SHA256: ${{ vars.AIRWIKI_WINDOWS_SIGNER_SHA256 }}
     steps:
-      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ inputs.commit_sha }}
           persist-credentials: false

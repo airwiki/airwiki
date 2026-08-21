@@ -12,7 +12,9 @@ constitute a supported public release.
   distributed package.
 - [x] Protect `main` with pull requests, strict required checks, linear history,
   conversation resolution, and no force pushes or deletion.
-- [ ] Configure protected release environments.
+- [x] Configure protected `macos-signing`, `windows-signing`, and
+  `public-release` environments for `main`, with required reviewers,
+  self-review disabled, and administrator bypass disabled.
 - [ ] Publish monitored security and Code of Conduct contacts.
 - [x] Document proportional review and add read-only DCO validation for pull
   requests.
@@ -64,7 +66,8 @@ constitute a supported public release.
 
 ## Updater and promotion
 
-- [ ] Generate the updater key in a trusted administrative environment.
+- [x] Generate the updater key in a trusted administrative environment and
+  configure the matching public key as a repository variable.
 - [ ] Store encrypted private material and its password separately in a protected
   environment; retain a tested offline recovery copy.
 - [ ] Embed the reviewed public key and stable endpoint in the exact release build.
@@ -111,7 +114,9 @@ constitute a supported public release.
 
 The official source repository is [airwiki/airwiki](https://github.com/airwiki/airwiki).
 The repository now contains fail-closed preparation and promotion workflows,
-but no public release exists until the protected environments, credentials,
-updater-key custody, contacts, legal review and complete installed acceptance
-matrix are configured and recorded. Clearing any one blocker does not waive the
-others. Follow the [public release process](release-process.md).
+and the protected environments plus macOS credentials are configured. No
+signed and notarized candidate has completed the protected workflow yet. Public
+release remains blocked on Windows public-trust signing configuration,
+validated updater-key recovery custody, monitored contacts, legal review and
+the complete installed acceptance matrix. Clearing any one blocker does not
+waive the others. Follow the [public release process](release-process.md).

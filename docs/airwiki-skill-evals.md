@@ -1,9 +1,12 @@
 # AirWiki skill evaluation
 
 This runbook evaluates the packaged `airwiki` skill with realistic prompts. It
-follows the Agent Skills recommendation to test activation and task behavior,
-not only frontmatter shape. It complements `xtask workflow-guide check`, which
-validates the packaged files deterministically.
+follows the [Agent Skills best practices] recommendation to refine a coherent,
+moderately sized skill through real execution, including activation and task
+behavior rather than only frontmatter shape. It complements `xtask
+workflow-guide check`, which validates the packaged files deterministically.
+
+[Agent Skills best practices]: https://agentskills.io/skill-creation/best-practices
 
 Use only synthetic memory Wikis and a disposable client profile. Never record
 capabilities, fingerprints, Wiki identifiers, local paths, complete tool

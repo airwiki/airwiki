@@ -1016,6 +1016,19 @@ impl UpdaterService {
         &self.view
     }
 
+    /// Restores a retryable, non-transient state after the updater task itself
+    /// fails unexpectedly. Backend failures are handled by the operation
+    /// methods; this path is reserved for panics and invalid internal state.
+    pub(crate) fn recover_after_unexpected_failure(&mut self) {
+        self.view.status = match std::mem::replace(&mut self.view.status, UpdaterStatus::Idle) {
+            UpdaterStatus::Checking => UpdaterStatus::Idle,
+            UpdaterStatus::Downloading(update) => UpdaterStatus::Available(update),
+            UpdaterStatus::Installing(update) => UpdaterStatus::ReadyToInstall(update),
+            status => status,
+        };
+        self.view.last_issue = Some(UpdateIssue::new(UpdateIssueCode::Internal));
+    }
+
     pub(crate) async fn check(&mut self) {
         self.generation = self.generation.wrapping_add(1);
         self.view.status = UpdaterStatus::Checking;
@@ -1662,6 +1675,34 @@ mod tests {
             service.view().last_issue.map(|issue| issue.code),
             Some(UpdateIssueCode::Offline)
         );
+    }
+
+    #[test]
+    fn unexpected_updater_failure_should_restore_a_retryable_state() {
+        let mut service = UpdaterService::new(FakeBackend::default());
+
+        service.view.status = UpdaterStatus::Checking;
+        service.recover_after_unexpected_failure();
+        assert_eq!(service.view.status, UpdaterStatus::Idle);
+        assert_eq!(
+            service.view.last_issue,
+            Some(UpdateIssue {
+                code: UpdateIssueCode::Internal,
+                retryable: true,
+            })
+        );
+
+        let update = available_update();
+        service.view.status = UpdaterStatus::Downloading(update.clone());
+        service.recover_after_unexpected_failure();
+        assert_eq!(
+            service.view.status,
+            UpdaterStatus::Available(update.clone())
+        );
+
+        service.view.status = UpdaterStatus::Installing(update.clone());
+        service.recover_after_unexpected_failure();
+        assert_eq!(service.view.status, UpdaterStatus::ReadyToInstall(update));
     }
 
     #[test]

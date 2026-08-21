@@ -2,7 +2,7 @@ import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testi
 import axe from 'axe-core';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import App from './App.svelte';
-import { allowPeerPairingAgain, approveReview, browseNearbyWiki, browsePublicWiki, configureFirewall, connect, installModels, loadWikiBundle, loadWikiPage, manageIntegration, openSystemDestination, pickOkfImport, prepareGuidedWikiRepair, quitCompletely, reanalyzeReview, refreshWikiHealth, rejectReview, searchKnowledge, updatePreferences, validateOkfImport, verifyWikiConcept } from './api';
+import { allowPeerPairingAgain, approveReview, browseNearbyWiki, browsePublicWiki, checkUpdates, configureFirewall, connect, installModels, loadWikiBundle, loadWikiPage, manageIntegration, openSystemDestination, pickOkfImport, prepareGuidedWikiRepair, quitCompletely, reanalyzeReview, refreshWikiHealth, rejectReview, searchKnowledge, updatePreferences, validateOkfImport, verifyWikiConcept } from './api';
 import type { UiEventEnvelope } from './generated/ui-contract';
 import { readySnapshot } from './test/fixtures';
 
@@ -48,6 +48,7 @@ vi.mock('./api', async (importOriginal) => {
     prepareGuidedWikiRepair: vi.fn(async () => 'repair-request'),
     updatePreferences: vi.fn(async () => undefined),
     configureFirewall: vi.fn(async () => undefined),
+    checkUpdates: vi.fn(async () => undefined),
     installModels: vi.fn(async () => undefined),
     openSystemDestination: vi.fn(async () => undefined),
     manageIntegration: vi.fn(async () => undefined),
@@ -1372,6 +1373,40 @@ describe('AirWiki wiki workspace', () => {
 
     expect(await screen.findByRole('status')).toHaveTextContent('No se pudo completar la comprobación de actualización.');
     expect(screen.queryByText('Listo para comprobar.')).not.toBeInTheDocument();
+  });
+
+  it('keeps updater progress visible until the matching result arrives', async () => {
+    window.location.hash = '#system/updates';
+    render(App);
+
+    const checkButton = await screen.findByRole('button', { name: 'Comprobar ahora' });
+    await fireEvent.click(checkButton);
+    const requestId = vi.mocked(checkUpdates).mock.calls[0]?.[0];
+    expect(requestId).toEqual(expect.any(String));
+    await waitFor(() => {
+      expect(screen.getByRole('status')).toHaveTextContent('Comprobando la versión estable');
+      expect(checkButton).toBeDisabled();
+    });
+
+    snapshot = {
+      ...snapshot,
+      sequence: snapshot.sequence + 1,
+      updater: {
+        status: 'idle', version: null, releaseNotes: null, issue: 'invalidManifest', retryable: false
+      }
+    };
+    await act(() => {
+      snapshotListener?.({
+        schemaVersion: snapshot.schemaVersion,
+        sequence: snapshot.sequence,
+        requestId: requestId ?? null,
+        kind: 'stateChanged',
+        snapshot
+      });
+    });
+
+    expect(screen.getByRole('status')).toHaveTextContent('El manifiesto de actualización no es válido.');
+    expect(checkButton).toBeEnabled();
   });
 
   it('explains an invalid updater configuration without calling it unsupported', async () => {

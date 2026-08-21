@@ -3114,18 +3114,33 @@ async fn send_updater_command(
     command: impl FnOnce(Uuid) -> WorkerCommand,
 ) -> Result<(), UiError> {
     let request_id = parse_uuid(&request_id)?;
-    runtime
-        .requests
-        .lock()
-        .map_err(|_| UiError::internal())?
-        .updater = Some(request_id);
+    reserve_updater_request(&runtime.requests, request_id)?;
     if let Err(error) = send_command(runtime, command(request_id)).await {
-        if let Ok(mut requests) = runtime.requests.lock()
-            && requests.updater == Some(request_id)
-        {
-            requests.updater = None;
-        }
+        release_updater_request(&runtime.requests, request_id)?;
         return Err(error);
+    }
+    Ok(())
+}
+
+fn reserve_updater_request(
+    requests: &Mutex<RequestTracker>,
+    request_id: Uuid,
+) -> Result<(), UiError> {
+    let mut requests = requests.lock().map_err(|_| UiError::internal())?;
+    if requests.updater.is_some() {
+        return Err(UiError::busy("updaterOperationAlreadyRunning"));
+    }
+    requests.updater = Some(request_id);
+    Ok(())
+}
+
+fn release_updater_request(
+    requests: &Mutex<RequestTracker>,
+    request_id: Uuid,
+) -> Result<(), UiError> {
+    let mut requests = requests.lock().map_err(|_| UiError::internal())?;
+    if requests.updater == Some(request_id) {
+        requests.updater = None;
     }
     Ok(())
 }
@@ -6392,6 +6407,22 @@ mod tests {
         assert!(!request_is_current(&event(stale), &requests));
         assert!(request_is_current(&event(current), &requests));
         assert!(request_is_current(&event(Uuid::new_v4()), &requests));
+    }
+
+    #[test]
+    fn duplicate_updater_request_keeps_the_original_reservation() {
+        let original = Uuid::new_v4();
+        let duplicate = Uuid::new_v4();
+        let requests = Mutex::new(RequestTracker::default());
+
+        assert!(reserve_updater_request(&requests, original).is_ok());
+        let error = reserve_updater_request(&requests, duplicate)
+            .expect_err("a duplicate updater operation must be rejected");
+        assert_eq!(error.code, "busy");
+        assert_eq!(
+            requests.lock().expect("request tracker").updater,
+            Some(original)
+        );
     }
 
     #[test]

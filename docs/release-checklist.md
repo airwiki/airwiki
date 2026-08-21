@@ -15,7 +15,9 @@ constitute a supported public release.
 - [x] Configure protected `macos-signing`, `windows-signing`, and
   `public-release` environments for `main`, with required reviewers,
   self-review disabled, and administrator bypass disabled.
-- [ ] Publish monitored security and Code of Conduct contacts.
+- [x] Enable GitHub private vulnerability reporting and link it from the security
+  policy.
+- [ ] Publish a monitored Code of Conduct enforcement contact.
 - [x] Document proportional review and add read-only DCO validation for pull
   requests.
 - [x] Require DCO and CI checks through branch protection or repository rulesets.
@@ -117,6 +119,7 @@ The repository now contains fail-closed preparation and promotion workflows,
 and the protected environments plus macOS credentials are configured. No
 signed and notarized candidate has completed the protected workflow yet. Public
 release remains blocked on Windows public-trust signing configuration,
-validated updater-key recovery custody, monitored contacts, legal review and
-the complete installed acceptance matrix. Clearing any one blocker does not
-waive the others. Follow the [public release process](release-process.md).
+validated updater-key recovery custody, a monitored Code of Conduct contact,
+legal review and the complete installed acceptance matrix. Clearing any one
+blocker does not waive the others. Follow the
+[public release process](release-process.md).

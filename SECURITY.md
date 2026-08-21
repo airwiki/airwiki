@@ -4,18 +4,16 @@ AirWiki handles private local knowledge. Suspected data exposure, authorization 
 
 ## Supported versions
 
-There is no supported public release. Security fixes currently target the latest development revision in [airwiki/airwiki](https://github.com/airwiki/airwiki) only. A monitored public reporting channel, a complete protected cross-platform signing run, Windows public-trust identity, notarization evidence, updater verification, and clean installed-platform gates remain public-release blockers.
+There is no supported public release. Security fixes currently target the latest development revision in [airwiki/airwiki](https://github.com/airwiki/airwiki) only. A complete protected cross-platform signing run, Windows public-trust identity, notarization evidence, updater verification, and clean installed-platform gates remain public-release blockers.
 
 ## Reporting a vulnerability
 
-Do not open a public issue or attach sensitive logs, documents, databases, screenshots, identities, or network addresses to a public discussion. Contact the project owner through the existing private project channel and include only:
+Do not open a public issue or attach sensitive logs, documents, databases, screenshots, identities, or network addresses to a public discussion. Use GitHub's [private vulnerability reporting form](https://github.com/airwiki/airwiki/security/advisories/new) and include only:
 
 - the affected revision and operating system;
 - a minimal synthetic reproduction;
 - the security property that failed;
 - whether data may have been exposed.
-
-Before public launch, the project must configure private vulnerability reporting or publish a monitored security address. Until then, the absence of a public contact is an explicit release blocker.
 
 The project will assess a complete report, prepare a fix and tests, and coordinate disclosure. Never include real knowledge or credentials in a report.
 

@@ -23,6 +23,11 @@ function stringField(value: Record<string, unknown>, field: string): string {
 }
 
 class McpStdioClient {
+  private static readonly protocolMetadata = {
+    'io.modelcontextprotocol/protocolVersion': '2026-07-28',
+    'io.modelcontextprotocol/clientInfo': { name: 'airwiki-e2e-agent', version: '1' },
+    'io.modelcontextprotocol/clientCapabilities': {}
+  };
   private readonly child: ChildProcessWithoutNullStreams;
   private readonly pending = new Map<number, {
     resolve: (value: Record<string, unknown>) => void;
@@ -50,13 +55,12 @@ class McpStdioClient {
     });
   }
 
-  async initialize(): Promise<void> {
-    await this.request('initialize', {
-      protocolVersion: '2026-07-28',
-      capabilities: {},
-      clientInfo: { name: 'airwiki-e2e-agent', version: '1' }
-    });
-    this.notify('notifications/initialized', {});
+  async discover(): Promise<void> {
+    const result = await this.request('server/discover', {});
+    const supportedVersions = result.supportedVersions;
+    if (!Array.isArray(supportedVersions) || !supportedVersions.includes('2026-07-28')) {
+      throw new Error('MCP server/discover did not advertise protocol 2026-07-28');
+    }
   }
 
   request(method: string, params: Record<string, unknown>): Promise<Record<string, unknown>> {
@@ -68,12 +72,13 @@ class McpStdioClient {
         reject(new Error(`MCP request ${method} timed out`));
       }, 15_000);
       this.pending.set(id, { resolve, reject, timeout });
-      this.write({ jsonrpc: '2.0', id, method, params });
+      this.write({
+        jsonrpc: '2.0',
+        id,
+        method,
+        params: { ...params, _meta: McpStdioClient.protocolMetadata }
+      });
     });
-  }
-
-  notify(method: string, params: Record<string, unknown>): void {
-    this.write({ jsonrpc: '2.0', method, params });
   }
 
   async callTool(name: string, arguments_: Record<string, unknown>): Promise<Record<string, unknown>> {
@@ -473,7 +478,7 @@ async function exerciseGenericMcpMemory(): Promise<void> {
   const memoryName = 'E2E agent memory';
   const client = new McpStdioClient(command, rawArgs);
   try {
-    await client.initialize();
+    await client.discover();
     const listedTools = await client.request('tools/list', {});
     const tools = listedTools.tools;
     if (!Array.isArray(tools)) throw new Error('MCP tools/list did not return tools');
@@ -591,7 +596,7 @@ async function exerciseGenericMcpMemory(): Promise<void> {
 
   const disconnectedClient = new McpStdioClient(command, rawArgs);
   try {
-    await disconnectedClient.initialize();
+    await disconnectedClient.discover();
     const listedTools = await disconnectedClient.request('tools/list', {});
     const tools = listedTools.tools;
     if (!Array.isArray(tools)) throw new Error('disconnected MCP tools/list did not return tools');

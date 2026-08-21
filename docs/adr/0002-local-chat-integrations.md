@@ -7,7 +7,8 @@
 
 ## Context
 
-AirWiki hosts one read-only MCP tool on a loopback HTTP listener. Desktop
+AirWiki hosts policy-scoped search plus capability-authenticated memory and
+computation tools on a loopback HTTP listener. Desktop
 clients register local servers differently: ChatGPT Desktop/Work and Gemini CLI
 can register MCP processes, while Claude Desktop distributes local extensions
 as MCPB packages. Requiring tunnels, API keys or manual configuration editing
@@ -15,13 +16,18 @@ would contradict the goal of a simple local installation.
 
 Relevant contracts are the official [Codex MCP documentation], [Codex skills
 documentation], [Claude Code memory documentation], [Gemini CLI skills
-documentation], [Gemini CLI MCP server documentation] and [MCPB manifest v0.3].
+documentation], [Gemini CLI MCP server documentation], the normative [MCP
+2026-07-28 specification], Anthropic's [MCP guidance] and [security guidance],
+and [MCPB manifest v0.3].
 
 [Codex MCP documentation]: https://developers.openai.com/codex/mcp/
 [Codex skills documentation]: https://developers.openai.com/codex/skills/
 [Claude Code memory documentation]: https://code.claude.com/docs/en/memory
 [Gemini CLI skills documentation]: https://geminicli.com/docs/cli/tutorials/skills-getting-started/
 [Gemini CLI MCP server documentation]: https://geminicli.com/docs/tools/mcp-server/
+[MCP 2026-07-28 specification]: https://modelcontextprotocol.io/specification/2026-07-28
+[MCP guidance]: https://code.claude.com/docs/en/mcp
+[security guidance]: https://code.claude.com/docs/en/security
 [MCPB manifest v0.3]: https://github.com/modelcontextprotocol/mcpb/blob/70fe3b34cd6dff1b3bba046638edc72a6467a4fb/MANIFEST.md
 
 ## Decision
@@ -33,10 +39,29 @@ Managed ChatGPT Desktop/Work, Codex, Claude Desktop, Claude Code and Gemini CLI
 integrations use the same bridge. Each client retains a distinct capability and
 application identity.
 
+The gateway and bridge implement MCP `2026-07-28` through the stable Rust SDK.
+Modern requests self-describe through `_meta`, use `server/discover`, omit
+sessions, and carry the standard routing headers on Streamable HTTP. Tool lists
+are deterministic, complete, immediately stale (`ttlMs: 0`) and private because
+the visible set can depend on an integration capability. Older lifecycle
+requests remain accepted only for client interoperability during the upgrade.
+Every tool publishes JSON Schema 2020-12 input and output contracts plus
+accurate read-only, destructive, idempotent and open-world hints. Recoverable
+execution failures return sanitized typed tool results; JSON-RPC errors remain
+reserved for malformed or unroutable protocol requests.
+
 Installation is per-user, visible, confirmed and reversible. The bridge accepts
 no arbitrary endpoint, ignores ambient proxies, stores no credentials and
 grants no Wiki access. Each client's configuration remains its own source
 of truth.
+
+The HTTP boundary accepts only the exact loopback host and port, rejects all
+browser `Origin` requests, ignores ambient proxies and redirects, bounds request
+and response bodies, and never exposes a configurable endpoint. User approval
+in AirWiki or the client remains mandatory for connecting integrations,
+granting another application access, executing a computation and saving its
+result. Tool annotations and instructions are usability hints, never an
+authorization boundary.
 
 For Codex/ChatGPT, Claude Code and Gemini CLI, the same native confirmation also
 installs a versioned, instruction-only user skill plus an `AirWiki.md` imported
@@ -61,6 +86,8 @@ services.
 ## Consequences
 
 - There is one definition of MCP tools, instructions and response schemas.
+- The managed bridge verifies discovery, protocol version, complete typed tool
+  metadata and the exact tool set before installing a client configuration.
 - A plain-language request can invoke a consistent memory workflow across
   clients that support user skills or MCP instructions.
 - All managed clients share bridge limits, errors and fixes.

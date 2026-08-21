@@ -6,7 +6,6 @@
 //! protecting a desktop-local server from DNS rebinding.
 
 use std::{
-    borrow::Cow,
     collections::VecDeque,
     fmt,
     net::{Ipv4Addr, SocketAddr},
@@ -30,24 +29,32 @@ pub use airwiki_types::{
 use axum::{
     Router,
     extract::{Request, State},
-    http::{HeaderMap, StatusCode, header::HOST},
+    http::{
+        HeaderMap, StatusCode,
+        header::{HOST, ORIGIN},
+    },
     middleware::{self, Next},
     response::{IntoResponse, Response},
     routing::get,
 };
 use rmcp::{
     ErrorData, ServerHandler, ServiceExt,
-    handler::server::router::tool::{AsyncTool, ToolBase, ToolRouter},
+    handler::server::router::tool::ToolRouter,
     model::{
-        CallToolResult, Implementation, ServerCapabilities, ServerInfo, Tool, ToolAnnotations,
+        CacheScope, CallToolResult, Implementation, ListToolsResult, ServerCapabilities,
+        ServerInfo, Tool, ToolAnnotations,
     },
+    service::RequestContext,
     tool_handler,
+    transport::common::http_header::{
+        HEADER_MCP_METHOD, HEADER_MCP_NAME, HEADER_MCP_PROTOCOL_VERSION,
+    },
     transport::streamable_http_server::{
         StreamableHttpServerConfig, StreamableHttpService, session::local::LocalSessionManager,
     },
 };
 use schemars::JsonSchema;
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use serde_json::json;
 use thiserror::Error;
 use tokio::{net::TcpListener, sync::watch, task::JoinHandle};
@@ -70,11 +77,13 @@ const OAUTH_PROTECTED_RESOURCE_PATH: &str = "/.well-known/oauth-protected-resour
 const OAUTH_PROTECTED_RESOURCE_MCP_PATH: &str = "/.well-known/oauth-protected-resource/mcp";
 const OAUTH_NOT_CONFIGURED_BODY: &str = "OAuth protected-resource metadata is not available.\n";
 const INVALID_HOST_BODY: &str = "Invalid Host header.\n";
+const INVALID_ORIGIN_BODY: &str = "Browser origins are not allowed.\n";
 const MCP_BRIDGE_ENDPOINT: &str = "http://127.0.0.1:43123/mcp";
 #[cfg(feature = "e2e")]
 pub const E2E_MCP_PORT_ENV: &str = "AIRWIKI_E2E_MCP_PORT";
 const MCP_BRIDGE_CONNECT_TIMEOUT: Duration = Duration::from_secs(1);
 const MCP_BRIDGE_REQUEST_TIMEOUT: Duration = Duration::from_secs(5);
+const MCP_PROTOCOL_VERSION: &str = "2026-07-28";
 const SEARCH_RATE_LIMIT: usize = 30;
 const SEARCH_RATE_WINDOW: Duration = Duration::from_secs(60);
 
@@ -315,55 +324,167 @@ pub struct McpApplicationIdentity {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
 pub struct ListAirWikiMemoriesInput {}
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct CreateAirWikiMemoryInput {
+    /// Human-readable name for a new application-owned memory wiki.
     pub name: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct GetAirWikiMemoryInput {
+    /// Opaque wiki identifier returned by `list_airwiki_memories` or
+    /// `create_airwiki_memory`.
     pub wiki_id: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct WriteAirWikiMemoryInput {
+    /// Opaque identifier of an accessible AI-memory wiki.
     pub wiki_id: String,
+    /// Existing concept identifier when updating, or null when creating.
     pub concept_id: Option<String>,
+    /// Latest fingerprint returned by `get_airwiki_memory` when updating.
+    /// Leave null only when creating a concept.
     pub expected_fingerprint: Option<String>,
+    /// Concise title for durable knowledge.
     pub title: String,
+    /// Optional one-sentence summary.
     #[serde(default)]
     pub description: String,
+    /// Open OKF concept type, such as `Decision`, `Architecture`, or `Runbook`.
     pub concept_type: String,
+    /// Short retrieval labels; do not include secrets or personal data.
     #[serde(default)]
     pub tags: Vec<String>,
+    /// Durable Markdown body, limited by AirWiki to 48 KiB.
     pub body_markdown: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct DeprecateAirWikiMemoryInput {
+    /// Opaque identifier of an accessible AI-memory wiki.
     pub wiki_id: String,
+    /// Existing concept identifier returned by `get_airwiki_memory`.
     pub concept_id: String,
+    /// Latest fingerprint returned by `get_airwiki_memory`.
     pub expected_fingerprint: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct RequestAirWikiComputationInput {
+    /// Opaque identifier of an accessible wiki containing the computation.
     pub wiki_id: String,
+    /// Validated relative OKF path of an `Attested Computation` concept.
     pub logical_path: String,
+    /// Parameter names and values accepted by the computation contract.
+    /// AirWiki asks the user for confirmation before executing them.
     pub parameters: serde_json::Map<String, serde_json::Value>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct GetAirWikiComputationRunInput {
+    /// Opaque run identifier returned by `request_airwiki_computation`.
     pub run_id: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct AirWikiMemorySummaryOutput {
+    /// Opaque wiki identifier for subsequent memory calls.
+    pub wiki_id: String,
+    /// Human-readable wiki name.
+    pub name: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
+pub struct ListAirWikiMemoriesOutput {
+    /// Memory wikis visible to the calling application.
+    pub wikis: Vec<AirWikiMemorySummaryOutput>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct CreateAirWikiMemoryOutput {
+    /// Opaque identifier of the created wiki.
+    pub wiki_id: String,
+    /// Final normalized wiki name.
+    pub name: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct AirWikiMemoryConceptOutput {
+    /// Opaque identifier of the containing wiki.
+    pub wiki_id: String,
+    /// Opaque concept identifier.
+    pub concept_id: String,
+    /// Validated relative path within the OKF bundle.
+    pub path: String,
+    /// Open OKF concept type.
+    #[serde(rename = "type")]
+    pub concept_type: String,
+    /// Concept title.
+    pub title: String,
+    /// Optional concept summary.
+    pub description: String,
+    /// Retrieval labels.
+    pub tags: Vec<String>,
+    /// Open OKF lifecycle value.
+    pub status: String,
+    /// Fingerprint required for the next edit or deprecation.
+    pub fingerprint: String,
+    /// Trust, freshness, and verification state computed by AirWiki.
+    pub assurance: McpConceptAssurance,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct GetAirWikiMemoryOutput {
+    /// Opaque identifier of the selected wiki.
+    pub wiki_id: String,
+    /// Current concepts and fingerprints in stable path order.
+    pub concepts: Vec<AirWikiMemoryConceptOutput>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct RequestAirWikiComputationOutput {
+    /// Opaque identifier used to poll this request.
+    pub run_id: String,
+    /// Initial state; execution always waits for native user confirmation.
+    pub state: String,
+    /// RFC 3339 expiration time for this pending request.
+    pub expires_at: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct GetAirWikiComputationRunOutput {
+    /// Opaque computation run identifier.
+    pub run_id: String,
+    /// Opaque identifier of the containing wiki.
+    pub wiki_id: String,
+    /// Validated relative OKF path of the computation concept.
+    pub logical_path: String,
+    /// Current sanitized state of the run.
+    pub state: String,
+    /// Deterministic attester verdict when available.
+    pub verdict: Option<String>,
+    /// RFC 3339 request time.
+    pub requested_at: String,
+    /// RFC 3339 expiration time.
+    pub expires_at: String,
+    /// Ephemeral receipt, available only for a completed unexpired run.
+    pub receipt: Option<serde_json::Value>,
 }
 
 #[async_trait::async_trait]
@@ -570,7 +691,7 @@ impl AirWikiMcp {
             },
             application_backend: None,
             bridge_identity: None,
-            tool_router: ToolRouter::new().with_async_tool::<SearchAirWikiTool>(),
+            tool_router: search_tool_router(),
         }
     }
 
@@ -599,7 +720,7 @@ impl AirWikiMcp {
             backend: SearchToolBackend::Bridge(bridge),
             application_backend: None,
             bridge_identity: identity.clone(),
-            tool_router: ToolRouter::new().with_async_tool::<SearchAirWikiTool>(),
+            tool_router: search_tool_router(),
         };
         if identity.is_some() {
             for route in application_tool_routes() {
@@ -618,52 +739,114 @@ impl AirWikiMcp {
             backend: SearchToolBackend::Bridge(BridgeHttpBackend::with_endpoint(client, endpoint)?),
             application_backend: None,
             bridge_identity: None,
-            tool_router: ToolRouter::new().with_async_tool::<SearchAirWikiTool>(),
+            tool_router: search_tool_router(),
         })
     }
+}
+
+fn search_tool_router() -> ToolRouter<AirWikiMcp> {
+    let mut router = ToolRouter::new();
+    let schema = match rmcp::handler::server::tool::schema_for_input::<SearchAirWikiInput>() {
+        Ok(schema) => schema,
+        Err(error) => {
+            tracing::error!(%error, "search_airwiki has an invalid input schema");
+            return router;
+        }
+    };
+    let tool = Tool::new("search_airwiki", SEARCH_TOOL_DESCRIPTION, schema)
+        .with_title("Search AirWiki knowledge")
+        .with_raw_output_schema(rmcp::handler::server::tool::schema_for_output::<
+            McpStructuredOutput<SearchAirWikiOutput>,
+        >())
+        .with_annotations(
+            ToolAnnotations::with_title("Search AirWiki knowledge")
+                .read_only(true)
+                .destructive(false)
+                .idempotent(true)
+                .open_world(false),
+        );
+    router.add_route(rmcp::handler::server::tool::ToolRoute::new_dyn(
+        tool,
+        |context: rmcp::handler::server::tool::ToolCallContext<'_, AirWikiMcp>| {
+            Box::pin(async move {
+                let input = match serde_json::from_value::<SearchAirWikiInput>(
+                    serde_json::Value::Object(context.arguments.unwrap_or_default()),
+                ) {
+                    Ok(input) => input,
+                    Err(_) => {
+                        return Ok(McpToolFailure::invalid_input(
+                            "Search input does not match the advertised schema",
+                        )
+                        .into_result()
+                        .into());
+                    }
+                };
+                match SearchAirWikiTool::invoke(context.service, input).await {
+                    Ok(output) => match serde_json::to_value(output) {
+                        Ok(output) => Ok(CallToolResult::structured(output).into()),
+                        Err(_) => Ok(McpToolFailure::temporarily_unavailable(
+                            "AirWiki could not encode the search result; try again later",
+                        )
+                        .into_result()
+                        .into()),
+                    },
+                    Err(error) => Ok(search_tool_failure(error).into_result().into()),
+                }
+            })
+        },
+    ));
+    router
 }
 
 fn application_tool_routes() -> Vec<rmcp::handler::server::tool::ToolRoute<AirWikiMcp>> {
     use rmcp::handler::server::router::tool::ToolRoute;
     [
-        application_tool::<ListAirWikiMemoriesInput>(
+        application_tool::<ListAirWikiMemoriesInput, ListAirWikiMemoriesOutput>(
             "list_airwiki_memories",
+            "List AirWiki memories",
             "List application-accessible AirWiki memory wikis before selecting, creating, or writing; reuse a single exact name and ask the user when matches are ambiguous",
-            true,
+            ApplicationToolBehavior::ReadOnly,
         ),
-        application_tool::<CreateAirWikiMemoryInput>(
+        application_tool::<CreateAirWikiMemoryInput, CreateAirWikiMemoryOutput>(
             "create_airwiki_memory",
+            "Create an AirWiki memory",
             "Create a new application-owned AirWiki memory wiki only after the user explicitly asks for one; this does not share or verify it",
-            false,
+            ApplicationToolBehavior::Additive,
         ),
-        application_tool::<GetAirWikiMemoryInput>(
+        application_tool::<GetAirWikiMemoryInput, GetAirWikiMemoryOutput>(
             "get_airwiki_memory",
+            "Read an AirWiki memory",
             "Read the selected AirWiki memory wiki and current concept fingerprints before every edit or deprecation",
-            true,
+            ApplicationToolBehavior::ReadOnly,
         ),
-        application_tool::<WriteAirWikiMemoryInput>(
+        application_tool::<WriteAirWikiMemoryInput, AirWikiMemoryConceptOutput>(
             "write_airwiki_memory",
+            "Write AirWiki memory",
             "Create or update one durable, non-secret memory concept using the latest expected fingerprint; after a conflict, read and retry at most once",
-            false,
+            ApplicationToolBehavior::Destructive,
         ),
-        application_tool::<DeprecateAirWikiMemoryInput>(
+        application_tool::<DeprecateAirWikiMemoryInput, AirWikiMemoryConceptOutput>(
             "deprecate_airwiki_memory",
+            "Deprecate AirWiki memory",
             "Deprecate superseded memory knowledge using its latest fingerprint; never use this to erase history",
-            false,
+            ApplicationToolBehavior::Destructive,
         ),
-        application_tool::<RequestAirWikiComputationInput>(
+        application_tool::<RequestAirWikiComputationInput, RequestAirWikiComputationOutput>(
             "request_airwiki_computation",
+            "Request an AirWiki computation",
             "Request an attested computation (maximum 16 pending and 30 requests per minute)",
-            false,
+            ApplicationToolBehavior::Additive,
         ),
-        application_tool::<GetAirWikiComputationRunInput>(
+        application_tool::<GetAirWikiComputationRunInput, GetAirWikiComputationRunOutput>(
             "get_airwiki_computation_run",
+            "Read an AirWiki computation",
             "Read an attested computation request",
-            true,
+            ApplicationToolBehavior::ReadOnly,
         ),
     ]
     .into_iter()
-    .map(|(tool, name)| {
+    .flatten()
+    .map(|(tool, name, normalize_output)| {
         ToolRoute::new_dyn(
             tool,
             move |context: rmcp::handler::server::tool::ToolCallContext<'_, AirWikiMcp>| {
@@ -678,31 +861,38 @@ fn application_tool_routes() -> Vec<rmcp::handler::server::tool::ToolRoute<AirWi
                         .map(ToOwned::to_owned);
                     let identity = header_capability
                         .map(|capability| McpApplicationIdentity { capability })
-                        .or_else(|| context.service.bridge_identity.clone())
-                        .ok_or_else(|| {
-                            ErrorData::invalid_request(
-                                "application authorization is required",
-                                None,
-                            )
-                        })?;
+                        .or_else(|| context.service.bridge_identity.clone());
+                    let Some(identity) = identity else {
+                        return Ok(application_tool_failure(
+                            McpApplicationError::Unauthorized,
+                        )
+                        .into_result()
+                        .into());
+                    };
                     let arguments = context.arguments.unwrap_or_default();
-                    let output = if let Some(backend) = context.service.application_backend.as_ref()
-                    {
+                    let output = if let Some(backend) = context.service.application_backend.as_ref() {
                         backend
                             .call(identity, name, serde_json::Value::Object(arguments))
                             .await
-                            .map_err(application_error_to_mcp)?
+                            .map_err(application_tool_failure)
                     } else if let SearchToolBackend::Bridge(bridge) = &context.service.backend {
                         bridge
                             .call_application(name, serde_json::Value::Object(arguments))
-                            .await?
+                            .await
                     } else {
-                        return Err(ErrorData::internal_error(
-                            "application tools are unavailable",
-                            None,
-                        ));
+                        Err(application_tool_failure(McpApplicationError::Unavailable))
                     };
-                    Ok(CallToolResult::structured(output))
+                    match output {
+                        Ok(output) => match normalize_output(output) {
+                            Ok(output) => Ok(CallToolResult::structured(output).into()),
+                            Err(_) => Ok(McpToolFailure::temporarily_unavailable(
+                                "AirWiki returned an invalid memory result; try again later",
+                            )
+                            .into_result()
+                            .into()),
+                        },
+                        Err(error) => Ok(error.into_result().into()),
+                    }
                 })
             },
         )
@@ -710,69 +900,162 @@ fn application_tool_routes() -> Vec<rmcp::handler::server::tool::ToolRoute<AirWi
     .collect()
 }
 
-fn application_tool<T: JsonSchema + 'static>(
-    name: &'static str,
-    description: &'static str,
-    read_only: bool,
-) -> (Tool, &'static str) {
-    let schema = rmcp::handler::server::tool::schema_for_input::<T>().unwrap_or_default();
-    (
-        Tool::new(name, description, schema).with_annotations(
-            ToolAnnotations::with_title(description)
-                .read_only(read_only)
-                .destructive(false)
-                .idempotent(read_only)
-                .open_world(false),
-        ),
-        name,
-    )
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ApplicationToolBehavior {
+    ReadOnly,
+    Additive,
+    Destructive,
 }
 
-fn application_error_to_mcp(error: McpApplicationError) -> ErrorData {
-    match error {
-        McpApplicationError::Unauthorized => {
-            ErrorData::invalid_request("application authorization is invalid or revoked", None)
+fn application_tool<Input, Output>(
+    name: &'static str,
+    title: &'static str,
+    description: &'static str,
+    behavior: ApplicationToolBehavior,
+) -> Option<(Tool, &'static str, NormalizeApplicationOutput)>
+where
+    Input: JsonSchema + 'static,
+    Output: DeserializeOwned + JsonSchema + Serialize + 'static,
+{
+    let schema = match rmcp::handler::server::tool::schema_for_input::<Input>() {
+        Ok(schema) => schema,
+        Err(error) => {
+            tracing::error!(tool = name, %error, "MCP tool has an invalid input schema");
+            return None;
         }
-        McpApplicationError::Invalid => {
-            ErrorData::invalid_params("application request is invalid", None)
+    };
+    let (read_only, destructive, idempotent) = match behavior {
+        ApplicationToolBehavior::ReadOnly => (true, false, true),
+        ApplicationToolBehavior::Additive => (false, false, false),
+        ApplicationToolBehavior::Destructive => (false, true, false),
+    };
+    Some((
+        Tool::new(name, description, schema)
+            .with_title(title)
+            .with_raw_output_schema(rmcp::handler::server::tool::schema_for_output::<
+                McpStructuredOutput<Output>,
+            >())
+            .with_annotations(
+                ToolAnnotations::with_title(title)
+                    .read_only(read_only)
+                    .destructive(destructive)
+                    .idempotent(idempotent)
+                    .open_world(false),
+            ),
+        name,
+        normalize_application_output::<Output>,
+    ))
+}
+
+type NormalizeApplicationOutput =
+    fn(serde_json::Value) -> Result<serde_json::Value, serde_json::Error>;
+
+fn normalize_application_output<Output>(
+    output: serde_json::Value,
+) -> Result<serde_json::Value, serde_json::Error>
+where
+    Output: DeserializeOwned + Serialize,
+{
+    serde_json::from_value::<Output>(output).and_then(serde_json::to_value)
+}
+
+/// Schema-only union for the two structured shapes a tool can return.
+///
+/// Successful payloads remain unwrapped for compatibility. Tool-level
+/// failures use the common error object and `isError: true`.
+#[allow(dead_code)]
+#[derive(JsonSchema)]
+#[serde(untagged)]
+enum McpStructuredOutput<Output> {
+    Success(Output),
+    Failure(McpToolFailure),
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct McpToolFailure {
+    code: String,
+    message: String,
+    retryable: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(schema_with = "mcp_retry_after_schema")]
+    retry_after_seconds: Option<u64>,
+}
+
+fn mcp_retry_after_schema(_: &mut schemars::SchemaGenerator) -> schemars::Schema {
+    schemars::json_schema!({
+        "type": "integer",
+        "minimum": 0,
+        "maximum": u32::MAX,
+    })
+}
+
+impl McpToolFailure {
+    fn invalid_input(message: impl Into<String>) -> Self {
+        Self {
+            code: "invalid_input".to_owned(),
+            message: message.into(),
+            retryable: false,
+            retry_after_seconds: None,
         }
-        McpApplicationError::Unavailable => {
-            ErrorData::internal_error("application operation is temporarily unavailable", None)
+    }
+
+    fn temporarily_unavailable(message: impl Into<String>) -> Self {
+        Self {
+            code: "temporarily_unavailable".to_owned(),
+            message: message.into(),
+            retryable: true,
+            retry_after_seconds: None,
         }
+    }
+
+    fn into_result(self) -> CallToolResult {
+        let mut value = json!({
+            "code": self.code,
+            "message": self.message,
+            "retryable": self.retryable,
+        });
+        if let Some(retry_after_seconds) = self.retry_after_seconds
+            && let Some(object) = value.as_object_mut()
+        {
+            object.insert(
+                "retryAfterSeconds".to_owned(),
+                serde_json::Value::from(retry_after_seconds),
+            );
+        }
+        CallToolResult::structured_error(value)
+    }
+}
+
+fn application_tool_failure(error: McpApplicationError) -> McpToolFailure {
+    let (code, message, retryable) = match error {
+        McpApplicationError::Unauthorized => (
+            "authorization_required",
+            "Reconnect this integration in AirWiki before using memory tools",
+            false,
+        ),
+        McpApplicationError::Invalid => (
+            "invalid_request",
+            "The memory request is invalid or no longer matches the current wiki state",
+            false,
+        ),
+        McpApplicationError::Unavailable => (
+            "temporarily_unavailable",
+            "AirWiki could not complete the memory operation; try again later",
+            true,
+        ),
+    };
+    McpToolFailure {
+        code: code.to_owned(),
+        message: message.to_owned(),
+        retryable,
+        retry_after_seconds: None,
     }
 }
 
 struct SearchAirWikiTool;
 
-impl ToolBase for SearchAirWikiTool {
-    type Parameter = SearchAirWikiInput;
-    type Output = SearchAirWikiOutput;
-    type Error = ErrorData;
-
-    fn name() -> Cow<'static, str> {
-        "search_airwiki".into()
-    }
-
-    fn title() -> Option<String> {
-        Some("Search AirWiki knowledge".to_owned())
-    }
-
-    fn description() -> Option<Cow<'static, str>> {
-        Some(SEARCH_TOOL_DESCRIPTION.into())
-    }
-
-    fn annotations() -> Option<ToolAnnotations> {
-        Some(
-            ToolAnnotations::with_title("Search AirWiki knowledge")
-                .read_only(true)
-                .destructive(false)
-                .idempotent(true)
-                .open_world(false),
-        )
-    }
-}
-
-impl AsyncTool<AirWikiMcp> for SearchAirWikiTool {
+impl SearchAirWikiTool {
     async fn invoke(
         service: &AirWikiMcp,
         input: SearchAirWikiInput,
@@ -822,6 +1105,23 @@ impl ServerHandler for AirWikiMcp {
                     ),
             )
             .with_instructions(SERVER_INSTRUCTIONS)
+    }
+
+    async fn list_tools(
+        &self,
+        _request: Option<rmcp::model::PaginatedRequestParams>,
+        context: RequestContext<rmcp::RoleServer>,
+    ) -> Result<ListToolsResult, ErrorData> {
+        let result = ListToolsResult::with_all_items(self.tool_router.list_all());
+        if context
+            .protocol_version()
+            .is_some_and(|version| version >= rmcp::model::ProtocolVersion::V_2026_07_28)
+        {
+            // The visible tool set is capability-dependent. It must never be
+            // reused across application authorization contexts.
+            return Ok(result.with_ttl_ms(0).with_cache_scope(CacheScope::Private));
+        }
+        Ok(result)
     }
 }
 
@@ -924,29 +1224,21 @@ impl BridgeHttpBackend {
         &self,
         tool: &'static str,
         arguments: serde_json::Value,
-    ) -> Result<serde_json::Value, ErrorData> {
+    ) -> Result<serde_json::Value, McpToolFailure> {
         if self.capability.is_none() {
-            return Err(ErrorData::invalid_request(
-                "application authorization is required",
-                None,
-            ));
+            return Err(application_tool_failure(McpApplicationError::Unauthorized));
         }
         let request_id = self.next_request_id.fetch_add(1, Ordering::Relaxed);
         match self.forward_application(request_id, tool, arguments).await {
             Ok(BridgeApplicationResponse::Output(output)) => Ok(output),
-            Ok(BridgeApplicationResponse::Error(error)) => {
-                Err(sanitize_application_upstream_error(error))
-            }
+            Ok(BridgeApplicationResponse::Error(error)) => Err(error),
             Err(error) => {
                 tracing::warn!(
                     client = %self.client_kind,
                     error_kind = error.kind(),
                     "AirWiki MCP bridge application request failed"
                 );
-                Err(ErrorData::internal_error(
-                    "application operation is temporarily unavailable",
-                    None,
-                ))
+                Err(application_tool_failure(McpApplicationError::Unavailable))
             }
         }
     }
@@ -960,6 +1252,9 @@ impl BridgeHttpBackend {
             .client
             .post(self.endpoint.as_ref())
             .header(MCP_CLIENT_HEADER, self.client_kind.as_str())
+            .header(HEADER_MCP_PROTOCOL_VERSION, MCP_PROTOCOL_VERSION)
+            .header(HEADER_MCP_METHOD, "tools/call")
+            .header(HEADER_MCP_NAME, "search_airwiki")
             .header(
                 reqwest::header::ACCEPT,
                 "application/json, text/event-stream",
@@ -971,6 +1266,7 @@ impl BridgeHttpBackend {
                 "params": {
                     "name": "search_airwiki",
                     "arguments": input,
+                    "_meta": bridge_request_meta(),
                 }
             }));
         if let Some(capability) = &self.capability {
@@ -999,6 +1295,9 @@ impl BridgeHttpBackend {
             .post(self.endpoint.as_ref())
             .header(MCP_CLIENT_HEADER, self.client_kind.as_str())
             .header(MCP_CAPABILITY_HEADER, capability)
+            .header(HEADER_MCP_PROTOCOL_VERSION, MCP_PROTOCOL_VERSION)
+            .header(HEADER_MCP_METHOD, "tools/call")
+            .header(HEADER_MCP_NAME, tool)
             .header(
                 reqwest::header::ACCEPT,
                 "application/json, text/event-stream",
@@ -1010,6 +1309,7 @@ impl BridgeHttpBackend {
                 "params": {
                     "name": tool,
                     "arguments": arguments,
+                    "_meta": bridge_request_meta(),
                 }
             }))
             .send()
@@ -1021,6 +1321,17 @@ impl BridgeHttpBackend {
         let body = read_bounded_response(response).await?;
         parse_bridge_application_response(request_id, &body)
     }
+}
+
+fn bridge_request_meta() -> serde_json::Value {
+    json!({
+        "io.modelcontextprotocol/protocolVersion": MCP_PROTOCOL_VERSION,
+        "io.modelcontextprotocol/clientInfo": {
+            "name": "airwiki-mcp-bridge",
+            "version": env!("CARGO_PKG_VERSION"),
+        },
+        "io.modelcontextprotocol/clientCapabilities": {},
+    })
 }
 
 fn read_bridge_capability(client: McpClientKind) -> Option<String> {
@@ -1061,7 +1372,7 @@ enum BridgeForwardResponse {
 
 enum BridgeApplicationResponse {
     Output(serde_json::Value),
-    Error(ErrorData),
+    Error(McpToolFailure),
 }
 
 #[derive(Debug, Error)]
@@ -1135,10 +1446,19 @@ fn parse_bridge_response(
             .map(BridgeForwardResponse::Error)
             .map_err(|_| BridgeForwardError::InvalidResponse);
     }
-    let structured_content = envelope
+    let result = envelope
         .get("result")
-        .and_then(|result| result.get("structuredContent"))
         .ok_or(BridgeForwardError::InvalidResponse)?;
+    let structured_content = result
+        .get("structuredContent")
+        .ok_or(BridgeForwardError::InvalidResponse)?;
+    if result.get("isError").and_then(serde_json::Value::as_bool) == Some(true) {
+        let failure: McpToolFailure = serde_json::from_value(structured_content.clone())
+            .map_err(|_| BridgeForwardError::InvalidResponse)?;
+        return Ok(BridgeForwardResponse::Error(search_failure_to_error_data(
+            failure,
+        )));
+    }
     serde_json::from_value(structured_content.clone())
         .map(BridgeForwardResponse::Output)
         .map_err(|_| BridgeForwardError::InvalidResponse)
@@ -1155,16 +1475,27 @@ fn parse_bridge_application_response(
         return Err(BridgeForwardError::InvalidResponse);
     }
     if let Some(error) = envelope.get("error") {
-        return serde_json::from_value(error.clone())
-            .map(BridgeApplicationResponse::Error)
-            .map_err(|_| BridgeForwardError::InvalidResponse);
+        let error: ErrorData = serde_json::from_value(error.clone())
+            .map_err(|_| BridgeForwardError::InvalidResponse)?;
+        return Ok(BridgeApplicationResponse::Error(
+            sanitize_application_upstream_error(error),
+        ));
     }
-    envelope
+    let result = envelope
         .get("result")
-        .and_then(|result| result.get("structuredContent"))
+        .ok_or(BridgeForwardError::InvalidResponse)?;
+    let structured = result
+        .get("structuredContent")
         .cloned()
-        .map(BridgeApplicationResponse::Output)
-        .ok_or(BridgeForwardError::InvalidResponse)
+        .ok_or(BridgeForwardError::InvalidResponse)?;
+    if result.get("isError").and_then(serde_json::Value::as_bool) == Some(true) {
+        let failure =
+            serde_json::from_value(structured).map_err(|_| BridgeForwardError::InvalidResponse)?;
+        return Ok(BridgeApplicationResponse::Error(
+            sanitize_application_tool_failure(failure),
+        ));
+    }
+    Ok(BridgeApplicationResponse::Output(structured))
 }
 
 fn decode_json_or_sse(body: &[u8]) -> Result<serde_json::Value, BridgeForwardError> {
@@ -1209,25 +1540,75 @@ fn sanitize_upstream_error(error: ErrorData) -> ErrorData {
     ErrorData::internal_error(MCP_BRIDGE_UNAVAILABLE_MESSAGE, None)
 }
 
-fn sanitize_application_upstream_error(error: ErrorData) -> ErrorData {
+fn sanitize_application_upstream_error(error: ErrorData) -> McpToolFailure {
     match error.message.as_ref() {
         "application authorization is invalid or revoked" => {
-            ErrorData::invalid_request("application authorization is invalid or revoked", None)
+            application_tool_failure(McpApplicationError::Unauthorized)
         }
-        "application request is invalid" => {
-            ErrorData::invalid_params("application request is invalid", None)
-        }
-        _ => ErrorData::internal_error("application operation is temporarily unavailable", None),
+        "application request is invalid" => application_tool_failure(McpApplicationError::Invalid),
+        _ => application_tool_failure(McpApplicationError::Unavailable),
+    }
+}
+
+fn sanitize_application_tool_failure(error: McpToolFailure) -> McpToolFailure {
+    match error.code.as_str() {
+        "authorization_required" => application_tool_failure(McpApplicationError::Unauthorized),
+        "invalid_request" => application_tool_failure(McpApplicationError::Invalid),
+        _ => application_tool_failure(McpApplicationError::Unavailable),
+    }
+}
+
+fn search_tool_failure(error: ErrorData) -> McpToolFailure {
+    if error.code == rmcp::model::ErrorCode::INVALID_REQUEST
+        && error.message == SEARCH_RATE_LIMIT_MESSAGE
+    {
+        return McpToolFailure {
+            code: "rate_limited".to_owned(),
+            message: SEARCH_RATE_LIMIT_MESSAGE.to_owned(),
+            retryable: true,
+            retry_after_seconds: Some(SEARCH_RATE_WINDOW.as_secs()),
+        };
+    }
+    if error.code == rmcp::model::ErrorCode::INVALID_PARAMS
+        && error.message == "search is not authorized for external AI"
+    {
+        return McpToolFailure {
+            code: "not_authorized".to_owned(),
+            message: "Search is not authorized for external AI".to_owned(),
+            retryable: false,
+            retry_after_seconds: None,
+        };
+    }
+    if error.code == rmcp::model::ErrorCode::INVALID_PARAMS {
+        return McpToolFailure::invalid_input("Search input is invalid");
+    }
+    McpToolFailure::temporarily_unavailable(MCP_BRIDGE_UNAVAILABLE_MESSAGE)
+}
+
+fn search_failure_to_error_data(error: McpToolFailure) -> ErrorData {
+    match error.code.as_str() {
+        "rate_limited" => ErrorData::invalid_request(
+            SEARCH_RATE_LIMIT_MESSAGE,
+            Some(json!({ "retry_after_seconds": SEARCH_RATE_WINDOW.as_secs() })),
+        ),
+        "not_authorized" => ErrorData::invalid_params(
+            "search is not authorized for external AI",
+            Some(json!({ "purpose": "external_ai" })),
+        ),
+        "invalid_input" => ErrorData::invalid_params("search input is invalid", None),
+        _ => ErrorData::internal_error(MCP_BRIDGE_UNAVAILABLE_MESSAGE, None),
     }
 }
 
 /// Runs the fixed loopback MCP bridge over stdin/stdout until its client exits.
 pub async fn run_stdio_bridge(client: McpClientKind) -> Result<(), McpBridgeError> {
-    let service = AirWikiMcp::bridge(client)?;
+    let service = tokio::task::spawn_blocking(move || AirWikiMcp::bridge(client))
+        .await
+        .map_err(McpBridgeError::PrepareTask)??;
     let running = service
         .serve(rmcp::transport::stdio())
         .await
-        .map_err(|error| McpBridgeError::Initialize(Box::new(error)))?;
+        .map_err(|error| McpBridgeError::Start(Box::new(error)))?;
     running.waiting().await.map_err(McpBridgeError::Join)?;
     Ok(())
 }
@@ -1239,8 +1620,10 @@ pub enum McpBridgeError {
     InvalidE2ePort(#[from] E2eMcpPortError),
     #[error("failed to initialize the local HTTP client")]
     BuildHttpClient(#[source] reqwest::Error),
-    #[error("failed to initialize MCP stdio")]
-    Initialize(#[source] Box<rmcp::service::ServerInitializeError>),
+    #[error("failed to prepare MCP stdio")]
+    PrepareTask(#[source] tokio::task::JoinError),
+    #[error("failed to start MCP stdio")]
+    Start(#[source] Box<rmcp::service::ServerInitializeError>),
     #[error("MCP stdio task failed")]
     Join(#[source] tokio::task::JoinError),
 }
@@ -1597,8 +1980,10 @@ pub async fn start_with_application_backend(
             // application capability. Keeping no MCP session state also lets
             // the Secure MCP Tunnel forward an independently delivered search
             // call without a prior local handshake.
-            .with_stateful_mode(false)
+            .with_legacy_session_mode(false)
+            .with_json_response(true)
             .with_allowed_hosts(allowed_hosts.clone())
+            .with_max_request_body_bytes(MAX_MCP_HTTP_BODY_BYTES)
             .with_cancellation_token(service_cancellation),
     );
     let discovery_state = DiscoveryRouteState {
@@ -1665,6 +2050,9 @@ async fn observe_client_activity(
     request: Request,
     next: Next,
 ) -> Response {
+    if request.headers().contains_key(ORIGIN) {
+        return (StatusCode::FORBIDDEN, INVALID_ORIGIN_BODY).into_response();
+    }
     if host_is_allowed(request.headers(), &state.allowed_hosts)
         && let Some(client) = request
             .headers()
@@ -1762,7 +2150,7 @@ mod tests {
     use airwiki_types::{FederatedSearch, SearchResponse};
     use async_trait::async_trait;
     use chrono::Utc;
-    use rmcp::{ServiceExt, handler::server::router::tool::AsyncTool, model::ErrorCode};
+    use rmcp::{ServiceExt, model::ErrorCode};
     use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader};
     use uuid::Uuid;
 
@@ -1876,6 +2264,30 @@ mod tests {
         }
     }
 
+    fn schema_properties_containing<'a>(
+        value: &'a serde_json::Value,
+        property: &str,
+    ) -> Option<&'a serde_json::Map<String, serde_json::Value>> {
+        match value {
+            serde_json::Value::Object(object) => {
+                if let Some(properties) = object
+                    .get("properties")
+                    .and_then(serde_json::Value::as_object)
+                    && properties.contains_key(property)
+                {
+                    return Some(properties);
+                }
+                object
+                    .values()
+                    .find_map(|value| schema_properties_containing(value, property))
+            }
+            serde_json::Value::Array(values) => values
+                .iter()
+                .find_map(|value| schema_properties_containing(value, property)),
+            _ => None,
+        }
+    }
+
     #[test]
     fn schema_exposes_one_read_only_tool() {
         let server = AirWikiMcp::new(Arc::new(RecordingBackend::default()));
@@ -1954,10 +2366,9 @@ mod tests {
         assert!(!required.iter().any(|name| name.as_str() == Some("top_k")));
 
         let output_schema = tool.output_schema.as_ref().expect("output schema");
-        let output_properties = output_schema
-            .get("properties")
-            .and_then(serde_json::Value::as_object)
-            .expect("output properties");
+        let output_schema = serde_json::Value::Object((**output_schema).clone());
+        let output_properties =
+            schema_properties_containing(&output_schema, "evidence").expect("output properties");
         assert_eq!(output_properties.len(), 4);
         assert!(output_properties.contains_key("evidence"));
         let candidate_schema = output_properties
@@ -1994,12 +2405,83 @@ mod tests {
         ] {
             assert!(!output_properties.contains_key(removed_field));
         }
+        let error_properties = schema_properties_containing(&output_schema, "retryable")
+            .expect("structured error properties");
+        assert!(error_properties.contains_key("code"));
+        assert!(error_properties.contains_key("message"));
+        assert!(error_properties.contains_key("retryAfterSeconds"));
 
         let annotations = tool.annotations.as_ref().expect("tool annotations");
         assert_eq!(annotations.read_only_hint, Some(true));
         assert_eq!(annotations.destructive_hint, Some(false));
         assert_eq!(annotations.idempotent_hint, Some(true));
         assert_eq!(annotations.open_world_hint, Some(false));
+    }
+
+    #[test]
+    fn application_tools_expose_typed_schemas_and_accurate_risk_hints() {
+        let routes = application_tool_routes();
+        assert_eq!(
+            routes.len(),
+            7,
+            "every managed application tool must register"
+        );
+        for route in &routes {
+            assert_eq!(
+                route
+                    .attr
+                    .input_schema
+                    .get("type")
+                    .and_then(serde_json::Value::as_str),
+                Some("object"),
+                "{} must expose an object input schema",
+                route.attr.name
+            );
+            assert!(
+                route.attr.output_schema.is_some(),
+                "{} must expose an output schema",
+                route.attr.name
+            );
+            assert!(
+                route
+                    .attr
+                    .title
+                    .as_deref()
+                    .is_some_and(|title| !title.is_empty())
+            );
+            let annotations = route.attr.annotations.as_ref().expect("tool annotations");
+            assert_eq!(annotations.open_world_hint, Some(false));
+        }
+
+        let annotation_for = |name: &str| {
+            routes
+                .iter()
+                .find(|route| route.attr.name == name)
+                .and_then(|route| route.attr.annotations.as_ref())
+                .expect("named tool annotations")
+        };
+        for name in [
+            "list_airwiki_memories",
+            "get_airwiki_memory",
+            "get_airwiki_computation_run",
+        ] {
+            let annotations = annotation_for(name);
+            assert_eq!(annotations.read_only_hint, Some(true), "{name}");
+            assert_eq!(annotations.destructive_hint, Some(false), "{name}");
+            assert_eq!(annotations.idempotent_hint, Some(true), "{name}");
+        }
+        for name in ["create_airwiki_memory", "request_airwiki_computation"] {
+            let annotations = annotation_for(name);
+            assert_eq!(annotations.read_only_hint, Some(false), "{name}");
+            assert_eq!(annotations.destructive_hint, Some(false), "{name}");
+            assert_eq!(annotations.idempotent_hint, Some(false), "{name}");
+        }
+        for name in ["write_airwiki_memory", "deprecate_airwiki_memory"] {
+            let annotations = annotation_for(name);
+            assert_eq!(annotations.read_only_hint, Some(false), "{name}");
+            assert_eq!(annotations.destructive_hint, Some(true), "{name}");
+            assert_eq!(annotations.idempotent_hint, Some(false), "{name}");
+        }
     }
 
     #[tokio::test]
@@ -2052,7 +2534,23 @@ mod tests {
         })
         .to_string();
         let unauthorized = raw_json_request(handle.local_addr(), &host, &call_body).await;
-        assert!(unauthorized.contains("application authorization is required"));
+        let unauthorized_json = response_json(&unauthorized);
+        let unauthorized_result = unauthorized_json
+            .get("result")
+            .expect("unauthorized tool result");
+        assert_eq!(
+            unauthorized_result
+                .get("isError")
+                .and_then(serde_json::Value::as_bool),
+            Some(true)
+        );
+        assert_eq!(
+            unauthorized_result
+                .get("structuredContent")
+                .and_then(|value| value.get("code"))
+                .and_then(serde_json::Value::as_str),
+            Some("authorization_required")
+        );
         assert!(
             application_backend
                 .calls
@@ -2752,6 +3250,88 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn stdio_bridge_discovers_and_lists_tools_with_the_2026_lifecycle() {
+        let server =
+            AirWikiMcp::bridge_with_endpoint(McpClientKind::ClaudeCode, "http://127.0.0.1:9/mcp")
+                .expect("bridge service");
+        let (server_transport, client_transport) = tokio::io::duplex(32 * 1024);
+        let server_task = tokio::spawn(async move {
+            let running = server
+                .serve(server_transport)
+                .await
+                .expect("discover stdio bridge");
+            running.waiting().await.expect("stdio task")
+        });
+        let (client_read, mut client_write) = tokio::io::split(client_transport);
+        let mut client_read = BufReader::new(client_read);
+
+        write_json_line(
+            &mut client_write,
+            &json!({
+                "jsonrpc": "2.0",
+                "id": 1,
+                "method": "server/discover",
+                "params": { "_meta": bridge_request_meta() },
+            }),
+        )
+        .await;
+        let discover = read_json_line(&mut client_read).await;
+        let result = discover.get("result").expect("discovery result");
+        assert_eq!(
+            result.get("resultType").and_then(serde_json::Value::as_str),
+            Some("complete")
+        );
+        assert!(
+            result
+                .get("supportedVersions")
+                .and_then(serde_json::Value::as_array)
+                .is_some_and(|versions| versions
+                    .iter()
+                    .any(|version| { version.as_str() == Some(MCP_PROTOCOL_VERSION) }))
+        );
+
+        write_json_line(
+            &mut client_write,
+            &json!({
+                "jsonrpc": "2.0",
+                "id": 2,
+                "method": "tools/list",
+                "params": { "_meta": bridge_request_meta() },
+            }),
+        )
+        .await;
+        let tools = read_json_line(&mut client_read).await;
+        assert_eq!(
+            tools
+                .get("result")
+                .and_then(|result| result.get("resultType"))
+                .and_then(serde_json::Value::as_str),
+            Some("complete")
+        );
+        assert_eq!(
+            tools
+                .get("result")
+                .and_then(|result| result.get("ttlMs"))
+                .and_then(serde_json::Value::as_u64),
+            Some(0)
+        );
+        assert_eq!(
+            tools
+                .get("result")
+                .and_then(|result| result.get("cacheScope"))
+                .and_then(serde_json::Value::as_str),
+            Some("private")
+        );
+        assert!(tools.to_string().contains("search_airwiki"));
+
+        client_write.shutdown().await.expect("close client input");
+        tokio::time::timeout(Duration::from_secs(1), server_task)
+            .await
+            .expect("server shutdown timeout")
+            .expect("join server task");
+    }
+
+    #[tokio::test]
     async fn managed_stdio_tool_schemas_fit_the_verification_budget() {
         let mut server =
             AirWikiMcp::bridge_with_endpoint(McpClientKind::GenericMcp, "http://127.0.0.1:9/mcp")
@@ -2899,6 +3479,52 @@ mod tests {
         handle.shutdown().await.expect("graceful shutdown");
     }
 
+    #[test]
+    fn bridge_preserves_only_typed_application_tool_errors() {
+        let response = json!({
+            "jsonrpc": "2.0",
+            "id": 7,
+            "result": {
+                "resultType": "complete",
+                "content": [],
+                "structuredContent": {
+                    "code": "authorization_required",
+                    "message": "Reconnect this integration in AirWiki before using memory tools",
+                    "retryable": false,
+                },
+                "isError": true,
+            }
+        });
+        let encoded = serde_json::to_vec(&response).expect("encode synthetic tool result");
+        let parsed = parse_bridge_application_response(7, &encoded)
+            .expect("parse structured application error");
+        let BridgeApplicationResponse::Error(error) = parsed else {
+            panic!("expected application tool error");
+        };
+        assert_eq!(error.code, "authorization_required");
+        assert!(!error.retryable);
+
+        let hostile = json!({
+            "jsonrpc": "2.0",
+            "id": 7,
+            "result": {
+                "resultType": "complete",
+                "structuredContent": {
+                    "code": "authorization_required",
+                    "message": "safe",
+                    "retryable": false,
+                    "sourcePath": "/private/document.md",
+                },
+                "isError": true,
+            }
+        });
+        let encoded = serde_json::to_vec(&hostile).expect("encode hostile tool result");
+        assert!(matches!(
+            parse_bridge_application_response(7, &encoded),
+            Err(BridgeForwardError::InvalidResponse)
+        ));
+    }
+
     #[tokio::test]
     async fn bridge_rejects_redirects_and_oversized_responses() {
         let redirect = spawn_single_http_response(
@@ -3043,6 +3669,25 @@ mod tests {
         )
         .await;
         assert!(limited.contains(SEARCH_RATE_LIMIT_MESSAGE));
+        let limited_json = response_json(&limited);
+        assert_eq!(
+            limited_json
+                .pointer("/result/isError")
+                .and_then(serde_json::Value::as_bool),
+            Some(true)
+        );
+        assert_eq!(
+            limited_json
+                .pointer("/result/structuredContent/code")
+                .and_then(serde_json::Value::as_str),
+            Some("rate_limited")
+        );
+        assert_eq!(
+            limited_json
+                .pointer("/result/structuredContent/retryAfterSeconds")
+                .and_then(serde_json::Value::as_u64),
+            Some(SEARCH_RATE_WINDOW.as_secs())
+        );
         assert_eq!(
             backend.requests.lock().expect("request lock").len(),
             SEARCH_RATE_LIMIT
@@ -3076,6 +3721,18 @@ mod tests {
         assert!(
             valid.starts_with("HTTP/1.1 405"),
             "unexpected response: {valid}"
+        );
+
+        let browser_request = raw_json_request_with_extra_headers(
+            handle.local_addr(),
+            &valid_host,
+            r#"{"jsonrpc":"2.0","id":1,"method":"tools/list","params":{}}"#,
+            "Origin: https://attacker.example\r\n",
+        )
+        .await;
+        assert!(
+            browser_request.starts_with("HTTP/1.1 403"),
+            "unexpected browser-origin response: {browser_request}"
         );
 
         for path in [
@@ -3119,6 +3776,117 @@ mod tests {
         assert!(
             !response.to_ascii_lowercase().contains("mcp-session-id"),
             "stateless responses must not create a session: {response}"
+        );
+
+        handle.shutdown().await.expect("graceful shutdown");
+    }
+
+    #[tokio::test]
+    async fn live_server_supports_2026_discovery_and_stateless_tool_listing() {
+        let handle = start(
+            McpServerConfig::default().with_port(0),
+            Arc::new(RecordingBackend::default()),
+        )
+        .await
+        .expect("start MCP server");
+        let host = format!("127.0.0.1:{}", handle.local_addr().port());
+        let discover_body = json!({
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "server/discover",
+            "params": { "_meta": bridge_request_meta() },
+        })
+        .to_string();
+        let discover = raw_modern_json_request(
+            handle.local_addr(),
+            &host,
+            &discover_body,
+            "server/discover",
+            None,
+        )
+        .await;
+        assert!(
+            discover.starts_with("HTTP/1.1 200"),
+            "unexpected discovery response: {discover}"
+        );
+        assert!(
+            !discover.to_ascii_lowercase().contains("mcp-session-id"),
+            "modern discovery must not create a session: {discover}"
+        );
+        let discovery_json = response_json(&discover);
+        let discovery_result = discovery_json.get("result").expect("discovery result");
+        assert_eq!(
+            discovery_result
+                .get("resultType")
+                .and_then(serde_json::Value::as_str),
+            Some("complete")
+        );
+        assert!(
+            discovery_result
+                .get("supportedVersions")
+                .and_then(serde_json::Value::as_array)
+                .is_some_and(|versions| versions
+                    .iter()
+                    .any(|version| { version.as_str() == Some(MCP_PROTOCOL_VERSION) }))
+        );
+        assert!(
+            discovery_result
+                .get("instructions")
+                .and_then(serde_json::Value::as_str)
+                .is_some_and(
+                    |instructions| instructions.contains("AirWiki provides private search")
+                )
+        );
+
+        let list_body = json!({
+            "jsonrpc": "2.0",
+            "id": 2,
+            "method": "tools/list",
+            "params": { "_meta": bridge_request_meta() },
+        })
+        .to_string();
+        let tools =
+            raw_modern_json_request(handle.local_addr(), &host, &list_body, "tools/list", None)
+                .await;
+        assert!(
+            tools.starts_with("HTTP/1.1 200"),
+            "unexpected tools response: {tools}"
+        );
+        let tools_json = response_json(&tools);
+        assert_eq!(
+            tools_json
+                .get("result")
+                .and_then(|result| result.get("resultType"))
+                .and_then(serde_json::Value::as_str),
+            Some("complete")
+        );
+        assert_eq!(
+            tools_json
+                .get("result")
+                .and_then(|result| result.get("ttlMs"))
+                .and_then(serde_json::Value::as_u64),
+            Some(0)
+        );
+        assert_eq!(
+            tools_json
+                .get("result")
+                .and_then(|result| result.get("cacheScope"))
+                .and_then(serde_json::Value::as_str),
+            Some("private")
+        );
+        assert!(tools_json.to_string().contains("search_airwiki"));
+
+        let mismatched = raw_modern_json_request(
+            handle.local_addr(),
+            &host,
+            &list_body,
+            "tools/call",
+            Some("search_airwiki"),
+        )
+        .await;
+        assert!(
+            mismatched.starts_with("HTTP/1.1 400"),
+            "mismatched routing headers must fail: {mismatched}"
         );
 
         handle.shutdown().await.expect("graceful shutdown");
@@ -3202,17 +3970,52 @@ mod tests {
         client: Option<McpClientKind>,
         capability: Option<&str>,
     ) -> String {
-        let mut stream = tokio::net::TcpStream::connect(address)
-            .await
-            .expect("connect to test MCP server");
         let client_header = client.map_or_else(String::new, |client| {
             format!("{MCP_CLIENT_HEADER}: {}\r\n", client.as_str())
         });
         let capability_header = capability.map_or_else(String::new, |capability| {
             format!("{MCP_CAPABILITY_HEADER}: {capability}\r\n")
         });
+        raw_json_request_with_extra_headers(
+            address,
+            host,
+            body,
+            &format!("{client_header}{capability_header}"),
+        )
+        .await
+    }
+
+    async fn raw_modern_json_request(
+        address: SocketAddr,
+        host: &str,
+        body: &str,
+        method: &str,
+        name: Option<&str>,
+    ) -> String {
+        let name_header =
+            name.map_or_else(String::new, |name| format!("{HEADER_MCP_NAME}: {name}\r\n"));
+        raw_json_request_with_extra_headers(
+            address,
+            host,
+            body,
+            &format!(
+                "{HEADER_MCP_PROTOCOL_VERSION}: {MCP_PROTOCOL_VERSION}\r\n{HEADER_MCP_METHOD}: {method}\r\n{name_header}"
+            ),
+        )
+        .await
+    }
+
+    async fn raw_json_request_with_extra_headers(
+        address: SocketAddr,
+        host: &str,
+        body: &str,
+        extra_headers: &str,
+    ) -> String {
+        let mut stream = tokio::net::TcpStream::connect(address)
+            .await
+            .expect("connect to test MCP server");
         let request = format!(
-            "POST {MCP_PATH} HTTP/1.1\r\nHost: {host}\r\n{client_header}{capability_header}Connection: close\r\nContent-Type: application/json\r\nAccept: application/json, text/event-stream\r\nContent-Length: {}\r\n\r\n{body}",
+            "POST {MCP_PATH} HTTP/1.1\r\nHost: {host}\r\n{extra_headers}Connection: close\r\nContent-Type: application/json\r\nAccept: application/json, text/event-stream\r\nContent-Length: {}\r\n\r\n{body}",
             body.len()
         );
         stream
@@ -3225,6 +4028,13 @@ mod tests {
             .await
             .expect("read test response");
         String::from_utf8(response).expect("HTTP response is UTF-8")
+    }
+
+    fn response_json(response: &str) -> serde_json::Value {
+        let (_, body) = response
+            .split_once("\r\n\r\n")
+            .expect("HTTP response separates headers and body");
+        serde_json::from_str(body).expect("HTTP response body is JSON")
     }
 
     fn tool_call_body(id: u64, question: &str) -> String {

@@ -17,7 +17,7 @@ axum = "0.8.8"
 airwiki-types = { version = "0.2.0", path = "../airwiki-types" }
 async-trait.workspace = true
 directories = "6.0.0"
-rmcp = { version = "2.2.0", default-features = false, features = [
+rmcp = { version = "=3.0.1", default-features = false, features = [
     "macros",
     "schemars",
     "server",

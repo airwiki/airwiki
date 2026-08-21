@@ -6,7 +6,7 @@ Scope: the union of the transitive dependency closures of `airwiki-desktop`, `ai
 
 If a crate declares an SPDX expression but does not include a separate legal file, the inventory assigns the standard MIT/Apache text bundled by the project or an identical text found in another crate with the same expression. Each text lists its origin explicitly.
 
-Third-party packages: **698**. Unique legal texts: **388**.
+Third-party packages: **702**. Unique legal texts: **389**.
 
 ## Packages
 
@@ -43,6 +43,7 @@ Third-party packages: **698**. Unique legal texts: **388**.
 | base64 | 0.13.1 | MIT/Apache-2.0 | [upstream](https://github.com/marshallpierce/rust-base64) | [0dd882e53de1](#sha256-0dd882e53de11566d50f8e8e2d5a651bcf3fabee4987d70f306233cf39094ba7), [a60eea817514](#sha256-a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2) |
 | base64 | 0.21.7 | MIT OR Apache-2.0 | [upstream](https://github.com/marshallpierce/rust-base64) | [0dd882e53de1](#sha256-0dd882e53de11566d50f8e8e2d5a651bcf3fabee4987d70f306233cf39094ba7), [a60eea817514](#sha256-a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2) |
 | base64 | 0.22.1 | MIT OR Apache-2.0 | [upstream](https://github.com/marshallpierce/rust-base64) | [0dd882e53de1](#sha256-0dd882e53de11566d50f8e8e2d5a651bcf3fabee4987d70f306233cf39094ba7), [a60eea817514](#sha256-a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2) |
+| base64 | 0.23.1 | MIT OR Apache-2.0 | [upstream](https://github.com/marshallpierce/rust-base64) | [a60eea817514](#sha256-a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2), [ab499c75a0f0](#sha256-ab499c75a0f0da8e0fe83bf9ba3a27e5c39705310f07107c6c66b69958d2401c) |
 | base64ct | 1.8.3 | Apache-2.0 OR MIT | [upstream](https://github.com/RustCrypto/formats) | [2d1c57bff283](#sha256-2d1c57bff28344b9e698f51063bc8509799cc4c99a4e0cf2aa3f7e7c3e1f9a9d), [a9040321c371](#sha256-a9040321c3712d8fd0b09cf52b17445de04a23a10165049ae187cd39e5c86be5) |
 | bip39 | 2.2.2 | CC0-1.0 | [upstream](https://github.com/rust-bitcoin/rust-bip39/) | [a2010f343487](#sha256-a2010f343487d3f7618affe54f789f5487602331c0a8d03f49e9a7c547cf0499) |
 | bit-set | 0.8.0 | Apache-2.0 OR MIT | [upstream](https://github.com/contain-rs/bit-set) | [8173d5c29b4f](#sha256-8173d5c29b4f956d532781d2b86e4e30f83e6b7878dce18c919451d6ba707c90), [f51ac2c59a22](#sha256-f51ac2c59a222f7476ce507ca879960e2b64ea64bb2786eefdbeb7b0b538d1b7) |
@@ -126,10 +127,13 @@ Third-party packages: **698**. Unique legal texts: **388**.
 | curve25519-dalek-derive | 0.1.1 | MIT/Apache-2.0 | [upstream](https://github.com/dalek-cryptography/curve25519-dalek) | [23f18e03dc49](#sha256-23f18e03dc49df91622fe2a76176497404e46ced8a715d9d2b67a7446571cca3), [a60eea817514](#sha256-a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2) |
 | darling | 0.20.11 | MIT | [upstream](https://github.com/TedDriggs/darling) | [8ea93490d74a](#sha256-8ea93490d74a5a1b1af3ff71d786271b3f1e5f0bea79ac16e02ec533cef040d6) |
 | darling | 0.23.0 | MIT | [upstream](https://github.com/TedDriggs/darling) | [8ea93490d74a](#sha256-8ea93490d74a5a1b1af3ff71d786271b3f1e5f0bea79ac16e02ec533cef040d6) |
+| darling | 0.24.1 | MIT | [upstream](https://github.com/TedDriggs/darling) | [8ea93490d74a](#sha256-8ea93490d74a5a1b1af3ff71d786271b3f1e5f0bea79ac16e02ec533cef040d6) |
 | darling_core | 0.20.11 | MIT | [upstream](https://github.com/TedDriggs/darling) | [8ea93490d74a](#sha256-8ea93490d74a5a1b1af3ff71d786271b3f1e5f0bea79ac16e02ec533cef040d6) |
 | darling_core | 0.23.0 | MIT | [upstream](https://github.com/TedDriggs/darling) | [8ea93490d74a](#sha256-8ea93490d74a5a1b1af3ff71d786271b3f1e5f0bea79ac16e02ec533cef040d6) |
+| darling_core | 0.24.1 | MIT | [upstream](https://github.com/TedDriggs/darling) | [8ea93490d74a](#sha256-8ea93490d74a5a1b1af3ff71d786271b3f1e5f0bea79ac16e02ec533cef040d6) |
 | darling_macro | 0.20.11 | MIT | [upstream](https://github.com/TedDriggs/darling) | [8ea93490d74a](#sha256-8ea93490d74a5a1b1af3ff71d786271b3f1e5f0bea79ac16e02ec533cef040d6) |
 | darling_macro | 0.23.0 | MIT | [upstream](https://github.com/TedDriggs/darling) | [8ea93490d74a](#sha256-8ea93490d74a5a1b1af3ff71d786271b3f1e5f0bea79ac16e02ec533cef040d6) |
+| darling_macro | 0.24.1 | MIT | [upstream](https://github.com/TedDriggs/darling) | [8ea93490d74a](#sha256-8ea93490d74a5a1b1af3ff71d786271b3f1e5f0bea79ac16e02ec533cef040d6) |
 | dary_heap | 0.3.9 | MIT OR Apache-2.0 | [upstream](https://github.com/hanmertens/dary_heap) | [23f18e03dc49](#sha256-23f18e03dc49df91622fe2a76176497404e46ced8a715d9d2b67a7446571cca3), [62c7a1e35f56](#sha256-62c7a1e35f56406896d7aa7ca52d0cc0d272ac022b5d2796e7d6905db8a3636a) |
 | data-encoding | 2.11.0 | MIT | [upstream](https://github.com/ia0/data-encoding) | [b68ad1a3367b](#sha256-b68ad1a3367b825447089e1f8d6829b97f47a89eb78d2f4ebaef4672f5606186) |
 | data-encoding-macro | 0.1.20 | MIT | [upstream](https://github.com/ia0/data-encoding) | [b68ad1a3367b](#sha256-b68ad1a3367b825447089e1f8d6829b97f47a89eb78d2f4ebaef4672f5606186) |
@@ -447,8 +451,8 @@ Third-party packages: **698**. Unique legal texts: **388**.
 | resolv-conf | 0.7.6 | MIT OR Apache-2.0 | [upstream](https://github.com/hickory-dns/resolv-conf) | [b40930bbcf80](#sha256-b40930bbcf80744c86c46a12bc9da056641d722716c378f5659b9e555ef833e1), [c303b44873ac](#sha256-c303b44873acb399b27d3d3983937073246f1ab083f32990ea6015ea31d976b2) |
 | rfd | 0.15.4 | MIT | [upstream](https://github.com/PolyMeilex/rfd) | [65fc947f4bac](#sha256-65fc947f4bac882a2cd104ef73c246b1b037059df9f2b3a58b7f77f0b9e56071) |
 | ring | 0.17.14 | Apache-2.0 AND ISC | [upstream](https://github.com/briansmith/ring) | [005fc765ddc5](#sha256-005fc765ddc5115da796cca915baa9557abae13ff35e0a47c47affc56f6c414d), [6ee2ed6c7771](#sha256-6ee2ed6c77710de911761acd5fc1ad1da00f476beb1a7ef27e78c2d1858deafc), [9eacbcb81be6](#sha256-9eacbcb81be660840c714a560a9d65ba07913db98dd4baf969f78dd499fdd60f), [a60eea817514](#sha256-a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2), [b3d734001a94](#sha256-b3d734001a94efff3579978d953391aa7115f877657d25eb54037a43875d078a), [f025ccfb7dfb](#sha256-f025ccfb7dfb6bdfedc75ca0f67acc69e6fb4998143d834f7c2f38a29989680f) |
-| rmcp | 2.2.0 | Apache-2.0 | [upstream](https://github.com/modelcontextprotocol/rust-sdk/) | [c71d239df917](#sha256-c71d239df91726fc519c6eb72d318ec65820627232b2f796219e87dcf35d0ab4) |
-| rmcp-macros | 2.2.0 | Apache-2.0 | [upstream](https://github.com/modelcontextprotocol/rust-sdk/) | [c71d239df917](#sha256-c71d239df91726fc519c6eb72d318ec65820627232b2f796219e87dcf35d0ab4) |
+| rmcp | 3.0.1 | Apache-2.0 | [upstream](https://github.com/modelcontextprotocol/rust-sdk/) | [c71d239df917](#sha256-c71d239df91726fc519c6eb72d318ec65820627232b2f796219e87dcf35d0ab4) |
+| rmcp-macros | 3.1.4 | Apache-2.0 | [upstream](https://github.com/modelcontextprotocol/rust-sdk/) | [c71d239df917](#sha256-c71d239df91726fc519c6eb72d318ec65820627232b2f796219e87dcf35d0ab4) |
 | rusqlite | 0.37.0 | MIT | [upstream](https://github.com/rusqlite/rusqlite) | [c10c1f273375](#sha256-c10c1f27337546471e5f7e4e97fdd398b35b9d4e126115dcd22de8d8e65abf6f) |
 | rustc-demangle | 0.1.28 | MIT/Apache-2.0 | [upstream](https://github.com/rust-lang/rustc-demangle) | [378f5840b258](#sha256-378f5840b258e2779c39418f3f2d7b2ba96f1c7917dd6be0713f88305dbda397), [a60eea817514](#sha256-a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2) |
 | rustc-hash | 2.1.3 | Apache-2.0 OR MIT | [upstream](https://github.com/rust-lang/rustc-hash) | [23f18e03dc49](#sha256-23f18e03dc49df91622fe2a76176497404e46ced8a715d9d2b67a7446571cca3), [62c7a1e35f56](#sha256-62c7a1e35f56406896d7aa7ca52d0cc0d272ac022b5d2796e7d6905db8a3636a) |
@@ -520,8 +524,8 @@ Third-party packages: **698**. Unique legal texts: **388**.
 | subtle | 2.6.1 | BSD-3-Clause | [upstream](https://github.com/dalek-cryptography/subtle) | [cc0332a88c2e](#sha256-cc0332a88c2ea21d5f3c1298f966120f4c95196871c3f6bb4fcf615508b93fa1) |
 | swift-rs | 1.0.7 | MIT OR Apache-2.0 | [upstream](https://github.com/Brendonovich/swift-rs) | [908a661cf763](#sha256-908a661cf763bddfa04f2739bea561be62a246f03ad53fcb2272d3ddbd1d943f), [f3c3e9f4febe](#sha256-f3c3e9f4febe81ff14ccc233c344e6e60051290d1c1e5a2c670d63cc3608a5bb) |
 | symlink | 0.1.0 | MIT/Apache-2.0 | [upstream](https://gitlab.com/chris-morgan/symlink) | [a60eea817514](#sha256-a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2), [b85cb7b51c3f](#sha256-b85cb7b51c3f8d600bbac3fb8dbbfe64cde697e460a55fc80978eb0804ca1427), [edb9885b41e4](#sha256-edb9885b41e4851740dcdcde4d2419c60104e1f3473f7bea6293a82729a32068) |
-| syn | 1.0.109 | MIT OR Apache-2.0 | [upstream](https://github.com/dtolnay/syn) | [23f18e03dc49](#sha256-23f18e03dc49df91622fe2a76176497404e46ced8a715d9d2b67a7446571cca3), [a60eea817514](#sha256-a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2) |
 | syn | 2.0.118 | MIT OR Apache-2.0 | [upstream](https://github.com/dtolnay/syn) | [23f18e03dc49](#sha256-23f18e03dc49df91622fe2a76176497404e46ced8a715d9d2b67a7446571cca3), [62c7a1e35f56](#sha256-62c7a1e35f56406896d7aa7ca52d0cc0d272ac022b5d2796e7d6905db8a3636a) |
+| syn | 3.0.3 | MIT OR Apache-2.0 | [upstream](https://github.com/dtolnay/syn) | [23f18e03dc49](#sha256-23f18e03dc49df91622fe2a76176497404e46ced8a715d9d2b67a7446571cca3), [62c7a1e35f56](#sha256-62c7a1e35f56406896d7aa7ca52d0cc0d272ac022b5d2796e7d6905db8a3636a) |
 | sync_wrapper | 1.0.2 | Apache-2.0 | [upstream](https://github.com/Actyx/sync_wrapper) | [0d542e0c8804](#sha256-0d542e0c8804e39aa7f37eb00da5a762149dc682d7829451287e11b938e94594) |
 | synstructure | 0.13.2 | MIT | [upstream](https://github.com/mystor/synstructure) | [219920e865ee](#sha256-219920e865eee70b7dcfc948a86b099e7f4fe2de01bcca2ca9a20c0a033f2b59) |
 | sys-locale | 0.3.2 | MIT OR Apache-2.0 | [upstream](https://github.com/1Password/sys-locale) | [5cc390ab5e5e](#sha256-5cc390ab5e5e6507f467368cbab1297552d64bfd863f4b496c7928508bcfefd8), [c71d239df917](#sha256-c71d239df91726fc519c6eb72d318ec65820627232b2f796219e87dcf35d0ab4) |
@@ -5137,8 +5141,8 @@ Used by:
 - `serde_path_to_error 0.1.20 / LICENSE-MIT`
 - `serde_repr 0.1.20 / LICENSE-MIT`
 - `servo_arc 0.4.3 / LICENSE-MIT`
-- `syn 1.0.109 / LICENSE-MIT`
 - `syn 2.0.118 / LICENSE-MIT`
+- `syn 3.0.3 / LICENSE-MIT`
 - `thiserror 1.0.69 / LICENSE-MIT`
 - `thiserror 2.0.18 / LICENSE-MIT`
 - `thiserror-impl 1.0.69 / LICENSE-MIT`
@@ -10892,6 +10896,7 @@ Used by:
 - `serde_repr 0.1.20 / LICENSE-APACHE`
 - `serde_urlencoded 0.7.1 / LICENSE-APACHE`
 - `syn 2.0.118 / LICENSE-APACHE`
+- `syn 3.0.3 / LICENSE-APACHE`
 - `thiserror 1.0.69 / LICENSE-APACHE`
 - `thiserror 2.0.18 / LICENSE-APACHE`
 - `thiserror-impl 1.0.69 / LICENSE-APACHE`
@@ -16313,10 +16318,13 @@ Used by:
 
 - `darling 0.20.11 / LICENSE`
 - `darling 0.23.0 / LICENSE`
+- `darling 0.24.1 / LICENSE`
 - `darling_core 0.20.11 / LICENSE`
 - `darling_core 0.23.0 / LICENSE`
+- `darling_core 0.24.1 / LICENSE`
 - `darling_macro 0.20.11 / LICENSE`
 - `darling_macro 0.23.0 / LICENSE`
+- `darling_macro 0.24.1 / LICENSE`
 
 ```text
 MIT License
@@ -18020,6 +18028,7 @@ Used by:
 - `base64 0.13.1 / LICENSE-APACHE`
 - `base64 0.21.7 / LICENSE-APACHE`
 - `base64 0.22.1 / LICENSE-APACHE`
+- `base64 0.23.1 / LICENSE-APACHE`
 - `bitflags 1.3.2 / LICENSE-APACHE`
 - `bitflags 2.13.0 / LICENSE-APACHE`
 - `bs58 0.5.1 / LICENSE-APACHE`
@@ -18124,7 +18133,6 @@ Used by:
 - `string_cache 0.9.0 / LICENSE-APACHE`
 - `string_cache_codegen 0.6.1 / LICENSE-APACHE`
 - `symlink 0.1.0 / LICENSE-APACHE`
-- `syn 1.0.109 / LICENSE-APACHE`
 - `system-configuration 0.7.0 / LICENSE-APACHE`
 - `system-configuration-sys 0.6.0 / LICENSE-APACHE`
 - `tar 0.4.46 / LICENSE-APACHE`
@@ -19547,6 +19555,36 @@ distributed under the License is distributed on an "AS IS" BASIS,
 WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 See the License for the specific language governing permissions and
 limitations under the License.
+```
+
+### sha256-ab499c75a0f0da8e0fe83bf9ba3a27e5c39705310f07107c6c66b69958d2401c
+
+Used by:
+
+- `base64 0.23.1 / LICENSE-MIT`
+
+```text
+The MIT License (MIT)
+
+Copyright (c) 2025 Alice Maz, Marshall Pierce
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in
+all copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+THE SOFTWARE.
 ```
 
 ### sha256-ad64fcb9589f162720f3cc5010ad76ca6ad3764e11861f9192c489df176bb71d
@@ -21910,8 +21948,8 @@ Used by:
 - `quinn 0.11.11 / LICENSE-APACHE`
 - `quinn-proto 0.11.16 / LICENSE-APACHE`
 - `quinn-udp 0.5.15 / LICENSE-APACHE`
-- `rmcp 2.2.0 / standard text for Apache-2.0 (the crate includes no separate file)`
-- `rmcp-macros 2.2.0 / standard text for Apache-2.0 (the crate includes no separate file)`
+- `rmcp 3.0.1 / standard text for Apache-2.0 (the crate includes no separate file)`
+- `rmcp-macros 3.1.4 / standard text for Apache-2.0 (the crate includes no separate file)`
 - `rustls-platform-verifier 0.7.0 / LICENSE-APACHE`
 - `safetensors 0.8.0 / LICENSE`
 - `self_cell 1.2.2 / LICENSE-APACHE`

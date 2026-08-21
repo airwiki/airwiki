@@ -23,6 +23,9 @@
 
   let selectedConceptId: string | null = null;
   let headingElement: HTMLHeadingElement | null = null;
+  let renderedWikiIdentity: string | null = null;
+
+  $: synchronizeWikiSelection(browse ? browseIdentity(browse) : null);
 
   $: selectedConcept = browse?.concepts.find((concept) => concept.conceptId === selectedConceptId)
     ?? browse?.concepts.find((concept) => concept.conceptId === initialConceptId)
@@ -34,12 +37,25 @@
     && !browse.concepts.some((concept) => concept.conceptId === initialConceptId)
   );
   $: if (!loading && browse && !unavailable()) {
-    const wikiKey = `${source}:${browse.wikiName ?? ''}`;
+    const wikiKey = browseIdentity(browse);
     void tick().then(() => {
       if (!headingElement || headingElement.dataset.focusedWiki === wikiKey) return;
       headingElement.dataset.focusedWiki = wikiKey;
       headingElement.focus({ preventScroll: true });
     });
+  }
+
+  function browseIdentity(value: NearbyBrowseSummary | PublicBrowseSummary): string {
+    const ownerId = source === 'nearby'
+      ? (value as NearbyBrowseSummary).peerId
+      : (value as PublicBrowseSummary).publisherId;
+    return [source, ownerId ?? '', value.wikiId ?? '', value.wikiName ?? ''].join(':');
+  }
+
+  function synchronizeWikiSelection(wikiIdentity: string | null) {
+    if (wikiIdentity === renderedWikiIdentity) return;
+    renderedWikiIdentity = wikiIdentity;
+    selectedConceptId = null;
   }
 
   function unavailable(): boolean {
@@ -68,6 +84,11 @@
 
   function publisherId(): string | null {
     return source === 'public' ? (browse as PublicBrowseSummary | null)?.publisherId ?? null : null;
+  }
+
+  function blockCurrentPublisher() {
+    const currentPublisherId = publisherId();
+    if (currentPublisherId) onblock?.(currentPublisherId);
   }
 </script>
 
@@ -110,7 +131,7 @@
         <span>{sourceName}</span>
       </div>
       <small>{statusLabel()}</small>
-      {#if publisherId() && onblock}<button class="text-action" onclick={() => onblock?.(publisherId()!)}>{t('search-public-block-publisher')}</button>{/if}
+      {#if publisherId() && onblock}<button class="text-action" onclick={blockCurrentPublisher}>{t('search-public-block-publisher')}</button>{/if}
     </section>
 
     <div class="content-tabs-bar shared-content-tabs">

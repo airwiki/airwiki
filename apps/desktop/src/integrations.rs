@@ -8,7 +8,7 @@ use std::{
     time::Duration,
 };
 
-use anyhow::{Context, Result, bail};
+use anyhow::{Context, Result, bail, ensure};
 use async_trait::async_trait;
 use serde_json::Value;
 use sha2::{Digest, Sha256};
@@ -29,6 +29,7 @@ const INTEGRATION_NAME: &str = "airwiki";
 const BRIDGE_BASENAME: &str = "airwiki-mcp-bridge";
 const CLAUDE_MCPB_NAME: &str = "airwiki-claude.mcpb";
 const SEARCH_TOOL: &str = "search_airwiki";
+const MCP_PROTOCOL_VERSION: &str = "2026-07-28";
 const APPLICATION_TOOLS: [&str; 7] = [
     "list_airwiki_memories",
     "create_airwiki_memory",
@@ -821,16 +822,33 @@ impl ChatIntegrationManager {
     }
 
     async fn verify_bridge(&self, bridge: &Path, client: ChatClientKind) -> Result<()> {
-        let input = format!(
-            concat!(
-                "{{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"initialize\",",
-                "\"params\":{{\"protocolVersion\":\"2025-06-18\",\"capabilities\":{{}},",
-                "\"clientInfo\":{{\"name\":\"airwiki-desktop\",\"version\":\"{}\"}}}}}}\n",
-                "{{\"jsonrpc\":\"2.0\",\"method\":\"notifications/initialized\",\"params\":{{}}}}\n",
-                "{{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"tools/list\",\"params\":{{}}}}\n"
-            ),
-            env!("CARGO_PKG_VERSION")
-        );
+        let request_meta = serde_json::json!({
+            "io.modelcontextprotocol/protocolVersion": MCP_PROTOCOL_VERSION,
+            "io.modelcontextprotocol/clientInfo": {
+                "name": "airwiki-desktop",
+                "version": env!("CARGO_PKG_VERSION"),
+            },
+            "io.modelcontextprotocol/clientCapabilities": {},
+        });
+        let input = [
+            serde_json::json!({
+                "jsonrpc": "2.0",
+                "id": 1,
+                "method": "server/discover",
+                "params": { "_meta": request_meta.clone() },
+            }),
+            serde_json::json!({
+                "jsonrpc": "2.0",
+                "id": 2,
+                "method": "tools/list",
+                "params": { "_meta": request_meta },
+            }),
+        ]
+        .into_iter()
+        .map(|request| request.to_string())
+        .collect::<Vec<_>>()
+        .join("\n")
+            + "\n";
         let output = self
             .runner
             .run(
@@ -843,7 +861,7 @@ impl ChatIntegrationManager {
             .await
             .context("el puente MCP no superó su verificación local")?;
         if !output.success {
-            bail!("el puente MCP rechazó initialize/tools/list")
+            bail!("el puente MCP rechazó server/discover o tools/list")
         }
         verify_tools_list(output.stdout_text()?)
     }
@@ -2049,20 +2067,88 @@ fn classify_configuration(
 }
 
 fn verify_tools_list(stdout: &str) -> Result<()> {
-    let mut found_initialize = false;
+    let mut found_discovery = false;
     let mut found_tools = false;
     for line in stdout.lines().filter(|line| !line.trim().is_empty()) {
         let Ok(message) = serde_json::from_str::<Value>(line) else {
             continue;
         };
         match message.get("id").and_then(Value::as_u64) {
-            Some(1) if message.get("result").is_some() => found_initialize = true,
-            Some(2) => {
-                let tools = message
+            Some(1) => {
+                let result = message
                     .get("result")
-                    .and_then(|result| result.get("tools"))
+                    .context("server/discover no devolvió un resultado")?;
+                let supports_current = result
+                    .get("supportedVersions")
+                    .and_then(Value::as_array)
+                    .is_some_and(|versions| {
+                        versions
+                            .iter()
+                            .any(|version| version.as_str() == Some(MCP_PROTOCOL_VERSION))
+                    });
+                found_discovery = supports_current
+                    && result.get("resultType").and_then(Value::as_str) == Some("complete")
+                    && result.get("ttlMs").and_then(Value::as_u64) == Some(0)
+                    && result.get("cacheScope").and_then(Value::as_str) == Some("private");
+            }
+            Some(2) => {
+                let result = message
+                    .get("result")
+                    .context("tools/list no devolvió un resultado")?;
+                ensure!(
+                    result.get("resultType").and_then(Value::as_str) == Some("complete"),
+                    "tools/list no devolvió un resultado MCP completo"
+                );
+                ensure!(
+                    result.get("ttlMs").and_then(Value::as_u64) == Some(0)
+                        && result.get("cacheScope").and_then(Value::as_str) == Some("private"),
+                    "tools/list no protegió el conjunto de herramientas por contexto"
+                );
+                let tools = result
+                    .get("tools")
                     .and_then(Value::as_array)
                     .context("tools/list no devolvió herramientas")?;
+                for tool in tools {
+                    let name = tool
+                        .get("name")
+                        .and_then(Value::as_str)
+                        .context("tools/list devolvió una herramienta sin nombre")?;
+                    ensure!(
+                        tool.get("title")
+                            .and_then(Value::as_str)
+                            .is_some_and(|value| !value.is_empty())
+                            && tool
+                                .get("description")
+                                .and_then(Value::as_str)
+                                .is_some_and(|value| !value.is_empty()),
+                        "la herramienta {name} no tiene metadata comprensible"
+                    );
+                    ensure!(
+                        tool.pointer("/inputSchema/type").and_then(Value::as_str) == Some("object")
+                            && tool.get("outputSchema").is_some_and(Value::is_object),
+                        "la herramienta {name} no expuso schemas tipados"
+                    );
+                    let (read_only, destructive, idempotent) = expected_tool_hints(name)
+                        .context("tools/list devolvió una herramienta no administrada")?;
+                    ensure!(
+                        tool.pointer("/annotations/readOnlyHint")
+                            .and_then(Value::as_bool)
+                            == Some(read_only)
+                            && tool
+                                .pointer("/annotations/destructiveHint")
+                                .and_then(Value::as_bool)
+                                == Some(destructive)
+                            && tool
+                                .pointer("/annotations/idempotentHint")
+                                .and_then(Value::as_bool)
+                                == Some(idempotent)
+                            && tool
+                                .pointer("/annotations/openWorldHint")
+                                .and_then(Value::as_bool)
+                                == Some(false),
+                        "la herramienta {name} no expuso anotaciones de seguridad correctas"
+                    );
+                }
                 let mut actual = tools
                     .iter()
                     .filter_map(|tool| tool.get("name"))
@@ -2076,10 +2162,22 @@ fn verify_tools_list(stdout: &str) -> Result<()> {
             _ => {}
         }
     }
-    if !found_initialize || !found_tools {
+    if !found_discovery || !found_tools {
         bail!("el puente no expuso exactamente las herramientas administradas esperadas")
     }
     Ok(())
+}
+
+fn expected_tool_hints(name: &str) -> Option<(bool, bool, bool)> {
+    match name {
+        SEARCH_TOOL
+        | "list_airwiki_memories"
+        | "get_airwiki_memory"
+        | "get_airwiki_computation_run" => Some((true, false, true)),
+        "create_airwiki_memory" | "request_airwiki_computation" => Some((false, false, false)),
+        "write_airwiki_memory" | "deprecate_airwiki_memory" => Some((false, true, false)),
+        _ => None,
+    }
 }
 
 fn bridge_filename() -> &'static str {
@@ -2907,12 +3005,47 @@ mod tests {
     fn tools_list_verification_accepts_the_exact_managed_tool_set() {
         let exact_tools = MANAGED_TOOLS
             .iter()
-            .map(|name| serde_json::json!({"name": name}))
+            .map(|name| {
+                let (read_only, destructive, idempotent) =
+                    expected_tool_hints(name).expect("managed tool hints");
+                serde_json::json!({
+                    "name": name,
+                    "title": format!("{name} title"),
+                    "description": format!("{name} description"),
+                    "inputSchema": { "type": "object", "properties": {} },
+                    "outputSchema": { "type": "object", "properties": {} },
+                    "annotations": {
+                        "readOnlyHint": read_only,
+                        "destructiveHint": destructive,
+                        "idempotentHint": idempotent,
+                        "openWorldHint": false,
+                    }
+                })
+            })
             .collect::<Vec<_>>();
         let output_for = |tools: Vec<Value>| {
             format!(
-                "{{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":{{}}}}\n{}\n",
-                serde_json::json!({"jsonrpc":"2.0","id":2,"result":{"tools":tools}})
+                "{}\n{}\n",
+                serde_json::json!({
+                    "jsonrpc": "2.0",
+                    "id": 1,
+                    "result": {
+                        "resultType": "complete",
+                        "supportedVersions": [MCP_PROTOCOL_VERSION],
+                        "ttlMs": 0,
+                        "cacheScope": "private",
+                    },
+                }),
+                serde_json::json!({
+                    "jsonrpc": "2.0",
+                    "id": 2,
+                    "result": {
+                        "resultType": "complete",
+                        "ttlMs": 0,
+                        "cacheScope": "private",
+                        "tools": tools,
+                    },
+                })
             )
         };
         let mut reordered_tools = exact_tools.clone();
@@ -2927,7 +3060,10 @@ mod tests {
         assert!(verify_tools_list(&output_for(duplicated_tools)).is_err());
         assert!(verify_tools_list(&output_for(extra_tools)).is_err());
         assert!(
-            verify_tools_list("{\"jsonrpc\":\"2.0\",\"id\":2,\"result\":{\"tools\":[]}}").is_err()
+            verify_tools_list(
+                "{\"jsonrpc\":\"2.0\",\"id\":2,\"result\":{\"resultType\":\"complete\",\"tools\":[]}}"
+            )
+            .is_err()
         );
     }
 

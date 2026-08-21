@@ -18,11 +18,16 @@ fn stdout_contains_only_mcp_protocol_and_eof_stops_the_bridge() {
     stdin
         .write_all(
             concat!(
-                "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"initialize\",",
-                "\"params\":{\"protocolVersion\":\"2025-06-18\",\"capabilities\":{},",
-                "\"clientInfo\":{\"name\":\"test-client\",\"version\":\"1\"}}}\n",
-                "{\"jsonrpc\":\"2.0\",\"method\":\"notifications/initialized\",\"params\":{}}\n",
-                "{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"tools/list\",\"params\":{}}\n",
+                "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"server/discover\",",
+                "\"params\":{\"_meta\":{",
+                "\"io.modelcontextprotocol/protocolVersion\":\"2026-07-28\",",
+                "\"io.modelcontextprotocol/clientInfo\":{\"name\":\"test-client\",\"version\":\"1\"},",
+                "\"io.modelcontextprotocol/clientCapabilities\":{}}}}\n",
+                "{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"tools/list\",",
+                "\"params\":{\"_meta\":{",
+                "\"io.modelcontextprotocol/protocolVersion\":\"2026-07-28\",",
+                "\"io.modelcontextprotocol/clientInfo\":{\"name\":\"test-client\",\"version\":\"1\"},",
+                "\"io.modelcontextprotocol/clientCapabilities\":{}}}}\n",
             )
             .as_bytes(),
         )
@@ -49,8 +54,38 @@ fn stdout_contains_only_mcp_protocol_and_eof_stops_the_bridge() {
     );
     assert_eq!(messages[0].get("id").and_then(Value::as_u64), Some(1));
     assert_eq!(
+        messages[0]
+            .pointer("/result/resultType")
+            .and_then(Value::as_str),
+        Some("complete")
+    );
+    assert!(
+        messages[0]
+            .pointer("/result/supportedVersions")
+            .and_then(Value::as_array)
+            .is_some_and(|versions| versions
+                .iter()
+                .any(|version| version.as_str() == Some("2026-07-28")))
+    );
+    assert_eq!(
         messages[1].get("jsonrpc").and_then(Value::as_str),
         Some("2.0")
     );
     assert_eq!(messages[1].get("id").and_then(Value::as_u64), Some(2));
+    assert_eq!(
+        messages[1]
+            .pointer("/result/resultType")
+            .and_then(Value::as_str),
+        Some("complete")
+    );
+    assert_eq!(
+        messages[1].pointer("/result/ttlMs").and_then(Value::as_u64),
+        Some(0)
+    );
+    assert_eq!(
+        messages[1]
+            .pointer("/result/cacheScope")
+            .and_then(Value::as_str),
+        Some("private")
+    );
 }

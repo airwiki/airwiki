@@ -5,6 +5,13 @@ attested-computation tools to ChatGPT Desktop/Work, Codex, Claude Desktop,
 Claude Code, Gemini CLI and generic local MCP clients. AirWiki does not need
 provider API keys; each client owns its account and session.
 
+The managed bridge implements MCP `2026-07-28`: clients may begin with
+`server/discover`, requests self-describe through `_meta`, and the fixed
+Streamable HTTP hop is sessionless. AirWiki continues to accept the older MCP
+lifecycle for compatible clients during the transition. Its deterministic tool
+list is private and non-cacheable across authorization contexts, and every tool
+advertises typed input/output schemas and explicit safety hints.
+
 ## Before connecting
 
 1. Keep AirWiki open or hidden in the tray and wait until local models, Wiki
@@ -26,6 +33,12 @@ private per-user files. The client configuration contains only a public
 integration identifier; the bridge resolves and sends the secret to the fixed
 loopback endpoint. The secret never appears in MCP arguments, tool responses,
 events or logs.
+
+The loopback endpoint rejects browser-origin requests, unexpected host headers,
+redirects and oversized bodies. A tool failure is returned as a sanitized,
+machine-readable result with a stable code and retryability hint; protocol
+errors are reserved for malformed or unknown MCP requests. Client UI approval
+and AirWiki's native confirmations remain the human-in-the-loop boundary.
 
 An application may create and maintain only AI-memory Wikis it owns or has an
 explicit reader/editor grant for. It may create, edit and deprecate concepts,
@@ -99,6 +112,12 @@ configuration that does not exactly match the managed bridge.
 Open a new Claude Code conversation after installation or an update. A
 different global MCP entry or modified workflow guide remains a visible
 conflict and is not replaced.
+
+Before changing the packaged skill, its awareness guide, or memory-tool
+instructions, run the synthetic [AirWiki skill evaluation](airwiki-skill-evals.md).
+It covers activation, exact reuse, ambiguity, read-before-write, fingerprint
+conflicts, pause, unavailable-service behavior, and authority boundaries across
+the supported assistant clients.
 
 ## Gemini CLI
 

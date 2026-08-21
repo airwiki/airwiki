@@ -1321,6 +1321,8 @@ describe('AirWiki wiki workspace', () => {
     render(App);
 
     expect(await screen.findByRole('heading', { name: 'First' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'First, first.md' })).toHaveAttribute('aria-current', 'page');
+    expect(screen.getByRole('button', { name: 'Second, second.md' })).not.toHaveAttribute('aria-current');
     expect(screen.getByText('Revisado por una persona')).toBeInTheDocument();
     expect(screen.getByText('process:first')).toBeInTheDocument();
 
@@ -1343,6 +1345,8 @@ describe('AirWiki wiki workspace', () => {
     });
 
     expect(screen.getByRole('heading', { name: 'Second' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'First, first.md' })).not.toHaveAttribute('aria-current');
+    expect(screen.getByRole('button', { name: 'Second, second.md' })).toHaveAttribute('aria-current', 'page');
     expect(screen.getByText('Reference')).toBeInTheDocument();
     expect(screen.getByText('Sin verificar')).toBeInTheDocument();
     expect(screen.queryByText('Revisado por una persona')).not.toBeInTheDocument();

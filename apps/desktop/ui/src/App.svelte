@@ -850,6 +850,12 @@
     return page.kind === 'concept' ? `concept:${page.path}` : page.kind;
   }
 
+  function knowledgePageIsActive(page: KnowledgePageInput): boolean {
+    return snapshot?.knowledgePage?.wikiId === selectedWikiId
+      && snapshot.knowledgePage.status === 'ready'
+      && pageKey(snapshot.knowledgePage.page) === pageKey(page);
+  }
+
   function compatibilityLabel(wiki: WikiSummary): string {
     return t(`desktop-okf-compatibility-${wiki.okfCompatibility.kind}`);
   }
@@ -1669,9 +1675,9 @@
                 <div class="file-browser">
                   <aside class="file-list" aria-label={t('knowledge-pages')}>
                     {#if snapshot.knowledge?.wikiId === selectedWiki.id}
-                      <button onclick={() => openKnowledgePage({ kind: 'index' })}><BookOpen size={17} aria-hidden="true" /><span><strong>{t('knowledge-index-title')}</strong><small>index.md</small></span></button>
-                      <button onclick={() => openKnowledgePage({ kind: 'log' })}><History size={17} aria-hidden="true" /><span><strong>{t('knowledge-recovery-history')}</strong><small>log.md</small></span></button>
-                      {#each snapshot.knowledge.concepts as concept (pageKey(concept.page))}<button onclick={() => openKnowledgePage(concept.page)}><FileText size={17} aria-hidden="true" /><span><strong>{concept.title}</strong><small>{concept.page.kind === 'concept' ? concept.page.path : concept.description}</small></span></button>{/each}
+                      <button aria-label={`${t('knowledge-index-title')}, index.md`} class:active={knowledgePageIsActive({ kind: 'index' })} aria-current={knowledgePageIsActive({ kind: 'index' }) ? 'page' : undefined} onclick={() => openKnowledgePage({ kind: 'index' })}><BookOpen size={17} aria-hidden="true" /><span><strong>{t('knowledge-index-title')}</strong><small>index.md</small></span></button>
+                      <button aria-label={`${t('knowledge-recovery-history')}, log.md`} class:active={knowledgePageIsActive({ kind: 'log' })} aria-current={knowledgePageIsActive({ kind: 'log' }) ? 'page' : undefined} onclick={() => openKnowledgePage({ kind: 'log' })}><History size={17} aria-hidden="true" /><span><strong>{t('knowledge-recovery-history')}</strong><small>log.md</small></span></button>
+                      {#each snapshot.knowledge.concepts as concept (pageKey(concept.page))}<button aria-label={`${concept.title}, ${concept.page.kind === 'concept' ? concept.page.path : concept.description}`} class:active={knowledgePageIsActive(concept.page)} aria-current={knowledgePageIsActive(concept.page) ? 'page' : undefined} onclick={() => openKnowledgePage(concept.page)}><FileText size={17} aria-hidden="true" /><span><strong>{concept.title}</strong><small>{concept.page.kind === 'concept' ? concept.page.path : concept.description}</small></span></button>{/each}
                     {/if}
                   </aside>
                   <section class="file-preview" aria-live="polite">

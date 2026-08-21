@@ -29,6 +29,7 @@ READY_STAMP="$ROOT/target/packaging-macos-ready.stamp"
 RUNTIME_MACHO_LIST="$ROOT/target/packaging-macos-runtime-machos.txt"
 SOURCE_RUNTIME_DIR="$ROOT/resources/llama/macos-aarch64"
 STAGED_RUNTIME_DIR="$ROOT/target/packaging-resources/macos/llama"
+STAGED_RUNTIME_SERVER="$STAGED_RUNTIME_DIR/llama-b9946/llama-server"
 PACKAGED_RUNTIME_DIR="$APP/Contents/Resources/llama"
 LAUNCH_AGENT_SOURCE="$ROOT/packaging/macos/io.github.airwiki.AirWiki.background.plist"
 LAUNCH_AGENT_DIR="$APP/Contents/Library/LaunchAgents"
@@ -124,6 +125,7 @@ if [ -d "$TAURI_BUNDLE_DIR/macos" ]; then
   find "$TAURI_BUNDLE_DIR/macos" -maxdepth 1 -type f -name "rw.*.$OUT_NAME" -exec rm -f -- {} +
 fi
 rm -f -- "$SOURCE_MCPB" "$READY_STAMP" "$RUNTIME_MACHO_LIST"
+unset AIRWIKI_MACOS_LLAMA_SERVER_SHA256
 
 cargo run --locked -p xtask -- workflow-guide check
 cargo run --locked -p xtask -- licenses check
@@ -141,6 +143,18 @@ if [ "$SIGNING_PURPOSE" = release ]; then
   # staging copy is transformed into the Developer ID distribution payload.
   sign_release_runtime "$STAGED_RUNTIME_DIR"
   RUNTIME_EXPECTED_DIR="$STAGED_RUNTIME_DIR"
+  AIRWIKI_MACOS_LLAMA_SERVER_SHA256=$(shasum -a 256 "$STAGED_RUNTIME_SERVER" | awk '{print $1}')
+  if [ "${#AIRWIKI_MACOS_LLAMA_SERVER_SHA256}" -ne 64 ]; then
+    echo "signed llama.cpp runtime hash is not a lowercase SHA-256" >&2
+    exit 1
+  fi
+  case "$AIRWIKI_MACOS_LLAMA_SERVER_SHA256" in
+    *[!0-9a-f]*)
+      echo "signed llama.cpp runtime hash is not a lowercase SHA-256" >&2
+      exit 1
+      ;;
+  esac
+  export AIRWIKI_MACOS_LLAMA_SERVER_SHA256
 fi
 cargo build --locked --release --target aarch64-apple-darwin -p airwiki-mcp-bridge
 ./packaging/sign-macos-bridge.sh
@@ -295,6 +309,10 @@ if [ "$SIGNING_PURPOSE" = release ]; then
     verify_release_runtime_signature "$CANDIDATE"
   done <"$RUNTIME_MACHO_LIST"
   rm -f -- "$RUNTIME_MACHO_LIST"
+  if ! strings "$PACKAGED_BINARY" | grep -Fq "$AIRWIKI_MACOS_LLAMA_SERVER_SHA256"; then
+    echo "packaged application does not pin the signed llama.cpp runtime hash" >&2
+    exit 1
+  fi
 fi
 
 if [ ! -f "$APP/Contents/_CodeSignature/CodeResources" ]; then

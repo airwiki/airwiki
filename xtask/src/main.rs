@@ -9227,6 +9227,10 @@ policy:
         let release = fs::read_to_string(root.join("packaging/release-macos.sh")).unwrap();
         let package = fs::read_to_string(root.join("packaging/package-macos.sh")).unwrap();
         let verify = fs::read_to_string(root.join("packaging/verify-macos-release.sh")).unwrap();
+        let inference_build =
+            fs::read_to_string(root.join("crates/airwiki-inference/build.rs")).unwrap();
+        let inference_assets =
+            fs::read_to_string(root.join("crates/airwiki-inference/src/assets.rs")).unwrap();
 
         assert!(release.contains("tauri signer sign \"$UPDATE_ARCHIVE\""));
         assert!(
@@ -9258,9 +9262,15 @@ policy:
                     "codesign --force --sign \"$SIGNING_IDENTITY\" --options runtime --timestamp"
                 )
                 && package.contains("RUNTIME_EXPECTED_DIR=\"$STAGED_RUNTIME_DIR\"")
+                && package.contains("AIRWIKI_MACOS_LLAMA_SERVER_SHA256=$(shasum -a 256")
+                && package.contains("export AIRWIKI_MACOS_LLAMA_SERVER_SHA256")
+                && inference_build.contains("AIRWIKI_MACOS_LLAMA_SERVER_SHA256")
+                && inference_assets.contains("option_env!(\"AIRWIKI_MACOS_LLAMA_SERVER_SHA256\")")
+                && package.contains("does not pin the signed llama.cpp runtime hash")
         );
         assert!(
             verify.contains("verify_nested_runtime_signatures")
+                && verify.contains("verify_runtime_trust_anchor")
                 && verify.contains("macOS llama.cpp runtime item")
                 && verify.contains("Timestamp=")
         );

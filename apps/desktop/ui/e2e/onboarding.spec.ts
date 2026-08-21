@@ -78,7 +78,13 @@ class McpStdioClient {
 
   async callTool(name: string, arguments_: Record<string, unknown>): Promise<Record<string, unknown>> {
     const result = await this.request('tools/call', { name, arguments: arguments_ });
-    return record(result.structuredContent, `${name} structured content`);
+    const structuredContent = record(result.structuredContent, `${name} structured content`);
+    if (result.isError === true) {
+      const code = stringField(structuredContent, 'code');
+      const message = stringField(structuredContent, 'message');
+      throw new Error(`${code}: ${message}`);
+    }
+    return structuredContent;
   }
 
   async close(): Promise<void> {
@@ -536,7 +542,7 @@ async function exerciseGenericMcpMemory(): Promise<void> {
       });
     } catch (error) {
       staleRejected = true;
-      expect(error instanceof Error ? error.message : '').toContain('invalid');
+      expect(error instanceof Error ? error.message : '').toContain('conflict');
     }
     expect(staleRejected).toBe(true);
 
@@ -576,7 +582,7 @@ async function exerciseGenericMcpMemory(): Promise<void> {
       await client.callTool('list_airwiki_memories', {});
     } catch (error) {
       revoked = true;
-      expect(error instanceof Error ? error.message : '').toContain('revoked');
+      expect(error instanceof Error ? error.message : '').toContain('authorization_required');
     }
     expect(revoked).toBe(true);
   } finally {

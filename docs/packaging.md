@@ -64,9 +64,12 @@ The internal wrapper:
 3. builds the desktop and MCP bridge for `aarch64-apple-darwin` with the lockfile;
 4. signs the bridge ad hoc for development when no release identity is supplied;
 5. builds a deterministic platform MCPB from those exact bridge bytes;
-6. builds and signs the Tauri application bundle without altering the
-   hash-pinned runtime resources; and
-7. creates a licensed Tauri DMG and copies the verified `.app` and `.dmg`
+6. for a public build only, signs the already verified staging copies of every
+   nested llama.cpp Mach-O with Developer ID, a secure timestamp and Hardened
+   Runtime, while leaving the hash-pinned upstream cache unchanged;
+7. builds and signs the Tauri application bundle and verifies that it contains
+   exactly that staging payload; and
+8. creates a licensed Tauri DMG and copies the verified `.app` and `.dmg`
    artifacts under `target/packages/macos`.
 
 After stapling the application, the public release wrapper rebuilds the DMG so
@@ -109,8 +112,12 @@ Expected package content includes:
 - `THIRD_PARTY_NOTICES.md`;
 - Cargo and non-Cargo license inventories.
 
-Do not re-sign a hash-pinned upstream runtime without a reviewed distinction
-between upstream identity and distributed payload identity.
+The immutable source cache retains the reviewed upstream identity and hashes.
+The public macOS staging copy has a distinct distributed-payload identity so
+Apple can validate every nested Mach-O; post-signing verification checks the
+Developer ID team, secure timestamp, Hardened Runtime, architecture and exact
+copy into the application. Windows keeps the source-built runtime identity and
+does not re-sign it as AirWiki.
 
 ## Windows x64 candidate
 

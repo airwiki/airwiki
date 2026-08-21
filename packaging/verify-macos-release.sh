@@ -90,19 +90,59 @@ verify_app() {
   codesign --verify --deep --strict --verbose=2 "$CANDIDATE"
   xcrun stapler validate -v "$CANDIDATE"
   spctl --assess --type execute --verbose=4 "$CANDIDATE"
-  DETAILS=$(codesign -dv --verbose=4 "$CANDIDATE" 2>&1)
-  case "$DETAILS" in
-    *"Authority=Developer ID Application:"*"TeamIdentifier=$AIRWIKI_MACOS_TEAM_ID"*"Runtime Version="*) ;;
-    *)
-      echo "macOS application does not match the approved Developer ID team and Hardened Runtime" >&2
-      exit 1
-      ;;
-  esac
+  verify_developer_id_item "$CANDIDATE" "macOS application"
+  verify_developer_id_item \
+    "$CANDIDATE/Contents/Resources/integrations/bridge/airwiki-mcp-bridge" \
+    "macOS MCP bridge"
+  verify_nested_runtime_signatures "$CANDIDATE/Contents/Resources/llama"
   ARCHS=$(lipo -archs "$CANDIDATE/Contents/MacOS/airwiki")
   if [ "$ARCHS" != "arm64" ]; then
     echo "macOS application is not an arm64-only release" >&2
     exit 1
   fi
+}
+
+verify_developer_id_item() {
+  ITEM=$1
+  LABEL=$2
+  codesign --verify --strict --verbose=2 "$ITEM"
+  DETAILS=$(codesign -dv --verbose=4 "$ITEM" 2>&1)
+  case "$DETAILS" in
+    *"Authority=Developer ID Application:"*"Timestamp="*"TeamIdentifier=$AIRWIKI_MACOS_TEAM_ID"*"Runtime Version="*) ;;
+    *)
+      echo "$LABEL does not match the approved Developer ID team, timestamp and Hardened Runtime" >&2
+      exit 1
+      ;;
+  esac
+}
+
+verify_nested_runtime_signatures() {
+  RUNTIME_ROOT=$1
+  if [ ! -d "$RUNTIME_ROOT" ] || [ -n "$(find "$RUNTIME_ROOT" -type l -print -quit)" ]; then
+    echo "macOS llama.cpp runtime is missing or contains symbolic links" >&2
+    exit 1
+  fi
+  RUNTIME_LIST=$(mktemp "$EXTRACT_ROOT/runtime-machos.XXXXXX")
+  find "$RUNTIME_ROOT" -type f -exec sh -c '
+    for candidate do
+      if lipo -archs "$candidate" >/dev/null 2>&1; then
+        printf "%s\n" "$candidate"
+      fi
+    done
+  ' sh {} + >"$RUNTIME_LIST"
+  if [ ! -s "$RUNTIME_LIST" ]; then
+    echo "macOS llama.cpp runtime contains no Mach-O files" >&2
+    exit 1
+  fi
+  while IFS= read -r ITEM; do
+    verify_developer_id_item "$ITEM" "macOS llama.cpp runtime item"
+    ARCHS=$(lipo -archs "$ITEM")
+    if [ "$ARCHS" != "arm64" ]; then
+      echo "macOS llama.cpp runtime item is not arm64-only" >&2
+      exit 1
+    fi
+  done <"$RUNTIME_LIST"
+  rm -f -- "$RUNTIME_LIST"
 }
 
 verify_app "$APP"

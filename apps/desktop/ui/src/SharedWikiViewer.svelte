@@ -6,6 +6,7 @@
   import LockKeyhole from '@lucide/svelte/icons/lock-keyhole';
   import { tick } from 'svelte';
   import type { NearbyBrowseSummary, PublicBrowseSummary, PublicConceptSummaryDto } from './api';
+  import { focusChoiceWithoutScroll } from './focus';
   import type { MessageArgs } from './i18n';
 
   type SharedWikiSource = 'nearby' | 'public';
@@ -144,7 +145,7 @@
     <div class="file-browser shared-file-browser">
       <aside class="file-list" aria-label={t('knowledge-pages')}>
         {#each browse.concepts as concept (`${concept.conceptId}:${concept.sourceRevision}`)}
-          <button class:active={selectedConcept?.conceptId === concept.conceptId} aria-current={selectedConcept?.conceptId === concept.conceptId ? 'page' : undefined} onclick={() => selectedConceptId = concept.conceptId}>
+          <button class:active={selectedConcept?.conceptId === concept.conceptId} aria-current={selectedConcept?.conceptId === concept.conceptId ? 'page' : undefined} onmousedown={focusChoiceWithoutScroll} onclick={() => selectedConceptId = concept.conceptId}>
             <FileText size={17} aria-hidden="true" />
             <span><strong>{concept.title}</strong><small>{concept.conceptType} · {concept.language}</small></span>
           </button>

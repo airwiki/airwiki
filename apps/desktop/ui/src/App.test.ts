@@ -775,6 +775,10 @@ describe('AirWiki wiki workspace', () => {
     const sharedWikiHeading = screen.getByRole('heading', { name: 'Guía del equipo' });
     expect(sharedWikiHeading).toBeInTheDocument();
     await waitFor(() => expect(sharedWikiHeading).toHaveFocus());
+    const sharedConcept = screen.getByRole('button', { name: /Evidencia cercana/ });
+    const sharedConceptFocus = vi.spyOn(sharedConcept, 'focus');
+    await fireEvent.mouseDown(sharedConcept);
+    expect(sharedConceptFocus).toHaveBeenCalledWith({ preventScroll: true });
     expect(screen.queryByRole('heading', { name: 'Buscar evidencia' })).not.toBeInTheDocument();
     expect(screen.queryByRole('tab')).not.toBeInTheDocument();
     expect(screen.getByText('Solo lectura')).toBeInTheDocument();
@@ -1323,7 +1327,11 @@ describe('AirWiki wiki workspace', () => {
 
     expect(await screen.findByRole('heading', { name: 'First' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'First, first.md' })).toHaveAttribute('aria-current', 'page');
-    expect(screen.getByRole('button', { name: 'Second, second.md' })).not.toHaveAttribute('aria-current');
+    const secondPage = screen.getByRole('button', { name: 'Second, second.md' });
+    expect(secondPage).not.toHaveAttribute('aria-current');
+    const secondPageFocus = vi.spyOn(secondPage, 'focus');
+    await fireEvent.mouseDown(secondPage);
+    expect(secondPageFocus).toHaveBeenCalledWith({ preventScroll: true });
     expect(screen.getByText('Revisado por una persona')).toBeInTheDocument();
     expect(screen.getByText('process:first')).toBeInTheDocument();
 

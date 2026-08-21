@@ -28,9 +28,10 @@ pub use airwiki_types::{
 };
 use axum::{
     Router,
+    body::{Body, to_bytes},
     extract::{Request, State},
     http::{
-        HeaderMap, StatusCode,
+        HeaderMap, Method, StatusCode,
         header::{HOST, ORIGIN},
     },
     middleware::{self, Next},
@@ -41,8 +42,8 @@ use rmcp::{
     ErrorData, ServerHandler, ServiceExt,
     handler::server::router::tool::ToolRouter,
     model::{
-        CacheScope, CallToolResult, Implementation, ListToolsResult, ServerCapabilities,
-        ServerInfo, Tool, ToolAnnotations,
+        CacheScope, CallToolResult, Implementation, ListToolsResult, ProtocolVersion,
+        RequestMetaObject, ServerCapabilities, ServerInfo, Tool, ToolAnnotations,
     },
     service::RequestContext,
     tool_handler,
@@ -84,6 +85,7 @@ pub const E2E_MCP_PORT_ENV: &str = "AIRWIKI_E2E_MCP_PORT";
 const MCP_BRIDGE_CONNECT_TIMEOUT: Duration = Duration::from_secs(1);
 const MCP_BRIDGE_REQUEST_TIMEOUT: Duration = Duration::from_secs(5);
 const MCP_PROTOCOL_VERSION: &str = "2026-07-28";
+const MCP_META_CLIENT_INFO_KEY: &str = "io.modelcontextprotocol/clientInfo";
 const SEARCH_RATE_LIMIT: usize = 30;
 const SEARCH_RATE_WINDOW: Duration = Duration::from_secs(60);
 
@@ -2040,6 +2042,7 @@ pub async fn start_with_application_backend(
         .nest_service(MCP_PATH, service)
         .with_state(discovery_state)
         .layer(RequestBodyLimitLayer::new(MAX_MCP_HTTP_BODY_BYTES))
+        .layer(middleware::from_fn(enforce_modern_request_metadata))
         .layer(middleware::from_fn_with_state(
             activity_state,
             observe_client_activity,
@@ -2067,6 +2070,83 @@ pub async fn start_mcp_server(
     backend: Arc<dyn FederatedSearch>,
 ) -> Result<McpServerHandle, McpServerError> {
     start(config, backend).await
+}
+
+/// Keeps each sessionless 2026 request self-contained even when transport
+/// routing would otherwise classify a request with missing metadata as legacy.
+async fn enforce_modern_request_metadata(request: Request, next: Next) -> Response {
+    let is_modern_mcp_request = request.method() == Method::POST
+        && request.uri().path() == MCP_PATH
+        && request
+            .headers()
+            .get(HEADER_MCP_PROTOCOL_VERSION)
+            .and_then(|value| value.to_str().ok())
+            .is_some_and(|version| version == MCP_PROTOCOL_VERSION);
+    if !is_modern_mcp_request {
+        return next.run(request).await;
+    }
+
+    let (parts, body) = request.into_parts();
+    let bytes = match to_bytes(body, MAX_MCP_HTTP_BODY_BYTES).await {
+        Ok(bytes) => bytes,
+        Err(_) => {
+            return (
+                StatusCode::PAYLOAD_TOO_LARGE,
+                "MCP request body exceeds the allowed size.\n",
+            )
+                .into_response();
+        }
+    };
+    let message = match serde_json::from_slice::<serde_json::Value>(&bytes) {
+        Ok(message) => message,
+        Err(_) => {
+            return next
+                .run(Request::from_parts(parts, Body::from(bytes)))
+                .await;
+        }
+    };
+    let missing = message
+        .get("params")
+        .and_then(|params| params.get("_meta"))
+        .cloned()
+        .and_then(|meta| serde_json::from_value::<RequestMetaObject>(meta).ok())
+        .map(|meta| {
+            let mut missing = meta.missing_required_keys(&ProtocolVersion::V_2026_07_28);
+            if meta.client_info().is_none() {
+                missing.push(MCP_META_CLIENT_INFO_KEY);
+            }
+            missing
+        })
+        .unwrap_or_else(|| {
+            let mut missing = RequestMetaObject::DRAFT_REQUIRED_KEYS.to_vec();
+            missing.push(MCP_META_CLIENT_INFO_KEY);
+            missing
+        });
+    if !missing.is_empty() {
+        let request_id = message
+            .get("id")
+            .cloned()
+            .unwrap_or(serde_json::Value::Null);
+        return (
+            StatusCode::BAD_REQUEST,
+            axum::Json(json!({
+                "jsonrpc": "2.0",
+                "id": request_id,
+                "error": {
+                    "code": -32602,
+                    "message": "Invalid params",
+                    "data": {
+                        "reason": "request _meta is missing or malformed",
+                        "missing": missing,
+                    },
+                },
+            })),
+        )
+            .into_response();
+    }
+
+    next.run(Request::from_parts(parts, Body::from(bytes)))
+        .await
 }
 
 fn allowed_hosts(port: u16) -> [String; 2] {
@@ -3939,6 +4019,79 @@ mod tests {
             Some("private")
         );
         assert!(tools_json.to_string().contains("search_airwiki"));
+
+        let missing_meta_body = json!({
+            "jsonrpc": "2.0",
+            "id": 3,
+            "method": "tools/list",
+            "params": {},
+        })
+        .to_string();
+        let missing_meta = raw_modern_json_request(
+            handle.local_addr(),
+            &host,
+            &missing_meta_body,
+            "tools/list",
+            None,
+        )
+        .await;
+        assert!(
+            missing_meta.starts_with("HTTP/1.1 400"),
+            "modern requests without required metadata must fail: {missing_meta}"
+        );
+        assert_eq!(
+            response_json(&missing_meta)
+                .get("error")
+                .and_then(|error| error.get("code"))
+                .and_then(serde_json::Value::as_i64),
+            Some(-32602)
+        );
+
+        let incomplete_meta_body = json!({
+            "jsonrpc": "2.0",
+            "id": 4,
+            "method": "tools/list",
+            "params": {
+                "_meta": {
+                    "io.modelcontextprotocol/protocolVersion": MCP_PROTOCOL_VERSION,
+                },
+            },
+        })
+        .to_string();
+        let incomplete_meta = raw_modern_json_request(
+            handle.local_addr(),
+            &host,
+            &incomplete_meta_body,
+            "tools/list",
+            None,
+        )
+        .await;
+        assert!(
+            incomplete_meta.starts_with("HTTP/1.1 400"),
+            "modern requests with incomplete metadata must fail: {incomplete_meta}"
+        );
+        assert!(
+            response_json(&incomplete_meta)
+                .get("error")
+                .and_then(|error| error.get("data"))
+                .and_then(|data| data.get("missing"))
+                .and_then(serde_json::Value::as_array)
+                .is_some_and(|missing| missing.iter().any(|field| {
+                    field.as_str() == Some("io.modelcontextprotocol/clientCapabilities")
+                })),
+            "missing capability metadata must be identified"
+        );
+        assert!(
+            response_json(&incomplete_meta)
+                .get("error")
+                .and_then(|error| error.get("data"))
+                .and_then(|data| data.get("missing"))
+                .and_then(serde_json::Value::as_array)
+                .is_some_and(|missing| missing
+                    .iter()
+                    .any(|field| field.as_str() == Some(MCP_META_CLIENT_INFO_KEY))),
+            "missing client identity metadata must be identified"
+        );
 
         let mismatched = raw_modern_json_request(
             handle.local_addr(),

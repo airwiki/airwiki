@@ -15,6 +15,8 @@ use tokio::{
 };
 use tracing::{info, warn};
 
+#[cfg(target_os = "macos")]
+use sysinfo::{ProcessesToUpdate, Signal, System};
 #[cfg(target_os = "windows")]
 use windows::Win32::System::Threading::CREATE_NO_WINDOW;
 
@@ -294,6 +296,16 @@ impl LlamaSupervisor {
             }
         }
 
+        #[cfg(target_os = "macos")]
+        terminate_stale_server_processes(self.inner.config.server_binary.clone())
+            .await
+            .map_err(|error| {
+                error.context(LlamaSupervisorFailure::new(
+                    LlamaSupervisorFailureKind::RuntimeSpawn,
+                    RuntimeExitClass::None,
+                ))
+            })?;
+
         let mut spawned = spawn_server(&self.inner.config).await.map_err(|error| {
             error.context(LlamaSupervisorFailure::new(
                 LlamaSupervisorFailureKind::RuntimeSpawn,
@@ -366,6 +378,101 @@ impl LlamaSupervisor {
                     server.child.wait().await.ok();
                 }
             }
+        });
+    }
+}
+
+#[cfg(target_os = "macos")]
+async fn terminate_stale_server_processes(server_binary: PathBuf) -> Result<()> {
+    tokio::task::spawn_blocking(move || terminate_stale_server_processes_blocking(&server_binary))
+        .await
+        .context("stale llama-server cleanup task failed")?
+}
+
+#[cfg(target_os = "macos")]
+fn terminate_stale_server_processes_blocking(server_binary: &std::path::Path) -> Result<()> {
+    let expected = std::fs::canonicalize(server_binary)
+        .context("bundled llama-server path could not be resolved")?;
+    let mut system = System::new_all();
+    system.refresh_processes(ProcessesToUpdate::All, false);
+    let mut stale = system
+        .processes()
+        .iter()
+        .filter_map(|(pid, process)| {
+            process_matches_runtime(process, &expected, process.start_time())
+                .then_some((*pid, process.start_time()))
+        })
+        .collect::<Vec<_>>();
+    if stale.is_empty() {
+        return Ok(());
+    }
+    let stale_count = stale.len();
+
+    for &(pid, started_at) in &stale {
+        signal_matching_runtime(&mut system, pid, started_at, &expected, Signal::Term)?;
+    }
+    wait_for_process_exit(&mut system, &mut stale, &expected, Duration::from_secs(1));
+    for &(pid, started_at) in &stale {
+        signal_matching_runtime(&mut system, pid, started_at, &expected, Signal::Kill)?;
+    }
+    wait_for_process_exit(&mut system, &mut stale, &expected, Duration::from_secs(1));
+    if !stale.is_empty() {
+        bail!("stale llama-server did not exit within the deadline");
+    }
+    info!(stale_count, "stale llama-server processes removed");
+    Ok(())
+}
+
+#[cfg(target_os = "macos")]
+fn signal_matching_runtime(
+    system: &mut System,
+    pid: sysinfo::Pid,
+    started_at: u64,
+    expected: &std::path::Path,
+    signal: Signal,
+) -> Result<()> {
+    system.refresh_processes(ProcessesToUpdate::Some(&[pid]), true);
+    let Some(process) = system.process(pid) else {
+        return Ok(());
+    };
+    if !process_matches_runtime(process, expected, started_at) {
+        return Ok(());
+    }
+    if process.kill_with(signal) != Some(true) {
+        bail!("stale llama-server could not be signalled");
+    }
+    Ok(())
+}
+
+#[cfg(target_os = "macos")]
+fn process_matches_runtime(
+    process: &sysinfo::Process,
+    expected: &std::path::Path,
+    started_at: u64,
+) -> bool {
+    process.start_time() == started_at
+        && process
+            .exe()
+            .and_then(|path| std::fs::canonicalize(path).ok())
+            .is_some_and(|path| path == expected)
+}
+
+#[cfg(target_os = "macos")]
+fn wait_for_process_exit(
+    system: &mut System,
+    processes: &mut Vec<(sysinfo::Pid, u64)>,
+    expected: &std::path::Path,
+    timeout: Duration,
+) {
+    let deadline = Instant::now() + timeout;
+    while !processes.is_empty() && Instant::now() < deadline {
+        std::thread::sleep(Duration::from_millis(50));
+        let pids = processes.iter().map(|(pid, _)| *pid).collect::<Vec<_>>();
+        system.refresh_processes(ProcessesToUpdate::Some(&pids), true);
+        processes.retain(|(pid, started_at)| {
+            system
+                .process(*pid)
+                .is_some_and(|process| process_matches_runtime(process, expected, *started_at))
         });
     }
 }
@@ -787,5 +894,34 @@ mod tests {
             .await
             .expect("job close should terminate the test child promptly")
             .expect("test child status should remain observable");
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn macos_stale_runtime_cleanup_matches_the_exact_executable() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let temp = tempfile::TempDir::new().expect("temporary directory");
+        let fixture = temp.path().join("synthetic-llama-server");
+        std::fs::copy("/bin/sleep", &fixture).expect("copy synthetic runtime");
+        let mut permissions = std::fs::metadata(&fixture)
+            .expect("synthetic runtime metadata")
+            .permissions();
+        permissions.set_mode(0o700);
+        std::fs::set_permissions(&fixture, permissions).expect("synthetic runtime permissions");
+        let mut child = std::process::Command::new(&fixture)
+            .arg("30")
+            .spawn()
+            .expect("start synthetic runtime");
+
+        let cleanup = terminate_stale_server_processes_blocking(&fixture);
+        if cleanup.is_err() {
+            let _ = child.kill();
+            let _ = child.wait();
+        }
+        cleanup.expect("stale runtime cleanup");
+        let status = child.wait().expect("reap synthetic runtime");
+
+        assert!(!status.success());
     }
 }

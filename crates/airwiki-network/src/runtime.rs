@@ -147,11 +147,12 @@ pub struct NetworkConfig {
 
 impl Default for NetworkConfig {
     fn default() -> Self {
+        let mut listen_address = Multiaddr::empty();
+        listen_address.push(Protocol::Ip4(std::net::Ipv4Addr::UNSPECIFIED));
+        listen_address.push(Protocol::Tcp(0));
         Self {
             node_name: "AirWiki node".to_owned(),
-            listen_address: "/ip4/0.0.0.0/tcp/0"
-                .parse()
-                .expect("static listen multiaddress is valid"),
+            listen_address,
             search_deadline: SEARCH_DEADLINE,
             command_capacity: 64,
         }
@@ -863,12 +864,13 @@ impl Runtime {
             tokio::select! {
                 command = self.command_rx.recv() => {
                     match command {
-                        Some(Command::Shutdown { completed }) => {
-                            shutdown_completed = Some(completed);
-                            break;
-                        }
                         None => break,
-                        Some(command) => self.handle_command(command),
+                        Some(command) => {
+                            if let Some(completed) = self.handle_command(command) {
+                                shutdown_completed = Some(completed);
+                                break;
+                            }
+                        }
                     }
                 }
                 event = self.swarm.select_next_some() => self.handle_swarm_event(event),
@@ -915,8 +917,9 @@ impl Runtime {
         }
     }
 
-    fn handle_command(&mut self, command: Command) {
+    fn handle_command(&mut self, command: Command) -> Option<oneshot::Sender<()>> {
         match command {
+            Command::Shutdown { completed } => return Some(completed),
             Command::Dial { address } => {
                 let dial = DialOpts::unknown_peer_id()
                     .address(address)
@@ -1065,8 +1068,8 @@ impl Runtime {
             }
             #[cfg(test)]
             Command::ExpirePairings { now } => self.expire_pairings(now),
-            Command::Shutdown { .. } => unreachable!("shutdown is handled in run"),
         }
+        None
     }
 
     fn begin_pairing(&mut self, peer: PeerId) {

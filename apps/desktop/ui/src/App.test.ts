@@ -1370,7 +1370,7 @@ describe('AirWiki wiki workspace', () => {
     window.location.hash = '#system/updates';
     render(App);
 
-    expect(await screen.findByText('No se pudo completar la comprobación de actualización.')).toBeInTheDocument();
+    expect(await screen.findByRole('status')).toHaveTextContent('No se pudo completar la comprobación de actualización.');
     expect(screen.queryByText('Listo para comprobar.')).not.toBeInTheDocument();
   });
 

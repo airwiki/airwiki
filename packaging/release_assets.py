@@ -19,6 +19,9 @@ STABLE_SEMVER = re.compile(
     r"^(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)$"
 )
 REPOSITORY = "airwiki/airwiki"
+WORKFLOW_RUN = re.compile(
+    rf"^https://github\.com/{re.escape(REPOSITORY)}/actions/runs/[1-9][0-9]*$"
+)
 SPDX_23_SCHEMA_SHA256 = "3ec6cd5b8ba0c9a3e821da48536fa1b814567dc7e4376efe98d3e7b2a7a8d230"
 UPDATER_SIGNATURE = re.compile(r"^[A-Za-z0-9+/=:\n\r-]+$")
 MAX_UPDATER_SIGNATURE_BYTES = 16 * 1024
@@ -449,6 +452,8 @@ def spdx_document(
 def generate(args: argparse.Namespace) -> None:
     directory = args.directory.resolve()
     root = Path(__file__).resolve().parent.parent
+    if WORKFLOW_RUN.fullmatch(args.workflow_run) is None:
+        raise ValueError("release workflow run must identify an AirWiki GitHub Actions run")
     base_files = require_exact_files(directory, base_asset_names(args.version))
     verify_legal_payloads(root, base_files)
     spdx_path = directory / f"airwiki-{args.version}.spdx.json"
@@ -520,8 +525,22 @@ def verify(args: argparse.Namespace) -> None:
 
     provenance = read_json(files[f"airwiki-{args.version}.provenance.json"])
     generated_at = provenance.get("generatedAt")
+    workflow_run = provenance.get("workflowRun")
     if (
-        provenance.get("schemaVersion") != 1
+        set(provenance)
+        != {
+            "schemaVersion",
+            "repository",
+            "commit",
+            "tag",
+            "version",
+            "generatedAt",
+            "workflowRun",
+            "artifacts",
+        }
+        or not isinstance(workflow_run, str)
+        or WORKFLOW_RUN.fullmatch(workflow_run) is None
+        or provenance.get("schemaVersion") != 1
         or provenance.get("repository") != REPOSITORY
         or provenance.get("commit") != args.commit
         or provenance.get("tag") != f"v{args.version}"
@@ -539,8 +558,11 @@ def verify(args: argparse.Namespace) -> None:
     }:
         raise ValueError("release provenance describes an unexpected artifact set")
     for name, record in described.items():
-        if not isinstance(record, dict) or record.get("sha256") != digest(files[name]):
-            raise ValueError(f"release provenance digest mismatch: {name}")
+        if record != {
+            "sha256": digest(files[name]),
+            "size": files[name].stat().st_size,
+        }:
+            raise ValueError(f"release provenance artifact metadata mismatch: {name}")
 
     verify_update_manifest(files, args.version, generated_at)
 

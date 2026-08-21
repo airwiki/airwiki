@@ -58,6 +58,19 @@ class ReleaseAssetTests(unittest.TestCase):
             Namespace(directory=directory, version=self.version, commit=self.commit)
         )
 
+    def rewrite_sums(self, directory: Path) -> None:
+        checksummed = set(MODULE.base_asset_names(self.version)) | {
+            f"airwiki-{self.version}.spdx.json",
+            f"airwiki-{self.version}.provenance.json",
+        }
+        (directory / "SHA256SUMS").write_text(
+            "".join(
+                f"{MODULE.digest(directory / name)}  {name}\n"
+                for name in sorted(checksummed)
+            ),
+            encoding="utf-8",
+        )
+
     def test_generated_metadata_verifies_exact_assets(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             directory = Path(temporary)
@@ -168,6 +181,7 @@ class ReleaseAssetTests(unittest.TestCase):
             provenance["artifacts"][spdx_path.name]["sha256"] = MODULE.digest(
                 spdx_path
             )
+            provenance["artifacts"][spdx_path.name]["size"] = spdx_path.stat().st_size
             MODULE.atomic_json(provenance_path, provenance)
             sums = directory / "SHA256SUMS"
             checksummed = set(MODULE.base_asset_names(self.version)) | {
@@ -211,14 +225,36 @@ class ReleaseAssetTests(unittest.TestCase):
             provenance = json.loads(provenance_path.read_text(encoding="utf-8"))
             provenance["commit"] = "b" * 40
             provenance_path.write_text(json.dumps(provenance), encoding="utf-8")
-            sums = directory / "SHA256SUMS"
-            lines = []
-            for name in sorted(set(MODULE.base_asset_names(self.version)) | {
-                f"airwiki-{self.version}.spdx.json",
-                f"airwiki-{self.version}.provenance.json",
-            }):
-                lines.append(f"{MODULE.digest(directory / name)}  {name}\n")
-            sums.write_text("".join(lines), encoding="utf-8")
+            self.rewrite_sums(directory)
+
+            with self.assertRaisesRegex(ValueError, "provenance"):
+                self.verify(directory)
+
+    def test_provenance_size_must_match_the_final_asset(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            directory = Path(temporary)
+            self.write_base_assets(directory)
+            self.generate(directory)
+            provenance_path = directory / f"airwiki-{self.version}.provenance.json"
+            provenance = json.loads(provenance_path.read_text(encoding="utf-8"))
+            asset = f"AirWiki_{self.version}_aarch64.dmg"
+            provenance["artifacts"][asset]["size"] += 1
+            MODULE.atomic_json(provenance_path, provenance)
+            self.rewrite_sums(directory)
+
+            with self.assertRaisesRegex(ValueError, "provenance"):
+                self.verify(directory)
+
+    def test_provenance_workflow_run_must_identify_airwiki_actions(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            directory = Path(temporary)
+            self.write_base_assets(directory)
+            self.generate(directory)
+            provenance_path = directory / f"airwiki-{self.version}.provenance.json"
+            provenance = json.loads(provenance_path.read_text(encoding="utf-8"))
+            provenance["workflowRun"] = "https://example.com/actions/runs/1"
+            MODULE.atomic_json(provenance_path, provenance)
+            self.rewrite_sums(directory)
 
             with self.assertRaisesRegex(ValueError, "provenance"):
                 self.verify(directory)

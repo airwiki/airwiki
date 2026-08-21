@@ -66,8 +66,9 @@ instructions. A custom root must be absolute and safely resolvable; otherwise
 AirWiki reports an unsupported or conflict state instead of guessing.
 
 The guide makes requests such as “create a wiki with AirWiki” self-contained.
-It lists memories before selecting or creating one, reads before every write,
-uses optimistic fingerprints, and retries one conflict at most once. In a code
+It lists memories before selecting or creating one, pages through the selected
+Wiki's concept metadata, and then reads the targeted concept body before an
+edit. It uses optimistic fingerprints and retries one conflict at most once. In a code
 repository it proposes `<project> — memory`; in general work it uses a named
 thematic Wiki. Creation still requires an explicit user request, and ambiguous
 matches require a choice.

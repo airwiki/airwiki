@@ -577,6 +577,20 @@ async function exerciseGenericMcpMemory(): Promise<void> {
     const persisted = record(afterStale.concepts[0], 'persisted concept');
     expect(persisted.title).toBe('Portable agent memory updated');
     expect(persisted.fingerprint).toBe(updatedFingerprint);
+    expect(persisted.bodyMarkdown).toBeNull();
+    expect(afterStale.nextCursor).toBeNull();
+
+    const targetedRead = await client.callTool('get_airwiki_memory', {
+      wiki_id: wikiId,
+      concept_id: conceptId
+    });
+    if (!Array.isArray(targetedRead.concepts) || targetedRead.concepts.length !== 1) {
+      throw new Error('targeted memory read did not return exactly one concept');
+    }
+    const readable = record(targetedRead.concepts[0], 'targeted memory concept');
+    expect(readable.fingerprint).toBe(updatedFingerprint);
+    expect(readable.bodyMarkdown).toBe('# Portable agent memory updated\n\nUpdated synthetic decision.');
+    expect(targetedRead.nextCursor).toBeNull();
     await $('.file-list').$('button*=Portable agent memory updated').click();
     await expect($('.concept-assurance')).toHaveText(expect.stringContaining('stable'));
 

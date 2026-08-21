@@ -22,6 +22,8 @@ use crate::{
 };
 
 pub const AI_MEMORY_CONCEPT_MAX_BYTES: usize = 48 * 1024;
+const AI_MEMORY_WIKI_NAME_MAX_CHARS: usize = 120;
+const AI_MEMORY_CONCEPT_TYPE_MAX_CHARS: usize = 120;
 const PROCESS_RESULT_CONCEPT_MAX_BYTES: usize = 1024 * 1024;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Error)]
@@ -197,6 +199,13 @@ impl AiMemoryService {
     }
 
     pub fn create(&self, app_id: Uuid, name: &str) -> Result<CollectionRecord> {
+        let name = name.trim();
+        if name.is_empty()
+            || name.chars().count() > AI_MEMORY_WIKI_NAME_MAX_CHARS
+            || has_unsupported_text_control(name)
+        {
+            bail!("AI memory wiki name is invalid");
+        }
         self.database.consume_application_rate_limit(app_id, true)?;
         let _producer = self.application_producer(app_id)?;
         let wiki_id = Uuid::new_v4();
@@ -266,6 +275,31 @@ impl AiMemoryService {
     pub fn get(&self, app_id: Uuid, wiki_id: Uuid) -> Result<Vec<OkfConceptProjectionRecord>> {
         self.require_role(app_id, wiki_id, false)?;
         self.database.list_okf_concept_projection(wiki_id)
+    }
+
+    /// Reads one application-visible concept and verifies that its managed file
+    /// still matches the projected fingerprint before returning the Markdown body.
+    pub fn get_concept(
+        &self,
+        app_id: Uuid,
+        wiki_id: Uuid,
+        concept_id: Uuid,
+    ) -> Result<(OkfConceptProjectionRecord, String)> {
+        self.require_role(app_id, wiki_id, false)?;
+        let concept = self
+            .database
+            .list_okf_concept_projection(wiki_id)?
+            .into_iter()
+            .find(|concept| concept.concept_id == concept_id)
+            .context("AI memory concept does not exist")?;
+        let wiki = self
+            .database
+            .collection(wiki_id)?
+            .context("AI memory wiki does not exist")?;
+        let path = checked_memory_path(&wiki.wiki_folder, &concept.logical_path)?;
+        let current = read_current_managed_concept(&path, &concept.fingerprint)?;
+        let body_markdown = read_body(&current)?;
+        Ok((concept, body_markdown))
     }
 
     pub fn write(
@@ -910,14 +944,31 @@ fn projected_bundle_size(
 }
 
 fn validate_input(input: &AiMemoryConceptInput) -> Result<()> {
+    let concept_type = input.concept_type.to_string();
     if input.title.trim().is_empty()
         || input.title.chars().count() > 200
         || input.description.chars().count() > 2_000
+        || concept_type.chars().count() > AI_MEMORY_CONCEPT_TYPE_MAX_CHARS
         || input.tags.len() > 20
+        || [
+            input.title.as_str(),
+            input.description.as_str(),
+            concept_type.as_str(),
+            input.body_markdown.as_str(),
+        ]
+        .into_iter()
+        .chain(input.tags.iter().map(String::as_str))
+        .any(has_unsupported_text_control)
     {
         bail!("AI memory concept metadata is invalid");
     }
     Ok(())
+}
+
+fn has_unsupported_text_control(value: &str) -> bool {
+    value
+        .chars()
+        .any(|character| character.is_control() && !matches!(character, '\n' | '\r' | '\t'))
 }
 
 fn checked_memory_path(root: &Path, logical_path: &str) -> Result<PathBuf> {
@@ -1049,6 +1100,68 @@ mod tests {
 
         assert_eq!(deprecated.lifecycle_status, "deprecated");
         assert_eq!(service.list(app_id).unwrap().len(), 1);
+    }
+
+    #[test]
+    fn owner_can_read_a_current_memory_concept_body() {
+        let (_temp, _database, service, app_id) = service();
+        let wiki = service.create(app_id, "Readable memory").unwrap();
+        let created = service
+            .write(
+                app_id,
+                wiki.id,
+                None,
+                None,
+                &AiMemoryConceptInput {
+                    title: "Decision".to_owned(),
+                    description: String::new(),
+                    concept_type: ConceptType::Other("Decision".to_owned()),
+                    tags: Vec::new(),
+                    body_markdown: "Keep durable context readable.".to_owned(),
+                },
+            )
+            .unwrap();
+
+        let (read, body_markdown) = service
+            .get_concept(app_id, wiki.id, created.concept_id)
+            .unwrap();
+
+        assert_eq!(read.fingerprint, created.fingerprint);
+        assert_eq!(body_markdown, "Keep durable context readable.");
+        assert!(
+            service
+                .get_concept(Uuid::new_v4(), wiki.id, created.concept_id)
+                .is_err()
+        );
+    }
+
+    #[test]
+    fn memory_write_rejects_non_text_control_characters() {
+        let (_temp, _database, service, app_id) = service();
+        let wiki = service.create(app_id, "Text memory").unwrap();
+        let input = AiMemoryConceptInput {
+            title: "Decision".to_owned(),
+            description: String::new(),
+            concept_type: ConceptType::Other("Decision".to_owned()),
+            tags: Vec::new(),
+            body_markdown: "Invalid\0body".to_owned(),
+        };
+
+        assert!(service.write(app_id, wiki.id, None, None, &input).is_err());
+        assert!(service.get(app_id, wiki.id).unwrap().is_empty());
+    }
+
+    #[test]
+    fn memory_creation_rejects_unbounded_or_controlled_names() {
+        let (_temp, _database, service, app_id) = service();
+
+        assert!(service.create(app_id, "\0invalid").is_err());
+        assert!(
+            service
+                .create(app_id, &"x".repeat(AI_MEMORY_WIKI_NAME_MAX_CHARS + 1))
+                .is_err()
+        );
+        assert!(service.list(app_id).unwrap().is_empty());
     }
 
     #[test]

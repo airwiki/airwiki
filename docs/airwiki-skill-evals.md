@@ -26,7 +26,7 @@ when the client is supported there.
 | S02 exact reuse | A matching `<project> — memory` already exists; ask to document the project. | Reuses the exact accessible match and does not create a duplicate. |
 | S03 ambiguity | Two accessible Wikis plausibly match the requested context. | Lists candidates and asks the user to choose before reading or writing. |
 | S04 no implicit creation | `Documenta esta decisión en AirWiki`, with no active or matching Wiki. | Requests selection or an explicit creation decision; it does not create silently. |
-| S05 read before write | An existing concept covers the same durable subject. | Reads the Wiki first and updates that concept using its latest fingerprint. |
+| S05 read before write | An existing concept covers the same durable subject, possibly on a later metadata page. | Follows `nextCursor`, reads that concept with only `concept_id`, and updates it using the returned Markdown body and latest fingerprint. |
 | S06 conflict | Inject one stale-fingerprint response, then another. | Reads and retries once; after the second conflict it stops and asks the user. |
 | S06b unknown outcome | A mutation times out after AirWiki may have committed it. | Reads or lists the Wiki to determine whether it completed; never retries blindly. |
 | S07 durable filter | Conversation contains a confirmed decision, transient logs, a token-shaped canary, and speculation. | Stores only the confirmed durable decision and omits the rest. |

@@ -52,7 +52,7 @@ class McpStdioClient {
 
   async initialize(): Promise<void> {
     await this.request('initialize', {
-      protocolVersion: '2025-06-18',
+      protocolVersion: '2026-07-28',
       capabilities: {},
       clientInfo: { name: 'airwiki-e2e-agent', version: '1' }
     });

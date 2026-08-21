@@ -120,6 +120,7 @@ pub const MAX_MCP_HTTP_BODY_BYTES: usize = 64 * 1024;
 const MAX_MCP_STRUCTURED_OUTPUT_BYTES: usize = 24 * 1024;
 #[cfg(test)]
 const MAX_AGENT_TOOL_CATALOG_BYTES: usize = 64 * 1024;
+const MAX_MCP_RETRY_AFTER_SECONDS: u64 = u32::MAX as u64;
 
 const MAX_LOGICAL_RESOURCE_URI_CHARS: usize = 500;
 const MAX_OFFLINE_NODES: usize = 64;
@@ -984,16 +985,15 @@ struct McpToolFailure {
     code: String,
     message: String,
     retryable: bool,
-    #[serde(skip_serializing_if = "Option::is_none")]
     #[schemars(schema_with = "mcp_retry_after_schema")]
     retry_after_seconds: Option<u64>,
 }
 
 fn mcp_retry_after_schema(_: &mut schemars::SchemaGenerator) -> schemars::Schema {
     schemars::json_schema!({
-        "type": "integer",
+        "type": ["integer", "null"],
         "minimum": 0,
-        "maximum": u32::MAX,
+        "maximum": MAX_MCP_RETRY_AFTER_SECONDS,
     })
 }
 
@@ -1017,19 +1017,12 @@ impl McpToolFailure {
     }
 
     fn into_result(self) -> CallToolResult {
-        let mut value = json!({
+        let value = json!({
             "code": self.code,
             "message": self.message,
             "retryable": self.retryable,
+            "retryAfterSeconds": self.retry_after_seconds,
         });
-        if let Some(retry_after_seconds) = self.retry_after_seconds
-            && let Some(object) = value.as_object_mut()
-        {
-            object.insert(
-                "retryAfterSeconds".to_owned(),
-                serde_json::Value::from(retry_after_seconds),
-            );
-        }
         CallToolResult::structured_error(value)
     }
 }
@@ -2669,6 +2662,13 @@ mod tests {
             Some("authorization_required")
         );
         assert!(
+            unauthorized_result
+                .get("structuredContent")
+                .and_then(|value| value.get("retryAfterSeconds"))
+                .is_some_and(serde_json::Value::is_null),
+            "non-rate-limited failures must serialize the advertised null retry delay"
+        );
+        assert!(
             application_backend
                 .calls
                 .lock()
@@ -3519,6 +3519,44 @@ mod tests {
         ] {
             assert!(tools.to_string().contains(tool), "missing tool {tool}");
         }
+        let search_output_schema = tools
+            .get("result")
+            .and_then(|result| result.get("tools"))
+            .and_then(serde_json::Value::as_array)
+            .and_then(|listed_tools| {
+                listed_tools.iter().find(|tool| {
+                    tool.get("name").and_then(serde_json::Value::as_str) == Some("search_airwiki")
+                })
+            })
+            .and_then(|tool| tool.get("outputSchema"))
+            .expect("search output schema");
+        let failure_schema = search_output_schema
+            .get("$defs")
+            .and_then(|definitions| definitions.get("McpToolFailure"))
+            .expect("tool failure schema");
+        assert!(
+            failure_schema
+                .get("required")
+                .and_then(serde_json::Value::as_array)
+                .is_some_and(|required| required
+                    .iter()
+                    .any(|field| field.as_str() == Some("retryAfterSeconds"))),
+            "retryAfterSeconds is always serialized and must be required"
+        );
+        let retry_after_schema = failure_schema
+            .get("properties")
+            .and_then(|properties| properties.get("retryAfterSeconds"))
+            .expect("retryAfterSeconds schema");
+        assert_eq!(
+            retry_after_schema
+                .get("maximum")
+                .and_then(serde_json::Value::as_u64),
+            Some(u64::from(u32::MAX))
+        );
+        assert_eq!(
+            retry_after_schema.get("type"),
+            Some(&json!(["integer", "null"]))
+        );
         let parameter_schema = tools
             .get("result")
             .and_then(|result| result.get("tools"))

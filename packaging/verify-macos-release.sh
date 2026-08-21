@@ -95,6 +95,7 @@ verify_app() {
     "$CANDIDATE/Contents/Resources/integrations/bridge/airwiki-mcp-bridge" \
     "macOS MCP bridge"
   verify_nested_runtime_signatures "$CANDIDATE/Contents/Resources/llama"
+  verify_runtime_trust_anchor "$CANDIDATE"
   ARCHS=$(lipo -archs "$CANDIDATE/Contents/MacOS/airwiki")
   if [ "$ARCHS" != "arm64" ]; then
     echo "macOS application is not an arm64-only release" >&2
@@ -143,6 +144,17 @@ verify_nested_runtime_signatures() {
     fi
   done <"$RUNTIME_LIST"
   rm -f -- "$RUNTIME_LIST"
+}
+
+verify_runtime_trust_anchor() {
+  CANDIDATE=$1
+  RUNTIME_SERVER="$CANDIDATE/Contents/Resources/llama/llama-b9946/llama-server"
+  RUNTIME_SHA256=$(shasum -a 256 "$RUNTIME_SERVER" | awk '{print $1}')
+  if [ "${#RUNTIME_SHA256}" -ne 64 ] ||
+    ! strings "$CANDIDATE/Contents/MacOS/airwiki" | grep -Fq "$RUNTIME_SHA256"; then
+    echo "macOS application does not pin its signed llama.cpp runtime" >&2
+    exit 1
+  fi
 }
 
 verify_app "$APP"

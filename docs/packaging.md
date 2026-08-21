@@ -116,8 +116,10 @@ The immutable source cache retains the reviewed upstream identity and hashes.
 The public macOS staging copy has a distinct distributed-payload identity so
 Apple can validate every nested Mach-O; post-signing verification checks the
 Developer ID team, secure timestamp, Hardened Runtime, architecture and exact
-copy into the application. Windows keeps the source-built runtime identity and
-does not re-sign it as AirWiki.
+copy into the application. The public desktop build pins the exact SHA-256 of
+that signed `llama-server`, while contributor and ad-hoc builds retain the
+upstream trust anchor. Windows keeps the source-built runtime identity and does
+not re-sign it as AirWiki.
 
 ## Windows x64 candidate
 

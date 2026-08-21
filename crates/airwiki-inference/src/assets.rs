@@ -24,8 +24,13 @@ pub const LLAMA_CPP_BUILD: &str = "b9946";
 pub const E5_REVISION: &str = "614241f622f53c4eeff9890bdc4f31cfecc418b3";
 pub const MMARCO_REVISION: &str = "1427fd652930e4ba29e8149678df786c240d8825";
 const APACHE_2_LICENSE_URL: &str = "https://www.apache.org/licenses/LICENSE-2.0.txt";
-pub const MACOS_LLAMA_SERVER_SHA256: &str =
-    "12df97ffa9d48545e96cd3237a71f78efd1cc0222f971cbd65f7ab57e793b128";
+pub const MACOS_LLAMA_SERVER_SHA256: &str = match option_env!("AIRWIKI_MACOS_LLAMA_SERVER_SHA256") {
+    Some(value) => value,
+    // Contributor and ad-hoc builds consume the immutable upstream
+    // runtime. Public packaging injects the hash of the separately signed
+    // distribution copy before compiling the desktop application.
+    None => "12df97ffa9d48545e96cd3237a71f78efd1cc0222f971cbd65f7ab57e793b128",
+};
 pub const WINDOWS_LLAMA_SERVER_SHA256: &str =
     match option_env!("AIRWIKI_WINDOWS_LLAMA_SERVER_SHA256") {
         Some(value) => value,

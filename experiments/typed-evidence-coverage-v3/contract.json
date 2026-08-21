@@ -2,7 +2,7 @@
   "schema_version": 1,
   "experiment_id": "typed_evidence_coverage_v3",
   "field_guide_sha256": "610f9efa8b45bc999c266277464e762f2a75fb59ad67f81aaaa6eaf99c720356",
-  "evaluator_sha256": "c6454b61ab84a678b348bfd688a02d331052cb0d3f15cbce8adecc8955b1ee69",
+  "evaluator_sha256": "aca68591cfc04704201e1a63eebef01542572b730bfc733ace8429e3aa2beee9",
   "minimum_domains_per_split": 4,
   "minimum_cases_per_split": 12,
   "minimum_no_answer_cases_per_split": 3,

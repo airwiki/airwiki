@@ -1557,9 +1557,19 @@
       <div class="top-actions"><button class="secondary" aria-expanded={newWikiMenuOpen} onclick={() => { newWikiMenuOpen = !newWikiMenuOpen; }}><Plus size={17} aria-hidden="true" />{t('desktop-new-wiki')}</button><button class="icon-button" class:active={destination === 'system'} aria-label={t('desktop-nav-system')} onclick={() => select('system')}><Settings2 size={19} aria-hidden="true" /></button></div>
     </header>
 
-    <section class="drive-page" bind:this={mainScrollRegion}>
+    <section
+      class="drive-page"
+      class:wiki-open={destination === 'wikis' && selectedWiki !== null}
+      class:shared-wiki-open={destination === 'search' && sharedBrowseOpen}
+      bind:this={mainScrollRegion}
+    >
       {#key `${destination}:${selectedWikiId ?? ''}:${wikiTab}:${systemSection}`}
-        <div class="route-page drive-route" data-route={destination}>
+        <div
+          class="route-page drive-route"
+          class:wiki-route={destination === 'wikis' && selectedWiki !== null}
+          class:shared-wiki-route={destination === 'search' && sharedBrowseOpen}
+          data-route={destination}
+        >
           {#if destination === 'wikis' && !selectedWiki}
             <header class="page-heading">
               <div><h1 tabindex="-1">{t('desktop-page-wikis-title')}</h1><p>{t('desktop-page-wikis-body')}</p></div>
@@ -1634,6 +1644,7 @@
               <div class="heading-actions">{#if selectedWiki.origin === 'folder' && selectedWiki.restrictions.length === 0}<button class="secondary" onclick={() => scanWiki(selectedWiki.id)} disabled={wikiScanState(selectedWiki.id) !== null}><RefreshCw size={16} aria-hidden="true" />{t('action-refresh')}</button>{/if}{#if selectedWiki.restrictions.length === 0}<button class="primary" onclick={() => editWiki(selectedWiki)}>{t('desktop-share-action')}</button>{/if}</div>
             </header>
 
+            <div class="wiki-detail-body">
             <section class="wiki-access-strip" aria-label={t('desktop-wiki-access-title')}>
               <strong>{t('desktop-wiki-access-title')}</strong>
               <div>{#if !selectedWiki.peerShareable && !selectedWiki.allowExternalAi && !selectedWiki.internetPublic}<span>{t('desktop-wiki-private')}</span>{/if}{#if selectedWiki.peerShareable}<span>{t(wikiPeers(selectedWiki.id).length > 0 ? 'desktop-share-nearby' : 'desktop-share-nearby-enabled')}</span>{/if}{#if selectedWiki.allowExternalAi}<span>{t('desktop-share-ai-apps')}</span>{/if}{#if selectedWiki.internetPublic}<span>{t('desktop-share-public')}</span>{/if}</div>
@@ -1734,6 +1745,7 @@
                 {#each selectedWikiReviews as review (`${review.conceptId}:${review.sourceRevision}`)}<button onclick={() => openReview(review)}><span class="pending-icon"><Sparkles size={17} aria-hidden="true" /></span><span><strong>{review.sourceName}</strong><small>{review.draft.summary}</small></span><span>{t('review-revision', { revision: review.sourceRevision })}</span></button>{:else}<div class="table-empty"><CheckCircle2 size={28} aria-hidden="true" /><strong>{t('review-empty-title')}</strong><p>{t('review-empty-body')}</p></div>{/each}
               </section>
             {/if}
+            </div>
           {:else if destination === 'search'}
             {#if sharedBrowseOpen}
               <SharedWikiViewer source={sharedBrowseSource} sourceName={sharedBrowseSourceName} browse={sharedBrowseLoading ? null : sharedBrowseSource === 'nearby' ? snapshot.nearbyBrowse : snapshot.publicBrowse} loading={sharedBrowseLoading} initialConceptId={sharedBrowseInitialConceptId} {t} metadata={publicConceptMetadata} onback={closeSharedBrowse} onmore={loadMoreSharedConcepts} onblock={sharedBrowseSource === 'public' ? (publisherId) => changePublisherBlock(publisherId, true) : null} />

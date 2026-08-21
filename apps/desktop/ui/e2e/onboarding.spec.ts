@@ -397,6 +397,29 @@ async function importOkfWiki(): Promise<void> {
     () => browser.execute(() => document.querySelector('.concept-assurance')?.textContent?.includes('Human-reviewed') === true),
     { timeout: 10_000, timeoutMsg: 'verified concept assurance did not replace the previous page atomically' }
   );
+  const workspaceLayout = await browser.execute(() => {
+    const page = document.querySelector<HTMLElement>('.drive-page');
+    const heading = document.querySelector<HTMLElement>('.wiki-route > .wiki-heading');
+    const browserPanel = document.querySelector<HTMLElement>('.wiki-detail-body > .file-browser');
+    const pageRect = page?.getBoundingClientRect();
+    const headingRect = heading?.getBoundingClientRect();
+    const browserRect = browserPanel?.getBoundingClientRect();
+    if (page) page.scrollTop = 10_000;
+    return {
+      pageScrollTop: page?.scrollTop ?? -1,
+      pageOverflowY: page ? getComputedStyle(page).overflowY : '',
+      headingTop: headingRect?.top ?? -1,
+      pageTop: pageRect?.top ?? -1,
+      browserBottom: browserRect?.bottom ?? Number.POSITIVE_INFINITY,
+      pageBottom: pageRect?.bottom ?? -1,
+      browserHeight: browserRect?.height ?? 0
+    };
+  });
+  expect(workspaceLayout.pageScrollTop).toBe(0);
+  expect(workspaceLayout.pageOverflowY).toBe('clip');
+  expect(workspaceLayout.headingTop).toBeGreaterThanOrEqual(workspaceLayout.pageTop);
+  expect(workspaceLayout.browserBottom).toBeLessThanOrEqual(workspaceLayout.pageBottom);
+  expect(workspaceLayout.browserHeight).toBeGreaterThan(0);
   const assurance = await $('.concept-assurance');
   await expect(assurance).toHaveText(expect.stringContaining('Reference'));
   await expect(assurance).toHaveText(expect.stringContaining('Current'));

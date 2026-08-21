@@ -47,7 +47,8 @@ pub use knowledge::{
     OkfBundleInspector,
 };
 pub use memory::{
-    AI_MEMORY_CONCEPT_MAX_BYTES, AiMemoryConceptInput, AiMemoryService, ManagedBundleRecoveryReport,
+    AI_MEMORY_CONCEPT_MAX_BYTES, AiMemoryConceptInput, AiMemoryError, AiMemoryService,
+    ManagedBundleRecoveryReport,
 };
 pub use okf::{
     AirWikiProfile, OkfActorEvent, OkfConcept, OkfLifecycleStatus, OkfPublisher, OkfValidationError,
@@ -70,14 +71,14 @@ pub use search::{
     EvidenceRelevanceProvider, HybridSearchEngine, RELEVANCE_CANDIDATE_LIMIT, RelevanceInput,
 };
 pub use storage::{
-    ApplicationCapabilityRecord, ApplicationGrantRecord, ApplicationWikiRole, AuditEvent,
-    BootstrapFederationIndexEntry, CollectionMaintenanceCounts, CollectionMaintenanceRecord,
-    CollectionMaintenanceResult, CollectionMaintenanceStatus, CollectionRecord, CollectionStats,
-    ComputationRunRecord, ComputationRunState, ConceptRecord, Database, FederationIndexRecord,
-    GrantRecord, IndexingMode, JobRecord, ManagedBundleMutationRecord, ManagedBundleMutationState,
-    NewCollection, NewManagedCollection, OkfConceptProjectionRecord, PeerRecord,
-    ReviewEvidenceChunkRecord, ReviewEvidencePageRecord, ReviewReanalysisClaim, ReviewVersionToken,
-    SourceDocumentRecord, StoredChunk, WikiOrigin,
+    ApplicationCapabilityRecord, ApplicationGrantRecord, ApplicationLimitError,
+    ApplicationWikiRole, AuditEvent, BootstrapFederationIndexEntry, CollectionMaintenanceCounts,
+    CollectionMaintenanceRecord, CollectionMaintenanceResult, CollectionMaintenanceStatus,
+    CollectionRecord, CollectionStats, ComputationRunRecord, ComputationRunState, ConceptRecord,
+    Database, FederationIndexRecord, GrantRecord, IndexingMode, JobRecord,
+    ManagedBundleMutationRecord, ManagedBundleMutationState, NewCollection, NewManagedCollection,
+    OkfConceptProjectionRecord, PeerRecord, ReviewEvidenceChunkRecord, ReviewEvidencePageRecord,
+    ReviewReanalysisClaim, ReviewVersionToken, SourceDocumentRecord, StoredChunk, WikiOrigin,
 };
 
 /// Embedding dimensionality required by multilingual-e5-small.

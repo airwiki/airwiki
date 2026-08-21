@@ -30,7 +30,8 @@ Use the connected AirWiki MCP tools to maintain durable, portable knowledge. Air
 2. Prefer updating an existing concept when it represents the same durable subject.
 3. Pass the latest `fingerprint` as `expected_fingerprint` to `write_airwiki_memory` or `deprecate_airwiki_memory`.
 4. If AirWiki reports a fingerprint conflict, read the wiki again, merge only non-conflicting durable facts, and retry once. If the second write conflicts, stop and ask the user to resolve it.
-5. Deprecate superseded knowledge instead of deleting or rewriting history.
+5. If AirWiki reports an unknown outcome after a timeout, read or list the wiki to determine whether the operation completed before considering any retry. Never retry the mutation blindly.
+6. Deprecate superseded knowledge instead of deleting or rewriting history.
 
 ## Coding project memory
 

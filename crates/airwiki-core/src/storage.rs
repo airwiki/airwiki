@@ -18,6 +18,7 @@ use rusqlite::{
 };
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
+use thiserror::Error;
 use uuid::Uuid;
 
 use crate::EMBEDDING_DIMENSIONS;
@@ -42,6 +43,30 @@ const MIGRATION_14: &str = include_str!("../migrations/0014_bound_computation_ru
 const APPLICATION_MUTATIONS_PER_MINUTE: u32 = 30;
 const APPLICATION_WIKI_CREATIONS_PER_HOUR: u32 = 5;
 const APPLICATION_MAX_WIKIS: u32 = 100;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Error)]
+pub enum ApplicationLimitError {
+    #[error("application mutation rate limit exceeded")]
+    MutationRate,
+    #[error("application wiki creation rate limit exceeded")]
+    WikiCreationRate,
+    #[error("application wiki count limit exceeded")]
+    WikiCount,
+    #[error("application pending computation limit exceeded")]
+    PendingComputations,
+    #[error("application computation request rate limit exceeded")]
+    ComputationRate,
+}
+
+impl ApplicationLimitError {
+    pub const fn retry_after_seconds(self) -> Option<u64> {
+        match self {
+            Self::MutationRate | Self::ComputationRate => Some(60),
+            Self::WikiCreationRate => Some(60 * 60),
+            Self::PendingComputations | Self::WikiCount => None,
+        }
+    }
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -1863,7 +1888,7 @@ impl Database {
             |row| row.get(0),
         )?;
         if pending >= MAX_PENDING_COMPUTATIONS_PER_APPLICATION {
-            bail!("application pending computation limit exceeded");
+            return Err(ApplicationLimitError::PendingComputations.into());
         }
         let recent: u32 = tx.query_row(
             "SELECT count(*) FROM computation_runs
@@ -1872,7 +1897,7 @@ impl Database {
             |row| row.get(0),
         )?;
         if recent >= MAX_COMPUTATION_REQUESTS_PER_MINUTE {
-            bail!("application computation request rate limit exceeded");
+            return Err(ApplicationLimitError::ComputationRate.into());
         }
         tx.execute(
             "INSERT INTO computation_runs
@@ -2104,12 +2129,12 @@ impl Database {
         let (mutation_start, mutation_count) =
             next_rate_window(row.0, row.1, now, chrono::Duration::minutes(1))?;
         if mutation_count >= APPLICATION_MUTATIONS_PER_MINUTE {
-            bail!("application mutation rate limit exceeded");
+            return Err(ApplicationLimitError::MutationRate.into());
         }
         let (creation_start, creation_count) =
             next_rate_window(row.2, row.3, now, chrono::Duration::hours(1))?;
         if wiki_creation && creation_count >= APPLICATION_WIKI_CREATIONS_PER_HOUR {
-            bail!("application wiki creation rate limit exceeded");
+            return Err(ApplicationLimitError::WikiCreationRate.into());
         }
         if wiki_creation {
             let wiki_count: u32 = tx.query_row(
@@ -2118,7 +2143,7 @@ impl Database {
                 |row| row.get(0),
             )?;
             if wiki_count >= APPLICATION_MAX_WIKIS {
-                bail!("application wiki limit exceeded");
+                return Err(ApplicationLimitError::WikiCount.into());
             }
         }
         tx.execute(
@@ -6491,10 +6516,14 @@ pub(crate) fn decode_embedding(bytes: &[u8]) -> Result<Vec<f32>> {
     if !bytes.len().is_multiple_of(std::mem::size_of::<f32>()) {
         bail!("embedding BLOB has invalid byte length {}", bytes.len());
     }
-    Ok(bytes
+    bytes
         .chunks_exact(4)
-        .map(|chunk| f32::from_le_bytes(chunk.try_into().expect("four-byte chunk")))
-        .collect())
+        .map(|chunk| {
+            let encoded = <[u8; 4]>::try_from(chunk)
+                .map_err(|_| anyhow!("embedding BLOB contains an incomplete value"))?;
+            Ok(f32::from_le_bytes(encoded))
+        })
+        .collect()
 }
 
 fn fts_query(query: &str) -> String {

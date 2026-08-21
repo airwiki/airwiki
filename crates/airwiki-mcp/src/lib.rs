@@ -97,6 +97,7 @@ const SERVER_INSTRUCTIONS: &str = r#"AirWiki provides private search and applica
 - Select a memory wiki for the current conversation or project before capturing anything. Never silently reuse a wiki selected in another conversation.
 - Reuse a single exact accessible name. Ask the user to choose when names are ambiguous. Create a wiki only after an explicit request.
 - Read the active wiki before every write. Use the latest fingerprint for optimistic concurrency. After one conflict, read, merge only confirmed durable knowledge, and retry once; stop after a second conflict.
+- If a mutation times out with `outcome_unknown`, inspect the wiki before deciding whether it completed. Never retry that mutation blindly.
 - Store only concise confirmed decisions, architecture, reusable procedures, durable conclusions, and known risks. Do not store secrets, credentials, personal data, private queries, logs, temporary state, speculation, or extensive copies of source files.
 - In a coding project, update durable project knowledge when completed work changes something future tasks should know. In general work, capture durable knowledge only after the user selects a thematic wiki.
 - If the user says "pause AirWiki", "pausa AirWiki", or an equivalent instruction, stop automatic capture until explicitly resumed.
@@ -503,6 +504,14 @@ pub enum McpApplicationError {
     Unauthorized,
     #[error("application request is invalid")]
     Invalid,
+    #[error("application memory changed since it was read")]
+    Conflict,
+    #[error("application request rate limit exceeded")]
+    RateLimited { retry_after_seconds: u64 },
+    #[error("application quota is exhausted")]
+    QuotaExceeded,
+    #[error("application operation timed out with an unknown outcome")]
+    OutcomeUnknown,
     #[error("application operation is not available")]
     Unavailable,
 }
@@ -1028,28 +1037,54 @@ impl McpToolFailure {
 }
 
 fn application_tool_failure(error: McpApplicationError) -> McpToolFailure {
-    let (code, message, retryable) = match error {
-        McpApplicationError::Unauthorized => (
-            "authorization_required",
-            "Reconnect this integration in AirWiki before using memory tools",
-            false,
-        ),
-        McpApplicationError::Invalid => (
-            "invalid_request",
-            "The memory request is invalid or no longer matches the current wiki state",
-            false,
-        ),
-        McpApplicationError::Unavailable => (
-            "temporarily_unavailable",
-            "AirWiki could not complete the memory operation; try again later",
-            true,
-        ),
-    };
-    McpToolFailure {
-        code: code.to_owned(),
-        message: message.to_owned(),
-        retryable,
-        retry_after_seconds: None,
+    match error {
+        McpApplicationError::Unauthorized => McpToolFailure {
+            code: "authorization_required".to_owned(),
+            message: "Reconnect this integration in AirWiki before using memory tools".to_owned(),
+            retryable: false,
+            retry_after_seconds: None,
+        },
+        McpApplicationError::Invalid => McpToolFailure {
+            code: "invalid_request".to_owned(),
+            message: "The memory request is invalid".to_owned(),
+            retryable: false,
+            retry_after_seconds: None,
+        },
+        McpApplicationError::Conflict => McpToolFailure {
+            code: "conflict".to_owned(),
+            message: "The memory changed; read it again and retry once with the latest fingerprint"
+                .to_owned(),
+            retryable: true,
+            retry_after_seconds: None,
+        },
+        McpApplicationError::RateLimited {
+            retry_after_seconds,
+        } => McpToolFailure {
+            code: "rate_limited".to_owned(),
+            message: "The application rate limit was reached; retry later".to_owned(),
+            retryable: true,
+            retry_after_seconds: Some(retry_after_seconds),
+        },
+        McpApplicationError::QuotaExceeded => McpToolFailure {
+            code: "quota_exceeded".to_owned(),
+            message: "The application quota was reached; resolve it in AirWiki before retrying"
+                .to_owned(),
+            retryable: false,
+            retry_after_seconds: None,
+        },
+        McpApplicationError::OutcomeUnknown => McpToolFailure {
+            code: "outcome_unknown".to_owned(),
+            message: "The operation timed out and may have completed; read the wiki before deciding whether to retry"
+                .to_owned(),
+            retryable: false,
+            retry_after_seconds: None,
+        },
+        McpApplicationError::Unavailable => McpToolFailure {
+            code: "temporarily_unavailable".to_owned(),
+            message: "AirWiki could not complete the memory operation; try again later".to_owned(),
+            retryable: true,
+            retry_after_seconds: None,
+        },
     }
 }
 
@@ -1554,6 +1589,12 @@ fn sanitize_application_tool_failure(error: McpToolFailure) -> McpToolFailure {
     match error.code.as_str() {
         "authorization_required" => application_tool_failure(McpApplicationError::Unauthorized),
         "invalid_request" => application_tool_failure(McpApplicationError::Invalid),
+        "conflict" => application_tool_failure(McpApplicationError::Conflict),
+        "rate_limited" => application_tool_failure(McpApplicationError::RateLimited {
+            retry_after_seconds: error.retry_after_seconds.unwrap_or(60).min(60 * 60),
+        }),
+        "quota_exceeded" => application_tool_failure(McpApplicationError::QuotaExceeded),
+        "outcome_unknown" => application_tool_failure(McpApplicationError::OutcomeUnknown),
         _ => application_tool_failure(McpApplicationError::Unavailable),
     }
 }
@@ -3503,6 +3544,31 @@ mod tests {
         };
         assert_eq!(error.code, "authorization_required");
         assert!(!error.retryable);
+
+        let rate_limited = sanitize_application_tool_failure(McpToolFailure {
+            code: "rate_limited".to_owned(),
+            message: "hostile upstream text".to_owned(),
+            retryable: true,
+            retry_after_seconds: Some(3_600),
+        });
+        assert_eq!(rate_limited.code, "rate_limited");
+        assert_eq!(rate_limited.retry_after_seconds, Some(3_600));
+        assert!(!rate_limited.message.contains("hostile"));
+
+        let conflict = application_tool_failure(McpApplicationError::Conflict);
+        assert_eq!(conflict.code, "conflict");
+        assert!(conflict.retryable);
+
+        let unknown_outcome = sanitize_application_tool_failure(McpToolFailure {
+            code: "outcome_unknown".to_owned(),
+            message: "hostile upstream text".to_owned(),
+            retryable: true,
+            retry_after_seconds: Some(1),
+        });
+        assert_eq!(unknown_outcome.code, "outcome_unknown");
+        assert!(!unknown_outcome.retryable);
+        assert_eq!(unknown_outcome.retry_after_seconds, None);
+        assert!(!unknown_outcome.message.contains("hostile"));
 
         let hostile = json!({
             "jsonrpc": "2.0",

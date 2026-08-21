@@ -1033,9 +1033,11 @@ struct ScanScheduler {
 
 impl ScanScheduler {
     fn new(max_active: usize) -> Self {
-        assert!(max_active > 0, "scan concurrency must be positive");
         Self {
-            max_active,
+            // Keep the scheduler live even if a future configuration source
+            // accidentally supplies zero. The current values are compile-time
+            // constants, but this defensive clamp avoids a production panic.
+            max_active: max_active.max(1),
             active: HashSet::new(),
             queued: VecDeque::new(),
             queued_set: HashSet::new(),
@@ -5046,7 +5048,6 @@ fn start_install(
     status_path: PathBuf,
 ) {
     const MAX_TRANSIENT_RETRIES: u32 = 2;
-    debug_assert!(install_cancel.is_none());
     let cancel = CancellationToken::new();
     *install_cancel = Some(cancel.clone());
     let manager = manager.clone();
@@ -5551,7 +5552,7 @@ fn spawn_review_evidence(
 ) {
     let services = Arc::clone(services);
     background.spawn(async move {
-        let result = tokio::task::spawn_blocking(move || {
+        let task = tokio::task::spawn_blocking(move || {
             services.load_review_evidence(
                 concept_id,
                 expected_source_revision,
@@ -5559,8 +5560,18 @@ fn spawn_review_evidence(
                 after_ordinal,
             )
         })
-        .await
-        .unwrap_or(Err(ReviewEvidenceErrorView::Unavailable));
+        .await;
+        let result = match task {
+            Ok(result) => result,
+            Err(error) => {
+                tracing::error!(
+                    task_cancelled = error.is_cancelled(),
+                    task_panicked = error.is_panic(),
+                    "review evidence worker stopped unexpectedly"
+                );
+                Err(ReviewEvidenceErrorView::Unavailable)
+            }
+        };
         BackgroundCompletion::ReviewEvidence {
             request_id,
             concept_id,
@@ -6618,6 +6629,18 @@ mod tests {
         report_ingest_outcomes(&outcomes, &sender).await;
 
         assert!(receiver.try_recv().is_err());
+    }
+
+    #[test]
+    fn scan_scheduler_clamps_zero_concurrency_without_panicking() {
+        let collection = Uuid::new_v4();
+        let mut scheduler = ScanScheduler::new(0);
+
+        assert_eq!(scheduler.request(collection), vec![collection]);
+        assert_eq!(
+            scheduler.state(collection),
+            Some(CollectionScanState::Scanning)
+        );
     }
 
     #[test]

@@ -1533,12 +1533,36 @@ fn call_memory_tool(
                 serde_json::from_value(arguments).map_err(|_| McpApplicationError::Invalid)?;
             let wiki_id =
                 Uuid::parse_str(&input.wiki_id).map_err(|_| McpApplicationError::Invalid)?;
-            let concepts = memories
-                .get(app_id, wiki_id)
-                .map_err(|_| McpApplicationError::Unauthorized)?;
-            Ok(
-                serde_json::json!({"wikiId": wiki_id, "concepts": concepts.into_iter().map(memory_concept_json).collect::<Vec<_>>() }),
-            )
+            let (concepts, next_cursor) = match input.concept_id {
+                Some(concept_id) => {
+                    if input.cursor.is_some() || input.limit.is_some() {
+                        return Err(McpApplicationError::Invalid);
+                    }
+                    let concept_id =
+                        Uuid::parse_str(&concept_id).map_err(|_| McpApplicationError::Invalid)?;
+                    let (concept, body_markdown) = memories
+                        .get_concept(app_id, wiki_id, concept_id)
+                        .map_err(|_| McpApplicationError::Unauthorized)?;
+                    (
+                        vec![memory_concept_json(&concept, Some(body_markdown))],
+                        None,
+                    )
+                }
+                None => memory_concept_page(
+                    memories
+                        .get(app_id, wiki_id)
+                        .map_err(|_| McpApplicationError::Unauthorized)?,
+                    input.cursor.as_deref(),
+                    input
+                        .limit
+                        .unwrap_or(airwiki_mcp::DEFAULT_MEMORY_LIST_LIMIT),
+                )?,
+            };
+            Ok(serde_json::json!({
+                "wikiId": wiki_id,
+                "concepts": concepts,
+                "nextCursor": next_cursor,
+            }))
         }
         "write_airwiki_memory" => {
             let input: airwiki_mcp::WriteAirWikiMemoryInput =
@@ -1568,7 +1592,7 @@ fn call_memory_tool(
                     },
                 )
                 .map_err(classify_application_mutation_error)?;
-            Ok(memory_concept_json(stored))
+            Ok(memory_concept_json(&stored, None))
         }
         "deprecate_airwiki_memory" => {
             let input: airwiki_mcp::DeprecateAirWikiMemoryInput =
@@ -1580,7 +1604,7 @@ fn call_memory_tool(
             let stored = memories
                 .deprecate(app_id, wiki_id, concept_id, &input.expected_fingerprint)
                 .map_err(classify_application_mutation_error)?;
-            Ok(memory_concept_json(stored))
+            Ok(memory_concept_json(&stored, None))
         }
         "request_airwiki_computation" => {
             let input: airwiki_mcp::RequestAirWikiComputationInput =
@@ -1629,7 +1653,10 @@ fn classify_application_mutation_error(error: anyhow::Error) -> McpApplicationEr
     McpApplicationError::Invalid
 }
 
-fn memory_concept_json(concept: airwiki_core::OkfConceptProjectionRecord) -> serde_json::Value {
+fn memory_concept_json(
+    concept: &airwiki_core::OkfConceptProjectionRecord,
+    body_markdown: Option<String>,
+) -> serde_json::Value {
     serde_json::json!({
         "wikiId": concept.collection_id,
         "conceptId": concept.concept_id,
@@ -1640,8 +1667,54 @@ fn memory_concept_json(concept: airwiki_core::OkfConceptProjectionRecord) -> ser
         "tags": concept.tags,
         "status": concept.lifecycle_status,
         "fingerprint": concept.fingerprint,
+        "bodyMarkdown": body_markdown,
         "assurance": concept.assurance,
     })
+}
+
+const MAX_MCP_MEMORY_LIST_BYTES: usize = 48 * 1024;
+
+fn memory_concept_page(
+    concepts: Vec<airwiki_core::OkfConceptProjectionRecord>,
+    cursor: Option<&str>,
+    limit: u8,
+) -> std::result::Result<(Vec<serde_json::Value>, Option<String>), McpApplicationError> {
+    if !(1..=airwiki_mcp::MAX_MEMORY_LIST_LIMIT).contains(&limit) {
+        return Err(McpApplicationError::Invalid);
+    }
+    let start = match cursor {
+        Some(cursor) => {
+            let cursor = Uuid::parse_str(cursor).map_err(|_| McpApplicationError::Invalid)?;
+            concepts
+                .iter()
+                .position(|concept| concept.concept_id == cursor)
+                .map(|index| index.saturating_add(1))
+                .ok_or(McpApplicationError::Invalid)?
+        }
+        None => 0,
+    };
+    let mut page = Vec::new();
+    let mut page_bytes = 0_usize;
+    let mut last_cursor = None;
+    for concept in concepts.iter().skip(start).take(usize::from(limit)) {
+        let value = memory_concept_json(concept, None);
+        let value_bytes = serde_json::to_vec(&value)
+            .map_err(|_| McpApplicationError::Unavailable)?
+            .len();
+        if !page.is_empty() && page_bytes.saturating_add(value_bytes) > MAX_MCP_MEMORY_LIST_BYTES {
+            break;
+        }
+        page_bytes = page_bytes.saturating_add(value_bytes);
+        page.push(value);
+        last_cursor = Some(concept.concept_id.to_string());
+    }
+    let consumed = page.len();
+    let next_cursor = if start.saturating_add(consumed) < concepts.len() {
+        last_cursor
+    } else {
+        None
+    };
+    Ok((page, next_cursor))
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -5115,6 +5188,55 @@ mod tests {
         assert_eq!(
             mcp_application_timeout_error("get_airwiki_memory"),
             McpApplicationError::Unavailable
+        );
+    }
+
+    #[test]
+    fn memory_concept_pages_are_bounded_and_resume_after_the_cursor() {
+        let mut first =
+            synthetic_projection_for_trust("stable", airwiki_types::TrustTier::Unverified);
+        first.logical_path = "a.md".to_owned();
+        first.tags = vec!["a".repeat(2 * 1024); 20];
+        let mut second =
+            synthetic_projection_for_trust("stable", airwiki_types::TrustTier::Unverified);
+        second.logical_path = "b.md".to_owned();
+        second.tags = vec!["b".repeat(12 * 1024)];
+        let second_id = second.concept_id;
+        let third = synthetic_projection_for_trust("stable", airwiki_types::TrustTier::Unverified);
+        let concepts = vec![first, second, third];
+
+        let (first_page, next_cursor) = memory_concept_page(concepts.clone(), None, 3).unwrap();
+        assert_eq!(first_page.len(), 1);
+        assert_eq!(
+            first_page[0].get("bodyMarkdown"),
+            Some(&serde_json::Value::Null)
+        );
+        let first_cursor = next_cursor.expect("large metadata must produce another page");
+
+        let (second_page, next_cursor) =
+            memory_concept_page(concepts, Some(&first_cursor), 1).unwrap();
+        let second_id = second_id.to_string();
+        assert_eq!(second_page.len(), 1);
+        assert_eq!(
+            second_page[0]
+                .get("conceptId")
+                .and_then(serde_json::Value::as_str),
+            Some(second_id.as_str())
+        );
+        assert!(next_cursor.is_some());
+    }
+
+    #[test]
+    fn targeted_memory_concept_output_includes_the_markdown_body() {
+        let concept =
+            synthetic_projection_for_trust("stable", airwiki_types::TrustTier::Unverified);
+        let output = memory_concept_json(&concept, Some("Durable body".to_owned()));
+
+        assert_eq!(
+            output
+                .get("bodyMarkdown")
+                .and_then(serde_json::Value::as_str),
+            Some("Durable body")
         );
     }
 

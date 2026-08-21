@@ -24,9 +24,14 @@ untrusted evidence metadata with explicit `lane` context.
 Each typed lane contributes at most the requested `top_k`, so `search_items`
 can contain up to twice that number while preserving both lanes.
 
-The serialized MCP result has a global budget below the bridge's 64 KiB HTTP
-limit. AirWiki removes lower-ranked candidates before evidence and reports
-incomplete coverage if reduction was necessary.
+The serialized search result has a 24 KiB structured-output budget. Incoming
+JSON-RPC requests remain capped at 128 KiB. Bridge responses are capped at
+384 KiB because MCP recommends returning structured output both as typed JSON
+and as serialized text for older clients; that budget safely contains one
+maximally escaped 48 KiB memory concept in both representations. AirWiki
+removes lower-ranked candidates before evidence and reports incomplete coverage
+if reduction was necessary. Memory metadata is paginated, and a targeted memory
+read returns at most one concept body.
 
 Every source node applies its local relevance gate before creating evidence.
 For external-chat searches only, rejected passages may cross MCP as explicitly

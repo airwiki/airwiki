@@ -39,4 +39,5 @@ uuid.workspace = true
 [dev-dependencies]
 async-trait.workspace = true
 chrono.workspace = true
+tempfile = "3.23.0"
 uuid.workspace = true

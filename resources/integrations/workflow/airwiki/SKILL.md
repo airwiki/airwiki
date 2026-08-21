@@ -26,7 +26,7 @@ Use the connected AirWiki MCP tools to maintain durable, portable knowledge. Air
 
 ## Read before writing
 
-1. Call `get_airwiki_memory` before every edit to the active wiki.
+1. Call `get_airwiki_memory` without `concept_id` to inspect the active wiki, following `nextCursor` until the relevant concept is found or the listing is complete. Before editing or deprecating an existing concept, call it again with `wiki_id` and that `concept_id`, omitting `cursor` and `limit`, to read the current Markdown body and fingerprint.
 2. Prefer updating an existing concept when it represents the same durable subject.
 3. Pass the latest `fingerprint` as `expected_fingerprint` to `write_airwiki_memory` or `deprecate_airwiki_memory`.
 4. If AirWiki reports a fingerprint conflict, read the wiki again, merge only non-conflicting durable facts, and retry once. If the second write conflicts, stop and ask the user to resolve it.

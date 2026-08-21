@@ -75,8 +75,9 @@ overwritten or deleted. Claude Desktop receives equivalent server instructions
 inside the MCPB; generic MCP clients receive standard MCP instructions without
 filesystem writes.
 
-The guide directs agents to list and read before mutation, use optimistic
-fingerprints, create only after an explicit request, and avoid secrets,
+The guide directs agents to page through concept metadata, read the targeted
+Markdown body before mutation, use optimistic fingerprints, create only after
+an explicit request, and avoid secrets,
 personal data and transient state. It grants no publication, sharing,
 verification or permission authority. If AirWiki is unavailable, the primary
 task continues with one pending-sync notice and no repository-local fallback.

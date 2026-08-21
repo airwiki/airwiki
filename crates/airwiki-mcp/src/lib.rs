@@ -972,7 +972,10 @@ where
 ///
 /// Successful payloads remain unwrapped for compatibility. Tool-level
 /// failures use the common error object and `isError: true`.
-#[allow(dead_code)]
+#[expect(
+    dead_code,
+    reason = "the variants exist only so schemars emits the success-or-failure output union"
+)]
 #[derive(JsonSchema)]
 #[serde(untagged)]
 enum McpStructuredOutput<Output> {

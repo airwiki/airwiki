@@ -517,10 +517,11 @@ impl PublicReader {
                             {
                                 return Err(SearchContractError::Unauthorized);
                             }
-                            let target_matches = request.target_concept_id.is_none_or(|target| {
-                                page.concepts.first().map(|concept| concept.concept_id)
-                                    == Some(target)
-                            });
+                            let target_matches = response_target_matches(
+                                request.target_concept_id,
+                                negotiated_request.target_concept_id,
+                                page.concepts.first().map(|concept| concept.concept_id),
+                            );
                             if page.manifest_sequence < manifest.manifest.sequence
                                 || !target_matches
                                 || page
@@ -780,6 +781,15 @@ impl PublicReader {
         }
         Ok(accepted)
     }
+}
+
+fn response_target_matches(
+    requested_target: Option<uuid::Uuid>,
+    negotiated_target: Option<uuid::Uuid>,
+    first_concept: Option<uuid::Uuid>,
+) -> bool {
+    negotiated_target.is_some()
+        || requested_target.is_none_or(|target| first_concept == Some(target))
 }
 
 struct RoutedPublicBrowsePage {
@@ -1741,6 +1751,20 @@ mod tests {
             reader.browse(&manifest, None, None, None, None, 1).await,
             Err(SearchContractError::Unauthorized)
         ));
+    }
+
+    #[test]
+    fn full_page_requests_do_not_require_the_target_to_lead_the_outline() {
+        let target = uuid::Uuid::from_u128(2);
+        let first = uuid::Uuid::from_u128(1);
+
+        assert!(response_target_matches(
+            Some(target),
+            Some(target),
+            Some(first)
+        ));
+        assert!(!response_target_matches(Some(target), None, Some(first)));
+        assert!(response_target_matches(Some(target), None, Some(target)));
     }
 
     #[test]

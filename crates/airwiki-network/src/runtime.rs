@@ -1910,7 +1910,7 @@ impl Runtime {
         } else {
             match response {
                 SharedWikiWireResponse::Success(page)
-                    if page.validate_for(&query.request).is_ok() =>
+                    if shared_wiki_page_matches_query(&query.request, &page) =>
                 {
                     Ok(*page)
                 }
@@ -2677,6 +2677,17 @@ fn expire_shared_wiki_queries(
     }
 }
 
+fn shared_wiki_page_matches_query(
+    request: &SharedWikiBrowseRequest,
+    page: &SharedWikiBrowsePage,
+) -> bool {
+    let mut negotiated_request = request.clone();
+    negotiated_request
+        .prepare_for_protocol(&page.protocol_version)
+        .is_ok()
+        && page.validate_for(&negotiated_request).is_ok()
+}
+
 fn byte_bounded_shared_wiki_response(
     mut response: SharedWikiWireResponse,
 ) -> SharedWikiWireResponse {
@@ -3272,6 +3283,40 @@ mod tests {
         assert!(shared_wiki_response_fits(&SharedWikiWireResponse::Success(
             page
         )));
+    }
+
+    #[test]
+    fn shared_wiki_response_validates_against_the_negotiated_legacy_protocol() {
+        let collection_id = uuid::Uuid::new_v4();
+        let request = SharedWikiBrowseRequest::new(collection_id, None, 1);
+        let response = SharedWikiBrowsePage {
+            protocol_version: airwiki_types::SHARED_WIKI_BROWSE_PROTOCOL.to_owned(),
+            request_id: request.request_id,
+            wiki: airwiki_types::SharedWikiDescriptor {
+                collection_id,
+                name: "Legacy shared Wiki".to_owned(),
+                okf_compatibility: airwiki_types::OkfCompatibility::DeclaredV02,
+            },
+            concepts: vec![airwiki_types::SharedWikiConceptSummary {
+                concept_id: uuid::Uuid::new_v4(),
+                concept_type: airwiki_types::ConceptType::Document,
+                title: "Legacy concept".to_owned(),
+                description: String::new(),
+                language: "en".to_owned(),
+                tags: Vec::new(),
+                summary: "Legacy summary".to_owned(),
+                logical_resource_uri: "urn:airwiki:legacy".to_owned(),
+                source_revision: 1,
+                updated_at: Utc::now(),
+                lifecycle_status: Some("stable".to_owned()),
+                assurance: None,
+            }],
+            next_cursor: None,
+            workspace: None,
+            document: None,
+        };
+
+        assert!(shared_wiki_page_matches_query(&request, &response));
     }
 
     struct FixtureBackend {

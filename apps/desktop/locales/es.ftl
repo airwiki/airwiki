@@ -771,7 +771,7 @@ desktop-atlas-system-body = Estado de los componentes locales de AirWiki y su re
 desktop-atlas-local = En este equipo
 desktop-atlas-public = Red pública
 desktop-advanced-details = Detalles avanzados
-desktop-network-controls = Controles de red
+desktop-private-network-details = Detalles de red privada
 onboarding-progress-title = Progreso de configuración
 desktop-source-issues-title = Fuentes que necesitan atención
 desktop-source-issues-body = AirWiki conserva el último estado seguro y nunca publica contenido incierto.
@@ -814,6 +814,18 @@ desktop-known-devices =
         [one] { $count } equipo conocido
        *[other] { $count } equipos conocidos
     }
+desktop-private-network = Red privada (LAN)
+desktop-private-devices-summary =
+    { $visible ->
+        [one] 1 disponible ahora de { $total } conocidos
+       *[other] { $visible } disponibles ahora de { $total } conocidos
+    }
+desktop-device-identified = Equipo { $id }
+desktop-device-platform-macos = macOS
+desktop-device-platform-windows = Windows
+desktop-device-platform-unknown = SO aún no disponible
+desktop-local-device-owner = Este equipo · { $platform }
+desktop-public-publisher = Publicador público { $id }
 desktop-listener = Listener
 desktop-discovery = Descubrimiento
 desktop-interfaces = Interfaces
@@ -1130,10 +1142,14 @@ action-reject = Rechazar
 desktop-share-drawer-body = El contenido sigue siendo privado salvo en los canales que habilites aquí.
 desktop-share-nearby = Equipos cercanos
 desktop-share-nearby-body = Solo equipos verificados y con permiso explícito por wiki.
+desktop-share-device-access = Equipos privados con acceso a esta Wiki
+desktop-share-no-verified-devices = Aún no hay equipos verificados
+desktop-share-no-verified-devices-body = Conecta y verifica un equipo antes de darle acceso a esta Wiki.
 desktop-share-ai-apps = Aplicaciones de IA
 desktop-share-ai-apps-body = Acceso de búsqueda de solo lectura mediante el puente MCP local. Esto no permite editar memorias.
 desktop-share-public = Red pública
 desktop-share-public-body = Publica el bundle OKF sin exponer la carpeta fuente.
+desktop-share-public-identity-note = Los lectores públicos ven una identidad de publicador firmada y separada. AirWiki no revela el nombre ni el sistema operativo de este equipo.
 desktop-wiki-public-description = Descripción pública
 desktop-wiki-public-languages = Idiomas
 desktop-wiki-public-profile-save = Guardar perfil público

@@ -35,9 +35,9 @@ use airwiki_core::{
 };
 use airwiki_inference::ModelProfile;
 use airwiki_types::{
-    ConceptType, EnrichmentDraft, PublishedWikiDocument, PublishedWikiPageDescriptor,
-    PublishedWikiPageId, PublishedWikiPageRequest, PublishedWikiWorkspacePage, SearchPurpose,
-    SuggestedEntity, SuggestedLink,
+    ConceptType, DevicePlatform, EnrichmentDraft, PublishedWikiDocument,
+    PublishedWikiPageDescriptor, PublishedWikiPageId, PublishedWikiPageRequest,
+    PublishedWikiWorkspacePage, SearchPurpose, SuggestedEntity, SuggestedLink,
 };
 use anyhow::{Context, Result};
 use pulldown_cmark::{CodeBlockKind, Event as MarkdownEvent, HeadingLevel, Parser, Tag, TagEnd};
@@ -319,10 +319,6 @@ struct AppSnapshot {
 #[derive(Clone, Copy, Debug, Serialize, TS)]
 #[serde(rename_all = "camelCase")]
 #[ts(rename_all = "camelCase")]
-#[expect(
-    dead_code,
-    reason = "both supported platform tags must remain in the shared UI contract"
-)]
 enum HostPlatform {
     MacOs,
     Windows,
@@ -826,6 +822,7 @@ struct SourceIssueSummary {
 struct PeerSummary {
     peer_id: String,
     device_name: Option<String>,
+    platform: Option<HostPlatform>,
     address: String,
     trust: PeerTrust,
     activity: PeerActivity,
@@ -5801,6 +5798,11 @@ impl From<worker::PeerView> for PeerSummary {
         Self {
             peer_id: value.peer_id,
             device_name: value.device_name,
+            platform: match value.device_platform {
+                Some(DevicePlatform::MacOs) => Some(HostPlatform::MacOs),
+                Some(DevicePlatform::Windows) => Some(HostPlatform::Windows),
+                Some(DevicePlatform::Unknown) | None => None,
+            },
             address: value.address,
             trust: match value.trust {
                 worker::PeerTrustState::Unpaired => PeerTrust::Unpaired,
@@ -7556,6 +7558,32 @@ mod tests {
         assert_eq!(serialized, serde_json::Value::String("macOs".to_owned()));
         #[cfg(target_os = "windows")]
         assert_eq!(serialized, serde_json::Value::String("windows".to_owned()));
+        Ok(())
+    }
+
+    #[test]
+    fn peer_summary_exposes_known_platform_without_transport_metadata() -> Result<()> {
+        let summary = PeerSummary::from(worker::PeerView {
+            peer_id: "synthetic-peer".to_owned(),
+            device_name: Some("RUSTICO".to_owned()),
+            device_platform: Some(DevicePlatform::Windows),
+            address: String::new(),
+            trust: worker::PeerTrustState::Trusted,
+            activity: worker::PeerActivityState::Connected,
+            sas_words: None,
+            granted_collections: Default::default(),
+        });
+        let serialized = serde_json::to_value(summary)?;
+
+        assert_eq!(
+            serialized.pointer("/platform"),
+            Some(&serde_json::Value::String("windows".to_owned()))
+        );
+        assert_eq!(
+            serialized.pointer("/deviceName"),
+            Some(&serde_json::json!("RUSTICO"))
+        );
+        assert_eq!(serialized.pointer("/address"), Some(&serde_json::json!("")));
         Ok(())
     }
 

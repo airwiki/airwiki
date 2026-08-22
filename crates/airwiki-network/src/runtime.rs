@@ -9,9 +9,9 @@ use std::sync::{
 use std::time::{Duration, Instant};
 
 use airwiki_types::{
-    DisclosureLease, FederatedSearch, SearchAuthorization, SearchContractError, SearchHit,
-    SearchPurpose, SearchRequest, SearchResponse, SharedWikiBrowsePage, SharedWikiBrowseRequest,
-    SharedWikiContractError,
+    DevicePlatform, DisclosureLease, FederatedSearch, SearchAuthorization, SearchContractError,
+    SearchHit, SearchPurpose, SearchRequest, SearchResponse, SharedWikiBrowsePage,
+    SharedWikiBrowseRequest, SharedWikiContractError,
 };
 use async_trait::async_trait;
 use futures::StreamExt;
@@ -58,6 +58,10 @@ struct LanAddressExchange {
     #[serde(default)]
     revision: u64,
     addresses: Vec<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    device_name: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    device_platform: Option<DevicePlatform>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -146,6 +150,7 @@ impl AuthorizedWikiBrowseResult {
 #[derive(Debug, Clone)]
 pub struct NetworkConfig {
     pub node_name: String,
+    pub device_platform: DevicePlatform,
     pub listen_address: Multiaddr,
     pub search_deadline: Duration,
     pub command_capacity: usize,
@@ -158,6 +163,7 @@ impl Default for NetworkConfig {
         listen_address.push(Protocol::Tcp(0));
         Self {
             node_name: "AirWiki node".to_owned(),
+            device_platform: DevicePlatform::Unknown,
             listen_address,
             search_deadline: SEARCH_DEADLINE,
             command_capacity: 64,
@@ -200,6 +206,13 @@ pub enum NetworkEvent {
         /// The SAS exchange completed. The desktop must persist trust and call
         /// `NetworkHandle::acknowledge_persisted_trust` before endpoint disclosure.
         peer: PeerId,
+    },
+    /// Metadata from a durably trusted peer. It is carried only by the
+    /// Noise-authenticated LAN address exchange, never by mDNS or federation.
+    PeerMetadataChanged {
+        peer: PeerId,
+        device_name: Option<String>,
+        device_platform: Option<DevicePlatform>,
     },
     PairingExpired {
         peer: PeerId,
@@ -1341,6 +1354,7 @@ impl Runtime {
                 self.lan_address_session_id,
                 self.lan_address_revision,
                 &self.advertised_lan_addresses,
+                &self.config,
             );
             self.swarm
                 .behaviour_mut()
@@ -1375,6 +1389,14 @@ impl Runtime {
         ) else {
             return;
         };
+        let device_name = exchange
+            .device_name
+            .as_deref()
+            .map(clean_node_name)
+            .filter(|name| !name.is_empty());
+        let device_platform = exchange
+            .device_platform
+            .filter(|platform| *platform != DevicePlatform::Unknown);
         let Ok(addresses) = exchange
             .addresses
             .into_iter()
@@ -1390,6 +1412,13 @@ impl Runtime {
         {
             self.accepted_lan_address_revisions
                 .insert(peer, accepted_revision);
+            if device_name.is_some() || device_platform.is_some() {
+                let _ = self.event_tx.send(NetworkEvent::PeerMetadataChanged {
+                    peer,
+                    device_name,
+                    device_platform,
+                });
+            }
         }
     }
 
@@ -1668,6 +1697,7 @@ impl Runtime {
                         self.lan_address_session_id,
                         self.lan_address_revision,
                         &self.advertised_lan_addresses,
+                        &self.config,
                     );
                     let _ = self
                         .swarm
@@ -2585,6 +2615,7 @@ fn lan_address_exchange_payload(
     session_id: Uuid,
     revision: u64,
     addresses: &HashSet<Multiaddr>,
+    config: &NetworkConfig,
 ) -> LanAddressExchange {
     if !trusted {
         return LanAddressExchange::default();
@@ -2603,6 +2634,9 @@ fn lan_address_exchange_payload(
         session_id,
         revision,
         addresses,
+        device_name: Some(clean_node_name(&config.node_name)).filter(|name| !name.is_empty()),
+        device_platform: (config.device_platform != DevicePlatform::Unknown)
+            .then_some(config.device_platform),
     }
 }
 
@@ -2689,7 +2723,13 @@ impl Drop for Runtime {
 }
 
 fn clean_node_name(name: &str) -> String {
-    name.trim().chars().take(128).collect()
+    name.trim()
+        .chars()
+        .filter(|character| !character.is_control())
+        .take(128)
+        .collect::<String>()
+        .trim()
+        .to_owned()
 }
 
 /// Preserve only the boolean completeness signal from diagnostics supplied by a
@@ -3028,21 +3068,61 @@ mod tests {
     fn lan_listener_exchange_discloses_addresses_only_after_trust() {
         let local_peer = PeerId::random();
         let session_id = Uuid::new_v4();
+        let config = NetworkConfig {
+            node_name: "RUSTICO".to_owned(),
+            device_platform: DevicePlatform::Windows,
+            ..NetworkConfig::default()
+        };
         let addresses =
             HashSet::from(["/ip4/192.168.1.20/tcp/41000".parse::<Multiaddr>().unwrap()]);
 
-        assert!(
-            lan_address_exchange_payload(false, local_peer, session_id, 7, &addresses)
-                .addresses
-                .is_empty()
-        );
-        let payload = lan_address_exchange_payload(true, local_peer, session_id, 7, &addresses);
+        let untrusted =
+            lan_address_exchange_payload(false, local_peer, session_id, 7, &addresses, &config);
+        assert!(untrusted.addresses.is_empty());
+        assert!(untrusted.device_name.is_none());
+        assert!(untrusted.device_platform.is_none());
+        let payload =
+            lan_address_exchange_payload(true, local_peer, session_id, 7, &addresses, &config);
         assert_eq!(payload.session_id, session_id);
         assert_eq!(payload.revision, 7);
+        assert_eq!(payload.device_name.as_deref(), Some("RUSTICO"));
+        assert_eq!(payload.device_platform, Some(DevicePlatform::Windows));
         assert_eq!(
             payload.addresses,
             [format!("/ip4/192.168.1.20/tcp/41000/p2p/{local_peer}")]
         );
+    }
+
+    #[test]
+    fn lan_listener_exchange_accepts_payloads_without_device_metadata() {
+        #[derive(Serialize)]
+        struct LegacyLanAddressExchange {
+            session_id: Uuid,
+            revision: u64,
+            addresses: Vec<String>,
+        }
+
+        let legacy = LegacyLanAddressExchange {
+            session_id: Uuid::new_v4(),
+            revision: 3,
+            addresses: vec!["/ip4/192.168.1.20/tcp/41000".to_owned()],
+        };
+        let mut encoded = Vec::new();
+        ciborium::into_writer(&legacy, &mut encoded).unwrap();
+
+        let decoded: LanAddressExchange = ciborium::from_reader(encoded.as_slice()).unwrap();
+
+        assert_eq!(decoded.session_id, legacy.session_id);
+        assert_eq!(decoded.revision, legacy.revision);
+        assert_eq!(decoded.addresses, legacy.addresses);
+        assert!(decoded.device_name.is_none());
+        assert!(decoded.device_platform.is_none());
+    }
+
+    #[test]
+    fn device_name_metadata_is_bounded_and_removes_control_characters() {
+        assert_eq!(clean_node_name("  RUS\nTICO\0  "), "RUSTICO");
+        assert_eq!(clean_node_name(&"a".repeat(140)).chars().count(), 128);
     }
 
     #[test]
@@ -3058,6 +3138,8 @@ mod tests {
             session_id,
             revision,
             addresses: Vec::new(),
+            device_name: None,
+            device_platform: None,
         };
 
         assert!(

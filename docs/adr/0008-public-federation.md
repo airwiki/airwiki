@@ -23,6 +23,13 @@ fingerprint and direct or relay routes. Federated indexes store only these
 manifests and signed tombstones. They never receive documents, chunks,
 embeddings, source paths or complete local indexes.
 
+The public publisher identity is also the only device-like identity shown to a
+public reader. Public protocols and UI do not expose the owner's LAN display
+name, hostname or operating-system family. A publisher that is also paired on
+LAN therefore appears as two deliberately separate identities: a named trusted
+device in the private channel and a shortened public publisher identifier in
+the public channel.
+
 Manifest expiry and its signed update-to-expiry interval are at most 24 hours;
 an update timestamp may be at most five minutes ahead of receipt. Each index
 admits at most 100,000 total manifest or tombstone rows and 1,000 rows per

@@ -38,6 +38,31 @@ pub const MAX_PENDING_COMPUTATIONS_PER_APPLICATION: u32 = 16;
 pub const MAX_COMPUTATION_REQUESTS_PER_MINUTE: u32 = 30;
 pub const COMPUTATION_RUN_RETENTION_SECONDS: i64 = 24 * 60 * 60;
 
+/// Operating-system family disclosed only between durably trusted LAN peers.
+///
+/// Public federation deliberately does not carry this value, because a local
+/// device platform is not part of a Wiki's public identity.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum DevicePlatform {
+    #[serde(rename = "macos")]
+    MacOs,
+    Windows,
+    #[default]
+    #[serde(other)]
+    Unknown,
+}
+
+impl DevicePlatform {
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::MacOs => "macos",
+            Self::Windows => "windows",
+            Self::Unknown => "unknown",
+        }
+    }
+}
+
 /// How confidently AirWiki can interpret an OKF bundle.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
@@ -775,6 +800,22 @@ pub trait FederatedSearch: Send + Sync + 'static {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn device_platform_has_stable_wire_names_and_unknown_fallback() {
+        assert_eq!(
+            serde_json::to_string(&DevicePlatform::MacOs).unwrap(),
+            "\"macos\""
+        );
+        assert_eq!(
+            serde_json::to_string(&DevicePlatform::Windows).unwrap(),
+            "\"windows\""
+        );
+        assert_eq!(
+            serde_json::from_str::<DevicePlatform>("\"linux\"").unwrap(),
+            DevicePlatform::Unknown
+        );
+    }
 
     #[test]
     fn disclosure_gate_blocks_mutation_until_the_lease_is_released() {

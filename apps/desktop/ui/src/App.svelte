@@ -31,6 +31,7 @@
   type SharedWikiSource = 'nearby' | 'public';
   type SystemSection = 'models' | 'preferences' | 'updates' | 'connectivity' | 'devices' | 'integrations';
   type ServiceTarget = 'knowledge' | 'connections' | 'apps';
+  type Peer = AppSnapshot['peers'][number];
 
   const destinations = [{ id: 'wikis', labelId: 'desktop-nav-wikis' }] as const;
   const systemSections = [
@@ -756,17 +757,6 @@
     }
   }
 
-  function connectivityLabel(currentLocale: LocalePreference): string {
-    if (snapshot?.lanRuntime?.listener === 'listening') return message(currentLocale, 'connectivity-active');
-    if (snapshot?.lanRuntime?.listener === 'starting') return message(currentLocale, 'connectivity-starting');
-    if (snapshot?.connectivity?.networkProfile === 'public') return message(currentLocale, 'connectivity-public-network');
-    if (snapshot?.connectivity?.firewall === 'rulesMissing') return message(currentLocale, 'connectivity-firewall-needed');
-    if (snapshot?.connectivity?.firewall === 'conflict' || snapshot?.connectivity?.firewall === 'legacyExposure') return message(currentLocale, 'connectivity-admin-needed');
-    if (snapshot?.lanRuntime?.listener === 'failed') return message(currentLocale, 'connectivity-failed');
-    if (lanPreference === 'disabled') return message(currentLocale, 'connectivity-disabled');
-    return message(currentLocale, 'connectivity-not-ready');
-  }
-
   function firewallGuidanceLabel(): string {
     const firewall = snapshot?.connectivity?.firewall;
     if (firewall === 'firewallDisabled') return t('connectivity-firewall-disabled');
@@ -941,35 +931,77 @@
     return role === 'reader' || role === 'editor' ? role : 'none';
   }
 
-  function wikiNameFor(wikiId: string): string {
-    return snapshot?.wikis.find((wiki) => wiki.id === wikiId)?.name ?? t('desktop-wiki-unknown');
+  function compactIdentity(value: string): string {
+    return value.length <= 16 ? value : `${value.slice(0, 8)}…${value.slice(-4)}`;
   }
 
-  function peerNameFor(nodeId: string): string | null {
-    const peer = snapshot?.peers.find((candidate) => candidate.peerId === nodeId && candidate.trust === 'trusted');
-    return peer ? (peer.deviceName ?? t('devices-nearby')) : null;
+  function peerFor(nodeId: string): Peer | null {
+    return snapshot?.peers.find((candidate) => candidate.peerId === nodeId) ?? null;
   }
 
-  function searchOriginFor(hit: SearchHitSummary): string {
-    if (hit.route === 'publicNetwork') return t('desktop-public-network');
-    if (hit.nodeId === snapshot?.nodeId) return wikiNameFor(hit.wikiId);
-    return peerNameFor(hit.nodeId) ?? t('devices-nearby');
+  function peerDisplayName(peer: Peer): string {
+    return peer.deviceName ?? t('desktop-device-identified', { id: compactIdentity(peer.peerId) });
   }
 
-  function searchSourceFor(hit: SearchHitSummary): string {
+  function platformLabel(platform: Peer['platform'] | AppSnapshot['platform'] | null): string {
+    if (platform === 'macOs') return t('desktop-device-platform-macos');
+    if (platform === 'windows') return t('desktop-device-platform-windows');
+    return t('desktop-device-platform-unknown');
+  }
+
+  function peerIdentityLabel(peer: Peer): string {
+    return `${peerDisplayName(peer)} · ${platformLabel(peer.platform)}`;
+  }
+
+  function searchOwnerFor(hit: SearchHitSummary): string {
+    if (hit.route === 'publicNetwork') {
+      return t('desktop-public-publisher', { id: compactIdentity(hit.nodeId) });
+    }
+    if (hit.nodeId === snapshot?.nodeId) {
+      return t('desktop-local-device-owner', { platform: platformLabel(snapshot?.platform ?? null) });
+    }
+    const peer = peerFor(hit.nodeId);
+    return peer
+      ? peerIdentityLabel(peer)
+      : `${t('desktop-device-identified', { id: compactIdentity(hit.nodeId) })} · ${platformLabel(null)}`;
+  }
+
+  function searchScopeFor(hit: SearchHitSummary): string {
     if (hit.route === 'publicNetwork') return t('desktop-public-network');
     if (hit.nodeId === snapshot?.nodeId) return t('desktop-search-local-source');
-    return t('desktop-search-nearby-source');
+    return t('desktop-private-network');
+  }
+
+  function peerActivityLabel(peer: Peer): string {
+    const labels: Record<Peer['activity'], string> = {
+      notObserved: 'peer-activity-not-observed',
+      discovered: 'peer-activity-discovered',
+      pairing: 'peer-activity-pairing',
+      connected: 'peer-activity-connected'
+    };
+    return t(labels[peer.activity]);
+  }
+
+  function trustedPeers(): Peer[] {
+    return snapshot?.peers.filter((peer) => peer.trust === 'trusted') ?? [];
+  }
+
+  function visiblePeerCount(): number {
+    return snapshot?.peers.filter((peer) => peer.activity !== 'notObserved').length ?? 0;
   }
 
   function isPublicSearchHit(hit: SearchHitSummary): boolean {
     return hit.route === 'publicNetwork';
   }
 
-  function wikiPeers(wikiId: string): string[] {
+  function wikiPeers(wikiId: string): Peer[] {
     return snapshot?.peers
       .filter((peer) => peer.trust === 'trusted' && peer.grantedWikiIds.includes(wikiId))
-      .map((peer) => peer.deviceName ?? t('devices-nearby')) ?? [];
+      ?? [];
+  }
+
+  function wikiPeerLabels(wikiId: string): string[] {
+    return wikiPeers(wikiId).map(peerIdentityLabel);
   }
 
   async function chooseFolder() {
@@ -1251,12 +1283,10 @@
     destination = 'search';
     pushHash('#search');
     scrollMainTo(0);
-    const nearbyName = hit.route === 'deviceNetwork' ? peerNameFor(hit.nodeId) : null;
     const browseSource: SharedWikiSource = hit.route === 'publicNetwork' ? 'public' : 'nearby';
     const browseGeneration = ++sharedBrowseGeneration;
     sharedBrowseSource = browseSource;
-    sharedBrowseSourceName = nearbyName
-      ?? t(browseSource === 'nearby' ? 'devices-nearby' : 'desktop-public-network');
+    sharedBrowseSourceName = searchOwnerFor(hit);
     sharedBrowseInitialConceptId = hit.conceptId;
     sharedBrowseOpen = true;
     sharedBrowseLoading = true;
@@ -1769,7 +1799,21 @@
             {/if}
             <section class="workspace-section public-discovery" id="public-wikis" aria-labelledby="public-wikis-title">
               <div class="section-heading"><div><h2 id="public-wikis-title">{t('desktop-public-network')}</h2><p>{t('desktop-public-discover-body')}</p></div><button class="secondary" onclick={openConnectionsPanel}>{t('desktop-connections')}</button></div>
-              {#if snapshot?.search?.hits.some(isPublicSearchHit)}<div class="search-results">{#each snapshot.search.hits.filter(isPublicSearchHit) as hit (`${hit.nodeId}:${hit.wikiId}:${hit.conceptId}:${hit.rank}`)}<article><small>{searchOriginFor(hit)}</small><h3>{hit.title}</h3><p>{hit.snippet}</p><button class="text-action" onclick={() => openSearchHit(hit)}>{t('action-open')}</button></article>{/each}</div>{:else}<div class="inline-empty"><BookOpen size={20} aria-hidden="true" /><span><strong>{t('desktop-public-empty-title')}</strong><small>{t('desktop-public-search-help')}</small></span></div>{/if}
+              {#if snapshot?.search?.hits.some(isPublicSearchHit)}
+                <div class="search-results">
+                  {#each snapshot.search.hits.filter(isPublicSearchHit) as hit (`${hit.nodeId}:${hit.wikiId}:${hit.conceptId}:${hit.rank}`)}
+                    <article class="search-result public-result">
+                      <div class="search-result-origin"><span class="network-scope public">{searchScopeFor(hit)}</span><strong>{searchOwnerFor(hit)}</strong></div>
+                      <small class="search-result-path">{hit.headingOrPage}</small>
+                      <h3>{hit.title}</h3>
+                      <p>{hit.snippet}</p>
+                      <button class="text-action" onclick={() => openSearchHit(hit)}>{t('action-open')}</button>
+                    </article>
+                  {/each}
+                </div>
+              {:else}
+                <div class="inline-empty"><BookOpen size={20} aria-hidden="true" /><span><strong>{t('desktop-public-empty-title')}</strong><small>{t('desktop-public-search-help')}</small></span></div>
+              {/if}
             </section>
           {:else if destination === 'wikis' && selectedWiki}
             {@const selectedWikiIssues = snapshot.sourceIssues.filter((issue) => issue.wikiId === selectedWiki.id)}
@@ -1782,7 +1826,7 @@
             <section class="wiki-access-strip" aria-label={t('desktop-wiki-access-title')}>
               <strong>{t('desktop-wiki-access-title')}</strong>
               <div>{#if !selectedWiki.peerShareable && !selectedWiki.allowExternalAi && !selectedWiki.internetPublic}<span>{t('desktop-wiki-private')}</span>{/if}{#if selectedWiki.peerShareable}<span>{t(wikiPeers(selectedWiki.id).length > 0 ? 'desktop-share-nearby' : 'desktop-share-nearby-enabled')}</span>{/if}{#if selectedWiki.allowExternalAi}<span>{t('desktop-share-ai-apps')}</span>{/if}{#if selectedWiki.internetPublic}<span>{t('desktop-share-public')}</span>{/if}</div>
-              <small>{wikiPeers(selectedWiki.id).length > 0 ? wikiPeers(selectedWiki.id).join(' · ') : t('desktop-wiki-no-specific-access')}</small>
+              <small>{wikiPeers(selectedWiki.id).length > 0 ? wikiPeerLabels(selectedWiki.id).join(' · ') : t('desktop-wiki-no-specific-access')}</small>
               {#if selectedWiki.restrictions.length === 0}<button class="text-action" onclick={openConnectionsPanel}>{t('desktop-manage-access')}</button>{/if}
             </section>
 
@@ -1885,7 +1929,38 @@
               <SharedWikiViewer source={sharedBrowseSource} sourceName={sharedBrowseSourceName} browse={sharedBrowseLoading ? null : sharedBrowseSource === 'nearby' ? snapshot.nearbyBrowse : snapshot.publicBrowse} loading={sharedBrowseLoading} structureLoading={sharedBrowseStructureLoading} pageLoading={sharedBrowsePageLoading} initialConceptId={sharedBrowseInitialConceptId} {t} metadata={publicConceptMetadata} onback={closeSharedBrowse} onopenpage={openSharedWikiPage} onblock={sharedBrowseSource === 'public' ? (publisherId) => changePublisherBlock(publisherId, true) : null} />
             {:else}
               <header class="page-heading"><div><h1 tabindex="-1">{t('desktop-page-search-title')}</h1><p>{t('desktop-page-search-body')}</p></div></header>
-              {#if !snapshot.model?.active}<div class="search-welcome" role="status"><Sparkles size={32} aria-hidden="true" /><h2>{t('desktop-search-preparing-title')}</h2><p>{t('desktop-search-preparing-body')}</p><button class="secondary" onclick={() => openServiceStatus('knowledge')}>{t('desktop-search-preparing-action')}</button></div>{:else if searchBusy && (!snapshot.search || snapshot.search.requestId !== activeSearchRequestId)}<div class="search-results"><LoadingState label={t('search-running')} detail={t('desktop-search-loading-detail')} /></div>{:else if snapshot.search && snapshot.search.requestId === activeSearchRequestId}<div class="search-results" aria-live="polite">{#if snapshot.search.status === 'searching'}<LoadingState label={t('search-running')} detail={snapshot.search.hits.length > 0 ? t('desktop-search-loading-partial') : t('desktop-search-loading-detail')} compact />{:else if snapshot.search.status === 'failed'}<div class="search-state error" role="alert"><AlertTriangle size={17} aria-hidden="true" /><span>{t('search-error-title')}</span></div>{:else if snapshot.search.hits.length > 0}<p class="section-label">{t('desktop-search-found')}</p>{/if}{#if snapshot.search.status === 'complete' && snapshot.search.coverage !== 'complete' && snapshot.search.hits.length > 0}<div class="search-state warning" role="status"><AlertTriangle size={17} aria-hidden="true" /><span>{searchCoverageMessage(snapshot.search.coverage)}</span></div>{/if}{#each snapshot.search.hits as hit (`${hit.nodeId}:${hit.wikiId}:${hit.conceptId}:${hit.rank}`)}<article><small>{searchOriginFor(hit)} · {hit.headingOrPage}</small><h3>{hit.title}</h3><p>{hit.snippet}</p><div class="citation-row"><span>{searchSourceFor(hit)}</span><span>{t('search-revision', { revision: hit.sourceRevision })}</span>{#if searchAssuranceLabel(hit)}<span>{searchAssuranceLabel(hit)}</span>{/if}</div><button class="text-action" onclick={() => openSearchHit(hit)} disabled={sharedBrowseRequestId !== null}>{t('action-open')}</button></article>{:else}{#if snapshot.search.status === 'complete'}<div class="table-empty"><strong>{snapshot.search.coverage === 'complete' ? t('search-empty-title') : t('search-coverage-incomplete-title')}</strong><p>{snapshot.search.coverage === 'complete' ? t(includePublic ? 'search-empty-public-body' : 'search-empty-local-body') : searchCoverageMessage(snapshot.search.coverage)}</p></div>{/if}{/each}</div>{:else}<div class="search-welcome"><BookOpen size={32} aria-hidden="true" /><h2>{t('desktop-search-welcome-title')}</h2><p>{t('desktop-search-welcome-body')}</p></div>{/if}
+              {#if !snapshot.model?.active}
+                <div class="search-welcome" role="status"><Sparkles size={32} aria-hidden="true" /><h2>{t('desktop-search-preparing-title')}</h2><p>{t('desktop-search-preparing-body')}</p><button class="secondary" onclick={() => openServiceStatus('knowledge')}>{t('desktop-search-preparing-action')}</button></div>
+              {:else if searchBusy && (!snapshot.search || snapshot.search.requestId !== activeSearchRequestId)}
+                <div class="search-results"><LoadingState label={t('search-running')} detail={t('desktop-search-loading-detail')} /></div>
+              {:else if snapshot.search && snapshot.search.requestId === activeSearchRequestId}
+                <div class="search-results" aria-live="polite">
+                  {#if snapshot.search.status === 'searching'}
+                    <LoadingState label={t('search-running')} detail={snapshot.search.hits.length > 0 ? t('desktop-search-loading-partial') : t('desktop-search-loading-detail')} compact />
+                  {:else if snapshot.search.status === 'failed'}
+                    <div class="search-state error" role="alert"><AlertTriangle size={17} aria-hidden="true" /><span>{t('search-error-title')}</span></div>
+                  {:else if snapshot.search.hits.length > 0}
+                    <p class="section-label">{t('desktop-search-found')}</p>
+                  {/if}
+                  {#if snapshot.search.status === 'complete' && snapshot.search.coverage !== 'complete' && snapshot.search.hits.length > 0}
+                    <div class="search-state warning" role="status"><AlertTriangle size={17} aria-hidden="true" /><span>{searchCoverageMessage(snapshot.search.coverage)}</span></div>
+                  {/if}
+                  {#each snapshot.search.hits as hit (`${hit.nodeId}:${hit.wikiId}:${hit.conceptId}:${hit.rank}`)}
+                    <article class="search-result" class:public-result={hit.route === 'publicNetwork'} class:private-result={hit.route !== 'publicNetwork'}>
+                      <div class="search-result-origin"><span class:public={hit.route === 'publicNetwork'} class:private={hit.route !== 'publicNetwork'} class="network-scope">{searchScopeFor(hit)}</span><strong>{searchOwnerFor(hit)}</strong></div>
+                      <small class="search-result-path">{hit.headingOrPage}</small>
+                      <h3>{hit.title}</h3>
+                      <p>{hit.snippet}</p>
+                      <div class="citation-row"><span>{t('search-revision', { revision: hit.sourceRevision })}</span>{#if searchAssuranceLabel(hit)}<span>{searchAssuranceLabel(hit)}</span>{/if}</div>
+                      <button class="text-action" onclick={() => openSearchHit(hit)} disabled={sharedBrowseRequestId !== null}>{t('action-open')}</button>
+                    </article>
+                  {:else}
+                    {#if snapshot.search.status === 'complete'}<div class="table-empty"><strong>{snapshot.search.coverage === 'complete' ? t('search-empty-title') : t('search-coverage-incomplete-title')}</strong><p>{snapshot.search.coverage === 'complete' ? t(includePublic ? 'search-empty-public-body' : 'search-empty-local-body') : searchCoverageMessage(snapshot.search.coverage)}</p></div>{/if}
+                  {/each}
+                </div>
+              {:else}
+                <div class="search-welcome"><BookOpen size={32} aria-hidden="true" /><h2>{t('desktop-search-welcome-title')}</h2><p>{t('desktop-search-welcome-body')}</p></div>
+              {/if}
             {/if}
           {:else if destination === 'system'}
             <header class="page-heading"><div><h1 tabindex="-1">{t('desktop-page-system-title')}</h1><p>{t('desktop-page-system-body')}</p></div></header>
@@ -1958,7 +2033,39 @@
 
 {#if editingWikiId}
   {@const activeWiki = snapshot.wikis.find((wiki) => wiki.id === editingWikiId)}
-  <div class="drawer-backdrop" role="presentation" onclick={(event) => { if (event.currentTarget === event.target) editingWikiId = null; }}><div class="side-drawer" role="dialog" aria-modal="true" aria-labelledby="share-title"><header><div><p class="section-label">{t('desktop-share-action')}</p><h2 id="share-title">{activeWiki?.name}</h2></div><button class="icon-button" aria-label={t('action-close')} onclick={() => { editingWikiId = null; }}>×</button></header><p>{t('desktop-share-drawer-body')}</p><div class="policy-list"><Switch label={t('desktop-share-nearby')} description={t('desktop-share-nearby-body')} bind:checked={wikiPolicy.peerShareable} /><Switch label={t('desktop-share-ai-apps')} description={t('desktop-share-ai-apps-body')} bind:checked={wikiPolicy.allowExternalAi} /><Switch label={t('desktop-share-public')} description={t('desktop-share-public-body')} bind:checked={wikiPolicy.internetPublic} /></div>{#if wikiPolicy.internetPublic}<TextField label={t('desktop-wiki-public-description')} bind:value={publicDescription} maxlength={2048} rows={3} multiline /><TextField label={t('desktop-wiki-public-languages')} bind:value={publicLanguages} maxlength={300} placeholder="es, en" />{/if}<div class="drawer-actions"><button class="primary" onclick={saveWikiPolicy} disabled={actionBusy}>{t('action-save')}</button>{#if wikiPolicy.internetPublic}<button class="secondary" onclick={savePublicProfile} disabled={actionBusy}>{t('desktop-wiki-public-profile-save')}</button>{/if}</div></div></div>
+  <div class="drawer-backdrop" role="presentation" onclick={(event) => { if (event.currentTarget === event.target) editingWikiId = null; }}>
+    <div class="side-drawer share-drawer" role="dialog" aria-modal="true" aria-labelledby="share-title">
+      <header><div><p class="section-label">{t('desktop-share-action')}</p><h2 id="share-title">{activeWiki?.name}</h2></div><button class="icon-button" aria-label={t('action-close')} onclick={() => { editingWikiId = null; }}>×</button></header>
+      <p>{t('desktop-share-drawer-body')}</p>
+      <div class="sharing-channels">
+        <section class="sharing-channel private-channel">
+          <span class="network-scope private">{t('desktop-private-network')}</span>
+          <Switch label={t('desktop-share-nearby')} description={t('desktop-share-nearby-body')} bind:checked={wikiPolicy.peerShareable} />
+          {#if wikiPolicy.peerShareable && activeWiki}
+            <div class="share-device-list" aria-label={t('desktop-share-device-access')}>
+              {#each trustedPeers() as peer (peer.peerId)}
+                <Checkbox label={peerDisplayName(peer)} description={`${platformLabel(peer.platform)} · ${peerActivityLabel(peer)}`} checked={peer.grantedWikiIds.includes(activeWiki.id)} disabled={peerActionId === peer.peerId} onchange={(checked) => changeGrant(peer.peerId, activeWiki.id, checked)} />
+              {:else}
+                <div class="share-channel-empty"><strong>{t('desktop-share-no-verified-devices')}</strong><small>{t('desktop-share-no-verified-devices-body')}</small><button class="text-action" onclick={() => { editingWikiId = null; openConnectionsPanel(); }}>{t('desktop-connections')}</button></div>
+              {/each}
+            </div>
+          {/if}
+        </section>
+        <section class="sharing-channel app-channel">
+          <Switch label={t('desktop-share-ai-apps')} description={t('desktop-share-ai-apps-body')} bind:checked={wikiPolicy.allowExternalAi} />
+        </section>
+        <section class="sharing-channel public-channel">
+          <span class="network-scope public">{t('desktop-public-network')}</span>
+          <Switch label={t('desktop-share-public')} description={t('desktop-share-public-body')} bind:checked={wikiPolicy.internetPublic} />
+          <small class="public-identity-note">{t('desktop-share-public-identity-note')}</small>
+          {#if wikiPolicy.internetPublic}
+            <div class="public-share-fields"><TextField label={t('desktop-wiki-public-description')} bind:value={publicDescription} maxlength={2048} rows={3} multiline /><TextField label={t('desktop-wiki-public-languages')} bind:value={publicLanguages} maxlength={300} placeholder="es, en" /></div>
+          {/if}
+        </section>
+      </div>
+      <div class="drawer-actions"><button class="primary" onclick={saveWikiPolicy} disabled={actionBusy}>{t('action-save')}</button>{#if wikiPolicy.internetPublic}<button class="secondary" onclick={savePublicProfile} disabled={actionBusy}>{t('desktop-wiki-public-profile-save')}</button>{/if}</div>
+    </div>
+  </div>
 {/if}
 
 {#if selectedReview && editDraft}
@@ -1972,9 +2079,9 @@
         <div><p class="section-label">{t('desktop-page-shared-title')}</p><h2 id="connections-title">{t('desktop-connections')}</h2></div>
         <button class="icon-button" aria-label={t('action-close')} onclick={() => { connectionsOpen = false; }}>×</button>
       </header>
-      <section>
+      <section class="private-network-section">
         <div class="section-heading">
-          <div><h3>{t('desktop-known-devices', { count: snapshot.peers.length })}</h3><p>{connectivityLabel(locale)}</p></div>
+          <div><span class="network-scope private">{t('desktop-private-network')}</span><h3>{t('desktop-known-devices', { count: snapshot.peers.length })}</h3><p>{t('desktop-private-devices-summary', { visible: visiblePeerCount(), total: snapshot.peers.length })}</p></div>
           <button class="text-action" onclick={() => runConnectivityAction('refresh')}>{t('action-refresh')}</button>
         </div>
         {#if lanPreference !== 'enabled'}
@@ -1993,7 +2100,7 @@
         <div class="peer-list">
           {#each snapshot.peers as peer (peer.peerId)}
             <article>
-              <div class="peer-summary"><strong>{peer.deviceName ?? t('devices-nearby')}</strong><small>{peer.trust === 'trusted' ? t('desktop-verified') : peer.trust === 'blocked' ? t('desktop-pairing-blocked') : t('desktop-unverified')}</small></div>
+              <div class="peer-summary"><strong>{peerDisplayName(peer)}</strong><small>{platformLabel(peer.platform)} · {peerActivityLabel(peer)}</small><span class:verified={peer.trust === 'trusted'} class:blocked={peer.trust === 'blocked'}>{peer.trust === 'trusted' ? t('desktop-verified') : peer.trust === 'blocked' ? t('desktop-pairing-blocked') : t('desktop-unverified')}</span></div>
               {#if peer.sasWords}
                 <strong class="sas-words">{peer.sasWords.join(' · ')}</strong>
                 <div class="row-actions"><button class="primary" disabled={peerActionId === peer.peerId} onclick={() => runPeerAction(peer.peerId, 'accept')}>{t('devices-code-matches')}</button><button class="danger" disabled={peerActionId === peer.peerId} onclick={() => runPeerAction(peer.peerId, 'reject')}>{t('devices-code-does-not-match')}</button></div>

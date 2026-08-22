@@ -4,6 +4,9 @@ All notable user-visible changes to AirWiki will be documented here. The project
 
 ## [Unreleased]
 
+- Identified trusted nearby devices by name, operating system and availability
+  in search, sharing and Connections, while keeping public publishers visually
+  separate and withholding private device metadata from public federation.
 - Fixed the missing AirWiki system-tray icon on macOS and Windows, with right-click reserved for the tray menu.
 - Added an explicit, fail-closed recovery action after a device verification
   code is rejected; retrying never restores trust or wiki grants.

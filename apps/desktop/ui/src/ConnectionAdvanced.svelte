@@ -23,15 +23,18 @@
   }
 </script>
 
-<details class="advanced-disclosure connection-advanced" aria-busy={busy}>
-  <summary>{t('desktop-network-controls')}</summary>
-  {#if lanRuntime}
+{#if lanRuntime}
+  <details class="advanced-disclosure connection-advanced" aria-busy={busy}>
+    <summary>{t('desktop-private-network-details')}</summary>
     <dl>
       <div><dt>{t('desktop-listener')}</dt><dd>{stateLabel(lanRuntime.listener)}</dd></div>
       <div><dt>{t('desktop-discovery')}</dt><dd>{stateLabel(lanRuntime.discovery)}</dd></div>
       <div><dt>{t('desktop-interfaces')}</dt><dd>{lanRuntime.addressCount}</dd></div>
     </dl>
-  {/if}
+  </details>
+{/if}
+<details class="advanced-disclosure connection-advanced" aria-busy={busy}>
+  <summary>{t('desktop-public-federation')}</summary>
   <section>
     <h3>{t('desktop-community-indexes')}</h3>
     <p>{t('desktop-community-indexes-body')}</p>

@@ -39,6 +39,7 @@ const MIGRATION_11: &str = include_str!("../migrations/0011_open_okf_lifecycle.s
 const MIGRATION_12: &str = include_str!("../migrations/0012_attested_computation_contracts.sql");
 const MIGRATION_13: &str = include_str!("../migrations/0013_restrict_incompatible_okf.sql");
 const MIGRATION_14: &str = include_str!("../migrations/0014_bound_computation_runs.sql");
+const MIGRATION_15: &str = include_str!("../migrations/0015_peer_device_platform.sql");
 
 const APPLICATION_MUTATIONS_PER_MINUTE: u32 = 30;
 const APPLICATION_WIKI_CREATIONS_PER_HOUR: u32 = 5;
@@ -526,6 +527,7 @@ pub(crate) struct ExpectedReview<'a> {
 pub struct PeerRecord {
     pub peer_id: String,
     pub display_name: Option<String>,
+    pub device_platform: Option<airwiki_types::DevicePlatform>,
     pub trusted: bool,
     pub blocked: bool,
     pub paired_at: Option<DateTime<Utc>>,
@@ -1063,7 +1065,13 @@ impl Database {
             tx.pragma_update(None, "user_version", 14)?;
             tx.commit()?;
         }
-        if version > 14 {
+        if version < 15 {
+            let tx = connection.transaction()?;
+            tx.execute_batch(MIGRATION_15)?;
+            tx.pragma_update(None, "user_version", 15)?;
+            tx.commit()?;
+        }
+        if version > 15 {
             bail!("database schema {version} is newer than this application supports");
         }
         let database = Self {
@@ -5155,14 +5163,16 @@ impl Database {
     pub fn upsert_peer(&self, peer: &PeerRecord) -> Result<()> {
         let now = Utc::now().to_rfc3339();
         self.connection()?.execute(
-            "INSERT INTO peers(peer_id,display_name,trusted,blocked,paired_at,last_seen_at,created_at,updated_at)
-             VALUES (?1,?2,?3,?4,?5,?6,?7,?7)
+            "INSERT INTO peers(peer_id,display_name,device_platform,trusted,blocked,paired_at,last_seen_at,created_at,updated_at)
+             VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?8)
              ON CONFLICT(peer_id) DO UPDATE SET display_name=excluded.display_name,
-             trusted=excluded.trusted,blocked=excluded.blocked,paired_at=excluded.paired_at,
+             device_platform=excluded.device_platform,trusted=excluded.trusted,
+             blocked=excluded.blocked,paired_at=excluded.paired_at,
              last_seen_at=excluded.last_seen_at,updated_at=excluded.updated_at",
             params![
                 peer.peer_id,
                 peer.display_name,
+                peer.device_platform.map(|platform| platform.as_str()),
                 peer.trusted,
                 peer.blocked,
                 peer.paired_at.map(|v| v.to_rfc3339()),
@@ -5176,16 +5186,17 @@ impl Database {
     pub fn peer(&self, peer_id: &str) -> Result<Option<PeerRecord>> {
         self.connection()?
             .query_row(
-                "SELECT peer_id,display_name,trusted,blocked,paired_at,last_seen_at FROM peers WHERE peer_id=?1",
+                "SELECT peer_id,display_name,device_platform,trusted,blocked,paired_at,last_seen_at FROM peers WHERE peer_id=?1",
                 [peer_id],
                 |row| {
                     Ok(PeerRecord {
                         peer_id: row.get(0)?,
                         display_name: row.get(1)?,
-                        trusted: row.get(2)?,
-                        blocked: row.get(3)?,
-                        paired_at: optional_datetime(row.get::<_, Option<String>>(4)?)?,
-                        last_seen_at: optional_datetime(row.get::<_, Option<String>>(5)?)?,
+                        device_platform: optional_device_platform_sql(row.get(2)?)?,
+                        trusted: row.get(3)?,
+                        blocked: row.get(4)?,
+                        paired_at: optional_datetime(row.get::<_, Option<String>>(5)?)?,
+                        last_seen_at: optional_datetime(row.get::<_, Option<String>>(6)?)?,
                     })
                 },
             )
@@ -5196,17 +5207,18 @@ impl Database {
     pub fn list_peers(&self) -> Result<Vec<PeerRecord>> {
         let connection = self.connection()?;
         let mut statement = connection.prepare(
-            "SELECT peer_id,display_name,trusted,blocked,paired_at,last_seen_at
+            "SELECT peer_id,display_name,device_platform,trusted,blocked,paired_at,last_seen_at
              FROM peers ORDER BY COALESCE(display_name, peer_id) COLLATE NOCASE",
         )?;
         let rows = statement.query_map([], |row| {
             Ok(PeerRecord {
                 peer_id: row.get(0)?,
                 display_name: row.get(1)?,
-                trusted: row.get(2)?,
-                blocked: row.get(3)?,
-                paired_at: optional_datetime(row.get::<_, Option<String>>(4)?)?,
-                last_seen_at: optional_datetime(row.get::<_, Option<String>>(5)?)?,
+                device_platform: optional_device_platform_sql(row.get(2)?)?,
+                trusted: row.get(3)?,
+                blocked: row.get(4)?,
+                paired_at: optional_datetime(row.get::<_, Option<String>>(5)?)?,
+                last_seen_at: optional_datetime(row.get::<_, Option<String>>(6)?)?,
             })
         })?;
         rows.collect::<rusqlite::Result<_>>().map_err(Into::into)
@@ -6452,6 +6464,18 @@ fn indexing_mode_sql(value: String) -> rusqlite::Result<IndexingMode> {
     }
 }
 
+fn optional_device_platform_sql(
+    value: Option<String>,
+) -> rusqlite::Result<Option<airwiki_types::DevicePlatform>> {
+    value
+        .map(|value| match value.as_str() {
+            "macos" => Ok(airwiki_types::DevicePlatform::MacOs),
+            "windows" => Ok(airwiki_types::DevicePlatform::Windows),
+            _ => Err(rusqlite::Error::InvalidQuery),
+        })
+        .transpose()
+}
+
 fn okf_compatibility_sql(
     value: String,
     declared_version: Option<&str>,
@@ -7014,7 +7038,7 @@ mod tests {
         let temp = tempfile::tempdir().unwrap();
         let path = temp.path().join("db.sqlite");
         let db = Database::open(&path).unwrap();
-        assert_eq!(db.schema_version().unwrap(), 14);
+        assert_eq!(db.schema_version().unwrap(), 15);
         for table in [
             "collections",
             "source_documents",
@@ -7034,7 +7058,7 @@ mod tests {
             assert_eq!(db.count(table).unwrap(), 0);
         }
         drop(db);
-        assert_eq!(Database::open(path).unwrap().schema_version().unwrap(), 14);
+        assert_eq!(Database::open(path).unwrap().schema_version().unwrap(), 15);
     }
 
     #[test]
@@ -7556,7 +7580,7 @@ mod tests {
         drop(connection);
 
         let database = Database::open(&path).unwrap();
-        assert_eq!(database.schema_version().unwrap(), 14);
+        assert_eq!(database.schema_version().unwrap(), 15);
         assert_eq!(database.count("collections").unwrap(), 1);
         assert_eq!(database.count("source_documents").unwrap(), 1);
         assert_eq!(database.count("publication_claims").unwrap(), 0);
@@ -7596,7 +7620,7 @@ mod tests {
 
         let database = Database::open(&path).unwrap();
 
-        assert_eq!(database.schema_version().unwrap(), 14);
+        assert_eq!(database.schema_version().unwrap(), 15);
         assert_eq!(
             database.collection(collection_id).unwrap().unwrap().policy,
             CollectionPolicy::local_only()
@@ -7631,7 +7655,7 @@ mod tests {
 
         let database = Database::open(&path).unwrap();
         let collection = database.collection(collection_id).unwrap().unwrap();
-        assert_eq!(database.schema_version().unwrap(), 14);
+        assert_eq!(database.schema_version().unwrap(), 15);
         assert_eq!(collection.policy, CollectionPolicy::local_only());
         assert!(
             database
@@ -7663,7 +7687,7 @@ mod tests {
         drop(connection);
 
         let database = Database::open(path).unwrap();
-        assert_eq!(database.schema_version().unwrap(), 14);
+        assert_eq!(database.schema_version().unwrap(), 15);
         let indexes = database.list_federation_indexes().unwrap();
         assert_eq!(indexes.len(), 1);
         assert_eq!(indexes[0].registry_version, 0);
@@ -7702,7 +7726,7 @@ mod tests {
             expires_at: Utc::now() + chrono::Duration::days(1),
         }];
 
-        assert_eq!(database.schema_version().unwrap(), 14);
+        assert_eq!(database.schema_version().unwrap(), 15);
         assert_eq!(
             database
                 .count("federation_bootstrap_registry_state")
@@ -7744,7 +7768,7 @@ mod tests {
         let database = Database::open(path).unwrap();
         let collection = database.collection(collection_id).unwrap().unwrap();
 
-        assert_eq!(database.schema_version().unwrap(), 14);
+        assert_eq!(database.schema_version().unwrap(), 15);
         assert_eq!(collection.origin, WikiOrigin::Folder);
         assert_eq!(collection.indexing_mode, IndexingMode::Manual);
         assert_eq!(collection.okf_version, "0.1");
@@ -7832,7 +7856,7 @@ mod tests {
             .unwrap()
             .unwrap();
 
-        assert_eq!(database.schema_version().unwrap(), 14);
+        assert_eq!(database.schema_version().unwrap(), 15);
         assert_eq!(collection.policy, CollectionPolicy::local_only());
         assert_eq!(collection.indexing_mode, IndexingMode::Manual);
         assert_eq!(database.count("collections").unwrap(), 1);
@@ -7964,7 +7988,7 @@ mod tests {
         let database = Database::open(path).unwrap();
         let concepts = database.list_okf_concept_projection(collection_id).unwrap();
 
-        assert_eq!(database.schema_version().unwrap(), 14);
+        assert_eq!(database.schema_version().unwrap(), 15);
         assert_eq!(concepts.len(), 1);
         assert_eq!(concepts[0].concept_type.to_string(), "Unknown Type");
         assert_eq!(concepts[0].lifecycle_status, "stable");
@@ -8627,11 +8651,82 @@ mod tests {
     }
 
     #[test]
+    fn peer_device_platform_round_trips_in_current_schema() {
+        let (_temp, db, _collection) = setup();
+        db.upsert_peer(&PeerRecord {
+            peer_id: "peer-platform".into(),
+            display_name: Some("RUSTICO".into()),
+            device_platform: Some(airwiki_types::DevicePlatform::Windows),
+            trusted: true,
+            blocked: false,
+            paired_at: Some(Utc::now()),
+            last_seen_at: None,
+        })
+        .unwrap();
+
+        let stored = db.peer("peer-platform").unwrap().unwrap();
+
+        assert_eq!(
+            stored.device_platform,
+            Some(airwiki_types::DevicePlatform::Windows)
+        );
+    }
+
+    #[test]
+    fn peer_device_platform_migration_preserves_existing_peers() {
+        let temp = tempfile::tempdir().unwrap();
+        let path = temp.path().join("version-fourteen.sqlite");
+        let mut connection = Connection::open(&path).unwrap();
+        connection
+            .pragma_update(None, "foreign_keys", "ON")
+            .unwrap();
+        let tx = connection.transaction().unwrap();
+        for migration in [
+            MIGRATION_1,
+            MIGRATION_2,
+            MIGRATION_3,
+            MIGRATION_4,
+            MIGRATION_5,
+            MIGRATION_6,
+            MIGRATION_7,
+            MIGRATION_8,
+            MIGRATION_9,
+            MIGRATION_10,
+            MIGRATION_11,
+            MIGRATION_12,
+            MIGRATION_13,
+            MIGRATION_14,
+        ] {
+            tx.execute_batch(migration).unwrap();
+        }
+        let now = Utc::now().to_rfc3339();
+        tx.execute(
+            "INSERT INTO peers
+             (peer_id,display_name,trusted,blocked,paired_at,last_seen_at,created_at,updated_at)
+             VALUES ('existing-peer','Atlas Mac',1,0,?1,?1,?1,?1)",
+            [&now],
+        )
+        .unwrap();
+        tx.pragma_update(None, "user_version", 14).unwrap();
+        tx.commit().unwrap();
+        drop(connection);
+
+        let database = Database::open(path).unwrap();
+        let peer = database.peer("existing-peer").unwrap().unwrap();
+
+        assert_eq!(database.schema_version().unwrap(), 15);
+        assert_eq!(peer.display_name.as_deref(), Some("Atlas Mac"));
+        assert!(peer.trusted);
+        assert_eq!(peer.device_platform, None);
+    }
+
+    #[test]
     fn grants_require_trusted_unblocked_peer_and_shareable_collection() {
         let (_temp, db, collection) = setup();
         db.upsert_peer(&PeerRecord {
             peer_id: "peer-b".into(),
             display_name: None,
+            device_platform: None,
             trusted: true,
             blocked: false,
             paired_at: Some(Utc::now()),
@@ -8719,6 +8814,7 @@ mod tests {
         db.upsert_peer(&PeerRecord {
             peer_id: "peer-reader".into(),
             display_name: Some("Reader".into()),
+            device_platform: None,
             trusted: true,
             blocked: false,
             paired_at: Some(Utc::now()),
@@ -8838,6 +8934,7 @@ mod tests {
         db.upsert_peer(&PeerRecord {
             peer_id: "peer-reader".into(),
             display_name: Some("Reader".into()),
+            device_platform: None,
             trusted: true,
             blocked: false,
             paired_at: Some(Utc::now()),
@@ -8970,6 +9067,7 @@ mod tests {
         db.upsert_peer(&PeerRecord {
             peer_id: "peer-reader".into(),
             display_name: Some("Reader".into()),
+            device_platform: None,
             trusted: true,
             blocked: false,
             paired_at: Some(Utc::now()),

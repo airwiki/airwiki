@@ -417,6 +417,7 @@ impl IntegrationEnvironment {
 pub(crate) struct ChatIntegrationManager {
     paths: AppPaths,
     environment: IntegrationEnvironment,
+    bundled_bridge_digest: Option<String>,
     runner: Arc<dyn CommandRunner>,
     opener: Arc<dyn PathOpener>,
     database: airwiki_core::Database,
@@ -433,14 +434,20 @@ impl ChatIntegrationManager {
             environment.platform == HostPlatform::MacOs,
             environment.discover_host_clients,
         );
-        Ok(Self {
+        let mut manager = Self {
             paths,
             environment,
+            bundled_bridge_digest: None,
             runner: Arc::new(SystemCommandRunner),
             opener: Arc::new(SystemPathOpener),
             database,
             workflow_guides,
-        })
+        };
+        manager.bundled_bridge_digest = manager
+            .bundled_bridge()
+            .map(|path| digest_file_bounded(&path))
+            .transpose()?;
+        Ok(manager)
     }
 
     pub(crate) async fn execute(&self, action: IntegrationAction) -> Result<Vec<IntegrationView>> {
@@ -692,11 +699,20 @@ impl ChatIntegrationManager {
     }
 
     fn managed_bridge_path(&self) -> PathBuf {
+        // The content digest keeps two signed/internal candidates with the same
+        // application semver from aliasing the same executable. Older
+        // version-only paths remain readable so existing installations can be
+        // upgraded without weakening integrity checks for new bridges.
         self.paths
             .data
             .join("integrations")
             .join("bridge")
             .join(env!("CARGO_PKG_VERSION"))
+            .join(
+                self.bundled_bridge_digest
+                    .as_deref()
+                    .unwrap_or("unavailable"),
+            )
             .join(bridge_filename())
     }
 
@@ -1767,7 +1783,14 @@ impl ChatIntegrationManager {
             };
             return files_equal_bounded(&bundled, &canonical_command).await;
         }
-        Ok(true)
+        match managed_bridge_location(&configuration.command, &root) {
+            Some(ManagedBridgeLocation::Legacy) => Ok(true),
+            Some(ManagedBridgeLocation::ContentAddressed(expected_digest)) => {
+                let bytes = read_file_bounded(&canonical_command).await?;
+                Ok(hex::encode(Sha256::digest(bytes)) == expected_digest)
+            }
+            None => Ok(false),
+        }
     }
 }
 
@@ -1812,6 +1835,12 @@ struct ManagedConfiguration {
     command: PathBuf,
     args: Vec<String>,
     parse_conflict: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum ManagedBridgeLocation {
+    Legacy,
+    ContentAddressed(String),
 }
 
 fn codex_reports_missing(stderr: &str) -> bool {
@@ -2036,8 +2065,30 @@ impl ManagedConfiguration {
                 .command
                 .file_name()
                 .is_some_and(|name| name == OsStr::new(bridge_filename()))
+            && managed_bridge_location(&self.command, managed_root).is_some()
             && self.args == ["--client", client.bridge_id()]
     }
+}
+
+fn managed_bridge_location(command: &Path, managed_root: &Path) -> Option<ManagedBridgeLocation> {
+    let revision_directory = command.parent()?;
+    let version_directory = revision_directory.parent()?;
+    if paths_equal(version_directory, managed_root) {
+        return Some(ManagedBridgeLocation::Legacy);
+    }
+    let root = version_directory.parent()?;
+    if !paths_equal(root, managed_root) {
+        return None;
+    }
+    let digest = revision_directory.file_name()?.to_str()?;
+    if digest.len() != 64
+        || !digest
+            .bytes()
+            .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
+    {
+        return None;
+    }
+    Some(ManagedBridgeLocation::ContentAddressed(digest.to_owned()))
 }
 
 fn classify_configuration(
@@ -2269,6 +2320,37 @@ async fn files_equal_bounded(left: &Path, right: &Path) -> Result<bool> {
     let (left_bytes, right_bytes) =
         tokio::try_join!(read_file_bounded(left), read_file_bounded(right))?;
     Ok(left_bytes == right_bytes)
+}
+
+fn digest_file_bounded(path: &Path) -> Result<String> {
+    use std::io::Read as _;
+
+    let mut file =
+        std::fs::File::open(path).context("no se pudo abrir el puente MCP empaquetado")?;
+    let before = file
+        .metadata()
+        .context("no se pudo inspeccionar el puente MCP empaquetado")?;
+    if !before.is_file() || before.len() > MAX_BRIDGE_BYTES {
+        bail!("el puente MCP empaquetado no es regular o excede el tamaño permitido")
+    }
+    let capacity = usize::try_from(before.len()).context("el puente MCP es demasiado grande")?;
+    let mut bytes = Vec::with_capacity(capacity);
+    {
+        let mut bounded = (&mut file).take(MAX_BRIDGE_BYTES.saturating_add(1));
+        bounded
+            .read_to_end(&mut bytes)
+            .context("no se pudo leer el puente MCP empaquetado")?;
+    }
+    if bytes.len() as u64 > MAX_BRIDGE_BYTES {
+        bail!("el puente MCP empaquetado excede el tamaño permitido")
+    }
+    let after = file
+        .metadata()
+        .context("no se pudo volver a comprobar el puente MCP empaquetado")?;
+    if before.len() != after.len() || after.len() != bytes.len() as u64 {
+        bail!("el puente MCP empaquetado cambió durante su comprobación")
+    }
+    Ok(hex::encode(Sha256::digest(bytes)))
 }
 
 async fn read_file_bounded(path: &Path) -> Result<Vec<u8>> {
@@ -2618,7 +2700,7 @@ mod tests {
             logs: root.join("data/logs"),
             config: root.join("config/config.json"),
         };
-        ChatIntegrationManager {
+        let mut manager = ChatIntegrationManager {
             paths: paths.clone(),
             environment: IntegrationEnvironment {
                 platform: test_platform(),
@@ -2627,6 +2709,7 @@ mod tests {
                 discover_host_clients: false,
                 current_exe: current_exe.clone(),
             },
+            bundled_bridge_digest: None,
             runner: Arc::new(RecordingRunner::default()),
             opener: Arc::new(RecordingOpener::default()),
             database: airwiki_core::Database::in_memory().unwrap(),
@@ -2637,7 +2720,13 @@ mod tests {
                 test_platform() == HostPlatform::MacOs,
                 false,
             ),
-        }
+        };
+        manager.bundled_bridge_digest = manager
+            .bundled_bridge()
+            .map(|path| digest_file_bounded(&path))
+            .transpose()
+            .unwrap();
+        manager
     }
 
     #[cfg(feature = "e2e")]
@@ -3129,6 +3218,7 @@ mod tests {
                 discover_host_clients: false,
                 current_exe: executable.clone(),
             },
+            bundled_bridge_digest: None,
             runner,
             opener: opener.clone(),
             database: airwiki_core::Database::in_memory().unwrap(),
@@ -3385,6 +3475,71 @@ mod tests {
                 .configuration_is_securely_managed(&configuration, ChatClientKind::ChatGptDesktop,)
                 .await
                 .unwrap()
+        );
+    }
+
+    #[tokio::test]
+    async fn prior_content_addressed_bridge_is_reported_as_an_update() {
+        let temp = TempDir::new().expect("temporary directory");
+        let executable = temp.path().join("airwiki-desktop");
+        std::fs::write(&executable, b"desktop").expect("desktop fixture");
+        let bundled = temp
+            .path()
+            .join("integrations/bridge")
+            .join(bridge_filename());
+        std::fs::create_dir_all(bundled.parent().expect("bundle parent"))
+            .expect("bundle directory");
+        std::fs::write(&bundled, b"current bridge").expect("current bridge fixture");
+        let manager = test_manager(&temp, executable);
+        let previous_bytes = b"previous bridge";
+        let previous_digest = hex::encode(Sha256::digest(previous_bytes));
+        let previous = manager
+            .managed_bridge_root()
+            .join(env!("CARGO_PKG_VERSION"))
+            .join(previous_digest)
+            .join(bridge_filename());
+        std::fs::create_dir_all(previous.parent().expect("previous bridge parent"))
+            .expect("previous bridge directory");
+        std::fs::write(&previous, previous_bytes).expect("previous bridge fixture");
+        set_executable_permissions(&previous)
+            .await
+            .expect("executable bridge fixture");
+        let configuration = ManagedConfiguration::new(previous, ChatClientKind::ChatGptDesktop);
+
+        let (status, _) = manager
+            .classify_configuration_securely(Some(&configuration), ChatClientKind::ChatGptDesktop)
+            .await
+            .expect("classify previous bridge");
+
+        assert_eq!(status, IntegrationStatus::UpdateAvailable);
+    }
+
+    #[tokio::test]
+    async fn prior_content_addressed_bridge_rejects_tampering() {
+        let temp = TempDir::new().expect("temporary directory");
+        let executable = temp.path().join("airwiki-desktop");
+        std::fs::write(&executable, b"desktop").expect("desktop fixture");
+        let manager = test_manager(&temp, executable);
+        let trusted_bytes = b"trusted old bridge";
+        let trusted_digest = hex::encode(Sha256::digest(trusted_bytes));
+        let installed = manager
+            .managed_bridge_root()
+            .join("0.1.0")
+            .join(trusted_digest)
+            .join(bridge_filename());
+        std::fs::create_dir_all(installed.parent().expect("bridge parent"))
+            .expect("bridge directory");
+        std::fs::write(&installed, b"altered old bridge").expect("altered bridge fixture");
+        set_executable_permissions(&installed)
+            .await
+            .expect("executable bridge fixture");
+        let configuration = ManagedConfiguration::new(installed, ChatClientKind::ChatGptDesktop);
+
+        assert!(
+            !manager
+                .configuration_is_securely_managed(&configuration, ChatClientKind::ChatGptDesktop,)
+                .await
+                .expect("validate previous bridge")
         );
     }
 

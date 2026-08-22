@@ -69,7 +69,7 @@ export type PeerTrust = "unpaired" | "trusted" | "blocked";
 
 export type PeerActivity = "notObserved" | "discovered" | "pairing" | "connected";
 
-export type PeerSummary = { peerId: string, deviceName: string | null, address: string, trust: PeerTrust, activity: PeerActivity, sasWords: Array<string> | null, grantedWikiIds: Array<string>, };
+export type PeerSummary = { peerId: string, deviceName: string | null, platform: HostPlatform | null, address: string, trust: PeerTrust, activity: PeerActivity, sasWords: Array<string> | null, grantedWikiIds: Array<string>, };
 
 export type ModelSummary = { stateSequence: number, profile: string, recommendedModelId: string | null, displayName: string | null, recommendationReason: string | null, active: boolean, installed: boolean, degraded: boolean, issues: Array<string>, pendingModelId: string | null, downloadBytes: number, requiredFreeBytes: number, fitsAvailableDisk: boolean, licenseAccepted: boolean, license: string | null, licenseUrl: string | null, revision: string | null, };
 

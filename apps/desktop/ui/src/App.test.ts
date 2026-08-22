@@ -2,7 +2,7 @@ import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testi
 import axe from 'axe-core';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import App from './App.svelte';
-import { allowPeerPairingAgain, approveReview, browseNearbyWiki, browsePublicWiki, checkUpdates, configureFirewall, connect, installModels, loadWikiBundle, loadWikiPage, manageIntegration, openSystemDestination, pickOkfImport, prepareGuidedWikiRepair, quitCompletely, reanalyzeReview, refreshWikiHealth, rejectReview, searchKnowledge, updatePreferences, validateOkfImport, verifyWikiConcept } from './api';
+import { allowPeerPairingAgain, approveReview, browseNearbyWiki, browsePublicWiki, checkUpdates, configureFirewall, connect, installModels, loadWikiBundle, loadWikiPage, manageIntegration, openSystemDestination, pickOkfImport, prepareGuidedWikiRepair, quitCompletely, reanalyzeReview, refreshWikiHealth, rejectReview, searchKnowledge, setWikiGrant, updatePreferences, validateOkfImport, verifyWikiConcept } from './api';
 import type { UiEventEnvelope } from './generated/ui-contract';
 import { readySnapshot } from './test/fixtures';
 
@@ -104,6 +104,7 @@ vi.mock('./api', async (importOriginal) => {
     browsePublicWiki: vi.fn(async () => 'public-browse-request'),
     browseNearbyWiki: vi.fn(async () => 'nearby-browse-request'),
     searchKnowledge: vi.fn(async () => snapshot.search?.requestId ?? 'search-request'),
+    setWikiGrant: vi.fn(async () => undefined),
     pickOkfImport: vi.fn(async () => null),
     validateOkfImport: vi.fn(),
     loadWikiBundle: vi.fn(async () => undefined),
@@ -269,7 +270,8 @@ describe('AirWiki wiki workspace', () => {
     await fireEvent.click(await screen.findByRole('button', { name: 'Conexiones: Solo este dispositivo' }));
 
     expect(screen.getByRole('dialog', { name: 'Conexiones' })).toBeInTheDocument();
-    expect(screen.getByText('Controles de red')).toBeInTheDocument();
+    expect(screen.getByText('Detalles de red privada')).toBeInTheDocument();
+    expect(screen.getByText('Federación pública avanzada')).toBeInTheDocument();
     expect(screen.getAllByText('Detalles avanzados')).toHaveLength(1);
     await waitFor(() => expect(manageIntegration).toHaveBeenCalledWith(expect.any(String), { kind: 'refresh' }));
   });
@@ -456,7 +458,7 @@ describe('AirWiki wiki workspace', () => {
   it('explains a rejected pairing and requires an explicit safe retry', async () => {
     snapshot.preferences!.lanPreference = 'enabled';
     snapshot.peers = [{
-      peerId: '12D3KooBlockedSyntheticPeer', deviceName: 'Office PC', address: '',
+      peerId: '12D3KooBlockedSyntheticPeer', deviceName: 'Office PC', platform: 'windows', address: '',
       trust: 'blocked', activity: 'discovered', sasWords: null, grantedWikiIds: []
     }];
     render(App);
@@ -588,6 +590,24 @@ describe('AirWiki wiki workspace', () => {
     expect(screen.queryByRole('dialog', { name: 'Atlas' })).not.toBeInTheDocument();
   });
 
+  it('lists known private devices with current availability and platform', async () => {
+    snapshot.peers = [{
+      peerId: '12D3KooSyntheticMacNode', deviceName: 'Atlas Mac', platform: 'macOs', address: '',
+      trust: 'trusted', activity: 'connected', sasWords: null, grantedWikiIds: []
+    }, {
+      peerId: '12D3KooSyntheticWindowsNode', deviceName: 'RUSTICO', platform: 'windows', address: '',
+      trust: 'trusted', activity: 'notObserved', sasWords: null, grantedWikiIds: []
+    }];
+    render(App);
+    await fireEvent.click(await screen.findByRole('button', { name: /Atlas 2 publicados/ }));
+    await fireEvent.click(screen.getByRole('button', { name: 'Gestionar acceso' }));
+
+    const dialog = screen.getByRole('dialog', { name: 'Conexiones' });
+    expect(within(dialog).getByText('1 disponible ahora de 2 conocidos')).toBeInTheDocument();
+    expect(within(dialog).getByText('macOS · Conexión activa')).toBeInTheDocument();
+    expect(within(dialog).getByText('Windows · Se conectará cuando sea necesario')).toBeInTheDocument();
+  });
+
   it('distinguishes an enabled LAN channel from a granted device', async () => {
     snapshot.wikis[0].localOnly = false;
     snapshot.wikis[0].peerShareable = true;
@@ -596,6 +616,25 @@ describe('AirWiki wiki workspace', () => {
 
     expect(screen.getByText('Compartición por LAN habilitada')).toBeInTheDocument();
     expect(screen.getByText('Aún no diste acceso a esta wiki a ningún equipo verificado')).toBeInTheDocument();
+  });
+
+  it('shows private device identity, platform, activity and Wiki access while sharing', async () => {
+    const peerId = '12D3KooSyntheticNearbyNode';
+    snapshot.peers = [{
+      peerId, deviceName: 'RUSTICO', platform: 'windows', address: '/ip4/192.0.2.1/tcp/4242',
+      trust: 'trusted', activity: 'connected', sasWords: null, grantedWikiIds: []
+    }];
+    render(App);
+    await fireEvent.click(await screen.findByRole('button', { name: /Atlas 2 publicados/ }));
+    await fireEvent.click(screen.getByRole('button', { name: 'Compartir' }));
+    await fireEvent.click(screen.getByRole('switch', { name: 'Equipos cercanos' }));
+
+    expect(screen.getByText('Red privada (LAN)')).toBeInTheDocument();
+    expect(screen.getByText('Windows · Conexión activa')).toBeInTheDocument();
+    expect(screen.getByText(/AirWiki no revela el nombre ni el sistema operativo/)).toBeInTheDocument();
+    await fireEvent.click(screen.getByRole('checkbox', { name: 'RUSTICO' }));
+
+    expect(setWikiGrant).toHaveBeenCalledWith(peerId, snapshot.wikis[0].id, true);
   });
 
   it('keeps wiki details and sharing as separate actions', async () => {
@@ -786,7 +825,7 @@ describe('AirWiki wiki workspace', () => {
     const peerId = '12D3KooSyntheticNearbyNode';
     activateLocalSearch();
     snapshot.peers = [{
-      peerId, deviceName: 'RUSTICO', address: '/ip4/192.0.2.1/tcp/4242',
+      peerId, deviceName: 'RUSTICO', platform: 'windows', address: '/ip4/192.0.2.1/tcp/4242',
       trust: 'trusted', activity: 'connected', sasWords: null, grantedWikiIds: []
     }];
     snapshot.search = {
@@ -801,8 +840,9 @@ describe('AirWiki wiki workspace', () => {
     const article = (await screen.findByRole('heading', { name: 'Evidencia cercana' })).closest('article');
     expect(article).not.toBeNull();
     const nearbyResult = within(article as HTMLElement);
-    expect(nearbyResult.getByText('RUSTICO · Responsable')).toBeInTheDocument();
-    expect(nearbyResult.getByText('Equipo cercano')).toBeInTheDocument();
+    expect(nearbyResult.getByText('RUSTICO · Windows')).toBeInTheDocument();
+    expect(nearbyResult.getByText('Responsable')).toBeInTheDocument();
+    expect(nearbyResult.getByText('Red privada (LAN)')).toBeInTheDocument();
     expect(nearbyResult.queryByText('Red pública')).not.toBeInTheDocument();
     await fireEvent.click(nearbyResult.getByRole('button', { name: 'Abrir' }));
     expect(browseNearbyWiki).toHaveBeenCalledWith(peerId, 'nearby-wiki', {
@@ -842,7 +882,7 @@ describe('AirWiki wiki workspace', () => {
     expect(screen.queryByRole('heading', { name: 'Buscar evidencia' })).not.toBeInTheDocument();
     expect(screen.queryByRole('tab')).not.toBeInTheDocument();
     expect(screen.getByText('Solo lectura')).toBeInTheDocument();
-    expect(screen.getAllByText('RUSTICO').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('RUSTICO · Windows').length).toBeGreaterThan(0);
     expect(screen.getByText('Contenido OKF completo publicado por el propietario.')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /index\.md/ })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /log\.md/ })).toBeInTheDocument();
@@ -896,7 +936,7 @@ describe('AirWiki wiki workspace', () => {
     const peerId = '12D3KooSyntheticNearbyNode';
     activateLocalSearch();
     snapshot.peers = [{
-      peerId, deviceName: 'RUSTICO', address: '/ip4/192.0.2.1/tcp/4242',
+      peerId, deviceName: 'RUSTICO', platform: 'windows', address: '/ip4/192.0.2.1/tcp/4242',
       trust: 'trusted', activity: 'connected', sasWords: null, grantedWikiIds: []
     }];
     snapshot.search = {
@@ -967,7 +1007,7 @@ describe('AirWiki wiki workspace', () => {
     const peerId = '12D3KooSyntheticFastNearbyNode';
     activateLocalSearch();
     snapshot.peers = [{
-      peerId, deviceName: 'RUSTICO', address: '/ip4/192.0.2.1/tcp/4242',
+      peerId, deviceName: 'RUSTICO', platform: 'windows', address: '/ip4/192.0.2.1/tcp/4242',
       trust: 'trusted', activity: 'connected', sasWords: null, grantedWikiIds: []
     }];
     snapshot.search = {
@@ -1028,7 +1068,7 @@ describe('AirWiki wiki workspace', () => {
     const peerId = '12D3KooSyntheticQueuedPageNode';
     activateLocalSearch();
     snapshot.peers = [{
-      peerId, deviceName: 'RUSTICO', address: '/ip4/192.0.2.1/tcp/4242',
+      peerId, deviceName: 'RUSTICO', platform: 'windows', address: '/ip4/192.0.2.1/tcp/4242',
       trust: 'trusted', activity: 'connected', sasWords: null, grantedWikiIds: []
     }];
     snapshot.search = {
@@ -1121,8 +1161,9 @@ describe('AirWiki wiki workspace', () => {
     const article = (await screen.findByRole('heading', { name: 'Resultado conservado' })).closest('article');
     expect(article).not.toBeNull();
     const result = within(article as HTMLElement);
-    expect(result.getByText('Equipo cercano · Guía')).toBeInTheDocument();
-    expect(result.getByText('Equipo cercano')).toBeInTheDocument();
+    expect(result.getByText('Red privada (LAN)')).toBeInTheDocument();
+    expect(result.getByText('Equipo 12D3KooD…Peer · SO aún no disponible')).toBeInTheDocument();
+    expect(result.getByText('Guía')).toBeInTheDocument();
     expect(result.queryByText('Red pública')).not.toBeInTheDocument();
 
     await fireEvent.click(result.getByRole('button', { name: 'Abrir' }));
@@ -1141,7 +1182,7 @@ describe('AirWiki wiki workspace', () => {
       snapshotListener?.({ schemaVersion: snapshot.schemaVersion, sequence: snapshot.sequence, requestId: 'nearby-browse-request', kind: 'stateChanged', snapshot });
     });
     expect(await screen.findByRole('heading', { name: 'Wiki conservada' })).toBeInTheDocument();
-    expect(screen.getAllByText('Equipo cercano').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('Equipo 12D3KooD…Peer · SO aún no disponible').length).toBeGreaterThan(0);
     expect(screen.queryByText('Red pública')).not.toBeInTheDocument();
   });
 
@@ -1270,7 +1311,7 @@ describe('AirWiki wiki workspace', () => {
   it('opens a public search result in a dedicated viewer and returns to the results', async () => {
     activateLocalSearch();
     snapshot.peers = [{
-      peerId: '12D3KooPublicPublisher', deviceName: 'Known publisher',
+      peerId: '12D3KooPublicPublisher', deviceName: 'Known publisher', platform: 'windows',
       address: '/ip4/192.0.2.9/tcp/4242', trust: 'trusted', activity: 'connected',
       sasWords: null, grantedWikiIds: []
     }];
@@ -1284,6 +1325,8 @@ describe('AirWiki wiki workspace', () => {
     await submitVisibleSearch('Resultado público');
 
     expect(screen.getAllByText('Red pública').length).toBeGreaterThan(0);
+    expect(screen.getByText('Publicador público 12D3KooP…sher')).toBeInTheDocument();
+    expect(screen.queryByText('Known publisher · Windows')).not.toBeInTheDocument();
     await fireEvent.click(await screen.findByRole('button', { name: 'Abrir' }));
     expect(browsePublicWiki).toHaveBeenCalledWith('12D3KooPublicPublisher', 'public-wiki', {
       targetConceptId: 'public-concept',

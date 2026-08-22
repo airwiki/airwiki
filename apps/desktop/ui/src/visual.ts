@@ -47,6 +47,19 @@ if (destination === 'review') {
   };
 }
 if (destination === 'search') {
+  const nearbyPeerId = '12D3KooSyntheticWindowsNode';
+  snapshot.model = {
+    stateSequence: 3, profile: 'balanced', recommendedModelId: 'synthetic-local-model',
+    displayName: 'Local knowledge model', recommendationReason: 'Balanced for this device',
+    active: true, installed: true, degraded: false, issues: [], pendingModelId: null,
+    downloadBytes: 0, requiredFreeBytes: 0, fitsAvailableDisk: true, licenseAccepted: true,
+    license: 'Apache-2.0', licenseUrl: null, revision: 'synthetic'
+  };
+  snapshot.peers = [{
+    peerId: nearbyPeerId, deviceName: 'RUSTICO', platform: 'windows',
+    address: '/ip4/192.0.2.1/tcp/4242', trust: 'trusted', activity: 'connected',
+    sasWords: null, grantedWikiIds: [snapshot.wikis[0].id]
+  }];
   snapshot.search = {
     requestId: 'synthetic-search', status: 'complete', coverage: 'complete', hits: [{
       conceptId: 'synthetic-result', wikiId: snapshot.wikis[0].id,
@@ -54,6 +67,18 @@ if (destination === 'search') {
       headingOrPage: 'Preparation', logicalResourceUri: 'okf://atlas/concepts/safe-maintenance',
       sourceRevision: 4, sourceSha256: 'a'.repeat(64), rank: 0.98, nodeId: snapshot.nodeId ?? 'local', route: 'deviceNetwork',
       assurance: { trust: 'humanReviewed', freshness: 'fresh', verificationOutdated: false }, lifecycle: 'stable'
+    }, {
+      conceptId: 'synthetic-nearby-result', wikiId: '20000000-0000-4000-8000-000000000002',
+      title: 'Windows recovery checklist', snippet: 'Restore the local backup and verify the recovered index.',
+      headingOrPage: 'Recovery', logicalResourceUri: 'okf://rustico/concepts/recovery',
+      sourceRevision: 2, sourceSha256: 'b'.repeat(64), rank: 0.91, nodeId: nearbyPeerId, route: 'deviceNetwork',
+      assurance: { trust: 'machineConfirmed', freshness: 'fresh', verificationOutdated: false }, lifecycle: 'stable'
+    }, {
+      conceptId: 'synthetic-public-result', wikiId: '20000000-0000-4000-8000-000000000003',
+      title: 'Community maintenance guidance', snippet: 'A public procedure for planning a recoverable maintenance window.',
+      headingOrPage: 'Community guide', logicalResourceUri: 'okf://public/concepts/maintenance',
+      sourceRevision: 7, sourceSha256: 'c'.repeat(64), rank: 0.83, nodeId: '12D3KooSyntheticPublicPublisher', route: 'publicNetwork',
+      assurance: { trust: 'unverified', freshness: 'notDeclared', verificationOutdated: false }, lifecycle: 'stable'
     }]
   };
 }
@@ -66,8 +91,19 @@ if (destination === 'shared') {
     license: 'Apache-2.0', licenseUrl: null, revision: 'synthetic'
   };
   snapshot.peers = [{
-    peerId: sharedPeerId, deviceName: 'RUSTICO', address: '/ip4/192.0.2.1/tcp/4242',
+    peerId: sharedPeerId, deviceName: 'RUSTICO', platform: 'windows', address: '/ip4/192.0.2.1/tcp/4242',
     trust: 'trusted', activity: 'connected', sasWords: null, grantedWikiIds: [sharedWikiId]
+  }];
+}
+if (destination === 'library') {
+  snapshot.peers = [{
+    peerId: '12D3KooSyntheticMacNode', deviceName: 'Atlas Mac', platform: 'macOs',
+    address: '/ip4/192.0.2.2/tcp/4242', trust: 'trusted', activity: 'connected',
+    sasWords: null, grantedWikiIds: []
+  }, {
+    peerId: '12D3KooSyntheticWindowsNode', deviceName: 'RUSTICO', platform: 'windows',
+    address: '', trust: 'trusted', activity: 'notObserved', sasWords: null,
+    grantedWikiIds: []
   }];
 }
 if (destination === 'graph') {
@@ -108,6 +144,9 @@ const bridge: DevelopmentBridge = {
   },
   async invoke(_command, arguments_) {
     const requestId = typeof arguments_?.requestId === 'string' ? arguments_.requestId : null;
+    if (destination === 'search' && _command === 'search' && requestId && snapshot.search) {
+      snapshot.search = { ...snapshot.search, requestId };
+    }
     if (destination === 'shared' && _command === 'search' && requestId) {
       snapshot.search = {
         requestId, status: 'complete', coverage: 'complete',

@@ -771,7 +771,7 @@ desktop-atlas-system-body = Status of AirWiki's local components and how they re
 desktop-atlas-local = On this device
 desktop-atlas-public = Public network
 desktop-advanced-details = Advanced details
-desktop-network-controls = Network controls
+desktop-private-network-details = Private network details
 onboarding-progress-title = Setup progress
 desktop-source-issues-title = Sources that need attention
 desktop-source-issues-body = AirWiki keeps the last safe state and never publishes uncertain content.
@@ -814,6 +814,18 @@ desktop-known-devices =
         [one] { $count } known device
        *[other] { $count } known devices
     }
+desktop-private-network = Private network (LAN)
+desktop-private-devices-summary =
+    { $visible ->
+        [one] 1 available now out of { $total } known
+       *[other] { $visible } available now out of { $total } known
+    }
+desktop-device-identified = Device { $id }
+desktop-device-platform-macos = macOS
+desktop-device-platform-windows = Windows
+desktop-device-platform-unknown = OS not available yet
+desktop-local-device-owner = This device · { $platform }
+desktop-public-publisher = Public publisher { $id }
 desktop-listener = Listener
 desktop-discovery = Discovery
 desktop-interfaces = Interfaces
@@ -1130,10 +1142,14 @@ action-reject = Reject
 desktop-share-drawer-body = Content remains private except through the channels you enable here.
 desktop-share-nearby = Nearby devices
 desktop-share-nearby-body = Only verified devices with explicit permission for this wiki.
+desktop-share-device-access = Private devices with access to this Wiki
+desktop-share-no-verified-devices = No verified devices yet
+desktop-share-no-verified-devices-body = Connect and verify a device before granting access to this Wiki.
 desktop-share-ai-apps = AI applications
 desktop-share-ai-apps-body = Read-only search access through the local MCP bridge. This does not grant memory editing.
 desktop-share-public = Public network
 desktop-share-public-body = Publish the OKF bundle without exposing the source folder.
+desktop-share-public-identity-note = Public readers see a separate signed publisher identity. AirWiki does not reveal this device name or operating system.
 desktop-wiki-public-description = Public description
 desktop-wiki-public-languages = Languages
 desktop-wiki-public-profile-save = Save public profile

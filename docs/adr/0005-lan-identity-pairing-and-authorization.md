@@ -41,6 +41,14 @@ withdrawn endpoint. A browse retry reuses an existing authenticated connection
 immediately; only a disconnected peer enters the redial queue. Every redial must
 still complete Noise authentication for the expected PeerId.
 
+The same authenticated exchange may carry a bounded display name and operating-
+system family so the owner can distinguish trusted devices in search results and
+per-Wiki grants. Receivers persist this presentation metadata only for an
+already trusted, unblocked PeerId. A name or platform never creates trust,
+restores a revoked grant or participates in authorization. Unknown and pairing-
+in-progress peers receive neither endpoints nor presentation metadata. Public
+federation never carries this LAN device metadata.
+
 New trust requires an explicit pairing session over Noise. Both devices exchange
 fresh 32-byte nonces and derive the same six-word short authentication string
 from the ordered PeerIds and their bound nonces. The human must compare and
@@ -90,6 +98,8 @@ previous collection grants.
 ## Consequences
 
 - Trust survives address and port changes but remains bound to the device key.
+- Trusted-device names and operating-system labels improve recognition but
+  remain mutable presentation metadata, never authorization identifiers.
 - Losing or replacing the private key creates a new PeerId and requires new
   pairing and grants.
 - Users must perform a two-device SAS comparison and grant collections

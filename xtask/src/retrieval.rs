@@ -1251,6 +1251,7 @@ async fn build_corpus(
     peer_database.upsert_peer(&airwiki_core::PeerRecord {
         peer_id: ORIGIN_REQUESTER_ID.to_owned(),
         display_name: Some("fixture origin".to_owned()),
+        device_platform: None,
         trusted: true,
         blocked: false,
         paired_at: None,

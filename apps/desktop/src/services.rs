@@ -56,14 +56,14 @@ use airwiki_network::{
     run_public_source_server, sign_manifest, sign_tombstone, spawn_network,
 };
 use airwiki_types::{
-    CollectionPolicy, DisclosureLease, DocumentStatus, EnrichmentDraft, FederatedSearch,
-    PUBLIC_BROWSE_PROTOCOL_V4, PUBLIC_CATALOG_PROTOCOL, PublicBrowsePage, PublicBrowseRequest,
-    PublicCollectionManifest, PublicCollectionRevision, PublicCollectionTombstone,
-    PublicSearchRequest, PublicSearchResponse, PublishedWikiDocument, PublishedWikiGraphLink,
-    PublishedWikiPageDescriptor, PublishedWikiPageId, PublishedWikiPageRequest,
-    PublishedWikiWorkspacePage, SHARED_WIKI_BROWSE_PROTOCOL_V2, SearchAuthorization,
-    SearchContractError, SearchHit, SearchPurpose, SearchRequest, SearchResponse,
-    SharedWikiBrowsePage, SharedWikiBrowseRequest,
+    CollectionPolicy, DevicePlatform, DisclosureLease, DocumentStatus, EnrichmentDraft,
+    FederatedSearch, PUBLIC_BROWSE_PROTOCOL_V4, PUBLIC_CATALOG_PROTOCOL, PublicBrowsePage,
+    PublicBrowseRequest, PublicCollectionManifest, PublicCollectionRevision,
+    PublicCollectionTombstone, PublicSearchRequest, PublicSearchResponse, PublishedWikiDocument,
+    PublishedWikiGraphLink, PublishedWikiPageDescriptor, PublishedWikiPageId,
+    PublishedWikiPageRequest, PublishedWikiWorkspacePage, SHARED_WIKI_BROWSE_PROTOCOL_V2,
+    SearchAuthorization, SearchContractError, SearchHit, SearchPurpose, SearchRequest,
+    SearchResponse, SharedWikiBrowsePage, SharedWikiBrowseRequest,
 };
 use anyhow::{Context, Result, anyhow, bail};
 use async_trait::async_trait;
@@ -1608,6 +1608,7 @@ struct LivePeer {
     connected: bool,
     pairing: bool,
     node_name: Option<String>,
+    device_platform: Option<DevicePlatform>,
     sas_words: Option<[String; 6]>,
 }
 
@@ -4115,6 +4116,9 @@ impl DesktopServices {
                 device_name: stored
                     .and_then(|peer| peer.display_name.clone())
                     .or_else(|| runtime.and_then(|peer| peer.node_name.clone())),
+                device_platform: stored
+                    .and_then(|peer| peer.device_platform)
+                    .or_else(|| runtime.and_then(|peer| peer.device_platform)),
                 address: runtime
                     .and_then(|peer| peer.addresses.iter().next().cloned())
                     .unwrap_or_default(),
@@ -4240,6 +4244,24 @@ impl DesktopServices {
                 )?;
                 effect.peers_changed = true;
                 effect.notice = Some("Nodo emparejado y confiable".into());
+            }
+            NetworkEvent::PeerMetadataChanged {
+                peer,
+                device_name,
+                device_platform,
+            } => {
+                let mut live = write_lock(&self.live_peers, "live peer view")?;
+                if let Some(state) = live_peer_slot(&mut live, peer, true) {
+                    if let Some(device_name) = device_name.as_ref() {
+                        state.node_name = Some(device_name.clone());
+                    }
+                    if device_platform.is_some() {
+                        state.device_platform = device_platform;
+                    }
+                }
+                drop(live);
+                persist_trusted_peer_metadata(&self.database, peer, device_name, device_platform)?;
+                effect.peers_changed = true;
             }
             NetworkEvent::PairingExpired { peer } => {
                 clear_pairing(&self.live_peers, peer)?;
@@ -4481,6 +4503,7 @@ fn persist_trusted_peer(
     database.upsert_peer(&airwiki_core::PeerRecord {
         peer_id: peer.to_string(),
         display_name: display_name.or_else(|| existing.as_ref()?.display_name.clone()),
+        device_platform: existing.as_ref().and_then(|peer| peer.device_platform),
         trusted: true,
         blocked: false,
         paired_at: existing
@@ -4501,12 +4524,36 @@ fn persist_blocked_peer(
     database.upsert_peer(&airwiki_core::PeerRecord {
         peer_id: peer_id.clone(),
         display_name: display_name.or_else(|| existing.as_ref()?.display_name.clone()),
+        device_platform: existing.as_ref().and_then(|peer| peer.device_platform),
         trusted: false,
         blocked: true,
         paired_at: existing.as_ref().and_then(|peer| peer.paired_at),
         last_seen_at: existing.as_ref().and_then(|peer| peer.last_seen_at),
     })?;
     database.revoke_peer(&peer_id)
+}
+
+fn persist_trusted_peer_metadata(
+    database: &Database,
+    peer: PeerId,
+    device_name: Option<String>,
+    device_platform: Option<DevicePlatform>,
+) -> Result<()> {
+    let peer_id = peer.to_string();
+    let Some(mut stored) = database.peer(&peer_id)? else {
+        return Ok(());
+    };
+    if !stored.trusted || stored.blocked {
+        return Ok(());
+    }
+    if device_name.is_some() {
+        stored.display_name = device_name;
+    }
+    if device_platform.is_some() {
+        stored.device_platform = device_platform;
+    }
+    stored.last_seen_at = Some(Utc::now());
+    database.upsert_peer(&stored)
 }
 
 fn touch_known_peer(database: &Database, peer: PeerId) -> Result<()> {
@@ -5310,6 +5357,21 @@ fn device_name() -> String {
         .collect()
 }
 
+#[cfg(target_os = "macos")]
+const fn device_platform() -> DevicePlatform {
+    DevicePlatform::MacOs
+}
+
+#[cfg(target_os = "windows")]
+const fn device_platform() -> DevicePlatform {
+    DevicePlatform::Windows
+}
+
+#[cfg(not(any(target_os = "macos", target_os = "windows")))]
+const fn device_platform() -> DevicePlatform {
+    DevicePlatform::Unknown
+}
+
 const fn pairing_failure_message(reason: PairingFailureReason) -> &'static str {
     match reason {
         PairingFailureReason::NoCurrentAddress => {
@@ -5354,6 +5416,7 @@ fn spawn_network_runtime(
 ) -> Result<NetworkRuntime> {
     let config = NetworkConfig {
         node_name: device_name(),
+        device_platform: device_platform(),
         ..NetworkConfig::default()
     };
     let (handle, events, task) = spawn_network(config, identity, access, backend)
@@ -6802,6 +6865,62 @@ mod tests {
     }
 
     #[test]
+    fn trusted_peer_metadata_updates_identity_without_changing_authorization() {
+        let database = Database::in_memory().unwrap();
+        let peer = PeerId::random();
+        persist_trusted_peer(&database, peer, Some("Previous name".into())).unwrap();
+
+        persist_trusted_peer_metadata(
+            &database,
+            peer,
+            Some("RUSTICO".into()),
+            Some(DevicePlatform::Windows),
+        )
+        .unwrap();
+
+        let stored = database.peer(&peer.to_string()).unwrap().unwrap();
+        assert_eq!(
+            (
+                stored.display_name.as_deref(),
+                stored.device_platform,
+                stored.trusted
+            ),
+            (Some("RUSTICO"), Some(DevicePlatform::Windows), true)
+        );
+    }
+
+    #[test]
+    fn untrusted_peer_metadata_is_ignored() {
+        let database = Database::in_memory().unwrap();
+        let peer = PeerId::random();
+        database
+            .upsert_peer(&airwiki_core::PeerRecord {
+                peer_id: peer.to_string(),
+                display_name: Some("Untrusted".into()),
+                device_platform: None,
+                trusted: false,
+                blocked: false,
+                paired_at: None,
+                last_seen_at: None,
+            })
+            .unwrap();
+
+        persist_trusted_peer_metadata(
+            &database,
+            peer,
+            Some("Spoofed".into()),
+            Some(DevicePlatform::MacOs),
+        )
+        .unwrap();
+
+        let stored = database.peer(&peer.to_string()).unwrap().unwrap();
+        assert_eq!(
+            (stored.display_name.as_deref(), stored.device_platform),
+            (Some("Untrusted"), None)
+        );
+    }
+
+    #[test]
     fn volatile_peer_view_rejects_new_discovery_at_capacity() {
         let mut peers = HashMap::new();
         for _ in 0..MAX_VOLATILE_LAN_PEERS {
@@ -6956,6 +7075,7 @@ mod tests {
             .upsert_peer(&airwiki_core::PeerRecord {
                 peer_id: identity.peer_id().to_string(),
                 display_name: Some("trusted peer".to_owned()),
+                device_platform: None,
                 trusted: true,
                 blocked: false,
                 paired_at: Some(Utc::now()),
@@ -7020,6 +7140,7 @@ mod tests {
             .upsert_peer(&airwiki_core::PeerRecord {
                 peer_id: peer_id.to_string(),
                 display_name: Some("test peer".into()),
+                device_platform: None,
                 trusted: true,
                 blocked: false,
                 paired_at: Some(now),
@@ -7572,6 +7693,7 @@ mod tests {
             .upsert_peer(&airwiki_core::PeerRecord {
                 peer_id: lan_peer.to_string(),
                 display_name: Some("LAN reader".to_owned()),
+                device_platform: None,
                 trusted: true,
                 blocked: false,
                 paired_at: Some(Utc::now()),

@@ -1297,6 +1297,7 @@ mod tests {
         db.upsert_peer(&PeerRecord {
             peer_id: "windows".into(),
             display_name: None,
+            device_platform: None,
             trusted: true,
             blocked: false,
             paired_at: Some(Utc::now()),
@@ -1375,6 +1376,7 @@ mod tests {
         db.upsert_peer(&PeerRecord {
             peer_id: "windows".into(),
             display_name: None,
+            device_platform: None,
             trusted: true,
             blocked: false,
             paired_at: Some(Utc::now()),

@@ -23,8 +23,8 @@ use airwiki_inference::{
 use airwiki_mcp::{McpClientActivity, McpClientKind};
 use airwiki_network::{NetworkEvent, PublicBrowseResult, PublicRouteKind};
 use airwiki_types::{
-    CollectionPolicy, EnrichmentDraft, PublishedWikiPageRequest, SearchHit, SearchPurpose,
-    SearchResponse, SharedWikiBrowsePage,
+    CollectionPolicy, DevicePlatform, EnrichmentDraft, PublishedWikiPageRequest, SearchHit,
+    SearchPurpose, SearchResponse, SharedWikiBrowsePage,
 };
 use futures::FutureExt;
 use tokio::sync::{
@@ -240,6 +240,7 @@ pub enum PeerActivityState {
 pub struct PeerView {
     pub peer_id: String,
     pub device_name: Option<String>,
+    pub device_platform: Option<DevicePlatform>,
     pub address: String,
     pub trust: PeerTrustState,
     pub activity: PeerActivityState,

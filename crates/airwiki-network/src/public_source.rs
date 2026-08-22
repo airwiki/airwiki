@@ -319,7 +319,7 @@ enum Completion {
     },
     Browse {
         channel: ResponseChannel<PublicBrowseWireResponse>,
-        result: Result<PublicBrowseDelivery, PublicSourceBackendError>,
+        result: Result<Box<PublicBrowseDelivery>, PublicSourceBackendError>,
     },
 }
 
@@ -553,7 +553,7 @@ pub async fn run_public_source_server(
                                 tasks.spawn(async move {
                                     Completion::Browse {
                                         channel,
-                                        result: backend.browse(request).await,
+                                        result: backend.browse(request).await.map(Box::new),
                                     }
                                 });
                             }
@@ -884,7 +884,8 @@ fn send_completion(behaviour: &mut SourceBehaviour, completion: Completion) {
             }
         },
         Completion::Browse { channel, result } => match result {
-            Ok(PublicBrowseDelivery { page, _lease }) => {
+            Ok(delivery) => {
+                let PublicBrowseDelivery { page, _lease } = *delivery;
                 handoff_public_payload(page, _lease, |page| {
                     let _ = behaviour
                         .browse

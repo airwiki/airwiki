@@ -27,6 +27,7 @@ function publicWiki(overrides: Partial<PublicBrowseSummary> = {}): PublicBrowseS
     }],
     nextCursor: null,
     workspaceSupported: false,
+    workspaceFingerprint: null,
     reservedPages: [],
     documents: [],
     links: [],
@@ -42,6 +43,7 @@ function completePublicWiki(): PublicBrowseSummary {
   const conceptFingerprint = '3'.repeat(64);
   return publicWiki({
     workspaceSupported: true,
+    workspaceFingerprint: '0'.repeat(64),
     reservedPages: [{
       page: { kind: 'index' }, logicalPath: 'index.md', title: 'Index',
       fingerprint: '1'.repeat(64)
@@ -85,6 +87,7 @@ const labels: Record<string, string> = {
   'desktop-wiki-view': 'View',
   'desktop-view-list': 'List',
   'desktop-view-graph': 'Graph',
+  'desktop-graph-loading': 'Building the wiki graph…',
   'desktop-shared-published-metadata': 'Published metadata',
   'desktop-shared-summary-label': 'Summary',
   'desktop-concept-assurance-title': 'Assurance',
@@ -128,6 +131,7 @@ describe('SharedWikiViewer', () => {
     expect(onopenpage).toHaveBeenCalledWith({ kind: 'index' }, '1'.repeat(64));
 
     await fireEvent.click(screen.getByRole('button', { name: 'Graph' }));
+    expect(screen.getByText('Building the wiki graph…')).toBeInTheDocument();
     await fireEvent.click(await screen.findByRole('button', { name: 'First concept' }));
     expect(screen.getByRole('button', { name: 'Graph' })).toHaveAttribute('aria-pressed', 'true');
     expect(onopenpage).toHaveBeenLastCalledWith(

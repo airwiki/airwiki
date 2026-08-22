@@ -219,6 +219,7 @@
               onselect={selectGraphPage}
               graphLabel={t('desktop-graph-map-label', { wiki: browse.wikiName ?? t('desktop-public-origin-missing') })}
               errorLabel={t('desktop-graph-error')}
+              loadingLabel={t('desktop-graph-loading')}
               pagesLabel={t('desktop-graph-pages-label')}
               countsLabel={t('knowledge-graph-counts', { nodes: descriptors.length, links: browse.links.length })}
             />

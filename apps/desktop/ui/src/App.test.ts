@@ -11,6 +11,7 @@ let snapshotListener: ((event: UiEventEnvelope) => void) | null = null;
 const tauriListeners = new Map<string, (event: unknown) => void>();
 const legacyRemoteWorkspace = {
   workspaceSupported: false,
+  workspaceFingerprint: null,
   reservedPages: [],
   documents: [],
   links: [],
@@ -27,6 +28,7 @@ function publishedRemoteWorkspace(
   const conceptFingerprint = '3'.repeat(64);
   return {
     workspaceSupported: true,
+    workspaceFingerprint: '0'.repeat(64),
     reservedPages: [{
       page: { kind: 'index' as const }, logicalPath: 'index.md', title: 'Index',
       fingerprint: '1'.repeat(64)
@@ -863,7 +865,7 @@ describe('AirWiki wiki workspace', () => {
     await act(() => {
       snapshotListener?.({ schemaVersion: snapshot.schemaVersion, sequence: snapshot.sequence, requestId: null, kind: 'stateChanged', snapshot });
     });
-    expect(screen.getByText('No se pudo cargar la wiki completa. Vuelve a los resultados e inténtalo de nuevo.')).toBeInTheDocument();
+    expect(screen.getByText('La wiki cambió durante la carga o se interrumpió la conexión. Vuelve a los resultados e inténtalo de nuevo.')).toBeInTheDocument();
     expect(screen.getByText('Contenido OKF completo publicado por el propietario.')).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Cargar más' })).not.toBeInTheDocument();
 

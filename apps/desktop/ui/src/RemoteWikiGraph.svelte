@@ -2,6 +2,7 @@
   import { onMount } from 'svelte';
   import type { Core, ElementDefinition } from 'cytoscape';
   import type { RemoteWikiGraphLinkSummary, RemoteWikiPageDescriptorSummary, RemoteWikiPageInput } from './api';
+  import LoadingState from './components/LoadingState.svelte';
   import { focusChoiceWithoutScroll } from './focus';
 
   export let wikiName: string;
@@ -10,6 +11,7 @@
   export let onselect: (page: RemoteWikiPageInput) => void;
   export let graphLabel: string;
   export let errorLabel: string;
+  export let loadingLabel: string;
   export let pagesLabel: string;
   export let countsLabel: string;
 
@@ -17,6 +19,7 @@
   let graph: Core | null = null;
   let resizeObserver: ResizeObserver | null = null;
   let layoutReady = false;
+  let graphReady = false;
   let loadFailed = false;
 
   function pageKey(page: RemoteWikiPageInput): string {
@@ -80,6 +83,7 @@
       layoutReady = true;
     }
     graph.fit(undefined, 24);
+    graphReady = true;
   }
 
   onMount(() => {
@@ -123,6 +127,7 @@
       graph?.destroy();
       graph = null;
       layoutReady = false;
+      graphReady = false;
     };
   });
 </script>
@@ -135,7 +140,10 @@
   {#if loadFailed}
     <p class="graph-error" role="status">{errorLabel}</p>
   {:else}
-    <div class="graph-canvas" bind:this={container} role="img" aria-label={graphLabel}></div>
+    <div class="graph-stage">
+      <div class="graph-canvas" bind:this={container} role="img" aria-label={graphLabel}></div>
+      {#if !graphReady}<div class="graph-loading"><LoadingState label={loadingLabel} compact /></div>{/if}
+    </div>
   {/if}
   <div class="graph-index" aria-label={pagesLabel}>
     {#each pages as descriptor (pageKey(descriptor.page))}
@@ -149,7 +157,9 @@
   .graph-heading { display: flex; align-items: end; justify-content: space-between; gap: 20px; padding-bottom: 16px; border-bottom: 1px solid var(--line); }
   .graph-heading h3 { margin: 0; font: 500 22px 'Space Grotesk', sans-serif; }
   .graph-heading small { color: var(--muted); }
-  .graph-canvas { position: relative; min-height: 340px; background: var(--graph-canvas); border-bottom: 1px solid var(--line); }
+  .graph-stage { position: relative; min-height: 340px; border-bottom: 1px solid var(--line); }
+  .graph-canvas { position: absolute; inset: 0; background: var(--graph-canvas); }
+  .graph-loading { position: absolute; inset: 0; display: grid; place-items: center; background: var(--graph-canvas); }
   .graph-index { display: flex; flex-wrap: wrap; gap: 7px; padding-top: 14px; }
   .graph-index button { flex: 1 1 220px; min-width: 0; padding: 7px 10px; overflow-wrap: anywhere; color: var(--muted); background: transparent; border: 1px solid var(--line); border-radius: 8px; text-align: left; cursor: pointer; }
   .graph-index button:hover, .graph-index button:focus-visible { color: inherit; border-color: var(--cyan); }

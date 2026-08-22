@@ -3336,6 +3336,7 @@ mod tests {
             next_cursor: None,
             workspace: (request.protocol_version == airwiki_types::SHARED_WIKI_BROWSE_PROTOCOL_V2)
                 .then_some(airwiki_types::PublishedWikiWorkspacePage {
+                    workspace_fingerprint: "b".repeat(64),
                     reserved_pages: Vec::new(),
                     documents: Vec::new(),
                     links: Vec::new(),

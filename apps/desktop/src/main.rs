@@ -921,6 +921,7 @@ struct PublicBrowseSummary {
     concepts: Vec<PublicConceptSummaryDto>,
     next_cursor: Option<String>,
     workspace_supported: bool,
+    workspace_fingerprint: Option<String>,
     reserved_pages: Vec<RemoteWikiPageDescriptorSummary>,
     documents: Vec<RemoteWikiPageDescriptorSummary>,
     links: Vec<RemoteWikiGraphLinkSummary>,
@@ -941,6 +942,7 @@ struct NearbyBrowseSummary {
     concepts: Vec<PublicConceptSummaryDto>,
     next_cursor: Option<String>,
     workspace_supported: bool,
+    workspace_fingerprint: Option<String>,
     reserved_pages: Vec<RemoteWikiPageDescriptorSummary>,
     documents: Vec<RemoteWikiPageDescriptorSummary>,
     links: Vec<RemoteWikiGraphLinkSummary>,
@@ -4393,6 +4395,7 @@ impl AppSnapshot {
                             concepts,
                             next_cursor,
                             workspace_supported: workspace.workspace_supported,
+                            workspace_fingerprint: workspace.workspace_fingerprint,
                             reserved_pages: workspace.reserved_pages,
                             documents: workspace.documents,
                             links: workspace.links,
@@ -4413,6 +4416,7 @@ impl AppSnapshot {
                         concepts: Vec::new(),
                         next_cursor: None,
                         workspace_supported: false,
+                        workspace_fingerprint: None,
                         reserved_pages: Vec::new(),
                         documents: Vec::new(),
                         links: Vec::new(),
@@ -4422,10 +4426,16 @@ impl AppSnapshot {
                     },
                 };
                 if update.kind != worker::BrowseUpdateKind::Replace
-                    && let Some(previous) = self.public_browse.take()
+                    && let Some(mut previous) = self.public_browse.take()
                     && previous.publisher_id == summary.publisher_id
                     && previous.wiki_id == summary.wiki_id
                 {
+                    if previous.workspace_fingerprint != summary.workspace_fingerprint {
+                        previous.request_id = request_id.to_string();
+                        previous.append_failed = true;
+                        self.public_browse = Some(previous);
+                        return;
+                    }
                     merge_remote_workspace(
                         &previous,
                         &mut summary.reserved_pages,
@@ -4448,6 +4458,7 @@ impl AppSnapshot {
                         summary.next_graph_cursor = previous.next_graph_cursor;
                     }
                 }
+                reject_dangling_remote_links(&mut summary);
                 self.public_browse = Some(summary);
             }
             WorkerEvent::NearbyWikiBrowseFinished {
@@ -4499,6 +4510,7 @@ impl AppSnapshot {
                                 .collect(),
                             next_cursor: page.next_cursor,
                             workspace_supported: workspace.workspace_supported,
+                            workspace_fingerprint: workspace.workspace_fingerprint,
                             reserved_pages: workspace.reserved_pages,
                             documents: workspace.documents,
                             links: workspace.links,
@@ -4517,6 +4529,7 @@ impl AppSnapshot {
                         concepts: Vec::new(),
                         next_cursor: None,
                         workspace_supported: false,
+                        workspace_fingerprint: None,
                         reserved_pages: Vec::new(),
                         documents: Vec::new(),
                         links: Vec::new(),
@@ -4526,10 +4539,16 @@ impl AppSnapshot {
                     },
                 };
                 if update.kind != worker::BrowseUpdateKind::Replace
-                    && let Some(previous) = self.nearby_browse.take()
+                    && let Some(mut previous) = self.nearby_browse.take()
                     && previous.peer_id == summary.peer_id
                     && previous.wiki_id == summary.wiki_id
                 {
+                    if previous.workspace_fingerprint != summary.workspace_fingerprint {
+                        previous.request_id = request_id.to_string();
+                        previous.append_failed = true;
+                        self.nearby_browse = Some(previous);
+                        return;
+                    }
                     merge_remote_workspace(
                         &previous,
                         &mut summary.reserved_pages,
@@ -4552,6 +4571,7 @@ impl AppSnapshot {
                         summary.next_graph_cursor = previous.next_graph_cursor;
                     }
                 }
+                reject_dangling_remote_links(&mut summary);
                 self.nearby_browse = Some(summary);
             }
             WorkerEvent::Notice(message) => {
@@ -5204,6 +5224,7 @@ fn knowledge_page_summary(
 
 struct RemoteWorkspaceParts {
     workspace_supported: bool,
+    workspace_fingerprint: Option<String>,
     reserved_pages: Vec<RemoteWikiPageDescriptorSummary>,
     documents: Vec<RemoteWikiPageDescriptorSummary>,
     links: Vec<RemoteWikiGraphLinkSummary>,
@@ -5238,33 +5259,35 @@ async fn remote_workspace_parts(
     document: Option<PublishedWikiDocument>,
 ) -> RemoteWorkspaceParts {
     let workspace_supported = workspace.is_some();
-    let (reserved_pages, documents, links, next_graph_cursor) = workspace.map_or_else(
-        || (Vec::new(), Vec::new(), Vec::new(), None),
-        |workspace| {
-            (
-                workspace
-                    .reserved_pages
-                    .into_iter()
-                    .map(remote_page_descriptor)
-                    .collect(),
-                workspace
-                    .documents
-                    .into_iter()
-                    .map(remote_page_descriptor)
-                    .collect(),
-                workspace
-                    .links
-                    .into_iter()
-                    .map(|link| RemoteWikiGraphLinkSummary {
-                        source: remote_page_input(link.source),
-                        target: remote_page_input(link.target),
-                        label: link.label,
-                    })
-                    .collect(),
-                workspace.next_graph_cursor,
-            )
-        },
-    );
+    let (workspace_fingerprint, reserved_pages, documents, links, next_graph_cursor) = workspace
+        .map_or_else(
+            || (None, Vec::new(), Vec::new(), Vec::new(), None),
+            |workspace| {
+                (
+                    Some(workspace.workspace_fingerprint),
+                    workspace
+                        .reserved_pages
+                        .into_iter()
+                        .map(remote_page_descriptor)
+                        .collect(),
+                    workspace
+                        .documents
+                        .into_iter()
+                        .map(remote_page_descriptor)
+                        .collect(),
+                    workspace
+                        .links
+                        .into_iter()
+                        .map(|link| RemoteWikiGraphLinkSummary {
+                            source: remote_page_input(link.source),
+                            target: remote_page_input(link.target),
+                            label: link.label,
+                        })
+                        .collect(),
+                    workspace.next_graph_cursor,
+                )
+            },
+        );
     let (page, conversion_failed) = if let Some(document) = document {
         let PublishedWikiDocument {
             descriptor,
@@ -5291,6 +5314,7 @@ async fn remote_workspace_parts(
     };
     RemoteWorkspaceParts {
         workspace_supported,
+        workspace_fingerprint,
         reserved_pages,
         documents,
         links,
@@ -5327,12 +5351,29 @@ fn merge_remote_workspace<Summary>(
 }
 
 trait RemoteWorkspaceSnapshot {
+    fn remote_workspace_supported(&self) -> bool;
+    fn remote_next_cursor(&self) -> Option<&str>;
+    fn remote_next_graph_cursor(&self) -> Option<u32>;
     fn remote_reserved_pages(&self) -> &[RemoteWikiPageDescriptorSummary];
     fn remote_documents(&self) -> &[RemoteWikiPageDescriptorSummary];
     fn remote_links(&self) -> &[RemoteWikiGraphLinkSummary];
+    fn remote_links_mut(&mut self) -> &mut Vec<RemoteWikiGraphLinkSummary>;
+    fn mark_remote_append_failed(&mut self);
 }
 
 impl RemoteWorkspaceSnapshot for PublicBrowseSummary {
+    fn remote_workspace_supported(&self) -> bool {
+        self.workspace_supported
+    }
+
+    fn remote_next_cursor(&self) -> Option<&str> {
+        self.next_cursor.as_deref()
+    }
+
+    fn remote_next_graph_cursor(&self) -> Option<u32> {
+        self.next_graph_cursor
+    }
+
     fn remote_reserved_pages(&self) -> &[RemoteWikiPageDescriptorSummary] {
         &self.reserved_pages
     }
@@ -5343,10 +5384,30 @@ impl RemoteWorkspaceSnapshot for PublicBrowseSummary {
 
     fn remote_links(&self) -> &[RemoteWikiGraphLinkSummary] {
         &self.links
+    }
+
+    fn remote_links_mut(&mut self) -> &mut Vec<RemoteWikiGraphLinkSummary> {
+        &mut self.links
+    }
+
+    fn mark_remote_append_failed(&mut self) {
+        self.append_failed = true;
     }
 }
 
 impl RemoteWorkspaceSnapshot for NearbyBrowseSummary {
+    fn remote_workspace_supported(&self) -> bool {
+        self.workspace_supported
+    }
+
+    fn remote_next_cursor(&self) -> Option<&str> {
+        self.next_cursor.as_deref()
+    }
+
+    fn remote_next_graph_cursor(&self) -> Option<u32> {
+        self.next_graph_cursor
+    }
+
     fn remote_reserved_pages(&self) -> &[RemoteWikiPageDescriptorSummary] {
         &self.reserved_pages
     }
@@ -5358,6 +5419,49 @@ impl RemoteWorkspaceSnapshot for NearbyBrowseSummary {
     fn remote_links(&self) -> &[RemoteWikiGraphLinkSummary] {
         &self.links
     }
+
+    fn remote_links_mut(&mut self) -> &mut Vec<RemoteWikiGraphLinkSummary> {
+        &mut self.links
+    }
+
+    fn mark_remote_append_failed(&mut self) {
+        self.append_failed = true;
+    }
+}
+
+fn reject_dangling_remote_links<Summary>(summary: &mut Summary)
+where
+    Summary: RemoteWorkspaceSnapshot,
+{
+    if !summary.remote_workspace_supported()
+        || summary.remote_next_cursor().is_some()
+        || summary.remote_next_graph_cursor().is_some()
+    {
+        return;
+    }
+    if !remote_links_are_internal(
+        summary.remote_reserved_pages(),
+        summary.remote_documents(),
+        summary.remote_links(),
+    ) {
+        summary.remote_links_mut().clear();
+        summary.mark_remote_append_failed();
+    }
+}
+
+fn remote_links_are_internal(
+    reserved_pages: &[RemoteWikiPageDescriptorSummary],
+    documents: &[RemoteWikiPageDescriptorSummary],
+    links: &[RemoteWikiGraphLinkSummary],
+) -> bool {
+    let pages = reserved_pages
+        .iter()
+        .chain(documents)
+        .map(|descriptor| descriptor.page.clone())
+        .collect::<std::collections::BTreeSet<_>>();
+    links
+        .iter()
+        .all(|link| pages.contains(&link.source) && pages.contains(&link.target))
 }
 
 fn page_input_for(
@@ -6150,6 +6254,25 @@ mod tests {
     }
 
     #[test]
+    fn remote_graph_rejects_links_to_unpublished_pages() {
+        let published = RemoteWikiPageDescriptorSummary {
+            page: RemoteWikiPageInput::Index,
+            logical_path: "index.md".to_owned(),
+            title: "Index".to_owned(),
+            fingerprint: "a".repeat(64),
+        };
+        let dangling = RemoteWikiGraphLinkSummary {
+            source: RemoteWikiPageInput::Index,
+            target: RemoteWikiPageInput::Concept {
+                concept_id: Uuid::new_v4().to_string(),
+            },
+            label: "Missing".to_owned(),
+        };
+
+        assert!(!remote_links_are_internal(&[published], &[], &[dangling]));
+    }
+
+    #[test]
     fn navigation_guard_allows_only_local_application_origins()
     -> Result<(), Box<dyn std::error::Error>> {
         assert!(navigation_is_allowed(&url::Url::parse(
@@ -6300,6 +6423,7 @@ mod tests {
             }],
             next_cursor: Some(Uuid::new_v4().to_string()),
             workspace_supported: true,
+            workspace_fingerprint: Some("a".repeat(64)),
             reserved_pages: Vec::new(),
             documents: Vec::new(),
             links: Vec::new(),
@@ -6343,6 +6467,88 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn nearby_append_rejects_a_different_workspace_generation() {
+        let request_id = Uuid::new_v4();
+        let collection_id = Uuid::new_v4();
+        let peer_id = "synthetic-peer".to_owned();
+        let mut snapshot = AppSnapshot::starting();
+        snapshot.nearby_browse = Some(NearbyBrowseSummary {
+            request_id: Uuid::new_v4().to_string(),
+            status: NearbyBrowseStatus::Available,
+            peer_id: Some(peer_id.clone()),
+            wiki_id: Some(collection_id.to_string()),
+            wiki_name: Some("Shared runbook".to_owned()),
+            okf_compatibility: Some(OkfCompatibilityDto::from(
+                airwiki_types::OkfCompatibility::DeclaredV02,
+            )),
+            concepts: Vec::new(),
+            next_cursor: None,
+            workspace_supported: true,
+            workspace_fingerprint: Some("a".repeat(64)),
+            reserved_pages: Vec::new(),
+            documents: Vec::new(),
+            links: Vec::new(),
+            next_graph_cursor: None,
+            page: None,
+            append_failed: false,
+        });
+        let requests = Mutex::new(RequestTracker {
+            nearby_browse: Some(request_id),
+            ..RequestTracker::default()
+        });
+        let result = airwiki_types::SharedWikiBrowsePage {
+            protocol_version: airwiki_types::SHARED_WIKI_BROWSE_PROTOCOL_V2.to_owned(),
+            request_id,
+            wiki: airwiki_types::SharedWikiDescriptor {
+                collection_id,
+                name: "Shared runbook".to_owned(),
+                okf_compatibility: airwiki_types::OkfCompatibility::DeclaredV02,
+            },
+            concepts: Vec::new(),
+            next_cursor: None,
+            workspace: Some(PublishedWikiWorkspacePage {
+                workspace_fingerprint: "b".repeat(64),
+                reserved_pages: Vec::new(),
+                documents: Vec::new(),
+                links: Vec::new(),
+                next_graph_cursor: None,
+            }),
+            document: None,
+        };
+
+        snapshot
+            .apply(
+                WorkerEvent::NearbyWikiBrowseFinished {
+                    request_id,
+                    peer_id,
+                    collection_id,
+                    update: worker::BrowseUpdate {
+                        kind: worker::BrowseUpdateKind::Append,
+                        concepts_requested: false,
+                        graph_requested: true,
+                    },
+                    result: Ok(result),
+                },
+                &Mutex::new(HashMap::new()),
+                &Mutex::new(HashMap::new()),
+                &Mutex::new(HashMap::new()),
+                &requests,
+            )
+            .await;
+
+        let browse = snapshot
+            .nearby_browse
+            .as_ref()
+            .expect("the original workspace should remain visible");
+        let original_fingerprint = "a".repeat(64);
+        assert_eq!(
+            browse.workspace_fingerprint.as_deref(),
+            Some(original_fingerprint.as_str())
+        );
+        assert!(browse.append_failed);
+    }
+
+    #[tokio::test]
     async fn failed_public_append_preserves_the_visible_page_and_retry_cursor() {
         let request_id = Uuid::new_v4();
         let mut snapshot = AppSnapshot::starting();
@@ -6371,6 +6577,7 @@ mod tests {
             }],
             next_cursor: Some(Uuid::new_v4().to_string()),
             workspace_supported: true,
+            workspace_fingerprint: Some("a".repeat(64)),
             reserved_pages: Vec::new(),
             documents: Vec::new(),
             links: Vec::new(),

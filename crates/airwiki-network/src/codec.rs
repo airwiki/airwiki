@@ -438,6 +438,7 @@ mod tests {
             concepts: Vec::new(),
             next_cursor: None,
             workspace: Some(PublishedWikiWorkspacePage {
+                workspace_fingerprint: "b".repeat(64),
                 reserved_pages: vec![descriptor.clone()],
                 documents: Vec::new(),
                 links: Vec::new(),

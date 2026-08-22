@@ -1435,8 +1435,17 @@
         : browseSource === 'nearby'
           ? await browseNearbyWiki(ownerId, browse.wikiId, options)
           : await browsePublicWiki(ownerId, browse.wikiId, options);
-      if (!requestId || browseGeneration !== sharedBrowseGeneration || !sharedBrowseOpen) {
+      if (!requestId) {
+        sharedBrowseRequestId = null;
+        sharedBrowseRequestKind = null;
+        sharedBrowsePendingPage = null;
         sharedBrowsePageLoading = false;
+        actionMessage = t(browseSource === 'nearby'
+          ? 'desktop-shared-nearby-unavailable'
+          : 'search-coverage-public-offline');
+        return;
+      }
+      if (browseGeneration !== sharedBrowseGeneration || !sharedBrowseOpen) {
         return;
       }
       sharedBrowseRequestId = requestId;

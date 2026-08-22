@@ -65,6 +65,10 @@ pub struct PublishedWikiGraphLink {
 /// independent numeric cursor.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct PublishedWikiWorkspacePage {
+    /// Fingerprint of the complete published bundle generation represented by
+    /// this bounded response. Consumers must not merge pages with different
+    /// fingerprints.
+    pub workspace_fingerprint: String,
     pub reserved_pages: Vec<PublishedWikiPageDescriptor>,
     pub documents: Vec<PublishedWikiPageDescriptor>,
     pub links: Vec<PublishedWikiGraphLink>,
@@ -331,7 +335,8 @@ where
         };
     }
     let workspace = workspace.ok_or(SharedWikiContractError::InvalidPage)?;
-    if workspace.documents.len() != concepts.len()
+    if !valid_fingerprint(&workspace.workspace_fingerprint)
+        || workspace.documents.len() != concepts.len()
         || workspace.reserved_pages.len() > 2
         || workspace.links.len() > MAX_SHARED_WIKI_GRAPH_PAGE_SIZE
         || workspace
@@ -372,6 +377,15 @@ where
                 descriptor.page == candidate.page
                     || descriptor.logical_path == candidate.logical_path
             })
+    }) {
+        return Err(SharedWikiContractError::InvalidPage);
+    }
+    if workspace.links.iter().enumerate().any(|(index, link)| {
+        workspace
+            .links
+            .iter()
+            .skip(index.saturating_add(1))
+            .any(|candidate| link == candidate)
     }) {
         return Err(SharedWikiContractError::InvalidPage);
     }
@@ -512,6 +526,7 @@ mod tests {
         };
         let workspace = (request.protocol_version == SHARED_WIKI_BROWSE_PROTOCOL_V2).then(|| {
             PublishedWikiWorkspacePage {
+                workspace_fingerprint: "b".repeat(64),
                 reserved_pages: Vec::new(),
                 documents: vec![PublishedWikiPageDescriptor {
                     page: PublishedWikiPageId::Concept {
@@ -681,6 +696,32 @@ mod tests {
         assert!(response.validate_for(&request).is_ok());
 
         response.workspace.as_mut().unwrap().next_graph_cursor = Some(0);
+        assert_eq!(
+            response.validate_for(&request),
+            Err(SharedWikiContractError::InvalidPage)
+        );
+    }
+
+    #[test]
+    fn rejects_invalid_workspace_fingerprints_and_duplicate_graph_edges() {
+        let mut request = SharedWikiBrowseRequest::new(Uuid::new_v4(), None, 1);
+        request.graph_cursor = Some(0);
+        let mut response = page(&request);
+        response.workspace.as_mut().unwrap().workspace_fingerprint = "invalid".to_owned();
+        assert_eq!(
+            response.validate_for(&request),
+            Err(SharedWikiContractError::InvalidPage)
+        );
+
+        let workspace = response.workspace.as_mut().unwrap();
+        workspace.workspace_fingerprint = "b".repeat(64);
+        let concept_page = workspace.documents[0].page;
+        let link = PublishedWikiGraphLink {
+            source: concept_page,
+            target: concept_page,
+            label: "Related".to_owned(),
+        };
+        workspace.links = vec![link.clone(), link];
         assert_eq!(
             response.validate_for(&request),
             Err(SharedWikiContractError::InvalidPage)

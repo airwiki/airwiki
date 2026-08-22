@@ -1153,7 +1153,7 @@ describe('AirWiki wiki workspace', () => {
     await submitVisibleSearch('sin coincidencias');
 
     expect(await screen.findByText('No encontramos evidencia coincidente')).toBeInTheDocument();
-    expect(screen.getByText('Buscamos en este equipo y en los equipos autorizados disponibles. Prueba palabras que aparezcan en el contenido publicado.')).toBeInTheDocument();
+    expect(screen.getByText('Buscamos en este equipo y en los equipos autorizados disponibles. Prueba formular una pregunta completa sobre la evidencia que necesitas.')).toBeInTheDocument();
     expect(screen.queryByText('Consultando los equipos disponibles…')).not.toBeInTheDocument();
   });
 
@@ -1178,7 +1178,7 @@ describe('AirWiki wiki workspace', () => {
     await fireEvent.click(await screen.findByRole('checkbox', { name: 'Incluir pública' }));
     await submitVisibleSearch('sin coincidencias públicas');
 
-    expect(screen.getByText('Buscamos en este equipo, en los equipos autorizados disponibles y en la red pública. Prueba palabras que aparezcan en el contenido publicado.')).toBeInTheDocument();
+    expect(screen.getByText('Buscamos en este equipo, en los equipos autorizados disponibles y en la red pública. Prueba formular una pregunta completa sobre la evidencia que necesitas.')).toBeInTheDocument();
   });
 
   it('does not present an unavailable public search as a conclusive empty result', async () => {

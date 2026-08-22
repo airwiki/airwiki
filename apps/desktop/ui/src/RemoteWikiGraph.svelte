@@ -157,9 +157,9 @@
   .graph-heading { display: flex; align-items: end; justify-content: space-between; gap: 20px; padding-bottom: 16px; border-bottom: 1px solid var(--line); }
   .graph-heading h3 { margin: 0; font: 500 22px 'Space Grotesk', sans-serif; }
   .graph-heading small { color: var(--muted); }
-  .graph-stage { position: relative; min-height: 340px; border-bottom: 1px solid var(--line); }
-  .graph-canvas { position: absolute; inset: 0; background: var(--graph-canvas); }
-  .graph-loading { position: absolute; inset: 0; display: grid; place-items: center; background: var(--graph-canvas); }
+  .graph-stage { display: grid; min-width: 0; min-height: 340px; border-bottom: 1px solid var(--line); }
+  .graph-canvas { position: relative; grid-area: 1 / 1; min-width: 0; min-height: 340px; background: var(--graph-canvas); }
+  .graph-loading { z-index: 1; display: grid; grid-area: 1 / 1; place-items: center; background: var(--graph-canvas); pointer-events: none; }
   .graph-index { display: flex; flex-wrap: wrap; gap: 7px; padding-top: 14px; }
   .graph-index button { flex: 1 1 220px; min-width: 0; padding: 7px 10px; overflow-wrap: anywhere; color: var(--muted); background: transparent; border: 1px solid var(--line); border-radius: 8px; text-align: left; cursor: pointer; }
   .graph-index button:hover, .graph-index button:focus-visible { color: inherit; border-color: var(--cyan); }

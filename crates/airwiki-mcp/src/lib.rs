@@ -127,8 +127,8 @@ const SERVER_INSTRUCTIONS: &str = r#"AirWiki provides private search and applica
 pub const MAX_MCP_HTTP_BODY_BYTES: usize = 128 * 1024;
 // MCP recommends duplicating structured output as serialized text for older
 // clients. The response budget therefore accounts for a maximally escaped
-// memory concept in both representations while remaining strictly bounded.
-const MAX_MCP_BRIDGE_RESPONSE_BYTES: usize = 384 * 1024;
+// 1 MiB computation result in both representations while remaining bounded.
+const MAX_MCP_BRIDGE_RESPONSE_BYTES: usize = 8 * 1024 * 1024;
 const MAX_MCP_STRUCTURED_OUTPUT_BYTES: usize = 24 * 1024;
 #[cfg(test)]
 const MAX_AGENT_TOOL_CATALOG_BYTES: usize = 64 * 1024;
@@ -3994,6 +3994,24 @@ mod tests {
             "nextCursor": null,
         }));
         let serialized = serde_json::to_vec(&result).expect("serialize maximum memory result");
+
+        assert!(
+            serialized.len().saturating_add(8 * 1024) <= MAX_MCP_BRIDGE_RESPONSE_BYTES,
+            "response budget must include the JSON-RPC and transport envelope"
+        );
+    }
+
+    #[test]
+    fn maximum_process_result_fits_the_compatibility_response_budget() {
+        const MAX_PROCESS_RESULT_BYTES: usize = 1024 * 1024;
+        let result = CallToolResult::structured(json!({
+            "wikiId": Uuid::new_v4(),
+            "concepts": [{
+                "bodyMarkdown": "\\".repeat(MAX_PROCESS_RESULT_BYTES),
+            }],
+            "nextCursor": null,
+        }));
+        let serialized = serde_json::to_vec(&result).expect("serialize maximum process result");
 
         assert!(
             serialized.len().saturating_add(8 * 1024) <= MAX_MCP_BRIDGE_RESPONSE_BYTES,

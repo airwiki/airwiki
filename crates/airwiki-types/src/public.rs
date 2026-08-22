@@ -401,12 +401,17 @@ impl PublicBrowsePage {
             return Err(PublicContractError::InvalidLimit);
         }
         let mut previous_concept = requested_after;
+        let legacy_protocol = request.protocol_version == PUBLIC_BROWSE_PROTOCOL;
         for concept in &self.concepts {
             if concept.publisher_id != publisher_id
                 || concept.collection_id != request.collection_id
                 || concept.tags.len() > 64
                 || previous_concept.is_some_and(|previous| concept.concept_id <= previous)
-                || concept.lifecycle_status.as_deref() != Some("stable")
+                || if legacy_protocol {
+                    concept.lifecycle_status.is_some()
+                } else {
+                    concept.lifecycle_status.as_deref() != Some("stable")
+                }
             {
                 return Err(PublicContractError::TooManyItems);
             }
@@ -425,10 +430,20 @@ impl PublicBrowsePage {
                 validate_text(tag, 64)?;
             }
         }
-        if next_cursor.is_some()
-            && (self.concepts.is_empty()
-                || next_cursor != self.concepts.last().map(|concept| concept.concept_id))
-        {
+        let invalid_next_cursor = if legacy_protocol {
+            next_cursor.is_some_and(|next| {
+                requested_after.is_some_and(|previous| next <= previous)
+                    || self
+                        .concepts
+                        .last()
+                        .is_some_and(|concept| next < concept.concept_id)
+            })
+        } else {
+            next_cursor.is_some()
+                && (self.concepts.is_empty()
+                    || next_cursor != self.concepts.last().map(|concept| concept.concept_id))
+        };
+        if invalid_next_cursor {
             return Err(PublicContractError::InvalidLimit);
         }
         crate::shared_wiki::validate_workspace_response(
@@ -746,5 +761,48 @@ mod tests {
         };
 
         assert!(request.validate().is_err());
+    }
+
+    #[test]
+    fn legacy_public_browse_accepts_a_cursor_past_filtered_concepts() {
+        let publisher_id = "publisher";
+        let collection_id = Uuid::new_v4();
+        let concept_id = Uuid::from_u128(2);
+        let request = PublicBrowseRequest {
+            protocol_version: PUBLIC_BROWSE_PROTOCOL.to_owned(),
+            request_id: Uuid::new_v4(),
+            collection_id,
+            cursor: Some(Uuid::from_u128(1).to_string()),
+            target_concept_id: None,
+            graph_cursor: None,
+            page: None,
+            limit: 2,
+        };
+        let page = PublicBrowsePage {
+            protocol_version: request.protocol_version.clone(),
+            request_id: request.request_id,
+            manifest_sequence: 1,
+            concepts: vec![PublicConceptSummary {
+                publisher_id: publisher_id.to_owned(),
+                collection_id,
+                concept_id,
+                concept_type: ConceptType::Document,
+                title: "Legacy concept".to_owned(),
+                description: String::new(),
+                language: "en".to_owned(),
+                tags: Vec::new(),
+                summary: "Bounded summary".to_owned(),
+                logical_resource_uri: "urn:airwiki:legacy".to_owned(),
+                source_revision: 1,
+                updated_at: Utc::now(),
+                lifecycle_status: None,
+                assurance: None,
+            }],
+            next_cursor: Some(Uuid::from_u128(3).to_string()),
+            workspace: None,
+            document: None,
+        };
+
+        assert!(page.validate_for(&request, publisher_id).is_ok());
     }
 }

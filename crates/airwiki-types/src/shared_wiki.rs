@@ -408,7 +408,13 @@ where
     }
     if let Some(document) = document {
         validate_document(document)?;
-        if requested_page.is_none_or(|page| page.page != document.descriptor.page) {
+        if requested_page.is_none_or(|page| {
+            page.page != document.descriptor.page
+                || page
+                    .expected_fingerprint
+                    .as_deref()
+                    .is_some_and(|expected| document.descriptor.fingerprint.as_str() != expected)
+        }) {
             return Err(SharedWikiContractError::InvalidPage);
         }
     } else if requested_page.is_some() {
@@ -669,6 +675,34 @@ mod tests {
         assert!(response.validate_for(&request).is_ok());
 
         response.document.as_mut().unwrap().truncated = true;
+        assert_eq!(
+            response.validate_for(&request),
+            Err(SharedWikiContractError::InvalidPage)
+        );
+    }
+
+    #[test]
+    fn rejects_a_document_that_does_not_match_the_requested_fingerprint() {
+        let mut request = SharedWikiBrowseRequest::new(Uuid::new_v4(), None, 1);
+        let mut response = page(&request);
+        let descriptor = response
+            .workspace
+            .as_ref()
+            .and_then(|workspace| workspace.documents.first())
+            .cloned()
+            .unwrap();
+        request.page = Some(PublishedWikiPageRequest {
+            page: descriptor.page,
+            expected_fingerprint: Some("c".repeat(64)),
+        });
+        response.document = Some(PublishedWikiDocument {
+            descriptor,
+            body_markdown: "Stale published page".to_owned(),
+            metadata: Vec::new(),
+            backlinks: Vec::new(),
+            truncated: false,
+        });
+
         assert_eq!(
             response.validate_for(&request),
             Err(SharedWikiContractError::InvalidPage)

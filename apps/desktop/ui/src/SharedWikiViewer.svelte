@@ -45,9 +45,7 @@
   let renderedWikiIdentity: string | null = null;
 
   $: synchronizeWikiSelection(browse ? browseIdentity(browse) : null);
-  $: descriptors = browse
-    ? [...browse.reservedPages, ...browse.documents].sort((left, right) => left.logicalPath.localeCompare(right.logicalPath))
-    : [];
+  $: descriptors = browse ? availableDescriptors(browse) : [];
   $: selectedDescriptor = descriptors.find((descriptor) => samePage(descriptor.page, selectedPage))
     ?? descriptorForInitialConcept(descriptors)
     ?? descriptors[0]
@@ -68,7 +66,7 @@
     && browse.workspaceSupported
     && !structureLoading
     && initialConceptId
-    && !browse.documents.some((descriptor) => descriptor.page.kind === 'concept' && descriptor.page.conceptId === initialConceptId)
+    && !descriptors.some((descriptor) => descriptor.page.kind === 'concept' && descriptor.page.conceptId === initialConceptId)
   );
   $: if (!loading && browse && !unavailable()) {
     const wikiKey = browseIdentity(browse);
@@ -98,6 +96,17 @@
   ): RemoteWikiPageDescriptorSummary | null {
     if (!initialConceptId) return null;
     return available.find((descriptor) => descriptor.page.kind === 'concept' && descriptor.page.conceptId === initialConceptId) ?? null;
+  }
+
+  function availableDescriptors(
+    value: NearbyBrowseSummary | PublicBrowseSummary
+  ): RemoteWikiPageDescriptorSummary[] {
+    const descriptors = [...value.reservedPages, ...value.documents];
+    const fetchedDescriptor = value.page?.descriptor;
+    if (fetchedDescriptor && !descriptors.some((descriptor) => samePage(descriptor.page, fetchedDescriptor.page))) {
+      descriptors.push(fetchedDescriptor);
+    }
+    return descriptors.sort((left, right) => left.logicalPath.localeCompare(right.logicalPath));
   }
 
   function pageKey(page: RemoteWikiPageInput | null): string {

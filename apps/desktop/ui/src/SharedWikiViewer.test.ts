@@ -140,6 +140,53 @@ describe('SharedWikiViewer', () => {
     );
   });
 
+  it('renders a requested page before its outline page arrives', async () => {
+    const wiki = completePublicWiki();
+    const requestedPage = {
+      page: { kind: 'concept' as const, conceptId: 'concept-z' },
+      logicalPath: 'guides/selected.md',
+      title: 'Selected concept',
+      fingerprint: '9'.repeat(64)
+    };
+    wiki.documents = [];
+    wiki.concepts = [{
+      conceptId: 'concept-z',
+      conceptType: 'Guide',
+      title: 'Selected concept',
+      description: '',
+      language: 'en',
+      tags: [],
+      summary: 'Selected summary.',
+      sourceRevision: 1,
+      lifecycle: 'stable',
+      assurance: null
+    }];
+    wiki.page = {
+      descriptor: requestedPage,
+      blocks: [{ kind: 'paragraph', text: 'The selected page arrived before the outline.' }],
+      metadata: [],
+      backlinks: [],
+      truncated: false
+    };
+
+    render(SharedWikiViewer, {
+      source: 'public',
+      sourceName: 'Public network',
+      browse: wiki,
+      loading: false,
+      structureLoading: false,
+      pageLoading: false,
+      initialConceptId: 'concept-z',
+      t: translate,
+      metadata: () => 'Unverified',
+      onback: vi.fn(),
+      onopenpage: vi.fn()
+    });
+
+    expect(await screen.findByText('The selected page arrived before the outline.')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /guides\/selected\.md/ })).toHaveAttribute('aria-current', 'page');
+  });
+
   it('treats publisher and Wiki IDs as part of the page identity', async () => {
     const firstWiki = publicWiki();
     const { rerender } = render(SharedWikiViewer, {

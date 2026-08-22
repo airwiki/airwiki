@@ -26,6 +26,7 @@ use zip::{CompressionMethod, DateTime, ZipArchive, ZipWriter, write::SimpleFileO
 mod docs;
 mod retrieval;
 mod selector_corpus;
+mod typed_evidence_v3;
 mod windows_msi;
 
 const LICENSE_REPORT: &str = "resources/licenses/THIRD_PARTY_LICENSES.md";
@@ -246,6 +247,86 @@ async fn main() -> Result<()> {
             Some(other) => bail!("unknown selector-corpus command: {other}"),
             None => bail!("missing selector-corpus command; expected `validate`"),
         },
+        "typed-evidence-v3" => match arguments.next().as_deref() {
+            Some("validate-contract") => {
+                ensure!(
+                    arguments.next().is_none(),
+                    "typed-evidence-v3 validate-contract received unexpected arguments"
+                );
+                typed_evidence_v3::validate_contract()
+            }
+            Some("validate-package") => {
+                ensure!(
+                    arguments.next().as_deref() == Some("--package"),
+                    "typed-evidence-v3 validate-package expects `--package <path>`"
+                );
+                let package = arguments
+                    .next()
+                    .context("typed-evidence-v3 validate-package is missing the package path")?;
+                ensure!(
+                    arguments.next().is_none(),
+                    "typed-evidence-v3 validate-package received unexpected arguments"
+                );
+                typed_evidence_v3::validate_package(Path::new(&package)).map(|_| ())
+            }
+            Some("run") => {
+                ensure!(
+                    arguments.next().as_deref() == Some("--package"),
+                    "typed-evidence-v3 run expects `--package <path>` first"
+                );
+                let package = arguments
+                    .next()
+                    .context("typed-evidence-v3 run is missing the package path")?;
+                ensure!(
+                    arguments.next().as_deref() == Some("--candidate"),
+                    "typed-evidence-v3 run expects `--candidate <path>` second"
+                );
+                let candidate = arguments
+                    .next()
+                    .context("typed-evidence-v3 run is missing the candidate path")?;
+                ensure!(
+                    arguments.next().as_deref() == Some("--platform"),
+                    "typed-evidence-v3 run expects `--platform <label>` third"
+                );
+                let platform = arguments
+                    .next()
+                    .context("typed-evidence-v3 run is missing the platform label")?;
+                ensure!(
+                    arguments.next().is_none(),
+                    "typed-evidence-v3 run received unexpected arguments"
+                );
+                typed_evidence_v3::run_candidate(
+                    Path::new(&package),
+                    Path::new(&candidate),
+                    &platform,
+                )
+            }
+            Some("score") => {
+                ensure!(
+                    arguments.next().as_deref() == Some("--package"),
+                    "typed-evidence-v3 score expects `--package <path>` first"
+                );
+                let package = arguments
+                    .next()
+                    .context("typed-evidence-v3 score is missing the package path")?;
+                ensure!(
+                    arguments.next().as_deref() == Some("--report"),
+                    "typed-evidence-v3 score expects `--report <path>` second"
+                );
+                let report = arguments
+                    .next()
+                    .context("typed-evidence-v3 score is missing the report path")?;
+                ensure!(
+                    arguments.next().is_none(),
+                    "typed-evidence-v3 score received unexpected arguments"
+                );
+                typed_evidence_v3::score(Path::new(&package), Path::new(&report))
+            }
+            Some(other) => bail!("unknown typed-evidence-v3 command: {other}"),
+            None => bail!(
+                "missing typed-evidence-v3 command; expected `validate-contract`, `run`, `validate-package` or `score`"
+            ),
+        },
         "licenses" => match arguments.next().as_deref() {
             Some("generate") => generate_licenses(false),
             Some("check") => generate_licenses(true),
@@ -331,6 +412,16 @@ async fn main() -> Result<()> {
                 "cargo run --locked -p xtask -- retrieval evaluate --embedding-snapshot <directory> --relevance-snapshot <directory>"
             );
             println!("cargo run --locked -p xtask -- selector-corpus validate");
+            println!("cargo run --locked -p xtask -- typed-evidence-v3 validate-contract");
+            println!(
+                "cargo run --locked -p xtask -- typed-evidence-v3 validate-package --package <directory>"
+            );
+            println!(
+                "cargo run --locked -p xtask -- typed-evidence-v3 run --package <directory> --candidate <path> --platform <macos_arm64|windows_x64>"
+            );
+            println!(
+                "cargo run --locked -p xtask -- typed-evidence-v3 score --package <directory> --report <path>"
+            );
             println!("cargo run --locked -p xtask -- licenses generate");
             println!("cargo run --locked -p xtask -- licenses check");
             println!("cargo run --locked -p xtask -- ui-bindings generate");

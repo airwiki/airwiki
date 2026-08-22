@@ -637,10 +637,18 @@ struct KnowledgeBundleSummary {
     wiki_name: String,
     version: String,
     status: KnowledgeBundleStatus,
+    reserved_pages: Vec<KnowledgeReservedPageSummary>,
     concepts: Vec<KnowledgeConceptSummary>,
     links: Vec<KnowledgeGraphLinkSummary>,
     error_count: usize,
     warning_count: usize,
+}
+
+#[derive(Clone, Debug, Serialize, PartialEq, Eq, TS)]
+#[serde(rename_all = "camelCase")]
+struct KnowledgeReservedPageSummary {
+    page: KnowledgePageInput,
+    fingerprint: String,
 }
 
 #[derive(Clone, Debug, Serialize, PartialEq, Eq, TS)]
@@ -778,7 +786,7 @@ struct RemoteWikiBrowseInput {
     page: Option<RemoteWikiPageRequestInput>,
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 struct CachedKnowledgePage {
     page_id: KnowledgePageId,
     fingerprint: String,
@@ -2995,16 +3003,18 @@ async fn load_wiki_page(
     request_id: String,
     wiki_id: String,
     page: KnowledgePageInput,
+    expected_fingerprint: String,
 ) -> Result<(), UiError> {
     let collection_id = parse_uuid(&wiki_id)?;
     let request_id = parse_uuid(&request_id)?;
-    let cached = runtime
-        .knowledge_fingerprints
-        .lock()
-        .map_err(|_| UiError::internal())?
-        .get(&(collection_id, page))
-        .cloned()
-        .ok_or_else(|| UiError::invalid("currentKnowledgeSnapshotRequired"))?;
+    validate_sha256_fingerprint(&expected_fingerprint, "invalidKnowledgeFingerprint")?;
+    let cached = {
+        let fingerprints = runtime
+            .knowledge_fingerprints
+            .lock()
+            .map_err(|_| UiError::internal())?;
+        current_knowledge_page(&fingerprints, collection_id, &page, &expected_fingerprint)?
+    };
     {
         let mut requests = runtime.requests.lock().map_err(|_| UiError::internal())?;
         track_latest_knowledge_page_request(&mut requests, collection_id, request_id);
@@ -3015,7 +3025,7 @@ async fn load_wiki_page(
             request_id,
             collection_id,
             page_id: cached.page_id,
-            expected_fingerprint: cached.fingerprint,
+            expected_fingerprint,
         },
     )
     .await;
@@ -3565,13 +3575,35 @@ fn parse_uuid(value: &str) -> Result<Uuid, UiError> {
     Uuid::parse_str(value).map_err(|_| UiError::invalid("invalidIdentifier"))
 }
 
+fn validate_sha256_fingerprint(
+    value: &str,
+    invalid_message_key: &'static str,
+) -> Result<(), UiError> {
+    if value.len() != 64 || !value.bytes().all(|byte| byte.is_ascii_hexdigit()) {
+        return Err(UiError::invalid(invalid_message_key));
+    }
+    Ok(())
+}
+
+fn current_knowledge_page(
+    fingerprints: &HashMap<(Uuid, KnowledgePageInput), CachedKnowledgePage>,
+    collection_id: Uuid,
+    page: &KnowledgePageInput,
+    expected_fingerprint: &str,
+) -> Result<CachedKnowledgePage, UiError> {
+    let cached = fingerprints
+        .get(&(collection_id, page.clone()))
+        .filter(|cached| cached.fingerprint == expected_fingerprint)
+        .cloned()
+        .ok_or_else(|| UiError::invalid("currentKnowledgeSnapshotRequired"))?;
+    Ok(cached)
+}
+
 fn remote_page_request(
     input: RemoteWikiPageRequestInput,
 ) -> Result<PublishedWikiPageRequest, UiError> {
-    if input.expected_fingerprint.as_deref().is_some_and(|value| {
-        value.len() != 64 || !value.bytes().all(|byte| byte.is_ascii_hexdigit())
-    }) {
-        return Err(UiError::invalid("invalidRemoteWikiFingerprint"));
+    if let Some(value) = input.expected_fingerprint.as_deref() {
+        validate_sha256_fingerprint(value, "invalidRemoteWikiFingerprint")?;
     }
     let page = match input.page {
         RemoteWikiPageInput::Index => PublishedWikiPageId::Index,
@@ -4166,6 +4198,10 @@ impl AppSnapshot {
                             KnowledgeBundleState::Ready => KnowledgeBundleStatus::Ready,
                             KnowledgeBundleState::Updating => KnowledgeBundleStatus::Updating,
                         },
+                        reserved_pages: knowledge_reserved_pages(
+                            bundle.index_fingerprint,
+                            bundle.log_fingerprint,
+                        ),
                         concepts: bundle
                             .concepts
                             .into_iter()
@@ -4221,6 +4257,7 @@ impl AppSnapshot {
                         wiki_name: String::new(),
                         version: String::new(),
                         status: KnowledgeBundleStatus::Failed,
+                        reserved_pages: Vec::new(),
                         concepts: Vec::new(),
                         links: Vec::new(),
                         error_count: 1,
@@ -4630,6 +4667,26 @@ fn update_wiki_scan(
     }
 }
 
+fn knowledge_reserved_pages(
+    index_fingerprint: Option<String>,
+    log_fingerprint: Option<String>,
+) -> Vec<KnowledgeReservedPageSummary> {
+    let mut pages = Vec::with_capacity(2);
+    if let Some(fingerprint) = index_fingerprint {
+        pages.push(KnowledgeReservedPageSummary {
+            page: KnowledgePageInput::Index,
+            fingerprint,
+        });
+    }
+    if let Some(fingerprint) = log_fingerprint {
+        pages.push(KnowledgeReservedPageSummary {
+            page: KnowledgePageInput::Log,
+            fingerprint,
+        });
+    }
+    pages
+}
+
 fn invalidate_knowledge_for_wiki(
     snapshot: &mut AppSnapshot,
     collection_id: Uuid,
@@ -4654,6 +4711,7 @@ fn invalidate_knowledge_for_wiki(
             wiki_name: knowledge.wiki_name,
             version: String::new(),
             status: KnowledgeBundleStatus::Updating,
+            reserved_pages: Vec::new(),
             concepts: Vec::new(),
             links: Vec::new(),
             error_count: 0,
@@ -5684,6 +5742,7 @@ fn ui_bindings_source() -> String {
         exported_declaration::<OkfWarningSummary>(&config),
         exported_declaration::<KnowledgeGraphLinkSummary>(&config),
         exported_declaration::<KnowledgeBundleStatus>(&config),
+        exported_declaration::<KnowledgeReservedPageSummary>(&config),
         exported_declaration::<KnowledgeBundleSummary>(&config),
         exported_declaration::<KnowledgePageStatus>(&config),
         exported_declaration::<KnowledgePageSummary>(&config),
@@ -6194,6 +6253,52 @@ mod tests {
     fn background_mode_requires_the_exact_flag() {
         assert!(launch_in_background(["--background"]));
         assert!(!launch_in_background(["background", "--foreground"]));
+    }
+
+    #[test]
+    fn knowledge_reserved_pages_omit_optional_files_that_are_not_published() {
+        let pages = knowledge_reserved_pages(None, None);
+
+        assert!(pages.is_empty());
+    }
+
+    #[test]
+    fn knowledge_reserved_pages_preserve_each_available_revision() {
+        let pages = knowledge_reserved_pages(Some("a".repeat(64)), Some("b".repeat(64)));
+
+        assert_eq!(
+            pages,
+            [
+                KnowledgeReservedPageSummary {
+                    page: KnowledgePageInput::Index,
+                    fingerprint: "a".repeat(64),
+                },
+                KnowledgeReservedPageSummary {
+                    page: KnowledgePageInput::Log,
+                    fingerprint: "b".repeat(64),
+                },
+            ]
+        );
+    }
+
+    #[test]
+    fn current_knowledge_page_rejects_a_revision_not_shown_to_the_user() {
+        let wiki_id = Uuid::new_v4();
+        let page = KnowledgePageInput::Concept {
+            path: "architecture/overview.md".to_owned(),
+        };
+        let fingerprints = HashMap::from([(
+            (wiki_id, page.clone()),
+            CachedKnowledgePage {
+                page_id: KnowledgePageId::Concept(Uuid::new_v4()),
+                fingerprint: "a".repeat(64),
+            },
+        )]);
+
+        let error = current_knowledge_page(&fingerprints, wiki_id, &page, &"b".repeat(64))
+            .expect_err("a stale page revision must fail closed");
+
+        assert_eq!(error.message_key, "currentKnowledgeSnapshotRequired");
     }
 
     #[test]
@@ -7207,6 +7312,7 @@ mod tests {
             wiki_name: "Memory".to_owned(),
             version: "before-update".to_owned(),
             status: KnowledgeBundleStatus::Ready,
+            reserved_pages: Vec::new(),
             concepts: Vec::new(),
             links: Vec::new(),
             error_count: 0,
@@ -7267,6 +7373,7 @@ mod tests {
             wiki_name: "Open wiki".to_owned(),
             version: "current".to_owned(),
             status: KnowledgeBundleStatus::Ready,
+            reserved_pages: Vec::new(),
             concepts: Vec::new(),
             links: Vec::new(),
             error_count: 0,
@@ -7297,6 +7404,7 @@ mod tests {
             wiki_name: "First wiki".to_owned(),
             version: "current".to_owned(),
             status: KnowledgeBundleStatus::Updating,
+            reserved_pages: Vec::new(),
             concepts: Vec::new(),
             links: Vec::new(),
             error_count: 0,

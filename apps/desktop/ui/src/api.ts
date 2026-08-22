@@ -251,9 +251,13 @@ export async function loadWikiBundle(wikiId: string): Promise<string> {
   return requestId;
 }
 
-export async function loadWikiPage(wikiId: string, page: KnowledgePageInput): Promise<string> {
+export async function loadWikiPage(
+  wikiId: string,
+  page: KnowledgePageInput,
+  expectedFingerprint: string
+): Promise<string> {
   const requestId = crypto.randomUUID();
-  await invoke('load_wiki_page', { requestId, wikiId, page });
+  await invoke('load_wiki_page', { requestId, wikiId, page, expectedFingerprint });
   return requestId;
 }
 

@@ -7,7 +7,7 @@
   import type { LocalePreference } from './generated/ui-contract';
 
   export let bundle: KnowledgeBundleSummary;
-  export let onselect: (page: KnowledgePageInput) => void;
+  export let onselect: (page: KnowledgePageInput, expectedFingerprint: string) => void;
   export let locale: LocalePreference;
 
   let container: HTMLDivElement;
@@ -29,15 +29,18 @@
     return bundle.concepts.find((concept) => concept.page.kind === 'concept' && concept.page.path === page.path)?.title ?? t('knowledge-concept-fallback');
   }
 
-  function graphElements(): ElementDefinition[] {
-    const pages: KnowledgePageInput[] = [
-      { kind: 'index' },
-      { kind: 'log' },
-      ...bundle.concepts.map((concept) => concept.page)
+  function pageEntries(): Array<{ page: KnowledgePageInput; fingerprint: string }> {
+    return [
+      ...bundle.reservedPages,
+      ...bundle.concepts.map((concept) => ({ page: concept.page, fingerprint: concept.fingerprint }))
     ];
-    const nodeIds = new Set(pages.map(pageKey));
-    const nodes: ElementDefinition[] = pages.map((page) => ({
-      data: { id: pageKey(page), label: pageTitle(page), page, kind: page.kind }
+  }
+
+  function graphElements(): ElementDefinition[] {
+    const entries = pageEntries();
+    const nodeIds = new Set(entries.map(({ page }) => pageKey(page)));
+    const nodes: ElementDefinition[] = entries.map(({ page, fingerprint }) => ({
+      data: { id: pageKey(page), label: pageTitle(page), page, fingerprint, kind: page.kind }
     }));
     const edges: ElementDefinition[] = bundle.links
       .filter((link) => nodeIds.has(pageKey(link.source)) && nodeIds.has(pageKey(link.target)))
@@ -54,18 +57,19 @@
 
   function graphRoots(): string[] {
     const targets = new Set(bundle.links.map((link) => pageKey(link.target)));
-    const roots = ['index', 'log', ...bundle.concepts.map((concept) => pageKey(concept.page))]
+    const pages = pageEntries().map(({ page }) => pageKey(page));
+    const roots = pages
       .filter((nodeId) => !targets.has(nodeId));
-    return roots.length > 0 ? roots : ['index'];
+    return roots.length > 0 ? roots : pages.slice(0, 1);
   }
 
-  function selectPage(page: KnowledgePageInput) {
+  function selectPage(page: KnowledgePageInput, expectedFingerprint: string) {
     graph?.elements().unselect();
     graph?.edges().removeClass('related');
     const node = graph?.getElementById(pageKey(page));
     node?.select();
     node?.connectedEdges().addClass('related');
-    onselect(page);
+    onselect(page, expectedFingerprint);
   }
 
   function renderGraph() {
@@ -122,7 +126,8 @@
       requestAnimationFrame(renderGraph);
       graph.on('tap', 'node', (event) => {
         const page = event.target.data('page') as KnowledgePageInput | undefined;
-        if (page) selectPage(page);
+        const fingerprint = event.target.data('fingerprint') as string | undefined;
+        if (page && fingerprint) selectPage(page, fingerprint);
       });
     }).catch(() => { loadFailed = true; });
 
@@ -140,7 +145,7 @@
 <div class="graph-shell">
   <div class="graph-heading">
     <div><p>{t('desktop-graph-verified')}</p><h3>{bundle.wikiName}</h3></div>
-    <small>{t('knowledge-graph-counts', { nodes: bundle.concepts.length + 2, links: bundle.links.length })}</small>
+    <small>{t('knowledge-graph-counts', { nodes: bundle.concepts.length + bundle.reservedPages.length, links: bundle.links.length })}</small>
   </div>
   {#if loadFailed}
     <p class="graph-error" role="status">{t('desktop-graph-error')}</p>
@@ -148,10 +153,11 @@
     <div class="graph-canvas" bind:this={container} role="img" aria-label={t('desktop-graph-map-label', { wiki: bundle.wikiName })}></div>
   {/if}
   <div class="graph-index" aria-label={t('desktop-graph-pages-label')}>
-    <button onmousedown={focusChoiceWithoutScroll} onclick={() => selectPage({ kind: 'index' })}>{t('knowledge-index-title')}</button>
-    <button onmousedown={focusChoiceWithoutScroll} onclick={() => selectPage({ kind: 'log' })}>{t('knowledge-recovery-history')}</button>
+    {#each bundle.reservedPages as reserved (pageKey(reserved.page))}
+      <button onmousedown={focusChoiceWithoutScroll} onclick={() => selectPage(reserved.page, reserved.fingerprint)}>{pageTitle(reserved.page)}</button>
+    {/each}
     {#each bundle.concepts as concept (concept.title)}
-      <button onmousedown={focusChoiceWithoutScroll} onclick={() => selectPage(concept.page)}>{concept.title}</button>
+      <button onmousedown={focusChoiceWithoutScroll} onclick={() => selectPage(concept.page, concept.fingerprint)}>{concept.title}</button>
     {/each}
   </div>
 </div>

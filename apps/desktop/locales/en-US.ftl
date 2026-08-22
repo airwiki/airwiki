@@ -246,8 +246,8 @@ onboarding-complete-body = You can change any option later. AirWiki will still a
 
 search-placeholder = What do you want to know?
 search-empty-title = No matching evidence found
-search-empty-local-body = We searched this device and available authorized devices. Try words that appear in the published content.
-search-empty-public-body = We searched this device, available authorized devices, and the public network. Try words that appear in the published content.
+search-empty-local-body = We searched this device and available authorized devices. Try asking a complete question about the evidence you need.
+search-empty-public-body = We searched this device, available authorized devices, and the public network. Try asking a complete question about the evidence you need.
 search-error-title = This search could not be completed
 desktop-search-preparing-title = Preparing local search
 desktop-search-preparing-body = AirWiki is activating the local AI that searches your wikis. You can type now and submit when its status changes to Ready.

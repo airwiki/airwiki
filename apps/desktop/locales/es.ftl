@@ -246,8 +246,8 @@ onboarding-complete-body = Puedes cambiar cualquier opción más adelante. AirWi
 
 search-placeholder = ¿Qué quieres saber?
 search-empty-title = No encontramos evidencia coincidente
-search-empty-local-body = Buscamos en este equipo y en los equipos autorizados disponibles. Prueba palabras que aparezcan en el contenido publicado.
-search-empty-public-body = Buscamos en este equipo, en los equipos autorizados disponibles y en la red pública. Prueba palabras que aparezcan en el contenido publicado.
+search-empty-local-body = Buscamos en este equipo y en los equipos autorizados disponibles. Prueba formular una pregunta completa sobre la evidencia que necesitas.
+search-empty-public-body = Buscamos en este equipo, en los equipos autorizados disponibles y en la red pública. Prueba formular una pregunta completa sobre la evidencia que necesitas.
 search-error-title = No se pudo completar esta búsqueda
 desktop-search-preparing-title = Preparando la búsqueda local
 desktop-search-preparing-body = AirWiki está activando la IA local que busca en tus wikis. Puedes escribir la consulta ahora; podrás enviarla cuando el estado cambie a Listo.

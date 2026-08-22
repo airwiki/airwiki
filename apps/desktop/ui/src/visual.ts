@@ -126,6 +126,7 @@ const bridge: DevelopmentBridge = {
         requestId, status: 'available', peerId: sharedPeerId, wikiId: sharedWikiId,
         wikiName: 'Guía operativa compartida', okfCompatibility: { kind: 'declaredV02' }, nextCursor: null,
         workspaceSupported: true,
+        workspaceFingerprint: '0'.repeat(64),
         reservedPages: [
           { page: { kind: 'index' }, logicalPath: 'index.md', title: 'Índice', fingerprint: 'a'.repeat(64) },
           { page: { kind: 'log' }, logicalPath: 'log.md', title: 'Historial', fingerprint: 'b'.repeat(64) }

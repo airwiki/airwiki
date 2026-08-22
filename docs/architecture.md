@@ -149,6 +149,9 @@ tray is known to be operational; all foreground launches start visible.
   `/airwiki/shared-wiki-browse/2.0.0` and automatically reconstructs the complete
   published OKF workspace from bounded frames: hierarchy, root `index.md` and
   `log.md`, stable concept pages, metadata, and verified internal graph edges.
+  Every frame carries the fingerprint of the complete published generation;
+  the desktop refuses to merge generations and rejects graph edges whose pages
+  are absent after reconstruction completes.
   Version 1 remains a summary-only compatibility fallback. Neither path returns
   a peer-wide Wiki catalog, original source files or paths, chunks, embeddings,
   or the owner's operational search index.

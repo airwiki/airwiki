@@ -104,6 +104,7 @@ impl PublicSourceBackend for PublicFixtureBackend {
                 }],
                 next_cursor: None,
                 workspace: Some(airwiki_types::PublishedWikiWorkspacePage {
+                    workspace_fingerprint: "b".repeat(64),
                     reserved_pages: Vec::new(),
                     documents: vec![airwiki_types::PublishedWikiPageDescriptor {
                         page: airwiki_types::PublishedWikiPageId::Concept {

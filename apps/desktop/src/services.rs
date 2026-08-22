@@ -1045,6 +1045,7 @@ fn published_workspace_page(
 
     Ok((
         PublishedWikiWorkspacePage {
+            workspace_fingerprint: bundle.fingerprint,
             reserved_pages,
             documents,
             links,
@@ -7610,9 +7611,20 @@ mod tests {
                 .map(|document| document.body_markdown.as_str()),
             Some(public_body.as_str())
         );
+        let lan_workspace = lan_page.workspace.as_ref().unwrap();
+        assert_ne!(
+            lan_workspace.workspace_fingerprint,
+            public_workspace_snapshot.workspace_fingerprint
+        );
         assert_eq!(
-            lan_page.workspace.as_ref(),
-            Some(&public_workspace_snapshot)
+            lan_workspace.reserved_pages,
+            public_workspace_snapshot.reserved_pages
+        );
+        assert_eq!(lan_workspace.documents, public_workspace_snapshot.documents);
+        assert_eq!(lan_workspace.links, public_workspace_snapshot.links);
+        assert_eq!(
+            lan_workspace.next_graph_cursor,
+            public_workspace_snapshot.next_graph_cursor
         );
         drop(complete_lan);
 

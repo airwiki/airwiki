@@ -72,7 +72,7 @@ Controls are not considered effective end to end until the
 | Threat | Design control | Residual risk / validation |
 | --- | --- | --- |
 | Unauthorized LAN peer queries data, learns listener endpoints, restores stale endpoints or steers private-network probes | Noise, SAS pairing, trust state, per-collection grants and rate limits; the wildcard listener is never announced, a dedicated bounded exchange sends OS-inspected private/on-link endpoints from active non-point-to-point interfaces only after durable trust, receivers accept only the IP observed on that exact authenticated connection, and session-scoped monotonic revisions reject delayed state | Excessive grants still disclose data; an endpoint is discovery data only and every redial authenticates the expected PeerId; test pre-trust non-disclosure, multi-interface selection, stale revision and cross-host endpoint rejection, interrupted retry, and the full grant and revocation matrix |
-| LAN browsing enumerates more knowledge than the selected result authorized | Browsing accepts one Wiki ID obtained from an authorized result, revalidates trust, the exact per-Wiki grant, policy, OKF compatibility and publication under a disclosure lease before every bounded frame or page, and exposes only that Wiki's complete published OKF workspace | A reader can retain the complete published knowledge of a granted Wiki; grant only Wikis intended for that device |
+| LAN browsing enumerates more knowledge than the selected result authorized | Browsing accepts one Wiki ID obtained from an authorized result, revalidates trust, the exact per-Wiki grant, policy, OKF compatibility and publication under a disclosure lease before every bounded frame or page, exposes only that Wiki's complete published OKF workspace, refuses mixed-generation frames and rejects dangling graph edges | A reader can retain the complete published knowledge of a granted Wiki; grant only Wikis intended for that device |
 | Private or stale content reaches a public reader | Separate opt-in, stable reviewed-publication checks, fingerprint-bound page reads, signed sequence and fingerprint, final disclosure lease, immediate owner-side revocation | A third party can retain previously returned search metadata or published OKF content |
 | Malicious index redirects or ranks content | Expected index PeerId is pinned; owner manifests are independently signed; index rank selects routes but never final ranking | An index can omit publishers, delay tombstones, or degrade availability until replaced |
 | Public queries exhaust an owner | Three-index, 64-candidate, 12-peer and two-collection caps; bounded payloads, semaphores, per-peer rate limits with a 1,024-identity window cap, a 1 s index stage, a 3 s cold owner-connection budget and a separate 800 ms owner-response budget | Bounded connection setup, local verification and ranking add work after catalog selection; distributed abuse can still consume bounded relay and inference capacity |
@@ -144,8 +144,10 @@ Controls are not considered effective end to end until the
   rollout; neither version broadens the Wiki grant.
 - Public catalog and search advertise v2 assurance metadata and fall back to
   v1 during rollout. Public browse advertises v4 for the complete published OKF
-  workspace and fingerprint-bound pages, then falls back through v3 exact-result
-  anchors and the cursor-compatible v2 and v1 contracts. The selected concept is
+  workspace, generation-bound frames and fingerprint-bound pages, then falls
+  back through v3 exact-result anchors and the cursor-compatible v2 and v1
+  contracts. Frames from different generations are never merged, and graph
+  edges must resolve to reconstructed published pages. The selected concept is
   revalidated after every adaptation. Absent legacy metadata is unknown, never
   verified. No version bypasses stable publication. Public browse cannot return
   original source files or paths, chunks, embeddings, the operational index, or

@@ -105,6 +105,35 @@ if (destination === 'library') {
     address: '', trust: 'trusted', activity: 'notObserved', sasWords: null,
     grantedWikiIds: []
   }];
+  snapshot.integrations = {
+    externalAiWikiCount: 1,
+    integrations: [{
+      client: 'chatGptDesktop', status: 'configured', detectedVersion: '1.2026.210',
+      activityRecent: true, restartRequired: false, mcpSetup: null,
+      workflowGuide: { kind: 'nativeSkill', status: 'installed', version: '1', restartRequired: false }
+    }, {
+      client: 'claudeDesktop', status: 'available', detectedVersion: '0.14.2',
+      activityRecent: false, restartRequired: false, mcpSetup: null,
+      workflowGuide: { kind: 'mcpInstructions', status: 'builtIn', version: '1', restartRequired: false }
+    }, {
+      client: 'claudeCode', status: 'configured', detectedVersion: '2.1.227',
+      activityRecent: true, restartRequired: false, mcpSetup: null,
+      workflowGuide: { kind: 'nativeSkill', status: 'installed', version: '1', restartRequired: false }
+    }, {
+      client: 'geminiCli', status: 'updateAvailable', detectedVersion: '0.12.0',
+      activityRecent: false, restartRequired: true, mcpSetup: null,
+      workflowGuide: { kind: 'nativeSkill', status: 'updateAvailable', version: '2', restartRequired: true }
+    }, {
+      client: 'genericMcp', status: 'configured', detectedVersion: null,
+      activityRecent: false, restartRequired: false,
+      mcpSetup: { command: '/Applications/AirWiki.app/Contents/MacOS/airwiki-mcp-bridge', args: ['--client', 'generic-mcp'] },
+      workflowGuide: { kind: 'mcpInstructions', status: 'builtIn', version: '1', restartRequired: false }
+    }]
+  };
+  snapshot.applicationAccess = [{
+    appId: 'codex', displayName: 'Codex', producer: 'codex/1.2', active: true,
+    ownedWikiCount: 1, managedBytes: 32768, grants: []
+  }];
 }
 if (destination === 'graph') {
   const wiki = snapshot.wikis[0];

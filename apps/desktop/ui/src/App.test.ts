@@ -295,7 +295,7 @@ describe('AirWiki wiki workspace', () => {
       }]
     };
     render(App);
-    await fireEvent.click(await screen.findByRole('button', { name: 'Apps de IA: Disponible' }));
+    await fireEvent.click(await screen.findByRole('button', { name: 'Apps de IA: 1 conectada' }));
 
     expect(screen.getByText('Cliente MCP genérico')).toBeInTheDocument();
     const setup = screen.getByText(/synthetic\/managed\/airwiki-mcp-bridge/);
@@ -604,8 +604,10 @@ describe('AirWiki wiki workspace', () => {
 
     const dialog = screen.getByRole('dialog', { name: 'Conexiones' });
     expect(within(dialog).getByText('1 disponible ahora de 2 conocidos')).toBeInTheDocument();
-    expect(within(dialog).getByText('macOS · Conexión activa')).toBeInTheDocument();
-    expect(within(dialog).getByText('Windows · Se conectará cuando sea necesario')).toBeInTheDocument();
+    expect(within(dialog).getByRole('img', { name: 'macOS' })).toBeInTheDocument();
+    expect(within(dialog).getByText('Conexión activa')).toBeInTheDocument();
+    expect(within(dialog).getByRole('img', { name: 'Windows' })).toBeInTheDocument();
+    expect(within(dialog).getByText('Se conectará cuando sea necesario')).toBeInTheDocument();
   });
 
   it('distinguishes an enabled LAN channel from a granted device', async () => {
@@ -630,9 +632,11 @@ describe('AirWiki wiki workspace', () => {
     await fireEvent.click(screen.getByRole('switch', { name: 'Equipos cercanos' }));
 
     expect(screen.getByText('Red privada (LAN)')).toBeInTheDocument();
-    expect(screen.getByText('Windows · Conexión activa')).toBeInTheDocument();
+    expect(screen.getByText('Conexión activa')).toBeInTheDocument();
     expect(screen.getByText(/AirWiki no revela el nombre ni el sistema operativo/)).toBeInTheDocument();
-    await fireEvent.click(screen.getByRole('checkbox', { name: 'RUSTICO' }));
+    const deviceGrant = screen.getByRole('checkbox', { name: 'RUSTICO, Windows' });
+    expect(deviceGrant.closest('label')?.querySelector('.platform-icon.windows')).not.toBeNull();
+    await fireEvent.click(deviceGrant);
 
     expect(setWikiGrant).toHaveBeenCalledWith(peerId, snapshot.wikis[0].id, true);
   });
@@ -840,7 +844,8 @@ describe('AirWiki wiki workspace', () => {
     const article = (await screen.findByRole('heading', { name: 'Evidencia cercana' })).closest('article');
     expect(article).not.toBeNull();
     const nearbyResult = within(article as HTMLElement);
-    expect(nearbyResult.getByText('RUSTICO · Windows')).toBeInTheDocument();
+    expect(nearbyResult.getByText('RUSTICO')).toBeInTheDocument();
+    expect(nearbyResult.getByRole('img', { name: 'Windows' })).toBeInTheDocument();
     expect(nearbyResult.getByText('Responsable')).toBeInTheDocument();
     expect(nearbyResult.getByText('Red privada (LAN)')).toBeInTheDocument();
     expect(nearbyResult.queryByText('Red pública')).not.toBeInTheDocument();
@@ -882,7 +887,8 @@ describe('AirWiki wiki workspace', () => {
     expect(screen.queryByRole('heading', { name: 'Buscar evidencia' })).not.toBeInTheDocument();
     expect(screen.queryByRole('tab')).not.toBeInTheDocument();
     expect(screen.getByText('Solo lectura')).toBeInTheDocument();
-    expect(screen.getAllByText('RUSTICO · Windows').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('RUSTICO').length).toBeGreaterThan(0);
+    expect(screen.getAllByRole('img', { name: 'Windows' }).length).toBeGreaterThan(0);
     expect(screen.getByText('Contenido OKF completo publicado por el propietario.')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /index\.md/ })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /log\.md/ })).toBeInTheDocument();
@@ -1162,7 +1168,8 @@ describe('AirWiki wiki workspace', () => {
     expect(article).not.toBeNull();
     const result = within(article as HTMLElement);
     expect(result.getByText('Red privada (LAN)')).toBeInTheDocument();
-    expect(result.getByText('Equipo 12D3KooD…Peer · SO aún no disponible')).toBeInTheDocument();
+    expect(result.getByText('Equipo 12D3KooD…Peer')).toBeInTheDocument();
+    expect(result.getByRole('img', { name: 'SO aún no disponible' })).toBeInTheDocument();
     expect(result.getByText('Guía')).toBeInTheDocument();
     expect(result.queryByText('Red pública')).not.toBeInTheDocument();
 
@@ -1182,7 +1189,8 @@ describe('AirWiki wiki workspace', () => {
       snapshotListener?.({ schemaVersion: snapshot.schemaVersion, sequence: snapshot.sequence, requestId: 'nearby-browse-request', kind: 'stateChanged', snapshot });
     });
     expect(await screen.findByRole('heading', { name: 'Wiki conservada' })).toBeInTheDocument();
-    expect(screen.getAllByText('Equipo 12D3KooD…Peer · SO aún no disponible').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('Equipo 12D3KooD…Peer').length).toBeGreaterThan(0);
+    expect(screen.getAllByRole('img', { name: 'SO aún no disponible' }).length).toBeGreaterThan(0);
     expect(screen.queryByText('Red pública')).not.toBeInTheDocument();
   });
 

@@ -341,7 +341,7 @@ integrations-no-chat-folders = No folder allows external chats. Chat searches wi
 integrations-chat-folder-count = { $count } folder(s) can send authorized excerpts to the chat provider.
 integrations-permissions-reminder = Connecting a client does not change permissions or publish content automatically.
 integrations-manage-folders = Manage folders
-integrations-recent-activity = ● Recent activity
+integrations-recent-activity = Recent activity
 integrations-version = Version { $version }
 integrations-managed-resource = Managed resource
 integrations-restart-chatgpt = Open a new task or restart ChatGPT after this change.
@@ -824,7 +824,7 @@ desktop-device-identified = Device { $id }
 desktop-device-platform-macos = macOS
 desktop-device-platform-windows = Windows
 desktop-device-platform-unknown = OS not available yet
-desktop-local-device-owner = This device · { $platform }
+desktop-local-device-owner = This device
 desktop-public-publisher = Public publisher { $id }
 desktop-listener = Listener
 desktop-discovery = Discovery
@@ -980,6 +980,11 @@ desktop-status-nearby-available = Nearby devices available
 desktop-status-public-active = Public network active
 desktop-status-private = This device only
 desktop-status-ai-apps = AI apps
+desktop-status-ai-apps-connected =
+    { $count ->
+        [one] 1 connected
+       *[other] { $count } connected
+    }
 desktop-system-status = System status
 desktop-wiki-access-title = Shared access
 desktop-share-nearby-enabled = Nearby sharing enabled

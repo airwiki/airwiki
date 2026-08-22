@@ -1,10 +1,10 @@
 <script lang="ts">
   import Blocks from '@lucide/svelte/icons/blocks';
-  import Bot from '@lucide/svelte/icons/bot';
-  import CodeXml from '@lucide/svelte/icons/code-xml';
-  import MessageCircle from '@lucide/svelte/icons/message-circle';
-  import Sparkles from '@lucide/svelte/icons/sparkles';
-  import SquareTerminal from '@lucide/svelte/icons/square-terminal';
+  import chatGptIcon from '../../assets/brands/chatgpt.png';
+  import claudeCodeIcon from '../../assets/brands/claude-code.svg';
+  import claudeDesktopIcon from '../../assets/brands/claude-desktop.svg';
+  import codexIcon from '../../assets/brands/codex.png';
+  import geminiCliIcon from '../../assets/brands/gemini-cli.png';
   import type { IntegrationClient } from '../../api';
 
   export let client: IntegrationClient | 'codex';
@@ -13,6 +13,19 @@
   export let decorative = false;
 
   $: glyphSize = Math.round(size * 0.5);
+
+  function brandAssetFor(value: IntegrationClient | 'codex'): string | null {
+    switch (value) {
+      case 'chatGptDesktop': return chatGptIcon;
+      case 'codex': return codexIcon;
+      case 'claudeDesktop': return claudeDesktopIcon;
+      case 'claudeCode': return claudeCodeIcon;
+      case 'geminiCli': return geminiCliIcon;
+      case 'genericMcp': return null;
+    }
+  }
+
+  $: brandAsset = brandAssetFor(client);
 </script>
 
 <span
@@ -22,16 +35,8 @@
   aria-hidden={decorative ? 'true' : undefined}
   style={`--ai-client-size: ${size}px`}
 >
-  {#if client === 'chatGptDesktop'}
-    <Bot size={glyphSize} strokeWidth={1.9} aria-hidden="true" />
-  {:else if client === 'codex'}
-    <CodeXml size={glyphSize} strokeWidth={1.9} aria-hidden="true" />
-  {:else if client === 'claudeDesktop'}
-    <MessageCircle size={glyphSize} strokeWidth={1.9} aria-hidden="true" />
-  {:else if client === 'claudeCode'}
-    <SquareTerminal size={glyphSize} strokeWidth={1.9} aria-hidden="true" />
-  {:else if client === 'geminiCli'}
-    <Sparkles size={glyphSize} strokeWidth={1.9} aria-hidden="true" />
+  {#if brandAsset}
+    <img class="brand-image" src={brandAsset} alt="" draggable="false" />
   {:else}
     <Blocks size={glyphSize} strokeWidth={1.9} aria-hidden="true" />
   {/if}
@@ -44,12 +49,35 @@
     place-items: center;
     width: var(--ai-client-size);
     height: var(--ai-client-size);
-    color: var(--violet);
-    background: color-mix(in srgb, var(--violet) 9%, var(--surface-raised));
-    border: 1px solid color-mix(in srgb, var(--violet) 24%, var(--line));
+    color: var(--cyan);
+    background: transparent;
+    border: 1px solid transparent;
     border-radius: calc(var(--control-radius) + 1px);
-    box-shadow: inset 0 1px 0 color-mix(in srgb, white 8%, transparent);
+    overflow: hidden;
   }
 
-  .client-genericMcp { color: var(--cyan); background: color-mix(in srgb, var(--cyan) 8%, var(--surface-raised)); border-color: color-mix(in srgb, var(--cyan) 22%, var(--line)); }
+  .brand-image {
+    display: block;
+    width: 100%;
+    height: 100%;
+    object-fit: contain;
+    user-select: none;
+  }
+
+  .client-claudeCode {
+    background: color-mix(in srgb, #d97757 5%, var(--surface-raised));
+    border-color: color-mix(in srgb, #d97757 18%, var(--line));
+  }
+
+  .client-claudeCode .brand-image {
+    width: 66%;
+    height: 66%;
+  }
+
+  .client-genericMcp {
+    color: var(--cyan);
+    background: color-mix(in srgb, var(--cyan) 8%, var(--surface-raised));
+    border-color: color-mix(in srgb, var(--cyan) 22%, var(--line));
+    box-shadow: inset 0 1px 0 color-mix(in srgb, white 8%, transparent);
+  }
 </style>

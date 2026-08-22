@@ -4,6 +4,9 @@ All notable user-visible changes to AirWiki will be documented here. The project
 
 ## [Unreleased]
 
+- Replaced generic AI-client pictograms with the original ChatGPT, Codex,
+  Claude Desktop, Claude Code and Gemini CLI artwork while retaining a neutral
+  fallback for unknown MCP clients.
 - Identified trusted nearby devices by name, operating system and availability
   in search, sharing and Connections, while keeping public publishers visually
   separate and withholding private device metadata from public federation.

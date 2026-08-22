@@ -147,6 +147,28 @@ const VERIFIED_DISTRIBUTED_FONT_ASSETS: [(&str, &str); 2] = [
         "abde1ad5cf78b9ac575ef90d991f2e9101eb0b3b6668bde9a00e2e1e27d99afd",
     ),
 ];
+const VERIFIED_DISTRIBUTED_BRAND_ASSETS: [(&str, &str); 5] = [
+    (
+        "apps/desktop/ui/src/assets/brands/chatgpt.png",
+        "29a63f80864a00daa15dd1a721b81e0aea59d10cb1827fb023e7587ebcd90c1e",
+    ),
+    (
+        "apps/desktop/ui/src/assets/brands/codex.png",
+        "051c1731e00275c8750fab436141b166c59cce519410681c34dfeca16fda1040",
+    ),
+    (
+        "apps/desktop/ui/src/assets/brands/claude-desktop.svg",
+        "059e22f525d67c6258c4f64514f0b0e717c914df8a706936d0299d5e6b8082d9",
+    ),
+    (
+        "apps/desktop/ui/src/assets/brands/claude-code.svg",
+        "6d53db4be375e899c937c26cf16684a80d6e869b1928d72b37748bef2560e219",
+    ),
+    (
+        "apps/desktop/ui/src/assets/brands/gemini-cli.png",
+        "28cfe81a91a7c58906f87970a2185e98707f391a079fe5455a5b71d48345baa1",
+    ),
+];
 const DISTRIBUTED_PACKAGES: [&str; 3] = [
     "airwiki-desktop",
     "airwiki-mcp-bridge",
@@ -2046,6 +2068,17 @@ fn validate_non_cargo_legal_inventory(root: &Path) -> Result<()> {
         );
     }
 
+    for (relative_path, expected_sha256) in VERIFIED_DISTRIBUTED_BRAND_ASSETS {
+        let path = root.join(relative_path);
+        let bytes = read_regular_file(&path, MAX_LEGAL_FILE_BYTES)?;
+        let actual_sha256 = hex::encode(Sha256::digest(&bytes));
+        ensure!(
+            actual_sha256 == expected_sha256,
+            "verified brand asset {} has SHA-256 {actual_sha256}, expected {expected_sha256}",
+            path.display()
+        );
+    }
+
     let inventory_path = root.join(NON_CARGO_LICENSE_INVENTORY);
     let inventory = String::from_utf8(read_regular_file(&inventory_path, MAX_LEGAL_FILE_BYTES)?)
         .with_context(|| format!("{} is not UTF-8", inventory_path.display()))?;
@@ -2079,6 +2112,12 @@ fn validate_non_cargo_legal_inventory(root: &Path) -> Result<()> {
         "7925f50f649b3813257faf2f4c0b381011f434f1",
         "8e085aa438094f11487a836652edd5c054fa6a96f63fc7c282105ee3a4b08c07",
         "abde1ad5cf78b9ac575ef90d991f2e9101eb0b3b6668bde9a00e2e1e27d99afd",
+        "29a63f80864a00daa15dd1a721b81e0aea59d10cb1827fb023e7587ebcd90c1e",
+        "051c1731e00275c8750fab436141b166c59cce519410681c34dfeca16fda1040",
+        "059e22f525d67c6258c4f64514f0b0e717c914df8a706936d0299d5e6b8082d9",
+        "6d53db4be375e899c937c26cf16684a80d6e869b1928d72b37748bef2560e219",
+        "28cfe81a91a7c58906f87970a2185e98707f391a079fe5455a5b71d48345baa1",
+        "Third-party product marks",
     ] {
         ensure!(
             inventory.contains(required),
@@ -2108,6 +2147,7 @@ fn validate_non_cargo_legal_inventory(root: &Path) -> Result<()> {
         "licenses/NON_CARGO_COMPONENTS.md",
         "Space Grotesk 2.0.0",
         "Atkinson Hyperlegible Next",
+        "Third-party product marks",
     ] {
         ensure!(
             notices.contains(required),

@@ -31,6 +31,42 @@ network. Both are redistributed unmodified under the SIL Open Font License 1.1.
   `OFL.txt` is included as `non-cargo/Atkinson-Hyperlegible-Next-7925f50-OFL.txt`, SHA-256
   `aca6a428580965d2297d1b718042dd427c2a9443ece3b0d02d758e161e0c4030`.
 
+## Third-party product marks
+
+The desktop displays these marks only beside the corresponding local integration so users can
+identify the client they are connecting. They are not AirWiki branding, do not imply sponsorship
+or endorsement, and are never recolored, combined with the AirWiki mark, or used for an unknown
+MCP client. Product and company names and marks remain the property of their respective owners.
+
+- ChatGPT and Codex artwork was sourced from the official OpenAI ChatGPT macOS application
+  `26.810.41047` (`6570`). The source files `icon-chatgpt.png` and
+  `icon-codex-dark-color.png` have SHA-256
+  `3453947a9ce2709b7ec51c0559c7eb976e4ac53b232b607d1d81b0d1d1048b61` and
+  `69fb4384e161be8a20dcb94a9ac34aea4fbfaeb67514110a71e7b0732eccb0fc`. They were scaled
+  proportionally to 256 px without cropping or recoloring. Distributed files:
+  `apps/desktop/ui/src/assets/brands/chatgpt.png`, 51,573 bytes, SHA-256
+  `29a63f80864a00daa15dd1a721b81e0aea59d10cb1827fb023e7587ebcd90c1e`; and
+  `apps/desktop/ui/src/assets/brands/codex.png`, 43,899 bytes, SHA-256
+  `051c1731e00275c8750fab436141b166c59cce519410681c34dfeca16fda1040`.
+  Use is subject to the [OpenAI design guidelines and Marks usage
+  terms](https://openai.com/brand/).
+- Claude Desktop and Claude Code use `ClaudeIcon-Rounded.svg` and `Claude Spark - Clay.svg`
+  from Anthropic's official newsroom press kit. The pinned 26,465,941-byte press-kit ZIP has
+  SHA-256 `c68ac92df86c825f95177e24016fcc9a8863a3fd4ca344fe6f0700b2c1e07151`.
+  The SVGs are distributed unmodified as
+  `apps/desktop/ui/src/assets/brands/claude-desktop.svg`, 3,064 bytes, SHA-256
+  `059e22f525d67c6258c4f64514f0b0e717c914df8a706936d0299d5e6b8082d9`; and
+  `apps/desktop/ui/src/assets/brands/claude-code.svg`, 2,580 bytes, SHA-256
+  `6d53db4be375e899c937c26cf16684a80d6e869b1928d72b37748bef2560e219`.
+- Gemini CLI uses the official IDE companion icon from
+  `google-gemini/gemini-cli` commit `5411f113cafae26161b4969b0237b8e1e024e2c2`. The upstream
+  46,696-byte PNG has SHA-256
+  `351e9f5b1bf863d738cd7be4ed040a625a1419450ae7fc490143e4042b7c2438`; it was scaled
+  proportionally to 256 px without cropping or recoloring. Distributed file:
+  `apps/desktop/ui/src/assets/brands/gemini-cli.png`, 28,218 bytes, SHA-256
+  `28cfe81a91a7c58906f87970a2185e98707f391a079fe5455a5b71d48345baa1`. The upstream
+  repository is Apache-2.0; Google and Gemini marks remain subject to Google's trademark terms.
+
 ## llama.cpp b9946: Windows runtime built from source
 
 The Windows x64 runtime is built in CI from the exact commit

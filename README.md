@@ -182,3 +182,7 @@ AirWiki does not currently provide OCR, DOCX ingestion, image/audio/video proces
 ## License
 
 AirWiki is open source under the [Apache License 2.0](LICENSE). Windows code signing for development candidates is provided by [SignPath.io](https://about.signpath.io), with a certificate from the [SignPath Foundation](https://signpath.org), under the project's [code signing policy](docs/code-signing-policy.md).
+
+ChatGPT, Codex, Claude and Gemini names and marks belong to OpenAI, Anthropic and Google
+respectively. AirWiki uses their official artwork only to identify optional integrations; this
+does not imply sponsorship or endorsement. See [third-party notices](THIRD_PARTY_NOTICES.md).

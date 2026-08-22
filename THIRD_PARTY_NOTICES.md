@@ -27,6 +27,14 @@ Space Grotesk 2.0.0 and Atkinson Hyperlegible Next are embedded in the local Web
 are not downloaded at runtime.
 Their exact font and OFL text hashes are recorded in `licenses/NON_CARGO_COMPONENTS.md`.
 
+## Third-party product marks
+
+The desktop includes official ChatGPT, Codex, Claude and Gemini artwork solely to identify the
+corresponding optional local integrations. These marks remain the property of OpenAI, Anthropic
+and Google respectively. Their appearance does not imply sponsorship or endorsement, and AirWiki
+does not use them for its own branding. Exact sources, transformations and SHA-256 values are
+recorded in `licenses/NON_CARGO_COMPONENTS.md`.
+
 ### llama.cpp Windows source build
 
 The Windows llama.cpp runtime is built from the pinned source ZIP (SHA-256

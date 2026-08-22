@@ -95,7 +95,7 @@ if (destination === 'shared') {
     trust: 'trusted', activity: 'connected', sasWords: null, grantedWikiIds: [sharedWikiId]
   }];
 }
-if (destination === 'library') {
+if (destination === 'library' || destination === 'connections') {
   snapshot.peers = [{
     peerId: '12D3KooSyntheticMacNode', deviceName: 'Atlas Mac', platform: 'macOs',
     address: '/ip4/192.0.2.2/tcp/4242', trust: 'trusted', activity: 'connected',
@@ -163,7 +163,7 @@ window.location.hash = destination === 'review'
   ? `wikis/${snapshot.wikis[0].id}/pending`
   : destination === 'graph' ? `wikis/${snapshot.wikis[0].id}`
   : destination === 'shared' ? 'search'
-  : destination === 'library' ? 'wikis' : destination;
+  : destination === 'library' || destination === 'connections' ? 'wikis' : destination;
 
 let eventSink: ((event: UiEventEnvelope) => void) | null = null;
 const bridge: DevelopmentBridge = {
@@ -252,3 +252,6 @@ installDevelopmentBridge(bridge);
 const target = document.getElementById('app');
 if (!target) throw new Error('visual fixture root is missing');
 mount(App, { target });
+if (destination === 'connections') {
+  requestAnimationFrame(() => target.querySelector<HTMLButtonElement>('.system-status-bar button:last-child')?.click());
+}

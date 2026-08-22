@@ -15,15 +15,24 @@ describe('identity components', () => {
     expect(screen.getByRole('img', { name: 'Windows' })).toHaveClass('windows');
   });
 
-  it('keeps AI clients distinguishable without relying on vendor color', () => {
-    const { rerender } = render(AiClientIcon, { client: 'claudeCode', label: 'Claude Code' });
-    expect(screen.getByRole('img', { name: 'Claude Code' })).toHaveClass('client-claudeCode');
+  it.each([
+    ['chatGptDesktop', 'ChatGPT'],
+    ['codex', 'Codex'],
+    ['claudeDesktop', 'Claude Desktop'],
+    ['claudeCode', 'Claude Code'],
+    ['geminiCli', 'Gemini CLI']
+  ] as const)('uses the original product artwork for %s', (client, label) => {
+    render(AiClientIcon, { client, label });
+    const icon = screen.getByRole('img', { name: label });
+    expect(icon).toHaveClass(`client-${client}`);
+    expect(icon.querySelector('img')).toBeInTheDocument();
+  });
 
-    rerender({ client: 'geminiCli', label: 'Gemini CLI' });
-    expect(screen.getByRole('img', { name: 'Gemini CLI' })).toHaveClass('client-geminiCli');
-
-    rerender({ client: 'codex', label: 'Codex' });
-    expect(screen.getByRole('img', { name: 'Codex' })).toHaveClass('client-codex');
+  it('keeps a neutral product-agnostic fallback for generic MCP clients', () => {
+    render(AiClientIcon, { client: 'genericMcp', label: 'Generic MCP' });
+    const icon = screen.getByRole('img', { name: 'Generic MCP' });
+    expect(icon).toHaveClass('client-genericMcp');
+    expect(icon.querySelector('img')).not.toBeInTheDocument();
   });
 
   it('makes public publishers visibly distinct from nearby devices', () => {

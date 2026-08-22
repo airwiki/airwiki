@@ -58,6 +58,16 @@ no arbitrary endpoint, ignores ambient proxies, stores no credentials and
 grants no Wiki access. Each client's configuration remains its own source
 of truth.
 
+AirWiki materializes the packaged bridge below a private path keyed by both the
+application version and the bridge SHA-256. This prevents two reviewed
+candidates with the same pre-release application version from aliasing
+different executables. A prior content-addressed bridge is accepted only when
+its bytes match the digest in its path and is presented as an available update;
+the current bridge must also match the immutable packaged copy. Legacy
+version-only paths remain replaceable for migration, while malformed paths,
+links, reparse points and altered content-addressed bridges fail closed as
+conflicts.
+
 The HTTP boundary accepts only the exact loopback host and port, rejects all
 browser `Origin` requests, ignores ambient proxies and redirects, bounds request
 and response bodies, and never exposes a configurable endpoint. User approval

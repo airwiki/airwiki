@@ -139,6 +139,10 @@ if (destination === 'graph') {
   const wiki = snapshot.wikis[0];
   snapshot.knowledge = {
     wikiId: wiki.id, wikiName: wiki.name, version: 'synthetic-graph', status: 'ready', errorCount: 0, warningCount: 0,
+    reservedPages: [
+      { page: { kind: 'index' }, fingerprint: 'c'.repeat(64) },
+      { page: { kind: 'log' }, fingerprint: 'd'.repeat(64) }
+    ],
     concepts: [
       { conceptId: 'safe-maintenance', page: { kind: 'concept', path: 'operations/safe-maintenance.md' }, title: 'Safe maintenance', description: 'Verified maintenance guidance.', conceptType: 'Procedure', tags: ['operations'], lifecycle: 'stable', generatedBy: 'airwiki/demo', verifiedBy: ['human:demo'], sources: [], staleAfter: null, assurance: { trust: 'humanReviewed', freshness: 'fresh', verificationOutdated: false }, warnings: [], executionAvailable: false, fingerprint: 'a'.repeat(64) },
       { conceptId: 'recovery', page: { kind: 'concept', path: 'operations/recovery.md' }, title: 'Recovery', description: 'Verified recovery guidance.', conceptType: 'Runbook', tags: ['recovery'], lifecycle: 'stable', generatedBy: 'airwiki/demo', verifiedBy: ['human:demo'], sources: [], staleAfter: null, assurance: { trust: 'humanReviewed', freshness: 'fresh', verificationOutdated: false }, warnings: [], executionAvailable: false, fingerprint: 'b'.repeat(64) }

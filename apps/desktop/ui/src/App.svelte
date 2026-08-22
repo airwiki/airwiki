@@ -1375,7 +1375,7 @@
       return;
     }
     pendingSearchConcept = null;
-    await loadWikiPage(pending.wikiId, concept.page);
+    await loadWikiPage(pending.wikiId, concept.page, concept.fingerprint);
   }
 
   async function continueSharedBrowse(current: AppSnapshot | null) {
@@ -1652,20 +1652,36 @@
     }
   }
 
-  async function openKnowledgePage(page: KnowledgePageInput) {
+  function knowledgePageFingerprint(page: KnowledgePageInput): string | null {
+    const knowledge = snapshot?.knowledge;
+    if (!knowledge || knowledge.wikiId !== selectedWikiId) return null;
+    if (page.kind === 'concept') {
+      return knowledge.concepts.find((concept) => pageKey(concept.page) === pageKey(page))?.fingerprint ?? null;
+    }
+    return knowledge.reservedPages.find((reserved) => pageKey(reserved.page) === pageKey(page))?.fingerprint ?? null;
+  }
+
+  async function openKnowledgePage(page: KnowledgePageInput, expectedFingerprint = knowledgePageFingerprint(page)) {
     if (!selectedWikiId) return;
+    if (!expectedFingerprint) {
+      actionMessage = t('knowledge-page-unavailable');
+      return;
+    }
     actionBusy = true;
+    actionMessage = '';
     try {
-      await loadWikiPage(selectedWikiId, page);
-    } catch {
-      actionMessage = t('search-local-unavailable');
+      await loadWikiPage(selectedWikiId, page, expectedFingerprint);
+    } catch (error) {
+      actionMessage = t(uiErrorMessageKey(error) === 'currentKnowledgeSnapshotRequired'
+        ? 'knowledge-page-changed'
+        : 'knowledge-page-load-failed');
     } finally {
       actionBusy = false;
     }
   }
 
-  async function selectGraphPage(page: KnowledgePageInput) {
-    await openKnowledgePage(page);
+  async function selectGraphPage(page: KnowledgePageInput, expectedFingerprint: string) {
+    await openKnowledgePage(page, expectedFingerprint);
   }
 
   async function savePreferences(completeOnboarding = false) {
@@ -1910,9 +1926,13 @@
                 <div class="file-browser">
                   <aside class="file-list" aria-label={t('knowledge-pages')}>
                     {#if snapshot.knowledge?.wikiId === selectedWiki.id}
-                      <button aria-label={`${t('knowledge-index-title')}, index.md`} class:active={knowledgePageIsActive({ kind: 'index' })} aria-current={knowledgePageIsActive({ kind: 'index' }) ? 'page' : undefined} onmousedown={focusChoiceWithoutScroll} onclick={() => openKnowledgePage({ kind: 'index' })}><BookOpen size={17} aria-hidden="true" /><span><strong>{t('knowledge-index-title')}</strong><small>index.md</small></span></button>
-                      <button aria-label={`${t('knowledge-recovery-history')}, log.md`} class:active={knowledgePageIsActive({ kind: 'log' })} aria-current={knowledgePageIsActive({ kind: 'log' }) ? 'page' : undefined} onmousedown={focusChoiceWithoutScroll} onclick={() => openKnowledgePage({ kind: 'log' })}><History size={17} aria-hidden="true" /><span><strong>{t('knowledge-recovery-history')}</strong><small>log.md</small></span></button>
-                      {#each snapshot.knowledge.concepts as concept (pageKey(concept.page))}<button aria-label={`${concept.title}, ${concept.page.kind === 'concept' ? concept.page.path : concept.description}`} class:active={knowledgePageIsActive(concept.page)} aria-current={knowledgePageIsActive(concept.page) ? 'page' : undefined} onmousedown={focusChoiceWithoutScroll} onclick={() => openKnowledgePage(concept.page)}><FileText size={17} aria-hidden="true" /><span><strong>{concept.title}</strong><small>{concept.page.kind === 'concept' ? concept.page.path : concept.description}</small></span></button>{/each}
+                      {#each snapshot.knowledge.reservedPages as reserved (pageKey(reserved.page))}
+                        <button aria-label={`${reserved.page.kind === 'index' ? t('knowledge-index-title') : t('knowledge-recovery-history')}, ${reserved.page.kind}.md`} class:active={knowledgePageIsActive(reserved.page)} aria-current={knowledgePageIsActive(reserved.page) ? 'page' : undefined} onmousedown={focusChoiceWithoutScroll} onclick={() => openKnowledgePage(reserved.page, reserved.fingerprint)}>
+                          {#if reserved.page.kind === 'index'}<BookOpen size={17} aria-hidden="true" />{:else}<History size={17} aria-hidden="true" />{/if}
+                          <span><strong>{reserved.page.kind === 'index' ? t('knowledge-index-title') : t('knowledge-recovery-history')}</strong><small>{reserved.page.kind}.md</small></span>
+                        </button>
+                      {/each}
+                      {#each snapshot.knowledge.concepts as concept (pageKey(concept.page))}<button aria-label={`${concept.title}, ${concept.page.kind === 'concept' ? concept.page.path : concept.description}`} class:active={knowledgePageIsActive(concept.page)} aria-current={knowledgePageIsActive(concept.page) ? 'page' : undefined} onmousedown={focusChoiceWithoutScroll} onclick={() => openKnowledgePage(concept.page, concept.fingerprint)}><FileText size={17} aria-hidden="true" /><span><strong>{concept.title}</strong><small>{concept.page.kind === 'concept' ? concept.page.path : concept.description}</small></span></button>{/each}
                     {/if}
                   </aside>
                   <section class="file-preview" aria-live="polite">
@@ -1934,6 +1954,8 @@
                       {/if}
                       {#if snapshot.knowledgePage.truncated}<p class="evidence-warning">{t('knowledge-page-truncated')}</p>{/if}
                       <div class="knowledge-blocks">{#each snapshot.knowledgePage.blocks as block, blockIndex (blockIndex)}{#if block.kind === 'heading'}<h3 class:minor={block.level > 2}>{block.text}</h3>{:else if block.kind === 'paragraph'}<p>{block.text}</p>{:else if block.kind === 'listItem'}<div class="safe-list-item"><span>{block.ordered ? '—' : '•'}</span><p>{block.text}</p></div>{:else if block.kind === 'code'}<pre><code>{block.text}</code></pre>{:else if block.kind === 'quote'}<blockquote>{block.text}</blockquote>{:else}<hr />{/if}{/each}</div>
+                    {:else if snapshot.knowledgePage?.wikiId === selectedWiki.id && snapshot.knowledgePage.status === 'failed'}
+                      <div class="file-empty" role="status"><AlertTriangle size={28} aria-hidden="true" /><h2>{t('knowledge-page-load-failed-title')}</h2><p>{t('knowledge-page-load-failed')}</p></div>
                     {:else}<div class="file-empty"><BookOpen size={28} aria-hidden="true" /><h2>{t('knowledge-select-page')}</h2><p>{t('desktop-verified-only')}</p></div>{/if}
                   </section>
                 </div>

@@ -57,7 +57,9 @@ export type KnowledgeGraphLinkSummary = { source: KnowledgePageInput, target: Kn
 
 export type KnowledgeBundleStatus = "empty" | "ready" | "updating" | "failed";
 
-export type KnowledgeBundleSummary = { wikiId: string, wikiName: string, version: string, status: KnowledgeBundleStatus, concepts: Array<KnowledgeConceptSummary>, links: Array<KnowledgeGraphLinkSummary>, errorCount: number, warningCount: number, };
+export type KnowledgeReservedPageSummary = { page: KnowledgePageInput, fingerprint: string, };
+
+export type KnowledgeBundleSummary = { wikiId: string, wikiName: string, version: string, status: KnowledgeBundleStatus, reservedPages: Array<KnowledgeReservedPageSummary>, concepts: Array<KnowledgeConceptSummary>, links: Array<KnowledgeGraphLinkSummary>, errorCount: number, warningCount: number, };
 
 export type KnowledgePageStatus = "ready" | "failed";
 

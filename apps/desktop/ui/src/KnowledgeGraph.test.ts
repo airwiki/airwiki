@@ -28,6 +28,10 @@ const bundle: KnowledgeBundleSummary = {
   wikiName: 'Layout fixture',
   version: '1',
   status: 'ready',
+  reservedPages: [
+    { page: { kind: 'index' }, fingerprint: 'a'.repeat(64) },
+    { page: { kind: 'log' }, fingerprint: 'b'.repeat(64) }
+  ],
   concepts: [],
   links: [],
   errorCount: 0,

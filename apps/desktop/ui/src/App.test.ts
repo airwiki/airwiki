@@ -810,6 +810,7 @@ describe('AirWiki wiki workspace', () => {
     };
     snapshot.knowledge = {
       wikiId: wiki.id, wikiName: wiki.name, version: 'search-fixture', status: 'ready', errorCount: 0, warningCount: 0,
+      reservedPages: [],
       concepts: [{ conceptId, page: { kind: 'concept', path: 'guides/atlas.md' }, title: 'Evidencia Atlas', description: 'Contenido verificado.', conceptType: 'Reference', tags: [], lifecycle: 'stable', generatedBy: 'airwiki/test', verifiedBy: ['human:test'], sources: [], staleAfter: null, assurance: { trust: 'humanReviewed', freshness: 'fresh', verificationOutdated: false }, warnings: [], executionAvailable: false, fingerprint: 'a'.repeat(64) }],
       links: []
     };
@@ -820,9 +821,55 @@ describe('AirWiki wiki workspace', () => {
     await fireEvent.click((await screen.findAllByRole('button', { name: 'Abrir' }))[0]);
 
     expect(loadWikiBundle).toHaveBeenCalledWith(wiki.id);
-    expect(loadWikiPage).toHaveBeenCalledWith(wiki.id, { kind: 'concept', path: 'guides/atlas.md' });
+    expect(loadWikiPage).toHaveBeenCalledWith(wiki.id, { kind: 'concept', path: 'guides/atlas.md' }, 'a'.repeat(64));
     expect(window.location.hash).toBe(`#wikis/${wiki.id}`);
     expect(window.location.hash).not.toContain('Evidencia');
+  });
+
+  it('offers only reserved pages that exist in the current OKF bundle', async () => {
+    const wiki = snapshot.wikis[0];
+    const fingerprint = 'e'.repeat(64);
+    snapshot.knowledge = {
+      wikiId: wiki.id, wikiName: wiki.name, version: 'minimal-okf', status: 'ready', errorCount: 0, warningCount: 0,
+      reservedPages: [],
+      concepts: [{ conceptId: 'minimal-concept', page: { kind: 'concept', path: 'guide.md' }, title: 'Minimal guide', description: 'Valid OKF without reserved pages.', conceptType: 'Guide', tags: [], lifecycle: 'stable', generatedBy: null, verifiedBy: [], sources: [], staleAfter: null, assurance: { trust: 'unverified', freshness: 'notDeclared', verificationOutdated: false }, warnings: [], executionAvailable: false, fingerprint }],
+      links: []
+    };
+    window.location.hash = `#wikis/${wiki.id}`;
+    render(App);
+
+    expect(screen.queryByText('index.md')).not.toBeInTheDocument();
+    expect(screen.queryByText('log.md')).not.toBeInTheDocument();
+    await fireEvent.click(await screen.findByRole('button', { name: 'Minimal guide, guide.md' }));
+
+    expect(loadWikiPage).toHaveBeenCalledWith(
+      wiki.id,
+      { kind: 'concept', path: 'guide.md' },
+      fingerprint
+    );
+  });
+
+  it('explains a concurrent Wiki update without mislabeling it as a search error', async () => {
+    const wiki = snapshot.wikis[0];
+    const fingerprint = 'f'.repeat(64);
+    snapshot.knowledge = {
+      wikiId: wiki.id, wikiName: wiki.name, version: 'current-revision', status: 'ready', errorCount: 0, warningCount: 0,
+      reservedPages: [],
+      concepts: [{ conceptId: 'changing-concept', page: { kind: 'concept', path: 'changing.md' }, title: 'Changing guide', description: '', conceptType: 'Guide', tags: [], lifecycle: 'stable', generatedBy: null, verifiedBy: [], sources: [], staleAfter: null, assurance: { trust: 'unverified', freshness: 'notDeclared', verificationOutdated: false }, warnings: [], executionAvailable: false, fingerprint }],
+      links: []
+    };
+    vi.mocked(loadWikiPage).mockRejectedValueOnce({
+      code: 'invalidInput',
+      messageKey: 'currentKnowledgeSnapshotRequired',
+      retryable: false
+    });
+    window.location.hash = `#wikis/${wiki.id}`;
+    render(App);
+
+    await fireEvent.click(await screen.findByRole('button', { name: 'Changing guide, changing.md' }));
+
+    expect(await screen.findByText('La Wiki se actualizó mientras esta página estaba seleccionada. Elige la página nuevamente para abrir su revisión actual.')).toBeInTheDocument();
+    expect(screen.queryByText('Este resultado cambió. Vuelve a buscar antes de abrir su página publicada.')).not.toBeInTheDocument();
   });
 
   it('opens a trusted LAN result with the same read-only Wiki workspace', async () => {
@@ -1515,6 +1562,7 @@ describe('AirWiki wiki workspace', () => {
     const wiki = snapshot.wikis[0];
     snapshot.knowledge = {
       wikiId: wiki.id, wikiName: wiki.name, version: 'graph-fixture', status: 'ready', errorCount: 0, warningCount: 0,
+      reservedPages: [],
       concepts: [{ conceptId: 'concept-atlas', page: { kind: 'concept', path: 'architecture/atlas.md' }, title: 'Atlas concept', description: 'Verified concept', conceptType: 'Reference', tags: [], lifecycle: 'stable', generatedBy: 'airwiki/test', verifiedBy: ['human:test'], sources: [], staleAfter: null, assurance: { trust: 'humanReviewed', freshness: 'notDeclared', verificationOutdated: false }, warnings: [], executionAvailable: false, fingerprint: 'a'.repeat(64) }],
       links: [{ source: { kind: 'index' }, target: { kind: 'concept', path: 'architecture/atlas.md' }, label: 'Verified concept' }]
     };
@@ -1526,7 +1574,7 @@ describe('AirWiki wiki workspace', () => {
     await fireEvent.click(await screen.findByRole('button', { name: 'Atlas concept' }));
 
     expect(graphButton).toHaveClass('active');
-    expect(loadWikiPage).toHaveBeenCalledWith(wiki.id, { kind: 'concept', path: 'architecture/atlas.md' });
+    expect(loadWikiPage).toHaveBeenCalledWith(wiki.id, { kind: 'concept', path: 'architecture/atlas.md' }, 'a'.repeat(64));
     await fireEvent.click(screen.getByRole('button', { name: 'Configuración' }));
     expect(await screen.findByRole('button', { name: 'Guardar preferencias' })).toBeEnabled();
   });
@@ -1537,6 +1585,7 @@ describe('AirWiki wiki workspace', () => {
     const fingerprint = 'a'.repeat(64);
     snapshot.knowledge = {
       wikiId: wiki.id, wikiName: wiki.name, version: 'managed-fixture', status: 'ready', errorCount: 0, warningCount: 0,
+      reservedPages: [],
       concepts: [{ conceptId: 'managed-concept', page: { kind: 'concept', path: 'memory/decision.md' }, title: 'Decision', description: 'Unverified decision', conceptType: 'Decision', tags: [], lifecycle: 'stable', generatedBy: 'codex/1', verifiedBy: [], sources: [], staleAfter: null, assurance: { trust: 'unverified', freshness: 'notDeclared', verificationOutdated: false }, warnings: [], executionAvailable: false, fingerprint }],
       links: []
     };
@@ -1568,7 +1617,7 @@ describe('AirWiki wiki workspace', () => {
     };
     snapshot.knowledge = {
       wikiId: wiki.id, wikiName: wiki.name, version: 'atomic-assurance', status: 'ready',
-      concepts: [first, second], links: [], errorCount: 0, warningCount: 0
+      reservedPages: [], concepts: [first, second], links: [], errorCount: 0, warningCount: 0
     };
     snapshot.knowledgePage = {
       wikiId: wiki.id, page: first.page, concept: first, title: first.title,

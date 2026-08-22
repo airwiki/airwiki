@@ -1,12 +1,16 @@
 <script lang="ts">
+  import Blocks from '@lucide/svelte/icons/blocks';
+  import BrainCircuit from '@lucide/svelte/icons/brain-circuit';
+  import Network from '@lucide/svelte/icons/network';
   import type { AppSnapshot } from './api';
+  import type { MessageArgs } from './i18n';
 
   type ServiceTarget = 'knowledge' | 'connections' | 'apps';
   type ServiceTone = 'ready' | 'working' | 'off' | 'attention';
   type ServiceStatus = { id: ServiceTarget; label: string; detail: string; tone: ServiceTone };
 
   export let snapshot: AppSnapshot;
-  export let t: (id: string) => string;
+  export let t: (id: string, args?: MessageArgs) => string;
   export let onselect: (target: ServiceTarget) => void;
 
   function statuses(current: AppSnapshot, translate: typeof t): ServiceStatus[] {
@@ -40,8 +44,9 @@
               ? { id: 'connections', label: translate('desktop-status-connections'), detail: translate('desktop-status-public-active'), tone: 'ready' }
               : { id: 'connections', label: translate('desktop-status-connections'), detail: translate('desktop-status-private'), tone: 'off' };
 
+    const connectedApps = current.integrations?.integrations.filter((integration) => integration.status === 'configured').length ?? 0;
     const apps: ServiceStatus = current.mcpUrl
-      ? { id: 'apps', label: translate('desktop-status-ai-apps'), detail: translate('desktop-status-available'), tone: 'ready' }
+      ? { id: 'apps', label: translate('desktop-status-ai-apps'), detail: connectedApps > 0 ? translate('desktop-status-ai-apps-connected', { count: connectedApps }) : translate('desktop-status-available'), tone: 'ready' }
       : { id: 'apps', label: translate('desktop-status-ai-apps'), detail: translate('desktop-status-unavailable'), tone: 'attention' };
 
     return [knowledge, connections, apps];
@@ -56,9 +61,11 @@
   <div>
     {#each services as service (service.id)}
       <button onclick={() => onselect(service.id)} aria-label={`${service.label}: ${service.detail}`}>
-        <span class={`status-dot ${service.tone}`} aria-hidden="true"></span>
-        <span>{service.label}</span>
-        <small>{service.detail}</small>
+        <span class="service-icon" aria-hidden="true">
+          {#if service.id === 'knowledge'}<BrainCircuit size={17} strokeWidth={1.9} />{:else if service.id === 'connections'}<Network size={17} strokeWidth={1.9} />{:else}<Blocks size={17} strokeWidth={1.9} />{/if}
+          <span class={`status-dot ${service.tone}`}></span>
+        </span>
+        <span class="service-copy"><span>{service.label}</span><small>{service.detail}</small></span>
       </button>
     {/each}
   </div>

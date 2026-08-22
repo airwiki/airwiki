@@ -1,5 +1,6 @@
 <script lang="ts">
   import type { IntegrationActionInput, IntegrationSummary } from './api';
+  import AiClientIcon from './components/identity/AiClientIcon.svelte';
   import type { MessageArgs } from './i18n';
 
   let {
@@ -42,6 +43,20 @@
     return t(`workflow-guide-status-${status}`);
   }
 
+  function connectionTone(status: IntegrationSummary['status']): 'ready' | 'working' | 'off' | 'attention' {
+    if (status === 'configured') return 'ready';
+    if (status === 'awaitingClientApproval' || status === 'updateAvailable') return 'working';
+    if (status === 'conflict' || status === 'error') return 'attention';
+    return 'off';
+  }
+
+  function guideTone(status: IntegrationSummary['workflowGuide']['status']): 'ready' | 'working' | 'off' | 'attention' {
+    if (status === 'installed' || status === 'builtIn') return 'ready';
+    if (status === 'updateAvailable') return 'working';
+    if (status === 'conflict') return 'attention';
+    return 'off';
+  }
+
   function setupText(command: string, args: string[]): string {
     return JSON.stringify({ command, args }, null, 2);
   }
@@ -63,18 +78,21 @@
   {#each integrations as integration (integration.client)}
     <article class="integration-item">
       <div class="integration-client-heading">
-        <strong>{clientName(integration.client)}</strong>
-        {#if integration.detectedVersion}<small>{t('integrations-version', { version: integration.detectedVersion })}</small>{/if}
-        {#if integration.activityRecent}<small class="recent-activity">{t('integrations-recent-activity')}</small>{/if}
+        <AiClientIcon client={integration.client} label={clientName(integration.client)} decorative />
+        <div class="integration-client-copy">
+          <strong>{clientName(integration.client)}</strong>
+          {#if integration.detectedVersion}<small>{t('integrations-version', { version: integration.detectedVersion })}</small>{/if}
+        </div>
+        {#if integration.activityRecent}<small class="recent-activity"><span aria-hidden="true"></span>{t('integrations-recent-activity')}</small>{/if}
       </div>
       <dl class="integration-state-list">
         <div>
           <dt>{t('integrations-local-connection')}</dt>
-          <dd class:state-warning={integration.status === 'conflict' || integration.status === 'error'}>{connectionState(integration.status)}</dd>
+          <dd class:state-warning={integration.status === 'conflict' || integration.status === 'error'}><span class={`integration-state-dot ${connectionTone(integration.status)}`} aria-hidden="true"></span>{connectionState(integration.status)}</dd>
         </div>
         <div>
           <dt>{t('integrations-assisted-memory')}</dt>
-          <dd class:state-warning={integration.workflowGuide.status === 'conflict'}>{guideState(integration.workflowGuide.status)}</dd>
+          <dd class:state-warning={integration.workflowGuide.status === 'conflict'}><span class={`integration-state-dot ${guideTone(integration.workflowGuide.status)}`} aria-hidden="true"></span>{guideState(integration.workflowGuide.status)}</dd>
         </div>
       </dl>
       <div class="integration-actions">

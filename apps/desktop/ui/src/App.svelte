@@ -10,7 +10,7 @@
   import Sparkles from '@lucide/svelte/icons/sparkles';
   import { listen } from '@tauri-apps/api/event';
   import { onMount, tick } from 'svelte';
-  import { addFederationIndex, addWiki, allowPeerPairingAgain, approveReview, browseNearbyWiki, browsePublicWiki, cancelModelInstall, checkUpdates, configureFirewall, confirmPairing, connect, deleteWiki, dialPeer, downloadUpdate, executeComputation, executeGuidedWikiRepair, hideToTray, importOkf, installModels, installUpdate, loadReviewEvidence, loadWikiBundle, loadWikiPage, manageIntegration, openExternalLink, openSystemDestination, pairPeer, pickOkfImport, pickWikiFolder, prepareGuidedWikiRepair, quitCompletely, reanalyzeReview, refreshApplicationAccess, refreshAutostart, refreshComputations, refreshConnectivity, refreshWikiHealth, rejectComputation, rejectReview, relinkWiki, removeFederationIndex, rescanWiki, revokePeer, saveComputationResult, searchKnowledge, setApplicationWikiRole, setAutostart, setPublicPublisherBlocked, setWikiGrant, setWikiIndexing, updatePreferences, updatePublicWikiProfile, updateWikiPolicy, validateOkfImport, verifyWikiConcept, type AppSnapshot, type ApplicationWikiRoleInput, type CloseBehavior, type EnrichmentDraft, type FolderSelection, type IntegrationActionInput, type KnowledgeConceptSummary, type KnowledgePageInput, type LanPreference, type LocalePreference, type OkfImportSummary, type PublicConceptSummaryDto, type RemoteWikiPageInput, type ReviewSummary, type SearchCoverage, type SearchHitSummary, type SourceIssueSummary, type SystemDestination, type ThemePreference, type UpdaterIssue, type WikiPolicyInput, type WikiSummary } from './api';
+  import { addFederationIndex, addWiki, allowPeerPairingAgain, approveReview, browseNearbyWiki, browsePublicWiki, cancelModelInstall, checkUpdates, configureFirewall, confirmPairing, connect, deleteWiki, dialPeer, downloadUpdate, executeComputation, executeGuidedWikiRepair, hideToTray, importOkf, installModels, installUpdate, loadReviewEvidence, loadWikiBundle, loadWikiPage, manageIntegration, openExternalLink, openSystemDestination, pairPeer, pickOkfImport, pickWikiFolder, prepareGuidedWikiRepair, quitCompletely, reanalyzeReview, refreshApplicationAccess, refreshAutostart, refreshComputations, refreshConnectivity, refreshWikiHealth, rejectComputation, rejectReview, relinkWiki, removeFederationIndex, rescanWiki, revokePeer, saveComputationResult, searchKnowledge, setApplicationWikiRole, setAutostart, setPublicPublisherBlocked, setWikiGrant, setWikiIndexing, updatePreferences, updatePublicWikiProfile, updateWikiPolicy, validateOkfImport, verifyWikiConcept, type AppSnapshot, type ApplicationWikiRoleInput, type CloseBehavior, type EnrichmentDraft, type FolderSelection, type IntegrationActionInput, type IntegrationClient, type KnowledgeConceptSummary, type KnowledgePageInput, type LanPreference, type LocalePreference, type OkfImportSummary, type PublicConceptSummaryDto, type RemoteWikiPageInput, type ReviewSummary, type SearchCoverage, type SearchHitSummary, type SourceIssueSummary, type SystemDestination, type ThemePreference, type UpdaterIssue, type WikiPolicyInput, type WikiSummary } from './api';
   import KnowledgeGraph from './KnowledgeGraph.svelte';
   import ConnectionAdvanced from './ConnectionAdvanced.svelte';
   import GlobalSearch from './GlobalSearch.svelte';
@@ -18,6 +18,9 @@
   import OnboardingFlow from './OnboardingFlow.svelte';
   import SharedWikiViewer from './SharedWikiViewer.svelte';
   import LoadingState from './components/LoadingState.svelte';
+  import AiClientIcon from './components/identity/AiClientIcon.svelte';
+  import DeviceIdentity from './components/identity/DeviceIdentity.svelte';
+  import PlatformIcon from './components/identity/PlatformIcon.svelte';
   import SystemStatusBar from './SystemStatusBar.svelte';
   import WikiTable from './WikiTable.svelte';
   import Checkbox from './components/controls/Checkbox.svelte';
@@ -102,6 +105,7 @@
   let sharedBrowsePageLoading = false;
   let sharedBrowseSource: SharedWikiSource = 'public';
   let sharedBrowseSourceName = '';
+  let sharedBrowsePlatform: Peer['platform'] = null;
   let sharedBrowseInitialConceptId: string | null = null;
   let activeSearchRequestId: string | null = null;
   let searchSubmissionSequence = 0;
@@ -949,21 +953,27 @@
     return t('desktop-device-platform-unknown');
   }
 
-  function peerIdentityLabel(peer: Peer): string {
-    return `${peerDisplayName(peer)} · ${platformLabel(peer.platform)}`;
-  }
-
   function searchOwnerFor(hit: SearchHitSummary): string {
     if (hit.route === 'publicNetwork') {
       return t('desktop-public-publisher', { id: compactIdentity(hit.nodeId) });
     }
     if (hit.nodeId === snapshot?.nodeId) {
-      return t('desktop-local-device-owner', { platform: platformLabel(snapshot?.platform ?? null) });
+      return t('desktop-local-device-owner');
     }
     const peer = peerFor(hit.nodeId);
-    return peer
-      ? peerIdentityLabel(peer)
-      : `${t('desktop-device-identified', { id: compactIdentity(hit.nodeId) })} · ${platformLabel(null)}`;
+    return peer ? peerDisplayName(peer) : t('desktop-device-identified', { id: compactIdentity(hit.nodeId) });
+  }
+
+  function searchPlatformFor(hit: SearchHitSummary): Peer['platform'] {
+    if (hit.route === 'publicNetwork') return null;
+    if (hit.nodeId === snapshot?.nodeId) return snapshot?.platform ?? null;
+    return peerFor(hit.nodeId)?.platform ?? null;
+  }
+
+  function searchIdentityLabel(hit: SearchHitSummary): string {
+    return hit.route === 'publicNetwork'
+      ? t('desktop-public-network')
+      : platformLabel(searchPlatformFor(hit));
   }
 
   function searchScopeFor(hit: SearchHitSummary): string {
@@ -1000,8 +1010,17 @@
       ?? [];
   }
 
-  function wikiPeerLabels(wikiId: string): string[] {
-    return wikiPeers(wikiId).map(peerIdentityLabel);
+  function applicationClientFor(application: AppSnapshot['applicationAccess'][number]): IntegrationClient | 'codex' {
+    const identity = `${application.appId} ${application.displayName} ${application.producer}`.toLocaleLowerCase();
+    if (identity.includes('claude') || identity.includes('anthropic')) {
+      return identity.includes('code') ? 'claudeCode' : 'claudeDesktop';
+    }
+    if (identity.includes('gemini')) return 'geminiCli';
+    if (identity.includes('codex')) return 'codex';
+    if (identity.includes('chatgpt') || identity.includes('openai')) {
+      return 'chatGptDesktop';
+    }
+    return 'genericMcp';
   }
 
   async function chooseFolder() {
@@ -1287,6 +1306,7 @@
     const browseGeneration = ++sharedBrowseGeneration;
     sharedBrowseSource = browseSource;
     sharedBrowseSourceName = searchOwnerFor(hit);
+    sharedBrowsePlatform = searchPlatformFor(hit);
     sharedBrowseInitialConceptId = hit.conceptId;
     sharedBrowseOpen = true;
     sharedBrowseLoading = true;
@@ -1803,7 +1823,7 @@
                 <div class="search-results">
                   {#each snapshot.search.hits.filter(isPublicSearchHit) as hit (`${hit.nodeId}:${hit.wikiId}:${hit.conceptId}:${hit.rank}`)}
                     <article class="search-result public-result">
-                      <div class="search-result-origin"><span class="network-scope public">{searchScopeFor(hit)}</span><strong>{searchOwnerFor(hit)}</strong></div>
+                      <div class="search-result-origin"><span class="network-scope public">{searchScopeFor(hit)}</span><DeviceIdentity name={searchOwnerFor(hit)} platform={null} platformLabel={searchIdentityLabel(hit)} source="public" compact /></div>
                       <small class="search-result-path">{hit.headingOrPage}</small>
                       <h3>{hit.title}</h3>
                       <p>{hit.snippet}</p>
@@ -1825,8 +1845,8 @@
             <div class="wiki-detail-body">
             <section class="wiki-access-strip" aria-label={t('desktop-wiki-access-title')}>
               <strong>{t('desktop-wiki-access-title')}</strong>
-              <div>{#if !selectedWiki.peerShareable && !selectedWiki.allowExternalAi && !selectedWiki.internetPublic}<span>{t('desktop-wiki-private')}</span>{/if}{#if selectedWiki.peerShareable}<span>{t(wikiPeers(selectedWiki.id).length > 0 ? 'desktop-share-nearby' : 'desktop-share-nearby-enabled')}</span>{/if}{#if selectedWiki.allowExternalAi}<span>{t('desktop-share-ai-apps')}</span>{/if}{#if selectedWiki.internetPublic}<span>{t('desktop-share-public')}</span>{/if}</div>
-              <small>{wikiPeers(selectedWiki.id).length > 0 ? wikiPeerLabels(selectedWiki.id).join(' · ') : t('desktop-wiki-no-specific-access')}</small>
+              <div class="wiki-access-channels">{#if !selectedWiki.peerShareable && !selectedWiki.allowExternalAi && !selectedWiki.internetPublic}<span>{t('desktop-wiki-private')}</span>{/if}{#if selectedWiki.peerShareable}<span>{t(wikiPeers(selectedWiki.id).length > 0 ? 'desktop-share-nearby' : 'desktop-share-nearby-enabled')}</span>{/if}{#if selectedWiki.allowExternalAi}<span>{t('desktop-share-ai-apps')}</span>{/if}{#if selectedWiki.internetPublic}<span>{t('desktop-share-public')}</span>{/if}</div>
+              {#if wikiPeers(selectedWiki.id).length > 0}<div class="wiki-access-devices">{#each wikiPeers(selectedWiki.id) as peer (peer.peerId)}<DeviceIdentity name={peerDisplayName(peer)} platform={peer.platform} platformLabel={platformLabel(peer.platform)} compact chip />{/each}</div>{:else}<small>{t('desktop-wiki-no-specific-access')}</small>{/if}
               {#if selectedWiki.restrictions.length === 0}<button class="text-action" onclick={openConnectionsPanel}>{t('desktop-manage-access')}</button>{/if}
             </section>
 
@@ -1926,7 +1946,7 @@
             </div>
           {:else if destination === 'search'}
             {#if sharedBrowseOpen}
-              <SharedWikiViewer source={sharedBrowseSource} sourceName={sharedBrowseSourceName} browse={sharedBrowseLoading ? null : sharedBrowseSource === 'nearby' ? snapshot.nearbyBrowse : snapshot.publicBrowse} loading={sharedBrowseLoading} structureLoading={sharedBrowseStructureLoading} pageLoading={sharedBrowsePageLoading} initialConceptId={sharedBrowseInitialConceptId} {t} metadata={publicConceptMetadata} onback={closeSharedBrowse} onopenpage={openSharedWikiPage} onblock={sharedBrowseSource === 'public' ? (publisherId) => changePublisherBlock(publisherId, true) : null} />
+              <SharedWikiViewer source={sharedBrowseSource} sourceName={sharedBrowseSourceName} sourcePlatform={sharedBrowsePlatform} sourceLabel={sharedBrowseSource === 'public' ? t('desktop-public-network') : platformLabel(sharedBrowsePlatform)} browse={sharedBrowseLoading ? null : sharedBrowseSource === 'nearby' ? snapshot.nearbyBrowse : snapshot.publicBrowse} loading={sharedBrowseLoading} structureLoading={sharedBrowseStructureLoading} pageLoading={sharedBrowsePageLoading} initialConceptId={sharedBrowseInitialConceptId} {t} metadata={publicConceptMetadata} onback={closeSharedBrowse} onopenpage={openSharedWikiPage} onblock={sharedBrowseSource === 'public' ? (publisherId) => changePublisherBlock(publisherId, true) : null} />
             {:else}
               <header class="page-heading"><div><h1 tabindex="-1">{t('desktop-page-search-title')}</h1><p>{t('desktop-page-search-body')}</p></div></header>
               {#if !snapshot.model?.active}
@@ -1947,7 +1967,7 @@
                   {/if}
                   {#each snapshot.search.hits as hit (`${hit.nodeId}:${hit.wikiId}:${hit.conceptId}:${hit.rank}`)}
                     <article class="search-result" class:public-result={hit.route === 'publicNetwork'} class:private-result={hit.route !== 'publicNetwork'}>
-                      <div class="search-result-origin"><span class:public={hit.route === 'publicNetwork'} class:private={hit.route !== 'publicNetwork'} class="network-scope">{searchScopeFor(hit)}</span><strong>{searchOwnerFor(hit)}</strong></div>
+                      <div class="search-result-origin"><span class:public={hit.route === 'publicNetwork'} class:private={hit.route !== 'publicNetwork'} class="network-scope">{searchScopeFor(hit)}</span><DeviceIdentity name={searchOwnerFor(hit)} platform={searchPlatformFor(hit)} platformLabel={searchIdentityLabel(hit)} source={hit.route === 'publicNetwork' ? 'public' : 'device'} compact /></div>
                       <small class="search-result-path">{hit.headingOrPage}</small>
                       <h3>{hit.title}</h3>
                       <p>{hit.snippet}</p>
@@ -2044,7 +2064,7 @@
           {#if wikiPolicy.peerShareable && activeWiki}
             <div class="share-device-list" aria-label={t('desktop-share-device-access')}>
               {#each trustedPeers() as peer (peer.peerId)}
-                <Checkbox label={peerDisplayName(peer)} description={`${platformLabel(peer.platform)} · ${peerActivityLabel(peer)}`} checked={peer.grantedWikiIds.includes(activeWiki.id)} disabled={peerActionId === peer.peerId} onchange={(checked) => changeGrant(peer.peerId, activeWiki.id, checked)} />
+                <Checkbox label={peerDisplayName(peer)} accessibleLabel={`${peerDisplayName(peer)}, ${platformLabel(peer.platform)}`} description={peerActivityLabel(peer)} checked={peer.grantedWikiIds.includes(activeWiki.id)} disabled={peerActionId === peer.peerId} onchange={(checked) => changeGrant(peer.peerId, activeWiki.id, checked)}>{#snippet leading()}<PlatformIcon platform={peer.platform} label={platformLabel(peer.platform)} size={30} decorative />{/snippet}</Checkbox>
               {:else}
                 <div class="share-channel-empty"><strong>{t('desktop-share-no-verified-devices')}</strong><small>{t('desktop-share-no-verified-devices-body')}</small><button class="text-action" onclick={() => { editingWikiId = null; openConnectionsPanel(); }}>{t('desktop-connections')}</button></div>
               {/each}
@@ -2100,7 +2120,7 @@
         <div class="peer-list">
           {#each snapshot.peers as peer (peer.peerId)}
             <article>
-              <div class="peer-summary"><strong>{peerDisplayName(peer)}</strong><small>{platformLabel(peer.platform)} · {peerActivityLabel(peer)}</small><span class:verified={peer.trust === 'trusted'} class:blocked={peer.trust === 'blocked'}>{peer.trust === 'trusted' ? t('desktop-verified') : peer.trust === 'blocked' ? t('desktop-pairing-blocked') : t('desktop-unverified')}</span></div>
+              <div class="peer-summary"><DeviceIdentity name={peerDisplayName(peer)} platform={peer.platform} platformLabel={platformLabel(peer.platform)} detail={peerActivityLabel(peer)} /><span class:verified={peer.trust === 'trusted'} class:blocked={peer.trust === 'blocked'}>{peer.trust === 'trusted' ? t('desktop-verified') : peer.trust === 'blocked' ? t('desktop-pairing-blocked') : t('desktop-unverified')}</span></div>
               {#if peer.sasWords}
                 <strong class="sas-words">{peer.sasWords.join(' · ')}</strong>
                 <div class="row-actions"><button class="primary" disabled={peerActionId === peer.peerId} onclick={() => runPeerAction(peer.peerId, 'accept')}>{t('devices-code-matches')}</button><button class="danger" disabled={peerActionId === peer.peerId} onclick={() => runPeerAction(peer.peerId, 'reject')}>{t('devices-code-does-not-match')}</button></div>
@@ -2127,7 +2147,7 @@
         <div class="application-access-list">
           {#each snapshot.applicationAccess.filter((application) => application.active) as application (application.appId)}
             <article>
-              <div><strong>{application.displayName}</strong><small>{t('desktop-application-quota', { count: application.ownedWikiCount, size: formatBytes(application.managedBytes) })}</small></div>
+              <div class="application-identity"><AiClientIcon client={applicationClientFor(application)} label={application.displayName} decorative /><div><strong>{application.displayName}</strong><small>{t('desktop-application-quota', { count: application.ownedWikiCount, size: formatBytes(application.managedBytes) })}</small></div></div>
               {#each snapshot.wikis.filter((wiki) => wiki.origin === 'aiMemory' && application.grants.some((grant) => grant.wikiId === wiki.id && grant.role === 'owner') === false) as wiki (wiki.id)}
                 <SelectField label={wiki.name} value={applicationGrantRole(application.appId, wiki.id)} options={[{ value: 'none', label: t('desktop-application-no-access') }, { value: 'reader', label: t('desktop-application-reader') }, { value: 'editor', label: t('desktop-application-editor') }]} onchange={(value) => changeApplicationGrant(application.appId, wiki.id, value === 'none' ? null : value as ApplicationWikiRoleInput)} disabled={actionBusy} />
               {/each}

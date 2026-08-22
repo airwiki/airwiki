@@ -341,7 +341,7 @@ integrations-no-chat-folders = Ninguna carpeta permite chats externos. Las búsq
 integrations-chat-folder-count = { $count } carpeta(s) puede(n) enviar fragmentos autorizados al proveedor del chat.
 integrations-permissions-reminder = Conectar un cliente no cambia permisos ni publica contenido automáticamente.
 integrations-manage-folders = Administrar carpetas
-integrations-recent-activity = ● Actividad reciente
+integrations-recent-activity = Actividad reciente
 integrations-version = Versión { $version }
 integrations-managed-resource = Recurso administrado
 integrations-restart-chatgpt = Abre una tarea nueva o reinicia ChatGPT después del cambio.
@@ -824,7 +824,7 @@ desktop-device-identified = Equipo { $id }
 desktop-device-platform-macos = macOS
 desktop-device-platform-windows = Windows
 desktop-device-platform-unknown = SO aún no disponible
-desktop-local-device-owner = Este equipo · { $platform }
+desktop-local-device-owner = Este equipo
 desktop-public-publisher = Publicador público { $id }
 desktop-listener = Listener
 desktop-discovery = Descubrimiento
@@ -980,6 +980,11 @@ desktop-status-nearby-available = Equipos cercanos disponibles
 desktop-status-public-active = Red pública activa
 desktop-status-private = Solo este dispositivo
 desktop-status-ai-apps = Apps de IA
+desktop-status-ai-apps-connected =
+    { $count ->
+        [one] 1 conectada
+       *[other] { $count } conectadas
+    }
 desktop-system-status = Estado del sistema
 desktop-wiki-access-title = Acceso compartido
 desktop-share-nearby-enabled = Compartición por LAN habilitada

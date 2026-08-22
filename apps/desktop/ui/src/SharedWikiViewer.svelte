@@ -12,10 +12,12 @@
     NearbyBrowseSummary,
     PublicBrowseSummary,
     PublicConceptSummaryDto,
+    HostPlatform,
     RemoteWikiPageDescriptorSummary,
     RemoteWikiPageInput
   } from './api';
   import LoadingState from './components/LoadingState.svelte';
+  import DeviceIdentity from './components/identity/DeviceIdentity.svelte';
   import { focusChoiceWithoutScroll } from './focus';
   import type { MessageArgs } from './i18n';
   import RemoteWikiGraph from './RemoteWikiGraph.svelte';
@@ -24,6 +26,8 @@
 
   export let source: SharedWikiSource;
   export let sourceName: string;
+  export let sourcePlatform: HostPlatform | null = null;
+  export let sourceLabel: string | null = null;
   export let browse: NearbyBrowseSummary | PublicBrowseSummary | null;
   export let loading: boolean;
   export let structureLoading: boolean;
@@ -188,7 +192,7 @@
 
     <section class="wiki-access-strip shared-wiki-access" aria-label={t('desktop-shared-access-title')}>
       <LockKeyhole size={17} aria-hidden="true" />
-      <div><span>{t('desktop-shared-read-only')}</span><span>{sourceName}</span></div>
+      <div class="shared-access-copy"><span>{t('desktop-shared-read-only')}</span><DeviceIdentity name={sourceName} platform={sourcePlatform} platformLabel={sourceLabel ?? sourceName} source={source === 'public' ? 'public' : 'device'} compact /></div>
       <small>{statusLabel()}</small>
       {#if publisherId() && onblock}<button class="text-action" onclick={blockCurrentPublisher}>{t('search-public-block-publisher')}</button>{/if}
     </section>
@@ -250,7 +254,7 @@
                 <aside class="concept-assurance shared-concept-assurance" aria-label={t('desktop-concept-assurance-title')}>
                   <div><span>{t('desktop-concept-type')}</span><strong>{selectedConcept.conceptType}</strong></div>
                   <div><span>{t('desktop-concept-trust')}</span><strong>{metadata(selectedConcept)}</strong></div>
-                  <div><span>{t('desktop-shared-source')}</span><strong>{sourceName}</strong></div>
+                  <div class="shared-source-assurance"><span>{t('desktop-shared-source')}</span><DeviceIdentity name={sourceName} platform={sourcePlatform} platformLabel={sourceLabel ?? sourceName} source={source === 'public' ? 'public' : 'device'} compact /></div>
                 </aside>
               {/if}
               <div class="knowledge-blocks">

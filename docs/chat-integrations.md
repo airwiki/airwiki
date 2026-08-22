@@ -98,6 +98,10 @@ for at most 24 hours and is pruned on startup or the next request.
 Select **Connect**, review the global locations, and confirm. AirWiki uses the
 compatible CLI found on `PATH` to register a local MCP server named `airwiki`.
 A different entry with the same name is a conflict and is never overwritten.
+Managed bridge paths are content-addressed. A bridge from an earlier candidate
+appears as **Update available** only after its path and bytes pass integrity
+checks; selecting **Update integration** installs and verifies the packaged
+bridge before changing the client entry.
 
 Open a new task or restart the client if the skill or tool is not visible.
 **Disconnect** removes the entry only while it still matches the configuration

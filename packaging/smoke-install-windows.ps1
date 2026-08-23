@@ -10,6 +10,10 @@ $UninstallerPassed = $false
 $OwnedDesktopProcess = $null
 $UpdaterRestartCleanupAllowed = $false
 $InstallCleanupAllowed = $false
+$UninstallerAuthorityFixtureCreated = $false
+$LlamaOriginalMoved = $false
+$OwnedDeleteLockProcess = $null
+$OwnedForeignProcess = $null
 $OwnedRegistryFixtures = [Collections.Generic.List[object]]::new()
 $CleanupFailures = [Collections.Generic.List[string]]::new()
 $InstallerWaitMilliseconds = 120000
@@ -69,6 +73,88 @@ function Invoke-Installer([string[]] $Arguments, [int] $ExpectedExit, [string] $
     if ($ExitCode -ne $ExpectedExit) {
         throw "installer exit code did not match the case contract"
     }
+}
+
+function Invoke-UninstallerCase(
+    [string] $Executable,
+    [string[]] $Arguments,
+    [int] $ExpectedExit,
+    [string] $CaseId
+) {
+    $script:CurrentCase = $CaseId
+    Assert-MutationProcessPrecondition $CaseId
+    $Process = Start-Process `
+        -FilePath $Executable `
+        -ArgumentList $Arguments `
+        -PassThru
+    try {
+        if (-not $Process.WaitForExit($InstallerWaitMilliseconds)) {
+            $Process.Kill()
+            if (-not $Process.WaitForExit($ProcessCleanupWaitMilliseconds)) {
+                throw "uninstaller timeout cleanup did not complete"
+            }
+            throw "uninstaller did not exit within the bounded wait"
+        }
+        $ExitCode = $Process.ExitCode
+    } finally {
+        $Process.Dispose()
+    }
+    if ($ExitCode -ne $ExpectedExit) {
+        throw "uninstaller exit code did not match the case contract"
+    }
+}
+
+function Stop-OwnedFixtureProcess($Process, [string] $Label) {
+    if ($null -eq $Process) {
+        return
+    }
+    try {
+        if (-not $Process.HasExited) {
+            $Process.Kill()
+            if (-not $Process.WaitForExit($ProcessCleanupWaitMilliseconds)) {
+                throw "$Label did not exit within the bounded wait"
+            }
+        }
+    } finally {
+        $Process.Dispose()
+    }
+}
+
+function Start-DeleteLockProcess(
+    [string] $Target,
+    [string] $ReadyMarker,
+    [int] $HoldMilliseconds,
+    [string] $CaseId
+) {
+    Assert-MutationProcessPrecondition $CaseId
+    $Process = Start-Process `
+        -FilePath $PowerShellExecutable `
+        -ArgumentList @(
+            "-NoProfile",
+            "-ExecutionPolicy",
+            "Bypass",
+            "-File",
+            "`"$DeleteLockHelper`"",
+            "-Target",
+            "`"$Target`"",
+            "-ReadyMarker",
+            "`"$ReadyMarker`"",
+            "-HoldMilliseconds",
+            [string] $HoldMilliseconds
+        ) `
+        -PassThru
+    for ($Attempt = 0; $Attempt -lt 100; $Attempt++) {
+        if (Test-Path -LiteralPath $ReadyMarker -PathType Leaf) {
+            return $Process
+        }
+        if ($Process.HasExited) {
+            $Process.Dispose()
+            throw "delete-lock fixture exited before acquiring its handle"
+        }
+        Start-Sleep -Milliseconds 100
+    }
+    Stop-OwnedFixtureProcess $Process "delete-lock fixture"
+    throw "delete-lock fixture did not acquire its handle"
 }
 
 function Set-InstalledVersionFixture([AllowEmptyString()][string] $Version) {
@@ -532,22 +618,58 @@ function Get-ExistingAirWikiWixCount {
 function Assert-OwnedCleanupLocation {
     Assert-NoReparsePath $ProgramDataRoot
     Assert-NoReparsePath $OwnerMarker
+    Assert-NoReparsePath $LocalAppDataRoot
     if ([IO.File]::ReadAllText($OwnerMarker) -cne $OwnerToken) {
         throw "installer-matrix ownership marker changed"
     }
-    $ExpectedParent = [IO.Path]::GetFullPath($ProgramDataRoot).TrimEnd(
-        [char[]]@([IO.Path]::DirectorySeparatorChar, [IO.Path]::AltDirectorySeparatorChar)
+    $ExpectedInstallDir = [IO.Path]::GetFullPath(
+        (Join-Path $ProgramsRoot "AirWiki")
     )
-    $ActualParent = [IO.Path]::GetDirectoryName([IO.Path]::GetFullPath($InstallDir))
-    if (-not $ActualParent.Equals($ExpectedParent, [StringComparison]::OrdinalIgnoreCase) -or
-        -not [IO.Path]::GetFileName($InstallDir).StartsWith(
-            "airwiki-installer-gate-",
-            [StringComparison]::Ordinal
-        )) {
-        throw "installer-matrix directory escaped the owned root"
+    if (-not [IO.Path]::GetFullPath($InstallDir).Equals(
+        $ExpectedInstallDir,
+        [StringComparison]::OrdinalIgnoreCase
+    )) {
+        throw "installer-matrix directory is not the fixed per-user binary path"
+    }
+    if (Test-Path -LiteralPath $ProgramsRoot) {
+        Assert-NoReparsePath $ProgramsRoot
     }
     if (Test-Path -LiteralPath $InstallDir) {
         Assert-NoReparsePath $InstallDir
+    }
+}
+
+function Assert-OwnedUninstallerAuthorityFixture {
+    if (-not $UninstallerAuthorityFixtureCreated) {
+        throw "uninstaller authority fixture ownership was not established"
+    }
+    $ExpectedRoot = [IO.Path]::GetFullPath(
+        (Join-Path $ProgramsRoot "AirWiki-uninstaller-authority-$RunSuffix")
+    )
+    if (-not [IO.Path]::GetFullPath($UninstallerAuthorityRoot).Equals(
+        $ExpectedRoot,
+        [StringComparison]::OrdinalIgnoreCase
+    )) {
+        throw "uninstaller authority fixture escaped its unique Programs child"
+    }
+    Assert-NoReparsePath $ProgramsRoot
+    Assert-NoReparsePath $UninstallerAuthorityRoot
+    if ([IO.File]::ReadAllText($UninstallerAuthorityMarker) -cne
+        $UninstallerAuthorityToken) {
+        throw "uninstaller authority fixture ownership marker changed"
+    }
+}
+
+function Get-DataRootPresence {
+    return @(
+        [bool] (Test-Path -LiteralPath $LocalDataRoot),
+        [bool] (Test-Path -LiteralPath $RoamingDataRoot)
+    ) -join ","
+}
+
+function Assert-DataRootPresence([string] $Expected) {
+    if ((Get-DataRootPresence) -cne $Expected) {
+        throw "uninstaller changed a local data root without explicit consent"
     }
 }
 
@@ -562,7 +684,7 @@ function Assert-InstalledRelease([string] $CaseId) {
     $UninstallMetadata = Get-ItemProperty -LiteralPath $UninstallRegistryPath
     if ([string]$UninstallMetadata.DisplayName -cne "AirWiki" -or
         [string]$UninstallMetadata.Publisher -cne $ExpectedPublisher -or
-        [string]$UninstallMetadata.DisplayVersion -cne "0.2.0" -or
+        [string]$UninstallMetadata.DisplayVersion -cne $ReleaseVersion -or
         [string]$UninstallMetadata.InstallLocation.Trim('"') -cne $InstallDir -or
         [string]$UninstallMetadata.UninstallString.Trim('"') -cne $InstalledUninstaller -or
         [string]$UninstallMetadata.DisplayIcon.Trim('"') -cne $DesktopExecutable) {
@@ -576,8 +698,10 @@ function Assert-InstalledRelease([string] $CaseId) {
         throw "silent or passive installer ignored /NS"
     }
 
-    Assert-SameFile (Join-Path $ReleaseDir "airwiki.exe") `
-        $DesktopExecutable "desktop executable"
+    Assert-WindowsNsisBundleTypePatch `
+        (Join-Path $ReleaseDir "airwiki.exe") `
+        $DesktopExecutable `
+        "installed desktop executable"
     Assert-SameFile (Join-Path $ReleaseDir "airwiki-mcp-bridge.exe") `
         (Join-Path $InstallDir "integrations\bridge\airwiki-mcp-bridge.exe") "MCP bridge"
     Assert-SameFile (Join-Path $ReleaseDir "airwiki-windows-firewall-helper.exe") `
@@ -604,7 +728,7 @@ function Assert-InstalledRelease([string] $CaseId) {
 
     $ExpectedPayload = New-WindowsPayloadManifest
     Add-WindowsPayloadFile $ExpectedPayload "airwiki.exe" `
-        (Join-Path $ReleaseDir "airwiki.exe") "desktop executable"
+        $DesktopExecutable "verified installed desktop executable"
     Add-WindowsPayloadFile $ExpectedPayload `
         "airwiki-windows-firewall-helper.exe" `
         (Join-Path $ReleaseDir "airwiki-windows-firewall-helper.exe") `
@@ -617,6 +741,10 @@ function Assert-InstalledRelease([string] $CaseId) {
         "integrations/airwiki-claude.mcpb" `
         $Mcpb `
         "Claude MCPB"
+    Add-WindowsPayloadTree $ExpectedPayload `
+        "integrations/workflow" `
+        (Join-Path $Root "resources\integrations\workflow") `
+        "AirWiki workflow guide"
     Add-WindowsPayloadFile $ExpectedPayload "LICENSE" `
         (Join-Path $Root "LICENSE") "project license"
     Add-WindowsPayloadFile $ExpectedPayload "THIRD_PARTY_NOTICES.md" `
@@ -631,7 +759,7 @@ function Assert-InstalledRelease([string] $CaseId) {
 
 function Restore-VerifiedInstall([string] $CaseId) {
     $script:CurrentCase = $CaseId
-    Set-InstalledVersionFixture "0.2.0"
+    Set-InstalledVersionFixture $ReleaseVersion
     Invoke-Installer @("/S", "/NS", "/D=$InstallDir") 0 $CaseId
     Assert-InstalledRelease $CaseId
 }
@@ -656,13 +784,17 @@ try {
         throw "the system-owned installer gate root is unavailable"
     }
     $ProgramDataRoot = (Resolve-Path -LiteralPath $env:ProgramData).Path
+    $LocalAppDataRoot = (Resolve-Path -LiteralPath $env:LOCALAPPDATA).Path
+    $ProgramsRoot = Join-Path $LocalAppDataRoot "Programs"
     $Root = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
+    . (Join-Path $PSScriptRoot "windows-release-version.ps1")
+    $ReleaseVersion = Get-AirWikiReleaseVersion $Root $env:AIRWIKI_RELEASE_VERSION
     $ReleaseDir = Join-Path $Root "target\x86_64-pc-windows-msvc\release"
     $Mcpb = Join-Path $Root "target\mcpb\x86_64-pc-windows-msvc\airwiki-claude.mcpb"
     $OutDir = Join-Path $Root "target\packages\windows"
     $RunSuffix = [Guid]::NewGuid().ToString("N")
-    $InstallDir = Join-Path $ProgramDataRoot "airwiki-installer-gate-$RunSuffix"
-    $OwnerMarker = "$InstallDir.owner"
+    $InstallDir = Join-Path $ProgramsRoot "AirWiki"
+    $OwnerMarker = Join-Path $ProgramDataRoot "airwiki-installer-gate-$RunSuffix.owner"
     $OwnerToken = [Guid]::NewGuid().ToString("N")
     $RegistryOwner = [Guid]::NewGuid().ToString("D")
     $WixUninstallRoot = "HKLM:\Software\Microsoft\Windows\CurrentVersion\Uninstall"
@@ -674,6 +806,27 @@ try {
     $ProductRegistryPath = "HKCU:\Software\AirWiki\AirWiki"
     $DesktopExecutable = Join-Path $InstallDir "airwiki.exe"
     $InstalledUninstaller = Join-Path $InstallDir "uninstall.exe"
+    $UninstallerAuthorityRoot = Join-Path `
+        $ProgramsRoot `
+        "AirWiki-uninstaller-authority-$RunSuffix"
+    $UninstallerAuthorityMarker = Join-Path $UninstallerAuthorityRoot ".owner"
+    $UninstallerAuthorityToken = [Guid]::NewGuid().ToString("N")
+    $DeleteLockHelper = Join-Path $UninstallerAuthorityRoot "hold-delete-lock.ps1"
+    $CopiedUninstallerRoot = Join-Path $UninstallerAuthorityRoot "copied"
+    $CopiedUninstaller = Join-Path $CopiedUninstallerRoot "uninstall.exe"
+    $CopiedDesktopFixture = Join-Path $CopiedUninstallerRoot "airwiki.exe"
+    $OverrideUninstallerRoot = Join-Path $UninstallerAuthorityRoot "override"
+    $OverrideDesktopFixture = Join-Path $OverrideUninstallerRoot "airwiki.exe"
+    $ReparseTarget = Join-Path $UninstallerAuthorityRoot "llama-original"
+    $InstalledLlamaRoot = Join-Path $InstallDir "llama"
+    $SustainedLockReady = Join-Path $UninstallerAuthorityRoot "sustained-lock.ready"
+    $ReleasedLockReady = Join-Path $UninstallerAuthorityRoot "released-lock.ready"
+    $ForeignProcessRoot = Join-Path $UninstallerAuthorityRoot "foreign"
+    $ForeignDesktopFixture = Join-Path $ForeignProcessRoot "airwiki.exe"
+    $LocalDataRoot = Join-Path $env:LOCALAPPDATA "airwiki\AirWiki"
+    $RoamingDataRoot = Join-Path $env:APPDATA "airwiki\AirWiki"
+    $PowerShellExecutable = (Get-Command powershell.exe -CommandType Application `
+        -ErrorAction Stop).Source
     $DesktopShortcut = Join-Path ([Environment]::GetFolderPath("Desktop")) "AirWiki.lnk"
     $StartMenuRoot = Join-Path $env:APPDATA "Microsoft\Windows\Start Menu\Programs"
 
@@ -683,11 +836,18 @@ try {
     . (Join-Path $PSScriptRoot "windows-safe-staging.ps1")
 
     Assert-NoReparsePath $ProgramDataRoot
+    Assert-NoReparsePath $LocalAppDataRoot
+    if (Test-Path -LiteralPath $ProgramsRoot) {
+        Assert-NoReparsePath $ProgramsRoot
+    }
     if (-not [IO.Path]::IsPathRooted($InstallDir) -or $InstallDir -match '\s') {
         throw "the installer gate path must be absolute and whitespace-free"
     }
     if ((Test-Path -LiteralPath $InstallDir) -or (Test-Path -LiteralPath $OwnerMarker)) {
         throw "the unique installer gate path already exists"
+    }
+    if (Test-Path -LiteralPath $UninstallerAuthorityRoot) {
+        throw "the unique uninstaller authority fixture path already exists"
     }
     if ((Test-Path -LiteralPath $UninstallRegistryPath) -or
         (Test-Path -LiteralPath $ProductRegistryPath) -or
@@ -697,9 +857,9 @@ try {
     }
     Assert-NoDesktopProcess "input-preflight"
 
-    $PackagerPolicy = [IO.File]::ReadAllText((Join-Path $Root "packaging\windows\Packager.toml"))
-    if (@($PackagerPolicy -split "`r?`n" |
-        Where-Object { $_ -ceq 'publisher = "AirWiki"' }).Count -ne 1) {
+    $TauriPolicy = [IO.File]::ReadAllText((Join-Path $Root "apps\desktop\tauri.conf.json")) |
+        ConvertFrom-Json
+    if ($TauriPolicy.bundle.publisher -cne "AirWiki") {
         throw "the fixture publisher does not match package policy"
     }
     $Installers = @(Get-ChildItem -LiteralPath $OutDir -File -Filter *.exe)
@@ -722,6 +882,51 @@ try {
         [IO.File]::WriteAllText($OwnerMarker, $OwnerToken, [Text.UTF8Encoding]::new($false))
         $OwnerMarkerCreated = $true
         Assert-OwnedCleanupLocation
+
+        Assert-MutationProcessPrecondition $CurrentCase
+        New-Item -ItemType Directory -Path $UninstallerAuthorityRoot -ErrorAction Stop |
+            Out-Null
+        Assert-MutationProcessPrecondition $CurrentCase
+        [IO.File]::WriteAllText(
+            $UninstallerAuthorityMarker,
+            $UninstallerAuthorityToken,
+            [Text.UTF8Encoding]::new($false)
+        )
+        $UninstallerAuthorityFixtureCreated = $true
+        $DeleteLockSource = @(
+            'param(',
+            '    [Parameter(Mandatory = $true)]',
+            '    [string] $Target,',
+            '    [Parameter(Mandatory = $true)]',
+            '    [string] $ReadyMarker,',
+            '    [Parameter(Mandatory = $true)]',
+            '    [int] $HoldMilliseconds',
+            ')',
+            '$ErrorActionPreference = "Stop"',
+            '$Stream = [IO.File]::Open(',
+            '    $Target,',
+            '    [IO.FileMode]::Open,',
+            '    [IO.FileAccess]::Read,',
+            '    [IO.FileShare]::Read',
+            ')',
+            'try {',
+            '    [IO.File]::WriteAllText(',
+            '        $ReadyMarker,',
+            '        "ready",',
+            '        [Text.UTF8Encoding]::new($false)',
+            '    )',
+            '    Start-Sleep -Milliseconds $HoldMilliseconds',
+            '} finally {',
+            '    $Stream.Dispose()',
+            '}'
+        ) -join "`r`n"
+        Assert-MutationProcessPrecondition $CurrentCase
+        [IO.File]::WriteAllText(
+            $DeleteLockHelper,
+            $DeleteLockSource,
+            [Text.UTF8Encoding]::new($false)
+        )
+        Assert-OwnedUninstallerAuthorityFixture
 
         Assert-CleanRejection @("/P", "/R", "/AIRWIKIUPDATE", "/NS", "/D=$InstallDir") "clean /AIRWIKIUPDATE rejection"
 
@@ -757,7 +962,7 @@ try {
         }
 
         try {
-            Set-InstalledVersionFixture "0.2.0"
+            Set-InstalledVersionFixture $ReleaseVersion
             Assert-RejectedInstallerPreservedState `
                 @("/P", "/R", "/AIRWIKIUPDATE", "/NS", "/D=$InstallDir") `
                 "/AIRWIKIUPDATE rejects same-version replay"
@@ -857,17 +1062,151 @@ try {
         }
 
         Assert-InstalledRelease "final installed release verification"
-        Assert-NoDesktopProcess "signed uninstaller"
-        $CurrentCase = "signed uninstaller"
+        Assert-NoDesktopProcess "uninstaller authority"
+        $DataRootPresence = Get-DataRootPresence
+
+        $CurrentCase = "copied uninstaller rejection"
         Assert-MutationProcessPrecondition $CurrentCase
-        $UninstallProcess = Start-Process `
-            -FilePath $InstalledUninstaller `
-            -ArgumentList "/S" `
-            -Wait `
-            -PassThru
-        if ($UninstallProcess.ExitCode -ne 0) {
-            throw "silent uninstaller returned a nonzero exit"
+        New-Item -ItemType Directory -Path $CopiedUninstallerRoot -ErrorAction Stop |
+            Out-Null
+        Assert-MutationProcessPrecondition $CurrentCase
+        Copy-Item -LiteralPath $InstalledUninstaller -Destination $CopiedUninstaller `
+            -ErrorAction Stop
+        Assert-MutationProcessPrecondition $CurrentCase
+        [IO.File]::WriteAllText(
+            $CopiedDesktopFixture,
+            "synthetic-copied-desktop",
+            [Text.UTF8Encoding]::new($false)
+        )
+        Invoke-UninstallerCase `
+            $CopiedUninstaller `
+            @("/S", "_?=$CopiedUninstallerRoot") `
+            2 `
+            $CurrentCase
+        if (-not (Test-Path -LiteralPath $CopiedUninstaller -PathType Leaf) -or
+            [IO.File]::ReadAllText($CopiedDesktopFixture) -cne
+                "synthetic-copied-desktop") {
+            throw "copied uninstaller mutated its untrusted directory"
         }
+        Assert-InstalledRelease "copied uninstaller preserved install"
+        Assert-DataRootPresence $DataRootPresence
+
+        $CurrentCase = "uninstaller directory override rejection"
+        Assert-MutationProcessPrecondition $CurrentCase
+        New-Item -ItemType Directory -Path $OverrideUninstallerRoot -ErrorAction Stop |
+            Out-Null
+        Assert-MutationProcessPrecondition $CurrentCase
+        [IO.File]::WriteAllText(
+            $OverrideDesktopFixture,
+            "synthetic-override-desktop",
+            [Text.UTF8Encoding]::new($false)
+        )
+        Invoke-UninstallerCase `
+            $InstalledUninstaller `
+            @("/S", "_?=$OverrideUninstallerRoot") `
+            2 `
+            $CurrentCase
+        if ([IO.File]::ReadAllText($OverrideDesktopFixture) -cne
+            "synthetic-override-desktop") {
+            throw "directory override uninstaller mutated its untrusted directory"
+        }
+        Assert-InstalledRelease "directory override preserved install"
+        Assert-DataRootPresence $DataRootPresence
+
+        $CurrentCase = "uninstaller descendant reparse rejection"
+        try {
+            Assert-MutationProcessPrecondition $CurrentCase
+            Move-Item -LiteralPath $InstalledLlamaRoot -Destination $ReparseTarget `
+                -ErrorAction Stop
+            $LlamaOriginalMoved = $true
+            Assert-MutationProcessPrecondition $CurrentCase
+            New-Item -ItemType Junction -Path $InstalledLlamaRoot -Target $ReparseTarget `
+                -ErrorAction Stop | Out-Null
+            Invoke-UninstallerCase `
+                $InstalledUninstaller `
+                @("/S", "_?=$InstallDir") `
+                2 `
+                $CurrentCase
+            if (-not (Test-Path -LiteralPath $DesktopExecutable -PathType Leaf) -or
+                -not (Test-Path -LiteralPath $UninstallRegistryPath) -or
+                -not (Test-Path -LiteralPath $ProductRegistryPath)) {
+                throw "reparse rejection mutated the registered install"
+            }
+            Assert-DataRootPresence $DataRootPresence
+        } finally {
+            if (Test-Path -LiteralPath $InstalledLlamaRoot) {
+                $LlamaItem = Get-Item -LiteralPath $InstalledLlamaRoot -Force
+                if (($LlamaItem.Attributes -band [IO.FileAttributes]::ReparsePoint) -eq 0) {
+                    throw "reparse fixture changed before recovery"
+                }
+                Assert-MutationProcessPrecondition $CurrentCase
+                Remove-Item -LiteralPath $InstalledLlamaRoot -Force -ErrorAction Stop
+            }
+            if ($LlamaOriginalMoved) {
+                Assert-MutationProcessPrecondition $CurrentCase
+                Move-Item -LiteralPath $ReparseTarget -Destination $InstalledLlamaRoot `
+                    -ErrorAction Stop
+                $LlamaOriginalMoved = $false
+            }
+        }
+        Assert-InstalledRelease "descendant reparse recovery"
+
+        $CurrentCase = "sustained delete lock rejection"
+        try {
+            $OwnedDeleteLockProcess = Start-DeleteLockProcess `
+                $DesktopExecutable `
+                $SustainedLockReady `
+                30000 `
+                $CurrentCase
+            Invoke-UninstallerCase `
+                $InstalledUninstaller `
+                @("/S", "_?=$InstallDir") `
+                2 `
+                $CurrentCase
+            if ($OwnedDeleteLockProcess.HasExited) {
+                throw "sustained delete-lock fixture exited before rejection"
+            }
+            Assert-InstalledRelease "sustained delete lock preserved install"
+            Assert-DataRootPresence $DataRootPresence
+        } finally {
+            Stop-OwnedFixtureProcess $OwnedDeleteLockProcess "sustained delete-lock fixture"
+            $OwnedDeleteLockProcess = $null
+        }
+
+        $CurrentCase = "released delete lock and foreign process"
+        Assert-MutationProcessPrecondition $CurrentCase
+        New-Item -ItemType Directory -Path $ForeignProcessRoot -ErrorAction Stop |
+            Out-Null
+        Assert-MutationProcessPrecondition $CurrentCase
+        Copy-Item -LiteralPath $PowerShellExecutable -Destination $ForeignDesktopFixture `
+            -ErrorAction Stop
+        Assert-MutationProcessPrecondition $CurrentCase
+        $OwnedForeignProcess = Start-Process `
+            -FilePath $ForeignDesktopFixture `
+            -ArgumentList @("-NoProfile", "-Command", "Start-Sleep -Seconds 60") `
+            -PassThru
+        $ForeignPath = [IO.Path]::GetFullPath($OwnedForeignProcess.MainModule.FileName)
+        if (-not $ForeignPath.Equals(
+            [IO.Path]::GetFullPath($ForeignDesktopFixture),
+            [StringComparison]::OrdinalIgnoreCase
+        )) {
+            throw "foreign homonym process identity changed"
+        }
+        $OwnedDeleteLockProcess = Start-DeleteLockProcess `
+            $DesktopExecutable `
+            $ReleasedLockReady `
+            5000 `
+            $CurrentCase
+        Invoke-UninstallerCase $InstalledUninstaller @("/S") 0 $CurrentCase
+        if ($OwnedForeignProcess.HasExited) {
+            throw "uninstaller terminated a foreign homonym process"
+        }
+        Stop-OwnedFixtureProcess $OwnedDeleteLockProcess "released delete-lock fixture"
+        $OwnedDeleteLockProcess = $null
+        Stop-OwnedFixtureProcess $OwnedForeignProcess "foreign homonym fixture"
+        $OwnedForeignProcess = $null
+        Assert-DataRootPresence $DataRootPresence
+
         for ($Attempt = 0; $Attempt -lt 100 -and
             (Test-Path -LiteralPath $InstallDir); $Attempt++) {
             Start-Sleep -Milliseconds 100
@@ -880,6 +1219,29 @@ try {
         }
         $UninstallerPassed = $true
     } finally {
+        Invoke-CleanupStep "uninstaller-fixture-processes" {
+            Stop-OwnedFixtureProcess $OwnedDeleteLockProcess "delete-lock fixture"
+            $script:OwnedDeleteLockProcess = $null
+            Stop-OwnedFixtureProcess $OwnedForeignProcess "foreign homonym fixture"
+            $script:OwnedForeignProcess = $null
+        }
+        if ($LlamaOriginalMoved) {
+            Invoke-CleanupStep "uninstaller-reparse-recovery" {
+                if (Test-Path -LiteralPath $InstalledLlamaRoot) {
+                    $LlamaItem = Get-Item -LiteralPath $InstalledLlamaRoot -Force
+                    if (($LlamaItem.Attributes -band
+                        [IO.FileAttributes]::ReparsePoint) -eq 0) {
+                        throw "reparse fixture changed before outer recovery"
+                    }
+                    Assert-MutationProcessPrecondition $CurrentCase
+                    Remove-Item -LiteralPath $InstalledLlamaRoot -Force -ErrorAction Stop
+                }
+                Assert-MutationProcessPrecondition $CurrentCase
+                Move-Item -LiteralPath $ReparseTarget -Destination $InstalledLlamaRoot `
+                    -ErrorAction Stop
+                $script:LlamaOriginalMoved = $false
+            }
+        }
         Invoke-CleanupStep "owned-desktop-process" {
             Stop-RegisteredDesktopProcess $DesktopExecutable
         }
@@ -915,7 +1277,7 @@ try {
                 Assert-MutationProcessPrecondition $CurrentCase
                 Remove-AirWikiWindowsStagingPath `
                     -Path $InstallDir `
-                    -AllowedRoot $ProgramDataRoot `
+                    -AllowedRoot $ProgramsRoot `
                     -Label "Windows installer matrix staging"
             }
             Invoke-CleanupStep "owner-marker" {
@@ -925,6 +1287,17 @@ try {
                     -Path $OwnerMarker `
                     -AllowedRoot $ProgramDataRoot `
                     -Label "Windows installer matrix owner marker"
+            }
+        }
+        if ($UninstallerAuthorityFixtureCreated) {
+            Invoke-CleanupStep "uninstaller-authority-fixture" {
+                Assert-OwnedUninstallerAuthorityFixture
+                Assert-MutationProcessPrecondition $CurrentCase
+                Remove-AirWikiWindowsStagingPath `
+                    -Path $UninstallerAuthorityRoot `
+                    -AllowedRoot $ProgramsRoot `
+                    -Label "Windows uninstaller authority fixture"
+                $script:UninstallerAuthorityFixtureCreated = $false
             }
         }
         if ($OwnedRegistryFixtures.Count -ne 0) {

@@ -1,44 +1,63 @@
-; Based on cargo-packager 0.11.8's default NSIS template. Keep changes narrow:
-; exact autostart cleanup and opt-in firewall cleanup during uninstall.
-; Set the compression algorithm.
-!if "{{compression}}" == ""
-  SetCompressor /SOLID lzma
+; Based on Tauri bundler 2.9.4's NSIS template, with AirWiki's fixed-path,
+; update, autostart, payload and opt-in cleanup policy kept in this file.
+Unicode true
+ManifestDPIAware true
+ManifestDPIAwareness PerMonitorV2
+
+!if "{{compression}}" == "none"
+  SetCompress off
 !else
   SetCompressor /SOLID "{{compression}}"
 !endif
 
-Unicode true
+{{#if signed_plugins_path}}
+!addplugindir "{{signed_plugins_path}}"
+{{/if}}
 
 !include MUI2.nsh
 !include FileFunc.nsh
 !include x64.nsh
 !include WinVer.nsh
 !include WordFunc.nsh
+!include "utils.nsh"
 !include "FileAssociation.nsh"
-!include "StrFunc.nsh"
+!include "Win\COM.nsh"
+!include "Win\Propkey.nsh"
 !include "StrFunc.nsh"
 ${StrCase}
 ${StrLoc}
 
+{{#if installer_hooks}}
+!include "{{installer_hooks}}"
+{{/if}}
+
+!define WEBVIEW2APPGUID "{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}"
 !define MANUFACTURER "{{manufacturer}}"
 !define PRODUCTNAME "{{product_name}}"
 !define VERSION "{{version}}"
 !define VERSIONWITHBUILD "{{version_with_build}}"
-!define SHORTDESCRIPTION "{{short_description}}"
+!define HOMEPAGE "{{homepage}}"
 !define INSTALLMODE "{{install_mode}}"
 !define LICENSE "{{license}}"
 !define INSTALLERICON "{{installer_icon}}"
 !define SIDEBARIMAGE "{{sidebar_image}}"
 !define HEADERIMAGE "{{header_image}}"
+!define UNINSTALLERICON "{{uninstaller_icon}}"
+!define UNINSTALLERHEADERIMAGE "{{uninstaller_header_image}}"
 !define MAINBINARYNAME "{{main_binary_name}}"
 !define MAINBINARYSRCPATH "{{main_binary_path}}"
-!define IDENTIFIER "{{identifier}}"
+!define BUNDLEID "{{bundle_id}}"
 !define COPYRIGHT "{{copyright}}"
 !define OUTFILE "{{out_file}}"
 !define ARCH "{{arch}}"
-!define PLUGINSPATH "{{additional_plugins_path}}"
+!define ADDITIONALPLUGINSPATH "{{additional_plugins_path}}"
 !define ALLOWDOWNGRADES "{{allow_downgrades}}"
 !define DISPLAYLANGUAGESELECTOR "{{display_language_selector}}"
+!define INSTALLWEBVIEW2MODE "{{install_webview2_mode}}"
+!define WEBVIEW2INSTALLERARGS "{{webview2_installer_args}}"
+!define WEBVIEW2BOOTSTRAPPERPATH "{{webview2_bootstrapper_path}}"
+!define WEBVIEW2INSTALLERPATH "{{webview2_installer_path}}"
+!define MINIMUMWEBVIEW2VERSION "{{minimum_webview2_version}}"
 !define UNINSTKEY "Software\Microsoft\Windows\CurrentVersion\Uninstall\${PRODUCTNAME}"
 !define MANUPRODUCTKEY "Software\${MANUFACTURER}\${PRODUCTNAME}"
 !define UNINSTALLERSIGNCOMMAND "{{uninstaller_sign_cmd}}"
@@ -54,13 +73,34 @@ ${StrLoc}
 !define NSIS_METADATA_ABSENT "absent"
 !define NSIS_METADATA_COMPLETE "complete"
 !define NSIS_METADATA_PARTIAL "partial"
+!define PAYLOAD_REMOVAL_ATTEMPTS 150
+!define PAYLOAD_REMOVAL_DELAY_MS 100
 !define UNINSTROOT "Software\Microsoft\Windows\CurrentVersion\Uninstall"
 
+; Declare state before page callbacks are compiled. LogicLib otherwise treats
+; forward variable references as constants and silently weakens the checks.
+Var ExistingInstallKind
+Var ExistingUninstallKey
+Var InstalledVersion
+Var InstallVersionRelation
+Var WixMetadataCount
+Var WixCandidateKey
+Var NsisMetadataState
+Var SilentMode
+Var PlatformRejectionMessage
+Var PassiveMode
+Var UpdaterMode
+Var ExistingNsisInstallLocation
+Var ManagedPayloadPath
+Var ManagedPayloadAttempts
+Var ManagedValidationPath
+Var ManagedValidationParent
+
 !if "${INSTALLMODE}" != "currentUser"
-  !error "AirWiki 0.2.0 supports only currentUser Windows installs."
+  !error "AirWiki ${VERSION} supports only currentUser Windows installs."
 !endif
 !if "${ALLOWDOWNGRADES}" != "false"
-  !error "AirWiki 0.2.0 does not support Windows downgrades."
+  !error "AirWiki ${VERSION} does not support Windows downgrades."
 !endif
 
 Name "${PRODUCTNAME}"
@@ -69,15 +109,12 @@ OutFile "${OUTFILE}"
 
 VIProductVersion "${VERSIONWITHBUILD}"
 VIAddVersionKey "ProductName" "${PRODUCTNAME}"
-VIAddVersionKey "FileDescription" "${SHORTDESCRIPTION}"
+VIAddVersionKey "FileDescription" "${PRODUCTNAME}"
 VIAddVersionKey "LegalCopyright" "${COPYRIGHT}"
 VIAddVersionKey "FileVersion" "${VERSION}"
 VIAddVersionKey "ProductVersion" "${VERSION}"
 
-; Plugins path, currently exists for linux only
-!if "${PLUGINSPATH}" != ""
-    !addplugindir "${PLUGINSPATH}"
-!endif
+!addplugindir "${ADDITIONALPLUGINSPATH}"
 
 !if "${UNINSTALLERSIGNCOMMAND}" != ""
   !uninstfinalize '${UNINSTALLERSIGNCOMMAND}'
@@ -273,19 +310,16 @@ Function PageLeaveReinstall
   reinst_done:
 FunctionEnd
 
-; 5. Choose install directoy page
-!define MUI_PAGE_CUSTOMFUNCTION_PRE SkipIfPassive
-!insertmacro MUI_PAGE_DIRECTORY
-
-; 6. Start menu shortcut page
+; 5. Start menu shortcut page. The current-user binary directory is fixed so
+; path aliases cannot overlap the local-first data roots.
 !define MUI_PAGE_CUSTOMFUNCTION_PRE SkipIfPassive
 Var AppStartMenuFolder
 !insertmacro MUI_PAGE_STARTMENU Application $AppStartMenuFolder
 
-; 7. Installation page
+; 6. Installation page
 !insertmacro MUI_PAGE_INSTFILES
 
-; 8. Finish page
+; 7. Finish page
 ;
 ; Don't auto jump to finish page after installation page,
 ; because the installation page has useful info that can be used debug any issues with the installer.
@@ -306,41 +340,29 @@ Var AppStartMenuFolder
 ; uninstall therefore keeps user data and firewall rules.
 Var RemoveFirewallCheckbox
 Var RemoveFirewallCheckboxState
-{{#if appdata_paths}}
 Var DeleteAppDataCheckbox
 Var DeleteAppDataCheckboxState
-{{/if}}
 !define /ifndef WS_EX_LAYOUTRTL         0x00400000
 !define MUI_PAGE_CUSTOMFUNCTION_SHOW un.ConfirmShow
 Function un.ConfirmShow
     FindWindow $1 "#32770" "" $HWNDPARENT ; Find inner dialog
     ${If} $(^RTL) == 1
       System::Call 'USER32::CreateWindowEx(i${__NSD_CheckBox_EXSTYLE}|${WS_EX_LAYOUTRTL},t"${__NSD_CheckBox_CLASS}",t "$(removeFirewallRules)",i${__NSD_CheckBox_STYLE},i 50,i 75,i 400, i 25,i$1,i0,i0,i0)i.s'
-      {{#if appdata_paths}}
       System::Call 'USER32::CreateWindowEx(i${__NSD_CheckBox_EXSTYLE}|${WS_EX_LAYOUTRTL},t"${__NSD_CheckBox_CLASS}",t "$(deleteAppData)",i${__NSD_CheckBox_STYLE},i 50,i 100,i 400, i 25,i$1,i0,i0,i0)i.s'
-      {{/if}}
     ${Else}
       System::Call 'USER32::CreateWindowEx(i${__NSD_CheckBox_EXSTYLE},t"${__NSD_CheckBox_CLASS}",t "$(removeFirewallRules)",i${__NSD_CheckBox_STYLE},i 0,i 75,i 400, i 25,i$1,i0,i0,i0)i.s'
-      {{#if appdata_paths}}
       System::Call 'USER32::CreateWindowEx(i${__NSD_CheckBox_EXSTYLE},t"${__NSD_CheckBox_CLASS}",t "$(deleteAppData)",i${__NSD_CheckBox_STYLE},i 0,i 100,i 400, i 25,i$1,i0,i0,i0)i.s'
-      {{/if}}
     ${EndIf}
-    {{#if appdata_paths}}
     Pop $DeleteAppDataCheckbox
-    {{/if}}
     Pop $RemoveFirewallCheckbox
     SendMessage $HWNDPARENT ${WM_GETFONT} 0 0 $1
     SendMessage $RemoveFirewallCheckbox ${WM_SETFONT} $1 1
-    {{#if appdata_paths}}
     SendMessage $DeleteAppDataCheckbox ${WM_SETFONT} $1 1
-    {{/if}}
 FunctionEnd
 !define MUI_PAGE_CUSTOMFUNCTION_LEAVE un.ConfirmLeave
 Function un.ConfirmLeave
     SendMessage $RemoveFirewallCheckbox ${BM_GETCHECK} 0 0 $RemoveFirewallCheckboxState
-    {{#if appdata_paths}}
     SendMessage $DeleteAppDataCheckbox ${BM_GETCHECK} 0 0 $DeleteAppDataCheckboxState
-    {{/if}}
 FunctionEnd
 !insertmacro MUI_UNPAGE_CONFIRM
 
@@ -357,6 +379,8 @@ LangString UnsupportedWindowsServer ${LANG_ENGLISH} "Windows Server is not suppo
 LangString UnsupportedWindowsServer ${LANG_SPANISH} "Windows Server no es compatible. AirWiki requiere Windows 10 u 11 cliente."
 LangString UnsupportedWindowsArchitecture ${LANG_ENGLISH} "AirWiki requires native x64 Windows on an AMD64 processor."
 LangString UnsupportedWindowsArchitecture ${LANG_SPANISH} "AirWiki requiere Windows x64 nativo en un procesador AMD64."
+LangString UnsafeInstallLocation ${LANG_ENGLISH} "AirWiki binaries must be installed outside AirWiki's local data folders. Uninstall an older development candidate while preserving its data, then install this candidate again."
+LangString UnsafeInstallLocation ${LANG_SPANISH} "Los binarios de AirWiki deben instalarse fuera de las carpetas de datos locales. Desinstala un candidato de desarrollo anterior conservando sus datos y vuelve a instalar este candidato."
 !insertmacro MUI_RESERVEFILE_LANGDLL
 {{#each language_files}}
   !include "{{this}}"
@@ -365,8 +389,12 @@ LangString removeFirewallRules ${LANG_ENGLISH} "Remove AirWiki's restricted loca
 LangString removeFirewallRules ${LANG_SPANISH} "Quitar las reglas restringidas de red local de AirWiki (requiere aprobación de administrador)"
 LangString firewallRulesRemain ${LANG_ENGLISH} "Windows could not remove the firewall rules. Uninstallation will continue and the rules will remain until removed from Windows Security."
 LangString firewallRulesRemain ${LANG_SPANISH} "Windows no pudo quitar las reglas del firewall. La desinstalación continuará y las reglas permanecerán hasta quitarlas desde Seguridad de Windows."
+LangString installedPayloadRemovalFailed ${LANG_ENGLISH} "Windows could not remove AirWiki's installed application files. Uninstallation stopped without deleting local data."
+LangString installedPayloadRemovalFailed ${LANG_SPANISH} "Windows no pudo quitar los archivos instalados de AirWiki. La desinstalación se detuvo sin borrar los datos locales."
+LangString untrustedUninstallState ${LANG_ENGLISH} "AirWiki could not verify this uninstaller against the fixed per-user installation. No application files or local data were removed."
+LangString untrustedUninstallState ${LANG_SPANISH} "AirWiki no pudo verificar este desinstalador contra la instalación fija del usuario. No se quitaron archivos de la aplicación ni datos locales."
 
-!macro SetContext
+!macro AirWikiSetContext
   !if "${INSTALLMODE}" == "currentUser"
     SetShellVarContext current
   !else if "${INSTALLMODE}" == "perMachine"
@@ -383,18 +411,6 @@ LangString firewallRulesRemain ${LANG_SPANISH} "Windows no pudo quitar las regla
     !endif
   ${EndIf}
 !macroend
-
-Var ExistingInstallKind
-Var ExistingUninstallKey
-Var InstalledVersion
-Var InstallVersionRelation
-Var WixMetadataCount
-Var WixCandidateKey
-Var NsisMetadataState
-Var SilentMode
-Var PlatformRejectionMessage
-Var PassiveMode
-Var UpdaterMode
 
 Function RejectUnsupportedPlatform
   IfSilent platform_reject_abort
@@ -427,6 +443,7 @@ Function ClassifyExistingInstallation
   StrCpy $WixMetadataCount 0
   StrCpy $WixCandidateKey ""
   StrCpy $NsisMetadataState "${NSIS_METADATA_ABSENT}"
+  StrCpy $ExistingNsisInstallLocation ""
 
   ; Validate the signed candidate independently of registry state.
   nsis_tauri_utils::SemverCompare "${VERSION}" "${VERSION_SENTINEL}"
@@ -481,6 +498,21 @@ Function ClassifyExistingInstallation
     Goto classify_evaluate
 
   classify_evaluate:
+    ReadRegStr $7 SHCTX "${MANUPRODUCTKEY}" ""
+    ${If} $NsisMetadataState == "${NSIS_METADATA_ABSENT}"
+      ${If} $7 != ""
+        Goto classify_reject
+      ${EndIf}
+    ${ElseIf} $NsisMetadataState == "${NSIS_METADATA_COMPLETE}"
+      ${If} $7 == ""
+        Goto classify_reject
+      ${EndIf}
+      StrCpy $8 "$\"$7$\""
+      StrCmp $4 $8 0 classify_reject
+      StrCpy $8 "$\"$7\uninstall.exe$\""
+      StrCmp $5 $8 0 classify_reject
+      StrCpy $ExistingNsisInstallLocation $7
+    ${EndIf}
     ${If} $WixMetadataCount > 1
       Goto classify_reject
     ${EndIf}
@@ -556,6 +588,41 @@ Function EnforceInstallPolicy
   ${EndIf}
 FunctionEnd
 
+Function RejectUnsafeInstallLocation
+  IfSilent unsafe_install_location_abort
+  MessageBox MB_OK|MB_ICONSTOP "$(UnsafeInstallLocation)"
+  unsafe_install_location_abort:
+    SetErrorLevel 2
+    Abort
+FunctionEnd
+
+Function ValidateInstallLocation
+  ClearErrors
+  GetFullPathName $0 "$LOCALAPPDATA"
+  IfErrors unsafe_install_location
+  StrCpy $0 "$0\Programs\${PRODUCTNAME}"
+  StrCpy $1 "$INSTDIR"
+  ${StrCase} $0 $0 "L"
+  ${StrCase} $1 $1 "L"
+  StrCmp $0 $1 install_location_valid unsafe_install_location
+
+  install_location_valid:
+  System::Call 'kernel32::GetFileAttributesW(w "$LOCALAPPDATA\Programs")i .r2'
+  StrCmp $2 -1 install_location_leaf_attributes
+  IntOp $3 $2 & 0x0400
+  StrCmp $3 0 install_location_leaf_attributes unsafe_install_location
+  install_location_leaf_attributes:
+  System::Call 'kernel32::GetFileAttributesW(w "$LOCALAPPDATA\Programs\${PRODUCTNAME}")i .r2'
+  StrCmp $2 -1 install_location_safe
+  IntOp $3 $2 & 0x0400
+  StrCmp $3 0 install_location_safe unsafe_install_location
+  install_location_safe:
+  Return
+
+  unsafe_install_location:
+    Call RejectUnsafeInstallLocation
+FunctionEnd
+
 Function .onInit
   Call EnforceSupportedWindows
 
@@ -572,13 +639,9 @@ Function .onInit
   IfErrors +2 0
     StrCpy $UpdaterMode 1
 
-  !insertmacro SetContext
+!insertmacro AirWikiSetContext
   Call ClassifyExistingInstallation
   Call EnforceInstallPolicy
-
-  !if "${DISPLAYLANGUAGESELECTOR}" == "true"
-    !insertmacro MUI_LANGDLL_DISPLAY
-  !endif
 
   ${If} $INSTDIR == ""
     ; Set default install location
@@ -595,12 +658,19 @@ Function .onInit
         StrCpy $INSTDIR "$PROGRAMFILES\${PRODUCTNAME}"
       ${EndIf}
     !else if "${INSTALLMODE}" == "currentUser"
-      StrCpy $INSTDIR "$LOCALAPPDATA\${PRODUCTNAME}"
+      ; Keep installed binaries outside the local-first data root
+      ; ($LOCALAPPDATA\airwiki\AirWiki on case-insensitive Windows).
+      StrCpy $INSTDIR "$LOCALAPPDATA\Programs\${PRODUCTNAME}"
     !endif
 
     Call RestorePreviousInstallLocation
   ${EndIf}
 
+  Call ValidateInstallLocation
+
+  !if "${DISPLAYLANGUAGESELECTOR}" == "true"
+    !insertmacro MUI_LANGDLL_DISPLAY
+  !endif
 
   !if "${INSTALLMODE}" == "both"
     !insertmacro MULTIUSER_INIT
@@ -608,42 +678,7 @@ Function .onInit
 FunctionEnd
 
 
-{{#if preinstall_section}}
-{{unescape_newlines preinstall_section}}
-{{/if}}
-
-!macro CheckIfAppIsRunning
-  nsis_tauri_utils::FindProcess "${MAINBINARYNAME}.exe"
-  Pop $R0
-  ${If} $R0 = 0
-      IfSilent kill 0
-      ${IfThen} $PassiveMode != 1 ${|} MessageBox MB_OKCANCEL "$(appRunningOkKill)" IDOK kill IDCANCEL cancel ${|}
-      kill:
-        nsis_tauri_utils::KillProcess "${MAINBINARYNAME}.exe"
-        Pop $R0
-        Sleep 500
-        ${If} $R0 = 0
-          Goto app_check_done
-        ${Else}
-          IfSilent silent ui
-          silent:
-            System::Call 'kernel32::AttachConsole(i -1)i.r0'
-            ${If} $0 != 0
-              System::Call 'kernel32::GetStdHandle(i -11)i.r0'
-              System::call 'kernel32::SetConsoleTextAttribute(i r0, i 0x0004)' ; set red color
-              FileWrite $0 "$(appRunning)$\n"
-            ${EndIf}
-            Abort
-          ui:
-            Abort "$(failedToKillApp)"
-        ${EndIf}
-      cancel:
-        Abort "$(appRunning)"
-  ${EndIf}
-  app_check_done:
-!macroend
-
-; The in-app updater launches this installer before asking the eframe process
+; The in-app updater launches this installer before asking the Tauri process
 ; to exit cleanly. Give MCP, LAN, watchers and the local model a bounded window
 ; to stop before the existing recovery path terminates a stuck process.
 Function WaitForAirWikiUpdateShutdown
@@ -665,11 +700,99 @@ Function WaitForAirWikiUpdateShutdown
   update_shutdown_done:
 FunctionEnd
 
+Section WebView2
+  ${If} ${RunningX64}
+    ReadRegStr $4 HKLM "SOFTWARE\WOW6432Node\Microsoft\EdgeUpdate\Clients\${WEBVIEW2APPGUID}" "pv"
+  ${Else}
+    ReadRegStr $4 HKLM "SOFTWARE\Microsoft\EdgeUpdate\Clients\${WEBVIEW2APPGUID}" "pv"
+  ${EndIf}
+  ${If} $4 == ""
+    ReadRegStr $4 HKCU "SOFTWARE\Microsoft\EdgeUpdate\Clients\${WEBVIEW2APPGUID}" "pv"
+  ${EndIf}
+
+  ${If} $4 == ""
+    ; An update never needs to bootstrap WebView2: the installed Tauri app
+    ; already proved that the runtime exists. A fresh install communicates a
+    ; network failure and remains on this page so the user can retry.
+    ${If} $UpdaterMode != 1
+      !if "${INSTALLWEBVIEW2MODE}" == "downloadBootstrapper"
+        Delete "$TEMP\MicrosoftEdgeWebview2Setup.exe"
+        DetailPrint "$(webview2Downloading)"
+        NSISdl::download "https://go.microsoft.com/fwlink/p/?LinkId=2124703" "$TEMP\MicrosoftEdgeWebview2Setup.exe"
+        Pop $0
+        ${If} $0 == "success"
+          DetailPrint "$(webview2DownloadSuccess)"
+        ${Else}
+          DetailPrint "$(webview2DownloadError)"
+          Abort "$(webview2AbortError)"
+        ${EndIf}
+        StrCpy $6 "$TEMP\MicrosoftEdgeWebview2Setup.exe"
+        Goto install_webview2
+      !endif
+
+      !if "${INSTALLWEBVIEW2MODE}" == "embedBootstrapper"
+        Delete "$TEMP\MicrosoftEdgeWebview2Setup.exe"
+        File "/oname=$TEMP\MicrosoftEdgeWebview2Setup.exe" "${WEBVIEW2BOOTSTRAPPERPATH}"
+        StrCpy $6 "$TEMP\MicrosoftEdgeWebview2Setup.exe"
+        Goto install_webview2
+      !endif
+
+      !if "${INSTALLWEBVIEW2MODE}" == "offlineInstaller"
+        Delete "$TEMP\MicrosoftEdgeWebView2RuntimeInstaller.exe"
+        File "/oname=$TEMP\MicrosoftEdgeWebView2RuntimeInstaller.exe" "${WEBVIEW2INSTALLERPATH}"
+        StrCpy $6 "$TEMP\MicrosoftEdgeWebView2RuntimeInstaller.exe"
+        Goto install_webview2
+      !endif
+
+      Goto webview2_done
+
+      install_webview2:
+        DetailPrint "$(installingWebview2)"
+        ExecWait "$6 ${WEBVIEW2INSTALLERARGS} /install" $1
+        ${If} $1 = 0
+          DetailPrint "$(webview2InstallSuccess)"
+        ${Else}
+          DetailPrint "$(webview2InstallError)"
+          Abort "$(webview2AbortError)"
+        ${EndIf}
+      webview2_done:
+    ${EndIf}
+  ${Else}
+    !if "${MINIMUMWEBVIEW2VERSION}" != ""
+      ${VersionCompare} "${MINIMUMWEBVIEW2VERSION}" "$4" $R0
+      ${If} $R0 = 1
+        update_webview:
+          DetailPrint "$(installingWebview2)"
+          ${If} ${RunningX64}
+            ReadRegStr $R1 HKLM "SOFTWARE\WOW6432Node\Microsoft\EdgeUpdate" "path"
+          ${Else}
+            ReadRegStr $R1 HKLM "SOFTWARE\Microsoft\EdgeUpdate" "path"
+          ${EndIf}
+          ${If} $R1 == ""
+            ReadRegStr $R1 HKCU "SOFTWARE\Microsoft\EdgeUpdate" "path"
+          ${EndIf}
+          ${If} $R1 != ""
+            ExecWait `"$R1" /install appguid=${WEBVIEW2APPGUID}&needsadmin=true` $1
+            ${If} $1 = 0
+              DetailPrint "$(webview2InstallSuccess)"
+            ${Else}
+              MessageBox MB_ICONEXCLAMATION|MB_ABORTRETRYIGNORE "$(webview2InstallError)" IDIGNORE ignore IDRETRY update_webview
+              Quit
+              ignore:
+            ${EndIf}
+          ${EndIf}
+      ${EndIf}
+    !endif
+  ${EndIf}
+SectionEnd
+
 Section Install
+  ; Revalidate the effective command-line/default path before every write.
+  Call ValidateInstallLocation
   SetOutPath $INSTDIR
 
   Call WaitForAirWikiUpdateShutdown
-  !insertmacro CheckIfAppIsRunning
+  !insertmacro CheckIfAppIsRunning "${MAINBINARYNAME}.exe" "${PRODUCTNAME}"
 
   ; Copy main executable
   File "${MAINBINARYSRCPATH}"
@@ -681,17 +804,17 @@ Section Install
 
   ; Copy resources
   {{#each resources}}
-    File /a "/oname={{this}}" "{{@key}}"
+    File /a "/oname={{this.[1]}}" "{{no-escape @key}}"
   {{/each}}
 
   ; Copy external binaries
   {{#each binaries}}
-    File /a "/oname={{this}}" "{{@key}}"
+    File /a "/oname={{this}}" "{{no-escape @key}}"
   {{/each}}
 
   ; Create file associations
   {{#each file_associations as |association| ~}}
-    {{#each association.extensions as |ext| ~}}
+    {{#each association.ext as |ext| ~}}
        !insertmacro APP_ASSOCIATE "{{ext}}" "{{or association.name ext}}" "{{association-description association.description ext}}" "$INSTDIR\${MAINBINARYNAME}.exe,0" "Open with ${PRODUCTNAME}" "$INSTDIR\${MAINBINARYNAME}.exe $\"%1$\""
     {{/each}}
   {{/each}}
@@ -762,19 +885,161 @@ Function .onInstSuccess
   run_done:
 FunctionEnd
 
+Function un.RejectUntrustedUninstallState
+  SetErrorLevel 2
+  Abort "$(untrustedUninstallState)"
+FunctionEnd
+
+Function un.ValidateUninstallAuthority
+  ClearErrors
+  GetFullPathName $0 "$LOCALAPPDATA"
+  IfErrors untrusted_uninstall_state
+  StrCpy $0 "$0\Programs\${PRODUCTNAME}"
+  GetFullPathName $1 "$INSTDIR"
+  IfErrors untrusted_uninstall_state
+  System::Call 'kernel32::lstrcmpiW(w r0, w r1)i .r2'
+  StrCmp $2 0 uninstall_path_matches untrusted_uninstall_state
+
+  uninstall_path_matches:
+  System::Call 'kernel32::GetFileAttributesW(w "$LOCALAPPDATA\Programs")i .r2'
+  StrCmp $2 -1 untrusted_uninstall_state
+  IntOp $3 $2 & 0x0010
+  StrCmp $3 0 untrusted_uninstall_state
+  IntOp $3 $2 & 0x0400
+  StrCmp $3 0 uninstall_leaf_attributes untrusted_uninstall_state
+
+  uninstall_leaf_attributes:
+  System::Call 'kernel32::GetFileAttributesW(w "$INSTDIR")i .r2'
+  StrCmp $2 -1 untrusted_uninstall_state
+  IntOp $3 $2 & 0x0010
+  StrCmp $3 0 untrusted_uninstall_state
+  IntOp $3 $2 & 0x0400
+  StrCmp $3 0 uninstall_binary_attributes untrusted_uninstall_state
+
+  uninstall_binary_attributes:
+  System::Call 'kernel32::GetFileAttributesW(w "$INSTDIR\uninstall.exe")i .r2'
+  StrCmp $2 -1 untrusted_uninstall_state
+  IntOp $3 $2 & 0x0010
+  StrCmp $3 0 uninstall_binary_reparse untrusted_uninstall_state
+  uninstall_binary_reparse:
+  IntOp $3 $2 & 0x0400
+  StrCmp $3 0 uninstall_registry_authority untrusted_uninstall_state
+
+  uninstall_registry_authority:
+  ReadRegStr $0 SHCTX "${UNINSTKEY}" "DisplayName"
+  StrCmp $0 "${PRODUCTNAME}" 0 untrusted_uninstall_state
+  ReadRegStr $0 SHCTX "${UNINSTKEY}" "Publisher"
+  StrCmp $0 "${MANUFACTURER}" 0 untrusted_uninstall_state
+  ReadRegStr $0 SHCTX "${UNINSTKEY}" "DisplayVersion"
+  StrCmp $0 "${VERSION}" 0 untrusted_uninstall_state
+  ReadRegStr $0 SHCTX "${UNINSTKEY}" "InstallLocation"
+  StrCpy $1 "$\"$INSTDIR$\""
+  StrCmp $0 $1 0 untrusted_uninstall_state
+  ReadRegStr $0 SHCTX "${UNINSTKEY}" "UninstallString"
+  StrCpy $1 "$\"$INSTDIR\uninstall.exe$\""
+  StrCmp $0 $1 0 untrusted_uninstall_state
+  ReadRegStr $0 SHCTX "${MANUPRODUCTKEY}" ""
+  StrCmp $0 $INSTDIR uninstall_authority_valid untrusted_uninstall_state
+
+  untrusted_uninstall_state:
+    Call un.RejectUntrustedUninstallState
+  uninstall_authority_valid:
+FunctionEnd
+
+Function un.ValidateManagedPayloadTree
+  Push "$INSTDIR\${MAINBINARYNAME}.exe"
+  Call un.ValidateManagedPath
+  Push "$INSTDIR\uninstall.exe"
+  Call un.ValidateManagedPath
+  {{#each resources}}
+    Push "$INSTDIR\\{{this.[1]}}"
+    Call un.ValidateManagedPath
+  {{/each}}
+  {{#each binaries}}
+    Push "$INSTDIR\\{{this}}"
+    Call un.ValidateManagedPath
+  {{/each}}
+  {{#each resources_dirs}}
+    Push "$INSTDIR\\{{this}}"
+    Call un.ValidateManagedPath
+  {{/each}}
+  Push "$INSTDIR\integrations"
+  Call un.ValidateManagedPath
+FunctionEnd
+
 Function un.onInit
-  !insertmacro SetContext
+!insertmacro AirWikiSetContext
 
   !if "${INSTALLMODE}" == "both"
     !insertmacro MULTIUSER_UNINIT
   !endif
 
   !insertmacro MUI_UNGETLANGUAGE
+  Call un.ValidateUninstallAuthority
+  Call un.ValidateManagedPayloadTree
+FunctionEnd
+
+Function un.RemoveManagedFile
+  Pop $ManagedPayloadPath
+  StrCpy $ManagedPayloadAttempts 0
+  managed_file_remove_retry:
+    Push "$ManagedPayloadPath"
+    Call un.ValidateManagedPath
+    ClearErrors
+    Delete "$ManagedPayloadPath"
+    IfFileExists "$ManagedPayloadPath" 0 managed_file_remove_done
+    IntOp $ManagedPayloadAttempts $ManagedPayloadAttempts + 1
+    ${If} $ManagedPayloadAttempts >= ${PAYLOAD_REMOVAL_ATTEMPTS}
+      SetErrorLevel 2
+      Abort "$(installedPayloadRemovalFailed)"
+    ${EndIf}
+    Sleep ${PAYLOAD_REMOVAL_DELAY_MS}
+    Goto managed_file_remove_retry
+  managed_file_remove_done:
+FunctionEnd
+
+Function un.RemoveManagedDirectory
+  Pop $ManagedPayloadPath
+  StrCpy $ManagedPayloadAttempts 0
+  managed_directory_remove_retry:
+    Push "$ManagedPayloadPath"
+    Call un.ValidateManagedPath
+    ClearErrors
+    RMDir "$ManagedPayloadPath"
+    IfFileExists "$ManagedPayloadPath\*.*" 0 managed_directory_remove_done
+    IntOp $ManagedPayloadAttempts $ManagedPayloadAttempts + 1
+    ${If} $ManagedPayloadAttempts >= ${PAYLOAD_REMOVAL_ATTEMPTS}
+      SetErrorLevel 2
+      Abort "$(installedPayloadRemovalFailed)"
+    ${EndIf}
+    Sleep ${PAYLOAD_REMOVAL_DELAY_MS}
+    Goto managed_directory_remove_retry
+  managed_directory_remove_done:
+FunctionEnd
+
+Function un.ValidateManagedPath
+  Pop $ManagedValidationPath
+  managed_path_validation_loop:
+    System::Call 'kernel32::GetFileAttributesW(w "$ManagedValidationPath")i .r2'
+    StrCmp $2 -1 managed_path_validation_parent
+    IntOp $3 $2 & 0x0400
+    StrCmp $3 0 managed_path_validation_parent untrusted_managed_path
+
+  managed_path_validation_parent:
+    System::Call 'kernel32::lstrcmpiW(w "$ManagedValidationPath", w "$INSTDIR")i .r2'
+    StrCmp $2 0 managed_path_valid
+    ${GetParent} "$ManagedValidationPath" $ManagedValidationParent
+    System::Call 'kernel32::lstrcmpiW(w "$ManagedValidationParent", w "$ManagedValidationPath")i .r2'
+    StrCmp $2 0 untrusted_managed_path
+    StrCpy $ManagedValidationPath "$ManagedValidationParent"
+    Goto managed_path_validation_loop
+
+  untrusted_managed_path:
+    Call un.RejectUntrustedUninstallState
+  managed_path_valid:
 FunctionEnd
 
 Section Uninstall
-  !insertmacro CheckIfAppIsRunning
-
   ; Delete only the exact per-user autostart command managed by AirWiki.
   ; A value with the same name but different bytes is a conflict and is preserved.
   ReadRegStr $R0 HKCU "${AUTOSTARTKEY}" "${AUTOSTARTVALUENAME}"
@@ -796,16 +1061,19 @@ Section Uninstall
 
   ; Delete the app directory and its content from disk
   ; Copy main executable
-  Delete "$INSTDIR\${MAINBINARYNAME}.exe"
+  Push "$INSTDIR\${MAINBINARYNAME}.exe"
+  Call un.RemoveManagedFile
 
   ; Delete resources
   {{#each resources}}
-    Delete "$INSTDIR\\{{this}}"
+    Push "$INSTDIR\\{{this.[1]}}"
+    Call un.RemoveManagedFile
   {{/each}}
 
   ; Delete external binaries
   {{#each binaries}}
-    Delete "$INSTDIR\\{{this}}"
+    Push "$INSTDIR\\{{this}}"
+    Call un.RemoveManagedFile
   {{/each}}
 
   ; Delete app associations
@@ -824,15 +1092,22 @@ Section Uninstall
   {{/each}}
 
   ; Delete uninstaller
-  Delete "$INSTDIR\uninstall.exe"
+  Push "$INSTDIR\uninstall.exe"
+  Call un.RemoveManagedFile
 
   {{#each resources_dirs}}
-  RMDir /REBOOTOK "$INSTDIR\\{{this}}"
+  Push "$INSTDIR\\{{this}}"
   {{/each}}
-  ; A resource targeted at integrations/bridge makes cargo-packager emit only
-  ; the leaf directory. Remove the empty app-owned parent as well.
-  RMDir "$INSTDIR\integrations"
-  RMDir "$INSTDIR"
+  ; Pop the sorted directory list in reverse so children are removed first.
+  {{#each resources_dirs}}
+  Call un.RemoveManagedDirectory
+  {{/each}}
+  ; The bridge resource contributes only its leaf directory. Remove the empty
+  ; app-owned parent as well.
+  Push "$INSTDIR\integrations"
+  Call un.RemoveManagedDirectory
+  Push "$INSTDIR"
+  Call un.RemoveManagedDirectory
 
   ; Remove start menu shortcut
   !insertmacro MUI_STARTMENU_GETFOLDER Application $AppStartMenuFolder
@@ -857,15 +1132,12 @@ Section Uninstall
     DeleteRegKey /ifempty SHCTX "${MANUPRODUCTKEY}"
   product_registry_cleanup_done:
 
-  ; Delete app data
-  {{#if appdata_paths}}
+  ; Delete only AirWiki's two documented mutable roots when explicitly chosen.
   ${If} $DeleteAppDataCheckboxState == 1
-      SetShellVarContext current
-      {{#each appdata_paths}}
-      RmDir /r "{{unescape_dollar_sign this}}"
-      {{/each}}
+    SetShellVarContext current
+    RmDir /r "$LOCALAPPDATA\airwiki\AirWiki"
+    RmDir /r "$APPDATA\airwiki\AirWiki"
   ${EndIf}
-  {{/if}}
 
   ${GetOptions} $CMDLINE "/P" $R0
   IfErrors +2 0
@@ -873,9 +1145,9 @@ Section Uninstall
 SectionEnd
 
 Function RestorePreviousInstallLocation
-  ReadRegStr $4 SHCTX "${MANUPRODUCTKEY}" ""
-  StrCmp $4 "" +2 0
-    StrCpy $INSTDIR $4
+  ${If} $ExistingInstallKind == "nsis"
+    StrCpy $INSTDIR $ExistingNsisInstallLocation
+  ${EndIf}
 FunctionEnd
 
 Function SkipIfPassive

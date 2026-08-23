@@ -8,6 +8,8 @@ Set-StrictMode -Version Latest
 
 $Root = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
 . (Join-Path $PSScriptRoot "windows-signing.ps1")
+. (Join-Path $PSScriptRoot "windows-release-version.ps1")
+$ReleaseVersion = Get-AirWikiReleaseVersion $Root $env:AIRWIKI_RELEASE_VERSION
 
 function Test-PathBelowRoot([string] $Candidate, [string] $AllowedRoot) {
     $Separators = [char[]]@([IO.Path]::DirectorySeparatorChar, [IO.Path]::AltDirectorySeparatorChar)
@@ -41,7 +43,7 @@ $ResolvedPath = $InputItem.FullName
 $PackageRoot = (Resolve-Path -LiteralPath (Join-Path $Root "target\packages\windows")).Path
 $SigningTempRoot = (Resolve-Path -LiteralPath (Join-Path $Root "target\packages\windows-signing-temp")).Path
 $FinalInstaller = [IO.Path]::GetFullPath(
-    (Join-Path $PackageRoot "airwiki_0.2.0_x64-setup.exe")
+    (Join-Path $PackageRoot "airwiki_${ReleaseVersion}_x64-setup.exe")
 )
 $PreSignedMainBinary = [IO.Path]::GetFullPath(
     (Join-Path $Root "target\x86_64-pc-windows-msvc\release\airwiki.exe")
@@ -70,11 +72,11 @@ if ($IsPreSignedMainBinary) {
     $ExpectedMachineHigh = 0x86
     $ExpectedMachineLabel = "Windows x64 desktop"
 } else {
-    # cargo-packager 0.11.8 pins NSIS 3.09, whose Unicode installer and
+# Tauri bundler 2.9.4 pins NSIS 3.11, whose Unicode installer and
     # uninstaller stubs are PE32 I386 even when they carry an x64 payload.
     $ExpectedMachineLow = 0x4c
     $ExpectedMachineHigh = 0x01
-    $ExpectedMachineLabel = "NSIS 3.09 I386 executable"
+$ExpectedMachineLabel = "NSIS 3.11 I386 executable"
 }
 
 $Stream = [IO.File]::OpenRead($ResolvedPath)
@@ -108,7 +110,7 @@ if ($Existing.Status -eq [System.Management.Automation.SignatureStatus]::Valid) 
     exit 0
 }
 if ($IsPreSignedMainBinary) {
-    throw "cargo-packager main executable must already have the expected Authenticode signature"
+    throw "Tauri main executable must already have the expected Authenticode signature"
 }
 if ($Existing.Status -ne [System.Management.Automation.SignatureStatus]::NotSigned) {
     throw "refusing to replace a non-valid existing Authenticode signature: $($Existing.Status)"

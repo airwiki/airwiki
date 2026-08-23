@@ -1,0 +1,8 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "main-window",
+  "description": "The bundled AirWiki interface may invoke only application-owned commands.",
+  "windows": ["main"],
+  "local": true,
+  "permissions": ["core:default"]
+}

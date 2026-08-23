@@ -1,13 +1,13 @@
 //! Background-service composition for the native desktop application.
 //!
-//! This module owns no egui state. It is created and called exclusively by the
-//! Tokio worker thread, while the UI communicates with that worker through
-//! channels. MCP starts independently; the optional LAN runtime is reconciled
+//! This module owns no WebView state. It is created and called exclusively by the
+//! Tokio worker task, while Tauri commands communicate with that worker through
+//! bounded channels. MCP starts independently; the optional LAN runtime is reconciled
 //! after platform readiness is known. Both use fail-closed proxies until
 //! [`DesktopServices::enable_models`] installs the real search engines.
 
 use std::{
-    collections::{HashMap, HashSet, VecDeque},
+    collections::{BTreeSet, HashMap, HashSet, VecDeque},
     path::{Path, PathBuf},
     str::FromStr,
     sync::{
@@ -17,58 +17,211 @@ use std::{
     time::{Duration, Instant},
 };
 
+#[cfg(windows)]
+use std::os::windows::fs::MetadataExt;
+
+use airwiki_core::inference::{GenerationExecutionClass, GenerationFailure, GenerationFailureKind};
 use airwiki_core::{
-    AppPaths as CoreAppPaths, AuditEvent, CollectionRecord, Database, E5Tokenizer,
-    EmbeddingProvider, EvidenceDecision, EvidenceRelevanceProvider, FastEmbedE5Small,
-    FastEmbedMmarcoReranker, FolderWatcher, GenerationProvider, GenerationRuntimeConfig,
-    GuidedRepairPreview, GuidedRepairResult, HybridSearchEngine, IngestOutcome, IngestPipeline,
-    KnowledgeBundleState, KnowledgeBundleView, KnowledgePageId, KnowledgePageView,
+    AiMemoryError, AppPaths as CoreAppPaths, ApplicationLimitError, AuditEvent,
+    BootstrapFederationIndexEntry, CollectionRecord, Database, E5Tokenizer, EmbeddingProvider,
+    EvidenceDecision, EvidenceRelevanceProvider, FastEmbedE5Small, FastEmbedMmarcoReranker,
+    FolderWatcher, GenerationProvider, GenerationRuntimeConfig, GuidedRepairPreview,
+    GuidedRepairResult, HybridSearchEngine, IngestOutcome, IngestPipeline, KnowledgeBundleState,
+    KnowledgeBundleView, KnowledgeLinkDisposition, KnowledgePageId, KnowledgePageView,
     LlamaServerProvider, OkfBundleInspector, OkfPublicationMaterializer, PinnedE5Snapshot,
     PinnedMmarcoRerankerSnapshot, RelevanceInput, ReviewEdits, ReviewVersionToken, SourceIssueCode,
-    Tokenizer, WikiRepairExecutor, WikiRepairPlanner,
+    Tokenizer, WikiOrigin, WikiRepairExecutor, WikiRepairPlanner,
 };
 use airwiki_inference::{
-    GenerationSettings, InstallOutcome, LlamaSupervisor, ModelSelection, SupervisorConfig,
-    ThinkingControl,
+    GenerationSettings, InstallOutcome, LlamaSupervisor, LlamaSupervisorFailure,
+    LlamaSupervisorFailureKind, ModelSelection, RuntimeExitClass, SupervisorConfig,
+    ThinkingControl, bundled_runtime_is_accelerated,
 };
-use airwiki_mcp::{McpClientActivitySnapshot, McpServerConfig, McpServerHandle, start_mcp_server};
+use airwiki_mcp::{
+    McpApplicationBackend, McpApplicationError, McpApplicationIdentity, McpClientActivitySnapshot,
+    McpServerConfig, McpServerHandle, start_with_application_backend,
+};
+#[cfg(feature = "e2e")]
+use airwiki_network::FileSecretStore;
+#[cfg(not(feature = "e2e"))]
+use airwiki_network::KeyringSecretStore;
 use airwiki_network::{
-    AccessControl, AuthorizedSearchBackend, AuthorizedSearchResult, FederatedCoordinator,
-    KeyringSecretStore, MAX_MDNS_ADDRESSES_PER_PEER, MAX_VOLATILE_LAN_PEERS, ManualLanAddress,
+    AccessControl, AuthorizedSearchBackend, AuthorizedSearchResult, AuthorizedWikiBrowseResult,
+    FederatedCoordinator, MAX_MDNS_ADDRESSES_PER_PEER, MAX_VOLATILE_LAN_PEERS, ManualLanAddress,
     Multiaddr, NetworkConfig, NetworkEvent, NetworkHandle, NetworkWarningKind, NodeIdentity,
-    PairingFailureReason, PeerAccess, PeerId, SecretStore, spawn_network,
+    PairingFailureReason, PeerAccess, PeerId, PublicBrowseDelivery, PublicBrowseOptions,
+    PublicBrowseResult, PublicIndexEndpoint, PublicReader, PublicRelayReadiness, PublicRouteKind,
+    PublicSearchDelivery, PublicSearchResult, PublicSourceBackend, PublicSourceBackendError,
+    PublicSourceServerConfig, SecretStore, relay_circuit_address, relayed_peer_address,
+    run_public_source_server, sign_manifest, sign_tombstone, spawn_network,
 };
 use airwiki_types::{
-    CollectionPolicy, DocumentStatus, EnrichmentDraft, FederatedSearch, SearchAuthorization,
-    SearchContractError, SearchPurpose, SearchRequest, SearchResponse,
+    CollectionPolicy, DevicePlatform, DisclosureLease, DocumentStatus, EnrichmentDraft,
+    FederatedSearch, PUBLIC_BROWSE_PROTOCOL_V4, PUBLIC_CATALOG_PROTOCOL, PublicBrowsePage,
+    PublicBrowseRequest, PublicCollectionManifest, PublicCollectionRevision,
+    PublicCollectionTombstone, PublicSearchRequest, PublicSearchResponse, PublishedWikiDocument,
+    PublishedWikiGraphLink, PublishedWikiPageDescriptor, PublishedWikiPageId,
+    PublishedWikiPageRequest, PublishedWikiWorkspacePage, SHARED_WIKI_BROWSE_PROTOCOL_V2,
+    SearchAuthorization, SearchContractError, SearchHit, SearchPurpose, SearchRequest,
+    SearchResponse, SharedWikiBrowsePage, SharedWikiBrowseRequest,
 };
 use anyhow::{Context, Result, anyhow, bail};
 use async_trait::async_trait;
-use chrono::Utc;
+use chrono::{DateTime, Duration as ChronoDuration, Utc};
 use tokio::{
-    sync::{Mutex as AsyncMutex, broadcast, mpsc},
+    sync::{Semaphore, broadcast, mpsc, oneshot, watch},
     task::JoinHandle,
 };
+
+#[cfg(test)]
+use tokio::sync::Mutex as AsyncMutex;
 use tokio_util::sync::CancellationToken;
 use uuid::Uuid;
 
 use crate::{
+    computations::{CompletedComputation, ComputationCoordinator, PendingComputation},
     manual_lan_route,
+    model_activation_status::{
+        ModelActivationElapsedBucket, ModelActivationErrorKind, ModelActivationExitClass,
+        ModelActivationFailureView,
+    },
     paths::AppPaths,
     worker::{
-        CollectionView, PeerActivityState, PeerTrustState, PeerView, ReviewEvidenceErrorView,
-        ReviewEvidenceExcerptView, ReviewEvidencePageView, ReviewItemView, SourceIssueView,
+        ApplicationAccessView, ApplicationWikiGrantView, ApplicationWikiRoleView,
+        BrowseWorkspaceSelection, CollectionView, PeerActivityState, PeerTrustState, PeerView,
+        PublicAnnouncementStatusView, ReviewEvidenceErrorView, ReviewEvidenceExcerptView,
+        ReviewEvidencePageView, ReviewItemView, SourceIssueView,
     },
 };
 
+#[cfg(windows)]
+const FILE_ATTRIBUTE_REPARSE_POINT: u32 = 0x0400;
+
+#[derive(Debug, Clone, Copy, Default)]
+struct RetiredBundleRecoveryReport {
+    recovered: usize,
+    pending: usize,
+}
+
+fn metadata_is_link_or_reparse(metadata: &std::fs::Metadata) -> bool {
+    if metadata.file_type().is_symlink() {
+        return true;
+    }
+    #[cfg(windows)]
+    {
+        metadata.file_attributes() & FILE_ATTRIBUTE_REPARSE_POINT != 0
+    }
+    #[cfg(not(windows))]
+    false
+}
+
+fn recover_retired_managed_wiki_files(vaults: &Path) -> Result<RetiredBundleRecoveryReport> {
+    let mut report = RetiredBundleRecoveryReport::default();
+    for entry in std::fs::read_dir(vaults).context("no se pudo inspeccionar el vault de wikis")? {
+        let entry = match entry {
+            Ok(entry) => entry,
+            Err(_) => {
+                report.pending = report.pending.saturating_add(1);
+                continue;
+            }
+        };
+        let name = entry.file_name();
+        let Some(marker) = name.to_str().and_then(|name| name.strip_prefix(".delete-")) else {
+            continue;
+        };
+        if Uuid::parse_str(marker).is_err() {
+            continue;
+        }
+        let path = entry.path();
+        let safe_directory = std::fs::symlink_metadata(&path)
+            .is_ok_and(|metadata| metadata.is_dir() && !metadata_is_link_or_reparse(&metadata));
+        if !safe_directory {
+            report.pending = report.pending.saturating_add(1);
+            continue;
+        }
+        match std::fs::remove_dir_all(&path) {
+            Ok(()) => report.recovered = report.recovered.saturating_add(1),
+            Err(_) => report.pending = report.pending.saturating_add(1),
+        }
+    }
+    Ok(report)
+}
+
+fn delete_managed_wiki_files(
+    database: &Database,
+    vaults: &Path,
+    collection_id: Uuid,
+    bundle: &Path,
+) -> Result<()> {
+    let expected = vaults.join(collection_id.to_string());
+    if bundle != expected {
+        bail!("la ubicación administrada de la wiki no es válida");
+    }
+    let retired = vaults.join(format!(".delete-{collection_id}"));
+    if retired.exists() {
+        bail!("ya existe una eliminación incompleta para esta wiki");
+    }
+    if bundle.exists() {
+        let metadata = std::fs::symlink_metadata(bundle)
+            .context("no se pudo comprobar el bundle administrado")?;
+        if metadata_is_link_or_reparse(&metadata) || !metadata.is_dir() {
+            bail!("el bundle administrado no es una carpeta segura");
+        }
+        std::fs::rename(bundle, &retired)
+            .context("no se pudo retirar atómicamente el bundle administrado")?;
+    }
+    if let Err(error) = database.delete_collection_record(collection_id) {
+        if retired.exists() {
+            let _ = std::fs::rename(&retired, bundle);
+        }
+        return Err(error).context("no se pudo eliminar el estado de la wiki");
+    }
+    if retired.exists() {
+        std::fs::remove_dir_all(&retired)
+            .context("la wiki se retiró, pero no se pudo limpiar su bundle")?;
+    }
+    Ok(())
+}
+
+fn ensure_public_withdrawal_completed(database: &Database, collection_id: Uuid) -> Result<()> {
+    if database
+        .public_collection_profile(collection_id)?
+        .is_some_and(|profile| profile.withdrawal_pending)
+    {
+        bail!(
+            "la wiki ya no se comparte, pero su retiro público debe confirmarse antes de eliminarla"
+        );
+    }
+    Ok(())
+}
+
+fn ensure_folder_ingestion_source(collection: &CollectionRecord) -> Result<()> {
+    if collection.origin != WikiOrigin::Folder {
+        bail!("solo las wikis creadas desde una carpeta pueden indexar archivos de origen");
+    }
+    Ok(())
+}
+
+#[cfg(not(feature = "e2e"))]
 const KEYRING_SERVICE: &str = "io.github.airwiki.AirWiki";
+#[cfg(not(feature = "e2e"))]
 const KEYRING_ACCOUNT: &str = "device-identity";
+pub(crate) const PUBLIC_NETWORK_OFFLINE_WARNING: &str = "public_network_offline";
 const MODEL_SMOKE_TEST_DOCUMENT: &str = "Documento sintético de diagnóstico local. Título: Prueba de AirWiki. Contenido: verificar que el enriquecimiento estructurado funciona sin utilizar información de la empresa.";
 const RELEVANCE_SMOKE_TEST_QUESTION: &str = "¿Cómo se recupera el servicio Atlas?";
 const RELEVANCE_SMOKE_TEST_PASSAGES: [&str; 2] = [
     "Procedimiento de recuperación de Atlas: restaurar el snapshot y validar el servicio.",
     "El presupuesto del evento comunitario se revisará el próximo trimestre.",
 ];
+
+const fn bundled_generation_execution_class() -> GenerationExecutionClass {
+    if bundled_runtime_is_accelerated() {
+        GenerationExecutionClass::Accelerated
+    } else {
+        GenerationExecutionClass::CpuOnly
+    }
+}
+
 const KNOWLEDGE_READ_ATTEMPTS: usize = 3;
 const KNOWLEDGE_READ_RETRY_DELAY: Duration = Duration::from_millis(100);
 const KNOWLEDGE_PAGE_MAX_BYTES: usize = 1024 * 1024;
@@ -76,6 +229,201 @@ const REVIEW_EVIDENCE_PAGE_SIZE: usize = 20;
 const REVIEW_EVIDENCE_EXCERPT_MAX_BYTES: usize = 4 * 1024;
 const LAN_LISTENER_START_GRACE: Duration = Duration::from_secs(10);
 const STARTUP_COLLECTION_DISCOVERY_TIMEOUT: Duration = Duration::from_secs(5);
+const PUBLIC_MANIFEST_RENEWAL_INTERVAL: Duration = Duration::from_secs(5 * 60);
+const BUNDLED_BOOTSTRAP_FEDERATION_INDEXES: Option<&str> =
+    option_env!("AIRWIKI_BOOTSTRAP_FEDERATION_INDEXES");
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ModelActivationStage {
+    Configuration,
+    OnnxInit,
+    EmbeddingSmoke,
+    RerankerSmoke,
+}
+
+impl ModelActivationStage {
+    const fn error_kind(self) -> ModelActivationErrorKind {
+        match self {
+            Self::Configuration => ModelActivationErrorKind::Configuration,
+            Self::OnnxInit => ModelActivationErrorKind::OnnxInit,
+            Self::EmbeddingSmoke => ModelActivationErrorKind::EmbeddingSmoke,
+            Self::RerankerSmoke => ModelActivationErrorKind::RerankerSmoke,
+        }
+    }
+}
+
+#[derive(Debug, thiserror::Error)]
+#[error("model activation stage failed")]
+struct ModelActivationStageFailure {
+    stage: ModelActivationStage,
+}
+
+impl ModelActivationStageFailure {
+    const fn new(stage: ModelActivationStage) -> Self {
+        Self { stage }
+    }
+}
+
+pub(crate) fn classify_model_activation_failure(
+    error: &anyhow::Error,
+) -> ModelActivationFailureView {
+    if let Some(failure) = error.downcast_ref::<GenerationFailure>() {
+        return ModelActivationFailureView {
+            error_kind: match failure.kind() {
+                GenerationFailureKind::Timeout => ModelActivationErrorKind::GenerationTimeout,
+                GenerationFailureKind::Unavailable => {
+                    ModelActivationErrorKind::GenerationUnavailable
+                }
+                GenerationFailureKind::Protocol => ModelActivationErrorKind::GenerationProtocol,
+                GenerationFailureKind::Invalid => ModelActivationErrorKind::GenerationInvalid,
+            },
+            exit_class: ModelActivationExitClass::None,
+        };
+    }
+    if let Some(failure) = error.downcast_ref::<LlamaSupervisorFailure>() {
+        return ModelActivationFailureView {
+            error_kind: match failure.kind() {
+                LlamaSupervisorFailureKind::RuntimeSpawn => ModelActivationErrorKind::RuntimeSpawn,
+                LlamaSupervisorFailureKind::RuntimeExitedBeforeHealth => {
+                    ModelActivationErrorKind::RuntimeExitBeforeHealth
+                }
+                LlamaSupervisorFailureKind::RuntimeHealthTimeout => {
+                    ModelActivationErrorKind::RuntimeHealthTimeout
+                }
+                LlamaSupervisorFailureKind::RuntimeState => ModelActivationErrorKind::RuntimeState,
+            },
+            exit_class: match failure.exit_class() {
+                RuntimeExitClass::None => ModelActivationExitClass::None,
+                RuntimeExitClass::Success => ModelActivationExitClass::Success,
+                RuntimeExitClass::Failure => ModelActivationExitClass::Failure,
+                RuntimeExitClass::Unknown => ModelActivationExitClass::Unknown,
+            },
+        };
+    }
+    if let Some(failure) = error.downcast_ref::<ModelActivationStageFailure>() {
+        return ModelActivationFailureView {
+            error_kind: failure.stage.error_kind(),
+            exit_class: ModelActivationExitClass::None,
+        };
+    }
+    ModelActivationFailureView {
+        error_kind: ModelActivationErrorKind::ActivationInternal,
+        exit_class: ModelActivationExitClass::Unknown,
+    }
+}
+
+pub(crate) const fn model_activation_elapsed_bucket(
+    elapsed: Duration,
+) -> ModelActivationElapsedBucket {
+    if elapsed.as_secs() < 5 {
+        ModelActivationElapsedBucket::Under5s
+    } else if elapsed.as_secs() < 30 {
+        ModelActivationElapsedBucket::From5sTo30s
+    } else if elapsed.as_secs() < 120 {
+        ModelActivationElapsedBucket::From30sTo120s
+    } else if elapsed.as_secs() < 300 {
+        ModelActivationElapsedBucket::From120sTo300s
+    } else {
+        ModelActivationElapsedBucket::Over300s
+    }
+}
+
+fn activation_stage<T>(result: Result<T>, stage: ModelActivationStage) -> Result<T> {
+    result.map_err(|error| error.context(ModelActivationStageFailure::new(stage)))
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct BundledBootstrapFederationIndex {
+    peer_id: String,
+    multiaddr: String,
+    registry_version: u32,
+    expires_at: DateTime<Utc>,
+}
+
+fn parse_bundled_bootstrap_federation_indexes(
+    encoded: Option<&str>,
+) -> Result<Vec<BundledBootstrapFederationIndex>> {
+    let Some(encoded) = encoded.map(str::trim).filter(|value| !value.is_empty()) else {
+        return Ok(Vec::new());
+    };
+    let entries = encoded.split(';').collect::<Vec<_>>();
+    if entries.len() > 3 {
+        bail!("el registro bootstrap federado excede tres índices");
+    }
+
+    let mut peers = HashSet::new();
+    let mut common_registry_version = None;
+    let mut parsed = Vec::with_capacity(entries.len());
+    for entry in entries {
+        let fields = entry.split('|').map(str::trim).collect::<Vec<_>>();
+        let [version, expiry, peer_id, multiaddr] = fields.as_slice() else {
+            bail!("una entrada bootstrap federada no tiene cuatro campos");
+        };
+        let registry_version = version
+            .parse::<u32>()
+            .context("la versión del registro bootstrap federado no es válida")?;
+        if registry_version == 0 {
+            bail!("la versión del registro bootstrap federado debe ser positiva");
+        }
+        if let Some(known_version) = common_registry_version.replace(registry_version)
+            && known_version != registry_version
+        {
+            bail!("el registro bootstrap federado mezcla versiones");
+        }
+        let expires_at = DateTime::parse_from_rfc3339(expiry)
+            .context("la expiración bootstrap federada no es RFC 3339")?
+            .with_timezone(&Utc);
+        let peer =
+            PeerId::from_str(peer_id).context("la identidad bootstrap federada no es válida")?;
+        let address = Multiaddr::from_str(multiaddr)
+            .context("la dirección bootstrap federada no es válida")?;
+        PublicIndexEndpoint {
+            peer_id: peer,
+            address: address.clone(),
+        }
+        .validate()
+        .context("la dirección bootstrap federada debe usar una IP TCP o QUIC")?;
+        let peer_id = peer.to_string();
+        if !peers.insert(peer_id.clone()) {
+            bail!("el registro bootstrap federado repite una identidad");
+        }
+        parsed.push(BundledBootstrapFederationIndex {
+            peer_id,
+            multiaddr: address.to_string(),
+            registry_version,
+            expires_at,
+        });
+    }
+    Ok(parsed)
+}
+
+fn install_bundled_bootstrap_federation_indexes(
+    database: &Database,
+    indexes: Vec<BundledBootstrapFederationIndex>,
+) -> Result<()> {
+    let Some(registry_version) = indexes.first().map(|index| index.registry_version) else {
+        return Ok(());
+    };
+    if database
+        .bootstrap_federation_registry_version()?
+        .is_some_and(|persisted| persisted > registry_version)
+    {
+        tracing::warn!(
+            error_kind = "bundled_bootstrap_registry_older_than_persisted",
+            "ignored an older bundled bootstrap registry"
+        );
+        return Ok(());
+    }
+    let entries = indexes
+        .into_iter()
+        .map(|index| BootstrapFederationIndexEntry {
+            peer_id: index.peer_id,
+            multiaddr: index.multiaddr,
+            expires_at: index.expires_at,
+        })
+        .collect::<Vec<_>>();
+    database.replace_bootstrap_federation_indexes(registry_version, &entries)
+}
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub(crate) struct WikiHealthRollup {
@@ -162,49 +510,17 @@ impl DynamicAuthorizedSearchBackend {
     /// Intersects the runtime authorization snapshot with the durable trust
     /// store. Any malformed/unknown/untrusted/blocked caller is denied; missing
     /// or stale grants simply produce no authorized collections.
-    fn durable_authorized_collections(
+    async fn durable_authorized_collections_async(
         &self,
-        authorization: &SearchAuthorization,
+        authorization: SearchAuthorization,
         purpose: SearchPurpose,
     ) -> std::result::Result<Vec<Uuid>, SearchContractError> {
-        let caller = authorization.caller_node_id.trim();
-        let peer_id = PeerId::from_str(caller).map_err(|_| SearchContractError::Unauthorized)?;
-        if peer_id.to_string() != caller {
-            return Err(SearchContractError::Unauthorized);
-        }
-        let live_access = self.access.state(&peer_id);
-        if !live_access.trusted || live_access.blocked {
-            return Err(SearchContractError::Unauthorized);
-        }
-        let peer = self
-            .database
-            .peer(caller)
-            .map_err(|error| SearchContractError::Backend(error.to_string()))?
-            .ok_or(SearchContractError::Unauthorized)?;
-        if !peer.trusted || peer.blocked {
-            return Err(SearchContractError::Unauthorized);
-        }
-
-        let runtime_grants = authorization
-            .allowed_collections
-            .iter()
-            .copied()
-            .filter(|collection| live_access.grants.contains(collection))
-            .collect::<HashSet<_>>();
-        let durable_grants = self
-            .database
-            .granted_collections_for_search(caller, purpose)
-            .map_err(|error| SearchContractError::Backend(error.to_string()))?;
-        let mut allowed = Vec::new();
-        for collection_id in durable_grants {
-            if !runtime_grants.contains(&collection_id) {
-                continue;
-            }
-            allowed.push(collection_id);
-        }
-        allowed.sort_unstable();
-        allowed.dedup();
-        Ok(allowed)
+        let database = self.database.clone();
+        let access = self.access.clone();
+        run_search_storage("authorized search policy worker stopped", move || {
+            durable_authorized_collections_blocking(&database, &access, &authorization, purpose)
+        })
+        .await
     }
 
     async fn finalize_authorized_response(
@@ -250,8 +566,9 @@ impl AuthorizedSearchBackend for DynamicAuthorizedSearchBackend {
             })?;
         // The AccessControl value is only a runtime snapshot. SQLite is the
         // durable authority for device trust, grants and collection policy.
-        let allowed_collections =
-            self.durable_authorized_collections(&authorization, request.purpose)?;
+        let allowed_collections = self
+            .durable_authorized_collections_async(authorization.clone(), request.purpose)
+            .await?;
         if allowed_collections.is_empty() {
             return self
                 .finalize_authorized_response(
@@ -272,6 +589,173 @@ impl AuthorizedSearchBackend for DynamicAuthorizedSearchBackend {
         self.finalize_authorized_response(response, authorization, purpose)
             .await
     }
+
+    async fn browse_authorized(
+        &self,
+        request: SharedWikiBrowseRequest,
+        authorization: SearchAuthorization,
+    ) -> std::result::Result<AuthorizedWikiBrowseResult, SearchContractError> {
+        request
+            .validate()
+            .map_err(|error| SearchContractError::Backend(error.to_string()))?;
+        if authorization.purpose != SearchPurpose::LocalAssistant
+            || !authorization
+                .allowed_collections
+                .contains(&request.collection_id)
+        {
+            return Err(SearchContractError::Unauthorized);
+        }
+        let cursor = request
+            .cursor
+            .as_deref()
+            .map(Uuid::parse_str)
+            .transpose()
+            .map_err(|_| SearchContractError::Backend("invalid browse cursor".to_owned()))?;
+        let database = self.database.clone();
+        let access = self.access.clone();
+        tokio::task::spawn_blocking(move || {
+            let peer = PeerId::from_str(&authorization.caller_node_id)
+                .map_err(|_| SearchContractError::Unauthorized)?;
+            let live_access = access.state(&peer);
+            if !live_access.trusted
+                || live_access.blocked
+                || !live_access.grants.contains(&request.collection_id)
+            {
+                return Err(SearchContractError::Unauthorized);
+            }
+            let lease = authorization.acquire_disclosure_lease();
+            let outline_target = (request.protocol_version
+                != airwiki_types::SHARED_WIKI_BROWSE_PROTOCOL_V2
+                || request.page.is_none())
+            .then_some(request.target_concept_id)
+            .flatten();
+            let (wiki, concepts) = database
+                .shared_wiki_page_under_disclosure(
+                    &lease,
+                    &authorization.caller_node_id,
+                    request.collection_id,
+                    cursor,
+                    outline_target,
+                    request.limit,
+                )
+                .map_err(|_| SearchContractError::Unauthorized)?;
+            if let Some(PublishedWikiPageRequest {
+                page: PublishedWikiPageId::Concept { concept_id },
+                ..
+            }) = request.page.as_ref()
+            {
+                let (_, authorized) = database
+                    .shared_wiki_page_under_disclosure(
+                        &lease,
+                        &authorization.caller_node_id,
+                        request.collection_id,
+                        None,
+                        Some(*concept_id),
+                        1,
+                    )
+                    .map_err(|_| SearchContractError::Unauthorized)?;
+                if authorized.first().map(|concept| concept.concept_id) != Some(*concept_id) {
+                    return Err(SearchContractError::Unauthorized);
+                }
+            }
+            let next_cursor = if concepts.len() == usize::from(request.limit) {
+                let last = concepts.last().map(|concept| concept.concept_id);
+                let (_, next) = database
+                    .shared_wiki_page_under_disclosure(
+                        &lease,
+                        &authorization.caller_node_id,
+                        request.collection_id,
+                        last,
+                        None,
+                        1,
+                    )
+                    .map_err(|_| SearchContractError::Unauthorized)?;
+                (!next.is_empty())
+                    .then(|| last.map(|concept_id| concept_id.to_string()))
+                    .flatten()
+            } else {
+                None
+            };
+            let (workspace, document) =
+                if request.protocol_version == airwiki_types::SHARED_WIKI_BROWSE_PROTOCOL_V2 {
+                    let concept_ids = concepts
+                        .iter()
+                        .map(|concept| concept.concept_id)
+                        .collect::<Vec<_>>();
+                    let (workspace, document) = published_workspace_page(
+                        &database,
+                        &lease,
+                        request.collection_id,
+                        &concept_ids,
+                        request.graph_cursor,
+                        request.page.as_ref(),
+                    )
+                    .map_err(|_| {
+                        SearchContractError::Unavailable(
+                            "the published Wiki is temporarily unavailable".to_owned(),
+                        )
+                    })?;
+                    (Some(workspace), document)
+                } else {
+                    (None, None)
+                };
+            let page = SharedWikiBrowsePage {
+                protocol_version: request.protocol_version.clone(),
+                request_id: request.request_id,
+                wiki,
+                concepts,
+                next_cursor,
+                workspace,
+                document,
+            };
+            page.validate_for(&request)
+                .map_err(|error| SearchContractError::Backend(error.to_string()))?;
+            Ok(AuthorizedWikiBrowseResult::new(page, lease))
+        })
+        .await
+        .map_err(|_| SearchContractError::Unavailable("browse worker stopped".to_owned()))?
+    }
+}
+
+fn durable_authorized_collections_blocking(
+    database: &Database,
+    access: &AccessControl,
+    authorization: &SearchAuthorization,
+    purpose: SearchPurpose,
+) -> std::result::Result<Vec<Uuid>, SearchContractError> {
+    let caller = authorization.caller_node_id.trim();
+    let peer_id = PeerId::from_str(caller).map_err(|_| SearchContractError::Unauthorized)?;
+    if peer_id.to_string() != caller {
+        return Err(SearchContractError::Unauthorized);
+    }
+    let live_access = access.state(&peer_id);
+    if !live_access.trusted || live_access.blocked {
+        return Err(SearchContractError::Unauthorized);
+    }
+    let peer = database
+        .peer(caller)
+        .map_err(|error| SearchContractError::Backend(error.to_string()))?
+        .ok_or(SearchContractError::Unauthorized)?;
+    if !peer.trusted || peer.blocked {
+        return Err(SearchContractError::Unauthorized);
+    }
+
+    let runtime_grants = authorization
+        .allowed_collections
+        .iter()
+        .copied()
+        .filter(|collection| live_access.grants.contains(collection))
+        .collect::<HashSet<_>>();
+    let durable_grants = database
+        .granted_collections_for_search(caller, purpose)
+        .map_err(|error| SearchContractError::Backend(error.to_string()))?;
+    let mut allowed = durable_grants
+        .into_iter()
+        .filter(|collection_id| runtime_grants.contains(collection_id))
+        .collect::<Vec<_>>();
+    allowed.sort_unstable();
+    allowed.dedup();
+    Ok(allowed)
 }
 
 fn finalize_authorized_response_blocking(
@@ -288,28 +772,473 @@ fn finalize_authorized_response_blocking(
     );
     if !live_access.trusted || live_access.blocked {
         response.hits.clear();
+        response.authorized_candidates.clear();
     } else {
-        let mut current_hits = Vec::with_capacity(response.hits.len());
-        for hit in response.hits {
-            if live_access.grants.contains(&hit.collection_id)
-                && database
-                    .peer_hit_is_current_under_disclosure(
-                        &lease,
-                        &hit,
-                        &authorization.caller_node_id,
-                        purpose,
-                    )
-                    .map_err(|error| SearchContractError::Backend(error.to_string()))?
-            {
-                current_hits.push(hit);
-            }
-        }
-        response.hits = current_hits;
+        response.hits = retain_disclosable_hits(
+            database,
+            &lease,
+            &live_access.grants,
+            response.hits,
+            &authorization.caller_node_id,
+            purpose,
+        )?;
+        response.authorized_candidates = if purpose == SearchPurpose::ExternalAi {
+            retain_disclosable_hits(
+                database,
+                &lease,
+                &live_access.grants,
+                response.authorized_candidates,
+                &authorization.caller_node_id,
+                purpose,
+            )?
+        } else {
+            Vec::new()
+        };
     }
-    for (index, hit) in response.hits.iter_mut().enumerate() {
+    renumber_search_hits(&mut response.hits);
+    renumber_search_hits(&mut response.authorized_candidates);
+    Ok(AuthorizedSearchResult::new(response, lease))
+}
+
+fn retain_disclosable_hits(
+    database: &Database,
+    lease: &DisclosureLease,
+    grants: &HashSet<Uuid>,
+    hits: Vec<SearchHit>,
+    caller_node_id: &str,
+    purpose: SearchPurpose,
+) -> std::result::Result<Vec<SearchHit>, SearchContractError> {
+    let mut current = Vec::with_capacity(hits.len());
+    for hit in hits {
+        if grants.contains(&hit.collection_id)
+            && database
+                .peer_hit_is_current_under_disclosure(lease, &hit, caller_node_id, purpose)
+                .map_err(|error| SearchContractError::Backend(error.to_string()))?
+        {
+            current.push(hit);
+        }
+    }
+    Ok(current)
+}
+
+fn renumber_search_hits(hits: &mut [SearchHit]) {
+    for (index, hit) in hits.iter_mut().enumerate() {
         hit.rank = u32::try_from(index + 1).unwrap_or(u32::MAX);
     }
-    Ok(AuthorizedSearchResult::new(response, lease))
+}
+
+fn revalidate_public_targets(
+    database: &Database,
+    lease: &DisclosureLease,
+    targets: &[airwiki_types::PublicCollectionTarget],
+) -> std::result::Result<Vec<PublicCollectionRevision>, PublicSourceBackendError> {
+    let mut revisions = Vec::with_capacity(targets.len());
+    for target in targets {
+        let Some(manifest_sequence) = database
+            .public_manifest_sequence_under_disclosure(lease, target.collection_id)
+            .map_err(|_| PublicSourceBackendError::Unavailable)?
+        else {
+            return Err(PublicSourceBackendError::NotPublic);
+        };
+        let fingerprint = database
+            .public_collection_fingerprint_under_disclosure(lease, target.collection_id)
+            .map_err(|_| PublicSourceBackendError::NotPublic)?;
+        if manifest_sequence < target.manifest_sequence
+            || fingerprint != target.publication_fingerprint
+        {
+            return Err(PublicSourceBackendError::NotPublic);
+        }
+        revisions.push(PublicCollectionRevision {
+            collection_id: target.collection_id,
+            manifest_sequence,
+        });
+    }
+    Ok(revisions)
+}
+
+fn public_page_next_cursor(
+    concepts: &[airwiki_types::PublicConceptSummary],
+    has_more: bool,
+) -> Option<String> {
+    if has_more {
+        concepts
+            .last()
+            .map(|concept| concept.concept_id.to_string())
+    } else {
+        None
+    }
+}
+
+fn published_page_id(page_id: KnowledgePageId) -> PublishedWikiPageId {
+    match page_id {
+        KnowledgePageId::Index => PublishedWikiPageId::Index,
+        KnowledgePageId::Log => PublishedWikiPageId::Log,
+        KnowledgePageId::Concept(concept_id) => PublishedWikiPageId::Concept { concept_id },
+    }
+}
+
+fn knowledge_page_id(page_id: PublishedWikiPageId) -> KnowledgePageId {
+    match page_id {
+        PublishedWikiPageId::Index => KnowledgePageId::Index,
+        PublishedWikiPageId::Log => KnowledgePageId::Log,
+        PublishedWikiPageId::Concept { concept_id } => KnowledgePageId::Concept(concept_id),
+    }
+}
+
+fn published_page_descriptor(
+    bundle: &KnowledgeBundleView,
+    page_id: KnowledgePageId,
+) -> Option<PublishedWikiPageDescriptor> {
+    let (logical_path, title) = match page_id {
+        KnowledgePageId::Index => ("index.md".to_owned(), "Wiki index".to_owned()),
+        KnowledgePageId::Log => ("log.md".to_owned(), "Change log".to_owned()),
+        KnowledgePageId::Concept(concept_id) => {
+            let concept = bundle
+                .concepts
+                .iter()
+                .find(|concept| concept.id == concept_id && concept.lifecycle_status == "stable")?;
+            (concept.relative_path.clone(), concept.title.clone())
+        }
+    };
+    let fingerprint = bundle.page_fingerprint(page_id)?.to_owned();
+    Some(PublishedWikiPageDescriptor {
+        page: published_page_id(page_id),
+        logical_path,
+        title,
+        fingerprint,
+    })
+}
+
+/// Builds the read-only, published OKF workspace sent to an already-authorized
+/// remote reader. The inspector is the same authority used by the owner's
+/// local viewer; source folders and operational SQLite fields never enter the
+/// wire contract.
+fn published_workspace_page(
+    database: &Database,
+    lease: &DisclosureLease,
+    collection_id: Uuid,
+    concept_ids: &[Uuid],
+    graph_cursor: Option<u32>,
+    requested_page: Option<&PublishedWikiPageRequest>,
+) -> Result<(PublishedWikiWorkspacePage, Option<PublishedWikiDocument>)> {
+    let inspector = OkfBundleInspector::new(database.clone());
+    let bundle = inspector.inspect_bundle_under_disclosure(lease, collection_id)?;
+    if bundle.state != KnowledgeBundleState::Ready || !bundle.health.is_healthy() {
+        bail!("the published OKF bundle is not ready for external browsing");
+    }
+
+    let stable_concepts = bundle
+        .concepts
+        .iter()
+        .filter(|concept| concept.lifecycle_status == "stable")
+        .map(|concept| concept.id)
+        .collect::<BTreeSet<_>>();
+    let mut allowed_pages = stable_concepts
+        .iter()
+        .copied()
+        .map(KnowledgePageId::Concept)
+        .collect::<BTreeSet<_>>();
+    let mut reserved_pages = Vec::new();
+    for page_id in [KnowledgePageId::Index, KnowledgePageId::Log] {
+        if let Some(descriptor) = published_page_descriptor(&bundle, page_id) {
+            allowed_pages.insert(page_id);
+            reserved_pages.push(descriptor);
+        }
+    }
+
+    let documents = concept_ids
+        .iter()
+        .map(|concept_id| {
+            if !stable_concepts.contains(concept_id) {
+                bail!("the requested concept is not externally publishable");
+            }
+            published_page_descriptor(&bundle, KnowledgePageId::Concept(*concept_id))
+                .context("the published concept is missing from its OKF bundle")
+        })
+        .collect::<Result<Vec<_>>>()?;
+
+    let mut graph_links = bundle
+        .links
+        .iter()
+        .filter_map(|link| {
+            let KnowledgeLinkDisposition::Internal(target) = link.disposition else {
+                return None;
+            };
+            if !allowed_pages.contains(&link.source) || !allowed_pages.contains(&target) {
+                return None;
+            }
+            let label = link
+                .label
+                .chars()
+                .filter(|character| !character.is_control())
+                .take(300)
+                .collect::<String>();
+            Some(PublishedWikiGraphLink {
+                source: published_page_id(link.source),
+                target: published_page_id(target),
+                label,
+            })
+        })
+        .collect::<Vec<_>>();
+    graph_links.sort_by(|left, right| {
+        left.source
+            .cmp(&right.source)
+            .then_with(|| left.target.cmp(&right.target))
+            .then_with(|| left.label.cmp(&right.label))
+    });
+    graph_links.dedup();
+    let (links, next_graph_cursor) = if let Some(graph_cursor) = graph_cursor {
+        let graph_start = usize::try_from(graph_cursor)
+            .context("the graph cursor is not supported on this platform")?;
+        if graph_start > graph_links.len() {
+            bail!("the graph cursor is outside the published Wiki");
+        }
+        let graph_end = graph_start
+            .saturating_add(airwiki_types::MAX_SHARED_WIKI_GRAPH_PAGE_SIZE)
+            .min(graph_links.len());
+        let next_graph_cursor = if graph_end < graph_links.len() {
+            Some(u32::try_from(graph_end).context("the published Wiki graph is too large")?)
+        } else {
+            None
+        };
+        (
+            graph_links[graph_start..graph_end].to_vec(),
+            next_graph_cursor,
+        )
+    } else {
+        (Vec::new(), None)
+    };
+
+    let document = requested_page
+        .map(|request| {
+            let page_id = knowledge_page_id(request.page);
+            if !allowed_pages.contains(&page_id) {
+                bail!("the requested page is not externally publishable");
+            }
+            let page = inspector.load_page_under_disclosure(
+                lease,
+                collection_id,
+                page_id,
+                request.expected_fingerprint.as_deref(),
+                airwiki_types::MAX_SHARED_WIKI_DOCUMENT_BYTES,
+            )?;
+            if page.truncated {
+                bail!("the published OKF page exceeds the supported document size");
+            }
+            let descriptor = published_page_descriptor(&bundle, page_id)
+                .context("the requested published page is missing from its OKF bundle")?;
+            let backlinks = page
+                .backlinks
+                .into_iter()
+                .filter(|backlink| allowed_pages.contains(backlink))
+                .map(published_page_id)
+                .collect();
+            Ok(PublishedWikiDocument {
+                descriptor,
+                body_markdown: page.body_markdown,
+                metadata: page.metadata,
+                backlinks,
+                truncated: false,
+            })
+        })
+        .transpose()?;
+
+    Ok((
+        PublishedWikiWorkspacePage {
+            workspace_fingerprint: bundle.fingerprint,
+            reserved_pages,
+            documents,
+            links,
+            next_graph_cursor,
+        },
+        document,
+    ))
+}
+
+pub struct DynamicPublicSourceBackend {
+    database: Database,
+    engine: Arc<DynamicAuthorizedSearchBackend>,
+    publisher_id: String,
+}
+
+impl DynamicPublicSourceBackend {
+    fn new(
+        database: Database,
+        engine: Arc<DynamicAuthorizedSearchBackend>,
+        publisher_id: String,
+    ) -> Self {
+        Self {
+            database,
+            engine,
+            publisher_id,
+        }
+    }
+
+    fn engine(&self) -> Result<Arc<HybridSearchEngine>, PublicSourceBackendError> {
+        read_lock(&self.engine.engine, "public search proxy")
+            .map_err(|_| PublicSourceBackendError::Unavailable)?
+            .clone()
+            .ok_or(PublicSourceBackendError::Unavailable)
+    }
+}
+
+#[async_trait]
+impl PublicSourceBackend for DynamicPublicSourceBackend {
+    async fn search(
+        &self,
+        request: PublicSearchRequest,
+    ) -> std::result::Result<PublicSearchDelivery, PublicSourceBackendError> {
+        request
+            .validate()
+            .map_err(|_| PublicSourceBackendError::Invalid)?;
+        let collection_targets = request.collections.clone();
+        let mut response = self
+            .engine()?
+            .search_public(request)
+            .await
+            .map_err(|_| PublicSourceBackendError::Unavailable)?;
+        let database = self.database.clone();
+        let publisher_id = self.publisher_id.clone();
+        tokio::task::spawn_blocking(move || {
+            let lease = database.disclosure_gate().acquire_disclosure();
+            let revisions = revalidate_public_targets(&database, &lease, &collection_targets)?;
+            let mut current = Vec::with_capacity(response.hits.len());
+            for mut hit in response.hits {
+                if database
+                    .public_hit_is_current_under_disclosure(&lease, &hit)
+                    .map_err(|_| PublicSourceBackendError::Unavailable)?
+                {
+                    hit.node_id.clone_from(&publisher_id);
+                    current.push(hit);
+                }
+            }
+            renumber_search_hits(&mut current);
+            response.hits = current;
+            response.authorized_candidates.clear();
+            if revisions.is_empty() {
+                return Err(PublicSourceBackendError::NotPublic);
+            }
+            Ok(PublicSearchDelivery::new(
+                PublicSearchResponse {
+                    protocol_version: airwiki_types::PUBLIC_SEARCH_PROTOCOL.to_owned(),
+                    manifest_sequences: revisions,
+                    response,
+                },
+                lease,
+            ))
+        })
+        .await
+        .map_err(|_| PublicSourceBackendError::Unavailable)?
+    }
+
+    async fn browse(
+        &self,
+        request: PublicBrowseRequest,
+    ) -> std::result::Result<PublicBrowseDelivery, PublicSourceBackendError> {
+        request
+            .validate()
+            .map_err(|_| PublicSourceBackendError::Invalid)?;
+        let cursor = request
+            .cursor
+            .as_deref()
+            .map(Uuid::parse_str)
+            .transpose()
+            .map_err(|_| PublicSourceBackendError::Invalid)?;
+        let database = self.database.clone();
+        let publisher_id = self.publisher_id.clone();
+        tokio::task::spawn_blocking(move || {
+            let lease = database.disclosure_gate().acquire_disclosure();
+            let outline_target = (request.protocol_version != PUBLIC_BROWSE_PROTOCOL_V4
+                || request.page.is_none())
+            .then_some(request.target_concept_id)
+            .flatten();
+            let concepts = database
+                .public_concept_page_under_disclosure(
+                    &lease,
+                    &publisher_id,
+                    request.collection_id,
+                    cursor,
+                    outline_target,
+                    request.limit,
+                )
+                .map_err(|_| PublicSourceBackendError::NotPublic)?;
+            if concepts.is_empty() {
+                return Err(PublicSourceBackendError::NotPublic);
+            }
+            let manifest_sequence = database
+                .public_manifest_sequence_under_disclosure(&lease, request.collection_id)
+                .map_err(|_| PublicSourceBackendError::Unavailable)?
+                .ok_or(PublicSourceBackendError::NotPublic)?;
+            if let Some(PublishedWikiPageRequest {
+                page: PublishedWikiPageId::Concept { concept_id },
+                ..
+            }) = request.page.as_ref()
+            {
+                let authorized = database
+                    .public_concept_page_under_disclosure(
+                        &lease,
+                        &publisher_id,
+                        request.collection_id,
+                        None,
+                        Some(*concept_id),
+                        1,
+                    )
+                    .map_err(|_| PublicSourceBackendError::NotPublic)?;
+                if authorized.first().map(|concept| concept.concept_id) != Some(*concept_id) {
+                    return Err(PublicSourceBackendError::NotPublic);
+                }
+            }
+            let last_concept_id = concepts.last().map(|concept| concept.concept_id);
+            let has_more = if concepts.len() == usize::from(request.limit) {
+                !database
+                    .public_concept_page_under_disclosure(
+                        &lease,
+                        &publisher_id,
+                        request.collection_id,
+                        last_concept_id,
+                        None,
+                        1,
+                    )
+                    .map_err(|_| PublicSourceBackendError::Unavailable)?
+                    .is_empty()
+            } else {
+                false
+            };
+            let next_cursor = public_page_next_cursor(&concepts, has_more);
+            let (workspace, document) = if request.protocol_version == PUBLIC_BROWSE_PROTOCOL_V4 {
+                let concept_ids = concepts
+                    .iter()
+                    .map(|concept| concept.concept_id)
+                    .collect::<Vec<_>>();
+                let (workspace, document) = published_workspace_page(
+                    &database,
+                    &lease,
+                    request.collection_id,
+                    &concept_ids,
+                    request.graph_cursor,
+                    request.page.as_ref(),
+                )
+                .map_err(|_| PublicSourceBackendError::Unavailable)?;
+                (Some(workspace), document)
+            } else {
+                (None, None)
+            };
+            Ok(PublicBrowseDelivery::new(
+                PublicBrowsePage {
+                    protocol_version: request.protocol_version.clone(),
+                    request_id: request.request_id,
+                    manifest_sequence,
+                    concepts,
+                    next_cursor,
+                    workspace,
+                    document,
+                },
+                lease,
+            ))
+        })
+        .await
+        .map_err(|_| PublicSourceBackendError::Unavailable)?
+    }
 }
 
 /// Stable proxy passed to the MCP server before model initialization.
@@ -340,38 +1269,90 @@ impl DynamicFederatedSearch {
         Ok(())
     }
 
+    async fn revalidate_federated_hits(
+        &self,
+        hits: Vec<SearchHit>,
+        purpose: SearchPurpose,
+    ) -> std::result::Result<Vec<SearchHit>, SearchContractError> {
+        let database = self.database.clone();
+        let access = self.access.clone();
+        let local_node_id = self.local_node_id.clone();
+        run_search_storage("federated result revalidation worker stopped", move || {
+            revalidate_federated_hits_blocking(&database, &access, &local_node_id, hits, purpose)
+        })
+        .await
+    }
+
     /// SQLite remains the authority for peers contacted by an outbound search.
     /// This closes the small window where a lossy presentation event could leave
     /// runtime trust broader than the state successfully persisted to disk.
-    fn reconcile_access(&self) -> Result<()> {
-        let stored = self
-            .database
-            .list_peers()?
+    async fn reconcile_access(&self) -> std::result::Result<(), SearchContractError> {
+        let database = self.database.clone();
+        let access = self.access.clone();
+        run_search_storage(
+            "federated access reconciliation worker stopped",
+            move || {
+                reconcile_federated_access_blocking(&database, &access)
+                    .map_err(|error| SearchContractError::Backend(error.to_string()))
+            },
+        )
+        .await
+    }
+}
+
+fn revalidate_federated_hits_blocking(
+    database: &Database,
+    access: &AccessControl,
+    local_node_id: &str,
+    hits: Vec<SearchHit>,
+    purpose: SearchPurpose,
+) -> std::result::Result<Vec<SearchHit>, SearchContractError> {
+    let mut current = Vec::with_capacity(hits.len());
+    for hit in hits {
+        let keep = if hit.node_id == local_node_id {
+            database
+                .hit_is_current(&hit, purpose)
+                .map_err(|error| SearchContractError::Backend(error.to_string()))?
+        } else {
+            PeerId::from_str(&hit.node_id).is_ok_and(|peer| {
+                let peer_access = access.state(&peer);
+                peer_access.trusted && !peer_access.blocked
+            })
+        };
+        if keep {
+            current.push(hit);
+        }
+    }
+    renumber_search_hits(&mut current);
+    Ok(current)
+}
+
+fn reconcile_federated_access_blocking(database: &Database, access: &AccessControl) -> Result<()> {
+    let stored = database
+        .list_peers()?
+        .into_iter()
+        .map(|peer| (peer.peer_id.clone(), peer))
+        .collect::<HashMap<_, _>>();
+    for peer in access.trusted_peers() {
+        let peer_id = peer.to_string();
+        let Some(durable) = stored
+            .get(&peer_id)
+            .filter(|stored| stored.trusted && !stored.blocked)
+        else {
+            access.block(peer);
+            continue;
+        };
+        let durable_grants = database
+            .granted_collections(&durable.peer_id)?
             .into_iter()
-            .map(|peer| (peer.peer_id.clone(), peer))
-            .collect::<HashMap<_, _>>();
-        for peer in self.access.trusted_peers() {
-            let peer_id = peer.to_string();
-            let Some(durable) = stored
-                .get(&peer_id)
-                .filter(|stored| stored.trusted && !stored.blocked)
-            else {
-                self.access.block(peer);
-                continue;
-            };
-            let durable_grants = self
-                .database
-                .granted_collections(&durable.peer_id)?
-                .into_iter()
-                .collect::<HashSet<_>>();
-            for runtime_grant in self.access.state(&peer).grants {
-                if !durable_grants.contains(&runtime_grant) {
-                    self.access.remove_grant(peer, runtime_grant);
-                }
+            .collect::<HashSet<_>>();
+        for runtime_grant in access.state(&peer).grants {
+            if !durable_grants.contains(&runtime_grant) {
+                access.remove_grant(peer, runtime_grant);
             }
         }
-        Ok(())
     }
+    Ok(())
 }
 
 #[async_trait]
@@ -381,8 +1362,7 @@ impl FederatedSearch for DynamicFederatedSearch {
         request: SearchRequest,
     ) -> std::result::Result<SearchResponse, SearchContractError> {
         request.validate()?;
-        self.reconcile_access()
-            .map_err(|error| SearchContractError::Backend(error.to_string()))?;
+        self.reconcile_access().await?;
         let backend = read_lock(&self.backend, "federated search proxy")
             .map_err(|error| SearchContractError::Unavailable(error.to_string()))?
             .clone()
@@ -391,33 +1371,29 @@ impl FederatedSearch for DynamicFederatedSearch {
             })?;
         let purpose = request.purpose;
         let mut response = backend.search(request).await?;
-        let before_revalidation = response.hits.len();
-        let mut current = Vec::with_capacity(response.hits.len());
-        for hit in response.hits {
-            let keep = if hit.node_id == self.local_node_id {
-                self.database
-                    .hit_is_current(&hit, purpose)
-                    .map_err(|error| SearchContractError::Backend(error.to_string()))?
-            } else {
-                PeerId::from_str(&hit.node_id).is_ok_and(|peer| {
-                    let access = self.access.state(&peer);
-                    access.trusted && !access.blocked
-                })
-            };
-            if keep {
-                current.push(hit);
-            }
-        }
-        for (index, hit) in current.iter_mut().enumerate() {
-            hit.rank = u32::try_from(index + 1).unwrap_or(u32::MAX);
-        }
-        if current.len() < before_revalidation {
+        let before_revalidation = response
+            .hits
+            .len()
+            .saturating_add(response.authorized_candidates.len());
+        response.hits = self
+            .revalidate_federated_hits(response.hits, purpose)
+            .await?;
+        response.authorized_candidates = if purpose == SearchPurpose::ExternalAi {
+            self.revalidate_federated_hits(response.authorized_candidates, purpose)
+                .await?
+        } else {
+            Vec::new()
+        };
+        let after_revalidation = response
+            .hits
+            .len()
+            .saturating_add(response.authorized_candidates.len());
+        if after_revalidation < before_revalidation {
             response.partial = true;
             response
                 .warnings
                 .push("results changed during final authorization revalidation".into());
         }
-        response.hits = current;
         Ok(response)
     }
 }
@@ -440,18 +1416,33 @@ impl FederatedSearch for LocalOnlyFederatedSearch {
         request: SearchRequest,
     ) -> std::result::Result<SearchResponse, SearchContractError> {
         let mut response = self.local.search(request).await?;
-        let has_trusted_peers = self
-            .database
-            .list_peers()
-            .map_err(|error| SearchContractError::Backend(error.to_string()))?
-            .into_iter()
-            .any(|peer| peer.trusted && !peer.blocked);
+        let database = self.database.clone();
+        let has_trusted_peers =
+            run_search_storage("local search topology worker stopped", move || {
+                database
+                    .list_peers()
+                    .map(|peers| peers.into_iter().any(|peer| peer.trusted && !peer.blocked))
+                    .map_err(|error| SearchContractError::Backend(error.to_string()))
+            })
+            .await?;
         if has_trusted_peers {
             response.partial = true;
             response.warnings.push("federation_disabled".to_owned());
         }
         Ok(response)
     }
+}
+
+async fn run_search_storage<T>(
+    failure: &'static str,
+    operation: impl FnOnce() -> std::result::Result<T, SearchContractError> + Send + 'static,
+) -> std::result::Result<T, SearchContractError>
+where
+    T: Send + 'static,
+{
+    tokio::task::spawn_blocking(operation)
+        .await
+        .map_err(|_| SearchContractError::Unavailable(failure.to_owned()))?
 }
 
 /// Generation provider that starts the bundled llama.cpp sidecar on first use
@@ -463,6 +1454,23 @@ struct SupervisedGenerationProvider {
     runtime_config: GenerationRuntimeConfig,
 }
 
+impl SupervisedGenerationProvider {
+    async fn verify_activation_smoke(&self) -> Result<()> {
+        let endpoint = self.supervisor.ensure_running().await?;
+        let provider = activation_stage(
+            LlamaServerProvider::for_activation_smoke(
+                &endpoint.base_url,
+                endpoint.bearer_token(),
+                self.runtime_config.clone(),
+            ),
+            ModelActivationStage::Configuration,
+        )?;
+        let result = provider.verify_activation_smoke().await;
+        self.supervisor.mark_activity().await;
+        result
+    }
+}
+
 #[async_trait]
 impl GenerationProvider for SupervisedGenerationProvider {
     fn model_id(&self) -> &str {
@@ -471,10 +1479,13 @@ impl GenerationProvider for SupervisedGenerationProvider {
 
     async fn enrich(&self, document_text: &str) -> Result<EnrichmentDraft> {
         let endpoint = self.supervisor.ensure_running().await?;
-        let provider = LlamaServerProvider::with_config(
-            &endpoint.base_url,
-            endpoint.bearer_token(),
-            self.runtime_config.clone(),
+        let provider = activation_stage(
+            LlamaServerProvider::with_config(
+                &endpoint.base_url,
+                endpoint.bearer_token(),
+                self.runtime_config.clone(),
+            ),
+            ModelActivationStage::Configuration,
         )?;
         // Hierarchical enrichment can span several individually bounded HTTP
         // calls. Keep the sidecar leased for the whole operation so its idle
@@ -493,7 +1504,7 @@ impl GenerationProvider for SupervisedGenerationProvider {
         });
         let result = provider.enrich(document_text).await;
         lease_cancel.cancel();
-        let _ = lease_task.await;
+        log_task_join("model_activity_lease", lease_task.await);
         self.supervisor.mark_activity().await;
         result
     }
@@ -513,6 +1524,76 @@ struct NetworkRuntime {
     started_at: Instant,
 }
 
+struct PublicNetworkRuntime {
+    cancellation: CancellationToken,
+    source_task: JoinHandle<()>,
+    renewal_task: JoinHandle<()>,
+    relay_readiness: watch::Receiver<PublicRelayReadiness>,
+}
+
+enum PreparedPublicAnnouncement {
+    Manifest(Box<PreparedManifestAnnouncement>),
+    Tombstone(Box<PreparedTombstoneAnnouncement>),
+    Missing,
+}
+
+struct PreparedManifestAnnouncement {
+    current: airwiki_types::SignedPublicCollectionManifest,
+    legacy: airwiki_types::SignedPublicCollectionManifest,
+}
+
+struct PreparedTombstoneAnnouncement {
+    current: airwiki_types::SignedPublicCollectionTombstone,
+    legacy: airwiki_types::SignedPublicCollectionTombstone,
+}
+
+fn public_announcement_expiry(
+    announcement: &PreparedPublicAnnouncement,
+) -> Option<chrono::DateTime<Utc>> {
+    match announcement {
+        PreparedPublicAnnouncement::Manifest(announcement) => {
+            Some(announcement.current.manifest.expires_at)
+        }
+        PreparedPublicAnnouncement::Tombstone(_) | PreparedPublicAnnouncement::Missing => None,
+    }
+}
+
+fn public_announcement_sequence(announcement: &PreparedPublicAnnouncement) -> Option<u64> {
+    match announcement {
+        PreparedPublicAnnouncement::Manifest(announcement) => {
+            Some(announcement.current.manifest.sequence)
+        }
+        PreparedPublicAnnouncement::Tombstone(announcement) => {
+            Some(announcement.current.tombstone.sequence)
+        }
+        PreparedPublicAnnouncement::Missing => None,
+    }
+}
+
+fn completed_public_announcement_state(
+    sequence: Option<u64>,
+    expires_at: Option<chrono::DateTime<Utc>>,
+    accepted_indexes: usize,
+    now: chrono::DateTime<Utc>,
+) -> Option<PublicAnnouncementState> {
+    sequence.map(|sequence| {
+        expires_at.map_or(
+            PublicAnnouncementState {
+                sequence,
+                accepted_indexes: 0,
+                last_announced_at: now,
+                expires_at: now,
+            },
+            |expires_at| PublicAnnouncementState {
+                sequence,
+                accepted_indexes,
+                last_announced_at: now,
+                expires_at,
+            },
+        )
+    })
+}
+
 /// Keeps the runtime generation attached until the worker consumes the event.
 /// An old event can already be queued when LAN is disabled or restarted.
 #[derive(Debug, Clone)]
@@ -527,6 +1608,7 @@ struct LivePeer {
     connected: bool,
     pairing: bool,
     node_name: Option<String>,
+    device_platform: Option<DevicePlatform>,
     sas_words: Option<[String; 6]>,
 }
 
@@ -534,6 +1616,7 @@ struct LivePeer {
 struct TransientSourceIssue {
     path: PathBuf,
     code: SourceIssueCode,
+    reason: Option<String>,
 }
 
 /// Side effects useful to the worker after applying a network event.
@@ -542,6 +1625,7 @@ pub struct NetworkEventEffect {
     pub peers_changed: bool,
     pub notice: Option<String>,
     pub warning: Option<String>,
+    pub persisted_trusted_peer: Option<PeerId>,
 }
 
 /// Complete background service graph for one workstation.
@@ -550,11 +1634,18 @@ pub struct DesktopServices {
     database: Database,
     node_id: String,
     identity: NodeIdentity,
+    public_identity: NodeIdentity,
     access: AccessControl,
     authorized_proxy: Arc<DynamicAuthorizedSearchBackend>,
+    public_source_proxy: Arc<DynamicPublicSourceBackend>,
     federated_proxy: Arc<DynamicFederatedSearch>,
     network: Mutex<Option<NetworkRuntime>>,
-    search_topology: AsyncMutex<()>,
+    public_network: Mutex<Option<PublicNetworkRuntime>>,
+    public_reader: Arc<PublicReader>,
+    public_announcements: Arc<RwLock<HashMap<Uuid, PublicAnnouncementState>>>,
+    public_announcement_sync: Arc<Semaphore>,
+    public_announcement_updates: watch::Sender<u64>,
+    search_topology: Semaphore,
     network_generation: Arc<AtomicU64>,
     network_events: broadcast::Sender<SequencedNetworkEvent>,
     mcp: Option<McpServerHandle>,
@@ -562,12 +1653,448 @@ pub struct DesktopServices {
     live_peers: RwLock<HashMap<PeerId, LivePeer>>,
     startup_preflight_blocked: RwLock<HashSet<Uuid>>,
     transient_source_issues: RwLock<HashMap<Uuid, Vec<TransientSourceIssue>>>,
+    memories: airwiki_core::AiMemoryService,
+    computations: ComputationCoordinator,
+    application_updates: broadcast::Sender<Uuid>,
+    application_backend_cancellation: CancellationToken,
+    application_backend_task: Option<JoinHandle<()>>,
+}
+
+#[derive(Clone)]
+struct DesktopMcpApplicationBackend {
+    requests: mpsc::Sender<McpApplicationRequest>,
+}
+
+const MCP_APPLICATION_RESPONSE_TIMEOUT: Duration = Duration::from_secs(5);
+
+struct McpApplicationRequest {
+    identity: McpApplicationIdentity,
+    tool: &'static str,
+    arguments: serde_json::Value,
+    response: oneshot::Sender<std::result::Result<serde_json::Value, McpApplicationError>>,
+}
+
+#[async_trait]
+impl McpApplicationBackend for DesktopMcpApplicationBackend {
+    async fn call(
+        &self,
+        identity: McpApplicationIdentity,
+        tool: &'static str,
+        arguments: serde_json::Value,
+    ) -> std::result::Result<serde_json::Value, McpApplicationError> {
+        let (response, receiver) = oneshot::channel();
+        self.requests
+            .try_send(McpApplicationRequest {
+                identity,
+                tool,
+                arguments,
+                response,
+            })
+            .map_err(|_| McpApplicationError::Unavailable)?;
+        tokio::time::timeout(MCP_APPLICATION_RESPONSE_TIMEOUT, receiver)
+            .await
+            .map_err(|_| mcp_application_timeout_error(tool))?
+            .map_err(|_| McpApplicationError::Unavailable)?
+    }
+}
+
+fn mcp_application_timeout_error(tool: &str) -> McpApplicationError {
+    match tool {
+        "create_airwiki_memory"
+        | "write_airwiki_memory"
+        | "deprecate_airwiki_memory"
+        | "request_airwiki_computation" => McpApplicationError::OutcomeUnknown,
+        _ => McpApplicationError::Unavailable,
+    }
+}
+
+fn spawn_mcp_application_backend(
+    database: Database,
+    memories: airwiki_core::AiMemoryService,
+    computations: ComputationCoordinator,
+    application_updates: broadcast::Sender<Uuid>,
+) -> (
+    DesktopMcpApplicationBackend,
+    CancellationToken,
+    JoinHandle<()>,
+) {
+    const REQUEST_CAPACITY: usize = 64;
+    let (sender, mut receiver) = mpsc::channel::<McpApplicationRequest>(REQUEST_CAPACITY);
+    let cancellation = CancellationToken::new();
+    let task_cancellation = cancellation.clone();
+    let task = tokio::spawn(async move {
+        loop {
+            let request = tokio::select! {
+                biased;
+                () = task_cancellation.cancelled() => break,
+                request = receiver.recv() => request,
+            };
+            let Some(request) = request else {
+                break;
+            };
+            let McpApplicationRequest {
+                identity,
+                tool,
+                arguments,
+                response,
+            } = request;
+            let database = database.clone();
+            let memories = memories.clone();
+            let computations = computations.clone();
+            let updates = application_updates.clone();
+            let result = tokio::task::spawn_blocking(move || {
+                let capability = database
+                    .authenticate_application_capability(&identity.capability)
+                    .map_err(|_| McpApplicationError::Unavailable)?
+                    .ok_or(McpApplicationError::Unauthorized)?;
+                call_memory_tool(&memories, &computations, &capability, tool, arguments)
+            })
+            .await;
+            let result = match result {
+                Ok(result) => result,
+                Err(error) => {
+                    tracing::error!(
+                        task_cancelled = error.is_cancelled(),
+                        task_panicked = error.is_panic(),
+                        "MCP application worker stopped unexpectedly"
+                    );
+                    Err(McpApplicationError::Unavailable)
+                }
+            };
+            if let Ok(value) = &result
+                && let Some(wiki_id) = application_update_wiki_id(tool, value)
+            {
+                let _ = updates.send(wiki_id);
+            }
+            let _ = response.send(result);
+        }
+    });
+    (
+        DesktopMcpApplicationBackend { requests: sender },
+        cancellation,
+        task,
+    )
+}
+
+fn application_update_wiki_id(tool: &str, result: &serde_json::Value) -> Option<Uuid> {
+    matches!(
+        tool,
+        "create_airwiki_memory" | "write_airwiki_memory" | "deprecate_airwiki_memory"
+    )
+    .then(|| result.get("wikiId")?.as_str()?.parse().ok())
+    .flatten()
+}
+
+fn call_memory_tool(
+    memories: &airwiki_core::AiMemoryService,
+    computations: &ComputationCoordinator,
+    capability: &airwiki_core::storage::ApplicationCapabilityRecord,
+    tool: &str,
+    arguments: serde_json::Value,
+) -> std::result::Result<serde_json::Value, McpApplicationError> {
+    let app_id = capability.app_id;
+    match tool {
+        "list_airwiki_memories" => {
+            let memories = memories
+                .list(app_id)
+                .map_err(|_| McpApplicationError::Unavailable)?;
+            Ok(
+                serde_json::json!({"wikis": memories.into_iter().map(|wiki| serde_json::json!({"wikiId": wiki.id, "name": wiki.name})).collect::<Vec<_>>() }),
+            )
+        }
+        "create_airwiki_memory" => {
+            let input: airwiki_mcp::CreateAirWikiMemoryInput =
+                serde_json::from_value(arguments).map_err(|_| McpApplicationError::Invalid)?;
+            let wiki = memories
+                .create(app_id, &input.name)
+                .map_err(classify_application_mutation_error)?;
+            Ok(serde_json::json!({"wikiId": wiki.id, "name": wiki.name}))
+        }
+        "get_airwiki_memory" => {
+            let input: airwiki_mcp::GetAirWikiMemoryInput =
+                serde_json::from_value(arguments).map_err(|_| McpApplicationError::Invalid)?;
+            let wiki_id =
+                Uuid::parse_str(&input.wiki_id).map_err(|_| McpApplicationError::Invalid)?;
+            let (concepts, next_cursor) = match input.concept_id {
+                Some(concept_id) => {
+                    if input.cursor.is_some() || input.limit.is_some() {
+                        return Err(McpApplicationError::Invalid);
+                    }
+                    let concept_id =
+                        Uuid::parse_str(&concept_id).map_err(|_| McpApplicationError::Invalid)?;
+                    let (concept, body_markdown) = memories
+                        .get_concept(app_id, wiki_id, concept_id)
+                        .map_err(|_| McpApplicationError::Unauthorized)?;
+                    (
+                        vec![memory_concept_json(&concept, Some(body_markdown))],
+                        None,
+                    )
+                }
+                None => memory_concept_page(
+                    memories
+                        .get(app_id, wiki_id)
+                        .map_err(|_| McpApplicationError::Unauthorized)?,
+                    input.cursor.as_deref(),
+                    input
+                        .limit
+                        .unwrap_or(airwiki_mcp::DEFAULT_MEMORY_LIST_LIMIT),
+                )?,
+            };
+            Ok(serde_json::json!({
+                "wikiId": wiki_id,
+                "concepts": concepts,
+                "nextCursor": next_cursor,
+            }))
+        }
+        "write_airwiki_memory" => {
+            let input: airwiki_mcp::WriteAirWikiMemoryInput =
+                serde_json::from_value(arguments).map_err(|_| McpApplicationError::Invalid)?;
+            let wiki_id =
+                Uuid::parse_str(&input.wiki_id).map_err(|_| McpApplicationError::Invalid)?;
+            let concept_id = input
+                .concept_id
+                .as_deref()
+                .map(Uuid::parse_str)
+                .transpose()
+                .map_err(|_| McpApplicationError::Invalid)?;
+            let concept_type = airwiki_types::ConceptType::parse(input.concept_type)
+                .ok_or(McpApplicationError::Invalid)?;
+            let stored = memories
+                .write(
+                    app_id,
+                    wiki_id,
+                    concept_id,
+                    input.expected_fingerprint.as_deref(),
+                    &airwiki_core::AiMemoryConceptInput {
+                        title: input.title,
+                        description: input.description,
+                        concept_type,
+                        tags: input.tags,
+                        body_markdown: input.body_markdown,
+                    },
+                )
+                .map_err(classify_application_mutation_error)?;
+            Ok(memory_concept_json(&stored, None))
+        }
+        "deprecate_airwiki_memory" => {
+            let input: airwiki_mcp::DeprecateAirWikiMemoryInput =
+                serde_json::from_value(arguments).map_err(|_| McpApplicationError::Invalid)?;
+            let wiki_id =
+                Uuid::parse_str(&input.wiki_id).map_err(|_| McpApplicationError::Invalid)?;
+            let concept_id =
+                Uuid::parse_str(&input.concept_id).map_err(|_| McpApplicationError::Invalid)?;
+            let stored = memories
+                .deprecate(app_id, wiki_id, concept_id, &input.expected_fingerprint)
+                .map_err(classify_application_mutation_error)?;
+            Ok(memory_concept_json(&stored, None))
+        }
+        "request_airwiki_computation" => {
+            let input: airwiki_mcp::RequestAirWikiComputationInput =
+                serde_json::from_value(arguments).map_err(|_| McpApplicationError::Invalid)?;
+            let wiki_id =
+                Uuid::parse_str(&input.wiki_id).map_err(|_| McpApplicationError::Invalid)?;
+            let pending = computations
+                .request(
+                    app_id,
+                    wiki_id,
+                    &input.logical_path,
+                    serde_json::Value::Object(input.parameters),
+                )
+                .map_err(classify_application_mutation_error)?;
+            Ok(serde_json::json!({
+                "runId": pending.run_id,
+                "state": "awaiting_confirmation",
+                "expiresAt": pending.expires_at,
+            }))
+        }
+        "get_airwiki_computation_run" => {
+            let input: airwiki_mcp::GetAirWikiComputationRunInput =
+                serde_json::from_value(arguments).map_err(|_| McpApplicationError::Invalid)?;
+            let run_id =
+                Uuid::parse_str(&input.run_id).map_err(|_| McpApplicationError::Invalid)?;
+            computations
+                .status_for_application(app_id, run_id)
+                .map_err(|_| McpApplicationError::Unauthorized)
+        }
+        _ => Err(McpApplicationError::Invalid),
+    }
+}
+
+fn classify_application_mutation_error(error: anyhow::Error) -> McpApplicationError {
+    if error.downcast_ref::<AiMemoryError>() == Some(&AiMemoryError::FingerprintConflict) {
+        return McpApplicationError::Conflict;
+    }
+    if let Some(limit) = error.downcast_ref::<ApplicationLimitError>() {
+        return match limit.retry_after_seconds() {
+            Some(retry_after_seconds) => McpApplicationError::RateLimited {
+                retry_after_seconds,
+            },
+            None => McpApplicationError::QuotaExceeded,
+        };
+    }
+    McpApplicationError::Invalid
+}
+
+fn memory_concept_json(
+    concept: &airwiki_core::OkfConceptProjectionRecord,
+    body_markdown: Option<String>,
+) -> serde_json::Value {
+    serde_json::json!({
+        "wikiId": concept.collection_id,
+        "conceptId": concept.concept_id,
+        "path": concept.logical_path,
+        "type": concept.concept_type,
+        "title": concept.title,
+        "description": concept.description,
+        "tags": concept.tags,
+        "status": concept.lifecycle_status,
+        "fingerprint": concept.fingerprint,
+        "bodyMarkdown": body_markdown,
+        "assurance": concept.assurance,
+    })
+}
+
+const MAX_MCP_MEMORY_LIST_BYTES: usize = 48 * 1024;
+
+fn memory_concept_page(
+    concepts: Vec<airwiki_core::OkfConceptProjectionRecord>,
+    cursor: Option<&str>,
+    limit: u8,
+) -> std::result::Result<(Vec<serde_json::Value>, Option<String>), McpApplicationError> {
+    if !(1..=airwiki_mcp::MAX_MEMORY_LIST_LIMIT).contains(&limit) {
+        return Err(McpApplicationError::Invalid);
+    }
+    let start = match cursor {
+        Some(cursor) => {
+            let cursor = Uuid::parse_str(cursor).map_err(|_| McpApplicationError::Invalid)?;
+            concepts
+                .iter()
+                .position(|concept| concept.concept_id == cursor)
+                .map(|index| index.saturating_add(1))
+                .ok_or(McpApplicationError::Invalid)?
+        }
+        None => 0,
+    };
+    let mut page = Vec::new();
+    let mut page_bytes = 0_usize;
+    let mut last_cursor = None;
+    for concept in concepts.iter().skip(start).take(usize::from(limit)) {
+        let value = memory_concept_json(concept, None);
+        let value_bytes = serde_json::to_vec(&value)
+            .map_err(|_| McpApplicationError::Unavailable)?
+            .len();
+        if !page.is_empty() && page_bytes.saturating_add(value_bytes) > MAX_MCP_MEMORY_LIST_BYTES {
+            break;
+        }
+        page_bytes = page_bytes.saturating_add(value_bytes);
+        page.push(value);
+        last_cursor = Some(concept.concept_id.to_string());
+    }
+    let consumed = page.len();
+    let next_cursor = if start.saturating_add(consumed) < concepts.len() {
+        last_cursor
+    } else {
+        None
+    };
+    Ok((page, next_cursor))
+}
+
+#[derive(Debug, Clone, Copy)]
+struct PublicAnnouncementState {
+    sequence: u64,
+    accepted_indexes: usize,
+    last_announced_at: chrono::DateTime<Utc>,
+    expires_at: chrono::DateTime<Utc>,
+}
+
+fn public_announcement_view(
+    announcement: Option<PublicAnnouncementState>,
+    now: chrono::DateTime<Utc>,
+) -> PublicAnnouncementStatusView {
+    match announcement {
+        Some(state) if state.accepted_indexes == 0 => PublicAnnouncementStatusView::Offline,
+        Some(state) if state.expires_at <= now => PublicAnnouncementStatusView::Expired {
+            last_announced_at: state.last_announced_at,
+            expires_at: state.expires_at,
+        },
+        Some(state) => PublicAnnouncementStatusView::Advertised {
+            accepted_indexes: state.accepted_indexes,
+            last_announced_at: state.last_announced_at,
+            expires_at: state.expires_at,
+        },
+        None => PublicAnnouncementStatusView::Offline,
+    }
+}
+
+fn update_public_announcement_state(
+    announcements: &RwLock<HashMap<Uuid, PublicAnnouncementState>>,
+    collection_id: Uuid,
+    state: Option<PublicAnnouncementState>,
+) {
+    let Ok(mut announcements) = write_lock(announcements, "public announcement state") else {
+        tracing::warn!(
+            error_kind = "public_announcement_state_unavailable",
+            "public announcement state could not be updated"
+        );
+        return;
+    };
+    if let Some(state) = state {
+        if announcements
+            .get(&collection_id)
+            .is_some_and(|known| known.sequence > state.sequence)
+        {
+            return;
+        }
+        announcements.insert(collection_id, state);
+    } else {
+        announcements.remove(&collection_id);
+    }
+}
+
+fn record_public_announcement_failure(
+    announcements: &RwLock<HashMap<Uuid, PublicAnnouncementState>>,
+    collection_id: Uuid,
+    sequence: u64,
+    now: chrono::DateTime<Utc>,
+) {
+    let Ok(mut announcements) = write_lock(announcements, "public announcement state") else {
+        tracing::warn!(
+            error_kind = "public_announcement_state_unavailable",
+            "public announcement state could not be updated"
+        );
+        return;
+    };
+    if announcements
+        .get(&collection_id)
+        .is_some_and(|state| state.sequence > sequence)
+    {
+        return;
+    }
+    if announcements
+        .get(&collection_id)
+        .is_some_and(|state| state.accepted_indexes > 0 && state.expires_at > now)
+    {
+        return;
+    }
+    announcements.insert(
+        collection_id,
+        PublicAnnouncementState {
+            sequence,
+            accepted_indexes: 0,
+            last_announced_at: now,
+            expires_at: now,
+        },
+    );
 }
 
 impl DesktopServices {
     /// Starts storage, persistent Ed25519 identity, LAN and loopback MCP. Models
     /// are intentionally optional at this stage.
     pub async fn start(paths: &AppPaths, lan_enabled: bool) -> Result<Self> {
+        #[cfg(feature = "e2e")]
+        let store: Arc<dyn SecretStore> =
+            Arc::new(FileSecretStore::new(paths.data.join("e2e-secrets")));
+        #[cfg(not(feature = "e2e"))]
         let store: Arc<dyn SecretStore> =
             Arc::new(KeyringSecretStore::new(KEYRING_SERVICE, KEYRING_ACCOUNT));
         Self::start_with_secret_store_and_lan(paths, store, lan_enabled).await
@@ -578,15 +2105,57 @@ impl DesktopServices {
         secret_store: Arc<dyn SecretStore>,
         lan_enabled: bool,
     ) -> Result<Self> {
-        let core_paths = CoreAppPaths::at(&paths.data);
-        core_paths.ensure()?;
-        let database = Database::open(&paths.database)?;
-        let recovery_database = database.clone();
-        let recovery = tokio::task::spawn_blocking(move || {
-            OkfPublicationMaterializer::new(recovery_database).recover_pending()
+        let blocking_paths = paths.clone();
+        let (
+            core_paths,
+            database,
+            recovery,
+            managed_recovery,
+            retired_recovery,
+            identity,
+            public_identity,
+            access,
+            blocked_public_publishers,
+            computations,
+        ) = tokio::task::spawn_blocking(move || {
+            let core_paths = CoreAppPaths::at(&blocking_paths.data);
+            core_paths.ensure()?;
+            let retired_recovery = recover_retired_managed_wiki_files(&core_paths.vaults)?;
+            let database = Database::open(&blocking_paths.database)?;
+            let bundled_bootstrap_indexes =
+                parse_bundled_bootstrap_federation_indexes(BUNDLED_BOOTSTRAP_FEDERATION_INDEXES)?;
+            let bootstrap_database = database.clone();
+            install_bundled_bootstrap_federation_indexes(
+                &bootstrap_database,
+                bundled_bootstrap_indexes,
+            )?;
+            let recovery = OkfPublicationMaterializer::new(database.clone()).recover_pending()?;
+            let managed_recovery =
+                airwiki_core::AiMemoryService::new(database.clone(), core_paths.vaults.clone())
+                    .recover_pending()?;
+            let identity = NodeIdentity::load_or_create(secret_store.as_ref())
+                .context("no se pudo cargar la identidad Ed25519 del dispositivo")?;
+            let public_identity =
+                NodeIdentity::load_or_create_public_publisher(secret_store.as_ref())
+                    .context("no se pudo cargar la identidad pública Ed25519")?;
+            let access = restore_access_control(&database)?;
+            let blocked_public_publishers = database.list_blocked_public_publishers()?;
+            let computations = ComputationCoordinator::new(database.clone())?;
+            Ok::<_, anyhow::Error>((
+                core_paths,
+                database,
+                recovery,
+                managed_recovery,
+                retired_recovery,
+                identity,
+                public_identity,
+                access,
+                blocked_public_publishers,
+                computations,
+            ))
         })
         .await
-        .context("falló el worker de recuperación de publicaciones OKF")??;
+        .context("se detuvo el worker de bootstrap privado")??;
         if recovery.pending > 0 {
             tracing::warn!(
                 pending = recovery.pending,
@@ -595,16 +2164,33 @@ impl DesktopServices {
                 "some OKF publications remain pending after startup recovery"
             );
         }
-        let identity = NodeIdentity::load_or_create(secret_store.as_ref())
-            .context("no se pudo cargar la identidad Ed25519 del dispositivo")?;
+        if managed_recovery.pending > 0 || managed_recovery.recovered > 0 {
+            tracing::warn!(
+                pending = managed_recovery.pending,
+                recovered = managed_recovery.recovered,
+                "AI memory bundle recovery completed with pending work"
+            );
+        }
+        if retired_recovery.pending > 0 || retired_recovery.recovered > 0 {
+            tracing::warn!(
+                pending = retired_recovery.pending,
+                recovered = retired_recovery.recovered,
+                "retired managed wiki cleanup completed with pending work"
+            );
+        }
         let node_id = identity.peer_id().to_string();
-        let access = restore_access_control(&database)?;
 
         let authorized_proxy = Arc::new(DynamicAuthorizedSearchBackend::new(
             database.clone(),
             access.clone(),
         ));
+        let public_source_proxy = Arc::new(DynamicPublicSourceBackend::new(
+            database.clone(),
+            Arc::clone(&authorized_proxy),
+            public_identity.peer_id().to_string(),
+        ));
         let (network_events, _) = broadcast::channel(128);
+        let (public_announcement_updates, _) = watch::channel(0_u64);
         let network_generation = Arc::new(AtomicU64::new(1));
         let network = if lan_enabled {
             Some(spawn_network_runtime(
@@ -624,7 +2210,33 @@ impl DesktopServices {
             access.clone(),
             node_id.clone(),
         ));
-        let mcp = match start_mcp_server(McpServerConfig::default(), federated_proxy.clone()).await
+        let public_reader = Arc::new(PublicReader::new());
+        for publisher_id in blocked_public_publishers {
+            public_reader
+                .set_publisher_blocked(publisher_id, true)
+                .await;
+        }
+        let memories =
+            airwiki_core::AiMemoryService::new(database.clone(), core_paths.vaults.clone());
+        let (application_updates, _) = broadcast::channel(128);
+        let (application_backend, application_backend_cancellation, application_backend_task) =
+            spawn_mcp_application_backend(
+                database.clone(),
+                memories.clone(),
+                computations.clone(),
+                application_updates.clone(),
+            );
+        let application_backend: Arc<dyn McpApplicationBackend> = Arc::new(application_backend);
+        let mcp_config = McpServerConfig::default();
+        #[cfg(feature = "e2e")]
+        let mcp_config = airwiki_mcp::e2e_mcp_port_from_environment()?
+            .map_or(mcp_config, |port| mcp_config.with_port(port));
+        let mcp = match start_with_application_backend(
+            mcp_config,
+            federated_proxy.clone(),
+            Some(application_backend),
+        )
+        .await
         {
             Ok(handle) => handle,
             Err(error) => {
@@ -633,20 +2245,29 @@ impl DesktopServices {
                     runtime.task.abort();
                     runtime.event_forwarder.abort();
                 }
+                application_backend_cancellation.cancel();
+                log_task_join("mcp_application_backend", application_backend_task.await);
                 return Err(error).context("no se pudo iniciar el MCP local");
             }
         };
 
-        Ok(Self {
+        let services = Self {
             core_paths,
             database,
             node_id,
             identity,
+            public_identity,
             access,
             authorized_proxy,
+            public_source_proxy,
             federated_proxy,
             network: Mutex::new(network),
-            search_topology: AsyncMutex::new(()),
+            public_network: Mutex::new(None),
+            public_reader,
+            public_announcements: Arc::new(RwLock::new(HashMap::new())),
+            public_announcement_sync: Arc::new(Semaphore::new(1)),
+            public_announcement_updates,
+            search_topology: Semaphore::new(1),
             network_generation,
             network_events,
             mcp: Some(mcp),
@@ -654,7 +2275,14 @@ impl DesktopServices {
             live_peers: RwLock::new(HashMap::new()),
             startup_preflight_blocked: RwLock::new(HashSet::new()),
             transient_source_issues: RwLock::new(HashMap::new()),
-        })
+            memories,
+            computations,
+            application_updates,
+            application_backend_cancellation,
+            application_backend_task: Some(application_backend_task),
+        };
+        services.reconcile_public_network().await?;
+        Ok(services)
     }
 
     pub fn node_id(&self) -> &str {
@@ -667,9 +2295,35 @@ impl DesktopServices {
         "http://127.0.0.1:43123/mcp"
     }
 
+    pub(crate) fn subscribe_public_announcement_updates(&self) -> watch::Receiver<u64> {
+        self.public_announcement_updates.subscribe()
+    }
+
     pub fn advertised_lan_addresses(&self, listener: &Multiaddr) -> Result<Vec<String>> {
         manual_lan_route::advertised_addresses(listener, self.identity.peer_id())
             .context("no se pudo preparar la dirección LAN manual")
+    }
+
+    pub async fn announce_lan_addresses(&self, addresses: &[String]) -> Result<()> {
+        let addresses = addresses
+            .iter()
+            .map(|address| {
+                address
+                    .parse::<Multiaddr>()
+                    .map_err(|_| anyhow!("la dirección LAN resuelta no es válida"))
+            })
+            .collect::<Result<Vec<_>>>()?;
+        self.required_network()?
+            .set_advertised_lan_addresses(addresses)
+            .await
+            .context("no se pudieron anunciar las direcciones LAN validadas")
+    }
+
+    pub async fn acknowledge_persisted_peer_trust(&self, peer: PeerId) -> Result<()> {
+        self.required_network()?
+            .acknowledge_persisted_trust(peer)
+            .await
+            .context("no se pudo completar el emparejamiento LAN persistido")
     }
 
     /// Returns the latest informational bridge activity. This value is
@@ -680,6 +2334,117 @@ impl DesktopServices {
         };
         let receiver = handle.subscribe_client_activities();
         *receiver.borrow()
+    }
+
+    pub(crate) fn pending_computations(&self) -> Result<Vec<PendingComputation>> {
+        self.computations.pending()
+    }
+
+    pub(crate) fn completed_computations(&self) -> Result<Vec<CompletedComputation>> {
+        self.computations.completed()
+    }
+
+    pub(crate) fn subscribe_computation_updates(&self) -> watch::Receiver<u64> {
+        self.computations.subscribe()
+    }
+
+    pub(crate) fn subscribe_application_updates(&self) -> broadcast::Receiver<Uuid> {
+        self.application_updates.subscribe()
+    }
+
+    pub(crate) fn reject_computation(&self, run_id: Uuid) -> Result<()> {
+        self.computations.reject(run_id)
+    }
+
+    pub(crate) fn execute_computation(
+        &self,
+        run_id: Uuid,
+    ) -> Result<airwiki_core::AirWikiWasmOutcome> {
+        self.computations.execute_confirmed(run_id)
+    }
+
+    pub(crate) fn save_computation_result(&self, run_id: Uuid, target_wiki_id: Uuid) -> Result<()> {
+        self.computations
+            .with_claimed_accepted_receipt(run_id, |receipt| {
+                self.memories
+                    .save_process_result(
+                        target_wiki_id,
+                        run_id,
+                        "Attested computation result",
+                        receipt,
+                    )
+                    .map(|_| ())
+            })
+    }
+
+    pub(crate) fn application_access_views(&self) -> Result<Vec<ApplicationAccessView>> {
+        let grants = self.database.list_application_wiki_grants()?;
+        let collections = self
+            .database
+            .list_collections()?
+            .into_iter()
+            .map(|wiki| (wiki.id, wiki.managed_size_bytes))
+            .collect::<HashMap<_, _>>();
+        self.database
+            .list_application_capabilities()?
+            .into_iter()
+            .map(|application| {
+                let application_grants = grants
+                    .iter()
+                    .filter(|grant| grant.app_id == application.app_id)
+                    .map(|grant| ApplicationWikiGrantView {
+                        wiki_id: grant.collection_id,
+                        role: match grant.role {
+                            airwiki_core::ApplicationWikiRole::Owner => {
+                                ApplicationWikiRoleView::Owner
+                            }
+                            airwiki_core::ApplicationWikiRole::Reader => {
+                                ApplicationWikiRoleView::Reader
+                            }
+                            airwiki_core::ApplicationWikiRole::Editor => {
+                                ApplicationWikiRoleView::Editor
+                            }
+                        },
+                    })
+                    .collect::<Vec<_>>();
+                let owned_wiki_count = application_grants
+                    .iter()
+                    .filter(|grant| grant.role == ApplicationWikiRoleView::Owner)
+                    .count();
+                let managed_bytes = application_grants
+                    .iter()
+                    .filter(|grant| grant.role == ApplicationWikiRoleView::Owner)
+                    .filter_map(|grant| collections.get(&grant.wiki_id))
+                    .copied()
+                    .fold(0_u64, u64::saturating_add);
+                Ok(ApplicationAccessView {
+                    app_id: application.app_id,
+                    display_name: application.display_name,
+                    producer: application.producer,
+                    active: application.revoked_at.is_none(),
+                    owned_wiki_count,
+                    managed_bytes,
+                    grants: application_grants,
+                })
+            })
+            .collect()
+    }
+
+    pub(crate) fn set_application_wiki_role(
+        &self,
+        app_id: Uuid,
+        wiki_id: Uuid,
+        role: Option<ApplicationWikiRoleView>,
+    ) -> Result<()> {
+        self.database.set_application_wiki_role(
+            app_id,
+            wiki_id,
+            role.map(|role| match role {
+                ApplicationWikiRoleView::Owner => airwiki_core::ApplicationWikiRole::Owner,
+                ApplicationWikiRoleView::Reader => airwiki_core::ApplicationWikiRole::Reader,
+                ApplicationWikiRoleView::Editor => airwiki_core::ApplicationWikiRole::Editor,
+            }),
+        )
     }
 
     pub fn subscribe_network_events(&self) -> broadcast::Receiver<SequencedNetworkEvent> {
@@ -714,7 +2479,7 @@ impl DesktopServices {
     /// Initializes ONNX/tokenizer state off the async executor's worker threads,
     /// then atomically enables local, LAN and MCP search.
     pub async fn enable_models(&self, paths: ModelRuntimePaths) -> Result<()> {
-        paths.validate()?;
+        activation_stage(paths.validate(), ModelActivationStage::Configuration)?;
         let selection = paths.selection.clone();
         let generation_settings = paths.generation_settings;
         let mut supervisor_config = SupervisorConfig::bundled(paths.llama_server, paths.model);
@@ -727,7 +2492,7 @@ impl DesktopServices {
             .map(usize::from)
             .unwrap_or(2)
             .clamp(1, 4);
-        let (embeddings, tokenizer, relevance) = tokio::task::spawn_blocking(move || {
+        let loaded = tokio::task::spawn_blocking(move || {
             let snapshot = PinnedE5Snapshot::open(e5_snapshot_path)?;
             let embeddings: Arc<dyn EmbeddingProvider> =
                 Arc::new(FastEmbedE5Small::from_snapshot(&snapshot, threads)?);
@@ -739,16 +2504,28 @@ impl DesktopServices {
             Ok::<_, anyhow::Error>((embeddings, tokenizer, relevance))
         })
         .await
-        .context("falló el worker de inicialización de los modelos de búsqueda")??;
+        .map_err(anyhow::Error::new);
+        let loaded = activation_stage(loaded, ModelActivationStage::OnnxInit)
+            .context("falló el worker de inicialización de los modelos de búsqueda")?;
+        let (embeddings, tokenizer, relevance) =
+            activation_stage(loaded, ModelActivationStage::OnnxInit)?;
 
-        let smoke_embeddings = embeddings
-            .embed(&[format!("query: {MODEL_SMOKE_TEST_DOCUMENT}")])
-            .await
-            .context("falló el smoke test de multilingual-e5-small")?;
+        let smoke_embeddings = activation_stage(
+            embeddings
+                .embed(&[format!("query: {MODEL_SMOKE_TEST_DOCUMENT}")])
+                .await,
+            ModelActivationStage::EmbeddingSmoke,
+        )
+        .context("falló el smoke test de multilingual-e5-small")?;
         if smoke_embeddings.len() != 1
             || smoke_embeddings[0].len() != airwiki_core::EMBEDDING_DIMENSIONS
         {
-            bail!("el smoke test de embeddings devolvió una forma inesperada");
+            return activation_stage(
+                Err(anyhow!(
+                    "el smoke test de embeddings devolvió una forma inesperada"
+                )),
+                ModelActivationStage::EmbeddingSmoke,
+            );
         }
 
         let relevance_inputs = RELEVANCE_SMOKE_TEST_PASSAGES
@@ -759,12 +2536,21 @@ impl DesktopServices {
                 text: text.to_owned(),
             })
             .collect::<Vec<_>>();
-        let relevance_decisions = relevance
-            .classify(RELEVANCE_SMOKE_TEST_QUESTION, &relevance_inputs)
-            .await
-            .context("falló el smoke test del clasificador de relevancia")?;
+        let relevance_decisions = activation_stage(
+            relevance
+                .classify(RELEVANCE_SMOKE_TEST_QUESTION, &relevance_inputs)
+                .await
+                .map_err(anyhow::Error::new),
+            ModelActivationStage::RerankerSmoke,
+        )
+        .context("falló el smoke test del clasificador de relevancia")?;
         if relevance_decisions != [EvidenceDecision::Relevant, EvidenceDecision::Irrelevant] {
-            bail!("el smoke test de relevancia devolvió decisiones inesperadas");
+            return activation_stage(
+                Err(anyhow!(
+                    "el smoke test de relevancia devolvió decisiones inesperadas"
+                )),
+                ModelActivationStage::RerankerSmoke,
+            );
         }
 
         let generation_provider = SupervisedGenerationProvider {
@@ -779,9 +2565,10 @@ impl DesktopServices {
                     ThinkingControl::None => None,
                     ThinkingControl::NoThinkDirective => Some("/no_think".to_owned()),
                 },
+                execution_class: bundled_generation_execution_class(),
             },
         };
-        if let Err(error) = generation_provider.enrich(MODEL_SMOKE_TEST_DOCUMENT).await {
+        if let Err(error) = generation_provider.verify_activation_smoke().await {
             let _ = supervisor.stop().await;
             return Err(error).with_context(|| {
                 format!(
@@ -814,6 +2601,7 @@ impl DesktopServices {
             .database
             .list_collections()?
             .into_iter()
+            .filter(|collection| collection.origin == WikiOrigin::Folder)
             .map(|collection| collection.id)
             .collect::<Vec<_>>();
         let preflight = async {
@@ -860,11 +2648,15 @@ impl DesktopServices {
             return Err(error);
         }
 
-        // Commit the search topology under one short async lock. Model loading
+        // Commit the search topology under one serialized permit. Model loading
         // and smoke tests deliberately happen above the lock so disabling LAN
         // remains responsive. Re-read the runtime here instead of retaining a
         // stale handle across a concurrent LAN transition.
-        let _topology = self.search_topology.lock().await;
+        let _topology = self
+            .search_topology
+            .acquire()
+            .await
+            .context("se cerró el coordinador de topología de búsqueda")?;
         let local_federated: Arc<dyn FederatedSearch> = local.clone();
         let federated: Arc<dyn FederatedSearch> = if let Some(network) = self.network_handle()? {
             Arc::new(FederatedCoordinator::new(local_federated, network))
@@ -886,14 +2678,27 @@ impl DesktopServices {
         if let Some(old) = old {
             old.supervisor.stop().await?;
         }
+        if self.renew_public_manifests().await.is_err() {
+            tracing::warn!(
+                error_kind = "public_manifest_renewal_failed",
+                "public collection announcements could not be renewed"
+            );
+        }
         Ok(())
     }
 
-    pub fn add_collection(
+    pub fn add_folder_wiki(
         &self,
         name: impl Into<String>,
         source_folder: impl AsRef<Path>,
+        indexing_mode: airwiki_core::IndexingMode,
     ) -> Result<CollectionRecord> {
+        if !matches!(
+            indexing_mode,
+            airwiki_core::IndexingMode::Continuous | airwiki_core::IndexingMode::Manual
+        ) {
+            bail!("una wiki de carpeta requiere indexación continua o manual");
+        }
         let source_folder = source_folder.as_ref();
         if !source_folder.is_dir() {
             bail!("la carpeta fuente no existe: {}", source_folder.display());
@@ -925,13 +2730,19 @@ impl DesktopServices {
                 );
             }
         }
-        let bundle_root = self.core_paths.vaults.join(Uuid::new_v4().to_string());
-        let collection = self.database.create_collection(
-            name,
-            &source_folder,
-            bundle_root,
-            CollectionPolicy::local_only(),
-        )?;
+        let collection_id = Uuid::new_v4();
+        let bundle_root = self.core_paths.vaults.join(collection_id.to_string());
+        let collection =
+            self.database
+                .create_collection_with_id_and_origin(airwiki_core::NewCollection {
+                    id: collection_id,
+                    name: name.into(),
+                    source_folder,
+                    wiki_folder: bundle_root,
+                    policy: CollectionPolicy::local_only(),
+                    origin: airwiki_core::WikiOrigin::Folder,
+                    indexing_mode,
+                })?;
         self.audit(
             "collection_created",
             "collection",
@@ -941,11 +2752,116 @@ impl DesktopServices {
         Ok(collection)
     }
 
+    pub(crate) fn collection_indexing_mode(
+        &self,
+        collection_id: Uuid,
+    ) -> Result<airwiki_core::IndexingMode> {
+        self.database
+            .collection(collection_id)?
+            .map(|collection| collection.indexing_mode)
+            .with_context(|| format!("la wiki {collection_id} no existe"))
+    }
+
+    pub(crate) fn collection_origin(&self, collection_id: Uuid) -> Result<WikiOrigin> {
+        self.database
+            .collection(collection_id)?
+            .map(|collection| collection.origin)
+            .with_context(|| format!("la wiki {collection_id} no existe"))
+    }
+
+    pub(crate) fn database(&self) -> &Database {
+        &self.database
+    }
+
+    pub fn import_okf_bundle(
+        &self,
+        name: impl Into<String>,
+        source: &Path,
+    ) -> Result<(CollectionRecord, airwiki_core::OkfImportReport)> {
+        let name = name.into();
+        let collection_id = Uuid::new_v4();
+        let staging = self
+            .core_paths
+            .vaults
+            .join(format!(".import-{collection_id}"));
+        let bundle_root = self.core_paths.vaults.join(collection_id.to_string());
+        let report = airwiki_core::OkfImportValidator::materialize_path(source, &staging)?;
+        let prepared = self.database.create_managed_collection_with_mutation(
+            airwiki_core::NewManagedCollection {
+                id: collection_id,
+                name,
+                bundle_root: bundle_root.clone(),
+                origin: airwiki_core::WikiOrigin::ImportedOkf,
+                replacement_fingerprint: report.bundle_fingerprint.clone(),
+                owner_app_id: None,
+            },
+        );
+        match prepared {
+            Ok((record, mutation)) => {
+                if let Err(error) = std::fs::rename(&staging, &bundle_root) {
+                    let _ = self.database.delete_collection_record(record.id);
+                    let _ = std::fs::remove_dir_all(&staging);
+                    return Err(error)
+                        .context("no se pudo activar atómicamente el bundle OKF importado");
+                }
+                self.database.set_managed_bundle_mutation_state(
+                    mutation.id,
+                    airwiki_core::ManagedBundleMutationState::FileReplaced,
+                )?;
+                self.database.update_collection_okf_metadata(
+                    record.id,
+                    report.declared_okf_version.as_deref(),
+                    &report.compatibility,
+                    report.uncompressed_bytes,
+                )?;
+                if let Err(error) = self
+                    .database
+                    .replace_okf_concept_projection(record.id, &report.concepts)
+                {
+                    let _ = self.database.set_managed_bundle_mutation_state(
+                        mutation.id,
+                        airwiki_core::ManagedBundleMutationState::RecoveryRequired,
+                    );
+                    return Err(error)
+                        .context("el bundle OKF quedó pendiente de reconciliación segura");
+                }
+                self.database
+                    .complete_managed_bundle_mutation(mutation.id)?;
+                self.audit(
+                    "okf_bundle_imported",
+                    "collection",
+                    Some(record.id.to_string()),
+                    serde_json::json!({
+                        "entry_count": report.entry_count,
+                        "concept_count": report.concept_count,
+                        "warning_count": report.warnings.len(),
+                    }),
+                )?;
+                let reconciled = self
+                    .database
+                    .collection(record.id)?
+                    .context("la wiki importada desapareció durante la reconciliación")?;
+                Ok((reconciled, report))
+            }
+            Err(error) => {
+                let _ = std::fs::remove_dir_all(&staging);
+                Err(error).context("no se pudo registrar el bundle OKF importado")
+            }
+        }
+    }
+
     pub fn relink_collection(
         &self,
         collection_id: Uuid,
         source_folder: impl AsRef<Path>,
     ) -> Result<()> {
+        let collection = self
+            .database
+            .collection(collection_id)?
+            .context("la wiki ya no existe")?;
+        if !collection.okf_compatibility.permits_external_disclosure() {
+            bail!("la wiki usa un formato OKF restringido y no admite cambios de origen");
+        }
         let source_folder = source_folder.as_ref();
         if !source_folder.is_dir() {
             bail!("la carpeta seleccionada no existe");
@@ -975,9 +2891,6 @@ impl DesktopServices {
                 bail!("la carpeta seleccionada se superpone con otra colección");
             }
         }
-        self.database
-            .collection(collection_id)?
-            .context("la colección ya no existe")?;
         self.database
             .update_collection_source_folder(collection_id, &source_folder)?;
         if let Ok(mut issues) = write_lock(&self.transient_source_issues, "source issue snapshot") {
@@ -1025,11 +2938,250 @@ impl DesktopServices {
                 "local_only": effective.local_only,
                 "peer_shareable": effective.peer_shareable,
                 "allow_external_ai": effective.allow_external_ai,
+                "internet_public": effective.internet_public,
             }),
         )
     }
 
+    pub async fn reconcile_public_network(&self) -> Result<()> {
+        let should_run = !self.database.public_collections_needing_sync()?.is_empty();
+        let relay_addresses = if should_run {
+            self.public_relay_listen_addresses()?
+        } else {
+            Vec::new()
+        };
+        let current = {
+            let mut guard = mutex_lock(&self.public_network, "public network runtime")?;
+            if should_run && guard.is_none() {
+                let listen_addresses = ["/ip4/0.0.0.0/udp/42043/quic-v1", "/ip4/0.0.0.0/tcp/42043"]
+                    .into_iter()
+                    .map(str::parse)
+                    .collect::<std::result::Result<Vec<Multiaddr>, _>>()
+                    .context("la dirección pública integrada no es válida")?;
+                let cancellation = CancellationToken::new();
+                let task_cancellation = cancellation.clone();
+                let identity = self.public_identity.clone();
+                let backend: Arc<dyn PublicSourceBackend> = self.public_source_proxy.clone();
+                let mut server_config = PublicSourceServerConfig::new(listen_addresses);
+                server_config.relay_addresses = relay_addresses;
+                let (readiness_sender, relay_readiness) =
+                    watch::channel(PublicRelayReadiness::default());
+                server_config.relay_readiness = Some(readiness_sender);
+                let source_task = tokio::spawn(async move {
+                    if run_public_source_server(identity, server_config, backend, task_cancellation)
+                        .await
+                        .is_err()
+                    {
+                        tracing::warn!(
+                            error_kind = "public_source_runtime_stopped",
+                            "public source runtime stopped"
+                        );
+                    }
+                });
+                let renewal_task = tokio::spawn(run_public_manifest_renewal(
+                    PublicManifestRenewalContext {
+                        database: self.database.clone(),
+                        identity: self.public_identity.clone(),
+                        reader: Arc::clone(&self.public_reader),
+                        announcements: Arc::clone(&self.public_announcements),
+                        announcement_sync: Arc::clone(&self.public_announcement_sync),
+                        updates: self.public_announcement_updates.clone(),
+                        cancellation: cancellation.clone(),
+                    },
+                    relay_readiness.clone(),
+                ));
+                *guard = Some(PublicNetworkRuntime {
+                    cancellation,
+                    source_task,
+                    renewal_task,
+                    relay_readiness,
+                });
+                None
+            } else if !should_run {
+                guard.take()
+            } else {
+                None
+            }
+        };
+        if let Some(runtime) = current {
+            runtime.cancellation.cancel();
+            log_task_join("public_source", runtime.source_task.await);
+            log_task_join("public_manifest_renewal", runtime.renewal_task.await);
+        }
+        Ok(())
+    }
+
+    pub async fn delete_wiki(&self, collection_id: Uuid) -> Result<()> {
+        let collection = self
+            .database
+            .collection(collection_id)?
+            .context("la wiki no existe")?;
+        for grant in self.database.list_grants(None)? {
+            if grant.collection_id == collection_id {
+                self.set_collection_grant(&grant.peer_id, collection_id, false)
+                    .await?;
+            }
+        }
+        self.update_collection_policy(collection_id, CollectionPolicy::local_only())?;
+        self.sync_public_collection(collection_id).await?;
+        self.reconcile_public_network().await?;
+        ensure_public_withdrawal_completed(&self.database, collection_id)?;
+
+        let database = self.database.clone();
+        let vaults = self.core_paths.vaults.clone();
+        let bundle = collection.wiki_folder.clone();
+        tokio::task::spawn_blocking(move || {
+            delete_managed_wiki_files(&database, &vaults, collection_id, &bundle)
+        })
+        .await
+        .context("se detuvo el worker de eliminación")??;
+        if let Ok(mut issues) = write_lock(&self.transient_source_issues, "source issue snapshot") {
+            issues.remove(&collection_id);
+        }
+        if self
+            .audit(
+                "wiki_deleted",
+                "collection",
+                Some(collection_id.to_string()),
+                serde_json::json!({"source_preserved": collection.origin == WikiOrigin::Folder}),
+            )
+            .is_err()
+        {
+            tracing::warn!(
+                error_kind = "wiki_deletion_audit_unavailable",
+                "wiki deletion completed but its audit receipt could not be stored"
+            );
+        }
+        Ok(())
+    }
+
+    pub async fn restart_public_network(&self) -> Result<()> {
+        let runtime = mutex_lock(&self.public_network, "public network runtime")?.take();
+        if let Some(runtime) = runtime {
+            runtime.cancellation.cancel();
+            log_task_join("public_source", runtime.source_task.await);
+            log_task_join("public_manifest_renewal", runtime.renewal_task.await);
+        }
+        self.reconcile_public_network().await
+    }
+
+    pub async fn sync_public_collection(&self, collection_id: Uuid) -> Result<()> {
+        let prepared = {
+            let _announcement_sync = self
+                .public_announcement_sync
+                .acquire()
+                .await
+                .context("se cerró el coordinador de anuncios públicos")?;
+            let database = self.database.clone();
+            let identity = self.public_identity.clone();
+            let relay_readiness = self.current_public_relay_readiness()?;
+            tokio::task::spawn_blocking(move || {
+                prepare_next_public_announcement(
+                    &database,
+                    &identity,
+                    collection_id,
+                    relay_readiness.ready_relay_addresses(),
+                )
+            })
+            .await
+            .context("se detuvo el worker del anuncio público")??
+        };
+        let (endpoints, announcement) = prepared;
+        let sequence = public_announcement_sequence(&announcement);
+        if endpoints.is_empty() {
+            let now = Utc::now();
+            update_public_announcement_state(
+                &self.public_announcements,
+                collection_id,
+                completed_public_announcement_state(sequence, None, 0, now),
+            );
+            notify_public_announcement_update(&self.public_announcement_updates);
+            self.audit(
+                "public_collection_not_announced",
+                "collection",
+                Some(collection_id.to_string()),
+                serde_json::json!({"reason": "no_index_configured"}),
+            )?;
+            return Ok(());
+        }
+        let expires_at = public_announcement_expiry(&announcement);
+        let is_tombstone = matches!(&announcement, PreparedPublicAnnouncement::Tombstone(_));
+        let accepted = match announcement {
+            PreparedPublicAnnouncement::Manifest(announcement) => self
+                .public_reader
+                .register_versioned_manifests(&endpoints, announcement.current, announcement.legacy)
+                .await
+                .map_err(|error| anyhow!(error.to_string()))?,
+            PreparedPublicAnnouncement::Tombstone(announcement) => self
+                .public_reader
+                .withdraw_versioned_manifests(&endpoints, announcement.current, announcement.legacy)
+                .await
+                .map_err(|error| anyhow!(error.to_string()))?,
+            PreparedPublicAnnouncement::Missing => return Ok(()),
+        };
+        if accepted > 0 && is_tombstone {
+            let database = self.database.clone();
+            tokio::task::spawn_blocking(move || {
+                complete_public_withdrawal_receipt(&database, collection_id).map(|_| ())
+            })
+            .await
+            .context("se detuvo el recibo de retiro público")??;
+        }
+        let now = Utc::now();
+        update_public_announcement_state(
+            &self.public_announcements,
+            collection_id,
+            completed_public_announcement_state(sequence, expires_at, accepted, now),
+        );
+        notify_public_announcement_update(&self.public_announcement_updates);
+        self.audit(
+            "public_collection_catalog_updated",
+            "collection",
+            Some(collection_id.to_string()),
+            serde_json::json!({"accepted_indexes": accepted}),
+        )
+    }
+
+    pub async fn sync_all_public_collections(&self) -> Result<()> {
+        let database = self.database.clone();
+        let collection_ids =
+            tokio::task::spawn_blocking(move || database.public_collections_needing_sync())
+                .await
+                .context("se detuvo el worker de colecciones públicas")??;
+        for collection_id in collection_ids {
+            self.sync_public_collection(collection_id).await?;
+        }
+        Ok(())
+    }
+
+    pub async fn renew_public_manifests(&self) -> Result<()> {
+        self.sync_all_public_collections().await
+    }
+
+    fn public_relay_listen_addresses(&self) -> Result<Vec<Multiaddr>> {
+        federation_index_endpoints(&self.database)?
+            .into_iter()
+            .map(|endpoint| Ok(relay_circuit_address(endpoint.address, endpoint.peer_id)))
+            .collect()
+    }
+
+    fn current_public_relay_readiness(&self) -> Result<PublicRelayReadiness> {
+        let runtime = mutex_lock(&self.public_network, "public network runtime")?;
+        Ok(runtime
+            .as_ref()
+            .map(|runtime| runtime.relay_readiness.borrow().clone())
+            .unwrap_or_default())
+    }
+
     pub async fn scan_collection(&self, collection_id: Uuid) -> Result<Vec<IngestOutcome>> {
+        let collection = self
+            .database
+            .collection(collection_id)?
+            .context("la wiki a actualizar no existe")?;
+        ensure_folder_ingestion_source(&collection)?;
+        if !collection.okf_compatibility.permits_external_disclosure() {
+            bail!("la wiki usa un formato OKF restringido y no admite indexación");
+        }
         let outcomes = self.pipeline()?.scan_collection(collection_id).await?;
         self.replace_transient_source_issues(collection_id, &outcomes);
         Ok(outcomes)
@@ -1040,7 +3192,13 @@ impl DesktopServices {
     /// The worker runs this on a blocking thread when a watcher event arrives
     /// while another scan is still performing inference.
     pub fn preflight_collection(&self, collection_id: Uuid) -> Result<()> {
+        let collection = self
+            .database
+            .collection(collection_id)?
+            .context("la wiki a comprobar no existe")?;
+        ensure_folder_ingestion_source(&collection)?;
         let _ = self.pipeline()?.preflight_collection(collection_id)?;
+        let _ = self.database.bump_public_manifest_sequence(collection_id)?;
         Ok(())
     }
 
@@ -1064,10 +3222,16 @@ impl DesktopServices {
         concept_id: Uuid,
         expected_review_version: &ReviewVersionToken,
         draft: EnrichmentDraft,
-    ) -> Result<()> {
+    ) -> Result<Uuid> {
+        let collection_id = self
+            .database
+            .concept(concept_id)?
+            .context("el concepto a publicar no existe")?
+            .collection_id;
         self.pipeline()?
             .approve(concept_id, ReviewEdits { draft }, expected_review_version)?;
-        Ok(())
+        let _ = self.database.bump_public_manifest_sequence(collection_id)?;
+        Ok(collection_id)
     }
 
     /// A rejection is fail-closed: the concept remains in NeedsReview and is
@@ -1090,6 +3254,17 @@ impl DesktopServices {
     }
 
     pub async fn reanalyze_review(&self, concept_id: Uuid) -> Result<()> {
+        let concept = self
+            .database
+            .concept(concept_id)?
+            .context("el concepto a volver a analizar no existe")?;
+        let collection = self
+            .database
+            .collection(concept.collection_id)?
+            .context("la wiki del concepto no existe")?;
+        if !collection.okf_compatibility.permits_external_disclosure() {
+            bail!("la wiki usa un formato OKF restringido y no admite nuevas propuestas");
+        }
         self.pipeline()?.reanalyze_review(concept_id).await?;
         Ok(())
     }
@@ -1103,6 +3278,178 @@ impl DesktopServices {
         self.federated_proxy
             .search(SearchRequest::new(question, purpose, top_k))
             .await
+    }
+
+    pub async fn search_with_public(
+        &self,
+        question: impl Into<String>,
+        top_k: u8,
+        purpose: SearchPurpose,
+        partials: mpsc::Sender<SearchResponse>,
+    ) -> std::result::Result<
+        (SearchResponse, PublicRouteKind, HashSet<(String, Uuid)>),
+        SearchContractError,
+    > {
+        let database = self.database.clone();
+        let endpoints = run_search_storage("public index lookup worker stopped", move || {
+            federation_index_endpoints(&database)
+                .map_err(|error| SearchContractError::Backend(error.to_string()))
+        })
+        .await?;
+        let request = SearchRequest::new(question, purpose, top_k);
+        let (trusted, public) = tokio::join!(
+            self.federated_proxy.search(request.clone()),
+            self.public_reader
+                .search_with_route_and_partials(&endpoints, request, partials),
+        );
+        match (trusted, public) {
+            (
+                Ok(trusted),
+                Ok(PublicSearchResult {
+                    response,
+                    route_kind,
+                }),
+            ) => {
+                let (response, public_hits) =
+                    merge_public_search_responses(trusted, response, usize::from(top_k));
+                Ok((response, route_kind, public_hits))
+            }
+            (Ok(mut trusted), Err(_)) => {
+                trusted.partial = true;
+                trusted
+                    .warnings
+                    .push(PUBLIC_NETWORK_OFFLINE_WARNING.to_owned());
+                Ok((trusted, PublicRouteKind::Offline, HashSet::new()))
+            }
+            (
+                Err(_),
+                Ok(PublicSearchResult {
+                    mut response,
+                    route_kind,
+                }),
+            ) => {
+                response.partial = true;
+                response
+                    .warnings
+                    .push("local or LAN search is unavailable".to_owned());
+                let public_hits = search_hit_keys(&response.hits);
+                Ok((response, route_kind, public_hits))
+            }
+            (Err(error), Err(_)) => Err(error),
+        }
+    }
+
+    pub fn add_federation_index(&self, peer_id: &str, address: &str) -> Result<()> {
+        let peer = PeerId::from_str(peer_id).context("la identidad del índice no es válida")?;
+        let address =
+            Multiaddr::from_str(address).context("la dirección del índice no es válida")?;
+        PublicIndexEndpoint {
+            peer_id: peer,
+            address: address.clone(),
+        }
+        .validate()
+        .context("la dirección del índice público no es compatible")?;
+        self.database.upsert_community_federation_index(
+            &peer.to_string(),
+            &address.to_string(),
+            true,
+        )?;
+        self.audit(
+            "federation_index_added",
+            "federation_index",
+            None,
+            serde_json::json!({"source": "community"}),
+        )
+    }
+
+    pub fn remove_federation_index(&self, peer_id: &str) -> Result<()> {
+        let peer = PeerId::from_str(peer_id).context("la identidad del índice no es válida")?;
+        self.database
+            .set_community_federation_index_enabled(&peer.to_string(), false)?;
+        self.audit(
+            "federation_index_disabled",
+            "federation_index",
+            None,
+            serde_json::json!({"source": "community"}),
+        )
+    }
+
+    pub async fn set_public_publisher_blocked(
+        &self,
+        publisher_id: &str,
+        blocked: bool,
+    ) -> Result<()> {
+        let publisher = PeerId::from_str(publisher_id)
+            .context("la identidad del publicador no es válida")?
+            .to_string();
+        self.database
+            .set_public_publisher_blocked(&publisher, blocked)?;
+        self.public_reader
+            .set_publisher_blocked(publisher, blocked)
+            .await;
+        self.audit(
+            if blocked {
+                "public_publisher_blocked"
+            } else {
+                "public_publisher_unblocked"
+            },
+            "public_publisher",
+            None,
+            serde_json::json!({"blocked": blocked}),
+        )
+    }
+
+    pub fn blocked_public_publishers(&self) -> Result<Vec<String>> {
+        self.database.list_blocked_public_publishers()
+    }
+
+    pub async fn browse_public_collection(
+        &self,
+        publisher_id: &str,
+        collection_id: Uuid,
+        cursor: Option<String>,
+        target_concept_id: Option<Uuid>,
+        graph_cursor: Option<u32>,
+        page: Option<PublishedWikiPageRequest>,
+    ) -> std::result::Result<PublicBrowseResult, SearchContractError> {
+        self.public_reader
+            .browse_collection(
+                publisher_id,
+                collection_id,
+                PublicBrowseOptions {
+                    cursor,
+                    target_concept_id,
+                    graph_cursor,
+                    page,
+                    limit: 50,
+                },
+            )
+            .await
+    }
+
+    pub async fn browse_shared_wiki(
+        &self,
+        request_id: Uuid,
+        peer_id: &str,
+        collection_id: Uuid,
+        selection: BrowseWorkspaceSelection,
+    ) -> std::result::Result<SharedWikiBrowsePage, SearchContractError> {
+        let peer = PeerId::from_str(peer_id).map_err(|_| SearchContractError::Unauthorized)?;
+        let request = SharedWikiBrowseRequest {
+            protocol_version: SHARED_WIKI_BROWSE_PROTOCOL_V2.to_owned(),
+            request_id,
+            collection_id,
+            cursor: selection.cursor,
+            target_concept_id: selection.target_concept_id,
+            graph_cursor: selection.graph_cursor,
+            page: selection.page,
+            limit: 50,
+        };
+        self.required_network()
+            .map_err(|_| SearchContractError::Unavailable("LAN is disabled".to_owned()))?
+            .browse_shared_wiki(peer, request)
+            .await
+            .map_err(|error| SearchContractError::Unavailable(error.to_string()))
     }
 
     /// Reports whether both tasks that constitute the optional LAN runtime are
@@ -1121,7 +3468,11 @@ impl DesktopServices {
     }
 
     pub async fn enable_lan(&self) -> Result<()> {
-        let _topology = self.search_topology.lock().await;
+        let _topology = self
+            .search_topology
+            .acquire()
+            .await
+            .context("se cerró el coordinador de topología de búsqueda")?;
         if self.network_handle()?.is_some() {
             return Ok(());
         }
@@ -1137,15 +3488,19 @@ impl DesktopServices {
             Arc::clone(&self.network_generation),
             generation,
         )?;
-        let local = match read_lock(&self.models, "model services") {
-            Ok(models) => models.as_ref().map(|models| models.local_search.clone()),
-            Err(error) => {
-                let _ = runtime.handle.shutdown().await;
-                runtime.event_forwarder.abort();
-                runtime.task.abort();
-                return Err(error);
-            }
+        let (local, model_lock_error) = match read_lock(&self.models, "model services") {
+            Ok(models) => (
+                models.as_ref().map(|models| models.local_search.clone()),
+                None,
+            ),
+            Err(error) => (None, Some(error)),
         };
+        if let Some(error) = model_lock_error {
+            let _ = runtime.handle.shutdown().await;
+            runtime.event_forwarder.abort();
+            runtime.task.abort();
+            return Err(error);
+        }
         let search_install = if let Some(local) = local {
             self.authorized_proxy.install(local.clone()).and_then(|()| {
                 let local: Arc<dyn FederatedSearch> = local;
@@ -1190,7 +3545,11 @@ impl DesktopServices {
     }
 
     pub async fn disable_lan(&self) -> Result<()> {
-        let _topology = self.search_topology.lock().await;
+        let _topology = self
+            .search_topology
+            .acquire()
+            .await
+            .context("se cerró el coordinador de topología de búsqueda")?;
         // Invalidate the forwarder before taking the runtime so an already
         // queued event from the previous generation cannot mutate trust or UI
         // state after LAN was disabled or restarted.
@@ -1352,27 +3711,106 @@ impl DesktopServices {
         )
     }
 
+    pub fn allow_peer_pairing_again(&self, peer_id: &str) -> Result<()> {
+        let peer = parse_peer_id(peer_id)?;
+        // Relax durable state first. If storage is unavailable, the shared ACL
+        // remains blocked and no network request can pass authorization.
+        self.database.allow_peer_pairing_again(peer_id)?;
+        self.access.unblock(peer);
+        self.audit(
+            "peer_pairing_allowed_again",
+            "peer",
+            Some(peer_id.to_owned()),
+            serde_json::json!({"peer_id": peer_id}),
+        )
+    }
+
     pub fn collection_views(&self) -> Result<Vec<CollectionView>> {
+        let announcements = read_lock(&self.public_announcements, "public announcement state")?;
         self.database
             .list_collections()?
             .into_iter()
             .map(|collection| {
                 let stats = self.database.collection_stats(collection.id)?;
+                let projected = if collection.origin == airwiki_core::WikiOrigin::Folder {
+                    Vec::new()
+                } else {
+                    self.database.list_okf_concept_projection(collection.id)?
+                };
+                let public_profile = self.database.public_collection_profile(collection.id)?;
+                let announcement = announcements.get(&collection.id).copied();
                 Ok(CollectionView {
                     id: collection.id,
                     name: collection.name,
                     folder: collection.source_folder,
-                    document_count: usize::try_from(stats.sources).unwrap_or(usize::MAX),
+                    document_count: if projected.is_empty() {
+                        usize::try_from(stats.sources).unwrap_or(usize::MAX)
+                    } else {
+                        projected.len()
+                    },
                     needs_review_count: usize::try_from(stats.needs_review).unwrap_or(usize::MAX),
-                    published_count: usize::try_from(stats.published).unwrap_or(usize::MAX),
+                    published_count: if projected.is_empty() {
+                        usize::try_from(stats.published).unwrap_or(usize::MAX)
+                    } else {
+                        projected
+                            .iter()
+                            .filter(|concept| concept.lifecycle_status == "stable")
+                            .count()
+                    },
                     failed_count: usize::try_from(stats.failed).unwrap_or(usize::MAX),
                     local_only: collection.policy.local_only,
                     peer_shareable: collection.policy.peer_shareable,
                     allow_external_ai: collection.policy.allow_external_ai,
+                    internet_public: collection.policy.internet_public,
+                    public_description: public_profile
+                        .as_ref()
+                        .map(|profile| profile.description.clone())
+                        .unwrap_or_default(),
+                    public_languages: public_profile
+                        .map(|profile| profile.languages.join(", "))
+                        .unwrap_or_default(),
+                    public_announcement: public_announcement_view(announcement, Utc::now()),
                     maintenance: self.database.collection_maintenance(collection.id)?,
+                    origin: collection.origin,
+                    indexing_mode: collection.indexing_mode,
+                    okf_version: collection.okf_version,
+                    declared_okf_version: collection.declared_okf_version,
+                    okf_compatibility: collection.okf_compatibility,
+                    managed_size_bytes: collection.managed_size_bytes,
+                    stale_concept_count: projected
+                        .iter()
+                        .filter(|concept| {
+                            concept.assurance.freshness == airwiki_types::FreshnessState::Stale
+                        })
+                        .count(),
+                    outdated_verification_count: projected
+                        .iter()
+                        .filter(|concept| concept.assurance.verification_outdated)
+                        .count(),
+                    metadata_warning_count: projected
+                        .iter()
+                        .map(|concept| concept.warnings.len())
+                        .sum(),
+                    trust_summary: summarize_projection_trust(&projected),
                 })
             })
             .collect()
+    }
+
+    pub fn update_public_collection_profile(
+        &self,
+        collection_id: Uuid,
+        description: &str,
+        languages: &[String],
+    ) -> Result<()> {
+        self.database
+            .update_public_collection_profile(collection_id, description, languages)?;
+        self.audit(
+            "public_collection_profile_updated",
+            "collection",
+            Some(collection_id.to_string()),
+            serde_json::json!({"language_count": languages.len()}),
+        )
     }
 
     /// Builds the read-only bundle snapshot used by the local Wiki, graph and
@@ -1415,9 +3853,29 @@ impl DesktopServices {
         )
     }
 
+    pub fn verify_managed_concept(
+        &self,
+        wiki_id: Uuid,
+        logical_path: &str,
+        expected_fingerprint: &str,
+    ) -> Result<()> {
+        self.memories
+            .verify_managed_concept(wiki_id, logical_path, expected_fingerprint)?;
+        self.audit(
+            "managed_concept_human_verified",
+            "collection",
+            Some(wiki_id.to_string()),
+            serde_json::json!({"scope": "single_concept"}),
+        )?;
+        Ok(())
+    }
+
     /// Regenerates only deterministic derived Wiki artifacts. Content-bearing
     /// concepts and history are left untouched for the guided repair UI.
     pub fn maintain_derived_wiki(&self, collection_id: Uuid) -> Result<bool> {
+        if self.collection_origin(collection_id)? != WikiOrigin::Folder {
+            return Ok(false);
+        }
         let bundle =
             OkfBundleInspector::new(self.database.clone()).inspect_bundle(collection_id)?;
         let plan = WikiRepairPlanner::plan(&bundle)?;
@@ -1496,6 +3954,7 @@ impl DesktopServices {
                 let source_name = source_display_name(&source.source_path);
                 Ok(ReviewItemView {
                     concept_id: concept.id,
+                    collection_id: concept.collection_id,
                     source_revision: source.revision,
                     source_name,
                     collection_name: collection.name,
@@ -1562,7 +4021,7 @@ impl DesktopServices {
             .into_iter()
             .map(|collection| (collection.id, collection.name))
             .collect::<HashMap<_, _>>();
-        let mut issues = HashMap::<(Uuid, PathBuf), SourceIssueCode>::new();
+        let mut issues = HashMap::<(Uuid, PathBuf), (SourceIssueCode, Option<String>)>::new();
         for collection_id in collections.keys().copied() {
             for source in self.database.list_sources(collection_id)? {
                 if source.status != DocumentStatus::Failed {
@@ -1573,7 +4032,11 @@ impl DesktopServices {
                     SourceIssueCode::from_error,
                 );
                 if code.is_user_visible() {
-                    issues.insert((collection_id, source.source_path), code);
+                    let reason = source
+                        .last_error
+                        .as_deref()
+                        .and_then(|message| source_issue_reason(message, code));
+                    issues.insert((collection_id, source.source_path), (code, reason));
                 }
             }
         }
@@ -1581,19 +4044,23 @@ impl DesktopServices {
             read_lock(&self.transient_source_issues, "source issue snapshot")?.iter()
         {
             for issue in transient {
-                issues.insert((*collection_id, issue.path.clone()), issue.code);
+                issues.insert(
+                    (*collection_id, issue.path.clone()),
+                    (issue.code, issue.reason.clone()),
+                );
             }
         }
 
         let mut views = issues
             .into_iter()
-            .filter_map(|((collection_id, path), code)| {
+            .filter_map(|((collection_id, path), (code, reason))| {
                 let collection_name = collections.get(&collection_id)?;
                 Some(source_issue_view(
                     collection_id,
                     collection_name,
                     &path,
                     code,
+                    reason,
                 ))
             })
             .collect::<Vec<_>>();
@@ -1611,9 +4078,8 @@ impl DesktopServices {
             Ok(mut snapshots) => {
                 snapshots.insert(collection_id, issues);
             }
-            Err(error) => tracing::warn!(
+            Err(_) => tracing::warn!(
                 error_kind = "source_issue_snapshot",
-                %error,
                 "source issue snapshot could not be refreshed"
             ),
         }
@@ -1650,6 +4116,9 @@ impl DesktopServices {
                 device_name: stored
                     .and_then(|peer| peer.display_name.clone())
                     .or_else(|| runtime.and_then(|peer| peer.node_name.clone())),
+                device_platform: stored
+                    .and_then(|peer| peer.device_platform)
+                    .or_else(|| runtime.and_then(|peer| peer.device_platform)),
                 address: runtime
                     .and_then(|peer| peer.addresses.iter().next().cloned())
                     .unwrap_or_default(),
@@ -1766,6 +4235,7 @@ impl DesktopServices {
                     return Err(error).context("no se pudo persistir el emparejamiento");
                 }
                 self.access.mark_trusted(peer);
+                effect.persisted_trusted_peer = Some(peer);
                 self.audit(
                     "peer_paired",
                     "peer",
@@ -1774,6 +4244,24 @@ impl DesktopServices {
                 )?;
                 effect.peers_changed = true;
                 effect.notice = Some("Nodo emparejado y confiable".into());
+            }
+            NetworkEvent::PeerMetadataChanged {
+                peer,
+                device_name,
+                device_platform,
+            } => {
+                let mut live = write_lock(&self.live_peers, "live peer view")?;
+                if let Some(state) = live_peer_slot(&mut live, peer, true) {
+                    if let Some(device_name) = device_name.as_ref() {
+                        state.node_name = Some(device_name.clone());
+                    }
+                    if device_platform.is_some() {
+                        state.device_platform = device_platform;
+                    }
+                }
+                drop(live);
+                persist_trusted_peer_metadata(&self.database, peer, device_name, device_platform)?;
+                effect.peers_changed = true;
             }
             NetworkEvent::PairingExpired { peer } => {
                 clear_pairing(&self.live_peers, peer)?;
@@ -1805,11 +4293,11 @@ impl DesktopServices {
                 effect.notice = Some("Peer revocado y conexiones cerradas".into());
             }
             NetworkEvent::InboundSearchCompleted {
-                peer,
-                request_id,
+                peer: _,
+                request_id: _,
                 hits,
             } => {
-                tracing::info!(%peer, %request_id, hits, "served authorized LAN search");
+                tracing::info!(hits, "served authorized LAN search");
             }
             NetworkEvent::Warning { peer, kind } => {
                 tracing::warn!(
@@ -1833,6 +4321,10 @@ impl DesktopServices {
         if let Some(mcp) = self.mcp.take() {
             mcp.shutdown().await?;
         }
+        self.application_backend_cancellation.cancel();
+        if let Some(task) = self.application_backend_task.take() {
+            log_task_join("mcp_application_backend", task.await);
+        }
         let network = self
             .network
             .get_mut()
@@ -1842,6 +4334,16 @@ impl DesktopServices {
             let _ = runtime.handle.shutdown().await;
             runtime.event_forwarder.abort();
             runtime.task.abort();
+        }
+        let public_network = self
+            .public_network
+            .get_mut()
+            .map_err(|_| anyhow!("public network runtime lock is poisoned"))?
+            .take();
+        if let Some(runtime) = public_network {
+            runtime.cancellation.cancel();
+            log_task_join("public_source", runtime.source_task.await);
+            log_task_join("public_manifest_renewal", runtime.renewal_task.await);
         }
         Ok(())
     }
@@ -1922,7 +4424,7 @@ impl CollectionWatcherHandle {
     pub fn spawn(
         collection_id: Uuid,
         folder: impl AsRef<Path>,
-        events: mpsc::UnboundedSender<CollectionWatchEvent>,
+        events: mpsc::Sender<CollectionWatchEvent>,
     ) -> Result<Self> {
         let watcher = FolderWatcher::two_second(folder)?;
         let cancel = CancellationToken::new();
@@ -1932,7 +4434,7 @@ impl CollectionWatcherHandle {
                 match watcher.recv_debounced_timeout(Duration::from_millis(250)) {
                     Ok(Some(paths)) => {
                         if events
-                            .send(CollectionWatchEvent::Changed {
+                            .blocking_send(CollectionWatchEvent::Changed {
                                 collection_id,
                                 paths,
                             })
@@ -1943,7 +4445,7 @@ impl CollectionWatcherHandle {
                     }
                     Ok(None) => continue,
                     Err(error) => {
-                        let _ = events.send(CollectionWatchEvent::Failed {
+                        let _ = events.blocking_send(CollectionWatchEvent::Failed {
                             collection_id,
                             error: error.to_string(),
                         });
@@ -1982,9 +4484,8 @@ fn restore_access_control(database: &Database) -> Result<AccessControl> {
                     grants: grants.remove(&peer.peer_id).unwrap_or_default(),
                 },
             ),
-            Err(error) => tracing::warn!(
-                peer_id = %peer.peer_id,
-                %error,
+            Err(_) => tracing::warn!(
+                error_kind = "malformed_persisted_peer_id",
                 "ignoring malformed persisted PeerId"
             ),
         }
@@ -2002,6 +4503,7 @@ fn persist_trusted_peer(
     database.upsert_peer(&airwiki_core::PeerRecord {
         peer_id: peer.to_string(),
         display_name: display_name.or_else(|| existing.as_ref()?.display_name.clone()),
+        device_platform: existing.as_ref().and_then(|peer| peer.device_platform),
         trusted: true,
         blocked: false,
         paired_at: existing
@@ -2022,12 +4524,36 @@ fn persist_blocked_peer(
     database.upsert_peer(&airwiki_core::PeerRecord {
         peer_id: peer_id.clone(),
         display_name: display_name.or_else(|| existing.as_ref()?.display_name.clone()),
+        device_platform: existing.as_ref().and_then(|peer| peer.device_platform),
         trusted: false,
         blocked: true,
         paired_at: existing.as_ref().and_then(|peer| peer.paired_at),
         last_seen_at: existing.as_ref().and_then(|peer| peer.last_seen_at),
     })?;
     database.revoke_peer(&peer_id)
+}
+
+fn persist_trusted_peer_metadata(
+    database: &Database,
+    peer: PeerId,
+    device_name: Option<String>,
+    device_platform: Option<DevicePlatform>,
+) -> Result<()> {
+    let peer_id = peer.to_string();
+    let Some(mut stored) = database.peer(&peer_id)? else {
+        return Ok(());
+    };
+    if !stored.trusted || stored.blocked {
+        return Ok(());
+    }
+    if device_name.is_some() {
+        stored.display_name = device_name;
+    }
+    if device_platform.is_some() {
+        stored.device_platform = device_platform;
+    }
+    stored.last_seen_at = Some(Utc::now());
+    database.upsert_peer(&stored)
 }
 
 fn touch_known_peer(database: &Database, peer: PeerId) -> Result<()> {
@@ -2064,12 +4590,14 @@ fn source_issue_view(
     collection_name: &str,
     path: &Path,
     code: SourceIssueCode,
+    reason: Option<String>,
 ) -> SourceIssueView {
     SourceIssueView {
         collection_id,
         source_name: source_display_name(path),
         collection_name: collection_name.to_owned(),
         code,
+        reason,
     }
 }
 
@@ -2081,14 +4609,575 @@ fn transient_source_issues_from_outcomes(outcomes: &[IngestOutcome]) -> Vec<Tran
                 source_document_id: None,
                 path,
                 code,
+                error,
                 ..
             } if code.is_user_visible() => Some(TransientSourceIssue {
                 path: path.clone(),
                 code: *code,
+                reason: source_issue_reason(error, *code),
             }),
             _ => None,
         })
         .collect()
+}
+
+fn merge_public_search_responses(
+    mut trusted: SearchResponse,
+    public: SearchResponse,
+    top_k: usize,
+) -> (SearchResponse, HashSet<(String, Uuid)>) {
+    const RRF_K: f64 = 60.0;
+    let trusted_hits = search_hit_keys(&trusted.hits);
+    let public_hits = search_hit_keys(&public.hits);
+    let mut fused = HashMap::<(String, Uuid), (SearchHit, f64)>::new();
+    for hits in [std::mem::take(&mut trusted.hits), public.hits] {
+        for (position, hit) in hits.into_iter().enumerate() {
+            let rank = if hit.rank == 0 {
+                u32::try_from(position + 1).unwrap_or(u32::MAX)
+            } else {
+                hit.rank
+            };
+            let score = 1.0 / (RRF_K + f64::from(rank));
+            let key = (hit.source_sha256.clone(), hit.chunk_id);
+            fused
+                .entry(key)
+                .and_modify(|(_, total)| *total += score)
+                .or_insert((hit, score));
+        }
+    }
+    let mut fused = fused.into_values().collect::<Vec<_>>();
+    fused.sort_by(|left, right| {
+        right
+            .1
+            .total_cmp(&left.1)
+            .then_with(|| left.0.title.cmp(&right.0.title))
+    });
+    trusted.hits = fused
+        .into_iter()
+        .take(top_k)
+        .enumerate()
+        .map(|(position, (mut hit, _))| {
+            hit.rank = u32::try_from(position + 1).unwrap_or(u32::MAX);
+            hit
+        })
+        .collect();
+    trusted.offline_nodes.extend(public.offline_nodes);
+    trusted.offline_nodes.sort();
+    trusted.offline_nodes.dedup();
+    trusted.warnings.extend(public.warnings);
+    trusted.partial |= public.partial;
+    let retained_public_hits = trusted
+        .hits
+        .iter()
+        .map(search_hit_key)
+        .filter(|key| public_hits.contains(key) && !trusted_hits.contains(key))
+        .collect();
+    (trusted, retained_public_hits)
+}
+
+fn search_hit_keys(hits: &[SearchHit]) -> HashSet<(String, Uuid)> {
+    hits.iter().map(search_hit_key).collect()
+}
+
+fn search_hit_key(hit: &SearchHit) -> (String, Uuid) {
+    (hit.source_sha256.clone(), hit.chunk_id)
+}
+
+fn federation_index_is_active(index: &airwiki_core::FederationIndexRecord) -> bool {
+    index.enabled && index.expires_at.is_none_or(|expiry| expiry > Utc::now())
+}
+
+fn selected_federation_indexes(
+    database: &Database,
+) -> Result<Vec<airwiki_core::FederationIndexRecord>> {
+    let mut indexes = database
+        .list_federation_indexes()?
+        .into_iter()
+        .filter(federation_index_is_active)
+        .collect::<Vec<_>>();
+    indexes.sort_by(|left, right| {
+        federation_index_priority(left)
+            .cmp(&federation_index_priority(right))
+            .then_with(|| left.peer_id.cmp(&right.peer_id))
+    });
+    indexes.truncate(3);
+    Ok(indexes)
+}
+
+fn federation_index_priority(index: &airwiki_core::FederationIndexRecord) -> u8 {
+    match index.source.as_str() {
+        "community" => 0,
+        "bootstrap" => 1,
+        _ => 2,
+    }
+}
+
+fn federation_index_endpoints(database: &Database) -> Result<Vec<PublicIndexEndpoint>> {
+    selected_federation_indexes(database)?
+        .into_iter()
+        .map(|index| {
+            let endpoint = PublicIndexEndpoint {
+                peer_id: PeerId::from_str(&index.peer_id)
+                    .context("la identidad del índice federado no es válida")?,
+                address: Multiaddr::from_str(&index.multiaddr)
+                    .context("la dirección del índice federado no es válida")?,
+            };
+            endpoint
+                .validate()
+                .context("el índice federado debe usar una IP TCP o QUIC")?;
+            Ok(endpoint)
+        })
+        .collect()
+}
+
+fn prepare_next_public_announcement(
+    database: &Database,
+    identity: &NodeIdentity,
+    collection_id: Uuid,
+    ready_relay_addresses: &[Multiaddr],
+) -> Result<(Vec<PublicIndexEndpoint>, PreparedPublicAnnouncement)> {
+    let _ = database.bump_public_manifest_sequence(collection_id)?;
+    prepare_public_announcement(database, identity, collection_id, ready_relay_addresses)
+}
+
+fn prepare_public_announcement(
+    database: &Database,
+    identity: &NodeIdentity,
+    collection_id: Uuid,
+    ready_relay_addresses: &[Multiaddr],
+) -> Result<(Vec<PublicIndexEndpoint>, PreparedPublicAnnouncement)> {
+    let endpoints = federation_index_endpoints(database)?;
+    let Some(collection) = database.collection(collection_id)? else {
+        return Ok((endpoints, PreparedPublicAnnouncement::Missing));
+    };
+    let Some(profile) = database.public_collection_profile(collection_id)? else {
+        return Ok((endpoints, PreparedPublicAnnouncement::Missing));
+    };
+    let publisher_id = identity.peer_id().to_string();
+    if !collection.policy.internet_public {
+        let (current, legacy) = prepare_public_tombstones(
+            identity,
+            &publisher_id,
+            collection_id,
+            profile.manifest_sequence,
+        )?;
+        return Ok((
+            endpoints,
+            PreparedPublicAnnouncement::Tombstone(Box::new(PreparedTombstoneAnnouncement {
+                current,
+                legacy,
+            })),
+        ));
+    }
+    if !collection.okf_compatibility.permits_external_disclosure() {
+        let (current, legacy) = prepare_public_tombstones(
+            identity,
+            &publisher_id,
+            collection_id,
+            profile.manifest_sequence,
+        )?;
+        return Ok((
+            endpoints,
+            PreparedPublicAnnouncement::Tombstone(Box::new(PreparedTombstoneAnnouncement {
+                current,
+                legacy,
+            })),
+        ));
+    }
+    let material = database.public_manifest_material(collection_id)?;
+    if material.concept_count == 0 {
+        let (current, legacy) = prepare_public_tombstones(
+            identity,
+            &publisher_id,
+            collection_id,
+            profile.manifest_sequence,
+        )?;
+        return Ok((
+            endpoints,
+            PreparedPublicAnnouncement::Tombstone(Box::new(PreparedTombstoneAnnouncement {
+                current,
+                legacy,
+            })),
+        ));
+    }
+    let routes = ready_public_routes(&endpoints, identity.peer_id(), ready_relay_addresses);
+    if routes.is_empty() {
+        let (current, legacy) = prepare_public_tombstones(
+            identity,
+            &publisher_id,
+            collection_id,
+            profile.manifest_sequence,
+        )?;
+        return Ok((
+            endpoints,
+            PreparedPublicAnnouncement::Tombstone(Box::new(PreparedTombstoneAnnouncement {
+                current,
+                legacy,
+            })),
+        ));
+    }
+    let fingerprint = database.public_collection_fingerprint(collection_id)?;
+    let now = Utc::now();
+    let current_manifest = PublicCollectionManifest {
+        protocol_version: airwiki_types::PUBLIC_CATALOG_PROTOCOL_V2.to_owned(),
+        publisher_id: publisher_id.clone(),
+        collection_id,
+        sequence: profile.manifest_sequence,
+        publication_fingerprint: fingerprint.clone(),
+        name: collection.name.clone(),
+        description: profile.description.clone(),
+        languages: profile.languages.clone(),
+        concept_count: material.concept_count,
+        okf_compatibility: Some(collection.okf_compatibility),
+        routing_terms: material.routing_terms.clone(),
+        routes: routes.clone(),
+        updated_at: material.updated_at.max(now),
+        expires_at: now + ChronoDuration::minutes(15),
+    };
+    let legacy_manifest = PublicCollectionManifest {
+        protocol_version: PUBLIC_CATALOG_PROTOCOL.to_owned(),
+        publisher_id,
+        collection_id,
+        sequence: profile.manifest_sequence,
+        publication_fingerprint: fingerprint,
+        name: collection.name,
+        description: profile.description,
+        languages: profile.languages,
+        concept_count: material.concept_count,
+        okf_compatibility: None,
+        routing_terms: material.routing_terms,
+        routes,
+        updated_at: material.updated_at.max(now),
+        expires_at: now + ChronoDuration::minutes(15),
+    };
+    let current = sign_manifest(identity.keypair(), current_manifest)?;
+    let legacy = sign_manifest(identity.keypair(), legacy_manifest)?;
+    Ok((
+        endpoints,
+        PreparedPublicAnnouncement::Manifest(Box::new(PreparedManifestAnnouncement {
+            current,
+            legacy,
+        })),
+    ))
+}
+
+fn prepare_public_tombstones(
+    identity: &NodeIdentity,
+    publisher_id: &str,
+    collection_id: Uuid,
+    sequence: u64,
+) -> Result<(
+    airwiki_types::SignedPublicCollectionTombstone,
+    airwiki_types::SignedPublicCollectionTombstone,
+)> {
+    let current = sign_tombstone(
+        identity.keypair(),
+        PublicCollectionTombstone {
+            protocol_version: airwiki_types::PUBLIC_CATALOG_PROTOCOL_V2.to_owned(),
+            publisher_id: publisher_id.to_owned(),
+            collection_id,
+            sequence,
+            withdrawn_at: Utc::now(),
+        },
+    )?;
+    let mut legacy_tombstone = current.tombstone.clone();
+    legacy_tombstone.protocol_version = PUBLIC_CATALOG_PROTOCOL.to_owned();
+    let legacy = sign_tombstone(identity.keypair(), legacy_tombstone)?;
+    Ok((current, legacy))
+}
+
+fn ready_public_routes(
+    endpoints: &[PublicIndexEndpoint],
+    publisher_peer: PeerId,
+    ready_relay_addresses: &[Multiaddr],
+) -> Vec<String> {
+    endpoints
+        .iter()
+        .filter(|endpoint| {
+            ready_relay_addresses.contains(&relay_circuit_address(
+                endpoint.address.clone(),
+                endpoint.peer_id,
+            ))
+        })
+        .map(|endpoint| {
+            relayed_peer_address(endpoint.address.clone(), endpoint.peer_id, publisher_peer)
+                .to_string()
+        })
+        .collect()
+}
+
+#[derive(Clone)]
+struct PublicManifestRenewalContext {
+    database: Database,
+    identity: NodeIdentity,
+    reader: Arc<PublicReader>,
+    announcements: Arc<RwLock<HashMap<Uuid, PublicAnnouncementState>>>,
+    announcement_sync: Arc<Semaphore>,
+    updates: watch::Sender<u64>,
+    cancellation: CancellationToken,
+}
+
+async fn run_public_manifest_renewal(
+    context: PublicManifestRenewalContext,
+    mut relay_readiness: watch::Receiver<PublicRelayReadiness>,
+) {
+    let mut current_relay_readiness = relay_readiness.borrow_and_update().clone();
+    let mut readiness_open = true;
+    let first_renewal = tokio::time::Instant::now() + PUBLIC_MANIFEST_RENEWAL_INTERVAL;
+    let mut renewal_interval =
+        tokio::time::interval_at(first_renewal, PUBLIC_MANIFEST_RENEWAL_INTERVAL);
+    renewal_interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+    if context.cancellation.is_cancelled() {
+        return;
+    }
+    renew_public_manifests_for_readiness(&context, current_relay_readiness.clone()).await;
+    loop {
+        let should_renew = tokio::select! {
+            biased;
+            () = context.cancellation.cancelled() => return,
+            changed = relay_readiness.changed(), if readiness_open => {
+                match changed {
+                    Ok(()) => {
+                        let next = relay_readiness.borrow_and_update().clone();
+                        if next == current_relay_readiness {
+                            false
+                        } else {
+                            current_relay_readiness = next;
+                            true
+                        }
+                    }
+                    Err(_) => {
+                        readiness_open = false;
+                        let changed = current_relay_readiness.ready_relay_count() > 0;
+                        current_relay_readiness = PublicRelayReadiness::default();
+                        changed
+                    }
+                }
+            }
+            _ = renewal_interval.tick() => true,
+        };
+        if !should_renew {
+            continue;
+        }
+        renew_public_manifests_for_readiness(&context, current_relay_readiness.clone()).await;
+    }
+}
+
+async fn renew_public_manifests_for_readiness(
+    context: &PublicManifestRenewalContext,
+    relay_readiness: PublicRelayReadiness,
+) {
+    let database = context.database.clone();
+    let identity = context.identity.clone();
+    let prepared = {
+        let Ok(_announcement_sync) = context.announcement_sync.acquire().await else {
+            tracing::warn!(
+                error_kind = "public_manifest_coordinator_closed",
+                "public manifest coordinator stopped"
+            );
+            return;
+        };
+        tokio::task::spawn_blocking(move || {
+            let mut updates = Vec::new();
+            for collection_id in database.public_collections_needing_sync()? {
+                let (endpoints, update) = prepare_next_public_announcement(
+                    &database,
+                    &identity,
+                    collection_id,
+                    relay_readiness.ready_relay_addresses(),
+                )?;
+                updates.push((collection_id, endpoints, update));
+            }
+            Result::<Vec<_>>::Ok(updates)
+        })
+        .await
+    };
+    let Ok(Ok(updates)) = prepared else {
+        notify_public_announcement_update(&context.updates);
+        tracing::warn!(
+            error_kind = "public_manifest_preparation_failed",
+            "public manifest renewal failed"
+        );
+        return;
+    };
+    let has_updates = !updates.is_empty();
+    if context.cancellation.is_cancelled() {
+        return;
+    }
+    let mut accepted = 0_usize;
+    let mut failed = 0_usize;
+    let mut runtime_is_idle = false;
+    for (collection_id, endpoints, update) in updates {
+        if context.cancellation.is_cancelled() {
+            return;
+        }
+        let sequence = public_announcement_sequence(&update);
+        if endpoints.is_empty() {
+            let now = Utc::now();
+            update_public_announcement_state(
+                &context.announcements,
+                collection_id,
+                completed_public_announcement_state(sequence, None, 0, now),
+            );
+            continue;
+        }
+        let expires_at = public_announcement_expiry(&update);
+        let is_tombstone = matches!(&update, PreparedPublicAnnouncement::Tombstone(_));
+        let result = tokio::select! {
+            biased;
+            () = context.cancellation.cancelled() => return,
+            result = async {
+                match update {
+                    PreparedPublicAnnouncement::Manifest(announcement) => {
+                        Some(
+                            context
+                                .reader
+                                .register_versioned_manifests(
+                                    &endpoints,
+                                    announcement.current,
+                                    announcement.legacy,
+                                )
+                                .await,
+                        )
+                    }
+                    PreparedPublicAnnouncement::Tombstone(announcement) => {
+                        Some(
+                            context
+                                .reader
+                                .withdraw_versioned_manifests(
+                                    &endpoints,
+                                    announcement.current,
+                                    announcement.legacy,
+                                )
+                                .await,
+                        )
+                    }
+                    PreparedPublicAnnouncement::Missing => None,
+                }
+            } => result,
+        };
+        let Some(result) = result else {
+            continue;
+        };
+        match result {
+            Ok(count) => {
+                accepted = accepted.saturating_add(count);
+                if count > 0 && is_tombstone {
+                    let database = context.database.clone();
+                    let receipt = tokio::task::spawn_blocking(move || {
+                        complete_public_withdrawal_receipt(&database, collection_id)
+                    })
+                    .await;
+                    match receipt {
+                        Ok(Ok(true)) => runtime_is_idle = true,
+                        Ok(Ok(false)) => {}
+                        Ok(Err(_)) | Err(_) => {
+                            failed = failed.saturating_add(1);
+                            tracing::warn!(
+                                error_kind = "public_withdrawal_receipt_failed",
+                                "public withdrawal was accepted but its durable receipt could not be stored"
+                            );
+                        }
+                    }
+                }
+                update_public_announcement_state(
+                    &context.announcements,
+                    collection_id,
+                    completed_public_announcement_state(sequence, expires_at, count, Utc::now()),
+                );
+            }
+            Err(_) => {
+                failed = failed.saturating_add(1);
+                if let Some(sequence) = sequence {
+                    record_public_announcement_failure(
+                        &context.announcements,
+                        collection_id,
+                        sequence,
+                        Utc::now(),
+                    );
+                }
+            }
+        }
+    }
+    if has_updates {
+        notify_public_announcement_update(&context.updates);
+    }
+    if runtime_is_idle {
+        context.cancellation.cancel();
+    }
+    tracing::info!(accepted, failed, "public manifests renewed");
+}
+
+fn notify_public_announcement_update(updates: &watch::Sender<u64>) {
+    updates.send_modify(|generation| *generation = generation.wrapping_add(1));
+}
+
+fn complete_public_withdrawal_receipt(database: &Database, collection_id: Uuid) -> Result<bool> {
+    database.complete_public_withdrawal(collection_id)?;
+    database
+        .public_collections_needing_sync()
+        .map(|pending| pending.is_empty())
+}
+
+fn source_issue_reason(message: &str, code: SourceIssueCode) -> Option<String> {
+    if matches!(code, SourceIssueCode::Superseded) {
+        return Some("processing-failed".to_owned());
+    }
+
+    let detail = message.to_lowercase();
+    let token = if detail.contains("no such file")
+        || detail.contains("not found")
+        || detail.contains("does not exist")
+    {
+        "source-missing"
+    } else if detail.contains("permission denied") || detail.contains("access denied") {
+        "permission-denied"
+    } else if detail.contains("encrypted pdf")
+        || detail.contains("password")
+        || detail.contains("encrypted")
+    {
+        "encrypted-pdf"
+    } else if detail.contains("character limit") {
+        "too-many-characters"
+    } else if detail.contains("no extractable text layer") {
+        "no-text-layer"
+    } else if detail.contains("symbolic link") || detail.contains("symbolic links") {
+        "unreadable"
+    } else if detail.contains("unsupported source file extension")
+        || detail.contains("source format is no longer supported")
+        || detail.contains("source changed")
+        || detail.contains("not a regular file")
+        || detail.contains("document produced no searchable chunks")
+        || detail.contains("could not inspect pdf metadata")
+    {
+        "processing-failed"
+    } else if detail.contains("utf-8") || detail.contains("invalid utf") {
+        "invalid-utf8"
+    } else if detail.contains("page") && detail.contains("maximum")
+        || detail.contains("too many pages")
+        || detail.contains("pdf has") && detail.contains("pages")
+    {
+        "too-many-pages"
+    } else if detail.contains("could not parse pdf")
+        || detail.contains("could not inspect")
+        || detail.contains("invalid pdf")
+    {
+        "invalid-pdf"
+    } else {
+        match code {
+            SourceIssueCode::FileTooLarge => "file-too-large",
+            SourceIssueCode::Unreadable => "unreadable",
+            SourceIssueCode::InvalidUtf8 => "invalid-utf8",
+            SourceIssueCode::InvalidPdf => "invalid-pdf",
+            SourceIssueCode::EncryptedPdf => "encrypted-pdf",
+            SourceIssueCode::TooManyPages => "too-many-pages",
+            SourceIssueCode::NoTextLayer => "no-text-layer",
+            SourceIssueCode::TooManyCharacters => "too-many-characters",
+            SourceIssueCode::Superseded | SourceIssueCode::ProcessingFailed => "processing-failed",
+        }
+    };
+
+    Some(token.to_owned())
 }
 
 fn clear_pairing(peers: &RwLock<HashMap<PeerId, LivePeer>>, peer: PeerId) -> Result<()> {
@@ -2161,6 +5250,66 @@ fn peer_presentation_states(
     (trust, activity)
 }
 
+fn summarize_projection_trust(
+    concepts: &[airwiki_core::OkfConceptProjectionRecord],
+) -> crate::worker::TrustSummaryView {
+    use crate::worker::TrustSummaryView;
+    use airwiki_types::TrustTier;
+    let mut stable = concepts
+        .iter()
+        .filter(|concept| concept.lifecycle_status == "stable");
+    let Some(first) = stable.next() else {
+        return TrustSummaryView::Unverified;
+    };
+    let mut summary = first.assurance.trust;
+    for concept in stable {
+        summary = match (summary, concept.assurance.trust) {
+            (TrustTier::Unverified, _) | (_, TrustTier::Unverified) => TrustTier::Unverified,
+            (TrustTier::MachineConfirmed, _) | (_, TrustTier::MachineConfirmed) => {
+                TrustTier::MachineConfirmed
+            }
+            _ => TrustTier::HumanReviewed,
+        };
+    }
+    match summary {
+        TrustTier::Unverified => TrustSummaryView::Unverified,
+        TrustTier::MachineConfirmed => TrustSummaryView::MachineConfirmed,
+        TrustTier::HumanReviewed => TrustSummaryView::HumanReviewed,
+    }
+}
+
+#[cfg(test)]
+fn synthetic_projection_for_trust(
+    lifecycle_status: &str,
+    trust: airwiki_types::TrustTier,
+) -> airwiki_core::OkfConceptProjectionRecord {
+    airwiki_core::OkfConceptProjectionRecord {
+        collection_id: Uuid::new_v4(),
+        concept_id: Uuid::new_v4(),
+        logical_path: "synthetic.md".to_owned(),
+        concept_type: airwiki_types::ConceptType::Reference,
+        title: "Synthetic".to_owned(),
+        description: String::new(),
+        tags: Vec::new(),
+        lifecycle_status: lifecycle_status.to_owned(),
+        generation: None,
+        verifications: serde_json::json!([]),
+        provenance: serde_json::json!([]),
+        stale_after: None,
+        version: None,
+        fingerprint: "a".repeat(64),
+        unknown_frontmatter: serde_json::json!({}),
+        attested_computation: None,
+        assurance: airwiki_types::ConceptAssurance {
+            trust,
+            freshness: airwiki_types::FreshnessState::NotDeclared,
+            verification_outdated: false,
+        },
+        warnings: Vec::new(),
+        indexed_at: Utc::now(),
+    }
+}
+
 fn parse_peer_id(value: &str) -> Result<PeerId> {
     PeerId::from_str(value.trim()).with_context(|| format!("PeerId inválido: {value}"))
 }
@@ -2175,7 +5324,9 @@ where
     F: FnMut() -> Result<T>,
     P: FnMut(&T) -> bool,
 {
-    assert!(attempts > 0, "knowledge read attempts must be positive");
+    if attempts == 0 {
+        bail!("knowledge read attempts must be positive");
+    }
     let mut last_updating = None;
     let mut last_error = None;
     for attempt in 0..attempts {
@@ -2188,10 +5339,10 @@ where
             std::thread::sleep(delay);
         }
     }
-    if let Some(value) = last_updating {
-        Ok(value)
-    } else {
-        Err(last_error.unwrap_or_else(|| anyhow!("knowledge bundle inspection did not complete")))
+    match (last_updating, last_error) {
+        (Some(value), _) => Ok(value),
+        (None, Some(error)) => Err(error),
+        (None, None) => bail!("knowledge bundle inspection did not complete"),
     }
 }
 
@@ -2204,6 +5355,21 @@ fn device_name() -> String {
         .chars()
         .take(120)
         .collect()
+}
+
+#[cfg(target_os = "macos")]
+const fn device_platform() -> DevicePlatform {
+    DevicePlatform::MacOs
+}
+
+#[cfg(target_os = "windows")]
+const fn device_platform() -> DevicePlatform {
+    DevicePlatform::Windows
+}
+
+#[cfg(not(any(target_os = "macos", target_os = "windows")))]
+const fn device_platform() -> DevicePlatform {
+    DevicePlatform::Unknown
 }
 
 const fn pairing_failure_message(reason: PairingFailureReason) -> &'static str {
@@ -2250,6 +5416,7 @@ fn spawn_network_runtime(
 ) -> Result<NetworkRuntime> {
     let config = NetworkConfig {
         node_name: device_name(),
+        device_platform: device_platform(),
         ..NetworkConfig::default()
     };
     let (handle, events, task) = spawn_network(config, identity, access, backend)
@@ -2306,6 +5473,17 @@ fn network_generation_is_current(active: &AtomicU64, event_generation: u64) -> b
     active.load(Ordering::Acquire) == event_generation
 }
 
+fn log_task_join(task_kind: &'static str, result: std::result::Result<(), tokio::task::JoinError>) {
+    if let Err(error) = result {
+        tracing::error!(
+            task_kind,
+            task_cancelled = error.is_cancelled(),
+            task_panicked = error.is_panic(),
+            "background task stopped unexpectedly"
+        );
+    }
+}
+
 fn read_lock<'a, T>(lock: &'a RwLock<T>, label: &str) -> Result<std::sync::RwLockReadGuard<'a, T>> {
     lock.read()
         .map_err(|_| anyhow!("{label} lock está envenenado"))
@@ -2326,11 +5504,1215 @@ fn write_lock<'a, T>(
 
 #[cfg(test)]
 mod tests {
-    use airwiki_network::MemorySecretStore;
+    use std::net::TcpListener;
+
+    use airwiki_network::{
+        MemorySecretStore, PublicCatalogBackend, PublicCatalogBackendError,
+        PublicCatalogServerConfig, run_public_catalog_server,
+    };
+    use async_trait::async_trait;
+    use tokio::net::TcpStream;
+    use tokio::sync::{Notify, oneshot};
 
     use super::*;
 
+    #[test]
+    fn mcp_application_errors_preserve_conflicts_and_limits() {
+        assert_eq!(
+            classify_application_mutation_error(AiMemoryError::FingerprintConflict.into()),
+            McpApplicationError::Conflict
+        );
+        assert_eq!(
+            classify_application_mutation_error(ApplicationLimitError::MutationRate.into()),
+            McpApplicationError::RateLimited {
+                retry_after_seconds: 60,
+            }
+        );
+        assert_eq!(
+            classify_application_mutation_error(ApplicationLimitError::WikiCreationRate.into()),
+            McpApplicationError::RateLimited {
+                retry_after_seconds: 3_600,
+            }
+        );
+        assert_eq!(
+            classify_application_mutation_error(ApplicationLimitError::WikiCount.into()),
+            McpApplicationError::QuotaExceeded
+        );
+        assert_eq!(
+            mcp_application_timeout_error("write_airwiki_memory"),
+            McpApplicationError::OutcomeUnknown
+        );
+        assert_eq!(
+            mcp_application_timeout_error("get_airwiki_memory"),
+            McpApplicationError::Unavailable
+        );
+    }
+
+    #[test]
+    fn memory_concept_pages_are_bounded_and_resume_after_the_cursor() {
+        let mut first =
+            synthetic_projection_for_trust("stable", airwiki_types::TrustTier::Unverified);
+        first.logical_path = "a.md".to_owned();
+        first.tags = vec!["a".repeat(2 * 1024); 20];
+        let mut second =
+            synthetic_projection_for_trust("stable", airwiki_types::TrustTier::Unverified);
+        second.logical_path = "b.md".to_owned();
+        second.tags = vec!["b".repeat(12 * 1024)];
+        let second_id = second.concept_id;
+        let third = synthetic_projection_for_trust("stable", airwiki_types::TrustTier::Unverified);
+        let concepts = vec![first, second, third];
+
+        let (first_page, next_cursor) = memory_concept_page(concepts.clone(), None, 3).unwrap();
+        assert_eq!(first_page.len(), 1);
+        assert_eq!(
+            first_page[0].get("bodyMarkdown"),
+            Some(&serde_json::Value::Null)
+        );
+        let first_cursor = next_cursor.expect("large metadata must produce another page");
+
+        let (second_page, next_cursor) =
+            memory_concept_page(concepts, Some(&first_cursor), 1).unwrap();
+        let second_id = second_id.to_string();
+        assert_eq!(second_page.len(), 1);
+        assert_eq!(
+            second_page[0]
+                .get("conceptId")
+                .and_then(serde_json::Value::as_str),
+            Some(second_id.as_str())
+        );
+        assert!(next_cursor.is_some());
+    }
+
+    #[test]
+    fn targeted_memory_concept_output_includes_the_markdown_body() {
+        let concept =
+            synthetic_projection_for_trust("stable", airwiki_types::TrustTier::Unverified);
+        let output = memory_concept_json(&concept, Some("Durable body".to_owned()));
+
+        assert_eq!(
+            output
+                .get("bodyMarkdown")
+                .and_then(serde_json::Value::as_str),
+            Some("Durable body")
+        );
+    }
+
+    #[tokio::test]
+    async fn mcp_application_backend_fails_closed_when_its_queue_is_full() {
+        let (sender, _receiver) = mpsc::channel(1);
+        let (response, _result) = oneshot::channel();
+        sender
+            .try_send(McpApplicationRequest {
+                identity: McpApplicationIdentity {
+                    capability: "fixture".to_owned(),
+                },
+                tool: "list_airwiki_memories",
+                arguments: serde_json::json!({}),
+                response,
+            })
+            .expect("fill request queue");
+        let backend = DesktopMcpApplicationBackend { requests: sender };
+
+        let result = backend
+            .call(
+                McpApplicationIdentity {
+                    capability: "fixture".to_owned(),
+                },
+                "list_airwiki_memories",
+                serde_json::json!({}),
+            )
+            .await;
+
+        assert_eq!(result, Err(McpApplicationError::Unavailable));
+    }
+
+    fn routed_search_hit(title: &str, source_sha256: &str, chunk_id: Uuid, rank: u32) -> SearchHit {
+        SearchHit {
+            concept_id: Uuid::new_v4(),
+            collection_id: Uuid::new_v4(),
+            chunk_id,
+            title: title.to_owned(),
+            snippet: "Synthetic evidence".to_owned(),
+            heading_or_page: "Fixture".to_owned(),
+            logical_resource_uri: "urn:airwiki:fixture".to_owned(),
+            source_revision: 1,
+            source_sha256: source_sha256.to_owned(),
+            updated_at: Utc::now(),
+            rank,
+            node_id: "synthetic-node".to_owned(),
+            assurance: None,
+            lifecycle_status: Some("stable".to_owned()),
+        }
+    }
+
+    #[test]
+    fn merged_search_preserves_public_only_provenance() {
+        let request_id = Uuid::new_v4();
+        let duplicate_chunk = Uuid::new_v4();
+        let public_chunk = Uuid::new_v4();
+        let mut trusted = SearchResponse::empty(request_id);
+        trusted.hits.push(routed_search_hit(
+            "Trusted duplicate",
+            "shared-source",
+            duplicate_chunk,
+            1,
+        ));
+        let mut public = SearchResponse::empty(request_id);
+        public.hits.push(routed_search_hit(
+            "Public duplicate",
+            "shared-source",
+            duplicate_chunk,
+            1,
+        ));
+        public.hits.push(routed_search_hit(
+            "Public only",
+            "public-source",
+            public_chunk,
+            2,
+        ));
+
+        let (merged, public_hits) = merge_public_search_responses(trusted, public, 10);
+
+        assert_eq!(merged.hits.len(), 2);
+        assert!(
+            merged
+                .hits
+                .iter()
+                .any(|hit| hit.title == "Trusted duplicate")
+        );
+        assert!(!public_hits.contains(&("shared-source".to_owned(), duplicate_chunk)));
+        assert!(public_hits.contains(&("public-source".to_owned(), public_chunk)));
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn search_storage_work_does_not_block_the_async_runtime() {
+        let (started_sender, started_receiver) = oneshot::channel();
+        let (release_sender, release_receiver) = std::sync::mpsc::channel();
+        let operation = tokio::spawn(async move {
+            run_search_storage("synthetic storage worker stopped", move || {
+                let _ = started_sender.send(());
+                release_receiver
+                    .recv_timeout(Duration::from_secs(2))
+                    .map_err(|_| {
+                        SearchContractError::Unavailable("synthetic release closed".into())
+                    })?;
+                Ok(())
+            })
+            .await
+        });
+
+        let started = tokio::time::timeout(Duration::from_secs(1), started_receiver).await;
+        let responsive =
+            tokio::time::timeout(Duration::from_millis(100), tokio::task::yield_now()).await;
+        let released = release_sender.send(());
+        started
+            .expect("blocking storage operation should start off the runtime")
+            .expect("blocking storage operation should report startup");
+        responsive.expect("the current-thread runtime must remain responsive");
+        released.expect("blocking storage operation should still be waiting");
+        operation
+            .await
+            .expect("search storage task should join")
+            .expect("search storage task should succeed");
+    }
+
+    #[test]
+    fn memory_mutations_identify_the_wiki_to_refresh() {
+        let wiki_id = Uuid::new_v4();
+        let result = serde_json::json!({ "wikiId": wiki_id });
+        for tool in [
+            "create_airwiki_memory",
+            "write_airwiki_memory",
+            "deprecate_airwiki_memory",
+        ] {
+            assert_eq!(application_update_wiki_id(tool, &result), Some(wiki_id));
+        }
+        for tool in [
+            "list_airwiki_memories",
+            "get_airwiki_memory",
+            "request_airwiki_computation",
+            "get_airwiki_computation_run",
+        ] {
+            assert_eq!(application_update_wiki_id(tool, &result), None);
+        }
+        assert_eq!(
+            application_update_wiki_id("write_airwiki_memory", &serde_json::json!({})),
+            None
+        );
+    }
+
+    #[test]
+    fn wiki_trust_summary_ignores_non_stable_concepts_and_defaults_conservatively() {
+        use crate::worker::TrustSummaryView;
+        use airwiki_types::TrustTier;
+
+        assert_eq!(
+            summarize_projection_trust(&[]),
+            TrustSummaryView::Unverified
+        );
+        assert_eq!(
+            summarize_projection_trust(&[synthetic_projection_for_trust(
+                "draft",
+                TrustTier::HumanReviewed,
+            )]),
+            TrustSummaryView::Unverified
+        );
+        assert_eq!(
+            summarize_projection_trust(&[
+                synthetic_projection_for_trust("stable", TrustTier::HumanReviewed),
+                synthetic_projection_for_trust("stable", TrustTier::Unverified),
+                synthetic_projection_for_trust("deprecated", TrustTier::HumanReviewed),
+            ]),
+            TrustSummaryView::Unverified
+        );
+    }
+
+    #[test]
+    fn managed_wiki_deletion_preserves_the_source_folder() {
+        let temp = tempfile::tempdir().unwrap();
+        let vaults = temp.path().join("vaults");
+        let source = temp.path().join("source");
+        std::fs::create_dir_all(&vaults).unwrap();
+        std::fs::create_dir_all(&source).unwrap();
+        std::fs::write(source.join("original.md"), "source").unwrap();
+        let database = Database::in_memory().unwrap();
+        let placeholder = temp.path().join("placeholder");
+        let collection = database
+            .create_collection_with_origin(
+                "Wiki",
+                &source,
+                &placeholder,
+                CollectionPolicy::local_only(),
+                WikiOrigin::Folder,
+                airwiki_core::IndexingMode::Manual,
+            )
+            .unwrap();
+        let bundle = vaults.join(collection.id.to_string());
+        std::fs::create_dir_all(&bundle).unwrap();
+        std::fs::write(bundle.join("index.md"), "managed").unwrap();
+
+        delete_managed_wiki_files(&database, &vaults, collection.id, &bundle).unwrap();
+
+        assert!(source.join("original.md").exists());
+        assert!(!bundle.exists());
+        assert!(database.collection(collection.id).unwrap().is_none());
+    }
+
+    #[test]
+    fn managed_wiki_deletion_rejects_a_bundle_outside_the_vault() {
+        let temp = tempfile::tempdir().unwrap();
+        let vaults = temp.path().join("vaults");
+        let outside = temp.path().join("outside");
+        std::fs::create_dir_all(&vaults).unwrap();
+        std::fs::create_dir_all(&outside).unwrap();
+        let database = Database::in_memory().unwrap();
+
+        assert!(delete_managed_wiki_files(&database, &vaults, Uuid::new_v4(), &outside).is_err());
+        assert!(outside.exists());
+    }
+
+    #[test]
+    fn deletion_waits_for_a_durable_public_withdrawal_receipt() {
+        let temp = tempfile::tempdir().unwrap();
+        let source = temp.path().join("source");
+        let bundle = temp.path().join("bundle");
+        std::fs::create_dir_all(&source).unwrap();
+        let database = Database::in_memory().unwrap();
+        let collection = database
+            .create_collection(
+                "Public wiki",
+                &source,
+                &bundle,
+                CollectionPolicy::local_only(),
+            )
+            .unwrap();
+        database
+            .update_collection_policy(
+                collection.id,
+                CollectionPolicy {
+                    local_only: false,
+                    peer_shareable: false,
+                    allow_external_ai: false,
+                    internet_public: true,
+                },
+            )
+            .unwrap();
+        database
+            .update_collection_policy(collection.id, CollectionPolicy::local_only())
+            .unwrap();
+
+        assert!(ensure_public_withdrawal_completed(&database, collection.id).is_err());
+        database.complete_public_withdrawal(collection.id).unwrap();
+        assert!(ensure_public_withdrawal_completed(&database, collection.id).is_ok());
+    }
+
+    #[test]
+    fn managed_wikis_are_not_folder_ingestion_sources() {
+        let temp = tempfile::tempdir().unwrap();
+        let bundle = temp.path().join("imported");
+        std::fs::create_dir_all(&bundle).unwrap();
+        let database = Database::in_memory().unwrap();
+        let collection = database
+            .create_collection_with_origin(
+                "Imported",
+                &bundle,
+                &bundle,
+                CollectionPolicy::local_only(),
+                WikiOrigin::ImportedOkf,
+                airwiki_core::IndexingMode::NotApplicable,
+            )
+            .unwrap();
+
+        assert!(ensure_folder_ingestion_source(&collection).is_err());
+    }
+
+    #[test]
+    fn retired_managed_wiki_cleanup_is_retried_at_startup() {
+        let temp = tempfile::tempdir().unwrap();
+        let vaults = temp.path().join("vaults");
+        let retired = vaults.join(format!(".delete-{}", Uuid::new_v4()));
+        std::fs::create_dir_all(&retired).unwrap();
+        std::fs::write(retired.join("locked-before-restart.md"), "synthetic").unwrap();
+
+        let report = recover_retired_managed_wiki_files(&vaults).unwrap();
+
+        assert_eq!(report.recovered, 1);
+        assert_eq!(report.pending, 0);
+        assert!(!retired.exists());
+    }
+
     struct EmptyFederatedSearch;
+
+    struct RecordingCatalogBackend {
+        withdrawals: mpsc::Sender<u64>,
+        gate: Option<Arc<CatalogWithdrawalGate>>,
+    }
+
+    struct CatalogWithdrawalGate {
+        started: AsyncMutex<Option<oneshot::Sender<()>>>,
+        release: Notify,
+    }
+
+    impl CatalogWithdrawalGate {
+        fn new() -> (Arc<Self>, oneshot::Receiver<()>) {
+            let (started, receiver) = oneshot::channel();
+            (
+                Arc::new(Self {
+                    started: AsyncMutex::new(Some(started)),
+                    release: Notify::new(),
+                }),
+                receiver,
+            )
+        }
+
+        async fn wait(&self) {
+            if let Some(started) = self.started.lock().await.take() {
+                let _ = started.send(());
+            }
+            self.release.notified().await;
+        }
+
+        fn release(&self) {
+            self.release.notify_one();
+        }
+    }
+
+    #[async_trait]
+    impl PublicCatalogBackend for RecordingCatalogBackend {
+        async fn register(
+            &self,
+            _manifest: airwiki_types::SignedPublicCollectionManifest,
+        ) -> std::result::Result<(), PublicCatalogBackendError> {
+            Ok(())
+        }
+
+        async fn withdraw(
+            &self,
+            tombstone: airwiki_types::SignedPublicCollectionTombstone,
+        ) -> std::result::Result<(), PublicCatalogBackendError> {
+            if let Some(gate) = &self.gate {
+                gate.wait().await;
+            }
+            let _ = self.withdrawals.send(tombstone.tombstone.sequence).await;
+            Ok(())
+        }
+
+        async fn query(
+            &self,
+            _query: airwiki_types::PublicCatalogQuery,
+        ) -> std::result::Result<
+            Vec<airwiki_types::SignedPublicCollectionManifest>,
+            PublicCatalogBackendError,
+        > {
+            Ok(Vec::new())
+        }
+    }
+
+    fn test_public_peer_id() -> String {
+        NodeIdentity::load_or_create(&MemorySecretStore::default())
+            .unwrap()
+            .peer_id()
+            .to_string()
+    }
+
+    fn available_public_catalog_address() -> (u16, Multiaddr) {
+        let listener = TcpListener::bind(("127.0.0.1", 0)).unwrap();
+        let port = listener.local_addr().unwrap().port();
+        drop(listener);
+        (port, format!("/ip4/127.0.0.1/tcp/{port}").parse().unwrap())
+    }
+
+    async fn wait_for_public_catalog_listener(port: u16) {
+        tokio::time::timeout(Duration::from_secs(2), async move {
+            loop {
+                if TcpStream::connect(("127.0.0.1", port)).await.is_ok() {
+                    return;
+                }
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .unwrap();
+    }
+
+    #[test]
+    fn model_activation_stage_is_preserved_as_a_sanitized_class() {
+        let error = activation_stage::<()>(
+            Err(anyhow!("synthetic activation detail")),
+            ModelActivationStage::OnnxInit,
+        )
+        .unwrap_err();
+
+        assert_eq!(
+            classify_model_activation_failure(&error),
+            ModelActivationFailureView {
+                error_kind: ModelActivationErrorKind::OnnxInit,
+                exit_class: ModelActivationExitClass::None,
+            }
+        );
+    }
+
+    #[test]
+    fn model_activation_elapsed_buckets_have_stable_boundaries() {
+        for (seconds, expected) in [
+            (0, ModelActivationElapsedBucket::Under5s),
+            (4, ModelActivationElapsedBucket::Under5s),
+            (5, ModelActivationElapsedBucket::From5sTo30s),
+            (29, ModelActivationElapsedBucket::From5sTo30s),
+            (30, ModelActivationElapsedBucket::From30sTo120s),
+            (119, ModelActivationElapsedBucket::From30sTo120s),
+            (120, ModelActivationElapsedBucket::From120sTo300s),
+            (299, ModelActivationElapsedBucket::From120sTo300s),
+            (300, ModelActivationElapsedBucket::Over300s),
+        ] {
+            assert_eq!(
+                model_activation_elapsed_bucket(Duration::from_secs(seconds)),
+                expected
+            );
+        }
+    }
+
+    #[test]
+    fn bundled_generation_execution_class_matches_platform_acceleration() {
+        let expected = if bundled_runtime_is_accelerated() {
+            GenerationExecutionClass::Accelerated
+        } else {
+            GenerationExecutionClass::CpuOnly
+        };
+
+        assert_eq!(bundled_generation_execution_class(), expected);
+    }
+
+    #[test]
+    fn bundled_bootstrap_registry_parses_and_installs_three_pinned_indexes() {
+        let encoded = format!(
+            "7|2099-01-01T00:00:00Z|{}|/ip6/2001:db8::1/udp/42042/quic-v1;\
+             7|2099-01-01T00:00:00Z|{}|/ip6/2001:db8::2/udp/42044/quic-v1;\
+             7|2099-01-01T00:00:00Z|{}|/ip6/2001:db8::3/udp/42046/quic-v1",
+            test_public_peer_id(),
+            test_public_peer_id(),
+            test_public_peer_id(),
+        );
+        let indexes = parse_bundled_bootstrap_federation_indexes(Some(&encoded)).unwrap();
+        let database = Database::in_memory().unwrap();
+        database
+            .replace_bootstrap_federation_indexes(
+                6,
+                &[BootstrapFederationIndexEntry {
+                    peer_id: test_public_peer_id(),
+                    multiaddr: "/ip6/2001:db8::10/tcp/42042".to_owned(),
+                    expires_at: Utc::now() + ChronoDuration::days(1),
+                }],
+            )
+            .unwrap();
+        database
+            .upsert_community_federation_index(
+                &test_public_peer_id(),
+                "/ip6/2001:db8::11/tcp/42044",
+                true,
+            )
+            .unwrap();
+
+        install_bundled_bootstrap_federation_indexes(&database, indexes).unwrap();
+
+        let installed = database.list_federation_indexes().unwrap();
+        assert_eq!(installed.len(), 4);
+        assert_eq!(
+            installed
+                .iter()
+                .filter(|index| {
+                    index.source == "bootstrap"
+                        && index.enabled
+                        && index.registry_version == 7
+                        && index.expires_at.is_some()
+                })
+                .count(),
+            3
+        );
+        assert_eq!(
+            installed
+                .iter()
+                .filter(|index| index.source == "community")
+                .count(),
+            1
+        );
+    }
+
+    #[test]
+    fn bundled_bootstrap_registry_rejects_duplicates_and_ignores_expired_entries() {
+        let peer_id = test_public_peer_id();
+        let duplicate = format!(
+            "2|2099-01-01T00:00:00Z|{peer_id}|/ip6/2001:db8::1/tcp/42042;\
+             2|2099-01-01T00:00:00Z|{peer_id}|/ip6/2001:db8::2/tcp/42044"
+        );
+        assert!(parse_bundled_bootstrap_federation_indexes(Some(&duplicate)).is_err());
+        let mixed_versions = format!(
+            "1|2099-01-01T00:00:00Z|{}|/ip6/2001:db8::1/tcp/42042;\
+             2|2099-01-01T00:00:00Z|{}|/ip6/2001:db8::2/tcp/42044",
+            test_public_peer_id(),
+            test_public_peer_id(),
+        );
+        assert!(parse_bundled_bootstrap_federation_indexes(Some(&mixed_versions)).is_err());
+
+        let expired = format!(
+            "1|2020-01-01T00:00:00Z|{}|/ip6/2001:db8::1/tcp/42042",
+            test_public_peer_id()
+        );
+        let database = Database::in_memory().unwrap();
+        let indexes = parse_bundled_bootstrap_federation_indexes(Some(&expired)).unwrap();
+        install_bundled_bootstrap_federation_indexes(&database, indexes).unwrap();
+        assert!(database.list_federation_indexes().unwrap().is_empty());
+    }
+
+    #[test]
+    fn older_bundled_bootstrap_preserves_a_newer_active_registry() {
+        let database = Database::in_memory().unwrap();
+        let active_peer = test_public_peer_id();
+        let active = parse_bundled_bootstrap_federation_indexes(Some(&format!(
+            "2|2099-01-01T00:00:00Z|{active_peer}|/ip6/2001:db8::20/tcp/42042"
+        )))
+        .unwrap();
+        install_bundled_bootstrap_federation_indexes(&database, active).unwrap();
+
+        let older_peer = test_public_peer_id();
+        let older = parse_bundled_bootstrap_federation_indexes(Some(&format!(
+            "1|2099-01-01T00:00:00Z|{older_peer}|/ip6/2001:db8::10/tcp/42042"
+        )))
+        .unwrap();
+        install_bundled_bootstrap_federation_indexes(&database, older).unwrap();
+
+        let active_indexes = database.list_federation_indexes().unwrap();
+        assert_eq!(
+            database.bootstrap_federation_registry_version().unwrap(),
+            Some(2)
+        );
+        assert_eq!(active_indexes.len(), 1);
+        assert_eq!(active_indexes[0].peer_id, active_peer);
+        assert_eq!(active_indexes[0].registry_version, 2);
+    }
+
+    #[test]
+    fn older_bundled_bootstrap_preserves_a_newer_expired_registry() {
+        let database = Database::in_memory().unwrap();
+        let expired_peer = test_public_peer_id();
+        let expired = parse_bundled_bootstrap_federation_indexes(Some(&format!(
+            "3|2020-01-01T00:00:00Z|{expired_peer}|/ip6/2001:db8::30/tcp/42042"
+        )))
+        .unwrap();
+        install_bundled_bootstrap_federation_indexes(&database, expired).unwrap();
+        let older_peer = test_public_peer_id();
+        let older = parse_bundled_bootstrap_federation_indexes(Some(&format!(
+            "1|2099-01-01T00:00:00Z|{older_peer}|/ip6/2001:db8::10/tcp/42042"
+        )))
+        .unwrap();
+        install_bundled_bootstrap_federation_indexes(&database, older).unwrap();
+
+        assert_eq!(
+            database.bootstrap_federation_registry_version().unwrap(),
+            Some(3)
+        );
+        assert!(
+            database
+                .list_federation_indexes()
+                .unwrap()
+                .iter()
+                .all(|index| index.source != "bootstrap")
+        );
+    }
+
+    #[test]
+    fn bundled_bootstrap_same_version_mutation_still_fails_closed() {
+        let database = Database::in_memory().unwrap();
+        let peer = test_public_peer_id();
+        let original = parse_bundled_bootstrap_federation_indexes(Some(&format!(
+            "2|2099-01-01T00:00:00Z|{peer}|/ip6/2001:db8::20/tcp/42042"
+        )))
+        .unwrap();
+        install_bundled_bootstrap_federation_indexes(&database, original).unwrap();
+        let mutation = parse_bundled_bootstrap_federation_indexes(Some(&format!(
+            "2|2099-01-01T00:00:00Z|{peer}|/ip6/2001:db8::21/tcp/42042"
+        )))
+        .unwrap();
+
+        assert!(install_bundled_bootstrap_federation_indexes(&database, mutation).is_err());
+    }
+
+    #[test]
+    fn public_announcement_status_distinguishes_advertised_expired_and_offline() {
+        let now = Utc::now();
+        let advertised = PublicAnnouncementState {
+            sequence: 1,
+            accepted_indexes: 2,
+            last_announced_at: now,
+            expires_at: now + ChronoDuration::minutes(15),
+        };
+        assert!(matches!(
+            public_announcement_view(Some(advertised), now),
+            PublicAnnouncementStatusView::Advertised {
+                accepted_indexes: 2,
+                ..
+            }
+        ));
+        let expired = PublicAnnouncementState {
+            expires_at: now,
+            ..advertised
+        };
+        assert!(matches!(
+            public_announcement_view(Some(expired), now),
+            PublicAnnouncementStatusView::Expired { .. }
+        ));
+        assert_eq!(
+            public_announcement_view(None, now),
+            PublicAnnouncementStatusView::Offline
+        );
+    }
+
+    #[test]
+    fn accepted_public_withdrawal_clears_the_last_pending_runtime_reason() {
+        let database = Database::in_memory().unwrap();
+        let temporary = tempfile::tempdir().unwrap();
+        let source = temporary.path().join("source");
+        let bundle = temporary.path().join("bundle");
+        std::fs::create_dir_all(&source).unwrap();
+        std::fs::create_dir_all(&bundle).unwrap();
+        let collection = database
+            .create_collection(
+                "Synthetic withdrawal",
+                source,
+                bundle,
+                CollectionPolicy::local_only(),
+            )
+            .unwrap();
+        database
+            .update_collection_policy(
+                collection.id,
+                CollectionPolicy {
+                    local_only: false,
+                    peer_shareable: false,
+                    allow_external_ai: false,
+                    internet_public: true,
+                },
+            )
+            .unwrap();
+        database
+            .update_collection_policy(collection.id, CollectionPolicy::local_only())
+            .unwrap();
+
+        assert!(complete_public_withdrawal_receipt(&database, collection.id).unwrap());
+        assert!(
+            database
+                .public_collections_needing_sync()
+                .unwrap()
+                .is_empty()
+        );
+    }
+
+    #[tokio::test]
+    async fn public_manifest_runner_withdraws_immediately_from_initial_zero_readiness() {
+        let temporary = tempfile::tempdir().unwrap();
+        let database = Database::in_memory().unwrap();
+        let source_directory = temporary.path().join("source");
+        let wiki_directory = temporary.path().join("wiki");
+        std::fs::create_dir_all(&source_directory).unwrap();
+        std::fs::create_dir_all(&wiki_directory).unwrap();
+        let collection = database
+            .create_collection(
+                "Synthetic initial readiness",
+                source_directory,
+                wiki_directory,
+                CollectionPolicy::local_only(),
+            )
+            .unwrap();
+        database
+            .update_collection_policy(
+                collection.id,
+                CollectionPolicy {
+                    local_only: false,
+                    peer_shareable: false,
+                    allow_external_ai: false,
+                    internet_public: true,
+                },
+            )
+            .unwrap();
+        let (port, address) = available_public_catalog_address();
+        let index_identity = NodeIdentity::load_or_create(&MemorySecretStore::default()).unwrap();
+        database
+            .upsert_community_federation_index(
+                &index_identity.peer_id().to_string(),
+                &address.to_string(),
+                true,
+            )
+            .unwrap();
+        let (withdrawals, mut recorded_withdrawals) = mpsc::channel(8);
+        let catalog_cancellation = CancellationToken::new();
+        let catalog_task = tokio::spawn(run_public_catalog_server(
+            index_identity,
+            PublicCatalogServerConfig::new(vec![address]),
+            Arc::new(RecordingCatalogBackend {
+                withdrawals,
+                gate: None,
+            }),
+            catalog_cancellation.clone(),
+        ));
+        wait_for_public_catalog_listener(port).await;
+
+        let (_readiness_sender, relay_readiness) = watch::channel(PublicRelayReadiness::default());
+        let (announcement_updates, mut announcement_update_events) = watch::channel(0_u64);
+        let renewal_cancellation = CancellationToken::new();
+        let announcements = Arc::new(RwLock::new(HashMap::new()));
+        let renewal_task = tokio::spawn(run_public_manifest_renewal(
+            PublicManifestRenewalContext {
+                database,
+                identity: NodeIdentity::load_or_create(&MemorySecretStore::default()).unwrap(),
+                reader: Arc::new(PublicReader::new()),
+                announcements: Arc::clone(&announcements),
+                announcement_sync: Arc::new(Semaphore::new(1)),
+                updates: announcement_updates,
+                cancellation: renewal_cancellation.clone(),
+            },
+            relay_readiness,
+        ));
+
+        let sequence = tokio::time::timeout(Duration::from_secs(2), recorded_withdrawals.recv())
+            .await
+            .unwrap()
+            .unwrap();
+        assert!(sequence > 1);
+        tokio::time::timeout(Duration::from_secs(2), announcement_update_events.changed())
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(*announcement_update_events.borrow_and_update(), 1);
+        assert_eq!(
+            public_announcement_view(
+                read_lock(&announcements, "test announcements")
+                    .unwrap()
+                    .get(&collection.id)
+                    .copied(),
+                Utc::now(),
+            ),
+            PublicAnnouncementStatusView::Offline
+        );
+
+        renewal_cancellation.cancel();
+        catalog_cancellation.cancel();
+        tokio::time::timeout(Duration::from_secs(2), renewal_task)
+            .await
+            .unwrap()
+            .unwrap();
+        tokio::time::timeout(Duration::from_secs(2), catalog_task)
+            .await
+            .unwrap()
+            .unwrap()
+            .unwrap();
+    }
+
+    #[tokio::test]
+    async fn public_manifest_runner_cancels_an_in_flight_catalog_update() {
+        let temporary = tempfile::tempdir().unwrap();
+        let source_directory = temporary.path().join("source");
+        let wiki_directory = temporary.path().join("wiki");
+        std::fs::create_dir_all(&source_directory).unwrap();
+        std::fs::create_dir_all(&wiki_directory).unwrap();
+        let database = Database::in_memory().unwrap();
+        let collection = database
+            .create_collection(
+                "Synthetic cancellation",
+                source_directory,
+                wiki_directory,
+                CollectionPolicy::local_only(),
+            )
+            .unwrap();
+        database
+            .update_collection_policy(
+                collection.id,
+                CollectionPolicy {
+                    local_only: false,
+                    peer_shareable: false,
+                    allow_external_ai: false,
+                    internet_public: true,
+                },
+            )
+            .unwrap();
+        let (port, address) = available_public_catalog_address();
+        let index_identity = NodeIdentity::load_or_create(&MemorySecretStore::default()).unwrap();
+        database
+            .upsert_community_federation_index(
+                &index_identity.peer_id().to_string(),
+                &address.to_string(),
+                true,
+            )
+            .unwrap();
+        let (withdrawals, _recorded_withdrawals) = mpsc::channel(8);
+        let (gate, withdrawal_started) = CatalogWithdrawalGate::new();
+        let catalog_cancellation = CancellationToken::new();
+        let catalog_task = tokio::spawn(run_public_catalog_server(
+            index_identity,
+            PublicCatalogServerConfig::new(vec![address]),
+            Arc::new(RecordingCatalogBackend {
+                withdrawals,
+                gate: Some(Arc::clone(&gate)),
+            }),
+            catalog_cancellation.clone(),
+        ));
+        wait_for_public_catalog_listener(port).await;
+
+        let (_readiness_sender, relay_readiness) = watch::channel(PublicRelayReadiness::default());
+        let (announcement_updates, _announcement_update_events) = watch::channel(0_u64);
+        let renewal_cancellation = CancellationToken::new();
+        let renewal_task = tokio::spawn(run_public_manifest_renewal(
+            PublicManifestRenewalContext {
+                database,
+                identity: NodeIdentity::load_or_create(&MemorySecretStore::default()).unwrap(),
+                reader: Arc::new(PublicReader::new()),
+                announcements: Arc::new(RwLock::new(HashMap::new())),
+                announcement_sync: Arc::new(Semaphore::new(1)),
+                updates: announcement_updates,
+                cancellation: renewal_cancellation.clone(),
+            },
+            relay_readiness,
+        ));
+        tokio::time::timeout(Duration::from_secs(2), withdrawal_started)
+            .await
+            .unwrap()
+            .unwrap();
+
+        renewal_cancellation.cancel();
+        tokio::time::timeout(Duration::from_millis(750), renewal_task)
+            .await
+            .unwrap()
+            .unwrap();
+
+        gate.release();
+        catalog_cancellation.cancel();
+        tokio::time::timeout(Duration::from_secs(2), catalog_task)
+            .await
+            .unwrap()
+            .unwrap()
+            .unwrap();
+    }
+
+    #[test]
+    fn public_manifest_routes_include_only_ready_relay_reservations() {
+        let first_relay = NodeIdentity::load_or_create(&MemorySecretStore::default()).unwrap();
+        let second_relay = NodeIdentity::load_or_create(&MemorySecretStore::default()).unwrap();
+        let publisher = NodeIdentity::load_or_create(&MemorySecretStore::default()).unwrap();
+        let endpoints = vec![
+            PublicIndexEndpoint {
+                peer_id: first_relay.peer_id(),
+                address: "/ip4/192.0.2.10/tcp/42042".parse().unwrap(),
+            },
+            PublicIndexEndpoint {
+                peer_id: second_relay.peer_id(),
+                address: "/ip4/192.0.2.20/tcp/42044".parse().unwrap(),
+            },
+        ];
+        let ready_relay_addresses = vec![relay_circuit_address(
+            endpoints[1].address.clone(),
+            endpoints[1].peer_id,
+        )];
+
+        let routes = ready_public_routes(&endpoints, publisher.peer_id(), &ready_relay_addresses);
+
+        assert_eq!(
+            routes,
+            vec![
+                relayed_peer_address(
+                    endpoints[1].address.clone(),
+                    endpoints[1].peer_id,
+                    publisher.peer_id(),
+                )
+                .to_string()
+            ]
+        );
+    }
+
+    #[test]
+    fn public_announcement_readiness_changes_advance_sequence_and_close_offline() {
+        let temporary = tempfile::tempdir().unwrap();
+        let database = Database::in_memory().unwrap();
+        let source_directory = temporary.path().join("source");
+        let wiki_directory = temporary.path().join("wiki");
+        std::fs::create_dir_all(&source_directory).unwrap();
+        std::fs::create_dir_all(&wiki_directory).unwrap();
+        let collection = database
+            .create_collection(
+                "Synthetic public collection",
+                &source_directory,
+                &wiki_directory,
+                CollectionPolicy::local_only(),
+            )
+            .unwrap();
+        database
+            .update_collection_policy(
+                collection.id,
+                CollectionPolicy {
+                    local_only: false,
+                    peer_shareable: false,
+                    allow_external_ai: false,
+                    internet_public: true,
+                },
+            )
+            .unwrap();
+        let relay = NodeIdentity::load_or_create(&MemorySecretStore::default()).unwrap();
+        let relay_address: Multiaddr = "/ip4/192.0.2.10/tcp/42042".parse().unwrap();
+        database
+            .upsert_community_federation_index(
+                &relay.peer_id().to_string(),
+                &relay_address.to_string(),
+                true,
+            )
+            .unwrap();
+        let source_path = source_directory.join("fixture.md");
+        let source_text = "Synthetic relay readiness evidence.";
+        std::fs::write(&source_path, source_text).unwrap();
+        let source_hash = airwiki_core::sha256_file(&source_path).unwrap();
+        let source = database
+            .register_source(
+                collection.id,
+                &source_path,
+                &source_hash,
+                "markdown",
+                u64::try_from(source_text.len()).unwrap(),
+            )
+            .unwrap();
+        database
+            .mark_extracted(source.id(), 0, u64::try_from(source_text.len()).unwrap())
+            .unwrap();
+        let source_record = database.source_document(source.id()).unwrap().unwrap();
+        let draft = EnrichmentDraft {
+            concept_type: airwiki_types::ConceptType::Document,
+            title: "Synthetic relay readiness".into(),
+            description: "Synthetic public announcement fixture".into(),
+            language: "en".into(),
+            tags: Vec::new(),
+            entities: Vec::new(),
+            links: Vec::new(),
+            summary: "Synthetic evidence".into(),
+            classification_confidence: 1.0,
+            classification_explanation: "fixture".into(),
+        };
+        let concept = database
+            .save_enrichment(source.id(), draft.clone(), "test-node", "test-model")
+            .unwrap();
+        database
+            .replace_chunks(
+                concept.id,
+                &[airwiki_core::StoredChunk {
+                    id: Uuid::new_v4(),
+                    concept_id: concept.id,
+                    source_document_id: source.id(),
+                    collection_id: collection.id,
+                    ordinal: 0,
+                    heading_or_page: "Fixture".into(),
+                    text: source_text.into(),
+                    text_sha256: "synthetic-chunk-hash".into(),
+                    embedding: vec![0.0; airwiki_core::EMBEDDING_DIMENSIONS],
+                    source_revision: source_record.revision,
+                }],
+            )
+            .unwrap();
+        let review_version = database
+            .review_evidence_page(concept.id, source_record.revision, None, None, 1)
+            .unwrap()
+            .unwrap()
+            .review_version;
+        OkfPublicationMaterializer::new(database.clone())
+            .approve(concept.id, draft, &review_version)
+            .unwrap();
+        let publisher = NodeIdentity::load_or_create(&MemorySecretStore::default()).unwrap();
+        let ready_relay_addresses = vec![relay_circuit_address(relay_address, relay.peer_id())];
+
+        let (_, ready) = prepare_next_public_announcement(
+            &database,
+            &publisher,
+            collection.id,
+            &ready_relay_addresses,
+        )
+        .unwrap();
+        let ready_sequence = match ready {
+            PreparedPublicAnnouncement::Manifest(announcement) => {
+                assert_eq!(
+                    announcement.current.manifest.sequence,
+                    announcement.legacy.manifest.sequence
+                );
+                announcement.current.manifest.sequence
+            }
+            _ => panic!("a ready relay must produce a manifest"),
+        };
+        let (_, offline) =
+            prepare_next_public_announcement(&database, &publisher, collection.id, &[]).unwrap();
+        let offline_sequence = match &offline {
+            PreparedPublicAnnouncement::Tombstone(announcement) => {
+                assert_eq!(
+                    announcement.current.tombstone.sequence,
+                    announcement.legacy.tombstone.sequence
+                );
+                announcement.current.tombstone.sequence
+            }
+            _ => panic!("zero ready relays must produce a tombstone"),
+        };
+
+        assert_eq!(
+            (
+                offline_sequence > ready_sequence,
+                public_announcement_expiry(&offline).is_none(),
+            ),
+            (true, true)
+        );
+    }
+
+    #[test]
+    fn newer_announcement_state_rejects_late_completion_and_expires() {
+        let now = Utc::now();
+        let announcements = RwLock::new(HashMap::new());
+        let collection_id = Uuid::new_v4();
+        update_public_announcement_state(
+            &announcements,
+            collection_id,
+            Some(PublicAnnouncementState {
+                sequence: 1,
+                accepted_indexes: 1,
+                last_announced_at: now,
+                expires_at: now + ChronoDuration::minutes(15),
+            }),
+        );
+        let renewed_at = now + ChronoDuration::minutes(5);
+        let renewed_expiry = renewed_at + ChronoDuration::minutes(15);
+        update_public_announcement_state(
+            &announcements,
+            collection_id,
+            Some(PublicAnnouncementState {
+                sequence: 3,
+                accepted_indexes: 3,
+                last_announced_at: renewed_at,
+                expires_at: renewed_expiry,
+            }),
+        );
+        update_public_announcement_state(
+            &announcements,
+            collection_id,
+            Some(PublicAnnouncementState {
+                sequence: 2,
+                accepted_indexes: 0,
+                last_announced_at: renewed_at,
+                expires_at: renewed_at,
+            }),
+        );
+        record_public_announcement_failure(
+            &announcements,
+            collection_id,
+            2,
+            renewed_at + ChronoDuration::minutes(5),
+        );
+
+        let state = read_lock(&announcements, "test announcements")
+            .unwrap()
+            .get(&collection_id)
+            .copied()
+            .unwrap();
+        assert_eq!(state.accepted_indexes, 3);
+        assert_eq!(state.sequence, 3);
+        assert_eq!(state.last_announced_at, renewed_at);
+        assert_eq!(state.expires_at, renewed_expiry);
+        assert!(matches!(
+            public_announcement_view(Some(state), renewed_at),
+            PublicAnnouncementStatusView::Advertised {
+                accepted_indexes: 3,
+                ..
+            }
+        ));
+
+        let after_expiry = renewed_expiry + ChronoDuration::seconds(1);
+        record_public_announcement_failure(&announcements, collection_id, 4, after_expiry);
+        let failed = read_lock(&announcements, "test announcements")
+            .unwrap()
+            .get(&collection_id)
+            .copied()
+            .unwrap();
+        assert_eq!(
+            public_announcement_view(Some(failed), after_expiry),
+            PublicAnnouncementStatusView::Offline
+        );
+        assert_eq!(failed.sequence, 4);
+    }
+
+    #[test]
+    fn community_index_takes_priority_over_the_bundled_index_budget() {
+        let database = Database::in_memory().unwrap();
+        let bootstrap = (1..=3)
+            .map(|offset| BootstrapFederationIndexEntry {
+                peer_id: test_public_peer_id(),
+                multiaddr: format!("/ip6/2001:db8::{offset}/tcp/42042"),
+                expires_at: Utc::now() + ChronoDuration::days(1),
+            })
+            .collect::<Vec<_>>();
+        database
+            .replace_bootstrap_federation_indexes(1, &bootstrap)
+            .unwrap();
+        let community_peer_id = test_public_peer_id();
+        database
+            .upsert_community_federation_index(
+                &community_peer_id,
+                "/ip6/2001:db8::4/tcp/42042",
+                true,
+            )
+            .unwrap();
+
+        let selected = selected_federation_indexes(&database).unwrap();
+
+        assert_eq!(selected.len(), 3);
+        let first = selected.first().unwrap();
+        assert_eq!(first.peer_id, community_peer_id);
+        assert_eq!(first.source, "community");
+        assert_eq!(
+            selected
+                .iter()
+                .filter(|index| index.source == "bootstrap")
+                .count(),
+            2
+        );
+    }
 
     #[test]
     fn source_issue_view_exposes_only_the_file_name() {
@@ -2339,9 +6721,47 @@ mod tests {
             "Synthetic collection",
             Path::new("/private/customer/secret-report.pdf"),
             SourceIssueCode::InvalidPdf,
+            None,
         );
 
         assert_eq!(view.source_name, "secret-report.pdf");
+    }
+
+    #[test]
+    fn source_issue_reason_prefers_trailing_cause_detail() {
+        let reason = source_issue_reason(
+            "parse failed: permission denied",
+            SourceIssueCode::Unreadable,
+        )
+        .unwrap_or_default();
+
+        assert_eq!(reason, "permission-denied");
+    }
+
+    #[test]
+    fn source_issue_reason_supports_processing_failed_non_fatal_messages() {
+        let symlink = source_issue_reason(
+            "symbolic links are not accepted",
+            SourceIssueCode::ProcessingFailed,
+        )
+        .unwrap_or_default();
+        let unsupported = source_issue_reason(
+            "unsupported source file extension",
+            SourceIssueCode::ProcessingFailed,
+        )
+        .unwrap_or_default();
+
+        assert_eq!(symlink, "unreadable");
+        assert_eq!(unsupported, "processing-failed");
+    }
+
+    #[test]
+    fn source_issue_reason_uses_known_code_when_no_special_pattern_exists() {
+        let long_reason = "x".repeat(250);
+        let reason = source_issue_reason(&long_reason, SourceIssueCode::Unreadable)
+            .expect("should return a sanitized reason");
+
+        assert_eq!(reason, "unreadable");
     }
 
     #[test]
@@ -2442,6 +6862,62 @@ mod tests {
 
         assert_eq!(trust, PeerTrustState::Unpaired);
         assert_eq!(activity, PeerActivityState::Connected);
+    }
+
+    #[test]
+    fn trusted_peer_metadata_updates_identity_without_changing_authorization() {
+        let database = Database::in_memory().unwrap();
+        let peer = PeerId::random();
+        persist_trusted_peer(&database, peer, Some("Previous name".into())).unwrap();
+
+        persist_trusted_peer_metadata(
+            &database,
+            peer,
+            Some("RUSTICO".into()),
+            Some(DevicePlatform::Windows),
+        )
+        .unwrap();
+
+        let stored = database.peer(&peer.to_string()).unwrap().unwrap();
+        assert_eq!(
+            (
+                stored.display_name.as_deref(),
+                stored.device_platform,
+                stored.trusted
+            ),
+            (Some("RUSTICO"), Some(DevicePlatform::Windows), true)
+        );
+    }
+
+    #[test]
+    fn untrusted_peer_metadata_is_ignored() {
+        let database = Database::in_memory().unwrap();
+        let peer = PeerId::random();
+        database
+            .upsert_peer(&airwiki_core::PeerRecord {
+                peer_id: peer.to_string(),
+                display_name: Some("Untrusted".into()),
+                device_platform: None,
+                trusted: false,
+                blocked: false,
+                paired_at: None,
+                last_seen_at: None,
+            })
+            .unwrap();
+
+        persist_trusted_peer_metadata(
+            &database,
+            peer,
+            Some("Spoofed".into()),
+            Some(DevicePlatform::MacOs),
+        )
+        .unwrap();
+
+        let stored = database.peer(&peer.to_string()).unwrap().unwrap();
+        assert_eq!(
+            (stored.display_name.as_deref(), stored.device_platform),
+            (Some("Untrusted"), None)
+        );
     }
 
     #[test]
@@ -2599,6 +7075,7 @@ mod tests {
             .upsert_peer(&airwiki_core::PeerRecord {
                 peer_id: identity.peer_id().to_string(),
                 display_name: Some("trusted peer".to_owned()),
+                device_platform: None,
                 trusted: true,
                 blocked: false,
                 paired_at: Some(Utc::now()),
@@ -2663,6 +7140,7 @@ mod tests {
             .upsert_peer(&airwiki_core::PeerRecord {
                 peer_id: peer_id.to_string(),
                 display_name: Some("test peer".into()),
+                device_platform: None,
                 trusted: true,
                 blocked: false,
                 paired_at: Some(now),
@@ -2688,6 +7166,19 @@ mod tests {
         (database, proxy, peer_id, collection.id)
     }
 
+    fn durable_authorized_collections(
+        proxy: &DynamicAuthorizedSearchBackend,
+        authorization: &SearchAuthorization,
+        purpose: SearchPurpose,
+    ) -> std::result::Result<Vec<Uuid>, SearchContractError> {
+        durable_authorized_collections_blocking(
+            &proxy.database,
+            &proxy.access,
+            authorization,
+            purpose,
+        )
+    }
+
     #[test]
     fn durable_peer_grant_and_policy_are_all_required() {
         let (database, proxy, peer_id, collection_id) = durable_fixture();
@@ -2698,8 +7189,7 @@ mod tests {
             database.disclosure_gate(),
         );
         assert_eq!(
-            proxy
-                .durable_authorized_collections(&authorization, SearchPurpose::LocalAssistant)
+            durable_authorized_collections(&proxy, &authorization, SearchPurpose::LocalAssistant,)
                 .unwrap(),
             vec![collection_id]
         );
@@ -2709,8 +7199,7 @@ mod tests {
             .set_grant(&peer_id.to_string(), collection_id, false)
             .unwrap();
         assert!(
-            proxy
-                .durable_authorized_collections(&authorization, SearchPurpose::LocalAssistant)
+            durable_authorized_collections(&proxy, &authorization, SearchPurpose::LocalAssistant,)
                 .unwrap()
                 .is_empty()
         );
@@ -2722,8 +7211,7 @@ mod tests {
         // broadened into the current request.
         authorization.allowed_collections.clear();
         assert!(
-            proxy
-                .durable_authorized_collections(&authorization, SearchPurpose::LocalAssistant)
+            durable_authorized_collections(&proxy, &authorization, SearchPurpose::LocalAssistant,)
                 .unwrap()
                 .is_empty()
         );
@@ -2731,8 +7219,7 @@ mod tests {
 
         // Peer sharing does not imply permission to disclose to external AI.
         assert!(
-            proxy
-                .durable_authorized_collections(&authorization, SearchPurpose::ExternalAi)
+            durable_authorized_collections(&proxy, &authorization, SearchPurpose::ExternalAi)
                 .unwrap()
                 .is_empty()
         );
@@ -2743,18 +7230,17 @@ mod tests {
                     local_only: true,
                     peer_shareable: false,
                     allow_external_ai: true,
+                    internet_public: false,
                 },
             )
             .unwrap();
         assert!(
-            proxy
-                .durable_authorized_collections(&authorization, SearchPurpose::LocalAssistant)
+            durable_authorized_collections(&proxy, &authorization, SearchPurpose::LocalAssistant,)
                 .unwrap()
                 .is_empty()
         );
         assert!(
-            proxy
-                .durable_authorized_collections(&authorization, SearchPurpose::ExternalAi)
+            durable_authorized_collections(&proxy, &authorization, SearchPurpose::ExternalAi)
                 .unwrap()
                 .is_empty()
         );
@@ -2765,12 +7251,12 @@ mod tests {
                     local_only: false,
                     peer_shareable: true,
                     allow_external_ai: true,
+                    internet_public: false,
                 },
             )
             .unwrap();
         assert_eq!(
-            proxy
-                .durable_authorized_collections(&authorization, SearchPurpose::ExternalAi)
+            durable_authorized_collections(&proxy, &authorization, SearchPurpose::ExternalAi)
                 .unwrap(),
             vec![collection_id]
         );
@@ -2779,7 +7265,7 @@ mod tests {
         // completes; the final authorization check must honor it immediately.
         proxy.access.revoke_and_block(peer_id);
         assert!(matches!(
-            proxy.durable_authorized_collections(&authorization, SearchPurpose::LocalAssistant),
+            durable_authorized_collections(&proxy, &authorization, SearchPurpose::LocalAssistant,),
             Err(SearchContractError::Unauthorized)
         ));
         proxy.access.mark_trusted(peer_id);
@@ -2787,7 +7273,7 @@ mod tests {
 
         database.revoke_peer(&peer_id.to_string()).unwrap();
         assert!(matches!(
-            proxy.durable_authorized_collections(&authorization, SearchPurpose::LocalAssistant),
+            durable_authorized_collections(&proxy, &authorization, SearchPurpose::LocalAssistant,),
             Err(SearchContractError::Unauthorized)
         ));
     }
@@ -2795,6 +7281,17 @@ mod tests {
     #[test]
     fn final_disclosure_lease_observes_a_policy_change_before_handoff() {
         let (database, proxy, peer_id, collection_id) = durable_fixture();
+        database
+            .update_collection_policy(
+                collection_id,
+                CollectionPolicy {
+                    local_only: false,
+                    peer_shareable: true,
+                    allow_external_ai: true,
+                    internet_public: false,
+                },
+            )
+            .unwrap();
         let source_path =
             std::env::temp_dir().join(format!("airwiki-disclosure-race-{}.md", Uuid::new_v4()));
         std::fs::write(&source_path, "Authorized evidence").unwrap();
@@ -2847,10 +7344,10 @@ mod tests {
             .unwrap();
         let authorization = proxy
             .access
-            .authorize(&peer_id, SearchPurpose::LocalAssistant)
+            .authorize(&peer_id, SearchPurpose::ExternalAi)
             .unwrap();
         let mut response = SearchResponse::empty(Uuid::new_v4());
-        response.hits.push(airwiki_types::SearchHit {
+        let hit = airwiki_types::SearchHit {
             concept_id: published.id,
             collection_id,
             chunk_id,
@@ -2863,7 +7360,11 @@ mod tests {
             updated_at: published.updated_at,
             rank: 1,
             node_id: "test-node".into(),
-        });
+            assurance: None,
+            lifecycle_status: Some("stable".to_owned()),
+        };
+        response.hits.push(hit.clone());
+        response.authorized_candidates.push(hit);
 
         database
             .update_collection_policy(collection_id, CollectionPolicy::local_only())
@@ -2873,11 +7374,12 @@ mod tests {
             &proxy.access,
             response,
             authorization,
-            SearchPurpose::LocalAssistant,
+            SearchPurpose::ExternalAi,
         )
         .unwrap();
 
         assert!(result.response().hits.is_empty());
+        assert!(result.response().authorized_candidates.is_empty());
         std::fs::remove_file(source_path).unwrap();
     }
 
@@ -2892,7 +7394,11 @@ mod tests {
                 proxy.database.disclosure_gate(),
             );
             assert!(matches!(
-                proxy.durable_authorized_collections(&authorization, SearchPurpose::LocalAssistant),
+                durable_authorized_collections(
+                    &proxy,
+                    &authorization,
+                    SearchPurpose::LocalAssistant,
+                ),
                 Err(SearchContractError::Unauthorized)
             ));
         }
@@ -2907,8 +7413,396 @@ mod tests {
             proxy.database.disclosure_gate(),
         );
         assert!(matches!(
-            proxy.durable_authorized_collections(&authorization, SearchPurpose::LocalAssistant),
+            durable_authorized_collections(&proxy, &authorization, SearchPurpose::LocalAssistant,),
             Err(SearchContractError::Unauthorized)
+        ));
+    }
+
+    #[tokio::test]
+    async fn public_browse_rejects_private_collections_and_unreviewed_drafts() {
+        let temporary = tempfile::tempdir().unwrap();
+        let database = Database::in_memory().unwrap();
+        for directory in [
+            "private-source",
+            "private-wiki",
+            "public-source",
+            "public-wiki",
+        ] {
+            std::fs::create_dir_all(temporary.path().join(directory)).unwrap();
+        }
+        let private = database
+            .create_collection(
+                "private",
+                temporary.path().join("private-source"),
+                temporary.path().join("private-wiki"),
+                CollectionPolicy::local_only(),
+            )
+            .unwrap();
+        let public = database
+            .create_collection(
+                "public",
+                temporary.path().join("public-source"),
+                temporary.path().join("public-wiki"),
+                CollectionPolicy::local_only(),
+            )
+            .unwrap();
+        database
+            .update_collection_policy(
+                public.id,
+                CollectionPolicy {
+                    local_only: false,
+                    peer_shareable: false,
+                    allow_external_ai: false,
+                    internet_public: true,
+                },
+            )
+            .unwrap();
+        let source_path = temporary.path().join("public-source/draft.md");
+        std::fs::write(&source_path, "Synthetic draft").unwrap();
+        let source_hash = airwiki_core::sha256_file(&source_path).unwrap();
+        let source = database
+            .register_source(public.id, &source_path, &source_hash, "markdown", 15)
+            .unwrap();
+        database.mark_extracted(source.id(), 0, 15).unwrap();
+        let draft = EnrichmentDraft {
+            concept_type: airwiki_types::ConceptType::Document,
+            title: "Synthetic draft".into(),
+            description: "Synthetic unreviewed draft".into(),
+            language: "en".into(),
+            tags: Vec::new(),
+            entities: Vec::new(),
+            links: Vec::new(),
+            summary: "Not reviewed".into(),
+            classification_confidence: 1.0,
+            classification_explanation: "fixture".into(),
+        };
+        let concept = database
+            .save_enrichment(source.id(), draft.clone(), "test-node", "test-model")
+            .unwrap();
+        let access = AccessControl::with_disclosure_gate(database.disclosure_gate());
+        let engine = Arc::new(DynamicAuthorizedSearchBackend::new(
+            database.clone(),
+            access,
+        ));
+        let backend = DynamicPublicSourceBackend::new(
+            database.clone(),
+            Arc::clone(&engine),
+            test_public_peer_id(),
+        );
+
+        for collection_id in [private.id, public.id] {
+            let result = backend
+                .browse(PublicBrowseRequest {
+                    protocol_version: airwiki_types::PUBLIC_BROWSE_PROTOCOL.to_owned(),
+                    request_id: Uuid::new_v4(),
+                    collection_id,
+                    cursor: None,
+                    target_concept_id: None,
+                    graph_cursor: None,
+                    page: None,
+                    limit: 50,
+                })
+                .await;
+            assert!(matches!(result, Err(PublicSourceBackendError::NotPublic)));
+        }
+
+        database
+            .replace_chunks(
+                concept.id,
+                &[airwiki_core::StoredChunk {
+                    id: Uuid::new_v4(),
+                    concept_id: concept.id,
+                    source_document_id: source.id(),
+                    collection_id: public.id,
+                    ordinal: 0,
+                    heading_or_page: "Fixture".into(),
+                    text: "Synthetic draft".into(),
+                    text_sha256: "chunk-hash".into(),
+                    embedding: vec![0.0; airwiki_core::EMBEDDING_DIMENSIONS],
+                    source_revision: 1,
+                }],
+            )
+            .unwrap();
+        let review_version = database
+            .review_evidence_page(concept.id, 1, None, None, 1)
+            .unwrap()
+            .unwrap()
+            .review_version;
+        OkfPublicationMaterializer::new(database.clone())
+            .approve(concept.id, draft, &review_version)
+            .unwrap();
+        assert_eq!(
+            database.concept(concept.id).unwrap().unwrap().status,
+            DocumentStatus::Published
+        );
+        assert_eq!(
+            database
+                .source_document(source.id())
+                .unwrap()
+                .unwrap()
+                .status,
+            DocumentStatus::Published
+        );
+        assert_eq!(
+            database
+                .public_concept_page(&test_public_peer_id(), public.id, None, 50)
+                .unwrap()
+                .len(),
+            1
+        );
+        {
+            let lease = database.disclosure_gate().acquire_disclosure();
+            assert!(
+                database
+                    .public_manifest_sequence_under_disclosure(&lease, public.id)
+                    .unwrap()
+                    .is_some()
+            );
+            let concepts = database
+                .public_concept_page_under_disclosure(
+                    &lease,
+                    &backend.publisher_id,
+                    public.id,
+                    None,
+                    None,
+                    1,
+                )
+                .unwrap();
+            assert_eq!(concepts.len(), 1);
+            let has_more = !database
+                .public_concept_page_under_disclosure(
+                    &lease,
+                    &backend.publisher_id,
+                    public.id,
+                    Some(concepts[0].concept_id),
+                    None,
+                    1,
+                )
+                .unwrap()
+                .is_empty();
+            assert!(!has_more);
+            assert_eq!(public_page_next_cursor(&concepts, has_more), None);
+            assert_eq!(
+                public_page_next_cursor(&concepts, true),
+                Some(concepts[0].concept_id.to_string())
+            );
+        }
+        let published = backend
+            .browse(PublicBrowseRequest {
+                protocol_version: airwiki_types::PUBLIC_BROWSE_PROTOCOL.to_owned(),
+                request_id: Uuid::new_v4(),
+                collection_id: public.id,
+                cursor: None,
+                target_concept_id: None,
+                graph_cursor: None,
+                page: None,
+                limit: 1,
+            })
+            .await;
+        assert!(
+            published.is_ok(),
+            "public browse failed: {:?}",
+            published.as_ref().err()
+        );
+        drop(published);
+
+        let bundle = OkfBundleInspector::new(database.clone())
+            .inspect_bundle(public.id)
+            .unwrap();
+        let page_fingerprint = bundle
+            .page_fingerprint(KnowledgePageId::Concept(concept.id))
+            .unwrap()
+            .to_owned();
+        let page_request = PublishedWikiPageRequest {
+            page: PublishedWikiPageId::Concept {
+                concept_id: concept.id,
+            },
+            expected_fingerprint: Some(page_fingerprint.clone()),
+        };
+        let complete_public = backend
+            .browse(PublicBrowseRequest {
+                protocol_version: PUBLIC_BROWSE_PROTOCOL_V4.to_owned(),
+                request_id: Uuid::new_v4(),
+                collection_id: public.id,
+                cursor: None,
+                target_concept_id: Some(concept.id),
+                graph_cursor: Some(0),
+                page: Some(page_request.clone()),
+                limit: 1,
+            })
+            .await
+            .unwrap();
+        let public_page = complete_public.page();
+        let public_workspace = public_page.workspace.as_ref().unwrap();
+        assert!(
+            public_workspace
+                .reserved_pages
+                .iter()
+                .any(|page| page.page == PublishedWikiPageId::Index)
+        );
+        assert_eq!(public_workspace.documents.len(), 1);
+        let public_document = public_page.document.as_ref().unwrap();
+        assert_eq!(public_document.descriptor.fingerprint, page_fingerprint);
+        assert!(!public_document.body_markdown.is_empty());
+        assert!(
+            !public_document
+                .body_markdown
+                .contains(&source_path.display().to_string())
+        );
+        assert!(!public_document.truncated);
+        let public_body = public_document.body_markdown.clone();
+        let public_workspace_snapshot = public_workspace.clone();
+        drop(complete_public);
+
+        let stale_page = backend
+            .browse(PublicBrowseRequest {
+                protocol_version: PUBLIC_BROWSE_PROTOCOL_V4.to_owned(),
+                request_id: Uuid::new_v4(),
+                collection_id: public.id,
+                cursor: None,
+                target_concept_id: Some(concept.id),
+                graph_cursor: None,
+                page: Some(PublishedWikiPageRequest {
+                    page: PublishedWikiPageId::Concept {
+                        concept_id: concept.id,
+                    },
+                    expected_fingerprint: Some("0".repeat(64)),
+                }),
+                limit: 1,
+            })
+            .await;
+        assert!(matches!(
+            stale_page,
+            Err(PublicSourceBackendError::Unavailable)
+        ));
+
+        database
+            .update_collection_policy(
+                public.id,
+                CollectionPolicy {
+                    local_only: false,
+                    peer_shareable: true,
+                    allow_external_ai: false,
+                    internet_public: true,
+                },
+            )
+            .unwrap();
+        let lan_identity = NodeIdentity::load_or_create(&MemorySecretStore::default()).unwrap();
+        let lan_peer = lan_identity.peer_id();
+        database
+            .upsert_peer(&airwiki_core::PeerRecord {
+                peer_id: lan_peer.to_string(),
+                display_name: Some("LAN reader".to_owned()),
+                device_platform: None,
+                trusted: true,
+                blocked: false,
+                paired_at: Some(Utc::now()),
+                last_seen_at: Some(Utc::now()),
+            })
+            .unwrap();
+        database
+            .set_grant(&lan_peer.to_string(), public.id, true)
+            .unwrap();
+        engine.access.mark_trusted(lan_peer);
+        engine.access.grant(lan_peer, public.id).unwrap();
+        let authorization = engine
+            .access
+            .authorize(&lan_peer, SearchPurpose::LocalAssistant)
+            .unwrap();
+        let complete_lan = engine
+            .browse_authorized(
+                SharedWikiBrowseRequest {
+                    protocol_version: SHARED_WIKI_BROWSE_PROTOCOL_V2.to_owned(),
+                    request_id: Uuid::new_v4(),
+                    collection_id: public.id,
+                    cursor: None,
+                    target_concept_id: Some(concept.id),
+                    graph_cursor: Some(0),
+                    page: Some(page_request),
+                    limit: 1,
+                },
+                authorization,
+            )
+            .await
+            .unwrap();
+        let lan_page = complete_lan.page();
+        assert_eq!(
+            lan_page
+                .document
+                .as_ref()
+                .map(|document| document.body_markdown.as_str()),
+            Some(public_body.as_str())
+        );
+        let lan_workspace = lan_page.workspace.as_ref().unwrap();
+        assert_ne!(
+            lan_workspace.workspace_fingerprint,
+            public_workspace_snapshot.workspace_fingerprint
+        );
+        assert_eq!(
+            lan_workspace.reserved_pages,
+            public_workspace_snapshot.reserved_pages
+        );
+        assert_eq!(lan_workspace.documents, public_workspace_snapshot.documents);
+        assert_eq!(lan_workspace.links, public_workspace_snapshot.links);
+        assert_eq!(
+            lan_workspace.next_graph_cursor,
+            public_workspace_snapshot.next_graph_cursor
+        );
+        drop(complete_lan);
+
+        {
+            let lease = database.disclosure_gate().acquire_disclosure();
+            let sequence = database
+                .public_manifest_sequence_under_disclosure(&lease, public.id)
+                .unwrap()
+                .unwrap();
+            let fingerprint = database
+                .public_collection_fingerprint_under_disclosure(&lease, public.id)
+                .unwrap();
+            let current = airwiki_types::PublicCollectionTarget {
+                collection_id: public.id,
+                manifest_sequence: sequence,
+                publication_fingerprint: fingerprint.clone(),
+            };
+            assert!(revalidate_public_targets(&database, &lease, &[current]).is_ok());
+            let stale_fingerprint = airwiki_types::PublicCollectionTarget {
+                collection_id: public.id,
+                manifest_sequence: sequence,
+                publication_fingerprint: "0".repeat(64),
+            };
+            assert!(matches!(
+                revalidate_public_targets(&database, &lease, &[stale_fingerprint]),
+                Err(PublicSourceBackendError::NotPublic)
+            ));
+            let future_sequence = airwiki_types::PublicCollectionTarget {
+                collection_id: public.id,
+                manifest_sequence: sequence.saturating_add(1),
+                publication_fingerprint: fingerprint,
+            };
+            assert!(matches!(
+                revalidate_public_targets(&database, &lease, &[future_sequence]),
+                Err(PublicSourceBackendError::NotPublic)
+            ));
+        }
+
+        database
+            .register_source(public.id, &source_path, "changed-hash", "markdown", 15)
+            .unwrap();
+        let withdrawn = backend
+            .browse(PublicBrowseRequest {
+                protocol_version: airwiki_types::PUBLIC_BROWSE_PROTOCOL.to_owned(),
+                request_id: Uuid::new_v4(),
+                collection_id: public.id,
+                cursor: None,
+                target_concept_id: None,
+                graph_cursor: None,
+                page: None,
+                limit: 50,
+            })
+            .await;
+        assert!(matches!(
+            withdrawn,
+            Err(PublicSourceBackendError::NotPublic)
         ));
     }
 }

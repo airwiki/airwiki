@@ -1,22 +1,49 @@
+param(
+    [string] $NodeBinDir
+)
+
 $ErrorActionPreference = "Stop"
 Set-StrictMode -Version Latest
 
 $Root = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
-$OutDir = Join-Path $Root "target\packages\windows"
+$TargetRoot = Join-Path $Root "target"
+$OutDir = Join-Path $TargetRoot "packages\windows"
 $ReleaseDir = Join-Path $Root "target\x86_64-pc-windows-msvc\release"
 $Bridge = Join-Path $ReleaseDir "airwiki-mcp-bridge.exe"
 $Desktop = Join-Path $ReleaseDir "airwiki.exe"
 $FirewallHelper = Join-Path $ReleaseDir "airwiki-windows-firewall-helper.exe"
 $Mcpb = Join-Path $Root "target\mcpb\x86_64-pc-windows-msvc\airwiki-claude.mcpb"
 $Xtask = Join-Path $Root "target\debug\xtask.exe"
-$NsisToolCacheRoot = Join-Path ([Environment]::GetFolderPath("LocalApplicationData")) ".cargo-packager"
-$SevenZipToolRoot = Join-Path $Root "target\verified-tools\7zip-26.02"
-$SevenZip = Join-Path $SevenZipToolRoot "7z.exe"
+$Tauri = Join-Path $Root "apps\desktop\ui\node_modules\.bin\tauri.cmd"
+$SvelteCheck = Join-Path $Root "apps\desktop\ui\node_modules\.bin\svelte-check.cmd"
+$Vite = Join-Path $Root "apps\desktop\ui\node_modules\.bin\vite.cmd"
+$TauriInstallerDir = Join-Path $ReleaseDir "bundle\msi"
 $LlamaRuntime = Join-Path $Root "resources\llama\windows-x64"
 $LlamaPolicy = Join-Path $Root "packaging\llama-windows-build-policy.json"
 . (Join-Path $PSScriptRoot "windows-runtime.ps1")
 . (Join-Path $PSScriptRoot "windows-payload.ps1")
 . (Join-Path $PSScriptRoot "windows-safe-staging.ps1")
+. (Join-Path $PSScriptRoot "windows-wix.ps1")
+
+$PreviousPath = $env:Path
+if ($NodeBinDir) {
+    $ResolvedNodeBinDir = (Resolve-Path -LiteralPath $NodeBinDir).Path
+    $NodeExecutable = Join-Path $ResolvedNodeBinDir "node.exe"
+    $CorepackCli = Join-Path $ResolvedNodeBinDir "node_modules\corepack\dist\corepack.js"
+    if (-not (Test-Path -LiteralPath $NodeExecutable -PathType Leaf) -or
+        -not (Test-Path -LiteralPath $CorepackCli -PathType Leaf)) {
+        throw "NodeBinDir must contain the official Node.js Windows distribution"
+    }
+    $NodeVersion = (& $NodeExecutable --version 2>&1 | Out-String).Trim()
+    if ($LASTEXITCODE -ne 0 -or $NodeVersion -ne "v24.15.0") {
+        throw "NodeBinDir must provide Node.js v24.15.0"
+    }
+    & $NodeExecutable $CorepackCli enable pnpm --install-directory $ResolvedNodeBinDir
+    if ($LASTEXITCODE -ne 0) {
+        throw "Could not provision the pinned pnpm shim"
+    }
+    $env:Path = "$ResolvedNodeBinDir;$PreviousPath"
+}
 
 function Assert-X64Pe([string] $Path) {
     if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) {
@@ -40,7 +67,7 @@ function Assert-X64Pe([string] $Path) {
 function Get-SinglePayload([string] $Root, [string] $Name) {
     $Matches = @(Get-ChildItem -LiteralPath $Root -Recurse -File -Filter $Name)
     if ($Matches.Count -ne 1) {
-        throw "Expected exactly one $Name in the NSIS payload"
+        throw "Expected exactly one $Name in the MSI payload"
     }
     return $Matches[0].FullName
 }
@@ -49,105 +76,58 @@ function Assert-SameBytes([string] $Expected, [string] $Actual, [string] $Label)
     $ExpectedHash = (Get-FileHash -LiteralPath $Expected -Algorithm SHA256).Hash
     $ActualHash = (Get-FileHash -LiteralPath $Actual -Algorithm SHA256).Hash
     if ($ExpectedHash -ne $ActualHash) {
-        throw "$Label in the NSIS payload differs from the fresh artifact"
+        throw "$Label in the MSI payload differs from the fresh artifact"
     }
 }
 
-Push-Location $Root
-try {
-    $CargoPackager = (Get-Command cargo-packager.exe -CommandType Application `
-        -ErrorAction Stop).Source
-    $CargoPackagerVersion = (& $CargoPackager --version 2>&1 | Out-String).Trim()
-    if ($LASTEXITCODE -ne 0 -or $CargoPackagerVersion -ne "cargo-packager 0.11.8") {
-        throw "cargo-packager 0.11.8 is required"
+function Assert-WindowsMsi([string] $Path) {
+    $Verified = Get-VerifiedWindowsRegularFile $Path "fresh MSI installer"
+    $Bytes = [IO.File]::ReadAllBytes($Verified)
+    $OleHeader = [byte[]] @(0xd0, 0xcf, 0x11, 0xe0, 0xa1, 0xb1, 0x1a, 0xe1)
+    if ($Bytes.Length -lt $OleHeader.Length) {
+        throw "MSI installer is truncated"
     }
-    & (Join-Path $PSScriptRoot "prepare-verified-nsis-toolchain.ps1") `
-        -ToolCacheRoot $NsisToolCacheRoot | Out-Null
-    & (Join-Path $PSScriptRoot "prepare-verified-7zip.ps1") `
-        -ToolRoot $SevenZipToolRoot | Out-Null
-    Remove-AirWikiWindowsStagingPath `
-        -Path $OutDir `
-        -AllowedRoot (Join-Path $Root "target") `
-        -Label "Windows package output"
-    New-Item -ItemType Directory -Path $OutDir -Force | Out-Null
-    $Started = [DateTime]::UtcNow
+    for ($Index = 0; $Index -lt $OleHeader.Length; $Index++) {
+        if ($Bytes[$Index] -ne $OleHeader[$Index]) {
+            throw "Installer is not an MSI compound file"
+        }
+    }
+}
 
-    & cargo build --locked -p xtask
-    if ($LASTEXITCODE -ne 0) {
-        throw "xtask build failed"
+function Expand-WindowsMsi([string] $Installer, [string] $Destination) {
+    $MsiExec = Join-Path $env:SystemRoot "System32\msiexec.exe"
+    $VerifiedMsiExec = Get-VerifiedWindowsRegularFile $MsiExec "Windows Installer executable"
+    $Arguments = "/a `"$Installer`" /qn /norestart TARGETDIR=`"$Destination`""
+    $Process = Start-Process `
+        -FilePath $VerifiedMsiExec `
+        -ArgumentList $Arguments `
+        -Wait `
+        -PassThru `
+        -WindowStyle Hidden
+    if ($Process.ExitCode -ne 0) {
+        throw "Windows Installer could not extract the MSI payload (exit $($Process.ExitCode))"
     }
-    & $Xtask licenses check
-    if ($LASTEXITCODE -ne 0) {
-        throw "license validation failed"
-    }
-    & $Xtask packaging verify-windows-uninstaller
-    if ($LASTEXITCODE -ne 0) {
-        throw "Windows uninstaller policy validation failed"
-    }
-    & powershell.exe -NoProfile -ExecutionPolicy Bypass -File packaging\fetch-llama-windows.ps1
-    if ($LASTEXITCODE -ne 0) {
-        throw "llama.cpp runtime source build failed"
-    }
-    $LlamaManifest = Get-WindowsLlamaRuntimeManifest $LlamaRuntime $LlamaPolicy
-    $env:AIRWIKI_WINDOWS_LLAMA_SERVER_SHA256 = `
-        [string] @($LlamaManifest.runtime.files)[0].sha256
-    & cargo build --locked --release --target x86_64-pc-windows-msvc `
-        -p airwiki-desktop `
-        -p airwiki-mcp-bridge `
-        -p airwiki-windows-firewall-helper
-    if ($LASTEXITCODE -ne 0) {
-        throw "release build failed"
-    }
-    Assert-WindowsDesktopEmbedsLlamaRuntimeHash $Desktop $LlamaRuntime $LlamaPolicy
-    & $Xtask mcpb build `
-        --target x86_64-pc-windows-msvc `
-        --bridge $Bridge `
-        --output $Mcpb
-    if ($LASTEXITCODE -ne 0) {
-        throw "Claude MCPB build failed"
-    }
-    Assert-X64Pe $Desktop
-    Assert-X64Pe $Bridge
-    Assert-X64Pe $FirewallHelper
-    Assert-WindowsFirewallHelperManifest `
-        $FirewallHelper `
-        "fresh Windows firewall helper"
-    & $Xtask mcpb verify `
-        --target x86_64-pc-windows-msvc `
-        --bridge $Bridge `
-        --output $Mcpb
-    if ($LASTEXITCODE -ne 0) {
-        throw "Claude MCPB validation failed"
-    }
+}
 
-    # The runtime is built before the desktop so its per-candidate SHA-256 is
-    # embedded in the executable. Revalidate both after every Cargo build.
-    Assert-WindowsDesktopEmbedsLlamaRuntimeHash $Desktop $LlamaRuntime $LlamaPolicy
-    & $CargoPackager --config packaging/windows/Packager.toml
-    if ($LASTEXITCODE -ne 0) {
-        throw "cargo-packager failed"
-    }
-
-    $Installers = @(Get-ChildItem -LiteralPath $OutDir -File -Filter *.exe)
-    if ($Installers.Count -ne 1) {
-        throw "Expected exactly one fresh NSIS installer"
-    }
-    if ($Installers[0].LastWriteTimeUtc -lt $Started) {
-        throw "NSIS installer predates this packaging run"
-    }
-    Assert-WindowsPeMachine $Installers[0].FullName 0x014c "fresh NSIS installer"
-
-    $ExtractDir = Join-Path $Root "target\packages\windows-payload-check"
+function Assert-WindowsMsiPayload(
+    [string] $Installer,
+    [string] $ExtractDir,
+    [string] $Desktop,
+    [string] $Bridge,
+    [string] $FirewallHelper,
+    [string] $Mcpb,
+    [string] $LlamaRuntime,
+    [string] $LlamaPolicy,
+    [string] $Xtask,
+    [string] $Root
+) {
     Remove-AirWikiWindowsStagingPath `
         -Path $ExtractDir `
         -AllowedRoot (Join-Path $Root "target") `
         -Label "Windows payload verification staging"
     New-Item -ItemType Directory -Path $ExtractDir -Force | Out-Null
     try {
-        & $SevenZip x -y "-o$ExtractDir" $Installers[0].FullName | Out-Null
-        if ($LASTEXITCODE -ne 0) {
-            throw "7-Zip could not inspect the NSIS payload"
-        }
+        Expand-WindowsMsi $Installer $ExtractDir
         $PackagedDesktop = Get-SinglePayload $ExtractDir "airwiki.exe"
         $PayloadRoot = [IO.Path]::GetDirectoryName($PackagedDesktop)
         $PackagedBridge = Get-VerifiedWindowsRegularFile `
@@ -172,7 +152,10 @@ try {
         Assert-WindowsFirewallHelperManifest `
             $PackagedFirewallHelper `
             "packaged Windows firewall helper"
-        Assert-SameBytes $Desktop $PackagedDesktop "Desktop executable"
+        Assert-WindowsMsiBundleTypePatch `
+            $Desktop `
+            $PackagedDesktop `
+            "Desktop executable"
         Assert-SameBytes $Bridge $PackagedBridge "MCP bridge"
         Assert-SameBytes $FirewallHelper $PackagedFirewallHelper "Windows Firewall helper"
         Assert-SameBytes $Mcpb $PackagedMcpb "Claude MCPB"
@@ -185,6 +168,10 @@ try {
             (Join-Path $Root "resources\licenses") `
             (Join-Path $PayloadRoot "licenses") `
             "packaged license inventory"
+        Assert-WindowsDirectoryTreeMatches `
+            (Join-Path $Root "resources\integrations\workflow") `
+            (Join-Path $PayloadRoot "integrations\workflow") `
+            "packaged AirWiki workflow guide"
         $PackagedRuntimeRoot = Get-WindowsPackagedRuntimeRoot `
             $PackagedDesktop `
             $PackagedLlamaServer
@@ -201,7 +188,7 @@ try {
             --bridge $PackagedBridge `
             --output $PackagedMcpb
         if ($LASTEXITCODE -ne 0) {
-            throw "Claude MCPB inside the NSIS payload failed validation"
+            throw "Claude MCPB inside the MSI payload failed validation"
         }
     } finally {
         Remove-AirWikiWindowsStagingPath `
@@ -209,7 +196,137 @@ try {
             -AllowedRoot (Join-Path $Root "target") `
             -Label "Windows payload verification staging"
     }
-    Write-Host "Verified fresh Windows x64 installer: $($Installers[0].FullName)"
+}
+
+Push-Location $Root
+try {
+    foreach ($FrontendTool in @($Tauri, $SvelteCheck, $Vite)) {
+        if (-not (Test-Path -LiteralPath $FrontendTool -PathType Leaf)) {
+            throw "pinned frontend build dependencies are missing; run pnpm install --frozen-lockfile --ignore-scripts --prod=false"
+        }
+    }
+    $TauriVersion = (& $Tauri --version 2>&1 | Out-String).Trim()
+    if ($LASTEXITCODE -ne 0 -or $TauriVersion -ne "tauri-cli 2.11.4") {
+        throw "Tauri CLI 2.11.4 is required"
+    }
+    Assert-AirWikiWindowsPathHasNoReparsePoint `
+        $TargetRoot `
+        "Windows target staging root"
+    New-Item -ItemType Directory -Path $TargetRoot -Force | Out-Null
+    Assert-AirWikiWindowsPathHasNoReparsePoint `
+        $TargetRoot `
+        "Windows target staging root"
+    Remove-AirWikiWindowsStagingPath `
+        -Path $OutDir `
+        -AllowedRoot $TargetRoot `
+        -Label "Windows package output"
+    New-Item -ItemType Directory -Path $OutDir -Force | Out-Null
+    $Started = [DateTime]::UtcNow
+
+    & cargo build --locked -p xtask
+    if ($LASTEXITCODE -ne 0) {
+        throw "xtask build failed"
+    }
+    & $Xtask licenses check
+    if ($LASTEXITCODE -ne 0) {
+        throw "license validation failed"
+    }
+    & $Xtask workflow-guide check
+    if ($LASTEXITCODE -ne 0) {
+        throw "AirWiki workflow guide validation failed"
+    }
+    & $Xtask packaging verify-windows-msi
+    if ($LASTEXITCODE -ne 0) {
+        throw "Windows MSI policy validation failed"
+    }
+    & powershell.exe -NoProfile -ExecutionPolicy Bypass -File packaging\fetch-llama-windows.ps1
+    if ($LASTEXITCODE -ne 0) {
+        throw "llama.cpp runtime source build failed"
+    }
+    $LlamaManifest = Get-WindowsLlamaRuntimeManifest $LlamaRuntime $LlamaPolicy
+    $env:AIRWIKI_WINDOWS_LLAMA_SERVER_SHA256 = `
+        [string] @($LlamaManifest.runtime.files)[0].sha256
+    & cargo build --locked --release --target x86_64-pc-windows-msvc `
+        -p airwiki-mcp-bridge `
+        -p airwiki-windows-firewall-helper
+    if ($LASTEXITCODE -ne 0) {
+        throw "release build failed"
+    }
+    & $Xtask mcpb build `
+        --target x86_64-pc-windows-msvc `
+        --bridge $Bridge `
+        --output $Mcpb
+    if ($LASTEXITCODE -ne 0) {
+        throw "Claude MCPB build failed"
+    }
+    Assert-X64Pe $Bridge
+    Assert-X64Pe $FirewallHelper
+    Assert-WindowsFirewallHelperManifest `
+        $FirewallHelper `
+        "fresh Windows firewall helper"
+    & $Xtask mcpb verify `
+        --target x86_64-pc-windows-msvc `
+        --bridge $Bridge `
+        --output $Mcpb
+    if ($LASTEXITCODE -ne 0) {
+        throw "Claude MCPB validation failed"
+    }
+    & $Xtask packaging generate-windows-msi-resources
+    if ($LASTEXITCODE -ne 0) {
+        throw "Windows MSI resource fragment generation failed"
+    }
+
+    Push-Location (Join-Path $Root "apps\desktop")
+    try {
+        & $Tauri build `
+            --ci `
+            --config ..\..\packaging\windows\tauri.msi.bundle.conf.json `
+            --target x86_64-pc-windows-msvc `
+            --bundles msi
+        if ($LASTEXITCODE -ne 0) {
+            Write-WixLightDiagnostic $Root $ReleaseDir
+            throw "Tauri MSI packaging failed"
+        }
+    } finally {
+        Pop-Location
+    }
+    Assert-WindowsWixLicenseRtf $ReleaseDir $Started
+    Assert-X64Pe $Desktop
+    Assert-WindowsDesktopEmbedsLlamaRuntimeHash $Desktop $LlamaRuntime $LlamaPolicy
+
+    $TauriInstallers = @(Get-ChildItem -LiteralPath $TauriInstallerDir -File -Filter *.msi)
+    if ($TauriInstallers.Count -ne 2) {
+        throw "Expected exactly two localized Tauri MSI installers"
+    }
+    foreach ($TauriInstaller in $TauriInstallers) {
+        Copy-Item -LiteralPath $TauriInstaller.FullName -Destination $OutDir
+    }
+    $Installers = @(Get-ChildItem -LiteralPath $OutDir -File -Filter *.msi)
+    if ($Installers.Count -ne 2) {
+        throw "Expected exactly two fresh localized MSI installers"
+    }
+    foreach ($Installer in $Installers) {
+        if ($Installer.LastWriteTimeUtc -lt $Started) {
+            throw "MSI installer predates this packaging run"
+        }
+        Assert-WindowsMsi $Installer.FullName
+    }
+
+    for ($Index = 0; $Index -lt $Installers.Count; $Index++) {
+        Assert-WindowsMsiPayload `
+            -Installer $Installers[$Index].FullName `
+            -ExtractDir (Join-Path $Root "target\packages\windows-payload-check-$Index") `
+            -Desktop $Desktop `
+            -Bridge $Bridge `
+            -FirewallHelper $FirewallHelper `
+            -Mcpb $Mcpb `
+            -LlamaRuntime $LlamaRuntime `
+            -LlamaPolicy $LlamaPolicy `
+            -Xtask $Xtask `
+            -Root $Root
+    }
+    Write-Host "Verified fresh Windows x64 MSI installers: $($Installers.FullName -join ', ')"
 } finally {
+    $env:Path = $PreviousPath
     Pop-Location
 }

@@ -3,38 +3,183 @@ set -eu
 
 ROOT=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 cd "$ROOT"
-APP="$ROOT/target/packages/macos/AirWiki.app"
+if [ -n "${AIRWIKI_RELEASE_VERSION:-}" ]; then
+  VERSION=$(node "$ROOT/packaging/release-version.mjs" --expect "$AIRWIKI_RELEASE_VERSION")
+else
+  VERSION=$(node "$ROOT/packaging/release-version.mjs")
+fi
 OUT_DIR="$ROOT/target/packages/macos"
-OUT_NAME="AirWiki_0.2.0_aarch64.dmg"
+OUT_NAME="AirWiki_${VERSION}_aarch64.dmg"
+TAURI_BUNDLE_DIR="$ROOT/target/aarch64-apple-darwin/release/bundle"
+APP="$TAURI_BUNDLE_DIR/macos/AirWiki.app"
+TAURI_DMG="$TAURI_BUNDLE_DIR/dmg/$OUT_NAME"
+TAURI_DMG_WORK="$TAURI_BUNDLE_DIR/macos/$OUT_NAME"
+FINAL_APP="$OUT_DIR/AirWiki.app"
 RELEASE_BINARY="$ROOT/target/aarch64-apple-darwin/release/airwiki"
 PACKAGED_BINARY="$APP/Contents/MacOS/airwiki"
 RELEASE_BRIDGE="$ROOT/target/aarch64-apple-darwin/release/airwiki-mcp-bridge"
 PACKAGED_BRIDGE="$APP/Contents/Resources/integrations/bridge/airwiki-mcp-bridge"
 SOURCE_MCPB="$ROOT/target/mcpb/aarch64-apple-darwin/airwiki-claude.mcpb"
 PACKAGED_MCPB="$APP/Contents/Resources/integrations/airwiki-claude.mcpb"
+SOURCE_WORKFLOW_GUIDE="$ROOT/resources/integrations/workflow"
+PACKAGED_WORKFLOW_GUIDE="$APP/Contents/Resources/integrations/workflow"
 SOURCE_ICON="$ROOT/resources/branding/airwiki.icns"
 PACKAGED_ICON="$APP/Contents/Resources/airwiki.icns"
 READY_STAMP="$ROOT/target/packaging-macos-ready.stamp"
+RUNTIME_MACHO_LIST="$ROOT/target/packaging-macos-runtime-machos.txt"
 SOURCE_RUNTIME_DIR="$ROOT/resources/llama/macos-aarch64"
+STAGED_RUNTIME_DIR="$ROOT/target/packaging-resources/macos/llama"
+STAGED_RUNTIME_SERVER="$STAGED_RUNTIME_DIR/llama-b9946/llama-server"
 PACKAGED_RUNTIME_DIR="$APP/Contents/Resources/llama"
 LAUNCH_AGENT_SOURCE="$ROOT/packaging/macos/io.github.airwiki.AirWiki.background.plist"
 LAUNCH_AGENT_DIR="$APP/Contents/Library/LaunchAgents"
 LAUNCH_AGENT="$LAUNCH_AGENT_DIR/io.github.airwiki.AirWiki.background.plist"
 SIGNING_IDENTITY=${AIRWIKI_SIGNING_IDENTITY:--}
+SIGNING_PURPOSE=${AIRWIKI_SIGNING_PURPOSE:-}
 
-# A failed build must never cause the fallback to package an older bundle.
-rm -rf -- "$APP"
-rm -f -- "$OUT_DIR/$OUT_NAME" "$OUT_DIR/rw.$OUT_NAME"
-rm -f -- "$SOURCE_MCPB" "$READY_STAMP"
+for FRONTEND_TOOL in tauri svelte-check vite; do
+  if [ ! -x "$ROOT/apps/desktop/ui/node_modules/.bin/$FRONTEND_TOOL" ]; then
+    echo "pinned frontend build dependencies are missing; run pnpm install --frozen-lockfile --ignore-scripts --prod=false" >&2
+    exit 1
+  fi
+done
 
-cargo packager --config packaging/macos/Packager.toml || true
+if [ -z "$SIGNING_PURPOSE" ]; then
+  if [ "$SIGNING_IDENTITY" = "-" ]; then
+    SIGNING_PURPOSE=adhoc
+  else
+    SIGNING_PURPOSE=release
+  fi
+fi
+case "$SIGNING_PURPOSE" in
+  adhoc)
+    if [ "$SIGNING_IDENTITY" != "-" ]; then
+      echo "ad-hoc packaging must use the ad-hoc signing identity" >&2
+      exit 1
+    fi
+    ;;
+  development | release)
+    if [ "$SIGNING_IDENTITY" = "-" ]; then
+      echo "identified packaging requires a non-ad-hoc signing identity" >&2
+      exit 1
+    fi
+    ;;
+  *)
+    echo "AIRWIKI_SIGNING_PURPOSE must be adhoc, development or release" >&2
+    exit 1
+    ;;
+esac
+
+runtime_macho_paths() {
+  find "$1" -type f -exec sh -c '
+    for candidate do
+      if xcrun lipo -archs "$candidate" >/dev/null 2>&1; then
+        printf "%s\n" "$candidate"
+      fi
+    done
+  ' sh {} +
+}
+
+verify_release_runtime_signature() {
+  CANDIDATE=$1
+  if ! codesign --verify --strict --verbose=2 "$CANDIDATE"; then
+    echo "signed llama.cpp runtime item failed code-signature verification" >&2
+    exit 1
+  fi
+  if ! DETAILS=$(codesign -dv --verbose=4 "$CANDIDATE" 2>&1); then
+    echo "could not inspect signed llama.cpp runtime item" >&2
+    exit 1
+  fi
+  case "$DETAILS" in
+    *"Authority=Developer ID Application:"*"Timestamp="*"TeamIdentifier="*"Runtime Version="*) ;;
+    *)
+      echo "llama.cpp runtime item lacks Developer ID, timestamp or Hardened Runtime" >&2
+      exit 1
+      ;;
+  esac
+  if ! ARCHS=$(xcrun lipo -archs "$CANDIDATE") || [ "$ARCHS" != "arm64" ]; then
+    echo "signed llama.cpp runtime item is not arm64-only" >&2
+    exit 1
+  fi
+}
+
+sign_release_runtime() {
+  RUNTIME_ROOT=$1
+  rm -f -- "$RUNTIME_MACHO_LIST"
+  runtime_macho_paths "$RUNTIME_ROOT" >"$RUNTIME_MACHO_LIST"
+  if [ ! -s "$RUNTIME_MACHO_LIST" ]; then
+    echo "verified llama.cpp runtime contains no Mach-O files" >&2
+    exit 1
+  fi
+  while IFS= read -r CANDIDATE; do
+    codesign --force --sign "$SIGNING_IDENTITY" --options runtime --timestamp "$CANDIDATE"
+    verify_release_runtime_signature "$CANDIDATE"
+  done <"$RUNTIME_MACHO_LIST"
+  rm -f -- "$RUNTIME_MACHO_LIST"
+}
+
+# A failed build must never cause an older bundle or staged payload to survive.
+rm -rf -- "$APP" "$FINAL_APP" "$STAGED_RUNTIME_DIR"
+rm -f -- "$TAURI_DMG" "$TAURI_DMG_WORK" "$OUT_DIR/$OUT_NAME" "$OUT_DIR/rw.$OUT_NAME"
+if [ -d "$TAURI_BUNDLE_DIR/macos" ]; then
+  find "$TAURI_BUNDLE_DIR/macos" -maxdepth 1 -type f -name "rw.*.$OUT_NAME" -exec rm -f -- {} +
+fi
+rm -f -- "$SOURCE_MCPB" "$READY_STAMP" "$RUNTIME_MACHO_LIST"
+unset AIRWIKI_MACOS_LLAMA_SERVER_SHA256
+
+cargo run --locked -p xtask -- workflow-guide check
+cargo run --locked -p xtask -- licenses check
+./packaging/fetch-llama-macos.sh
+mkdir -p -- "$STAGED_RUNTIME_DIR"
+cp -RL -- "$SOURCE_RUNTIME_DIR/." "$STAGED_RUNTIME_DIR/"
+if [ -n "$(find "$STAGED_RUNTIME_DIR" -type l -print -quit)" ] ||
+  ! diff -qr "$SOURCE_RUNTIME_DIR" "$STAGED_RUNTIME_DIR" >/dev/null; then
+  echo "staged llama.cpp runtime differs from the verified source payload" >&2
+  exit 1
+fi
+RUNTIME_EXPECTED_DIR="$SOURCE_RUNTIME_DIR"
+if [ "$SIGNING_PURPOSE" = release ]; then
+  # The source cache remains byte-for-byte upstream. Only the already verified
+  # staging copy is transformed into the Developer ID distribution payload.
+  sign_release_runtime "$STAGED_RUNTIME_DIR"
+  RUNTIME_EXPECTED_DIR="$STAGED_RUNTIME_DIR"
+  AIRWIKI_MACOS_LLAMA_SERVER_SHA256=$(shasum -a 256 "$STAGED_RUNTIME_SERVER" | awk '{print $1}')
+  if [ "${#AIRWIKI_MACOS_LLAMA_SERVER_SHA256}" -ne 64 ]; then
+    echo "signed llama.cpp runtime hash is not a lowercase SHA-256" >&2
+    exit 1
+  fi
+  case "$AIRWIKI_MACOS_LLAMA_SERVER_SHA256" in
+    *[!0-9a-f]*)
+      echo "signed llama.cpp runtime hash is not a lowercase SHA-256" >&2
+      exit 1
+      ;;
+  esac
+  export AIRWIKI_MACOS_LLAMA_SERVER_SHA256
+fi
+cargo build --locked --release --target aarch64-apple-darwin -p airwiki-mcp-bridge
+./packaging/sign-macos-bridge.sh
+cargo run --locked -p xtask -- mcpb build \
+  --target aarch64-apple-darwin \
+  --bridge "$RELEASE_BRIDGE" \
+  --output "$SOURCE_MCPB"
+touch "$READY_STAMP"
+
+(
+  cd "$ROOT/apps/desktop"
+  export APPLE_SIGNING_IDENTITY="$SIGNING_IDENTITY"
+  ./ui/node_modules/.bin/tauri build \
+    --ci \
+    --config ../../packaging/macos/tauri.bundle.conf.json \
+    --target aarch64-apple-darwin \
+    --bundles app,dmg
+)
 
 if [ ! -f "$READY_STAMP" ]; then
-  echo "cargo-packager did not complete its build and validation hook" >&2
+  echo "Tauri packaging preparation did not complete" >&2
   exit 1
 fi
 if [ ! -d "$APP" ]; then
-  echo "cargo-packager failed before producing AirWiki.app" >&2
+  echo "Tauri bundler failed before producing AirWiki.app" >&2
   exit 1
 fi
 if [ ! -x "$RELEASE_BINARY" ] || [ ! -x "$PACKAGED_BINARY" ] ||
@@ -44,6 +189,12 @@ if [ ! -x "$RELEASE_BINARY" ] || [ ! -x "$PACKAGED_BINARY" ] ||
 fi
 if [ ! -f "$SOURCE_MCPB" ] || [ ! -f "$PACKAGED_MCPB" ]; then
   echo "fresh or packaged Claude MCPB is missing" >&2
+  exit 1
+fi
+if [ ! -d "$PACKAGED_WORKFLOW_GUIDE" ] ||
+  [ -n "$(find "$PACKAGED_WORKFLOW_GUIDE" -type l -print -quit)" ] ||
+  ! diff -qr "$SOURCE_WORKFLOW_GUIDE" "$PACKAGED_WORKFLOW_GUIDE" >/dev/null; then
+  echo "packaged AirWiki workflow guide differs from its immutable source" >&2
   exit 1
 fi
 if [ ! -f "$SOURCE_ICON" ] || [ ! -f "$PACKAGED_ICON" ]; then
@@ -60,11 +211,6 @@ if ! cmp -s "$SOURCE_ICON" "$PACKAGED_ICON"; then
   exit 1
 fi
 
-# SMAppService only accepts launch-agent definitions sealed inside the app
-# bundle. This build-time copy never writes to the user's LaunchAgents folder.
-mkdir -p -- "$LAUNCH_AGENT_DIR"
-cp -- "$LAUNCH_AGENT_SOURCE" "$LAUNCH_AGENT"
-chmod 0644 "$LAUNCH_AGENT"
 if ! cmp -s "$LAUNCH_AGENT_SOURCE" "$LAUNCH_AGENT"; then
   echo "packaged launch agent differs from its source" >&2
   exit 1
@@ -140,28 +286,33 @@ fi
 
 runtime_bytes_match() {
   # The pinned upstream archive contains dylib aliases as symlinks. Packager
-  # materializes those aliases as regular files; diff compares their resolved
-  # bytes while the packaged side remains symlink-free.
-  [ -d "$SOURCE_RUNTIME_DIR" ] &&
+  # materializes those aliases as regular files. Internal builds compare the
+  # resolved upstream bytes. Public builds compare the separately signed
+  # staging payload after its source bytes were verified above.
+  [ -d "$RUNTIME_EXPECTED_DIR" ] &&
     [ -d "$PACKAGED_RUNTIME_DIR" ] &&
     [ -z "$(find "$PACKAGED_RUNTIME_DIR" -type l -print -quit)" ] &&
-    diff -qr "$SOURCE_RUNTIME_DIR" "$PACKAGED_RUNTIME_DIR" >/dev/null
+    diff -qr "$RUNTIME_EXPECTED_DIR" "$PACKAGED_RUNTIME_DIR" >/dev/null
 }
 
-# AssetManager verifies the pinned upstream hashes at runtime. Signing nested
-# llama.cpp Mach-O files would mutate those trusted bytes, so seal them as
-# resources and sign only the outer application bundle.
 if ! runtime_bytes_match; then
-  echo "packaged llama.cpp runtime differs from the verified source payload" >&2
+  echo "packaged llama.cpp runtime differs from its verified staging payload" >&2
   exit 1
 fi
-if ! codesign --force --sign "$SIGNING_IDENTITY" --options runtime --timestamp "$APP"; then
-  echo "could not sign the application bundle" >&2
-  exit 1
-fi
-if ! runtime_bytes_match; then
-  echo "application signing changed the verified llama.cpp runtime" >&2
-  exit 1
+if [ "$SIGNING_PURPOSE" = release ]; then
+  runtime_macho_paths "$PACKAGED_RUNTIME_DIR" >"$RUNTIME_MACHO_LIST"
+  if [ ! -s "$RUNTIME_MACHO_LIST" ]; then
+    echo "packaged llama.cpp runtime contains no Mach-O files" >&2
+    exit 1
+  fi
+  while IFS= read -r CANDIDATE; do
+    verify_release_runtime_signature "$CANDIDATE"
+  done <"$RUNTIME_MACHO_LIST"
+  rm -f -- "$RUNTIME_MACHO_LIST"
+  if ! strings "$PACKAGED_BINARY" | grep -Fq "$AIRWIKI_MACOS_LLAMA_SERVER_SHA256"; then
+    echo "packaged application does not pin the signed llama.cpp runtime hash" >&2
+    exit 1
+  fi
 fi
 
 if [ ! -f "$APP/Contents/_CodeSignature/CodeResources" ]; then
@@ -180,55 +331,56 @@ if ! SIGNATURE_DETAILS=$(codesign -dv --verbose=4 "$APP" 2>&1); then
   echo "could not inspect packaged application signature" >&2
   exit 1
 fi
-if [ "$SIGNING_IDENTITY" = "-" ]; then
-  case "$SIGNATURE_DETAILS" in
-    *"Signature=adhoc"*"Sealed Resources version="*) ;;
-    *)
-      echo "development application is not fully ad-hoc signed" >&2
-      exit 1
-      ;;
-  esac
-else
-  case "$SIGNATURE_DETAILS" in
-    *"Authority=Developer ID Application:"*"TeamIdentifier="*"Runtime Version="*) ;;
-    *)
-      echo "release application is not Developer ID signed with Hardened Runtime" >&2
-      exit 1
-      ;;
-  esac
-fi
+case "$SIGNING_PURPOSE" in
+  adhoc)
+    case "$SIGNATURE_DETAILS" in
+      *"Signature=adhoc"*"Sealed Resources version="*) ;;
+      *)
+        echo "development application is not fully ad-hoc signed" >&2
+        exit 1
+        ;;
+    esac
+    ;;
+  development)
+    case "$SIGNATURE_DETAILS" in
+      *"Authority=Apple Development:"*"TeamIdentifier="*"Runtime Version="*"Sealed Resources version="*) ;;
+      *)
+        echo "development application is not Apple Development signed with Hardened Runtime" >&2
+        exit 1
+        ;;
+    esac
+    ;;
+  release)
+    case "$SIGNATURE_DETAILS" in
+      *"Authority=Developer ID Application:"*"TeamIdentifier="*"Runtime Version="*"Sealed Resources version="*) ;;
+      *)
+        echo "release application is not Developer ID signed with Hardened Runtime" >&2
+        exit 1
+        ;;
+    esac
+    ;;
+esac
 
-# cargo-packager creates the .app before invoking Finder for DMG cosmetics. Its
-# DMG may therefore be missing on headless runs and, when present, predates the
-# outer-bundle signature above. Always rebuild it from the verified .app using
-# the helper's supported non-interactive path.
-CREATE_DMG=$(find "$HOME/Library/Caches/.cargo-packager" -type f -path '*/script/create-dmg' -print -quit 2>/dev/null || true)
-if [ -z "$CREATE_DMG" ]; then
-  echo "cargo-packager did not install its create-dmg helper" >&2
+if [ ! -f "$TAURI_DMG" ]; then
+  echo "Tauri bundler did not produce the expected DMG" >&2
   exit 1
 fi
-rm -f -- "$OUT_DIR/$OUT_NAME" "$OUT_DIR/rw.$OUT_NAME"
-
-cd "$OUT_DIR"
-"$CREATE_DMG" \
-  --skip-jenkins \
-  --volname "AirWiki" \
-  --app-drop-link 480 210 \
-  --window-size 660 420 \
-  --hide-extension "AirWiki.app" \
-  --eula "$ROOT/LICENSE" \
-  "$OUT_NAME" \
-  "AirWiki.app"
-
-if [ ! -f "$OUT_DIR/$OUT_NAME" ]; then
-  echo "packaging did not produce the expected DMG" >&2
+mkdir -p -- "$OUT_DIR"
+cp -R -- "$APP" "$FINAL_APP"
+cp -- "$TAURI_DMG" "$OUT_DIR/$OUT_NAME"
+if ! codesign --verify --deep --strict --verbose=2 "$FINAL_APP"; then
+  echo "copied application failed strict code-signature verification" >&2
   exit 1
 fi
 if [ "$SIGNING_IDENTITY" != "-" ]; then
-  codesign --force --sign "$SIGNING_IDENTITY" --timestamp "$OUT_DIR/$OUT_NAME"
   codesign --verify --strict --verbose=2 "$OUT_DIR/$OUT_NAME"
 fi
 if ! hdiutil verify "$OUT_DIR/$OUT_NAME"; then
   echo "packaged DMG failed integrity verification" >&2
+  exit 1
+fi
+if ! hdiutil udifderez -xml "$OUT_DIR/$OUT_NAME" 2>/dev/null |
+  python3 "$ROOT/packaging/macos_dmg_license_resources.py" --input -; then
+  echo "packaged DMG does not contain the required license agreement" >&2
   exit 1
 fi

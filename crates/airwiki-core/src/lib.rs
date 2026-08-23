@@ -4,12 +4,15 @@
 //! exposed through ordinary synchronous APIs or async provider traits so callers
 //! can run them on Tokio worker tasks and keep the desktop thread responsive.
 
+mod attested;
 mod chunk_identity;
 pub mod config;
 pub mod inference;
 pub mod ingest;
 pub mod knowledge;
+mod memory;
 pub mod okf;
+pub mod okf_import;
 pub mod pipeline;
 pub mod publication;
 pub mod repair;
@@ -18,6 +21,10 @@ mod reranker;
 pub mod search;
 pub mod storage;
 
+pub use attested::{
+    AirWikiWasmOutcome, AirWikiWasmRequest, AirWikiWasmRuntime, AttestedComputationError,
+    AttestedVerdict,
+};
 pub use config::{AppPaths, CollectionPaths};
 #[cfg(feature = "fastembed-runtime")]
 pub use inference::fastembed_provider::{
@@ -36,9 +43,17 @@ pub use ingest::{
 pub use knowledge::{
     BundleHealthReport, HealthIssue, HealthRecovery, HealthSeverity, KnowledgeBundleState,
     KnowledgeBundleView, KnowledgeConceptView, KnowledgeLinkDisposition, KnowledgeLinkView,
-    KnowledgePageId, KnowledgePageView, MAX_KNOWLEDGE_PAGE_BYTES, OkfBundleInspector,
+    KnowledgePageId, KnowledgePageView, KnowledgeSourceView, MAX_KNOWLEDGE_PAGE_BYTES,
+    OkfBundleInspector,
 };
-pub use okf::{OkfConcept, OkfPublisher, OkfValidationError};
+pub use memory::{
+    AI_MEMORY_CONCEPT_MAX_BYTES, AiMemoryConceptInput, AiMemoryError, AiMemoryService,
+    ManagedBundleRecoveryReport,
+};
+pub use okf::{
+    AirWikiProfile, OkfActorEvent, OkfConcept, OkfLifecycleStatus, OkfPublisher, OkfValidationError,
+};
+pub use okf_import::{OkfImportReport, OkfImportValidator, OkfImportedConcept};
 pub use pipeline::{CollectionPreflight, IngestOutcome, IngestPipeline, ReviewEdits};
 pub use publication::{OkfPublicationMaterializer, PublicationRecoveryReport};
 pub use repair::{
@@ -56,11 +71,14 @@ pub use search::{
     EvidenceRelevanceProvider, HybridSearchEngine, RELEVANCE_CANDIDATE_LIMIT, RelevanceInput,
 };
 pub use storage::{
-    AuditEvent, CollectionMaintenanceCounts, CollectionMaintenanceRecord,
-    CollectionMaintenanceResult, CollectionMaintenanceStatus, CollectionRecord, CollectionStats,
-    ConceptRecord, Database, GrantRecord, JobRecord, PeerRecord, ReviewEvidenceChunkRecord,
-    ReviewEvidencePageRecord, ReviewReanalysisClaim, ReviewVersionToken, SourceDocumentRecord,
-    StoredChunk,
+    ApplicationCapabilityRecord, ApplicationGrantRecord, ApplicationLimitError,
+    ApplicationWikiRole, AuditEvent, BootstrapFederationIndexEntry, CollectionMaintenanceCounts,
+    CollectionMaintenanceRecord, CollectionMaintenanceResult, CollectionMaintenanceStatus,
+    CollectionRecord, CollectionStats, ComputationRunRecord, ComputationRunState, ConceptRecord,
+    Database, FederationIndexRecord, GrantRecord, IndexingMode, JobRecord,
+    ManagedBundleMutationRecord, ManagedBundleMutationState, NewCollection, NewManagedCollection,
+    OkfConceptProjectionRecord, PeerRecord, ReviewEvidenceChunkRecord, ReviewEvidencePageRecord,
+    ReviewReanalysisClaim, ReviewVersionToken, SourceDocumentRecord, StoredChunk, WikiOrigin,
 };
 
 /// Embedding dimensionality required by multilingual-e5-small.

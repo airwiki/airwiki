@@ -1,6 +1,7 @@
 //! Tokio-driven LAN runtime. The desktop UI talks to it only through channels.
 
 use std::collections::{HashMap, HashSet};
+use std::net::IpAddr;
 use std::sync::{
     Arc,
     atomic::{AtomicBool, Ordering},
@@ -8,25 +9,33 @@ use std::sync::{
 use std::time::{Duration, Instant};
 
 use airwiki_types::{
-    DisclosureLease, FederatedSearch, SearchAuthorization, SearchContractError, SearchHit,
-    SearchRequest, SearchResponse,
+    DevicePlatform, DisclosureLease, FederatedSearch, SearchAuthorization, SearchContractError,
+    SearchHit, SearchPurpose, SearchRequest, SearchResponse, SharedWikiBrowsePage,
+    SharedWikiBrowseRequest, SharedWikiContractError,
 };
 use async_trait::async_trait;
 use futures::StreamExt;
 use libp2p::core::{ConnectedPoint, Transport, upgrade};
+use libp2p::multiaddr::Protocol;
 use libp2p::request_response::{self, OutboundRequestId, ProtocolSupport, ResponseChannel};
 use libp2p::swarm::{
-    DialError, NetworkBehaviour, SwarmEvent, behaviour::toggle::Toggle, dial_opts::DialOpts,
+    ConnectionId, DialError, NetworkBehaviour, SwarmEvent, behaviour::toggle::Toggle,
+    dial_opts::DialOpts,
 };
 use libp2p::{Multiaddr, PeerId, StreamProtocol, Swarm, tcp, yamux};
+use serde::{Deserialize, Serialize};
 use tokio::sync::{broadcast, mpsc, oneshot};
-use tokio::task::JoinHandle;
+use tokio::task::{JoinHandle, JoinSet};
 use tracing::{info, warn};
+use uuid::Uuid;
 
 use crate::access::{AccessControl, AccessError};
-use crate::address::{ManualLanAddress, PeerAddressBook};
+use crate::address::{
+    LanAddressError, MAX_AUTHENTICATED_LISTENERS_PER_PEER, ManualLanAddress, PeerAddressBook,
+};
 use crate::codec::{
-    BoundedSearchCodec, SearchWireError, SearchWireErrorCode, SearchWireResponse, response_fits,
+    BoundedSearchCodec, BoundedSharedWikiCodec, SearchWireError, SearchWireErrorCode,
+    SearchWireResponse, SharedWikiWireResponse, response_fits, shared_wiki_response_fits,
 };
 use crate::identity::NodeIdentity;
 use crate::pairing::{
@@ -37,13 +46,49 @@ use crate::rate_limit::PeerRateLimiter;
 use crate::{NetworkError, SEARCH_DEADLINE};
 
 const PAIRING_FRAME_LIMIT: u64 = 4 * 1024;
+const LAN_ADDRESS_FRAME_LIMIT: u64 = 2 * 1024;
 const MDNS_QUERY_INTERVAL: Duration = Duration::from_secs(8);
+const LAN_ADDRESS_EXCHANGE_PROTOCOL: &str = "/airwiki/lan-address-exchange/1.0.0";
+const MAX_OUTBOUND_SHARED_WIKI_BROWSES: usize = 64;
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+struct LanAddressExchange {
+    #[serde(default)]
+    session_id: Uuid,
+    #[serde(default)]
+    revision: u64,
+    addresses: Vec<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    device_name: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    device_platform: Option<DevicePlatform>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct AcceptedLanAddressRevision {
+    session_id: Uuid,
+    revision: u64,
+    connection_epoch: u64,
+}
 
 fn supported_search_protocols() -> [(StreamProtocol, ProtocolSupport); 1] {
     [(
         StreamProtocol::new(airwiki_types::SEARCH_PROTOCOL),
         ProtocolSupport::Full,
     )]
+}
+
+fn supported_shared_wiki_protocols() -> [(StreamProtocol, ProtocolSupport); 2] {
+    [
+        (
+            StreamProtocol::new(airwiki_types::SHARED_WIKI_BROWSE_PROTOCOL_V2),
+            ProtocolSupport::Full,
+        ),
+        (
+            StreamProtocol::new(airwiki_types::SHARED_WIKI_BROWSE_PROTOCOL),
+            ProtocolSupport::Full,
+        ),
+    ]
 }
 
 #[async_trait]
@@ -56,6 +101,14 @@ pub trait AuthorizedSearchBackend: Send + Sync + 'static {
         request: SearchRequest,
         authorization: SearchAuthorization,
     ) -> Result<AuthorizedSearchResult, SearchContractError>;
+
+    /// Browse only a specifically requested Wiki inside the peer's durable grant
+    /// set. The result remains protected by its disclosure lease until transport.
+    async fn browse_authorized(
+        &self,
+        request: SharedWikiBrowseRequest,
+        authorization: SearchAuthorization,
+    ) -> Result<AuthorizedWikiBrowseResult, SearchContractError>;
 }
 
 pub struct AuthorizedSearchResult {
@@ -76,9 +129,28 @@ impl AuthorizedSearchResult {
     }
 }
 
+pub struct AuthorizedWikiBrowseResult {
+    page: SharedWikiBrowsePage,
+    disclosure_lease: DisclosureLease,
+}
+
+impl AuthorizedWikiBrowseResult {
+    pub fn new(page: SharedWikiBrowsePage, disclosure_lease: DisclosureLease) -> Self {
+        Self {
+            page,
+            disclosure_lease,
+        }
+    }
+
+    pub fn page(&self) -> &SharedWikiBrowsePage {
+        &self.page
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct NetworkConfig {
     pub node_name: String,
+    pub device_platform: DevicePlatform,
     pub listen_address: Multiaddr,
     pub search_deadline: Duration,
     pub command_capacity: usize,
@@ -86,11 +158,13 @@ pub struct NetworkConfig {
 
 impl Default for NetworkConfig {
     fn default() -> Self {
+        let mut listen_address = Multiaddr::empty();
+        listen_address.push(Protocol::Ip4(std::net::Ipv4Addr::UNSPECIFIED));
+        listen_address.push(Protocol::Tcp(0));
         Self {
             node_name: "AirWiki node".to_owned(),
-            listen_address: "/ip4/0.0.0.0/tcp/0"
-                .parse()
-                .expect("static listen multiaddress is valid"),
+            device_platform: DevicePlatform::Unknown,
+            listen_address,
             search_deadline: SEARCH_DEADLINE,
             command_capacity: 64,
         }
@@ -129,7 +203,16 @@ pub enum NetworkEvent {
         expires_in_seconds: u64,
     },
     PairingTrusted {
+        /// The SAS exchange completed. The desktop must persist trust and call
+        /// `NetworkHandle::acknowledge_persisted_trust` before endpoint disclosure.
         peer: PeerId,
+    },
+    /// Metadata from a durably trusted peer. It is carried only by the
+    /// Noise-authenticated LAN address exchange, never by mDNS or federation.
+    PeerMetadataChanged {
+        peer: PeerId,
+        device_name: Option<String>,
+        device_platform: Option<DevicePlatform>,
     },
     PairingExpired {
         peer: PeerId,
@@ -202,14 +285,18 @@ fn select_pairing_dial_source(
 #[behaviour(to_swarm = "BehaviourEvent")]
 struct AirWikiBehaviour {
     mdns: Toggle<libp2p::mdns::tokio::Behaviour>,
+    lan_addresses: request_response::cbor::Behaviour<LanAddressExchange, LanAddressExchange>,
     search: request_response::Behaviour<BoundedSearchCodec>,
+    shared_wiki: request_response::Behaviour<BoundedSharedWikiCodec>,
     pairing: request_response::cbor::Behaviour<PairingRequest, PairingResponse>,
 }
 
 #[derive(Debug)]
 enum BehaviourEvent {
     Mdns(libp2p::mdns::Event),
+    LanAddresses(request_response::Event<LanAddressExchange, LanAddressExchange>),
     Search(request_response::Event<SearchRequest, SearchWireResponse>),
+    SharedWiki(request_response::Event<SharedWikiBrowseRequest, SharedWikiWireResponse>),
     Pairing(request_response::Event<PairingRequest, PairingResponse>),
 }
 
@@ -219,9 +306,25 @@ impl From<libp2p::mdns::Event> for BehaviourEvent {
     }
 }
 
+impl From<request_response::Event<LanAddressExchange, LanAddressExchange>> for BehaviourEvent {
+    fn from(event: request_response::Event<LanAddressExchange, LanAddressExchange>) -> Self {
+        Self::LanAddresses(event)
+    }
+}
+
 impl From<request_response::Event<SearchRequest, SearchWireResponse>> for BehaviourEvent {
     fn from(event: request_response::Event<SearchRequest, SearchWireResponse>) -> Self {
         Self::Search(event)
+    }
+}
+
+impl From<request_response::Event<SharedWikiBrowseRequest, SharedWikiWireResponse>>
+    for BehaviourEvent
+{
+    fn from(
+        event: request_response::Event<SharedWikiBrowseRequest, SharedWikiWireResponse>,
+    ) -> Self {
+        Self::SharedWiki(event)
     }
 }
 
@@ -273,12 +376,45 @@ impl NetworkHandle {
         self.command(Command::Dial { address }).await
     }
 
+    /// Replaces the concrete LAN addresses announced to authenticated peers.
+    ///
+    /// The desktop resolves active interfaces only after the dynamic listener
+    /// port is known. This boundary validates and bounds the result again and
+    /// strips the redundant local PeerId suffix before advertising it.
+    pub async fn set_advertised_lan_addresses(
+        &self,
+        addresses: Vec<Multiaddr>,
+    ) -> Result<(), NetworkError> {
+        let addresses = validate_local_advertisements(self.local_peer_id, addresses)?;
+        let (completed_tx, completed_rx) = oneshot::channel();
+        self.command(Command::SetAdvertisedLanAddresses {
+            addresses,
+            completed: completed_tx,
+        })
+        .await?;
+        completed_rx.await.map_err(|_| NetworkError::RuntimeStopped)
+    }
+
     pub async fn begin_pairing(&self, peer: PeerId) -> Result<(), NetworkError> {
         self.command(Command::BeginPairing { peer }).await
     }
 
     pub async fn confirm_pairing(&self, peer: PeerId) -> Result<(), NetworkError> {
         self.command(Command::ConfirmPairing { peer }).await
+    }
+
+    /// Acknowledges that the desktop committed this peer's trust to durable
+    /// storage and may now disclose concrete LAN listener addresses.
+    pub async fn acknowledge_persisted_trust(&self, peer: PeerId) -> Result<(), NetworkError> {
+        let (completed_tx, completed_rx) = oneshot::channel();
+        self.command(Command::AcknowledgePersistedTrust {
+            peer,
+            completed: completed_tx,
+        })
+        .await?;
+        completed_rx
+            .await
+            .map_err(|_| NetworkError::RuntimeStopped)?
     }
 
     /// Cancel the current pairing attempt without trusting or blocking the peer.
@@ -331,6 +467,26 @@ impl NetworkHandle {
         reply_rx.await.map_err(|_| NetworkError::RuntimeStopped)?
     }
 
+    pub async fn browse_shared_wiki(
+        &self,
+        peer: PeerId,
+        request: SharedWikiBrowseRequest,
+    ) -> Result<SharedWikiBrowsePage, NetworkError> {
+        request
+            .validate()
+            .map_err(NetworkError::SharedWikiContract)?;
+        let (reply_tx, reply_rx) = oneshot::channel();
+        self.command_tx
+            .send(Command::BrowseSharedWiki {
+                peer,
+                request,
+                reply: reply_tx,
+            })
+            .await
+            .map_err(|_| NetworkError::RuntimeStopped)?;
+        reply_rx.await.map_err(|_| NetworkError::RuntimeStopped)?
+    }
+
     pub async fn shutdown(&self) -> Result<(), NetworkError> {
         let (completed_tx, completed_rx) = oneshot::channel();
         self.command(Command::Shutdown {
@@ -348,6 +504,30 @@ impl NetworkHandle {
     }
 }
 
+fn validate_local_advertisements(
+    local_peer_id: PeerId,
+    addresses: Vec<Multiaddr>,
+) -> Result<Vec<Multiaddr>, LanAddressError> {
+    if addresses.len() > MAX_AUTHENTICATED_LISTENERS_PER_PEER {
+        return Err(LanAddressError::CapacityExceeded);
+    }
+    let mut validated = Vec::with_capacity(addresses.len());
+    for address in addresses {
+        let address = ManualLanAddress::try_from(address)?;
+        if address
+            .peer_id()
+            .is_some_and(|peer_id| peer_id != local_peer_id)
+        {
+            return Err(LanAddressError::PeerMismatch);
+        }
+        let address = address.transport_address();
+        if !validated.contains(&address) {
+            validated.push(address);
+        }
+    }
+    Ok(validated)
+}
+
 #[async_trait]
 impl FederatedSearch for NetworkHandle {
     async fn search(&self, request: SearchRequest) -> Result<SearchResponse, SearchContractError> {
@@ -361,11 +541,19 @@ enum Command {
     Dial {
         address: Multiaddr,
     },
+    SetAdvertisedLanAddresses {
+        addresses: Vec<Multiaddr>,
+        completed: oneshot::Sender<()>,
+    },
     BeginPairing {
         peer: PeerId,
     },
     ConfirmPairing {
         peer: PeerId,
+    },
+    AcknowledgePersistedTrust {
+        peer: PeerId,
+        completed: oneshot::Sender<Result<(), NetworkError>>,
     },
     CancelPairing {
         peer: PeerId,
@@ -386,9 +574,20 @@ enum Command {
         request: SearchRequest,
         reply: oneshot::Sender<Result<SearchResponse, NetworkError>>,
     },
+    BrowseSharedWiki {
+        peer: PeerId,
+        request: SharedWikiBrowseRequest,
+        reply: oneshot::Sender<Result<SharedWikiBrowsePage, NetworkError>>,
+    },
     #[cfg(test)]
     DisconnectPeer {
         peer: PeerId,
+    },
+    #[cfg(test)]
+    QueueSharedWikiRetry {
+        peer: PeerId,
+        request: SharedWikiBrowseRequest,
+        reply: oneshot::Sender<Result<SharedWikiBrowsePage, NetworkError>>,
     },
     #[cfg(test)]
     SearchThenRevokeAndBeginPairing {
@@ -400,6 +599,15 @@ enum Command {
     RecordDiscoveredAddress {
         peer: PeerId,
         address: Multiaddr,
+    },
+    #[cfg(test)]
+    ClearPeerAddresses {
+        peer: PeerId,
+    },
+    #[cfg(test)]
+    KnownDialAddressCount {
+        peer: PeerId,
+        reply: oneshot::Sender<usize>,
     },
     #[cfg(test)]
     PairingAttemptActive {
@@ -422,6 +630,28 @@ struct BackendResult {
     response: SearchWireResponse,
     hit_count: usize,
     disclosure_lease: Option<DisclosureLease>,
+}
+
+struct SharedWikiBackendResult {
+    peer: PeerId,
+    request: SharedWikiBrowseRequest,
+    channel: ResponseChannel<SharedWikiWireResponse>,
+    response: SharedWikiWireResponse,
+    disclosure_lease: Option<DisclosureLease>,
+}
+
+struct SharedWikiQuery {
+    peer: PeerId,
+    request: SharedWikiBrowseRequest,
+    deadline: Instant,
+    reconnect_attempted: bool,
+    reply: oneshot::Sender<Result<SharedWikiBrowsePage, NetworkError>>,
+}
+
+struct SharedWikiPendingDial {
+    request: SharedWikiBrowseRequest,
+    deadline: Instant,
+    reply: oneshot::Sender<Result<SharedWikiBrowsePage, NetworkError>>,
 }
 
 struct QueryAggregate {
@@ -455,16 +685,28 @@ struct Runtime {
     /// re-pairing attempt. Every non-success terminal restores the block.
     pairing_reblock_on_failure: HashSet<PeerId>,
     addresses: PeerAddressBook,
+    connection_remote_ips: HashMap<ConnectionId, IpAddr>,
+    connection_epochs: HashMap<ConnectionId, u64>,
+    next_connection_epoch: u64,
+    accepted_lan_address_revisions: HashMap<PeerId, AcceptedLanAddressRevision>,
     queries: HashMap<u64, QueryAggregate>,
     query_by_request: HashMap<OutboundRequestId, u64>,
+    shared_wiki_queries: HashMap<OutboundRequestId, SharedWikiQuery>,
+    shared_wiki_dials: HashMap<PeerId, Vec<SharedWikiPendingDial>>,
     next_query_id: u64,
     command_rx: mpsc::Receiver<Command>,
     event_tx: broadcast::Sender<NetworkEvent>,
     listener_ready: Arc<AtomicBool>,
     listener_unavailable: Arc<AtomicBool>,
     listen_addresses: HashSet<Multiaddr>,
+    advertised_lan_addresses: HashSet<Multiaddr>,
+    lan_address_session_id: Uuid,
+    lan_address_revision: u64,
     backend_result_tx: mpsc::Sender<BackendResult>,
     backend_result_rx: mpsc::Receiver<BackendResult>,
+    shared_wiki_result_tx: mpsc::Sender<SharedWikiBackendResult>,
+    shared_wiki_result_rx: mpsc::Receiver<SharedWikiBackendResult>,
+    backend_tasks: JoinSet<()>,
 }
 
 pub fn spawn_network(
@@ -498,6 +740,11 @@ pub fn spawn_network(
         supported_search_protocols(),
         request_config.clone(),
     );
+    let shared_wiki = request_response::Behaviour::with_codec(
+        BoundedSharedWikiCodec,
+        supported_shared_wiki_protocols(),
+        request_config.clone(),
+    );
     let pairing_codec =
         request_response::cbor::codec::Codec::<PairingRequest, PairingResponse>::default()
             .set_request_size_maximum(PAIRING_FRAME_LIMIT)
@@ -505,6 +752,18 @@ pub fn spawn_network(
     let pairing = request_response::cbor::Behaviour::with_codec(
         pairing_codec,
         [(StreamProtocol::new(PAIRING_PROTOCOL), ProtocolSupport::Full)],
+        request_config.clone(),
+    );
+    let lan_address_codec =
+        request_response::cbor::codec::Codec::<LanAddressExchange, LanAddressExchange>::default()
+            .set_request_size_maximum(LAN_ADDRESS_FRAME_LIMIT)
+            .set_response_size_maximum(LAN_ADDRESS_FRAME_LIMIT);
+    let lan_addresses = request_response::cbor::Behaviour::with_codec(
+        lan_address_codec,
+        [(
+            StreamProtocol::new(LAN_ADDRESS_EXCHANGE_PROTOCOL),
+            ProtocolSupport::Full,
+        )],
         request_config,
     );
     // Unit tests must never advertise random libp2p identities on the real LAN.
@@ -521,7 +780,9 @@ pub fn spawn_network(
     .into();
     let behaviour = AirWikiBehaviour {
         mdns,
+        lan_addresses,
         search,
+        shared_wiki,
         pairing,
     };
     let mut swarm = Swarm::new(
@@ -537,6 +798,7 @@ pub fn spawn_network(
     let (command_tx, command_rx) = mpsc::channel(config.command_capacity);
     let (event_tx, _) = broadcast::channel(128);
     let (backend_result_tx, backend_result_rx) = mpsc::channel(32);
+    let (shared_wiki_result_tx, shared_wiki_result_rx) = mpsc::channel(32);
     let listener_ready = Arc::new(AtomicBool::new(false));
     let listener_unavailable = Arc::new(AtomicBool::new(false));
     let handle = NetworkHandle {
@@ -563,16 +825,28 @@ pub fn spawn_network(
         pairing_dials: HashMap::new(),
         pairing_reblock_on_failure: HashSet::new(),
         addresses: PeerAddressBook::default(),
+        connection_remote_ips: HashMap::new(),
+        connection_epochs: HashMap::new(),
+        next_connection_epoch: 1,
+        accepted_lan_address_revisions: HashMap::new(),
         queries: HashMap::new(),
         query_by_request: HashMap::new(),
+        shared_wiki_queries: HashMap::new(),
+        shared_wiki_dials: HashMap::new(),
         next_query_id: 1,
         command_rx,
         event_tx,
         listener_ready,
         listener_unavailable,
         listen_addresses: HashSet::new(),
+        advertised_lan_addresses: HashSet::new(),
+        lan_address_session_id: Uuid::new_v4(),
+        lan_address_revision: 0,
         backend_result_tx,
         backend_result_rx,
+        shared_wiki_result_tx,
+        shared_wiki_result_rx,
+        backend_tasks: JoinSet::new(),
     };
     let task = tokio::spawn(runtime.run());
     Ok((handle, initial_events, task))
@@ -588,6 +862,16 @@ fn mdns_config() -> libp2p::mdns::Config {
     }
 }
 
+fn connected_remote_ip(endpoint: &ConnectedPoint) -> Option<IpAddr> {
+    let address = match endpoint {
+        ConnectedPoint::Dialer { address, .. } => address,
+        ConnectedPoint::Listener { send_back_addr, .. } => send_back_addr,
+    };
+    ManualLanAddress::try_from(address.clone())
+        .ok()
+        .map(|address| address.ip_addr())
+}
+
 impl Runtime {
     async fn run(mut self) {
         if self.swarm.behaviour().mdns.is_enabled() {
@@ -599,12 +883,13 @@ impl Runtime {
             tokio::select! {
                 command = self.command_rx.recv() => {
                     match command {
-                        Some(Command::Shutdown { completed }) => {
-                            shutdown_completed = Some(completed);
-                            break;
-                        }
                         None => break,
-                        Some(command) => self.handle_command(command),
+                        Some(command) => {
+                            if let Some(completed) = self.handle_command(command) {
+                                shutdown_completed = Some(completed);
+                                break;
+                            }
+                        }
                     }
                 }
                 event = self.swarm.select_next_some() => self.handle_swarm_event(event),
@@ -613,23 +898,47 @@ impl Runtime {
                         self.handle_backend_result(result);
                     }
                 }
+                result = self.shared_wiki_result_rx.recv() => {
+                    if let Some(result) = result {
+                        self.handle_shared_wiki_backend_result(result);
+                    }
+                }
+                completion = self.backend_tasks.join_next(), if !self.backend_tasks.is_empty() => {
+                    if completion.is_some_and(|result| result.is_err()) {
+                        warn!(
+                            error_kind = "authorized_search_task_join",
+                            "an authorized search task did not join cleanly"
+                        );
+                    }
+                }
                 _ = maintenance.tick() => self.maintenance(),
             }
         }
+        self.backend_tasks.abort_all();
+        while self.backend_tasks.join_next().await.is_some() {}
         self.restore_pairing_blocks_for_shutdown();
         for (_, query) in self.queries.drain() {
             let _ = query.reply.send(Err(NetworkError::RuntimeStopped));
         }
+        for (_, query) in self.shared_wiki_queries.drain() {
+            let _ = query.reply.send(Err(NetworkError::RuntimeStopped));
+        }
+        for (_, pending) in self.shared_wiki_dials.drain() {
+            for browse in pending {
+                let _ = browse.reply.send(Err(NetworkError::RuntimeStopped));
+            }
+        }
         self.listener_ready.store(false, Ordering::Release);
         self.listener_unavailable.store(true, Ordering::Release);
-        info!(peer = %self.local_peer_id, "LAN runtime stopped");
+        info!("LAN runtime stopped");
         if let Some(completed) = shutdown_completed {
             let _ = completed.send(());
         }
     }
 
-    fn handle_command(&mut self, command: Command) {
+    fn handle_command(&mut self, command: Command) -> Option<oneshot::Sender<()>> {
         match command {
+            Command::Shutdown { completed } => return Some(completed),
             Command::Dial { address } => {
                 let dial = DialOpts::unknown_peer_id()
                     .address(address)
@@ -638,6 +947,13 @@ impl Runtime {
                 if self.swarm.dial(dial).is_err() {
                     self.emit_warning(None, NetworkWarningKind::DialFailed);
                 }
+            }
+            Command::SetAdvertisedLanAddresses {
+                addresses,
+                completed,
+            } => {
+                self.replace_advertised_lan_addresses(addresses);
+                let _ = completed.send(());
             }
             Command::BeginPairing { peer } => {
                 self.begin_pairing(peer);
@@ -658,6 +974,17 @@ impl Runtime {
                         self.emit_warning(Some(peer), NetworkWarningKind::PairingStateInvalid)
                     }
                 }
+            }
+            Command::AcknowledgePersistedTrust { peer, completed } => {
+                let result = if self.peer_is_trusted_for_search(&peer) {
+                    self.exchange_lan_addresses_with_trusted_peer(peer);
+                    Ok(())
+                } else {
+                    Err(NetworkError::Access(
+                        "peer trust has not been persisted".to_owned(),
+                    ))
+                };
+                let _ = completed.send(result);
             }
             Command::CancelPairing { peer, block } => {
                 self.pairing.remove(&peer);
@@ -689,6 +1016,7 @@ impl Runtime {
                 self.pairing_reblock_on_failure.remove(&peer);
                 self.access.revoke_and_block(peer);
                 self.addresses.clear_peer(&peer);
+                self.accepted_lan_address_revisions.remove(&peer);
                 self.pairing.remove(&peer);
                 self.pairing_dials.remove(&peer);
                 self.pairing_hellos
@@ -696,15 +1024,38 @@ impl Runtime {
                 self.pairing_confirms
                     .retain(|_, pending_peer| *pending_peer != peer);
                 self.retire_peer_searches(peer);
+                self.retire_peer_shared_wiki_browses(peer);
                 let _ = self.swarm.disconnect_peer_id(peer);
                 let _ = self.event_tx.send(NetworkEvent::PeerRevoked { peer });
             }
             Command::SearchPeers { request, reply } => {
                 self.start_search(request, reply);
             }
+            Command::BrowseSharedWiki {
+                peer,
+                request,
+                reply,
+            } => {
+                self.start_shared_wiki_browse(peer, request, reply);
+            }
             #[cfg(test)]
             Command::DisconnectPeer { peer } => {
                 let _ = self.swarm.disconnect_peer_id(peer);
+            }
+            #[cfg(test)]
+            Command::QueueSharedWikiRetry {
+                peer,
+                request,
+                reply,
+            } => {
+                self.queue_shared_wiki_dial(
+                    peer,
+                    SharedWikiPendingDial {
+                        request,
+                        deadline: Instant::now() + self.config.search_deadline,
+                        reply,
+                    },
+                );
             }
             #[cfg(test)]
             Command::SearchThenRevokeAndBeginPairing {
@@ -723,13 +1074,21 @@ impl Runtime {
                     .expect("test discovery address must be valid");
             }
             #[cfg(test)]
+            Command::ClearPeerAddresses { peer } => {
+                self.addresses.clear_peer(&peer);
+            }
+            #[cfg(test)]
+            Command::KnownDialAddressCount { peer, reply } => {
+                let _ = reply.send(self.addresses.dial_addresses(&peer).len());
+            }
+            #[cfg(test)]
             Command::PairingAttemptActive { peer, reply } => {
                 let _ = reply.send(self.pairing_attempt_active(&peer));
             }
             #[cfg(test)]
             Command::ExpirePairings { now } => self.expire_pairings(now),
-            Command::Shutdown { .. } => unreachable!("shutdown is handled in run"),
         }
+        None
     }
 
     fn begin_pairing(&mut self, peer: PeerId) {
@@ -838,7 +1197,9 @@ impl Runtime {
     fn enforce_peer_block(&mut self, peer: PeerId) {
         self.access.block(peer);
         self.addresses.clear_peer(&peer);
+        self.accepted_lan_address_revisions.remove(&peer);
         self.retire_peer_searches(peer);
+        self.retire_peer_shared_wiki_browses(peer);
         let _ = self.swarm.disconnect_peer_id(peer);
     }
 
@@ -922,10 +1283,236 @@ impl Runtime {
         }
     }
 
+    fn start_shared_wiki_browse(
+        &mut self,
+        peer: PeerId,
+        request: SharedWikiBrowseRequest,
+        reply: oneshot::Sender<Result<SharedWikiBrowsePage, NetworkError>>,
+    ) {
+        if let Err(error) = request.validate() {
+            let _ = reply.send(Err(NetworkError::SharedWikiContract(error)));
+            return;
+        }
+        if !self.peer_is_trusted_for_search(&peer) {
+            let _ = reply.send(Err(NetworkError::Access("peer is not trusted".to_owned())));
+            return;
+        }
+        if self.outbound_shared_wiki_browse_count() >= MAX_OUTBOUND_SHARED_WIKI_BROWSES {
+            let _ = reply.send(Err(NetworkError::Unavailable));
+            return;
+        }
+        let deadline = Instant::now() + self.config.search_deadline;
+        if self.swarm.is_connected(&peer) {
+            self.send_shared_wiki_request(peer, request, deadline, false, reply);
+            return;
+        }
+
+        self.queue_shared_wiki_dial(
+            peer,
+            SharedWikiPendingDial {
+                request,
+                deadline,
+                reply,
+            },
+        );
+    }
+
+    fn outbound_shared_wiki_browse_count(&self) -> usize {
+        self.shared_wiki_dials
+            .values()
+            .fold(self.shared_wiki_queries.len(), |count, pending| {
+                count.saturating_add(pending.len())
+            })
+    }
+
+    fn replace_advertised_lan_addresses(&mut self, addresses: Vec<Multiaddr>) {
+        let addresses = addresses.into_iter().collect::<HashSet<_>>();
+        if addresses != self.advertised_lan_addresses {
+            self.advertised_lan_addresses = addresses;
+            self.lan_address_revision = self.lan_address_revision.saturating_add(1);
+        }
+        self.exchange_lan_addresses_with_connected_trusted_peers();
+    }
+
+    fn exchange_lan_addresses_with_connected_trusted_peers(&mut self) {
+        let peers = self
+            .swarm
+            .connected_peers()
+            .copied()
+            .filter(|peer| self.peer_is_trusted_for_search(peer))
+            .collect::<Vec<_>>();
+        for peer in peers {
+            self.exchange_lan_addresses_with_trusted_peer(peer);
+        }
+    }
+
+    fn exchange_lan_addresses_with_trusted_peer(&mut self, peer: PeerId) {
+        if self.peer_is_trusted_for_search(&peer) && self.swarm.is_connected(&peer) {
+            let request = lan_address_exchange_payload(
+                true,
+                self.local_peer_id,
+                self.lan_address_session_id,
+                self.lan_address_revision,
+                &self.advertised_lan_addresses,
+                &self.config,
+            );
+            self.swarm
+                .behaviour_mut()
+                .lan_addresses
+                .send_request(&peer, request);
+        }
+    }
+
+    fn record_lan_address_exchange(
+        &mut self,
+        peer: PeerId,
+        connection_id: ConnectionId,
+        exchange: LanAddressExchange,
+    ) {
+        if !self.peer_is_trusted_for_search(&peer)
+            || exchange.session_id.is_nil()
+            || exchange.addresses.len() > MAX_AUTHENTICATED_LISTENERS_PER_PEER
+        {
+            return;
+        }
+        let Some(observed_remote_ip) = self.connection_remote_ips.get(&connection_id).copied()
+        else {
+            return;
+        };
+        let Some(connection_epoch) = self.connection_epochs.get(&connection_id).copied() else {
+            return;
+        };
+        let Some(accepted_revision) = next_accepted_lan_address_revision(
+            self.accepted_lan_address_revisions.get(&peer).copied(),
+            &exchange,
+            connection_epoch,
+        ) else {
+            return;
+        };
+        let device_name = exchange
+            .device_name
+            .as_deref()
+            .map(clean_node_name)
+            .filter(|name| !name.is_empty());
+        let device_platform = exchange
+            .device_platform
+            .filter(|platform| *platform != DevicePlatform::Unknown);
+        let Ok(addresses) = exchange
+            .addresses
+            .into_iter()
+            .map(|encoded| encoded.parse::<Multiaddr>())
+            .collect::<Result<Vec<_>, _>>()
+        else {
+            return;
+        };
+        if self
+            .addresses
+            .replace_authenticated_listeners(peer, observed_remote_ip, addresses)
+            .is_ok()
+        {
+            self.accepted_lan_address_revisions
+                .insert(peer, accepted_revision);
+            if device_name.is_some() || device_platform.is_some() {
+                let _ = self.event_tx.send(NetworkEvent::PeerMetadataChanged {
+                    peer,
+                    device_name,
+                    device_platform,
+                });
+            }
+        }
+    }
+
+    fn queue_shared_wiki_dial(&mut self, peer: PeerId, pending: SharedWikiPendingDial) {
+        if Instant::now() >= pending.deadline {
+            let _ = pending.reply.send(Err(NetworkError::Unavailable));
+            return;
+        }
+        if !self.peer_is_trusted_for_search(&peer) {
+            let _ = pending
+                .reply
+                .send(Err(NetworkError::Access("peer is not trusted".to_owned())));
+            return;
+        }
+        if self.swarm.is_connected(&peer) {
+            self.send_shared_wiki_request(
+                peer,
+                pending.request,
+                pending.deadline,
+                true,
+                pending.reply,
+            );
+            return;
+        }
+        if !self.shared_wiki_dials.contains_key(&peer) {
+            let addresses = self.addresses.dial_addresses(&peer);
+            if addresses.is_empty() {
+                let _ = pending.reply.send(Err(NetworkError::Unavailable));
+                return;
+            }
+            let dial = DialOpts::peer_id(peer)
+                .addresses(addresses)
+                .allocate_new_port()
+                .build();
+            match self.swarm.dial(dial) {
+                Ok(()) => {}
+                Err(DialError::DialPeerConditionFalse(_)) if self.swarm.is_connected(&peer) => {
+                    self.send_shared_wiki_request(
+                        peer,
+                        pending.request,
+                        pending.deadline,
+                        true,
+                        pending.reply,
+                    );
+                    return;
+                }
+                Err(DialError::DialPeerConditionFalse(_)) => {}
+                Err(_) => {
+                    let _ = pending.reply.send(Err(NetworkError::Unavailable));
+                    return;
+                }
+            }
+        }
+        self.shared_wiki_dials
+            .entry(peer)
+            .or_default()
+            .push(pending);
+    }
+
+    fn send_shared_wiki_request(
+        &mut self,
+        peer: PeerId,
+        request: SharedWikiBrowseRequest,
+        deadline: Instant,
+        reconnect_attempted: bool,
+        reply: oneshot::Sender<Result<SharedWikiBrowsePage, NetworkError>>,
+    ) {
+        let outbound_id = self
+            .swarm
+            .behaviour_mut()
+            .shared_wiki
+            .send_request(&peer, request.clone());
+        self.shared_wiki_queries.insert(
+            outbound_id,
+            SharedWikiQuery {
+                peer,
+                request,
+                deadline,
+                reconnect_attempted,
+                reply,
+            },
+        );
+    }
+
     fn handle_swarm_event(&mut self, event: SwarmEvent<BehaviourEvent>) {
         match event {
             SwarmEvent::Behaviour(BehaviourEvent::Mdns(event)) => self.handle_mdns(event),
+            SwarmEvent::Behaviour(BehaviourEvent::LanAddresses(event)) => {
+                self.handle_lan_address_exchange_event(event);
+            }
             SwarmEvent::Behaviour(BehaviourEvent::Search(event)) => self.handle_search_event(event),
+            SwarmEvent::Behaviour(BehaviourEvent::SharedWiki(event)) => {
+                self.handle_shared_wiki_event(event);
+            }
             SwarmEvent::Behaviour(BehaviourEvent::Pairing(event)) => {
                 self.handle_pairing_event(event);
             }
@@ -941,7 +1528,10 @@ impl Runtime {
                     .store(!self.listen_addresses.is_empty(), Ordering::Release);
             }
             SwarmEvent::ConnectionEstablished {
-                peer_id, endpoint, ..
+                peer_id,
+                connection_id,
+                endpoint,
+                ..
             } => {
                 if self.access.is_blocked(&peer_id) {
                     self.pairing_reblock_on_failure.remove(&peer_id);
@@ -949,7 +1539,15 @@ impl Runtime {
                     self.pairing.remove(&peer_id);
                     let _ = self.swarm.disconnect_peer_id(peer_id);
                     self.retire_peer_searches(peer_id);
+                    self.retire_peer_shared_wiki_browses(peer_id);
                 } else {
+                    let connection_epoch = self.next_connection_epoch;
+                    self.next_connection_epoch = self.next_connection_epoch.saturating_add(1);
+                    self.connection_epochs
+                        .insert(connection_id, connection_epoch);
+                    if let Some(remote_ip) = connected_remote_ip(&endpoint) {
+                        self.connection_remote_ips.insert(connection_id, remote_ip);
+                    }
                     // Retain only an address that completed an outgoing Noise
                     // handshake. Listener send-back addresses can be ephemeral
                     // client ports and are not reliable redial targets.
@@ -959,9 +1557,8 @@ impl Runtime {
                             .record_authenticated_outbound(peer_id, address)
                         {
                             Ok(address) => self.swarm.add_peer_address(peer_id, address),
-                            Err(error) => warn!(
-                                %peer_id,
-                                error = %error,
+                            Err(_) => warn!(
+                                error_kind = "non_lan_authenticated_address",
                                 "ignored non-LAN authenticated outbound address"
                             ),
                         }
@@ -973,20 +1570,32 @@ impl Runtime {
                         .event_tx
                         .send(NetworkEvent::Connected { peer: peer_id });
                     if self.peer_is_trusted_for_search(&peer_id) {
+                        // Exchange a concrete listener only after durable trust
+                        // is known so the peer can reopen a shared Wiki after
+                        // this connection becomes idle.
+                        self.exchange_lan_addresses_with_trusted_peer(peer_id);
                         self.resume_waiting_searches(peer_id);
+                        self.resume_waiting_shared_wiki_browses(peer_id);
                     } else {
                         self.retire_peer_searches(peer_id);
+                        self.retire_peer_shared_wiki_browses(peer_id);
                     }
                 }
             }
             SwarmEvent::ConnectionClosed {
                 peer_id,
-                num_established: 0,
+                connection_id,
+                num_established,
                 ..
             } => {
-                let _ = self
-                    .event_tx
-                    .send(NetworkEvent::Disconnected { peer: peer_id });
+                self.connection_remote_ips.remove(&connection_id);
+                self.connection_epochs.remove(&connection_id);
+                if num_established == 0 {
+                    self.retry_peer_shared_wiki_browses(peer_id);
+                    let _ = self
+                        .event_tx
+                        .send(NetworkEvent::Disconnected { peer: peer_id });
+                }
             }
             SwarmEvent::OutgoingConnectionError { peer_id, .. } => {
                 let pairing_failed = peer_id.is_some_and(|peer| {
@@ -999,6 +1608,7 @@ impl Runtime {
                 });
                 if let Some(peer) = peer_id {
                     self.fail_waiting_searches(peer);
+                    self.fail_waiting_shared_wiki_browses(peer);
                 }
                 if pairing_failed {
                     warn!(peer = ?peer_id, "pairing connection failed");
@@ -1038,9 +1648,8 @@ impl Runtime {
                                 .event_tx
                                 .send(NetworkEvent::Discovered { peer, address });
                         }
-                        Err(error) => warn!(
-                            %peer,
-                            error = %error,
+                        Err(_) => warn!(
+                            error_kind = "invalid_mdns_address",
                             "ignored invalid mDNS address"
                         ),
                     }
@@ -1055,14 +1664,54 @@ impl Runtime {
                                 .send(NetworkEvent::DiscoveryExpired { peer, address });
                         }
                         Ok(None) => {}
-                        Err(error) => warn!(
-                            %peer,
-                            error = %error,
+                        Err(_) => warn!(
+                            error_kind = "invalid_expired_mdns_address",
                             "ignored invalid expired mDNS address"
                         ),
                     }
                 }
             }
+        }
+    }
+
+    fn handle_lan_address_exchange_event(
+        &mut self,
+        event: request_response::Event<LanAddressExchange, LanAddressExchange>,
+    ) {
+        match event {
+            request_response::Event::Message {
+                peer,
+                connection_id,
+                message,
+            } => match message {
+                request_response::Message::Request {
+                    request, channel, ..
+                } => {
+                    let trusted = self.peer_is_trusted_for_search(&peer);
+                    if trusted {
+                        self.record_lan_address_exchange(peer, connection_id, request);
+                    }
+                    let response = lan_address_exchange_payload(
+                        trusted,
+                        self.local_peer_id,
+                        self.lan_address_session_id,
+                        self.lan_address_revision,
+                        &self.advertised_lan_addresses,
+                        &self.config,
+                    );
+                    let _ = self
+                        .swarm
+                        .behaviour_mut()
+                        .lan_addresses
+                        .send_response(channel, response);
+                }
+                request_response::Message::Response { response, .. } => {
+                    self.record_lan_address_exchange(peer, connection_id, response);
+                }
+            },
+            request_response::Event::OutboundFailure { .. }
+            | request_response::Event::InboundFailure { .. }
+            | request_response::Event::ResponseSent { .. } => {}
         }
     }
 
@@ -1074,7 +1723,13 @@ impl Runtime {
             request_response::Event::Message { peer, message, .. } => match message {
                 request_response::Message::Request {
                     request, channel, ..
-                } => self.handle_inbound_search(peer, request, channel),
+                } => {
+                    // Search results can outlive the connection that delivered
+                    // them. Ensure the authorized requester learns a concrete
+                    // listener before it later opens the selected Wiki.
+                    self.exchange_lan_addresses_with_trusted_peer(peer);
+                    self.handle_inbound_search(peer, request, channel);
+                }
                 request_response::Message::Response {
                     request_id,
                     response,
@@ -1092,6 +1747,180 @@ impl Runtime {
             }
             request_response::Event::ResponseSent { .. } => {}
         }
+    }
+
+    fn handle_shared_wiki_event(
+        &mut self,
+        event: request_response::Event<SharedWikiBrowseRequest, SharedWikiWireResponse>,
+    ) {
+        match event {
+            request_response::Event::Message { peer, message, .. } => match message {
+                request_response::Message::Request {
+                    request, channel, ..
+                } => self.handle_inbound_shared_wiki(peer, request, channel),
+                request_response::Message::Response {
+                    request_id,
+                    response,
+                } => self.handle_shared_wiki_response(peer, request_id, response),
+            },
+            request_response::Event::OutboundFailure {
+                peer,
+                request_id,
+                error,
+                ..
+            } => self.handle_outbound_shared_wiki_failure(peer, request_id, &error),
+            request_response::Event::InboundFailure { peer, .. } => {
+                self.emit_warning(Some(peer), NetworkWarningKind::InboundSearchFailed);
+            }
+            request_response::Event::ResponseSent { .. } => {}
+        }
+    }
+
+    fn handle_inbound_shared_wiki(
+        &mut self,
+        peer: PeerId,
+        request: SharedWikiBrowseRequest,
+        channel: ResponseChannel<SharedWikiWireResponse>,
+    ) {
+        let error_response =
+            |code, message| SharedWikiWireResponse::Error(SearchWireError::new(code, message));
+        let authorization = match self.access.authorize(&peer, SearchPurpose::LocalAssistant) {
+            Ok(authorization) => authorization,
+            Err(_) => {
+                self.send_shared_wiki_response(
+                    channel,
+                    error_response(SearchWireErrorCode::Unauthorized, "peer is not authorized"),
+                );
+                return;
+            }
+        };
+        if !self.limiter.check(peer) {
+            self.send_shared_wiki_response(
+                channel,
+                error_response(SearchWireErrorCode::RateLimited, "request limit exceeded"),
+            );
+            return;
+        }
+        if request.validate().is_err()
+            || !authorization
+                .allowed_collections
+                .contains(&request.collection_id)
+        {
+            self.send_shared_wiki_response(
+                channel,
+                error_response(SearchWireErrorCode::InvalidRequest, "request is invalid"),
+            );
+            return;
+        }
+
+        let backend = Arc::clone(&self.backend);
+        let result_tx = self.shared_wiki_result_tx.clone();
+        let deadline = self.config.search_deadline;
+        self.backend_tasks.spawn(async move {
+            let result = tokio::time::timeout(
+                deadline,
+                backend.browse_authorized(request.clone(), authorization),
+            )
+            .await;
+            let (response, disclosure_lease) = match result {
+                Ok(Ok(result)) if result.page().validate_for(&request).is_ok() => (
+                    SharedWikiWireResponse::Success(Box::new(result.page)),
+                    Some(result.disclosure_lease),
+                ),
+                Ok(Ok(_)) | Ok(Err(_)) => (
+                    error_response(SearchWireErrorCode::Unavailable, "Wiki is unavailable"),
+                    None,
+                ),
+                Err(_) => (
+                    error_response(SearchWireErrorCode::Unavailable, "request timed out"),
+                    None,
+                ),
+            };
+            let _ = result_tx
+                .send(SharedWikiBackendResult {
+                    peer,
+                    request,
+                    channel,
+                    response,
+                    disclosure_lease,
+                })
+                .await;
+        });
+    }
+
+    fn handle_shared_wiki_backend_result(&mut self, result: SharedWikiBackendResult) {
+        let SharedWikiBackendResult {
+            peer,
+            request,
+            channel,
+            mut response,
+            disclosure_lease,
+        } = result;
+        let access = self.access.state(&peer);
+        let lease_is_current = disclosure_lease
+            .as_ref()
+            .is_some_and(|lease| self.access.disclosure_lease_is_current(lease));
+        if !access.trusted
+            || access.blocked
+            || !access.grants.contains(&request.collection_id)
+            || !lease_is_current
+        {
+            response = SharedWikiWireResponse::Error(SearchWireError::new(
+                SearchWireErrorCode::Unauthorized,
+                "authorization changed",
+            ));
+        }
+        self.send_shared_wiki_response(channel, response);
+        drop(disclosure_lease);
+    }
+
+    fn send_shared_wiki_response(
+        &mut self,
+        channel: ResponseChannel<SharedWikiWireResponse>,
+        response: SharedWikiWireResponse,
+    ) {
+        let response = byte_bounded_shared_wiki_response(response);
+        if self
+            .swarm
+            .behaviour_mut()
+            .shared_wiki
+            .send_response(channel, response)
+            .is_err()
+        {
+            warn!(
+                error_kind = "shared_wiki_response_closed",
+                "shared Wiki response channel closed before response"
+            );
+        }
+    }
+
+    fn handle_shared_wiki_response(
+        &mut self,
+        peer: PeerId,
+        request_id: OutboundRequestId,
+        response: SharedWikiWireResponse,
+    ) {
+        let Some(query) = self.shared_wiki_queries.remove(&request_id) else {
+            return;
+        };
+        let result = if query.peer != peer || !self.peer_is_trusted_for_search(&peer) {
+            Err(NetworkError::Access(
+                "peer authorization changed".to_owned(),
+            ))
+        } else {
+            match response {
+                SharedWikiWireResponse::Success(page)
+                    if shared_wiki_page_matches_query(&query.request, &page) =>
+                {
+                    Ok(*page)
+                }
+                SharedWikiWireResponse::Success(_) => Err(NetworkError::SharedWikiContract(
+                    SharedWikiContractError::InvalidPage,
+                )),
+                SharedWikiWireResponse::Error(_) => Err(NetworkError::Unavailable),
+            }
+        };
+        let _ = query.reply.send(result);
     }
 
     fn handle_inbound_search(
@@ -1143,7 +1972,7 @@ impl Runtime {
         let result_tx = self.backend_result_tx.clone();
         let deadline = self.config.search_deadline;
         let local_node = self.local_peer_id.to_string();
-        tokio::spawn(async move {
+        self.backend_tasks.spawn(async move {
             let request_id = request.request_id;
             let allowed: HashSet<_> = authorization.allowed_collections.iter().copied().collect();
             let result = tokio::time::timeout(
@@ -1161,8 +1990,21 @@ impl Runtime {
                     response
                         .hits
                         .retain(|hit| allowed.contains(&hit.collection_id));
+                    response
+                        .authorized_candidates
+                        .retain(|hit| allowed.contains(&hit.collection_id));
+                    if request.purpose != SearchPurpose::ExternalAi {
+                        response.authorized_candidates.clear();
+                    }
                     response.hits.truncate(usize::from(request.top_k));
-                    for hit in &mut response.hits {
+                    response
+                        .authorized_candidates
+                        .truncate(usize::from(request.top_k));
+                    for hit in response
+                        .hits
+                        .iter_mut()
+                        .chain(&mut response.authorized_candidates)
+                    {
                         hit.sanitize_for_wire();
                         hit.node_id.clone_from(&local_node);
                     }
@@ -1178,7 +2020,10 @@ impl Runtime {
                     None,
                 ),
                 Ok(Err(error)) => {
-                    warn!(%peer, error_kind = search_error_kind(&error), "authorized search backend failed");
+                    warn!(
+                        error_kind = search_error_kind(&error),
+                        "authorized search backend failed"
+                    );
                     (
                         error_response(SearchWireErrorCode::Internal, "search backend failed"),
                         None,
@@ -1390,6 +2235,112 @@ impl Runtime {
         }
     }
 
+    fn retire_peer_shared_wiki_browses(&mut self, peer: PeerId) {
+        self.fail_waiting_shared_wiki_browses(peer);
+        let request_ids = self
+            .shared_wiki_queries
+            .iter()
+            .filter_map(|(request_id, query)| (query.peer == peer).then_some(*request_id))
+            .collect::<Vec<_>>();
+        for request_id in request_ids {
+            if let Some(query) = self.shared_wiki_queries.remove(&request_id) {
+                let _ = query
+                    .reply
+                    .send(Err(NetworkError::Access("peer is unavailable".to_owned())));
+            }
+        }
+    }
+
+    fn retry_peer_shared_wiki_browses(&mut self, peer: PeerId) {
+        if !self.peer_is_trusted_for_search(&peer) {
+            self.retire_peer_shared_wiki_browses(peer);
+            return;
+        }
+        let request_ids = self
+            .shared_wiki_queries
+            .iter()
+            .filter_map(|(request_id, query)| (query.peer == peer).then_some(*request_id))
+            .collect::<Vec<_>>();
+        for request_id in request_ids {
+            let Some(query) = self.shared_wiki_queries.remove(&request_id) else {
+                continue;
+            };
+            if query.reconnect_attempted || Instant::now() >= query.deadline {
+                let _ = query.reply.send(Err(NetworkError::Unavailable));
+                continue;
+            }
+            self.queue_shared_wiki_dial(
+                peer,
+                SharedWikiPendingDial {
+                    request: query.request,
+                    deadline: query.deadline,
+                    reply: query.reply,
+                },
+            );
+        }
+    }
+
+    fn handle_outbound_shared_wiki_failure(
+        &mut self,
+        peer: PeerId,
+        request_id: OutboundRequestId,
+        error: &request_response::OutboundFailure,
+    ) {
+        let Some(query) = self.shared_wiki_queries.remove(&request_id) else {
+            return;
+        };
+        let retryable = matches!(
+            error,
+            request_response::OutboundFailure::DialFailure
+                | request_response::OutboundFailure::ConnectionClosed
+                | request_response::OutboundFailure::Io(_)
+        );
+        if query.peer != peer
+            || !retryable
+            || query.reconnect_attempted
+            || Instant::now() >= query.deadline
+        {
+            let _ = query.reply.send(Err(NetworkError::Unavailable));
+            return;
+        }
+        self.queue_shared_wiki_dial(
+            peer,
+            SharedWikiPendingDial {
+                request: query.request,
+                deadline: query.deadline,
+                reply: query.reply,
+            },
+        );
+    }
+
+    fn resume_waiting_shared_wiki_browses(&mut self, peer: PeerId) {
+        if !self.peer_is_trusted_for_search(&peer) {
+            self.retire_peer_shared_wiki_browses(peer);
+            return;
+        }
+        let Some(pending) = self.shared_wiki_dials.remove(&peer) else {
+            return;
+        };
+        for browse in pending {
+            self.send_shared_wiki_request(
+                peer,
+                browse.request,
+                browse.deadline,
+                true,
+                browse.reply,
+            );
+        }
+    }
+
+    fn fail_waiting_shared_wiki_browses(&mut self, peer: PeerId) {
+        let Some(pending) = self.shared_wiki_dials.remove(&peer) else {
+            return;
+        };
+        for browse in pending {
+            let _ = browse.reply.send(Err(NetworkError::Unavailable));
+        }
+    }
+
     fn fail_waiting_searches(&mut self, peer: PeerId) {
         let mut finished = Vec::new();
         for (query_id, query) in &mut self.queries {
@@ -1442,7 +2393,7 @@ impl Runtime {
                 self.pairing_confirms.remove(&request_id);
                 if hello_failed {
                     self.fail_pairing(peer, PairingFailureReason::HandshakeFailed);
-                    warn!(%peer, "pairing Hello failed");
+                    warn!(error_kind = "pairing_hello_failed", "pairing Hello failed");
                 } else {
                     let _ = error;
                     self.emit_warning(Some(peer), NetworkWarningKind::PairingProtocolFailed);
@@ -1592,7 +2543,6 @@ impl Runtime {
         }
         if self.pairing.is_complete(&peer, Instant::now()) {
             self.pairing_reblock_on_failure.remove(&peer);
-            self.access.mark_trusted(peer);
             self.pairing.remove(&peer);
             self.pairing_dials.remove(&peer);
             let _ = self.event_tx.send(NetworkEvent::PairingTrusted { peer });
@@ -1602,6 +2552,20 @@ impl Runtime {
     fn maintenance(&mut self) {
         let now = Instant::now();
         self.expire_pairings(now);
+        for pending in self.shared_wiki_dials.values_mut() {
+            let mut active = Vec::with_capacity(pending.len());
+            for browse in std::mem::take(pending) {
+                if now >= browse.deadline {
+                    let _ = browse.reply.send(Err(NetworkError::Unavailable));
+                } else {
+                    active.push(browse);
+                }
+            }
+            *pending = active;
+        }
+        self.shared_wiki_dials
+            .retain(|_, pending| !pending.is_empty());
+        expire_shared_wiki_queries(&mut self.shared_wiki_queries, now);
         let expired_queries: Vec<_> = self
             .queries
             .iter()
@@ -1645,6 +2609,119 @@ impl Runtime {
     }
 }
 
+fn lan_address_exchange_payload(
+    trusted: bool,
+    local_peer_id: PeerId,
+    session_id: Uuid,
+    revision: u64,
+    addresses: &HashSet<Multiaddr>,
+    config: &NetworkConfig,
+) -> LanAddressExchange {
+    if !trusted {
+        return LanAddressExchange::default();
+    }
+    let mut addresses = addresses
+        .iter()
+        .take(MAX_AUTHENTICATED_LISTENERS_PER_PEER)
+        .map(|address| {
+            let mut address = address.clone();
+            address.push(Protocol::P2p(local_peer_id));
+            address.to_string()
+        })
+        .collect::<Vec<_>>();
+    addresses.sort_unstable();
+    LanAddressExchange {
+        session_id,
+        revision,
+        addresses,
+        device_name: Some(clean_node_name(&config.node_name)).filter(|name| !name.is_empty()),
+        device_platform: (config.device_platform != DevicePlatform::Unknown)
+            .then_some(config.device_platform),
+    }
+}
+
+fn next_accepted_lan_address_revision(
+    current: Option<AcceptedLanAddressRevision>,
+    exchange: &LanAddressExchange,
+    connection_epoch: u64,
+) -> Option<AcceptedLanAddressRevision> {
+    let next = AcceptedLanAddressRevision {
+        session_id: exchange.session_id,
+        revision: exchange.revision,
+        connection_epoch,
+    };
+    let Some(current) = current else {
+        return Some(next);
+    };
+    if exchange.session_id == current.session_id {
+        return (exchange.revision >= current.revision).then_some(AcceptedLanAddressRevision {
+            connection_epoch: current.connection_epoch.max(connection_epoch),
+            ..next
+        });
+    }
+    (connection_epoch > current.connection_epoch).then_some(next)
+}
+
+fn expire_shared_wiki_queries(
+    queries: &mut HashMap<OutboundRequestId, SharedWikiQuery>,
+    now: Instant,
+) {
+    let expired = queries
+        .iter()
+        .filter_map(|(request_id, query)| (now >= query.deadline).then_some(*request_id))
+        .collect::<Vec<_>>();
+    for request_id in expired {
+        if let Some(query) = queries.remove(&request_id) {
+            let _ = query.reply.send(Err(NetworkError::Unavailable));
+        }
+    }
+}
+
+fn shared_wiki_page_matches_query(
+    request: &SharedWikiBrowseRequest,
+    page: &SharedWikiBrowsePage,
+) -> bool {
+    let mut negotiated_request = request.clone();
+    negotiated_request
+        .prepare_for_protocol(&page.protocol_version)
+        .is_ok()
+        && page.validate_for(&negotiated_request).is_ok()
+}
+
+fn byte_bounded_shared_wiki_response(
+    mut response: SharedWikiWireResponse,
+) -> SharedWikiWireResponse {
+    if shared_wiki_response_fits(&response) {
+        return response;
+    }
+    loop {
+        let shortened = match &mut response {
+            SharedWikiWireResponse::Success(page) if page.concepts.len() > 1 => {
+                page.concepts.pop();
+                if let Some(workspace) = &mut page.workspace {
+                    workspace.documents.pop();
+                }
+                page.next_cursor = page
+                    .concepts
+                    .last()
+                    .map(|concept| concept.concept_id.to_string());
+                true
+            }
+            _ => false,
+        };
+        if !shortened {
+            break;
+        }
+        if shared_wiki_response_fits(&response) {
+            return response;
+        }
+    }
+    SharedWikiWireResponse::Error(SearchWireError::new(
+        SearchWireErrorCode::Unavailable,
+        "response is too large",
+    ))
+}
+
 impl Drop for Runtime {
     fn drop(&mut self) {
         // `AccessControl` survives LAN runtime replacement. If Tokio aborts or
@@ -1657,7 +2734,13 @@ impl Drop for Runtime {
 }
 
 fn clean_node_name(name: &str) -> String {
-    name.trim().chars().take(128).collect()
+    name.trim()
+        .chars()
+        .filter(|character| !character.is_control())
+        .take(128)
+        .collect::<String>()
+        .trim()
+        .to_owned()
 }
 
 /// Preserve only the boolean completeness signal from diagnostics supplied by a
@@ -1691,7 +2774,13 @@ fn deliver_backend_response(
         success
             .hits
             .retain(|hit| access.grants.contains(&hit.collection_id));
+        success
+            .authorized_candidates
+            .retain(|hit| access.grants.contains(&hit.collection_id));
         for (index, hit) in success.hits.iter_mut().enumerate() {
+            hit.rank = u32::try_from(index + 1).unwrap_or(u32::MAX);
+        }
+        for (index, hit) in success.authorized_candidates.iter_mut().enumerate() {
             hit.rank = u32::try_from(index + 1).unwrap_or(u32::MAX);
         }
         hit_count = success.hits.len();
@@ -1780,6 +2869,19 @@ fn shrink_to_wire_limit(response: &mut SearchWireResponse) {
         let SearchWireResponse::Success(success) = response else {
             return;
         };
+        if success.authorized_candidates.pop().is_some() {
+            success.partial = true;
+            if !success
+                .warnings
+                .iter()
+                .any(|warning| warning == "response truncated to 256 KiB")
+            {
+                success
+                    .warnings
+                    .push("response truncated to 256 KiB".to_owned());
+            }
+            continue;
+        }
         if success.hits.pop().is_some() {
             success.partial = true;
             if !success
@@ -1808,47 +2910,28 @@ fn fuse_peer_rankings(
 ) {
     const RRF_K: f64 = 60.0;
     let mut fused: HashMap<(String, uuid::Uuid), (SearchHit, f64)> = HashMap::new();
+    let mut fused_candidates: HashMap<(String, uuid::Uuid), (SearchHit, f64)> = HashMap::new();
+    let include_candidates = query.request.purpose == SearchPurpose::ExternalAi;
     let mut warnings = query.warnings;
     for (peer, mut response) in query.responses {
         sanitize_untrusted_search_diagnostics(&mut response);
         if response.partial {
             warnings.push(format!("peer {peer}: remote results may be incomplete"));
         }
-        for (position, mut hit) in response.hits.into_iter().enumerate() {
-            // Noise authenticates the sending peer. Response-controlled
-            // metadata must never choose the citation identity, otherwise a
-            // peer could impersonate another trusted node and evade a final
-            // in-flight revocation check.
-            hit.node_id = peer.to_string();
-            let rank = if hit.rank == 0 {
-                (position + 1) as u32
-            } else {
-                hit.rank
-            };
-            let contribution = 1.0 / (RRF_K + f64::from(rank));
-            hit.sanitize_for_wire();
-            let key = (hit.source_sha256.clone(), hit.chunk_id);
-            fused
-                .entry(key)
-                .and_modify(|(_, score)| *score += contribution)
-                .or_insert((hit, contribution));
+        add_peer_rankings(&mut fused, &peer, response.hits, RRF_K);
+        if include_candidates {
+            add_peer_rankings(
+                &mut fused_candidates,
+                &peer,
+                response.authorized_candidates,
+                RRF_K,
+            );
         }
     }
-    let mut ranked: Vec<_> = fused.into_values().collect();
-    ranked.sort_by(|left, right| {
-        right
-            .1
-            .total_cmp(&left.1)
-            .then_with(|| left.0.title.cmp(&right.0.title))
-    });
-    let mut hits: Vec<_> = ranked
-        .into_iter()
-        .take(usize::from(query.request.top_k))
-        .map(|(hit, _)| hit)
-        .collect();
-    for (index, hit) in hits.iter_mut().enumerate() {
-        hit.rank = (index + 1) as u32;
-    }
+    let hits = finish_fused_rankings(fused, query.request.top_k);
+    let mut authorized_candidates = rank_fused_rankings(fused_candidates);
+    remove_evidence_duplicates(&hits, &mut authorized_candidates);
+    truncate_and_renumber(&mut authorized_candidates, query.request.top_k);
     let mut offline_nodes: Vec<_> = query
         .offline
         .into_iter()
@@ -1863,12 +2946,73 @@ fn fuse_peer_rankings(
         SearchResponse {
             request_id: query.request.request_id,
             hits,
+            authorized_candidates,
             offline_nodes,
             warnings,
             partial,
         },
         query.reply,
     )
+}
+
+fn remove_evidence_duplicates(hits: &[SearchHit], candidates: &mut Vec<SearchHit>) {
+    let evidence = hits
+        .iter()
+        .map(|hit| (hit.source_sha256.as_str(), hit.chunk_id))
+        .collect::<HashSet<_>>();
+    candidates.retain(|hit| !evidence.contains(&(hit.source_sha256.as_str(), hit.chunk_id)));
+}
+
+fn add_peer_rankings(
+    fused: &mut HashMap<(String, uuid::Uuid), (SearchHit, f64)>,
+    peer: &PeerId,
+    hits: Vec<SearchHit>,
+    rrf_k: f64,
+) {
+    for (position, mut hit) in hits.into_iter().enumerate() {
+        // Noise authenticates the sending peer. Response-controlled metadata
+        // must never choose the citation identity.
+        hit.node_id = peer.to_string();
+        let rank = if hit.rank == 0 {
+            u32::try_from(position.saturating_add(1)).unwrap_or(u32::MAX)
+        } else {
+            hit.rank
+        };
+        let contribution = 1.0 / (rrf_k + f64::from(rank));
+        hit.sanitize_for_wire();
+        let key = (hit.source_sha256.clone(), hit.chunk_id);
+        fused
+            .entry(key)
+            .and_modify(|(_, score)| *score += contribution)
+            .or_insert((hit, contribution));
+    }
+}
+
+fn finish_fused_rankings(
+    fused: HashMap<(String, uuid::Uuid), (SearchHit, f64)>,
+    top_k: u8,
+) -> Vec<SearchHit> {
+    let mut hits = rank_fused_rankings(fused);
+    truncate_and_renumber(&mut hits, top_k);
+    hits
+}
+
+fn rank_fused_rankings(fused: HashMap<(String, uuid::Uuid), (SearchHit, f64)>) -> Vec<SearchHit> {
+    let mut ranked: Vec<_> = fused.into_values().collect();
+    ranked.sort_by(|left, right| {
+        right
+            .1
+            .total_cmp(&left.1)
+            .then_with(|| left.0.title.cmp(&right.0.title))
+    });
+    ranked.into_iter().map(|(hit, _)| hit).collect()
+}
+
+fn truncate_and_renumber(hits: &mut Vec<SearchHit>, top_k: u8) {
+    hits.truncate(usize::from(top_k));
+    for (index, hit) in hits.iter_mut().enumerate() {
+        hit.rank = u32::try_from(index.saturating_add(1)).unwrap_or(u32::MAX);
+    }
 }
 
 impl From<AccessError> for NetworkError {
@@ -1895,6 +3039,286 @@ mod tests {
         assert!(!config.enable_ipv6);
     }
 
+    #[test]
+    fn local_advertisements_are_bounded_deduplicated_and_identity_scoped() {
+        let local_peer = PeerId::random();
+        let other_peer = PeerId::random();
+        let address = format!("/ip4/192.168.1.20/tcp/41000/p2p/{local_peer}")
+            .parse::<Multiaddr>()
+            .unwrap();
+
+        let validated =
+            validate_local_advertisements(local_peer, vec![address.clone(), address]).unwrap();
+        assert_eq!(
+            validated,
+            vec!["/ip4/192.168.1.20/tcp/41000".parse().unwrap()]
+        );
+
+        let mismatched = format!("/ip4/192.168.1.20/tcp/41000/p2p/{other_peer}")
+            .parse::<Multiaddr>()
+            .unwrap();
+        assert_eq!(
+            validate_local_advertisements(local_peer, vec![mismatched]),
+            Err(LanAddressError::PeerMismatch)
+        );
+
+        let too_many = (0..=MAX_AUTHENTICATED_LISTENERS_PER_PEER)
+            .map(|offset| {
+                format!("/ip4/192.168.1.20/tcp/{}", 42000 + offset)
+                    .parse::<Multiaddr>()
+                    .unwrap()
+            })
+            .collect();
+        assert_eq!(
+            validate_local_advertisements(local_peer, too_many),
+            Err(LanAddressError::CapacityExceeded)
+        );
+    }
+
+    #[test]
+    fn lan_listener_exchange_discloses_addresses_only_after_trust() {
+        let local_peer = PeerId::random();
+        let session_id = Uuid::new_v4();
+        let config = NetworkConfig {
+            node_name: "RUSTICO".to_owned(),
+            device_platform: DevicePlatform::Windows,
+            ..NetworkConfig::default()
+        };
+        let addresses =
+            HashSet::from(["/ip4/192.168.1.20/tcp/41000".parse::<Multiaddr>().unwrap()]);
+
+        let untrusted =
+            lan_address_exchange_payload(false, local_peer, session_id, 7, &addresses, &config);
+        assert!(untrusted.addresses.is_empty());
+        assert!(untrusted.device_name.is_none());
+        assert!(untrusted.device_platform.is_none());
+        let payload =
+            lan_address_exchange_payload(true, local_peer, session_id, 7, &addresses, &config);
+        assert_eq!(payload.session_id, session_id);
+        assert_eq!(payload.revision, 7);
+        assert_eq!(payload.device_name.as_deref(), Some("RUSTICO"));
+        assert_eq!(payload.device_platform, Some(DevicePlatform::Windows));
+        assert_eq!(
+            payload.addresses,
+            [format!("/ip4/192.168.1.20/tcp/41000/p2p/{local_peer}")]
+        );
+    }
+
+    #[test]
+    fn lan_listener_exchange_accepts_payloads_without_device_metadata() {
+        #[derive(Serialize)]
+        struct LegacyLanAddressExchange {
+            session_id: Uuid,
+            revision: u64,
+            addresses: Vec<String>,
+        }
+
+        let legacy = LegacyLanAddressExchange {
+            session_id: Uuid::new_v4(),
+            revision: 3,
+            addresses: vec!["/ip4/192.168.1.20/tcp/41000".to_owned()],
+        };
+        let mut encoded = Vec::new();
+        ciborium::into_writer(&legacy, &mut encoded).unwrap();
+
+        let decoded: LanAddressExchange = ciborium::from_reader(encoded.as_slice()).unwrap();
+
+        assert_eq!(decoded.session_id, legacy.session_id);
+        assert_eq!(decoded.revision, legacy.revision);
+        assert_eq!(decoded.addresses, legacy.addresses);
+        assert!(decoded.device_name.is_none());
+        assert!(decoded.device_platform.is_none());
+    }
+
+    #[test]
+    fn device_name_metadata_is_bounded_and_removes_control_characters() {
+        assert_eq!(clean_node_name("  RUS\nTICO\0  "), "RUSTICO");
+        assert_eq!(clean_node_name(&"a".repeat(140)).chars().count(), 128);
+    }
+
+    #[test]
+    fn lan_listener_exchange_rejects_stale_revisions_across_reconnects_and_retired_sessions() {
+        let current_session = Uuid::new_v4();
+        let replacement_session = Uuid::new_v4();
+        let current = AcceptedLanAddressRevision {
+            session_id: current_session,
+            revision: 4,
+            connection_epoch: 10,
+        };
+        let exchange = |session_id, revision| LanAddressExchange {
+            session_id,
+            revision,
+            addresses: Vec::new(),
+            device_name: None,
+            device_platform: None,
+        };
+
+        assert!(
+            next_accepted_lan_address_revision(Some(current), &exchange(current_session, 3), 12,)
+                .is_none()
+        );
+        let updated =
+            next_accepted_lan_address_revision(Some(current), &exchange(current_session, 5), 8)
+                .expect("a newer revision in the current process must be accepted");
+        assert_eq!(updated.revision, 5);
+        assert_eq!(updated.connection_epoch, 10);
+
+        assert!(next_accepted_lan_address_revision(
+            Some(updated),
+            &exchange(replacement_session, 1),
+            9,
+        )
+        .is_none());
+        let replacement = next_accepted_lan_address_revision(
+            Some(updated),
+            &exchange(replacement_session, 1),
+            11,
+        )
+        .expect("a restarted peer may replace state only on its newer connection");
+        assert!(
+            next_accepted_lan_address_revision(
+                Some(replacement),
+                &exchange(current_session, 6),
+                10,
+            )
+            .is_none()
+        );
+    }
+
+    #[tokio::test]
+    async fn shared_wiki_retries_expire_at_the_original_absolute_deadline() {
+        let mut behaviour = request_response::Behaviour::with_codec(
+            BoundedSharedWikiCodec,
+            supported_shared_wiki_protocols(),
+            request_response::Config::default(),
+        );
+        let peer = PeerId::random();
+        let collection_id = uuid::Uuid::new_v4();
+        let expired_request = SharedWikiBrowseRequest::new(collection_id, None, 50);
+        let live_request = SharedWikiBrowseRequest::new(collection_id, None, 50);
+        let expired_id = behaviour.send_request(&peer, expired_request.clone());
+        let live_id = behaviour.send_request(&peer, live_request.clone());
+        let (expired_reply, expired_result) = oneshot::channel();
+        let (live_reply, _live_result) = oneshot::channel();
+        let now = Instant::now();
+        let mut queries = HashMap::from([
+            (
+                expired_id,
+                SharedWikiQuery {
+                    peer,
+                    request: expired_request,
+                    deadline: now - Duration::from_millis(1),
+                    reconnect_attempted: true,
+                    reply: expired_reply,
+                },
+            ),
+            (
+                live_id,
+                SharedWikiQuery {
+                    peer,
+                    request: live_request,
+                    deadline: now + Duration::from_secs(1),
+                    reconnect_attempted: true,
+                    reply: live_reply,
+                },
+            ),
+        ]);
+
+        expire_shared_wiki_queries(&mut queries, now);
+
+        assert!(!queries.contains_key(&expired_id));
+        assert!(queries.contains_key(&live_id));
+        assert!(matches!(
+            expired_result.await.unwrap(),
+            Err(NetworkError::Unavailable)
+        ));
+    }
+
+    #[test]
+    fn shared_wiki_response_uses_a_valid_short_page_when_bytes_reach_the_wire_limit() {
+        let collection_id = uuid::Uuid::new_v4();
+        let mut request = SharedWikiBrowseRequest::new(collection_id, None, 50);
+        request
+            .prepare_for_protocol(airwiki_types::SHARED_WIKI_BROWSE_PROTOCOL)
+            .unwrap();
+        let concepts = (1_u128..=50)
+            .map(|value| airwiki_types::SharedWikiConceptSummary {
+                concept_id: uuid::Uuid::from_u128(value),
+                concept_type: airwiki_types::ConceptType::Document,
+                title: format!("Concept {value}"),
+                description: "d".repeat(1_000),
+                language: "en".to_owned(),
+                tags: (0..64)
+                    .map(|index| format!("tag-{index:02}-{}", "x".repeat(54)))
+                    .collect(),
+                summary: "é".repeat(airwiki_types::MAX_SNIPPET_CHARS),
+                logical_resource_uri: "u".repeat(2_048),
+                source_revision: 1,
+                updated_at: Utc::now(),
+                lifecycle_status: Some("stable".to_owned()),
+                assurance: Some(airwiki_types::ConceptAssurance::default()),
+            })
+            .collect();
+        let response = SharedWikiWireResponse::Success(Box::new(SharedWikiBrowsePage {
+            protocol_version: request.protocol_version.clone(),
+            request_id: request.request_id,
+            wiki: airwiki_types::SharedWikiDescriptor {
+                collection_id,
+                name: "Byte-bounded Wiki".to_owned(),
+                okf_compatibility: airwiki_types::OkfCompatibility::DeclaredV02,
+            },
+            concepts,
+            next_cursor: None,
+            workspace: None,
+            document: None,
+        }));
+
+        let bounded = byte_bounded_shared_wiki_response(response);
+        let SharedWikiWireResponse::Success(page) = bounded else {
+            panic!("a bounded subset should fit the shared Wiki response");
+        };
+        assert!(!page.concepts.is_empty());
+        assert!(page.concepts.len() <= usize::from(request.limit));
+        assert!(page.validate_for(&request).is_ok());
+        assert!(shared_wiki_response_fits(&SharedWikiWireResponse::Success(
+            page
+        )));
+    }
+
+    #[test]
+    fn shared_wiki_response_validates_against_the_negotiated_legacy_protocol() {
+        let collection_id = uuid::Uuid::new_v4();
+        let request = SharedWikiBrowseRequest::new(collection_id, None, 1);
+        let response = SharedWikiBrowsePage {
+            protocol_version: airwiki_types::SHARED_WIKI_BROWSE_PROTOCOL.to_owned(),
+            request_id: request.request_id,
+            wiki: airwiki_types::SharedWikiDescriptor {
+                collection_id,
+                name: "Legacy shared Wiki".to_owned(),
+                okf_compatibility: airwiki_types::OkfCompatibility::DeclaredV02,
+            },
+            concepts: vec![airwiki_types::SharedWikiConceptSummary {
+                concept_id: uuid::Uuid::new_v4(),
+                concept_type: airwiki_types::ConceptType::Document,
+                title: "Legacy concept".to_owned(),
+                description: String::new(),
+                language: "en".to_owned(),
+                tags: Vec::new(),
+                summary: "Legacy summary".to_owned(),
+                logical_resource_uri: "urn:airwiki:legacy".to_owned(),
+                source_revision: 1,
+                updated_at: Utc::now(),
+                lifecycle_status: Some("stable".to_owned()),
+                assurance: None,
+            }],
+            next_cursor: None,
+            workspace: None,
+            document: None,
+        };
+
+        assert!(shared_wiki_page_matches_query(&request, &response));
+    }
+
     struct FixtureBackend {
         collection: uuid::Uuid,
         title: &'static str,
@@ -1906,6 +3330,12 @@ mod tests {
         calls: Arc<AtomicUsize>,
         first_call_started: Arc<Notify>,
         release_first_call: Arc<Notify>,
+    }
+
+    struct GatedBrowseBackend {
+        collection: uuid::Uuid,
+        started: Arc<Notify>,
+        release: Arc<Notify>,
     }
 
     fn fixture_response(
@@ -1929,6 +3359,8 @@ mod tests {
                 updated_at: Utc::now(),
                 rank: 1,
                 node_id: "backend-must-not-control-this".to_owned(),
+                assurance: None,
+                lifecycle_status: Some("stable".to_owned()),
             });
         }
         response
@@ -1944,6 +3376,14 @@ mod tests {
             let response = fixture_response(&request, &authorization, self.collection, self.title);
             let lease = authorization.acquire_disclosure_lease();
             Ok(AuthorizedSearchResult::new(response, lease))
+        }
+
+        async fn browse_authorized(
+            &self,
+            request: SharedWikiBrowseRequest,
+            authorization: SearchAuthorization,
+        ) -> Result<AuthorizedWikiBrowseResult, SearchContractError> {
+            fixture_shared_wiki_page(request, authorization, self.collection, self.title)
         }
     }
 
@@ -1962,6 +3402,77 @@ mod tests {
             let lease = authorization.acquire_disclosure_lease();
             Ok(AuthorizedSearchResult::new(response, lease))
         }
+
+        async fn browse_authorized(
+            &self,
+            request: SharedWikiBrowseRequest,
+            authorization: SearchAuthorization,
+        ) -> Result<AuthorizedWikiBrowseResult, SearchContractError> {
+            fixture_shared_wiki_page(request, authorization, self.collection, self.title)
+        }
+    }
+
+    #[async_trait]
+    impl AuthorizedSearchBackend for GatedBrowseBackend {
+        async fn search_authorized(
+            &self,
+            request: SearchRequest,
+            authorization: SearchAuthorization,
+        ) -> Result<AuthorizedSearchResult, SearchContractError> {
+            let response = fixture_response(
+                &request,
+                &authorization,
+                self.collection,
+                "authorized evidence",
+            );
+            let lease = authorization.acquire_disclosure_lease();
+            Ok(AuthorizedSearchResult::new(response, lease))
+        }
+
+        async fn browse_authorized(
+            &self,
+            request: SharedWikiBrowseRequest,
+            authorization: SearchAuthorization,
+        ) -> Result<AuthorizedWikiBrowseResult, SearchContractError> {
+            self.started.notify_one();
+            self.release.notified().await;
+            fixture_shared_wiki_page(request, authorization, self.collection, "authorized Wiki")
+        }
+    }
+
+    fn fixture_shared_wiki_page(
+        request: SharedWikiBrowseRequest,
+        authorization: SearchAuthorization,
+        collection: uuid::Uuid,
+        title: &str,
+    ) -> Result<AuthorizedWikiBrowseResult, SearchContractError> {
+        if request.collection_id != collection
+            || !authorization.allowed_collections.contains(&collection)
+        {
+            return Err(SearchContractError::Unauthorized);
+        }
+        let page = SharedWikiBrowsePage {
+            protocol_version: request.protocol_version.clone(),
+            request_id: request.request_id,
+            wiki: airwiki_types::SharedWikiDescriptor {
+                collection_id: collection,
+                name: title.to_owned(),
+                okf_compatibility: airwiki_types::OkfCompatibility::DeclaredV02,
+            },
+            concepts: Vec::new(),
+            next_cursor: None,
+            workspace: (request.protocol_version == airwiki_types::SHARED_WIKI_BROWSE_PROTOCOL_V2)
+                .then_some(airwiki_types::PublishedWikiWorkspacePage {
+                    workspace_fingerprint: "b".repeat(64),
+                    reserved_pages: Vec::new(),
+                    documents: Vec::new(),
+                    links: Vec::new(),
+                    next_graph_cursor: None,
+                }),
+            document: None,
+        };
+        let lease = authorization.acquire_disclosure_lease();
+        Ok(AuthorizedWikiBrowseResult::new(page, lease))
     }
 
     fn available_loopback_address() -> Multiaddr {
@@ -2054,6 +3565,46 @@ mod tests {
         assert!(matches!(sent, Some(SearchWireResponse::Error(_))));
     }
 
+    #[test]
+    fn final_transport_barrier_removes_candidate_without_current_grant() {
+        let access = AccessControl::default();
+        let peer = PeerId::random();
+        let granted_collection = uuid::Uuid::new_v4();
+        let ungranted_collection = uuid::Uuid::new_v4();
+        access.mark_trusted(peer);
+        access.grant(peer, granted_collection).unwrap();
+        let authorization = access
+            .authorize(&peer, airwiki_types::SearchPurpose::ExternalAi)
+            .unwrap();
+        let request = SearchRequest::new("authorized", airwiki_types::SearchPurpose::ExternalAi, 1);
+        let mut response = fixture_response(
+            &request,
+            &authorization,
+            granted_collection,
+            "authorized evidence",
+        );
+        let mut candidate = response.hits[0].clone();
+        candidate.collection_id = ungranted_collection;
+        response.authorized_candidates.push(candidate);
+        let lease = authorization.acquire_disclosure_lease();
+        let mut sent = None;
+
+        deliver_backend_response(
+            &access,
+            peer,
+            SearchWireResponse::Success(response),
+            1,
+            Some(lease),
+            |response| sent = Some(response),
+        );
+
+        let Some(SearchWireResponse::Success(sent)) = sent else {
+            panic!("expected an authorized response");
+        };
+        assert_eq!(sent.hits.len(), 1);
+        assert!(sent.authorized_candidates.is_empty());
+    }
+
     async fn wait_for_connected(events: &mut broadcast::Receiver<NetworkEvent>, expected: PeerId) {
         tokio::time::timeout(Duration::from_secs(5), async {
             loop {
@@ -2066,6 +3617,18 @@ mod tests {
         })
         .await
         .expect("nodes should establish Noise connection");
+    }
+
+    async fn wait_for_listening(events: &mut broadcast::Receiver<NetworkEvent>) -> Multiaddr {
+        tokio::time::timeout(Duration::from_secs(5), async {
+            loop {
+                if let NetworkEvent::Listening { address } = events.recv().await.unwrap() {
+                    return address;
+                }
+            }
+        })
+        .await
+        .expect("node should expose its dynamic listener")
     }
 
     async fn wait_for_disconnected(
@@ -2102,7 +3665,13 @@ mod tests {
         .expect("both nodes should receive an SAS")
     }
 
-    async fn wait_for_trusted(events: &mut broadcast::Receiver<NetworkEvent>, expected: PeerId) {
+    async fn persist_runtime_trust(
+        events: &mut broadcast::Receiver<NetworkEvent>,
+        expected: PeerId,
+        access: &AccessControl,
+        handle: &NetworkHandle,
+        must_be_new_trust: bool,
+    ) {
         tokio::time::timeout(Duration::from_secs(5), async {
             loop {
                 if let NetworkEvent::PairingTrusted { peer } = events.recv().await.unwrap()
@@ -2114,6 +3683,14 @@ mod tests {
         })
         .await
         .expect("both confirmations should establish trust");
+        if must_be_new_trust {
+            assert!(
+                !access.state(&expected).trusted,
+                "SAS completion must not grant trust before durable persistence"
+            );
+        }
+        access.mark_trusted(expected);
+        handle.acknowledge_persisted_trust(expected).await.unwrap();
     }
 
     async fn wait_for_cancelled(events: &mut broadcast::Receiver<NetworkEvent>, expected: PeerId) {
@@ -2174,6 +3751,35 @@ mod tests {
             .unwrap();
     }
 
+    async fn clear_peer_addresses(handle: &NetworkHandle, peer: PeerId) {
+        handle
+            .command(Command::ClearPeerAddresses { peer })
+            .await
+            .unwrap();
+    }
+
+    async fn known_dial_address_count(handle: &NetworkHandle, peer: PeerId) -> usize {
+        let (reply, result) = oneshot::channel();
+        handle
+            .command(Command::KnownDialAddressCount { peer, reply })
+            .await
+            .unwrap();
+        result.await.unwrap()
+    }
+
+    async fn wait_for_known_dial_address(handle: &NetworkHandle, peer: PeerId) {
+        tokio::time::timeout(Duration::from_secs(5), async {
+            loop {
+                if known_dial_address_count(handle, peer).await > 0 {
+                    return;
+                }
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .expect("trusted address exchange should provide a concrete authenticated listener");
+    }
+
     async fn pairing_attempt_active(handle: &NetworkHandle, peer: PeerId) -> bool {
         let (reply, result) = oneshot::channel();
         handle
@@ -2197,16 +3803,28 @@ mod tests {
             updated_at: Utc::now(),
             rank,
             node_id: node.to_owned(),
+            assurance: None,
+            lifecycle_status: None,
         }
     }
 
     #[test]
-    fn runtime_registers_only_search_protocol_v2() {
-        let protocols = supported_search_protocols();
+    fn runtime_prefers_full_wiki_browse_and_keeps_summary_fallback() {
+        let search_protocols = supported_search_protocols();
+        let browse_protocols = supported_shared_wiki_protocols();
 
-        assert_eq!(protocols.len(), 1);
-        assert_eq!(protocols[0].0.as_ref(), "/airwiki/search/2.0.0");
-        assert_ne!(protocols[0].0.as_ref(), "/airwiki/search/1.0.0");
+        assert_eq!(search_protocols.len(), 1);
+        assert_eq!(search_protocols[0].0.as_ref(), "/airwiki/search/2.0.0");
+        assert_ne!(search_protocols[0].0.as_ref(), "/airwiki/search/1.0.0");
+        assert_eq!(browse_protocols.len(), 2);
+        assert_eq!(
+            browse_protocols[0].0.as_ref(),
+            "/airwiki/shared-wiki-browse/2.0.0"
+        );
+        assert_eq!(
+            browse_protocols[1].0.as_ref(),
+            "/airwiki/shared-wiki-browse/1.0.0"
+        );
     }
 
     #[test]
@@ -2328,6 +3946,64 @@ mod tests {
         let (response, _) = fuse_peer_rankings(query);
         assert_eq!(response.hits.len(), 2);
         assert_eq!(response.hits[0].source_sha256, "same");
+    }
+
+    #[tokio::test]
+    async fn peer_ranking_discards_candidates_for_local_assistant_requests() {
+        let request = SearchRequest::new("query", airwiki_types::SearchPurpose::LocalAssistant, 5);
+        let (reply, _receiver) = oneshot::channel();
+        let mut remote = SearchResponse::empty(request.request_id);
+        remote.authorized_candidates.push(hit(
+            "candidate",
+            1,
+            "candidate-hash",
+            uuid::Uuid::new_v4(),
+        ));
+        let query = QueryAggregate {
+            request,
+            pending: HashMap::new(),
+            connecting: HashSet::new(),
+            responses: vec![(PeerId::random(), remote)],
+            offline: HashSet::new(),
+            warnings: Vec::new(),
+            deadline: Instant::now(),
+            reply,
+        };
+
+        let (response, _) = fuse_peer_rankings(query);
+
+        assert!(response.authorized_candidates.is_empty());
+    }
+
+    #[tokio::test]
+    async fn peer_evidence_duplicate_does_not_displace_unique_candidate_at_top_k() {
+        let request = SearchRequest::new("query", airwiki_types::SearchPurpose::ExternalAi, 1);
+        let duplicate = uuid::Uuid::new_v4();
+        let (reply, _receiver) = oneshot::channel();
+        let mut remote = SearchResponse::empty(request.request_id);
+        remote.hits.push(hit("evidence", 1, "same", duplicate));
+        remote
+            .authorized_candidates
+            .push(hit("duplicate", 1, "same", duplicate));
+        remote
+            .authorized_candidates
+            .push(hit("unique", 2, "unique", uuid::Uuid::new_v4()));
+        let query = QueryAggregate {
+            request,
+            pending: HashMap::new(),
+            connecting: HashSet::new(),
+            responses: vec![(PeerId::random(), remote)],
+            offline: HashSet::new(),
+            warnings: Vec::new(),
+            deadline: Instant::now(),
+            reply,
+        };
+
+        let (response, _) = fuse_peer_rankings(query);
+
+        assert_eq!(response.authorized_candidates.len(), 1);
+        assert_eq!(response.authorized_candidates[0].title, "unique");
+        assert_eq!(response.authorized_candidates[0].rank, 1);
     }
 
     #[tokio::test]
@@ -2480,6 +4156,28 @@ mod tests {
         let mut wire = SearchWireResponse::Success(response);
         shrink_to_wire_limit(&mut wire);
         assert!(response_fits(&wire));
+    }
+
+    #[test]
+    fn wire_reduction_discards_candidates_before_evidence() {
+        let mut response = SearchResponse::empty(uuid::Uuid::new_v4());
+        response
+            .hits
+            .push(hit("evidence", 1, "evidence", uuid::Uuid::new_v4()));
+        for _ in 0..10 {
+            let mut oversized = hit("candidate", 1, "candidate", uuid::Uuid::new_v4());
+            oversized.snippet = "x".repeat(100_000);
+            response.authorized_candidates.push(oversized);
+        }
+        let mut wire = SearchWireResponse::Success(response);
+
+        shrink_to_wire_limit(&mut wire);
+
+        let SearchWireResponse::Success(response) = wire else {
+            panic!("expected success response");
+        };
+        assert_eq!(response.hits.len(), 1);
+        assert!(response.authorized_candidates.len() < 10);
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
@@ -3059,8 +4757,72 @@ mod tests {
         task.await.unwrap();
     }
 
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn shared_wiki_browse_queue_rejects_work_above_its_fixed_capacity() {
+        let collection = uuid::Uuid::new_v4();
+        let identity = NodeIdentity::load_or_create(&crate::MemorySecretStore::default()).unwrap();
+        let pending_peer = PeerId::random();
+        let access = AccessControl::default();
+        access.mark_trusted(pending_peer);
+        let listener = std::net::TcpListener::bind((std::net::Ipv4Addr::LOCALHOST, 0)).unwrap();
+        let blackhole = format!(
+            "/ip4/127.0.0.1/tcp/{}",
+            listener.local_addr().unwrap().port()
+        )
+        .parse()
+        .unwrap();
+        let (handle, _events, task) = spawn_network(
+            NetworkConfig {
+                listen_address: available_loopback_address(),
+                ..NetworkConfig::default()
+            },
+            identity,
+            access,
+            Arc::new(FixtureBackend {
+                collection,
+                title: "unused",
+            }),
+        )
+        .unwrap();
+        record_discovered_address(&handle, pending_peer, blackhole).await;
+
+        let mut pending_replies = Vec::with_capacity(MAX_OUTBOUND_SHARED_WIKI_BROWSES);
+        for _ in 0..MAX_OUTBOUND_SHARED_WIKI_BROWSES {
+            let (reply, result) = oneshot::channel();
+            handle
+                .command(Command::BrowseSharedWiki {
+                    peer: pending_peer,
+                    request: SharedWikiBrowseRequest::new(collection, None, 50),
+                    reply,
+                })
+                .await
+                .unwrap();
+            pending_replies.push(result);
+        }
+        let (overflow_reply, overflow_result) = oneshot::channel();
+        handle
+            .command(Command::BrowseSharedWiki {
+                peer: pending_peer,
+                request: SharedWikiBrowseRequest::new(collection, None, 50),
+                reply: overflow_reply,
+            })
+            .await
+            .unwrap();
+
+        let overflow = tokio::time::timeout(Duration::from_secs(1), overflow_result)
+            .await
+            .expect("capacity rejection should be immediate")
+            .expect("runtime should return a typed result");
+        assert!(matches!(overflow, Err(NetworkError::Unavailable)));
+
+        drop(pending_replies);
+        drop(listener);
+        handle.shutdown().await.unwrap();
+        task.await.unwrap();
+    }
+
     #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-    async fn two_real_nodes_pair_and_search_over_tcp_noise_yamux() {
+    async fn two_real_nodes_pair_search_and_browse_over_tcp_noise_yamux() {
         let collection = uuid::Uuid::new_v4();
         let identity_a =
             NodeIdentity::load_or_create(&crate::MemorySecretStore::default()).unwrap();
@@ -3070,17 +4832,16 @@ mod tests {
         let peer_b = identity_b.peer_id();
         let access_a = AccessControl::default();
         let access_b = AccessControl::default();
-        let listen_a = available_loopback_address();
-        let listen_b = available_loopback_address();
+        let wildcard_listener = "/ip4/0.0.0.0/tcp/0".parse::<Multiaddr>().unwrap();
 
         let config_a = NetworkConfig {
             node_name: "Mac fixture".to_owned(),
-            listen_address: listen_a,
+            listen_address: wildcard_listener.clone(),
             ..NetworkConfig::default()
         };
         let config_b = NetworkConfig {
             node_name: "Windows fixture".to_owned(),
-            listen_address: listen_b.clone(),
+            listen_address: wildcard_listener,
             ..NetworkConfig::default()
         };
         let (handle_a, mut events_a, task_a) = spawn_network(
@@ -3103,13 +4864,36 @@ mod tests {
             }),
         )
         .unwrap();
-        let mut listen_b = listen_b;
-        listen_b.push(Protocol::P2p(peer_b));
 
-        handle_a.dial(listen_b).await.unwrap();
+        let (listen_a, listen_b) = tokio::join!(
+            wait_for_listening(&mut events_a),
+            wait_for_listening(&mut events_b)
+        );
+        let advertised_a =
+            ManualLanAddress::from_ipv4_listener(&listen_a, std::net::Ipv4Addr::LOCALHOST, peer_a)
+                .unwrap();
+        let advertised_b =
+            ManualLanAddress::from_ipv4_listener(&listen_b, std::net::Ipv4Addr::LOCALHOST, peer_b)
+                .unwrap();
+        handle_a
+            .set_advertised_lan_addresses(vec![advertised_a.as_multiaddr().clone()])
+            .await
+            .unwrap();
+        handle_b
+            .set_advertised_lan_addresses(vec![advertised_b.as_multiaddr().clone()])
+            .await
+            .unwrap();
+
+        handle_a.dial(advertised_b.into_multiaddr()).await.unwrap();
         tokio::join!(
             wait_for_connected(&mut events_a, peer_b),
             wait_for_connected(&mut events_b, peer_a)
+        );
+        tokio::time::sleep(Duration::from_millis(250)).await;
+        assert_eq!(
+            known_dial_address_count(&handle_b, peer_a).await,
+            0,
+            "an untrusted connection must not populate redial state"
         );
 
         handle_a.begin_pairing(peer_b).await.unwrap();
@@ -3133,8 +4917,8 @@ mod tests {
         handle_a.confirm_pairing(peer_b).await.unwrap();
         handle_b.confirm_pairing(peer_a).await.unwrap();
         tokio::join!(
-            wait_for_trusted(&mut events_a, peer_b),
-            wait_for_trusted(&mut events_b, peer_a)
+            persist_runtime_trust(&mut events_a, peer_b, &access_a, &handle_a, true),
+            persist_runtime_trust(&mut events_b, peer_a, &access_b, &handle_b, true)
         );
 
         let denied = handle_a
@@ -3147,6 +4931,13 @@ mod tests {
             .unwrap();
         assert!(denied.hits.is_empty(), "no grant may return no evidence");
         assert!(denied.partial);
+        assert!(
+            handle_a
+                .browse_shared_wiki(peer_b, SharedWikiBrowseRequest::new(collection, None, 50),)
+                .await
+                .is_err(),
+            "a trusted connection without a Wiki grant must remain unreadable"
+        );
 
         access_b.grant(peer_a, collection).unwrap();
 
@@ -3161,6 +4952,86 @@ mod tests {
         assert_eq!(response.hits.len(), 1);
         assert_eq!(response.hits[0].title, "remote Windows evidence");
         assert_eq!(response.hits[0].node_id, peer_b.to_string());
+        let shared_wiki = handle_a
+            .browse_shared_wiki(peer_b, SharedWikiBrowseRequest::new(collection, None, 50))
+            .await
+            .unwrap();
+        assert_eq!(shared_wiki.wiki.collection_id, collection);
+        assert_eq!(shared_wiki.wiki.name, "remote Windows evidence");
+
+        let (retry_reply, retry_result) = oneshot::channel();
+        handle_a
+            .command(Command::QueueSharedWikiRetry {
+                peer: peer_b,
+                request: SharedWikiBrowseRequest::new(collection, None, 50),
+                reply: retry_reply,
+            })
+            .await
+            .unwrap();
+        let retry_page = tokio::time::timeout(Duration::from_secs(2), retry_result)
+            .await
+            .expect("a retry over an existing connection must not await a new connection event")
+            .expect("the runtime must return the retry result")
+            .expect("the connected retry must succeed");
+        assert_eq!(retry_page.wiki.name, "remote Windows evidence");
+
+        access_a.grant(peer_b, collection).unwrap();
+        clear_peer_addresses(&handle_b, peer_a).await;
+        assert_eq!(known_dial_address_count(&handle_b, peer_a).await, 0);
+        let reverse_response = handle_b
+            .search_peers(SearchRequest::new(
+                "local",
+                airwiki_types::SearchPurpose::LocalAssistant,
+                5,
+            ))
+            .await
+            .unwrap();
+        assert_eq!(reverse_response.hits.len(), 1);
+        assert_eq!(reverse_response.hits[0].node_id, peer_a.to_string());
+        wait_for_known_dial_address(&handle_b, peer_a).await;
+
+        handle_b
+            .command(Command::DisconnectPeer { peer: peer_a })
+            .await
+            .unwrap();
+        tokio::join!(
+            wait_for_disconnected(&mut events_a, peer_b),
+            wait_for_disconnected(&mut events_b, peer_a)
+        );
+        let (reverse_shared_wiki, ()) = tokio::time::timeout(Duration::from_secs(5), async {
+            tokio::join!(
+                    handle_b.browse_shared_wiki(
+                        peer_a,
+                        SharedWikiBrowseRequest::new(collection, None, 50),
+                    ),
+                    wait_for_connected(&mut events_b, peer_a),
+                )
+        })
+        .await
+        .expect("inbound peer should redial an authenticated advertised listener");
+        assert_eq!(reverse_shared_wiki.unwrap().wiki.name, "local");
+
+        handle_a
+            .command(Command::DisconnectPeer { peer: peer_b })
+            .await
+            .unwrap();
+        tokio::join!(
+            wait_for_disconnected(&mut events_a, peer_b),
+            wait_for_disconnected(&mut events_b, peer_a)
+        );
+
+        let (shared_wiki, ()) = tokio::time::timeout(Duration::from_secs(5), async {
+            tokio::join!(
+                handle_a.browse_shared_wiki(
+                    peer_b,
+                    SharedWikiBrowseRequest::new(collection, None, 50),
+                ),
+                wait_for_connected(&mut events_a, peer_b),
+            )
+        })
+        .await
+        .expect("browse should redial a trusted peer with a known address");
+        assert_eq!(shared_wiki.unwrap().wiki.name, "remote Windows evidence");
 
         handle_a
             .command(Command::DisconnectPeer { peer: peer_b })
@@ -3184,6 +5055,77 @@ mod tests {
         assert_eq!(response.hits[0].title, "remote Windows evidence");
         assert_eq!(response.hits[0].node_id, peer_b.to_string());
 
+        handle_a.shutdown().await.unwrap();
+        handle_b.shutdown().await.unwrap();
+        task_a.await.unwrap();
+        task_b.await.unwrap();
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    async fn removing_a_grant_retires_an_in_flight_shared_wiki_browse() {
+        let collection = uuid::Uuid::new_v4();
+        let identity_a =
+            NodeIdentity::load_or_create(&crate::MemorySecretStore::default()).unwrap();
+        let identity_b =
+            NodeIdentity::load_or_create(&crate::MemorySecretStore::default()).unwrap();
+        let peer_a = identity_a.peer_id();
+        let peer_b = identity_b.peer_id();
+        let access_a = AccessControl::default();
+        let access_b = AccessControl::default();
+        access_a.mark_trusted(peer_b);
+        access_b.mark_trusted(peer_a);
+        access_b.grant(peer_a, collection).unwrap();
+        let listen_b = available_loopback_address();
+        let started = Arc::new(Notify::new());
+        let release = Arc::new(Notify::new());
+        let (handle_a, mut events_a, task_a) = spawn_network(
+            NetworkConfig {
+                listen_address: available_loopback_address(),
+                ..NetworkConfig::default()
+            },
+            identity_a,
+            access_a,
+            Arc::new(FixtureBackend {
+                collection,
+                title: "reader",
+            }),
+        )
+        .unwrap();
+        let (handle_b, mut events_b, task_b) = spawn_network(
+            NetworkConfig {
+                listen_address: listen_b.clone(),
+                ..NetworkConfig::default()
+            },
+            identity_b,
+            access_b.clone(),
+            Arc::new(GatedBrowseBackend {
+                collection,
+                started: Arc::clone(&started),
+                release: Arc::clone(&release),
+            }),
+        )
+        .unwrap();
+        let mut dial_b = listen_b;
+        dial_b.push(Protocol::P2p(peer_b));
+        handle_a.dial(dial_b).await.unwrap();
+        tokio::join!(
+            wait_for_connected(&mut events_a, peer_b),
+            wait_for_connected(&mut events_b, peer_a)
+        );
+
+        let browsing_handle = handle_a.clone();
+        let browse = tokio::spawn(async move {
+            browsing_handle
+                .browse_shared_wiki(peer_b, SharedWikiBrowseRequest::new(collection, None, 50))
+                .await
+        });
+        tokio::time::timeout(Duration::from_secs(5), started.notified())
+            .await
+            .expect("the remote browse backend should receive the request");
+        access_b.remove_grant(peer_a, collection);
+        release.notify_one();
+
+        assert!(browse.await.unwrap().is_err());
         handle_a.shutdown().await.unwrap();
         handle_b.shutdown().await.unwrap();
         task_a.await.unwrap();
@@ -3352,8 +5294,8 @@ mod tests {
         handle_a.confirm_pairing(peer_b).await.unwrap();
         handle_b.confirm_pairing(peer_a).await.unwrap();
         tokio::join!(
-            wait_for_trusted(&mut events_a, peer_b),
-            wait_for_trusted(&mut events_b, peer_a)
+            persist_runtime_trust(&mut events_a, peer_b, &access_a, &handle_a, true),
+            persist_runtime_trust(&mut events_b, peer_a, &access_b, &handle_b, true)
         );
         access_b.grant(peer_a, collection).unwrap();
 
@@ -3398,8 +5340,8 @@ mod tests {
         handle_a.confirm_pairing(peer_b).await.unwrap();
         handle_b.confirm_pairing(peer_a).await.unwrap();
         tokio::join!(
-            wait_for_trusted(&mut events_a, peer_b),
-            wait_for_trusted(&mut events_b, peer_a)
+            persist_runtime_trust(&mut events_a, peer_b, &access_a, &handle_a, false),
+            persist_runtime_trust(&mut events_b, peer_a, &access_b, &handle_b, false)
         );
 
         let repaired = handle_a
@@ -3481,8 +5423,8 @@ mod tests {
         handle_a.confirm_pairing(peer_b).await.unwrap();
         handle_b.confirm_pairing(peer_a).await.unwrap();
         tokio::join!(
-            wait_for_trusted(&mut events_a, peer_b),
-            wait_for_trusted(&mut events_b, peer_a)
+            persist_runtime_trust(&mut events_a, peer_b, &access_a, &handle_a, false),
+            persist_runtime_trust(&mut events_b, peer_a, &access_b, &handle_b, false)
         );
         let recovered = handle_a
             .search_peers(SearchRequest::new(

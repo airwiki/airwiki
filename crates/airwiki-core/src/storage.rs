@@ -1,25 +1,109 @@
+use std::collections::{BTreeMap, BTreeSet, HashSet};
 use std::ops::{Deref, DerefMut};
 use std::path::{Path, PathBuf};
 use std::str::FromStr;
 use std::sync::{Arc, Mutex, MutexGuard};
 
 use airwiki_types::{
-    CollectionPolicy, ConceptType, DisclosureGate, DisclosureLease, DisclosureMutationGuard,
-    DocumentStatus, EnrichmentDraft, SearchHit, SearchPurpose,
+    AttestedComputationContract, COMPUTATION_RUN_RETENTION_SECONDS, CollectionPolicy,
+    ConceptAssurance, ConceptType, DisclosureGate, DisclosureLease, DisclosureMutationGuard,
+    DocumentStatus, EnrichmentDraft, FreshnessState, MAX_COMPUTATION_REQUESTS_PER_MINUTE,
+    MAX_PENDING_COMPUTATIONS_PER_APPLICATION, OkfCompatibility, OkfWarning, PublicConceptSummary,
+    SearchHit, SearchPurpose, SharedWikiConceptSummary, SharedWikiDescriptor, TrustTier,
 };
 use anyhow::{Context, Result, anyhow, bail};
-use chrono::{DateTime, Utc};
-use rusqlite::{Connection, OptionalExtension, Transaction, params, params_from_iter};
+use chrono::{DateTime, Duration, Utc};
+use rusqlite::{
+    Connection, OptionalExtension, Transaction, TransactionBehavior, params, params_from_iter,
+};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
+use thiserror::Error;
 use uuid::Uuid;
 
 use crate::EMBEDDING_DIMENSIONS;
 use crate::chunk_identity::public_chunk_id;
+use crate::ingest::SourceFormat;
 
 const MIGRATION_1: &str = include_str!("../migrations/0001_initial.sql");
 const MIGRATION_2: &str = include_str!("../migrations/0002_publication_claims.sql");
 const MIGRATION_3: &str = include_str!("../migrations/0003_collection_maintenance.sql");
+const MIGRATION_4: &str = include_str!("../migrations/0004_public_federation.sql");
+const MIGRATION_5: &str = include_str!("../migrations/0005_public_federation_hardening.sql");
+const MIGRATION_6: &str = include_str!("../migrations/0006_bootstrap_registry_state.sql");
+const MIGRATION_7: &str = include_str!("../migrations/0007_okf_v02_origins_and_capabilities.sql");
+const MIGRATION_8: &str = include_str!("../migrations/0008_okf_projection_search.sql");
+const MIGRATION_9: &str = include_str!("../migrations/0009_application_capability_hardening.sql");
+const MIGRATION_10: &str = include_str!("../migrations/0010_okf_v02_assurance.sql");
+const MIGRATION_11: &str = include_str!("../migrations/0011_open_okf_lifecycle.sql");
+const MIGRATION_12: &str = include_str!("../migrations/0012_attested_computation_contracts.sql");
+const MIGRATION_13: &str = include_str!("../migrations/0013_restrict_incompatible_okf.sql");
+const MIGRATION_14: &str = include_str!("../migrations/0014_bound_computation_runs.sql");
+const MIGRATION_15: &str = include_str!("../migrations/0015_peer_device_platform.sql");
+
+const APPLICATION_MUTATIONS_PER_MINUTE: u32 = 30;
+const APPLICATION_WIKI_CREATIONS_PER_HOUR: u32 = 5;
+const APPLICATION_MAX_WIKIS: u32 = 100;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Error)]
+pub enum ApplicationLimitError {
+    #[error("application mutation rate limit exceeded")]
+    MutationRate,
+    #[error("application wiki creation rate limit exceeded")]
+    WikiCreationRate,
+    #[error("application wiki count limit exceeded")]
+    WikiCount,
+    #[error("application pending computation limit exceeded")]
+    PendingComputations,
+    #[error("application computation request rate limit exceeded")]
+    ComputationRate,
+}
+
+impl ApplicationLimitError {
+    pub const fn retry_after_seconds(self) -> Option<u64> {
+        match self {
+            Self::MutationRate | Self::ComputationRate => Some(60),
+            Self::WikiCreationRate => Some(60 * 60),
+            Self::PendingComputations | Self::WikiCount => None,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum WikiOrigin {
+    Folder,
+    ImportedOkf,
+    AiMemory,
+}
+
+impl WikiOrigin {
+    const fn as_str(self) -> &'static str {
+        match self {
+            Self::Folder => "folder",
+            Self::ImportedOkf => "imported_okf",
+            Self::AiMemory => "ai_memory",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum IndexingMode {
+    Continuous,
+    Manual,
+    NotApplicable,
+}
+
+impl IndexingMode {
+    const fn as_str(self) -> &'static str {
+        match self {
+            Self::Continuous => "continuous",
+            Self::Manual => "manual",
+            Self::NotApplicable => "not_applicable",
+        }
+    }
+}
 
 #[derive(Debug, Clone)]
 pub struct Database {
@@ -55,8 +139,72 @@ pub struct CollectionRecord {
     pub source_folder: PathBuf,
     pub wiki_folder: PathBuf,
     pub policy: CollectionPolicy,
+    pub origin: WikiOrigin,
+    pub indexing_mode: IndexingMode,
+    pub okf_version: String,
+    pub declared_okf_version: Option<String>,
+    pub okf_compatibility: OkfCompatibility,
+    pub managed_size_bytes: u64,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
+}
+
+#[derive(Debug, Clone)]
+pub struct NewCollection {
+    pub id: Uuid,
+    pub name: String,
+    pub source_folder: PathBuf,
+    pub wiki_folder: PathBuf,
+    pub policy: CollectionPolicy,
+    pub origin: WikiOrigin,
+    pub indexing_mode: IndexingMode,
+}
+
+#[derive(Debug, Clone)]
+pub struct NewManagedCollection {
+    pub id: Uuid,
+    pub name: String,
+    pub bundle_root: PathBuf,
+    pub origin: WikiOrigin,
+    pub replacement_fingerprint: String,
+    pub owner_app_id: Option<Uuid>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PublicCollectionProfileRecord {
+    pub collection_id: Uuid,
+    pub description: String,
+    pub languages: Vec<String>,
+    pub manifest_sequence: u64,
+    pub enabled_at: Option<DateTime<Utc>>,
+    pub withdrawal_pending: bool,
+    pub updated_at: DateTime<Utc>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PublicManifestMaterial {
+    pub concept_count: u32,
+    pub routing_terms: Vec<String>,
+    pub updated_at: DateTime<Utc>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FederationIndexRecord {
+    pub peer_id: String,
+    pub multiaddr: String,
+    pub enabled: bool,
+    pub source: String,
+    pub registry_version: u32,
+    pub expires_at: Option<DateTime<Utc>>,
+    pub created_at: DateTime<Utc>,
+    pub updated_at: DateTime<Utc>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BootstrapFederationIndexEntry {
+    pub peer_id: String,
+    pub multiaddr: String,
+    pub expires_at: DateTime<Utc>,
 }
 
 #[derive(Debug, Clone)]
@@ -90,6 +238,148 @@ pub struct ConceptRecord {
     pub reviewed_at: Option<DateTime<Utc>>,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct OkfConceptProjectionRecord {
+    pub collection_id: Uuid,
+    pub concept_id: Uuid,
+    pub logical_path: String,
+    pub concept_type: ConceptType,
+    pub title: String,
+    pub description: String,
+    pub tags: Vec<String>,
+    pub lifecycle_status: String,
+    pub generation: Option<serde_json::Value>,
+    pub verifications: serde_json::Value,
+    pub provenance: serde_json::Value,
+    pub stale_after: Option<String>,
+    pub assurance: ConceptAssurance,
+    pub warnings: Vec<OkfWarning>,
+    pub version: Option<String>,
+    pub fingerprint: String,
+    pub unknown_frontmatter: serde_json::Value,
+    pub attested_computation: Option<AttestedComputationContract>,
+    pub indexed_at: DateTime<Utc>,
+}
+
+/// Database material required to inspect a published OKF bundle.
+///
+/// Keeping these records together lets disclosure-sensitive readers capture
+/// one SQLite snapshot without reacquiring the mutation barrier while a
+/// disclosure lease is active.
+#[derive(Debug)]
+pub(crate) struct PublishedBundleDatabaseRecords {
+    pub collection: CollectionRecord,
+    pub published: Vec<ConceptRecord>,
+    pub sources: BTreeMap<Uuid, Option<SourceDocumentRecord>>,
+    pub publication_pending: bool,
+    pub projection: Vec<OkfConceptProjectionRecord>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ApplicationCapabilityRecord {
+    pub app_id: Uuid,
+    pub display_name: String,
+    pub owner_kind: String,
+    pub producer: String,
+    pub capability_prefix: String,
+    pub secret_hash: String,
+    pub revoked_at: Option<DateTime<Utc>>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ApplicationGrantRecord {
+    pub app_id: Uuid,
+    pub collection_id: Uuid,
+    pub role: ApplicationWikiRole,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ComputationRunState {
+    AwaitingConfirmation,
+    Running,
+    Completed,
+    Rejected,
+    Failed,
+    Expired,
+}
+
+impl ComputationRunState {
+    const fn as_str(self) -> &'static str {
+        match self {
+            Self::AwaitingConfirmation => "awaiting_confirmation",
+            Self::Running => "running",
+            Self::Completed => "completed",
+            Self::Rejected => "rejected",
+            Self::Failed => "failed",
+            Self::Expired => "expired",
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ComputationRunRecord {
+    pub id: Uuid,
+    pub collection_id: Uuid,
+    pub logical_path: String,
+    pub actor_kind: String,
+    pub actor_id: Option<String>,
+    pub state: ComputationRunState,
+    pub contract_fingerprint: String,
+    pub executor_sha256: String,
+    pub attester_sha256: String,
+    pub parameter_schema: serde_json::Value,
+    pub receipt_sha256: Option<String>,
+    pub verdict: Option<String>,
+    pub requested_at: DateTime<Utc>,
+    pub confirmed_at: Option<DateTime<Utc>>,
+    pub completed_at: Option<DateTime<Utc>>,
+    pub expires_at: DateTime<Utc>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ManagedBundleMutationState {
+    Prepared,
+    FileReplaced,
+    RecoveryRequired,
+}
+
+impl ManagedBundleMutationState {
+    const fn as_str(self) -> &'static str {
+        match self {
+            Self::Prepared => "prepared",
+            Self::FileReplaced => "file_replaced",
+            Self::RecoveryRequired => "recovery_required",
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ManagedBundleMutationRecord {
+    pub id: Uuid,
+    pub collection_id: Uuid,
+    pub logical_path: String,
+    pub state: ManagedBundleMutationState,
+    pub previous_fingerprint: Option<String>,
+    pub replacement_fingerprint: String,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ApplicationWikiRole {
+    Owner,
+    Reader,
+    Editor,
+}
+
+impl ApplicationWikiRole {
+    const fn as_str(self) -> &'static str {
+        match self {
+            Self::Owner => "owner",
+            Self::Reader => "reader",
+            Self::Editor => "editor",
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -187,6 +477,14 @@ pub struct JobRecord {
     pub updated_at: DateTime<Utc>,
 }
 
+#[derive(Debug, Clone)]
+pub(crate) struct IngestClaim {
+    pub job_id: Uuid,
+    pub source_document_id: Uuid,
+    pub source_sha256: String,
+    pub revision: u32,
+}
+
 /// Immutable identity captured while a pending review is exclusively claimed
 /// for another enrichment attempt. The claim keeps the existing draft and
 /// chunks intact, but makes the concept temporarily non-approvable.
@@ -229,6 +527,7 @@ pub(crate) struct ExpectedReview<'a> {
 pub struct PeerRecord {
     pub peer_id: String,
     pub display_name: Option<String>,
+    pub device_platform: Option<airwiki_types::DevicePlatform>,
     pub trusted: bool,
     pub blocked: bool,
     pub paired_at: Option<DateTime<Utc>>,
@@ -434,9 +733,11 @@ impl SourceRegistration {
 pub(crate) struct RankedChunk {
     pub chunk: StoredChunk,
     pub title: String,
-    pub logical_resource_uri: String,
     pub source_sha256: String,
+    pub source_format: SourceFormat,
     pub updated_at: DateTime<Utc>,
+    pub assurance: Option<ConceptAssurance>,
+    pub lifecycle_status: Option<String>,
     pub lexical_score: Option<f64>,
 }
 
@@ -698,7 +999,79 @@ impl Database {
             tx.pragma_update(None, "user_version", 3)?;
             tx.commit()?;
         }
-        if version > 3 {
+        if version < 4 {
+            let tx = connection.transaction()?;
+            tx.execute_batch(MIGRATION_4)?;
+            tx.pragma_update(None, "user_version", 4)?;
+            tx.commit()?;
+        }
+        if version < 5 {
+            let tx = connection.transaction()?;
+            tx.execute_batch(MIGRATION_5)?;
+            tx.pragma_update(None, "user_version", 5)?;
+            tx.commit()?;
+        }
+        if version < 6 {
+            let tx = connection.transaction()?;
+            tx.execute_batch(MIGRATION_6)?;
+            tx.pragma_update(None, "user_version", 6)?;
+            tx.commit()?;
+        }
+        if version < 7 {
+            let tx = connection.transaction()?;
+            tx.execute_batch(MIGRATION_7)?;
+            tx.pragma_update(None, "user_version", 7)?;
+            tx.commit()?;
+        }
+        if version < 8 {
+            let tx = connection.transaction()?;
+            tx.execute_batch(MIGRATION_8)?;
+            tx.pragma_update(None, "user_version", 8)?;
+            tx.commit()?;
+        }
+        if version < 9 {
+            let tx = connection.transaction()?;
+            tx.execute_batch(MIGRATION_9)?;
+            tx.pragma_update(None, "user_version", 9)?;
+            tx.commit()?;
+        }
+        if version < 10 {
+            let tx = connection.transaction()?;
+            tx.execute_batch(MIGRATION_10)?;
+            tx.pragma_update(None, "user_version", 10)?;
+            tx.commit()?;
+        }
+        if version < 11 {
+            let tx = connection.transaction()?;
+            tx.execute_batch(MIGRATION_11)?;
+            tx.pragma_update(None, "user_version", 11)?;
+            tx.commit()?;
+        }
+        if version < 12 {
+            let tx = connection.transaction()?;
+            tx.execute_batch(MIGRATION_12)?;
+            tx.pragma_update(None, "user_version", 12)?;
+            tx.commit()?;
+        }
+        if version < 13 {
+            let tx = connection.transaction()?;
+            tx.execute_batch(MIGRATION_13)?;
+            tx.pragma_update(None, "user_version", 13)?;
+            tx.commit()?;
+        }
+        if version < 14 {
+            let tx = connection.transaction()?;
+            tx.execute_batch(MIGRATION_14)?;
+            tx.pragma_update(None, "user_version", 14)?;
+            tx.commit()?;
+        }
+        if version < 15 {
+            let tx = connection.transaction()?;
+            tx.execute_batch(MIGRATION_15)?;
+            tx.pragma_update(None, "user_version", 15)?;
+            tx.commit()?;
+        }
+        if version > 15 {
             bail!("database schema {version} is newer than this application supports");
         }
         let database = Self {
@@ -899,54 +1272,1232 @@ impl Database {
         name: impl Into<String>,
         source_folder: impl AsRef<Path>,
         wiki_folder: impl AsRef<Path>,
-        mut policy: CollectionPolicy,
+        policy: CollectionPolicy,
     ) -> Result<CollectionRecord> {
-        policy.normalize();
-        let record = CollectionRecord {
-            id: Uuid::new_v4(),
-            name: name.into().trim().to_owned(),
-            source_folder: absolute_path(source_folder.as_ref())?,
-            wiki_folder: absolute_path(wiki_folder.as_ref())?,
+        self.create_collection_with_origin(
+            name,
+            source_folder,
+            wiki_folder,
             policy,
-            created_at: Utc::now(),
-            updated_at: Utc::now(),
-        };
-        if record.name.is_empty() {
-            bail!("collection name must not be empty");
-        }
-        self.connection()?.execute(
-            "INSERT INTO collections
-             (id,name,source_folder,wiki_folder,local_only,peer_shareable,allow_external_ai,created_at,updated_at)
-             VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9)",
-            params![
-                record.id.to_string(),
-                record.name,
-                path_text(&record.source_folder),
-                path_text(&record.wiki_folder),
-                record.policy.local_only,
-                record.policy.peer_shareable,
-                record.policy.allow_external_ai,
-                record.created_at.to_rfc3339(),
-                record.updated_at.to_rfc3339(),
-            ],
+            WikiOrigin::Folder,
+            IndexingMode::Continuous,
+        )
+    }
+
+    pub fn create_collection_with_origin(
+        &self,
+        name: impl Into<String>,
+        source_folder: impl AsRef<Path>,
+        wiki_folder: impl AsRef<Path>,
+        policy: CollectionPolicy,
+        origin: WikiOrigin,
+        indexing_mode: IndexingMode,
+    ) -> Result<CollectionRecord> {
+        self.create_collection_with_id_and_origin(NewCollection {
+            id: Uuid::new_v4(),
+            name: name.into(),
+            source_folder: source_folder.as_ref().to_path_buf(),
+            wiki_folder: wiki_folder.as_ref().to_path_buf(),
+            policy,
+            origin,
+            indexing_mode,
+        })
+    }
+
+    pub fn create_collection_with_id_and_origin(
+        &self,
+        input: NewCollection,
+    ) -> Result<CollectionRecord> {
+        let record = build_collection_record(
+            input.id,
+            input.name,
+            &input.source_folder,
+            &input.wiki_folder,
+            input.policy,
+            input.origin,
+            input.indexing_mode,
         )?;
+        let connection = self.connection()?;
+        insert_collection(&connection, &record)?;
         Ok(record)
     }
 
-    pub fn update_collection_policy(&self, id: Uuid, mut policy: CollectionPolicy) -> Result<()> {
-        policy.normalize();
+    pub fn create_managed_collection_with_mutation(
+        &self,
+        input: NewManagedCollection,
+    ) -> Result<(CollectionRecord, ManagedBundleMutationRecord)> {
+        if !matches!(input.origin, WikiOrigin::ImportedOkf | WikiOrigin::AiMemory) {
+            bail!("only managed wiki origins can begin with a filesystem mutation");
+        }
+        if (input.origin == WikiOrigin::AiMemory) != input.owner_app_id.is_some() {
+            bail!("AI memory creation requires exactly one owning application");
+        }
+        let record = build_collection_record(
+            input.id,
+            input.name,
+            &input.bundle_root,
+            &input.bundle_root,
+            CollectionPolicy::local_only(),
+            input.origin,
+            IndexingMode::NotApplicable,
+        )?;
+        let mutation = ManagedBundleMutationRecord {
+            id: Uuid::new_v4(),
+            collection_id: input.id,
+            logical_path: ".".to_owned(),
+            state: ManagedBundleMutationState::Prepared,
+            previous_fingerprint: None,
+            replacement_fingerprint: input.replacement_fingerprint,
+        };
+        let now = Utc::now().to_rfc3339();
+        let mut connection = self.connection()?;
+        let tx = connection.transaction()?;
+        insert_collection(&tx, &record)?;
+        if let Some(app_id) = input.owner_app_id {
+            let active = tx.query_row(
+                "SELECT EXISTS(SELECT 1 FROM application_capabilities
+                               WHERE app_id=?1 AND revoked_at IS NULL)",
+                [app_id.to_string()],
+                |row| row.get::<_, bool>(0),
+            )?;
+            if !active {
+                bail!("application capability is unavailable");
+            }
+            tx.execute(
+                "INSERT INTO application_wiki_grants
+                 (app_id,collection_id,role,granted_at,confirmed_at)
+                 VALUES (?1,?2,'owner',?3,?3)",
+                params![app_id.to_string(), record.id.to_string(), now],
+            )?;
+        }
+        tx.execute(
+            "INSERT INTO managed_bundle_mutations
+             (id,collection_id,logical_path,state,previous_fingerprint,replacement_fingerprint,created_at,updated_at)
+             VALUES (?1,?2,?3,'prepared',NULL,?4,?5,?5)",
+            params![
+                mutation.id.to_string(),
+                mutation.collection_id.to_string(),
+                mutation.logical_path,
+                mutation.replacement_fingerprint,
+                now,
+            ],
+        )?;
+        tx.commit()?;
+        Ok((record, mutation))
+    }
+
+    pub fn update_collection_indexing_mode(
+        &self,
+        id: Uuid,
+        indexing_mode: IndexingMode,
+    ) -> Result<()> {
+        let collection = self
+            .collection(id)?
+            .with_context(|| format!("collection {id} does not exist"))?;
+        if !collection.okf_compatibility.permits_external_disclosure() {
+            bail!("this OKF compatibility level is restricted to local read-only use");
+        }
+        match (collection.origin, indexing_mode) {
+            (WikiOrigin::Folder, IndexingMode::Continuous | IndexingMode::Manual)
+            | (WikiOrigin::ImportedOkf | WikiOrigin::AiMemory, IndexingMode::NotApplicable) => {}
+            _ => bail!("indexing mode is not valid for this wiki origin"),
+        }
         let count = self.connection()?.execute(
+            "UPDATE collections SET indexing_mode=?2,updated_at=?3 WHERE id=?1",
+            params![
+                id.to_string(),
+                indexing_mode.as_str(),
+                Utc::now().to_rfc3339()
+            ],
+        )?;
+        ensure_changed(count, "collection", id)
+    }
+
+    pub fn delete_collection_record(&self, id: Uuid) -> Result<()> {
+        let mut connection = self.connection()?;
+        let tx = connection.transaction()?;
+        tx.execute(
+            "DELETE FROM okf_projection_fts WHERE collection_id=?1",
+            [id.to_string()],
+        )?;
+        let count = tx.execute("DELETE FROM collections WHERE id=?1", [id.to_string()])?;
+        tx.commit()?;
+        ensure_changed(count, "collection", id)
+    }
+
+    pub fn replace_okf_concept_projection(
+        &self,
+        collection_id: Uuid,
+        concepts: &[crate::okf_import::OkfImportedConcept],
+    ) -> Result<()> {
+        let mut connection = self.connection()?;
+        let tx = connection.transaction()?;
+        tx.execute(
+            "DELETE FROM okf_concept_projection WHERE collection_id=?1",
+            [collection_id.to_string()],
+        )?;
+        tx.execute(
+            "DELETE FROM okf_projection_fts WHERE collection_id=?1",
+            [collection_id.to_string()],
+        )?;
+        let now = Utc::now().to_rfc3339();
+        for concept in concepts {
+            let concept_id = Uuid::new_v5(&collection_id, concept.logical_path.as_bytes());
+            tx.execute(
+                "INSERT INTO okf_concept_projection
+                 (collection_id,concept_id,logical_path,concept_type,title,description,tags_json,
+                  lifecycle_status,generation_json,verifications_json,provenance_json,version,
+                  fingerprint,unknown_frontmatter_json,indexed_at,stale_after,trust_tier,
+                  freshness_state,verification_outdated,warnings_json,attested_computation_json)
+                 VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18,?19,?20,?21)",
+                params![
+                    collection_id.to_string(),
+                    concept_id.to_string(),
+                    concept.logical_path,
+                    concept.concept_type,
+                    concept.title,
+                    concept.description,
+                    serde_json::to_string(&concept.tags)?,
+                    concept.lifecycle_status,
+                    yaml_json(concept.generated.as_ref())?,
+                    yaml_json(concept.verified.as_ref())?.unwrap_or_else(|| "[]".to_owned()),
+                    yaml_json(concept.sources.as_ref())?.unwrap_or_else(|| "[]".to_owned()),
+                    concept.version,
+                    concept.fingerprint,
+                    serde_json::to_string(&serde_json::to_value(&concept.unknown_frontmatter)?)?,
+                    now,
+                    concept.stale_after,
+                    trust_tier_sql_value(concept.assurance.trust),
+                    freshness_state_sql_value(concept.assurance.freshness),
+                    concept.assurance.verification_outdated,
+                    serde_json::to_string(&concept.warnings)?,
+                    concept.attested_computation.as_ref().map(serde_json::to_string).transpose()?,
+                ],
+            )?;
+            tx.execute(
+                "INSERT INTO okf_projection_fts
+                 (collection_id,concept_id,logical_path,title,description,tags,text,fingerprint,lifecycle_status)
+                 VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9)",
+                params![
+                    collection_id.to_string(),
+                    concept_id.to_string(),
+                    concept.logical_path,
+                    concept.title,
+                    concept.description,
+                    concept.tags.join(" "),
+                    concept.search_text,
+                    concept.fingerprint,
+                    concept.lifecycle_status,
+                ],
+            )?;
+        }
+        tx.commit()?;
+        Ok(())
+    }
+
+    pub fn list_okf_concept_projection(
+        &self,
+        collection_id: Uuid,
+    ) -> Result<Vec<OkfConceptProjectionRecord>> {
+        let connection = self.connection()?;
+        Self::list_okf_concept_projection_on(&connection, collection_id)
+    }
+
+    fn list_okf_concept_projection_on(
+        connection: &Connection,
+        collection_id: Uuid,
+    ) -> Result<Vec<OkfConceptProjectionRecord>> {
+        let mut statement = connection.prepare(
+            "SELECT collection_id,concept_id,logical_path,concept_type,title,description,tags_json,
+             lifecycle_status,generation_json,verifications_json,provenance_json,version,fingerprint,
+             unknown_frontmatter_json,indexed_at,stale_after,trust_tier,freshness_state,
+             verification_outdated,warnings_json,attested_computation_json FROM okf_concept_projection
+             WHERE collection_id=?1 ORDER BY logical_path COLLATE NOCASE",
+        )?;
+        let rows = statement.query_map([collection_id.to_string()], |row| {
+            Ok(OkfConceptProjectionRecord {
+                collection_id: uuid_sql(row.get(0)?)?,
+                concept_id: uuid_sql(row.get(1)?)?,
+                logical_path: row.get(2)?,
+                concept_type: concept_type_sql(row.get(3)?)?,
+                title: row.get(4)?,
+                description: row.get(5)?,
+                tags: json_sql(row.get(6)?)?,
+                lifecycle_status: row.get(7)?,
+                generation: row.get::<_, Option<String>>(8)?.map(json_sql).transpose()?,
+                verifications: json_sql(row.get(9)?)?,
+                provenance: json_sql(row.get(10)?)?,
+                stale_after: row.get(15)?,
+                assurance: ConceptAssurance {
+                    trust: trust_tier_sql(row.get(16)?)?,
+                    freshness: freshness_state_sql(row.get(17)?)?,
+                    verification_outdated: row.get(18)?,
+                },
+                warnings: json_sql(row.get(19)?)?,
+                version: row.get(11)?,
+                fingerprint: row.get(12)?,
+                unknown_frontmatter: json_sql(row.get(13)?)?,
+                attested_computation: row
+                    .get::<_, Option<String>>(20)?
+                    .map(json_sql)
+                    .transpose()?,
+                indexed_at: datetime_sql(row.get(14)?)?,
+            })
+        })?;
+        rows.collect::<rusqlite::Result<_>>().map_err(Into::into)
+    }
+
+    pub fn create_application_capability(
+        &self,
+        app_id: Uuid,
+        display_name: &str,
+        owner_kind: &str,
+        producer: &str,
+        capability_prefix: &str,
+        secret_hash: &str,
+    ) -> Result<ApplicationCapabilityRecord> {
+        let display_name = display_name.trim();
+        if display_name.is_empty() || display_name.chars().count() > 120 {
+            bail!("application display name is invalid");
+        }
+        if owner_kind.is_empty()
+            || owner_kind.len() > 64
+            || producer.parse::<airwiki_types::ActorId>().is_err()
+            || capability_prefix.len() != 16
+        {
+            bail!("application capability metadata is invalid");
+        }
+        let now = Utc::now();
+        self.connection()?.execute(
+            "INSERT INTO application_capabilities
+             (app_id,display_name,owner_kind,producer,secret_hash,capability_prefix,created_at)
+             VALUES (?1,?2,?3,?4,?5,?6,?7)",
+            params![
+                app_id.to_string(),
+                display_name,
+                owner_kind,
+                producer,
+                secret_hash,
+                capability_prefix,
+                now.to_rfc3339()
+            ],
+        )?;
+        Ok(ApplicationCapabilityRecord {
+            app_id,
+            display_name: display_name.to_owned(),
+            owner_kind: owner_kind.to_owned(),
+            producer: producer.to_owned(),
+            capability_prefix: capability_prefix.to_owned(),
+            secret_hash: secret_hash.to_owned(),
+            revoked_at: None,
+        })
+    }
+
+    pub fn application_capability_by_prefix(
+        &self,
+        capability_prefix: &str,
+    ) -> Result<Option<ApplicationCapabilityRecord>> {
+        self.connection()?
+            .query_row(
+            "SELECT app_id,display_name,owner_kind,producer,capability_prefix,secret_hash,revoked_at
+                 FROM application_capabilities WHERE capability_prefix=?1",
+                [capability_prefix],
+                |row| {
+                    Ok(ApplicationCapabilityRecord {
+                        app_id: uuid_sql(row.get(0)?)?,
+                        display_name: row.get(1)?,
+                        owner_kind: row.get(2)?,
+                        producer: row.get(3)?,
+                        capability_prefix: row.get(4)?,
+                        secret_hash: row.get(5)?,
+                        revoked_at: row
+                            .get::<_, Option<String>>(6)?
+                            .map(datetime_sql)
+                            .transpose()?,
+                    })
+                },
+            )
+            .optional()
+            .map_err(Into::into)
+    }
+
+    pub fn application_capability_by_app_id(
+        &self,
+        app_id: Uuid,
+    ) -> Result<Option<ApplicationCapabilityRecord>> {
+        self.connection()?
+            .query_row(
+                "SELECT app_id,display_name,owner_kind,producer,capability_prefix,secret_hash,revoked_at
+                 FROM application_capabilities WHERE app_id=?1 AND revoked_at IS NULL",
+                [app_id.to_string()],
+                |row| {
+                    Ok(ApplicationCapabilityRecord {
+                        app_id: uuid_sql(row.get(0)?)?,
+                        display_name: row.get(1)?,
+                        owner_kind: row.get(2)?,
+                        producer: row.get(3)?,
+                        capability_prefix: row.get(4)?,
+                        secret_hash: row.get(5)?,
+                        revoked_at: row
+                            .get::<_, Option<String>>(6)?
+                            .map(datetime_sql)
+                            .transpose()?,
+                    })
+                },
+            )
+            .optional()
+            .map_err(Into::into)
+    }
+
+    pub fn application_capability_any_by_app_id(
+        &self,
+        app_id: Uuid,
+    ) -> Result<Option<ApplicationCapabilityRecord>> {
+        self.connection()?
+            .query_row(
+                "SELECT app_id,display_name,owner_kind,producer,capability_prefix,secret_hash,revoked_at
+                 FROM application_capabilities WHERE app_id=?1",
+                [app_id.to_string()],
+                |row| {
+                    Ok(ApplicationCapabilityRecord {
+                        app_id: uuid_sql(row.get(0)?)?,
+                        display_name: row.get(1)?,
+                        owner_kind: row.get(2)?,
+                        producer: row.get(3)?,
+                        capability_prefix: row.get(4)?,
+                        secret_hash: row.get(5)?,
+                        revoked_at: row
+                            .get::<_, Option<String>>(6)?
+                            .map(datetime_sql)
+                            .transpose()?,
+                    })
+                },
+            )
+            .optional()
+            .map_err(Into::into)
+    }
+
+    pub fn list_application_capabilities(&self) -> Result<Vec<ApplicationCapabilityRecord>> {
+        let connection = self.connection()?;
+        let mut statement = connection.prepare(
+            "SELECT app_id,display_name,owner_kind,producer,capability_prefix,secret_hash,revoked_at
+             FROM application_capabilities ORDER BY display_name COLLATE NOCASE,app_id",
+        )?;
+        let rows = statement.query_map([], |row| {
+            Ok(ApplicationCapabilityRecord {
+                app_id: uuid_sql(row.get(0)?)?,
+                display_name: row.get(1)?,
+                owner_kind: row.get(2)?,
+                producer: row.get(3)?,
+                capability_prefix: row.get(4)?,
+                secret_hash: row.get(5)?,
+                revoked_at: row
+                    .get::<_, Option<String>>(6)?
+                    .map(datetime_sql)
+                    .transpose()?,
+            })
+        })?;
+        rows.collect::<rusqlite::Result<_>>().map_err(Into::into)
+    }
+
+    pub fn list_application_wiki_grants(&self) -> Result<Vec<ApplicationGrantRecord>> {
+        let connection = self.connection()?;
+        let mut statement = connection.prepare(
+            "SELECT app_id,collection_id,role FROM application_wiki_grants
+             ORDER BY app_id,collection_id",
+        )?;
+        let rows = statement.query_map([], |row| {
+            let role = match row.get::<_, String>(2)?.as_str() {
+                "owner" => ApplicationWikiRole::Owner,
+                "reader" => ApplicationWikiRole::Reader,
+                "editor" => ApplicationWikiRole::Editor,
+                value => {
+                    return Err(to_sql_error(format!(
+                        "invalid application wiki role {value}"
+                    )));
+                }
+            };
+            Ok(ApplicationGrantRecord {
+                app_id: uuid_sql(row.get(0)?)?,
+                collection_id: uuid_sql(row.get(1)?)?,
+                role,
+            })
+        })?;
+        rows.collect::<rusqlite::Result<_>>().map_err(Into::into)
+    }
+
+    pub fn rotate_application_capability(
+        &self,
+        app_id: Uuid,
+        producer: &str,
+        capability_prefix: &str,
+        secret_hash: &str,
+    ) -> Result<()> {
+        if capability_prefix.len() != 16 || secret_hash.len() != 64 {
+            bail!("application capability secret metadata is invalid");
+        }
+        let count = self.connection()?.execute(
+            "UPDATE application_capabilities
+             SET capability_prefix=?3,secret_hash=?4,revoked_at=NULL,last_used_at=NULL,
+                 mutations_window_started_at=NULL,mutations_in_window=0,
+                 creations_window_started_at=NULL,creations_in_window=0
+             WHERE app_id=?1 AND producer=?2",
+            params![app_id.to_string(), producer, capability_prefix, secret_hash],
+        )?;
+        ensure_changed(count, "application capability", app_id)
+    }
+
+    pub fn authenticate_application_capability(
+        &self,
+        capability: &str,
+    ) -> Result<Option<ApplicationCapabilityRecord>> {
+        if capability.len() < 80
+            || capability.len() > 256
+            || !capability.bytes().all(|byte| byte.is_ascii_hexdigit())
+        {
+            return Ok(None);
+        }
+        let Some(prefix) = capability.get(..16) else {
+            return Ok(None);
+        };
+        let Some(record) = self.application_capability_by_prefix(prefix)? else {
+            return Ok(None);
+        };
+        if record.revoked_at.is_some() {
+            return Ok(None);
+        }
+        let actual = hex::encode(Sha256::digest(capability.as_bytes()));
+        if constant_time_eq(actual.as_bytes(), record.secret_hash.as_bytes()) {
+            Ok(Some(record))
+        } else {
+            Ok(None)
+        }
+    }
+
+    pub fn set_application_capability_revoked(&self, app_id: Uuid, revoked: bool) -> Result<()> {
+        let mut connection = self.connection()?;
+        let tx = connection.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let count = tx.execute(
+            "UPDATE application_capabilities SET revoked_at=?2 WHERE app_id=?1",
+            params![app_id.to_string(), revoked.then(|| Utc::now().to_rfc3339())],
+        )?;
+        ensure_changed(count, "application capability", app_id)?;
+        if revoked {
+            tx.execute(
+                "DELETE FROM application_wiki_grants WHERE app_id=?1 AND role!='owner'",
+                [app_id.to_string()],
+            )?;
+        }
+        tx.commit()?;
+        Ok(())
+    }
+
+    pub fn set_application_wiki_role(
+        &self,
+        app_id: Uuid,
+        collection_id: Uuid,
+        role: Option<ApplicationWikiRole>,
+    ) -> Result<()> {
+        let mut connection = self.connection()?;
+        let tx = connection.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let existing_role = tx
+            .query_row(
+                "SELECT role FROM application_wiki_grants WHERE app_id=?1 AND collection_id=?2",
+                params![app_id.to_string(), collection_id.to_string()],
+                |row| row.get::<_, String>(0),
+            )
+            .optional()?;
+        if existing_role.as_deref() == Some("owner") {
+            bail!("application ownership cannot be changed or removed");
+        }
+        if let Some(role) = role {
+            if role == ApplicationWikiRole::Owner {
+                bail!("application ownership cannot be granted after wiki creation");
+            }
+            let active: bool = tx.query_row(
+                "SELECT EXISTS(SELECT 1 FROM application_capabilities
+                               WHERE app_id=?1 AND revoked_at IS NULL)",
+                [app_id.to_string()],
+                |row| row.get(0),
+            )?;
+            if !active {
+                bail!("application capability is unavailable");
+            }
+            let origin: String = tx.query_row(
+                "SELECT origin FROM collections WHERE id=?1",
+                [collection_id.to_string()],
+                |row| row.get(0),
+            )?;
+            if origin != WikiOrigin::AiMemory.as_str() {
+                bail!("applications may only receive grants for AI memory wikis");
+            }
+            let now = Utc::now().to_rfc3339();
+            tx.execute(
+                "INSERT INTO application_wiki_grants
+                 (app_id,collection_id,role,granted_at,confirmed_at)
+                 VALUES (?1,?2,?3,?4,?4)
+                 ON CONFLICT(app_id,collection_id) DO UPDATE SET role=excluded.role,confirmed_at=excluded.confirmed_at",
+                params![app_id.to_string(), collection_id.to_string(), role.as_str(), now],
+            )?;
+        } else {
+            tx.execute(
+                "DELETE FROM application_wiki_grants WHERE app_id=?1 AND collection_id=?2",
+                params![app_id.to_string(), collection_id.to_string()],
+            )?;
+        }
+        tx.commit()?;
+        Ok(())
+    }
+
+    pub fn application_wiki_role(
+        &self,
+        app_id: Uuid,
+        collection_id: Uuid,
+    ) -> Result<Option<ApplicationWikiRole>> {
+        let role = self.connection()?.query_row(
+            "SELECT g.role FROM application_wiki_grants g
+             JOIN application_capabilities a ON a.app_id=g.app_id
+             JOIN collections c ON c.id=g.collection_id
+             WHERE g.app_id=?1 AND g.collection_id=?2 AND a.revoked_at IS NULL AND c.origin='ai_memory'",
+            params![app_id.to_string(), collection_id.to_string()],
+            |row| row.get::<_, String>(0),
+        ).optional()?;
+        role.map(|role| match role.as_str() {
+            "owner" => Ok(ApplicationWikiRole::Owner),
+            "reader" => Ok(ApplicationWikiRole::Reader),
+            "editor" => Ok(ApplicationWikiRole::Editor),
+            _ => bail!("application wiki role is invalid"),
+        })
+        .transpose()
+    }
+
+    pub fn application_memory_wikis(&self, app_id: Uuid) -> Result<Vec<CollectionRecord>> {
+        let connection = self.connection()?;
+        let mut statement = connection.prepare(
+            "SELECT c.id,c.name,c.source_folder,c.wiki_folder,c.local_only,c.peer_shareable,
+             c.allow_external_ai,c.internet_public,c.origin,c.indexing_mode,c.okf_version,
+             c.declared_okf_version,c.okf_compatibility,c.managed_size_bytes,
+             c.created_at,c.updated_at FROM collections c
+             JOIN application_wiki_grants g ON g.collection_id=c.id
+             JOIN application_capabilities a ON a.app_id=g.app_id
+             WHERE g.app_id=?1 AND c.origin='ai_memory' AND a.revoked_at IS NULL
+             ORDER BY c.name COLLATE NOCASE,c.id",
+        )?;
+        let rows = statement.query_map([app_id.to_string()], collection_from_row)?;
+        rows.collect::<rusqlite::Result<_>>().map_err(Into::into)
+    }
+
+    pub fn create_computation_run(&self, run: &ComputationRunRecord) -> Result<()> {
+        let actor_id = run
+            .actor_id
+            .as_deref()
+            .context("application computation actor is required")?;
+        if run.actor_kind != "application" {
+            bail!("computation request actor is invalid");
+        }
+        let mut connection = self.connection()?;
+        let tx = connection.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let now = run.requested_at;
+        tx.execute(
+            "UPDATE computation_runs SET state='expired',completed_at=?1
+             WHERE state='awaiting_confirmation' AND expires_at<=?1",
+            [now.to_rfc3339()],
+        )?;
+        tx.execute(
+            "DELETE FROM computation_runs
+             WHERE state IN ('completed','rejected','failed','expired')
+               AND COALESCE(completed_at,expires_at)<?1",
+            [(now - Duration::seconds(COMPUTATION_RUN_RETENTION_SECONDS)).to_rfc3339()],
+        )?;
+        let pending: u32 = tx.query_row(
+            "SELECT count(*) FROM computation_runs
+             WHERE actor_kind='application' AND actor_id=?1
+               AND state IN ('awaiting_confirmation','running')",
+            [actor_id],
+            |row| row.get(0),
+        )?;
+        if pending >= MAX_PENDING_COMPUTATIONS_PER_APPLICATION {
+            return Err(ApplicationLimitError::PendingComputations.into());
+        }
+        let recent: u32 = tx.query_row(
+            "SELECT count(*) FROM computation_runs
+             WHERE actor_kind='application' AND actor_id=?1 AND requested_at>=?2",
+            params![actor_id, (now - Duration::minutes(1)).to_rfc3339()],
+            |row| row.get(0),
+        )?;
+        if recent >= MAX_COMPUTATION_REQUESTS_PER_MINUTE {
+            return Err(ApplicationLimitError::ComputationRate.into());
+        }
+        tx.execute(
+            "INSERT INTO computation_runs
+             (id,collection_id,logical_path,actor_kind,actor_id,state,contract_fingerprint,
+              executor_sha256,attester_sha256,parameter_schema_json,receipt_sha256,verdict,
+              requested_at,confirmed_at,completed_at,expires_at)
+             VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,NULL,NULL,?11,NULL,NULL,?12)",
+            params![
+                run.id.to_string(),
+                run.collection_id.to_string(),
+                run.logical_path,
+                run.actor_kind,
+                run.actor_id,
+                run.state.as_str(),
+                run.contract_fingerprint,
+                run.executor_sha256,
+                run.attester_sha256,
+                serde_json::to_string(&run.parameter_schema)?,
+                run.requested_at.to_rfc3339(),
+                run.expires_at.to_rfc3339(),
+            ],
+        )?;
+        tx.commit()?;
+        Ok(())
+    }
+
+    pub fn expire_computation_run_if_awaiting(&self, id: Uuid, now: DateTime<Utc>) -> Result<bool> {
+        let count = self.connection()?.execute(
+            "UPDATE computation_runs SET state='expired',completed_at=?2
+             WHERE id=?1 AND state='awaiting_confirmation' AND expires_at<=?2",
+            params![id.to_string(), now.to_rfc3339()],
+        )?;
+        Ok(count == 1)
+    }
+
+    pub fn computation_run(&self, id: Uuid) -> Result<Option<ComputationRunRecord>> {
+        self.connection()?
+            .query_row(
+                "SELECT id,collection_id,logical_path,actor_kind,actor_id,state,
+                 contract_fingerprint,executor_sha256,attester_sha256,parameter_schema_json,
+                 receipt_sha256,verdict,requested_at,confirmed_at,completed_at,expires_at
+                 FROM computation_runs WHERE id=?1",
+                [id.to_string()],
+                computation_run_from_row,
+            )
+            .optional()
+            .map_err(Into::into)
+    }
+
+    /// Closes runs that cannot be resumed after a desktop-runtime restart.
+    ///
+    /// Parameter values deliberately live only in memory, so replaying either
+    /// an unconfirmed or interrupted run would weaken the consent boundary.
+    pub fn close_orphaned_computation_runs(&self) -> Result<usize> {
+        let now = Utc::now();
+        let now_text = now.to_rfc3339();
+        let connection = self.connection()?;
+        let awaiting = connection.execute(
+            "UPDATE computation_runs SET state='expired',completed_at=?1
+             WHERE state='awaiting_confirmation'",
+            [&now_text],
+        )?;
+        let running = connection.execute(
+            "UPDATE computation_runs SET state='failed',completed_at=?1
+             WHERE state='running'",
+            [&now_text],
+        )?;
+        connection.execute(
+            "DELETE FROM computation_runs
+             WHERE state IN ('completed','rejected','failed','expired')
+               AND COALESCE(completed_at,expires_at)<?1",
+            [(now - Duration::seconds(COMPUTATION_RUN_RETENTION_SECONDS)).to_rfc3339()],
+        )?;
+        Ok(awaiting.saturating_add(running))
+    }
+
+    pub fn set_computation_run_state(
+        &self,
+        id: Uuid,
+        state: ComputationRunState,
+        receipt_sha256: Option<&str>,
+        verdict: Option<&str>,
+    ) -> Result<()> {
+        let now = Utc::now().to_rfc3339();
+        let confirmed_at = matches!(state, ComputationRunState::Running).then_some(now.as_str());
+        let completed_at = matches!(
+            state,
+            ComputationRunState::Completed
+                | ComputationRunState::Rejected
+                | ComputationRunState::Failed
+                | ComputationRunState::Expired
+        )
+        .then_some(now.as_str());
+        let expected_state = match state {
+            ComputationRunState::Running
+            | ComputationRunState::Rejected
+            | ComputationRunState::Expired => ComputationRunState::AwaitingConfirmation,
+            ComputationRunState::Completed | ComputationRunState::Failed => {
+                ComputationRunState::Running
+            }
+            ComputationRunState::AwaitingConfirmation => {
+                bail!("a computation run cannot return to awaiting confirmation")
+            }
+        };
+        let count = self.connection()?.execute(
+            "UPDATE computation_runs SET state=?2,
+             confirmed_at=COALESCE(confirmed_at,?3),completed_at=COALESCE(completed_at,?4),
+             receipt_sha256=?5,verdict=?6 WHERE id=?1 AND state=?7",
+            params![
+                id.to_string(),
+                state.as_str(),
+                confirmed_at,
+                completed_at,
+                receipt_sha256,
+                verdict,
+                expected_state.as_str(),
+            ],
+        )?;
+        if count != 1 {
+            bail!("computation run is unavailable or its state changed");
+        }
+        Ok(())
+    }
+
+    pub fn complete_computation_run(
+        &self,
+        id: Uuid,
+        receipt_sha256: &str,
+        verdict: &str,
+        result_expires_at: DateTime<Utc>,
+    ) -> Result<()> {
+        let completed_at = Utc::now().to_rfc3339();
+        let count = self.connection()?.execute(
+            "UPDATE computation_runs SET state='completed',completed_at=?2,
+             receipt_sha256=?3,verdict=?4,expires_at=?5
+             WHERE id=?1 AND state='running'",
+            params![
+                id.to_string(),
+                completed_at,
+                receipt_sha256,
+                verdict,
+                result_expires_at.to_rfc3339(),
+            ],
+        )?;
+        if count != 1 {
+            bail!("computation run is unavailable or its state changed");
+        }
+        Ok(())
+    }
+
+    pub fn upsert_okf_concept_projection(
+        &self,
+        collection_id: Uuid,
+        concept: &crate::okf_import::OkfImportedConcept,
+    ) -> Result<OkfConceptProjectionRecord> {
+        let mut connection = self.connection()?;
+        let tx = connection.transaction()?;
+        let concept_id = Uuid::new_v5(&collection_id, concept.logical_path.as_bytes());
+        let now = Utc::now();
+        tx.execute(
+            "INSERT INTO okf_concept_projection
+             (collection_id,concept_id,logical_path,concept_type,title,description,tags_json,
+              lifecycle_status,generation_json,verifications_json,provenance_json,version,
+              fingerprint,unknown_frontmatter_json,indexed_at,stale_after,trust_tier,
+              freshness_state,verification_outdated,warnings_json,attested_computation_json)
+             VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18,?19,?20,?21)
+             ON CONFLICT(collection_id,logical_path) DO UPDATE SET
+              concept_type=excluded.concept_type,title=excluded.title,description=excluded.description,
+              tags_json=excluded.tags_json,lifecycle_status=excluded.lifecycle_status,
+              generation_json=excluded.generation_json,verifications_json=excluded.verifications_json,
+              provenance_json=excluded.provenance_json,version=excluded.version,
+              fingerprint=excluded.fingerprint,unknown_frontmatter_json=excluded.unknown_frontmatter_json,
+              indexed_at=excluded.indexed_at,stale_after=excluded.stale_after,
+              trust_tier=excluded.trust_tier,freshness_state=excluded.freshness_state,
+              verification_outdated=excluded.verification_outdated,warnings_json=excluded.warnings_json,
+              attested_computation_json=excluded.attested_computation_json",
+            params![collection_id.to_string(), concept_id.to_string(), concept.logical_path,
+                concept.concept_type, concept.title, concept.description, serde_json::to_string(&concept.tags)?,
+                concept.lifecycle_status, yaml_json(concept.generated.as_ref())?,
+                yaml_json(concept.verified.as_ref())?.unwrap_or_else(|| "[]".to_owned()),
+                yaml_json(concept.sources.as_ref())?.unwrap_or_else(|| "[]".to_owned()), concept.version,
+                concept.fingerprint, serde_json::to_string(&serde_json::to_value(&concept.unknown_frontmatter)?)?,
+                now.to_rfc3339(), concept.stale_after, trust_tier_sql_value(concept.assurance.trust),
+                freshness_state_sql_value(concept.assurance.freshness), concept.assurance.verification_outdated,
+                serde_json::to_string(&concept.warnings)?,
+                concept.attested_computation.as_ref().map(serde_json::to_string).transpose()?],
+        )?;
+        tx.execute(
+            "DELETE FROM okf_projection_fts WHERE collection_id=?1 AND concept_id=?2",
+            params![collection_id.to_string(), concept_id.to_string()],
+        )?;
+        tx.execute(
+            "INSERT INTO okf_projection_fts
+             (collection_id,concept_id,logical_path,title,description,tags,text,fingerprint,lifecycle_status)
+             VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9)",
+            params![collection_id.to_string(), concept_id.to_string(), concept.logical_path,
+                concept.title, concept.description, concept.tags.join(" "), concept.search_text,
+                concept.fingerprint, concept.lifecycle_status],
+        )?;
+        tx.commit()?;
+        drop(connection);
+        self.list_okf_concept_projection(collection_id)?
+            .into_iter()
+            .find(|record| record.concept_id == concept_id)
+            .context("stored OKF concept projection is unavailable")
+    }
+
+    pub fn consume_application_rate_limit(&self, app_id: Uuid, wiki_creation: bool) -> Result<()> {
+        let mut connection = self.connection()?;
+        let tx = connection.transaction()?;
+        let now = Utc::now();
+        let row = tx
+            .query_row(
+                "SELECT mutations_window_started_at,mutations_in_window,
+             creations_window_started_at,creations_in_window
+             FROM application_capabilities WHERE app_id=?1 AND revoked_at IS NULL",
+                [app_id.to_string()],
+                |row| {
+                    Ok((
+                        row.get::<_, Option<String>>(0)?,
+                        row.get::<_, u32>(1)?,
+                        row.get::<_, Option<String>>(2)?,
+                        row.get::<_, u32>(3)?,
+                    ))
+                },
+            )
+            .optional()?
+            .context("application capability is unavailable")?;
+        let (mutation_start, mutation_count) =
+            next_rate_window(row.0, row.1, now, chrono::Duration::minutes(1))?;
+        if mutation_count >= APPLICATION_MUTATIONS_PER_MINUTE {
+            return Err(ApplicationLimitError::MutationRate.into());
+        }
+        let (creation_start, creation_count) =
+            next_rate_window(row.2, row.3, now, chrono::Duration::hours(1))?;
+        if wiki_creation && creation_count >= APPLICATION_WIKI_CREATIONS_PER_HOUR {
+            return Err(ApplicationLimitError::WikiCreationRate.into());
+        }
+        if wiki_creation {
+            let wiki_count: u32 = tx.query_row(
+                "SELECT count(*) FROM application_wiki_grants WHERE app_id=?1 AND role='owner'",
+                [app_id.to_string()],
+                |row| row.get(0),
+            )?;
+            if wiki_count >= APPLICATION_MAX_WIKIS {
+                return Err(ApplicationLimitError::WikiCount.into());
+            }
+        }
+        tx.execute(
+            "UPDATE application_capabilities SET last_used_at=?2,
+             mutations_window_started_at=?3,mutations_in_window=?4,
+             creations_window_started_at=?5,creations_in_window=?6 WHERE app_id=?1",
+            params![
+                app_id.to_string(),
+                now.to_rfc3339(),
+                mutation_start.to_rfc3339(),
+                mutation_count + 1,
+                creation_start.to_rfc3339(),
+                creation_count + u32::from(wiki_creation)
+            ],
+        )?;
+        tx.commit()?;
+        Ok(())
+    }
+
+    pub fn ensure_application_managed_size(
+        &self,
+        app_id: Uuid,
+        replacement_wiki_id: Uuid,
+        replacement_bytes: u64,
+    ) -> Result<()> {
+        const MAX_MANAGED_BYTES: u64 = 256 * 1024 * 1024;
+        let current: u64 = self.connection()?.query_row(
+            "SELECT COALESCE(SUM(c.managed_size_bytes),0) FROM collections c
+             JOIN application_wiki_grants g ON g.collection_id=c.id
+             WHERE g.app_id=?1 AND g.role='owner' AND c.id!=?2",
+            params![app_id.to_string(), replacement_wiki_id.to_string()],
+            |row| row.get(0),
+        )?;
+        if current.saturating_add(replacement_bytes) > MAX_MANAGED_BYTES {
+            bail!("application managed memory limit exceeded");
+        }
+        Ok(())
+    }
+
+    pub fn begin_managed_bundle_mutation(
+        &self,
+        collection_id: Uuid,
+        logical_path: &str,
+        previous_fingerprint: Option<&str>,
+        replacement_fingerprint: &str,
+    ) -> Result<ManagedBundleMutationRecord> {
+        let id = Uuid::new_v4();
+        let now = Utc::now().to_rfc3339();
+        let mut connection = self.connection()?;
+        let tx = connection.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let pending = tx.query_row(
+            "SELECT EXISTS(SELECT 1 FROM managed_bundle_mutations
+                           WHERE collection_id=?1 AND state!='committed')",
+            [collection_id.to_string()],
+            |row| row.get::<_, bool>(0),
+        )?;
+        if pending {
+            bail!("managed OKF bundle already has a pending mutation");
+        }
+        let current_fingerprint = tx
+            .query_row(
+                "SELECT fingerprint FROM okf_concept_projection
+                 WHERE collection_id=?1 AND logical_path=?2",
+                params![collection_id.to_string(), logical_path],
+                |row| row.get::<_, String>(0),
+            )
+            .optional()?;
+        if current_fingerprint.as_deref() != previous_fingerprint {
+            bail!("managed OKF concept fingerprint is stale");
+        }
+        tx.execute(
+            "INSERT INTO managed_bundle_mutations
+             (id,collection_id,logical_path,state,previous_fingerprint,replacement_fingerprint,created_at,updated_at)
+             VALUES (?1,?2,?3,'prepared',?4,?5,?6,?6)",
+            params![
+                id.to_string(),
+                collection_id.to_string(),
+                logical_path,
+                previous_fingerprint,
+                replacement_fingerprint,
+                now,
+            ],
+        )?;
+        tx.commit()?;
+        Ok(ManagedBundleMutationRecord {
+            id,
+            collection_id,
+            logical_path: logical_path.to_owned(),
+            state: ManagedBundleMutationState::Prepared,
+            previous_fingerprint: previous_fingerprint.map(ToOwned::to_owned),
+            replacement_fingerprint: replacement_fingerprint.to_owned(),
+        })
+    }
+
+    pub fn set_managed_bundle_mutation_state(
+        &self,
+        id: Uuid,
+        state: ManagedBundleMutationState,
+    ) -> Result<()> {
+        let count = self.connection()?.execute(
+            "UPDATE managed_bundle_mutations SET state=?2,updated_at=?3 WHERE id=?1",
+            params![id.to_string(), state.as_str(), Utc::now().to_rfc3339()],
+        )?;
+        ensure_changed(count, "managed bundle mutation", id)
+    }
+
+    pub fn complete_managed_bundle_mutation(&self, id: Uuid) -> Result<()> {
+        let count = self.connection()?.execute(
+            "DELETE FROM managed_bundle_mutations WHERE id=?1",
+            [id.to_string()],
+        )?;
+        ensure_changed(count, "managed bundle mutation", id)
+    }
+
+    pub fn pending_managed_bundle_mutations(&self) -> Result<Vec<ManagedBundleMutationRecord>> {
+        let connection = self.connection()?;
+        let mut statement = connection.prepare(
+            "SELECT id,collection_id,logical_path,state,previous_fingerprint,replacement_fingerprint
+             FROM managed_bundle_mutations WHERE state!='committed' ORDER BY created_at,id",
+        )?;
+        let rows = statement.query_map([], |row| {
+            Ok(ManagedBundleMutationRecord {
+                id: uuid_sql(row.get::<_, String>(0)?)?,
+                collection_id: uuid_sql(row.get::<_, String>(1)?)?,
+                logical_path: row.get(2)?,
+                state: managed_bundle_mutation_state_sql(row.get(3)?)?,
+                previous_fingerprint: row.get(4)?,
+                replacement_fingerprint: row.get(5)?,
+            })
+        })?;
+        rows.collect::<rusqlite::Result<_>>().map_err(Into::into)
+    }
+
+    pub fn pending_managed_bundle_mutations_for_collection(
+        &self,
+        collection_id: Uuid,
+    ) -> Result<Vec<ManagedBundleMutationRecord>> {
+        self.pending_managed_bundle_mutations().map(|mutations| {
+            mutations
+                .into_iter()
+                .filter(|mutation| mutation.collection_id == collection_id)
+                .collect()
+        })
+    }
+
+    pub fn update_collection_policy(&self, id: Uuid, mut policy: CollectionPolicy) -> Result<()> {
+        if (policy.peer_shareable || policy.allow_external_ai || policy.internet_public)
+            && !self
+                .pending_managed_bundle_mutations_for_collection(id)?
+                .is_empty()
+        {
+            bail!("managed OKF bundle has a pending recovery and cannot be shared");
+        }
+        if self
+            .collection(id)?
+            .is_some_and(|collection| !collection.okf_compatibility.permits_external_disclosure())
+            && (policy.peer_shareable || policy.allow_external_ai || policy.internet_public)
+        {
+            bail!("this OKF compatibility level is restricted to local read-only use");
+        }
+        policy.normalize();
+        let now = Utc::now();
+        let mut connection = self.connection()?;
+        let tx = connection.transaction()?;
+        let previous_public = tx
+            .query_row(
+                "SELECT internet_public FROM collections WHERE id=?1",
+                [id.to_string()],
+                |row| row.get::<_, bool>(0),
+            )
+            .optional()?;
+        let count = tx.execute(
             "UPDATE collections SET local_only=?2, peer_shareable=?3, allow_external_ai=?4,
-             updated_at=?5 WHERE id=?1",
+             internet_public=?5, updated_at=?6 WHERE id=?1",
             params![
                 id.to_string(),
                 policy.local_only,
                 policy.peer_shareable,
                 policy.allow_external_ai,
-                Utc::now().to_rfc3339()
+                policy.internet_public,
+                now.to_rfc3339()
             ],
         )?;
-        ensure_changed(count, "collection", id)
+        ensure_changed(count, "collection", id)?;
+        if previous_public != Some(policy.internet_public) {
+            tx.execute(
+                "INSERT INTO public_collection_profiles
+                 (collection_id,description,languages_json,manifest_sequence,enabled_at,updated_at,
+                  withdrawal_pending)
+                 VALUES (?1,'','[]',1,?2,?3,?4)
+                 ON CONFLICT(collection_id) DO UPDATE SET
+                   manifest_sequence=manifest_sequence+1,
+                   enabled_at=?2,
+                   updated_at=?3,
+                   withdrawal_pending=?4",
+                params![
+                    id.to_string(),
+                    policy.internet_public.then(|| now.to_rfc3339()),
+                    now.to_rfc3339(),
+                    !policy.internet_public,
+                ],
+            )?;
+        }
+        tx.commit()?;
+        Ok(())
+    }
+
+    pub fn public_collection_profile(
+        &self,
+        collection_id: Uuid,
+    ) -> Result<Option<PublicCollectionProfileRecord>> {
+        self.connection()?
+            .query_row(
+                "SELECT collection_id,description,languages_json,manifest_sequence,enabled_at,updated_at,
+                        withdrawal_pending
+                 FROM public_collection_profiles WHERE collection_id=?1",
+                [collection_id.to_string()],
+                public_collection_profile_from_row,
+            )
+            .optional()
+            .map_err(Into::into)
+    }
+
+    pub fn public_collections_needing_sync(&self) -> Result<Vec<Uuid>> {
+        let connection = self.connection()?;
+        let mut statement = connection.prepare(
+            "SELECT c.id FROM collections c
+             LEFT JOIN public_collection_profiles p ON p.collection_id=c.id
+             WHERE c.internet_public=1 OR p.withdrawal_pending=1
+             ORDER BY c.id",
+        )?;
+        let rows = statement.query_map([], |row| row.get::<_, String>(0))?;
+        rows.map(|row| parse_uuid(&row?)).collect()
+    }
+
+    pub fn pending_public_withdrawals(&self) -> Result<Vec<Uuid>> {
+        let connection = self.connection()?;
+        let mut statement = connection.prepare(
+            "SELECT collection_id FROM public_collection_profiles
+             WHERE withdrawal_pending=1 ORDER BY collection_id",
+        )?;
+        let rows = statement.query_map([], |row| row.get::<_, String>(0))?;
+        rows.map(|row| parse_uuid(&row?)).collect()
+    }
+
+    pub fn complete_public_withdrawal(&self, collection_id: Uuid) -> Result<()> {
+        self.connection()?.execute(
+            "UPDATE public_collection_profiles SET withdrawal_pending=0,updated_at=?2
+             WHERE collection_id=?1 AND EXISTS(
+               SELECT 1 FROM collections c WHERE c.id=?1 AND c.internet_public=0
+             )",
+            params![collection_id.to_string(), Utc::now().to_rfc3339()],
+        )?;
+        Ok(())
+    }
+
+    pub fn update_public_collection_profile(
+        &self,
+        collection_id: Uuid,
+        description: &str,
+        languages: &[String],
+    ) -> Result<PublicCollectionProfileRecord> {
+        let collection = self
+            .collection(collection_id)?
+            .context("public collection does not exist")?;
+        if !collection.policy.internet_public
+            || !collection.okf_compatibility.permits_external_disclosure()
+        {
+            bail!("collection is not eligible for a public profile");
+        }
+        let description = description.trim();
+        if description.chars().count() > 1_000 || description.chars().any(char::is_control) {
+            bail!("public collection description is invalid");
+        }
+        if languages.len() > 16
+            || languages.iter().any(|language| {
+                let language = language.trim();
+                language.is_empty() || language.len() > 16 || language.chars().any(char::is_control)
+            })
+        {
+            bail!("public collection languages are invalid");
+        }
+        let mut normalized = languages
+            .iter()
+            .map(|language| language.trim().to_ascii_lowercase())
+            .collect::<Vec<_>>();
+        normalized.sort();
+        normalized.dedup();
+        let now = Utc::now();
+        let count = self.connection()?.execute(
+            "UPDATE public_collection_profiles SET description=?2,languages_json=?3,
+             manifest_sequence=manifest_sequence+1,updated_at=?4 WHERE collection_id=?1",
+            params![
+                collection_id.to_string(),
+                description,
+                serde_json::to_string(&normalized)?,
+                now.to_rfc3339(),
+            ],
+        )?;
+        ensure_changed(count, "public collection profile", collection_id)?;
+        self.public_collection_profile(collection_id)?
+            .context("public collection profile disappeared after update")
+    }
+
+    pub fn bump_public_manifest_sequence(&self, collection_id: Uuid) -> Result<Option<u64>> {
+        let now = Utc::now();
+        let connection = self.connection()?;
+        let count = connection.execute(
+            "UPDATE public_collection_profiles SET manifest_sequence=manifest_sequence+1,
+             updated_at=?2 WHERE collection_id=?1 AND EXISTS(
+               SELECT 1 FROM collections c WHERE c.id=?1 AND c.internet_public=1
+             )",
+            params![collection_id.to_string(), now.to_rfc3339()],
+        )?;
+        if count == 0 {
+            return Ok(None);
+        }
+        connection
+            .query_row(
+                "SELECT manifest_sequence FROM public_collection_profiles WHERE collection_id=?1",
+                [collection_id.to_string()],
+                |row| row.get(0),
+            )
+            .optional()
+            .map_err(Into::into)
     }
 
     pub fn update_collection_source_folder(
@@ -966,11 +2517,45 @@ impl Database {
         ensure_changed(count, "collection", id)
     }
 
+    pub fn update_collection_okf_metadata(
+        &self,
+        id: Uuid,
+        declared_version: Option<&str>,
+        compatibility: &OkfCompatibility,
+        managed_size_bytes: u64,
+    ) -> Result<()> {
+        let effective_version = match compatibility {
+            OkfCompatibility::LegacyV01 => "0.1",
+            OkfCompatibility::FutureRestricted { .. } => "future",
+            OkfCompatibility::DeclaredV02 | OkfCompatibility::UndeclaredV02Compatible => "0.2",
+        };
+        let count = self.connection()?.execute(
+            "UPDATE collections SET okf_version=?2,declared_okf_version=?3,okf_compatibility=?4,
+             managed_size_bytes=?5,updated_at=?6 WHERE id=?1",
+            params![
+                id.to_string(),
+                effective_version,
+                declared_version,
+                okf_compatibility_sql_value(compatibility),
+                managed_size_bytes,
+                Utc::now().to_rfc3339()
+            ],
+        )?;
+        ensure_changed(count, "collection", id)
+    }
+
     pub fn collection(&self, id: Uuid) -> Result<Option<CollectionRecord>> {
-        self.connection()?
+        let connection = self.connection()?;
+        Self::collection_on(&connection, id)
+    }
+
+    fn collection_on(connection: &Connection, id: Uuid) -> Result<Option<CollectionRecord>> {
+        connection
             .query_row(
                 "SELECT id,name,source_folder,wiki_folder,local_only,peer_shareable,
-                 allow_external_ai,created_at,updated_at FROM collections WHERE id=?1",
+                 allow_external_ai,internet_public,origin,indexing_mode,okf_version,declared_okf_version,
+                 okf_compatibility,managed_size_bytes,created_at,updated_at
+                 FROM collections WHERE id=?1",
                 [id.to_string()],
                 collection_from_row,
             )
@@ -982,10 +2567,252 @@ impl Database {
         let connection = self.connection()?;
         let mut statement = connection.prepare(
             "SELECT id,name,source_folder,wiki_folder,local_only,peer_shareable,
-             allow_external_ai,created_at,updated_at FROM collections ORDER BY name COLLATE NOCASE",
+             allow_external_ai,internet_public,origin,indexing_mode,okf_version,declared_okf_version,
+             okf_compatibility,managed_size_bytes,created_at,updated_at
+             FROM collections ORDER BY name COLLATE NOCASE",
         )?;
         let rows = statement.query_map([], collection_from_row)?;
         rows.collect::<rusqlite::Result<_>>().map_err(Into::into)
+    }
+
+    pub fn upsert_community_federation_index(
+        &self,
+        peer_id: &str,
+        multiaddr: &str,
+        enabled: bool,
+    ) -> Result<()> {
+        if peer_id.is_empty()
+            || peer_id.len() > 128
+            || multiaddr.is_empty()
+            || multiaddr.len() > 500
+        {
+            bail!("federation index configuration is invalid");
+        }
+        let now = Utc::now().to_rfc3339();
+        self.connection()?.execute(
+            "INSERT INTO federation_indexes
+             (peer_id,multiaddr,enabled,source,registry_version,expires_at,created_at,updated_at)
+             VALUES (?1,?2,?3,'community',0,NULL,?4,?4)
+             ON CONFLICT(peer_id) DO UPDATE SET multiaddr=?2,enabled=?3,source='community',
+               expires_at=NULL,updated_at=?4",
+            params![peer_id, multiaddr, enabled, now],
+        )?;
+        Ok(())
+    }
+
+    pub fn replace_bootstrap_federation_indexes(
+        &self,
+        registry_version: u32,
+        indexes: &[BootstrapFederationIndexEntry],
+    ) -> Result<()> {
+        let now = Utc::now();
+        let mut peers = HashSet::with_capacity(indexes.len());
+        if registry_version == 0
+            || indexes.is_empty()
+            || indexes.len() > 3
+            || indexes.iter().any(|index| {
+                index.peer_id.is_empty()
+                    || index.peer_id.len() > 128
+                    || index.multiaddr.is_empty()
+                    || index.multiaddr.len() > 500
+                    || !peers.insert(index.peer_id.as_str())
+            })
+        {
+            bail!("bootstrap federation index registry is invalid");
+        }
+
+        let mut connection = self.connection()?;
+        let transaction = connection.transaction()?;
+        let mut active = Vec::with_capacity(indexes.len());
+        let mut community_peers = Vec::with_capacity(indexes.len());
+        for index in indexes.iter().filter(|index| index.expires_at > now) {
+            let source = transaction
+                .query_row(
+                    "SELECT source FROM federation_indexes WHERE peer_id=?1",
+                    [&index.peer_id],
+                    |row| row.get::<_, String>(0),
+                )
+                .optional()?;
+            if source.as_deref() == Some("community") {
+                community_peers.push(index.peer_id.as_str());
+            } else {
+                active.push(index);
+            }
+        }
+        let known_version = transaction
+            .query_row(
+                "SELECT registry_version FROM federation_bootstrap_registry_state
+             WHERE singleton=1",
+                [],
+                |row| row.get::<_, u32>(0),
+            )
+            .optional()?;
+        if known_version.is_some_and(|known| known > registry_version) {
+            bail!("bootstrap federation index registry downgrade rejected");
+        }
+
+        // Community entries are user-owned overrides. Their bundled address and
+        // expiry are deliberately ignored, so same-version equality covers only
+        // the effective bootstrap rows that this registry is allowed to manage.
+        let expected = active
+            .iter()
+            .map(|index| {
+                (
+                    index.peer_id.clone(),
+                    index.multiaddr.clone(),
+                    index.expires_at.to_rfc3339(),
+                )
+            })
+            .collect::<BTreeSet<_>>();
+        if known_version == Some(registry_version) {
+            let mut statement = transaction.prepare(
+                "SELECT peer_id,multiaddr,expires_at FROM federation_indexes
+                 WHERE source='bootstrap' AND registry_version=?1 AND expires_at>?2",
+            )?;
+            let actual = statement
+                .query_map(params![registry_version, now.to_rfc3339()], |row| {
+                    Ok((
+                        row.get::<_, String>(0)?,
+                        row.get::<_, String>(1)?,
+                        row.get::<_, String>(2)?,
+                    ))
+                })?
+                .collect::<rusqlite::Result<BTreeSet<_>>>()?;
+            if actual != expected {
+                bail!("bootstrap federation index mutation requires a newer registry version");
+            }
+        } else {
+            let updated_at = now.to_rfc3339();
+            for index in active {
+                transaction.execute(
+                    "INSERT INTO federation_indexes
+                     (peer_id,multiaddr,enabled,source,registry_version,expires_at,created_at,updated_at)
+                     VALUES (?1,?2,1,'bootstrap',?3,?4,?5,?5)
+                     ON CONFLICT(peer_id) DO UPDATE SET multiaddr=?2,enabled=1,source='bootstrap',
+                       registry_version=?3,expires_at=?4,updated_at=?5",
+                    params![
+                        index.peer_id,
+                        index.multiaddr,
+                        registry_version,
+                        index.expires_at.to_rfc3339(),
+                        updated_at,
+                    ],
+                )?;
+            }
+        }
+        let updated_at = now.to_rfc3339();
+        for peer_id in community_peers {
+            transaction.execute(
+                "UPDATE federation_indexes SET registry_version=?2,updated_at=?3
+                 WHERE peer_id=?1 AND source='community' AND registry_version<>?2",
+                params![peer_id, registry_version, updated_at],
+            )?;
+        }
+        transaction.execute(
+            "DELETE FROM federation_indexes
+             WHERE source='bootstrap' AND registry_version < ?1",
+            [registry_version],
+        )?;
+        if known_version != Some(registry_version) {
+            transaction.execute(
+                "INSERT INTO federation_bootstrap_registry_state(singleton,registry_version,updated_at)
+                 VALUES (1,?1,?2)
+                 ON CONFLICT(singleton) DO UPDATE
+                 SET registry_version=?1,updated_at=?2",
+                params![registry_version, now.to_rfc3339()],
+            )?;
+        }
+        transaction.commit()?;
+        Ok(())
+    }
+
+    /// Returns the highest bundled bootstrap registry version accepted by this
+    /// database, including a version whose entries have all expired.
+    pub fn bootstrap_federation_registry_version(&self) -> Result<Option<u32>> {
+        self.connection()?
+            .query_row(
+                "SELECT registry_version FROM federation_bootstrap_registry_state
+                 WHERE singleton=1",
+                [],
+                |row| row.get(0),
+            )
+            .optional()
+            .map_err(Into::into)
+    }
+
+    pub fn list_federation_indexes(&self) -> Result<Vec<FederationIndexRecord>> {
+        let connection = self.connection()?;
+        let mut statement = connection.prepare(
+            "SELECT peer_id,multiaddr,enabled,source,registry_version,expires_at,created_at,updated_at
+             FROM federation_indexes ORDER BY source,peer_id LIMIT 64",
+        )?;
+        statement
+            .query_map([], federation_index_from_row)?
+            .collect::<rusqlite::Result<_>>()
+            .map_err(Into::into)
+    }
+
+    pub fn set_community_federation_index_enabled(
+        &self,
+        peer_id: &str,
+        enabled: bool,
+    ) -> Result<()> {
+        let count = self.connection()?.execute(
+            "UPDATE federation_indexes SET enabled=?2,updated_at=?3
+             WHERE peer_id=?1 AND source='community'",
+            params![peer_id, enabled, Utc::now().to_rfc3339()],
+        )?;
+        if count == 0 {
+            bail!("federation index does not exist");
+        }
+        Ok(())
+    }
+
+    pub fn set_public_publisher_blocked(&self, publisher_id: &str, blocked: bool) -> Result<()> {
+        let publisher_id = publisher_id.trim();
+        if publisher_id.is_empty()
+            || publisher_id.len() > 128
+            || publisher_id.chars().any(char::is_control)
+        {
+            bail!("public publisher identity is invalid");
+        }
+        let connection = self.connection()?;
+        if blocked {
+            connection.execute(
+                "INSERT INTO public_publisher_blocks(publisher_id,blocked_at) VALUES (?1,?2)
+                 ON CONFLICT(publisher_id) DO UPDATE SET blocked_at=?2",
+                params![publisher_id, Utc::now().to_rfc3339()],
+            )?;
+        } else {
+            connection.execute(
+                "DELETE FROM public_publisher_blocks WHERE publisher_id=?1",
+                [publisher_id],
+            )?;
+        }
+        Ok(())
+    }
+
+    pub fn public_publisher_is_blocked(&self, publisher_id: &str) -> Result<bool> {
+        Ok(self
+            .connection()?
+            .query_row(
+                "SELECT 1 FROM public_publisher_blocks WHERE publisher_id=?1",
+                [publisher_id],
+                |_| Ok(()),
+            )
+            .optional()?
+            .is_some())
+    }
+
+    pub fn list_blocked_public_publishers(&self) -> Result<Vec<String>> {
+        let connection = self.connection()?;
+        let mut statement = connection.prepare(
+            "SELECT publisher_id FROM public_publisher_blocks ORDER BY publisher_id LIMIT 1024",
+        )?;
+        statement
+            .query_map([], |row| row.get(0))?
+            .collect::<rusqlite::Result<_>>()
+            .map_err(Into::into)
     }
 
     pub fn register_source(
@@ -1016,10 +2843,17 @@ impl Database {
                     tx.commit()?;
                     return Ok(SourceRegistration::Unchanged(id));
                 }
+                if matches!(status.as_str(), "detected" | "extracted" | "enriched")
+                    && source_has_active_ingest_job(&tx, id)?
+                {
+                    tx.commit()?;
+                    return Ok(SourceRegistration::Unchanged(id));
+                }
                 if status != "deleted" {
                     // A crash or processing failure must be retryable even when
                     // the file bytes did not change. Preserve the source revision
                     // while resetting any partial index state.
+                    supersede_active_ingest_jobs(&tx, id, &now)?;
                     withdraw_source(&tx, id)?;
                     tx.execute(
                         "UPDATE source_documents SET source_path=?2,source_format=?3,byte_size=?4,
@@ -1038,6 +2872,7 @@ impl Database {
                 }
             }
             let hash_changed = old_hash != sha256;
+            supersede_active_ingest_jobs(&tx, id, &now)?;
             withdraw_source(&tx, id)?;
             tx.execute(
                 "UPDATE source_documents SET source_path=?2,source_sha256=?3,source_format=?4,
@@ -1091,6 +2926,7 @@ impl Database {
             let needs_processing =
                 !matches!(status.as_str(), "needs_review" | "publishing" | "published");
             if needs_processing {
+                supersede_active_ingest_jobs(&tx, id, &now)?;
                 withdraw_source(&tx, id)?;
                 tx.execute(
                     "UPDATE source_documents SET source_path=?2,source_format=?3,byte_size=?4,
@@ -1146,7 +2982,15 @@ impl Database {
     }
 
     pub fn source_document(&self, id: Uuid) -> Result<Option<SourceDocumentRecord>> {
-        self.connection()?
+        let connection = self.connection()?;
+        Self::source_document_on(&connection, id)
+    }
+
+    fn source_document_on(
+        connection: &Connection,
+        id: Uuid,
+    ) -> Result<Option<SourceDocumentRecord>> {
+        connection
             .query_row(
                 "SELECT id,collection_id,source_path,source_sha256,source_format,byte_size,
                  page_count,character_count,status,revision,concept_id,last_error,discovered_at,
@@ -1176,44 +3020,47 @@ impl Database {
     /// Claims the extraction transition only for the exact registered revision.
     /// The status predicate also prevents duplicate workers from moving a
     /// completed revision backwards through the pipeline.
-    pub fn mark_extracted_if_current(
+    pub(crate) fn mark_extracted_if_current(
         &self,
-        id: Uuid,
-        source_sha256: &str,
-        revision: u32,
+        claim: &IngestClaim,
         pages: u32,
         characters: u64,
     ) -> Result<bool> {
         let changed = self.connection()?.execute(
             "UPDATE source_documents SET status='extracted',page_count=?4,character_count=?5,
-             last_error=NULL,updated_at=?6
-             WHERE id=?1 AND source_sha256=?2 AND revision=?3 AND status='detected'",
+             last_error=NULL,updated_at=?7
+             WHERE id=?1 AND source_sha256=?2 AND revision=?3 AND status='detected'
+               AND EXISTS (
+                 SELECT 1 FROM jobs
+                 WHERE id=?6 AND source_document_id=?1 AND kind='ingest' AND state='running'
+               )",
             params![
-                id.to_string(),
-                source_sha256,
-                revision,
+                claim.source_document_id.to_string(),
+                claim.source_sha256.as_str(),
+                claim.revision,
                 pages,
                 characters,
+                claim.job_id.to_string(),
                 Utc::now().to_rfc3339()
             ],
         )?;
         Ok(changed == 1)
     }
 
-    pub fn mark_enriched_if_current(
-        &self,
-        id: Uuid,
-        source_sha256: &str,
-        revision: u32,
-    ) -> Result<bool> {
+    pub(crate) fn mark_enriched_if_current(&self, claim: &IngestClaim) -> Result<bool> {
         let changed = self.connection()?.execute(
             "UPDATE source_documents SET status='enriched',last_error=NULL,updated_at=?4
-             WHERE id=?1 AND source_sha256=?2 AND revision=?3 AND status='extracted'",
+             WHERE id=?1 AND source_sha256=?2 AND revision=?3 AND status='extracted'
+               AND EXISTS (
+                 SELECT 1 FROM jobs
+                 WHERE id=?5 AND source_document_id=?1 AND kind='ingest' AND state='running'
+               )",
             params![
-                id.to_string(),
-                source_sha256,
-                revision,
-                Utc::now().to_rfc3339()
+                claim.source_document_id.to_string(),
+                claim.source_sha256.as_str(),
+                claim.revision,
+                Utc::now().to_rfc3339(),
+                claim.job_id.to_string()
             ],
         )?;
         Ok(changed == 1)
@@ -1250,33 +3097,52 @@ impl Database {
         Ok(())
     }
 
-    /// Marks a processing failure only if the source still points at the
-    /// revision owned by that worker. A stale task therefore cannot overwrite a
-    /// newer preflight's detected/review state.
-    pub fn mark_source_failed_if_current(
+    /// Terminalizes a claimed ingestion failure and updates the source only
+    /// while that exact job still owns the current revision.
+    pub(crate) fn fail_ingest_job_if_current(
         &self,
-        id: Uuid,
-        source_sha256: &str,
-        revision: u32,
+        claim: &IngestClaim,
         error: impl AsRef<str>,
+        mark_source_failed: bool,
     ) -> Result<bool> {
         let error: String = error.as_ref().chars().take(2_000).collect();
         let now = Utc::now().to_rfc3339();
         let mut connection = self.connection()?;
         let tx = connection.transaction()?;
+        let claimed = tx.execute(
+            "UPDATE jobs SET state='failed',last_error=?2,updated_at=?3
+             WHERE id=?1 AND source_document_id=?4 AND kind='ingest' AND state='running'",
+            params![
+                claim.job_id.to_string(),
+                error,
+                now,
+                claim.source_document_id.to_string()
+            ],
+        )?;
+        if claimed == 0 || !mark_source_failed {
+            tx.commit()?;
+            return Ok(claimed == 1);
+        }
         let changed = tx.execute(
             "UPDATE source_documents SET status='failed',last_error=?4,updated_at=?5
              WHERE id=?1 AND source_sha256=?2 AND revision=?3
              AND status NOT IN ('published','deleted')",
-            params![id.to_string(), source_sha256, revision, error, now],
+            params![
+                claim.source_document_id.to_string(),
+                claim.source_sha256.as_str(),
+                claim.revision,
+                error,
+                now
+            ],
         )?;
         if changed == 0 {
-            return Ok(false);
+            tx.commit()?;
+            return Ok(true);
         }
         tx.execute(
             "UPDATE concepts SET status='failed',reviewed_at=NULL,updated_at=?2
              WHERE source_document_id=?1",
-            params![id.to_string(), now],
+            params![claim.source_document_id.to_string(), now],
         )?;
         tx.commit()?;
         Ok(true)
@@ -1365,11 +3231,9 @@ impl Database {
 
     /// Atomically saves metadata only while the exact source revision remains
     /// in the `Enriched` stage claimed by the caller.
-    pub fn save_enrichment_if_current(
+    pub(crate) fn save_enrichment_if_current(
         &self,
-        source_document_id: Uuid,
-        source_sha256: &str,
-        revision: u32,
+        claim: &IngestClaim,
         mut draft: EnrichmentDraft,
         node_id: &str,
         generator_model: &str,
@@ -1382,8 +3246,17 @@ impl Database {
         let source = tx
             .query_row(
                 "SELECT collection_id,concept_id FROM source_documents
-                 WHERE id=?1 AND source_sha256=?2 AND revision=?3 AND status='enriched'",
-                params![source_document_id.to_string(), source_sha256, revision],
+                 WHERE id=?1 AND source_sha256=?2 AND revision=?3 AND status='enriched'
+                   AND EXISTS (
+                     SELECT 1 FROM jobs
+                     WHERE id=?4 AND source_document_id=?1 AND kind='ingest' AND state='running'
+                   )",
+                params![
+                    claim.source_document_id.to_string(),
+                    claim.source_sha256.as_str(),
+                    claim.revision,
+                    claim.job_id.to_string()
+                ],
                 |row| Ok((row.get::<_, String>(0)?, row.get::<_, Option<String>>(1)?)),
             )
             .optional()?;
@@ -1412,7 +3285,7 @@ impl Database {
               status='needs_review',reviewed_at=NULL,updated_at=excluded.updated_at",
             params![
                 id.to_string(),
-                source_document_id.to_string(),
+                claim.source_document_id.to_string(),
                 collection_id.to_string(),
                 draft.concept_type.to_string(),
                 draft.title,
@@ -1431,13 +3304,18 @@ impl Database {
         )?;
         let changed = tx.execute(
             "UPDATE source_documents SET concept_id=?4,status='needs_review',updated_at=?5
-             WHERE id=?1 AND source_sha256=?2 AND revision=?3 AND status='enriched'",
+             WHERE id=?1 AND source_sha256=?2 AND revision=?3 AND status='enriched'
+               AND EXISTS (
+                 SELECT 1 FROM jobs
+                 WHERE id=?6 AND source_document_id=?1 AND kind='ingest' AND state='running'
+               )",
             params![
-                source_document_id.to_string(),
-                source_sha256,
-                revision,
+                claim.source_document_id.to_string(),
+                claim.source_sha256.as_str(),
+                claim.revision,
                 id.to_string(),
-                now.to_rfc3339()
+                now.to_rfc3339(),
+                claim.job_id.to_string()
             ],
         )?;
         if changed != 1 {
@@ -1488,8 +3366,10 @@ impl Database {
                         sd.byte_size,sd.revision
                  FROM concepts co
                  JOIN source_documents sd ON sd.id=co.source_document_id
+                 JOIN collections col ON col.id=co.collection_id
                  WHERE co.id=?1 AND co.status='needs_review' AND sd.status='needs_review'
-                   AND sd.concept_id=co.id",
+                   AND sd.concept_id=co.id
+                   AND col.okf_compatibility IN ('declared_v02','undeclared_v02_compatible')",
                 [concept_id.to_string()],
                 |row| {
                     Ok((
@@ -1744,6 +3624,13 @@ impl Database {
 
     pub fn list_published_concepts(&self, collection_id: Uuid) -> Result<Vec<ConceptRecord>> {
         let connection = self.connection()?;
+        Self::list_published_concepts_on(&connection, collection_id)
+    }
+
+    fn list_published_concepts_on(
+        connection: &Connection,
+        collection_id: Uuid,
+    ) -> Result<Vec<ConceptRecord>> {
         let mut statement = connection.prepare(
             "SELECT id,source_document_id,collection_id,concept_type,title,description,language,
              tags_json,entities_json,links_json,summary,classification_confidence,
@@ -1753,6 +3640,506 @@ impl Database {
         )?;
         let rows = statement.query_map([collection_id.to_string()], concept_from_row)?;
         rows.collect::<rusqlite::Result<_>>().map_err(Into::into)
+    }
+
+    pub fn public_concept_page(
+        &self,
+        publisher_id: &str,
+        collection_id: Uuid,
+        after_concept_id: Option<Uuid>,
+        limit: u8,
+    ) -> Result<Vec<PublicConceptSummary>> {
+        if !(1..=airwiki_types::MAX_PUBLIC_PAGE_SIZE).contains(&limit) {
+            bail!("public browse limit is invalid");
+        }
+        let connection = self.connection()?;
+        Self::public_concept_page_on(
+            &connection,
+            publisher_id,
+            collection_id,
+            after_concept_id,
+            None,
+            limit,
+        )
+    }
+
+    pub fn public_concept_page_under_disclosure(
+        &self,
+        lease: &DisclosureLease,
+        publisher_id: &str,
+        collection_id: Uuid,
+        after_concept_id: Option<Uuid>,
+        target_concept_id: Option<Uuid>,
+        limit: u8,
+    ) -> Result<Vec<PublicConceptSummary>> {
+        let connection = self.connection_under_disclosure(lease)?;
+        Self::public_concept_page_on(
+            &connection,
+            publisher_id,
+            collection_id,
+            after_concept_id,
+            target_concept_id,
+            limit,
+        )
+    }
+
+    fn public_concept_page_on(
+        connection: &Connection,
+        publisher_id: &str,
+        collection_id: Uuid,
+        after_concept_id: Option<Uuid>,
+        target_concept_id: Option<Uuid>,
+        limit: u8,
+    ) -> Result<Vec<PublicConceptSummary>> {
+        if after_concept_id.is_some() && target_concept_id.is_some() {
+            bail!("public browse cannot combine a cursor with a target");
+        }
+        let public_origin = connection
+            .query_row(
+                "SELECT origin FROM collections
+                 WHERE id=?1 AND internet_public=1
+                   AND okf_compatibility IN ('declared_v02','undeclared_v02_compatible')
+                   AND NOT EXISTS(SELECT 1 FROM managed_bundle_mutations m
+                                  WHERE m.collection_id=collections.id AND m.state!='committed')",
+                [collection_id.to_string()],
+                |row| row.get::<_, String>(0),
+            )
+            .optional()?;
+        let Some(public_origin) = public_origin else {
+            bail!("collection is not publicly accessible");
+        };
+        let lower_bound = target_concept_id
+            .or(after_concept_id)
+            .map(|id| id.to_string())
+            .unwrap_or_default();
+        let inclusive_lower_bound = i64::from(target_concept_id.is_some());
+        if public_origin != WikiOrigin::Folder.as_str() {
+            let mut statement = connection.prepare(
+                "SELECT p.concept_id,p.concept_type,p.title,p.description,p.tags_json,
+                        p.indexed_at,p.lifecycle_status,p.trust_tier,p.freshness_state,
+                        p.verification_outdated
+                 FROM okf_concept_projection p
+                 WHERE p.collection_id=?1 AND p.lifecycle_status='stable'
+                   AND ((?3=1 AND p.concept_id>=?2) OR (?3=0 AND p.concept_id>?2))
+                 ORDER BY p.concept_id LIMIT ?4",
+            )?;
+            let concepts = statement
+                .query_map(
+                    params![
+                        collection_id.to_string(),
+                        lower_bound,
+                        inclusive_lower_bound,
+                        i64::from(limit)
+                    ],
+                    |row| {
+                        let concept_id = uuid_sql(row.get::<_, String>(0)?)?;
+                        let description = row.get::<_, String>(3)?;
+                        let summary = network_safe_summary(&description);
+                        let tags = json_sql::<Vec<String>>(row.get::<_, String>(4)?)?;
+                        Ok(PublicConceptSummary {
+                            publisher_id: publisher_id.to_owned(),
+                            collection_id,
+                            concept_id,
+                            concept_type: network_safe_concept_type(&row.get::<_, String>(1)?),
+                            title: network_safe_title(&row.get::<_, String>(2)?),
+                            description: network_safe_line(&description, 1_000),
+                            language: "und".to_owned(),
+                            tags: network_safe_tags(tags),
+                            summary,
+                            logical_resource_uri: format!(
+                                "urn:airwiki:{publisher_id}:{concept_id}"
+                            ),
+                            source_revision: 1,
+                            updated_at: datetime_sql(row.get::<_, String>(5)?)?,
+                            lifecycle_status: Some(row.get(6)?),
+                            assurance: Some(ConceptAssurance {
+                                trust: trust_tier_sql(row.get(7)?)?,
+                                freshness: freshness_state_sql(row.get(8)?)?,
+                                verification_outdated: row.get(9)?,
+                            }),
+                        })
+                    },
+                )?
+                .collect::<rusqlite::Result<Vec<PublicConceptSummary>>>()
+                .map_err(anyhow::Error::from)?;
+            ensure_target_is_first(&concepts, target_concept_id, |concept| concept.concept_id)?;
+            return Ok(concepts);
+        }
+        let mut statement = connection.prepare(
+            "SELECT co.id,co.concept_type,co.title,co.description,co.language,co.tags_json,
+                    co.summary,co.logical_resource_uri,sd.revision,co.updated_at
+             FROM concepts co
+             JOIN source_documents sd ON sd.id=co.source_document_id
+             JOIN collections col ON col.id=co.collection_id
+             WHERE co.collection_id=?1 AND co.status='published' AND sd.status='published'
+               AND col.internet_public=1
+               AND NOT EXISTS(SELECT 1 FROM managed_bundle_mutations m
+                              WHERE m.collection_id=col.id AND m.state!='committed')
+               AND ((?3=1 AND co.id>=?2) OR (?3=0 AND co.id>?2))
+             ORDER BY co.id LIMIT ?4",
+        )?;
+        let concepts = statement
+            .query_map(
+                params![
+                    collection_id.to_string(),
+                    lower_bound,
+                    inclusive_lower_bound,
+                    i64::from(limit)
+                ],
+                |row| {
+                    let concept_id = uuid_sql(row.get::<_, String>(0)?)?;
+                    let description = row.get::<_, String>(3)?;
+                    let language = row.get::<_, String>(4)?;
+                    let tags = json_sql::<Vec<String>>(row.get::<_, String>(5)?)?;
+                    let logical_resource_uri = row.get::<_, String>(7)?;
+                    Ok(PublicConceptSummary {
+                        publisher_id: publisher_id.to_owned(),
+                        collection_id,
+                        concept_id,
+                        concept_type: network_safe_concept_type(&row.get::<_, String>(1)?),
+                        title: network_safe_title(&row.get::<_, String>(2)?),
+                        description: network_safe_line(&description, 1_000),
+                        language: network_safe_required_line(&language, 16, "und"),
+                        tags: network_safe_tags(tags),
+                        summary: network_safe_summary(&row.get::<_, String>(6)?),
+                        logical_resource_uri: network_safe_required_line(
+                            &logical_resource_uri,
+                            2_048,
+                            &format!("urn:airwiki:{publisher_id}:{concept_id}"),
+                        ),
+                        source_revision: row.get(8)?,
+                        updated_at: datetime_sql(row.get::<_, String>(9)?)?,
+                        lifecycle_status: Some("stable".to_owned()),
+                        assurance: Some(ConceptAssurance {
+                            trust: TrustTier::HumanReviewed,
+                            freshness: FreshnessState::NotDeclared,
+                            verification_outdated: false,
+                        }),
+                    })
+                },
+            )?
+            .collect::<rusqlite::Result<Vec<PublicConceptSummary>>>()
+            .map_err(anyhow::Error::from)?;
+        ensure_target_is_first(&concepts, target_concept_id, |concept| concept.concept_id)?;
+        Ok(concepts)
+    }
+
+    /// Returns only stable, published concept records from a Wiki explicitly
+    /// granted to the authenticated LAN peer. The caller may use those records
+    /// to build the published OKF workspace, but source paths, chunks, embeddings
+    /// and operational index state never cross this boundary.
+    pub fn shared_wiki_page_under_disclosure(
+        &self,
+        lease: &DisclosureLease,
+        peer_id: &str,
+        collection_id: Uuid,
+        after_concept_id: Option<Uuid>,
+        target_concept_id: Option<Uuid>,
+        limit: u8,
+    ) -> Result<(SharedWikiDescriptor, Vec<SharedWikiConceptSummary>)> {
+        if !(1..=airwiki_types::MAX_SHARED_WIKI_PAGE_SIZE).contains(&limit) {
+            bail!("shared Wiki browse limit is invalid");
+        }
+        if after_concept_id.is_some() && target_concept_id.is_some() {
+            bail!("shared Wiki browse cannot combine a cursor with a target");
+        }
+        let connection = self.connection_under_disclosure(lease)?;
+        let descriptor = connection
+            .query_row(
+                "SELECT c.name,c.origin,c.okf_compatibility,c.declared_okf_version
+                 FROM collections c
+                 JOIN grants g ON g.collection_id=c.id
+                 JOIN peers p ON p.peer_id=g.peer_id
+                 WHERE g.peer_id=?1 AND c.id=?2 AND p.trusted=1 AND p.blocked=0
+                   AND c.peer_shareable=1
+                   AND c.okf_compatibility IN ('declared_v02','undeclared_v02_compatible')
+                   AND NOT EXISTS(SELECT 1 FROM managed_bundle_mutations m
+                                  WHERE m.collection_id=c.id AND m.state!='committed')",
+                params![peer_id, collection_id.to_string()],
+                |row| {
+                    let declared_version = row.get::<_, Option<String>>(3)?;
+                    Ok((
+                        SharedWikiDescriptor {
+                            collection_id,
+                            name: network_safe_required_line(
+                                &row.get::<_, String>(0)?,
+                                240,
+                                "Untitled Wiki",
+                            ),
+                            okf_compatibility: okf_compatibility_sql(
+                                row.get(2)?,
+                                declared_version.as_deref(),
+                            )?,
+                        },
+                        wiki_origin_sql(row.get(1)?)?,
+                    ))
+                },
+            )
+            .optional()?
+            .context("Wiki is not granted for LAN browsing")?;
+        let lower_bound = target_concept_id
+            .or(after_concept_id)
+            .map(|id| id.to_string())
+            .unwrap_or_default();
+        let inclusive_lower_bound = i64::from(target_concept_id.is_some());
+        let concepts = if descriptor.1 == WikiOrigin::Folder {
+            let mut statement = connection.prepare(
+                "SELECT co.id,co.concept_type,co.title,co.description,co.language,co.tags_json,
+                        co.summary,co.logical_resource_uri,sd.revision,co.updated_at
+                 FROM concepts co
+                 JOIN source_documents sd ON sd.id=co.source_document_id
+                 WHERE co.collection_id=?1 AND co.status='published' AND sd.status='published'
+                   AND ((?3=1 AND co.id>=?2) OR (?3=0 AND co.id>?2))
+                 ORDER BY co.id LIMIT ?4",
+            )?;
+            statement
+                .query_map(
+                    params![
+                        collection_id.to_string(),
+                        lower_bound,
+                        inclusive_lower_bound,
+                        i64::from(limit)
+                    ],
+                    |row| {
+                        let concept_id = uuid_sql(row.get::<_, String>(0)?)?;
+                        let description = row.get::<_, String>(3)?;
+                        let language = row.get::<_, String>(4)?;
+                        let tags = json_sql::<Vec<String>>(row.get::<_, String>(5)?)?;
+                        let logical_resource_uri = row.get::<_, String>(7)?;
+                        Ok(SharedWikiConceptSummary {
+                            concept_id,
+                            concept_type: network_safe_concept_type(&row.get::<_, String>(1)?),
+                            title: network_safe_title(&row.get::<_, String>(2)?),
+                            description: network_safe_line(&description, 1_000),
+                            language: network_safe_required_line(&language, 16, "und"),
+                            tags: network_safe_tags(tags),
+                            summary: network_safe_summary(&row.get::<_, String>(6)?),
+                            logical_resource_uri: network_safe_required_line(
+                                &logical_resource_uri,
+                                2_048,
+                                &format!("urn:airwiki:{collection_id}:{concept_id}"),
+                            ),
+                            source_revision: row.get(8)?,
+                            updated_at: datetime_sql(row.get::<_, String>(9)?)?,
+                            lifecycle_status: Some("stable".to_owned()),
+                            assurance: Some(ConceptAssurance {
+                                trust: TrustTier::HumanReviewed,
+                                freshness: FreshnessState::NotDeclared,
+                                verification_outdated: false,
+                            }),
+                        })
+                    },
+                )?
+                .collect::<rusqlite::Result<Vec<_>>>()?
+        } else {
+            let mut statement = connection.prepare(
+                "SELECT p.concept_id,p.concept_type,p.title,p.description,p.tags_json,
+                        p.indexed_at,p.lifecycle_status,p.trust_tier,
+                        p.freshness_state,p.verification_outdated
+                 FROM okf_concept_projection p
+                 WHERE p.collection_id=?1 AND p.lifecycle_status='stable'
+                   AND ((?3=1 AND p.concept_id>=?2) OR (?3=0 AND p.concept_id>?2))
+                 ORDER BY p.concept_id LIMIT ?4",
+            )?;
+            statement
+                .query_map(
+                    params![
+                        collection_id.to_string(),
+                        lower_bound,
+                        inclusive_lower_bound,
+                        i64::from(limit)
+                    ],
+                    |row| {
+                        let concept_id = uuid_sql(row.get::<_, String>(0)?)?;
+                        let description = row.get::<_, String>(3)?;
+                        let summary = network_safe_summary(&description);
+                        let tags = json_sql::<Vec<String>>(row.get::<_, String>(4)?)?;
+                        Ok(SharedWikiConceptSummary {
+                            concept_id,
+                            concept_type: network_safe_concept_type(&row.get::<_, String>(1)?),
+                            title: network_safe_title(&row.get::<_, String>(2)?),
+                            description: network_safe_line(&description, 1_000),
+                            language: "und".to_owned(),
+                            tags: network_safe_tags(tags),
+                            summary,
+                            logical_resource_uri: format!(
+                                "urn:airwiki:{collection_id}:{concept_id}"
+                            ),
+                            source_revision: 1,
+                            updated_at: datetime_sql(row.get::<_, String>(5)?)?,
+                            lifecycle_status: Some(row.get(6)?),
+                            assurance: Some(ConceptAssurance {
+                                trust: trust_tier_sql(row.get(7)?)?,
+                                freshness: freshness_state_sql(row.get(8)?)?,
+                                verification_outdated: row.get(9)?,
+                            }),
+                        })
+                    },
+                )?
+                .collect::<rusqlite::Result<Vec<_>>>()?
+        };
+        ensure_target_is_first(&concepts, target_concept_id, |concept| concept.concept_id)?;
+        Ok((descriptor.0, concepts))
+    }
+
+    pub fn public_manifest_sequence_under_disclosure(
+        &self,
+        lease: &DisclosureLease,
+        collection_id: Uuid,
+    ) -> Result<Option<u64>> {
+        self.connection_under_disclosure(lease)?
+            .query_row(
+                "SELECT p.manifest_sequence FROM public_collection_profiles p
+                 JOIN collections c ON c.id=p.collection_id
+                 WHERE p.collection_id=?1 AND c.internet_public=1
+                   AND NOT EXISTS(SELECT 1 FROM managed_bundle_mutations m
+                                  WHERE m.collection_id=c.id AND m.state!='committed')",
+                [collection_id.to_string()],
+                |row| row.get(0),
+            )
+            .optional()
+            .map_err(Into::into)
+    }
+
+    pub fn public_collection_fingerprint(&self, collection_id: Uuid) -> Result<String> {
+        let connection = self.connection()?;
+        Self::public_collection_fingerprint_on(&connection, collection_id)
+    }
+
+    pub fn public_collection_fingerprint_under_disclosure(
+        &self,
+        lease: &DisclosureLease,
+        collection_id: Uuid,
+    ) -> Result<String> {
+        let connection = self.connection_under_disclosure(lease)?;
+        Self::public_collection_fingerprint_on(&connection, collection_id)
+    }
+
+    fn public_collection_fingerprint_on(
+        connection: &Connection,
+        collection_id: Uuid,
+    ) -> Result<String> {
+        let origin = connection
+            .query_row(
+                "SELECT origin FROM collections
+                 WHERE id=?1 AND internet_public=1
+                   AND okf_compatibility IN ('declared_v02','undeclared_v02_compatible')
+                   AND NOT EXISTS(SELECT 1 FROM managed_bundle_mutations m
+                                  WHERE m.collection_id=collections.id AND m.state!='committed')",
+                [collection_id.to_string()],
+                |row| row.get::<_, String>(0),
+            )
+            .optional()?
+            .context("public collection is unavailable")?;
+        let query = if origin == WikiOrigin::Folder.as_str() {
+            "SELECT co.id,sd.source_sha256,sd.revision,co.updated_at
+             FROM concepts co
+             JOIN source_documents sd ON sd.id=co.source_document_id
+             JOIN collections col ON col.id=co.collection_id
+             WHERE co.collection_id=?1 AND co.status='published' AND sd.status='published'
+               AND col.internet_public=1
+             ORDER BY co.id"
+        } else {
+            "SELECT concept_id,fingerprint,1,indexed_at
+             FROM okf_concept_projection
+             WHERE collection_id=?1 AND lifecycle_status='stable'
+             ORDER BY concept_id"
+        };
+        let mut statement = connection.prepare(query)?;
+        let rows = statement.query_map([collection_id.to_string()], |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, u32>(2)?,
+                row.get::<_, String>(3)?,
+            ))
+        })?;
+        let mut hasher = Sha256::new();
+        let mut count = 0_u64;
+        for row in rows {
+            let (concept_id, source_sha256, revision, updated_at) = row?;
+            hasher.update(concept_id.as_bytes());
+            hasher.update(source_sha256.as_bytes());
+            hasher.update(revision.to_be_bytes());
+            hasher.update(updated_at.as_bytes());
+            count = count.saturating_add(1);
+        }
+        if count == 0 {
+            bail!("public collection has no published concepts");
+        }
+        Ok(format!("{:x}", hasher.finalize()))
+    }
+
+    pub fn public_manifest_material(&self, collection_id: Uuid) -> Result<PublicManifestMaterial> {
+        let connection = self.connection()?;
+        let origin = connection
+            .query_row(
+                "SELECT origin FROM collections
+                 WHERE id=?1 AND internet_public=1
+                   AND okf_compatibility IN ('declared_v02','undeclared_v02_compatible')
+                   AND NOT EXISTS(SELECT 1 FROM managed_bundle_mutations m
+                                  WHERE m.collection_id=collections.id AND m.state!='committed')",
+                [collection_id.to_string()],
+                |row| row.get::<_, String>(0),
+            )
+            .optional()?
+            .context("public collection is unavailable")?;
+        let query = if origin == WikiOrigin::Folder.as_str() {
+            "SELECT co.title,co.description,co.language,co.tags_json,co.updated_at
+             FROM concepts co
+             JOIN source_documents sd ON sd.id=co.source_document_id
+             JOIN collections col ON col.id=co.collection_id
+             WHERE co.collection_id=?1 AND co.status='published' AND sd.status='published'
+               AND col.internet_public=1
+             ORDER BY co.id"
+        } else {
+            "SELECT title,description,'und',tags_json,indexed_at
+             FROM okf_concept_projection
+             WHERE collection_id=?1 AND lifecycle_status='stable'
+             ORDER BY concept_id"
+        };
+        let mut statement = connection.prepare(query)?;
+        let rows = statement.query_map([collection_id.to_string()], |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, String>(2)?,
+                row.get::<_, String>(3)?,
+                datetime_sql(row.get::<_, String>(4)?)?,
+            ))
+        })?;
+        let mut terms = std::collections::BTreeSet::new();
+        let mut count = 0_u32;
+        let mut updated_at = None;
+        for row in rows {
+            let (title, description, language, tags_json, concept_updated_at) = row?;
+            count = count.saturating_add(1);
+            updated_at = Some(
+                updated_at.map_or(concept_updated_at, |known: DateTime<Utc>| {
+                    known.max(concept_updated_at)
+                }),
+            );
+            for value in [title, description, language, tags_json] {
+                for term in value
+                    .split(|character: char| !character.is_alphanumeric())
+                    .filter(|term| term.chars().count() >= 2)
+                {
+                    if terms.len() >= airwiki_types::MAX_PUBLIC_ROUTING_TERMS {
+                        break;
+                    }
+                    let normalized = term.to_lowercase();
+                    if normalized.len() <= 64 {
+                        terms.insert(normalized);
+                    }
+                }
+            }
+        }
+        let updated_at = updated_at.unwrap_or_else(Utc::now);
+        Ok(PublicManifestMaterial {
+            concept_count: count,
+            routing_terms: terms.into_iter().collect(),
+            updated_at,
+        })
     }
 
     pub fn return_to_review_if_current(
@@ -1808,21 +4195,20 @@ impl Database {
         Ok(())
     }
 
-    pub fn replace_chunks_if_current(
+    pub(crate) fn replace_chunks_if_current(
         &self,
         concept_id: Uuid,
-        source_sha256: &str,
-        revision: u32,
+        claim: &IngestClaim,
         chunks: &[StoredChunk],
     ) -> Result<bool> {
-        self.replace_chunks_inner(concept_id, chunks, Some((source_sha256, revision)))
+        self.replace_chunks_inner(concept_id, chunks, Some(claim))
     }
 
     fn replace_chunks_inner(
         &self,
         concept_id: Uuid,
         chunks: &[StoredChunk],
-        expected_source: Option<(&str, u32)>,
+        expected_source: Option<&IngestClaim>,
     ) -> Result<bool> {
         if chunks
             .iter()
@@ -1835,16 +4221,22 @@ impl Database {
             .ok_or_else(|| anyhow!("concept {concept_id} does not exist"))?;
         let mut connection = self.connection()?;
         let tx = connection.transaction()?;
-        if let Some((source_sha256, revision)) = expected_source {
+        if let Some(claim) = expected_source {
             let current = tx.query_row(
                 "SELECT EXISTS(
                    SELECT 1 FROM source_documents
                    WHERE id=?1 AND source_sha256=?2 AND revision=?3 AND status='needs_review'
+                     AND EXISTS (
+                       SELECT 1 FROM jobs
+                       WHERE id=?4 AND source_document_id=?1
+                         AND kind='ingest' AND state='running'
+                     )
                  )",
                 params![
                     concept.source_document_id.to_string(),
-                    source_sha256,
-                    revision
+                    claim.source_sha256.as_str(),
+                    claim.revision,
+                    claim.job_id.to_string()
                 ],
                 |row| row.get::<_, bool>(0),
             )?;
@@ -2107,14 +4499,64 @@ impl Database {
         rows.collect::<rusqlite::Result<_>>().map_err(Into::into)
     }
 
-    pub(crate) fn collection_has_publication_claim(&self, collection_id: Uuid) -> Result<bool> {
-        self.connection()?
+    fn collection_has_publication_claim_on(
+        connection: &Connection,
+        collection_id: Uuid,
+    ) -> Result<bool> {
+        connection
             .query_row(
                 "SELECT EXISTS(SELECT 1 FROM publication_claims WHERE collection_id=?1)",
                 [collection_id.to_string()],
                 |row| row.get(0),
             )
             .map_err(Into::into)
+    }
+
+    pub(crate) fn published_bundle_database_records(
+        &self,
+        collection_id: Uuid,
+    ) -> Result<PublishedBundleDatabaseRecords> {
+        let connection = self.connection()?;
+        Self::published_bundle_database_records_on(&connection, collection_id)
+    }
+
+    pub(crate) fn published_bundle_database_records_under_disclosure(
+        &self,
+        lease: &DisclosureLease,
+        collection_id: Uuid,
+    ) -> Result<PublishedBundleDatabaseRecords> {
+        let connection = self.connection_under_disclosure(lease)?;
+        Self::published_bundle_database_records_on(&connection, collection_id)
+    }
+
+    fn published_bundle_database_records_on(
+        connection: &Connection,
+        collection_id: Uuid,
+    ) -> Result<PublishedBundleDatabaseRecords> {
+        let collection = Self::collection_on(connection, collection_id)?
+            .with_context(|| format!("collection {collection_id} does not exist"))?;
+        let published = Self::list_published_concepts_on(connection, collection_id)?;
+        let mut sources = BTreeMap::new();
+        for concept in &published {
+            if let std::collections::btree_map::Entry::Vacant(entry) =
+                sources.entry(concept.source_document_id)
+            {
+                entry.insert(Self::source_document_on(
+                    connection,
+                    concept.source_document_id,
+                )?);
+            }
+        }
+        let publication_pending =
+            Self::collection_has_publication_claim_on(connection, collection_id)?;
+        let projection = Self::list_okf_concept_projection_on(connection, collection_id)?;
+        Ok(PublishedBundleDatabaseRecords {
+            collection,
+            published,
+            sources,
+            publication_pending,
+            projection,
+        })
     }
 
     pub(crate) fn publication_snapshot(
@@ -2496,10 +4938,11 @@ impl Database {
     }
 
     pub fn mark_deleted(&self, source_document_id: Uuid) -> Result<()> {
+        let now = Utc::now().to_rfc3339();
         let mut connection = self.connection()?;
         let tx = connection.transaction()?;
+        supersede_active_ingest_jobs(&tx, source_document_id, &now)?;
         withdraw_source(&tx, source_document_id)?;
-        let now = Utc::now().to_rfc3339();
         let count = tx.execute(
             "UPDATE source_documents SET status='deleted',deleted_at=?2,updated_at=?2 WHERE id=?1",
             params![source_document_id.to_string(), now],
@@ -2539,6 +4982,7 @@ impl Database {
         if status == "deleted" {
             return Ok(None);
         }
+        supersede_active_ingest_jobs(&tx, source_document_id, &now)?;
         withdraw_source(&tx, source_document_id)?;
         tx.execute(
             "UPDATE source_documents SET status='failed',last_error=?2,updated_at=?3
@@ -2594,6 +5038,7 @@ impl Database {
         let mut published_artifacts = Vec::new();
         for (source_id, concept_id, source_sha256, status) in rows {
             let source_id = parse_uuid(&source_id)?;
+            supersede_active_ingest_jobs(&tx, source_id, &now)?;
             withdraw_source(&tx, source_id)?;
             tx.execute(
                 "UPDATE source_documents SET status='failed',last_error=?2,updated_at=?3
@@ -2641,6 +5086,52 @@ impl Database {
         Ok(job)
     }
 
+    pub(crate) fn claim_ingest_job(
+        &self,
+        source_document_id: Uuid,
+        expected_sha256: &str,
+        expected_revision: u32,
+    ) -> Result<Option<IngestClaim>> {
+        let now = Utc::now();
+        let now_text = now.to_rfc3339();
+        let mut connection = self.connection()?;
+        let tx = connection.transaction()?;
+        let is_current: bool = tx.query_row(
+            "SELECT EXISTS(
+               SELECT 1 FROM source_documents
+               WHERE id=?1 AND source_sha256=?2 AND revision=?3 AND status='detected'
+             )",
+            params![
+                source_document_id.to_string(),
+                expected_sha256,
+                expected_revision
+            ],
+            |row| row.get(0),
+        )?;
+        if !is_current || source_has_active_ingest_job(&tx, source_document_id)? {
+            tx.commit()?;
+            return Ok(None);
+        }
+
+        let claim = IngestClaim {
+            job_id: Uuid::new_v4(),
+            source_document_id,
+            source_sha256: expected_sha256.to_owned(),
+            revision: expected_revision,
+        };
+        tx.execute(
+            "INSERT INTO jobs(id,source_document_id,kind,state,attempts,created_at,updated_at)
+             VALUES (?1,?2,'ingest','running',1,?3,?3)",
+            params![
+                claim.job_id.to_string(),
+                source_document_id.to_string(),
+                now_text
+            ],
+        )?;
+        tx.commit()?;
+        Ok(Some(claim))
+    }
+
     pub fn set_job_state(&self, id: Uuid, state: &str, error: Option<&str>) -> Result<()> {
         let attempts_increment = u8::from(state == "running");
         let count = self.connection()?.execute(
@@ -2656,17 +5147,32 @@ impl Database {
         ensure_changed(count, "job", id)
     }
 
+    pub(crate) fn complete_ingest_job_if_running(&self, claim: &IngestClaim) -> Result<bool> {
+        let changed = self.connection()?.execute(
+            "UPDATE jobs SET state='completed',last_error=NULL,updated_at=?2
+             WHERE id=?1 AND source_document_id=?3 AND kind='ingest' AND state='running'",
+            params![
+                claim.job_id.to_string(),
+                Utc::now().to_rfc3339(),
+                claim.source_document_id.to_string()
+            ],
+        )?;
+        Ok(changed == 1)
+    }
+
     pub fn upsert_peer(&self, peer: &PeerRecord) -> Result<()> {
         let now = Utc::now().to_rfc3339();
         self.connection()?.execute(
-            "INSERT INTO peers(peer_id,display_name,trusted,blocked,paired_at,last_seen_at,created_at,updated_at)
-             VALUES (?1,?2,?3,?4,?5,?6,?7,?7)
+            "INSERT INTO peers(peer_id,display_name,device_platform,trusted,blocked,paired_at,last_seen_at,created_at,updated_at)
+             VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?8)
              ON CONFLICT(peer_id) DO UPDATE SET display_name=excluded.display_name,
-             trusted=excluded.trusted,blocked=excluded.blocked,paired_at=excluded.paired_at,
+             device_platform=excluded.device_platform,trusted=excluded.trusted,
+             blocked=excluded.blocked,paired_at=excluded.paired_at,
              last_seen_at=excluded.last_seen_at,updated_at=excluded.updated_at",
             params![
                 peer.peer_id,
                 peer.display_name,
+                peer.device_platform.map(|platform| platform.as_str()),
                 peer.trusted,
                 peer.blocked,
                 peer.paired_at.map(|v| v.to_rfc3339()),
@@ -2680,16 +5186,17 @@ impl Database {
     pub fn peer(&self, peer_id: &str) -> Result<Option<PeerRecord>> {
         self.connection()?
             .query_row(
-                "SELECT peer_id,display_name,trusted,blocked,paired_at,last_seen_at FROM peers WHERE peer_id=?1",
+                "SELECT peer_id,display_name,device_platform,trusted,blocked,paired_at,last_seen_at FROM peers WHERE peer_id=?1",
                 [peer_id],
                 |row| {
                     Ok(PeerRecord {
                         peer_id: row.get(0)?,
                         display_name: row.get(1)?,
-                        trusted: row.get(2)?,
-                        blocked: row.get(3)?,
-                        paired_at: optional_datetime(row.get::<_, Option<String>>(4)?)?,
-                        last_seen_at: optional_datetime(row.get::<_, Option<String>>(5)?)?,
+                        device_platform: optional_device_platform_sql(row.get(2)?)?,
+                        trusted: row.get(3)?,
+                        blocked: row.get(4)?,
+                        paired_at: optional_datetime(row.get::<_, Option<String>>(5)?)?,
+                        last_seen_at: optional_datetime(row.get::<_, Option<String>>(6)?)?,
                     })
                 },
             )
@@ -2700,17 +5207,18 @@ impl Database {
     pub fn list_peers(&self) -> Result<Vec<PeerRecord>> {
         let connection = self.connection()?;
         let mut statement = connection.prepare(
-            "SELECT peer_id,display_name,trusted,blocked,paired_at,last_seen_at
+            "SELECT peer_id,display_name,device_platform,trusted,blocked,paired_at,last_seen_at
              FROM peers ORDER BY COALESCE(display_name, peer_id) COLLATE NOCASE",
         )?;
         let rows = statement.query_map([], |row| {
             Ok(PeerRecord {
                 peer_id: row.get(0)?,
                 display_name: row.get(1)?,
-                trusted: row.get(2)?,
-                blocked: row.get(3)?,
-                paired_at: optional_datetime(row.get::<_, Option<String>>(4)?)?,
-                last_seen_at: optional_datetime(row.get::<_, Option<String>>(5)?)?,
+                device_platform: optional_device_platform_sql(row.get(2)?)?,
+                trusted: row.get(3)?,
+                blocked: row.get(4)?,
+                paired_at: optional_datetime(row.get::<_, Option<String>>(5)?)?,
+                last_seen_at: optional_datetime(row.get::<_, Option<String>>(6)?)?,
             })
         })?;
         rows.collect::<rusqlite::Result<_>>().map_err(Into::into)
@@ -2770,8 +5278,48 @@ impl Database {
         Ok(())
     }
 
+    /// Allows a human to retry verification after a rejected pairing code.
+    ///
+    /// This deliberately restores neither trust nor grants. The peer must
+    /// complete pairing again before it can access any wiki.
+    pub fn allow_peer_pairing_again(&self, peer_id: &str) -> Result<()> {
+        let mut connection = self.connection()?;
+        let tx = connection.transaction()?;
+        tx.execute("DELETE FROM grants WHERE peer_id=?1", [peer_id])?;
+        let changed = tx.execute(
+            "UPDATE peers SET trusted=0,blocked=0,updated_at=?2 WHERE peer_id=?1",
+            params![peer_id, Utc::now().to_rfc3339()],
+        )?;
+        if changed != 1 {
+            bail!("unknown peer");
+        }
+        tx.commit()?;
+        Ok(())
+    }
+
     pub fn granted_collections(&self, peer_id: &str) -> Result<Vec<Uuid>> {
         self.granted_collections_for_search(peer_id, SearchPurpose::LocalAssistant)
+    }
+
+    pub fn publicly_searchable_collections(&self, requested: &[Uuid]) -> Result<Vec<Uuid>> {
+        if requested.is_empty() {
+            return Ok(Vec::new());
+        }
+        let connection = self.connection()?;
+        let placeholders = repeat_placeholders(requested.len(), 1);
+        let sql = format!(
+            "SELECT id FROM collections WHERE internet_public=1
+             AND okf_compatibility IN ('declared_v02','undeclared_v02_compatible')
+             AND NOT EXISTS(SELECT 1 FROM managed_bundle_mutations m
+                            WHERE m.collection_id=collections.id AND m.state!='committed')
+             AND id IN ({placeholders})"
+        );
+        let values = requested.iter().map(Uuid::to_string).collect::<Vec<_>>();
+        let mut statement = connection.prepare(&sql)?;
+        statement
+            .query_map(params_from_iter(values), |row| row.get::<_, String>(0))?
+            .map(|row| parse_uuid(&row?))
+            .collect()
     }
 
     /// Returns the durable peer-grant and collection-policy intersection.
@@ -2786,7 +5334,10 @@ impl Database {
             "SELECT g.collection_id FROM grants g JOIN peers p ON p.peer_id=g.peer_id
              JOIN collections c ON c.id=g.collection_id
              WHERE g.peer_id=?1 AND p.trusted=1 AND p.blocked=0 AND c.peer_shareable=1
-               AND (?2=0 OR c.allow_external_ai=1)",
+               AND c.okf_compatibility IN ('declared_v02','undeclared_v02_compatible')
+               AND (?2=0 OR c.allow_external_ai=1)
+               AND NOT EXISTS(SELECT 1 FROM managed_bundle_mutations m
+                              WHERE m.collection_id=c.id AND m.state!='committed')",
         )?;
         let external_ai = purpose == SearchPurpose::ExternalAi;
         let rows =
@@ -2824,6 +5375,10 @@ impl Database {
                 | "grants"
                 | "audit_events"
                 | "collection_maintenance"
+                | "public_collection_profiles"
+                | "federation_indexes"
+                | "federation_bootstrap_registry_state"
+                | "public_publisher_blocks"
         ) {
             bail!("unsupported table name");
         }
@@ -2878,7 +5433,8 @@ impl Database {
         let sql = format!(
             "SELECT ch.id,ch.concept_id,ch.source_document_id,ch.collection_id,ch.ordinal,
              ch.heading_or_page,ch.text,ch.text_sha256,ch.embedding,ch.source_revision,
-             co.title,co.logical_resource_uri,sd.source_sha256,co.updated_at,bm25(chunk_fts)
+             co.title,co.logical_resource_uri,sd.source_sha256,sd.source_format,co.updated_at,
+             bm25(chunk_fts)
              FROM chunk_fts JOIN chunks ch ON ch.id=chunk_fts.chunk_id
              JOIN concepts co ON co.id=ch.concept_id
              JOIN source_documents sd ON sd.id=ch.source_document_id
@@ -2895,6 +5451,87 @@ impl Database {
         let connection = self.connection()?;
         let mut statement = connection.prepare(&sql)?;
         let rows = statement.query_map(params_from_iter(values), ranked_chunk_from_row)?;
+        rows.collect::<rusqlite::Result<_>>().map_err(Into::into)
+    }
+
+    pub(crate) fn projected_lexical_candidates(
+        &self,
+        query: &str,
+        collections: &[Uuid],
+        purpose: SearchPurpose,
+        limit: usize,
+    ) -> Result<Vec<RankedChunk>> {
+        if collections.is_empty() || limit == 0 {
+            return Ok(Vec::new());
+        }
+        let fts_query = fts_query(query);
+        if fts_query.is_empty() {
+            return Ok(Vec::new());
+        }
+        let placeholders = repeat_placeholders(collections.len(), 3);
+        let external_clause = if purpose == SearchPurpose::ExternalAi {
+            " AND col.allow_external_ai=1
+              AND col.okf_compatibility IN ('declared_v02','undeclared_v02_compatible')
+              AND f.lifecycle_status='stable'"
+        } else {
+            ""
+        };
+        let sql = format!(
+            "SELECT f.collection_id,f.concept_id,f.logical_path,f.title,f.text,f.fingerprint,
+             col.updated_at,p.trust_tier,p.freshness_state,p.verification_outdated,
+             f.lifecycle_status,
+             bm25(okf_projection_fts)
+             FROM okf_projection_fts f
+             JOIN collections col ON col.id=f.collection_id
+             JOIN okf_concept_projection p
+               ON p.collection_id=f.collection_id AND p.concept_id=f.concept_id
+             WHERE okf_projection_fts MATCH ?1
+             AND f.collection_id IN ({placeholders}){external_clause}
+             AND NOT EXISTS(SELECT 1 FROM managed_bundle_mutations m
+                            WHERE m.collection_id=col.id AND m.state!='committed')
+             ORDER BY bm25(okf_projection_fts), f.concept_id LIMIT ?2"
+        );
+        let mut values: Vec<rusqlite::types::Value> = vec![
+            fts_query.into(),
+            i64::try_from(limit).unwrap_or(i64::MAX).into(),
+        ];
+        values.extend(collections.iter().map(|id| id.to_string().into()));
+        let connection = self.connection()?;
+        let mut statement = connection.prepare(&sql)?;
+        let rows = statement.query_map(params_from_iter(values), |row| {
+            let collection_id = uuid_sql(row.get(0)?)?;
+            let concept_id = uuid_sql(row.get(1)?)?;
+            let logical_path: String = row.get(2)?;
+            let title: String = row.get(3)?;
+            let text: String = row.get(4)?;
+            let fingerprint: String = row.get(5)?;
+            let text_sha256 = hex::encode(Sha256::digest(text.as_bytes()));
+            Ok(RankedChunk {
+                chunk: StoredChunk {
+                    id: Uuid::new_v5(&concept_id, b"okf-projection-search"),
+                    concept_id,
+                    source_document_id: Uuid::new_v5(&concept_id, b"okf-projection-source"),
+                    collection_id,
+                    ordinal: 0,
+                    heading_or_page: logical_path.clone(),
+                    text,
+                    text_sha256,
+                    embedding: Vec::new(),
+                    source_revision: 1,
+                },
+                title,
+                source_sha256: fingerprint,
+                source_format: SourceFormat::Markdown,
+                updated_at: datetime_sql(row.get(6)?)?,
+                assurance: Some(ConceptAssurance {
+                    trust: trust_tier_sql(row.get(7)?)?,
+                    freshness: freshness_state_sql(row.get(8)?)?,
+                    verification_outdated: row.get(9)?,
+                }),
+                lifecycle_status: Some(row.get(10)?),
+                lexical_score: row.get(11)?,
+            })
+        })?;
         rows.collect::<rusqlite::Result<_>>().map_err(Into::into)
     }
 
@@ -2969,7 +5606,7 @@ impl Database {
         let sql = format!(
             "SELECT ch.id,ch.concept_id,ch.source_document_id,ch.collection_id,ch.ordinal,
              ch.heading_or_page,ch.text,ch.text_sha256,ch.embedding,ch.source_revision,
-             co.title,co.logical_resource_uri,sd.source_sha256,co.updated_at,NULL
+             co.title,co.logical_resource_uri,sd.source_sha256,sd.source_format,co.updated_at,NULL
              FROM chunks ch JOIN concepts co ON co.id=ch.concept_id
              JOIN source_documents sd ON sd.id=ch.source_document_id
              JOIN collections col ON col.id=ch.collection_id
@@ -2997,6 +5634,9 @@ impl Database {
     /// concurrent modification, deletion, review withdrawal or cloud-policy
     /// restriction that occurred after candidates were loaded.
     pub fn hit_is_current(&self, hit: &SearchHit, purpose: SearchPurpose) -> Result<bool> {
+        if self.projected_hit_is_current(hit, purpose, None, false)? {
+            return Ok(true);
+        }
         let external_clause = if purpose == SearchPurpose::ExternalAi {
             " AND col.allow_external_ai=1"
         } else {
@@ -3037,6 +5677,48 @@ impl Database {
         Self::peer_hit_is_current_on(&connection, hit, peer_id, purpose)
     }
 
+    /// Revalidates publication and the collection's Internet opt-in without a
+    /// pairing or per-reader grant.
+    pub fn public_hit_is_current(&self, hit: &SearchHit) -> Result<bool> {
+        let connection = self.connection()?;
+        Self::public_hit_is_current_on(&connection, hit)
+    }
+
+    pub fn public_hit_is_current_under_disclosure(
+        &self,
+        lease: &DisclosureLease,
+        hit: &SearchHit,
+    ) -> Result<bool> {
+        let connection = self.connection_under_disclosure(lease)?;
+        Self::public_hit_is_current_on(&connection, hit)
+    }
+
+    fn public_hit_is_current_on(connection: &Connection, hit: &SearchHit) -> Result<bool> {
+        if projected_hit_is_current_on(connection, hit, SearchPurpose::LocalAssistant, None, true)?
+        {
+            return Ok(true);
+        }
+        let mut statement = connection.prepare(
+            "SELECT ch.ordinal,ch.text_sha256 FROM chunks ch
+                JOIN concepts co ON co.id=ch.concept_id
+                JOIN source_documents sd ON sd.id=ch.source_document_id
+                JOIN collections col ON col.id=ch.collection_id
+                WHERE co.id=?1 AND ch.collection_id=?2
+                  AND co.source_document_id=sd.id AND co.collection_id=ch.collection_id
+                  AND sd.collection_id=ch.collection_id AND sd.concept_id=co.id
+                  AND co.status='published' AND sd.status='published'
+                  AND sd.source_sha256=?3 AND ch.source_revision=?4
+                  AND ch.source_revision=sd.revision AND col.internet_public=1",
+        )?;
+        let mut rows = statement.query(params![
+            hit.concept_id.to_string(),
+            hit.collection_id.to_string(),
+            hit.source_sha256,
+            hit.source_revision,
+        ])?;
+        rows_contain_public_chunk(&mut rows, hit)
+    }
+
     /// Revalidates a peer hit while retaining the disclosure lease through the
     /// transport handoff. The lease must originate from this database's gate.
     pub fn peer_hit_is_current_under_disclosure(
@@ -3056,6 +5738,9 @@ impl Database {
         peer_id: &str,
         purpose: SearchPurpose,
     ) -> Result<bool> {
+        if projected_hit_is_current_on(connection, hit, purpose, Some(peer_id), false)? {
+            return Ok(true);
+        }
         let external_ai = purpose == SearchPurpose::ExternalAi;
         let mut statement = connection.prepare(
             "SELECT ch.ordinal,ch.text_sha256 FROM chunks ch
@@ -3083,6 +5768,90 @@ impl Database {
         ])?;
         rows_contain_public_chunk(&mut rows, hit)
     }
+
+    fn projected_hit_is_current(
+        &self,
+        hit: &SearchHit,
+        purpose: SearchPurpose,
+        peer_id: Option<&str>,
+        public: bool,
+    ) -> Result<bool> {
+        let connection = self.connection()?;
+        projected_hit_is_current_on(&connection, hit, purpose, peer_id, public)
+    }
+}
+
+fn projected_hit_is_current_on(
+    connection: &Connection,
+    hit: &SearchHit,
+    purpose: SearchPurpose,
+    peer_id: Option<&str>,
+    public: bool,
+) -> Result<bool> {
+    let row = connection
+        .query_row(
+            "SELECT f.text,f.fingerprint,f.lifecycle_status,col.allow_external_ai,
+             col.internet_public,col.peer_shareable,col.okf_compatibility,
+             NOT EXISTS(SELECT 1 FROM managed_bundle_mutations m
+                        WHERE m.collection_id=col.id AND m.state!='committed')
+             FROM okf_projection_fts f JOIN collections col ON col.id=f.collection_id
+             WHERE f.collection_id=?1 AND f.concept_id=?2",
+            params![hit.collection_id.to_string(), hit.concept_id.to_string()],
+            |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, String>(2)?,
+                    row.get::<_, bool>(3)?,
+                    row.get::<_, bool>(4)?,
+                    row.get::<_, bool>(5)?,
+                    row.get::<_, String>(6)?,
+                    row.get::<_, bool>(7)?,
+                ))
+            },
+        )
+        .optional()?;
+    let Some((
+        text,
+        fingerprint,
+        lifecycle,
+        external_ai,
+        internet_public,
+        peer_shareable,
+        compatibility,
+        mutation_free,
+    )) = row
+    else {
+        return Ok(false);
+    };
+    let local_only = purpose == SearchPurpose::LocalAssistant && peer_id.is_none() && !public;
+    if (!local_only && lifecycle != "stable")
+        || fingerprint != hit.source_sha256
+        || (!local_only
+            && !matches!(
+                compatibility.as_str(),
+                "declared_v02" | "undeclared_v02_compatible"
+            ))
+        || (!local_only && !mutation_free)
+        || (purpose == SearchPurpose::ExternalAi && !external_ai)
+        || (public && !internet_public)
+        || (peer_id.is_some() && !peer_shareable)
+    {
+        return Ok(false);
+    }
+    if let Some(peer_id) = peer_id {
+        let allowed = connection.query_row(
+            "SELECT EXISTS(SELECT 1 FROM grants g JOIN peers p ON p.peer_id=g.peer_id
+             WHERE g.peer_id=?1 AND g.collection_id=?2 AND p.trusted=1 AND p.blocked=0)",
+            params![peer_id, hit.collection_id.to_string()],
+            |row| row.get::<_, bool>(0),
+        )?;
+        if !allowed {
+            return Ok(false);
+        }
+    }
+    let text_sha256 = hex::encode(Sha256::digest(text.as_bytes()));
+    Ok(hit.source_revision == 1 && public_chunk_id(&fingerprint, 0, &text_sha256) == hit.chunk_id)
 }
 
 fn rows_contain_public_chunk(rows: &mut rusqlite::Rows<'_>, hit: &SearchHit) -> Result<bool> {
@@ -3152,6 +5921,7 @@ fn delete_chunks_for_concept(tx: &Transaction<'_>, concept_id: Uuid) -> Result<(
 }
 
 fn collection_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<CollectionRecord> {
+    let declared_okf_version = row.get::<_, Option<String>>(11)?;
     Ok(CollectionRecord {
         id: uuid_sql(row.get::<_, String>(0)?)?,
         name: row.get(1)?,
@@ -3161,9 +5931,49 @@ fn collection_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<CollectionRe
             local_only: row.get(4)?,
             peer_shareable: row.get(5)?,
             allow_external_ai: row.get(6)?,
+            internet_public: row.get(7)?,
         },
-        created_at: datetime_sql(row.get::<_, String>(7)?)?,
-        updated_at: datetime_sql(row.get::<_, String>(8)?)?,
+        origin: wiki_origin_sql(row.get::<_, String>(8)?)?,
+        indexing_mode: indexing_mode_sql(row.get::<_, String>(9)?)?,
+        okf_version: row.get(10)?,
+        declared_okf_version: declared_okf_version.clone(),
+        okf_compatibility: okf_compatibility_sql(row.get(12)?, declared_okf_version.as_deref())?,
+        managed_size_bytes: row.get(13)?,
+        created_at: datetime_sql(row.get::<_, String>(14)?)?,
+        updated_at: datetime_sql(row.get::<_, String>(15)?)?,
+    })
+}
+
+fn public_collection_profile_from_row(
+    row: &rusqlite::Row<'_>,
+) -> rusqlite::Result<PublicCollectionProfileRecord> {
+    Ok(PublicCollectionProfileRecord {
+        collection_id: uuid_sql(row.get::<_, String>(0)?)?,
+        description: row.get(1)?,
+        languages: json_sql(row.get::<_, String>(2)?)?,
+        manifest_sequence: row.get(3)?,
+        enabled_at: row
+            .get::<_, Option<String>>(4)?
+            .map(datetime_sql)
+            .transpose()?,
+        updated_at: datetime_sql(row.get::<_, String>(5)?)?,
+        withdrawal_pending: row.get(6)?,
+    })
+}
+
+fn federation_index_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<FederationIndexRecord> {
+    Ok(FederationIndexRecord {
+        peer_id: row.get(0)?,
+        multiaddr: row.get(1)?,
+        enabled: row.get(2)?,
+        source: row.get(3)?,
+        registry_version: row.get(4)?,
+        expires_at: row
+            .get::<_, Option<String>>(5)?
+            .map(datetime_sql)
+            .transpose()?,
+        created_at: datetime_sql(row.get::<_, String>(6)?)?,
+        updated_at: datetime_sql(row.get::<_, String>(7)?)?,
     })
 }
 
@@ -3295,11 +6105,29 @@ fn ranked_chunk_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<RankedChun
     Ok(RankedChunk {
         chunk,
         title: row.get(10)?,
-        logical_resource_uri: row.get(11)?,
         source_sha256: row.get(12)?,
-        updated_at: datetime_sql(row.get::<_, String>(13)?)?,
-        lexical_score: row.get(14)?,
+        source_format: source_format_sql(row.get::<_, String>(13)?)?,
+        updated_at: datetime_sql(row.get::<_, String>(14)?)?,
+        assurance: Some(ConceptAssurance {
+            trust: TrustTier::HumanReviewed,
+            freshness: FreshnessState::NotDeclared,
+            verification_outdated: false,
+        }),
+        lifecycle_status: Some("stable".to_owned()),
+        lexical_score: row.get(15)?,
     })
+}
+
+fn source_format_sql(value: String) -> rusqlite::Result<SourceFormat> {
+    match value.as_str() {
+        "markdown" => Ok(SourceFormat::Markdown),
+        "pdf" => Ok(SourceFormat::Pdf),
+        _ => Err(rusqlite::Error::FromSqlConversionFailure(
+            13,
+            rusqlite::types::Type::Text,
+            format!("unknown source format: {value}").into(),
+        )),
+    }
 }
 
 fn publication_claim_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<PublicationClaim> {
@@ -3385,6 +6213,33 @@ fn source_registration_by_path(
     Ok(matched)
 }
 
+fn source_has_active_ingest_job(tx: &Transaction<'_>, source_document_id: Uuid) -> Result<bool> {
+    tx.query_row(
+        "SELECT EXISTS(
+           SELECT 1 FROM jobs
+           WHERE source_document_id=?1 AND kind='ingest'
+             AND state IN ('queued','running')
+         )",
+        [source_document_id.to_string()],
+        |row| row.get(0),
+    )
+    .map_err(Into::into)
+}
+
+fn supersede_active_ingest_jobs(
+    tx: &Transaction<'_>,
+    source_document_id: Uuid,
+    now: &str,
+) -> Result<()> {
+    tx.execute(
+        "UPDATE jobs SET state='failed',last_error='superseded by source reconciliation',
+         updated_at=?2
+         WHERE source_document_id=?1 AND kind='ingest' AND state IN ('queued','running')",
+        params![source_document_id.to_string(), now],
+    )?;
+    Ok(())
+}
+
 fn absolute_path(path: &Path) -> Result<PathBuf> {
     if path.is_absolute() {
         Ok(path.to_path_buf())
@@ -3402,6 +6257,157 @@ fn path_is_definitely_missing(path: &Path) -> bool {
 
 fn path_text(path: &Path) -> String {
     path.to_string_lossy().into_owned()
+}
+
+fn build_collection_record(
+    id: Uuid,
+    name: String,
+    source_folder: &Path,
+    wiki_folder: &Path,
+    mut policy: CollectionPolicy,
+    origin: WikiOrigin,
+    indexing_mode: IndexingMode,
+) -> Result<CollectionRecord> {
+    match (origin, indexing_mode) {
+        (WikiOrigin::Folder, IndexingMode::Continuous | IndexingMode::Manual)
+        | (WikiOrigin::ImportedOkf | WikiOrigin::AiMemory, IndexingMode::NotApplicable) => {}
+        _ => bail!("indexing mode is not valid for this wiki origin"),
+    }
+    policy.normalize();
+    let now = Utc::now();
+    let record = CollectionRecord {
+        id,
+        name: name.trim().to_owned(),
+        source_folder: absolute_path(source_folder)?,
+        wiki_folder: absolute_path(wiki_folder)?,
+        policy,
+        origin,
+        indexing_mode,
+        okf_version: "0.2".to_owned(),
+        declared_okf_version: Some("0.2".to_owned()),
+        okf_compatibility: OkfCompatibility::DeclaredV02,
+        managed_size_bytes: 0,
+        created_at: now,
+        updated_at: now,
+    };
+    if record.name.is_empty() {
+        bail!("collection name must not be empty");
+    }
+    Ok(record)
+}
+
+fn insert_collection(connection: &Connection, record: &CollectionRecord) -> Result<()> {
+    connection.execute(
+        "INSERT INTO collections
+         (id,name,source_folder,wiki_folder,local_only,peer_shareable,allow_external_ai,internet_public,
+          origin,indexing_mode,okf_version,declared_okf_version,okf_compatibility,managed_size_bytes,
+          created_at,updated_at)
+         VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16)",
+        params![
+            record.id.to_string(),
+            record.name,
+            path_text(&record.source_folder),
+            path_text(&record.wiki_folder),
+            record.policy.local_only,
+            record.policy.peer_shareable,
+            record.policy.allow_external_ai,
+            record.policy.internet_public,
+            record.origin.as_str(),
+            record.indexing_mode.as_str(),
+            record.okf_version,
+            record.declared_okf_version,
+            okf_compatibility_sql_value(&record.okf_compatibility),
+            record.managed_size_bytes,
+            record.created_at.to_rfc3339(),
+            record.updated_at.to_rfc3339(),
+        ],
+    )?;
+    Ok(())
+}
+
+/// Produces the bounded, single-line summary required by the public and LAN
+/// browse contracts. Imported OKF search text intentionally retains Markdown
+/// line breaks for local indexing; those control characters must not make the
+/// complete remote page fail validation.
+fn network_safe_summary(value: &str) -> String {
+    network_safe_line(value, airwiki_types::MAX_SNIPPET_CHARS)
+}
+
+fn network_safe_line(value: &str, maximum_size: usize) -> String {
+    let mut summary = String::with_capacity(value.len().min(maximum_size));
+    let mut char_count = 0_usize;
+    let mut byte_count = 0_usize;
+    let mut pending_separator = false;
+
+    for character in value.chars() {
+        if character.is_whitespace() || character.is_control() {
+            pending_separator = !summary.is_empty();
+            continue;
+        }
+        if pending_separator {
+            if char_count.saturating_add(1) > maximum_size
+                || byte_count.saturating_add(1) > maximum_size
+            {
+                break;
+            }
+            summary.push(' ');
+            char_count += 1;
+            byte_count += 1;
+            pending_separator = false;
+        }
+        let character_bytes = character.len_utf8();
+        if char_count >= maximum_size || byte_count.saturating_add(character_bytes) > maximum_size {
+            break;
+        }
+        summary.push(character);
+        char_count += 1;
+        byte_count += character_bytes;
+    }
+
+    summary
+}
+
+fn network_safe_concept_type(value: &str) -> ConceptType {
+    ConceptType::parse(network_safe_line(value, 120))
+        .unwrap_or_else(|| ConceptType::Other("Unknown".to_owned()))
+}
+
+fn network_safe_title(value: &str) -> String {
+    network_safe_required_line(value, 240, "Untitled concept")
+}
+
+fn network_safe_required_line(value: &str, maximum_size: usize, fallback: &str) -> String {
+    let value = network_safe_line(value, maximum_size);
+    if value.is_empty() {
+        fallback.to_owned()
+    } else {
+        value
+    }
+}
+
+fn network_safe_tags(tags: Vec<String>) -> Vec<String> {
+    let mut safe = Vec::with_capacity(tags.len().min(64));
+    for tag in tags {
+        let tag = network_safe_line(&tag, 64);
+        if !tag.is_empty() && !safe.contains(&tag) {
+            safe.push(tag);
+            if safe.len() == 64 {
+                break;
+            }
+        }
+    }
+    safe
+}
+
+fn ensure_target_is_first<T>(
+    concepts: &[T],
+    target_concept_id: Option<Uuid>,
+    concept_id: impl Fn(&T) -> Uuid,
+) -> Result<()> {
+    if target_concept_id.is_some_and(|target| concepts.first().map(concept_id) != Some(target)) {
+        bail!("requested concept is unavailable");
+    }
+    Ok(())
 }
 
 fn parse_uuid(value: &str) -> Result<Uuid> {
@@ -3437,19 +6443,167 @@ fn status_sql(value: String) -> rusqlite::Result<DocumentStatus> {
 }
 
 fn concept_type_sql(value: String) -> rusqlite::Result<ConceptType> {
+    ConceptType::parse(value).ok_or_else(|| to_sql_error("concept type must not be empty"))
+}
+
+fn wiki_origin_sql(value: String) -> rusqlite::Result<WikiOrigin> {
     match value.as_str() {
-        "Document" => Ok(ConceptType::Document),
-        "Policy" => Ok(ConceptType::Policy),
-        "Procedure" => Ok(ConceptType::Procedure),
-        "Runbook" => Ok(ConceptType::Runbook),
-        "Reference" => Ok(ConceptType::Reference),
-        "Report" => Ok(ConceptType::Report),
-        _ => Err(to_sql_error(anyhow!("invalid concept type {value}"))),
+        "folder" => Ok(WikiOrigin::Folder),
+        "imported_okf" => Ok(WikiOrigin::ImportedOkf),
+        "ai_memory" => Ok(WikiOrigin::AiMemory),
+        _ => Err(to_sql_error(format!("invalid wiki origin {value}"))),
+    }
+}
+
+fn indexing_mode_sql(value: String) -> rusqlite::Result<IndexingMode> {
+    match value.as_str() {
+        "continuous" => Ok(IndexingMode::Continuous),
+        "manual" => Ok(IndexingMode::Manual),
+        "not_applicable" => Ok(IndexingMode::NotApplicable),
+        _ => Err(to_sql_error(format!("invalid indexing mode {value}"))),
+    }
+}
+
+fn optional_device_platform_sql(
+    value: Option<String>,
+) -> rusqlite::Result<Option<airwiki_types::DevicePlatform>> {
+    value
+        .map(|value| match value.as_str() {
+            "macos" => Ok(airwiki_types::DevicePlatform::MacOs),
+            "windows" => Ok(airwiki_types::DevicePlatform::Windows),
+            _ => Err(rusqlite::Error::InvalidQuery),
+        })
+        .transpose()
+}
+
+fn okf_compatibility_sql(
+    value: String,
+    declared_version: Option<&str>,
+) -> rusqlite::Result<OkfCompatibility> {
+    match value.as_str() {
+        "declared_v02" => Ok(OkfCompatibility::DeclaredV02),
+        "undeclared_v02_compatible" => Ok(OkfCompatibility::UndeclaredV02Compatible),
+        "legacy_v01" => Ok(OkfCompatibility::LegacyV01),
+        "future_restricted" => Ok(OkfCompatibility::FutureRestricted {
+            declared_version: declared_version.unwrap_or("unknown").to_owned(),
+        }),
+        _ => Err(to_sql_error(format!("invalid OKF compatibility {value}"))),
+    }
+}
+
+fn okf_compatibility_sql_value(value: &OkfCompatibility) -> &'static str {
+    match value {
+        OkfCompatibility::DeclaredV02 => "declared_v02",
+        OkfCompatibility::UndeclaredV02Compatible => "undeclared_v02_compatible",
+        OkfCompatibility::LegacyV01 => "legacy_v01",
+        OkfCompatibility::FutureRestricted { .. } => "future_restricted",
+    }
+}
+
+fn managed_bundle_mutation_state_sql(
+    value: String,
+) -> rusqlite::Result<ManagedBundleMutationState> {
+    match value.as_str() {
+        "prepared" => Ok(ManagedBundleMutationState::Prepared),
+        "file_replaced" => Ok(ManagedBundleMutationState::FileReplaced),
+        "recovery_required" => Ok(ManagedBundleMutationState::RecoveryRequired),
+        _ => Err(to_sql_error(format!(
+            "invalid managed bundle mutation state {value}"
+        ))),
+    }
+}
+
+fn computation_run_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<ComputationRunRecord> {
+    Ok(ComputationRunRecord {
+        id: uuid_sql(row.get(0)?)?,
+        collection_id: uuid_sql(row.get(1)?)?,
+        logical_path: row.get(2)?,
+        actor_kind: row.get(3)?,
+        actor_id: row.get(4)?,
+        state: computation_run_state_sql(row.get(5)?)?,
+        contract_fingerprint: row.get(6)?,
+        executor_sha256: row.get(7)?,
+        attester_sha256: row.get(8)?,
+        parameter_schema: json_sql(row.get(9)?)?,
+        receipt_sha256: row.get(10)?,
+        verdict: row.get(11)?,
+        requested_at: datetime_sql(row.get(12)?)?,
+        confirmed_at: optional_datetime(row.get(13)?)?,
+        completed_at: optional_datetime(row.get(14)?)?,
+        expires_at: datetime_sql(row.get(15)?)?,
+    })
+}
+
+fn computation_run_state_sql(value: String) -> rusqlite::Result<ComputationRunState> {
+    match value.as_str() {
+        "awaiting_confirmation" => Ok(ComputationRunState::AwaitingConfirmation),
+        "running" => Ok(ComputationRunState::Running),
+        "completed" => Ok(ComputationRunState::Completed),
+        "rejected" => Ok(ComputationRunState::Rejected),
+        "failed" => Ok(ComputationRunState::Failed),
+        "expired" => Ok(ComputationRunState::Expired),
+        _ => Err(to_sql_error(format!(
+            "invalid computation run state {value}"
+        ))),
+    }
+}
+
+fn trust_tier_sql(value: String) -> rusqlite::Result<TrustTier> {
+    match value.as_str() {
+        "unverified" => Ok(TrustTier::Unverified),
+        "machine_confirmed" => Ok(TrustTier::MachineConfirmed),
+        "human_reviewed" => Ok(TrustTier::HumanReviewed),
+        _ => Err(to_sql_error(format!("invalid trust tier {value}"))),
+    }
+}
+
+const fn trust_tier_sql_value(value: TrustTier) -> &'static str {
+    match value {
+        TrustTier::Unverified => "unverified",
+        TrustTier::MachineConfirmed => "machine_confirmed",
+        TrustTier::HumanReviewed => "human_reviewed",
+    }
+}
+
+fn freshness_state_sql(value: String) -> rusqlite::Result<FreshnessState> {
+    match value.as_str() {
+        "not_declared" => Ok(FreshnessState::NotDeclared),
+        "fresh" => Ok(FreshnessState::Fresh),
+        "stale" => Ok(FreshnessState::Stale),
+        "invalid" => Ok(FreshnessState::Invalid),
+        _ => Err(to_sql_error(format!("invalid freshness state {value}"))),
+    }
+}
+
+const fn freshness_state_sql_value(value: FreshnessState) -> &'static str {
+    match value {
+        FreshnessState::NotDeclared => "not_declared",
+        FreshnessState::Fresh => "fresh",
+        FreshnessState::Stale => "stale",
+        FreshnessState::Invalid => "invalid",
     }
 }
 
 fn json_sql<T: for<'de> Deserialize<'de>>(value: String) -> rusqlite::Result<T> {
     serde_json::from_str(&value).map_err(to_sql_error)
+}
+
+fn yaml_json(value: Option<&serde_yaml::Value>) -> Result<Option<String>> {
+    value
+        .map(|value| serde_json::to_string(value).map_err(Into::into))
+        .transpose()
+}
+
+fn constant_time_eq(left: &[u8], right: &[u8]) -> bool {
+    if left.len() != right.len() {
+        return false;
+    }
+    left.iter()
+        .zip(right)
+        .fold(0_u8, |difference, (left, right)| {
+            difference | (left ^ right)
+        })
+        == 0
 }
 
 fn to_sql_error(error: impl std::fmt::Display) -> rusqlite::Error {
@@ -3478,10 +6632,14 @@ pub(crate) fn decode_embedding(bytes: &[u8]) -> Result<Vec<f32>> {
     if !bytes.len().is_multiple_of(std::mem::size_of::<f32>()) {
         bail!("embedding BLOB has invalid byte length {}", bytes.len());
     }
-    Ok(bytes
+    bytes
         .chunks_exact(4)
-        .map(|chunk| f32::from_le_bytes(chunk.try_into().expect("four-byte chunk")))
-        .collect())
+        .map(|chunk| {
+            let encoded = <[u8; 4]>::try_from(chunk)
+                .map_err(|_| anyhow!("embedding BLOB contains an incomplete value"))?;
+            Ok(f32::from_le_bytes(encoded))
+        })
+        .collect()
 }
 
 fn fts_query(query: &str) -> String {
@@ -3492,6 +6650,25 @@ fn fts_query(query: &str) -> String {
         .map(|word| format!("\"{}\"", word.replace('"', "")))
         .collect::<Vec<_>>()
         .join(" OR ")
+}
+
+fn next_rate_window(
+    started_at: Option<String>,
+    count: u32,
+    now: DateTime<Utc>,
+    duration: chrono::Duration,
+) -> Result<(DateTime<Utc>, u32)> {
+    let Some(started_at) = started_at else {
+        return Ok((now, 0));
+    };
+    let started_at = DateTime::parse_from_rfc3339(&started_at)
+        .context("application rate-limit timestamp is invalid")?
+        .with_timezone(&Utc);
+    if now.signed_duration_since(started_at) >= duration {
+        Ok((now, 0))
+    } else {
+        Ok((started_at, count))
+    }
 }
 
 fn repeat_placeholders(count: usize, start_index: usize) -> String {
@@ -3861,7 +7038,7 @@ mod tests {
         let temp = tempfile::tempdir().unwrap();
         let path = temp.path().join("db.sqlite");
         let db = Database::open(&path).unwrap();
-        assert_eq!(db.schema_version().unwrap(), 3);
+        assert_eq!(db.schema_version().unwrap(), 15);
         for table in [
             "collections",
             "source_documents",
@@ -3873,11 +7050,15 @@ mod tests {
             "grants",
             "audit_events",
             "collection_maintenance",
+            "public_collection_profiles",
+            "federation_indexes",
+            "federation_bootstrap_registry_state",
+            "public_publisher_blocks",
         ] {
             assert_eq!(db.count(table).unwrap(), 0);
         }
         drop(db);
-        assert_eq!(Database::open(path).unwrap().schema_version().unwrap(), 3);
+        assert_eq!(Database::open(path).unwrap().schema_version().unwrap(), 15);
     }
 
     #[test]
@@ -3889,6 +7070,7 @@ mod tests {
                 local_only: true,
                 peer_shareable: false,
                 allow_external_ai: true,
+                internet_public: false,
             },
         )
         .unwrap();
@@ -3899,6 +7081,7 @@ mod tests {
                 local_only: false,
                 peer_shareable: false,
                 allow_external_ai: true,
+                internet_public: false,
             }
         );
 
@@ -3908,12 +7091,438 @@ mod tests {
                 local_only: false,
                 peer_shareable: false,
                 allow_external_ai: false,
+                internet_public: false,
             },
         )
         .unwrap();
         assert_eq!(
             db.collection(collection.id).unwrap().unwrap().policy,
             CollectionPolicy::local_only()
+        );
+
+        db.update_collection_policy(
+            collection.id,
+            CollectionPolicy {
+                local_only: true,
+                peer_shareable: false,
+                allow_external_ai: false,
+                internet_public: true,
+            },
+        )
+        .unwrap();
+        let public = db.collection(collection.id).unwrap().unwrap();
+        assert!(!public.policy.local_only);
+        assert!(public.policy.internet_public);
+        let enabled = db
+            .public_collection_profile(collection.id)
+            .unwrap()
+            .unwrap();
+        assert_eq!(enabled.manifest_sequence, 1);
+        assert!(enabled.enabled_at.is_some());
+
+        db.update_collection_policy(collection.id, CollectionPolicy::local_only())
+            .unwrap();
+        let disabled = db
+            .public_collection_profile(collection.id)
+            .unwrap()
+            .unwrap();
+        assert_eq!(disabled.manifest_sequence, 2);
+        assert!(disabled.enabled_at.is_none());
+        assert!(disabled.withdrawal_pending);
+        assert_eq!(db.pending_public_withdrawals().unwrap(), [collection.id]);
+
+        db.complete_public_withdrawal(collection.id).unwrap();
+        assert!(db.pending_public_withdrawals().unwrap().is_empty());
+    }
+
+    #[test]
+    fn public_publisher_blocks_are_persistent_and_reversible() {
+        let (_temp, db, _collection) = setup();
+        let publisher = "12D3KooWSyntheticPublisher";
+
+        assert!(!db.public_publisher_is_blocked(publisher).unwrap());
+        db.set_public_publisher_blocked(publisher, true).unwrap();
+        assert!(db.public_publisher_is_blocked(publisher).unwrap());
+        assert_eq!(db.list_blocked_public_publishers().unwrap(), [publisher]);
+
+        db.set_public_publisher_blocked(publisher, false).unwrap();
+        assert!(!db.public_publisher_is_blocked(publisher).unwrap());
+    }
+
+    #[test]
+    fn bootstrap_indexes_preserve_registry_version_and_expiry() {
+        let (_temp, db, _collection) = setup();
+        let expiry = Utc::now() + chrono::Duration::days(30);
+        let indexes = [BootstrapFederationIndexEntry {
+            peer_id: "12D3KooWSyntheticBootstrap".to_owned(),
+            multiaddr: "/ip4/203.0.113.10/tcp/42042".to_owned(),
+            expires_at: expiry,
+        }];
+        db.replace_bootstrap_federation_indexes(1, &indexes)
+            .unwrap();
+
+        let indexes = db.list_federation_indexes().unwrap();
+        assert_eq!(indexes.len(), 1);
+        assert_eq!(indexes[0].source, "bootstrap");
+        assert_eq!(indexes[0].registry_version, 1);
+        assert_eq!(indexes[0].expires_at, Some(expiry));
+    }
+
+    #[test]
+    fn bootstrap_indexes_reject_downgrade_and_same_version_mutation() {
+        let (_temp, db, _collection) = setup();
+        let peer = "12D3KooWSyntheticBootstrap";
+        let first_address = "/ip4/203.0.113.10/tcp/42042";
+        let expiry = Utc::now() + chrono::Duration::days(30);
+        let first = [BootstrapFederationIndexEntry {
+            peer_id: peer.to_owned(),
+            multiaddr: first_address.to_owned(),
+            expires_at: expiry,
+        }];
+        db.replace_bootstrap_federation_indexes(2, &first).unwrap();
+
+        assert!(db.replace_bootstrap_federation_indexes(1, &first).is_err());
+        let mutated = [BootstrapFederationIndexEntry {
+            peer_id: peer.to_owned(),
+            multiaddr: "/ip4/203.0.113.11/tcp/42042".to_owned(),
+            expires_at: expiry,
+        }];
+        assert!(
+            db.replace_bootstrap_federation_indexes(2, &mutated)
+                .is_err()
+        );
+        db.replace_bootstrap_federation_indexes(2, &first).unwrap();
+
+        let indexes = db.list_federation_indexes().unwrap();
+        assert_eq!(indexes[0].multiaddr, first_address);
+        assert_eq!(indexes[0].registry_version, 2);
+    }
+
+    #[test]
+    fn bootstrap_registry_replacement_retires_older_entries_and_preserves_community_indexes() {
+        let (_temp, db, _collection) = setup();
+        let expiry = Utc::now() + chrono::Duration::days(30);
+        let old = vec![
+            BootstrapFederationIndexEntry {
+                peer_id: "12D3KooWOldBootstrapOne".to_owned(),
+                multiaddr: "/ip4/203.0.113.10/tcp/42042".to_owned(),
+                expires_at: expiry,
+            },
+            BootstrapFederationIndexEntry {
+                peer_id: "12D3KooWOldBootstrapTwo".to_owned(),
+                multiaddr: "/ip4/203.0.113.11/tcp/42044".to_owned(),
+                expires_at: expiry,
+            },
+        ];
+        db.replace_bootstrap_federation_indexes(1, &old).unwrap();
+        db.upsert_community_federation_index(
+            "12D3KooWCommunityIndex",
+            "/ip4/203.0.113.12/tcp/42046",
+            true,
+        )
+        .unwrap();
+        let replacement = vec![
+            BootstrapFederationIndexEntry {
+                peer_id: "12D3KooWNewBootstrapOne".to_owned(),
+                multiaddr: "/ip4/203.0.113.20/udp/42042/quic-v1".to_owned(),
+                expires_at: expiry,
+            },
+            BootstrapFederationIndexEntry {
+                peer_id: "12D3KooWNewBootstrapTwo".to_owned(),
+                multiaddr: "/ip4/203.0.113.21/udp/42044/quic-v1".to_owned(),
+                expires_at: expiry,
+            },
+        ];
+
+        db.replace_bootstrap_federation_indexes(2, &replacement)
+            .unwrap();
+        db.replace_bootstrap_federation_indexes(2, &replacement)
+            .unwrap();
+
+        let indexes = db.list_federation_indexes().unwrap();
+        assert_eq!(indexes.len(), 3);
+        assert_eq!(
+            indexes
+                .iter()
+                .filter(|index| index.source == "bootstrap")
+                .count(),
+            2
+        );
+        assert!(indexes.iter().any(|index| {
+            index.peer_id == "12D3KooWCommunityIndex" && index.source == "community"
+        }));
+        assert!(
+            indexes
+                .iter()
+                .filter(|index| index.source == "bootstrap")
+                .all(|index| index.registry_version == 2
+                    && index.peer_id != "12D3KooWOldBootstrapOne"
+                    && index.peer_id != "12D3KooWOldBootstrapTwo")
+        );
+
+        let mut mutated = replacement.clone();
+        mutated[0].multiaddr = "/ip4/203.0.113.30/udp/42042/quic-v1".to_owned();
+        assert!(
+            db.replace_bootstrap_federation_indexes(2, &mutated)
+                .is_err()
+        );
+        assert!(
+            db.replace_bootstrap_federation_indexes(1, &replacement)
+                .is_err()
+        );
+        assert_eq!(db.list_federation_indexes().unwrap(), indexes);
+    }
+
+    #[test]
+    fn bootstrap_registry_ignores_expired_entries_and_never_overwrites_community_indexes() {
+        let (_temp, db, _collection) = setup();
+        let community_peer = "12D3KooWCommunityCollision";
+        let community_address = "/ip4/203.0.113.40/tcp/42042";
+        db.upsert_community_federation_index(community_peer, community_address, true)
+            .unwrap();
+        let now = Utc::now();
+        let registry = vec![
+            BootstrapFederationIndexEntry {
+                peer_id: community_peer.to_owned(),
+                multiaddr: "/ip4/203.0.113.41/udp/42042/quic-v1".to_owned(),
+                expires_at: now + chrono::Duration::days(1),
+            },
+            BootstrapFederationIndexEntry {
+                peer_id: "12D3KooWShortLivedBootstrap".to_owned(),
+                multiaddr: "/ip4/203.0.113.42/udp/42044/quic-v1".to_owned(),
+                expires_at: now - chrono::Duration::seconds(1),
+            },
+            BootstrapFederationIndexEntry {
+                peer_id: "12D3KooWActiveBootstrap".to_owned(),
+                multiaddr: "/ip4/203.0.113.43/udp/42046/quic-v1".to_owned(),
+                expires_at: now + chrono::Duration::days(1),
+            },
+        ];
+
+        db.replace_bootstrap_federation_indexes(2, &registry)
+            .unwrap();
+        db.replace_bootstrap_federation_indexes(2, &registry)
+            .unwrap();
+
+        let indexes = db.list_federation_indexes().unwrap();
+        assert_eq!(indexes.len(), 2);
+        assert!(indexes.iter().any(|index| {
+            index.peer_id == community_peer
+                && index.multiaddr == community_address
+                && index.source == "community"
+                && index.expires_at.is_none()
+        }));
+        assert!(indexes.iter().any(|index| {
+            index.peer_id == "12D3KooWActiveBootstrap"
+                && index.source == "bootstrap"
+                && index.registry_version == 2
+        }));
+        assert!(
+            indexes
+                .iter()
+                .all(|index| index.peer_id != "12D3KooWShortLivedBootstrap")
+        );
+
+        let next_registry = [BootstrapFederationIndexEntry {
+            peer_id: "12D3KooWNextBootstrap".to_owned(),
+            multiaddr: "/ip4/203.0.113.44/udp/42042/quic-v1".to_owned(),
+            expires_at: now + chrono::Duration::days(2),
+        }];
+        db.replace_bootstrap_federation_indexes(3, &next_registry)
+            .unwrap();
+        let replaced = db.list_federation_indexes().unwrap();
+        assert_eq!(replaced.len(), 2);
+        assert!(replaced.iter().any(|index| {
+            index.peer_id == community_peer
+                && index.multiaddr == community_address
+                && index.source == "community"
+        }));
+        assert!(replaced.iter().any(|index| {
+            index.peer_id == "12D3KooWNextBootstrap"
+                && index.source == "bootstrap"
+                && index.registry_version == 3
+        }));
+    }
+
+    #[test]
+    fn fully_expired_higher_registry_retires_all_older_bootstrap_indexes() {
+        let (_temp, db, _collection) = setup();
+        let active = [BootstrapFederationIndexEntry {
+            peer_id: "12D3KooWActiveBeforeExpiry".to_owned(),
+            multiaddr: "/ip4/203.0.113.45/udp/42042/quic-v1".to_owned(),
+            expires_at: Utc::now() + chrono::Duration::days(1),
+        }];
+        db.replace_bootstrap_federation_indexes(7, &active).unwrap();
+        let expired = [BootstrapFederationIndexEntry {
+            peer_id: "12D3KooWExpiredReplacement".to_owned(),
+            multiaddr: "/ip4/203.0.113.46/udp/42044/quic-v1".to_owned(),
+            expires_at: Utc::now() - chrono::Duration::seconds(1),
+        }];
+
+        db.replace_bootstrap_federation_indexes(8, &expired)
+            .unwrap();
+
+        assert!(
+            db.list_federation_indexes()
+                .unwrap()
+                .iter()
+                .all(|index| index.source != "bootstrap")
+        );
+    }
+
+    #[test]
+    fn fully_expired_registry_version_still_rejects_downgrade() {
+        let (_temp, db, _collection) = setup();
+        let expired = [BootstrapFederationIndexEntry {
+            peer_id: "12D3KooWExpiredVersionMarker".to_owned(),
+            multiaddr: "/ip4/203.0.113.47/udp/42042/quic-v1".to_owned(),
+            expires_at: Utc::now() - chrono::Duration::seconds(1),
+        }];
+        db.replace_bootstrap_federation_indexes(10, &expired)
+            .unwrap();
+        let downgrade = [BootstrapFederationIndexEntry {
+            peer_id: "12D3KooWDowngradeAfterExpiry".to_owned(),
+            multiaddr: "/ip4/203.0.113.48/udp/42044/quic-v1".to_owned(),
+            expires_at: Utc::now() + chrono::Duration::days(1),
+        }];
+
+        assert!(
+            db.replace_bootstrap_federation_indexes(9, &downgrade)
+                .is_err()
+        );
+    }
+
+    #[test]
+    fn bootstrap_registry_restart_tolerates_one_entry_expiring_before_the_others() {
+        let (_temp, db, _collection) = setup();
+        let now = Utc::now();
+        let expiring_peer = "12D3KooWExpiringBootstrap";
+        let mut registry = vec![
+            BootstrapFederationIndexEntry {
+                peer_id: expiring_peer.to_owned(),
+                multiaddr: "/ip4/203.0.113.50/udp/42042/quic-v1".to_owned(),
+                expires_at: now + chrono::Duration::days(1),
+            },
+            BootstrapFederationIndexEntry {
+                peer_id: "12D3KooWLongerBootstrap".to_owned(),
+                multiaddr: "/ip4/203.0.113.51/udp/42044/quic-v1".to_owned(),
+                expires_at: now + chrono::Duration::days(2),
+            },
+        ];
+        db.replace_bootstrap_federation_indexes(4, &registry)
+            .unwrap();
+        db.connection()
+            .unwrap()
+            .execute(
+                "UPDATE federation_indexes SET expires_at=?2 WHERE peer_id=?1",
+                params![
+                    expiring_peer,
+                    (Utc::now() - chrono::Duration::seconds(1)).to_rfc3339()
+                ],
+            )
+            .unwrap();
+        registry[0].expires_at = Utc::now() - chrono::Duration::seconds(1);
+
+        db.replace_bootstrap_federation_indexes(4, &registry)
+            .unwrap();
+
+        let indexes = db.list_federation_indexes().unwrap();
+        assert_eq!(
+            indexes
+                .iter()
+                .filter(|index| index.source == "bootstrap")
+                .count(),
+            2
+        );
+        assert_eq!(
+            indexes
+                .iter()
+                .filter(|index| {
+                    index.source == "bootstrap"
+                        && index.expires_at.is_some_and(|expiry| expiry > Utc::now())
+                })
+                .count(),
+            1
+        );
+    }
+
+    #[test]
+    fn community_collisions_retain_the_global_registry_version_and_allow_old_bootstrap_cleanup() {
+        let (_temp, db, _collection) = setup();
+        let now = Utc::now();
+        let old_registry = [BootstrapFederationIndexEntry {
+            peer_id: "12D3KooWOldBootstrap".to_owned(),
+            multiaddr: "/ip4/203.0.113.60/udp/42042/quic-v1".to_owned(),
+            expires_at: now + chrono::Duration::days(1),
+        }];
+        db.replace_bootstrap_federation_indexes(1, &old_registry)
+            .unwrap();
+        let community_peer = "12D3KooWCommunityOnlyRegistry";
+        let community_address = "/ip4/203.0.113.61/tcp/42044";
+        db.upsert_community_federation_index(community_peer, community_address, true)
+            .unwrap();
+        let community_registry = [BootstrapFederationIndexEntry {
+            peer_id: community_peer.to_owned(),
+            multiaddr: "/ip4/203.0.113.62/udp/42044/quic-v1".to_owned(),
+            expires_at: now + chrono::Duration::days(2),
+        }];
+
+        db.replace_bootstrap_federation_indexes(2, &community_registry)
+            .unwrap();
+
+        let indexes = db.list_federation_indexes().unwrap();
+        assert_eq!(indexes.len(), 1);
+        assert_eq!(indexes[0].peer_id, community_peer);
+        assert_eq!(indexes[0].multiaddr, community_address);
+        assert_eq!(indexes[0].source, "community");
+        assert_eq!(indexes[0].registry_version, 2);
+        assert!(indexes[0].expires_at.is_none());
+        let ignored_community_mutation = [BootstrapFederationIndexEntry {
+            peer_id: community_peer.to_owned(),
+            multiaddr: "/ip4/203.0.113.63/udp/42046/quic-v1".to_owned(),
+            expires_at: now + chrono::Duration::days(3),
+        }];
+        db.replace_bootstrap_federation_indexes(2, &ignored_community_mutation)
+            .unwrap();
+        assert_eq!(db.list_federation_indexes().unwrap(), indexes);
+        assert!(
+            db.replace_bootstrap_federation_indexes(1, &old_registry)
+                .is_err()
+        );
+    }
+
+    #[test]
+    fn promoting_the_last_bootstrap_to_community_does_not_allow_registry_downgrade() {
+        let (_temp, db, _collection) = setup();
+        let expiry = Utc::now() + chrono::Duration::days(1);
+        let current = [BootstrapFederationIndexEntry {
+            peer_id: "12D3KooWPromotedBootstrap".to_owned(),
+            multiaddr: "/ip4/203.0.113.70/udp/42042/quic-v1".to_owned(),
+            expires_at: expiry,
+        }];
+        db.replace_bootstrap_federation_indexes(5, &current)
+            .unwrap();
+        db.upsert_community_federation_index(
+            "12D3KooWPromotedBootstrap",
+            "/ip4/203.0.113.71/tcp/42042",
+            true,
+        )
+        .unwrap();
+
+        let promoted = db.list_federation_indexes().unwrap();
+        assert_eq!(promoted.len(), 1);
+        assert_eq!(promoted[0].source, "community");
+        assert_eq!(promoted[0].registry_version, 5);
+        assert!(promoted[0].expires_at.is_none());
+
+        let downgrade = [BootstrapFederationIndexEntry {
+            peer_id: "12D3KooWDowngradedBootstrap".to_owned(),
+            multiaddr: "/ip4/203.0.113.72/udp/42044/quic-v1".to_owned(),
+            expires_at: expiry,
+        }];
+        assert!(
+            db.replace_bootstrap_federation_indexes(4, &downgrade)
+                .is_err()
         );
     }
 
@@ -3971,7 +7580,7 @@ mod tests {
         drop(connection);
 
         let database = Database::open(&path).unwrap();
-        assert_eq!(database.schema_version().unwrap(), 3);
+        assert_eq!(database.schema_version().unwrap(), 15);
         assert_eq!(database.count("collections").unwrap(), 1);
         assert_eq!(database.count("source_documents").unwrap(), 1);
         assert_eq!(database.count("publication_claims").unwrap(), 0);
@@ -3986,7 +7595,7 @@ mod tests {
     }
 
     #[test]
-    fn migration_three_preserves_version_two_collection_state() {
+    fn migration_three_preserves_content_but_restricts_legacy_policy() {
         let temp = tempfile::tempdir().unwrap();
         let path = temp.path().join("version-two.sqlite");
         let mut connection = Connection::open(&path).unwrap();
@@ -4011,16 +7620,502 @@ mod tests {
 
         let database = Database::open(&path).unwrap();
 
-        assert_eq!(database.schema_version().unwrap(), 3);
-        assert!(
-            database
-                .collection(collection_id)
-                .unwrap()
-                .unwrap()
-                .policy
-                .peer_shareable
+        assert_eq!(database.schema_version().unwrap(), 15);
+        assert_eq!(
+            database.collection(collection_id).unwrap().unwrap().policy,
+            CollectionPolicy::local_only()
         );
         assert_eq!(database.count("collection_maintenance").unwrap(), 0);
+    }
+
+    #[test]
+    fn migration_four_removes_legacy_lan_and_ai_disclosure() {
+        let temp = tempfile::tempdir().unwrap();
+        let path = temp.path().join("version-three.sqlite");
+        let mut connection = Connection::open(&path).unwrap();
+        connection
+            .pragma_update(None, "foreign_keys", "ON")
+            .unwrap();
+        let tx = connection.transaction().unwrap();
+        tx.execute_batch(MIGRATION_1).unwrap();
+        tx.execute_batch(MIGRATION_2).unwrap();
+        tx.execute_batch(MIGRATION_3).unwrap();
+        let collection_id = Uuid::new_v4();
+        let now = Utc::now().to_rfc3339();
+        tx.execute(
+            "INSERT INTO collections
+             (id,name,source_folder,wiki_folder,peer_shareable,allow_external_ai,created_at,updated_at)
+             VALUES (?1,'Existing','/synthetic/source','/synthetic/wiki',1,1,?2,?2)",
+            params![collection_id.to_string(), now],
+        )
+        .unwrap();
+        tx.pragma_update(None, "user_version", 3).unwrap();
+        tx.commit().unwrap();
+        drop(connection);
+
+        let database = Database::open(&path).unwrap();
+        let collection = database.collection(collection_id).unwrap().unwrap();
+        assert_eq!(database.schema_version().unwrap(), 15);
+        assert_eq!(collection.policy, CollectionPolicy::local_only());
+        assert!(
+            database
+                .public_collection_profile(collection_id)
+                .unwrap()
+                .is_none()
+        );
+    }
+
+    #[test]
+    fn migration_five_preserves_public_indexes_and_adds_private_blocks() {
+        let temp = tempfile::tempdir().unwrap();
+        let path = temp.path().join("version-four.sqlite");
+        let mut connection = Connection::open(&path).unwrap();
+        let tx = connection.transaction().unwrap();
+        tx.execute_batch(MIGRATION_1).unwrap();
+        tx.execute_batch(MIGRATION_2).unwrap();
+        tx.execute_batch(MIGRATION_3).unwrap();
+        tx.execute_batch(MIGRATION_4).unwrap();
+        let now = Utc::now().to_rfc3339();
+        tx.execute(
+            "INSERT INTO federation_indexes(peer_id,multiaddr,enabled,source,created_at,updated_at)
+             VALUES ('synthetic','/ip4/127.0.0.1/tcp/42042',1,'community',?1,?1)",
+            [&now],
+        )
+        .unwrap();
+        tx.pragma_update(None, "user_version", 4).unwrap();
+        tx.commit().unwrap();
+        drop(connection);
+
+        let database = Database::open(path).unwrap();
+        assert_eq!(database.schema_version().unwrap(), 15);
+        let indexes = database.list_federation_indexes().unwrap();
+        assert_eq!(indexes.len(), 1);
+        assert_eq!(indexes[0].registry_version, 0);
+        assert!(indexes[0].expires_at.is_none());
+        assert_eq!(database.count("public_publisher_blocks").unwrap(), 0);
+    }
+
+    #[test]
+    fn migration_six_preserves_the_highest_bootstrap_registry_version() {
+        let temp = tempfile::tempdir().unwrap();
+        let path = temp.path().join("version-five.sqlite");
+        let mut connection = Connection::open(&path).unwrap();
+        let tx = connection.transaction().unwrap();
+        tx.execute_batch(MIGRATION_1).unwrap();
+        tx.execute_batch(MIGRATION_2).unwrap();
+        tx.execute_batch(MIGRATION_3).unwrap();
+        tx.execute_batch(MIGRATION_4).unwrap();
+        tx.execute_batch(MIGRATION_5).unwrap();
+        let now = Utc::now().to_rfc3339();
+        tx.execute(
+            "INSERT INTO federation_indexes
+             (peer_id,multiaddr,enabled,source,registry_version,expires_at,created_at,updated_at)
+             VALUES ('12D3KooWMigratedBootstrap','/ip4/203.0.113.80/udp/42042/quic-v1',
+                     1,'bootstrap',12,?1,?2,?2)",
+            params![(Utc::now() + chrono::Duration::days(1)).to_rfc3339(), now],
+        )
+        .unwrap();
+        tx.pragma_update(None, "user_version", 5).unwrap();
+        tx.commit().unwrap();
+        drop(connection);
+
+        let database = Database::open(path).unwrap();
+        let downgrade = [BootstrapFederationIndexEntry {
+            peer_id: "12D3KooWMigrationDowngrade".to_owned(),
+            multiaddr: "/ip4/203.0.113.81/udp/42044/quic-v1".to_owned(),
+            expires_at: Utc::now() + chrono::Duration::days(1),
+        }];
+
+        assert_eq!(database.schema_version().unwrap(), 15);
+        assert_eq!(
+            database
+                .count("federation_bootstrap_registry_state")
+                .unwrap(),
+            1
+        );
+        assert!(
+            database
+                .replace_bootstrap_federation_indexes(11, &downgrade)
+                .is_err()
+        );
+    }
+
+    #[test]
+    fn migration_seven_marks_existing_wikis_as_legacy_manual_folders() {
+        let temp = tempfile::tempdir().unwrap();
+        let path = temp.path().join("version-six.sqlite");
+        let mut connection = Connection::open(&path).unwrap();
+        let tx = connection.transaction().unwrap();
+        tx.execute_batch(MIGRATION_1).unwrap();
+        tx.execute_batch(MIGRATION_2).unwrap();
+        tx.execute_batch(MIGRATION_3).unwrap();
+        tx.execute_batch(MIGRATION_4).unwrap();
+        tx.execute_batch(MIGRATION_5).unwrap();
+        tx.execute_batch(MIGRATION_6).unwrap();
+        let collection_id = Uuid::new_v4();
+        let now = Utc::now().to_rfc3339();
+        tx.execute(
+            "INSERT INTO collections
+             (id,name,source_folder,wiki_folder,created_at,updated_at)
+             VALUES (?1,'Legacy','/synthetic/source','/synthetic/wiki',?2,?2)",
+            params![collection_id.to_string(), now],
+        )
+        .unwrap();
+        tx.pragma_update(None, "user_version", 6).unwrap();
+        tx.commit().unwrap();
+        drop(connection);
+
+        let database = Database::open(path).unwrap();
+        let collection = database.collection(collection_id).unwrap().unwrap();
+
+        assert_eq!(database.schema_version().unwrap(), 15);
+        assert_eq!(collection.origin, WikiOrigin::Folder);
+        assert_eq!(collection.indexing_mode, IndexingMode::Manual);
+        assert_eq!(collection.okf_version, "0.1");
+    }
+
+    #[test]
+    fn migration_thirteen_withdraws_incompatible_disclosure_and_preserves_content() {
+        let temp = tempfile::tempdir().unwrap();
+        let path = temp.path().join("version-twelve.sqlite");
+        let mut connection = Connection::open(&path).unwrap();
+        connection
+            .pragma_update(None, "foreign_keys", "ON")
+            .unwrap();
+        let tx = connection.transaction().unwrap();
+        for migration in [
+            MIGRATION_1,
+            MIGRATION_2,
+            MIGRATION_3,
+            MIGRATION_4,
+            MIGRATION_5,
+            MIGRATION_6,
+            MIGRATION_7,
+            MIGRATION_8,
+            MIGRATION_9,
+            MIGRATION_10,
+            MIGRATION_11,
+            MIGRATION_12,
+        ] {
+            tx.execute_batch(migration).unwrap();
+        }
+        let collection_id = Uuid::new_v4();
+        let app_id = Uuid::new_v4();
+        let now = Utc::now().to_rfc3339();
+        tx.execute(
+            "INSERT INTO collections
+             (id,name,source_folder,wiki_folder,local_only,peer_shareable,allow_external_ai,
+              internet_public,origin,indexing_mode,okf_version,declared_okf_version,
+              okf_compatibility,created_at,updated_at)
+             VALUES (?1,'Legacy','/synthetic/source','/synthetic/wiki',0,1,1,1,'folder',
+                     'continuous','0.1','0.1','legacy_v01',?2,?2)",
+            params![collection_id.to_string(), now],
+        )
+        .unwrap();
+        tx.execute(
+            "INSERT INTO peers(peer_id,trusted,blocked,created_at,updated_at)
+             VALUES ('peer-legacy',1,0,?1,?1)",
+            [&now],
+        )
+        .unwrap();
+        tx.execute(
+            "INSERT INTO grants(peer_id,collection_id,granted_at)
+             VALUES ('peer-legacy',?1,?2)",
+            params![collection_id.to_string(), now],
+        )
+        .unwrap();
+        tx.execute(
+            "INSERT INTO application_capabilities
+             (app_id,display_name,owner_kind,secret_hash,producer,created_at)
+             VALUES (?1,'Synthetic','generic',?2,'synthetic/1.0',?3)",
+            params![app_id.to_string(), "a".repeat(64), now],
+        )
+        .unwrap();
+        tx.execute(
+            "INSERT INTO application_wiki_grants
+             (app_id,collection_id,role,granted_at,confirmed_at)
+             VALUES (?1,?2,'reader',?3,?3)",
+            params![app_id.to_string(), collection_id.to_string(), now],
+        )
+        .unwrap();
+        tx.execute(
+            "INSERT INTO public_collection_profiles
+             (collection_id,description,languages_json,manifest_sequence,enabled_at,updated_at)
+             VALUES (?1,'Legacy public','[]',7,?2,?2)",
+            params![collection_id.to_string(), now],
+        )
+        .unwrap();
+        tx.pragma_update(None, "user_version", 12).unwrap();
+        tx.commit().unwrap();
+        drop(connection);
+
+        let database = Database::open(path).unwrap();
+        let collection = database.collection(collection_id).unwrap().unwrap();
+        let profile = database
+            .public_collection_profile(collection_id)
+            .unwrap()
+            .unwrap();
+
+        assert_eq!(database.schema_version().unwrap(), 15);
+        assert_eq!(collection.policy, CollectionPolicy::local_only());
+        assert_eq!(collection.indexing_mode, IndexingMode::Manual);
+        assert_eq!(database.count("collections").unwrap(), 1);
+        assert!(database.list_grants(None).unwrap().is_empty());
+        assert!(
+            database
+                .list_application_wiki_grants()
+                .unwrap()
+                .into_iter()
+                .all(|grant| grant.app_id != app_id)
+        );
+        assert_eq!(profile.manifest_sequence, 8);
+        assert!(profile.enabled_at.is_none());
+        assert!(profile.withdrawal_pending);
+        assert_eq!(
+            database.public_collections_needing_sync().unwrap(),
+            [collection_id]
+        );
+    }
+
+    #[test]
+    fn migration_thirteen_disables_persisted_dns_federation_indexes() {
+        let temp = tempfile::tempdir().unwrap();
+        let path = temp.path().join("version-twelve-dns.sqlite");
+        let mut connection = Connection::open(&path).unwrap();
+        let tx = connection.transaction().unwrap();
+        for migration in [
+            MIGRATION_1,
+            MIGRATION_2,
+            MIGRATION_3,
+            MIGRATION_4,
+            MIGRATION_5,
+            MIGRATION_6,
+            MIGRATION_7,
+            MIGRATION_8,
+            MIGRATION_9,
+            MIGRATION_10,
+            MIGRATION_11,
+            MIGRATION_12,
+        ] {
+            tx.execute_batch(migration).unwrap();
+        }
+        let now = Utc::now().to_rfc3339();
+        tx.execute(
+            "INSERT INTO federation_indexes
+             (peer_id,multiaddr,enabled,source,created_at,updated_at)
+             VALUES ('dns-index','/dns4/index.example.org/tcp/42042',1,'community',?1,?1),
+                    ('ip-index','/ip4/192.0.2.10/tcp/42042',1,'community',?1,?1)",
+            [&now],
+        )
+        .unwrap();
+        tx.pragma_update(None, "user_version", 12).unwrap();
+        tx.commit().unwrap();
+        drop(connection);
+
+        let database = Database::open(path).unwrap();
+        let indexes = database.list_federation_indexes().unwrap();
+
+        assert_eq!(indexes.len(), 2);
+        assert!(
+            !indexes
+                .iter()
+                .find(|item| item.peer_id == "dns-index")
+                .unwrap()
+                .enabled
+        );
+        assert!(
+            indexes
+                .iter()
+                .find(|item| item.peer_id == "ip-index")
+                .unwrap()
+                .enabled
+        );
+    }
+
+    #[test]
+    fn latest_migrations_preserve_open_lifecycle_and_assurance() {
+        let temp = tempfile::tempdir().unwrap();
+        let path = temp.path().join("version-ten.sqlite");
+        let mut connection = Connection::open(&path).unwrap();
+        connection
+            .pragma_update(None, "foreign_keys", "ON")
+            .unwrap();
+        let tx = connection.transaction().unwrap();
+        for migration in [
+            MIGRATION_1,
+            MIGRATION_2,
+            MIGRATION_3,
+            MIGRATION_4,
+            MIGRATION_5,
+            MIGRATION_6,
+            MIGRATION_7,
+            MIGRATION_8,
+            MIGRATION_9,
+            MIGRATION_10,
+        ] {
+            tx.execute_batch(migration).unwrap();
+        }
+        let collection_id = Uuid::new_v4();
+        let concept_id = Uuid::new_v4();
+        let now = Utc::now().to_rfc3339();
+        tx.execute(
+            "INSERT INTO collections
+             (id,name,source_folder,wiki_folder,origin,indexing_mode,okf_version,
+              declared_okf_version,okf_compatibility,created_at,updated_at)
+             VALUES (?1,'Migrated','/synthetic/wiki','/synthetic/wiki','imported_okf',
+                     'not_applicable','0.2','0.2','declared_v02',?2,?2)",
+            params![collection_id.to_string(), now],
+        )
+        .unwrap();
+        tx.execute(
+            "INSERT INTO okf_concept_projection
+             (collection_id,concept_id,logical_path,concept_type,title,description,lifecycle_status,
+              fingerprint,indexed_at,trust_tier,freshness_state,verification_outdated,warnings_json)
+             VALUES (?1,?2,'concept.md','Unknown Type','Concept','','stable',?3,?4,
+                     'human_reviewed','fresh',1,'[]')",
+            params![
+                collection_id.to_string(),
+                concept_id.to_string(),
+                "f".repeat(64),
+                now
+            ],
+        )
+        .unwrap();
+        tx.pragma_update(None, "user_version", 10).unwrap();
+        tx.commit().unwrap();
+        drop(connection);
+
+        let database = Database::open(path).unwrap();
+        let concepts = database.list_okf_concept_projection(collection_id).unwrap();
+
+        assert_eq!(database.schema_version().unwrap(), 15);
+        assert_eq!(concepts.len(), 1);
+        assert_eq!(concepts[0].concept_type.to_string(), "Unknown Type");
+        assert_eq!(concepts[0].lifecycle_status, "stable");
+        assert_eq!(concepts[0].assurance.trust, TrustTier::HumanReviewed);
+        assert_eq!(concepts[0].assurance.freshness, FreshnessState::Fresh);
+        assert!(concepts[0].assurance.verification_outdated);
+        assert!(concepts[0].attested_computation.is_none());
+    }
+
+    #[test]
+    fn runtime_restart_closes_non_resumable_computation_runs() {
+        let (_temp, database, collection) = setup();
+        let now = Utc::now();
+        let awaiting = ComputationRunRecord {
+            id: Uuid::new_v4(),
+            collection_id: collection.id,
+            logical_path: "computations/awaiting.md".to_owned(),
+            actor_kind: "application".to_owned(),
+            actor_id: Some(Uuid::new_v4().to_string()),
+            state: ComputationRunState::AwaitingConfirmation,
+            contract_fingerprint: "a".repeat(64),
+            executor_sha256: "b".repeat(64),
+            attester_sha256: "c".repeat(64),
+            parameter_schema: serde_json::json!([]),
+            receipt_sha256: None,
+            verdict: None,
+            requested_at: now,
+            confirmed_at: None,
+            completed_at: None,
+            expires_at: now + chrono::Duration::minutes(10),
+        };
+        let mut running = awaiting.clone();
+        running.id = Uuid::new_v4();
+        running.logical_path = "computations/running.md".to_owned();
+        database.create_computation_run(&awaiting).unwrap();
+        database.create_computation_run(&running).unwrap();
+        database
+            .set_computation_run_state(running.id, ComputationRunState::Running, None, None)
+            .unwrap();
+
+        assert_eq!(database.close_orphaned_computation_runs().unwrap(), 2);
+        assert_eq!(
+            database
+                .computation_run(awaiting.id)
+                .unwrap()
+                .unwrap()
+                .state,
+            ComputationRunState::Expired
+        );
+        assert_eq!(
+            database.computation_run(running.id).unwrap().unwrap().state,
+            ComputationRunState::Failed
+        );
+    }
+
+    #[test]
+    fn completed_computation_receipt_gets_its_own_expiry_window() {
+        let (_temp, database, collection) = setup();
+        let now = Utc::now();
+        let run = ComputationRunRecord {
+            id: Uuid::new_v4(),
+            collection_id: collection.id,
+            logical_path: "computations/receipt-window.md".to_owned(),
+            actor_kind: "application".to_owned(),
+            actor_id: Some(Uuid::new_v4().to_string()),
+            state: ComputationRunState::AwaitingConfirmation,
+            contract_fingerprint: "a".repeat(64),
+            executor_sha256: "b".repeat(64),
+            attester_sha256: "c".repeat(64),
+            parameter_schema: serde_json::json!([]),
+            receipt_sha256: None,
+            verdict: None,
+            requested_at: now,
+            confirmed_at: None,
+            completed_at: None,
+            expires_at: now + chrono::Duration::seconds(1),
+        };
+        database.create_computation_run(&run).unwrap();
+        database
+            .set_computation_run_state(run.id, ComputationRunState::Running, None, None)
+            .unwrap();
+        let result_expires_at = now + chrono::Duration::minutes(10);
+
+        database
+            .complete_computation_run(run.id, &"d".repeat(64), "accepted", result_expires_at)
+            .unwrap();
+
+        let completed = database.computation_run(run.id).unwrap().unwrap();
+        assert_eq!(completed.state, ComputationRunState::Completed);
+        assert_eq!(completed.expires_at, result_expires_at);
+        assert_eq!(
+            completed.receipt_sha256.as_deref(),
+            Some("dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd")
+        );
+    }
+
+    #[test]
+    fn malformed_utf8_capability_is_rejected_without_slicing_panic() {
+        let database = Database::in_memory().unwrap();
+        let malformed = format!("{}{}{}", "é".repeat(7), "€", "a".repeat(80));
+
+        assert!(
+            database
+                .authenticate_application_capability(&malformed)
+                .unwrap()
+                .is_none()
+        );
+    }
+
+    #[test]
+    fn non_folder_wikis_cannot_enable_source_indexing() {
+        let (_temp, database, collection) = setup();
+        database
+            .connection()
+            .unwrap()
+            .execute(
+                "UPDATE collections SET origin='imported_okf',indexing_mode='not_applicable'
+                 WHERE id=?1",
+                [collection.id.to_string()],
+            )
+            .unwrap();
+
+        assert!(
+            database
+                .update_collection_indexing_mode(collection.id, IndexingMode::Continuous)
+                .is_err()
+        );
     }
 
     #[test]
@@ -4217,6 +8312,73 @@ mod tests {
     }
 
     #[test]
+    fn active_ingest_registration_preserves_same_hash_progress() {
+        let (temp, db, collection) = setup();
+        let path = temp.path().join("source/active.md");
+        std::fs::write(&path, "hello").unwrap();
+        let source = db
+            .register_source(collection.id, &path, "aaa", "markdown", 5)
+            .unwrap();
+        let job = db.claim_ingest_job(source.id(), "aaa", 1).unwrap().unwrap();
+        db.mark_extracted(source.id(), 1, 5).unwrap();
+
+        assert!(
+            db.claim_ingest_job(source.id(), "aaa", 1)
+                .unwrap()
+                .is_none()
+        );
+
+        let concurrent = db
+            .register_source(collection.id, &path, "aaa", "markdown", 5)
+            .unwrap();
+        assert!(matches!(
+            concurrent,
+            SourceRegistration::Unchanged(id) if id == source.id()
+        ));
+        let active = db.source_document(source.id()).unwrap().unwrap();
+        assert_eq!(active.status, DocumentStatus::Extracted);
+        assert_eq!(active.revision, 1);
+
+        db.set_job_state(job.job_id, "failed", Some("worker stopped"))
+            .unwrap();
+        let retry = db
+            .register_source(collection.id, &path, "aaa", "markdown", 5)
+            .unwrap();
+        assert!(matches!(
+            retry,
+            SourceRegistration::Changed(id) if id == source.id()
+        ));
+        let reset = db.source_document(source.id()).unwrap().unwrap();
+        assert_eq!(reset.status, DocumentStatus::Detected);
+        assert_eq!(reset.revision, 1);
+    }
+
+    #[test]
+    fn superseded_ingest_job_cannot_complete_or_block_new_revision() {
+        let (temp, db, collection) = setup();
+        let path = temp.path().join("source/superseded.md");
+        std::fs::write(&path, "hello").unwrap();
+        let source = db
+            .register_source(collection.id, &path, "aaa", "markdown", 5)
+            .unwrap();
+        let old_job = db.claim_ingest_job(source.id(), "aaa", 1).unwrap().unwrap();
+
+        let changed = db
+            .register_source(collection.id, &path, "bbb", "markdown", 5)
+            .unwrap();
+        assert!(matches!(
+            changed,
+            SourceRegistration::Replaced { id, .. } if id == source.id()
+        ));
+        assert!(!db.complete_ingest_job_if_running(&old_job).unwrap());
+        assert!(
+            db.claim_ingest_job(source.id(), "bbb", 2)
+                .unwrap()
+                .is_some()
+        );
+    }
+
+    #[test]
     fn same_hash_rename_of_failed_work_is_reprocessed_without_bumping_revision() {
         let (temp, db, collection) = setup();
         let old_path = temp.path().join("source/old.md");
@@ -4322,6 +8484,40 @@ mod tests {
             )
             .unwrap();
         assert_eq!(job_state, "failed");
+    }
+
+    #[test]
+    fn restricted_okf_review_cannot_be_claimed_for_reanalysis() {
+        let (temp, db, collection) = setup();
+        let path = temp.path().join("source/restricted-review.md");
+        std::fs::write(&path, "hello").unwrap();
+        let source = db
+            .register_source(collection.id, &path, "aaa", "markdown", 5)
+            .unwrap();
+        db.mark_extracted(source.id(), 0, 5).unwrap();
+        let concept = db
+            .save_enrichment(source.id(), draft(), "peer-a", "fake")
+            .unwrap();
+        db.connection()
+            .unwrap()
+            .execute(
+                "UPDATE collections
+                 SET okf_version='0.1',declared_okf_version='0.1',okf_compatibility='legacy_v01'
+                 WHERE id=?1",
+                [collection.id.to_string()],
+            )
+            .unwrap();
+
+        assert!(db.begin_review_reanalysis(concept.id).is_err());
+        assert_eq!(
+            db.concept(concept.id).unwrap().unwrap().status,
+            DocumentStatus::NeedsReview
+        );
+        assert_eq!(
+            db.source_document(source.id()).unwrap().unwrap().status,
+            DocumentStatus::NeedsReview
+        );
+        assert_eq!(db.count("jobs").unwrap(), 0);
     }
 
     #[test]
@@ -4455,11 +8651,82 @@ mod tests {
     }
 
     #[test]
+    fn peer_device_platform_round_trips_in_current_schema() {
+        let (_temp, db, _collection) = setup();
+        db.upsert_peer(&PeerRecord {
+            peer_id: "peer-platform".into(),
+            display_name: Some("RUSTICO".into()),
+            device_platform: Some(airwiki_types::DevicePlatform::Windows),
+            trusted: true,
+            blocked: false,
+            paired_at: Some(Utc::now()),
+            last_seen_at: None,
+        })
+        .unwrap();
+
+        let stored = db.peer("peer-platform").unwrap().unwrap();
+
+        assert_eq!(
+            stored.device_platform,
+            Some(airwiki_types::DevicePlatform::Windows)
+        );
+    }
+
+    #[test]
+    fn peer_device_platform_migration_preserves_existing_peers() {
+        let temp = tempfile::tempdir().unwrap();
+        let path = temp.path().join("version-fourteen.sqlite");
+        let mut connection = Connection::open(&path).unwrap();
+        connection
+            .pragma_update(None, "foreign_keys", "ON")
+            .unwrap();
+        let tx = connection.transaction().unwrap();
+        for migration in [
+            MIGRATION_1,
+            MIGRATION_2,
+            MIGRATION_3,
+            MIGRATION_4,
+            MIGRATION_5,
+            MIGRATION_6,
+            MIGRATION_7,
+            MIGRATION_8,
+            MIGRATION_9,
+            MIGRATION_10,
+            MIGRATION_11,
+            MIGRATION_12,
+            MIGRATION_13,
+            MIGRATION_14,
+        ] {
+            tx.execute_batch(migration).unwrap();
+        }
+        let now = Utc::now().to_rfc3339();
+        tx.execute(
+            "INSERT INTO peers
+             (peer_id,display_name,trusted,blocked,paired_at,last_seen_at,created_at,updated_at)
+             VALUES ('existing-peer','Atlas Mac',1,0,?1,?1,?1,?1)",
+            [&now],
+        )
+        .unwrap();
+        tx.pragma_update(None, "user_version", 14).unwrap();
+        tx.commit().unwrap();
+        drop(connection);
+
+        let database = Database::open(path).unwrap();
+        let peer = database.peer("existing-peer").unwrap().unwrap();
+
+        assert_eq!(database.schema_version().unwrap(), 15);
+        assert_eq!(peer.display_name.as_deref(), Some("Atlas Mac"));
+        assert!(peer.trusted);
+        assert_eq!(peer.device_platform, None);
+    }
+
+    #[test]
     fn grants_require_trusted_unblocked_peer_and_shareable_collection() {
         let (_temp, db, collection) = setup();
         db.upsert_peer(&PeerRecord {
             peer_id: "peer-b".into(),
             display_name: None,
+            device_platform: None,
             trusted: true,
             blocked: false,
             paired_at: Some(Utc::now()),
@@ -4486,6 +8753,7 @@ mod tests {
                 local_only: false,
                 peer_shareable: false,
                 allow_external_ai: true,
+                internet_public: false,
             },
         )
         .unwrap();
@@ -4497,6 +8765,7 @@ mod tests {
                 local_only: false,
                 peer_shareable: true,
                 allow_external_ai: true,
+                internet_public: false,
             },
         )
         .unwrap();
@@ -4517,6 +8786,356 @@ mod tests {
         db.revoke_peer("peer-b").unwrap();
         assert!(db.granted_collections("peer-b").unwrap().is_empty());
         assert!(db.list_grants(None).unwrap().is_empty());
+
+        db.allow_peer_pairing_again("peer-b").unwrap();
+        let peer = db.peer("peer-b").unwrap().unwrap();
+        assert!(!peer.trusted);
+        assert!(!peer.blocked);
+        assert!(db.granted_collections("peer-b").unwrap().is_empty());
+    }
+
+    #[test]
+    fn shared_wiki_browse_returns_only_published_content_for_a_current_grant() {
+        let (_temp, db, collection, source_id, concept_id) = setup_review_evidence(1);
+        db.connection()
+            .unwrap()
+            .execute(
+                "UPDATE source_documents SET status='published' WHERE id=?1",
+                [source_id.to_string()],
+            )
+            .unwrap();
+        db.connection()
+            .unwrap()
+            .execute(
+                "UPDATE concepts SET status='published' WHERE id=?1",
+                [concept_id.to_string()],
+            )
+            .unwrap();
+        db.upsert_peer(&PeerRecord {
+            peer_id: "peer-reader".into(),
+            display_name: Some("Reader".into()),
+            device_platform: None,
+            trusted: true,
+            blocked: false,
+            paired_at: Some(Utc::now()),
+            last_seen_at: None,
+        })
+        .unwrap();
+        db.set_grant("peer-reader", collection.id, true).unwrap();
+
+        let lease = db.disclosure_gate().acquire_disclosure();
+        let (descriptor, concepts) = db
+            .shared_wiki_page_under_disclosure(&lease, "peer-reader", collection.id, None, None, 50)
+            .unwrap();
+        drop(lease);
+
+        assert_eq!(descriptor.collection_id, collection.id);
+        assert_eq!(descriptor.name, collection.name);
+        assert_eq!(concepts.len(), 1);
+        assert_eq!(concepts[0].concept_id, concept_id);
+        assert_eq!(concepts[0].summary, "Restaurar el servicio.");
+        assert_eq!(
+            concepts[0].assurance.as_ref().map(|value| value.trust),
+            Some(TrustTier::HumanReviewed)
+        );
+
+        let lease = db.disclosure_gate().acquire_disclosure();
+        let (_, anchored) = db
+            .shared_wiki_page_under_disclosure(
+                &lease,
+                "peer-reader",
+                collection.id,
+                None,
+                Some(concept_id),
+                50,
+            )
+            .unwrap();
+        assert_eq!(
+            anchored.first().map(|concept| concept.concept_id),
+            Some(concept_id)
+        );
+        assert!(
+            db.shared_wiki_page_under_disclosure(
+                &lease,
+                "peer-reader",
+                collection.id,
+                None,
+                Some(Uuid::new_v4()),
+                50,
+            )
+            .is_err()
+        );
+        drop(lease);
+
+        db.set_grant("peer-reader", collection.id, false).unwrap();
+        let lease = db.disclosure_gate().acquire_disclosure();
+        assert!(
+            db.shared_wiki_page_under_disclosure(
+                &lease,
+                "peer-reader",
+                collection.id,
+                None,
+                None,
+                50,
+            )
+            .is_err()
+        );
+    }
+
+    #[test]
+    fn folder_browse_normalizes_remote_metadata_without_rewriting_local_state() {
+        let (_temp, db, collection, source_id, concept_id) = setup_review_evidence(1);
+        let hostile_name = format!("Atlas\n{}", "界".repeat(240));
+        let hostile_type = format!("Guide\n{}", "é".repeat(120));
+        let hostile_title = format!("Setup\n{}", "界".repeat(240));
+        let hostile_description = format!("Safe overview.\r\n{}", "é".repeat(1_000));
+        let hostile_language = "es\nregional-language-that-is-too-long";
+        let hostile_tags = serde_json::to_string(
+            &(0..70)
+                .map(|index| format!("tag-{index}\n{}", "é".repeat(64)))
+                .collect::<Vec<_>>(),
+        )
+        .unwrap();
+        let hostile_uri = format!("urn:airwiki\n{}", "界".repeat(2_048));
+        let connection = db.connection().unwrap();
+        connection
+            .execute(
+                "UPDATE collections
+                 SET name=?1,internet_public=1,
+                     okf_compatibility='declared_v02',declared_okf_version='0.2'
+                 WHERE id=?2",
+                params![hostile_name, collection.id.to_string()],
+            )
+            .unwrap();
+        connection
+            .execute(
+                "UPDATE source_documents SET status='published' WHERE id=?1",
+                [source_id.to_string()],
+            )
+            .unwrap();
+        connection
+            .execute(
+                "UPDATE concepts
+                 SET status='published',concept_type=?1,title=?2,description=?3,language=?4,
+                     tags_json=?5,logical_resource_uri=?6
+                 WHERE id=?7",
+                params![
+                    hostile_type,
+                    hostile_title,
+                    hostile_description,
+                    hostile_language,
+                    hostile_tags,
+                    hostile_uri,
+                    concept_id.to_string()
+                ],
+            )
+            .unwrap();
+        drop(connection);
+        db.upsert_peer(&PeerRecord {
+            peer_id: "peer-reader".into(),
+            display_name: Some("Reader".into()),
+            device_platform: None,
+            trusted: true,
+            blocked: false,
+            paired_at: Some(Utc::now()),
+            last_seen_at: None,
+        })
+        .unwrap();
+        db.set_grant("peer-reader", collection.id, true).unwrap();
+
+        let mut shared_request =
+            airwiki_types::SharedWikiBrowseRequest::new(collection.id, None, 50);
+        shared_request
+            .prepare_for_protocol(airwiki_types::SHARED_WIKI_BROWSE_PROTOCOL)
+            .unwrap();
+        let lease = db.disclosure_gate().acquire_disclosure();
+        let (descriptor, shared_concepts) = db
+            .shared_wiki_page_under_disclosure(&lease, "peer-reader", collection.id, None, None, 50)
+            .unwrap();
+        drop(lease);
+        let shared_page = airwiki_types::SharedWikiBrowsePage {
+            protocol_version: shared_request.protocol_version.clone(),
+            request_id: shared_request.request_id,
+            wiki: descriptor,
+            concepts: shared_concepts,
+            next_cursor: None,
+            workspace: None,
+            document: None,
+        };
+        assert!(shared_page.validate_for(&shared_request).is_ok());
+
+        let public_request = airwiki_types::PublicBrowseRequest {
+            protocol_version: airwiki_types::PUBLIC_BROWSE_PROTOCOL_V3.to_owned(),
+            request_id: Uuid::new_v4(),
+            collection_id: collection.id,
+            cursor: None,
+            target_concept_id: None,
+            graph_cursor: None,
+            page: None,
+            limit: 50,
+        };
+        let public_concepts = db
+            .public_concept_page("publisher", collection.id, None, 50)
+            .unwrap();
+        let public_page = airwiki_types::PublicBrowsePage {
+            protocol_version: public_request.protocol_version.clone(),
+            request_id: public_request.request_id,
+            manifest_sequence: 1,
+            concepts: public_concepts,
+            next_cursor: None,
+            workspace: None,
+            document: None,
+        };
+        assert!(
+            public_page
+                .validate_for(&public_request, "publisher")
+                .is_ok()
+        );
+
+        let local_title = db
+            .connection()
+            .unwrap()
+            .query_row(
+                "SELECT title FROM concepts WHERE id=?1",
+                [concept_id.to_string()],
+                |row| row.get::<_, String>(0),
+            )
+            .unwrap();
+        assert!(local_title.contains('\n'));
+    }
+
+    #[test]
+    fn imported_okf_browse_uses_declared_description_instead_of_document_body() {
+        let (_temp, db, collection) = setup();
+        let concept_id = Uuid::new_v4();
+        let now = Utc::now().to_rfc3339();
+        let imported_type = format!("Guide\n{}", "T".repeat(140));
+        let imported_title = format!("Setup\n{}", "S".repeat(300));
+        let imported_description = format!("Safe setup overview.\n{}", "D".repeat(1_200));
+        let imported_tags = serde_json::to_string(
+            &(0..70)
+                .map(|index| format!("tag {index}\n{}", "x".repeat(80)))
+                .collect::<Vec<_>>(),
+        )
+        .unwrap();
+        let connection = db.connection().unwrap();
+        connection
+            .execute(
+                "UPDATE collections
+                 SET origin='imported_okf',indexing_mode='not_applicable',
+                     okf_compatibility='declared_v02',declared_okf_version='0.2',
+                     peer_shareable=1,internet_public=1
+                 WHERE id=?1",
+                [collection.id.to_string()],
+            )
+            .unwrap();
+        connection
+            .execute(
+                "INSERT INTO okf_concept_projection
+                 (collection_id,concept_id,logical_path,concept_type,title,description,tags_json,
+                  lifecycle_status,fingerprint,indexed_at,trust_tier,freshness_state,
+                  verification_outdated,warnings_json)
+                 VALUES (?1,?2,'guides/setup.md',?3,?4,?5,?6,'stable',?7,?8,
+                         'human_reviewed','not_declared',0,'[]')",
+                params![
+                    collection.id.to_string(),
+                    concept_id.to_string(),
+                    imported_type,
+                    imported_title,
+                    imported_description,
+                    imported_tags,
+                    "f".repeat(64),
+                    now
+                ],
+            )
+            .unwrap();
+        connection
+            .execute(
+                "INSERT INTO okf_projection_fts
+                 (collection_id,concept_id,logical_path,title,description,tags,text,fingerprint,
+                  lifecycle_status)
+                 VALUES (?1,?2,'guides/setup.md','Setup','','',?3,?4,'stable')",
+                params![
+                    collection.id.to_string(),
+                    concept_id.to_string(),
+                    "PRIVATE COMPLETE BODY\n\nFirst step\tthen continue.\r\n",
+                    "f".repeat(64)
+                ],
+            )
+            .unwrap();
+        drop(connection);
+        db.upsert_peer(&PeerRecord {
+            peer_id: "peer-reader".into(),
+            display_name: Some("Reader".into()),
+            device_platform: None,
+            trusted: true,
+            blocked: false,
+            paired_at: Some(Utc::now()),
+            last_seen_at: None,
+        })
+        .unwrap();
+        db.set_grant("peer-reader", collection.id, true).unwrap();
+
+        let lease = db.disclosure_gate().acquire_disclosure();
+        let (_, shared_concepts) = db
+            .shared_wiki_page_under_disclosure(&lease, "peer-reader", collection.id, None, None, 50)
+            .unwrap();
+        drop(lease);
+        let public_concepts = db
+            .public_concept_page("publisher", collection.id, None, 50)
+            .unwrap();
+
+        assert_eq!(shared_concepts.len(), 1);
+        assert_eq!(public_concepts.len(), 1);
+        assert!(
+            shared_concepts[0]
+                .summary
+                .starts_with("Safe setup overview.")
+        );
+        assert_eq!(public_concepts[0].summary, shared_concepts[0].summary);
+        assert!(!shared_concepts[0].summary.contains("PRIVATE COMPLETE BODY"));
+        assert_eq!(
+            shared_concepts[0].logical_resource_uri,
+            format!("urn:airwiki:{}:{concept_id}", collection.id)
+        );
+        assert!(
+            !shared_concepts[0]
+                .logical_resource_uri
+                .contains("guides/setup.md")
+        );
+        assert!(!shared_concepts[0].summary.chars().any(char::is_control));
+        let assert_safe_metadata =
+            |concept_type: &ConceptType, title: &str, description: &str, tags: &[String]| {
+                assert!(concept_type.to_string().chars().count() <= 120);
+                assert!(!concept_type.to_string().chars().any(char::is_control));
+                assert!(title.chars().count() <= 240);
+                assert!(!title.chars().any(char::is_control));
+                assert!(description.chars().count() <= 1_000);
+                assert!(!description.chars().any(char::is_control));
+                assert_eq!(tags.len(), 64);
+                assert!(tags.iter().all(|tag| {
+                    tag.chars().count() <= 64 && !tag.chars().any(char::is_control)
+                }));
+            };
+        assert_safe_metadata(
+            &shared_concepts[0].concept_type,
+            &shared_concepts[0].title,
+            &shared_concepts[0].description,
+            &shared_concepts[0].tags,
+        );
+        assert_safe_metadata(
+            &public_concepts[0].concept_type,
+            &public_concepts[0].title,
+            &public_concepts[0].description,
+            &public_concepts[0].tags,
+        );
+    }
+
+    #[test]
+    fn allowing_pairing_again_requires_a_known_peer() {
+        let (_temp, db, _collection) = setup();
+
+        assert!(db.allow_peer_pairing_again("unknown-peer").is_err());
     }
 
     #[test]

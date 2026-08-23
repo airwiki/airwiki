@@ -43,6 +43,15 @@ cargo clippy --workspace --all-targets --all-features --locked -- -D warnings
 cargo test --workspace --all-features --locked
 cargo run --locked -p xtask -- docs check
 cargo run --locked -p xtask -- licenses check
+# Node.js 24.15.0 is required.
+corepack enable
+corepack prepare pnpm@10.18.3 --activate
+pnpm --dir apps/desktop/ui install --frozen-lockfile --ignore-scripts --prod=false
+pnpm --dir apps/desktop/ui run check
+pnpm --dir apps/desktop/ui run lint
+pnpm --dir apps/desktop/ui run test
+pnpm --dir apps/desktop/ui run check:e2e
+pnpm --dir apps/desktop/ui audit --audit-level high --prod
 ```
 
 Run `cargo deny --locked check` whenever dependencies or `Cargo.lock` change. UI, operating-system, LAN, installer, and packaging changes also require the shortest relevant manual test on an installed development candidate.
@@ -55,7 +64,7 @@ Manual evidence attached to a pull request must be sanitized according to [docs/
 
 - Prefer safe, idiomatic Rust, typed errors, small modules, and explicit state machines.
 - Keep domain rules out of widgets and transport crates. Respect the ownership boundaries in `AGENTS.md`.
-- Do not block egui or a Tokio runtime worker with filesystem, parsing, hashing, database-heavy, inference, network, or blocking operating-system work.
+- Do not block a Tauri command or Tokio runtime worker with filesystem, parsing, hashing, database-heavy, inference, network, or blocking operating-system work.
 - Logs must not contain document content, queries, snippets, credentials, embeddings, local paths, or network identities.
 - Released migrations are append-only.
 - Automation may prepare knowledge but may never publish, grant access, enable external AI, or make ambiguous repairs without explicit human confirmation.

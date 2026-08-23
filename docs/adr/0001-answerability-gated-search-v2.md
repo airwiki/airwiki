@@ -1,7 +1,8 @@
 # ADR 0001: Gate federated evidence by local answerability
 
-- Status: Accepted
+- Status: Superseded
 - Date: 2026-07-12
+- Superseded by: [ADR 0007](0007-separate-evidence-from-authorized-candidates.md)
 
 ## Context
 

@@ -6,7 +6,9 @@
 
 use std::net::{IpAddr, Ipv4Addr};
 
-use airwiki_network::{LanAddressError, ManualLanAddress, Multiaddr, PeerId};
+use airwiki_network::{
+    LanAddressError, MAX_AUTHENTICATED_LISTENERS_PER_PEER, ManualLanAddress, Multiaddr, PeerId,
+};
 use thiserror::Error;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Error)]
@@ -62,6 +64,7 @@ fn build_advertised_addresses(
     addresses.dedup();
     addresses
         .into_iter()
+        .take(MAX_AUTHENTICATED_LISTENERS_PER_PEER)
         .map(|address| {
             ManualLanAddress::from_ipv4_listener(listener, address, peer_id)
                 .map(|address| address.to_string())
@@ -315,9 +318,10 @@ mod platform {
 
 #[cfg(not(target_os = "windows"))]
 mod platform {
-    use std::net::{IpAddr, Ipv4Addr, SocketAddr, UdpSocket};
+    use std::net::Ipv4Addr;
 
     use airwiki_network::ManualLanAddress;
+    use if_addrs::IfAddr;
 
     use super::ManualLanRouteError;
 
@@ -328,24 +332,20 @@ mod platform {
     }
 
     pub(super) fn active_ipv4_addresses() -> Result<Vec<Ipv4Addr>, ManualLanRouteError> {
-        // UDP connect selects the active IPv4 route without sending a packet.
-        // Failure simply leaves the advanced fallback unavailable; mDNS and
-        // local-only operation continue normally.
-        let socket = UdpSocket::bind(SocketAddr::from((Ipv4Addr::UNSPECIFIED, 0)))
-            .map_err(|_| ManualLanRouteError::InspectionFailed)?;
-        socket
-            .connect(SocketAddr::from((Ipv4Addr::new(192, 0, 2, 1), 9)))
-            .map_err(|_| ManualLanRouteError::InspectionFailed)?;
-        let address = socket
-            .local_addr()
-            .map_err(|_| ManualLanRouteError::InspectionFailed)?
-            .ip();
-        Ok(match address {
-            IpAddr::V4(address) if address.is_private() || address.is_link_local() => {
-                vec![address]
-            }
-            IpAddr::V4(_) | IpAddr::V6(_) => Vec::new(),
-        })
+        // A default-route probe misses Ethernet when Wi-Fi or a VPN owns that
+        // route. Enumerating active non-point-to-point interfaces lets each
+        // authenticated peer retain only the endpoint matching the remote IP
+        // it actually observed, without trusting interface names or routes.
+        let interfaces =
+            if_addrs::get_if_addrs().map_err(|_| ManualLanRouteError::InspectionFailed)?;
+        Ok(interfaces
+            .into_iter()
+            .filter(|interface| interface.is_oper_up() && !interface.is_p2p())
+            .filter_map(|interface| match interface.addr {
+                IfAddr::V4(address) => Some(address.ip),
+                IfAddr::V6(_) => None,
+            })
+            .collect())
     }
 }
 
@@ -460,5 +460,20 @@ mod tests {
             addresses,
             [format!("/ip4/192.168.1.25/tcp/61743/p2p/{peer}")]
         );
+    }
+
+    #[test]
+    fn advertised_fallback_is_bounded_after_sorting_and_deduplication() {
+        let peer = PeerId::random();
+        let listener = "/ip4/0.0.0.0/tcp/61743".parse::<Multiaddr>().unwrap();
+        let candidates = (1..=u8::try_from(MAX_AUTHENTICATED_LISTENERS_PER_PEER).unwrap() + 2)
+            .map(|last| Ipv4Addr::new(192, 168, 1, last))
+            .collect();
+
+        let addresses = build_advertised_addresses(&listener, peer, candidates).unwrap();
+
+        assert_eq!(addresses.len(), MAX_AUTHENTICATED_LISTENERS_PER_PEER);
+        assert!(addresses[0].contains("/ip4/192.168.1.1/"));
+        assert!(addresses.last().unwrap().contains("/ip4/192.168.1.8/"));
     }
 }

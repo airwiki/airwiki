@@ -6,7 +6,9 @@ use std::io;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
+#[cfg(feature = "os-keyring")]
 use base64::Engine;
+#[cfg(feature = "os-keyring")]
 use base64::engine::general_purpose::STANDARD as BASE64;
 use libp2p::PeerId;
 use libp2p::identity::Keypair;
@@ -190,9 +192,14 @@ impl std::fmt::Debug for NodeIdentity {
 
 impl NodeIdentity {
     pub const DEFAULT_SECRET_KEY: &'static str = "libp2p-ed25519-v1";
+    pub const PUBLIC_PUBLISHER_SECRET_KEY: &'static str = "libp2p-public-publisher-ed25519-v1";
 
     pub fn load_or_create(store: &dyn SecretStore) -> Result<Self, IdentityError> {
         Self::load_or_create_at(store, Self::DEFAULT_SECRET_KEY)
+    }
+
+    pub fn load_or_create_public_publisher(store: &dyn SecretStore) -> Result<Self, IdentityError> {
+        Self::load_or_create_at(store, Self::PUBLIC_PUBLISHER_SECRET_KEY)
     }
 
     pub fn load_or_create_at(

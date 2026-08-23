@@ -28,6 +28,118 @@ function Assert-WindowsPeMachine(
     }
 }
 
+function Get-WindowsByteArraySha256([byte[]] $Bytes) {
+    $Hasher = [Security.Cryptography.SHA256]::Create()
+    try {
+        return [BitConverter]::ToString($Hasher.ComputeHash($Bytes)).Replace("-", "")
+    } finally {
+        $Hasher.Dispose()
+    }
+}
+
+function Assert-WindowsBundleTypePatch(
+    [string] $UnpatchedPath,
+    [string] $PackagedPath,
+    [string] $Label,
+    [ValidateSet("__TAURI_BUNDLE_TYPE_VAR_MSI", "__TAURI_BUNDLE_TYPE_VAR_NSS")]
+    [string] $ExpectedToken
+) {
+    $Unpatched = [IO.File]::ReadAllBytes(
+        (Get-VerifiedWindowsRegularFile $UnpatchedPath "$Label unpatched executable")
+    )
+    $Packaged = [IO.File]::ReadAllBytes(
+        (Get-VerifiedWindowsRegularFile $PackagedPath "$Label packaged executable")
+    )
+    if ($Unpatched.Length -ne $Packaged.Length) {
+        throw "$Label packaged executable has an unexpected length"
+    }
+
+    $UnknownToken = "__TAURI_BUNDLE_TYPE_VAR_UNK"
+    $BundleToken = $ExpectedToken
+    $UnpatchedText = [Text.Encoding]::ASCII.GetString($Unpatched)
+    $TokenOffset = $UnpatchedText.IndexOf($UnknownToken, [StringComparison]::Ordinal)
+    if ($TokenOffset -lt 0 -or
+        $TokenOffset -ne $UnpatchedText.LastIndexOf($UnknownToken, [StringComparison]::Ordinal)) {
+        throw "$Label unpatched executable must contain exactly one Tauri bundle marker"
+    }
+
+    $UnknownBytes = [Text.Encoding]::ASCII.GetBytes($UnknownToken)
+    $BundleBytes = [Text.Encoding]::ASCII.GetBytes($BundleToken)
+    for ($Index = 0; $Index -lt $BundleBytes.Length; $Index++) {
+        if ($Packaged[$TokenOffset + $Index] -ne $BundleBytes[$Index]) {
+            throw "$Label packaged executable has an invalid Tauri bundle marker"
+        }
+        $Packaged[$TokenOffset + $Index] = $UnknownBytes[$Index]
+    }
+    if ((Get-WindowsByteArraySha256 $Unpatched) -ne
+        (Get-WindowsByteArraySha256 $Packaged)) {
+        throw "$Label packaged executable differs beyond the required Tauri bundle marker"
+    }
+}
+
+function Assert-WindowsNsisBundleTypePatch(
+    [string] $UnpatchedPath,
+    [string] $PackagedPath,
+    [string] $Label
+) {
+    Assert-WindowsBundleTypePatch `
+        $UnpatchedPath `
+        $PackagedPath `
+        $Label `
+        "__TAURI_BUNDLE_TYPE_VAR_NSS"
+}
+
+function Assert-WindowsMsiBundleTypePatch(
+    [string] $UnpatchedPath,
+    [string] $PackagedPath,
+    [string] $Label
+) {
+    Assert-WindowsBundleTypePatch `
+        $UnpatchedPath `
+        $PackagedPath `
+        $Label `
+        "__TAURI_BUNDLE_TYPE_VAR_MSI"
+}
+
+function Set-WindowsMsiBundleType([string] $Path) {
+    $Verified = Get-VerifiedWindowsRegularFile $Path "unsigned Windows desktop executable"
+    $UnknownBytes = [Text.Encoding]::ASCII.GetBytes("__TAURI_BUNDLE_TYPE_VAR_UNK")
+    $MsiBytes = [Text.Encoding]::ASCII.GetBytes("__TAURI_BUNDLE_TYPE_VAR_MSI")
+    $Bytes = [IO.File]::ReadAllBytes($Verified)
+    $Match = -1
+    for ($Offset = 0; $Offset -le $Bytes.Length - $UnknownBytes.Length; $Offset++) {
+        $Equal = $true
+        for ($Index = 0; $Index -lt $UnknownBytes.Length; $Index++) {
+            if ($Bytes[$Offset + $Index] -ne $UnknownBytes[$Index]) {
+                $Equal = $false
+                break
+            }
+        }
+        if ($Equal) {
+            if ($Match -ge 0) {
+                throw "Windows desktop contains more than one Tauri bundle marker"
+            }
+            $Match = $Offset
+        }
+    }
+    if ($Match -lt 0) {
+        throw "Windows desktop does not contain the unsigned Tauri bundle marker"
+    }
+    [Array]::Copy($MsiBytes, 0, $Bytes, $Match, $MsiBytes.Length)
+    [IO.File]::WriteAllBytes($Verified, $Bytes)
+}
+
+function Assert-WindowsMsiBundleType([string] $Path, [string] $Label) {
+    $Verified = Get-VerifiedWindowsRegularFile $Path $Label
+    $Text = [Text.Encoding]::ASCII.GetString([IO.File]::ReadAllBytes($Verified))
+    if ($Text.IndexOf("__TAURI_BUNDLE_TYPE_VAR_UNK", [StringComparison]::Ordinal) -ge 0 -or
+        $Text.IndexOf("__TAURI_BUNDLE_TYPE_VAR_MSI", [StringComparison]::Ordinal) -lt 0 -or
+        $Text.IndexOf("__TAURI_BUNDLE_TYPE_VAR_MSI", [StringComparison]::Ordinal) -ne
+        $Text.LastIndexOf("__TAURI_BUNDLE_TYPE_VAR_MSI", [StringComparison]::Ordinal)) {
+        throw "$Label does not contain exactly one fixed Tauri MSI bundle marker"
+    }
+}
+
 function New-WindowsPayloadManifest {
     return [PSCustomObject]@{
         Files = [Collections.Generic.SortedDictionary[string, object]]::new(

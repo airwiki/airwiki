@@ -34,8 +34,11 @@ thiserror.workspace = true
 tokio.workspace = true
 tokenizers = { version = "0.22.2", optional = true, default-features = false, features = ["onig"] }
 tracing.workspace = true
+unicode-normalization = "0.1.25"
 uuid.workspace = true
 walkdir = "2.5.0"
+wasmtime.workspace = true
+zip = { version = "6.0.0", default-features = false, features = ["deflate"] }
 
 [target.'cfg(windows)'.dependencies]
 windows-sys = { version = "0.61.2", features = ["Win32_Foundation", "Win32_Storage_FileSystem"] }
@@ -43,3 +46,4 @@ windows-sys = { version = "0.61.2", features = ["Win32_Foundation", "Win32_Stora
 [dev-dependencies]
 airwiki-inference = { version = "0.2.0", path = "../airwiki-inference" }
 tempfile = "3.23.0"
+wasm-encoder.workspace = true

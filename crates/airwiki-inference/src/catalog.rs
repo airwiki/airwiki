@@ -185,7 +185,7 @@ pub static GEMMA_4_E2B: ModelManifest = ModelManifest {
     capabilities: GEMMA_MULTIMODAL,
     backend: ModelBackend::LlamaCpp,
     minimum_ram_bytes: 8 * GIB,
-    windows_minimum_ram_bytes: 8 * GIB,
+    windows_minimum_ram_bytes: 12 * GIB,
     recommended_ram_bytes: 8 * GIB,
     supports_macos_arm64: true,
     supports_windows_x64: true,
@@ -315,6 +315,7 @@ pub fn select_model(profile: ModelProfile, hardware: &HardwareReport) -> ModelDe
     }
 
     let is_macos = hardware.os == "macos";
+    let windows_qwen_only = hardware.os == "windows" && !GEMMA_4_E2B.is_hardware_eligible(hardware);
     let e4b_quality_eligible = if is_macos {
         hardware.total_memory_bytes >= 12 * GIB
     } else {
@@ -326,15 +327,30 @@ pub fn select_model(profile: ModelProfile, hardware: &HardwareReport) -> ModelDe
             false,
             "Gemma 4 E4B aprovecha la memoria unificada disponible en esta Mac",
         ),
+        ModelProfile::Automatic if windows_qwen_only => (
+            &QWEN_3_1_7B,
+            false,
+            "Qwen3 1.7B mantiene capacidad estructurada dentro del margen del Windows mínimo",
+        ),
         ModelProfile::Automatic => (
             &GEMMA_4_E2B,
             false,
             "Gemma 4 E2B mantiene margen de memoria para la aplicación y el sistema",
         ),
+        ModelProfile::Efficient if windows_qwen_only => (
+            &QWEN_3_1_7B,
+            false,
+            "El perfil eficiente usa el modelo estructurado compatible con el Windows mínimo",
+        ),
         ModelProfile::Efficient => (
             &GEMMA_4_E2B,
             false,
             "El perfil eficiente prioriza menor uso de memoria y disco",
+        ),
+        ModelProfile::Quality if windows_qwen_only => (
+            &QWEN_3_1_7B,
+            true,
+            "El perfil de calidad se reduce al modelo estructurado compatible con el Windows mínimo",
         ),
         ModelProfile::Quality if e4b_quality_eligible => (
             &GEMMA_4_E4B,
@@ -397,10 +413,20 @@ mod tests {
     }
 
     #[test]
-    fn automatic_selects_e2b_for_an_eight_gib_windows_pc() {
+    fn automatic_selects_qwen_for_an_eight_gib_windows_pc() {
         let decision = select_model(
             ModelProfile::Automatic,
             &hardware("windows", "x86_64", 8, true),
+        );
+        assert_eq!(decision.selected().unwrap().model_id, QWEN_3_1_7B.id);
+        assert!(!decision.selected().unwrap().degraded);
+    }
+
+    #[test]
+    fn automatic_selects_e2b_for_a_twelve_gib_windows_pc() {
+        let decision = select_model(
+            ModelProfile::Automatic,
+            &hardware("windows", "x86_64", 12, true),
         );
         assert_eq!(decision.selected().unwrap().model_id, GEMMA_4_E2B.id);
     }
@@ -436,8 +462,26 @@ mod tests {
             &hardware("windows", "x86_64", 8, true),
         );
         let selected = decision.selected().unwrap();
-        assert_eq!(selected.model_id, GEMMA_4_E2B.id);
+        assert_eq!(selected.model_id, QWEN_3_1_7B.id);
         assert!(selected.degraded);
+    }
+
+    #[test]
+    fn efficient_uses_qwen_on_the_minimum_windows_profile() {
+        let decision = select_model(
+            ModelProfile::Efficient,
+            &hardware("windows", "x86_64", 8, true),
+        );
+        let selected = decision.selected().unwrap();
+        assert_eq!(selected.model_id, QWEN_3_1_7B.id);
+        assert!(!selected.degraded);
+    }
+
+    #[test]
+    fn e2b_requires_twelve_gib_on_windows_but_remains_available_on_eight_gib_macos() {
+        assert!(!GEMMA_4_E2B.is_hardware_eligible(&hardware("windows", "x86_64", 8, true)));
+        assert!(GEMMA_4_E2B.is_hardware_eligible(&hardware("windows", "x86_64", 12, true)));
+        assert!(GEMMA_4_E2B.is_hardware_eligible(&hardware("macos", "aarch64", 8, false)));
     }
 
     #[test]

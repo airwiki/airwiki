@@ -8,11 +8,13 @@ use airwiki_types::{
 };
 use anyhow::{Context, Result, bail};
 use async_trait::async_trait;
+use pulldown_cmark::{Event, Parser, TagEnd};
 use thiserror::Error;
 use uuid::Uuid;
 
 use crate::chunk_identity::public_chunk_id;
 use crate::inference::EmbeddingProvider;
+use crate::ingest::SourceFormat;
 use crate::storage::{Database, RankedChunk};
 
 const RRF_K: f64 = 60.0;
@@ -176,11 +178,60 @@ impl HybridSearchEngine {
         let mut response = self.search_collections(request, &collections).await?;
         let database = self.database.clone();
         let hits = std::mem::take(&mut response.hits);
+        let authorized_candidates = std::mem::take(&mut response.authorized_candidates);
+        let hits_peer_id = peer_id.clone();
         response.hits =
             run_search_blocking("peer search revalidation worker task failed", move || {
-                revalidate_peer_hits(database, hits, peer_id, purpose)
+                revalidate_peer_hits(database, hits, hits_peer_id, purpose)
             })
             .await?;
+        let database = self.database.clone();
+        response.authorized_candidates = run_search_blocking(
+            "peer candidate revalidation worker task failed",
+            move || revalidate_peer_hits(database, authorized_candidates, peer_id, purpose),
+        )
+        .await?;
+        Ok(response)
+    }
+
+    /// Searches only explicitly Internet-public collections. Public search is
+    /// evidence-only: making content public cannot enable the separately typed
+    /// external-AI candidate lane by caller assertion.
+    pub async fn search_public(
+        &self,
+        request: airwiki_types::PublicSearchRequest,
+    ) -> Result<SearchResponse> {
+        request.validate()?;
+        let database = self.database.clone();
+        let requested = request
+            .collections
+            .iter()
+            .map(|collection| collection.collection_id)
+            .collect::<Vec<_>>();
+        let collections =
+            run_search_blocking("public search scope worker task failed", move || {
+                database.publicly_searchable_collections(&requested)
+            })
+            .await?;
+        if collections.is_empty() {
+            bail!("no requested collection is publicly accessible");
+        }
+        let local_request = SearchRequest {
+            protocol_version: airwiki_types::SEARCH_PROTOCOL.to_owned(),
+            request_id: request.request_id,
+            query: request.query,
+            purpose: SearchPurpose::LocalAssistant,
+            top_k: request.top_k,
+        };
+        let mut response = self.search_collections(local_request, &collections).await?;
+        let database = self.database.clone();
+        let hits = std::mem::take(&mut response.hits);
+        response.hits =
+            run_search_blocking("public search revalidation worker task failed", move || {
+                revalidate_public_hits(database, hits)
+            })
+            .await?;
+        response.authorized_candidates.clear();
         Ok(response)
     }
 
@@ -244,14 +295,12 @@ impl HybridSearchEngine {
         }
 
         let mut hits = Vec::new();
+        let mut authorized_candidates = Vec::new();
         for ((candidate, snippet), decision) in deduplicated_candidates
             .into_iter()
             .zip(visible_snippets)
             .zip(decisions)
         {
-            if decision == EvidenceDecision::Irrelevant {
-                continue;
-            }
             let chunk_id = public_chunk_id(
                 &candidate.source_sha256,
                 candidate.chunk.ordinal,
@@ -264,27 +313,51 @@ impl HybridSearchEngine {
                 title: candidate.title,
                 snippet,
                 heading_or_page: candidate.chunk.heading_or_page,
-                logical_resource_uri: candidate.logical_resource_uri,
+                logical_resource_uri: format!(
+                    "urn:airwiki:{}:{}",
+                    self.node_id, candidate.chunk.concept_id
+                ),
                 source_revision: candidate.chunk.source_revision,
                 source_sha256: candidate.source_sha256,
                 updated_at: candidate.updated_at,
-                rank: u32::try_from(hits.len() + 1).unwrap_or(u32::MAX),
+                rank: 0,
                 node_id: self.node_id.clone(),
+                assurance: candidate.assurance,
+                lifecycle_status: candidate.lifecycle_status,
             };
             hit.sanitize_for_wire();
-            hits.push(hit);
-            if hits.len() == usize::from(request.top_k) {
+            let destination = match decision {
+                EvidenceDecision::Relevant => &mut hits,
+                EvidenceDecision::Irrelevant if purpose == SearchPurpose::ExternalAi => {
+                    &mut authorized_candidates
+                }
+                EvidenceDecision::Irrelevant => continue,
+            };
+            if destination.len() < usize::from(request.top_k) {
+                hit.rank = u32::try_from(destination.len() + 1).unwrap_or(u32::MAX);
+                destination.push(hit);
+            }
+            let candidate_lane_complete = purpose != SearchPurpose::ExternalAi
+                || authorized_candidates.len() == usize::from(request.top_k);
+            if hits.len() == usize::from(request.top_k) && candidate_lane_complete {
                 break;
             }
         }
-        let before_revalidation = hits.len();
+        let before_revalidation = hits.len().saturating_add(authorized_candidates.len());
         let database = self.database.clone();
         let purpose = request.purpose;
         let hits = run_search_blocking("local search revalidation worker task failed", move || {
             revalidate_local_hits(database, hits, purpose)
         })
         .await?;
-        let removed_during_revalidation = before_revalidation > hits.len();
+        let database = self.database.clone();
+        let authorized_candidates = run_search_blocking(
+            "local candidate revalidation worker task failed",
+            move || revalidate_local_hits(database, authorized_candidates, purpose),
+        )
+        .await?;
+        let removed_during_revalidation =
+            before_revalidation > hits.len().saturating_add(authorized_candidates.len());
         let mut warnings = Vec::new();
         if candidate_snapshot_changed {
             warnings.push("results changed during candidate hydration".to_owned());
@@ -295,6 +368,7 @@ impl HybridSearchEngine {
         Ok(SearchResponse {
             request_id: request.request_id,
             hits,
+            authorized_candidates,
             offline_nodes: Vec::new(),
             partial: !warnings.is_empty(),
             warnings,
@@ -341,12 +415,25 @@ fn prepare_candidates(
     purpose: SearchPurpose,
     query_embedding: Vec<f32>,
 ) -> Result<PreparedCandidates> {
-    let lexical = database.lexical_candidates(
+    let mut lexical = database.lexical_candidates(
         &query,
         &collections,
         purpose,
         PRE_DEDUPLICATION_CANDIDATE_LIMIT,
     )?;
+    lexical.extend(database.projected_lexical_candidates(
+        &query,
+        &collections,
+        purpose,
+        PRE_DEDUPLICATION_CANDIDATE_LIMIT,
+    )?);
+    lexical.sort_by(|left, right| {
+        left.lexical_score
+            .partial_cmp(&right.lexical_score)
+            .unwrap_or(Ordering::Equal)
+            .then_with(|| left.chunk.id.cmp(&right.chunk.id))
+    });
+    lexical.truncate(PRE_DEDUPLICATION_CANDIDATE_LIMIT);
     let mut vector_scores = Vec::with_capacity(PRE_DEDUPLICATION_CANDIDATE_LIMIT * 2);
     for collection_id in &collections {
         let mut after_rowid = None;
@@ -434,7 +521,7 @@ fn prepare_candidates(
 
     let visible_snippets = deduplicated_candidates
         .iter()
-        .map(|candidate| relevant_snippet(&candidate.chunk.text, &query))
+        .map(|candidate| relevant_snippet(&candidate.chunk.text, &query, candidate.source_format))
         .collect::<Vec<_>>();
     let relevance_inputs = deduplicated_candidates
         .iter()
@@ -492,6 +579,17 @@ fn revalidate_peer_hits(
     Ok(current_hits)
 }
 
+fn revalidate_public_hits(database: Database, hits: Vec<SearchHit>) -> Result<Vec<SearchHit>> {
+    let mut current_hits = Vec::with_capacity(hits.len());
+    for hit in hits {
+        if database.public_hit_is_current(&hit)? {
+            current_hits.push(hit);
+        }
+    }
+    renumber_hits(&mut current_hits);
+    Ok(current_hits)
+}
+
 fn renumber_hits(hits: &mut [SearchHit]) {
     for (index, hit) in hits.iter_mut().enumerate() {
         hit.rank = u32::try_from(index + 1).unwrap_or(u32::MAX);
@@ -539,7 +637,14 @@ fn normalized_terms(text: &str) -> HashSet<String> {
         .collect()
 }
 
-fn relevant_snippet(text: &str, query: &str) -> String {
+fn relevant_snippet(text: &str, query: &str, source_format: SourceFormat) -> String {
+    let plain_text;
+    let text = if source_format == SourceFormat::Markdown {
+        plain_text = markdown_plain_text(text);
+        plain_text.as_str()
+    } else {
+        text
+    };
     let query_words = query
         .split(|character: char| !character.is_alphanumeric())
         .filter(|word| word.len() >= 3)
@@ -569,6 +674,70 @@ fn relevant_snippet(text: &str, query: &str) -> String {
     snippet.chars().take(MAX_SNIPPET_CHARS).collect()
 }
 
+fn markdown_plain_text(markdown: &str) -> String {
+    let mut extracted = String::with_capacity(markdown.len());
+    for event in Parser::new(markdown) {
+        match event {
+            Event::Text(text)
+            | Event::Code(text)
+            | Event::InlineMath(text)
+            | Event::DisplayMath(text) => extracted.push_str(&text),
+            Event::SoftBreak | Event::HardBreak | Event::Rule => {
+                push_text_separator(&mut extracted);
+            }
+            Event::End(tag) if markdown_block_ended(tag) => {
+                push_text_separator(&mut extracted);
+            }
+            // Match the safe viewer contract: raw HTML blocks and tags are
+            // excluded rather than interpreted. Text emitted separately by
+            // pulldown-cmark remains ordinary visible text.
+            Event::Start(_)
+            | Event::End(_)
+            | Event::Html(_)
+            | Event::InlineHtml(_)
+            | Event::FootnoteReference(_)
+            | Event::TaskListMarker(_) => {}
+        }
+    }
+
+    let mut normalized = String::with_capacity(extracted.len());
+    for word in extracted.split_whitespace() {
+        if !normalized.is_empty() {
+            normalized.push(' ');
+        }
+        normalized.push_str(word);
+    }
+    normalized
+}
+
+fn push_text_separator(text: &mut String) {
+    if !text.is_empty() && !text.ends_with(char::is_whitespace) {
+        text.push(' ');
+    }
+}
+
+const fn markdown_block_ended(tag: TagEnd) -> bool {
+    matches!(
+        tag,
+        TagEnd::Paragraph
+            | TagEnd::Heading(_)
+            | TagEnd::BlockQuote(_)
+            | TagEnd::CodeBlock
+            | TagEnd::HtmlBlock
+            | TagEnd::List(_)
+            | TagEnd::Item
+            | TagEnd::FootnoteDefinition
+            | TagEnd::DefinitionList
+            | TagEnd::DefinitionListTitle
+            | TagEnd::DefinitionListDefinition
+            | TagEnd::Table
+            | TagEnd::TableHead
+            | TagEnd::TableRow
+            | TagEnd::TableCell
+            | TagEnd::MetadataBlock(_)
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use std::path::PathBuf;
@@ -577,7 +746,8 @@ mod tests {
     use std::time::Duration;
 
     use airwiki_types::{
-        CollectionPolicy, ConceptType, DEFAULT_TOP_K, EnrichmentDraft, SearchPurpose,
+        CollectionPolicy, ConceptType, DEFAULT_TOP_K, EnrichmentDraft, PUBLIC_SEARCH_PROTOCOL,
+        PublicSearchRequest, SearchPurpose,
     };
     use chrono::Utc;
 
@@ -609,6 +779,7 @@ mod tests {
     struct WithdrawsDuringRelevance {
         database: Database,
         source_document_id: Uuid,
+        decision: EvidenceDecision,
     }
 
     #[derive(Debug, Clone, Default)]
@@ -692,7 +863,7 @@ mod tests {
             self.database
                 .mark_deleted(self.source_document_id)
                 .map_err(|_| EvidenceRelevanceError::InferenceFailed)?;
-            Ok(vec![EvidenceDecision::Relevant; candidates.len()])
+            Ok(vec![self.decision; candidates.len()])
         }
     }
 
@@ -707,6 +878,7 @@ mod tests {
                     local_only: false,
                     peer_shareable: true,
                     allow_external_ai: false,
+                    internet_public: false,
                 },
             )
             .unwrap();
@@ -759,6 +931,80 @@ mod tests {
         .unwrap();
         db.approve_concept(concept.id, draft).unwrap();
         (db, collection.id, concept.id)
+    }
+
+    #[tokio::test]
+    async fn imported_okf_is_searchable_from_its_derived_projection() {
+        let database = Database::in_memory().unwrap();
+        let collection = database
+            .create_collection_with_origin(
+                "Imported",
+                "/tmp/imported-search-source",
+                "/tmp/imported-search-bundle",
+                CollectionPolicy::local_only(),
+                crate::WikiOrigin::ImportedOkf,
+                crate::IndexingMode::NotApplicable,
+            )
+            .unwrap();
+        let concept = crate::OkfImportedConcept {
+            logical_path: "guides/recovery.md".to_owned(),
+            concept_type: "Operational Guide".to_owned(),
+            title: "Recuperación de Atlas".to_owned(),
+            description: "Procedimiento importado".to_owned(),
+            tags: vec!["atlas".to_owned()],
+            lifecycle_status: "stable".to_owned(),
+            generated: None,
+            verified: None,
+            sources: None,
+            stale_after: None,
+            version: Some("1".to_owned()),
+            unknown_frontmatter: serde_yaml::Value::Mapping(Default::default()),
+            attested_computation: None,
+            fingerprint: "a".repeat(64),
+            search_text: "Reiniciar el servicio Atlas y validar la recuperación".to_owned(),
+            assurance: airwiki_types::ConceptAssurance::default(),
+            warnings: Vec::new(),
+        };
+        database
+            .replace_okf_concept_projection(collection.id, &[concept])
+            .unwrap();
+        let engine = HybridSearchEngine::new(
+            database,
+            Arc::new(DeterministicEmbeddingProvider),
+            Arc::new(AllRelevantEvidenceRelevanceProvider),
+            "local",
+        );
+
+        let response = engine
+            .search_local(SearchRequest::new(
+                "reiniciar Atlas",
+                SearchPurpose::LocalAssistant,
+                5,
+            ))
+            .await
+            .unwrap();
+
+        assert_eq!(response.hits.len(), 1);
+        assert_eq!(response.hits[0].collection_id, collection.id);
+        assert_eq!(response.hits[0].heading_or_page, "guides/recovery.md");
+        assert_eq!(
+            response.hits[0].logical_resource_uri,
+            format!("urn:airwiki:local:{}", response.hits[0].concept_id)
+        );
+    }
+
+    fn allow_external_ai(database: &Database, collection_id: Uuid) {
+        database
+            .update_collection_policy(
+                collection_id,
+                CollectionPolicy {
+                    local_only: false,
+                    peer_shareable: true,
+                    allow_external_ai: true,
+                    internet_public: false,
+                },
+            )
+            .unwrap();
     }
 
     async fn replace_with_ranked_fixture_chunks(database: &Database, concept_id: Uuid) {
@@ -982,6 +1228,46 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn public_search_requires_live_public_policy_but_no_peer_grant() {
+        let (db, collection_id, _concept_id) = indexed_database().await;
+        let engine = HybridSearchEngine::new(
+            db.clone(),
+            Arc::new(DeterministicEmbeddingProvider),
+            Arc::new(DeterministicEvidenceRelevanceProvider),
+            "publisher",
+        );
+        let request = || PublicSearchRequest {
+            protocol_version: PUBLIC_SEARCH_PROTOCOL.to_owned(),
+            request_id: Uuid::new_v4(),
+            query: "recuperar pagos".to_owned(),
+            purpose: SearchPurpose::LocalAssistant,
+            collections: vec![airwiki_types::PublicCollectionTarget {
+                collection_id,
+                manifest_sequence: 1,
+                publication_fingerprint: "a".repeat(64),
+            }],
+            top_k: 5,
+        };
+
+        assert!(engine.search_public(request()).await.is_err());
+        db.update_collection_policy(
+            collection_id,
+            CollectionPolicy {
+                local_only: false,
+                peer_shareable: false,
+                allow_external_ai: false,
+                internet_public: true,
+            },
+        )
+        .unwrap();
+        assert_eq!(engine.search_public(request()).await.unwrap().hits.len(), 1);
+
+        db.update_collection_policy(collection_id, CollectionPolicy::local_only())
+            .unwrap();
+        assert!(engine.search_public(request()).await.is_err());
+    }
+
+    #[tokio::test]
     async fn search_exposes_content_stable_chunk_identity() {
         let (db, _collection_id, _concept_id) = indexed_database().await;
         let engine = HybridSearchEngine::new(
@@ -1011,6 +1297,7 @@ mod tests {
         db.upsert_peer(&PeerRecord {
             peer_id: "windows".into(),
             display_name: None,
+            device_platform: None,
             trusted: true,
             blocked: false,
             paired_at: Some(Utc::now()),
@@ -1057,6 +1344,7 @@ mod tests {
                 local_only: false,
                 peer_shareable: true,
                 allow_external_ai: true,
+                internet_public: false,
             },
         )
         .unwrap();
@@ -1081,12 +1369,14 @@ mod tests {
                 local_only: true,
                 peer_shareable: false,
                 allow_external_ai: true,
+                internet_public: false,
             },
         )
         .unwrap();
         db.upsert_peer(&PeerRecord {
             peer_id: "windows".into(),
             display_name: None,
+            device_platform: None,
             trusted: true,
             blocked: false,
             paired_at: Some(Utc::now()),
@@ -1115,6 +1405,30 @@ mod tests {
             .await
             .unwrap();
         assert!(remote.hits.is_empty());
+        assert!(remote.authorized_candidates.is_empty());
+    }
+
+    #[tokio::test]
+    async fn external_ai_policy_blocks_rejected_candidates_before_disclosure() {
+        let (database, _collection_id, _concept_id) = indexed_database().await;
+        let engine = HybridSearchEngine::new(
+            database,
+            Arc::new(DeterministicEmbeddingProvider),
+            Arc::new(DeterministicEvidenceRelevanceProvider),
+            "mac",
+        );
+
+        let response = engine
+            .search_local(SearchRequest::new(
+                "presupuesto anual",
+                SearchPurpose::ExternalAi,
+                5,
+            ))
+            .await
+            .unwrap();
+
+        assert!(response.hits.is_empty());
+        assert!(response.authorized_candidates.is_empty());
     }
 
     #[tokio::test]
@@ -1150,8 +1464,9 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn irrelevant_candidates_produce_complete_empty_response() {
-        let (database, _collection_id, _concept_id) = indexed_database().await;
+    async fn irrelevant_candidates_remain_authorized_but_separate_from_evidence() {
+        let (database, collection_id, _concept_id) = indexed_database().await;
+        allow_external_ai(&database, collection_id);
         let engine = HybridSearchEngine::new(
             database,
             Arc::new(DeterministicEmbeddingProvider),
@@ -1162,20 +1477,23 @@ mod tests {
         let response = engine
             .search_local(SearchRequest::new(
                 "presupuesto anual",
-                SearchPurpose::LocalAssistant,
+                SearchPurpose::ExternalAi,
                 5,
             ))
             .await
             .unwrap();
 
         assert!(response.hits.is_empty());
+        assert_eq!(response.authorized_candidates.len(), 1);
+        assert_eq!(response.authorized_candidates[0].rank, 1);
         assert!(!response.partial);
         assert!(response.warnings.is_empty());
     }
 
     #[tokio::test]
     async fn relevance_gate_classifies_only_the_exact_visible_snippet() {
-        let (database, _collection_id, concept_id) = indexed_database().await;
+        let (database, collection_id, concept_id) = indexed_database().await;
+        allow_external_ai(&database, collection_id);
         let template = database.chunks_for_concept(concept_id).unwrap().remove(0);
         let text = format!(
             "Pagos al inicio. {} OUTSIDE_VISIBLE_SNIPPET",
@@ -1213,15 +1531,35 @@ mod tests {
         );
 
         let response = engine
+            .search_local(SearchRequest::new("pagos", SearchPurpose::ExternalAi, 1))
+            .await
+            .unwrap();
+
+        assert!(response.hits.is_empty());
+        assert_eq!(response.authorized_candidates.len(), 1);
+    }
+
+    #[tokio::test]
+    async fn local_assistant_does_not_receive_irrelevant_candidates() {
+        let (database, _collection_id, _concept_id) = indexed_database().await;
+        let engine = HybridSearchEngine::new(
+            database,
+            Arc::new(DeterministicEmbeddingProvider),
+            Arc::new(DeterministicEvidenceRelevanceProvider),
+            "mac",
+        );
+
+        let response = engine
             .search_local(SearchRequest::new(
-                "pagos",
+                "presupuesto anual",
                 SearchPurpose::LocalAssistant,
-                1,
+                5,
             ))
             .await
             .unwrap();
 
         assert!(response.hits.is_empty());
+        assert!(response.authorized_candidates.is_empty());
     }
 
     #[tokio::test]
@@ -1447,7 +1785,7 @@ mod tests {
 
     #[tokio::test]
     async fn relevance_filter_preserves_rrf_order_and_renumbers_hits() {
-        let (database, _collection_id, concept_id) = indexed_database().await;
+        let (database, collection_id, concept_id) = indexed_database().await;
         replace_with_ranked_fixture_chunks(&database, concept_id).await;
         let baseline = HybridSearchEngine::new(
             database.clone(),
@@ -1462,6 +1800,7 @@ mod tests {
         ))
         .await
         .unwrap();
+        allow_external_ai(&database, collection_id);
         let filtered = HybridSearchEngine::new(
             database,
             Arc::new(DeterministicEmbeddingProvider),
@@ -1474,11 +1813,7 @@ mod tests {
             }),
             "mac",
         )
-        .search_local(SearchRequest::new(
-            "pagos",
-            SearchPurpose::LocalAssistant,
-            3,
-        ))
+        .search_local(SearchRequest::new("pagos", SearchPurpose::ExternalAi, 3))
         .await
         .unwrap();
 
@@ -1500,6 +1835,8 @@ mod tests {
             filtered.hits.iter().map(|hit| hit.rank).collect::<Vec<_>>(),
             vec![1, 2]
         );
+        assert_eq!(filtered.authorized_candidates.len(), 1);
+        assert_eq!(filtered.authorized_candidates[0].rank, 1);
     }
 
     #[tokio::test]
@@ -1516,6 +1853,7 @@ mod tests {
             Arc::new(WithdrawsDuringRelevance {
                 database,
                 source_document_id,
+                decision: EvidenceDecision::Relevant,
             }),
             "mac",
         );
@@ -1530,6 +1868,38 @@ mod tests {
             .unwrap();
 
         assert!(response.hits.is_empty());
+        assert!(response.authorized_candidates.is_empty());
+        assert!(response.partial);
+        assert_eq!(response.warnings.len(), 1);
+    }
+
+    #[tokio::test]
+    async fn candidate_publication_is_revalidated_after_relevance_classification() {
+        let (database, collection_id, concept_id) = indexed_database().await;
+        allow_external_ai(&database, collection_id);
+        let source_document_id = database
+            .concept(concept_id)
+            .unwrap()
+            .unwrap()
+            .source_document_id;
+        let engine = HybridSearchEngine::new(
+            database.clone(),
+            Arc::new(DeterministicEmbeddingProvider),
+            Arc::new(WithdrawsDuringRelevance {
+                database,
+                source_document_id,
+                decision: EvidenceDecision::Irrelevant,
+            }),
+            "mac",
+        );
+
+        let response = engine
+            .search_local(SearchRequest::new("pagos", SearchPurpose::ExternalAi, 5))
+            .await
+            .unwrap();
+
+        assert!(response.hits.is_empty());
+        assert!(response.authorized_candidates.is_empty());
         assert!(response.partial);
         assert_eq!(response.warnings.len(), 1);
     }
@@ -1537,14 +1907,58 @@ mod tests {
     #[test]
     fn snippets_respect_unicode_character_limit() {
         let text = "á".repeat(MAX_SNIPPET_CHARS + 100);
-        let snippet = relevant_snippet(&text, "nada");
+        let snippet = relevant_snippet(&text, "nada", SourceFormat::Markdown);
         assert!(snippet.chars().count() <= MAX_SNIPPET_CHARS);
     }
 
     #[test]
     fn snippets_handle_unicode_lowercase_that_changes_utf8_byte_length() {
-        let snippet = relevant_snippet("İ área de pagos", "área");
+        let snippet = relevant_snippet("İ área de pagos", "área", SourceFormat::Markdown);
 
         assert!(snippet.contains("área"));
+    }
+
+    #[test]
+    fn snippets_render_markdown_evidence_as_plain_text() {
+        let snippet = relevant_snippet(
+            "> Documento **aprobado** con `evidencia` verificable.",
+            "aprobado",
+            SourceFormat::Markdown,
+        );
+
+        assert_eq!(snippet, "Documento aprobado con evidencia verificable.");
+    }
+
+    #[test]
+    fn markdown_plain_text_preserves_adjacent_inline_fragments() {
+        assert_eq!(markdown_plain_text("co**or**dinación"), "coordinación");
+    }
+
+    #[test]
+    fn markdown_plain_text_excludes_raw_html_blocks_like_the_safe_viewer() {
+        let markdown = "<div>PRIVATE_BLOCK</div>\n\nVisible Markdown";
+
+        assert_eq!(markdown_plain_text(markdown), "Visible Markdown");
+    }
+
+    #[test]
+    fn markdown_plain_text_preserves_inline_text_exposed_by_the_safe_viewer() {
+        let markdown = "Visible <span data-detail=\"ignored\">inline text</span> after";
+
+        assert_eq!(markdown_plain_text(markdown), "Visible inline text after");
+    }
+
+    #[test]
+    fn snippets_preserve_plain_pdf_text() {
+        let snippet = relevant_snippet(
+            "El identificador <account-id> usa **asteriscos** literales.",
+            "identificador",
+            SourceFormat::Pdf,
+        );
+
+        assert_eq!(
+            snippet,
+            "El identificador <account-id> usa **asteriscos** literales."
+        );
     }
 }

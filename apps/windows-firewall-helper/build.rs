@@ -1,4 +1,5 @@
 fn main() {
+    println!("cargo:rerun-if-env-changed=AIRWIKI_WINDOWS_SIGNER_SHA256");
     #[cfg(windows)]
     {
         const MANIFEST: &str = r#"
@@ -14,7 +15,7 @@ fn main() {
 "#;
 
         let mut resource = winresource::WindowsResource::new();
-        resource.set("ProductName", "AirWiki Firewall Helper");
+        resource.set("ProductName", "AirWiki");
         resource.set(
             "FileDescription",
             "Configures restricted local-network firewall rules for AirWiki",

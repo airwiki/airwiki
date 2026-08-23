@@ -1,0 +1,31 @@
+[package]
+name = "airwiki-federation-index"
+description = "Federated routing index for opt-in public AirWiki collections"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[dependencies]
+airwiki-network = { version = "0.2.0", path = "../../crates/airwiki-network", default-features = false }
+airwiki-types = { version = "0.2.0", path = "../../crates/airwiki-types" }
+anyhow.workspace = true
+async-trait.workspace = true
+chrono.workspace = true
+ciborium = "0.2.2"
+rusqlite = { version = "0.37.0", features = ["bundled", "chrono", "uuid"] }
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+tokio = { workspace = true, features = ["signal"] }
+tokio-util = "0.7.18"
+tracing.workspace = true
+tracing-subscriber.workspace = true
+uuid.workspace = true
+
+[dev-dependencies]
+libp2p = { version = "0.56.0", default-features = false, features = ["ed25519"] }
+tempfile = "3.23.0"

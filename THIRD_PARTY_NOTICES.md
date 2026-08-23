@@ -2,10 +2,18 @@
 
 AirWiki source is licensed under Apache-2.0 and incorporates or downloads third-party components under their own terms. The project license does not replace those terms; distributed artifacts include this notice, the root `LICENSE`, and the generated legal inventory.
 
+The source tree vendors the official SPDX 2.3 JSON Schema from
+`spdx/spdx-spec` commit `aadf3b0b8dbbabdb4d880b0fc714255fea436ff7` under
+CC-BY-3.0 for deterministic release validation. It is not included in the
+installed application or published assets; exact provenance and hash are in
+`resources/licenses/NON_CARGO_COMPONENTS.md`.
+
 ## Distributed or downloaded runtime assets
 
 | Component | Version / revision | Pinned file size | License | Source |
 | --- | --- | ---: | --- | --- |
+| Space Grotesk | `2.0.0` / `7220f5d04813fe83babe76d4fd23e02275021280` | 49,256 bytes | SIL OFL-1.1 | [floriankarsten/space-grotesk](https://github.com/floriankarsten/space-grotesk/tree/7220f5d04813fe83babe76d4fd23e02275021280) |
+| Atkinson Hyperlegible Next | `7925f50f649b3813257faf2f4c0b381011f434f1` | 48,188 bytes | SIL OFL-1.1 | [googlefonts/atkinson-hyperlegible-next](https://github.com/googlefonts/atkinson-hyperlegible-next/tree/7925f50f649b3813257faf2f4c0b381011f434f1) |
 | llama.cpp | `b9946` / `fb30ba9a6c5b4674174d06aed14794832ab33278` | macOS archive; Windows source archive: 36,865,897 bytes | MIT and vendored terms below | [ggml-org/llama.cpp](https://github.com/ggml-org/llama.cpp/tree/fb30ba9a6c5b4674174d06aed14794832ab33278) |
 | Gemma 4 E2B Q4 | `69536a21d70340464240401ba38223d805f6a709` | 3,349,514,112 bytes | Apache-2.0 | [google/gemma-4-E2B-it-qat-q4_0-gguf](https://huggingface.co/google/gemma-4-E2B-it-qat-q4_0-gguf/tree/69536a21d70340464240401ba38223d805f6a709) |
 | Gemma 4 E4B Q4 | `7edc6763a77bbca236126a361613b834c5ea0f7a` | 5,154,939,136 bytes | Apache-2.0 | [google/gemma-4-E4B-it-qat-q4_0-gguf](https://huggingface.co/google/gemma-4-E4B-it-qat-q4_0-gguf/tree/7edc6763a77bbca236126a361613b834c5ea0f7a) |
@@ -14,6 +22,18 @@ AirWiki source is licensed under Apache-2.0 and incorporates or downloads third-
 | mMARCO mMiniLMv2 L12 H384 v1 | `1427fd652930e4ba29e8149678df786c240d8825` | 135,704,242 bytes on macOS or 135,704,241 bytes on Windows, across five files | Apache-2.0 | [cross-encoder/mmarco-mMiniLMv2-L12-H384-v1](https://huggingface.co/cross-encoder/mmarco-mMiniLMv2-L12-H384-v1/tree/1427fd652930e4ba29e8149678df786c240d8825) |
 
 On first use, the application downloads only the Gemma core selected for the detected hardware and any missing files from the pinned embedding and relevance snapshots. A previously installed and verified Qwen model is retained as a legacy fallback; it is not downloaded by a clean installation. The desktop enables the `fastembed-runtime` integration; CI uses deterministic providers and does not download model weights.
+
+Space Grotesk 2.0.0 and Atkinson Hyperlegible Next are embedded in the local WebView bundle and
+are not downloaded at runtime.
+Their exact font and OFL text hashes are recorded in `licenses/NON_CARGO_COMPONENTS.md`.
+
+## Third-party product marks
+
+The desktop includes official ChatGPT, Codex, Claude and Gemini artwork solely to identify the
+corresponding optional local integrations. These marks remain the property of OpenAI, Anthropic
+and Google respectively. Their appearance does not imply sponsorship or endorsement, and AirWiki
+does not use them for its own branding. Exact sources, transformations and SHA-256 values are
+recorded in `licenses/NON_CARGO_COMPONENTS.md`.
 
 ### llama.cpp Windows source build
 
@@ -55,19 +75,18 @@ The catalog records these projectors so a later multimodal pipeline can remain r
 
 ## Windows installer components
 
-The Windows package is produced with the NSIS 3.09 toolchain pinned by
-`cargo-packager 0.11.8` and uses its LZMA solid Unicode stub. NSIS core components are licensed
+The Windows package is produced with the NSIS 3.11 toolchain pinned by Tauri bundler 2.9.4 and
+uses its LZMA solid Unicode stub. NSIS core components are licensed
 under zlib/libpng; the embedded LZMA module is under Common Public License 1.0 with the special
-NSIS linking exception. The installer also embeds `nsis-tauri-utils 0.2.1`, licensed under
+NSIS linking exception. The installer also embeds `nsis-tauri-utils 0.5.3`, licensed under
 MIT OR Apache-2.0.
 
 The complete artifact provenance, SHA-256 values and verified upstream texts are installed under
 `licenses/NON_CARGO_COMPONENTS.md` and `licenses/non-cargo/`. In the source tree they live under
 `resources/licenses/`.
 
-`NSIS-ApplicationID 1.1` has no verifiable redistribution license in its upstream tag or release.
-AirWiki does not invoke or embed that optional plug-in. The release gate fails closed if it
-is referenced again without a verified license.
+AirWiki does not download, invoke, or embed the optional unlicensed `NSIS-ApplicationID` plug-in;
+the release gate fails closed if it is referenced or staged.
 
 The package verifier uses the official 7-Zip 26.02 x64 MSI as a build-time inspection tool. The
 MSI and its selected `7z.exe`/`7z.dll` files are pinned by SHA-256, staged through an
@@ -91,18 +110,32 @@ Selected primary components:
 
 | Component | Version in current lockfile | License expression | Source |
 | --- | --- | --- | --- |
-| eframe / egui | 0.35.0 | MIT OR Apache-2.0 | [emilk/egui](https://github.com/emilk/egui) |
-| egui_commonmark | 0.24.0 | MIT OR Apache-2.0 | [lampsitter/egui_commonmark](https://github.com/lampsitter/egui_commonmark) |
-| egui_graphs | 0.31.0 | MIT | [blitzarx1/egui_graphs](https://github.com/blitzarx1/egui_graphs) |
+| Tauri | 2.11.5 | MIT OR Apache-2.0 | [tauri-apps/tauri](https://github.com/tauri-apps/tauri) |
+| Tauri updater plugin | 2.10.1 | MIT OR Apache-2.0 | [tauri-apps/plugins-workspace](https://github.com/tauri-apps/plugins-workspace) |
 | pulldown-cmark | 0.13.4 | MIT | [pulldown-cmark/pulldown-cmark](https://github.com/pulldown-cmark/pulldown-cmark) |
 | rust-libp2p | 0.56.0 | MIT | [libp2p/rust-libp2p](https://github.com/libp2p/rust-libp2p) |
 | rmcp | 2.2.0 | Apache-2.0 | [modelcontextprotocol/rust-sdk](https://github.com/modelcontextprotocol/rust-sdk) |
 | fastembed | 5.17.2 | Apache-2.0 | [Anush008/fastembed-rs](https://github.com/Anush008/fastembed-rs) |
 | rusqlite | 0.37.0 | MIT | [rusqlite/rusqlite](https://github.com/rusqlite/rusqlite) |
 | lopdf | 0.44.0 | MIT | [J-F-Liu/lopdf](https://github.com/J-F-Liu/lopdf) |
-| cargo-packager | 0.11.8, build-time | MIT OR Apache-2.0 | [crabnebula-dev/cargo-packager](https://github.com/crabnebula-dev/cargo-packager) |
+| Tauri bundler | 2.9.4, build-time | MIT OR Apache-2.0 | [tauri-apps/tauri](https://github.com/tauri-apps/tauri) |
 
 SQLite itself is bundled through `libsqlite3-sys` and is dedicated to the public domain by its authors; see [sqlite.org/copyright.html](https://www.sqlite.org/copyright.html).
+
+## npm dependencies
+
+The Svelte WebView and Tauri frontend toolchain use exact direct versions and a frozen pnpm
+lockfile. Platform-specific generated inventories cover the complete installed production and
+development closures, preserve declared license metadata, and deduplicate every legal text found
+in the published packages by SHA-256:
+
+- `licenses/NPM_LICENSES_MACOS_ARM64.md`;
+- `licenses/NPM_LICENSES_WINDOWS_X64.md`.
+
+The runtime interface includes Svelte 5.56.8, Fluent Bundle 0.19.1, Lucide Svelte 1.30.0,
+Tauri API 2.11.1 and Cytoscape 3.34.0. Build and test dependencies are inventoried as well but are
+not shipped in the WebView assets. Installation uses pnpm 10.18.3 with a frozen lockfile,
+`--ignore-scripts`, and an explicit complete dependency graph.
 
 `Cargo.lock` pins versions but is not the legal inventory. The generated
 artifact uses `cargo metadata --locked` and the files present in each package
@@ -110,6 +143,6 @@ source. CI verifies that it is current and checks advisories, sources, and SPDX
 expressions with `cargo-audit` and `cargo-deny`. An allowlist does not relicense
 any component.
 
-Installers include the generated inventory, copies of the common MIT and Apache
+Installers include the generated Rust and platform npm inventories, copies of the common MIT and Apache
 License 2.0 texts, pinned non-Cargo license texts, and this notice. When a
 runtime is updated or restaged, its upstream legal files must remain with it.

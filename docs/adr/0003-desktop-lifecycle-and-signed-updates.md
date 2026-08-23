@@ -18,9 +18,19 @@ reverse because they affect process lifecycle, OS integration and package trust.
 
 ## Decision
 
+The desktop shell is Tauri v2 with one local system WebView. Rust owns window,
+tray, single-instance, updater and shutdown state. The WebView receives no
+direct native plugins for filesystem, shell, HTTP, SQL, updater, autostart or
+process execution; it can invoke only the explicit commands registered by the
+composition root. A strict CSP permits bundled application resources only.
+An explicit navigation guard rejects every top-level destination except the
+packaged application origin (and the fixed local Vite origin in debug builds).
+HTTP(S) destinations open only through a closed Rust command and an
+OS-native, parented confirmation dialog.
+
 AirWiki runs one instance per user session. A second normal launch sends
-only `SHOW` through a bounded local activation channel and exits. The channel
-accepts no paths, queries or business parameters.
+no application arguments to the existing process: Tauri's single-instance
+callback can only show, restore and focus the main window.
 
 On the tested development targets, macOS arm64 and Windows x64, closing the
 window may hide it in the tray when the tray is operational. The tray exposes
@@ -35,16 +45,29 @@ consent:
 - Windows uses one exact entry under
   `HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Run`.
 
+Both entries launch the exact binary with `--background`. The process reads
+only that closed flag, creates the tray first, and leaves the initially hidden
+window hidden only when the tray is operational; foreground launches and tray
+failure show and focus the window.
+
 The operating system is authoritative for autostart state. Conflicts are not
 overwritten. AirWiki uses no `sudo`, daemon, system service, scheduled
 task, manual LaunchAgent write or machine-wide registry key.
 
-Public updates use one stable channel. The client embeds only the updater public
-key; the private key remains outside the repository. Checks send no installation
-identifier, document, query or PeerId. Download and installation require human
-confirmation and reject downgrades and invalid signatures. Offline failure does
-not block normal use. The stable manifest is published only after every artifact
-has passed its release gates.
+Public updates use the official Tauri v2 updater from Rust only, on one stable
+channel. The client embeds only the updater public key; the private key remains
+outside the repository. Checks send no installation identifier, document,
+query or PeerId. Download and installation require human confirmation and
+reject downgrades and invalid signatures. Offline failure does not block normal
+use. The stable manifest is published only after every artifact has passed its
+release gates.
+Release packaging verifies both the generated updater signature and that the
+desktop binary actually embeds the same public key supplied to the signer.
+
+Publication, sharing grants, external-AI/network policy expansion, model
+license acceptance, guided repair and updater installation obtain authority
+through OS-native dialogs created by Rust. A WebView-supplied boolean is never
+accepted as evidence of human consent.
 
 Native package trust remains an independent requirement:
 
@@ -65,6 +88,8 @@ versioned.
 - Tray loss and shell restarts are explicit recovery scenarios.
 - Release work must separate building, signing, verification, prerelease
   publication and stable-manifest promotion.
+- The WebView and IPC contract are part of the trust boundary and require CSP,
+  capability, hostile-payload and stale-event tests.
 - Until real signing credentials and all release gates exist, packages are
   internal candidates rather than supported public releases.
 

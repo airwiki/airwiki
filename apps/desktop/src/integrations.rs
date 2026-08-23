@@ -8,9 +8,10 @@ use std::{
     time::Duration,
 };
 
-use anyhow::{Context, Result, bail};
+use anyhow::{Context, Result, bail, ensure};
 use async_trait::async_trait;
 use serde_json::Value;
+use sha2::{Digest, Sha256};
 use tokio::{
     fs,
     io::{AsyncRead, AsyncReadExt, AsyncWriteExt},
@@ -19,15 +20,39 @@ use tokio::{
 };
 use uuid::Uuid;
 
-use crate::paths::AppPaths;
+use crate::{
+    paths::AppPaths,
+    workflow_guides::{WorkflowChange, WorkflowClient, WorkflowGuideManager, WorkflowGuideView},
+};
 
 const INTEGRATION_NAME: &str = "airwiki";
 const BRIDGE_BASENAME: &str = "airwiki-mcp-bridge";
 const CLAUDE_MCPB_NAME: &str = "airwiki-claude.mcpb";
 const SEARCH_TOOL: &str = "search_airwiki";
+const MCP_PROTOCOL_VERSION: &str = "2026-07-28";
+const APPLICATION_TOOLS: [&str; 7] = [
+    "list_airwiki_memories",
+    "create_airwiki_memory",
+    "get_airwiki_memory",
+    "write_airwiki_memory",
+    "deprecate_airwiki_memory",
+    "request_airwiki_computation",
+    "get_airwiki_computation_run",
+];
+const MANAGED_TOOLS: [&str; 8] = [
+    SEARCH_TOOL,
+    APPLICATION_TOOLS[0],
+    APPLICATION_TOOLS[1],
+    APPLICATION_TOOLS[2],
+    APPLICATION_TOOLS[3],
+    APPLICATION_TOOLS[4],
+    APPLICATION_TOOLS[5],
+    APPLICATION_TOOLS[6],
+];
 const PROCESS_TIMEOUT: Duration = Duration::from_secs(10);
 const VERIFY_TIMEOUT: Duration = Duration::from_secs(5);
 const MAX_PROCESS_OUTPUT: usize = 64 * 1024;
+const MAX_BRIDGE_VERIFY_OUTPUT: usize = airwiki_mcp::MAX_MANAGED_BRIDGE_VERIFICATION_BYTES;
 const MAX_BRIDGE_BYTES: u64 = 64 * 1024 * 1024;
 #[cfg(target_os = "windows")]
 const FILE_ATTRIBUTE_REPARSE_POINT: u32 = 0x0400;
@@ -36,25 +61,56 @@ const FILE_ATTRIBUTE_REPARSE_POINT: u32 = 0x0400;
 pub(crate) enum ChatClientKind {
     ChatGptDesktop,
     ClaudeDesktop,
+    ClaudeCode,
     GeminiCli,
+    GenericMcp,
 }
 
 impl ChatClientKind {
-    pub(crate) const ALL: [Self; 3] = [Self::ChatGptDesktop, Self::ClaudeDesktop, Self::GeminiCli];
-
-    pub(crate) const fn display_name(self) -> &'static str {
-        match self {
-            Self::ChatGptDesktop => "ChatGPT Desktop / Work",
-            Self::ClaudeDesktop => "Claude Desktop",
-            Self::GeminiCli => "Gemini CLI",
-        }
-    }
+    pub(crate) const ALL: [Self; 5] = [
+        Self::ChatGptDesktop,
+        Self::ClaudeDesktop,
+        Self::ClaudeCode,
+        Self::GeminiCli,
+        Self::GenericMcp,
+    ];
 
     const fn bridge_id(self) -> &'static str {
         match self {
             Self::ChatGptDesktop => "chatgpt-desktop",
             Self::ClaudeDesktop => "claude-desktop",
+            Self::ClaudeCode => "claude-code",
             Self::GeminiCli => "gemini-cli",
+            Self::GenericMcp => "generic-mcp",
+        }
+    }
+
+    const fn display_name(self) -> &'static str {
+        match self {
+            Self::ChatGptDesktop => "ChatGPT/Codex",
+            Self::ClaudeDesktop => "Claude Desktop",
+            Self::ClaudeCode => "Claude Code",
+            Self::GeminiCli => "Gemini CLI",
+            Self::GenericMcp => "Generic MCP",
+        }
+    }
+
+    const fn producer(self) -> &'static str {
+        match self {
+            Self::ChatGptDesktop => "codex/managed",
+            Self::ClaudeDesktop => "claude/managed",
+            Self::ClaudeCode => "claude-code/managed",
+            Self::GeminiCli => "gemini/managed",
+            Self::GenericMcp => "generic-mcp/1",
+        }
+    }
+
+    const fn workflow_client(self) -> Option<WorkflowClient> {
+        match self {
+            Self::ChatGptDesktop => Some(WorkflowClient::Codex),
+            Self::ClaudeCode => Some(WorkflowClient::ClaudeCode),
+            Self::GeminiCli => Some(WorkflowClient::GeminiCli),
+            Self::ClaudeDesktop | Self::GenericMcp => None,
         }
     }
 }
@@ -63,7 +119,6 @@ impl ChatClientKind {
 pub(crate) enum IntegrationStatus {
     NotInstalled,
     Available,
-    Configuring,
     AwaitingClientApproval,
     Configured,
     UpdateAvailable,
@@ -81,6 +136,7 @@ pub(crate) struct IntegrationView {
     pub planned_path: Option<PathBuf>,
     pub activity_recent: bool,
     pub restart_required: bool,
+    pub workflow_guide: WorkflowGuideView,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -96,6 +152,14 @@ pub(crate) enum IntegrationAction {
     Disconnect(ChatClientKind),
     ConfirmClaudeInstalled,
     OpenClaudeSettings,
+    InstallWorkflowGuide(ChatClientKind),
+    RemoveWorkflowGuide(ChatClientKind),
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum CapabilityProvision {
+    Existing,
+    Created,
 }
 
 #[derive(Debug, Clone)]
@@ -105,6 +169,7 @@ struct CommandSpec {
     environment: Vec<(OsString, OsString)>,
     stdin: Option<Vec<u8>>,
     timeout: Duration,
+    stdout_limit: usize,
 }
 
 impl CommandSpec {
@@ -115,6 +180,7 @@ impl CommandSpec {
             environment: Vec::new(),
             stdin: None,
             timeout: PROCESS_TIMEOUT,
+            stdout_limit: MAX_PROCESS_OUTPUT,
         }
     }
 
@@ -135,6 +201,11 @@ impl CommandSpec {
 
     fn timeout(mut self, timeout: Duration) -> Self {
         self.timeout = timeout;
+        self
+    }
+
+    fn stdout_limit(mut self, limit: usize) -> Self {
+        self.stdout_limit = limit;
         self
     }
 }
@@ -206,8 +277,8 @@ impl CommandRunner for SystemCommandRunner {
         let process = async {
             let (status, stdout, stderr) = tokio::try_join!(
                 async { child.wait().await.context("no se pudo esperar al proceso") },
-                read_bounded(stdout),
-                read_bounded(stderr),
+                read_bounded(stdout, spec.stdout_limit),
+                read_bounded(stderr, MAX_PROCESS_OUTPUT),
             )?;
             Ok::<_, anyhow::Error>(CommandOutput {
                 success: status.success(),
@@ -225,7 +296,7 @@ impl CommandRunner for SystemCommandRunner {
     }
 }
 
-async fn read_bounded(mut reader: impl AsyncRead + Unpin) -> Result<Vec<u8>> {
+async fn read_bounded(mut reader: impl AsyncRead + Unpin, limit: usize) -> Result<Vec<u8>> {
     let mut output = Vec::new();
     let mut chunk = [0_u8; 4096];
     loop {
@@ -236,7 +307,7 @@ async fn read_bounded(mut reader: impl AsyncRead + Unpin) -> Result<Vec<u8>> {
         if read == 0 {
             return Ok(output);
         }
-        if output.len().saturating_add(read) > MAX_PROCESS_OUTPUT {
+        if output.len().saturating_add(read) > limit {
             bail!("la salida del proceso excedió el límite permitido");
         }
         output.extend_from_slice(&chunk[..read]);
@@ -304,11 +375,12 @@ struct IntegrationEnvironment {
     platform: HostPlatform,
     home: PathBuf,
     path_entries: Vec<PathBuf>,
+    discover_host_clients: bool,
     current_exe: PathBuf,
 }
 
 impl IntegrationEnvironment {
-    fn discover() -> Result<Self> {
+    fn discover(paths: &AppPaths) -> Result<Self> {
         #[cfg(target_os = "macos")]
         let platform = HostPlatform::MacOs;
         #[cfg(target_os = "windows")]
@@ -316,16 +388,25 @@ impl IntegrationEnvironment {
         #[cfg(not(any(target_os = "macos", target_os = "windows")))]
         let platform = HostPlatform::Unsupported;
 
-        let home = std::env::var_os(if cfg!(windows) { "USERPROFILE" } else { "HOME" })
-            .map(PathBuf::from)
-            .context("no se encontró el directorio personal")?;
-        let path_entries = std::env::var_os("PATH")
-            .map(|value| std::env::split_paths(&value).collect())
-            .unwrap_or_default();
+        #[cfg(feature = "e2e")]
+        let (home, path_entries, discover_host_clients) =
+            (paths.data.join("integration-home"), Vec::new(), false);
+        #[cfg(not(feature = "e2e"))]
+        let (home, path_entries, discover_host_clients) = {
+            let _ = paths;
+            let home = std::env::var_os(if cfg!(windows) { "USERPROFILE" } else { "HOME" })
+                .map(PathBuf::from)
+                .context("no se encontró el directorio personal")?;
+            let path_entries = std::env::var_os("PATH")
+                .map(|value| std::env::split_paths(&value).collect())
+                .unwrap_or_default();
+            (home, path_entries, true)
+        };
         Ok(Self {
             platform,
             home,
             path_entries,
+            discover_host_clients,
             current_exe: std::env::current_exe()
                 .context("no se pudo localizar el ejecutable actual")?,
         })
@@ -336,18 +417,37 @@ impl IntegrationEnvironment {
 pub(crate) struct ChatIntegrationManager {
     paths: AppPaths,
     environment: IntegrationEnvironment,
+    bundled_bridge_digest: Option<String>,
     runner: Arc<dyn CommandRunner>,
     opener: Arc<dyn PathOpener>,
+    database: airwiki_core::Database,
+    workflow_guides: WorkflowGuideManager,
 }
 
 impl ChatIntegrationManager {
-    pub(crate) fn new(paths: AppPaths) -> Result<Self> {
-        Ok(Self {
+    pub(crate) fn new(paths: AppPaths, database: airwiki_core::Database) -> Result<Self> {
+        let environment = IntegrationEnvironment::discover(&paths)?;
+        let workflow_guides = WorkflowGuideManager::new(
+            paths.clone(),
+            environment.home.clone(),
+            environment.current_exe.clone(),
+            environment.platform == HostPlatform::MacOs,
+            environment.discover_host_clients,
+        );
+        let mut manager = Self {
             paths,
-            environment: IntegrationEnvironment::discover()?,
+            environment,
+            bundled_bridge_digest: None,
             runner: Arc::new(SystemCommandRunner),
             opener: Arc::new(SystemPathOpener),
-        })
+            database,
+            workflow_guides,
+        };
+        manager.bundled_bridge_digest = manager
+            .bundled_bridge()
+            .map(|path| digest_file_bounded(&path))
+            .transpose()?;
+        Ok(manager)
     }
 
     pub(crate) async fn execute(&self, action: IntegrationAction) -> Result<Vec<IntegrationView>> {
@@ -357,6 +457,18 @@ impl ChatIntegrationManager {
             IntegrationAction::Disconnect(client) => self.disconnect(client).await?,
             IntegrationAction::ConfirmClaudeInstalled => {}
             IntegrationAction::OpenClaudeSettings => self.open_claude_settings().await?,
+            IntegrationAction::InstallWorkflowGuide(client) => {
+                let workflow_client = client
+                    .workflow_client()
+                    .context("este cliente no admite una skill nativa")?;
+                self.workflow_guides.install(workflow_client).await?;
+            }
+            IntegrationAction::RemoveWorkflowGuide(client) => {
+                let workflow_client = client
+                    .workflow_client()
+                    .context("este cliente no admite una skill nativa")?;
+                self.workflow_guides.remove(workflow_client).await?;
+            }
         }
         let mut views = self.inspect_all().await?;
         if matches!(
@@ -375,52 +487,232 @@ impl ChatIntegrationManager {
     }
 
     async fn inspect_all(&self) -> Result<Vec<IntegrationView>> {
-        let mut views = Vec::with_capacity(ChatClientKind::ALL.len());
-        for client in ChatClientKind::ALL {
-            match self.inspect(client).await {
-                Ok(view) => views.push(view),
-                Err(error) => views.push(view(
+        let inspections = ChatClientKind::ALL.map(|client| async move {
+            let result = self.inspect(client).await;
+            (client, result)
+        });
+        Ok(futures::future::join_all(inspections)
+            .await
+            .into_iter()
+            .map(|(client, result)| match result {
+                Ok(view) => view,
+                Err(error) => view(
                     client,
                     IntegrationStatus::Error,
                     format!("No se pudo comprobar esta integración: {error:#}"),
                     None,
                     Some(self.managed_bridge_path()),
-                )),
-            }
-        }
-        Ok(views)
+                ),
+            })
+            .collect())
     }
 
     async fn inspect(&self, client: ChatClientKind) -> Result<IntegrationView> {
-        match client {
+        let mut view = match client {
             ChatClientKind::ChatGptDesktop => self.inspect_chatgpt().await,
             ChatClientKind::ClaudeDesktop => self.inspect_claude().await,
+            ChatClientKind::ClaudeCode => self.inspect_claude_code().await,
             ChatClientKind::GeminiCli => self.inspect_gemini().await,
-        }
+            ChatClientKind::GenericMcp => self.inspect_generic_mcp().await,
+        }?;
+        view.workflow_guide = if let Some(workflow_client) = client.workflow_client() {
+            self.workflow_guides.inspect(workflow_client).await
+        } else {
+            WorkflowGuideView::built_in()
+        };
+        Ok(view)
     }
 
     async fn connect(&self, client: ChatClientKind) -> Result<()> {
-        match client {
+        let provision = self.ensure_application_capability(client).await?;
+        let workflow_change = if let Some(workflow_client) = client.workflow_client() {
+            match self.workflow_guides.install(workflow_client).await {
+                Ok(change) => change,
+                Err(error) if provision == CapabilityProvision::Created => {
+                    let rollback = self.revoke_application_capability(client).await;
+                    return Err(with_rollback_context(error, rollback));
+                }
+                Err(error) => return Err(error),
+            }
+        } else {
+            None
+        };
+        let result = match client {
             ChatClientKind::ChatGptDesktop => self.connect_chatgpt().await,
             ChatClientKind::ClaudeDesktop => self.open_claude_bundle().await,
+            ChatClientKind::ClaudeCode => self.connect_claude_code().await,
             ChatClientKind::GeminiCli => self.connect_gemini().await,
+            ChatClientKind::GenericMcp => self.connect_generic_mcp().await,
+        };
+        match result {
+            Ok(()) => Ok(()),
+            Err(error) => {
+                let workflow_rollback = self.rollback_workflow_change(workflow_change).await;
+                let error = with_rollback_context(
+                    error.context("no se pudo conectar la integración"),
+                    workflow_rollback,
+                );
+                if provision == CapabilityProvision::Created {
+                    let capability_rollback = self.revoke_application_capability(client).await;
+                    Err(with_rollback_context(error, capability_rollback))
+                } else {
+                    Err(error)
+                }
+            }
         }
     }
 
     async fn disconnect(&self, client: ChatClientKind) -> Result<()> {
-        match client {
+        self.revoke_application_capability(client).await?;
+        let workflow_change = if let Some(workflow_client) = client.workflow_client() {
+            self.workflow_guides.remove(workflow_client).await?
+        } else {
+            None
+        };
+        let result = match client {
             ChatClientKind::ChatGptDesktop => self.disconnect_chatgpt().await,
             ChatClientKind::ClaudeDesktop => self.open_claude_settings().await,
+            ChatClientKind::ClaudeCode => self.disconnect_claude_code().await,
             ChatClientKind::GeminiCli => self.disconnect_gemini().await,
+            ChatClientKind::GenericMcp => Ok(()),
+        };
+        if let Err(error) = result {
+            let rollback = self.rollback_workflow_change(workflow_change).await;
+            return Err(with_rollback_context(error, rollback));
+        }
+        Ok(())
+    }
+
+    async fn rollback_workflow_change(&self, change: Option<WorkflowChange>) -> Result<()> {
+        if let Some(change) = change {
+            self.workflow_guides.rollback(change).await
+        } else {
+            Ok(())
+        }
+    }
+
+    fn capability_path(&self, client: ChatClientKind) -> PathBuf {
+        self.paths
+            .data
+            .join("integrations")
+            .join("capabilities")
+            .join(format!("{}.cap", client.bridge_id()))
+    }
+
+    async fn ensure_application_capability(
+        &self,
+        client: ChatClientKind,
+    ) -> Result<CapabilityProvision> {
+        let path = self.capability_path(client);
+        let app_id = application_id(client);
+        if regular_file(&path)? {
+            let parent = path
+                .parent()
+                .context("la capacidad no tiene un directorio padre")?;
+            if path_contains_link_or_reparse_point(parent).await? {
+                bail!("el directorio de capacidades contiene un enlace no permitido")
+            }
+            let metadata = fs::symlink_metadata(&path)
+                .await
+                .context("no se pudo inspeccionar la capacidad privada")?;
+            if metadata.len() > 256 {
+                bail!("la capacidad privada de la integración excede el tamaño permitido")
+            }
+            set_private_permissions(&path).await?;
+            let secret = fs::read_to_string(&path)
+                .await
+                .context("no se pudo leer la capacidad privada de la integración")?;
+            match self
+                .database
+                .authenticate_application_capability(secret.trim())?
+            {
+                Some(capability) if capability.app_id == app_id => {
+                    return Ok(CapabilityProvision::Existing);
+                }
+                Some(_) => bail!("la capacidad privada pertenece a otra integración"),
+                None if self
+                    .database
+                    .application_capability_any_by_app_id(app_id)?
+                    .is_some_and(|capability| capability.revoked_at.is_some()) =>
+                {
+                    fs::remove_file(&path)
+                        .await
+                        .context("no se pudo reemplazar la capacidad revocada")?;
+                }
+                None => {
+                    bail!("la capacidad privada de la integración no coincide con su registro")
+                }
+            }
+        }
+        let mut random = [0_u8; 48];
+        getrandom::fill(&mut random).context("no se pudo generar una capacidad segura")?;
+        let secret = hex::encode(random);
+        let prefix = secret
+            .get(..16)
+            .context("la capacidad generada no contiene un prefijo válido")?;
+        let secret_hash = hex::encode(Sha256::digest(secret.as_bytes()));
+        if self
+            .database
+            .application_capability_any_by_app_id(app_id)?
+            .is_some()
+        {
+            self.database.rotate_application_capability(
+                app_id,
+                client.producer(),
+                prefix,
+                &secret_hash,
+            )?;
+        } else {
+            self.database.create_application_capability(
+                app_id,
+                client.display_name(),
+                client.bridge_id(),
+                client.producer(),
+                prefix,
+                &secret_hash,
+            )?;
+        }
+        if let Err(error) = write_capability_atomically(&path, secret.as_bytes()).await {
+            let rollback = self
+                .database
+                .set_application_capability_revoked(app_id, true);
+            return Err(with_rollback_context(error, rollback));
+        }
+        Ok(CapabilityProvision::Created)
+    }
+
+    async fn revoke_application_capability(&self, client: ChatClientKind) -> Result<()> {
+        let app_id = application_id(client);
+        if self
+            .database
+            .application_capability_by_app_id(app_id)?
+            .is_some()
+        {
+            self.database
+                .set_application_capability_revoked(app_id, true)?;
+        }
+        match fs::remove_file(self.capability_path(client)).await {
+            Ok(()) => Ok(()),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
+            Err(error) => Err(error).context("no se pudo retirar la capacidad de la integración"),
         }
     }
 
     fn managed_bridge_path(&self) -> PathBuf {
+        // The content digest keeps two signed/internal candidates with the same
+        // application semver from aliasing the same executable. Older
+        // version-only paths remain readable so existing installations can be
+        // upgraded without weakening integrity checks for new bridges.
         self.paths
             .data
             .join("integrations")
             .join("bridge")
             .join(env!("CARGO_PKG_VERSION"))
+            .join(
+                self.bundled_bridge_digest
+                    .as_deref()
+                    .unwrap_or("unavailable"),
+            )
             .join(bridge_filename())
     }
 
@@ -546,28 +838,46 @@ impl ChatIntegrationManager {
     }
 
     async fn verify_bridge(&self, bridge: &Path, client: ChatClientKind) -> Result<()> {
-        let input = format!(
-            concat!(
-                "{{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"initialize\",",
-                "\"params\":{{\"protocolVersion\":\"2025-06-18\",\"capabilities\":{{}},",
-                "\"clientInfo\":{{\"name\":\"airwiki-desktop\",\"version\":\"{}\"}}}}}}\n",
-                "{{\"jsonrpc\":\"2.0\",\"method\":\"notifications/initialized\",\"params\":{{}}}}\n",
-                "{{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"tools/list\",\"params\":{{}}}}\n"
-            ),
-            env!("CARGO_PKG_VERSION")
-        );
+        let request_meta = serde_json::json!({
+            "io.modelcontextprotocol/protocolVersion": MCP_PROTOCOL_VERSION,
+            "io.modelcontextprotocol/clientInfo": {
+                "name": "airwiki-desktop",
+                "version": env!("CARGO_PKG_VERSION"),
+            },
+            "io.modelcontextprotocol/clientCapabilities": {},
+        });
+        let input = [
+            serde_json::json!({
+                "jsonrpc": "2.0",
+                "id": 1,
+                "method": "server/discover",
+                "params": { "_meta": request_meta.clone() },
+            }),
+            serde_json::json!({
+                "jsonrpc": "2.0",
+                "id": 2,
+                "method": "tools/list",
+                "params": { "_meta": request_meta },
+            }),
+        ]
+        .into_iter()
+        .map(|request| request.to_string())
+        .collect::<Vec<_>>()
+        .join("\n")
+            + "\n";
         let output = self
             .runner
             .run(
                 CommandSpec::new(bridge.to_path_buf())
                     .args(["--client", client.bridge_id()])
                     .stdin(input.into_bytes())
-                    .timeout(VERIFY_TIMEOUT),
+                    .timeout(VERIFY_TIMEOUT)
+                    .stdout_limit(MAX_BRIDGE_VERIFY_OUTPUT),
             )
             .await
             .context("el puente MCP no superó su verificación local")?;
         if !output.success {
-            bail!("el puente MCP rechazó initialize/tools/list")
+            bail!("el puente MCP rechazó server/discover o tools/list")
         }
         verify_tools_list(output.stdout_text()?)
     }
@@ -582,12 +892,17 @@ impl ChatIntegrationManager {
                 Some(self.managed_bridge_path()),
             ));
         };
-        if !self.codex_supported(&codex).await? {
+        // Codex startup can include its own plugin discovery. Probe support and
+        // version concurrently so a slow CLI cannot serialize two independent
+        // process timeouts and block every integration action.
+        let (supported, detected_version) =
+            tokio::join!(self.codex_supported(&codex), self.program_version(&codex));
+        if !supported? {
             return Ok(view(
                 ChatClientKind::ChatGptDesktop,
                 IntegrationStatus::Unsupported,
                 "La versión detectada no admite administración MCP local.",
-                self.program_version(&codex).await,
+                detected_version,
                 Some(self.managed_bridge_path()),
             ));
         }
@@ -599,7 +914,7 @@ impl ChatIntegrationManager {
             ChatClientKind::ChatGptDesktop,
             status,
             detail,
-            self.program_version(&codex).await,
+            detected_version,
             Some(self.managed_bridge_path()),
         ))
     }
@@ -664,6 +979,9 @@ impl ChatIntegrationManager {
     }
 
     fn find_codex(&self) -> Option<PathBuf> {
+        if !self.environment.discover_host_clients {
+            return None;
+        }
         let mut candidates = program_candidates("codex", &self.environment.path_entries);
         if self.environment.platform == HostPlatform::MacOs {
             candidates.extend([
@@ -768,6 +1086,221 @@ impl ChatIntegrationManager {
         Ok(())
     }
 
+    async fn inspect_claude_code(&self) -> Result<IntegrationView> {
+        let Some(claude) = self.find_claude_code() else {
+            return Ok(view(
+                ChatClientKind::ClaudeCode,
+                IntegrationStatus::NotInstalled,
+                "Instala Claude Code para habilitar esta integración.",
+                None,
+                Some(self.managed_bridge_path()),
+            ));
+        };
+        let (supported, detected_version) = tokio::join!(
+            self.claude_code_supported(&claude),
+            self.program_version(&claude)
+        );
+        if !supported? {
+            return Ok(view(
+                ChatClientKind::ClaudeCode,
+                IntegrationStatus::Unsupported,
+                "La versión detectada no admite MCP stdio de alcance de usuario.",
+                detected_version,
+                Some(self.managed_bridge_path()),
+            ));
+        }
+        let configured = self.claude_code_configuration(&claude).await?;
+        let (status, detail) = self
+            .classify_configuration_securely(configured.as_ref(), ChatClientKind::ClaudeCode)
+            .await?;
+        Ok(view(
+            ChatClientKind::ClaudeCode,
+            status,
+            detail,
+            detected_version,
+            Some(self.managed_bridge_path()),
+        ))
+    }
+
+    async fn connect_claude_code(&self) -> Result<()> {
+        let claude = self
+            .find_claude_code()
+            .context("no se encontró Claude Code")?;
+        if !self.claude_code_supported(&claude).await? {
+            bail!("actualiza Claude Code antes de conectar AirWiki")
+        }
+        let current = self.claude_code_configuration(&claude).await?;
+        self.ensure_replaceable(current.as_ref(), ChatClientKind::ClaudeCode)
+            .await?;
+        let bridge = self.materialize_bridge().await?;
+        self.verify_bridge(&bridge, ChatClientKind::ClaudeCode)
+            .await?;
+        if current.as_ref().is_some_and(|configuration| {
+            configuration.is_exact(&bridge, ChatClientKind::ClaudeCode)
+        }) {
+            return Ok(());
+        }
+        if current.is_some() {
+            self.claude_code_remove(&claude).await?;
+        }
+        if let Err(error) = self.claude_code_add(&claude, &bridge).await {
+            let rollback = self
+                .rollback_claude_code(&claude, &bridge, current.as_ref())
+                .await;
+            return Err(with_rollback_context(error, rollback));
+        }
+        let verified = self
+            .claude_code_configuration(&claude)
+            .await
+            .and_then(|configured| {
+                if configured.as_ref().is_some_and(|configuration| {
+                    configuration.is_exact(&bridge, ChatClientKind::ClaudeCode)
+                }) {
+                    Ok(())
+                } else {
+                    bail!("Claude Code no confirmó la configuración instalada")
+                }
+            });
+        if let Err(error) = verified {
+            let rollback = self
+                .rollback_claude_code(&claude, &bridge, current.as_ref())
+                .await;
+            return Err(with_rollback_context(error, rollback));
+        }
+        Ok(())
+    }
+
+    async fn disconnect_claude_code(&self) -> Result<()> {
+        let claude = self
+            .find_claude_code()
+            .context("no se encontró Claude Code")?;
+        let Some(current) = self.claude_code_configuration(&claude).await? else {
+            return Ok(());
+        };
+        if !self
+            .configuration_is_securely_managed(&current, ChatClientKind::ClaudeCode)
+            .await?
+        {
+            bail!("la entrada airwiki no pertenece a esta aplicación")
+        }
+        self.claude_code_remove(&claude).await
+    }
+
+    fn find_claude_code(&self) -> Option<PathBuf> {
+        if !self.environment.discover_host_clients {
+            return None;
+        }
+        find_program("claude", &self.environment.path_entries)
+    }
+
+    async fn claude_code_supported(&self, claude: &Path) -> Result<bool> {
+        let output = self
+            .runner
+            .run(CommandSpec::new(claude.to_path_buf()).args(["mcp", "add", "--help"]))
+            .await?;
+        let help = output.stdout_text()?;
+        Ok(output.success && help.contains("--scope") && help.contains("--transport"))
+    }
+
+    async fn claude_code_configuration(
+        &self,
+        claude: &Path,
+    ) -> Result<Option<ManagedConfiguration>> {
+        let output = self
+            .runner
+            .run(home_environment(
+                CommandSpec::new(claude.to_path_buf()).args(["mcp", "get", INTEGRATION_NAME]),
+                &self.environment.home,
+            ))
+            .await?;
+        if !output.success {
+            if claude_code_reports_missing(output.stdout_text()?, output.stderr_text()?) {
+                return Ok(None);
+            }
+            bail!("Claude Code no pudo leer la integración MCP existente")
+        }
+        Ok(Some(parse_claude_code_configuration(output.stdout_text()?)))
+    }
+
+    async fn claude_code_add(&self, claude: &Path, bridge: &Path) -> Result<()> {
+        self.claude_code_add_configuration(
+            claude,
+            &ManagedConfiguration::new(bridge.to_path_buf(), ChatClientKind::ClaudeCode),
+        )
+        .await
+    }
+
+    async fn claude_code_add_configuration(
+        &self,
+        claude: &Path,
+        configuration: &ManagedConfiguration,
+    ) -> Result<()> {
+        let mut args = vec![
+            OsString::from("mcp"),
+            OsString::from("add"),
+            OsString::from("--scope"),
+            OsString::from("user"),
+            OsString::from("--transport"),
+            OsString::from("stdio"),
+            OsString::from(INTEGRATION_NAME),
+            OsString::from("--"),
+            configuration.command.as_os_str().to_owned(),
+        ];
+        args.extend(configuration.args.iter().cloned().map(OsString::from));
+        let output = self
+            .runner
+            .run(home_environment(
+                CommandSpec::new(claude.to_path_buf()).args(args),
+                &self.environment.home,
+            ))
+            .await?;
+        if !output.success {
+            bail!("Claude Code no pudo guardar la integración")
+        }
+        Ok(())
+    }
+
+    async fn claude_code_remove(&self, claude: &Path) -> Result<()> {
+        let output = self
+            .runner
+            .run(home_environment(
+                CommandSpec::new(claude.to_path_buf()).args([
+                    "mcp",
+                    "remove",
+                    "--scope",
+                    "user",
+                    INTEGRATION_NAME,
+                ]),
+                &self.environment.home,
+            ))
+            .await?;
+        if !output.success {
+            bail!("Claude Code no pudo quitar la integración")
+        }
+        Ok(())
+    }
+
+    async fn rollback_claude_code(
+        &self,
+        claude: &Path,
+        attempted_bridge: &Path,
+        previous: Option<&ManagedConfiguration>,
+    ) -> Result<()> {
+        match self.claude_code_configuration(claude).await? {
+            Some(configuration)
+                if configuration.is_exact(attempted_bridge, ChatClientKind::ClaudeCode) =>
+            {
+                self.claude_code_remove(claude).await?;
+            }
+            Some(_) => bail!("la configuración de Claude Code cambió durante la recuperación"),
+            None => {}
+        }
+        if let Some(previous) = previous {
+            self.claude_code_add_configuration(claude, previous).await?;
+        }
+        Ok(())
+    }
+
     async fn inspect_gemini(&self) -> Result<IntegrationView> {
         let Some(gemini) = find_program("gemini", &self.environment.path_entries) else {
             return Ok(view(
@@ -798,6 +1331,83 @@ impl ChatIntegrationManager {
             self.program_version(&gemini).await,
             Some(self.managed_bridge_path()),
         ))
+    }
+
+    async fn inspect_generic_mcp(&self) -> Result<IntegrationView> {
+        let planned_path = self.managed_bridge_path();
+        if self.bundled_bridge().is_none() {
+            return Ok(view(
+                ChatClientKind::GenericMcp,
+                IntegrationStatus::NotInstalled,
+                "El paquete no contiene el puente MCP para esta plataforma.",
+                None,
+                Some(planned_path),
+            ));
+        }
+        if !self.generic_capability_is_active().await? {
+            return Ok(view(
+                ChatClientKind::GenericMcp,
+                IntegrationStatus::Available,
+                "Activa el arnés genérico para obtener su configuración MCP local.",
+                None,
+                Some(planned_path),
+            ));
+        }
+        let configuration =
+            ManagedConfiguration::new(planned_path.clone(), ChatClientKind::GenericMcp);
+        if !self
+            .configuration_is_securely_managed(&configuration, ChatClientKind::GenericMcp)
+            .await?
+        {
+            return Ok(view(
+                ChatClientKind::GenericMcp,
+                IntegrationStatus::UpdateAvailable,
+                "El puente MCP administrado debe instalarse o repararse antes de usarlo.",
+                None,
+                Some(planned_path),
+            ));
+        }
+        Ok(view(
+            ChatClientKind::GenericMcp,
+            IntegrationStatus::Configured,
+            "Copia esta configuración en cualquier cliente MCP stdio compatible.",
+            None,
+            Some(planned_path),
+        ))
+    }
+
+    async fn generic_capability_is_active(&self) -> Result<bool> {
+        let path = self.capability_path(ChatClientKind::GenericMcp);
+        if !regular_file(&path)? {
+            return Ok(false);
+        }
+        let parent = path
+            .parent()
+            .context("la capacidad no tiene un directorio padre")?;
+        if path_contains_link_or_reparse_point(parent).await? {
+            return Ok(false);
+        }
+        let metadata = fs::symlink_metadata(&path)
+            .await
+            .context("no se pudo inspeccionar la capacidad privada")?;
+        if metadata.len() > 256 || !private_permissions_are_valid(&metadata) {
+            return Ok(false);
+        }
+        let secret = fs::read_to_string(path)
+            .await
+            .context("no se pudo leer la capacidad privada de la integración")?;
+        Ok(self
+            .database
+            .authenticate_application_capability(secret.trim())?
+            .is_some_and(|capability| {
+                capability.app_id == application_id(ChatClientKind::GenericMcp)
+            }))
+    }
+
+    async fn connect_generic_mcp(&self) -> Result<()> {
+        let bridge = self.materialize_bridge().await?;
+        self.verify_bridge(&bridge, ChatClientKind::GenericMcp)
+            .await
     }
 
     async fn connect_gemini(&self) -> Result<()> {
@@ -1062,6 +1672,9 @@ impl ChatIntegrationManager {
     }
 
     fn find_claude(&self) -> Option<PathBuf> {
+        if !self.environment.discover_host_clients {
+            return None;
+        }
         let candidates = match self.environment.platform {
             HostPlatform::MacOs => vec![
                 PathBuf::from("/Applications/Claude.app"),
@@ -1170,8 +1783,19 @@ impl ChatIntegrationManager {
             };
             return files_equal_bounded(&bundled, &canonical_command).await;
         }
-        Ok(true)
+        match managed_bridge_location(&configuration.command, &root) {
+            Some(ManagedBridgeLocation::Legacy) => Ok(true),
+            Some(ManagedBridgeLocation::ContentAddressed(expected_digest)) => {
+                let bytes = read_file_bounded(&canonical_command).await?;
+                Ok(hex::encode(Sha256::digest(bytes)) == expected_digest)
+            }
+            None => Ok(false),
+        }
     }
+}
+
+fn application_id(client: ChatClientKind) -> Uuid {
+    Uuid::new_v5(&Uuid::NAMESPACE_URL, client.bridge_id().as_bytes())
 }
 
 fn view(
@@ -1188,7 +1812,12 @@ fn view(
         detail: detail.into(),
         planned_path,
         activity_recent: false,
-        restart_required: matches!(client, ChatClientKind::ChatGptDesktop),
+        restart_required: client.workflow_client().is_some(),
+        workflow_guide: if client.workflow_client().is_some() {
+            WorkflowGuideView::unsupported()
+        } else {
+            WorkflowGuideView::built_in()
+        },
     }
 }
 
@@ -1208,10 +1837,75 @@ struct ManagedConfiguration {
     parse_conflict: bool,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum ManagedBridgeLocation {
+    Legacy,
+    ContentAddressed(String),
+}
+
 fn codex_reports_missing(stderr: &str) -> bool {
     let normalized = stderr.trim();
     normalized.contains("No MCP server named 'airwiki' found")
         || normalized.contains("No MCP server named \"airwiki\" found")
+}
+
+fn claude_code_reports_missing(stdout: &str, stderr: &str) -> bool {
+    [stdout, stderr].iter().any(|output| {
+        output.contains("No MCP server named \"airwiki\"")
+            || output.contains("No MCP server named 'airwiki'")
+    })
+}
+
+fn parse_claude_code_configuration(output: &str) -> ManagedConfiguration {
+    let mut scope_is_user = false;
+    let mut type_is_stdio = false;
+    let mut command = None;
+    let mut args = None;
+    let mut environment_present = false;
+    let mut environment_block = false;
+    for raw_line in output.lines() {
+        let line = raw_line.trim();
+        if environment_block {
+            if line.is_empty() {
+                environment_block = false;
+                continue;
+            }
+            if raw_line.starts_with(' ') || raw_line.starts_with('\t') {
+                environment_present = true;
+                environment_block = false;
+                continue;
+            }
+            environment_block = false;
+        }
+        if let Some(value) = line.strip_prefix("Scope:") {
+            scope_is_user = value.trim_start().starts_with("User config");
+        } else if let Some(value) = line.strip_prefix("Type:") {
+            type_is_stdio = value.trim() == "stdio";
+        } else if let Some(value) = line.strip_prefix("Command:") {
+            command = Some(PathBuf::from(value.trim()));
+        } else if let Some(value) = line.strip_prefix("Args:") {
+            args = Some(
+                value
+                    .split_whitespace()
+                    .map(str::to_owned)
+                    .collect::<Vec<_>>(),
+            );
+        } else if let Some(value) = line.strip_prefix("Environment:") {
+            environment_present = !value.trim().is_empty();
+            environment_block = !environment_present;
+        }
+    }
+    if !scope_is_user || !type_is_stdio || environment_present {
+        return ManagedConfiguration::conflict();
+    }
+    let Some(command) = command else {
+        return ManagedConfiguration::conflict();
+    };
+    ManagedConfiguration {
+        command,
+        args: args.unwrap_or_default(),
+        parse_conflict: false,
+    }
 }
 
 fn parse_codex_configuration(value: &Value) -> ManagedConfiguration {
@@ -1270,7 +1964,8 @@ fn parse_gemini_configuration(value: &Value) -> ManagedConfiguration {
             .get("includeTools")
             .and_then(Value::as_array)
             .is_none_or(|tools| {
-                tools.len() != 1 || tools.first().and_then(Value::as_str) != Some(SEARCH_TOOL)
+                let actual = tools.iter().filter_map(Value::as_str).collect::<Vec<_>>();
+                actual.as_slice() != MANAGED_TOOLS
             })
     {
         return ManagedConfiguration::conflict();
@@ -1285,18 +1980,18 @@ enum GeminiAddSyntax {
 }
 
 fn gemini_add_args(configuration: &ManagedConfiguration, syntax: GeminiAddSyntax) -> Vec<OsString> {
-    let options = [
+    let mut options = vec![
         OsString::from("--scope"),
         OsString::from("user"),
         OsString::from("--transport"),
         OsString::from("stdio"),
         OsString::from("--include-tools"),
-        OsString::from(SEARCH_TOOL),
+        OsString::from(MANAGED_TOOLS.join(",")),
     ];
     let mut args = vec![OsString::from("mcp"), OsString::from("add")];
     match syntax {
         GeminiAddSyntax::OptionsFirst => {
-            args.extend(options);
+            args.append(&mut options);
             args.push(OsString::from(INTEGRATION_NAME));
             args.push(configuration.command.as_os_str().to_owned());
             args.push(OsString::from("--"));
@@ -1306,7 +2001,7 @@ fn gemini_add_args(configuration: &ManagedConfiguration, syntax: GeminiAddSyntax
             args.push(OsString::from(INTEGRATION_NAME));
             args.push(configuration.command.as_os_str().to_owned());
             args.extend(configuration.args.iter().cloned().map(OsString::from));
-            args.extend(options);
+            args.append(&mut options);
         }
     }
     args
@@ -1370,8 +2065,30 @@ impl ManagedConfiguration {
                 .command
                 .file_name()
                 .is_some_and(|name| name == OsStr::new(bridge_filename()))
+            && managed_bridge_location(&self.command, managed_root).is_some()
             && self.args == ["--client", client.bridge_id()]
     }
+}
+
+fn managed_bridge_location(command: &Path, managed_root: &Path) -> Option<ManagedBridgeLocation> {
+    let revision_directory = command.parent()?;
+    let version_directory = revision_directory.parent()?;
+    if paths_equal(version_directory, managed_root) {
+        return Some(ManagedBridgeLocation::Legacy);
+    }
+    let root = version_directory.parent()?;
+    if !paths_equal(root, managed_root) {
+        return None;
+    }
+    let digest = revision_directory.file_name()?.to_str()?;
+    if digest.len() != 64
+        || !digest
+            .bytes()
+            .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
+    {
+        return None;
+    }
+    Some(ManagedBridgeLocation::ContentAddressed(digest.to_owned()))
 }
 
 fn classify_configuration(
@@ -1401,34 +2118,117 @@ fn classify_configuration(
 }
 
 fn verify_tools_list(stdout: &str) -> Result<()> {
-    let mut found_initialize = false;
+    let mut found_discovery = false;
     let mut found_tools = false;
     for line in stdout.lines().filter(|line| !line.trim().is_empty()) {
         let Ok(message) = serde_json::from_str::<Value>(line) else {
             continue;
         };
         match message.get("id").and_then(Value::as_u64) {
-            Some(1) if message.get("result").is_some() => found_initialize = true,
-            Some(2) => {
-                let tools = message
+            Some(1) => {
+                let result = message
                     .get("result")
-                    .and_then(|result| result.get("tools"))
+                    .context("server/discover no devolvió un resultado")?;
+                let supports_current = result
+                    .get("supportedVersions")
+                    .and_then(Value::as_array)
+                    .is_some_and(|versions| {
+                        versions
+                            .iter()
+                            .any(|version| version.as_str() == Some(MCP_PROTOCOL_VERSION))
+                    });
+                found_discovery = supports_current
+                    && result.get("resultType").and_then(Value::as_str) == Some("complete")
+                    && result.get("ttlMs").and_then(Value::as_u64) == Some(0)
+                    && result.get("cacheScope").and_then(Value::as_str) == Some("private");
+            }
+            Some(2) => {
+                let result = message
+                    .get("result")
+                    .context("tools/list no devolvió un resultado")?;
+                ensure!(
+                    result.get("resultType").and_then(Value::as_str) == Some("complete"),
+                    "tools/list no devolvió un resultado MCP completo"
+                );
+                ensure!(
+                    result.get("ttlMs").and_then(Value::as_u64) == Some(0)
+                        && result.get("cacheScope").and_then(Value::as_str) == Some("private"),
+                    "tools/list no protegió el conjunto de herramientas por contexto"
+                );
+                let tools = result
+                    .get("tools")
                     .and_then(Value::as_array)
                     .context("tools/list no devolvió herramientas")?;
-                found_tools = tools.len() == 1
-                    && tools
-                        .first()
-                        .and_then(|tool| tool.get("name"))
+                for tool in tools {
+                    let name = tool
+                        .get("name")
                         .and_then(Value::as_str)
-                        == Some(SEARCH_TOOL);
+                        .context("tools/list devolvió una herramienta sin nombre")?;
+                    ensure!(
+                        tool.get("title")
+                            .and_then(Value::as_str)
+                            .is_some_and(|value| !value.is_empty())
+                            && tool
+                                .get("description")
+                                .and_then(Value::as_str)
+                                .is_some_and(|value| !value.is_empty()),
+                        "la herramienta {name} no tiene metadata comprensible"
+                    );
+                    ensure!(
+                        tool.pointer("/inputSchema/type").and_then(Value::as_str) == Some("object")
+                            && tool.get("outputSchema").is_some_and(Value::is_object),
+                        "la herramienta {name} no expuso schemas tipados"
+                    );
+                    let (read_only, destructive, idempotent) = expected_tool_hints(name)
+                        .context("tools/list devolvió una herramienta no administrada")?;
+                    ensure!(
+                        tool.pointer("/annotations/readOnlyHint")
+                            .and_then(Value::as_bool)
+                            == Some(read_only)
+                            && tool
+                                .pointer("/annotations/destructiveHint")
+                                .and_then(Value::as_bool)
+                                == Some(destructive)
+                            && tool
+                                .pointer("/annotations/idempotentHint")
+                                .and_then(Value::as_bool)
+                                == Some(idempotent)
+                            && tool
+                                .pointer("/annotations/openWorldHint")
+                                .and_then(Value::as_bool)
+                                == Some(false),
+                        "la herramienta {name} no expuso anotaciones de seguridad correctas"
+                    );
+                }
+                let mut actual = tools
+                    .iter()
+                    .filter_map(|tool| tool.get("name"))
+                    .filter_map(Value::as_str)
+                    .collect::<Vec<_>>();
+                let mut expected = MANAGED_TOOLS;
+                actual.sort_unstable();
+                expected.sort_unstable();
+                found_tools = actual.as_slice() == expected;
             }
             _ => {}
         }
     }
-    if !found_initialize || !found_tools {
-        bail!("el puente no expuso exactamente la herramienta de búsqueda esperada")
+    if !found_discovery || !found_tools {
+        bail!("el puente no expuso exactamente las herramientas administradas esperadas")
     }
     Ok(())
+}
+
+fn expected_tool_hints(name: &str) -> Option<(bool, bool, bool)> {
+    match name {
+        SEARCH_TOOL
+        | "list_airwiki_memories"
+        | "get_airwiki_memory"
+        | "get_airwiki_computation_run" => Some((true, false, true)),
+        "create_airwiki_memory" | "request_airwiki_computation" => Some((false, false, false)),
+        "write_airwiki_memory" | "deprecate_airwiki_memory" => Some((false, true, false)),
+        _ => None,
+    }
 }
 
 fn bridge_filename() -> &'static str {
@@ -1522,6 +2322,37 @@ async fn files_equal_bounded(left: &Path, right: &Path) -> Result<bool> {
     Ok(left_bytes == right_bytes)
 }
 
+fn digest_file_bounded(path: &Path) -> Result<String> {
+    use std::io::Read as _;
+
+    let mut file =
+        std::fs::File::open(path).context("no se pudo abrir el puente MCP empaquetado")?;
+    let before = file
+        .metadata()
+        .context("no se pudo inspeccionar el puente MCP empaquetado")?;
+    if !before.is_file() || before.len() > MAX_BRIDGE_BYTES {
+        bail!("el puente MCP empaquetado no es regular o excede el tamaño permitido")
+    }
+    let capacity = usize::try_from(before.len()).context("el puente MCP es demasiado grande")?;
+    let mut bytes = Vec::with_capacity(capacity);
+    {
+        let mut bounded = (&mut file).take(MAX_BRIDGE_BYTES.saturating_add(1));
+        bounded
+            .read_to_end(&mut bytes)
+            .context("no se pudo leer el puente MCP empaquetado")?;
+    }
+    if bytes.len() as u64 > MAX_BRIDGE_BYTES {
+        bail!("el puente MCP empaquetado excede el tamaño permitido")
+    }
+    let after = file
+        .metadata()
+        .context("no se pudo volver a comprobar el puente MCP empaquetado")?;
+    if before.len() != after.len() || after.len() != bytes.len() as u64 {
+        bail!("el puente MCP empaquetado cambió durante su comprobación")
+    }
+    Ok(hex::encode(Sha256::digest(bytes)))
+}
+
 async fn read_file_bounded(path: &Path) -> Result<Vec<u8>> {
     let mut file = fs::File::open(path)
         .await
@@ -1588,6 +2419,70 @@ async fn write_bridge_atomically(
         .await
         .context("no se pudo activar atómicamente el puente MCP")?;
     sync_directory(parent).await?;
+    Ok(())
+}
+
+async fn write_capability_atomically(destination: &Path, bytes: &[u8]) -> Result<()> {
+    let parent = destination
+        .parent()
+        .context("la capacidad no tiene un directorio padre")?;
+    fs::create_dir_all(parent)
+        .await
+        .context("no se pudo crear el directorio privado de capacidades")?;
+    if path_contains_link_or_reparse_point(parent).await? {
+        bail!("el directorio de capacidades contiene un enlace no permitido")
+    }
+    let temporary = parent.join(format!(".capability-{}.tmp", Uuid::new_v4()));
+    let result = async {
+        let mut file = fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&temporary)
+            .await
+            .context("no se pudo crear la capacidad temporal")?;
+        set_private_permissions(&temporary).await?;
+        file.write_all(bytes)
+            .await
+            .context("no se pudo escribir la capacidad privada")?;
+        file.sync_all()
+            .await
+            .context("no se pudo sincronizar la capacidad privada")?;
+        drop(file);
+        fs::rename(&temporary, destination)
+            .await
+            .context("no se pudo activar la capacidad privada")?;
+        sync_directory(parent).await
+    }
+    .await;
+    if result.is_err() {
+        let _ = fs::remove_file(&temporary).await;
+    }
+    result
+}
+
+#[cfg(unix)]
+async fn set_private_permissions(path: &Path) -> Result<()> {
+    use std::os::unix::fs::PermissionsExt;
+
+    fs::set_permissions(path, std::fs::Permissions::from_mode(0o600))
+        .await
+        .context("no se pudieron restringir los permisos de la capacidad")
+}
+
+#[cfg(unix)]
+fn private_permissions_are_valid(metadata: &std::fs::Metadata) -> bool {
+    use std::os::unix::fs::PermissionsExt;
+
+    metadata.permissions().mode() & 0o077 == 0
+}
+
+#[cfg(not(unix))]
+fn private_permissions_are_valid(_metadata: &std::fs::Metadata) -> bool {
+    true
+}
+
+#[cfg(not(unix))]
+async fn set_private_permissions(_path: &Path) -> Result<()> {
     Ok(())
 }
 
@@ -1799,23 +2694,104 @@ mod tests {
 
     fn test_manager(temp: &TempDir, current_exe: PathBuf) -> ChatIntegrationManager {
         let root = std::fs::canonicalize(temp.path()).unwrap();
-        ChatIntegrationManager {
-            paths: AppPaths {
-                data: root.join("data"),
-                database: root.join("data/airwiki.sqlite3"),
-                vaults: root.join("data/vaults"),
-                logs: root.join("data/logs"),
-                config: root.join("config/config.json"),
-            },
+        let paths = AppPaths {
+            data: root.join("data"),
+            database: root.join("data/airwiki.sqlite3"),
+            logs: root.join("data/logs"),
+            config: root.join("config/config.json"),
+        };
+        let mut manager = ChatIntegrationManager {
+            paths: paths.clone(),
             environment: IntegrationEnvironment {
                 platform: test_platform(),
-                home: root,
+                home: root.clone(),
                 path_entries: Vec::new(),
-                current_exe,
+                discover_host_clients: false,
+                current_exe: current_exe.clone(),
             },
+            bundled_bridge_digest: None,
             runner: Arc::new(RecordingRunner::default()),
             opener: Arc::new(RecordingOpener::default()),
-        }
+            database: airwiki_core::Database::in_memory().unwrap(),
+            workflow_guides: WorkflowGuideManager::new(
+                paths,
+                root,
+                current_exe,
+                test_platform() == HostPlatform::MacOs,
+                false,
+            ),
+        };
+        manager.bundled_bridge_digest = manager
+            .bundled_bridge()
+            .map(|path| digest_file_bounded(&path))
+            .transpose()
+            .unwrap();
+        manager
+    }
+
+    #[cfg(feature = "e2e")]
+    #[test]
+    fn e2e_integration_discovery_does_not_inspect_host_clients() {
+        let temp = TempDir::new().unwrap();
+        let paths = AppPaths {
+            data: temp.path().join("data"),
+            database: temp.path().join("data/airwiki.sqlite3"),
+            logs: temp.path().join("data/logs"),
+            config: temp.path().join("config/config.json"),
+        };
+
+        let environment = IntegrationEnvironment::discover(&paths).unwrap();
+
+        assert_eq!(environment.home, paths.data.join("integration-home"));
+        assert!(environment.path_entries.is_empty());
+        assert!(!environment.discover_host_clients);
+    }
+
+    fn tools_list_output() -> Vec<u8> {
+        let tools = MANAGED_TOOLS
+            .iter()
+            .map(|name| {
+                let (read_only, destructive, idempotent) =
+                    expected_tool_hints(name).expect("managed tool hints");
+                serde_json::json!({
+                    "name": name,
+                    "title": format!("Fixture {name}"),
+                    "description": format!("Synthetic contract for {name}"),
+                    "inputSchema": { "type": "object" },
+                    "outputSchema": { "type": "object" },
+                    "annotations": {
+                        "readOnlyHint": read_only,
+                        "destructiveHint": destructive,
+                        "idempotentHint": idempotent,
+                        "openWorldHint": false,
+                    },
+                })
+            })
+            .collect::<Vec<_>>();
+        format!(
+            "{}\n{}\n",
+            serde_json::json!({
+                "jsonrpc": "2.0",
+                "id": 1,
+                "result": {
+                    "resultType": "complete",
+                    "supportedVersions": [MCP_PROTOCOL_VERSION],
+                    "ttlMs": 0,
+                    "cacheScope": "private",
+                }
+            }),
+            serde_json::json!({
+                "jsonrpc": "2.0",
+                "id": 2,
+                "result": {
+                    "resultType": "complete",
+                    "tools": tools,
+                    "ttlMs": 0,
+                    "cacheScope": "private",
+                }
+            })
+        )
+        .into_bytes()
     }
 
     fn runner_helper_spec(mode: &str) -> CommandSpec {
@@ -1837,6 +2813,12 @@ mod tests {
                 std::io::stdout().flush().unwrap();
                 std::process::exit(0);
             }
+            Ok("bridge-oversized") => {
+                let bytes = vec![b'x'; MAX_BRIDGE_VERIFY_OUTPUT + 1];
+                std::io::stdout().write_all(&bytes).unwrap();
+                std::io::stdout().flush().unwrap();
+                std::process::exit(0);
+            }
             Ok("timeout") => {
                 std::thread::sleep(Duration::from_secs(5));
                 std::process::exit(0);
@@ -1850,6 +2832,27 @@ mod tests {
     async fn system_command_runner_rejects_excessive_output() {
         let error = SystemCommandRunner
             .run(runner_helper_spec("oversized"))
+            .await
+            .unwrap_err();
+
+        assert!(error.to_string().contains("excedió el límite"));
+    }
+
+    #[tokio::test]
+    async fn system_command_runner_accepts_the_bounded_bridge_verification_output() {
+        let output = SystemCommandRunner
+            .run(runner_helper_spec("oversized").stdout_limit(MAX_BRIDGE_VERIFY_OUTPUT))
+            .await
+            .unwrap();
+
+        assert!(output.stdout.len() > MAX_PROCESS_OUTPUT);
+        assert!(output.stdout.len() <= MAX_BRIDGE_VERIFY_OUTPUT);
+    }
+
+    #[tokio::test]
+    async fn system_command_runner_rejects_output_above_the_bridge_verification_limit() {
+        let error = SystemCommandRunner
+            .run(runner_helper_spec("bridge-oversized").stdout_limit(MAX_BRIDGE_VERIFY_OUTPUT))
             .await
             .unwrap_err();
 
@@ -1966,11 +2969,105 @@ mod tests {
     }
 
     #[test]
+    fn claude_code_configuration_accepts_exact_user_stdio_output() {
+        let configuration = parse_claude_code_configuration(
+            "airwiki:\n  Scope: User config (available in all your projects)\n  \
+             Status: Connected\n  Type: stdio\n  Command: /data/airwiki-mcp-bridge\n  \
+             Args: --client claude-code\n  Environment:\n\nTo remove this server, run: \
+             claude mcp remove airwiki -s user\n",
+        );
+
+        assert!(!configuration.parse_conflict);
+        assert_eq!(configuration.command, Path::new("/data/airwiki-mcp-bridge"));
+        assert_eq!(configuration.args, ["--client", "claude-code"]);
+    }
+
+    #[test]
+    fn claude_code_configuration_rejects_other_scopes_and_environment() {
+        let local = parse_claude_code_configuration(
+            "Scope: Local config\nType: stdio\nCommand: /data/bridge\n\
+             Args: --client claude-code\nEnvironment:\n",
+        );
+        let environment = parse_claude_code_configuration(
+            "Scope: User config\nType: stdio\nCommand: /data/bridge\n\
+             Args: --client claude-code\nEnvironment:\n  TOKEN=value\n",
+        );
+
+        assert!(local.parse_conflict);
+        assert!(environment.parse_conflict);
+    }
+
+    #[test]
+    fn claude_code_missing_detection_does_not_hide_other_process_failures() {
+        assert!(claude_code_reports_missing(
+            "No MCP server named \"airwiki\".",
+            ""
+        ));
+        assert!(!claude_code_reports_missing("", "permission denied"));
+    }
+
+    #[tokio::test]
+    async fn claude_code_add_uses_user_scoped_stdio_without_credentials() {
+        let temp = TempDir::new().expect("temporary directory");
+        let executable = temp.path().join("airwiki-desktop");
+        std::fs::write(&executable, b"desktop").expect("write desktop fixture");
+        let runner = Arc::new(RecordingRunner {
+            specs: Mutex::new(Vec::new()),
+            outputs: Mutex::new(vec![CommandOutput {
+                success: true,
+                stdout: Vec::new(),
+                _stderr: Vec::new(),
+            }]),
+        });
+        let mut manager = test_manager(&temp, executable);
+        manager.runner = runner.clone();
+        let claude = temp.path().join("claude");
+        let bridge = temp.path().join("airwiki-mcp-bridge");
+
+        manager
+            .claude_code_add_configuration(
+                &claude,
+                &ManagedConfiguration::new(bridge.clone(), ChatClientKind::ClaudeCode),
+            )
+            .await
+            .expect("add Claude Code configuration");
+
+        let specs = runner.specs.lock().expect("recorded command lock");
+        assert_eq!(specs.len(), 1);
+        assert_eq!(specs[0].executable, claude);
+        let expected_args = vec![
+            "mcp".to_owned(),
+            "add".to_owned(),
+            "--scope".to_owned(),
+            "user".to_owned(),
+            "--transport".to_owned(),
+            "stdio".to_owned(),
+            "airwiki".to_owned(),
+            "--".to_owned(),
+            bridge.to_string_lossy().into_owned(),
+            "--client".to_owned(),
+            "claude-code".to_owned(),
+        ];
+        assert_eq!(
+            specs[0]
+                .args
+                .iter()
+                .map(|argument| argument.to_string_lossy().into_owned())
+                .collect::<Vec<_>>(),
+            expected_args
+        );
+        assert!(specs[0].args.iter().all(|argument| {
+            !argument.to_string_lossy().contains("capability")
+                && !argument.to_string_lossy().contains("secret")
+        }));
+    }
+
+    #[test]
     fn gemini_configuration_rejects_any_extra_field() {
         let exact = serde_json::json!({
             "command": "/data/bridge",
             "args": ["--client", "gemini-cli"],
-            "includeTools": [SEARCH_TOOL]
+            "includeTools": MANAGED_TOOLS
         });
         let mut altered = exact.clone();
         altered["env"] = serde_json::json!({"TOKEN": "value"});
@@ -2028,15 +3125,68 @@ mod tests {
     }
 
     #[test]
-    fn tools_list_verification_accepts_only_the_read_only_search_tool() {
-        let output = concat!(
-            "{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":{}}\n",
-            "{\"jsonrpc\":\"2.0\",\"id\":2,\"result\":{\"tools\":[{\"name\":\"search_airwiki\"}]}}\n"
-        );
+    fn tools_list_verification_accepts_the_exact_managed_tool_set() {
+        let exact_tools = MANAGED_TOOLS
+            .iter()
+            .map(|name| {
+                let (read_only, destructive, idempotent) =
+                    expected_tool_hints(name).expect("managed tool hints");
+                serde_json::json!({
+                    "name": name,
+                    "title": format!("{name} title"),
+                    "description": format!("{name} description"),
+                    "inputSchema": { "type": "object", "properties": {} },
+                    "outputSchema": { "type": "object", "properties": {} },
+                    "annotations": {
+                        "readOnlyHint": read_only,
+                        "destructiveHint": destructive,
+                        "idempotentHint": idempotent,
+                        "openWorldHint": false,
+                    }
+                })
+            })
+            .collect::<Vec<_>>();
+        let output_for = |tools: Vec<Value>| {
+            format!(
+                "{}\n{}\n",
+                serde_json::json!({
+                    "jsonrpc": "2.0",
+                    "id": 1,
+                    "result": {
+                        "resultType": "complete",
+                        "supportedVersions": [MCP_PROTOCOL_VERSION],
+                        "ttlMs": 0,
+                        "cacheScope": "private",
+                    },
+                }),
+                serde_json::json!({
+                    "jsonrpc": "2.0",
+                    "id": 2,
+                    "result": {
+                        "resultType": "complete",
+                        "ttlMs": 0,
+                        "cacheScope": "private",
+                        "tools": tools,
+                    },
+                })
+            )
+        };
+        let mut reordered_tools = exact_tools.clone();
+        reordered_tools.reverse();
+        let mut duplicated_tools = exact_tools.clone();
+        duplicated_tools.push(serde_json::json!({"name": SEARCH_TOOL}));
+        let mut extra_tools = exact_tools.clone();
+        extra_tools.push(serde_json::json!({"name": "unexpected_tool"}));
 
-        assert!(verify_tools_list(output).is_ok());
+        assert!(verify_tools_list(&output_for(exact_tools)).is_ok());
+        assert!(verify_tools_list(&output_for(reordered_tools)).is_ok());
+        assert!(verify_tools_list(&output_for(duplicated_tools)).is_err());
+        assert!(verify_tools_list(&output_for(extra_tools)).is_err());
         assert!(
-            verify_tools_list("{\"jsonrpc\":\"2.0\",\"id\":2,\"result\":{\"tools\":[]}}").is_err()
+            verify_tools_list(
+                "{\"jsonrpc\":\"2.0\",\"id\":2,\"result\":{\"resultType\":\"complete\",\"tools\":[]}}"
+            )
+            .is_err()
         );
     }
 
@@ -2053,22 +3203,32 @@ mod tests {
         std::fs::create_dir_all(&claude).unwrap();
         let runner = Arc::new(RecordingRunner::default());
         let opener = Arc::new(RecordingOpener::default());
+        let paths = AppPaths {
+            data: temp.path().join("data"),
+            database: temp.path().join("database"),
+            logs: temp.path().join("logs"),
+            config: temp.path().join("config"),
+        };
         let manager = ChatIntegrationManager {
-            paths: AppPaths {
-                data: temp.path().join("data"),
-                database: temp.path().join("database"),
-                vaults: temp.path().join("vaults"),
-                logs: temp.path().join("logs"),
-                config: temp.path().join("config"),
-            },
+            paths: paths.clone(),
             environment: IntegrationEnvironment {
                 platform: HostPlatform::MacOs,
                 home: temp.path().to_path_buf(),
                 path_entries: Vec::new(),
-                current_exe: executable,
+                discover_host_clients: false,
+                current_exe: executable.clone(),
             },
+            bundled_bridge_digest: None,
             runner,
             opener: opener.clone(),
+            database: airwiki_core::Database::in_memory().unwrap(),
+            workflow_guides: WorkflowGuideManager::new(
+                paths,
+                temp.path().to_path_buf(),
+                executable,
+                true,
+                false,
+            ),
         };
 
         manager.opener.open(&bundle).await.unwrap();
@@ -2108,6 +3268,191 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn generic_mcp_capability_is_scoped_revocable_and_never_an_argument() {
+        let temp = TempDir::new().unwrap();
+        let executable = temp.path().join("airwiki-desktop");
+        std::fs::write(&executable, b"desktop").unwrap();
+        let bundled = temp
+            .path()
+            .join("integrations/bridge")
+            .join(bridge_filename());
+        std::fs::create_dir_all(bundled.parent().unwrap()).unwrap();
+        std::fs::write(&bundled, b"trusted bridge").unwrap();
+        let runner = Arc::new(RecordingRunner {
+            specs: Mutex::new(Vec::new()),
+            outputs: Mutex::new(vec![CommandOutput {
+                success: true,
+                stdout: tools_list_output(),
+                _stderr: Vec::new(),
+            }]),
+        });
+        let mut manager = test_manager(&temp, executable);
+        manager.runner = runner.clone();
+
+        manager.connect(ChatClientKind::GenericMcp).await.unwrap();
+
+        assert!(manager.generic_capability_is_active().await.unwrap());
+        assert_eq!(
+            manager.inspect_generic_mcp().await.unwrap().status,
+            IntegrationStatus::Configured
+        );
+        {
+            let specs = runner.specs.lock().unwrap();
+            assert_eq!(specs.len(), 1);
+            assert_eq!(
+                specs[0]
+                    .args
+                    .iter()
+                    .map(|argument| argument.to_string_lossy().into_owned())
+                    .collect::<Vec<_>>(),
+                ["--client", "generic-mcp"]
+            );
+        }
+
+        manager
+            .disconnect(ChatClientKind::GenericMcp)
+            .await
+            .unwrap();
+
+        assert!(!manager.generic_capability_is_active().await.unwrap());
+        assert_eq!(
+            manager.inspect_generic_mcp().await.unwrap().status,
+            IntegrationStatus::Available
+        );
+    }
+
+    #[tokio::test]
+    async fn failed_generic_mcp_connection_revokes_new_capability() {
+        let temp = TempDir::new().unwrap();
+        let executable = temp.path().join("airwiki-desktop");
+        std::fs::write(&executable, b"desktop").unwrap();
+        let bundled = temp
+            .path()
+            .join("integrations/bridge")
+            .join(bridge_filename());
+        std::fs::create_dir_all(bundled.parent().unwrap()).unwrap();
+        std::fs::write(&bundled, b"trusted bridge").unwrap();
+        let manager = test_manager(&temp, executable);
+
+        assert!(manager.connect(ChatClientKind::GenericMcp).await.is_err());
+        assert!(!manager.generic_capability_is_active().await.unwrap());
+        assert!(!manager.capability_path(ChatClientKind::GenericMcp).exists());
+    }
+
+    #[tokio::test]
+    async fn disconnect_revokes_capability_before_a_workflow_conflict() {
+        let temp = TempDir::new().expect("temporary directory");
+        let executable = temp.path().join("airwiki-desktop");
+        std::fs::write(&executable, b"desktop").expect("desktop fixture");
+        let manager = test_manager(&temp, executable);
+        manager
+            .ensure_application_capability(ChatClientKind::ClaudeCode)
+            .await
+            .expect("provision Claude Code capability");
+        manager
+            .workflow_guides
+            .install(WorkflowClient::ClaudeCode)
+            .await
+            .expect("install Claude Code workflow guide");
+        std::fs::write(
+            temp.path().join(".claude/skills/airwiki/SKILL.md"),
+            b"user-modified skill",
+        )
+        .expect("modify installed workflow guide");
+
+        assert!(
+            manager
+                .disconnect(ChatClientKind::ClaudeCode)
+                .await
+                .is_err()
+        );
+        assert!(!manager.capability_path(ChatClientKind::ClaudeCode).exists());
+    }
+
+    #[tokio::test]
+    async fn revoked_capability_file_is_replaced_on_reconnect() {
+        let temp = TempDir::new().unwrap();
+        let executable = temp.path().join("airwiki-desktop");
+        std::fs::write(&executable, b"desktop").unwrap();
+        let manager = test_manager(&temp, executable);
+        manager
+            .ensure_application_capability(ChatClientKind::GenericMcp)
+            .await
+            .unwrap();
+        let path = manager.capability_path(ChatClientKind::GenericMcp);
+        let previous = std::fs::read_to_string(&path).unwrap();
+        manager
+            .database
+            .set_application_capability_revoked(application_id(ChatClientKind::GenericMcp), true)
+            .unwrap();
+
+        let provision = manager
+            .ensure_application_capability(ChatClientKind::GenericMcp)
+            .await
+            .unwrap();
+        let replacement = std::fs::read_to_string(path).unwrap();
+
+        assert_eq!(provision, CapabilityProvision::Created);
+        assert_ne!(replacement, previous);
+        assert!(manager.generic_capability_is_active().await.unwrap());
+    }
+
+    #[tokio::test]
+    async fn reused_capability_must_belong_to_the_selected_client() {
+        let temp = TempDir::new().unwrap();
+        let executable = temp.path().join("airwiki-desktop");
+        std::fs::write(&executable, b"desktop").unwrap();
+        let manager = test_manager(&temp, executable);
+        manager
+            .ensure_application_capability(ChatClientKind::ChatGptDesktop)
+            .await
+            .unwrap();
+        let chatgpt_secret =
+            std::fs::read(manager.capability_path(ChatClientKind::ChatGptDesktop)).unwrap();
+        let generic_path = manager.capability_path(ChatClientKind::GenericMcp);
+        std::fs::write(&generic_path, chatgpt_secret).unwrap();
+
+        let error = manager
+            .ensure_application_capability(ChatClientKind::GenericMcp)
+            .await
+            .unwrap_err();
+
+        assert!(error.to_string().contains("otra integración"));
+        assert!(!manager.generic_capability_is_active().await.unwrap());
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn reused_capability_permissions_are_repaired_before_acceptance() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let temp = TempDir::new().unwrap();
+        let executable = temp.path().join("airwiki-desktop");
+        std::fs::write(&executable, b"desktop").unwrap();
+        let manager = test_manager(&temp, executable);
+        manager
+            .ensure_application_capability(ChatClientKind::GenericMcp)
+            .await
+            .unwrap();
+        let path = manager.capability_path(ChatClientKind::GenericMcp);
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o644)).unwrap();
+
+        assert!(!manager.generic_capability_is_active().await.unwrap());
+
+        let provision = manager
+            .ensure_application_capability(ChatClientKind::GenericMcp)
+            .await
+            .unwrap();
+
+        assert_eq!(provision, CapabilityProvision::Existing);
+        assert_eq!(
+            std::fs::metadata(path).unwrap().permissions().mode() & 0o777,
+            0o600
+        );
+        assert!(manager.generic_capability_is_active().await.unwrap());
+    }
+
+    #[tokio::test]
     async fn current_managed_bridge_rejects_same_size_tampering() {
         let temp = TempDir::new().unwrap();
         let executable = temp.path().join("airwiki-desktop");
@@ -2130,6 +3475,71 @@ mod tests {
                 .configuration_is_securely_managed(&configuration, ChatClientKind::ChatGptDesktop,)
                 .await
                 .unwrap()
+        );
+    }
+
+    #[tokio::test]
+    async fn prior_content_addressed_bridge_is_reported_as_an_update() {
+        let temp = TempDir::new().expect("temporary directory");
+        let executable = temp.path().join("airwiki-desktop");
+        std::fs::write(&executable, b"desktop").expect("desktop fixture");
+        let bundled = temp
+            .path()
+            .join("integrations/bridge")
+            .join(bridge_filename());
+        std::fs::create_dir_all(bundled.parent().expect("bundle parent"))
+            .expect("bundle directory");
+        std::fs::write(&bundled, b"current bridge").expect("current bridge fixture");
+        let manager = test_manager(&temp, executable);
+        let previous_bytes = b"previous bridge";
+        let previous_digest = hex::encode(Sha256::digest(previous_bytes));
+        let previous = manager
+            .managed_bridge_root()
+            .join(env!("CARGO_PKG_VERSION"))
+            .join(previous_digest)
+            .join(bridge_filename());
+        std::fs::create_dir_all(previous.parent().expect("previous bridge parent"))
+            .expect("previous bridge directory");
+        std::fs::write(&previous, previous_bytes).expect("previous bridge fixture");
+        set_executable_permissions(&previous)
+            .await
+            .expect("executable bridge fixture");
+        let configuration = ManagedConfiguration::new(previous, ChatClientKind::ChatGptDesktop);
+
+        let (status, _) = manager
+            .classify_configuration_securely(Some(&configuration), ChatClientKind::ChatGptDesktop)
+            .await
+            .expect("classify previous bridge");
+
+        assert_eq!(status, IntegrationStatus::UpdateAvailable);
+    }
+
+    #[tokio::test]
+    async fn prior_content_addressed_bridge_rejects_tampering() {
+        let temp = TempDir::new().expect("temporary directory");
+        let executable = temp.path().join("airwiki-desktop");
+        std::fs::write(&executable, b"desktop").expect("desktop fixture");
+        let manager = test_manager(&temp, executable);
+        let trusted_bytes = b"trusted old bridge";
+        let trusted_digest = hex::encode(Sha256::digest(trusted_bytes));
+        let installed = manager
+            .managed_bridge_root()
+            .join("0.1.0")
+            .join(trusted_digest)
+            .join(bridge_filename());
+        std::fs::create_dir_all(installed.parent().expect("bridge parent"))
+            .expect("bridge directory");
+        std::fs::write(&installed, b"altered old bridge").expect("altered bridge fixture");
+        set_executable_permissions(&installed)
+            .await
+            .expect("executable bridge fixture");
+        let configuration = ManagedConfiguration::new(installed, ChatClientKind::ChatGptDesktop);
+
+        assert!(
+            !manager
+                .configuration_is_securely_managed(&configuration, ChatClientKind::ChatGptDesktop,)
+                .await
+                .expect("validate previous bridge")
         );
     }
 
@@ -2179,7 +3589,7 @@ mod tests {
                 "--transport",
                 "stdio",
                 "--include-tools",
-                SEARCH_TOOL,
+                &MANAGED_TOOLS.join(","),
                 INTEGRATION_NAME,
                 "/tmp/bridge",
                 "--",

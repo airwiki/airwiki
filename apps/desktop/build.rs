@@ -1,16 +1,19 @@
-fn main() {
-    const WINDOWS_ICON: &str = "../../resources/branding/airwiki.ico";
-    println!("cargo:rerun-if-changed={WINDOWS_ICON}");
-
-    #[cfg(windows)]
-    {
-        let mut resource = winresource::WindowsResource::new();
-        resource.set_icon(WINDOWS_ICON);
-        resource.set("ProductName", "AirWiki");
-        resource.set("FileDescription", "AirWiki local-first knowledge desktop");
-        resource.set("LegalCopyright", "Copyright 2026 AirWiki contributors");
-        if let Err(error) = resource.compile() {
-            panic!("failed to compile Windows resources: {error}");
-        }
+fn main() -> Result<(), Box<dyn std::error::Error>> {
+    for name in [
+        "AIRWIKI_BOOTSTRAP_FEDERATION_INDEXES",
+        "AIRWIKI_UPDATE_ENDPOINT",
+        "AIRWIKI_UPDATER_PUBLIC_KEY",
+        "AIRWIKI_WINDOWS_SIGNER_SHA256",
+    ] {
+        println!("cargo:rerun-if-env-changed={name}");
     }
+
+    let attributes = tauri_build::Attributes::new();
+    #[cfg(target_os = "windows")]
+    let attributes = attributes.windows_attributes(
+        tauri_build::WindowsAttributes::new()
+            .window_icon_path("../../resources/branding/airwiki.ico"),
+    );
+    tauri_build::try_build(attributes)?;
+    Ok(())
 }

@@ -1,0 +1,213 @@
+<?if $(sys.BUILDARCH)="x64"?>
+    <?define Win64 = "yes" ?>
+<?else?>
+    <?error AirWiki MSI supports only x64 builds; received $(sys.BUILDARCH)?>
+<?endif?>
+
+<!-- Based on Tauri bundler 2.9.4's WiX template. AirWiki fixes the package
+     to the current user's LocalAppData tree and deliberately exposes no
+     configurable installation directory. See ADR 0009. -->
+<Wix xmlns="http://schemas.microsoft.com/wix/2006/wi">
+  <Product
+      Id="*"
+      Name="{{product_name}}"
+      UpgradeCode="{{upgrade_code}}"
+      Language="!(loc.TauriLanguage)"
+      Manufacturer="{{manufacturer}}"
+      Version="{{version}}">
+
+    <Package
+        Id="*"
+        Keywords="Installer"
+        InstallerVersion="500"
+        Languages="0"
+        Compressed="yes"
+        InstallScope="perUser"
+        InstallPrivileges="limited"
+        SummaryCodepage="!(loc.TauriCodepage)" />
+
+    <Property Id="REINSTALLMODE" Value="amus" />
+    <Property Id="AUTOLAUNCHAPP" Secure="yes" />
+    <Property Id="LAUNCHAPPARGS" Secure="yes" />
+    <Property Id="ARPNOREPAIR" Value="yes" Secure="yes" />
+    <SetProperty Id="ARPNOMODIFY" Value="1" After="InstallValidate" Sequence="execute" />
+
+    {{#if allow_downgrades}}
+      <MajorUpgrade Schedule="afterInstallInitialize" AllowDowngrades="yes" />
+    {{else}}
+      <MajorUpgrade
+          Schedule="afterInstallInitialize"
+          DowngradeErrorMessage="!(loc.DowngradeErrorMessage)"
+          AllowSameVersionUpgrades="yes" />
+    {{/if}}
+
+    <Media Id="1" Cabinet="app.cab" EmbedCab="yes" />
+    {{#if license}}
+      <WixVariable Id="WixUILicenseRtf" Value="{{license}}" />
+    {{/if}}
+    <Icon Id="ProductIcon" SourceFile="{{icon_path}}" />
+    <Property Id="ARPPRODUCTICON" Value="ProductIcon" />
+
+    {{#if homepage}}
+      <Property Id="ARPURLINFOABOUT" Value="{{homepage}}" />
+      <Property Id="ARPHELPLINK" Value="{{homepage}}" />
+      <Property Id="ARPURLUPDATEINFO" Value="{{homepage}}" />
+    {{/if}}
+
+    <!-- A fixed-path package must reject pre-existing junctions after
+         CostFinalize initializes formatted directory properties, but before
+         validation or file actions. The command has no caller-controlled path
+         and runs as the interactive user; failure aborts before installation. -->
+    <CustomAction
+        Id="RejectReparseInstallPath"
+        Directory="SystemFolder"
+        Execute="firstSequence"
+        Impersonate="yes"
+        Return="check"
+        ExeCommand='WindowsPowerShell\v1.0\powershell.exe -NoLogo -NoProfile -NonInteractive -WindowStyle Hidden -EncodedCommand JAByAG8AbwB0ACAAPQAgAEoAbwBpAG4ALQBQAGEAdABoACAAKABbAEUAbgB2AGkAcgBvAG4AbQBlAG4AdABdADoAOgBHAGUAdABGAG8AbABkAGUAcgBQAGEAdABoACgAWwBFAG4AdgBpAHIAbwBuAG0AZQBuAHQAKwBTAHAAZQBjAGkAYQBsAEYAbwBsAGQAZQByAF0AOgA6AEwAbwBjAGEAbABBAHAAcABsAGkAYwBhAHQAaQBvAG4ARABhAHQAYQApACkAIAAnAFAAcgBvAGcAcgBhAG0AcwAnADsAIAAkAHAAYQB0AGgAcwAgAD0AIABAACgAJAByAG8AbwB0ACwAIAAoAEoAbwBpAG4ALQBQAGEAdABoACAAJAByAG8AbwB0ACAAJwBBAGkAcgBXAGkAawBpACcAKQApADsAIABmAG8AcgBlAGEAYwBoACAAKAAkAHAAYQB0AGgAIABpAG4AIAAkAHAAYQB0AGgAcwApACAAewAgAGkAZgAgACgAVABlAHMAdAAtAFAAYQB0AGgAIAAtAEwAaQB0AGUAcgBhAGwAUABhAHQAaAAgACQAcABhAHQAaAApACAAewAgACQAaQB0AGUAbQAgAD0AIABHAGUAdAAtAEkAdABlAG0AIAAtAEwAaQB0AGUAcgBhAGwAUABhAHQAaAAgACQAcABhAHQAaAAgAC0ARgBvAHIAYwBlACAALQBFAHIAcgBvAHIAQQBjAHQAaQBvAG4AIABTAHQAbwBwADsAIABpAGYAIAAoACgAJABpAHQAZQBtAC4AQQB0AHQAcgBpAGIAdQB0AGUAcwAgAC0AYgBhAG4AZAAgAFsASQBPAC4ARgBpAGwAZQBBAHQAdAByAGkAYgB1AHQAZQBzAF0AOgA6AFIAZQBwAGEAcgBzAGUAUABvAGkAbgB0ACkAIAAtAG4AZQAgADAAKQAgAHsAIABlAHgAaQB0ACAAMgAzACAAfQAgAH0AIAB9ADsAIABlAHgAaQB0ACAAMAA=' />
+    <CustomAction
+        Id="RemoveExactAutostart"
+        Directory="SystemFolder"
+        Execute="immediate"
+        Impersonate="yes"
+        Return="check"
+        ExeCommand='WindowsPowerShell\v1.0\powershell.exe -NoLogo -NoProfile -NonInteractive -WindowStyle Hidden -Command "&amp; [\{] $key = &apos;HKCU:\Software\Microsoft\Windows\CurrentVersion\Run&apos;; $expected = &apos;&quot;[INSTALLDIR]airwiki.exe&quot; --background&apos;; $current = (Get-ItemProperty -LiteralPath $key -Name &apos;AirWiki&apos; -ErrorAction SilentlyContinue).AirWiki; if ($null -ne $current -and [\[]string[\]]::Equals([\[]string[\]]$current, $expected, [\[]StringComparison[\]]::Ordinal)) [\{] Remove-ItemProperty -LiteralPath $key -Name &apos;AirWiki&apos; -ErrorAction Stop [\}]; exit 0 [\}]"' />
+
+    <InstallUISequence>
+      <Custom Action="RejectReparseInstallPath" After="CostFinalize">NOT Installed</Custom>
+    </InstallUISequence>
+    <InstallExecuteSequence>
+      <Custom Action="RejectReparseInstallPath" After="CostFinalize">NOT Installed</Custom>
+      <Custom Action="RemoveExactAutostart" Before="RemoveFiles"><![CDATA[(REMOVE = "ALL") AND NOT UPGRADINGPRODUCTCODE]]></Custom>
+      <RemoveShortcuts>Installed AND NOT UPGRADINGPRODUCTCODE</RemoveShortcuts>
+    </InstallExecuteSequence>
+
+    <Directory Id="TARGETDIR" Name="SourceDir">
+      <Directory Id="LocalAppDataFolder">
+        <Directory Id="AirWikiProgramsFolder" Name="Programs">
+          <Directory Id="INSTALLDIR" Name="{{product_name}}" />
+        </Directory>
+      </Directory>
+      <Directory Id="SystemFolder" />
+      <Directory Id="ProgramMenuFolder">
+        <Directory Id="ApplicationProgramsFolder" Name="{{product_name}}" />
+      </Directory>
+    </Directory>
+
+    <DirectoryRef Id="INSTALLDIR">
+      <Component Id="RegistryEntries" Guid="*">
+        <RegistryKey Root="HKCU" Key="Software\{{manufacturer}}\{{product_name}}">
+          <RegistryValue Name="InstallDir" Type="string" Value="[INSTALLDIR]" KeyPath="yes" />
+        </RegistryKey>
+        <RemoveFolder Id="RemoveAirWikiInstallDirectory" Directory="INSTALLDIR" On="uninstall" />
+        <RemoveFolder Id="RemoveAirWikiProgramsDirectory" Directory="AirWikiProgramsFolder" On="uninstall" />
+      </Component>
+
+      <Component Id="Path" Guid="{{path_component_guid}}" Win64="$(var.Win64)">
+        <File Id="Path" Source="{{main_binary_path}}" Checksum="yes" />
+        <RegistryValue Root="HKCU" Key="Software\io.github.airwiki\AirWiki\Components" Name="MainExecutable" Type="integer" Value="1" KeyPath="yes" />
+      </Component>
+
+      {{#each binaries as |bin| ~}}
+      <Component Id="{{bin.id}}" Guid="{{bin.guid}}" Win64="$(var.Win64)">
+        <File Id="Bin_{{bin.id}}" Source="{{bin.path}}" />
+        <RegistryValue Root="HKCU" Key="Software\io.github.airwiki\AirWiki\Components" Name="{{bin.id}}" Type="integer" Value="1" KeyPath="yes" />
+      </Component>
+      {{/each~}}
+
+      {{resources}}
+    </DirectoryRef>
+
+    <DirectoryRef Id="ApplicationProgramsFolder">
+      <Component Id="ApplicationShortcut" Guid="*">
+        <Shortcut
+            Id="ApplicationStartMenuShortcut"
+            Name="{{product_name}}"
+            Description="{{product_name}}"
+            Target="[!Path]"
+            Icon="ProductIcon"
+            WorkingDirectory="INSTALLDIR">
+          <ShortcutProperty Key="System.AppUserModel.ID" Value="{{bundle_id}}" />
+        </Shortcut>
+        <RemoveFolder Id="ApplicationProgramsFolder" On="uninstall" />
+        <RegistryValue
+            Root="HKCU"
+            Key="Software\{{manufacturer}}\{{product_name}}"
+            Name="Start Menu Shortcut"
+            Type="integer"
+            Value="1"
+            KeyPath="yes" />
+      </Component>
+    </DirectoryRef>
+
+    <Feature
+        Id="MainProgram"
+        Title="{{product_name}}"
+        Level="1"
+        AllowAdvertise="no"
+        Display="expand"
+        Absent="disallow">
+      <ComponentRef Id="RegistryEntries" />
+      <ComponentRef Id="Path" />
+      <ComponentRef Id="ApplicationShortcut" />
+      {{#each resource_file_ids as |resource_file_id| ~}}
+      <ComponentRef Id="{{resource_file_id}}" />
+      {{/each~}}
+      {{#each binaries as |bin| ~}}
+      <ComponentRef Id="{{bin.id}}" />
+      {{/each~}}
+    </Feature>
+
+    <Feature Id="External" AllowAdvertise="no" Absent="disallow">
+      {{#each component_group_refs as |id| ~}}
+      <ComponentGroupRef Id="{{id}}" />
+      {{/each~}}
+      {{#each component_refs as |id| ~}}
+      <ComponentRef Id="{{id}}" />
+      {{/each~}}
+      {{#each feature_group_refs as |id| ~}}
+      <FeatureGroupRef Id="{{id}}" />
+      {{/each~}}
+      {{#each feature_refs as |id| ~}}
+      <FeatureRef Id="{{id}}" />
+      {{/each~}}
+      {{#each merge_refs as |id| ~}}
+      <MergeRef Id="{{id}}" />
+      {{/each~}}
+    </Feature>
+
+    {{#if install_webview}}
+    <Property Id="INSTALLED_WEBVIEW2_VERSION">
+      <RegistrySearch Id="Webview2VersionSystemx64" Root="HKLM" Key="SOFTWARE\WOW6432Node\Microsoft\EdgeUpdate\Clients\{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}" Name="pv" Type="raw" />
+      <RegistrySearch Id="Webview2VersionSystemx86" Root="HKLM" Key="SOFTWARE\Microsoft\EdgeUpdate\Clients\{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}" Name="pv" Type="raw" />
+      <RegistrySearch Id="Webview2VersionUser" Root="HKCU" Key="SOFTWARE\Microsoft\EdgeUpdate\Clients\{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}" Name="pv" Type="raw" />
+    </Property>
+
+    {{#if download_bootstrapper}}
+    <CustomAction
+        Id="DownloadAndInvokeBootstrapper"
+        Directory="INSTALLDIR"
+        Execute="deferred"
+        Impersonate="yes"
+        ExeCommand='powershell.exe -NoLogo -NoProfile -NonInteractive -WindowStyle Hidden -Command "&amp; [\{] [\[]Net.ServicePointManager[\]]::SecurityProtocol = [\[]Net.SecurityProtocolType[\]]::Tls12; $target = Join-Path ([\[]IO.Path[\]]::GetTempPath()) &apos;MicrosoftEdgeWebView2Setup.exe&apos;; Invoke-WebRequest -UseBasicParsing -Uri &apos;https://go.microsoft.com/fwlink/p/?LinkId=2124703&apos; -OutFile $target; $process = Start-Process -FilePath $target -ArgumentList &apos;{{webview_installer_args}} /install&apos; -Wait -PassThru; exit $process.ExitCode [\}]"'
+        Return="check" />
+    <InstallExecuteSequence>
+      <Custom Action="DownloadAndInvokeBootstrapper" Before="InstallFinalize"><![CDATA[NOT(REMOVE OR INSTALLED_WEBVIEW2_VERSION)]]></Custom>
+    </InstallExecuteSequence>
+    {{/if}}
+    {{/if}}
+
+    <Property Id="WIXUI_EXITDIALOGOPTIONALCHECKBOXTEXT" Value="!(loc.LaunchApp)" />
+    <Property Id="WIXUI_EXITDIALOGOPTIONALCHECKBOX" Value="1" />
+    <CustomAction Id="LaunchApplication" Impersonate="yes" FileKey="Path" ExeCommand="[LAUNCHAPPARGS]" Return="asyncNoWait" />
+    <UI>
+      <Publish Dialog="ExitDialog" Control="Finish" Event="DoAction" Value="LaunchApplication">WIXUI_EXITDIALOGOPTIONALCHECKBOX = 1 AND NOT Installed</Publish>
+    </UI>
+    <UIRef Id="WixUI_Minimal" />
+
+    <InstallExecuteSequence>
+      <Custom Action="LaunchApplication" After="InstallFinalize">AUTOLAUNCHAPP AND NOT Installed</Custom>
+    </InstallExecuteSequence>
+    <SetProperty Id="ARPINSTALLLOCATION" Value="[INSTALLDIR]" After="CostFinalize" />
+  </Product>
+</Wix>

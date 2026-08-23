@@ -1,0 +1,187 @@
+name: Windows signed MSI candidate
+
+on:
+  workflow_call:
+    inputs:
+      version:
+        description: Stable version that exactly matches the source manifests
+        required: true
+        type: string
+      commit_sha:
+        description: Full commit SHA at the tip of main
+        required: true
+        type: string
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Stable version that exactly matches the source manifests
+        required: true
+        type: string
+      commit_sha:
+        description: Full commit SHA at the tip of main
+        required: true
+        type: string
+
+permissions:
+  actions: read
+  contents: read
+
+concurrency:
+  group: windows-signpath-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  CARGO_TERM_COLOR: always
+  AIRWIKI_UPDATE_ENDPOINT: https://github.com/airwiki/airwiki/releases/latest/download/latest.json
+  AIRWIKI_RELEASE_VERSION: ${{ inputs.version }}
+  AIRWIKI_RELEASE_COMMIT: ${{ inputs.commit_sha }}
+
+jobs:
+  build-signing-inputs:
+    name: Build origin-verified binaries
+    runs-on: windows-2022
+    timeout-minutes: 60
+    outputs:
+      artifact-id: ${{ steps.upload.outputs.artifact-id }}
+    env:
+      AIRWIKI_UPDATER_PUBLIC_KEY: ${{ vars.AIRWIKI_UPDATER_PUBLIC_KEY }}
+      AIRWIKI_WINDOWS_SIGNER_SHA256: ${{ vars.AIRWIKI_WINDOWS_SIGNER_SHA256 }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.commit_sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6.5.0
+        with:
+          node-version: 24.15.0
+          package-manager-cache: false
+      - name: Validate exact release source
+        shell: powershell
+        run: |
+          if ($env:GITHUB_REPOSITORY -cne "airwiki/airwiki") {
+            throw "release signing is restricted to airwiki/airwiki"
+          }
+          $Commit = (git rev-parse HEAD).Trim()
+          $Main = (git rev-parse origin/main).Trim()
+          if ($Commit -cne $env:AIRWIKI_RELEASE_COMMIT -or $Commit -cne $Main) {
+            throw "release commit must be the exact current tip of main"
+          }
+          node.exe packaging/release-version.mjs --expect $env:AIRWIKI_RELEASE_VERSION
+          if ($LASTEXITCODE -ne 0) { throw "release version validation failed" }
+      - uses: dtolnay/rust-toolchain@fa04a1451ff1842e2626ccb99004d0195b455a88 # master
+        with:
+          toolchain: 1.96.1
+          targets: x86_64-pc-windows-msvc
+      - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+      - name: Install pinned frontend dependencies
+        shell: powershell
+        run: |
+          corepack enable
+          corepack prepare pnpm@10.18.3 --activate
+          pnpm.cmd --dir apps/desktop/ui install --frozen-lockfile --ignore-scripts --prod=false
+          pnpm.cmd --dir apps/desktop/ui run licenses:check windows-x64
+      - name: Prepare unsigned SignPath input
+        shell: powershell
+        run: ./packaging/prepare-signpath-windows-binaries.ps1
+      - id: upload
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: airwiki-windows-signpath-binaries
+          path: target/signpath/windows-binaries
+          if-no-files-found: error
+          retention-days: 7
+
+  sign-and-package:
+    name: Sign binaries and MSI
+    needs: build-signing-inputs
+    runs-on: windows-2022
+    timeout-minutes: 90
+    environment: windows-signing
+    env:
+      AIRWIKI_UPDATER_PUBLIC_KEY: ${{ vars.AIRWIKI_UPDATER_PUBLIC_KEY }}
+      AIRWIKI_WINDOWS_SIGNER_SHA256: ${{ vars.AIRWIKI_WINDOWS_SIGNER_SHA256 }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.commit_sha }}
+          persist-credentials: false
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6.5.0
+        with:
+          node-version: 24.15.0
+          package-manager-cache: false
+      - uses: dtolnay/rust-toolchain@fa04a1451ff1842e2626ccb99004d0195b455a88 # master
+        with:
+          toolchain: 1.96.1
+          targets: x86_64-pc-windows-msvc
+      - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+      - name: Install pinned frontend dependencies
+        shell: powershell
+        run: |
+          corepack enable
+          corepack prepare pnpm@10.18.3 --activate
+          pnpm.cmd --dir apps/desktop/ui install --frozen-lockfile --ignore-scripts --prod=false
+          pnpm.cmd --dir apps/desktop/ui run licenses:check windows-x64
+      - name: Sign release binaries with SignPath
+        uses: signpath/github-action-submit-signing-request@b9d91eadd323de506c0c81cf0c7fe7438f3360fd # v2.2
+        with:
+          api-token: ${{ secrets.SIGNPATH_API_TOKEN }}
+          organization-id: ${{ vars.SIGNPATH_ORGANIZATION_ID }}
+          project-slug: ${{ vars.SIGNPATH_PROJECT_SLUG }}
+          signing-policy-slug: ${{ vars.SIGNPATH_SIGNING_POLICY_SLUG }}
+          artifact-configuration-slug: ${{ vars.SIGNPATH_BINARIES_CONFIGURATION_SLUG }}
+          parameters: |
+            version: "${{ env.AIRWIKI_RELEASE_VERSION }}"
+          github-artifact-id: ${{ needs.build-signing-inputs.outputs.artifact-id }}
+          output-artifact-directory: target/signpath/windows-binaries-signed
+          wait-for-completion-timeout-in-seconds: "1200"
+      - name: Build MSI from signed binaries
+        shell: powershell
+        run: |
+          ./packaging/package-signpath-windows-msi.ps1 `
+            -SignedBinaryRoot target/signpath/windows-binaries-signed
+      - id: upload-msi
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: airwiki-windows-signpath-msi
+          path: target/signpath/windows-msi
+          if-no-files-found: error
+          retention-days: 7
+      - name: Sign MSI containers with SignPath
+        uses: signpath/github-action-submit-signing-request@b9d91eadd323de506c0c81cf0c7fe7438f3360fd # v2.2
+        with:
+          api-token: ${{ secrets.SIGNPATH_API_TOKEN }}
+          organization-id: ${{ vars.SIGNPATH_ORGANIZATION_ID }}
+          project-slug: ${{ vars.SIGNPATH_PROJECT_SLUG }}
+          signing-policy-slug: ${{ vars.SIGNPATH_SIGNING_POLICY_SLUG }}
+          artifact-configuration-slug: ${{ vars.SIGNPATH_MSI_CONFIGURATION_SLUG }}
+          parameters: |
+            version: "${{ env.AIRWIKI_RELEASE_VERSION }}"
+          github-artifact-id: ${{ steps.upload-msi.outputs.artifact-id }}
+          output-artifact-directory: target/packages/windows-signed
+          wait-for-completion-timeout-in-seconds: "1200"
+      - name: Sign final MSI bytes for the Tauri updater
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        shell: powershell
+        run: |
+          if ([string]::IsNullOrWhiteSpace($env:TAURI_SIGNING_PRIVATE_KEY)) {
+            throw "Tauri updater signing key is missing"
+          }
+          $Tauri = Resolve-Path apps\desktop\ui\node_modules\.bin\tauri.cmd
+          $Installers = @(Get-ChildItem target\packages\windows-signed -File -Filter *.msi)
+          if ($Installers.Count -ne 2) { throw "Expected two signed localized MSI packages" }
+          foreach ($Installer in $Installers) {
+            & $Tauri signer sign $Installer.FullName
+            if ($LASTEXITCODE -ne 0) { throw "Tauri updater signing failed" }
+          }
+      - name: Verify signed MSI candidate
+        shell: powershell
+        run: ./packaging/verify-signpath-windows-msi.ps1 -PackageRoot target/packages/windows-signed
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: airwiki-windows-x64-signed-msi
+          path: target/packages/windows-signed
+          if-no-files-found: error
+          retention-days: 14

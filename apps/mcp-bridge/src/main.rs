@@ -2,8 +2,10 @@ use std::{env, ffi::OsString, process::ExitCode, str::FromStr};
 
 use airwiki_mcp::McpClientKind;
 
-const USAGE: &str =
-    "usage: airwiki-mcp-bridge --client <chatgpt-desktop|claude-desktop|gemini-cli>";
+const USAGE: &str = concat!(
+    "usage: airwiki-mcp-bridge --client ",
+    "<chatgpt-desktop|claude-desktop|claude-code|gemini-cli|generic-mcp>"
+);
 
 #[tokio::main]
 async fn main() -> ExitCode {
@@ -51,8 +53,11 @@ mod tests {
         for (value, expected) in [
             ("chatgpt-desktop", McpClientKind::ChatGptDesktop),
             ("claude-desktop", McpClientKind::ClaudeDesktop),
+            ("claude-code", McpClientKind::ClaudeCode),
             ("gemini-cli", McpClientKind::GeminiCli),
+            ("generic-mcp", McpClientKind::GenericMcp),
         ] {
+            assert!(USAGE.contains(value));
             let parsed = parse_client([OsString::from("--client"), OsString::from(value)])
                 .expect("supported client");
             assert_eq!(parsed, expected);

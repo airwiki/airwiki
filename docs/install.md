@@ -5,10 +5,12 @@ This guide covers the tested development targets: macOS arm64 and Windows
 subnet with multicast available. Hiding the window keeps the node running;
 **Exit completely** stops it.
 
-AirWiki is still a development candidate. Until an official release
-exists, use only artifacts supplied through an agreed private channel and verify
-their SHA-256 independently. Do not bypass Gatekeeper, SmartScreen, model hashes,
-or runtime verification.
+AirWiki is still a development candidate. When an official release exists, use
+only the signed installers on the
+[latest GitHub release](https://github.com/airwiki/airwiki/releases/latest) and
+verify them against its `SHA256SUMS`. Until then, use only artifacts supplied
+through an agreed private channel and verify their SHA-256 independently. Do not
+bypass Gatekeeper, SmartScreen, model hashes, or runtime verification.
 
 ## Before installing
 
@@ -25,17 +27,25 @@ or runtime verification.
 1. Open the DMG and move **AirWiki** to Applications.
 2. For an internal candidate, compare its hash through the agreed channel. A
    future public release must pass Developer ID signing and notarization.
-3. The onboarding wizard explains local-network collaboration before requesting
+3. When replacing one ad-hoc internal candidate with another, macOS can ask
+   whether the new build may access AirWiki's existing device identity in the
+   login Keychain. Authorize that access only after verifying the candidate
+   hash. Cancelling fails closed and never creates a replacement identity.
+4. The onboarding wizard explains local-network collaboration before requesting
    permission. Grant it only when LAN search is desired.
-4. Review the hardware recommendation, licenses, and remaining download size.
-5. Allow the application to prepare only the selected local model assets.
+5. Review the hardware recommendation, licenses, and remaining download size.
+6. Allow the application to prepare only the selected local model assets.
 
 No daemon, system service, or Internet-facing port is installed. Optional
 per-user autostart uses `SMAppService` only after consent.
 
 ## Windows x64
 
-1. Run the per-user NSIS installer from an interactive desktop session.
+1. Run the per-user MSI installer from an interactive desktop session.
+   If Microsoft Edge WebView2 is absent, the installer downloads Microsoft's
+   bootstrapper and installs the runtime before AirWiki. A network failure is
+   reported without a partial AirWiki install and can be retried; the package
+   intentionally does not embed the offline WebView2 runtime.
 2. Verify Authenticode when using a signed candidate. An unknown-publisher
    warning means the artifact is not a validated public release.
 3. Keep LAN disabled on a Public network. On a Private or Domain network, the
@@ -49,8 +59,10 @@ incoming connections,” or delete inherited broad rules. Resolve those states i
 Windows settings or with the device administrator, then select **Check again**.
 Cancelling UAC leaves the node in local-only mode.
 
-Uninstall keeps local data by default. Removing application data and managed
-firewall rules are separate, explicit options.
+Windows Installer removes only immutable application files. Local data is kept
+by default. Remove managed firewall rules from AirWiki before uninstalling when
+that access is no longer wanted; cancelling UAC keeps the rules and does not
+affect the application removal.
 
 ## First start and local models
 
@@ -66,10 +78,16 @@ silently replaces the active model.
 | Quality | Prefer the larger supported model and visibly fall back when hardware is insufficient. |
 
 A clean installation prepares one generative model, multilingual embeddings,
-and the local relevance classifier. A verified legacy Qwen installation may be
-retained as a fallback but is not downloaded on a clean install. Candidate model
-updates become active only after verification and restart; a failed smoke test
-keeps the previous model.
+and the local relevance classifier. On the minimum-memory Windows profile,
+Automatic and Efficient select the smaller pinned Qwen model so the complete
+installed acceptance journey remains representative; systems with more memory
+select the eligible Gemma profile. Candidate model updates become active only
+after verification and restart; a failed smoke test keeps the previous model.
+Activation uses one compact, bounded strict-JSON health probe. The catalog's
+production enrichment budget and hardware-specific request deadline remain
+unchanged. The activation probe does not replace installed validation of real
+enrichment, human review and publication, and MCP retrieval from a synthetic
+document.
 
 The pinned model revisions, filenames, sizes, hashes, and platform constraints
 live in the `airwiki-inference` catalog and its tests. Build manifests authenticate
@@ -80,12 +98,13 @@ Before enabling search, startup:
 
 1. verifies installed hashes and runtime provenance;
 2. loads embeddings and the relevance classifier;
-3. runs local embedding, relevance, and enrichment smoke tests; and
-4. reconciles every watched collection.
+3. runs local embedding and relevance smoke tests plus the bounded strict-JSON
+   generation health probe; and
+4. reconciles every watched folder Wiki.
 
 LAN and MCP remain closed when any required step fails.
 
-## Collection automation and reconciliation
+## Wiki automation and reconciliation
 
 Filesystem watchers reduce latency but are not a source of truth. AirWiki
 runs a complete idempotent scan at startup and every 15 minutes while the process
@@ -93,7 +112,7 @@ and required models remain ready.
 
 - Repeating a scan over unchanged content creates no duplicate revisions, jobs,
   or tombstones.
-- An incomplete traversal quarantines the collection and withdraws it from
+- An incomplete traversal quarantines the Wiki and withdraws it from
   search, but does not interpret uncertain absences as deletions.
 - A changed source withdraws the published revision before processing the new
   content.
@@ -106,15 +125,20 @@ and required models remain ready.
 
 See [recovery](recovery.md) for failure paths.
 
-## Create a synthetic collection
+## Create or import a synthetic Wiki
 
 1. Copy `fixtures/mac` and `fixtures/windows` outside the repository on their
    respective devices.
-2. Create one collection per copied folder.
-3. Keep external chat disabled during the first local test.
-4. Wait for automatic ingestion and review every proposal.
-5. Publish only recognized synthetic content.
-6. Enable peer sharing and grant only the synthetic Atlas collection when the
+2. Select **New Wiki → From a folder** for each copied folder. Leave continuous
+   indexing enabled for this acceptance journey; disabling it stops discovery
+   of new files but keeps manual update available.
+3. To validate portable knowledge separately, use **New Wiki → Import OKF** and
+   review the validation summary before AirWiki copies the bundle. Imported
+   Wikis have no source watcher and remain managed from their OKF content.
+4. Keep external chat disabled during the first local test.
+5. Wait for automatic ingestion and review every proposal.
+6. Publish only recognized synthetic content.
+7. Enable peer sharing and grant only the synthetic Atlas Wiki when the
    two-node test requests it.
 
 Use the [two-node runbook](two-node-runbook.md) for acceptance. A visible screen
@@ -122,12 +146,15 @@ is not evidence by itself; verify the stated effect.
 
 ## Connect a local chat client
 
-After preflight is ready, open **Integrations** and refresh detection. AirWiki can register ChatGPT Desktop/Work and Gemini CLI through supported CLIs and
-open Claude's MCPB installer. Every configuration change shows the client,
-versioned bridge, and cloud boundary before confirmation.
+After preflight is ready, open **Connections** and refresh detection. AirWiki
+can register ChatGPT Desktop/Work, Codex, Claude Code and Gemini CLI through
+supported CLIs, and can open Claude Desktop's MCPB installer. For clients with
+documented user skills, one confirmation installs the local MCP connection and
+the global AirWiki workflow guide; the prompt lists every global file first.
+Open a new conversation after installing or updating the guide.
 
 **Allow in external chats** is independent from **Share with authorized peers**.
-Connecting a client never enables a collection. See
+Connecting a client never enables a Wiki, sharing or publication. See
 [local chat integrations](chat-integrations.md).
 
 ## Background operation, autostart, and updates
@@ -138,23 +165,31 @@ onboarding consent and can be disabled later.
 - macOS registers the bundled per-user agent through `SMAppService`.
 - Windows registers one exact command under the current user's Run key.
 - No service survives logout.
-- Updates require confirmation and never change collections, permissions, or
+- Updates require confirmation and never change Wikis, permissions, or
   models implicitly.
 - Version checks send no documents, queries, PeerIds, or installation identifier.
 - Offline checks are non-blocking; invalid signatures and downgrades fail closed.
 
-If a watched root becomes unavailable, AirWiki quarantines the collection,
+If a watched root becomes unavailable, AirWiki quarantines the Wiki,
 retries the watcher, and performs a new scan when access returns. Recovered
 documents require review before publication.
 
 ## Windows uninstall
 
-The uninstaller removes autostart only when the stored command exactly matches
-the AirWiki entry. It can optionally request UAC to remove the two exact
-managed firewall rules. Cancelling that request does not block uninstall.
+Select **Quit completely** from the AirWiki tray menu before starting the
+uninstall. Closing only the window may leave AirWiki running in the tray so it
+can continue serving approved local integrations and network requests.
 
-Local data is also retained unless explicitly selected for deletion. Watched
-source folders are never application-data paths and are never removed.
+Windows Installer removes the fixed per-user program and Start-menu entry. The
+application removes autostart only when the stored command exactly matches the
+AirWiki entry. Disable LAN sharing in AirWiki before uninstalling to request
+removal of the two exact managed firewall rules; cancelling that UAC request
+does not block later uninstall.
+
+Local data is retained. The MSI transition is not complete until an explicit,
+separately confirmed data-removal path has passed the same containment tests as
+the previous candidate. Watched source folders are never application-data paths
+and are never removed.
 
 ## Local data
 

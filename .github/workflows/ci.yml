@@ -16,6 +16,63 @@ env:
   CARGO_TERM_COLOR: always
 
 jobs:
+  frontend:
+    name: Frontend checks (${{ matrix.target }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-14
+            target: macos-arm64
+          - os: windows-2022
+            target: windows-x64
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6.5.0
+        with:
+          node-version: 24.15.0
+          package-manager-cache: false
+      - name: Activate pinned pnpm
+        shell: bash
+        run: |
+          corepack enable
+          corepack prepare pnpm@10.18.3 --activate
+      - name: Install pinned frontend dependencies
+        shell: bash
+        run: pnpm --dir apps/desktop/ui install --frozen-lockfile --ignore-scripts --prod=false
+      - name: Type and Svelte checks
+        shell: bash
+        run: pnpm --dir apps/desktop/ui run check
+      - name: Lint
+        shell: bash
+        run: pnpm --dir apps/desktop/ui run lint
+      - name: Unit and accessibility tests
+        shell: bash
+        run: pnpm --dir apps/desktop/ui run test
+      - name: Native E2E contract typecheck
+        shell: bash
+        run: pnpm --dir apps/desktop/ui run check:e2e
+      - name: Platform npm license inventory
+        shell: bash
+        run: pnpm --dir apps/desktop/ui run licenses:check ${{ matrix.target }}
+      - name: Generate stale platform inventory for review
+        if: failure()
+        shell: bash
+        run: pnpm --dir apps/desktop/ui run licenses:generate ${{ matrix.target }}
+      - name: Upload stale platform inventory for review
+        if: failure()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: npm-license-inventory-${{ matrix.target }}
+          path: resources/licenses/NPM_LICENSES_*.md
+          if-no-files-found: error
+          retention-days: 7
+      - name: Production dependency advisories
+        shell: bash
+        run: pnpm --dir apps/desktop/ui audit --audit-level high --prod
+
   native:
     name: Rust checks (${{ matrix.os }})
     strategy:
@@ -23,9 +80,13 @@ jobs:
       matrix:
         os: [macos-14, windows-2022]
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 45
+    timeout-minutes: 60
     steps:
-      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6.5.0
+        with:
+          node-version: 24.15.0
+          package-manager-cache: false
       - uses: dtolnay/rust-toolchain@fa04a1451ff1842e2626ccb99004d0195b455a88 # master
         with:
           toolchain: 1.96.1
@@ -35,43 +96,105 @@ jobs:
         if: runner.os == 'Windows'
         shell: powershell
         run: ./packaging/test-windows-safe-staging.ps1
+      - name: Windows extended-length path policy
+        if: runner.os == 'Windows'
+        shell: powershell
+        run: ./packaging/test-windows-long-paths.ps1
+      - name: macOS beta bootstrap packaging policy
+        if: runner.os == 'macOS'
+        shell: bash
+        run: |
+          install -d -m 0700 target/private
+          printf '%s\n' \
+            '7|2099-01-01T00:00:00Z|synthetic-a|synthetic-endpoint-a;7|2099-01-01T00:00:00Z|synthetic-b|synthetic-endpoint-b' \
+            > target/private/synthetic.bootstrap
+          chmod 0600 target/private/synthetic.bootstrap
+          AIRWIKI_BETA_CANDIDATE_SHA="$(git rev-parse HEAD)" \
+            ./packaging/package-beta-macos.sh \
+              --validate-only target/private/synthetic.bootstrap
+      - name: Windows beta bootstrap packaging policy
+        if: runner.os == 'Windows'
+        shell: powershell
+        run: |
+          New-Item -ItemType Directory -Force target\private | Out-Null
+          Set-Content -LiteralPath target\private\synthetic.bootstrap -NoNewline `
+            -Value '7|2099-01-01T00:00:00Z|synthetic-a|synthetic-endpoint-a;7|2099-01-01T00:00:00Z|synthetic-b|synthetic-endpoint-b'
+          $env:AIRWIKI_BETA_CANDIDATE_SHA = (git rev-parse HEAD).Trim()
+          ./packaging/package-beta-windows.ps1 `
+            -BootstrapFile target\private\synthetic.bootstrap `
+            -ValidateOnly
       - name: Formatting
         run: cargo fmt --all -- --check
       - name: Clippy
         run: cargo clippy --workspace --all-targets --all-features --locked -- -D warnings
       - name: Tests
         run: cargo test --workspace --all-features --locked
+      - name: Rust documentation
+        run: cargo doc --workspace --all-features --no-deps --locked
+      - name: Generated UI contract
+        run: cargo run --locked -p xtask -- ui-bindings check
       - name: Synthetic relevance fixture
         run: cargo run --locked -p xtask -- relevance validate
       - name: Synthetic retrieval pipeline
         run: cargo run --locked -p xtask -- retrieval validate
+      - name: Activate pinned pnpm
+        shell: bash
+        run: |
+          corepack enable
+          corepack prepare pnpm@10.18.3 --activate
+      - name: Install pinned E2E dependencies
+        shell: bash
+        run: pnpm --dir apps/desktop/ui install --frozen-lockfile --ignore-scripts --prod=false
+      - name: Native desktop functional E2E
+        shell: bash
+        env:
+          # Hosted-runner window chrome is not stable enough to select the
+          # dimension-keyed visual baselines. Installed platform acceptance
+          # runs the same journey with the visual matrix enabled.
+          AIRWIKI_E2E_VISUAL: "0"
+        run: pnpm --dir apps/desktop/ui e2e
 
   supply-chain:
     name: Advisories, licenses and sources
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     steps:
-      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6.5.0
+        with:
+          node-version: 24.15.0
+          package-manager-cache: false
       - uses: dtolnay/rust-toolchain@fa04a1451ff1842e2626ccb99004d0195b455a88 # master
         with:
           toolchain: 1.96.1
       - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
       - name: Documentation contracts
         run: cargo run --locked -p xtask -- docs check
+      - name: Release version contract
+        run: |
+          node packaging/release-version.mjs
+          node --test packaging/tests/release-version.test.mjs
+          python3 -m unittest discover -s packaging/tests -p 'test_*.py'
       - name: Reproducible third-party license inventory
         run: cargo run --locked -p xtask -- licenses check
       - name: Install cargo-audit
         run: cargo install cargo-audit --version 0.22.2 --locked
       - name: Dependency advisories
-        # 0118/0119 are constrained to libp2p's mDNS-only hickory build; the
-        # quick-xml advisories are target-Linux dependencies absent from both
-        # supported binaries. All four exceptions are documented in the threat model.
+        # 0118/0119 are constrained to libp2p's mDNS-only hickory build.
+        # Both exceptions are documented in the threat model.
         run: >-
           cargo audit
           --ignore RUSTSEC-2026-0118
           --ignore RUSTSEC-2026-0119
-          --ignore RUSTSEC-2026-0194
-          --ignore RUSTSEC-2026-0195
+      - name: Hickory remains confined to local mDNS
+        shell: bash
+        run: |
+          feature_tree="$(cargo tree --edges features --invert hickory-proto@0.25.2)"
+          grep -q 'libp2p-mdns' <<<"$feature_tree"
+          if grep -Eq 'hickory-resolver|libp2p-dns' <<<"$feature_tree"; then
+            echo 'Hickory escaped the reviewed local-mDNS feature boundary.' >&2
+            exit 1
+          fi
       - name: Install cargo-deny
         run: cargo install cargo-deny --version 0.20.2 --locked
       - name: Dependency policy

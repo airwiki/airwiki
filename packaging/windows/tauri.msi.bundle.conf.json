@@ -1,0 +1,23 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "bundle": {
+    "active": true,
+    "targets": ["msi"],
+    "useLocalToolsDir": true,
+    "icon": ["../../resources/branding/airwiki.ico"],
+    "windows": {
+      "allowDowngrades": false,
+      "webviewInstallMode": {
+        "type": "downloadBootstrapper",
+        "silent": true
+      },
+      "wix": {
+        "upgradeCode": "22b0c55b-2965-57de-887f-27be43e62110",
+        "language": ["en-US", "es-ES"],
+        "template": "../../packaging/windows/installer.wxs",
+        "fragmentPaths": ["../../target/windows-msi-resources.wxs"],
+        "componentGroupRefs": ["AirWikiResources"]
+      }
+    }
+  }
+}

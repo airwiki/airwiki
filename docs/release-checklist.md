@@ -12,11 +12,19 @@ constitute a supported public release.
   distributed package.
 - [x] Protect `main` with pull requests, strict required checks, linear history,
   conversation resolution, and no force pushes or deletion.
-- [ ] Configure protected release environments.
-- [ ] Publish monitored security and Code of Conduct contacts.
+- [x] Configure protected `macos-signing`, `windows-signing`, and
+  `public-release` environments for `main`, with required reviewers,
+  self-review disabled, and administrator bypass disabled.
+- [x] Enable GitHub private vulnerability reporting and link it from the security
+  policy.
+- [ ] Publish a monitored Code of Conduct enforcement contact.
 - [x] Document proportional review and add read-only DCO validation for pull
   requests.
 - [x] Require DCO and CI checks through branch protection or repository rulesets.
+- [x] Require immutable commit SHAs for external GitHub Actions and make both
+  platform frontend checks mandatory on `main`.
+- [x] Enable secret scanning with push protection, Dependabot security updates,
+  and GitHub CodeQL default setup.
 - [ ] Review Apache-2.0, model terms, third-party notices, package metadata, and
   distribution terms with the project owner.
 
@@ -42,7 +50,7 @@ constitute a supported public release.
 - [ ] Notarize and staple the application, updater archive, and final DMG as
   applicable.
 - [ ] Pass `codesign`, `spctl`, `notarytool`, `stapler`, architecture, runtime
-  closure, MCPB, and legal-payload checks.
+  closure, MCPB, DMG checksum, EULA-resource, and legal-payload checks.
 - [ ] Audit the upstream llama.cpp binary against its linked-source and legal
   closure before public redistribution.
 
@@ -50,28 +58,46 @@ constitute a supported public release.
 
 - [ ] Build the pinned llama.cpp runtime twice in isolated roots and require
   byte-identical output plus a complete build manifest.
-- [ ] Sign desktop, bridge, firewall helper, uninstaller, and final NSIS with the
-  approved public-trust publisher identity and RFC3161 timestamps.
+- [ ] Use the origin-verified SignPath workflow to sign the desktop, bridge and
+  firewall helper before packaging, then sign both localized MSI containers
+  with the approved public-trust identity and RFC3161 timestamps.
 - [ ] Validate Authenticode, code-signing EKU, durable publisher identity, PE
-  version metadata, helper elevation manifest, runtime imports, and exact payload.
+  version metadata, helper elevation manifest, runtime imports, nested MSI
+  signatures, and exact payload.
 - [ ] Build MCPB from the already signed bridge and compare its bytes with the
-  installer payload.
-- [ ] Install under a clean standard user, verify the materialized uninstaller,
-  uninstall, and confirm only explicitly selected AirWiki state is removed.
+  MSI payload.
+- [ ] Install both localized MSIs under a clean standard user; verify the fixed
+  per-user path, Start-menu entry, upgrade and uninstall; confirm mutable data is
+  retained unless a separately confirmed cleanup flow is used.
 
 ## Updater and promotion
 
-- [ ] Generate the updater key in a trusted administrative environment.
+- [x] Generate the updater key in a trusted administrative environment and
+  configure the matching public key as a repository variable.
 - [ ] Store encrypted private material and its password separately in a protected
   environment; retain a tested offline recovery copy.
 - [ ] Embed the reviewed public key and stable endpoint in the exact release build.
 - [ ] Cryptographically verify updater signatures after all native signing and
   notarization.
+- [ ] Verify that `latest.json` names the exact release version, platform keys,
+  artifact URLs and detached signatures in the candidate.
 - [ ] Reject invalid signatures, equal versions, downgrades, replayed historical
-  installers, redirects, symlinks, reparse points, and unexpected assets.
+  installers, symlinks, reparse points, and unexpected assets. Treat hosting
+  redirects as untrusted transport and verify the final downloaded bytes with
+  both the updater signature and native platform trust.
 - [ ] Create a draft prerelease tied to the exact audited commit.
+- [ ] Protect `v*` tags against update and deletion; resolve the release target
+  and final tag to the exact audited commit immediately before publication.
+- [ ] Require a candidate newer than the current stable version; permit recovery
+  only when the candidate is already the stable latest release.
 - [ ] Re-download and verify the complete draft before human promotion.
-- [ ] Publish the stable manifest last and never point it at a prerelease.
+- [ ] Match every legal payload and the complete SPDX dependency inventory to
+  the reviewed release commit; match macOS bundle/build metadata and Windows PE
+  metadata to the exact requested version.
+- [ ] Bind both native verification jobs and final publication to the same
+  fingerprinted `SHA256SUMS` inventory.
+- [ ] Keep the stable manifest private and verified until the final release
+  publication; never point it at a prerelease.
 - [ ] Keep the previous stable manifest and artifacts intact on failure.
 
 ## Manual acceptance
@@ -84,7 +110,7 @@ constitute a supported public release.
   fixtures and sanitized evidence.
 - [ ] Wiki repair cancellation writes nothing, confirmed repair withdraws before
   mutation, stale preview is rejected, and ambiguous history remains blocked.
-- [ ] At least five nontechnical participants complete onboarding, collection
+- [ ] At least five nontechnical participants complete onboarding, Wiki
   review, pairing, background recovery, and permission recovery without a terminal
   or internal identifiers.
 - [ ] A human owner approves public promotion after reviewing final hashes,
@@ -93,6 +119,11 @@ constitute a supported public release.
 ## Current deliberate blockers
 
 The official source repository is [airwiki/airwiki](https://github.com/airwiki/airwiki).
-The development baseline still has no public contact, signing credentials,
-updater key, or active signed-release workflow. Clearing any one blocker does not
-waive the others.
+The repository now contains fail-closed preparation and promotion workflows,
+and the protected environments plus macOS credentials are configured. No
+signed and notarized candidate has completed the protected workflow yet. Public
+release remains blocked on Windows public-trust signing configuration,
+validated updater-key recovery custody, a monitored Code of Conduct contact,
+legal review and the complete installed acceptance matrix. Clearing any one
+blocker does not waive the others. Follow the
+[public release process](release-process.md).

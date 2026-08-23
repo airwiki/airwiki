@@ -2,7 +2,7 @@ use std::{
     fmt,
     net::{IpAddr, Ipv4Addr, SocketAddr, TcpListener},
     path::PathBuf,
-    process::Stdio,
+    process::{ExitStatus, Stdio},
     sync::Arc,
     time::{Duration, Instant},
 };
@@ -11,9 +11,14 @@ use anyhow::{Context, Result, bail};
 use rand::RngCore;
 use tokio::{
     process::{Child, Command},
-    sync::Mutex,
+    sync::{Mutex, Semaphore},
 };
 use tracing::{info, warn};
+
+#[cfg(target_os = "macos")]
+use sysinfo::{ProcessesToUpdate, Signal, System};
+#[cfg(target_os = "windows")]
+use windows::Win32::System::Threading::CREATE_NO_WINDOW;
 
 #[cfg(target_os = "windows")]
 mod child_process_guard {
@@ -97,6 +102,65 @@ mod child_process_guard {
 }
 
 use child_process_guard::ChildProcessGuard;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RuntimeExitClass {
+    None,
+    Success,
+    Failure,
+    Unknown,
+}
+
+impl RuntimeExitClass {
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::None => "none",
+            Self::Success => "success",
+            Self::Failure => "failure",
+            Self::Unknown => "unknown",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LlamaSupervisorFailureKind {
+    RuntimeSpawn,
+    RuntimeExitedBeforeHealth,
+    RuntimeHealthTimeout,
+    RuntimeState,
+}
+
+impl LlamaSupervisorFailureKind {
+    pub const fn error_kind(self) -> &'static str {
+        match self {
+            Self::RuntimeSpawn => "runtime_spawn",
+            Self::RuntimeExitedBeforeHealth => "runtime_exit_before_health",
+            Self::RuntimeHealthTimeout => "runtime_health_timeout",
+            Self::RuntimeState => "runtime_state",
+        }
+    }
+}
+
+#[derive(Debug, thiserror::Error)]
+#[error("local model runtime failed")]
+pub struct LlamaSupervisorFailure {
+    kind: LlamaSupervisorFailureKind,
+    exit_class: RuntimeExitClass,
+}
+
+impl LlamaSupervisorFailure {
+    const fn new(kind: LlamaSupervisorFailureKind, exit_class: RuntimeExitClass) -> Self {
+        Self { kind, exit_class }
+    }
+
+    pub const fn kind(&self) -> LlamaSupervisorFailureKind {
+        self.kind
+    }
+
+    pub const fn exit_class(&self) -> RuntimeExitClass {
+        self.exit_class
+    }
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ServerReasoningMode {
@@ -184,6 +248,7 @@ struct SpawnedServer {
 
 struct Inner {
     config: SupervisorConfig,
+    operation: Semaphore,
     state: Mutex<Option<RunningServer>>,
     http: reqwest::Client,
 }
@@ -198,6 +263,7 @@ impl LlamaSupervisor {
         let this = Self {
             inner: Arc::new(Inner {
                 config,
+                operation: Semaphore::new(1),
                 state: Mutex::new(None),
                 http: reqwest::Client::new(),
             }),
@@ -207,19 +273,48 @@ impl LlamaSupervisor {
     }
 
     pub async fn ensure_running(&self) -> Result<LlamaEndpoint> {
-        let mut state = self.inner.state.lock().await;
-        if let Some(server) = state.as_mut() {
-            if server.child.try_wait()?.is_none() {
-                server.last_used = Instant::now();
-                return Ok(server.endpoint.clone());
+        let _operation = self
+            .inner
+            .operation
+            .acquire()
+            .await
+            .context("llama-server operation coordinator closed")?;
+        {
+            let mut state = self.inner.state.lock().await;
+            if let Some(server) = state.as_mut() {
+                let status = server.child.try_wait().map_err(|error| {
+                    anyhow::Error::new(error).context(LlamaSupervisorFailure::new(
+                        LlamaSupervisorFailureKind::RuntimeState,
+                        RuntimeExitClass::Unknown,
+                    ))
+                })?;
+                if status.is_none() {
+                    server.last_used = Instant::now();
+                    return Ok(server.endpoint.clone());
+                }
+                *state = None;
             }
-            *state = None;
         }
 
-        let spawned = spawn_server(&self.inner.config).await?;
+        #[cfg(target_os = "macos")]
+        terminate_stale_server_processes(self.inner.config.server_binary.clone())
+            .await
+            .map_err(|error| {
+                error.context(LlamaSupervisorFailure::new(
+                    LlamaSupervisorFailureKind::RuntimeSpawn,
+                    RuntimeExitClass::None,
+                ))
+            })?;
+
+        let mut spawned = spawn_server(&self.inner.config).await.map_err(|error| {
+            error.context(LlamaSupervisorFailure::new(
+                LlamaSupervisorFailureKind::RuntimeSpawn,
+                RuntimeExitClass::None,
+            ))
+        })?;
         wait_until_healthy(
             &self.inner.http,
-            &spawned,
+            &mut spawned,
             self.inner.config.startup_timeout,
         )
         .await?;
@@ -228,8 +323,8 @@ impl LlamaSupervisor {
             process_guard,
             endpoint,
         } = spawned;
-        info!(url = endpoint.base_url, "llama-server is ready on loopback");
-        *state = Some(RunningServer {
+        info!("llama-server is ready on loopback");
+        *self.inner.state.lock().await = Some(RunningServer {
             child,
             _process_guard: process_guard,
             endpoint: endpoint.clone(),
@@ -245,8 +340,14 @@ impl LlamaSupervisor {
     }
 
     pub async fn stop(&self) -> Result<()> {
-        let mut state = self.inner.state.lock().await;
-        if let Some(mut server) = state.take() {
+        let _operation = self
+            .inner
+            .operation
+            .acquire()
+            .await
+            .context("llama-server operation coordinator closed")?;
+        let server = self.inner.state.lock().await.take();
+        if let Some(mut server) = server {
             server.child.kill().await.ok();
             server.child.wait().await.ok();
             info!("llama-server stopped");
@@ -261,16 +362,117 @@ impl LlamaSupervisor {
             loop {
                 timer.tick().await;
                 let Some(inner) = weak.upgrade() else { break };
-                let mut state = inner.state.lock().await;
-                let should_stop = state
-                    .as_ref()
-                    .is_some_and(|server| server.last_used.elapsed() >= inner.config.idle_timeout);
-                if should_stop && let Some(mut server) = state.take() {
+                let Ok(_operation) = inner.operation.acquire().await else {
+                    break;
+                };
+                let server = {
+                    let mut state = inner.state.lock().await;
+                    let should_stop = state.as_ref().is_some_and(|server| {
+                        server.last_used.elapsed() >= inner.config.idle_timeout
+                    });
+                    if should_stop { state.take() } else { None }
+                };
+                if let Some(mut server) = server {
                     warn!("stopping idle llama-server");
                     server.child.kill().await.ok();
                     server.child.wait().await.ok();
                 }
             }
+        });
+    }
+}
+
+#[cfg(target_os = "macos")]
+async fn terminate_stale_server_processes(server_binary: PathBuf) -> Result<()> {
+    tokio::task::spawn_blocking(move || terminate_stale_server_processes_blocking(&server_binary))
+        .await
+        .context("stale llama-server cleanup task failed")?
+}
+
+#[cfg(target_os = "macos")]
+fn terminate_stale_server_processes_blocking(server_binary: &std::path::Path) -> Result<()> {
+    let expected = std::fs::canonicalize(server_binary)
+        .context("bundled llama-server path could not be resolved")?;
+    let mut system = System::new_all();
+    system.refresh_processes(ProcessesToUpdate::All, false);
+    let mut stale = system
+        .processes()
+        .iter()
+        .filter_map(|(pid, process)| {
+            process_matches_runtime(process, &expected, process.start_time())
+                .then_some((*pid, process.start_time()))
+        })
+        .collect::<Vec<_>>();
+    if stale.is_empty() {
+        return Ok(());
+    }
+    let stale_count = stale.len();
+
+    for &(pid, started_at) in &stale {
+        signal_matching_runtime(&mut system, pid, started_at, &expected, Signal::Term)?;
+    }
+    wait_for_process_exit(&mut system, &mut stale, &expected, Duration::from_secs(1));
+    for &(pid, started_at) in &stale {
+        signal_matching_runtime(&mut system, pid, started_at, &expected, Signal::Kill)?;
+    }
+    wait_for_process_exit(&mut system, &mut stale, &expected, Duration::from_secs(1));
+    if !stale.is_empty() {
+        bail!("stale llama-server did not exit within the deadline");
+    }
+    info!(stale_count, "stale llama-server processes removed");
+    Ok(())
+}
+
+#[cfg(target_os = "macos")]
+fn signal_matching_runtime(
+    system: &mut System,
+    pid: sysinfo::Pid,
+    started_at: u64,
+    expected: &std::path::Path,
+    signal: Signal,
+) -> Result<()> {
+    system.refresh_processes(ProcessesToUpdate::Some(&[pid]), true);
+    let Some(process) = system.process(pid) else {
+        return Ok(());
+    };
+    if !process_matches_runtime(process, expected, started_at) {
+        return Ok(());
+    }
+    if process.kill_with(signal) != Some(true) {
+        bail!("stale llama-server could not be signalled");
+    }
+    Ok(())
+}
+
+#[cfg(target_os = "macos")]
+fn process_matches_runtime(
+    process: &sysinfo::Process,
+    expected: &std::path::Path,
+    started_at: u64,
+) -> bool {
+    process.start_time() == started_at
+        && process
+            .exe()
+            .and_then(|path| std::fs::canonicalize(path).ok())
+            .is_some_and(|path| path == expected)
+}
+
+#[cfg(target_os = "macos")]
+fn wait_for_process_exit(
+    system: &mut System,
+    processes: &mut Vec<(sysinfo::Pid, u64)>,
+    expected: &std::path::Path,
+    timeout: Duration,
+) {
+    let deadline = Instant::now() + timeout;
+    while !processes.is_empty() && Instant::now() < deadline {
+        std::thread::sleep(Duration::from_millis(50));
+        let pids = processes.iter().map(|(pid, _)| *pid).collect::<Vec<_>>();
+        system.refresh_processes(ProcessesToUpdate::Some(&pids), true);
+        processes.retain(|(pid, started_at)| {
+            system
+                .process(*pid)
+                .is_some_and(|process| process_matches_runtime(process, expected, *started_at))
         });
     }
 }
@@ -341,6 +543,8 @@ async fn spawn_server(config: &SupervisorConfig) -> Result<SpawnedServer> {
 
 fn server_command(config: &SupervisorConfig, address: SocketAddr, token: &str) -> Command {
     let mut command = Command::new(&config.server_binary);
+    #[cfg(target_os = "windows")]
+    command.creation_flags(CREATE_NO_WINDOW.0);
     command
         .arg("--model")
         .arg(&config.model_path)
@@ -371,12 +575,17 @@ fn server_command(config: &SupervisorConfig, address: SocketAddr, token: &str) -
     if let Some(mmproj) = &config.mmproj_path {
         command.arg("--mmproj").arg(mmproj);
     }
-    if cfg!(target_os = "macos") {
+    if bundled_runtime_is_accelerated() {
         command.arg("--n-gpu-layers").arg("99");
     } else {
         command.arg("--n-gpu-layers").arg("0");
     }
     command
+}
+
+/// Whether the bundled runtime enables GPU layers on this platform.
+pub const fn bundled_runtime_is_accelerated() -> bool {
+    cfg!(target_os = "macos")
 }
 
 fn reserve_loopback_port() -> Result<u16> {
@@ -386,28 +595,242 @@ fn reserve_loopback_port() -> Result<u16> {
 
 async fn wait_until_healthy(
     client: &reqwest::Client,
-    server: &SpawnedServer,
+    server: &mut SpawnedServer,
     timeout: Duration,
 ) -> Result<()> {
-    let endpoint = &server.endpoint;
     let started = Instant::now();
-    while started.elapsed() < timeout {
-        let response = client
-            .get(format!("{}/health", endpoint.base_url))
-            .bearer_auth(endpoint.bearer_token())
-            .send()
-            .await;
+    loop {
+        let status = server.child.try_wait().map_err(|error| {
+            anyhow::Error::new(error).context(LlamaSupervisorFailure::new(
+                LlamaSupervisorFailureKind::RuntimeState,
+                RuntimeExitClass::Unknown,
+            ))
+        })?;
+        if let Some(status) = status {
+            return runtime_exited_before_health(status);
+        }
+        let Some(remaining) = timeout.checked_sub(started.elapsed()) else {
+            return runtime_health_timeout();
+        };
+        let request = client
+            .get(format!("{}/health", server.endpoint.base_url))
+            .bearer_auth(server.endpoint.bearer_token())
+            .send();
+        let response = tokio::select! {
+            biased;
+            status = server.child.wait() => {
+                return runtime_exited_before_health(status.map_err(|error| {
+                    anyhow::Error::new(error).context(LlamaSupervisorFailure::new(
+                        LlamaSupervisorFailureKind::RuntimeState,
+                        RuntimeExitClass::Unknown,
+                    ))
+                })?);
+            }
+            response = tokio::time::timeout(remaining, request) => {
+                match response {
+                    Ok(response) => response,
+                    Err(_) => return runtime_health_timeout(),
+                }
+            }
+        };
         if response.is_ok_and(|response| response.status().is_success()) {
             return Ok(());
         }
-        tokio::time::sleep(Duration::from_millis(250)).await;
+        let Some(remaining) = timeout.checked_sub(started.elapsed()) else {
+            return runtime_health_timeout();
+        };
+        tokio::select! {
+            biased;
+            status = server.child.wait() => {
+                return runtime_exited_before_health(status.map_err(|error| {
+                    anyhow::Error::new(error).context(LlamaSupervisorFailure::new(
+                        LlamaSupervisorFailureKind::RuntimeState,
+                        RuntimeExitClass::Unknown,
+                    ))
+                })?);
+            }
+            () = tokio::time::sleep(Duration::from_millis(250).min(remaining)) => {}
+        }
     }
-    bail!("llama-server did not become healthy within {timeout:?}")
+}
+
+fn runtime_exited_before_health(status: ExitStatus) -> Result<()> {
+    let exit_class = if status.success() {
+        RuntimeExitClass::Success
+    } else {
+        RuntimeExitClass::Failure
+    };
+    Err(LlamaSupervisorFailure::new(
+        LlamaSupervisorFailureKind::RuntimeExitedBeforeHealth,
+        exit_class,
+    )
+    .into())
+}
+
+fn runtime_health_timeout() -> Result<()> {
+    Err(LlamaSupervisorFailure::new(
+        LlamaSupervisorFailureKind::RuntimeHealthTimeout,
+        RuntimeExitClass::None,
+    )
+    .into())
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[cfg(target_os = "windows")]
+    fn gated_failure_command() -> Command {
+        let mut command = Command::new("powershell.exe");
+        command
+            .arg("-NoProfile")
+            .arg("-Command")
+            .arg("$null = [Console]::In.ReadLine(); exit 7");
+        command
+    }
+
+    #[cfg(not(target_os = "windows"))]
+    fn gated_failure_command() -> Command {
+        let mut command = Command::new("sh");
+        command.arg("-c").arg("read -r _ || true; exit 7");
+        command
+    }
+
+    #[tokio::test]
+    async fn health_probe_reports_early_runtime_exit_without_waiting_for_timeout() {
+        let mut command = gated_failure_command();
+        command
+            .stdin(Stdio::piped())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .kill_on_drop(true);
+        let mut child = command.spawn().expect("synthetic child should start");
+        let mut child_stdin = child
+            .stdin
+            .take()
+            .expect("synthetic child stdin should be piped");
+        let process_guard =
+            ChildProcessGuard::attach(&child).expect("synthetic child should be guarded");
+        let listener = tokio::net::TcpListener::bind((Ipv4Addr::LOCALHOST, 0))
+            .await
+            .expect("synthetic health listener should bind loopback");
+        let port = listener
+            .local_addr()
+            .expect("synthetic health listener should expose its address")
+            .port();
+        let (accepted_sender, accepted_receiver) = tokio::sync::oneshot::channel();
+        let (release_sender, release_receiver) = tokio::sync::oneshot::channel();
+        let listener_task = tokio::spawn(async move {
+            let (socket, _) = listener
+                .accept()
+                .await
+                .expect("synthetic health request should connect");
+            accepted_sender
+                .send(())
+                .expect("health probe should await the synthetic listener");
+            let _ = release_receiver.await;
+            drop(socket);
+        });
+        let server = SpawnedServer {
+            child,
+            process_guard,
+            endpoint: LlamaEndpoint {
+                base_url: format!("http://{}:{port}", Ipv4Addr::LOCALHOST),
+                token: Arc::from("redacted-test-token"),
+            },
+        };
+        let probe_task = tokio::spawn(async move {
+            let mut server = server;
+            let started = Instant::now();
+            let result = wait_until_healthy(
+                &reqwest::Client::new(),
+                &mut server,
+                Duration::from_secs(10),
+            )
+            .await;
+            (result, started.elapsed())
+        });
+        tokio::time::timeout(Duration::from_secs(2), accepted_receiver)
+            .await
+            .expect("health request should reach the synthetic listener")
+            .expect("synthetic listener should report the accepted request");
+        use tokio::io::AsyncWriteExt;
+        child_stdin
+            .shutdown()
+            .await
+            .expect("synthetic child stdin should close cleanly");
+        drop(child_stdin);
+        let (result, elapsed) = tokio::time::timeout(Duration::from_secs(5), probe_task)
+            .await
+            .expect("exited child should interrupt the pending health request")
+            .expect("synthetic probe task should finish");
+        let error = result.expect_err("exited child must fail the health probe");
+        let failure = error
+            .downcast_ref::<LlamaSupervisorFailure>()
+            .expect("supervisor failure class must be preserved");
+
+        assert_eq!(
+            failure.kind(),
+            LlamaSupervisorFailureKind::RuntimeExitedBeforeHealth
+        );
+        assert_eq!(failure.exit_class(), RuntimeExitClass::Failure);
+        assert!(
+            elapsed < Duration::from_secs(5),
+            "health probe waited for its full timeout after child exit"
+        );
+        let _ = release_sender.send(());
+        tokio::time::timeout(Duration::from_secs(2), listener_task)
+            .await
+            .expect("synthetic health listener should stop")
+            .expect("synthetic health listener task should finish");
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn runtime_startup_does_not_hold_the_shared_state_lock() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let temporary = tempfile::tempdir().expect("temporary runtime directory");
+        let marker = temporary.path().join("started");
+        let server = temporary.path().join("synthetic-llama-server");
+        let model = temporary.path().join("synthetic-model.gguf");
+        std::fs::write(
+            &server,
+            format!("#!/bin/sh\n: > \"{}\"\nsleep 30\n", marker.display()),
+        )
+        .expect("synthetic runtime script");
+        let mut permissions = std::fs::metadata(&server)
+            .expect("synthetic runtime metadata")
+            .permissions();
+        permissions.set_mode(0o700);
+        std::fs::set_permissions(&server, permissions)
+            .expect("synthetic runtime executable permission");
+        std::fs::write(&model, b"synthetic").expect("synthetic model");
+
+        let mut config = SupervisorConfig::bundled(server, model);
+        config.startup_timeout = Duration::from_secs(10);
+        let supervisor = LlamaSupervisor::new(config);
+        let startup_supervisor = supervisor.clone();
+        let startup = tokio::spawn(async move { startup_supervisor.ensure_running().await });
+
+        tokio::time::timeout(Duration::from_secs(10), async {
+            while !marker.is_file() {
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+        })
+        .await
+        .expect("synthetic runtime should start");
+        tokio::time::timeout(Duration::from_millis(250), supervisor.mark_activity())
+            .await
+            .expect("runtime startup must not retain the shared state lock");
+
+        startup.abort();
+        let _ = startup.await;
+        supervisor
+            .stop()
+            .await
+            .expect("aborted startup should release the operation coordinator");
+    }
 
     #[test]
     fn structured_sidecar_disables_reasoning_explicitly() {
@@ -433,6 +856,16 @@ mod tests {
             .find(|pair| pair[0] == "--reasoning-budget")
             .expect("reasoning budget must be present when reasoning is off");
         assert_eq!(budget[1], "0");
+        let gpu_layers = args
+            .windows(2)
+            .find(|pair| pair[0] == "--n-gpu-layers")
+            .expect("GPU layer configuration must be present");
+        let expected_gpu_layers = if bundled_runtime_is_accelerated() {
+            "99"
+        } else {
+            "0"
+        };
+        assert_eq!(gpu_layers[1], expected_gpu_layers);
     }
 
     #[cfg(target_os = "windows")]
@@ -461,5 +894,34 @@ mod tests {
             .await
             .expect("job close should terminate the test child promptly")
             .expect("test child status should remain observable");
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn macos_stale_runtime_cleanup_matches_the_exact_executable() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let temp = tempfile::TempDir::new().expect("temporary directory");
+        let fixture = temp.path().join("synthetic-llama-server");
+        std::fs::copy("/bin/sleep", &fixture).expect("copy synthetic runtime");
+        let mut permissions = std::fs::metadata(&fixture)
+            .expect("synthetic runtime metadata")
+            .permissions();
+        permissions.set_mode(0o700);
+        std::fs::set_permissions(&fixture, permissions).expect("synthetic runtime permissions");
+        let mut child = std::process::Command::new(&fixture)
+            .arg("30")
+            .spawn()
+            .expect("start synthetic runtime");
+
+        let cleanup = terminate_stale_server_processes_blocking(&fixture);
+        if cleanup.is_err() {
+            let _ = child.kill();
+            let _ = child.wait();
+        }
+        cleanup.expect("stale runtime cleanup");
+        let status = child.wait().expect("reap synthetic runtime");
+
+        assert!(!status.success());
     }
 }

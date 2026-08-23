@@ -6,18 +6,13 @@ Scope: the union of the transitive dependency closures of `airwiki-desktop`, `ai
 
 If a crate declares an SPDX expression but does not include a separate legal file, the inventory assigns the standard MIT/Apache text bundled by the project or an identical text found in another crate with the same expression. Each text lists its origin explicitly.
 
-Third-party packages: **633**. Unique legal texts: **377**.
+Third-party packages: **702**. Unique legal texts: **389**.
 
 ## Packages
 
 | Package | Version | Declared license | Source | Included texts |
 | --- | --- | --- | --- | --- |
-| accesskit | 0.24.1 | MIT OR Apache-2.0 | [upstream](https://github.com/AccessKit/accesskit) | [508a77d2e7b5](#sha256-508a77d2e7b51d98adeed32648ad124b7b30241a8e70b2e72c99f92d8e5874d1) |
-| accesskit_consumer | 0.35.0 | MIT OR Apache-2.0 | [upstream](https://github.com/AccessKit/accesskit) | [508a77d2e7b5](#sha256-508a77d2e7b51d98adeed32648ad124b7b30241a8e70b2e72c99f92d8e5874d1) |
-| accesskit_consumer | 0.37.0 | MIT OR Apache-2.0 | [upstream](https://github.com/AccessKit/accesskit) | [508a77d2e7b5](#sha256-508a77d2e7b51d98adeed32648ad124b7b30241a8e70b2e72c99f92d8e5874d1) |
-| accesskit_macos | 0.26.2 | MIT OR Apache-2.0 | [upstream](https://github.com/AccessKit/accesskit) | [508a77d2e7b5](#sha256-508a77d2e7b51d98adeed32648ad124b7b30241a8e70b2e72c99f92d8e5874d1) |
-| accesskit_windows | 0.32.1 | MIT OR Apache-2.0 | [upstream](https://github.com/AccessKit/accesskit) | [508a77d2e7b5](#sha256-508a77d2e7b51d98adeed32648ad124b7b30241a8e70b2e72c99f92d8e5874d1) |
-| accesskit_winit | 0.32.2 | Apache-2.0 | [upstream](https://github.com/AccessKit/accesskit) | [c71d239df917](#sha256-c71d239df91726fc519c6eb72d318ec65820627232b2f796219e87dcf35d0ab4) |
+| addr2line | 0.26.1 | Apache-2.0 OR MIT | [upstream](https://github.com/gimli-rs/addr2line) | [a60eea817514](#sha256-a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2), [e99d88d232bf](#sha256-e99d88d232bf57d70f0fb87f6b496d44b6653f99f8a63d250a54c61ea4bcde40) |
 | adler2 | 2.0.1 | 0BSD OR MIT OR Apache-2.0 | [upstream](https://github.com/oyvindln/adler2) | [23f18e03dc49](#sha256-23f18e03dc49df91622fe2a76176497404e46ced8a715d9d2b67a7446571cca3), [861399f8c21c](#sha256-861399f8c21c042b110517e76dc6b63a2b334276c8cf17412fc3c8908ca8dc17), [8ada45cd9f84](#sha256-8ada45cd9f843acf64e4722ae262c622a2b3b3007c7310ef36ac1061a30f6adb) |
 | aead | 0.5.2 | MIT OR Apache-2.0 | [upstream](https://github.com/RustCrypto/traits) | [949ab7b3e714](#sha256-949ab7b3e7140fee216f06fe3a2bd67d68dd511f8ea73c1e01c98cb348e9c8ae), [a9040321c371](#sha256-a9040321c3712d8fd0b09cf52b17445de04a23a10165049ae187cd39e5c86be5) |
 | aes | 0.8.4 | MIT OR Apache-2.0 | [upstream](https://github.com/RustCrypto/block-ciphers) | [a9040321c371](#sha256-a9040321c3712d8fd0b09cf52b17445de04a23a10165049ae187cd39e5c86be5), [f7e8ab639afe](#sha256-f7e8ab639afef15573680c97f796166835cbeb3865175882fea41c60d106b733) |
@@ -25,9 +20,11 @@ Third-party packages: **633**. Unique legal texts: **377**.
 | aes-gcm | 0.10.3 | Apache-2.0 OR MIT | [upstream](https://github.com/RustCrypto/AEADs) | [3c0dfa33fd2e](#sha256-3c0dfa33fd2e6976038555b52095699452653b1fcabe113074f14e0848a6b11e), [a9040321c371](#sha256-a9040321c3712d8fd0b09cf52b17445de04a23a10165049ae187cd39e5c86be5) |
 | ahash | 0.8.12 | MIT OR Apache-2.0 | [upstream](https://github.com/tkaitchuck/ahash) | [0444c6991eea](#sha256-0444c6991eead6822f7b9102e654448d51624431119546492e8b231db42c48bb), [a60eea817514](#sha256-a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2) |
 | aho-corasick | 1.1.4 | Unlicense OR MIT | [upstream](https://github.com/BurntSushi/aho-corasick) | [01c266bced4a](#sha256-01c266bced4a434da0051174d6bee16a4c82cf634e2679b6155d40d75012390f), [0f96a83840e1](#sha256-0f96a83840e146e43c0ec96a22ec1f392e0680e6c1226e6f3ba87e0740af850f), [7e12e5df4bae](#sha256-7e12e5df4bae12cb21581ba157ced20e1986a0508dd10d0e8a4ab9a4cf94e85c) |
+| alloc-no-stdlib | 2.0.4 | BSD-3-Clause | [upstream](https://github.com/dropbox/rust-alloc-no-stdlib) | [c0c56f26d9c0](#sha256-c0c56f26d9c051cac4d200c34c84e7ae9aaa853e01a982a1df08b09931e518ae) |
+| alloc-stdlib | 0.2.4 | BSD-3-Clause | [upstream](https://github.com/dropbox/rust-alloc-no-stdlib) | [6fe6d6a54d01](#sha256-6fe6d6a54d0190972a733d1292ac9a8679fc76e6899cbe871b85ce38c2f887f4) |
 | allocator-api2 | 0.2.21 | MIT OR Apache-2.0 | [upstream](https://github.com/zakarumych/allocator-api2) | [23f18e03dc49](#sha256-23f18e03dc49df91622fe2a76176497404e46ced8a715d9d2b67a7446571cca3), [62c7a1e35f56](#sha256-62c7a1e35f56406896d7aa7ca52d0cc0d272ac022b5d2796e7d6905db8a3636a) |
 | anyhow | 1.0.103 | MIT OR Apache-2.0 | [upstream](https://github.com/dtolnay/anyhow) | [23f18e03dc49](#sha256-23f18e03dc49df91622fe2a76176497404e46ced8a715d9d2b67a7446571cca3), [62c7a1e35f56](#sha256-62c7a1e35f56406896d7aa7ca52d0cc0d272ac022b5d2796e7d6905db8a3636a) |
-| arboard | 3.6.1 | MIT OR Apache-2.0 | [upstream](https://github.com/1Password/arboard) | [0d542e0c8804](#sha256-0d542e0c8804e39aa7f37eb00da5a762149dc682d7829451287e11b938e94594), [f35468024534](#sha256-f35468024534e0f4f16bb94cd0e88c87fbd1314f919c2645a07d350fb77b40c0) |
+| arbitrary | 1.4.2 | MIT OR Apache-2.0 | [upstream](https://github.com/rust-fuzz/arbitrary/) | [15656cc11a83](#sha256-15656cc11a8331f28c0986b8ab97220d3e76f98e60ed388b5ffad37dfac4710c), [a60eea817514](#sha256-a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2) |
 | arrayref | 0.3.9 | BSD-2-Clause | [upstream](https://github.com/droundy/arrayref) | [1bc7e6f475b3](#sha256-1bc7e6f475b3ec99b7e2643411950ae2368c250dd4c5c325f80f9811362a94a1) |
 | arrayvec | 0.7.8 | MIT OR Apache-2.0 | [upstream](https://github.com/bluss/arrayvec) | [4da95ec4ecb6](#sha256-4da95ec4ecb65b738d470b7d762894ad9c97da93e6cbfb18b570fc2c96f4b871), [a60eea817514](#sha256-a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2) |
 | asn1-rs | 0.7.2 | MIT OR Apache-2.0 | [upstream](https://github.com/rusticata/asn1-rs.git) | [a5c61b93b6ee](#sha256-a5c61b93b6ee1d104af9920cf020ff3c7efe818e31fe562c72261847a728f513), [a60eea817514](#sha256-a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2) |
@@ -44,9 +41,13 @@ Third-party packages: **633**. Unique legal texts: **377**.
 | base256emoji | 1.0.2 | MIT | [upstream](https://github.com/Jorropo/base256emoji/) | [508a77d2e7b5](#sha256-508a77d2e7b51d98adeed32648ad124b7b30241a8e70b2e72c99f92d8e5874d1) |
 | base45 | 3.2.0 | MIT | [upstream](https://github.com/opendevtools/base45) | [508a77d2e7b5](#sha256-508a77d2e7b51d98adeed32648ad124b7b30241a8e70b2e72c99f92d8e5874d1) |
 | base64 | 0.13.1 | MIT/Apache-2.0 | [upstream](https://github.com/marshallpierce/rust-base64) | [0dd882e53de1](#sha256-0dd882e53de11566d50f8e8e2d5a651bcf3fabee4987d70f306233cf39094ba7), [a60eea817514](#sha256-a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2) |
+| base64 | 0.21.7 | MIT OR Apache-2.0 | [upstream](https://github.com/marshallpierce/rust-base64) | [0dd882e53de1](#sha256-0dd882e53de11566d50f8e8e2d5a651bcf3fabee4987d70f306233cf39094ba7), [a60eea817514](#sha256-a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2) |
 | base64 | 0.22.1 | MIT OR Apache-2.0 | [upstream](https://github.com/marshallpierce/rust-base64) | [0dd882e53de1](#sha256-0dd882e53de11566d50f8e8e2d5a651bcf3fabee4987d70f306233cf39094ba7), [a60eea817514](#sha256-a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2) |
+| base64 | 0.23.1 | MIT OR Apache-2.0 | [upstream](https://github.com/marshallpierce/rust-base64) | [a60eea817514](#sha256-a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2), [ab499c75a0f0](#sha256-ab499c75a0f0da8e0fe83bf9ba3a27e5c39705310f07107c6c66b69958d2401c) |
 | base64ct | 1.8.3 | Apache-2.0 OR MIT | [upstream](https://github.com/RustCrypto/formats) | [2d1c57bff283](#sha256-2d1c57bff28344b9e698f51063bc8509799cc4c99a4e0cf2aa3f7e7c3e1f9a9d), [a9040321c371](#sha256-a9040321c3712d8fd0b09cf52b17445de04a23a10165049ae187cd39e5c86be5) |
 | bip39 | 2.2.2 | CC0-1.0 | [upstream](https://github.com/rust-bitcoin/rust-bip39/) | [a2010f343487](#sha256-a2010f343487d3f7618affe54f789f5487602331c0a8d03f49e9a7c547cf0499) |
+| bit-set | 0.8.0 | Apache-2.0 OR MIT | [upstream](https://github.com/contain-rs/bit-set) | [8173d5c29b4f](#sha256-8173d5c29b4f956d532781d2b86e4e30f83e6b7878dce18c919451d6ba707c90), [f51ac2c59a22](#sha256-f51ac2c59a222f7476ce507ca879960e2b64ea64bb2786eefdbeb7b0b538d1b7) |
+| bit-vec | 0.8.0 | Apache-2.0 OR MIT | [upstream](https://github.com/contain-rs/bit-vec) | [8173d5c29b4f](#sha256-8173d5c29b4f956d532781d2b86e4e30f83e6b7878dce18c919451d6ba707c90), [f51ac2c59a22](#sha256-f51ac2c59a222f7476ce507ca879960e2b64ea64bb2786eefdbeb7b0b538d1b7) |
 | bitcoin_hashes | 0.14.101 | CC0-1.0 | [upstream](https://github.com/rust-bitcoin/rust-bitcoin) | [29f359024dac](#sha256-29f359024dacaa3361dcddf5a9316e8458028ff062b63105a61e04a16566f968) |
 | bitflags | 1.3.2 | MIT/Apache-2.0 | [upstream](https://github.com/bitflags/bitflags) | [6485b8ed310d](#sha256-6485b8ed310d3f0340bf1ad1f47645069ce4069dcc6bb46c7d5c6faf41de1fdb), [a60eea817514](#sha256-a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2) |
 | bitflags | 2.13.0 | MIT OR Apache-2.0 | [upstream](https://github.com/bitflags/bitflags) | [6485b8ed310d](#sha256-6485b8ed310d3f0340bf1ad1f47645069ce4069dcc6bb46c7d5c6faf41de1fdb), [a60eea817514](#sha256-a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2) |
@@ -54,24 +55,24 @@ Third-party packages: **633**. Unique legal texts: **377**.
 | block-buffer | 0.10.4 | MIT OR Apache-2.0 | [upstream](https://github.com/RustCrypto/utils) | [a9040321c371](#sha256-a9040321c3712d8fd0b09cf52b17445de04a23a10165049ae187cd39e5c86be5), [d5c22aa3118d](#sha256-d5c22aa3118d240e877ad41c5d9fa232f9c77d757d4aac0c2f943afc0a95e0ef) |
 | block-buffer | 0.12.1 | MIT OR Apache-2.0 | [upstream](https://github.com/RustCrypto/utils) | [98181e7249d0](#sha256-98181e7249d0c01737645ec982499ce99a0f07eb8f7d625b8840d799d10dbc01), [a9040321c371](#sha256-a9040321c3712d8fd0b09cf52b17445de04a23a10165049ae187cd39e5c86be5) |
 | block-padding | 0.4.2 | MIT OR Apache-2.0 | [upstream](https://github.com/RustCrypto/utils) | [98181e7249d0](#sha256-98181e7249d0c01737645ec982499ce99a0f07eb8f7d625b8840d799d10dbc01), [a9040321c371](#sha256-a9040321c3712d8fd0b09cf52b17445de04a23a10165049ae187cd39e5c86be5) |
-| block2 | 0.5.1 | MIT | [upstream](https://github.com/madsmtm/objc2) | [508a77d2e7b5](#sha256-508a77d2e7b51d98adeed32648ad124b7b30241a8e70b2e72c99f92d8e5874d1) |
 | block2 | 0.6.2 | MIT | [upstream](https://github.com/madsmtm/objc2) | [508a77d2e7b5](#sha256-508a77d2e7b51d98adeed32648ad124b7b30241a8e70b2e72c99f92d8e5874d1) |
+| brotli | 8.0.4 | BSD-3-Clause AND MIT | [upstream](https://github.com/dropbox/rust-brotli) | [3d180008e369](#sha256-3d180008e36922a4e8daec11c34c7af264fed5962d07924aea928c38e8663c94), [c0c56f26d9c0](#sha256-c0c56f26d9c051cac4d200c34c84e7ae9aaa853e01a982a1df08b09931e518ae) |
+| brotli-decompressor | 5.0.3 | BSD-3-Clause/MIT | [upstream](https://github.com/dropbox/rust-brotli-decompressor) | [c0c56f26d9c0](#sha256-c0c56f26d9c051cac4d200c34c84e7ae9aaa853e01a982a1df08b09931e518ae) |
 | bs58 | 0.5.1 | MIT/Apache-2.0 | [upstream](https://github.com/Nullus157/bs58-rs) | [42d3bf7e7d4d](#sha256-42d3bf7e7d4d49d72c0555d14ed99c3ee7ce9ce3cbffbc38bbafe8c103f50969), [a60eea817514](#sha256-a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2) |
 | bumpalo | 3.20.3 | MIT OR Apache-2.0 | [upstream](https://github.com/fitzgen/bumpalo) | [65f94e99ddaf](#sha256-65f94e99ddaf4f5d1782a6dae23f35d4293a9a01444a13135a6887017d353cee), [a60eea817514](#sha256-a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2) |
-| bytemuck | 1.25.0 | Zlib OR Apache-2.0 OR MIT | [upstream](https://github.com/Lokathor/bytemuck) | [84b34dd7608f](#sha256-84b34dd7608f7fb9b17bd588a6bf392bf7de504e2716f024a77d89f1b145a151), [9df9ba60a11a](#sha256-9df9ba60a11af705f2e451b53762686e615d86f76b169cf075c3237730dbd7e2), [e3ba223bb142](#sha256-e3ba223bb1423f0aad8c3dfce0fe3148db48926d41e6fbc3afbbf5ff9e1c89cb) |
-| bytemuck_derive | 1.10.2 | Zlib OR Apache-2.0 OR MIT | [upstream](https://github.com/Lokathor/bytemuck) | [84b34dd7608f](#sha256-84b34dd7608f7fb9b17bd588a6bf392bf7de504e2716f024a77d89f1b145a151), [9df9ba60a11a](#sha256-9df9ba60a11af705f2e451b53762686e615d86f76b169cf075c3237730dbd7e2), [e3ba223bb142](#sha256-e3ba223bb1423f0aad8c3dfce0fe3148db48926d41e6fbc3afbbf5ff9e1c89cb) |
 | byteorder | 1.5.0 | Unlicense OR MIT | [upstream](https://github.com/BurntSushi/byteorder) | [01c266bced4a](#sha256-01c266bced4a434da0051174d6bee16a4c82cf634e2679b6155d40d75012390f), [0f96a83840e1](#sha256-0f96a83840e146e43c0ec96a22ec1f392e0680e6c1226e6f3ba87e0740af850f), [7e12e5df4bae](#sha256-7e12e5df4bae12cb21581ba157ced20e1986a0508dd10d0e8a4ab9a4cf94e85c) |
-| byteorder-lite | 0.1.0 | Unlicense OR MIT | [upstream](https://github.com/image-rs/byteorder-lite) | [0f96a83840e1](#sha256-0f96a83840e146e43c0ec96a22ec1f392e0680e6c1226e6f3ba87e0740af850f), [7e12e5df4bae](#sha256-7e12e5df4bae12cb21581ba157ced20e1986a0508dd10d0e8a4ab9a4cf94e85c) |
 | bytes | 1.12.1 | MIT | [upstream](https://github.com/tokio-rs/bytes) | [45f522cacecb](#sha256-45f522cacecb1023856e46df79ca625dfc550c94910078bd8aec6e02880b3d42) |
-| cargo-packager-updater | 0.2.3 | Apache-2.0 OR MIT | [upstream](https://github.com/crabnebula-dev/cargo-packager) | [508a77d2e7b5](#sha256-508a77d2e7b51d98adeed32648ad124b7b30241a8e70b2e72c99f92d8e5874d1) |
-| cargo-packager-utils | 0.1.1 | Apache-2.0 OR MIT | [upstream](https://github.com/crabnebula-dev/cargo-packager) | [508a77d2e7b5](#sha256-508a77d2e7b51d98adeed32648ad124b7b30241a8e70b2e72c99f92d8e5874d1) |
+| camino | 1.2.5 | MIT OR Apache-2.0 | [upstream](https://github.com/camino-rs/camino) | [23f18e03dc49](#sha256-23f18e03dc49df91622fe2a76176497404e46ced8a715d9d2b67a7446571cca3), [a60eea817514](#sha256-a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2) |
+| cargo-platform | 0.1.9 | MIT OR Apache-2.0 | [upstream](https://github.com/rust-lang/cargo) | [23f18e03dc49](#sha256-23f18e03dc49df91622fe2a76176497404e46ced8a715d9d2b67a7446571cca3), [8ada45cd9f84](#sha256-8ada45cd9f843acf64e4722ae262c622a2b3b3007c7310ef36ac1061a30f6adb) |
+| cargo_metadata | 0.19.2 | MIT | [upstream](https://github.com/oli-obk/cargo_metadata) | [23f18e03dc49](#sha256-23f18e03dc49df91622fe2a76176497404e46ced8a715d9d2b67a7446571cca3) |
+| cargo_toml | 0.22.3 | Apache-2.0 OR MIT | [upstream](https://gitlab.com/lib.rs/cargo_toml) | [6742bd3e9c20](#sha256-6742bd3e9c2035522b00ddd9a7c76f09e7ed89491a6750d56db2c062d9251b65) |
 | castaway | 0.2.4 | MIT | [upstream](https://github.com/sagebind/castaway) | [f98e09091d5a](#sha256-f98e09091d5ae02b2f2ec1ead4f7f28c4c44d1cb98b078739ba67091637e170c) |
 | cbc | 0.2.1 | MIT OR Apache-2.0 | [upstream](https://github.com/RustCrypto/block-modes) | [63af4bea227c](#sha256-63af4bea227c94d021e99427f6ca3a4b8efddadcca93ab6130f708cf6138cf68), [a9040321c371](#sha256-a9040321c3712d8fd0b09cf52b17445de04a23a10165049ae187cd39e5c86be5) |
 | cbor4ii | 0.3.3 | MIT | [upstream](https://github.com/quininer/cbor4ii) | [3f09ca77e208](#sha256-3f09ca77e208780d4b2c1b6e8e3404cb747c540b766a5292d7cbe8a196d3f844) |
 | cc | 1.2.66 | MIT OR Apache-2.0 | [upstream](https://github.com/rust-lang/cc-rs) | [378f5840b258](#sha256-378f5840b258e2779c39418f3f2d7b2ba96f1c7917dd6be0713f88305dbda397), [a60eea817514](#sha256-a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2) |
+| cfb | 0.7.3 | MIT | [upstream](https://github.com/mdsteele/rust-cfb) | [ebaac853b53f](#sha256-ebaac853b53fec0ed475796f533ce676912a4df9ad9d8a621fa76d5060591e10) |
 | cfg-if | 1.0.4 | MIT OR Apache-2.0 | [upstream](https://github.com/rust-lang/cfg-if) | [378f5840b258](#sha256-378f5840b258e2779c39418f3f2d7b2ba96f1c7917dd6be0713f88305dbda397), [a60eea817514](#sha256-a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2) |
 | cfg_aliases | 0.2.1 | MIT | [upstream](https://github.com/katharostech/cfg_aliases) | [31b94860253d](#sha256-31b94860253d8ec7b4529f51901044d3b459d6292d996504a36b1bae3a36a812) |
-| cgl | 0.3.2 | MIT / Apache-2.0 | [upstream](https://github.com/servo/cgl-rs) | [62065228e42c](#sha256-62065228e42caebca7e7d7db1204cbb867033de5982ca4009928915e4095f3a3), [a60eea817514](#sha256-a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2), [ec82b96487e9](#sha256-ec82b96487e9e778ee610c7ab245162464782cfa1f555c2299333f8dbe5c036a) |
 | chacha20 | 0.10.1 | MIT OR Apache-2.0 | [upstream](https://github.com/RustCrypto/stream-ciphers) | [a9040321c371](#sha256-a9040321c3712d8fd0b09cf52b17445de04a23a10165049ae187cd39e5c86be5), [b8c6939380a4](#sha256-b8c6939380a400f53e11923d50fcc4dd2fa1ba8339fd9d04cda38a0251b6c9b0) |
 | chacha20 | 0.9.1 | Apache-2.0 OR MIT | [upstream](https://github.com/RustCrypto/stream-ciphers) | [a9040321c371](#sha256-a9040321c3712d8fd0b09cf52b17445de04a23a10165049ae187cd39e5c86be5), [b6f6f01b03ee](#sha256-b6f6f01b03ee7e93c0ae96d62ed39527e98a120fb951afc9de456a741ef3f204) |
 | chacha20poly1305 | 0.10.1 | Apache-2.0 OR MIT | [upstream](https://github.com/RustCrypto/AEADs/tree/master/chacha20poly1305) | [3c0dfa33fd2e](#sha256-3c0dfa33fd2e6976038555b52095699452653b1fcabe113074f14e0848a6b11e), [a9040321c371](#sha256-a9040321c3712d8fd0b09cf52b17445de04a23a10165049ae187cd39e5c86be5) |
@@ -81,20 +82,34 @@ Third-party packages: **633**. Unique legal texts: **377**.
 | ciborium-ll | 0.2.2 | Apache-2.0 | [upstream](https://github.com/enarx/ciborium) | [c71d239df917](#sha256-c71d239df91726fc519c6eb72d318ec65820627232b2f796219e87dcf35d0ab4) |
 | cipher | 0.4.4 | MIT OR Apache-2.0 | [upstream](https://github.com/RustCrypto/traits) | [5c7bd92d1f09](#sha256-5c7bd92d1f096f12203dc1b601e3cb17484fa1b023e30b6b8edcc80e416237ec), [a9040321c371](#sha256-a9040321c3712d8fd0b09cf52b17445de04a23a10165049ae187cd39e5c86be5) |
 | cipher | 0.5.2 | MIT OR Apache-2.0 | [upstream](https://github.com/RustCrypto/traits) | [950d712c518a](#sha256-950d712c518a02fcb7cff96950aee304a1cc5283361712c980ea21e8d6d669a5), [a9040321c371](#sha256-a9040321c3712d8fd0b09cf52b17445de04a23a10165049ae187cd39e5c86be5) |
-| clipboard-win | 5.4.1 | BSL-1.0 | [upstream](https://github.com/DoumanAsh/clipboard-win) | [c9bff7573892](#sha256-c9bff75738922193e67fa726fa225535870d2aa1059f91452c411736284ad566) |
-| color | 0.3.3 | Apache-2.0 OR MIT | [upstream](https://github.com/linebender/color) | [508a77d2e7b5](#sha256-508a77d2e7b51d98adeed32648ad124b7b30241a8e70b2e72c99f92d8e5874d1), [a6cba85bc92e](#sha256-a6cba85bc92e0cff7a450b1d873c0eaa2e9fc96bf472df0247a26bec77bf3ff9) |
+| cobs | 0.3.0 | MIT OR Apache-2.0 | [upstream](https://github.com/jamesmunns/cobs.rs) | [b40930bbcf80](#sha256-b40930bbcf80744c86c46a12bc9da056641d722716c378f5659b9e555ef833e1), [e0cfa1006a64](#sha256-e0cfa1006a64520633de6bfbf563f5b1bea04ef0c5b73f049681931fa297dda3) |
 | compact_str | 0.9.1 | MIT | [upstream](https://github.com/ParkMyCar/compact_str) | [0d52feec7958](#sha256-0d52feec79589df30138dad3800323fe5686b764b73347330a2dfef8ac83efe8) |
 | const-oid | 0.10.2 | Apache-2.0 OR MIT | [upstream](https://github.com/RustCrypto/formats) | [73b9dc2e79c7](#sha256-73b9dc2e79c7308998dd30296e073aefaefb944a68fb89aa412c23c0edcabcaa), [a9040321c371](#sha256-a9040321c3712d8fd0b09cf52b17445de04a23a10165049ae187cd39e5c86be5) |
 | const-oid | 0.9.6 | Apache-2.0 OR MIT | [upstream](https://github.com/RustCrypto/formats/tree/master/const-oid) | [a9040321c371](#sha256-a9040321c3712d8fd0b09cf52b17445de04a23a10165049ae187cd39e5c86be5), [bada9e7ed8dc](#sha256-bada9e7ed8dc00d63502053c455d7c8d7575dfb7e8277a2a832531844d900682) |
 | const-str | 0.4.3 | MIT | [upstream](https://github.com/Nugine/const-str) | [508a77d2e7b5](#sha256-508a77d2e7b51d98adeed32648ad124b7b30241a8e70b2e72c99f92d8e5874d1) |
+| cookie | 0.18.1 | MIT OR Apache-2.0 | [upstream](https://github.com/SergioBenitez/cookie-rs) | [2773e20df8f4](#sha256-2773e20df8f4c52a026b5b578c7f2457341f5aa3fb6612fd87e1d2e1bd8f48ad), [f28420c1906a](#sha256-f28420c1906af38be726cd7842798f0194b27c41d6051c0d1e9ee348b8a4a0ea) |
 | core-foundation | 0.10.1 | MIT OR Apache-2.0 | [upstream](https://github.com/servo/core-foundation-rs) | [62065228e42c](#sha256-62065228e42caebca7e7d7db1204cbb867033de5982ca4009928915e4095f3a3), [a60eea817514](#sha256-a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2) |
 | core-foundation | 0.9.4 | MIT OR Apache-2.0 | [upstream](https://github.com/servo/core-foundation-rs) | [62065228e42c](#sha256-62065228e42caebca7e7d7db1204cbb867033de5982ca4009928915e4095f3a3), [a60eea817514](#sha256-a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2) |
 | core-foundation-sys | 0.8.7 | MIT OR Apache-2.0 | [upstream](https://github.com/servo/core-foundation-rs) | [62065228e42c](#sha256-62065228e42caebca7e7d7db1204cbb867033de5982ca4009928915e4095f3a3), [a60eea817514](#sha256-a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2) |
-| core-graphics | 0.23.2 | MIT OR Apache-2.0 | [upstream](https://github.com/servo/core-foundation-rs) | [62065228e42c](#sha256-62065228e42caebca7e7d7db1204cbb867033de5982ca4009928915e4095f3a3), [a60eea817514](#sha256-a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2), [ec82b96487e9](#sha256-ec82b96487e9e778ee610c7ab245162464782cfa1f555c2299333f8dbe5c036a) |
-| core-graphics-types | 0.1.3 | MIT OR Apache-2.0 | [upstream](https://github.com/servo/core-foundation-rs) | [62065228e42c](#sha256-62065228e42caebca7e7d7db1204cbb867033de5982ca4009928915e4095f3a3), [a60eea817514](#sha256-a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2) |
+| core-graphics | 0.25.0 | MIT OR Apache-2.0 | [upstream](https://github.com/servo/core-foundation-rs) | [62065228e42c](#sha256-62065228e42caebca7e7d7db1204cbb867033de5982ca4009928915e4095f3a3), [a60eea817514](#sha256-a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2), [ec82b96487e9](#sha256-ec82b96487e9e778ee610c7ab245162464782cfa1f555c2299333f8dbe5c036a) |
+| core-graphics-types | 0.2.0 | MIT OR Apache-2.0 | [upstream](https://github.com/servo/core-foundation-rs) | [62065228e42c](#sha256-62065228e42caebca7e7d7db1204cbb867033de5982ca4009928915e4095f3a3), [a60eea817514](#sha256-a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2) |
+| cpp_demangle | 0.5.1 | MIT OR Apache-2.0 | [upstream](https://github.com/gimli-rs/cpp_demangle) | [7b63ecd5f190](#sha256-7b63ecd5f1902af1b63729947373683c32745c16a10e8e6292e2e2dcd7e90ae0), [a60eea817514](#sha256-a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2) |
 | cpubits | 0.1.1 | MIT OR Apache-2.0 | [upstream](https://github.com/RustCrypto/utils) | [003736bc9840](#sha256-003736bc98408b53511b9cc8ff5d1af3bf0a8f17d53841cc39d8ab1b96a195b0), [a9040321c371](#sha256-a9040321c3712d8fd0b09cf52b17445de04a23a10165049ae187cd39e5c86be5) |
 | cpufeatures | 0.2.17 | MIT OR Apache-2.0 | [upstream](https://github.com/RustCrypto/utils) | [a9040321c371](#sha256-a9040321c3712d8fd0b09cf52b17445de04a23a10165049ae187cd39e5c86be5), [ae9baa7beea9](#sha256-ae9baa7beea910273c2f384c2a6b721fb7bd02bda3436074a1072e4ee689f985) |
 | cpufeatures | 0.3.0 | MIT OR Apache-2.0 | [upstream](https://github.com/RustCrypto/utils) | [a9040321c371](#sha256-a9040321c3712d8fd0b09cf52b17445de04a23a10165049ae187cd39e5c86be5), [ae9baa7beea9](#sha256-ae9baa7beea910273c2f384c2a6b721fb7bd02bda3436074a1072e4ee689f985) |
+| cranelift-assembler-x64 | 0.134.3 | Apache-2.0 WITH LLVM-exception | `registry+https://github.com/rust-lang/crates.io-index` | [c71d239df917](#sha256-c71d239df91726fc519c6eb72d318ec65820627232b2f796219e87dcf35d0ab4) |
+| cranelift-assembler-x64-meta | 0.134.3 | Apache-2.0 WITH LLVM-exception | `registry+https://github.com/rust-lang/crates.io-index` | [c71d239df917](#sha256-c71d239df91726fc519c6eb72d318ec65820627232b2f796219e87dcf35d0ab4) |
+| cranelift-bforest | 0.134.3 | Apache-2.0 WITH LLVM-exception | [upstream](https://github.com/bytecodealliance/wasmtime) | [a6c48161a09a](#sha256-a6c48161a09acc75a0e25503bab66a731eb5fba5392ed4bb4743e4ba5085327a) |
+| cranelift-bitset | 0.134.3 | Apache-2.0 WITH LLVM-exception | [upstream](https://github.com/bytecodealliance/wasmtime) | [c71d239df917](#sha256-c71d239df91726fc519c6eb72d318ec65820627232b2f796219e87dcf35d0ab4) |
+| cranelift-codegen | 0.134.3 | Apache-2.0 WITH LLVM-exception | [upstream](https://github.com/bytecodealliance/wasmtime) | [a6c48161a09a](#sha256-a6c48161a09acc75a0e25503bab66a731eb5fba5392ed4bb4743e4ba5085327a) |
+| cranelift-codegen-meta | 0.134.3 | Apache-2.0 WITH LLVM-exception | [upstream](https://github.com/bytecodealliance/wasmtime) | [a6c48161a09a](#sha256-a6c48161a09acc75a0e25503bab66a731eb5fba5392ed4bb4743e4ba5085327a) |
+| cranelift-codegen-shared | 0.134.3 | Apache-2.0 WITH LLVM-exception | [upstream](https://github.com/bytecodealliance/wasmtime) | [a6c48161a09a](#sha256-a6c48161a09acc75a0e25503bab66a731eb5fba5392ed4bb4743e4ba5085327a) |
+| cranelift-control | 0.134.3 | Apache-2.0 WITH LLVM-exception | [upstream](https://github.com/bytecodealliance/wasmtime) | [a6c48161a09a](#sha256-a6c48161a09acc75a0e25503bab66a731eb5fba5392ed4bb4743e4ba5085327a) |
+| cranelift-entity | 0.134.3 | Apache-2.0 WITH LLVM-exception | [upstream](https://github.com/bytecodealliance/wasmtime) | [a6c48161a09a](#sha256-a6c48161a09acc75a0e25503bab66a731eb5fba5392ed4bb4743e4ba5085327a) |
+| cranelift-frontend | 0.134.3 | Apache-2.0 WITH LLVM-exception | [upstream](https://github.com/bytecodealliance/wasmtime) | [a6c48161a09a](#sha256-a6c48161a09acc75a0e25503bab66a731eb5fba5392ed4bb4743e4ba5085327a) |
+| cranelift-isle | 0.134.3 | Apache-2.0 WITH LLVM-exception | [upstream](https://github.com/bytecodealliance/wasmtime/tree/main/cranelift/isle) | [c71d239df917](#sha256-c71d239df91726fc519c6eb72d318ec65820627232b2f796219e87dcf35d0ab4) |
+| cranelift-native | 0.134.3 | Apache-2.0 WITH LLVM-exception | [upstream](https://github.com/bytecodealliance/wasmtime) | [a6c48161a09a](#sha256-a6c48161a09acc75a0e25503bab66a731eb5fba5392ed4bb4743e4ba5085327a) |
+| cranelift-srcgen | 0.134.3 | Apache-2.0 WITH LLVM-exception | [upstream](https://github.com/bytecodealliance/wasmtime) | [c71d239df917](#sha256-c71d239df91726fc519c6eb72d318ec65820627232b2f796219e87dcf35d0ab4) |
 | crc32fast | 1.5.0 | MIT OR Apache-2.0 | [upstream](https://github.com/srijs/rust-crc32fast) | [61d383b05b87](#sha256-61d383b05b87d78f94d2937e2580cce47226d17823c0430fbcad09596537efcf), [b40930bbcf80](#sha256-b40930bbcf80744c86c46a12bc9da056641d722716c378f5659b9e555ef833e1) |
 | critical-section | 1.2.0 | MIT OR Apache-2.0 | [upstream](https://github.com/rust-embedded/critical-section) | [a60eea817514](#sha256-a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2), [fee6bdac4b91](#sha256-fee6bdac4b917351332567b9fd5013c2ef3c847dd113fd6216cf28e96637a157) |
 | crossbeam-channel | 0.5.16 | MIT OR Apache-2.0 | [upstream](https://github.com/crossbeam-rs/crossbeam) | [5734ed989dfc](#sha256-5734ed989dfca1f625b40281ee9f4530f91b2411ec01cb748223e7eb87e201ab), [a60eea817514](#sha256-a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2), [b16db96b93b1](#sha256-b16db96b93b1d7cf7bea533f572091ec6bca3234fbe0a83038be772ff391a44c) |
@@ -103,17 +118,22 @@ Third-party packages: **633**. Unique legal texts: **377**.
 | crossbeam-utils | 0.8.22 | MIT OR Apache-2.0 | [upstream](https://github.com/crossbeam-rs/crossbeam) | [5734ed989dfc](#sha256-5734ed989dfca1f625b40281ee9f4530f91b2411ec01cb748223e7eb87e201ab), [a60eea817514](#sha256-a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2) |
 | crypto-common | 0.1.7 | MIT OR Apache-2.0 | [upstream](https://github.com/RustCrypto/traits) | [3521672491a3](#sha256-3521672491a3479422d5fe1aca6645dd2984090f85da6e5205abfb18fb7a6897), [a9040321c371](#sha256-a9040321c3712d8fd0b09cf52b17445de04a23a10165049ae187cd39e5c86be5) |
 | crypto-common | 0.2.2 | MIT OR Apache-2.0 | [upstream](https://github.com/RustCrypto/traits) | [a9040321c371](#sha256-a9040321c3712d8fd0b09cf52b17445de04a23a10165049ae187cd39e5c86be5), [d2e7ec5355c9](#sha256-d2e7ec5355c96eeade56b09187ceb48a6a30299da3ce7531a66d3d11405ab963) |
-| ctor | 0.2.9 | Apache-2.0 OR MIT | [upstream](https://github.com/mmastrac/rust-ctor) | [a8ad31b1c3f4](#sha256-a8ad31b1c3f40dca5a84119351b8fa8ddc868edd77fad8a8ebf6d8f2d16fa4ae), [fd80a26fbb3f](#sha256-fd80a26fbb3f644af1fa994134446702932968519797227e07a1368dea80f0bc) |
+| cssparser | 0.36.0 | MPL-2.0 | [upstream](https://github.com/servo/rust-cssparser) | [fab3dd6bdab2](#sha256-fab3dd6bdab226f1c08630b1dd917e11fcb4ec5e1e020e2c16f83a0a13863e85) |
+| cssparser-macros | 0.6.1 | MPL-2.0 | [upstream](https://github.com/servo/rust-cssparser) | [fab3dd6bdab2](#sha256-fab3dd6bdab226f1c08630b1dd917e11fcb4ec5e1e020e2c16f83a0a13863e85) |
+| ctor | 0.8.0 | Apache-2.0 OR MIT | [upstream](https://github.com/mmastrac/rust-ctor) | [a8ad31b1c3f4](#sha256-a8ad31b1c3f40dca5a84119351b8fa8ddc868edd77fad8a8ebf6d8f2d16fa4ae), [fd80a26fbb3f](#sha256-fd80a26fbb3f644af1fa994134446702932968519797227e07a1368dea80f0bc) |
+| ctor-proc-macro | 0.0.7 | Apache-2.0 OR MIT | [upstream](https://github.com/mmastrac/rust-ctor) | [a8ad31b1c3f4](#sha256-a8ad31b1c3f40dca5a84119351b8fa8ddc868edd77fad8a8ebf6d8f2d16fa4ae), [fd80a26fbb3f](#sha256-fd80a26fbb3f644af1fa994134446702932968519797227e07a1368dea80f0bc) |
 | ctr | 0.9.2 | MIT OR Apache-2.0 | [upstream](https://github.com/RustCrypto/block-modes) | [63af4bea227c](#sha256-63af4bea227c94d021e99427f6ca3a4b8efddadcca93ab6130f708cf6138cf68), [a9040321c371](#sha256-a9040321c3712d8fd0b09cf52b17445de04a23a10165049ae187cd39e5c86be5) |
-| cursor-icon | 1.2.0 | MIT OR Apache-2.0 OR Zlib | [upstream](https://github.com/rust-windowing/cursor-icon) | [01e533bd94e8](#sha256-01e533bd94e8f1c32b2c2531e2c398de7d35d7804add3d574b4e1fe581d53537), [b59affd015e5](#sha256-b59affd015e517ed998dd735757f9a3693643cd389609947ed54074234a10784), [c138726a726a](#sha256-c138726a726ac37bae09d0f8a48e74e8e3aa8a8952fcd10fae0fb224cc1c05f1) |
 | curve25519-dalek | 4.1.3 | BSD-3-Clause | [upstream](https://github.com/dalek-cryptography/curve25519-dalek/tree/main/curve25519-dalek) | [cca0bd3c4fcd](#sha256-cca0bd3c4fcdba74145ef9d49c62337e2c9fbf9368288f11d0547f1b0273219f) |
 | curve25519-dalek-derive | 0.1.1 | MIT/Apache-2.0 | [upstream](https://github.com/dalek-cryptography/curve25519-dalek) | [23f18e03dc49](#sha256-23f18e03dc49df91622fe2a76176497404e46ced8a715d9d2b67a7446571cca3), [a60eea817514](#sha256-a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2) |
 | darling | 0.20.11 | MIT | [upstream](https://github.com/TedDriggs/darling) | [8ea93490d74a](#sha256-8ea93490d74a5a1b1af3ff71d786271b3f1e5f0bea79ac16e02ec533cef040d6) |
 | darling | 0.23.0 | MIT | [upstream](https://github.com/TedDriggs/darling) | [8ea93490d74a](#sha256-8ea93490d74a5a1b1af3ff71d786271b3f1e5f0bea79ac16e02ec533cef040d6) |
+| darling | 0.24.1 | MIT | [upstream](https://github.com/TedDriggs/darling) | [8ea93490d74a](#sha256-8ea93490d74a5a1b1af3ff71d786271b3f1e5f0bea79ac16e02ec533cef040d6) |
 | darling_core | 0.20.11 | MIT | [upstream](https://github.com/TedDriggs/darling) | [8ea93490d74a](#sha256-8ea93490d74a5a1b1af3ff71d786271b3f1e5f0bea79ac16e02ec533cef040d6) |
 | darling_core | 0.23.0 | MIT | [upstream](https://github.com/TedDriggs/darling) | [8ea93490d74a](#sha256-8ea93490d74a5a1b1af3ff71d786271b3f1e5f0bea79ac16e02ec533cef040d6) |
+| darling_core | 0.24.1 | MIT | [upstream](https://github.com/TedDriggs/darling) | [8ea93490d74a](#sha256-8ea93490d74a5a1b1af3ff71d786271b3f1e5f0bea79ac16e02ec533cef040d6) |
 | darling_macro | 0.20.11 | MIT | [upstream](https://github.com/TedDriggs/darling) | [8ea93490d74a](#sha256-8ea93490d74a5a1b1af3ff71d786271b3f1e5f0bea79ac16e02ec533cef040d6) |
 | darling_macro | 0.23.0 | MIT | [upstream](https://github.com/TedDriggs/darling) | [8ea93490d74a](#sha256-8ea93490d74a5a1b1af3ff71d786271b3f1e5f0bea79ac16e02ec533cef040d6) |
+| darling_macro | 0.24.1 | MIT | [upstream](https://github.com/TedDriggs/darling) | [8ea93490d74a](#sha256-8ea93490d74a5a1b1af3ff71d786271b3f1e5f0bea79ac16e02ec533cef040d6) |
 | dary_heap | 0.3.9 | MIT OR Apache-2.0 | [upstream](https://github.com/hanmertens/dary_heap) | [23f18e03dc49](#sha256-23f18e03dc49df91622fe2a76176497404e46ced8a715d9d2b67a7446571cca3), [62c7a1e35f56](#sha256-62c7a1e35f56406896d7aa7ca52d0cc0d272ac022b5d2796e7d6905db8a3636a) |
 | data-encoding | 2.11.0 | MIT | [upstream](https://github.com/ia0/data-encoding) | [b68ad1a3367b](#sha256-b68ad1a3367b825447089e1f8d6829b97f47a89eb78d2f4ebaef4672f5606186) |
 | data-encoding-macro | 0.1.20 | MIT | [upstream](https://github.com/ia0/data-encoding) | [b68ad1a3367b](#sha256-b68ad1a3367b825447089e1f8d6829b97f47a89eb78d2f4ebaef4672f5606186) |
@@ -125,60 +145,50 @@ Third-party packages: **633**. Unique legal texts: **377**.
 | der | 0.8.1 | Apache-2.0 OR MIT | [upstream](https://github.com/RustCrypto/formats) | [73b9dc2e79c7](#sha256-73b9dc2e79c7308998dd30296e073aefaefb944a68fb89aa412c23c0edcabcaa), [a9040321c371](#sha256-a9040321c3712d8fd0b09cf52b17445de04a23a10165049ae187cd39e5c86be5) |
 | der-parser | 10.0.0 | MIT OR Apache-2.0 | [upstream](https://github.com/rusticata/der-parser.git) | [a5c61b93b6ee](#sha256-a5c61b93b6ee1d104af9920cf020ff3c7efe818e31fe562c72261847a728f513), [a60eea817514](#sha256-a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2) |
 | deranged | 0.5.8 | MIT OR Apache-2.0 | [upstream](https://github.com/jhpratt/deranged) | [231c837c45eb](#sha256-231c837c45eb53f108fb48929e488965bc4fcc14e9ea21d35f50e6b99d98685b), [edd65bdd8895](#sha256-edd65bdd88957a205c47d53fa499eed8865a70320f0f03f6391668cb304ea376) |
+| derive_arbitrary | 1.4.2 | MIT OR Apache-2.0 | [upstream](https://github.com/rust-fuzz/arbitrary) | [15656cc11a83](#sha256-15656cc11a8331f28c0986b8ab97220d3e76f98e60ed388b5ffad37dfac4710c), [a60eea817514](#sha256-a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2) |
 | derive_builder | 0.20.2 | MIT OR Apache-2.0 | [upstream](https://github.com/colin-kiegel/rust-derive-builder) | [8c9612877aac](#sha256-8c9612877aacfa1b42f5e80b679e6c3c93a7ba2bb99dfaf6e87e200dca4b4e6c), [b40930bbcf80](#sha256-b40930bbcf80744c86c46a12bc9da056641d722716c378f5659b9e555ef833e1) |
 | derive_builder_core | 0.20.2 | MIT OR Apache-2.0 | [upstream](https://github.com/colin-kiegel/rust-derive-builder) | [8c9612877aac](#sha256-8c9612877aacfa1b42f5e80b679e6c3c93a7ba2bb99dfaf6e87e200dca4b4e6c), [b40930bbcf80](#sha256-b40930bbcf80744c86c46a12bc9da056641d722716c378f5659b9e555ef833e1) |
 | derive_builder_macro | 0.20.2 | MIT OR Apache-2.0 | [upstream](https://github.com/colin-kiegel/rust-derive-builder) | [8c9612877aac](#sha256-8c9612877aacfa1b42f5e80b679e6c3c93a7ba2bb99dfaf6e87e200dca4b4e6c), [b40930bbcf80](#sha256-b40930bbcf80744c86c46a12bc9da056641d722716c378f5659b9e555ef833e1) |
+| derive_more | 2.1.1 | MIT | [upstream](https://github.com/JelteF/derive_more) | [8a35369f3ca2](#sha256-8a35369f3ca263b3c62fbb5032947e53b6bfebc6c8a4d1bb982de1c069f6fba5) |
+| derive_more-impl | 2.1.1 | MIT | [upstream](https://github.com/JelteF/derive_more) | [8a35369f3ca2](#sha256-8a35369f3ca263b3c62fbb5032947e53b6bfebc6c8a4d1bb982de1c069f6fba5) |
 | digest | 0.10.7 | MIT OR Apache-2.0 | [upstream](https://github.com/RustCrypto/traits) | [9e0dfd2dd417](#sha256-9e0dfd2dd4173a530e238cb6adb37aa78c34c6bc7444e0e10c1ab5d8881f63ba), [a9040321c371](#sha256-a9040321c3712d8fd0b09cf52b17445de04a23a10165049ae187cd39e5c86be5) |
 | digest | 0.11.3 | MIT OR Apache-2.0 | [upstream](https://github.com/RustCrypto/traits) | [a9040321c371](#sha256-a9040321c3712d8fd0b09cf52b17445de04a23a10165049ae187cd39e5c86be5), [af59cea35d7f](#sha256-af59cea35d7f5e2777a713b8d155d65efa2c339eb43f3c14e868c6ac8506edad) |
 | directories | 6.0.0 | MIT OR Apache-2.0 | [upstream](https://github.com/soc/directories-rs) | [11955c617c19](#sha256-11955c617c19899b5c36d78c916739d1686f2e7ad8e3cec684c2f0f73b0db950), [d3174ad63e72](#sha256-d3174ad63e721d4c9dccb8ad4320848992d314369bc46319720b5802c9153fe9) |
-| dirs | 5.0.1 | MIT OR Apache-2.0 | [upstream](https://github.com/soc/dirs-rs) | [6a2e0ade09a7](#sha256-6a2e0ade09a7d5f816f11566fee2b151b32235a7fad52b41d49cce96f833c1a9), [d3174ad63e72](#sha256-d3174ad63e721d4c9dccb8ad4320848992d314369bc46319720b5802c9153fe9) |
-| dirs-sys | 0.4.1 | MIT OR Apache-2.0 | [upstream](https://github.com/dirs-dev/dirs-sys-rs) | [6a2e0ade09a7](#sha256-6a2e0ade09a7d5f816f11566fee2b151b32235a7fad52b41d49cce96f833c1a9), [d3174ad63e72](#sha256-d3174ad63e721d4c9dccb8ad4320848992d314369bc46319720b5802c9153fe9) |
+| dirs | 6.0.0 | MIT OR Apache-2.0 | [upstream](https://github.com/soc/dirs-rs) | [6a2e0ade09a7](#sha256-6a2e0ade09a7d5f816f11566fee2b151b32235a7fad52b41d49cce96f833c1a9), [d3174ad63e72](#sha256-d3174ad63e721d4c9dccb8ad4320848992d314369bc46319720b5802c9153fe9) |
 | dirs-sys | 0.5.0 | MIT OR Apache-2.0 | [upstream](https://github.com/dirs-dev/dirs-sys-rs) | [6a2e0ade09a7](#sha256-6a2e0ade09a7d5f816f11566fee2b151b32235a7fad52b41d49cce96f833c1a9), [d3174ad63e72](#sha256-d3174ad63e721d4c9dccb8ad4320848992d314369bc46319720b5802c9153fe9) |
-| dispatch | 0.2.0 | MIT | [upstream](http://github.com/SSheldon/rust-dispatch) | [508a77d2e7b5](#sha256-508a77d2e7b51d98adeed32648ad124b7b30241a8e70b2e72c99f92d8e5874d1) |
 | dispatch2 | 0.3.1 | Zlib OR Apache-2.0 OR MIT | [upstream](https://github.com/madsmtm/objc2) | [508a77d2e7b5](#sha256-508a77d2e7b51d98adeed32648ad124b7b30241a8e70b2e72c99f92d8e5874d1) |
 | displaydoc | 0.2.6 | MIT OR Apache-2.0 | [upstream](https://github.com/yaahc/displaydoc) | [23f18e03dc49](#sha256-23f18e03dc49df91622fe2a76176497404e46ced8a715d9d2b67a7446571cca3), [a60eea817514](#sha256-a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2) |
 | doctest-file | 1.1.1 | 0BSD | [upstream](https://codeberg.org/Goat7658/doctest-file) | [00515b2bb138](#sha256-00515b2bb13879db00e9483244b1bb80d7af9237c58e4de30af52a761d8d2524) |
-| document-features | 0.2.12 | MIT OR Apache-2.0 | [upstream](https://github.com/slint-ui/document-features) | [074e6e32c86a](#sha256-074e6e32c86a4c0ef8b3ed25b721ca23aca83df277cd88106ef7177c354615ff), [aa893340d14b](#sha256-aa893340d14b9844625be6a50ac644169a01b52f0211cbf81b09e1874c8cd81d) |
+| dom_query | 0.27.0 | MIT | [upstream](https://github.com/niklak/dom_query) | [9766e5d58cae](#sha256-9766e5d58cae9d457057c7cdb2cde8bf357624329c1e5cc50ca9210149b77aed) |
 | dpi | 0.1.2 | Apache-2.0 AND MIT | [upstream](https://github.com/rust-windowing/winit) | [9eff396a99ba](#sha256-9eff396a99bafd208e7126602420d6864f6066c08b84485a5b032320a9c01997), [a8ad31b1c3f4](#sha256-a8ad31b1c3f40dca5a84119351b8fa8ddc868edd77fad8a8ebf6d8f2d16fa4ae) |
+| dtoa | 1.0.11 | MIT OR Apache-2.0 | [upstream](https://github.com/dtolnay/dtoa) | [23f18e03dc49](#sha256-23f18e03dc49df91622fe2a76176497404e46ced8a715d9d2b67a7446571cca3), [62c7a1e35f56](#sha256-62c7a1e35f56406896d7aa7ca52d0cc0d272ac022b5d2796e7d6905db8a3636a) |
+| dtoa-short | 0.3.5 | MPL-2.0 | [upstream](https://github.com/upsuper/dtoa-short) | [1f256ecad192](#sha256-1f256ecad192880510e84ad60474eab7589218784b9a50bc7ceee34c2b91f1d5) |
+| dtor | 0.3.0 | Apache-2.0 OR MIT | [upstream](https://github.com/mmastrac/rust-ctor) | [a8ad31b1c3f4](#sha256-a8ad31b1c3f40dca5a84119351b8fa8ddc868edd77fad8a8ebf6d8f2d16fa4ae), [fd80a26fbb3f](#sha256-fd80a26fbb3f644af1fa994134446702932968519797227e07a1368dea80f0bc) |
+| dtor-proc-macro | 0.0.6 | Apache-2.0 OR MIT | [upstream](https://github.com/mmastrac/rust-ctor) | [a8ad31b1c3f4](#sha256-a8ad31b1c3f40dca5a84119351b8fa8ddc868edd77fad8a8ebf6d8f2d16fa4ae), [fd80a26fbb3f](#sha256-fd80a26fbb3f644af1fa994134446702932968519797227e07a1368dea80f0bc) |
 | dunce | 1.0.5 | CC0-1.0 OR MIT-0 OR Apache-2.0 | [upstream](https://gitlab.com/kornelski/dunce) | [a2010f343487](#sha256-a2010f343487d3f7618affe54f789f5487602331c0a8d03f49e9a7c547cf0499) |
 | dyn-clone | 1.0.20 | MIT OR Apache-2.0 | [upstream](https://github.com/dtolnay/dyn-clone) | [23f18e03dc49](#sha256-23f18e03dc49df91622fe2a76176497404e46ced8a715d9d2b67a7446571cca3), [62c7a1e35f56](#sha256-62c7a1e35f56406896d7aa7ca52d0cc0d272ac022b5d2796e7d6905db8a3636a) |
 | ecb | 0.2.0 | MIT | [upstream](https://github.com/magic-akari/ecb) | [6f58f94baa69](#sha256-6f58f94baa693514ec6212fd23914c356cdfea0370f7d1e154d5b7fbd5bbdcc1) |
-| ecolor | 0.35.0 | MIT OR Apache-2.0 | [upstream](https://github.com/emilk/egui) | [508a77d2e7b5](#sha256-508a77d2e7b51d98adeed32648ad124b7b30241a8e70b2e72c99f92d8e5874d1) |
 | ed25519 | 2.2.3 | Apache-2.0 OR MIT | [upstream](https://github.com/RustCrypto/signatures/tree/master/ed25519) | [78779d420019](#sha256-78779d420019e6b4630376af8e86b6b335ee8a2f89ede6e0411e0469a326aaa4), [b3470648aff0](#sha256-b3470648aff02beb36d7a53240fc9260ed80ed93bd43bace6b67d7ef7336ee33) |
 | ed25519-dalek | 2.2.0 | BSD-3-Clause | [upstream](https://github.com/dalek-cryptography/curve25519-dalek/tree/main/ed25519-dalek) | [7b6a19666b13](#sha256-7b6a19666b1304f2dec9202b0dd2d92ca220558aa23f07d4c5e86dbd271050b9) |
-| eframe | 0.35.0 | MIT OR Apache-2.0 | [upstream](https://github.com/emilk/egui/tree/main/crates/eframe) | [508a77d2e7b5](#sha256-508a77d2e7b51d98adeed32648ad124b7b30241a8e70b2e72c99f92d8e5874d1) |
-| egui | 0.35.0 | MIT OR Apache-2.0 | [upstream](https://github.com/emilk/egui) | [508a77d2e7b5](#sha256-508a77d2e7b51d98adeed32648ad124b7b30241a8e70b2e72c99f92d8e5874d1) |
-| egui-winit | 0.35.0 | MIT OR Apache-2.0 | [upstream](https://github.com/emilk/egui/tree/main/crates/egui-winit) | [508a77d2e7b5](#sha256-508a77d2e7b51d98adeed32648ad124b7b30241a8e70b2e72c99f92d8e5874d1) |
-| egui_commonmark | 0.24.0 | MIT OR Apache-2.0 | [upstream](https://github.com/lampsitter/egui_commonmark) | [b0e1018ab9da](#sha256-b0e1018ab9da12e3fe3e415f5a8ae37afff663fba3f47b1fc26a29cf682c236b), [c71d239df917](#sha256-c71d239df91726fc519c6eb72d318ec65820627232b2f796219e87dcf35d0ab4) |
-| egui_commonmark_backend | 0.24.0 | MIT OR Apache-2.0 | [upstream](https://github.com/lampsitter/egui_commonmark) | [b0e1018ab9da](#sha256-b0e1018ab9da12e3fe3e415f5a8ae37afff663fba3f47b1fc26a29cf682c236b), [c71d239df917](#sha256-c71d239df91726fc519c6eb72d318ec65820627232b2f796219e87dcf35d0ab4) |
-| egui_extras | 0.35.0 | MIT OR Apache-2.0 | [upstream](https://github.com/emilk/egui) | [508a77d2e7b5](#sha256-508a77d2e7b51d98adeed32648ad124b7b30241a8e70b2e72c99f92d8e5874d1) |
-| egui_glow | 0.35.0 | MIT OR Apache-2.0 | [upstream](https://github.com/emilk/egui/tree/main/crates/egui_glow) | [508a77d2e7b5](#sha256-508a77d2e7b51d98adeed32648ad124b7b30241a8e70b2e72c99f92d8e5874d1) |
-| egui_graphs | 0.31.0 | MIT | [upstream](https://github.com/blitzarx1/egui_graphs) | [508a77d2e7b5](#sha256-508a77d2e7b51d98adeed32648ad124b7b30241a8e70b2e72c99f92d8e5874d1) |
 | either | 1.16.0 | MIT OR Apache-2.0 | [upstream](https://github.com/rayon-rs/either) | [7576269ea71f](#sha256-7576269ea71f767b99297934c0b2367532690f8c4badc695edf8e04ab6a1e545), [a60eea817514](#sha256-a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2) |
-| emath | 0.35.0 | MIT OR Apache-2.0 | [upstream](https://github.com/emilk/egui/tree/main/crates/emath) | [508a77d2e7b5](#sha256-508a77d2e7b51d98adeed32648ad124b7b30241a8e70b2e72c99f92d8e5874d1) |
+| embed-resource | 3.0.11 | MIT | [upstream](https://github.com/nabijaczleweli/rust-embed-resource) | [1abdbbd4e3f9](#sha256-1abdbbd4e3f95e56c79d4a8af190254c23ddb14db34aadadfafef9c3af041113) |
+| embed_plist | 1.2.2 | MIT OR Apache-2.0 | [upstream](https://github.com/nvzqz/embed-plist-rs) | [cfc7749b96f6](#sha256-cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30), [daacc37f680c](#sha256-daacc37f680c7dd0a758ac99a109f2f57d9f21d3683df9e9245055922842a695) |
+| embedded-io | 0.4.0 | MIT OR Apache-2.0 | [upstream](https://github.com/embassy-rs/embedded-io) | [423e1c4900b3](#sha256-423e1c4900b3fbb41cda3e34530b2597d50c2e61473e18c085756c507e46fe1c), [a60eea817514](#sha256-a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2) |
+| embedded-io | 0.6.1 | MIT OR Apache-2.0 | [upstream](https://github.com/rust-embedded/embedded-hal) | [47674f8b7d98](#sha256-47674f8b7d98c232c6f81346c4cfe48933d913a9e257d7a522ad9f42e3dd61e1), [a60eea817514](#sha256-a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2) |
 | encoding_rs | 0.8.35 | (Apache-2.0 OR MIT) AND BSD-3-Clause | [upstream](https://github.com/hsivonen/encoding_rs) | [11789f45bb18](#sha256-11789f45bb180841cd362a5eee6789c68ddb573a11105e30768c308a6add0190), [3fa4ca83dcc9](#sha256-3fa4ca83dcc9237839b1bdeb2e6d16bdfb5ec0c5ce42b24694d8bbf0dcbef72c), [838118388fe5](#sha256-838118388fe5c2e7f1dbbaeed13e1c7f3ebf88be91319c7c1d77c18e987d1a50), [cfc7749b96f6](#sha256-cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30) |
 | enum-as-inner | 0.6.1 | MIT/Apache-2.0 | [upstream](https://github.com/bluejekyll/enum-as-inner) | [10d73bf26900](#sha256-10d73bf26900fa6dd6f2613bb962b7bd8fa1e66618fcf0f9f899aa071a4ee200), [b40930bbcf80](#sha256-b40930bbcf80744c86c46a12bc9da056641d722716c378f5659b9e555ef833e1), [b54db71f7d0b](#sha256-b54db71f7d0b1f62c8c1b6b297347b81f7c217b4ce7e58223a20d2275535cd17) |
-| enum-map | 2.7.3 | MIT OR Apache-2.0 | [upstream](https://codeberg.org/xfix/enum-map) | [508a77d2e7b5](#sha256-508a77d2e7b51d98adeed32648ad124b7b30241a8e70b2e72c99f92d8e5874d1) |
-| enum-map-derive | 0.17.0 | MIT OR Apache-2.0 | [upstream](https://codeberg.org/xfix/enum-map) | [508a77d2e7b5](#sha256-508a77d2e7b51d98adeed32648ad124b7b30241a8e70b2e72c99f92d8e5874d1) |
-| enumn | 0.1.14 | MIT OR Apache-2.0 | [upstream](https://github.com/dtolnay/enumn) | [23f18e03dc49](#sha256-23f18e03dc49df91622fe2a76176497404e46ced8a715d9d2b67a7446571cca3), [62c7a1e35f56](#sha256-62c7a1e35f56406896d7aa7ca52d0cc0d272ac022b5d2796e7d6905db8a3636a) |
-| epaint | 0.35.0 | MIT OR Apache-2.0 | [upstream](https://github.com/emilk/egui/tree/main/crates/epaint) | [508a77d2e7b5](#sha256-508a77d2e7b51d98adeed32648ad124b7b30241a8e70b2e72c99f92d8e5874d1) |
-| epaint_default_fonts | 0.35.0 | (MIT OR Apache-2.0) AND OFL-1.1 AND Ubuntu-font-1.0 | [upstream](https://github.com/emilk/egui/tree/main/crates/epaint_default_fonts) | [2f0015108d68](#sha256-2f0015108d68627bd788d313f529c21ff4da2c2c42a5e1f3883acc83480f9002), [47c0cccbeec7](#sha256-47c0cccbeec7e8614548cc485588b28149e7874188df5f41b36efebcee285c87), [6a73f9541c2d](#sha256-6a73f9541c2de74158c0e7cf6b0a58ef774f5a780bf191f2d7ec9cc53efe2bf2), [b9d2c1d909aa](#sha256-b9d2c1d909aa149996fd4c91dcb92b2362a04431640c1d200959da94caf8cde1) |
 | equivalent | 1.0.2 | Apache-2.0 OR MIT | [upstream](https://github.com/indexmap-rs/equivalent) | [7365cc8878a1](#sha256-7365cc8878a1d7ce155a58c4ca09c3d7a6be413efa5334a80ea842912b669349), [a60eea817514](#sha256-a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2) |
+| erased-serde | 0.4.10 | MIT OR Apache-2.0 | [upstream](https://github.com/dtolnay/erased-serde) | [23f18e03dc49](#sha256-23f18e03dc49df91622fe2a76176497404e46ced8a715d9d2b67a7446571cca3), [62c7a1e35f56](#sha256-62c7a1e35f56406896d7aa7ca52d0cc0d272ac022b5d2796e7d6905db8a3636a) |
 | errno | 0.3.14 | MIT OR Apache-2.0 | [upstream](https://github.com/lambda-fairy/rust-errno) | [8764a5976757](#sha256-8764a597675778ddfd4e25f81b08a05dbcf089ac05662df7613fe67f150e3aa2), [a60eea817514](#sha256-a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2) |
-| error-code | 3.3.2 | BSL-1.0 | [upstream](https://github.com/DoumanAsh/error-code) | [c9bff7573892](#sha256-c9bff75738922193e67fa726fa225535870d2aa1059f91452c411736284ad566) |
 | esaxx-rs | 0.1.10 | Apache-2.0 | [upstream](https://github.com/Narsil/esaxx-rs) | [c71d239df917](#sha256-c71d239df91726fc519c6eb72d318ec65820627232b2f796219e87dcf35d0ab4) |
-| euclid | 0.22.14 | MIT OR Apache-2.0 | [upstream](https://github.com/servo/euclid) | [62065228e42c](#sha256-62065228e42caebca7e7d7db1204cbb867033de5982ca4009928915e4095f3a3), [a60eea817514](#sha256-a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2), [ec82b96487e9](#sha256-ec82b96487e9e778ee610c7ab245162464782cfa1f555c2299333f8dbe5c036a) |
 | fallible-iterator | 0.3.0 | MIT/Apache-2.0 | [upstream](https://github.com/sfackler/rust-fallible-iterator) | [0816e154b159](#sha256-0816e154b159ba255c563f7c8c7df5bbb8cc5fc96f5ab8cf9f4743b4f41fe7eb), [b40930bbcf80](#sha256-b40930bbcf80744c86c46a12bc9da056641d722716c378f5659b9e555ef833e1) |
 | fallible-streaming-iterator | 0.1.9 | MIT/Apache-2.0 | [upstream](https://github.com/sfackler/fallible-streaming-iterator) | [8dcec5569a9b](#sha256-8dcec5569a9be5b0e086c80faed6f1aefa670af0ec29cecc2f714303096887e0), [b40930bbcf80](#sha256-b40930bbcf80744c86c46a12bc9da056641d722716c378f5659b9e555ef833e1) |
 | fastbloom | 0.17.0 | MIT OR Apache-2.0 | [upstream](https://github.com/tomtomwombat/fastbloom/) | [25d56607a5f9](#sha256-25d56607a5f999d7fde0f9b9c2b2ea828c3c56e7f81beea4e1ae25994db4d9dd), [62c7a1e35f56](#sha256-62c7a1e35f56406896d7aa7ca52d0cc0d272ac022b5d2796e7d6905db8a3636a) |
 | fastembed | 5.17.2 | Apache-2.0 | [upstream](https://github.com/Anush008/fastembed-rs) | [c71d239df917](#sha256-c71d239df91726fc519c6eb72d318ec65820627232b2f796219e87dcf35d0ab4) |
 | fastrand | 2.4.1 | Apache-2.0 OR MIT | [upstream](https://github.com/smol-rs/fastrand) | [23f18e03dc49](#sha256-23f18e03dc49df91622fe2a76176497404e46ced8a715d9d2b67a7446571cca3), [a60eea817514](#sha256-a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2) |
-| fax | 0.2.7 | MIT | [upstream](https://github.com/pdf-rs/fax) | [7101390b4c8e](#sha256-7101390b4c8edd752f4c0de47f35d61b44d9cf0ee8dd032115e25644e277cfff) |
 | fdeflate | 0.3.7 | MIT OR Apache-2.0 | [upstream](https://github.com/image-rs/fdeflate) | [0d542e0c8804](#sha256-0d542e0c8804e39aa7f37eb00da5a762149dc682d7829451287e11b938e94594), [c77a4cf9da72](#sha256-c77a4cf9da729987d0fe7ccd811e3bd27393914ddf3d23467c18cc22954513b3) |
-| fearless_simd | 0.4.1 | Apache-2.0 OR MIT | [upstream](https://github.com/linebender/fearless_simd) | [23c23145f6ea](#sha256-23c23145f6eac25c28cdcc03d38506a5712a9a8cffb5bd5301457f6173ea696e), [a6cba85bc92e](#sha256-a6cba85bc92e0cff7a450b1d873c0eaa2e9fc96bf472df0247a26bec77bf3ff9) |
 | filetime | 0.2.29 | MIT/Apache-2.0 | [upstream](https://github.com/alexcrichton/filetime) | [378f5840b258](#sha256-378f5840b258e2779c39418f3f2d7b2ba96f1c7917dd6be0713f88305dbda397), [a60eea817514](#sha256-a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2) |
 | find-msvc-tools | 0.1.9 | MIT OR Apache-2.0 | [upstream](https://github.com/rust-lang/cc-rs) | [378f5840b258](#sha256-378f5840b258e2779c39418f3f2d7b2ba96f1c7917dd6be0713f88305dbda397), [a60eea817514](#sha256-a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2) |
-| fixedbitset | 0.5.7 | MIT OR Apache-2.0 | [upstream](https://github.com/petgraph/fixedbitset) | [a60eea817514](#sha256-a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2), [ce592787ff23](#sha256-ce592787ff2321feab698a4c612237f4378cc658ebb1d472913e5802cc47afb4) |
 | flate2 | 1.1.9 | MIT OR Apache-2.0 | [upstream](https://github.com/rust-lang/flate2-rs) | [025436edff4c](#sha256-025436edff4cfcdde17a5811fdea78892d8482efd1abdec5a17872d07a4f2112), [a60eea817514](#sha256-a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2) |
 | fluent-bundle | 0.16.0 | Apache-2.0 OR MIT | [upstream](https://github.com/projectfluent/fluent-rs) | [49c0b000c037](#sha256-49c0b000c03731d9e3970dc059ad4ca345d773681f4a612b0024435b663e0220), [5db2b182453f](#sha256-5db2b182453ff32ed40f7da63589c9667a3f8bd8b16b1471b152caae56f77e45) |
 | fluent-langneg | 0.13.1 | Apache-2.0 OR MIT | [upstream](https://github.com/projectfluent/fluent-langneg-rs) | [508a77d2e7b5](#sha256-508a77d2e7b51d98adeed32648ad124b7b30241a8e70b2e72c99f92d8e5874d1) |
@@ -186,7 +196,6 @@ Third-party packages: **633**. Unique legal texts: **377**.
 | fnv | 1.0.7 | Apache-2.0 / MIT | [upstream](https://github.com/servo/rust-fnv) | [65fdb6c76cd6](#sha256-65fdb6c76cd61612070c066eec9ecdb30ee74fb27859d0d9af58b9f499fd0c3e), [a60eea817514](#sha256-a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2) |
 | foldhash | 0.1.5 | Zlib | [upstream](https://github.com/orlp/foldhash) | [1d4c38d56650](#sha256-1d4c38d56650edc2c673cadbec74bec14db1fe8f2f10f4e3477dcbb49563be40) |
 | foldhash | 0.2.0 | Zlib | [upstream](https://github.com/orlp/foldhash) | [1d4c38d56650](#sha256-1d4c38d56650edc2c673cadbec74bec14db1fe8f2f10f4e3477dcbb49563be40) |
-| font-types | 0.11.3 | MIT OR Apache-2.0 | [upstream](https://github.com/googlefonts/fontations) | [8a62fa27ffdc](#sha256-8a62fa27ffdccc3df19dce90f8bb3d572e27aecffc1a383d0c2601834dcec434), [a14f7d685a79](#sha256-a14f7d685a79c0f4fb64aee305527a6d5fa55f2401f4e6d688d7b1301868e6c0) |
 | foreign-types | 0.5.0 | MIT/Apache-2.0 | [upstream](https://github.com/sfackler/foreign-types) | [333ea3aaa3ca](#sha256-333ea3aaa3cadb819f4acd9f9153f9feee060a995ca8710f32bc5bd9a4b91734), [b40930bbcf80](#sha256-b40930bbcf80744c86c46a12bc9da056641d722716c378f5659b9e555ef833e1) |
 | foreign-types-macros | 0.2.3 | MIT/Apache-2.0 | [upstream](https://github.com/sfackler/foreign-types) | [333ea3aaa3ca](#sha256-333ea3aaa3cadb819f4acd9f9153f9feee060a995ca8710f32bc5bd9a4b91734), [b40930bbcf80](#sha256-b40930bbcf80744c86c46a12bc9da056641d722716c378f5659b9e555ef833e1) |
 | foreign-types-shared | 0.3.1 | MIT/Apache-2.0 | [upstream](https://github.com/sfackler/foreign-types) | [333ea3aaa3ca](#sha256-333ea3aaa3cadb819f4acd9f9153f9feee060a995ca8710f32bc5bd9a4b91734), [b40930bbcf80](#sha256-b40930bbcf80744c86c46a12bc9da056641d722716c378f5659b9e555ef833e1) |
@@ -209,17 +218,11 @@ Third-party packages: **633**. Unique legal texts: **377**.
 | getrandom | 0.3.4 | MIT OR Apache-2.0 | [upstream](https://github.com/rust-random/getrandom) | [29e9fe5074bd](#sha256-29e9fe5074bd27e0e5d5d110394fbbcd841baee2651a3c4b4560a632702cede4), [aaff376532ea](#sha256-aaff376532ea30a0cd5330b9502ad4a4c8bf769c539c87ffe78819d188a18ebf) |
 | getrandom | 0.4.3 | MIT OR Apache-2.0 | [upstream](https://github.com/rust-random/getrandom) | [523a42c25d24](#sha256-523a42c25d245dde9c015f882cec7f4555aad883382a6cf19b4b7d9b2cd5419b), [aaff376532ea](#sha256-aaff376532ea30a0cd5330b9502ad4a4c8bf769c539c87ffe78819d188a18ebf) |
 | ghash | 0.5.1 | Apache-2.0 OR MIT | [upstream](https://github.com/RustCrypto/universal-hashes) | [a9040321c371](#sha256-a9040321c3712d8fd0b09cf52b17445de04a23a10165049ae187cd39e5c86be5), [c0fabcc308b4](#sha256-c0fabcc308b450cb6fe62c9f56fae6abbeb9768eb80d992484c857d744846c2e) |
-| gl_generator | 0.14.0 | Apache-2.0 | [upstream](https://github.com/brendanzab/gl-rs/) | [c71d239df917](#sha256-c71d239df91726fc519c6eb72d318ec65820627232b2f796219e87dcf35d0ab4) |
-| glifo | 0.1.1 | Apache-2.0 OR MIT | [upstream](https://github.com/linebender/vello) | [3252fc481fda](#sha256-3252fc481fda4d2bad9e1ae675065889abd35c8abb500499ac01e70aaffa02b9), [62c7a1e35f56](#sha256-62c7a1e35f56406896d7aa7ca52d0cc0d272ac022b5d2796e7d6905db8a3636a) |
-| glow | 0.17.0 | MIT OR Apache-2.0 OR Zlib | [upstream](https://github.com/grovesNL/glow) | [23f18e03dc49](#sha256-23f18e03dc49df91622fe2a76176497404e46ced8a715d9d2b67a7446571cca3), [a60eea817514](#sha256-a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2), [b3ec01ad0869](#sha256-b3ec01ad0869c5c50937bc68780cd0bb44e235ad858dfa54a7a381dced9b115a) |
-| glutin | 0.32.3 | Apache-2.0 | [upstream](https://github.com/rust-windowing/glutin) | [a44454274400](#sha256-a4445427440043e8ce6fadf7a43fb906cb0d7f6c573a560a9f142cf9f9bf8ff4) |
-| glutin-winit | 0.5.0 | MIT | [upstream](https://github.com/rust-windowing/glutin) | [d35629aec828](#sha256-d35629aec828ca86834f76e4c813bd6a6f0dda9005da898b0f49021f8042c5bd) |
-| glutin_egl_sys | 0.7.1 | Apache-2.0 | [upstream](https://github.com/rust-windowing/glutin) | [a44454274400](#sha256-a4445427440043e8ce6fadf7a43fb906cb0d7f6c573a560a9f142cf9f9bf8ff4) |
-| glutin_wgl_sys | 0.6.1 | Apache-2.0 | [upstream](https://github.com/rust-windowing/glutin) | [a44454274400](#sha256-a4445427440043e8ce6fadf7a43fb906cb0d7f6c573a560a9f142cf9f9bf8ff4) |
-| guillotiere | 0.7.0 | MIT/Apache-2.0 | [upstream](https://github.com/nical/guillotiere) | [644d05561bc2](#sha256-644d05561bc2dc5993f19d6602894315d925744d854a0413876e203f86c35830), [cab31b979edf](#sha256-cab31b979edfb1d6ff72a9a84e1092a9b68954022fc3f253338e64879961b8d2) |
-| h2 | 0.4.15 | MIT | [upstream](https://github.com/hyperium/h2) | [b21623012e6c](#sha256-b21623012e6c453d944b0342c515b631cfcbf30704c2621b291526b69c10724d) |
+| gimli | 0.33.0 | MIT OR Apache-2.0 | [upstream](https://github.com/gimli-rs/gimli) | [7b63ecd5f190](#sha256-7b63ecd5f1902af1b63729947373683c32745c16a10e8e6292e2e2dcd7e90ae0), [a60eea817514](#sha256-a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2) |
+| glob | 0.3.4 | MIT OR Apache-2.0 | [upstream](https://github.com/rust-lang/glob) | [6485b8ed310d](#sha256-6485b8ed310d3f0340bf1ad1f47645069ce4069dcc6bb46c7d5c6faf41de1fdb), [a60eea817514](#sha256-a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2) |
+| h2 | 0.4.16 | MIT | [upstream](https://github.com/hyperium/h2) | [b21623012e6c](#sha256-b21623012e6c453d944b0342c515b631cfcbf30704c2621b291526b69c10724d) |
 | half | 2.7.1 | MIT OR Apache-2.0 | [upstream](https://github.com/VoidStarKat/half-rs) | [508a77d2e7b5](#sha256-508a77d2e7b51d98adeed32648ad124b7b30241a8e70b2e72c99f92d8e5874d1), [a6cba85bc92e](#sha256-a6cba85bc92e0cff7a450b1d873c0eaa2e9fc96bf472df0247a26bec77bf3ff9) |
-| harfrust | 0.7.0 | MIT | [upstream](https://github.com/harfbuzz/harfrust) | [7a8afa057800](#sha256-7a8afa0578009eee56ec5462cebfe0f08648102f97e331ae02b5753a3f672bb1) |
+| hashbrown | 0.12.3 | MIT OR Apache-2.0 | [upstream](https://github.com/rust-lang/hashbrown) | [a60eea817514](#sha256-a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2), [ff8f68cb076c](#sha256-ff8f68cb076caf8cefe7a6430d4ac086ce6af2ca8ce2c4e5a2004d4552ef52a2) |
 | hashbrown | 0.15.5 | MIT OR Apache-2.0 | [upstream](https://github.com/rust-lang/hashbrown) | [a60eea817514](#sha256-a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2), [ff8f68cb076c](#sha256-ff8f68cb076caf8cefe7a6430d4ac086ce6af2ca8ce2c4e5a2004d4552ef52a2) |
 | hashbrown | 0.16.1 | MIT OR Apache-2.0 | [upstream](https://github.com/rust-lang/hashbrown) | [a60eea817514](#sha256-a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2), [ff8f68cb076c](#sha256-ff8f68cb076caf8cefe7a6430d4ac086ce6af2ca8ce2c4e5a2004d4552ef52a2) |
 | hashbrown | 0.17.1 | MIT OR Apache-2.0 | [upstream](https://github.com/rust-lang/hashbrown) | [a60eea817514](#sha256-a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2), [ff8f68cb076c](#sha256-ff8f68cb076caf8cefe7a6430d4ac086ce6af2ca8ce2c4e5a2004d4552ef52a2) |
@@ -232,7 +235,7 @@ Third-party packages: **633**. Unique legal texts: **377**.
 | hkdf | 0.12.4 | MIT OR Apache-2.0 | [upstream](https://github.com/RustCrypto/KDFs/) | [a9040321c371](#sha256-a9040321c3712d8fd0b09cf52b17445de04a23a10165049ae187cd39e5c86be5), [d288f9c9b459](#sha256-d288f9c9b4590446ec18c22ead8f8b5a12a3d4025b68f62dc9015063eb9cca69) |
 | hmac | 0.12.1 | MIT OR Apache-2.0 | [upstream](https://github.com/RustCrypto/MACs) | [9e0dfd2dd417](#sha256-9e0dfd2dd4173a530e238cb6adb37aa78c34c6bc7444e0e10c1ab5d8881f63ba), [a9040321c371](#sha256-a9040321c3712d8fd0b09cf52b17445de04a23a10165049ae187cd39e5c86be5) |
 | hmac-sha256 | 1.1.14 | ISC | [upstream](https://github.com/jedisct1/rust-hmac-sha256) | [6f4e2de03c87](#sha256-6f4e2de03c87fde1f0d4481b5a6358f9d2ba1f4bf8ed331d8f2d2fc4579b4747) |
-| home | 0.5.12 | MIT OR Apache-2.0 | [upstream](https://github.com/rust-lang/cargo) | [23f18e03dc49](#sha256-23f18e03dc49df91622fe2a76176497404e46ced8a715d9d2b67a7446571cca3), [8ada45cd9f84](#sha256-8ada45cd9f843acf64e4722ae262c622a2b3b3007c7310ef36ac1061a30f6adb) |
+| html5ever | 0.38.0 | MIT OR Apache-2.0 | [upstream](https://github.com/servo/html5ever) | [86dd7f026f91](#sha256-86dd7f026f916daf7511e39951ad8ea8cf55a8db67ae64060dacf829761c18f3), [a60eea817514](#sha256-a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2) |
 | http | 1.4.2 | MIT OR Apache-2.0 | [upstream](https://github.com/hyperium/http) | [8bb1b50b0e5c](#sha256-8bb1b50b0e5c9399ae33bd35fab2769010fa6c14e8860c729a52295d84896b7a), [dc91f8200e4b](#sha256-dc91f8200e4b2a1f9261035d4c18c33c246911a6c0f7b543d75347e61b249cff) |
 | http-body | 1.0.1 | MIT | [upstream](https://github.com/hyperium/http-body) | [cddabf8adc6c](#sha256-cddabf8adc6ccd6c3e68f5d71eac9fae3094116623cf23a46af0a5fd6b8ee813) |
 | http-body-util | 0.1.3 | MIT | [upstream](https://github.com/hyperium/http-body) | [b843fb7430ef](#sha256-b843fb7430efdf9732c834b6814beda44fccf3f0ddf7c9e030b39da17f6b159c) |
@@ -243,6 +246,7 @@ Third-party packages: **633**. Unique legal texts: **377**.
 | hyper-rustls | 0.27.9 | Apache-2.0 OR ISC OR MIT | [upstream](https://github.com/rustls/hyper-rustls) | [709e3175b421](#sha256-709e3175b4212f7b13aa93971c9f62ff8c69ec45ad8c6532a7e0c41d7a7d6f8c), [7cfafc877ecc](#sha256-7cfafc877eccc46c0e346ccbaa5c51bb6b894d2b818e617d970211e232785ad4), [a60eea817514](#sha256-a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2) |
 | hyper-util | 0.1.20 | MIT | [upstream](https://github.com/hyperium/hyper-util) | [9e0a97848ea5](#sha256-9e0a97848ea543aef745c98e84fde696a9a3e0735538f6daefdd3cb1942effc1) |
 | iana-time-zone | 0.1.65 | MIT OR Apache-2.0 | [upstream](https://github.com/strawlab/iana-time-zone) | [696759d65dfe](#sha256-696759d65dfe558ff7d9f031c76db19ec5c0767470fb67c4e8d990820d1e99c9), [da28ccc6b158](#sha256-da28ccc6b158fc2d8cccc74e99794b1cff1d29bd7bbeb019442fcf0c04c6cad9) |
+| ico | 0.5.0 | MIT | [upstream](https://github.com/mdsteele/rust-ico) | [41ca90213441](#sha256-41ca90213441b294e7517d5858f0cc85bc12e19ec044001b45bc213de461d33b) |
 | icu_collections | 2.2.0 | Unicode-3.0 | [upstream](https://github.com/unicode-org/icu4x) | [f367c1b8e1aa](#sha256-f367c1b8e1aa262435251e442901da4607b4650e0e63a026f5044473ecfb90f2) |
 | icu_locale_core | 2.2.0 | Unicode-3.0 | [upstream](https://github.com/unicode-org/icu4x) | [f367c1b8e1aa](#sha256-f367c1b8e1aa262435251e442901da4607b4650e0e63a026f5044473ecfb90f2) |
 | icu_normalizer | 2.2.0 | Unicode-3.0 | [upstream](https://github.com/unicode-org/icu4x) | [f367c1b8e1aa](#sha256-f367c1b8e1aa262435251e442901da4607b4650e0e63a026f5044473ecfb90f2) |
@@ -250,14 +254,16 @@ Third-party packages: **633**. Unique legal texts: **377**.
 | icu_properties | 2.2.0 | Unicode-3.0 | [upstream](https://github.com/unicode-org/icu4x) | [f367c1b8e1aa](#sha256-f367c1b8e1aa262435251e442901da4607b4650e0e63a026f5044473ecfb90f2) |
 | icu_properties_data | 2.2.0 | Unicode-3.0 | [upstream](https://github.com/unicode-org/icu4x) | [f367c1b8e1aa](#sha256-f367c1b8e1aa262435251e442901da4607b4650e0e63a026f5044473ecfb90f2) |
 | icu_provider | 2.2.0 | Unicode-3.0 | [upstream](https://github.com/unicode-org/icu4x) | [f367c1b8e1aa](#sha256-f367c1b8e1aa262435251e442901da4607b4650e0e63a026f5044473ecfb90f2) |
+| id-arena | 2.3.0 | MIT/Apache-2.0 | [upstream](https://github.com/fitzgen/id-arena) | [378f5840b258](#sha256-378f5840b258e2779c39418f3f2d7b2ba96f1c7917dd6be0713f88305dbda397), [a60eea817514](#sha256-a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2) |
 | ident_case | 1.0.1 | MIT/Apache-2.0 | [upstream](https://github.com/TedDriggs/ident_case) | [508a77d2e7b5](#sha256-508a77d2e7b51d98adeed32648ad124b7b30241a8e70b2e72c99f92d8e5874d1) |
 | idna | 1.1.0 | MIT OR Apache-2.0 | [upstream](https://github.com/servo/rust-url/) | [a60eea817514](#sha256-a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2), [b38f11f60967](#sha256-b38f11f6096706e6de553dabe2a7ed142d59b6fa8c97e290c67496154745cdd5) |
 | idna_adapter | 1.2.2 | Apache-2.0 OR MIT | [upstream](https://github.com/hsivonen/idna_adapter) | [8b43ce8accd6](#sha256-8b43ce8accd61e9d370b5ca9e9c4f953279b5c239926c62315b40e24df51b726), [a60eea817514](#sha256-a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2) |
 | if-addrs | 0.15.0 | MIT OR BSD-3-Clause | [upstream](https://github.com/messense/if-addrs) | [3990ddb78a5a](#sha256-3990ddb78a5a2cfd64a5ffe5cebc3306f3298f6880c644afdf15043ef7d702d9), [588713c78138](#sha256-588713c78138d7d6985b87275724f7047949a71a007b16b352d7745499976f7f) |
 | if-watch | 3.2.2 | MIT OR Apache-2.0 | [upstream](https://github.com/libp2p/if-watch) | [508a77d2e7b5](#sha256-508a77d2e7b51d98adeed32648ad124b7b30241a8e70b2e72c99f92d8e5874d1) |
 | igd-next | 0.16.2 | MIT | [upstream](https://github.com/dariusc93/rust-igd) | [a89137c40f91](#sha256-a89137c40f91e102d1e3b6aa5061fbd84f6e39638e69f6bda124c104a6e1c83d) |
-| image | 0.25.10 | MIT OR Apache-2.0 | [upstream](https://github.com/image-rs/image) | [0d542e0c8804](#sha256-0d542e0c8804e39aa7f37eb00da5a762149dc682d7829451287e11b938e94594), [c77a4cf9da72](#sha256-c77a4cf9da729987d0fe7ccd811e3bd27393914ddf3d23467c18cc22954513b3) |
+| indexmap | 1.9.3 | Apache-2.0 OR MIT | [upstream](https://github.com/bluss/indexmap) | [a60eea817514](#sha256-a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2), [ecc269ef87fd](#sha256-ecc269ef87fd38a1d98e30bfac9ba964a9dbd9315c3770fed98d4d7cb5882055) |
 | indexmap | 2.14.0 | Apache-2.0 OR MIT | [upstream](https://github.com/indexmap-rs/indexmap) | [a60eea817514](#sha256-a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2), [ecc269ef87fd](#sha256-ecc269ef87fd38a1d98e30bfac9ba964a9dbd9315c3770fed98d4d7cb5882055) |
+| infer | 0.19.0 | MIT | [upstream](https://github.com/bojand/infer) | [270b0d81891a](#sha256-270b0d81891aa44c7e8726cf9432dade9556a01c848bacd2f3ef839c9c1a1859) |
 | inout | 0.1.4 | MIT OR Apache-2.0 | [upstream](https://github.com/RustCrypto/utils) | [304b898acad7](#sha256-304b898acad7f02e03d6d8832d682a3b43ee729ab5d3a069af5a36979083b6b4), [a9040321c371](#sha256-a9040321c3712d8fd0b09cf52b17445de04a23a10165049ae187cd39e5c86be5) |
 | inout | 0.2.2 | MIT OR Apache-2.0 | [upstream](https://github.com/RustCrypto/utils) | [a07fcacc3c60](#sha256-a07fcacc3c60de4dc0fab10ac9d6aaba7379974e28451c99da7f7df09c25b28c), [a9040321c371](#sha256-a9040321c3712d8fd0b09cf52b17445de04a23a10165049ae187cd39e5c86be5) |
 | interprocess | 2.4.2 | 0BSD OR Apache-2.0 | [upstream](https://github.com/kotauskas/interprocess) | [814fc616d256](#sha256-814fc616d256859d513d7c1a1f76d5a759a6318971cfdc7f9ac934e1d85f58eb), [8fab50bdd851](#sha256-8fab50bdd851f4e8282c3d1a2c8e3490d7b664e4b90cc44dd15d37be8c8d473a) |
@@ -271,24 +277,27 @@ Third-party packages: **633**. Unique legal texts: **377**.
 | jiff-static | 0.2.32 | Unlicense OR MIT | [upstream](https://github.com/BurntSushi/jiff) | [01c266bced4a](#sha256-01c266bced4a434da0051174d6bee16a4c82cf634e2679b6155d40d75012390f), [0f96a83840e1](#sha256-0f96a83840e146e43c0ec96a22ec1f392e0680e6c1226e6f3ba87e0740af850f), [7e12e5df4bae](#sha256-7e12e5df4bae12cb21581ba157ced20e1986a0508dd10d0e8a4ab9a4cf94e85c) |
 | jiff-tzdb | 0.1.8 | Unlicense OR MIT | [upstream](https://github.com/BurntSushi/jiff) | [01c266bced4a](#sha256-01c266bced4a434da0051174d6bee16a4c82cf634e2679b6155d40d75012390f), [0f96a83840e1](#sha256-0f96a83840e146e43c0ec96a22ec1f392e0680e6c1226e6f3ba87e0740af850f), [7e12e5df4bae](#sha256-7e12e5df4bae12cb21581ba157ced20e1986a0508dd10d0e8a4ab9a4cf94e85c) |
 | jiff-tzdb-platform | 0.1.3 | Unlicense OR MIT | [upstream](https://github.com/BurntSushi/jiff) | [01c266bced4a](#sha256-01c266bced4a434da0051174d6bee16a4c82cf634e2679b6155d40d75012390f), [0f96a83840e1](#sha256-0f96a83840e146e43c0ec96a22ec1f392e0680e6c1226e6f3ba87e0740af850f), [7e12e5df4bae](#sha256-7e12e5df4bae12cb21581ba157ced20e1986a0508dd10d0e8a4ab9a4cf94e85c) |
-| jobserver | 0.1.35 | MIT OR Apache-2.0 | [upstream](https://github.com/rust-lang/jobserver-rs) | [378f5840b258](#sha256-378f5840b258e2779c39418f3f2d7b2ba96f1c7917dd6be0713f88305dbda397), [a60eea817514](#sha256-a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2) |
+| json-patch | 3.0.1 | MIT/Apache-2.0 | [upstream](https://github.com/idubrov/json-patch) | [87f7527b1066](#sha256-87f7527b1066337751f7f4d717089bf514ff8f7ee7d66c4c5b891b09e744ec11), [b40930bbcf80](#sha256-b40930bbcf80744c86c46a12bc9da056641d722716c378f5659b9e555ef833e1) |
+| jsonptr | 0.6.3 | MIT OR Apache-2.0 | [upstream](https://github.com/chanced/jsonptr) | [2bc107bdc18a](#sha256-2bc107bdc18a74263d20bdefdb8073e17bc1a01b6b374dc5835683a33ee5ba7d), [2cf31f2ae7f3](#sha256-2cf31f2ae7f3feba667d50fc1d4d21ecf217703c04c3068b83c9a73b6dde723a) |
 | keyboard-types | 0.7.0 | MIT OR Apache-2.0 | [upstream](https://github.com/pyfisch/keyboard-types) | [a60eea817514](#sha256-a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2), [dd57ede7eb6b](#sha256-dd57ede7eb6b56bc60b7c69f4b701b5550b9b5a1f4f47b98f26758ed74743f82) |
 | keyring | 3.6.3 | MIT OR Apache-2.0 | [upstream](https://github.com/hwchen/keyring-rs.git) | [157cc607717b](#sha256-157cc607717b1b372a69f6b4526f6ad18c1279af9f3267835cca2943f37bc07d), [78ebc2ea2a1c](#sha256-78ebc2ea2a1cec9cbec2e1a6fc15e73474fe22bdad7575518e7f4628651d49c4) |
-| khronos_api | 3.1.0 | Apache-2.0 | [upstream](https://github.com/brendanzab/gl-rs/) | [c71d239df917](#sha256-c71d239df91726fc519c6eb72d318ec65820627232b2f796219e87dcf35d0ab4) |
-| kurbo | 0.13.1 | Apache-2.0 OR MIT | [upstream](https://github.com/linebender/kurbo) | [23c23145f6ea](#sha256-23c23145f6eac25c28cdcc03d38506a5712a9a8cffb5bd5301457f6173ea696e), [cfc7749b96f6](#sha256-cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30) |
 | lazy_static | 1.5.0 | MIT OR Apache-2.0 | [upstream](https://github.com/rust-lang-nursery/lazy-static.rs) | [0621878e61f0](#sha256-0621878e61f0d0fda054bcbe02df75192c28bde1ecc8289cbd86aeba2dd72720), [a60eea817514](#sha256-a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2) |
+| leb128fmt | 0.1.0 | MIT OR Apache-2.0 | [upstream](https://github.com/bluk/leb128fmt) | [23f18e03dc49](#sha256-23f18e03dc49df91622fe2a76176497404e46ced8a715d9d2b67a7446571cca3), [a60eea817514](#sha256-a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2) |
 | libc | 0.2.186 | MIT OR Apache-2.0 | [upstream](https://github.com/rust-lang/libc) | [123a331b5dbf](#sha256-123a331b5dbf04c30097fa43b8f858bc85df671fe776de498d01f3d6b7c1f69e), [62c7a1e35f56](#sha256-62c7a1e35f56406896d7aa7ca52d0cc0d272ac022b5d2796e7d6905db8a3636a) |
-| libloading | 0.8.9 | ISC | [upstream](https://github.com/nagisa/rust_libloading/) | [b29f8b014523](#sha256-b29f8b01452350c20dd1af16ef83b598fea3053578ccc1c7a0ef40e57be2620f) |
 | libm | 0.2.16 | MIT | [upstream](https://github.com/rust-lang/compiler-builtins) | [3823dda7cf04](#sha256-3823dda7cf046602f4b4e77ec8e227863dc4736037cc85bb33d9f19febe16bb7) |
 | libp2p | 0.56.0 | MIT | [upstream](https://github.com/libp2p/rust-libp2p) | [508a77d2e7b5](#sha256-508a77d2e7b51d98adeed32648ad124b7b30241a8e70b2e72c99f92d8e5874d1) |
 | libp2p-allow-block-list | 0.6.0 | MIT | [upstream](https://github.com/libp2p/rust-libp2p) | [508a77d2e7b5](#sha256-508a77d2e7b51d98adeed32648ad124b7b30241a8e70b2e72c99f92d8e5874d1) |
+| libp2p-autonat | 0.15.0 | MIT | [upstream](https://github.com/libp2p/rust-libp2p) | [508a77d2e7b5](#sha256-508a77d2e7b51d98adeed32648ad124b7b30241a8e70b2e72c99f92d8e5874d1) |
 | libp2p-connection-limits | 0.6.0 | MIT | [upstream](https://github.com/libp2p/rust-libp2p) | [508a77d2e7b5](#sha256-508a77d2e7b51d98adeed32648ad124b7b30241a8e70b2e72c99f92d8e5874d1) |
 | libp2p-core | 0.43.2 | MIT | [upstream](https://github.com/libp2p/rust-libp2p) | [508a77d2e7b5](#sha256-508a77d2e7b51d98adeed32648ad124b7b30241a8e70b2e72c99f92d8e5874d1) |
+| libp2p-dcutr | 0.14.1 | MIT | [upstream](https://github.com/libp2p/rust-libp2p) | [508a77d2e7b5](#sha256-508a77d2e7b51d98adeed32648ad124b7b30241a8e70b2e72c99f92d8e5874d1) |
 | libp2p-dns | 0.44.0 | MIT | [upstream](https://github.com/libp2p/rust-libp2p) | [508a77d2e7b5](#sha256-508a77d2e7b51d98adeed32648ad124b7b30241a8e70b2e72c99f92d8e5874d1) |
 | libp2p-identity | 0.2.14 | MIT | [upstream](https://github.com/libp2p/rust-libp2p) | [508a77d2e7b5](#sha256-508a77d2e7b51d98adeed32648ad124b7b30241a8e70b2e72c99f92d8e5874d1) |
 | libp2p-mdns | 0.48.0 | MIT | [upstream](https://github.com/libp2p/rust-libp2p) | [508a77d2e7b5](#sha256-508a77d2e7b51d98adeed32648ad124b7b30241a8e70b2e72c99f92d8e5874d1) |
+| libp2p-metrics | 0.17.0 | MIT | [upstream](https://github.com/libp2p/rust-libp2p) | [508a77d2e7b5](#sha256-508a77d2e7b51d98adeed32648ad124b7b30241a8e70b2e72c99f92d8e5874d1) |
 | libp2p-noise | 0.46.1 | MIT | [upstream](https://github.com/libp2p/rust-libp2p) | [508a77d2e7b5](#sha256-508a77d2e7b51d98adeed32648ad124b7b30241a8e70b2e72c99f92d8e5874d1) |
 | libp2p-quic | 0.13.1 | MIT | [upstream](https://github.com/libp2p/rust-libp2p) | [508a77d2e7b5](#sha256-508a77d2e7b51d98adeed32648ad124b7b30241a8e70b2e72c99f92d8e5874d1) |
+| libp2p-relay | 0.21.1 | MIT | [upstream](https://github.com/libp2p/rust-libp2p) | [508a77d2e7b5](#sha256-508a77d2e7b51d98adeed32648ad124b7b30241a8e70b2e72c99f92d8e5874d1) |
 | libp2p-request-response | 0.29.0 | MIT | [upstream](https://github.com/libp2p/rust-libp2p) | [508a77d2e7b5](#sha256-508a77d2e7b51d98adeed32648ad124b7b30241a8e70b2e72c99f92d8e5874d1) |
 | libp2p-swarm | 0.47.1 | MIT | [upstream](https://github.com/libp2p/rust-libp2p) | [508a77d2e7b5](#sha256-508a77d2e7b51d98adeed32648ad124b7b30241a8e70b2e72c99f92d8e5874d1) |
 | libp2p-swarm-derive | 0.35.1 | MIT | [upstream](https://github.com/libp2p/rust-libp2p) | [508a77d2e7b5](#sha256-508a77d2e7b51d98adeed32648ad124b7b30241a8e70b2e72c99f92d8e5874d1) |
@@ -297,26 +306,23 @@ Third-party packages: **633**. Unique legal texts: **377**.
 | libp2p-upnp | 0.5.0 | MIT | [upstream](https://github.com/libp2p/rust-libp2p) | [508a77d2e7b5](#sha256-508a77d2e7b51d98adeed32648ad124b7b30241a8e70b2e72c99f92d8e5874d1) |
 | libp2p-yamux | 0.47.0 | MIT | [upstream](https://github.com/libp2p/rust-libp2p) | [508a77d2e7b5](#sha256-508a77d2e7b51d98adeed32648ad124b7b30241a8e70b2e72c99f92d8e5874d1) |
 | libsqlite3-sys | 0.35.0 | MIT | [upstream](https://github.com/rusqlite/rusqlite) | [c10c1f273375](#sha256-c10c1f27337546471e5f7e4e97fdd398b35b9d4e126115dcd22de8d8e65abf6f), [ea4fcb309f14](#sha256-ea4fcb309f14a22065e1ea45362d494d320012249ed865fe9c7c0946db754131) |
-| linebender_resource_handle | 0.1.1 | Apache-2.0 OR MIT | [upstream](https://github.com/linebender/raw_resource_handle) | [508a77d2e7b5](#sha256-508a77d2e7b51d98adeed32648ad124b7b30241a8e70b2e72c99f92d8e5874d1), [a6cba85bc92e](#sha256-a6cba85bc92e0cff7a450b1d873c0eaa2e9fc96bf472df0247a26bec77bf3ff9) |
 | litemap | 0.8.2 | Unicode-3.0 | [upstream](https://github.com/unicode-org/icu4x) | [f367c1b8e1aa](#sha256-f367c1b8e1aa262435251e442901da4607b4650e0e63a026f5044473ecfb90f2) |
-| litrs | 1.0.0 | MIT OR Apache-2.0 | [upstream](https://github.com/LukasKalbertodt/litrs) | [62c7a1e35f56](#sha256-62c7a1e35f56406896d7aa7ca52d0cc0d272ac022b5d2796e7d6905db8a3636a), [7dc1552e88f4](#sha256-7dc1552e88f49132cb358b1b962fc5e79fa42d70bcbb88c526d33e45b8e98036) |
 | lock_api | 0.4.14 | MIT OR Apache-2.0 | [upstream](https://github.com/Amanieu/parking_lot) | [a60eea817514](#sha256-a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2), [c9a75f18b9ab](#sha256-c9a75f18b9ab2927829a208fc6aa2cf4e63b8420887ba29cdb265d6619ae82d5) |
 | log | 0.4.33 | MIT OR Apache-2.0 | [upstream](https://github.com/rust-lang/log) | [6485b8ed310d](#sha256-6485b8ed310d3f0340bf1ad1f47645069ce4069dcc6bb46c7d5c6faf41de1fdb), [a60eea817514](#sha256-a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2) |
 | lopdf | 0.44.0 | MIT | [upstream](https://github.com/J-F-Liu/lopdf.git) | [2fb01e6708ea](#sha256-2fb01e6708ea9d53e8b7e74bd82af23bce5256f19f4de93915027a53173c50d8) |
 | lru-slab | 0.1.2 | MIT OR Apache-2.0 OR Zlib | [upstream](https://github.com/Ralith/lru-slab) | [09785877275f](#sha256-09785877275ffada6c371b652a30e95c26b435126fc0fc62f1bc2d72171f80a4), [1466d9b4f3a5](#sha256-1466d9b4f3a59bb8997fc8d5fa977ce3f6a24bb2358793c09bfdf007039f6486), [cfc7749b96f6](#sha256-cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30) |
 | lzma-rust2 | 0.15.8 | Apache-2.0 | [upstream](https://github.com/hasenbanck/lzma-rust2/) | [c71d239df917](#sha256-c71d239df91726fc519c6eb72d318ec65820627232b2f796219e87dcf35d0ab4) |
+| mach2 | 0.6.0 | BSD-2-Clause OR MIT OR Apache-2.0 | [upstream](https://github.com/JohnTitor/mach2) | [044983df14c9](#sha256-044983df14c97f2f9570766aaf977b3cdfc4a06cf1f36b776331c5ff89b4fb89), [3f9f0f7e5a59](#sha256-3f9f0f7e5a5911a8042e32c83ff5d061ce1ffd02e8a207ec2135a44ad73b4191), [62c7a1e35f56](#sha256-62c7a1e35f56406896d7aa7ca52d0cc0d272ac022b5d2796e7d6905db8a3636a) |
 | macro_rules_attribute | 0.2.2 | Apache-2.0 OR MIT OR Zlib | [upstream](https://github.com/danielhenrymantilla/macro_rules_attribute-rs) | [1c41c0e19caa](#sha256-1c41c0e19caa2c20b0adfeb8219b606b21b7c63914aa3ae74ae3e091d7ce09ca), [388e98b08de1](#sha256-388e98b08de12ba8a9d4575883c8b0386c747cea188ed459380fc58d60da15c9), [603fb27ef326](#sha256-603fb27ef3266ea516872eefd9ae587746b8c34614a35c0fb24e4e9e0c17e137) |
 | macro_rules_attribute-proc_macro | 0.2.2 | Apache-2.0 OR MIT OR Zlib | [upstream](https://github.com/danielhenrymantilla/macro_rules_attribute-rs) | [1c41c0e19caa](#sha256-1c41c0e19caa2c20b0adfeb8219b606b21b7c63914aa3ae74ae3e091d7ce09ca), [388e98b08de1](#sha256-388e98b08de12ba8a9d4575883c8b0386c747cea188ed459380fc58d60da15c9), [603fb27ef326](#sha256-603fb27ef3266ea516872eefd9ae587746b8c34614a35c0fb24e4e9e0c17e137) |
+| markup5ever | 0.38.0 | MIT OR Apache-2.0 | [upstream](https://github.com/servo/html5ever) | [86dd7f026f91](#sha256-86dd7f026f916daf7511e39951ad8ea8cf55a8db67ae64060dacf829761c18f3), [a60eea817514](#sha256-a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2) |
 | match-lookup | 0.1.2 | MIT | [upstream](https://github.com/mriise/smol-base-x) | [508a77d2e7b5](#sha256-508a77d2e7b51d98adeed32648ad124b7b30241a8e70b2e72c99f92d8e5874d1) |
 | matchers | 0.2.0 | MIT | [upstream](https://github.com/hawkw/matchers) | [a47129d73875](#sha256-a47129d738752a6ae52247fea645b42cb320d19e9327f1eb2d1a7f99d9455ad3) |
 | matchit | 0.8.4 | MIT AND BSD-3-Clause | [upstream](https://github.com/ibraheemdev/matchit) | [162ce11ad713](#sha256-162ce11ad71338d0a0c6ebaf5c48af72c6ae237b468859d3656fe2d9ed3f3a85), [de701d0618d6](#sha256-de701d0618d694feb1af90f02181a1763d9b0bdeb70a3a592781e529077dba65) |
 | matrixmultiply | 0.3.10 | MIT/Apache-2.0 | [upstream](https://github.com/bluss/matrixmultiply/) | [792d075c7bad](#sha256-792d075c7bad6dac258a44e799eb64cbf465e24d9932d27669be08c5ec957e27), [a60eea817514](#sha256-a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2) |
 | md-5 | 0.11.0 | MIT OR Apache-2.0 | [upstream](https://github.com/RustCrypto/hashes) | [831e0f43ad0b](#sha256-831e0f43ad0bf014c1c4fec5767aae470434c1d66d6e671be2d823e729063e25), [a9040321c371](#sha256-a9040321c3712d8fd0b09cf52b17445de04a23a10165049ae187cd39e5c86be5) |
 | memchr | 2.8.3 | Unlicense OR MIT | [upstream](https://github.com/BurntSushi/memchr) | [01c266bced4a](#sha256-01c266bced4a434da0051174d6bee16a4c82cf634e2679b6155d40d75012390f), [0f96a83840e1](#sha256-0f96a83840e146e43c0ec96a22ec1f392e0680e6c1226e6f3ba87e0740af850f), [7e12e5df4bae](#sha256-7e12e5df4bae12cb21581ba157ced20e1986a0508dd10d0e8a4ab9a4cf94e85c) |
-| memoffset | 0.6.5 | MIT | [upstream](https://github.com/Gilnaa/memoffset) | [eb69eece7d46](#sha256-eb69eece7d469c69466506e5819153646d8fb57b0350dadb62ac693f8a765c6b) |
-| memoffset | 0.9.1 | MIT | [upstream](https://github.com/Gilnaa/memoffset) | [eb69eece7d46](#sha256-eb69eece7d469c69466506e5819153646d8fb57b0350dadb62ac693f8a765c6b) |
 | mime | 0.3.17 | MIT OR Apache-2.0 | [upstream](https://github.com/hyperium/mime) | [8b87502eddb2](#sha256-8b87502eddb2d7fa23d54ed2caf5681ab5fbbdc8eb553e8ade710240842f9097), [a60eea817514](#sha256-a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2) |
-| mime_guess2 | 2.3.1 | MIT | [upstream](https://github.com/ttys3/mime_guess2) | [14373973f98d](#sha256-14373973f98d640ebefcf8161adb9363188fedc7695bdc5604003b17288c4e1f) |
 | minimal-lexical | 0.2.1 | MIT/Apache-2.0 | [upstream](https://github.com/Alexhuszagh/minimal-lexical) | [23f18e03dc49](#sha256-23f18e03dc49df91622fe2a76176497404e46ced8a715d9d2b67a7446571cca3), [8173d5c29b4f](#sha256-8173d5c29b4f956d532781d2b86e4e30f83e6b7878dce18c919451d6ba707c90), [dbe1fff0fb13](#sha256-dbe1fff0fb1314b6af94f161511406275cf01c5a32441fbf24528a57a051d599) |
 | minisign-verify | 0.2.5 | MIT | [upstream](https://github.com/jedisct1/rust-minisign-verify) | [42c8695fbc46](#sha256-42c8695fbc468866d9756be99af0ba4e37d733f8daa3c8827c8d80b8bec1b2f9) |
 | miniz_oxide | 0.8.9 | MIT OR Zlib OR Apache-2.0 | [upstream](https://github.com/Frommi/miniz_oxide/tree/master/miniz_oxide) | [0a54e647fe54](#sha256-0a54e647fe54104658b5e563c04c6f9edf251710e47bce692e0bd990a4ddaa39), [0d542e0c8804](#sha256-0d542e0c8804e39aa7f37eb00da5a762149dc682d7829451287e11b938e94594), [4108245a1f2d](#sha256-4108245a1f2df9d4e94df8abed5b4ba0759bb2f9b40a6b939f1be141077ae50b), [799e9ca9d179](#sha256-799e9ca9d179295ef372f25d3769cdda7d25bb2668add6a6a1e22d1e4c678b8d) |
@@ -324,7 +330,6 @@ Third-party packages: **633**. Unique legal texts: **377**.
 | moka | 0.12.15 | (MIT OR Apache-2.0) AND Apache-2.0 | [upstream](https://github.com/moka-rs/moka) | [021f4a01e583](#sha256-021f4a01e58372b826203064fac216e15d51e07f7739b8ca33d4b746ec8abb3b), [7fe7e5e13e44](#sha256-7fe7e5e13e445074314ba0aa12ec2e71132931632876ba27b98a1020cf24eb57), [f6d3f84b39d5](#sha256-f6d3f84b39d597c19748c6b50a04abe1634edb3c0b15392daa217ec44119f652) |
 | monostate | 0.1.18 | MIT OR Apache-2.0 | [upstream](https://github.com/dtolnay/monostate) | [23f18e03dc49](#sha256-23f18e03dc49df91622fe2a76176497404e46ced8a715d9d2b67a7446571cca3), [62c7a1e35f56](#sha256-62c7a1e35f56406896d7aa7ca52d0cc0d272ac022b5d2796e7d6905db8a3636a) |
 | monostate-impl | 0.1.18 | MIT OR Apache-2.0 | [upstream](https://github.com/dtolnay/monostate) | [23f18e03dc49](#sha256-23f18e03dc49df91622fe2a76176497404e46ced8a715d9d2b67a7446571cca3), [62c7a1e35f56](#sha256-62c7a1e35f56406896d7aa7ca52d0cc0d272ac022b5d2796e7d6905db8a3636a) |
-| moxcms | 0.8.1 | BSD-3-Clause OR Apache-2.0 | [upstream](https://github.com/awxkee/moxcms.git) | [4b6c5ac5c550](#sha256-4b6c5ac5c550bea22b1d6455684b21d94ca96f3bcbbc2840b793180707ed582a), [90bf2d659c43](#sha256-90bf2d659c43045111b65c733ab2a6d4cbcb422a098368c8c58a9ba3db4ed0c5) |
 | muda | 0.19.3 | Apache-2.0 OR MIT | [upstream](https://github.com/tauri-apps/muda) | [135bd40d7e81](#sha256-135bd40d7e81207369801d42a130c337371322df59687bf986fb8216352d71b6), [2ab5537b8c0c](#sha256-2ab5537b8c0cb1d475e2145b6a7994b04e7c71e6e5bd836f7f9c47c221a5ad9a), [a60eea817514](#sha256-a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2) |
 | multiaddr | 0.18.2 | MIT | [upstream](https://github.com/multiformats/rust-multiaddr) | [c1c9930ca38e](#sha256-c1c9930ca38e756f9d7f9c7d7b76dcbc4618ded395b9b4a8fa4e103c30d11971) |
 | multibase | 0.9.3 | MIT | [upstream](https://github.com/multiformats/rust-multibase) | [0cb24bdcd14a](#sha256-0cb24bdcd14ab74a06b78eb8ff06d3efa0a4014111da713d489d8242ad90ad1b) |
@@ -332,7 +337,7 @@ Third-party packages: **633**. Unique legal texts: **377**.
 | multistream-select | 0.13.0 | MIT | [upstream](https://github.com/libp2p/rust-libp2p) | [508a77d2e7b5](#sha256-508a77d2e7b51d98adeed32648ad124b7b30241a8e70b2e72c99f92d8e5874d1) |
 | native-tls | 0.2.18 | MIT OR Apache-2.0 | [upstream](https://github.com/rust-native-tls/rust-native-tls) | [b40930bbcf80](#sha256-b40930bbcf80744c86c46a12bc9da056641d722716c378f5659b9e555ef833e1), [f2ad7982ddbf](#sha256-f2ad7982ddbfa8c45eb965315718c55b70b9cc311b49afacb50d5fe84173ae2c) |
 | ndarray | 0.17.2 | MIT OR Apache-2.0 | [upstream](https://github.com/rust-ndarray/ndarray) | [1fd6747d2c8e](#sha256-1fd6747d2c8e80f9fa766f57c5888864774621deb85cc2838ccaed727db32d45), [a60eea817514](#sha256-a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2) |
-| nix | 0.23.2 | MIT | [upstream](https://github.com/nix-rust/nix) | [66e3ee1fa7f9](#sha256-66e3ee1fa7f909ad3c612d556f2a0cdabcd809ad6e66f3b0605015ac64841b70) |
+| new_debug_unreachable | 1.0.6 | MIT | [upstream](https://github.com/mbrubeck/rust-debug-unreachable) | [f7715d38a3fa](#sha256-f7715d38a3fa1b4ac97c5729740752505a39cb92ee83ab5b102aeb5eaa7cdea4) |
 | nohash-hasher | 0.2.0 | Apache-2.0 OR MIT | [upstream](https://github.com/paritytech/nohash-hasher) | [cfc7749b96f6](#sha256-cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30), [ec353d4fecf7](#sha256-ec353d4fecf7963b4c054384557e5dbc3c7a717997eb4a3815b315721a6aa75a) |
 | nom | 7.1.3 | MIT | [upstream](https://github.com/Geal/nom) | [4dbda0434445](#sha256-4dbda04344456f09a7a588140455413a9ac59b6b26a1ef7cdf9c800c012d87f0) |
 | nom | 8.0.0 | MIT | [upstream](https://github.com/rust-bakery/nom) | [4dbda0434445](#sha256-4dbda04344456f09a7a588140455413a9ac59b6b26a1ef7cdf9c800c012d87f0) |
@@ -345,24 +350,27 @@ Third-party packages: **633**. Unique legal texts: **377**.
 | num-conv | 0.2.2 | MIT OR Apache-2.0 | [upstream](https://github.com/jhpratt/num-conv) | [0d542e0c8804](#sha256-0d542e0c8804e39aa7f37eb00da5a762149dc682d7829451287e11b938e94594), [e2e245f2b566](#sha256-e2e245f2b566d0bfafb0f6a04c16b82d710c4e6e7d799e39bb4ef6e541b85b98) |
 | num-integer | 0.1.46 | MIT OR Apache-2.0 | [upstream](https://github.com/rust-num/num-integer) | [6485b8ed310d](#sha256-6485b8ed310d3f0340bf1ad1f47645069ce4069dcc6bb46c7d5c6faf41de1fdb), [a60eea817514](#sha256-a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2) |
 | num-traits | 0.2.19 | MIT OR Apache-2.0 | [upstream](https://github.com/rust-num/num-traits) | [6485b8ed310d](#sha256-6485b8ed310d3f0340bf1ad1f47645069ce4069dcc6bb46c7d5c6faf41de1fdb), [a60eea817514](#sha256-a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2) |
-| objc-sys | 0.3.5 | MIT | [upstream](https://github.com/madsmtm/objc2) | [508a77d2e7b5](#sha256-508a77d2e7b51d98adeed32648ad124b7b30241a8e70b2e72c99f92d8e5874d1) |
-| objc2 | 0.5.2 | MIT | [upstream](https://github.com/madsmtm/objc2) | [508a77d2e7b5](#sha256-508a77d2e7b51d98adeed32648ad124b7b30241a8e70b2e72c99f92d8e5874d1) |
 | objc2 | 0.6.4 | MIT | [upstream](https://github.com/madsmtm/objc2) | [508a77d2e7b5](#sha256-508a77d2e7b51d98adeed32648ad124b7b30241a8e70b2e72c99f92d8e5874d1) |
-| objc2-app-kit | 0.2.2 | MIT | [upstream](https://github.com/madsmtm/objc2) | [508a77d2e7b5](#sha256-508a77d2e7b51d98adeed32648ad124b7b30241a8e70b2e72c99f92d8e5874d1) |
 | objc2-app-kit | 0.3.2 | Zlib OR Apache-2.0 OR MIT | [upstream](https://github.com/madsmtm/objc2) | [508a77d2e7b5](#sha256-508a77d2e7b51d98adeed32648ad124b7b30241a8e70b2e72c99f92d8e5874d1) |
-| objc2-core-data | 0.2.2 | MIT | [upstream](https://github.com/madsmtm/objc2) | [508a77d2e7b5](#sha256-508a77d2e7b51d98adeed32648ad124b7b30241a8e70b2e72c99f92d8e5874d1) |
+| objc2-cloud-kit | 0.3.2 | Zlib OR Apache-2.0 OR MIT | [upstream](https://github.com/madsmtm/objc2) | [508a77d2e7b5](#sha256-508a77d2e7b51d98adeed32648ad124b7b30241a8e70b2e72c99f92d8e5874d1) |
+| objc2-core-data | 0.3.2 | Zlib OR Apache-2.0 OR MIT | [upstream](https://github.com/madsmtm/objc2) | [508a77d2e7b5](#sha256-508a77d2e7b51d98adeed32648ad124b7b30241a8e70b2e72c99f92d8e5874d1) |
 | objc2-core-foundation | 0.3.2 | Zlib OR Apache-2.0 OR MIT | [upstream](https://github.com/madsmtm/objc2) | [508a77d2e7b5](#sha256-508a77d2e7b51d98adeed32648ad124b7b30241a8e70b2e72c99f92d8e5874d1) |
 | objc2-core-graphics | 0.3.2 | Zlib OR Apache-2.0 OR MIT | [upstream](https://github.com/madsmtm/objc2) | [508a77d2e7b5](#sha256-508a77d2e7b51d98adeed32648ad124b7b30241a8e70b2e72c99f92d8e5874d1) |
-| objc2-core-image | 0.2.2 | MIT | [upstream](https://github.com/madsmtm/objc2) | [508a77d2e7b5](#sha256-508a77d2e7b51d98adeed32648ad124b7b30241a8e70b2e72c99f92d8e5874d1) |
+| objc2-core-image | 0.3.2 | Zlib OR Apache-2.0 OR MIT | [upstream](https://github.com/madsmtm/objc2) | [508a77d2e7b5](#sha256-508a77d2e7b51d98adeed32648ad124b7b30241a8e70b2e72c99f92d8e5874d1) |
+| objc2-core-text | 0.3.2 | Zlib OR Apache-2.0 OR MIT | [upstream](https://github.com/madsmtm/objc2) | [508a77d2e7b5](#sha256-508a77d2e7b51d98adeed32648ad124b7b30241a8e70b2e72c99f92d8e5874d1) |
+| objc2-core-video | 0.3.2 | Zlib OR Apache-2.0 OR MIT | [upstream](https://github.com/madsmtm/objc2) | [508a77d2e7b5](#sha256-508a77d2e7b51d98adeed32648ad124b7b30241a8e70b2e72c99f92d8e5874d1) |
 | objc2-encode | 4.1.0 | MIT | [upstream](https://github.com/madsmtm/objc2) | [508a77d2e7b5](#sha256-508a77d2e7b51d98adeed32648ad124b7b30241a8e70b2e72c99f92d8e5874d1) |
-| objc2-foundation | 0.2.2 | MIT | [upstream](https://github.com/madsmtm/objc2) | [508a77d2e7b5](#sha256-508a77d2e7b51d98adeed32648ad124b7b30241a8e70b2e72c99f92d8e5874d1) |
+| objc2-exception-helper | 0.1.1 | Zlib OR Apache-2.0 OR MIT | [upstream](https://github.com/madsmtm/objc2) | [508a77d2e7b5](#sha256-508a77d2e7b51d98adeed32648ad124b7b30241a8e70b2e72c99f92d8e5874d1) |
 | objc2-foundation | 0.3.2 | MIT | [upstream](https://github.com/madsmtm/objc2) | [508a77d2e7b5](#sha256-508a77d2e7b51d98adeed32648ad124b7b30241a8e70b2e72c99f92d8e5874d1) |
 | objc2-io-kit | 0.3.2 | Zlib OR Apache-2.0 OR MIT | [upstream](https://github.com/madsmtm/objc2) | [508a77d2e7b5](#sha256-508a77d2e7b51d98adeed32648ad124b7b30241a8e70b2e72c99f92d8e5874d1) |
 | objc2-io-surface | 0.3.2 | Zlib OR Apache-2.0 OR MIT | [upstream](https://github.com/madsmtm/objc2) | [508a77d2e7b5](#sha256-508a77d2e7b51d98adeed32648ad124b7b30241a8e70b2e72c99f92d8e5874d1) |
-| objc2-metal | 0.2.2 | MIT | [upstream](https://github.com/madsmtm/objc2) | [508a77d2e7b5](#sha256-508a77d2e7b51d98adeed32648ad124b7b30241a8e70b2e72c99f92d8e5874d1) |
-| objc2-quartz-core | 0.2.2 | MIT | [upstream](https://github.com/madsmtm/objc2) | [508a77d2e7b5](#sha256-508a77d2e7b51d98adeed32648ad124b7b30241a8e70b2e72c99f92d8e5874d1) |
+| objc2-javascript-core | 0.3.2 | Zlib OR Apache-2.0 OR MIT | [upstream](https://github.com/madsmtm/objc2) | [508a77d2e7b5](#sha256-508a77d2e7b51d98adeed32648ad124b7b30241a8e70b2e72c99f92d8e5874d1) |
+| objc2-osa-kit | 0.3.2 | Zlib OR Apache-2.0 OR MIT | [upstream](https://github.com/madsmtm/objc2) | [508a77d2e7b5](#sha256-508a77d2e7b51d98adeed32648ad124b7b30241a8e70b2e72c99f92d8e5874d1) |
+| objc2-quartz-core | 0.3.2 | Zlib OR Apache-2.0 OR MIT | [upstream](https://github.com/madsmtm/objc2) | [508a77d2e7b5](#sha256-508a77d2e7b51d98adeed32648ad124b7b30241a8e70b2e72c99f92d8e5874d1) |
 | objc2-security | 0.3.2 | Zlib OR Apache-2.0 OR MIT | [upstream](https://github.com/madsmtm/objc2) | [508a77d2e7b5](#sha256-508a77d2e7b51d98adeed32648ad124b7b30241a8e70b2e72c99f92d8e5874d1) |
 | objc2-service-management | 0.3.2 | Zlib OR Apache-2.0 OR MIT | [upstream](https://github.com/madsmtm/objc2) | [508a77d2e7b5](#sha256-508a77d2e7b51d98adeed32648ad124b7b30241a8e70b2e72c99f92d8e5874d1) |
+| objc2-web-kit | 0.3.2 | Zlib OR Apache-2.0 OR MIT | [upstream](https://github.com/madsmtm/objc2) | [508a77d2e7b5](#sha256-508a77d2e7b51d98adeed32648ad124b7b30241a8e70b2e72c99f92d8e5874d1) |
+| object | 0.39.1 | Apache-2.0 OR MIT | [upstream](https://github.com/gimli-rs/object) | [0b74dfa0bcee](#sha256-0b74dfa0bcee5c420c6b7f67b4b2658f9ab8388c97b8e733975f2cecbdd668a6), [a60eea817514](#sha256-a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2) |
 | oid-registry | 0.8.1 | MIT OR Apache-2.0 | [upstream](https://github.com/rusticata/oid-registry.git) | [a5c61b93b6ee](#sha256-a5c61b93b6ee1d104af9920cf020ff3c7efe818e31fe562c72261847a728f513), [a60eea817514](#sha256-a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2) |
 | once_cell | 1.21.4 | MIT OR Apache-2.0 | [upstream](https://github.com/matklad/once_cell) | [23f18e03dc49](#sha256-23f18e03dc49df91622fe2a76176497404e46ced8a715d9d2b67a7446571cca3), [a60eea817514](#sha256-a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2) |
 | onig | 6.5.3 | MIT | [upstream](https://github.com/iwillspeak/rust-onig) | [e9c1238c5beb](#sha256-e9c1238c5beb73c6cc130160418968058b21d486a7a445f0ceff27d51fbfdc44) |
@@ -371,40 +379,46 @@ Third-party packages: **633**. Unique legal texts: **377**.
 | option-ext | 0.2.0 | MPL-2.0 | [upstream](https://github.com/soc/option-ext.git) | [66a3107d5ad6](#sha256-66a3107d5ad6a058aab753eaac2047ccb2ed0e39465dd0fe5844da3e300d5172) |
 | ort | 2.0.0-rc.12 | MIT OR Apache-2.0 | [upstream](https://github.com/pykeio/ort) | [6bba08de4628](#sha256-6bba08de46289c40986a2e6b310e2da61fcea33b3c112c8320f6093f8f9cb71b), [cfc7749b96f6](#sha256-cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30) |
 | ort-sys | 2.0.0-rc.12 | MIT OR Apache-2.0 | [upstream](https://github.com/pykeio/ort) | [6bba08de4628](#sha256-6bba08de46289c40986a2e6b310e2da61fcea33b3c112c8320f6093f8f9cb71b), [cfc7749b96f6](#sha256-cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30) |
+| osakit | 0.3.1 | MIT OR Apache-2.0 | [upstream](https://github.com/mdevils/rust-osakit) | [5fb3573f6e71](#sha256-5fb3573f6e7198ff6c203dbbd58d1da4bec9e8c5a828edefd9e98587d0443471), [62c7a1e35f56](#sha256-62c7a1e35f56406896d7aa7ca52d0cc0d272ac022b5d2796e7d6905db8a3636a) |
 | parking_lot | 0.12.5 | MIT OR Apache-2.0 | [upstream](https://github.com/Amanieu/parking_lot) | [a60eea817514](#sha256-a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2), [c9a75f18b9ab](#sha256-c9a75f18b9ab2927829a208fc6aa2cf4e63b8420887ba29cdb265d6619ae82d5) |
 | parking_lot_core | 0.9.12 | MIT OR Apache-2.0 | [upstream](https://github.com/Amanieu/parking_lot) | [a60eea817514](#sha256-a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2), [c9a75f18b9ab](#sha256-c9a75f18b9ab2927829a208fc6aa2cf4e63b8420887ba29cdb265d6619ae82d5) |
 | paste | 1.0.15 | MIT OR Apache-2.0 | [upstream](https://github.com/dtolnay/paste) | [23f18e03dc49](#sha256-23f18e03dc49df91622fe2a76176497404e46ced8a715d9d2b67a7446571cca3), [62c7a1e35f56](#sha256-62c7a1e35f56406896d7aa7ca52d0cc0d272ac022b5d2796e7d6905db8a3636a) |
 | pastey | 0.2.3 | MIT OR Apache-2.0 | [upstream](https://github.com/as1100k/pastey) | [23f18e03dc49](#sha256-23f18e03dc49df91622fe2a76176497404e46ced8a715d9d2b67a7446571cca3), [62c7a1e35f56](#sha256-62c7a1e35f56406896d7aa7ca52d0cc0d272ac022b5d2796e7d6905db8a3636a) |
 | pem | 3.0.6 | MIT | [upstream](https://github.com/jcreekmore/pem-rs.git) | [b7c76ff4466a](#sha256-b7c76ff4466a3aeb6a7d903e81b651335e97d64ecb857e2ee9812a36c6fd1acf) |
 | pem-rfc7468 | 1.0.0 | Apache-2.0 OR MIT | [upstream](https://github.com/RustCrypto/formats) | [4148e7b027fb](#sha256-4148e7b027fba018131f297b4fe27995386ba317018d6855e182fd0e86cd754f), [a9040321c371](#sha256-a9040321c3712d8fd0b09cf52b17445de04a23a10165049ae187cd39e5c86be5) |
-| peniko | 0.6.1 | Apache-2.0 OR MIT | [upstream](https://github.com/linebender/peniko) | [23c23145f6ea](#sha256-23c23145f6eac25c28cdcc03d38506a5712a9a8cffb5bd5301457f6173ea696e), [cfc7749b96f6](#sha256-cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30) |
 | percent-encoding | 2.3.2 | MIT OR Apache-2.0 | [upstream](https://github.com/servo/rust-url/) | [a60eea817514](#sha256-a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2), [b38f11f60967](#sha256-b38f11f6096706e6de553dabe2a7ed142d59b6fa8c97e290c67496154745cdd5) |
-| petgraph | 0.8.3 | MIT OR Apache-2.0 | [upstream](https://github.com/petgraph/petgraph) | [7576269ea71f](#sha256-7576269ea71f767b99297934c0b2367532690f8c4badc695edf8e04ab6a1e545), [9938ad67a06f](#sha256-9938ad67a06f6207e9694257339e93e402d7eecbd19788d82e4455ad14d71789), [a60eea817514](#sha256-a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2) |
-| phf | 0.11.3 | MIT | [upstream](https://github.com/rust-phf/rust-phf) | [0ab4d106b6fa](#sha256-0ab4d106b6faac07fb6a051815fd1b4d862d730895e2d7d7358c2f13565e7a38) |
-| phf_generator | 0.11.3 | MIT | [upstream](https://github.com/rust-phf/rust-phf) | [0ab4d106b6fa](#sha256-0ab4d106b6faac07fb6a051815fd1b4d862d730895e2d7d7358c2f13565e7a38) |
-| phf_macros | 0.11.3 | MIT | [upstream](https://github.com/rust-phf/rust-phf) | [0ab4d106b6fa](#sha256-0ab4d106b6faac07fb6a051815fd1b4d862d730895e2d7d7358c2f13565e7a38) |
-| phf_shared | 0.11.3 | MIT | [upstream](https://github.com/rust-phf/rust-phf) | [0ab4d106b6fa](#sha256-0ab4d106b6faac07fb6a051815fd1b4d862d730895e2d7d7358c2f13565e7a38) |
+| phf | 0.13.1 | MIT | [upstream](https://github.com/rust-phf/rust-phf) | [0ab4d106b6fa](#sha256-0ab4d106b6faac07fb6a051815fd1b4d862d730895e2d7d7358c2f13565e7a38) |
+| phf_codegen | 0.13.1 | MIT | [upstream](https://github.com/rust-phf/rust-phf) | [0ab4d106b6fa](#sha256-0ab4d106b6faac07fb6a051815fd1b4d862d730895e2d7d7358c2f13565e7a38) |
+| phf_generator | 0.13.1 | MIT | [upstream](https://github.com/rust-phf/rust-phf) | [0ab4d106b6fa](#sha256-0ab4d106b6faac07fb6a051815fd1b4d862d730895e2d7d7358c2f13565e7a38) |
+| phf_macros | 0.13.1 | MIT | [upstream](https://github.com/rust-phf/rust-phf) | [0ab4d106b6fa](#sha256-0ab4d106b6faac07fb6a051815fd1b4d862d730895e2d7d7358c2f13565e7a38) |
+| phf_shared | 0.13.1 | MIT | [upstream](https://github.com/rust-phf/rust-phf) | [0ab4d106b6fa](#sha256-0ab4d106b6faac07fb6a051815fd1b4d862d730895e2d7d7358c2f13565e7a38) |
 | pin-project | 1.1.13 | Apache-2.0 OR MIT | [upstream](https://github.com/taiki-e/pin-project) | [0d542e0c8804](#sha256-0d542e0c8804e39aa7f37eb00da5a762149dc682d7829451287e11b938e94594), [23f18e03dc49](#sha256-23f18e03dc49df91622fe2a76176497404e46ced8a715d9d2b67a7446571cca3) |
 | pin-project-internal | 1.1.13 | Apache-2.0 OR MIT | [upstream](https://github.com/taiki-e/pin-project) | [0d542e0c8804](#sha256-0d542e0c8804e39aa7f37eb00da5a762149dc682d7829451287e11b938e94594), [23f18e03dc49](#sha256-23f18e03dc49df91622fe2a76176497404e46ced8a715d9d2b67a7446571cca3) |
 | pin-project-lite | 0.2.17 | Apache-2.0 OR MIT | [upstream](https://github.com/taiki-e/pin-project-lite) | [0d542e0c8804](#sha256-0d542e0c8804e39aa7f37eb00da5a762149dc682d7829451287e11b938e94594), [23f18e03dc49](#sha256-23f18e03dc49df91622fe2a76176497404e46ced8a715d9d2b67a7446571cca3) |
 | pkcs8 | 0.10.2 | Apache-2.0 OR MIT | [upstream](https://github.com/RustCrypto/formats/tree/master/pkcs8) | [a9040321c371](#sha256-a9040321c3712d8fd0b09cf52b17445de04a23a10165049ae187cd39e5c86be5), [ad64fcb9589f](#sha256-ad64fcb9589f162720f3cc5010ad76ca6ad3764e11861f9192c489df176bb71d) |
 | pkg-config | 0.3.33 | MIT OR Apache-2.0 | [upstream](https://github.com/rust-lang/pkg-config-rs) | [378f5840b258](#sha256-378f5840b258e2779c39418f3f2d7b2ba96f1c7917dd6be0713f88305dbda397), [a60eea817514](#sha256-a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2) |
+| plist | 1.10.0 | MIT | [upstream](https://github.com/ebarnard/rust-plist/) | [b61cf1a75b37](#sha256-b61cf1a75b378860940eb420fd0fd1d8e747fd5dae5f5a2f2c9cd4454e1db78a) |
+| png | 0.17.16 | MIT OR Apache-2.0 | [upstream](https://github.com/image-rs/image-png) | [a60eea817514](#sha256-a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2), [eaf40297c75d](#sha256-eaf40297c75da471f7cda1f3458e8d91b4b2ec866e609527a13acfa93b638652) |
 | png | 0.18.1 | MIT OR Apache-2.0 | [upstream](https://github.com/image-rs/image-png) | [a60eea817514](#sha256-a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2), [eaf40297c75d](#sha256-eaf40297c75da471f7cda1f3458e8d91b4b2ec866e609527a13acfa93b638652) |
 | poly1305 | 0.8.0 | Apache-2.0 OR MIT | [upstream](https://github.com/RustCrypto/universal-hashes) | [6d99fffea918](#sha256-6d99fffea918d1f7dfe567029c7bd21d6fcaf310ad28c44e6511a0e1f68c79ea), [a9040321c371](#sha256-a9040321c3712d8fd0b09cf52b17445de04a23a10165049ae187cd39e5c86be5) |
-| polycool | 0.4.0 | MIT OR Apache-2.0 | [upstream](https://github.com/linebender/kurbo) | [23c23145f6ea](#sha256-23c23145f6eac25c28cdcc03d38506a5712a9a8cffb5bd5301457f6173ea696e), [cfc7749b96f6](#sha256-cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30) |
 | polyval | 0.6.2 | Apache-2.0 OR MIT | [upstream](https://github.com/RustCrypto/universal-hashes) | [a291b6910744](#sha256-a291b6910744d262a9e953c3b5868d74510e20161359f649a11e1791fde84fcd), [a9040321c371](#sha256-a9040321c3712d8fd0b09cf52b17445de04a23a10165049ae187cd39e5c86be5) |
 | portable-atomic | 1.13.1 | Apache-2.0 OR MIT | [upstream](https://github.com/taiki-e/portable-atomic) | [0d542e0c8804](#sha256-0d542e0c8804e39aa7f37eb00da5a762149dc682d7829451287e11b938e94594), [23f18e03dc49](#sha256-23f18e03dc49df91622fe2a76176497404e46ced8a715d9d2b67a7446571cca3) |
+| postcard | 1.1.3 | MIT OR Apache-2.0 | [upstream](https://github.com/jamesmunns/postcard) | [177540cad091](#sha256-177540cad091a40e8071db310bc3b6115c4e329a92a234609b60c154b008a888), [a60eea817514](#sha256-a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2) |
 | potential_utf | 0.1.5 | Unicode-3.0 | [upstream](https://github.com/unicode-org/icu4x) | [f367c1b8e1aa](#sha256-f367c1b8e1aa262435251e442901da4607b4650e0e63a026f5044473ecfb90f2) |
 | powerfmt | 0.2.0 | MIT OR Apache-2.0 | [upstream](https://github.com/jhpratt/powerfmt) | [070dbc7dda03](#sha256-070dbc7dda03a29296f2d58bdb9b7331af90f2abc9f31df22875d1eabaf29852), [155420c6403d](#sha256-155420c6403d4e0fca34105e3c03fdd6939b64c393c7ec6f95f5b72c5474eab0) |
 | ppv-lite86 | 0.2.21 | MIT OR Apache-2.0 | [upstream](https://github.com/cryptocorrosion/cryptocorrosion) | [0218327e7a48](#sha256-0218327e7a480793ffdd4eb792379a9709e5c135c7ba267f709d6f6d4d70af0a), [4cada0bd02ea](#sha256-4cada0bd02ea3692eee6f16400d86c6508bbd3bafb2b65fed0419f36d4f83e8f) |
+| precomputed-hash | 0.1.1 | MIT | [upstream](https://github.com/emilio/precomputed-hash) | [7ca6700600df](#sha256-7ca6700600dfa9c9497bf5556365067daa802c871ea78239f129309c7a2048f7) |
 | proc-macro2 | 1.0.106 | MIT OR Apache-2.0 | [upstream](https://github.com/dtolnay/proc-macro2) | [23f18e03dc49](#sha256-23f18e03dc49df91622fe2a76176497404e46ced8a715d9d2b67a7446571cca3), [62c7a1e35f56](#sha256-62c7a1e35f56406896d7aa7ca52d0cc0d272ac022b5d2796e7d6905db8a3636a) |
-| profiling | 1.0.18 | MIT OR Apache-2.0 | [upstream](https://github.com/aclysma/profiling) | [508a77d2e7b5](#sha256-508a77d2e7b51d98adeed32648ad124b7b30241a8e70b2e72c99f92d8e5874d1) |
+| prometheus-client | 0.23.1 | Apache-2.0 OR MIT | [upstream](https://github.com/prometheus/client_rust) | [0fd830000a45](#sha256-0fd830000a45d0c472e06b2a3718b070c902ee9a71a6abc1647ce66920de2eb5), [2f1947dc9523](#sha256-2f1947dc952374ef4bf326c7c576a0287fb10a8c069dc6bdef981a7ea0a0cf1a) |
+| prometheus-client-derive-encode | 0.4.2 | Apache-2.0 OR MIT | [upstream](https://github.com/prometheus/client_rust) | [508a77d2e7b5](#sha256-508a77d2e7b51d98adeed32648ad124b7b30241a8e70b2e72c99f92d8e5874d1) |
 | prost | 0.14.4 | Apache-2.0 | [upstream](https://github.com/tokio-rs/prost) | [a60eea817514](#sha256-a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2) |
 | prost-derive | 0.14.4 | Apache-2.0 | [upstream](https://github.com/tokio-rs/prost) | [a60eea817514](#sha256-a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2) |
 | pulldown-cmark | 0.13.4 | MIT | [upstream](https://github.com/raphlinus/pulldown-cmark) | [c4f10f55904b](#sha256-c4f10f55904bdb9f27d3fbf94c354926d6cfe8b982276e556238c258941b243b) |
-| pxfm | 0.1.30 | BSD-3-Clause OR Apache-2.0 | [upstream](https://github.com/awxkee/pxfm) | [4b6c5ac5c550](#sha256-4b6c5ac5c550bea22b1d6455684b21d94ca96f3bcbbc2840b793180707ed582a), [90bf2d659c43](#sha256-90bf2d659c43045111b65c733ab2a6d4cbcb422a098368c8c58a9ba3db4ed0c5) |
-| quick-error | 2.0.1 | MIT/Apache-2.0 | [upstream](http://github.com/tailhook/quick-error) | [058f01fe1816](#sha256-058f01fe181608d027fcde7e528fc03ea3cf90f30903c407644b0a9bbc54f500), [b40930bbcf80](#sha256-b40930bbcf80744c86c46a12bc9da056641d722716c378f5659b9e555ef833e1) |
+| pulley-interpreter | 47.0.3 | Apache-2.0 WITH LLVM-exception | [upstream](https://github.com/bytecodealliance/wasmtime/tree/main/pulley) | [c71d239df917](#sha256-c71d239df91726fc519c6eb72d318ec65820627232b2f796219e87dcf35d0ab4) |
+| pulley-macros | 47.0.3 | Apache-2.0 WITH LLVM-exception | [upstream](https://github.com/bytecodealliance/wasmtime/tree/main/pulley/macros) | [c71d239df917](#sha256-c71d239df91726fc519c6eb72d318ec65820627232b2f796219e87dcf35d0ab4) |
 | quick-protobuf | 0.8.1 | MIT | [upstream](https://github.com/tafia/quick-protobuf) | [508a77d2e7b5](#sha256-508a77d2e7b51d98adeed32648ad124b7b30241a8e70b2e72c99f92d8e5874d1) |
+| quick-protobuf-codec | 0.3.1 | MIT | [upstream](https://github.com/libp2p/rust-libp2p) | [508a77d2e7b5](#sha256-508a77d2e7b51d98adeed32648ad124b7b30241a8e70b2e72c99f92d8e5874d1) |
+| quick-xml | 0.41.0 | MIT | [upstream](https://github.com/tafia/quick-xml) | [f0cf9b1c62bb](#sha256-f0cf9b1c62bbe3bd3a69f5f79c7158f513f612b4940a0a812d1db39d605318bc) |
 | quinn | 0.11.11 | MIT OR Apache-2.0 | [upstream](https://github.com/quinn-rs/quinn) | [4b2d0aca6789](#sha256-4b2d0aca6789fa39e03d6738e869ea0988cceba210ca34ebb59c15c463e93a04), [c71d239df917](#sha256-c71d239df91726fc519c6eb72d318ec65820627232b2f796219e87dcf35d0ab4) |
 | quinn-proto | 0.11.16 | MIT OR Apache-2.0 | [upstream](https://github.com/quinn-rs/quinn) | [4b2d0aca6789](#sha256-4b2d0aca6789fa39e03d6738e869ea0988cceba210ca34ebb59c15c463e93a04), [c71d239df917](#sha256-c71d239df91726fc519c6eb72d318ec65820627232b2f796219e87dcf35d0ab4) |
 | quinn-udp | 0.5.15 | MIT OR Apache-2.0 | [upstream](https://github.com/quinn-rs/quinn) | [4b2d0aca6789](#sha256-4b2d0aca6789fa39e03d6738e869ea0988cceba210ca34ebb59c15c463e93a04), [c71d239df917](#sha256-c71d239df91726fc519c6eb72d318ec65820627232b2f796219e87dcf35d0ab4) |
@@ -425,28 +439,29 @@ Third-party packages: **633**. Unique legal texts: **377**.
 | rayon-cond | 0.4.0 | Apache-2.0/MIT | [upstream](https://github.com/cuviper/rayon-cond) | [27995d58ad5c](#sha256-27995d58ad5c1145c1a8cd86244ce844886958a35eb2b78c6b772748669999ac), [a60eea817514](#sha256-a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2) |
 | rayon-core | 1.13.0 | MIT OR Apache-2.0 | [upstream](https://github.com/rayon-rs/rayon) | [0621878e61f0](#sha256-0621878e61f0d0fda054bcbe02df75192c28bde1ecc8289cbd86aeba2dd72720), [a60eea817514](#sha256-a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2) |
 | rcgen | 0.13.2 | MIT OR Apache-2.0 | [upstream](https://github.com/rustls/rcgen) | [2ff0e21d54b1](#sha256-2ff0e21d54b189664c884c142f7a608aae1515524b72e6b1ca251577760d44cf) |
-| read-fonts | 0.39.2 | MIT OR Apache-2.0 | [upstream](https://github.com/googlefonts/fontations) | [8a62fa27ffdc](#sha256-8a62fa27ffdccc3df19dce90f8bb3d572e27aecffc1a383d0c2601834dcec434), [a14f7d685a79](#sha256-a14f7d685a79c0f4fb64aee305527a6d5fa55f2401f4e6d688d7b1301868e6c0) |
 | recvmsg | 1.0.0 | 0BSD | `registry+https://github.com/rust-lang/crates.io-index` | [b4ee9d022957](#sha256-b4ee9d0229578ea46c95741f355943fcc81f248ca9f02a631ab1eb2f9b6ae8dc) |
 | ref-cast | 1.0.25 | MIT OR Apache-2.0 | [upstream](https://github.com/dtolnay/ref-cast) | [23f18e03dc49](#sha256-23f18e03dc49df91622fe2a76176497404e46ced8a715d9d2b67a7446571cca3), [62c7a1e35f56](#sha256-62c7a1e35f56406896d7aa7ca52d0cc0d272ac022b5d2796e7d6905db8a3636a) |
 | ref-cast-impl | 1.0.25 | MIT OR Apache-2.0 | [upstream](https://github.com/dtolnay/ref-cast) | [23f18e03dc49](#sha256-23f18e03dc49df91622fe2a76176497404e46ced8a715d9d2b67a7446571cca3), [62c7a1e35f56](#sha256-62c7a1e35f56406896d7aa7ca52d0cc0d272ac022b5d2796e7d6905db8a3636a) |
+| regalloc2 | 0.15.2 | Apache-2.0 WITH LLVM-exception | [upstream](https://github.com/bytecodealliance/regalloc2) | [a6c48161a09a](#sha256-a6c48161a09acc75a0e25503bab66a731eb5fba5392ed4bb4743e4ba5085327a) |
 | regex | 1.13.0 | MIT OR Apache-2.0 | [upstream](https://github.com/rust-lang/regex) | [6485b8ed310d](#sha256-6485b8ed310d3f0340bf1ad1f47645069ce4069dcc6bb46c7d5c6faf41de1fdb), [a60eea817514](#sha256-a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2) |
 | regex-automata | 0.4.15 | MIT OR Apache-2.0 | [upstream](https://github.com/rust-lang/regex) | [6485b8ed310d](#sha256-6485b8ed310d3f0340bf1ad1f47645069ce4069dcc6bb46c7d5c6faf41de1fdb), [a60eea817514](#sha256-a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2) |
 | regex-syntax | 0.8.11 | MIT OR Apache-2.0 | [upstream](https://github.com/rust-lang/regex) | [6485b8ed310d](#sha256-6485b8ed310d3f0340bf1ad1f47645069ce4069dcc6bb46c7d5c6faf41de1fdb), [74db5baf44a4](#sha256-74db5baf44a41b1000312c673544b3374e4198af5605c7f9080a402cec42cfa3), [a60eea817514](#sha256-a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2) |
 | reqwest | 0.12.28 | MIT OR Apache-2.0 | [upstream](https://github.com/seanmonstar/reqwest) | [34f17d906738](#sha256-34f17d90673854314276164d17a4861400d4528066eb458a003fdb15ef98fbbe), [751963a8b88c](#sha256-751963a8b88c0e3a9f27e98933079fbcf09b9998b2c13ac49c2e4d58444520d6) |
+| reqwest | 0.13.4 | MIT OR Apache-2.0 | [upstream](https://github.com/seanmonstar/reqwest) | [751963a8b88c](#sha256-751963a8b88c0e3a9f27e98933079fbcf09b9998b2c13ac49c2e4d58444520d6), [917c0fe02296](#sha256-917c0fe02296eec634820b2758519e39278716bb0104f055cfee771bd7a4c534) |
 | resolv-conf | 0.7.6 | MIT OR Apache-2.0 | [upstream](https://github.com/hickory-dns/resolv-conf) | [b40930bbcf80](#sha256-b40930bbcf80744c86c46a12bc9da056641d722716c378f5659b9e555ef833e1), [c303b44873ac](#sha256-c303b44873acb399b27d3d3983937073246f1ab083f32990ea6015ea31d976b2) |
 | rfd | 0.15.4 | MIT | [upstream](https://github.com/PolyMeilex/rfd) | [65fc947f4bac](#sha256-65fc947f4bac882a2cd104ef73c246b1b037059df9f2b3a58b7f77f0b9e56071) |
 | ring | 0.17.14 | Apache-2.0 AND ISC | [upstream](https://github.com/briansmith/ring) | [005fc765ddc5](#sha256-005fc765ddc5115da796cca915baa9557abae13ff35e0a47c47affc56f6c414d), [6ee2ed6c7771](#sha256-6ee2ed6c77710de911761acd5fc1ad1da00f476beb1a7ef27e78c2d1858deafc), [9eacbcb81be6](#sha256-9eacbcb81be660840c714a560a9d65ba07913db98dd4baf969f78dd499fdd60f), [a60eea817514](#sha256-a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2), [b3d734001a94](#sha256-b3d734001a94efff3579978d953391aa7115f877657d25eb54037a43875d078a), [f025ccfb7dfb](#sha256-f025ccfb7dfb6bdfedc75ca0f67acc69e6fb4998143d834f7c2f38a29989680f) |
-| rmcp | 2.2.0 | Apache-2.0 | [upstream](https://github.com/modelcontextprotocol/rust-sdk/) | [c71d239df917](#sha256-c71d239df91726fc519c6eb72d318ec65820627232b2f796219e87dcf35d0ab4) |
-| rmcp-macros | 2.2.0 | Apache-2.0 | [upstream](https://github.com/modelcontextprotocol/rust-sdk/) | [c71d239df917](#sha256-c71d239df91726fc519c6eb72d318ec65820627232b2f796219e87dcf35d0ab4) |
-| ron | 0.12.2 | MIT OR Apache-2.0 | [upstream](https://github.com/ron-rs/ron) | [a60eea817514](#sha256-a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2), [fa0598d52049](#sha256-fa0598d520497731445a5bc89a2b3d47896d95568bd2be255b7bc43d771b9994) |
+| rmcp | 3.0.1 | Apache-2.0 | [upstream](https://github.com/modelcontextprotocol/rust-sdk/) | [c71d239df917](#sha256-c71d239df91726fc519c6eb72d318ec65820627232b2f796219e87dcf35d0ab4) |
+| rmcp-macros | 3.1.4 | Apache-2.0 | [upstream](https://github.com/modelcontextprotocol/rust-sdk/) | [c71d239df917](#sha256-c71d239df91726fc519c6eb72d318ec65820627232b2f796219e87dcf35d0ab4) |
 | rusqlite | 0.37.0 | MIT | [upstream](https://github.com/rusqlite/rusqlite) | [c10c1f273375](#sha256-c10c1f27337546471e5f7e4e97fdd398b35b9d4e126115dcd22de8d8e65abf6f) |
+| rustc-demangle | 0.1.28 | MIT/Apache-2.0 | [upstream](https://github.com/rust-lang/rustc-demangle) | [378f5840b258](#sha256-378f5840b258e2779c39418f3f2d7b2ba96f1c7917dd6be0713f88305dbda397), [a60eea817514](#sha256-a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2) |
 | rustc-hash | 2.1.3 | Apache-2.0 OR MIT | [upstream](https://github.com/rust-lang/rustc-hash) | [23f18e03dc49](#sha256-23f18e03dc49df91622fe2a76176497404e46ced8a715d9d2b67a7446571cca3), [62c7a1e35f56](#sha256-62c7a1e35f56406896d7aa7ca52d0cc0d272ac022b5d2796e7d6905db8a3636a) |
 | rustc_version | 0.4.1 | MIT OR Apache-2.0 | [upstream](https://github.com/djc/rustc-version-rs) | [a60eea817514](#sha256-a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2), [c9a75f18b9ab](#sha256-c9a75f18b9ab2927829a208fc6aa2cf4e63b8420887ba29cdb265d6619ae82d5) |
 | rusticata-macros | 4.1.0 | MIT/Apache-2.0 | [upstream](https://github.com/rusticata/rusticata-macros.git) | [a5c61b93b6ee](#sha256-a5c61b93b6ee1d104af9920cf020ff3c7efe818e31fe562c72261847a728f513), [a60eea817514](#sha256-a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2) |
 | rustix | 1.1.4 | Apache-2.0 WITH LLVM-exception OR Apache-2.0 OR MIT | [upstream](https://github.com/bytecodealliance/rustix) | [23f18e03dc49](#sha256-23f18e03dc49df91622fe2a76176497404e46ced8a715d9d2b67a7446571cca3), [377c2e7c5325](#sha256-377c2e7c53250cc5905c0b0532d35973392af16ffb9596a41d99d202cf3617c9), [a60eea817514](#sha256-a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2), [a6c48161a09a](#sha256-a6c48161a09acc75a0e25503bab66a731eb5fba5392ed4bb4743e4ba5085327a) |
 | rustls | 0.23.41 | Apache-2.0 OR ISC OR MIT | [upstream](https://github.com/rustls/rustls) | [709e3175b421](#sha256-709e3175b4212f7b13aa93971c9f62ff8c69ec45ad8c6532a7e0c41d7a7d6f8c), [7cfafc877ecc](#sha256-7cfafc877eccc46c0e346ccbaa5c51bb6b894d2b818e617d970211e232785ad4), [a60eea817514](#sha256-a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2) |
-| rustls-native-certs | 0.8.4 | Apache-2.0 OR ISC OR MIT | [upstream](https://github.com/rustls/rustls-native-certs) | [2775d45acac7](#sha256-2775d45acac79b1b67278e018e38e925ed1b17f2ab5729f0ef062418fd954a60), [709e3175b421](#sha256-709e3175b4212f7b13aa93971c9f62ff8c69ec45ad8c6532a7e0c41d7a7d6f8c), [7cfafc877ecc](#sha256-7cfafc877eccc46c0e346ccbaa5c51bb6b894d2b818e617d970211e232785ad4), [a60eea817514](#sha256-a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2) |
 | rustls-pki-types | 1.15.0 | MIT OR Apache-2.0 | [upstream](https://github.com/rustls/pki-types) | [45fd05c4865e](#sha256-45fd05c4865e7c350b98ad7ac50e1b15462d49af4a91e9b0c9dd933dc9a69742), [9117d922e667](#sha256-9117d922e667125508dde62b02c1f57ed22f5ad21eb536aa2e2d99e1c796e639) |
+| rustls-platform-verifier | 0.7.0 | MIT OR Apache-2.0 | [upstream](https://github.com/rustls/rustls-platform-verifier) | [1c7cf76689c8](#sha256-1c7cf76689c837a68ed8d704994e52a0f2940c087958f860d17f3186afbdcc0c), [c71d239df917](#sha256-c71d239df91726fc519c6eb72d318ec65820627232b2f796219e87dcf35d0ab4) |
 | rustls-webpki | 0.103.13 | ISC | [upstream](https://github.com/rustls/webpki) | [5b698ca13897](#sha256-5b698ca13897be3afdb7174256fa1574f8c6892b8bea1a66dd6469d3fe27885a) |
 | rustversion | 1.0.23 | MIT OR Apache-2.0 | [upstream](https://github.com/dtolnay/rustversion) | [23f18e03dc49](#sha256-23f18e03dc49df91622fe2a76176497404e46ced8a715d9d2b67a7446571cca3), [62c7a1e35f56](#sha256-62c7a1e35f56406896d7aa7ca52d0cc0d272ac022b5d2796e7d6905db8a3636a) |
 | rw-stream-sink | 0.4.0 | MIT | [upstream](https://github.com/libp2p/rust-libp2p) | [508a77d2e7b5](#sha256-508a77d2e7b51d98adeed32648ad124b7b30241a8e70b2e72c99f92d8e5874d1) |
@@ -454,22 +469,33 @@ Third-party packages: **633**. Unique legal texts: **377**.
 | safetensors | 0.8.0 | Apache-2.0 | [upstream](https://github.com/huggingface/safetensors) | [c71d239df917](#sha256-c71d239df91726fc519c6eb72d318ec65820627232b2f796219e87dcf35d0ab4) |
 | same-file | 1.0.6 | Unlicense/MIT | [upstream](https://github.com/BurntSushi/same-file) | [01c266bced4a](#sha256-01c266bced4a434da0051174d6bee16a4c82cf634e2679b6155d40d75012390f), [7e12e5df4bae](#sha256-7e12e5df4bae12cb21581ba157ced20e1986a0508dd10d0e8a4ab9a4cf94e85c), [cb3c929a05e6](#sha256-cb3c929a05e6cbc9de9ab06a4c57eeb60ca8c724bef6c138c87d3a577e27aa14) |
 | schannel | 0.1.29 | MIT | [upstream](https://github.com/steffengy/schannel-rs) | [aa72991ac35b](#sha256-aa72991ac35b4de0034da0afe943e62b48c4092fc2ba13ae47806d8e9a4ad551) |
+| schemars | 0.8.22 | MIT | [upstream](https://github.com/GREsau/schemars) | [1954992a2b32](#sha256-1954992a2b32e8a2af24a4c11b726902e344c1934b947a77f04d404908f8db30) |
+| schemars | 0.9.0 | MIT | [upstream](https://github.com/GREsau/schemars) | [1954992a2b32](#sha256-1954992a2b32e8a2af24a4c11b726902e344c1934b947a77f04d404908f8db30) |
 | schemars | 1.2.1 | MIT | [upstream](https://github.com/GREsau/schemars) | [1954992a2b32](#sha256-1954992a2b32e8a2af24a4c11b726902e344c1934b947a77f04d404908f8db30) |
+| schemars_derive | 0.8.22 | MIT | [upstream](https://github.com/GREsau/schemars) | [1954992a2b32](#sha256-1954992a2b32e8a2af24a4c11b726902e344c1934b947a77f04d404908f8db30) |
 | schemars_derive | 1.2.1 | MIT | [upstream](https://github.com/GREsau/schemars) | [1954992a2b32](#sha256-1954992a2b32e8a2af24a4c11b726902e344c1934b947a77f04d404908f8db30) |
 | scopeguard | 1.2.0 | MIT OR Apache-2.0 | [upstream](https://github.com/bluss/scopeguard) | [a60eea817514](#sha256-a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2), [fb77f0a9c53e](#sha256-fb77f0a9c53e473abe5103c8632ef9f0f2874d4fb3f17cb2d8c661aab9cee9d7) |
 | security-framework | 3.7.0 | MIT OR Apache-2.0 | [upstream](https://github.com/kornelski/rust-security-framework) | [91e934255ba3](#sha256-91e934255ba3b2f21103d68c5581c23ef34aa95c4628e4405b8c901935e11c69), [a60eea817514](#sha256-a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2) |
 | security-framework-sys | 2.17.0 | MIT OR Apache-2.0 | [upstream](https://github.com/kornelski/rust-security-framework) | [91e934255ba3](#sha256-91e934255ba3b2f21103d68c5581c23ef34aa95c4628e4405b8c901935e11c69), [a60eea817514](#sha256-a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2) |
+| selectors | 0.36.1 | MPL-2.0 | [upstream](https://github.com/servo/stylo) | [66a3107d5ad6](#sha256-66a3107d5ad6a058aab753eaac2047ccb2ed0e39465dd0fe5844da3e300d5172) |
 | self_cell | 1.2.2 | Apache-2.0 OR GPL-2.0-only | [upstream](https://github.com/Voultapher/self_cell) | [8177f9751321](#sha256-8177f97513213526df2cf6184d8ff986c675afb514d4e68a404010521b880643), [c71d239df917](#sha256-c71d239df91726fc519c6eb72d318ec65820627232b2f796219e87dcf35d0ab4) |
 | semver | 1.0.28 | MIT OR Apache-2.0 | [upstream](https://github.com/dtolnay/semver) | [23f18e03dc49](#sha256-23f18e03dc49df91622fe2a76176497404e46ced8a715d9d2b67a7446571cca3), [62c7a1e35f56](#sha256-62c7a1e35f56406896d7aa7ca52d0cc0d272ac022b5d2796e7d6905db8a3636a) |
 | serde | 1.0.228 | MIT OR Apache-2.0 | [upstream](https://github.com/serde-rs/serde) | [23f18e03dc49](#sha256-23f18e03dc49df91622fe2a76176497404e46ced8a715d9d2b67a7446571cca3), [62c7a1e35f56](#sha256-62c7a1e35f56406896d7aa7ca52d0cc0d272ac022b5d2796e7d6905db8a3636a) |
+| serde-untagged | 0.1.9 | MIT OR Apache-2.0 | [upstream](https://github.com/dtolnay/serde-untagged) | [23f18e03dc49](#sha256-23f18e03dc49df91622fe2a76176497404e46ced8a715d9d2b67a7446571cca3), [62c7a1e35f56](#sha256-62c7a1e35f56406896d7aa7ca52d0cc0d272ac022b5d2796e7d6905db8a3636a) |
 | serde_core | 1.0.228 | MIT OR Apache-2.0 | [upstream](https://github.com/serde-rs/serde) | [23f18e03dc49](#sha256-23f18e03dc49df91622fe2a76176497404e46ced8a715d9d2b67a7446571cca3), [62c7a1e35f56](#sha256-62c7a1e35f56406896d7aa7ca52d0cc0d272ac022b5d2796e7d6905db8a3636a) |
 | serde_derive | 1.0.228 | MIT OR Apache-2.0 | [upstream](https://github.com/serde-rs/serde) | [23f18e03dc49](#sha256-23f18e03dc49df91622fe2a76176497404e46ced8a715d9d2b67a7446571cca3), [62c7a1e35f56](#sha256-62c7a1e35f56406896d7aa7ca52d0cc0d272ac022b5d2796e7d6905db8a3636a) |
 | serde_derive_internals | 0.29.1 | MIT OR Apache-2.0 | [upstream](https://github.com/serde-rs/serde) | [23f18e03dc49](#sha256-23f18e03dc49df91622fe2a76176497404e46ced8a715d9d2b67a7446571cca3), [62c7a1e35f56](#sha256-62c7a1e35f56406896d7aa7ca52d0cc0d272ac022b5d2796e7d6905db8a3636a) |
 | serde_json | 1.0.150 | MIT OR Apache-2.0 | [upstream](https://github.com/serde-rs/json) | [23f18e03dc49](#sha256-23f18e03dc49df91622fe2a76176497404e46ced8a715d9d2b67a7446571cca3), [62c7a1e35f56](#sha256-62c7a1e35f56406896d7aa7ca52d0cc0d272ac022b5d2796e7d6905db8a3636a) |
 | serde_path_to_error | 0.1.20 | MIT OR Apache-2.0 | [upstream](https://github.com/dtolnay/path-to-error) | [23f18e03dc49](#sha256-23f18e03dc49df91622fe2a76176497404e46ced8a715d9d2b67a7446571cca3), [62c7a1e35f56](#sha256-62c7a1e35f56406896d7aa7ca52d0cc0d272ac022b5d2796e7d6905db8a3636a) |
+| serde_repr | 0.1.20 | MIT OR Apache-2.0 | [upstream](https://github.com/dtolnay/serde-repr) | [23f18e03dc49](#sha256-23f18e03dc49df91622fe2a76176497404e46ced8a715d9d2b67a7446571cca3), [62c7a1e35f56](#sha256-62c7a1e35f56406896d7aa7ca52d0cc0d272ac022b5d2796e7d6905db8a3636a) |
 | serde_spanned | 1.1.1 | MIT OR Apache-2.0 | [upstream](https://github.com/toml-rs/toml) | [6efb0476a1cc](#sha256-6efb0476a1cc085077ed49357026d8c173bf33017278ef440f222fb9cbcb66e6), [b40930bbcf80](#sha256-b40930bbcf80744c86c46a12bc9da056641d722716c378f5659b9e555ef833e1) |
 | serde_urlencoded | 0.7.1 | MIT/Apache-2.0 | [upstream](https://github.com/nox/serde_urlencoded) | [62c7a1e35f56](#sha256-62c7a1e35f56406896d7aa7ca52d0cc0d272ac022b5d2796e7d6905db8a3636a), [b9eb26629432](#sha256-b9eb266294324f672cbe945fe8f2e32f85024f0d61a1a7d14382cdde0ac44769) |
+| serde_with | 3.21.0 | MIT OR Apache-2.0 | [upstream](https://github.com/jonasbb/serde_with/) | [7576269ea71f](#sha256-7576269ea71f767b99297934c0b2367532690f8c4badc695edf8e04ab6a1e545), [a60eea817514](#sha256-a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2) |
+| serde_with_macros | 3.21.0 | MIT OR Apache-2.0 | [upstream](https://github.com/jonasbb/serde_with/) | [7576269ea71f](#sha256-7576269ea71f767b99297934c0b2367532690f8c4badc695edf8e04ab6a1e545), [a60eea817514](#sha256-a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2) |
 | serde_yaml_ng | 0.10.0 | MIT | [upstream](https://github.com/acatton/serde-yaml-ng) | [4cb6f99bc615](#sha256-4cb6f99bc6158a9feba329a21ac24020c3b2cc6b6597645023adb8ae1371bd74) |
+| serialize-to-javascript | 0.1.2 | MIT OR Apache-2.0 | [upstream](https://github.com/chippers/serialize-to-javascript) | [c71d239df917](#sha256-c71d239df91726fc519c6eb72d318ec65820627232b2f796219e87dcf35d0ab4), [e53a7165e8bc](#sha256-e53a7165e8bc3ced5e5628404b3d2d28ecc14ad720f1c09ba28385d5151ecf93) |
+| serialize-to-javascript-impl | 0.1.2 | MIT OR Apache-2.0 | [upstream](https://github.com/chippers/serialize-to-javascript) | [c71d239df917](#sha256-c71d239df91726fc519c6eb72d318ec65820627232b2f796219e87dcf35d0ab4), [e53a7165e8bc](#sha256-e53a7165e8bc3ced5e5628404b3d2d28ecc14ad720f1c09ba28385d5151ecf93) |
+| servo_arc | 0.4.3 | MIT OR Apache-2.0 | [upstream](https://github.com/servo/stylo) | [23f18e03dc49](#sha256-23f18e03dc49df91622fe2a76176497404e46ced8a715d9d2b67a7446571cca3), [a60eea817514](#sha256-a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2) |
 | sha1_smol | 1.0.1 | BSD-3-Clause | [upstream](https://github.com/mitsuhiko/sha1-smol) | [282a21b07104](#sha256-282a21b0710441c364025461a447362daf18f5798a7b72ae2f801a2aa536da51) |
 | sha2 | 0.10.9 | MIT OR Apache-2.0 | [upstream](https://github.com/RustCrypto/hashes) | [a9040321c371](#sha256-a9040321c3712d8fd0b09cf52b17445de04a23a10165049ae187cd39e5c86be5), [b4eb00df6e2a](#sha256-b4eb00df6e2a4d22518fcaa6a2b4646f249b3a3c9814509b22bd2091f1392ff1) |
 | sha2 | 0.11.0 | MIT OR Apache-2.0 | [upstream](https://github.com/RustCrypto/hashes) | [831e0f43ad0b](#sha256-831e0f43ad0bf014c1c4fec5767aae470434c1d66d6e671be2d823e729063e25), [a9040321c371](#sha256-a9040321c3712d8fd0b09cf52b17445de04a23a10165049ae187cd39e5c86be5) |
@@ -478,26 +504,28 @@ Third-party packages: **633**. Unique legal texts: **377**.
 | signal-hook-registry | 1.4.8 | MIT OR Apache-2.0 | [upstream](https://github.com/vorner/signal-hook) | [503558bfefe6](#sha256-503558bfefe66ca15e4e3f7955b3cb0ec87fd52f29bf24b336af7bd00e946d5c), [a60eea817514](#sha256-a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2) |
 | signature | 2.2.0 | Apache-2.0 OR MIT | [upstream](https://github.com/RustCrypto/traits/tree/master/signature) | [a9040321c371](#sha256-a9040321c3712d8fd0b09cf52b17445de04a23a10165049ae187cd39e5c86be5), [b3470648aff0](#sha256-b3470648aff02beb36d7a53240fc9260ed80ed93bd43bace6b67d7ef7336ee33) |
 | simd-adler32 | 0.3.9 | MIT | [upstream](https://github.com/mcountryman/simd-adler32) | [42a35170233e](#sha256-42a35170233e83e18856792e748de4c1ce4a63b2afce9a370c89ef3fe23f9f2d) |
-| single-instance | 0.3.3 | MIT | [upstream](https://github.com/WLBF/single-instance) | [508a77d2e7b5](#sha256-508a77d2e7b51d98adeed32648ad124b7b30241a8e70b2e72c99f92d8e5874d1) |
 | siphasher | 1.0.3 | MIT/Apache-2.0 | [upstream](https://github.com/jedisct1/rust-siphash) | [c962ee4d1d05](#sha256-c962ee4d1d05ddc138b202b2540219ebc57893fcf97b364852094a9a94ce1365) |
-| skrifa | 0.42.1 | MIT OR Apache-2.0 | [upstream](https://github.com/googlefonts/fontations) | [8a62fa27ffdc](#sha256-8a62fa27ffdccc3df19dce90f8bb3d572e27aecffc1a383d0c2601834dcec434), [a14f7d685a79](#sha256-a14f7d685a79c0f4fb64aee305527a6d5fa55f2401f4e6d688d7b1301868e6c0) |
 | slab | 0.4.12 | MIT | [upstream](https://github.com/tokio-rs/slab) | [8ce0830173fd](#sha256-8ce0830173fdac609dfb4ea603fdc002c2f4af0dc9b1a005653f5da9cf534b18) |
 | smallvec | 1.15.2 | MIT OR Apache-2.0 | [upstream](https://github.com/servo/rust-smallvec) | [0b28172679e0](#sha256-0b28172679e0009b655da42797c03fd163a3379d5cfa67ba1f1655e974a2a1a9), [a60eea817514](#sha256-a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2) |
-| smol_str | 0.2.2 | MIT OR Apache-2.0 | [upstream](https://github.com/rust-analyzer/smol_str) | [23f18e03dc49](#sha256-23f18e03dc49df91622fe2a76176497404e46ced8a715d9d2b67a7446571cca3), [a60eea817514](#sha256-a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2) |
 | snow | 0.9.6 | Apache-2.0 OR MIT | [upstream](https://github.com/mcginty/snow) | [35242e7a83f6](#sha256-35242e7a83f69875e6edeff02291e688c97caafe2f8902e4e19b49d3e78b4cab), [dd6a6177e441](#sha256-dd6a6177e441f98b36c8e0e92e399a90e94fe09c3fed92d8bf21fe00a840a6ed) |
 | socket2 | 0.5.10 | MIT OR Apache-2.0 | [upstream](https://github.com/rust-lang/socket2) | [378f5840b258](#sha256-378f5840b258e2779c39418f3f2d7b2ba96f1c7917dd6be0713f88305dbda397), [a60eea817514](#sha256-a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2) |
 | socket2 | 0.6.4 | MIT OR Apache-2.0 | [upstream](https://github.com/rust-lang/socket2) | [378f5840b258](#sha256-378f5840b258e2779c39418f3f2d7b2ba96f1c7917dd6be0713f88305dbda397), [a60eea817514](#sha256-a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2) |
 | socks | 0.3.4 | MIT/Apache-2.0 | [upstream](https://github.com/sfackler/rust-socks) | [b40930bbcf80](#sha256-b40930bbcf80744c86c46a12bc9da056641d722716c378f5659b9e555ef833e1), [b68cdf814c41](#sha256-b68cdf814c41180614110bb1ae36c58f7de5ed701683e2f7dad366e683493111) |
+| softbuffer | 0.4.8 | MIT OR Apache-2.0 | [upstream](https://github.com/rust-windowing/softbuffer) | [74f180f4d19f](#sha256-74f180f4d19f51aede780e1884b37d02c19cbbad872f8ca3b6450288db66e5cd), [a44454274400](#sha256-a4445427440043e8ce6fadf7a43fb906cb0d7f6c573a560a9f142cf9f9bf8ff4) |
 | spki | 0.7.3 | Apache-2.0 OR MIT | [upstream](https://github.com/RustCrypto/formats/tree/master/spki) | [a9040321c371](#sha256-a9040321c3712d8fd0b09cf52b17445de04a23a10165049ae187cd39e5c86be5), [c995204cc6ba](#sha256-c995204cc6bad2ed67dd41f7d89bb9f1a9d48e0edd745732b30640d7912089a4) |
 | spm_precompiled | 0.1.4 | Apache-2.0 | [upstream](https://github.com/huggingface/spm_precompiled) | [c71d239df917](#sha256-c71d239df91726fc519c6eb72d318ec65820627232b2f796219e87dcf35d0ab4) |
 | sse-stream | 0.2.4 | MIT OR Apache-2.0 | [upstream](https://github.com/4t145/sse-stream/) | [508a77d2e7b5](#sha256-508a77d2e7b51d98adeed32648ad124b7b30241a8e70b2e72c99f92d8e5874d1) |
 | stable_deref_trait | 1.2.1 | MIT OR Apache-2.0 | [upstream](https://github.com/storyyeller/stable_deref_trait) | [3c125f249fc6](#sha256-3c125f249fc6fb19f2415d027a0d9a170860583960ea53d08ea1d2b3f269d153), [a60eea817514](#sha256-a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2) |
 | static_assertions | 1.1.0 | MIT OR Apache-2.0 | [upstream](https://github.com/nvzqz/static-assertions-rs) | [cfc7749b96f6](#sha256-cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30), [ea084a2373eb](#sha256-ea084a2373ebc1f0902c09266e7bf25a05ab3814c1805bb017ffa7308f90c061) |
+| string_cache | 0.9.0 | MIT OR Apache-2.0 | [upstream](https://github.com/servo/string-cache) | [62065228e42c](#sha256-62065228e42caebca7e7d7db1204cbb867033de5982ca4009928915e4095f3a3), [a60eea817514](#sha256-a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2) |
+| string_cache_codegen | 0.6.1 | MIT OR Apache-2.0 | [upstream](https://github.com/servo/string-cache) | [62065228e42c](#sha256-62065228e42caebca7e7d7db1204cbb867033de5982ca4009928915e4095f3a3), [a60eea817514](#sha256-a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2) |
 | stringprep | 0.1.5 | MIT/Apache-2.0 | [upstream](https://github.com/sfackler/rust-stringprep) | [a07450fd4496](#sha256-a07450fd4496cb8b58466e6d529f1f502444eee4a235659337e9194d694739d6), [b40930bbcf80](#sha256-b40930bbcf80744c86c46a12bc9da056641d722716c378f5659b9e555ef833e1) |
 | strsim | 0.11.1 | MIT | [upstream](https://github.com/rapidfuzz/strsim-rs) | [1e697ce8d214](#sha256-1e697ce8d21401fbf1bddd9b5c3fd4c4c79ae1e3bdf51f81761c85e11d5a89cd) |
 | subtle | 2.6.1 | BSD-3-Clause | [upstream](https://github.com/dalek-cryptography/subtle) | [cc0332a88c2e](#sha256-cc0332a88c2ea21d5f3c1298f966120f4c95196871c3f6bb4fcf615508b93fa1) |
+| swift-rs | 1.0.7 | MIT OR Apache-2.0 | [upstream](https://github.com/Brendonovich/swift-rs) | [908a661cf763](#sha256-908a661cf763bddfa04f2739bea561be62a246f03ad53fcb2272d3ddbd1d943f), [f3c3e9f4febe](#sha256-f3c3e9f4febe81ff14ccc233c344e6e60051290d1c1e5a2c670d63cc3608a5bb) |
 | symlink | 0.1.0 | MIT/Apache-2.0 | [upstream](https://gitlab.com/chris-morgan/symlink) | [a60eea817514](#sha256-a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2), [b85cb7b51c3f](#sha256-b85cb7b51c3f8d600bbac3fb8dbbfe64cde697e460a55fc80978eb0804ca1427), [edb9885b41e4](#sha256-edb9885b41e4851740dcdcde4d2419c60104e1f3473f7bea6293a82729a32068) |
 | syn | 2.0.118 | MIT OR Apache-2.0 | [upstream](https://github.com/dtolnay/syn) | [23f18e03dc49](#sha256-23f18e03dc49df91622fe2a76176497404e46ced8a715d9d2b67a7446571cca3), [62c7a1e35f56](#sha256-62c7a1e35f56406896d7aa7ca52d0cc0d272ac022b5d2796e7d6905db8a3636a) |
+| syn | 3.0.3 | MIT OR Apache-2.0 | [upstream](https://github.com/dtolnay/syn) | [23f18e03dc49](#sha256-23f18e03dc49df91622fe2a76176497404e46ced8a715d9d2b67a7446571cca3), [62c7a1e35f56](#sha256-62c7a1e35f56406896d7aa7ca52d0cc0d272ac022b5d2796e7d6905db8a3636a) |
 | sync_wrapper | 1.0.2 | Apache-2.0 | [upstream](https://github.com/Actyx/sync_wrapper) | [0d542e0c8804](#sha256-0d542e0c8804e39aa7f37eb00da5a762149dc682d7829451287e11b938e94594) |
 | synstructure | 0.13.2 | MIT | [upstream](https://github.com/mystor/synstructure) | [219920e865ee](#sha256-219920e865eee70b7dcfc948a86b099e7f4fe2de01bcca2ca9a20c0a033f2b59) |
 | sys-locale | 0.3.2 | MIT OR Apache-2.0 | [upstream](https://github.com/1Password/sys-locale) | [5cc390ab5e5e](#sha256-5cc390ab5e5e6507f467368cbab1297552d64bfd863f4b496c7928508bcfefd8), [c71d239df917](#sha256-c71d239df91726fc519c6eb72d318ec65820627232b2f796219e87dcf35d0ab4) |
@@ -505,14 +533,29 @@ Third-party packages: **633**. Unique legal texts: **377**.
 | system-configuration | 0.7.0 | MIT OR Apache-2.0 | [upstream](https://github.com/mullvad/system-configuration-rs) | [000cbb5bea6f](#sha256-000cbb5bea6f21829c8f0d9e1fe87410bd5ef0453412ffc017845982a3e19824), [a60eea817514](#sha256-a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2) |
 | system-configuration-sys | 0.6.0 | MIT OR Apache-2.0 | [upstream](https://github.com/mullvad/system-configuration-rs) | [000cbb5bea6f](#sha256-000cbb5bea6f21829c8f0d9e1fe87410bd5ef0453412ffc017845982a3e19824), [a60eea817514](#sha256-a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2) |
 | tagptr | 0.2.0 | MIT/Apache-2.0 | [upstream](https://github.com/oliver-giersch/tagptr.git) | [175d33d2e88f](#sha256-175d33d2e88fc3944f1f54125e886e7232a85380b73dce505e9088fe4e91c576), [a2b15e1e9004](#sha256-a2b15e1e900414317d0e00d887dd2747d4abd00382c6addeb5daf746bed4b52b) |
+| tao | 0.35.3 | Apache-2.0 | [upstream](https://github.com/tauri-apps/tao) | [02b6448337b7](#sha256-02b6448337b757772d90e5f31caaa0f9e6afaad2221c01771d0a3deaa4d4196c), [a8ad31b1c3f4](#sha256-a8ad31b1c3f40dca5a84119351b8fa8ddc868edd77fad8a8ebf6d8f2d16fa4ae) |
 | tar | 0.4.46 | MIT OR Apache-2.0 | [upstream](https://github.com/composefs/tar-rs) | [8ca6b96cea9e](#sha256-8ca6b96cea9e67c6c5c63f452c31bd396db8bd2406231fdea5d48ef462b48077), [a60eea817514](#sha256-a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2) |
+| target-lexicon | 0.13.5 | Apache-2.0 WITH LLVM-exception | [upstream](https://github.com/bytecodealliance/target-lexicon) | [a6c48161a09a](#sha256-a6c48161a09acc75a0e25503bab66a731eb5fba5392ed4bb4743e4ba5085327a) |
+| tauri | 2.11.5 | Apache-2.0 OR MIT | [upstream](https://github.com/tauri-apps/tauri) | [0d542e0c8804](#sha256-0d542e0c8804e39aa7f37eb00da5a762149dc682d7829451287e11b938e94594), [9dd42ea92cff](#sha256-9dd42ea92cff2ede5cd477cbfcce051b2d0115c0ac7f368ee88cb545055dff1d) |
+| tauri-build | 2.6.3 | Apache-2.0 OR MIT | [upstream](https://github.com/tauri-apps/tauri) | [0d542e0c8804](#sha256-0d542e0c8804e39aa7f37eb00da5a762149dc682d7829451287e11b938e94594), [9dd42ea92cff](#sha256-9dd42ea92cff2ede5cd477cbfcce051b2d0115c0ac7f368ee88cb545055dff1d) |
+| tauri-codegen | 2.6.3 | Apache-2.0 OR MIT | [upstream](https://github.com/tauri-apps/tauri) | [0d542e0c8804](#sha256-0d542e0c8804e39aa7f37eb00da5a762149dc682d7829451287e11b938e94594), [9dd42ea92cff](#sha256-9dd42ea92cff2ede5cd477cbfcce051b2d0115c0ac7f368ee88cb545055dff1d) |
+| tauri-macros | 2.6.3 | Apache-2.0 OR MIT | [upstream](https://github.com/tauri-apps/tauri) | [0d542e0c8804](#sha256-0d542e0c8804e39aa7f37eb00da5a762149dc682d7829451287e11b938e94594), [9dd42ea92cff](#sha256-9dd42ea92cff2ede5cd477cbfcce051b2d0115c0ac7f368ee88cb545055dff1d) |
+| tauri-plugin | 2.6.3 | Apache-2.0 OR MIT | [upstream](https://github.com/tauri-apps/tauri) | [508a77d2e7b5](#sha256-508a77d2e7b51d98adeed32648ad124b7b30241a8e70b2e72c99f92d8e5874d1) |
+| tauri-plugin-single-instance | 2.4.3 | Apache-2.0 OR MIT | [upstream](https://github.com/tauri-apps/plugins-workspace) | [0d542e0c8804](#sha256-0d542e0c8804e39aa7f37eb00da5a762149dc682d7829451287e11b938e94594), [9c1db6b7e7eb](#sha256-9c1db6b7e7eb83e1cb2af973b5df2bdc63651ede0f38506ab98dfa0940487759), [af76c60594af](#sha256-af76c60594af325c4efdcbcd27f5d34ff441c11f09b46b627b378d04d5aa1f1d) |
+| tauri-plugin-updater | 2.10.1 | Apache-2.0 OR MIT | [upstream](https://github.com/tauri-apps/plugins-workspace) | [0d542e0c8804](#sha256-0d542e0c8804e39aa7f37eb00da5a762149dc682d7829451287e11b938e94594), [9c1db6b7e7eb](#sha256-9c1db6b7e7eb83e1cb2af973b5df2bdc63651ede0f38506ab98dfa0940487759), [9dd42ea92cff](#sha256-9dd42ea92cff2ede5cd477cbfcce051b2d0115c0ac7f368ee88cb545055dff1d) |
+| tauri-plugin-wdio-webdriver | 1.3.0 | MIT | [upstream](https://github.com/webdriverio/desktop-mobile) | [20c84663dbfa](#sha256-20c84663dbfa685b230f362509fdbaea7819f5da166afea9857c4d96dcc7e0bc) |
+| tauri-runtime | 2.11.3 | Apache-2.0 OR MIT | [upstream](https://github.com/tauri-apps/tauri) | [0d542e0c8804](#sha256-0d542e0c8804e39aa7f37eb00da5a762149dc682d7829451287e11b938e94594), [9dd42ea92cff](#sha256-9dd42ea92cff2ede5cd477cbfcce051b2d0115c0ac7f368ee88cb545055dff1d) |
+| tauri-runtime-wry | 2.11.4 | Apache-2.0 OR MIT | [upstream](https://github.com/tauri-apps/tauri) | [0d542e0c8804](#sha256-0d542e0c8804e39aa7f37eb00da5a762149dc682d7829451287e11b938e94594), [9dd42ea92cff](#sha256-9dd42ea92cff2ede5cd477cbfcce051b2d0115c0ac7f368ee88cb545055dff1d) |
+| tauri-utils | 2.9.3 | Apache-2.0 OR MIT | [upstream](https://github.com/tauri-apps/tauri) | [0d542e0c8804](#sha256-0d542e0c8804e39aa7f37eb00da5a762149dc682d7829451287e11b938e94594), [9dd42ea92cff](#sha256-9dd42ea92cff2ede5cd477cbfcce051b2d0115c0ac7f368ee88cb545055dff1d) |
+| tauri-winres | 0.3.6 | MIT | [upstream](https://github.com/tauri-apps/winres) | [d9fa6b0e6fed](#sha256-d9fa6b0e6fed50d4961b9c931587af6bd127df13e9473418d3e324f427db4f06) |
 | tempfile | 3.27.0 | MIT OR Apache-2.0 | [upstream](https://github.com/Stebalien/tempfile) | [8b427f5bc501](#sha256-8b427f5bc501764575e52ba4f9d95673cf8f6d80a86d0d06599852e1a9a20a36), [a60eea817514](#sha256-a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2) |
+| tendril | 0.5.1 | MIT OR Apache-2.0 | [upstream](https://github.com/servo/html5ever) | [60a7062291b0](#sha256-60a7062291b01ba068f300612cdbdc20382ac1d4934f07bcdd7167c15299f309), [a60eea817514](#sha256-a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2) |
+| termcolor | 1.4.1 | Unlicense OR MIT | [upstream](https://github.com/BurntSushi/termcolor) | [01c266bced4a](#sha256-01c266bced4a434da0051174d6bee16a4c82cf634e2679b6155d40d75012390f), [0f96a83840e1](#sha256-0f96a83840e146e43c0ec96a22ec1f392e0680e6c1226e6f3ba87e0740af850f), [7e12e5df4bae](#sha256-7e12e5df4bae12cb21581ba157ced20e1986a0508dd10d0e8a4ab9a4cf94e85c) |
 | thiserror | 1.0.69 | MIT OR Apache-2.0 | [upstream](https://github.com/dtolnay/thiserror) | [23f18e03dc49](#sha256-23f18e03dc49df91622fe2a76176497404e46ced8a715d9d2b67a7446571cca3), [62c7a1e35f56](#sha256-62c7a1e35f56406896d7aa7ca52d0cc0d272ac022b5d2796e7d6905db8a3636a) |
 | thiserror | 2.0.18 | MIT OR Apache-2.0 | [upstream](https://github.com/dtolnay/thiserror) | [23f18e03dc49](#sha256-23f18e03dc49df91622fe2a76176497404e46ced8a715d9d2b67a7446571cca3), [62c7a1e35f56](#sha256-62c7a1e35f56406896d7aa7ca52d0cc0d272ac022b5d2796e7d6905db8a3636a) |
 | thiserror-impl | 1.0.69 | MIT OR Apache-2.0 | [upstream](https://github.com/dtolnay/thiserror) | [23f18e03dc49](#sha256-23f18e03dc49df91622fe2a76176497404e46ced8a715d9d2b67a7446571cca3), [62c7a1e35f56](#sha256-62c7a1e35f56406896d7aa7ca52d0cc0d272ac022b5d2796e7d6905db8a3636a) |
 | thiserror-impl | 2.0.18 | MIT OR Apache-2.0 | [upstream](https://github.com/dtolnay/thiserror) | [23f18e03dc49](#sha256-23f18e03dc49df91622fe2a76176497404e46ced8a715d9d2b67a7446571cca3), [62c7a1e35f56](#sha256-62c7a1e35f56406896d7aa7ca52d0cc0d272ac022b5d2796e7d6905db8a3636a) |
 | thread_local | 1.1.9 | MIT OR Apache-2.0 | [upstream](https://github.com/Amanieu/thread_local-rs) | [a60eea817514](#sha256-a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2), [c9a75f18b9ab](#sha256-c9a75f18b9ab2927829a208fc6aa2cf4e63b8420887ba29cdb265d6619ae82d5) |
-| tiff | 0.11.3 | MIT | [upstream](https://github.com/image-rs/image-tiff) | [20c097d0de27](#sha256-20c097d0de27e2adc179140a3d542091951a030699c7e1c78655f2a2d08d4e3e), [c6d1d56bb6e2](#sha256-c6d1d56bb6e2fe4f0aed4aa8553261dd65247db6db50c87c9e9f3fbe095e2202) |
 | time | 0.3.53 | MIT OR Apache-2.0 | [upstream](https://github.com/time-rs/time) | [0d542e0c8804](#sha256-0d542e0c8804e39aa7f37eb00da5a762149dc682d7829451287e11b938e94594), [2537228d9a1b](#sha256-2537228d9a1b44a5dc595241349cae7090b326c8de165aaf89bfddef4a00d0fc) |
 | time-core | 0.1.9 | MIT OR Apache-2.0 | [upstream](https://github.com/time-rs/time) | [0d542e0c8804](#sha256-0d542e0c8804e39aa7f37eb00da5a762149dc682d7829451287e11b938e94594), [2537228d9a1b](#sha256-2537228d9a1b44a5dc595241349cae7090b326c8de165aaf89bfddef4a00d0fc) |
 | time-macros | 0.2.31 | MIT OR Apache-2.0 | [upstream](https://github.com/time-rs/time) | [0d542e0c8804](#sha256-0d542e0c8804e39aa7f37eb00da5a762149dc682d7829451287e11b938e94594), [2537228d9a1b](#sha256-2537228d9a1b44a5dc595241349cae7090b326c8de165aaf89bfddef4a00d0fc) |
@@ -525,7 +568,9 @@ Third-party packages: **633**. Unique legal texts: **377**.
 | tokio-rustls | 0.26.4 | MIT OR Apache-2.0 | [upstream](https://github.com/rustls/tokio-rustls) | [cc117d90b498](#sha256-cc117d90b498b32b11a886f279b359da16a73c3b01efbb2f5cc004b20262334e), [e20fa2b8e0a2](#sha256-e20fa2b8e0a2565f24a792b94b4bf4b6c2b9d36f781d8a9516e218a036e6677a) |
 | tokio-stream | 0.1.18 | MIT | [upstream](https://github.com/tokio-rs/tokio) | [253cd04c6714](#sha256-253cd04c6714889df2d32f3f64d669179a1c95c76ac43c40882c52eb06bc3552) |
 | tokio-util | 0.7.18 | MIT | [upstream](https://github.com/tokio-rs/tokio) | [253cd04c6714](#sha256-253cd04c6714889df2d32f3f64d669179a1c95c76ac43c40882c52eb06bc3552) |
+| toml | 0.9.12+spec-1.1.0 | MIT OR Apache-2.0 | [upstream](https://github.com/toml-rs/toml) | [6efb0476a1cc](#sha256-6efb0476a1cc085077ed49357026d8c173bf33017278ef440f222fb9cbcb66e6), [b40930bbcf80](#sha256-b40930bbcf80744c86c46a12bc9da056641d722716c378f5659b9e555ef833e1) |
 | toml | 1.1.2+spec-1.1.0 | MIT OR Apache-2.0 | [upstream](https://github.com/toml-rs/toml) | [6efb0476a1cc](#sha256-6efb0476a1cc085077ed49357026d8c173bf33017278ef440f222fb9cbcb66e6), [b40930bbcf80](#sha256-b40930bbcf80744c86c46a12bc9da056641d722716c378f5659b9e555ef833e1) |
+| toml_datetime | 0.7.5+spec-1.1.0 | MIT OR Apache-2.0 | [upstream](https://github.com/toml-rs/toml) | [6efb0476a1cc](#sha256-6efb0476a1cc085077ed49357026d8c173bf33017278ef440f222fb9cbcb66e6), [b40930bbcf80](#sha256-b40930bbcf80744c86c46a12bc9da056641d722716c378f5659b9e555ef833e1) |
 | toml_datetime | 1.1.1+spec-1.1.0 | MIT OR Apache-2.0 | [upstream](https://github.com/toml-rs/toml) | [6efb0476a1cc](#sha256-6efb0476a1cc085077ed49357026d8c173bf33017278ef440f222fb9cbcb66e6), [b40930bbcf80](#sha256-b40930bbcf80744c86c46a12bc9da056641d722716c378f5659b9e555ef833e1) |
 | toml_parser | 1.1.2+spec-1.1.0 | MIT OR Apache-2.0 | [upstream](https://github.com/toml-rs/toml) | [6efb0476a1cc](#sha256-6efb0476a1cc085077ed49357026d8c173bf33017278ef440f222fb9cbcb66e6), [b40930bbcf80](#sha256-b40930bbcf80744c86c46a12bc9da056641d722716c378f5659b9e555ef833e1) |
 | toml_writer | 1.1.1+spec-1.1.0 | MIT OR Apache-2.0 | [upstream](https://github.com/toml-rs/toml) | [6efb0476a1cc](#sha256-6efb0476a1cc085077ed49357026d8c173bf33017278ef440f222fb9cbcb66e6), [b40930bbcf80](#sha256-b40930bbcf80744c86c46a12bc9da056641d722716c378f5659b9e555ef833e1) |
@@ -542,14 +587,20 @@ Third-party packages: **633**. Unique legal texts: **377**.
 | tracing-subscriber | 0.3.23 | MIT | [upstream](https://github.com/tokio-rs/tracing) | [898b1ae9821e](#sha256-898b1ae9821e98daf8964c8d6c7f61641f5f5aa78ad500020771c0939ee0dea1) |
 | tray-icon | 0.24.1 | MIT OR Apache-2.0 | [upstream](https://github.com/tauri-apps/tray-icon) | [2ab5537b8c0c](#sha256-2ab5537b8c0cb1d475e2145b6a7994b04e7c71e6e5bd836f7f9c47c221a5ad9a), [44181d1db740](#sha256-44181d1db740d9841dbe6d7fa1963a23067f335567127fc15a9d050476af71a6), [a60eea817514](#sha256-a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2) |
 | try-lock | 0.2.5 | MIT | [upstream](https://github.com/seanmonstar/try-lock) | [8b62775bacdf](#sha256-8b62775bacdfa5ae8390519b7cdf7ab7d6c53f008981f1b9abd6135ef745b67e) |
+| ts-rs | 12.0.1 | MIT | [upstream](https://github.com/Aleph-Alpha/ts-rs) | [508a77d2e7b5](#sha256-508a77d2e7b51d98adeed32648ad124b7b30241a8e70b2e72c99f92d8e5874d1) |
+| ts-rs-macros | 12.0.1 | MIT | [upstream](https://github.com/Aleph-Alpha/ts-rs) | [508a77d2e7b5](#sha256-508a77d2e7b51d98adeed32648ad124b7b30241a8e70b2e72c99f92d8e5874d1) |
 | type-map | 0.5.1 | MIT/Apache-2.0 | [upstream](https://github.com/kardeiz/type-map) | [1e932f2af080](#sha256-1e932f2af080ff34117d4090bf0b873ed6339f5db932fd0aef2595501915c21e), [5c18446aec2f](#sha256-5c18446aec2f97ba6f8c2c7d5e3883a13bb2ef04d7d6187e2feec031b0358e0b) |
 | typeid | 1.0.3 | MIT OR Apache-2.0 | [upstream](https://github.com/dtolnay/typeid) | [23f18e03dc49](#sha256-23f18e03dc49df91622fe2a76176497404e46ced8a715d9d2b67a7446571cca3), [62c7a1e35f56](#sha256-62c7a1e35f56406896d7aa7ca52d0cc0d272ac022b5d2796e7d6905db8a3636a) |
 | typenum | 1.20.1 | MIT OR Apache-2.0 | [upstream](https://github.com/paholg/typenum) | [36bb253818ac](#sha256-36bb253818ac13761081556ff5c457d626da9df1eb4f56194d9ad3926c418a68), [3c97f5b6ad4e](#sha256-3c97f5b6ad4e73ad22dc0d1e0c7120579a350df57095120017ddfe5a8669604e), [a825bd853ab7](#sha256-a825bd853ab71619a4923d7b4311221427848070ff44d990da39b0b274c1683f) |
+| unic-char-property | 0.9.0 | MIT/Apache-2.0 | [upstream](https://github.com/open-i18n/rust-unic/) | [508a77d2e7b5](#sha256-508a77d2e7b51d98adeed32648ad124b7b30241a8e70b2e72c99f92d8e5874d1) |
+| unic-char-range | 0.9.0 | MIT/Apache-2.0 | [upstream](https://github.com/open-i18n/rust-unic/) | [508a77d2e7b5](#sha256-508a77d2e7b51d98adeed32648ad124b7b30241a8e70b2e72c99f92d8e5874d1) |
+| unic-common | 0.9.0 | MIT/Apache-2.0 | [upstream](https://github.com/open-i18n/rust-unic/) | [508a77d2e7b5](#sha256-508a77d2e7b51d98adeed32648ad124b7b30241a8e70b2e72c99f92d8e5874d1) |
 | unic-langid | 0.9.6 | MIT OR Apache-2.0 | [upstream](https://github.com/zbraniecki/unic-locale) | [23f18e03dc49](#sha256-23f18e03dc49df91622fe2a76176497404e46ced8a715d9d2b67a7446571cca3), [a60eea817514](#sha256-a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2) |
 | unic-langid-impl | 0.9.6 | MIT OR Apache-2.0 | [upstream](https://github.com/zbraniecki/unic-locale) | [23f18e03dc49](#sha256-23f18e03dc49df91622fe2a76176497404e46ced8a715d9d2b67a7446571cca3), [a60eea817514](#sha256-a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2) |
+| unic-ucd-ident | 0.9.0 | MIT/Apache-2.0 | [upstream](https://github.com/open-i18n/rust-unic/) | [508a77d2e7b5](#sha256-508a77d2e7b51d98adeed32648ad124b7b30241a8e70b2e72c99f92d8e5874d1) |
+| unic-ucd-version | 0.9.0 | MIT/Apache-2.0 | [upstream](https://github.com/open-i18n/rust-unic/) | [508a77d2e7b5](#sha256-508a77d2e7b51d98adeed32648ad124b7b30241a8e70b2e72c99f92d8e5874d1) |
 | unicase | 2.9.0 | MIT OR Apache-2.0 | [upstream](https://github.com/seanmonstar/unicase) | [2d0189041449](#sha256-2d01890414494742ba4a509fcec8efa40f6d8be22cbd72be7cff08d6fda4ec89), [a60eea817514](#sha256-a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2) |
 | unicode-bidi | 0.3.18 | MIT OR Apache-2.0 | [upstream](https://github.com/servo/unicode-bidi) | [7b63ecd5f190](#sha256-7b63ecd5f1902af1b63729947373683c32745c16a10e8e6292e2e2dcd7e90ae0), [a60eea817514](#sha256-a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2), [edb20b474f6c](#sha256-edb20b474f6cbd4f4db066b54a9e0f687d0009d309412a63431189b59b8e2a07) |
-| unicode-general-category | 1.1.0 | Apache-2.0 | [upstream](https://github.com/yeslogic/unicode-general-category) | [b40930bbcf80](#sha256-b40930bbcf80744c86c46a12bc9da056641d722716c378f5659b9e555ef833e1) |
 | unicode-ident | 1.0.24 | (MIT OR Apache-2.0) AND Unicode-3.0 | [upstream](https://github.com/dtolnay/unicode-ident) | [23f18e03dc49](#sha256-23f18e03dc49df91622fe2a76176497404e46ced8a715d9d2b67a7446571cca3), [62c7a1e35f56](#sha256-62c7a1e35f56406896d7aa7ca52d0cc0d272ac022b5d2796e7d6905db8a3636a), [f7db81051789](#sha256-f7db81051789b729fea528a63ec4c938fdcb93d9d61d97dc8cc2e9df6d47f2a1) |
 | unicode-normalization | 0.1.25 | MIT OR Apache-2.0 | [upstream](https://github.com/unicode-rs/unicode-normalization) | [23860c2a7b5d](#sha256-23860c2a7b5d96b21569afedf033469bab9fe14a1b24a35068b8641c578ce24d), [7b63ecd5f190](#sha256-7b63ecd5f1902af1b63729947373683c32745c16a10e8e6292e2e2dcd7e90ae0), [a60eea817514](#sha256-a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2) |
 | unicode-normalization-alignments | 0.1.12 | MIT/Apache-2.0 | [upstream](https://github.com/n1t0/unicode-normalization) | [23860c2a7b5d](#sha256-23860c2a7b5d96b21569afedf033469bab9fe14a1b24a35068b8641c578ce24d), [7b63ecd5f190](#sha256-7b63ecd5f1902af1b63729947373683c32745c16a10e8e6292e2e2dcd7e90ae0), [a60eea817514](#sha256-a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2) |
@@ -564,25 +615,43 @@ Third-party packages: **633**. Unique legal texts: **377**.
 | ureq | 3.3.0 | MIT OR Apache-2.0 | [upstream](https://github.com/algesten/ureq) | [7e5886959f67](#sha256-7e5886959f67f8c75063a9d55cd3cb08c5a8cbea9a944fa1df2d4ae038f53721), [c71d239df917](#sha256-c71d239df91726fc519c6eb72d318ec65820627232b2f796219e87dcf35d0ab4) |
 | ureq-proto | 0.6.0 | MIT OR Apache-2.0 | [upstream](https://github.com/algesten/ureq-proto) | [5b460f37be48](#sha256-5b460f37be48ac4cf2181596181cc6cae432fc2caae05944873f380730829a4b) |
 | url | 2.5.8 | MIT OR Apache-2.0 | [upstream](https://github.com/servo/rust-url) | [a60eea817514](#sha256-a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2), [b38f11f60967](#sha256-b38f11f6096706e6de553dabe2a7ed142d59b6fa8c97e290c67496154745cdd5) |
+| urlpattern | 0.3.0 | MIT | [upstream](https://github.com/denoland/rust-urlpattern) | [5cf1c9dc617e](#sha256-5cf1c9dc617e4cad7fa03181ff893601ad5243aa3be527ef39034e1cd6377676) |
 | utf8-zero | 0.8.1 | MIT OR Apache-2.0 | [upstream](https://github.com/algesten/utf8-zero) | [23f18e03dc49](#sha256-23f18e03dc49df91622fe2a76176497404e46ced8a715d9d2b67a7446571cca3), [62c7a1e35f56](#sha256-62c7a1e35f56406896d7aa7ca52d0cc0d272ac022b5d2796e7d6905db8a3636a) |
 | utf8_iter | 1.0.4 | Apache-2.0 OR MIT | [upstream](https://github.com/hsivonen/utf8_iter) | [3fa4ca83dcc9](#sha256-3fa4ca83dcc9237839b1bdeb2e6d16bdfb5ec0c5ce42b24694d8bbf0dcbef72c), [c30152c94a6d](#sha256-c30152c94a6d75e021adbc52b3a52470366a46edb917e17deae3259251af244c), [cfc7749b96f6](#sha256-cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30) |
 | uuid | 1.23.4 | Apache-2.0 OR MIT | [upstream](https://github.com/uuid-rs/uuid) | [436bc5a105d8](#sha256-436bc5a105d8e57dcd8778730f3754f7bf39c14d2f530e4cde4bd2d17a83ec3d), [a60eea817514](#sha256-a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2) |
 | vcpkg | 0.2.15 | MIT/Apache-2.0 | [upstream](https://github.com/mcgoo/vcpkg-rs) | [88dd8bac6070](#sha256-88dd8bac60708839888df45dd46fb390f96c1317b72a632f16e064282218a723), [a60eea817514](#sha256-a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2) |
-| vello_common | 0.0.9 | Apache-2.0 OR MIT | [upstream](https://github.com/linebender/vello) | [a6cba85bc92e](#sha256-a6cba85bc92e0cff7a450b1d873c0eaa2e9fc96bf472df0247a26bec77bf3ff9), [adf157330f72](#sha256-adf157330f722fe7cfd5964a2a6974eff851b718228c6735724a11706e6f4dec) |
-| vello_cpu | 0.0.9 | Apache-2.0 OR MIT | [upstream](https://github.com/linebender/vello) | [a6cba85bc92e](#sha256-a6cba85bc92e0cff7a450b1d873c0eaa2e9fc96bf472df0247a26bec77bf3ff9), [adf157330f72](#sha256-adf157330f722fe7cfd5964a2a6974eff851b718228c6735724a11706e6f4dec) |
 | version_check | 0.9.5 | MIT/Apache-2.0 | [upstream](https://github.com/SergioBenitez/version_check) | [a60eea817514](#sha256-a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2), [b7e650f3fce5](#sha256-b7e650f3fce5c53249d1cdc608b54df156a97edd636cf9d23498d0cfe7aec63e) |
+| vswhom | 0.1.0 | MIT | [upstream](https://github.com/nabijaczleweli/vswhom.rs) | [e339134e5373](#sha256-e339134e53732f093f68ef00bcec3687ebf964ef8c6c812f31e74099c07d3f49) |
+| vswhom-sys | 0.1.3 | MIT | [upstream](https://github.com/nabijaczleweli/vswhom-sys.rs) | [e339134e5373](#sha256-e339134e53732f093f68ef00bcec3687ebf964ef8c6c812f31e74099c07d3f49) |
 | walkdir | 2.5.0 | Unlicense/MIT | [upstream](https://github.com/BurntSushi/walkdir) | [01c266bced4a](#sha256-01c266bced4a434da0051174d6bee16a4c82cf634e2679b6155d40d75012390f), [0f96a83840e1](#sha256-0f96a83840e146e43c0ec96a22ec1f392e0680e6c1226e6f3ba87e0740af850f), [7e12e5df4bae](#sha256-7e12e5df4bae12cb21581ba157ced20e1986a0508dd10d0e8a4ab9a4cf94e85c) |
 | want | 0.3.1 | MIT | [upstream](https://github.com/seanmonstar/want) | [96d741569b18](#sha256-96d741569b18c61043e5ad2b8505b5e4891a27994b732b1da9f86f46be67f59a) |
+| wasm-encoder | 0.252.0 | Apache-2.0 WITH LLVM-exception OR Apache-2.0 OR MIT | [upstream](https://github.com/bytecodealliance/wasm-tools/tree/main/crates/wasm-encoder) | [23f18e03dc49](#sha256-23f18e03dc49df91622fe2a76176497404e46ced8a715d9d2b67a7446571cca3), [a60eea817514](#sha256-a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2), [a6c48161a09a](#sha256-a6c48161a09acc75a0e25503bab66a731eb5fba5392ed4bb4743e4ba5085327a) |
+| wasmparser | 0.252.0 | Apache-2.0 WITH LLVM-exception OR Apache-2.0 OR MIT | [upstream](https://github.com/bytecodealliance/wasm-tools/tree/main/crates/wasmparser) | [23f18e03dc49](#sha256-23f18e03dc49df91622fe2a76176497404e46ced8a715d9d2b67a7446571cca3), [a60eea817514](#sha256-a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2), [a6c48161a09a](#sha256-a6c48161a09acc75a0e25503bab66a731eb5fba5392ed4bb4743e4ba5085327a) |
+| wasmprinter | 0.252.0 | Apache-2.0 WITH LLVM-exception OR Apache-2.0 OR MIT | [upstream](https://github.com/bytecodealliance/wasm-tools/tree/main/crates/wasmprinter) | [23f18e03dc49](#sha256-23f18e03dc49df91622fe2a76176497404e46ced8a715d9d2b67a7446571cca3), [a60eea817514](#sha256-a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2), [a6c48161a09a](#sha256-a6c48161a09acc75a0e25503bab66a731eb5fba5392ed4bb4743e4ba5085327a) |
+| wasmtime | 47.0.3 | Apache-2.0 WITH LLVM-exception | [upstream](https://github.com/bytecodealliance/wasmtime) | [a6c48161a09a](#sha256-a6c48161a09acc75a0e25503bab66a731eb5fba5392ed4bb4743e4ba5085327a) |
+| wasmtime-environ | 47.0.3 | Apache-2.0 WITH LLVM-exception | [upstream](https://github.com/bytecodealliance/wasmtime) | [a6c48161a09a](#sha256-a6c48161a09acc75a0e25503bab66a731eb5fba5392ed4bb4743e4ba5085327a) |
+| wasmtime-internal-component-macro | 47.0.3 | Apache-2.0 WITH LLVM-exception | [upstream](https://github.com/bytecodealliance/wasmtime) | [c71d239df917](#sha256-c71d239df91726fc519c6eb72d318ec65820627232b2f796219e87dcf35d0ab4) |
+| wasmtime-internal-component-util | 47.0.3 | Apache-2.0 WITH LLVM-exception | [upstream](https://github.com/bytecodealliance/wasmtime) | [c71d239df917](#sha256-c71d239df91726fc519c6eb72d318ec65820627232b2f796219e87dcf35d0ab4) |
+| wasmtime-internal-core | 47.0.3 | Apache-2.0 WITH LLVM-exception | `registry+https://github.com/rust-lang/crates.io-index` | [c71d239df917](#sha256-c71d239df91726fc519c6eb72d318ec65820627232b2f796219e87dcf35d0ab4) |
+| wasmtime-internal-cranelift | 47.0.3 | Apache-2.0 WITH LLVM-exception | [upstream](https://github.com/bytecodealliance/wasmtime) | [a6c48161a09a](#sha256-a6c48161a09acc75a0e25503bab66a731eb5fba5392ed4bb4743e4ba5085327a) |
+| wasmtime-internal-fiber | 47.0.3 | Apache-2.0 WITH LLVM-exception | [upstream](https://github.com/bytecodealliance/wasmtime) | [a6c48161a09a](#sha256-a6c48161a09acc75a0e25503bab66a731eb5fba5392ed4bb4743e4ba5085327a) |
+| wasmtime-internal-jit-debug | 47.0.3 | Apache-2.0 WITH LLVM-exception | [upstream](https://github.com/bytecodealliance/wasmtime) | [c71d239df917](#sha256-c71d239df91726fc519c6eb72d318ec65820627232b2f796219e87dcf35d0ab4) |
+| wasmtime-internal-jit-icache-coherence | 47.0.3 | Apache-2.0 WITH LLVM-exception | [upstream](https://github.com/bytecodealliance/wasmtime) | [c71d239df917](#sha256-c71d239df91726fc519c6eb72d318ec65820627232b2f796219e87dcf35d0ab4) |
+| wasmtime-internal-unwinder | 47.0.3 | Apache-2.0 WITH LLVM-exception | [upstream](https://github.com/bytecodealliance/wasmtime) | [a6c48161a09a](#sha256-a6c48161a09acc75a0e25503bab66a731eb5fba5392ed4bb4743e4ba5085327a) |
+| wasmtime-internal-versioned-export-macros | 47.0.3 | Apache-2.0 WITH LLVM-exception | [upstream](https://github.com/bytecodealliance/wasmtime) | [c71d239df917](#sha256-c71d239df91726fc519c6eb72d318ec65820627232b2f796219e87dcf35d0ab4) |
+| wasmtime-internal-wit-bindgen | 47.0.3 | Apache-2.0 WITH LLVM-exception | [upstream](https://github.com/bytecodealliance/wasmtime) | [c71d239df917](#sha256-c71d239df91726fc519c6eb72d318ec65820627232b2f796219e87dcf35d0ab4) |
 | web-time | 1.1.0 | MIT OR Apache-2.0 | [upstream](https://github.com/daxpedda/web-time) | [54a744942eb3](#sha256-54a744942eb3fa63a74d8d359989ed6962c04f3f10ff20cfa08ff8aa7efbe4e6), [f428305bbf2e](#sha256-f428305bbf2e70fbd807af0f3c7ac1b7acfb95311640f451e9d2e48db6d7e96b) |
-| webbrowser | 1.2.1 | MIT OR Apache-2.0 | [upstream](https://github.com/amodm/webbrowser-rs) | [7f0f4f8802c1](#sha256-7f0f4f8802c102d35110806d1755b7681127575b644f64750810cc47fa78df5b), [b0f7d40eaa95](#sha256-b0f7d40eaa9577d99132579866bf1eaf448577dc737582b8a34f1b3e7fab8994) |
+| web_atoms | 0.2.5 | MIT OR Apache-2.0 | [upstream](https://github.com/servo/html5ever) | [86dd7f026f91](#sha256-86dd7f026f916daf7511e39951ad8ea8cf55a8db67ae64060dacf829761c18f3), [a60eea817514](#sha256-a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2) |
 | webpki-root-certs | 1.0.8 | CDLA-Permissive-2.0 | [upstream](https://github.com/rustls/webpki-roots) | [e271993808fe](#sha256-e271993808fec50ab29350b39539cdec611a9103f827e0aa26d61da70e2d33f8) |
 | webpki-roots | 1.0.8 | CDLA-Permissive-2.0 | [upstream](https://github.com/rustls/webpki-roots) | [e271993808fe](#sha256-e271993808fec50ab29350b39539cdec611a9103f827e0aa26d61da70e2d33f8) |
-| weezl | 0.1.12 | MIT OR Apache-2.0 | [upstream](https://github.com/image-rs/weezl) | [776aa6f89099](#sha256-776aa6f89099bf24a9bceac4b7d9ad8946c017161de770698b5a5cc8de0254a6), [a60eea817514](#sha256-a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2) |
+| webview2-com | 0.38.2 | MIT | [upstream](https://github.com/wravery/webview2-rs) | [508a77d2e7b5](#sha256-508a77d2e7b51d98adeed32648ad124b7b30241a8e70b2e72c99f92d8e5874d1) |
+| webview2-com-macros | 0.8.1 | MIT | [upstream](https://github.com/wravery/webview2-rs) | [508a77d2e7b5](#sha256-508a77d2e7b51d98adeed32648ad124b7b30241a8e70b2e72c99f92d8e5874d1) |
+| webview2-com-sys | 0.38.2 | MIT | [upstream](https://github.com/wravery/webview2-rs) | [508a77d2e7b5](#sha256-508a77d2e7b51d98adeed32648ad124b7b30241a8e70b2e72c99f92d8e5874d1) |
 | weezl | 0.2.1 | MIT OR Apache-2.0 | [upstream](https://github.com/image-rs/weezl) | [776aa6f89099](#sha256-776aa6f89099bf24a9bceac4b7d9ad8946c017161de770698b5a5cc8de0254a6), [a60eea817514](#sha256-a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2) |
-| widestring | 0.4.3 | MIT/Apache-2.0 | [upstream](https://github.com/starkat99/widestring-rs.git) | [02f1e4709f1c](#sha256-02f1e4709f1c03c99e2cb4de81f694cc41fb26acc14c0e6f3ee74a4852f0e4e8), [8173d5c29b4f](#sha256-8173d5c29b4f956d532781d2b86e4e30f83e6b7878dce18c919451d6ba707c90) |
 | widestring | 1.2.1 | MIT OR Apache-2.0 | [upstream](https://github.com/VoidStarKat/widestring-rs) | [508a77d2e7b5](#sha256-508a77d2e7b51d98adeed32648ad124b7b30241a8e70b2e72c99f92d8e5874d1), [a6cba85bc92e](#sha256-a6cba85bc92e0cff7a450b1d873c0eaa2e9fc96bf472df0247a26bec77bf3ff9) |
 | winapi | 0.3.9 | MIT/Apache-2.0 | [upstream](https://github.com/retep998/winapi-rs) | [b40930bbcf80](#sha256-b40930bbcf80744c86c46a12bc9da056641d722716c378f5659b9e555ef833e1), [ce7bc3499fee](#sha256-ce7bc3499fee93d5022ef430d5e4201e79a6d9154f3974e42f41349f0569e09b) |
 | winapi-util | 0.1.11 | Unlicense OR MIT | [upstream](https://github.com/BurntSushi/winapi-util) | [01c266bced4a](#sha256-01c266bced4a434da0051174d6bee16a4c82cf634e2679b6155d40d75012390f), [7e12e5df4bae](#sha256-7e12e5df4bae12cb21581ba157ced20e1986a0508dd10d0e8a4ab9a4cf94e85c), [cb3c929a05e6](#sha256-cb3c929a05e6cbc9de9ab06a4c57eeb60ca8c724bef6c138c87d3a577e27aa14) |
+| window-vibrancy | 0.6.0 | Apache-2.0 OR MIT | [upstream](https://github.com/tauri-apps/tauri-plugin-vibrancy) | [617b85f62a4f](#sha256-617b85f62a4f1b6a62d3d9f28f6d7003b7f68a70b7675a8174bbcc68401ac62d), [7ccef0d35e85](#sha256-7ccef0d35e8507fa02d7e904a5277d62723f9ec576d52f6a865cab7b4dbf12ad), [a60eea817514](#sha256-a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2) |
 | windows | 0.61.3 | MIT OR Apache-2.0 | [upstream](https://github.com/microsoft/windows-rs) | [c16f8dcf1a36](#sha256-c16f8dcf1a368b83be78d826ea23de4079fe1b4469a0ab9ee20563f37ff3d44b), [c2cfccb812fe](#sha256-c2cfccb812fe482101a8f04597dfc5a9991a6b2748266c47ac91b6a5aae15383) |
 | windows | 0.62.2 | MIT OR Apache-2.0 | [upstream](https://github.com/microsoft/windows-rs) | [c16f8dcf1a36](#sha256-c16f8dcf1a368b83be78d826ea23de4079fe1b4469a0ab9ee20563f37ff3d44b), [c2cfccb812fe](#sha256-c2cfccb812fe482101a8f04597dfc5a9991a6b2748266c47ac91b6a5aae15383) |
 | windows-collections | 0.2.0 | MIT OR Apache-2.0 | [upstream](https://github.com/microsoft/windows-rs) | [c16f8dcf1a36](#sha256-c16f8dcf1a368b83be78d826ea23de4079fe1b4469a0ab9ee20563f37ff3d44b), [c2cfccb812fe](#sha256-c2cfccb812fe482101a8f04597dfc5a9991a6b2748266c47ac91b6a5aae15383) |
@@ -602,24 +671,25 @@ Third-party packages: **633**. Unique legal texts: **377**.
 | windows-result | 0.4.1 | MIT OR Apache-2.0 | [upstream](https://github.com/microsoft/windows-rs) | [c16f8dcf1a36](#sha256-c16f8dcf1a368b83be78d826ea23de4079fe1b4469a0ab9ee20563f37ff3d44b), [c2cfccb812fe](#sha256-c2cfccb812fe482101a8f04597dfc5a9991a6b2748266c47ac91b6a5aae15383) |
 | windows-strings | 0.4.2 | MIT OR Apache-2.0 | [upstream](https://github.com/microsoft/windows-rs) | [c16f8dcf1a36](#sha256-c16f8dcf1a368b83be78d826ea23de4079fe1b4469a0ab9ee20563f37ff3d44b), [c2cfccb812fe](#sha256-c2cfccb812fe482101a8f04597dfc5a9991a6b2748266c47ac91b6a5aae15383) |
 | windows-strings | 0.5.1 | MIT OR Apache-2.0 | [upstream](https://github.com/microsoft/windows-rs) | [c16f8dcf1a36](#sha256-c16f8dcf1a368b83be78d826ea23de4079fe1b4469a0ab9ee20563f37ff3d44b), [c2cfccb812fe](#sha256-c2cfccb812fe482101a8f04597dfc5a9991a6b2748266c47ac91b6a5aae15383) |
-| windows-sys | 0.48.0 | MIT OR Apache-2.0 | [upstream](https://github.com/microsoft/windows-rs) | [c16f8dcf1a36](#sha256-c16f8dcf1a368b83be78d826ea23de4079fe1b4469a0ab9ee20563f37ff3d44b), [c2cfccb812fe](#sha256-c2cfccb812fe482101a8f04597dfc5a9991a6b2748266c47ac91b6a5aae15383) |
 | windows-sys | 0.52.0 | MIT OR Apache-2.0 | [upstream](https://github.com/microsoft/windows-rs) | [c16f8dcf1a36](#sha256-c16f8dcf1a368b83be78d826ea23de4079fe1b4469a0ab9ee20563f37ff3d44b), [c2cfccb812fe](#sha256-c2cfccb812fe482101a8f04597dfc5a9991a6b2748266c47ac91b6a5aae15383) |
 | windows-sys | 0.59.0 | MIT OR Apache-2.0 | [upstream](https://github.com/microsoft/windows-rs) | [c16f8dcf1a36](#sha256-c16f8dcf1a368b83be78d826ea23de4079fe1b4469a0ab9ee20563f37ff3d44b), [c2cfccb812fe](#sha256-c2cfccb812fe482101a8f04597dfc5a9991a6b2748266c47ac91b6a5aae15383) |
 | windows-sys | 0.60.2 | MIT OR Apache-2.0 | [upstream](https://github.com/microsoft/windows-rs) | [c16f8dcf1a36](#sha256-c16f8dcf1a368b83be78d826ea23de4079fe1b4469a0ab9ee20563f37ff3d44b), [c2cfccb812fe](#sha256-c2cfccb812fe482101a8f04597dfc5a9991a6b2748266c47ac91b6a5aae15383) |
 | windows-sys | 0.61.2 | MIT OR Apache-2.0 | [upstream](https://github.com/microsoft/windows-rs) | [c16f8dcf1a36](#sha256-c16f8dcf1a368b83be78d826ea23de4079fe1b4469a0ab9ee20563f37ff3d44b), [c2cfccb812fe](#sha256-c2cfccb812fe482101a8f04597dfc5a9991a6b2748266c47ac91b6a5aae15383) |
-| windows-targets | 0.48.5 | MIT OR Apache-2.0 | [upstream](https://github.com/microsoft/windows-rs) | [c16f8dcf1a36](#sha256-c16f8dcf1a368b83be78d826ea23de4079fe1b4469a0ab9ee20563f37ff3d44b), [c2cfccb812fe](#sha256-c2cfccb812fe482101a8f04597dfc5a9991a6b2748266c47ac91b6a5aae15383) |
 | windows-targets | 0.52.6 | MIT OR Apache-2.0 | [upstream](https://github.com/microsoft/windows-rs) | [c16f8dcf1a36](#sha256-c16f8dcf1a368b83be78d826ea23de4079fe1b4469a0ab9ee20563f37ff3d44b), [c2cfccb812fe](#sha256-c2cfccb812fe482101a8f04597dfc5a9991a6b2748266c47ac91b6a5aae15383) |
 | windows-targets | 0.53.5 | MIT OR Apache-2.0 | [upstream](https://github.com/microsoft/windows-rs) | [c16f8dcf1a36](#sha256-c16f8dcf1a368b83be78d826ea23de4079fe1b4469a0ab9ee20563f37ff3d44b), [c2cfccb812fe](#sha256-c2cfccb812fe482101a8f04597dfc5a9991a6b2748266c47ac91b6a5aae15383) |
 | windows-threading | 0.1.0 | MIT OR Apache-2.0 | [upstream](https://github.com/microsoft/windows-rs) | [c16f8dcf1a36](#sha256-c16f8dcf1a368b83be78d826ea23de4079fe1b4469a0ab9ee20563f37ff3d44b), [c2cfccb812fe](#sha256-c2cfccb812fe482101a8f04597dfc5a9991a6b2748266c47ac91b6a5aae15383) |
 | windows-threading | 0.2.1 | MIT OR Apache-2.0 | [upstream](https://github.com/microsoft/windows-rs) | [c16f8dcf1a36](#sha256-c16f8dcf1a368b83be78d826ea23de4079fe1b4469a0ab9ee20563f37ff3d44b), [c2cfccb812fe](#sha256-c2cfccb812fe482101a8f04597dfc5a9991a6b2748266c47ac91b6a5aae15383) |
-| windows_x86_64_msvc | 0.48.5 | MIT OR Apache-2.0 | [upstream](https://github.com/microsoft/windows-rs) | [c16f8dcf1a36](#sha256-c16f8dcf1a368b83be78d826ea23de4079fe1b4469a0ab9ee20563f37ff3d44b), [c2cfccb812fe](#sha256-c2cfccb812fe482101a8f04597dfc5a9991a6b2748266c47ac91b6a5aae15383) |
+| windows-version | 0.1.7 | MIT OR Apache-2.0 | [upstream](https://github.com/microsoft/windows-rs) | [c16f8dcf1a36](#sha256-c16f8dcf1a368b83be78d826ea23de4079fe1b4469a0ab9ee20563f37ff3d44b), [c2cfccb812fe](#sha256-c2cfccb812fe482101a8f04597dfc5a9991a6b2748266c47ac91b6a5aae15383) |
 | windows_x86_64_msvc | 0.52.6 | MIT OR Apache-2.0 | [upstream](https://github.com/microsoft/windows-rs) | [c16f8dcf1a36](#sha256-c16f8dcf1a368b83be78d826ea23de4079fe1b4469a0ab9ee20563f37ff3d44b), [c2cfccb812fe](#sha256-c2cfccb812fe482101a8f04597dfc5a9991a6b2748266c47ac91b6a5aae15383) |
 | windows_x86_64_msvc | 0.53.1 | MIT OR Apache-2.0 | [upstream](https://github.com/microsoft/windows-rs) | [c16f8dcf1a36](#sha256-c16f8dcf1a368b83be78d826ea23de4079fe1b4469a0ab9ee20563f37ff3d44b), [c2cfccb812fe](#sha256-c2cfccb812fe482101a8f04597dfc5a9991a6b2748266c47ac91b6a5aae15383) |
-| winit | 0.30.13 | Apache-2.0 | [upstream](https://github.com/rust-windowing/winit) | [a8ad31b1c3f4](#sha256-a8ad31b1c3f40dca5a84119351b8fa8ddc868edd77fad8a8ebf6d8f2d16fa4ae) |
+| winnow | 0.7.15 | MIT | [upstream](https://github.com/winnow-rs/winnow) | [cb5aedb296c5](#sha256-cb5aedb296c5246d1f22e9099f925a65146f9f0d6b4eebba97fd27a6cdbbab2d) |
 | winnow | 1.0.3 | MIT | [upstream](https://github.com/winnow-rs/winnow) | [cb5aedb296c5](#sha256-cb5aedb296c5246d1f22e9099f925a65146f9f0d6b4eebba97fd27a6cdbbab2d) |
+| winreg | 0.55.0 | MIT | [upstream](https://github.com/gentoo90/winreg-rs) | [ea021d8c6383](#sha256-ea021d8c6383c84d19c15ce90d3b1602cf448fdcc0bf3772c98e43c7bf1bf1d1) |
 | winreg | 0.56.0 | MIT | [upstream](https://github.com/gentoo90/winreg-rs) | [ea021d8c6383](#sha256-ea021d8c6383c84d19c15ce90d3b1602cf448fdcc0bf3772c98e43c7bf1bf1d1) |
 | winresource | 0.1.31 | MIT | [upstream](https://github.com/BenjaminRi/winresource) | [3564da09711c](#sha256-3564da09711c475669c15346bb25a1530a7de683c13f4a51489c15a6d74438fa) |
+| wit-parser | 0.252.0 | Apache-2.0 WITH LLVM-exception OR Apache-2.0 OR MIT | [upstream](https://github.com/bytecodealliance/wasm-tools/tree/main/crates/wit-parser) | [23f18e03dc49](#sha256-23f18e03dc49df91622fe2a76176497404e46ced8a715d9d2b67a7446571cca3), [a60eea817514](#sha256-a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2), [a6c48161a09a](#sha256-a6c48161a09acc75a0e25503bab66a731eb5fba5392ed4bb4743e4ba5085327a) |
 | writeable | 0.6.3 | Unicode-3.0 | [upstream](https://github.com/unicode-org/icu4x) | [f367c1b8e1aa](#sha256-f367c1b8e1aa262435251e442901da4607b4650e0e63a026f5044473ecfb90f2) |
+| wry | 0.55.1 | Apache-2.0 OR MIT | [upstream](https://github.com/tauri-apps/wry) | [a60eea817514](#sha256-a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2), [ef88893533af](#sha256-ef88893533af22ffbb68ceef0724ba1389518df26165a34f3c99ad30b884df4f), [f73041468536](#sha256-f73041468536d0b5fd1a6610fa3f317e3dc6cf9a0c0591a5529d6556a0d8a2c3) |
 | x25519-dalek | 2.0.1 | BSD-3-Clause | [upstream](https://github.com/dalek-cryptography/curve25519-dalek/tree/main/x25519-dalek) | [6fe6d6a54d01](#sha256-6fe6d6a54d0190972a733d1292ac9a8679fc76e6899cbe871b85ce38c2f887f4) |
 | x509-parser | 0.17.0 | MIT OR Apache-2.0 | [upstream](https://github.com/rusticata/x509-parser.git) | [a5c61b93b6ee](#sha256-a5c61b93b6ee1d104af9920cf020ff3c7efe818e31fe562c72261847a728f513), [a60eea817514](#sha256-a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2) |
 | xattr | 1.6.1 | MIT OR Apache-2.0 | [upstream](https://github.com/Stebalien/xattr) | [8b427f5bc501](#sha256-8b427f5bc501764575e52ba4f9d95673cf8f6d80a86d0d06599852e1a9a20a36), [a60eea817514](#sha256-a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2) |
@@ -639,12 +709,11 @@ Third-party packages: **633**. Unique legal texts: **377**.
 | zerotrie | 0.2.4 | Unicode-3.0 | [upstream](https://github.com/unicode-org/icu4x) | [f367c1b8e1aa](#sha256-f367c1b8e1aa262435251e442901da4607b4650e0e63a026f5044473ecfb90f2) |
 | zerovec | 0.11.6 | Unicode-3.0 | [upstream](https://github.com/unicode-org/icu4x) | [f367c1b8e1aa](#sha256-f367c1b8e1aa262435251e442901da4607b4650e0e63a026f5044473ecfb90f2) |
 | zerovec-derive | 0.11.3 | Unicode-3.0 | [upstream](https://github.com/unicode-org/icu4x) | [f367c1b8e1aa](#sha256-f367c1b8e1aa262435251e442901da4607b4650e0e63a026f5044473ecfb90f2) |
+| zip | 4.6.1 | MIT | [upstream](https://github.com/zip-rs/zip2.git) | [13f16f8435b4](#sha256-13f16f8435b4242f494f038d761bd99c5af70395aa39274bd287d22c4d35c3b7) |
 | zip | 6.0.0 | MIT | [upstream](https://github.com/zip-rs/zip2.git) | [13f16f8435b4](#sha256-13f16f8435b4242f494f038d761bd99c5af70395aa39274bd287d22c4d35c3b7) |
 | zlib-rs | 0.6.6 | Zlib | [upstream](https://github.com/trifectatechfoundation/zlib-rs) | [e72111c52b7d](#sha256-e72111c52b7d96ebe25348dee19f0744f444d3c95ae6b1ecb6ccaecc5bce05ba) |
 | zmij | 1.0.21 | MIT | [upstream](https://github.com/dtolnay/zmij) | [23f18e03dc49](#sha256-23f18e03dc49df91622fe2a76176497404e46ced8a715d9d2b67a7446571cca3) |
 | zopfli | 0.8.3 | Apache-2.0 | [upstream](https://github.com/zopfli-rs/zopfli) | [018b1cb87efd](#sha256-018b1cb87efdf7a04c2fcc13d57ed63f62149113fb207b27ea13430d64f13513) |
-| zune-core | 0.5.1 | MIT OR Apache-2.0 OR Zlib | [upstream](https://github.com/etemesi254/zune-image) | [c71d239df917](#sha256-c71d239df91726fc519c6eb72d318ec65820627232b2f796219e87dcf35d0ab4), [d201d14804d3](#sha256-d201d14804d3bcd3b944147173175e4abfbd838b7c8069b6bd3452496bf13e6c), [d30047bca3b5](#sha256-d30047bca3b516639339a3c279bb84c3483124fb5a9dafe3c75056a85090e745) |
-| zune-jpeg | 0.5.15 | MIT OR Apache-2.0 OR Zlib | [upstream](https://github.com/etemesi254/zune-image/tree/dev/crates/zune-jpeg) | [c71d239df917](#sha256-c71d239df91726fc519c6eb72d318ec65820627232b2f796219e87dcf35d0ab4), [d201d14804d3](#sha256-d201d14804d3bcd3b944147173175e4abfbd838b7c8069b6bd3452496bf13e6c), [d30047bca3b5](#sha256-d30047bca3b516639339a3c279bb84c3483124fb5a9dafe3c75056a85090e745) |
 
 ## Deduplicated legal texts
 
@@ -1243,6 +1312,7 @@ Used by:
 - `jiff-tzdb-platform 0.1.3 / COPYING`
 - `memchr 2.8.3 / COPYING`
 - `same-file 1.0.6 / COPYING`
+- `termcolor 1.4.1 / COPYING`
 - `walkdir 2.5.0 / COPYING`
 - `winapi-util 0.1.11 / COPYING`
 
@@ -1250,26 +1320,6 @@ Used by:
 This project is dual-licensed under the Unlicense and MIT licenses.
 
 You may use this code under the terms of either license.
-```
-
-### sha256-01e533bd94e8f1c32b2c2531e2c398de7d35d7804add3d574b4e1fe581d53537
-
-Used by:
-
-- `cursor-icon 1.2.0 / LICENSE-ZLIB`
-
-```text
-Copyright (c) 2023 Kirill Chibisov
-
-This software is provided 'as-is', without any express or implied warranty. In no event will the authors be held liable for any damages arising from the use of this software.
-
-Permission is granted to anyone to use this software for any purpose, including commercial applications, and to alter it and redistribute it freely, subject to the following restrictions:
-
-1. The origin of this software must not be misrepresented; you must not claim that you wrote the original software. If you use this software in a product, an acknowledgment in the product documentation would be appreciated but is not required.
-
-2. Altered source versions must be plainly marked as such, and must not be misrepresented as being the original software.
-
-3. This notice may not be removed or altered from any source distribution.
 ```
 
 ### sha256-0218327e7a480793ffdd4eb792379a9709e5c135c7ba267f709d6f6d4d70af0a
@@ -1726,38 +1776,31 @@ IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 DEALINGS IN THE SOFTWARE.
 ```
 
-### sha256-02f1e4709f1c03c99e2cb4de81f694cc41fb26acc14c0e6f3ee74a4852f0e4e8
+### sha256-02b6448337b757772d90e5f31caaa0f9e6afaad2221c01771d0a3deaa4d4196c
 
 Used by:
 
-- `widestring 0.4.3 / LICENSE-MIT`
+- `tao 0.35.3 / LICENSE.spdx`
 
 ```text
-Copyright (c) 2016 Kathryn Long
-
-Permission is hereby granted, free of charge, to any
-person obtaining a copy of this software and associated
-documentation files (the "Software"), to deal in the
-Software without restriction, including without
-limitation the rights to use, copy, modify, merge,
-publish, distribute, sublicense, and/or sell copies of
-the Software, and to permit persons to whom the Software
-is furnished to do so, subject to the following
-conditions:
-
-The above copyright notice and this permission notice
-shall be included in all copies or substantial portions
-of the Software.
-
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF
-ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED
-TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A
-PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT
-SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY
-CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION
-OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR
-IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
-DEALINGS IN THE SOFTWARE.
+SPDXVersion: SPDX-2.1
+DataLicense: CC0-1.0
+PackageName: tao
+DataFormat: SPDXRef-1
+PackageSupplier: Organization: The Tauri Programme in the Commons Conservancy
+PackageHomePage: https://tauri.app
+PackageLicenseDeclared: Apache-2.0
+PackageCopyrightText: 2021-2023, The Tauri Programme in the Commons Conservancy
+PackageSummary: <text>Tao is the official, rust-based window manager for Wry.
+                </text>
+PackageComment: <text>The package includes the following libraries; see
+Relationship information.
+                </text>
+Created: 2020-05-20T09:00:00Z
+PackageDownloadLocation: git://github.com/tauri-apps/tao
+PackageDownloadLocation: git+https://github.com/tauri-apps/tao.git
+PackageDownloadLocation: git+ssh://github.com/tauri-apps/tao.git
+Creator: Person: Daniel Thompson-Yvetot
 ```
 
 ### sha256-0444c6991eead6822f7b9102e654448d51624431119546492e8b231db42c48bb
@@ -1794,32 +1837,36 @@ IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 DEALINGS IN THE SOFTWARE.
 ```
 
-### sha256-058f01fe181608d027fcde7e528fc03ea3cf90f30903c407644b0a9bbc54f500
+### sha256-044983df14c97f2f9570766aaf977b3cdfc4a06cf1f36b776331c5ff89b4fb89
 
 Used by:
 
-- `quick-error 2.0.1 / LICENSE-MIT`
+- `mach2 0.6.0 / LICENSE-BSD`
 
 ```text
-Copyright (c) 2015 The quick-error Developers
+Copyright (c) 2019 Nick Fitzgerald, 2021 Yuki Okushi
+All rights reserved.
 
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
+Redistribution and use in source and binary forms, with or without modification,
+are permitted provided that the following conditions are met:
 
-The above copyright notice and this permission notice shall be included in all
-copies or substantial portions of the Software.
+1. Redistributions of source code must retain the above copyright notice, this
+   list of conditions and the following disclaimer.
 
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-SOFTWARE.
+2. Redistributions in binary form must reproduce the above copyright notice,
+   this list of conditions and the following disclaimer in the documentation
+   and/or other materials provided with the distribution.
+
+THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS" AND
+ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED
+WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
+DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE FOR
+ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES
+(INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES;
+LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON
+ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
+(INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
+SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 ```
 
 ### sha256-061ce553795735ba48239b6e55b08d5ef2ce554051e6364bf3f6f37ac02a6474
@@ -1914,88 +1961,6 @@ AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
-```
-
-### sha256-074e6e32c86a4c0ef8b3ed25b721ca23aca83df277cd88106ef7177c354615ff
-
-Used by:
-
-- `document-features 0.2.12 / LICENSE-APACHE`
-
-```text
-Apache License
-Version 2.0, January 2004
-http://www.apache.org/licenses/
-
-TERMS AND CONDITIONS FOR USE, REPRODUCTION, AND DISTRIBUTION
-
-1. Definitions.
-
-"License" shall mean the terms and conditions for use, reproduction, and distribution as defined by Sections 1 through 9 of this document.
-
-"Licensor" shall mean the copyright owner or entity authorized by the copyright owner that is granting the License.
-
-"Legal Entity" shall mean the union of the acting entity and all other entities that control, are controlled by, or are under common control with that entity. For the purposes of this definition, "control" means (i) the power, direct or indirect, to cause the direction or management of such entity, whether by contract or otherwise, or (ii) ownership of fifty percent (50%) or more of the outstanding shares, or (iii) beneficial ownership of such entity.
-
-"You" (or "Your") shall mean an individual or Legal Entity exercising permissions granted by this License.
-
-"Source" form shall mean the preferred form for making modifications, including but not limited to software source code, documentation source, and configuration files.
-
-"Object" form shall mean any form resulting from mechanical transformation or translation of a Source form, including but not limited to compiled object code, generated documentation, and conversions to other media types.
-
-"Work" shall mean the work of authorship, whether in Source or Object form, made available under the License, as indicated by a copyright notice that is included in or attached to the work (an example is provided in the Appendix below).
-
-"Derivative Works" shall mean any work, whether in Source or Object form, that is based on (or derived from) the Work and for which the editorial revisions, annotations, elaborations, or other modifications represent, as a whole, an original work of authorship. For the purposes of this License, Derivative Works shall not include works that remain separable from, or merely link (or bind by name) to the interfaces of, the Work and Derivative Works thereof.
-
-"Contribution" shall mean any work of authorship, including the original version of the Work and any modifications or additions to that Work or Derivative Works thereof, that is intentionally submitted to Licensor for inclusion in the Work by the copyright owner or by an individual or Legal Entity authorized to submit on behalf of the copyright owner. For the purposes of this definition, "submitted" means any form of electronic, verbal, or written communication sent to the Licensor or its representatives, including but not limited to communication on electronic mailing lists, source code control systems, and issue tracking systems that are managed by, or on behalf of, the Licensor for the purpose of discussing and improving the Work, but excluding communication that is conspicuously marked or otherwise designated in writing by the copyright owner as "Not a Contribution."
-
-"Contributor" shall mean Licensor and any individual or Legal Entity on behalf of whom a Contribution has been received by Licensor and subsequently incorporated within the Work.
-
-2. Grant of Copyright License. Subject to the terms and conditions of this License, each Contributor hereby grants to You a perpetual, worldwide, non-exclusive, no-charge, royalty-free, irrevocable copyright license to reproduce, prepare Derivative Works of, publicly display, publicly perform, sublicense, and distribute the Work and such Derivative Works in Source or Object form.
-
-3. Grant of Patent License. Subject to the terms and conditions of this License, each Contributor hereby grants to You a perpetual, worldwide, non-exclusive, no-charge, royalty-free, irrevocable (except as stated in this section) patent license to make, have made, use, offer to sell, sell, import, and otherwise transfer the Work, where such license applies only to those patent claims licensable by such Contributor that are necessarily infringed by their Contribution(s) alone or by combination of their Contribution(s) with the Work to which such Contribution(s) was submitted. If You institute patent litigation against any entity (including a cross-claim or counterclaim in a lawsuit) alleging that the Work or a Contribution incorporated within the Work constitutes direct or contributory patent infringement, then any patent licenses granted to You under this License for that Work shall terminate as of the date such litigation is filed.
-
-4. Redistribution. You may reproduce and distribute copies of the Work or Derivative Works thereof in any medium, with or without modifications, and in Source or Object form, provided that You meet the following conditions:
-
-     (a) You must give any other recipients of the Work or Derivative Works a copy of this License; and
-
-     (b) You must cause any modified files to carry prominent notices stating that You changed the files; and
-
-     (c) You must retain, in the Source form of any Derivative Works that You distribute, all copyright, patent, trademark, and attribution notices from the Source form of the Work, excluding those notices that do not pertain to any part of the Derivative Works; and
-
-     (d) If the Work includes a "NOTICE" text file as part of its distribution, then any Derivative Works that You distribute must include a readable copy of the attribution notices contained within such NOTICE file, excluding those notices that do not pertain to any part of the Derivative Works, in at least one of the following places: within a NOTICE text file distributed as part of the Derivative Works; within the Source form or documentation, if provided along with the Derivative Works; or, within a display generated by the Derivative Works, if and wherever such third-party notices normally appear. The contents of the NOTICE file are for informational purposes only and do not modify the License. You may add Your own attribution notices within Derivative Works that You distribute, alongside or as an addendum to the NOTICE text from the Work, provided that such additional attribution notices cannot be construed as modifying the License.
-
-     You may add Your own copyright statement to Your modifications and may provide additional or different license terms and conditions for use, reproduction, or distribution of Your modifications, or for any such Derivative Works as a whole, provided Your use, reproduction, and distribution of the Work otherwise complies with the conditions stated in this License.
-
-5. Submission of Contributions. Unless You explicitly state otherwise, any Contribution intentionally submitted for inclusion in the Work by You to the Licensor shall be under the terms and conditions of this License, without any additional terms or conditions. Notwithstanding the above, nothing herein shall supersede or modify the terms of any separate license agreement you may have executed with Licensor regarding such Contributions.
-
-6. Trademarks. This License does not grant permission to use the trade names, trademarks, service marks, or product names of the Licensor, except as required for reasonable and customary use in describing the origin of the Work and reproducing the content of the NOTICE file.
-
-7. Disclaimer of Warranty. Unless required by applicable law or agreed to in writing, Licensor provides the Work (and each Contributor provides its Contributions) on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied, including, without limitation, any warranties or conditions of TITLE, NON-INFRINGEMENT, MERCHANTABILITY, or FITNESS FOR A PARTICULAR PURPOSE. You are solely responsible for determining the appropriateness of using or redistributing the Work and assume any risks associated with Your exercise of permissions under this License.
-
-8. Limitation of Liability. In no event and under no legal theory, whether in tort (including negligence), contract, or otherwise, unless required by applicable law (such as deliberate and grossly negligent acts) or agreed to in writing, shall any Contributor be liable to You for damages, including any direct, indirect, special, incidental, or consequential damages of any character arising as a result of this License or out of the use or inability to use the Work (including but not limited to damages for loss of goodwill, work stoppage, computer failure or malfunction, or any and all other commercial damages or losses), even if such Contributor has been advised of the possibility of such damages.
-
-9. Accepting Warranty or Additional Liability. While redistributing the Work or Derivative Works thereof, You may choose to offer, and charge a fee for, acceptance of support, warranty, indemnity, or other liability obligations and/or rights consistent with this License. However, in accepting such obligations, You may act only on Your own behalf and on Your sole responsibility, not on behalf of any other Contributor, and only if You agree to indemnify, defend, and hold each Contributor harmless for any liability incurred by, or claims asserted against, such Contributor by reason of your accepting any such warranty or additional liability.
-
-END OF TERMS AND CONDITIONS
-
-APPENDIX: How to apply the Apache License to your work.
-
-To apply the Apache License to your work, attach the following boilerplate notice, with the fields enclosed by brackets "[]" replaced with your own identifying information. (Don't include the brackets!)  The text should be enclosed in the appropriate comment syntax for the file format. We also recommend that a file or class name and description of purpose be included on the same "printed page" as the copyright notice for easier identification within third-party archives.
-
-Copyright [yyyy] [name of copyright owner]
-
-Licensed under the Apache License, Version 2.0 (the "License");
-you may not use this file except in compliance with the License.
-You may obtain a copy of the License at
-
-http://www.apache.org/licenses/LICENSE-2.0
-
-Unless required by applicable law or agreed to in writing, software
-distributed under the License is distributed on an "AS IS" BASIS,
-WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-See the License for the specific language governing permissions and
-limitations under the License.
 ```
 
 ### sha256-07919255c7e04793d8ea760d6c2ce32d19f9ff02bdbdde3ce90b1e1880929a9b
@@ -2109,10 +2074,11 @@ Permission is granted to anyone to use this software for any purpose, including 
 
 Used by:
 
-- `phf 0.11.3 / LICENSE`
-- `phf_generator 0.11.3 / LICENSE`
-- `phf_macros 0.11.3 / LICENSE`
-- `phf_shared 0.11.3 / LICENSE`
+- `phf 0.13.1 / LICENSE`
+- `phf_codegen 0.13.1 / LICENSE`
+- `phf_generator 0.13.1 / LICENSE`
+- `phf_macros 0.13.1 / LICENSE`
+- `phf_shared 0.13.1 / LICENSE`
 
 ```text
 The MIT License (MIT)
@@ -2145,6 +2111,40 @@ Used by:
 
 ```text
 Copyright (c) 2018 The Servo Project Developers
+
+Permission is hereby granted, free of charge, to any
+person obtaining a copy of this software and associated
+documentation files (the "Software"), to deal in the
+Software without restriction, including without
+limitation the rights to use, copy, modify, merge,
+publish, distribute, sublicense, and/or sell copies of
+the Software, and to permit persons to whom the Software
+is furnished to do so, subject to the following
+conditions:
+
+The above copyright notice and this permission notice
+shall be included in all copies or substantial portions
+of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF
+ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED
+TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A
+PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT
+SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY
+CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION
+OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR
+IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
+DEALINGS IN THE SOFTWARE.
+```
+
+### sha256-0b74dfa0bcee5c420c6b7f67b4b2658f9ab8388c97b8e733975f2cecbdd668a6
+
+Used by:
+
+- `object 0.39.1 / LICENSE-MIT`
+
+```text
+Copyright (c) 2015 The Gimli Developers
 
 Permission is hereby granted, free of charge, to any
 person obtaining a copy of this software and associated
@@ -2301,9 +2301,7 @@ SOFTWARE.
 
 Used by:
 
-- `arboard 3.6.1 / LICENSE-APACHE.txt`
 - `fdeflate 0.3.7 / LICENSE-APACHE`
-- `image 0.25.10 / LICENSE-APACHE`
 - `miniz_oxide 0.8.9 / LICENSE-APACHE.md`
 - `num-conv 0.2.2 / LICENSE-Apache`
 - `pin-project 1.1.13 / LICENSE-APACHE`
@@ -2312,6 +2310,15 @@ Used by:
 - `portable-atomic 1.13.1 / LICENSE-APACHE`
 - `raw-window-handle 0.6.2 / LICENSE-APACHE.md`
 - `sync_wrapper 1.0.2 / LICENSE`
+- `tauri 2.11.5 / LICENSE_APACHE-2.0`
+- `tauri-build 2.6.3 / LICENSE_APACHE-2.0`
+- `tauri-codegen 2.6.3 / LICENSE_APACHE-2.0`
+- `tauri-macros 2.6.3 / LICENSE_APACHE-2.0`
+- `tauri-plugin-single-instance 2.4.3 / LICENSE_APACHE-2.0`
+- `tauri-plugin-updater 2.10.1 / LICENSE_APACHE-2.0`
+- `tauri-runtime 2.11.3 / LICENSE_APACHE-2.0`
+- `tauri-runtime-wry 2.11.4 / LICENSE_APACHE-2.0`
+- `tauri-utils 2.9.3 / LICENSE_APACHE-2.0`
 - `time 0.3.53 / LICENSE-Apache`
 - `time-core 0.1.9 / LICENSE-Apache`
 - `time-macros 0.2.31 / LICENSE-Apache`
@@ -2531,6 +2538,7 @@ SOFTWARE.
 Used by:
 
 - `base64 0.13.1 / LICENSE-MIT`
+- `base64 0.21.7 / LICENSE-MIT`
 - `base64 0.22.1 / LICENSE-MIT`
 
 ```text
@@ -2563,12 +2571,12 @@ Used by:
 
 - `aho-corasick 1.1.4 / LICENSE-MIT`
 - `byteorder 1.5.0 / LICENSE-MIT`
-- `byteorder-lite 0.1.0 / LICENSE-MIT`
 - `jiff 0.2.32 / LICENSE-MIT`
 - `jiff-static 0.2.32 / LICENSE-MIT`
 - `jiff-tzdb 0.1.8 / LICENSE-MIT`
 - `jiff-tzdb-platform 0.1.3 / LICENSE-MIT`
 - `memchr 2.8.3 / LICENSE-MIT`
+- `termcolor 1.4.1 / LICENSE-MIT`
 - `walkdir 2.5.0 / LICENSE-MIT`
 
 ```text
@@ -2593,6 +2601,36 @@ AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 THE SOFTWARE.
+```
+
+### sha256-0fd830000a45d0c472e06b2a3718b070c902ee9a71a6abc1647ce66920de2eb5
+
+Used by:
+
+- `prometheus-client 0.23.1 / LICENSE-MIT`
+
+```text
+MIT License
+
+Copyright (c) 2020 Max Inden
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
 ```
 
 ### sha256-10d73bf26900fa6dd6f2613bb962b7bd8fa1e66618fcf0f9f899aa071a4ee200
@@ -2770,6 +2808,7 @@ Creator: Person: Daniel Thompson-Yvetot
 
 Used by:
 
+- `zip 4.6.1 / LICENSE`
 - `zip 6.0.0 / LICENSE`
 
 ```text
@@ -2797,36 +2836,6 @@ SOFTWARE.
 
 Some files in the "tests/data" subdirectory of this repository are under other
 licences; see files named LICENSE.*.txt for details.
-```
-
-### sha256-14373973f98d640ebefcf8161adb9363188fedc7695bdc5604003b17288c4e1f
-
-Used by:
-
-- `mime_guess2 2.3.1 / LICENSE`
-
-```text
-The MIT License (MIT)
-
-Copyright (c) 2015 Austin Bonander
-
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
-
-The above copyright notice and this permission notice shall be included in all
-copies or substantial portions of the Software.
-
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-SOFTWARE.
 ```
 
 ### sha256-1466d9b4f3a59bb8997fc8d5fa977ce3f6a24bb2358793c09bfdf007039f6486
@@ -3267,6 +3276,43 @@ Used by:
    limitations under the License.
 ```
 
+### sha256-15656cc11a8331f28c0986b8ab97220d3e76f98e60ed388b5ffad37dfac4710c
+
+Used by:
+
+- `arbitrary 1.4.2 / LICENSE-MIT`
+- `derive_arbitrary 1.4.2 / LICENSE-MIT`
+
+```text
+MIT License
+
+Copyright (c) 2019 Manish Goregaokar
+
+Permission is hereby granted, free of charge, to any
+person obtaining a copy of this software and associated
+documentation files (the "Software"), to deal in the
+Software without restriction, including without
+limitation the rights to use, copy, modify, merge,
+publish, distribute, sublicense, and/or sell copies of
+the Software, and to permit persons to whom the Software
+is furnished to do so, subject to the following
+conditions:
+
+The above copyright notice and this permission notice
+shall be included in all copies or substantial portions
+of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF
+ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED
+TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A
+PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT
+SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY
+CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION
+OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR
+IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
+DEALINGS IN THE SOFTWARE.
+```
+
 ### sha256-157cc607717b1b372a69f6b4526f6ad18c1279af9f3267835cca2943f37bc07d
 
 Used by:
@@ -3397,17 +3443,84 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 ```
 
+### sha256-177540cad091a40e8071db310bc3b6115c4e329a92a234609b60c154b008a888
+
+Used by:
+
+- `postcard 1.1.3 / LICENSE-MIT`
+
+```text
+Copyright (c) 2019 Anthony James Munns
+
+Permission is hereby granted, free of charge, to any
+person obtaining a copy of this software and associated
+documentation files (the "Software"), to deal in the
+Software without restriction, including without
+limitation the rights to use, copy, modify, merge,
+publish, distribute, sublicense, and/or sell copies of
+the Software, and to permit persons to whom the Software
+is furnished to do so, subject to the following
+conditions:
+
+The above copyright notice and this permission notice
+shall be included in all copies or substantial portions
+of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF
+ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED
+TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A
+PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT
+SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY
+CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION
+OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR
+IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
+DEALINGS IN THE SOFTWARE.
+```
+
 ### sha256-1954992a2b32e8a2af24a4c11b726902e344c1934b947a77f04d404908f8db30
 
 Used by:
 
+- `schemars 0.8.22 / LICENSE`
+- `schemars 0.9.0 / LICENSE`
 - `schemars 1.2.1 / LICENSE`
+- `schemars_derive 0.8.22 / LICENSE`
 - `schemars_derive 1.2.1 / LICENSE`
 
 ```text
 MIT License
 
 Copyright (c) 2019 Graham Esau
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+```
+
+### sha256-1abdbbd4e3f95e56c79d4a8af190254c23ddb14db34aadadfafef9c3af041113
+
+Used by:
+
+- `embed-resource 3.0.11 / LICENSE`
+
+```text
+The MIT License (MIT)
+
+Copyright (c) 2017 nabijaczleweli
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
@@ -3690,6 +3803,36 @@ Used by:
    WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
    See the License for the specific language governing permissions and
    limitations under the License.
+```
+
+### sha256-1c7cf76689c837a68ed8d704994e52a0f2940c087958f860d17f3186afbdcc0c
+
+Used by:
+
+- `rustls-platform-verifier 0.7.0 / LICENSE-MIT`
+
+```text
+MIT License
+
+Copyright (c) 2022 1Password
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
 ```
 
 ### sha256-1cdc81fa44119bd4ea2c08ae5c635df952bafacd0e5e4dba002c62d1c4c6fb1b
@@ -4081,6 +4224,388 @@ IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 DEALINGS IN THE SOFTWARE.
 ```
 
+### sha256-1f256ecad192880510e84ad60474eab7589218784b9a50bc7ceee34c2b91f1d5
+
+Used by:
+
+- `dtoa-short 0.3.5 / LICENSE`
+
+```text
+Mozilla Public License Version 2.0
+==================================
+
+1. Definitions
+--------------
+
+1.1. "Contributor"
+    means each individual or legal entity that creates, contributes to
+    the creation of, or owns Covered Software.
+
+1.2. "Contributor Version"
+    means the combination of the Contributions of others (if any) used
+    by a Contributor and that particular Contributor's Contribution.
+
+1.3. "Contribution"
+    means Covered Software of a particular Contributor.
+
+1.4. "Covered Software"
+    means Source Code Form to which the initial Contributor has attached
+    the notice in Exhibit A, the Executable Form of such Source Code
+    Form, and Modifications of such Source Code Form, in each case
+    including portions thereof.
+
+1.5. "Incompatible With Secondary Licenses"
+    means
+
+    (a) that the initial Contributor has attached the notice described
+        in Exhibit B to the Covered Software; or
+
+    (b) that the Covered Software was made available under the terms of
+        version 1.1 or earlier of the License, but not also under the
+        terms of a Secondary License.
+
+1.6. "Executable Form"
+    means any form of the work other than Source Code Form.
+
+1.7. "Larger Work"
+    means a work that combines Covered Software with other material, in
+    a separate file or files, that is not Covered Software.
+
+1.8. "License"
+    means this document.
+
+1.9. "Licensable"
+    means having the right to grant, to the maximum extent possible,
+    whether at the time of the initial grant or subsequently, any and
+    all of the rights conveyed by this License.
+
+1.10. "Modifications"
+    means any of the following:
+
+    (a) any file in Source Code Form that results from an addition to,
+        deletion from, or modification of the contents of Covered
+        Software; or
+
+    (b) any new file in Source Code Form that contains any Covered
+        Software.
+
+1.11. "Patent Claims" of a Contributor
+    means any patent claim(s), including without limitation, method,
+    process, and apparatus claims, in any patent Licensable by such
+    Contributor that would be infringed, but for the grant of the
+    License, by the making, using, selling, offering for sale, having
+    made, import, or transfer of either its Contributions or its
+    Contributor Version.
+
+1.12. "Secondary License"
+    means either the GNU General Public License, Version 2.0, the GNU
+    Lesser General Public License, Version 2.1, the GNU Affero General
+    Public License, Version 3.0, or any later versions of those
+    licenses.
+
+1.13. "Source Code Form"
+    means the form of the work preferred for making modifications.
+
+1.14. "You" (or "Your")
+    means an individual or a legal entity exercising rights under this
+    License. For legal entities, "You" includes any entity that
+    controls, is controlled by, or is under common control with You. For
+    purposes of this definition, "control" means (a) the power, direct
+    or indirect, to cause the direction or management of such entity,
+    whether by contract or otherwise, or (b) ownership of more than
+    fifty percent (50%) of the outstanding shares or beneficial
+    ownership of such entity.
+
+2. License Grants and Conditions
+--------------------------------
+
+2.1. Grants
+
+Each Contributor hereby grants You a world-wide, royalty-free,
+non-exclusive license:
+
+(a) under intellectual property rights (other than patent or trademark)
+    Licensable by such Contributor to use, reproduce, make available,
+    modify, display, perform, distribute, and otherwise exploit its
+    Contributions, either on an unmodified basis, with Modifications, or
+    as part of a Larger Work; and
+
+(b) under Patent Claims of such Contributor to make, use, sell, offer
+    for sale, have made, import, and otherwise transfer either its
+    Contributions or its Contributor Version.
+
+2.2. Effective Date
+
+The licenses granted in Section 2.1 with respect to any Contribution
+become effective for each Contribution on the date the Contributor first
+distributes such Contribution.
+
+2.3. Limitations on Grant Scope
+
+The licenses granted in this Section 2 are the only rights granted under
+this License. No additional rights or licenses will be implied from the
+distribution or licensing of Covered Software under this License.
+Notwithstanding Section 2.1(b) above, no patent license is granted by a
+Contributor:
+
+(a) for any code that a Contributor has removed from Covered Software;
+    or
+
+(b) for infringements caused by: (i) Your and any other third party's
+    modifications of Covered Software, or (ii) the combination of its
+    Contributions with other software (except as part of its Contributor
+    Version); or
+
+(c) under Patent Claims infringed by Covered Software in the absence of
+    its Contributions.
+
+This License does not grant any rights in the trademarks, service marks,
+or logos of any Contributor (except as may be necessary to comply with
+the notice requirements in Section 3.4).
+
+2.4. Subsequent Licenses
+
+No Contributor makes additional grants as a result of Your choice to
+distribute the Covered Software under a subsequent version of this
+License (see Section 10.2) or under the terms of a Secondary License (if
+permitted under the terms of Section 3.3).
+
+2.5. Representation
+
+Each Contributor represents that the Contributor believes its
+Contributions are its original creation(s) or it has sufficient rights
+to grant the rights to its Contributions conveyed by this License.
+
+2.6. Fair Use
+
+This License is not intended to limit any rights You have under
+applicable copyright doctrines of fair use, fair dealing, or other
+equivalents.
+
+2.7. Conditions
+
+Sections 3.1, 3.2, 3.3, and 3.4 are conditions of the licenses granted
+in Section 2.1.
+
+3. Responsibilities
+-------------------
+
+3.1. Distribution of Source Form
+
+All distribution of Covered Software in Source Code Form, including any
+Modifications that You create or to which You contribute, must be under
+the terms of this License. You must inform recipients that the Source
+Code Form of the Covered Software is governed by the terms of this
+License, and how they can obtain a copy of this License. You may not
+attempt to alter or restrict the recipients' rights in the Source Code
+Form.
+
+3.2. Distribution of Executable Form
+
+If You distribute Covered Software in Executable Form then:
+
+(a) such Covered Software must also be made available in Source Code
+    Form, as described in Section 3.1, and You must inform recipients of
+    the Executable Form how they can obtain a copy of such Source Code
+    Form by reasonable means in a timely manner, at a charge no more
+    than the cost of distribution to the recipient; and
+
+(b) You may distribute such Executable Form under the terms of this
+    License, or sublicense it under different terms, provided that the
+    license for the Executable Form does not attempt to limit or alter
+    the recipients' rights in the Source Code Form under this License.
+
+3.3. Distribution of a Larger Work
+
+You may create and distribute a Larger Work under terms of Your choice,
+provided that You also comply with the requirements of this License for
+the Covered Software. If the Larger Work is a combination of Covered
+Software with a work governed by one or more Secondary Licenses, and the
+Covered Software is not Incompatible With Secondary Licenses, this
+License permits You to additionally distribute such Covered Software
+under the terms of such Secondary License(s), so that the recipient of
+the Larger Work may, at their option, further distribute the Covered
+Software under the terms of either this License or such Secondary
+License(s).
+
+3.4. Notices
+
+You may not remove or alter the substance of any license notices
+(including copyright notices, patent notices, disclaimers of warranty,
+or limitations of liability) contained within the Source Code Form of
+the Covered Software, except that You may alter any license notices to
+the extent required to remedy known factual inaccuracies.
+
+3.5. Application of Additional Terms
+
+You may choose to offer, and to charge a fee for, warranty, support,
+indemnity or liability obligations to one or more recipients of Covered
+Software. However, You may do so only on Your own behalf, and not on
+behalf of any Contributor. You must make it absolutely clear that any
+such warranty, support, indemnity, or liability obligation is offered by
+You alone, and You hereby agree to indemnify every Contributor for any
+liability incurred by such Contributor as a result of warranty, support,
+indemnity or liability terms You offer. You may include additional
+disclaimers of warranty and limitations of liability specific to any
+jurisdiction.
+
+4. Inability to Comply Due to Statute or Regulation
+---------------------------------------------------
+
+If it is impossible for You to comply with any of the terms of this
+License with respect to some or all of the Covered Software due to
+statute, judicial order, or regulation then You must: (a) comply with
+the terms of this License to the maximum extent possible; and (b)
+describe the limitations and the code they affect. Such description must
+be placed in a text file included with all distributions of the Covered
+Software under this License. Except to the extent prohibited by statute
+or regulation, such description must be sufficiently detailed for a
+recipient of ordinary skill to be able to understand it.
+
+5. Termination
+--------------
+
+5.1. The rights granted under this License will terminate automatically
+if You fail to comply with any of its terms. However, if You become
+compliant, then the rights granted under this License from a particular
+Contributor are reinstated (a) provisionally, unless and until such
+Contributor explicitly and finally terminates Your grants, and (b) on an
+ongoing basis, if such Contributor fails to notify You of the
+non-compliance by some reasonable means prior to 60 days after You have
+come back into compliance. Moreover, Your grants from a particular
+Contributor are reinstated on an ongoing basis if such Contributor
+notifies You of the non-compliance by some reasonable means, this is the
+first time You have received notice of non-compliance with this License
+from such Contributor, and You become compliant prior to 30 days after
+Your receipt of the notice.
+
+5.2. If You initiate litigation against any entity by asserting a patent
+infringement claim (excluding declaratory judgment actions,
+counter-claims, and cross-claims) alleging that a Contributor Version
+directly or indirectly infringes any patent, then the rights granted to
+You by any and all Contributors for the Covered Software under Section
+2.1 of this License shall terminate.
+
+5.3. In the event of termination under Sections 5.1 or 5.2 above, all
+end user license agreements (excluding distributors and resellers) which
+have been validly granted by You or Your distributors under this License
+prior to termination shall survive termination.
+
+************************************************************************
+*                                                                      *
+*  6. Disclaimer of Warranty                                           *
+*  -------------------------                                           *
+*                                                                      *
+*  Covered Software is provided under this License on an "as is"       *
+*  basis, without warranty of any kind, either expressed, implied, or  *
+*  statutory, including, without limitation, warranties that the       *
+*  Covered Software is free of defects, merchantable, fit for a        *
+*  particular purpose or non-infringing. The entire risk as to the     *
+*  quality and performance of the Covered Software is with You.        *
+*  Should any Covered Software prove defective in any respect, You     *
+*  (not any Contributor) assume the cost of any necessary servicing,   *
+*  repair, or correction. This disclaimer of warranty constitutes an   *
+*  essential part of this License. No use of any Covered Software is   *
+*  authorized under this License except under this disclaimer.         *
+*                                                                      *
+************************************************************************
+
+************************************************************************
+*                                                                      *
+*  7. Limitation of Liability                                          *
+*  --------------------------                                          *
+*                                                                      *
+*  Under no circumstances and under no legal theory, whether tort      *
+*  (including negligence), contract, or otherwise, shall any           *
+*  Contributor, or anyone who distributes Covered Software as          *
+*  permitted above, be liable to You for any direct, indirect,         *
+*  special, incidental, or consequential damages of any character      *
+*  including, without limitation, damages for lost profits, loss of    *
+*  goodwill, work stoppage, computer failure or malfunction, or any    *
+*  and all other commercial damages or losses, even if such party      *
+*  shall have been informed of the possibility of such damages. This   *
+*  limitation of liability shall not apply to liability for death or   *
+*  personal injury resulting from such party's negligence to the       *
+*  extent applicable law prohibits such limitation. Some               *
+*  jurisdictions do not allow the exclusion or limitation of           *
+*  incidental or consequential damages, so this exclusion and          *
+*  limitation may not apply to You.                                    *
+*                                                                      *
+************************************************************************
+
+8. Litigation
+-------------
+
+Any litigation relating to this License may be brought only in the
+courts of a jurisdiction where the defendant maintains its principal
+place of business and such litigation shall be governed by laws of that
+jurisdiction, without reference to its conflict-of-law provisions.
+Nothing in this Section shall prevent a party's ability to bring
+cross-claims or counter-claims.
+
+9. Miscellaneous
+----------------
+
+This License represents the complete agreement concerning the subject
+matter hereof. If any provision of this License is held to be
+unenforceable, such provision shall be reformed only to the extent
+necessary to make it enforceable. Any law or regulation which provides
+that the language of a contract shall be construed against the drafter
+shall not be used to construe this License against a Contributor.
+
+10. Versions of the License
+---------------------------
+
+10.1. New Versions
+
+Mozilla Foundation is the license steward. Except as provided in Section
+10.3, no one other than the license steward has the right to modify or
+publish new versions of this License. Each version will be given a
+distinguishing version number.
+
+10.2. Effect of New Versions
+
+You may distribute the Covered Software under the terms of the version
+of the License under which You originally received the Covered Software,
+or under the terms of any subsequent version published by the license
+steward.
+
+10.3. Modified Versions
+
+If you create software not governed by this License, and you want to
+create a new license for such software, you may create and use a
+modified version of this License if you rename the license and remove
+any references to the name of the license steward (except to note that
+such modified license differs from this License).
+
+10.4. Distributing Source Code Form that is Incompatible With Secondary
+Licenses
+
+If You choose to distribute Source Code Form that is Incompatible With
+Secondary Licenses under the terms of this version of the License, the
+notice described in Exhibit B of this License must be attached.
+
+Exhibit A - Source Code Form License Notice
+-------------------------------------------
+
+  This Source Code Form is subject to the terms of the Mozilla Public
+  License, v. 2.0. If a copy of the MPL was not distributed with this
+  file, You can obtain one at http://mozilla.org/MPL/2.0/.
+
+If it is not possible or desirable to put the notice in a particular
+file, then You may include the notice in a location (such as a LICENSE
+file in a relevant directory) where a recipient would be likely to look
+for such a notice.
+
+You may add additional accurate notices of copyright ownership.
+
+Exhibit B - "Incompatible With Secondary Licenses" Notice
+---------------------------------------------------------
+
+  This Source Code Form is "Incompatible With Secondary Licenses", as
+  defined by the Mozilla Public License, v. 2.0.
+```
+
 ### sha256-1fd6747d2c8e80f9fa766f57c5888864774621deb85cc2838ccaed727db32d45
 
 Used by:
@@ -4158,36 +4683,6 @@ IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 DEALINGS IN THE SOFTWARE.
 ```
 
-### sha256-20c097d0de27e2adc179140a3d542091951a030699c7e1c78655f2a2d08d4e3e
-
-Used by:
-
-- `tiff 0.11.3 / LICENSE`
-
-```text
-MIT License
-
-Copyright (c) 2018 PistonDevelopers
-
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
-
-The above copyright notice and this permission notice shall be included in all
-copies or substantial portions of the Software.
-
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-SOFTWARE.
-```
-
 ### sha256-20c7855c364d57ea4c97889a5e8d98470a9952dade37bd9248b9a54431670e5e
 
 Used by:
@@ -4220,6 +4715,36 @@ CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION
 OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR
 IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 DEALINGS IN THE SOFTWARE.
+```
+
+### sha256-20c84663dbfa685b230f362509fdbaea7819f5da166afea9857c4d96dcc7e0bc
+
+Used by:
+
+- `tauri-plugin-wdio-webdriver 1.3.0 / LICENSE`
+
+```text
+MIT License
+
+Copyright (c) 2024 WebdriverIO Community
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
 ```
 
 ### sha256-219920e865eee70b7dcfc948a86b099e7f4fe2de01bcca2ca9a20c0a033f2b59
@@ -4568,43 +5093,6 @@ notice may not be copied, modified, or distributed except
 according to those terms.
 ```
 
-### sha256-23c23145f6eac25c28cdcc03d38506a5712a9a8cffb5bd5301457f6173ea696e
-
-Used by:
-
-- `fearless_simd 0.4.1 / LICENSE-MIT`
-- `kurbo 0.13.1 / LICENSE-MIT`
-- `peniko 0.6.1 / LICENSE-MIT`
-- `polycool 0.4.0 / LICENSE-MIT`
-
-```text
-Copyright (c) 2018 Raph Levien
-
-Permission is hereby granted, free of charge, to any
-person obtaining a copy of this software and associated
-documentation files (the "Software"), to deal in the
-Software without restriction, including without
-limitation the rights to use, copy, modify, merge,
-publish, distribute, sublicense, and/or sell copies of
-the Software, and to permit persons to whom the Software
-is furnished to do so, subject to the following
-conditions:
-
-The above copyright notice and this permission notice
-shall be included in all copies or substantial portions
-of the Software.
-
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF
-ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED
-TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A
-PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT
-SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY
-CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION
-OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR
-IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
-DEALINGS IN THE SOFTWARE.
-```
-
 ### sha256-23f18e03dc49df91622fe2a76176497404e46ced8a715d9d2b67a7446571cca3
 
 Used by:
@@ -4614,15 +5102,18 @@ Used by:
 - `anyhow 1.0.103 / LICENSE-MIT`
 - `async-trait 0.1.89 / LICENSE-MIT`
 - `atomic-waker 1.1.2 / LICENSE-MIT`
+- `camino 1.2.5 / LICENSE-MIT`
+- `cargo-platform 0.1.9 / LICENSE-MIT`
+- `cargo_metadata 0.19.2 / LICENSE-MIT`
 - `curve25519-dalek-derive 0.1.1 / LICENSE-MIT`
 - `dary_heap 0.3.9 / LICENSE-MIT`
 - `displaydoc 0.2.6 / LICENSE-MIT`
+- `dtoa 1.0.11 / LICENSE-MIT`
 - `dyn-clone 1.0.20 / LICENSE-MIT`
-- `enumn 0.1.14 / LICENSE-MIT`
+- `erased-serde 0.4.10 / LICENSE-MIT`
 - `fastrand 2.4.1 / LICENSE-MIT`
-- `glow 0.17.0 / LICENSE-MIT`
-- `home 0.5.12 / LICENSE-MIT`
 - `itoa 1.0.18 / LICENSE-MIT`
+- `leb128fmt 0.1.0 / LICENSE-MIT`
 - `minimal-lexical 0.2.1 / LICENSE-MIT`
 - `monostate 0.1.18 / LICENSE-MIT`
 - `monostate-impl 0.1.18 / LICENSE-MIT`
@@ -4642,13 +5133,16 @@ Used by:
 - `rustversion 1.0.23 / LICENSE-MIT`
 - `semver 1.0.28 / LICENSE-MIT`
 - `serde 1.0.228 / LICENSE-MIT`
+- `serde-untagged 0.1.9 / LICENSE-MIT`
 - `serde_core 1.0.228 / LICENSE-MIT`
 - `serde_derive 1.0.228 / LICENSE-MIT`
 - `serde_derive_internals 0.29.1 / LICENSE-MIT`
 - `serde_json 1.0.150 / LICENSE-MIT`
 - `serde_path_to_error 0.1.20 / LICENSE-MIT`
-- `smol_str 0.2.2 / LICENSE-MIT`
+- `serde_repr 0.1.20 / LICENSE-MIT`
+- `servo_arc 0.4.3 / LICENSE-MIT`
 - `syn 2.0.118 / LICENSE-MIT`
+- `syn 3.0.3 / LICENSE-MIT`
 - `thiserror 1.0.69 / LICENSE-MIT`
 - `thiserror 2.0.18 / LICENSE-MIT`
 - `thiserror-impl 1.0.69 / LICENSE-MIT`
@@ -4659,6 +5153,10 @@ Used by:
 - `unicode-ident 1.0.24 / LICENSE-MIT`
 - `unsafe-libyaml 0.2.11 / LICENSE-MIT`
 - `utf8-zero 0.8.1 / LICENSE-MIT`
+- `wasm-encoder 0.252.0 / LICENSE-MIT`
+- `wasmparser 0.252.0 / LICENSE-MIT`
+- `wasmprinter 0.252.0 / LICENSE-MIT`
+- `wit-parser 0.252.0 / LICENSE-MIT`
 - `zmij 1.0.21 / LICENSE-MIT`
 
 ```text
@@ -4851,6 +5349,36 @@ CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION
 OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR
 IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 DEALINGS IN THE SOFTWARE.
+```
+
+### sha256-270b0d81891aa44c7e8726cf9432dade9556a01c848bacd2f3ef839c9c1a1859
+
+Used by:
+
+- `infer 0.19.0 / LICENSE`
+
+```text
+MIT License
+
+Copyright (c) 2019 Bojan
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
 ```
 
 ### sha256-275c491d6d1160553c32fd6127061d7f9606c3ea25abfad6ca3f6ed088785427
@@ -5072,22 +5600,215 @@ See the License for the specific language governing permissions and
 limitations under the License.
 ```
 
-### sha256-2775d45acac79b1b67278e018e38e925ed1b17f2ab5729f0ef062418fd954a60
+### sha256-2773e20df8f4c52a026b5b578c7f2457341f5aa3fb6612fd87e1d2e1bd8f48ad
 
 Used by:
 
-- `rustls-native-certs 0.8.4 / LICENSE`
+- `cookie 0.18.1 / LICENSE-APACHE`
 
 ```text
-Rustls is distributed under the following three licenses:
+                              Apache License
+                        Version 2.0, January 2004
+                     http://www.apache.org/licenses/
 
-- Apache License version 2.0.
-- MIT license.
-- ISC license.
+TERMS AND CONDITIONS FOR USE, REPRODUCTION, AND DISTRIBUTION
 
-These are included as LICENSE-APACHE, LICENSE-MIT and LICENSE-ISC
-respectively.  You may use this software under the terms of any
-of these licenses, at your option.
+1. Definitions.
+
+   "License" shall mean the terms and conditions for use, reproduction,
+   and distribution as defined by Sections 1 through 9 of this document.
+
+   "Licensor" shall mean the copyright owner or entity authorized by
+   the copyright owner that is granting the License.
+
+   "Legal Entity" shall mean the union of the acting entity and all
+   other entities that control, are controlled by, or are under common
+   control with that entity. For the purposes of this definition,
+   "control" means (i) the power, direct or indirect, to cause the
+   direction or management of such entity, whether by contract or
+   otherwise, or (ii) ownership of fifty percent (50%) or more of the
+   outstanding shares, or (iii) beneficial ownership of such entity.
+
+   "You" (or "Your") shall mean an individual or Legal Entity
+   exercising permissions granted by this License.
+
+   "Source" form shall mean the preferred form for making modifications,
+   including but not limited to software source code, documentation
+   source, and configuration files.
+
+   "Object" form shall mean any form resulting from mechanical
+   transformation or translation of a Source form, including but
+   not limited to compiled object code, generated documentation,
+   and conversions to other media types.
+
+   "Work" shall mean the work of authorship, whether in Source or
+   Object form, made available under the License, as indicated by a
+   copyright notice that is included in or attached to the work
+   (an example is provided in the Appendix below).
+
+   "Derivative Works" shall mean any work, whether in Source or Object
+   form, that is based on (or derived from) the Work and for which the
+   editorial revisions, annotations, elaborations, or other modifications
+   represent, as a whole, an original work of authorship. For the purposes
+   of this License, Derivative Works shall not include works that remain
+   separable from, or merely link (or bind by name) to the interfaces of,
+   the Work and Derivative Works thereof.
+
+   "Contribution" shall mean any work of authorship, including
+   the original version of the Work and any modifications or additions
+   to that Work or Derivative Works thereof, that is intentionally
+   submitted to Licensor for inclusion in the Work by the copyright owner
+   or by an individual or Legal Entity authorized to submit on behalf of
+   the copyright owner. For the purposes of this definition, "submitted"
+   means any form of electronic, verbal, or written communication sent
+   to the Licensor or its representatives, including but not limited to
+   communication on electronic mailing lists, source code control systems,
+   and issue tracking systems that are managed by, or on behalf of, the
+   Licensor for the purpose of discussing and improving the Work, but
+   excluding communication that is conspicuously marked or otherwise
+   designated in writing by the copyright owner as "Not a Contribution."
+
+   "Contributor" shall mean Licensor and any individual or Legal Entity
+   on behalf of whom a Contribution has been received by Licensor and
+   subsequently incorporated within the Work.
+
+2. Grant of Copyright License. Subject to the terms and conditions of
+   this License, each Contributor hereby grants to You a perpetual,
+   worldwide, non-exclusive, no-charge, royalty-free, irrevocable
+   copyright license to reproduce, prepare Derivative Works of,
+   publicly display, publicly perform, sublicense, and distribute the
+   Work and such Derivative Works in Source or Object form.
+
+3. Grant of Patent License. Subject to the terms and conditions of
+   this License, each Contributor hereby grants to You a perpetual,
+   worldwide, non-exclusive, no-charge, royalty-free, irrevocable
+   (except as stated in this section) patent license to make, have made,
+   use, offer to sell, sell, import, and otherwise transfer the Work,
+   where such license applies only to those patent claims licensable
+   by such Contributor that are necessarily infringed by their
+   Contribution(s) alone or by combination of their Contribution(s)
+   with the Work to which such Contribution(s) was submitted. If You
+   institute patent litigation against any entity (including a
+   cross-claim or counterclaim in a lawsuit) alleging that the Work
+   or a Contribution incorporated within the Work constitutes direct
+   or contributory patent infringement, then any patent licenses
+   granted to You under this License for that Work shall terminate
+   as of the date such litigation is filed.
+
+4. Redistribution. You may reproduce and distribute copies of the
+   Work or Derivative Works thereof in any medium, with or without
+   modifications, and in Source or Object form, provided that You
+   meet the following conditions:
+
+   (a) You must give any other recipients of the Work or
+       Derivative Works a copy of this License; and
+
+   (b) You must cause any modified files to carry prominent notices
+       stating that You changed the files; and
+
+   (c) You must retain, in the Source form of any Derivative Works
+       that You distribute, all copyright, patent, trademark, and
+       attribution notices from the Source form of the Work,
+       excluding those notices that do not pertain to any part of
+       the Derivative Works; and
+
+   (d) If the Work includes a "NOTICE" text file as part of its
+       distribution, then any Derivative Works that You distribute must
+       include a readable copy of the attribution notices contained
+       within such NOTICE file, excluding those notices that do not
+       pertain to any part of the Derivative Works, in at least one
+       of the following places: within a NOTICE text file distributed
+       as part of the Derivative Works; within the Source form or
+       documentation, if provided along with the Derivative Works; or,
+       within a display generated by the Derivative Works, if and
+       wherever such third-party notices normally appear. The contents
+       of the NOTICE file are for informational purposes only and
+       do not modify the License. You may add Your own attribution
+       notices within Derivative Works that You distribute, alongside
+       or as an addendum to the NOTICE text from the Work, provided
+       that such additional attribution notices cannot be construed
+       as modifying the License.
+
+   You may add Your own copyright statement to Your modifications and
+   may provide additional or different license terms and conditions
+   for use, reproduction, or distribution of Your modifications, or
+   for any such Derivative Works as a whole, provided Your use,
+   reproduction, and distribution of the Work otherwise complies with
+   the conditions stated in this License.
+
+5. Submission of Contributions. Unless You explicitly state otherwise,
+   any Contribution intentionally submitted for inclusion in the Work
+   by You to the Licensor shall be under the terms and conditions of
+   this License, without any additional terms or conditions.
+   Notwithstanding the above, nothing herein shall supersede or modify
+   the terms of any separate license agreement you may have executed
+   with Licensor regarding such Contributions.
+
+6. Trademarks. This License does not grant permission to use the trade
+   names, trademarks, service marks, or product names of the Licensor,
+   except as required for reasonable and customary use in describing the
+   origin of the Work and reproducing the content of the NOTICE file.
+
+7. Disclaimer of Warranty. Unless required by applicable law or
+   agreed to in writing, Licensor provides the Work (and each
+   Contributor provides its Contributions) on an "AS IS" BASIS,
+   WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or
+   implied, including, without limitation, any warranties or conditions
+   of TITLE, NON-INFRINGEMENT, MERCHANTABILITY, or FITNESS FOR A
+   PARTICULAR PURPOSE. You are solely responsible for determining the
+   appropriateness of using or redistributing the Work and assume any
+   risks associated with Your exercise of permissions under this License.
+
+8. Limitation of Liability. In no event and under no legal theory,
+   whether in tort (including negligence), contract, or otherwise,
+   unless required by applicable law (such as deliberate and grossly
+   negligent acts) or agreed to in writing, shall any Contributor be
+   liable to You for damages, including any direct, indirect, special,
+   incidental, or consequential damages of any character arising as a
+   result of this License or out of the use or inability to use the
+   Work (including but not limited to damages for loss of goodwill,
+   work stoppage, computer failure or malfunction, or any and all
+   other commercial damages or losses), even if such Contributor
+   has been advised of the possibility of such damages.
+
+9. Accepting Warranty or Additional Liability. While redistributing
+   the Work or Derivative Works thereof, You may choose to offer,
+   and charge a fee for, acceptance of support, warranty, indemnity,
+   or other liability obligations and/or rights consistent with this
+   License. However, in accepting such obligations, You may act only
+   on Your own behalf and on Your sole responsibility, not on behalf
+   of any other Contributor, and only if You agree to indemnify,
+   defend, and hold each Contributor harmless for any liability
+   incurred by, or claims asserted against, such Contributor by reason
+   of your accepting any such warranty or additional liability.
+
+END OF TERMS AND CONDITIONS
+
+APPENDIX: How to apply the Apache License to your work.
+
+   To apply the Apache License to your work, attach the following
+   boilerplate notice, with the fields enclosed by brackets "[]"
+   replaced with your own identifying information. (Don't include
+   the brackets!)  The text should be enclosed in the appropriate
+   comment syntax for the file format. We also recommend that a
+   file or class name and description of purpose be included on the
+   same "printed page" as the copyright notice for easier
+   identification within third-party archives.
+
+Copyright 2017 Sergio Benitez
+Copyright 2014 Alex Chricton
+
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+
+	http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.
 ```
 
 ### sha256-27995d58ad5c1145c1a8cd86244ce844886958a35eb2b78c6b772748669999ac
@@ -5327,6 +6048,246 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 ```
 
+### sha256-2bc107bdc18a74263d20bdefdb8073e17bc1a01b6b374dc5835683a33ee5ba7d
+
+Used by:
+
+- `jsonptr 0.6.3 / LICENSE-MIT`
+
+```text
+MIT License
+
+Copyright (c) 2022 Chance Dinkins
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+```
+
+### sha256-2cf31f2ae7f3feba667d50fc1d4d21ecf217703c04c3068b83c9a73b6dde723a
+
+Used by:
+
+- `jsonptr 0.6.3 / LICENSE-APACHE`
+
+```text
+                                 Apache License
+                           Version 2.0, January 2004
+                        http://www.apache.org/licenses/
+
+TERMS AND CONDITIONS FOR USE, REPRODUCTION, AND DISTRIBUTION
+
+1. Definitions.
+
+    "License" shall mean the terms and conditions for use, reproduction,
+    and distribution as defined by Sections 1 through 9 of this document.
+
+    "Licensor" shall mean the copyright owner or entity authorized by
+    the copyright owner that is granting the License.
+
+    "Legal Entity" shall mean the union of the acting entity and all
+    other entities that control, are controlled by, or are under common
+    control with that entity. For the purposes of this definition,
+    "control" means (i) the power, direct or indirect, to cause the
+    direction or management of such entity, whether by contract or
+    otherwise, or (ii) ownership of fifty percent (50%) or more of the
+    outstanding shares, or (iii) beneficial ownership of such entity.
+
+    "You" (or "Your") shall mean an individual or Legal Entity
+    exercising permissions granted by this License.
+
+    "Source" form shall mean the preferred form for making modifications,
+    including but not limited to software source code, documentation
+    source, and configuration files.
+
+    "Object" form shall mean any form resulting from mechanical
+    transformation or translation of a Source form, including but
+    not limited to compiled object code, generated documentation,
+    and conversions to other media types.
+
+    "Work" shall mean the work of authorship, whether in Source or
+    Object form, made available under the License, as indicated by a
+    copyright notice that is included in or attached to the work
+    (an example is provided in the Appendix below).
+
+    "Derivative Works" shall mean any work, whether in Source or Object
+    form, that is based on (or derived from) the Work and for which the
+    editorial revisions, annotations, elaborations, or other modifications
+    represent, as a whole, an original work of authorship. For the purposes
+    of this License, Derivative Works shall not include works that remain
+    separable from, or merely link (or bind by name) to the interfaces of,
+    the Work and Derivative Works thereof.
+
+    "Contribution" shall mean any work of authorship, including
+    the original version of the Work and any modifications or additions
+    to that Work or Derivative Works thereof, that is intentionally
+    submitted to Licensor for inclusion in the Work by the copyright owner
+    or by an individual or Legal Entity authorized to submit on behalf of
+    the copyright owner. For the purposes of this definition, "submitted"
+    means any form of electronic, verbal, or written communication sent
+    to the Licensor or its representatives, including but not limited to
+    communication on electronic mailing lists, source code control systems,
+    and issue tracking systems that are managed by, or on behalf of, the
+    Licensor for the purpose of discussing and improving the Work, but
+    excluding communication that is conspicuously marked or otherwise
+    designated in writing by the copyright owner as "Not a Contribution."
+
+    "Contributor" shall mean Licensor and any individual or Legal Entity
+    on behalf of whom a Contribution has been received by Licensor and
+    subsequently incorporated within the Work.
+
+2. Grant of Copyright License. Subject to the terms and conditions of
+   this License, each Contributor hereby grants to You a perpetual,
+   worldwide, non-exclusive, no-charge, royalty-free, irrevocable
+   copyright license to reproduce, prepare Derivative Works of,
+   publicly display, publicly perform, sublicense, and distribute the
+   Work and such Derivative Works in Source or Object form.
+
+3. Grant of Patent License. Subject to the terms and conditions of
+   this License, each Contributor hereby grants to You a perpetual,
+   worldwide, non-exclusive, no-charge, royalty-free, irrevocable
+   (except as stated in this section) patent license to make, have made,
+   use, offer to sell, sell, import, and otherwise transfer the Work,
+   where such license applies only to those patent claims licensable
+   by such Contributor that are necessarily infringed by their
+   Contribution(s) alone or by combination of their Contribution(s)
+   with the Work to which such Contribution(s) was submitted. If You
+   institute patent litigation against any entity (including a
+   cross-claim or counterclaim in a lawsuit) alleging that the Work
+   or a Contribution incorporated within the Work constitutes direct
+   or contributory patent infringement, then any patent licenses
+   granted to You under this License for that Work shall terminate
+   as of the date such litigation is filed.
+
+4. Redistribution. You may reproduce and distribute copies of the
+   Work or Derivative Works thereof in any medium, with or without
+   modifications, and in Source or Object form, provided that You
+   meet the following conditions:
+
+    (a) You must give any other recipients of the Work or
+    Derivative Works a copy of this License; and
+
+    (b) You must cause any modified files to carry prominent notices
+    stating that You changed the files; and
+
+    (c) You must retain, in the Source form of any Derivative Works
+    that You distribute, all copyright, patent, trademark, and
+    attribution notices from the Source form of the Work,
+    excluding those notices that do not pertain to any part of
+    the Derivative Works; and
+
+    (d) If the Work includes a "NOTICE" text file as part of its
+    distribution, then any Derivative Works that You distribute must
+    include a readable copy of the attribution notices contained
+    within such NOTICE file, excluding those notices that do not
+    pertain to any part of the Derivative Works, in at least one
+    of the following places: within a NOTICE text file distributed
+    as part of the Derivative Works; within the Source form or
+    documentation, if provided along with the Derivative Works; or,
+    within a display generated by the Derivative Works, if and
+    wherever such third-party notices normally appear. The contents
+    of the NOTICE file are for informational purposes only and
+    do not modify the License. You may add Your own attribution
+    notices within Derivative Works that You distribute, alongside
+    or as an addendum to the NOTICE text from the Work, provided
+    that such additional attribution notices cannot be construed
+    as modifying the License.
+
+    You may add Your own copyright statement to Your modifications and
+    may provide additional or different license terms and conditions
+    for use, reproduction, or distribution of Your modifications, or
+    for any such Derivative Works as a whole, provided Your use,
+    reproduction, and distribution of the Work otherwise complies with
+    the conditions stated in this License.
+
+5. Submission of Contributions. Unless You explicitly state otherwise,
+   any Contribution intentionally submitted for inclusion in the Work
+   by You to the Licensor shall be under the terms and conditions of
+   this License, without any additional terms or conditions.
+   Notwithstanding the above, nothing herein shall supersede or modify
+   the terms of any separate license agreement you may have executed
+   with Licensor regarding such Contributions.
+
+6. Trademarks. This License does not grant permission to use the trade
+   names, trademarks, service marks, or product names of the Licensor,
+   except as required for reasonable and customary use in describing the
+   origin of the Work and reproducing the content of the NOTICE file.
+
+7. Disclaimer of Warranty. Unless required by applicable law or
+   agreed to in writing, Licensor provides the Work (and each
+   Contributor provides its Contributions) on an "AS IS" BASIS,
+   WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or
+   implied, including, without limitation, any warranties or conditions
+   of TITLE, NON-INFRINGEMENT, MERCHANTABILITY, or FITNESS FOR A
+   PARTICULAR PURPOSE. You are solely responsible for determining the
+   appropriateness of using or redistributing the Work and assume any
+   risks associated with Your exercise of permissions under this License.
+
+8. Limitation of Liability. In no event and under no legal theory,
+   whether in tort (including negligence), contract, or otherwise,
+   unless required by applicable law (such as deliberate and grossly
+   negligent acts) or agreed to in writing, shall any Contributor be
+   liable to You for damages, including any direct, indirect, special,
+   incidental, or consequential damages of any character arising as a
+   result of this License or out of the use or inability to use the
+   Work (including but not limited to damages for loss of goodwill,
+   work stoppage, computer failure or malfunction, or any and all
+   other commercial damages or losses), even if such Contributor
+   has been advised of the possibility of such damages.
+
+9. Accepting Warranty or Additional Liability. While redistributing
+   the Work or Derivative Works thereof, You may choose to offer,
+   and charge a fee for, acceptance of support, warranty, indemnity,
+   or other liability obligations and/or rights consistent with this
+   License. However, in accepting such obligations, You may act only
+   on Your own behalf and on Your sole responsibility, not on behalf
+   of any other Contributor, and only if You agree to indemnify,
+   defend, and hold each Contributor harmless for any liability
+   incurred by, or claims asserted against, such Contributor by reason
+   of your accepting any such warranty or additional liability.
+
+END OF TERMS AND CONDITIONS
+
+APPENDIX: How to apply the Apache License to your work.
+
+      To apply the Apache License to your work, attach the following
+      boilerplate notice, with the fields enclosed by brackets "[]"
+      replaced with your own identifying information. (Don't include
+      the brackets!)  The text should be enclosed in the appropriate
+      comment syntax for the file format. We also recommend that a
+      file or class name and description of purpose be included on the
+      same "printed page" as the copyright notice for easier
+      identification within third-party archives.
+
+Copyright 2024 Chance Dinkins
+
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+
+       http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.
+```
+
 ### sha256-2d01890414494742ba4a509fcec8efa40f6d8be22cbd72be7cff08d6fda4ec89
 
 Used by:
@@ -5391,109 +6352,214 @@ IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 DEALINGS IN THE SOFTWARE.
 ```
 
-### sha256-2f0015108d68627bd788d313f529c21ff4da2c2c42a5e1f3883acc83480f9002
+### sha256-2f1947dc952374ef4bf326c7c576a0287fb10a8c069dc6bdef981a7ea0a0cf1a
 
 Used by:
 
-- `epaint_default_fonts 0.35.0 / fonts/UFL.txt`
+- `prometheus-client 0.23.1 / LICENSE-APACHE`
 
 ```text
--------------------------------
-UBUNTU FONT LICENCE Version 1.0
--------------------------------
+                                 Apache License
+                           Version 2.0, January 2004
+                        http://www.apache.org/licenses/
 
-PREAMBLE
-This licence allows the licensed fonts to be used, studied, modified and
-redistributed freely. The fonts, including any derivative works, can be
-bundled, embedded, and redistributed provided the terms of this licence
-are met. The fonts and derivatives, however, cannot be released under
-any other licence. The requirement for fonts to remain under this
-licence does not require any document created using the fonts or their
-derivatives to be published under this licence, as long as the primary
-purpose of the document is not to be a vehicle for the distribution of
-the fonts.
+   TERMS AND CONDITIONS FOR USE, REPRODUCTION, AND DISTRIBUTION
 
-DEFINITIONS
-"Font Software" refers to the set of files released by the Copyright
-Holder(s) under this licence and clearly marked as such. This may
-include source files, build scripts and documentation.
+1. Definitions.
 
-"Original Version" refers to the collection of Font Software components
-as received under this licence.
+   "License" shall mean the terms and conditions for use, reproduction,
+   and distribution as defined by Sections 1 through 9 of this document.
 
-"Modified Version" refers to any derivative made by adding to, deleting,
-or substituting -- in part or in whole -- any of the components of the
-Original Version, by changing formats or by porting the Font Software to
-a new environment.
+   "Licensor" shall mean the copyright owner or entity authorized by
+   the copyright owner that is granting the License.
 
-"Copyright Holder(s)" refers to all individuals and companies who have a
-copyright ownership of the Font Software.
+   "Legal Entity" shall mean the union of the acting entity and all
+   other entities that control, are controlled by, or are under common
+   control with that entity. For the purposes of this definition,
+   "control" means (i) the power, direct or indirect, to cause the
+   direction or management of such entity, whether by contract or
+   otherwise, or (ii) ownership of fifty percent (50%) or more of the
+   outstanding shares, or (iii) beneficial ownership of such entity.
 
-"Substantially Changed" refers to Modified Versions which can be easily
-identified as dissimilar to the Font Software by users of the Font
-Software comparing the Original Version with the Modified Version.
+   "You" (or "Your") shall mean an individual or Legal Entity
+   exercising permissions granted by this License.
 
-To "Propagate" a work means to do anything with it that, without
-permission, would make you directly or secondarily liable for
-infringement under applicable copyright law, except executing it on a
-computer or modifying a private copy. Propagation includes copying,
-distribution (with or without modification and with or without charging
-a redistribution fee), making available to the public, and in some
-countries other activities as well.
+   "Source" form shall mean the preferred form for making modifications,
+   including but not limited to software source code, documentation
+   source, and configuration files.
 
-PERMISSION & CONDITIONS
-This licence does not grant any rights under trademark law and all such
-rights are reserved.
+   "Object" form shall mean any form resulting from mechanical
+   transformation or translation of a Source form, including but
+   not limited to compiled object code, generated documentation,
+   and conversions to other media types.
 
-Permission is hereby granted, free of charge, to any person obtaining a
-copy of the Font Software, to propagate the Font Software, subject to
-the below conditions:
+   "Work" shall mean the work of authorship, whether in Source or
+   Object form, made available under the License, as indicated by a
+   copyright notice that is included in or attached to the work
+   (an example is provided in the Appendix below).
 
-1) Each copy of the Font Software must contain the above copyright
-notice and this licence. These can be included either as stand-alone
-text files, human-readable headers or in the appropriate machine-
-readable metadata fields within text or binary files as long as those
-fields can be easily viewed by the user.
+   "Derivative Works" shall mean any work, whether in Source or Object
+   form, that is based on (or derived from) the Work and for which the
+   editorial revisions, annotations, elaborations, or other modifications
+   represent, as a whole, an original work of authorship. For the purposes
+   of this License, Derivative Works shall not include works that remain
+   separable from, or merely link (or bind by name) to the interfaces of,
+   the Work and Derivative Works thereof.
 
-2) The font name complies with the following:
-(a) The Original Version must retain its name, unmodified.
-(b) Modified Versions which are Substantially Changed must be renamed to
-avoid use of the name of the Original Version or similar names entirely.
-(c) Modified Versions which are not Substantially Changed must be
-renamed to both (i) retain the name of the Original Version and (ii) add
-additional naming elements to distinguish the Modified Version from the
-Original Version. The name of such Modified Versions must be the name of
-the Original Version, with "derivative X" where X represents the name of
-the new work, appended to that name.
+   "Contribution" shall mean any work of authorship, including
+   the original version of the Work and any modifications or additions
+   to that Work or Derivative Works thereof, that is intentionally
+   submitted to Licensor for inclusion in the Work by the copyright owner
+   or by an individual or Legal Entity authorized to submit on behalf of
+   the copyright owner. For the purposes of this definition, "submitted"
+   means any form of electronic, verbal, or written communication sent
+   to the Licensor or its representatives, including but not limited to
+   communication on electronic mailing lists, source code control systems,
+   and issue tracking systems that are managed by, or on behalf of, the
+   Licensor for the purpose of discussing and improving the Work, but
+   excluding communication that is conspicuously marked or otherwise
+   designated in writing by the copyright owner as "Not a Contribution."
 
-3) The name(s) of the Copyright Holder(s) and any contributor to the
-Font Software shall not be used to promote, endorse or advertise any
-Modified Version, except (i) as required by this licence, (ii) to
-acknowledge the contribution(s) of the Copyright Holder(s) or (iii) with
-their explicit written permission.
+   "Contributor" shall mean Licensor and any individual or Legal Entity
+   on behalf of whom a Contribution has been received by Licensor and
+   subsequently incorporated within the Work.
 
-4) The Font Software, modified or unmodified, in part or in whole, must
-be distributed entirely under this licence, and must not be distributed
-under any other licence. The requirement for fonts to remain under this
-licence does not affect any document created using the Font Software,
-except any version of the Font Software extracted from a document
-created using the Font Software may only be distributed under this
-licence.
+2. Grant of Copyright License. Subject to the terms and conditions of
+   this License, each Contributor hereby grants to You a perpetual,
+   worldwide, non-exclusive, no-charge, royalty-free, irrevocable
+   copyright license to reproduce, prepare Derivative Works of,
+   publicly display, publicly perform, sublicense, and distribute the
+   Work and such Derivative Works in Source or Object form.
 
-TERMINATION
-This licence becomes null and void if any of the above conditions are
-not met.
+3. Grant of Patent License. Subject to the terms and conditions of
+   this License, each Contributor hereby grants to You a perpetual,
+   worldwide, non-exclusive, no-charge, royalty-free, irrevocable
+   (except as stated in this section) patent license to make, have made,
+   use, offer to sell, sell, import, and otherwise transfer the Work,
+   where such license applies only to those patent claims licensable
+   by such Contributor that are necessarily infringed by their
+   Contribution(s) alone or by combination of their Contribution(s)
+   with the Work to which such Contribution(s) was submitted. If You
+   institute patent litigation against any entity (including a
+   cross-claim or counterclaim in a lawsuit) alleging that the Work
+   or a Contribution incorporated within the Work constitutes direct
+   or contributory patent infringement, then any patent licenses
+   granted to You under this License for that Work shall terminate
+   as of the date such litigation is filed.
 
-DISCLAIMER
-THE FONT SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,
-EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO ANY WARRANTIES OF
-MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT OF
-COPYRIGHT, PATENT, TRADEMARK, OR OTHER RIGHT. IN NO EVENT SHALL THE
-COPYRIGHT HOLDER BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY,
-INCLUDING ANY GENERAL, SPECIAL, INDIRECT, INCIDENTAL, OR CONSEQUENTIAL
-DAMAGES, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
-FROM, OUT OF THE USE OR INABILITY TO USE THE FONT SOFTWARE OR FROM OTHER
-DEALINGS IN THE FONT SOFTWARE.
+4. Redistribution. You may reproduce and distribute copies of the
+   Work or Derivative Works thereof in any medium, with or without
+   modifications, and in Source or Object form, provided that You
+   meet the following conditions:
+
+   (a) You must give any other recipients of the Work or
+       Derivative Works a copy of this License; and
+
+   (b) You must cause any modified files to carry prominent notices
+       stating that You changed the files; and
+
+   (c) You must retain, in the Source form of any Derivative Works
+       that You distribute, all copyright, patent, trademark, and
+       attribution notices from the Source form of the Work,
+       excluding those notices that do not pertain to any part of
+       the Derivative Works; and
+
+   (d) If the Work includes a "NOTICE" text file as part of its
+       distribution, then any Derivative Works that You distribute must
+       include a readable copy of the attribution notices contained
+       within such NOTICE file, excluding those notices that do not
+       pertain to any part of the Derivative Works, in at least one
+       of the following places: within a NOTICE text file distributed
+       as part of the Derivative Works; within the Source form or
+       documentation, if provided along with the Derivative Works; or,
+       within a display generated by the Derivative Works, if and
+       wherever such third-party notices normally appear. The contents
+       of the NOTICE file are for informational purposes only and
+       do not modify the License. You may add Your own attribution
+       notices within Derivative Works that You distribute, alongside
+       or as an addendum to the NOTICE text from the Work, provided
+       that such additional attribution notices cannot be construed
+       as modifying the License.
+
+   You may add Your own copyright statement to Your modifications and
+   may provide additional or different license terms and conditions
+   for use, reproduction, or distribution of Your modifications, or
+   for any such Derivative Works as a whole, provided Your use,
+   reproduction, and distribution of the Work otherwise complies with
+   the conditions stated in this License.
+
+5. Submission of Contributions. Unless You explicitly state otherwise,
+   any Contribution intentionally submitted for inclusion in the Work
+   by You to the Licensor shall be under the terms and conditions of
+   this License, without any additional terms or conditions.
+   Notwithstanding the above, nothing herein shall supersede or modify
+   the terms of any separate license agreement you may have executed
+   with Licensor regarding such Contributions.
+
+6. Trademarks. This License does not grant permission to use the trade
+   names, trademarks, service marks, or product names of the Licensor,
+   except as required for reasonable and customary use in describing the
+   origin of the Work and reproducing the content of the NOTICE file.
+
+7. Disclaimer of Warranty. Unless required by applicable law or
+   agreed to in writing, Licensor provides the Work (and each
+   Contributor provides its Contributions) on an "AS IS" BASIS,
+   WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or
+   implied, including, without limitation, any warranties or conditions
+   of TITLE, NON-INFRINGEMENT, MERCHANTABILITY, or FITNESS FOR A
+   PARTICULAR PURPOSE. You are solely responsible for determining the
+   appropriateness of using or redistributing the Work and assume any
+   risks associated with Your exercise of permissions under this License.
+
+8. Limitation of Liability. In no event and under no legal theory,
+   whether in tort (including negligence), contract, or otherwise,
+   unless required by applicable law (such as deliberate and grossly
+   negligent acts) or agreed to in writing, shall any Contributor be
+   liable to You for damages, including any direct, indirect, special,
+   incidental, or consequential damages of any character arising as a
+   result of this License or out of the use or inability to use the
+   Work (including but not limited to damages for loss of goodwill,
+   work stoppage, computer failure or malfunction, or any and all
+   other commercial damages or losses), even if such Contributor
+   has been advised of the possibility of such damages.
+
+9. Accepting Warranty or Additional Liability. While redistributing
+   the Work or Derivative Works thereof, You may choose to offer,
+   and charge a fee for, acceptance of support, warranty, indemnity,
+   or other liability obligations and/or rights consistent with this
+   License. However, in accepting such obligations, You may act only
+   on Your own behalf and on Your sole responsibility, not on behalf
+   of any other Contributor, and only if You agree to indemnify,
+   defend, and hold each Contributor harmless for any liability
+   incurred by, or claims asserted against, such Contributor by reason
+   of your accepting any such warranty or additional liability.
+
+END OF TERMS AND CONDITIONS
+
+APPENDIX: How to apply the Apache License to your work.
+
+   To apply the Apache License to your work, attach the following
+   boilerplate notice, with the fields enclosed by brackets "[]"
+   replaced with your own identifying information. (Don't include
+   the brackets!)  The text should be enclosed in the appropriate
+   comment syntax for the file format. We also recommend that a
+   file or class name and description of purpose be included on the
+   same "printed page" as the copyright notice for easier
+   identification within third-party archives.
+
+Copyright [yyyy] [name of copyright owner]
+
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+
+    http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.
 ```
 
 ### sha256-2fb01e6708ea9d53e8b7e74bd82af23bce5256f19f4de93915027a53173c50d8
@@ -5800,40 +6866,6 @@ Permission is hereby granted, free of charge, to any person obtaining a copy of 
 The above copyright notice and this permission notice shall be included in all copies or substantial portions of the Software.
 
 THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
-```
-
-### sha256-3252fc481fda4d2bad9e1ae675065889abd35c8abb500499ac01e70aaffa02b9
-
-Used by:
-
-- `glifo 0.1.1 / LICENSE-MIT`
-
-```text
-Copyright 2025 the Vello Authors
-
-Permission is hereby granted, free of charge, to any
-person obtaining a copy of this software and associated
-documentation files (the "Software"), to deal in the
-Software without restriction, including without
-limitation the rights to use, copy, modify, merge,
-publish, distribute, sublicense, and/or sell copies of
-the Software, and to permit persons to whom the Software
-is furnished to do so, subject to the following
-conditions:
-
-The above copyright notice and this permission notice
-shall be included in all copies or substantial portions
-of the Software.
-
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF
-ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED
-TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A
-PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT
-SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY
-CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION
-OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR
-IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
-DEALINGS IN THE SOFTWARE.
 ```
 
 ### sha256-333ea3aaa3cadb819f4acd9f9153f9feee060a995ca8710f32bc5bd9a4b91734
@@ -6208,8 +7240,9 @@ Used by:
 - `filetime 0.2.29 / LICENSE-MIT`
 - `find-msvc-tools 0.1.9 / LICENSE-MIT`
 - `futures-timer 3.0.4 / LICENSE-MIT`
-- `jobserver 0.1.35 / LICENSE-MIT`
+- `id-arena 2.3.0 / LICENSE-MIT`
 - `pkg-config 0.3.33 / LICENSE-MIT`
+- `rustc-demangle 0.1.28 / LICENSE-MIT`
 - `socket2 0.5.10 / LICENSE-MIT`
 - `socket2 0.6.4 / LICENSE-MIT`
 
@@ -7015,6 +8048,34 @@ See the License for the specific language governing permissions and
 limitations under the License.
 ```
 
+### sha256-3d180008e36922a4e8daec11c34c7af264fed5962d07924aea928c38e8663c94
+
+Used by:
+
+- `brotli 8.0.4 / LICENSE.MIT`
+
+```text
+Copyright (c) 2009, 2010, 2013-2016 by the Brotli Authors.
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in
+all copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+THE SOFTWARE.
+```
+
 ### sha256-3f09ca77e208780d4b2c1b6e8e3404cb747c540b766a5292d7cbe8a196d3f844
 
 Used by:
@@ -7023,6 +8084,40 @@ Used by:
 
 ```text
 Copyright (c) 2021 quininer
+
+Permission is hereby granted, free of charge, to any
+person obtaining a copy of this software and associated
+documentation files (the "Software"), to deal in the
+Software without restriction, including without
+limitation the rights to use, copy, modify, merge,
+publish, distribute, sublicense, and/or sell copies of
+the Software, and to permit persons to whom the Software
+is furnished to do so, subject to the following
+conditions:
+
+The above copyright notice and this permission notice
+shall be included in all copies or substantial portions
+of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF
+ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED
+TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A
+PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT
+SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY
+CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION
+OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR
+IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
+DEALINGS IN THE SOFTWARE.
+```
+
+### sha256-3f9f0f7e5a5911a8042e32c83ff5d061ce1ffd02e8a207ec2135a44ad73b4191
+
+Used by:
+
+- `mach2 0.6.0 / LICENSE-MIT`
+
+```text
+Copyright (c) 2019 Nick Fitzgerald, 2021 Yuki Okushi
 
 Permission is hereby granted, free of charge, to any
 person obtaining a copy of this software and associated
@@ -7126,6 +8221,70 @@ Used by:
 
 ```text
 Copyright (c) 2021-2025 The RustCrypto Project Developers
+
+Permission is hereby granted, free of charge, to any
+person obtaining a copy of this software and associated
+documentation files (the "Software"), to deal in the
+Software without restriction, including without
+limitation the rights to use, copy, modify, merge,
+publish, distribute, sublicense, and/or sell copies of
+the Software, and to permit persons to whom the Software
+is furnished to do so, subject to the following
+conditions:
+
+The above copyright notice and this permission notice
+shall be included in all copies or substantial portions
+of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF
+ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED
+TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A
+PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT
+SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY
+CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION
+OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR
+IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
+DEALINGS IN THE SOFTWARE.
+```
+
+### sha256-41ca90213441b294e7517d5858f0cc85bc12e19ec044001b45bc213de461d33b
+
+Used by:
+
+- `ico 0.5.0 / LICENSE`
+
+```text
+MIT License
+
+Copyright (c) 2018 Matthew D. Steele
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+```
+
+### sha256-423e1c4900b3fbb41cda3e34530b2597d50c2e61473e18c085756c507e46fe1c
+
+Used by:
+
+- `embedded-io 0.4.0 / LICENSE-MIT`
+
+```text
+Copyright (c) 2022 The embedded-io authors
 
 Permission is hereby granted, free of charge, to any
 person obtaining a copy of this software and associated
@@ -7687,44 +8846,38 @@ See the License for the specific language governing permissions and
 limitations under the License.
 ```
 
-### sha256-47c0cccbeec7e8614548cc485588b28149e7874188df5f41b36efebcee285c87
+### sha256-47674f8b7d98c232c6f81346c4cfe48933d913a9e257d7a522ad9f42e3dd61e1
 
 Used by:
 
-- `epaint_default_fonts 0.35.0 / fonts/Hack-Regular.txt`
+- `embedded-io 0.6.1 / LICENSE-MIT`
 
 ```text
-The work in the Hack project is Copyright 2018 Source Foundry Authors and licensed under the MIT License
+Copyright (c) 2023 The embedded-io authors
 
-The work in the DejaVu project was committed to the public domain.
+Permission is hereby granted, free of charge, to any
+person obtaining a copy of this software and associated
+documentation files (the "Software"), to deal in the
+Software without restriction, including without
+limitation the rights to use, copy, modify, merge,
+publish, distribute, sublicense, and/or sell copies of
+the Software, and to permit persons to whom the Software
+is furnished to do so, subject to the following
+conditions:
 
-Bitstream Vera Sans Mono Copyright 2003 Bitstream Inc. and licensed under the Bitstream Vera License with Reserved Font Names "Bitstream" and "Vera"
-MIT License
+The above copyright notice and this permission notice
+shall be included in all copies or substantial portions
+of the Software.
 
-Copyright (c) 2018 Source Foundry Authors
-
-Permission is hereby granted, free of charge, to any person obtaining a copy of this software and associated documentation files (the "Software"), to deal in the Software without restriction, including without limitation the rights to use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of the Software, and to permit persons to whom the Software is furnished to do so, subject to the following conditions:
-
-The above copyright notice and this permission notice shall be included in all copies or substantial portions of the Software.
-
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
-BITSTREAM VERA LICENSE
-
-Copyright (c) 2003 by Bitstream, Inc. All Rights Reserved. Bitstream Vera is a trademark of Bitstream, Inc.
-
-Permission is hereby granted, free of charge, to any person obtaining a copy of the fonts accompanying this license ("Fonts") and associated documentation files (the "Font Software"), to reproduce and distribute the Font Software, including without limitation the rights to use, copy, merge, publish, distribute, and/or sell copies of the Font Software, and to permit persons to whom the Font Software is furnished to do so, subject to the following conditions:
-
-The above copyright and trademark notices and this permission notice shall be included in all copies of one or more of the Font Software typefaces.
-
-The Font Software may be modified, altered, or added to, and in particular the designs of glyphs or characters in the Fonts may be modified and additional glyphs or characters may be added to the Fonts, only if the fonts are renamed to names not containing either the words "Bitstream" or the word "Vera".
-
-This License becomes null and void to the extent applicable to Fonts or Font Software that has been modified and is distributed under the "Bitstream Vera" names.
-
-The Font Software may be sold as part of a larger software package but no copy of one or more of the Font Software typefaces may be sold by itself.
-
-THE FONT SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO ANY WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT OF COPYRIGHT, PATENT, TRADEMARK, OR OTHER RIGHT. IN NO EVENT SHALL BITSTREAM OR THE GNOME FOUNDATION BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, INCLUDING ANY GENERAL, SPECIAL, INDIRECT, INCIDENTAL, OR CONSEQUENTIAL DAMAGES, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF THE USE OR INABILITY TO USE THE FONT SOFTWARE OR FROM OTHER DEALINGS IN THE FONT SOFTWARE.
-
-Except as contained in this notice, the names of Gnome, the Gnome Foundation, and Bitstream Inc., shall not be used in advertising or otherwise to promote the sale, use or other dealings in this Font Software without prior written authorization from the Gnome Foundation or Bitstream Inc., respectively. For further information, contact: fonts at gnome dot org.
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF
+ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED
+TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A
+PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT
+SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY
+CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION
+OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR
+IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
+DEALINGS IN THE SOFTWARE.
 ```
 
 ### sha256-47dc9ff29128ddfb4d6a0435383c9f89120bc374dbcc1dd00b933a0b28aa7865
@@ -7789,42 +8942,6 @@ Permission is hereby granted, free of charge, to any person obtaining a copy of 
 The above copyright notice and this permission notice shall be included in all copies or substantial portions of the Software.
 
 THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
-```
-
-### sha256-4b6c5ac5c550bea22b1d6455684b21d94ca96f3bcbbc2840b793180707ed582a
-
-Used by:
-
-- `moxcms 0.8.1 / LICENSE.md`
-- `pxfm 0.1.30 / LICENSE.md`
-
-```text
-Copyright (c) Radzivon Bartoshyk. All rights reserved.
-
-Redistribution and use in source and binary forms, with or without modification,
-are permitted provided that the following conditions are met:
-
-1.  Redistributions of source code must retain the above copyright notice, this
-    list of conditions and the following disclaimer.
-
-2.  Redistributions in binary form must reproduce the above copyright notice,
-    this list of conditions and the following disclaimer in the documentation
-    and/or other materials provided with the distribution.
-
-3.  Neither the name of the copyright holder nor the names of its
-    contributors may be used to endorse or promote products derived from
-    this software without specific prior written permission.
-
-THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
-AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
-IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
-DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE
-FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
-DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR
-SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER
-CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY,
-OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
-OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 ```
 
 ### sha256-4cada0bd02ea3692eee6f16400d86c6508bbd3bafb2b65fed0419f36d4f83e8f
@@ -8239,34 +9356,13 @@ DEALINGS IN THE SOFTWARE.
 
 Used by:
 
-- `accesskit 0.24.1 / standard text for MIT OR Apache-2.0 (the crate includes no separate file)`
-- `accesskit_consumer 0.35.0 / standard text for MIT OR Apache-2.0 (the crate includes no separate file)`
-- `accesskit_consumer 0.37.0 / standard text for MIT OR Apache-2.0 (the crate includes no separate file)`
-- `accesskit_macos 0.26.2 / standard text for MIT OR Apache-2.0 (the crate includes no separate file)`
-- `accesskit_windows 0.32.1 / standard text for MIT OR Apache-2.0 (the crate includes no separate file)`
 - `asn1-rs-impl 0.2.0 / standard text for MIT/Apache-2.0 (the crate includes no separate file)`
 - `base256emoji 1.0.2 / standard text for MIT (the crate includes no separate file)`
 - `base45 3.2.0 / standard text for MIT (the crate includes no separate file)`
-- `block2 0.5.1 / standard text for MIT (the crate includes no separate file)`
 - `block2 0.6.2 / standard text for MIT (the crate includes no separate file)`
-- `cargo-packager-updater 0.2.3 / standard text for Apache-2.0 OR MIT (the crate includes no separate file)`
-- `cargo-packager-utils 0.1.1 / standard text for Apache-2.0 OR MIT (the crate includes no separate file)`
-- `color 0.3.3 / LICENSE-MIT`
 - `const-str 0.4.3 / standard text for MIT (the crate includes no separate file)`
 - `defmt-parser 1.0.0 / standard text for MIT OR Apache-2.0 (the crate includes no separate file)`
-- `dispatch 0.2.0 / standard text for MIT (the crate includes no separate file)`
 - `dispatch2 0.3.1 / standard text for Zlib OR Apache-2.0 OR MIT (the crate includes no separate file)`
-- `ecolor 0.35.0 / standard text for MIT OR Apache-2.0 (the crate includes no separate file)`
-- `eframe 0.35.0 / standard text for MIT OR Apache-2.0 (the crate includes no separate file)`
-- `egui 0.35.0 / standard text for MIT OR Apache-2.0 (the crate includes no separate file)`
-- `egui-winit 0.35.0 / standard text for MIT OR Apache-2.0 (the crate includes no separate file)`
-- `egui_extras 0.35.0 / standard text for MIT OR Apache-2.0 (the crate includes no separate file)`
-- `egui_glow 0.35.0 / standard text for MIT OR Apache-2.0 (the crate includes no separate file)`
-- `egui_graphs 0.31.0 / standard text for MIT (the crate includes no separate file)`
-- `emath 0.35.0 / standard text for MIT OR Apache-2.0 (the crate includes no separate file)`
-- `enum-map 2.7.3 / standard text for MIT OR Apache-2.0 (the crate includes no separate file)`
-- `enum-map-derive 0.17.0 / standard text for MIT OR Apache-2.0 (the crate includes no separate file)`
-- `epaint 0.35.0 / standard text for MIT OR Apache-2.0 (the crate includes no separate file)`
 - `fluent-langneg 0.13.1 / standard text for Apache-2.0 OR MIT (the crate includes no separate file)`
 - `futures-bounded 0.2.4 / standard text for MIT (the crate includes no separate file)`
 - `half 2.7.1 / LICENSE-MIT`
@@ -8275,13 +9371,17 @@ Used by:
 - `intl_pluralrules 7.0.2 / standard text for Apache-2.0/MIT (the crate includes no separate file)`
 - `libp2p 0.56.0 / standard text for MIT (the crate includes no separate file)`
 - `libp2p-allow-block-list 0.6.0 / standard text for MIT (the crate includes no separate file)`
+- `libp2p-autonat 0.15.0 / standard text for MIT (the crate includes no separate file)`
 - `libp2p-connection-limits 0.6.0 / standard text for MIT (the crate includes no separate file)`
 - `libp2p-core 0.43.2 / standard text for MIT (the crate includes no separate file)`
+- `libp2p-dcutr 0.14.1 / standard text for MIT (the crate includes no separate file)`
 - `libp2p-dns 0.44.0 / standard text for MIT (the crate includes no separate file)`
 - `libp2p-identity 0.2.14 / standard text for MIT (the crate includes no separate file)`
 - `libp2p-mdns 0.48.0 / standard text for MIT (the crate includes no separate file)`
+- `libp2p-metrics 0.17.0 / standard text for MIT (the crate includes no separate file)`
 - `libp2p-noise 0.46.1 / standard text for MIT (the crate includes no separate file)`
 - `libp2p-quic 0.13.1 / standard text for MIT (the crate includes no separate file)`
+- `libp2p-relay 0.21.1 / standard text for MIT (the crate includes no separate file)`
 - `libp2p-request-response 0.29.0 / standard text for MIT (the crate includes no separate file)`
 - `libp2p-swarm 0.47.1 / standard text for MIT (the crate includes no separate file)`
 - `libp2p-swarm-derive 0.35.1 / standard text for MIT (the crate includes no separate file)`
@@ -8289,32 +9389,44 @@ Used by:
 - `libp2p-tls 0.6.2 / standard text for MIT (the crate includes no separate file)`
 - `libp2p-upnp 0.5.0 / standard text for MIT (the crate includes no separate file)`
 - `libp2p-yamux 0.47.0 / standard text for MIT (the crate includes no separate file)`
-- `linebender_resource_handle 0.1.1 / LICENSE-MIT`
 - `match-lookup 0.1.2 / standard text for MIT (the crate includes no separate file)`
 - `multistream-select 0.13.0 / standard text for MIT (the crate includes no separate file)`
-- `objc-sys 0.3.5 / standard text for MIT (the crate includes no separate file)`
-- `objc2 0.5.2 / standard text for MIT (the crate includes no separate file)`
 - `objc2 0.6.4 / standard text for MIT (the crate includes no separate file)`
-- `objc2-app-kit 0.2.2 / standard text for MIT (the crate includes no separate file)`
 - `objc2-app-kit 0.3.2 / standard text for Zlib OR Apache-2.0 OR MIT (the crate includes no separate file)`
-- `objc2-core-data 0.2.2 / standard text for MIT (the crate includes no separate file)`
+- `objc2-cloud-kit 0.3.2 / standard text for Zlib OR Apache-2.0 OR MIT (the crate includes no separate file)`
+- `objc2-core-data 0.3.2 / standard text for Zlib OR Apache-2.0 OR MIT (the crate includes no separate file)`
 - `objc2-core-foundation 0.3.2 / standard text for Zlib OR Apache-2.0 OR MIT (the crate includes no separate file)`
 - `objc2-core-graphics 0.3.2 / standard text for Zlib OR Apache-2.0 OR MIT (the crate includes no separate file)`
-- `objc2-core-image 0.2.2 / standard text for MIT (the crate includes no separate file)`
+- `objc2-core-image 0.3.2 / standard text for Zlib OR Apache-2.0 OR MIT (the crate includes no separate file)`
+- `objc2-core-text 0.3.2 / standard text for Zlib OR Apache-2.0 OR MIT (the crate includes no separate file)`
+- `objc2-core-video 0.3.2 / standard text for Zlib OR Apache-2.0 OR MIT (the crate includes no separate file)`
 - `objc2-encode 4.1.0 / standard text for MIT (the crate includes no separate file)`
-- `objc2-foundation 0.2.2 / standard text for MIT (the crate includes no separate file)`
+- `objc2-exception-helper 0.1.1 / standard text for Zlib OR Apache-2.0 OR MIT (the crate includes no separate file)`
 - `objc2-foundation 0.3.2 / standard text for MIT (the crate includes no separate file)`
 - `objc2-io-kit 0.3.2 / standard text for Zlib OR Apache-2.0 OR MIT (the crate includes no separate file)`
 - `objc2-io-surface 0.3.2 / standard text for Zlib OR Apache-2.0 OR MIT (the crate includes no separate file)`
-- `objc2-metal 0.2.2 / standard text for MIT (the crate includes no separate file)`
-- `objc2-quartz-core 0.2.2 / standard text for MIT (the crate includes no separate file)`
+- `objc2-javascript-core 0.3.2 / standard text for Zlib OR Apache-2.0 OR MIT (the crate includes no separate file)`
+- `objc2-osa-kit 0.3.2 / standard text for Zlib OR Apache-2.0 OR MIT (the crate includes no separate file)`
+- `objc2-quartz-core 0.3.2 / standard text for Zlib OR Apache-2.0 OR MIT (the crate includes no separate file)`
 - `objc2-security 0.3.2 / standard text for Zlib OR Apache-2.0 OR MIT (the crate includes no separate file)`
 - `objc2-service-management 0.3.2 / standard text for Zlib OR Apache-2.0 OR MIT (the crate includes no separate file)`
-- `profiling 1.0.18 / standard text for MIT OR Apache-2.0 (the crate includes no separate file)`
+- `objc2-web-kit 0.3.2 / standard text for Zlib OR Apache-2.0 OR MIT (the crate includes no separate file)`
+- `prometheus-client-derive-encode 0.4.2 / standard text for Apache-2.0 OR MIT (the crate includes no separate file)`
 - `quick-protobuf 0.8.1 / standard text for MIT (the crate includes no separate file)`
+- `quick-protobuf-codec 0.3.1 / standard text for MIT (the crate includes no separate file)`
 - `rw-stream-sink 0.4.0 / standard text for MIT (the crate includes no separate file)`
-- `single-instance 0.3.3 / standard text for MIT (the crate includes no separate file)`
 - `sse-stream 0.2.4 / standard text for MIT OR Apache-2.0 (the crate includes no separate file)`
+- `tauri-plugin 2.6.3 / standard text for Apache-2.0 OR MIT (the crate includes no separate file)`
+- `ts-rs 12.0.1 / standard text for MIT (the crate includes no separate file)`
+- `ts-rs-macros 12.0.1 / standard text for MIT (the crate includes no separate file)`
+- `unic-char-property 0.9.0 / standard text for MIT/Apache-2.0 (the crate includes no separate file)`
+- `unic-char-range 0.9.0 / standard text for MIT/Apache-2.0 (the crate includes no separate file)`
+- `unic-common 0.9.0 / standard text for MIT/Apache-2.0 (the crate includes no separate file)`
+- `unic-ucd-ident 0.9.0 / standard text for MIT/Apache-2.0 (the crate includes no separate file)`
+- `unic-ucd-version 0.9.0 / standard text for MIT/Apache-2.0 (the crate includes no separate file)`
+- `webview2-com 0.38.2 / standard text for MIT (the crate includes no separate file)`
+- `webview2-com-macros 0.8.1 / standard text for MIT (the crate includes no separate file)`
+- `webview2-com-sys 0.38.2 / standard text for MIT (the crate includes no separate file)`
 - `widestring 1.2.1 / LICENSE-MIT`
 - `yamux 0.12.1 / standard text for Apache-2.0 OR MIT (the crate includes no separate file)`
 - `yamux 0.13.10 / standard text for Apache-2.0 OR MIT (the crate includes no separate file)`
@@ -9251,6 +10363,36 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 ```
 
+### sha256-5cf1c9dc617e4cad7fa03181ff893601ad5243aa3be527ef39034e1cd6377676
+
+Used by:
+
+- `urlpattern 0.3.0 / LICENSE`
+
+```text
+MIT License
+
+Copyright (c) 2021 the Deno authors
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+```
+
 ### sha256-5db2b182453ff32ed40f7da63589c9667a3f8bd8b16b1471b152caae56f77e45
 
 Used by:
@@ -9463,6 +10605,40 @@ Used by:
    limitations under the License.
 ```
 
+### sha256-5fb3573f6e7198ff6c203dbbd58d1da4bec9e8c5a828edefd9e98587d0443471
+
+Used by:
+
+- `osakit 0.3.1 / LICENSE-MIT`
+
+```text
+Copyright (c) 2024 Marat Dulin
+
+Permission is hereby granted, free of charge, to any
+person obtaining a copy of this software and associated
+documentation files (the "Software"), to deal in the
+Software without restriction, including without
+limitation the rights to use, copy, modify, merge,
+publish, distribute, sublicense, and/or sell copies of
+the Software, and to permit persons to whom the Software
+is furnished to do so, subject to the following
+conditions:
+
+The above copyright notice and this permission notice
+shall be included in all copies or substantial portions
+of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF
+ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED
+TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A
+PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT
+SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY
+CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION
+OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR
+IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
+DEALINGS IN THE SOFTWARE.
+```
+
 ### sha256-603fb27ef3266ea516872eefd9ae587746b8c34614a35c0fb24e4e9e0c17e137
 
 Used by:
@@ -9474,6 +10650,70 @@ Used by:
 MIT License
 
 Copyright (c) 2019 Daniel Henry-Mantilla <daniel.henry.mantilla@gmail.com>
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+```
+
+### sha256-60a7062291b01ba068f300612cdbdc20382ac1d4934f07bcdd7167c15299f309
+
+Used by:
+
+- `tendril 0.5.1 / LICENSE-MIT`
+
+```text
+Copyright (c) 2015 Keegan McAllister
+
+Permission is hereby granted, free of charge, to any
+person obtaining a copy of this software and associated
+documentation files (the "Software"), to deal in the
+Software without restriction, including without
+limitation the rights to use, copy, modify, merge,
+publish, distribute, sublicense, and/or sell copies of
+the Software, and to permit persons to whom the Software
+is furnished to do so, subject to the following
+conditions:
+
+The above copyright notice and this permission notice
+shall be included in all copies or substantial portions
+of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF
+ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED
+TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A
+PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT
+SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY
+CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION
+OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR
+IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
+DEALINGS IN THE SOFTWARE.
+```
+
+### sha256-617b85f62a4f1b6a62d3d9f28f6d7003b7f68a70b7675a8174bbcc68401ac62d
+
+Used by:
+
+- `window-vibrancy 0.6.0 / LICENSE-MIT`
+
+```text
+MIT License
+
+Copyright (c) 2020-2022 Tauri Programme within The Commons Conservancy
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
@@ -9528,13 +10768,13 @@ SOFTWARE.
 
 Used by:
 
-- `cgl 0.3.2 / LICENSE-MIT`
 - `core-foundation 0.10.1 / LICENSE-MIT`
 - `core-foundation 0.9.4 / LICENSE-MIT`
 - `core-foundation-sys 0.8.7 / LICENSE-MIT`
-- `core-graphics 0.23.2 / LICENSE-MIT`
-- `core-graphics-types 0.1.3 / LICENSE-MIT`
-- `euclid 0.22.14 / LICENSE-MIT`
+- `core-graphics 0.25.0 / LICENSE-MIT`
+- `core-graphics-types 0.2.0 / LICENSE-MIT`
+- `string_cache 0.9.0 / LICENSE-MIT`
+- `string_cache_codegen 0.6.1 / LICENSE-MIT`
 
 ```text
 Copyright (c) 2012-2013 Mozilla Foundation
@@ -9626,15 +10866,16 @@ Used by:
 - `anyhow 1.0.103 / LICENSE-APACHE`
 - `async-trait 0.1.89 / LICENSE-APACHE`
 - `dary_heap 0.3.9 / LICENSE-APACHE`
+- `dtoa 1.0.11 / LICENSE-APACHE`
 - `dyn-clone 1.0.20 / LICENSE-APACHE`
-- `enumn 0.1.14 / LICENSE-APACHE`
+- `erased-serde 0.4.10 / LICENSE-APACHE`
 - `fastbloom 0.17.0 / LICENSE-APACHE`
-- `glifo 0.1.1 / LICENSE-APACHE`
 - `itoa 1.0.18 / LICENSE-APACHE`
 - `libc 0.2.186 / LICENSE-APACHE`
-- `litrs 1.0.0 / LICENSE-APACHE`
+- `mach2 0.6.0 / LICENSE-APACHE`
 - `monostate 0.1.18 / LICENSE-APACHE`
 - `monostate-impl 0.1.18 / LICENSE-APACHE`
+- `osakit 0.3.1 / LICENSE-APACHE`
 - `paste 1.0.15 / LICENSE-APACHE`
 - `pastey 0.2.3 / LICENSE-APACHE`
 - `proc-macro2 1.0.106 / LICENSE-APACHE`
@@ -9646,13 +10887,16 @@ Used by:
 - `ryu 1.0.23 / LICENSE-APACHE`
 - `semver 1.0.28 / LICENSE-APACHE`
 - `serde 1.0.228 / LICENSE-APACHE`
+- `serde-untagged 0.1.9 / LICENSE-APACHE`
 - `serde_core 1.0.228 / LICENSE-APACHE`
 - `serde_derive 1.0.228 / LICENSE-APACHE`
 - `serde_derive_internals 0.29.1 / LICENSE-APACHE`
 - `serde_json 1.0.150 / LICENSE-APACHE`
 - `serde_path_to_error 0.1.20 / LICENSE-APACHE`
+- `serde_repr 0.1.20 / LICENSE-APACHE`
 - `serde_urlencoded 0.7.1 / LICENSE-APACHE`
 - `syn 2.0.118 / LICENSE-APACHE`
+- `syn 3.0.3 / LICENSE-APACHE`
 - `thiserror 1.0.69 / LICENSE-APACHE`
 - `thiserror 2.0.18 / LICENSE-APACHE`
 - `thiserror-impl 1.0.69 / LICENSE-APACHE`
@@ -10087,34 +11331,13 @@ IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 DEALINGS IN THE SOFTWARE.
 ```
 
-### sha256-644d05561bc2dc5993f19d6602894315d925744d854a0413876e203f86c35830
-
-Used by:
-
-- `guillotiere 0.7.0 / LICENSE-APACHE`
-
-```text
-Copyright 2019 Nicolas Silva
-
-Licensed under the Apache License, Version 2.0 (the "License");
-you may not use this file except in compliance with the License.
-You may obtain a copy of the License at
-
-    http://www.apache.org/licenses/LICENSE-2.0
-
-Unless required by applicable law or agreed to in writing, software
-distributed under the License is distributed on an "AS IS" BASIS,
-WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-See the License for the specific language governing permissions and
-limitations under the License.
-```
-
 ### sha256-6485b8ed310d3f0340bf1ad1f47645069ce4069dcc6bb46c7d5c6faf41de1fdb
 
 Used by:
 
 - `bitflags 1.3.2 / LICENSE-MIT`
 - `bitflags 2.13.0 / LICENSE-MIT`
+- `glob 0.3.4 / LICENSE-MIT`
 - `log 0.4.33 / LICENSE-MIT`
 - `num-bigint 0.4.8 / LICENSE-MIT`
 - `num-complex 0.4.6 / LICENSE-MIT`
@@ -10328,6 +11551,7 @@ SOFTWARE.
 Used by:
 
 - `option-ext 0.2.0 / LICENSE.txt`
+- `selectors 0.36.1 / standard text for MPL-2.0 (the crate includes no separate file)`
 
 ```text
 Mozilla Public License Version 2.0
@@ -10705,34 +11929,215 @@ Exhibit B - "Incompatible With Secondary Licenses" Notice
   defined by the Mozilla Public License, v. 2.0.
 ```
 
-### sha256-66e3ee1fa7f909ad3c612d556f2a0cdabcd809ad6e66f3b0605015ac64841b70
+### sha256-6742bd3e9c2035522b00ddd9a7c76f09e7ed89491a6750d56db2c062d9251b65
 
 Used by:
 
-- `nix 0.23.2 / LICENSE`
+- `cargo_toml 0.22.3 / LICENSE`
 
 ```text
-The MIT License (MIT)
+© Kornel Lesiński
 
-Copyright (c) 2015 Carl Lerche + nix-rust Authors
+                                 Apache License
+                           Version 2.0, January 2004
+                        http://www.apache.org/licenses/
 
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
+   TERMS AND CONDITIONS FOR USE, REPRODUCTION, AND DISTRIBUTION
 
-The above copyright notice and this permission notice shall be included in
-all copies or substantial portions of the Software.
+   1. Definitions.
 
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
-THE SOFTWARE.
+      "License" shall mean the terms and conditions for use, reproduction,
+      and distribution as defined by Sections 1 through 9 of this document.
+
+      "Licensor" shall mean the copyright owner or entity authorized by
+      the copyright owner that is granting the License.
+
+      "Legal Entity" shall mean the union of the acting entity and all
+      other entities that control, are controlled by, or are under common
+      control with that entity. For the purposes of this definition,
+      "control" means (i) the power, direct or indirect, to cause the
+      direction or management of such entity, whether by contract or
+      otherwise, or (ii) ownership of fifty percent (50%) or more of the
+      outstanding shares, or (iii) beneficial ownership of such entity.
+
+      "You" (or "Your") shall mean an individual or Legal Entity
+      exercising permissions granted by this License.
+
+      "Source" form shall mean the preferred form for making modifications,
+      including but not limited to software source code, documentation
+      source, and configuration files.
+
+      "Object" form shall mean any form resulting from mechanical
+      transformation or translation of a Source form, including but
+      not limited to compiled object code, generated documentation,
+      and conversions to other media types.
+
+      "Work" shall mean the work of authorship, whether in Source or
+      Object form, made available under the License, as indicated by a
+      copyright notice that is included in or attached to the work
+      (an example is provided in the Appendix below).
+
+      "Derivative Works" shall mean any work, whether in Source or Object
+      form, that is based on (or derived from) the Work and for which the
+      editorial revisions, annotations, elaborations, or other modifications
+      represent, as a whole, an original work of authorship. For the purposes
+      of this License, Derivative Works shall not include works that remain
+      separable from, or merely link (or bind by name) to the interfaces of,
+      the Work and Derivative Works thereof.
+
+      "Contribution" shall mean any work of authorship, including
+      the original version of the Work and any modifications or additions
+      to that Work or Derivative Works thereof, that is intentionally
+      submitted to Licensor for inclusion in the Work by the copyright owner
+      or by an individual or Legal Entity authorized to submit on behalf of
+      the copyright owner. For the purposes of this definition, "submitted"
+      means any form of electronic, verbal, or written communication sent
+      to the Licensor or its representatives, including but not limited to
+      communication on electronic mailing lists, source code control systems,
+      and issue tracking systems that are managed by, or on behalf of, the
+      Licensor for the purpose of discussing and improving the Work, but
+      excluding communication that is conspicuously marked or otherwise
+      designated in writing by the copyright owner as "Not a Contribution."
+
+      "Contributor" shall mean Licensor and any individual or Legal Entity
+      on behalf of whom a Contribution has been received by Licensor and
+      subsequently incorporated within the Work.
+
+   2. Grant of Copyright License. Subject to the terms and conditions of
+      this License, each Contributor hereby grants to You a perpetual,
+      worldwide, non-exclusive, no-charge, royalty-free, irrevocable
+      copyright license to reproduce, prepare Derivative Works of,
+      publicly display, publicly perform, sublicense, and distribute the
+      Work and such Derivative Works in Source or Object form.
+
+   3. Grant of Patent License. Subject to the terms and conditions of
+      this License, each Contributor hereby grants to You a perpetual,
+      worldwide, non-exclusive, no-charge, royalty-free, irrevocable
+      (except as stated in this section) patent license to make, have made,
+      use, offer to sell, sell, import, and otherwise transfer the Work,
+      where such license applies only to those patent claims licensable
+      by such Contributor that are necessarily infringed by their
+      Contribution(s) alone or by combination of their Contribution(s)
+      with the Work to which such Contribution(s) was submitted. If You
+      institute patent litigation against any entity (including a
+      cross-claim or counterclaim in a lawsuit) alleging that the Work
+      or a Contribution incorporated within the Work constitutes direct
+      or contributory patent infringement, then any patent licenses
+      granted to You under this License for that Work shall terminate
+      as of the date such litigation is filed.
+
+   4. Redistribution. You may reproduce and distribute copies of the
+      Work or Derivative Works thereof in any medium, with or without
+      modifications, and in Source or Object form, provided that You
+      meet the following conditions:
+
+      (a) You must give any other recipients of the Work or
+          Derivative Works a copy of this License; and
+
+      (b) You must cause any modified files to carry prominent notices
+          stating that You changed the files; and
+
+      (c) You must retain, in the Source form of any Derivative Works
+          that You distribute, all copyright, patent, trademark, and
+          attribution notices from the Source form of the Work,
+          excluding those notices that do not pertain to any part of
+          the Derivative Works; and
+
+      (d) If the Work includes a "NOTICE" text file as part of its
+          distribution, then any Derivative Works that You distribute must
+          include a readable copy of the attribution notices contained
+          within such NOTICE file, excluding those notices that do not
+          pertain to any part of the Derivative Works, in at least one
+          of the following places: within a NOTICE text file distributed
+          as part of the Derivative Works; within the Source form or
+          documentation, if provided along with the Derivative Works; or,
+          within a display generated by the Derivative Works, if and
+          wherever such third-party notices normally appear. The contents
+          of the NOTICE file are for informational purposes only and
+          do not modify the License. You may add Your own attribution
+          notices within Derivative Works that You distribute, alongside
+          or as an addendum to the NOTICE text from the Work, provided
+          that such additional attribution notices cannot be construed
+          as modifying the License.
+
+      You may add Your own copyright statement to Your modifications and
+      may provide additional or different license terms and conditions
+      for use, reproduction, or distribution of Your modifications, or
+      for any such Derivative Works as a whole, provided Your use,
+      reproduction, and distribution of the Work otherwise complies with
+      the conditions stated in this License.
+
+   5. Submission of Contributions. Unless You explicitly state otherwise,
+      any Contribution intentionally submitted for inclusion in the Work
+      by You to the Licensor shall be under the terms and conditions of
+      this License, without any additional terms or conditions.
+      Notwithstanding the above, nothing herein shall supersede or modify
+      the terms of any separate license agreement you may have executed
+      with Licensor regarding such Contributions.
+
+   6. Trademarks. This License does not grant permission to use the trade
+      names, trademarks, service marks, or product names of the Licensor,
+      except as required for reasonable and customary use in describing the
+      origin of the Work and reproducing the content of the NOTICE file.
+
+   7. Disclaimer of Warranty. Unless required by applicable law or
+      agreed to in writing, Licensor provides the Work (and each
+      Contributor provides its Contributions) on an "AS IS" BASIS,
+      WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or
+      implied, including, without limitation, any warranties or conditions
+      of TITLE, NON-INFRINGEMENT, MERCHANTABILITY, or FITNESS FOR A
+      PARTICULAR PURPOSE. You are solely responsible for determining the
+      appropriateness of using or redistributing the Work and assume any
+      risks associated with Your exercise of permissions under this License.
+
+   8. Limitation of Liability. In no event and under no legal theory,
+      whether in tort (including negligence), contract, or otherwise,
+      unless required by applicable law (such as deliberate and grossly
+      negligent acts) or agreed to in writing, shall any Contributor be
+      liable to You for damages, including any direct, indirect, special,
+      incidental, or consequential damages of any character arising as a
+      result of this License or out of the use or inability to use the
+      Work (including but not limited to damages for loss of goodwill,
+      work stoppage, computer failure or malfunction, or any and all
+      other commercial damages or losses), even if such Contributor
+      has been advised of the possibility of such damages.
+
+   9. Accepting Warranty or Additional Liability. While redistributing
+      the Work or Derivative Works thereof, You may choose to offer,
+      and charge a fee for, acceptance of support, warranty, indemnity,
+      or other liability obligations and/or rights consistent with this
+      License. However, in accepting such obligations, You may act only
+      on Your own behalf and on Your sole responsibility, not on behalf
+      of any other Contributor, and only if You agree to indemnify,
+      defend, and hold each Contributor harmless for any liability
+      incurred by, or claims asserted against, such Contributor by reason
+      of your accepting any such warranty or additional liability.
+
+----
+
+Permission is hereby granted, free of charge, to any
+person obtaining a copy of this software and associated
+documentation files (the "Software"), to deal in the
+Software without restriction, including without
+limitation the rights to use, copy, modify, merge,
+publish, distribute, sublicense, and/or sell copies of
+the Software, and to permit persons to whom the Software
+is furnished to do so, subject to the following
+conditions:
+
+The above copyright notice and this permission notice
+shall be included in all copies or substantial portions
+of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF
+ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED
+TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A
+PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT
+SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY
+CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION
+OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR
+IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
+DEALINGS IN THE SOFTWARE.
 ```
 
 ### sha256-696759d65dfe558ff7d9f031c76db19ec5c0767470fb67c4e8d990820d1e99c9
@@ -10983,8 +12388,7 @@ DEALINGS IN THE SOFTWARE.
 
 Used by:
 
-- `dirs 5.0.1 / LICENSE-MIT`
-- `dirs-sys 0.4.1 / LICENSE-MIT`
+- `dirs 6.0.0 / LICENSE-MIT`
 - `dirs-sys 0.5.0 / LICENSE-MIT`
 
 ```text
@@ -11007,107 +12411,6 @@ AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
-```
-
-### sha256-6a73f9541c2de74158c0e7cf6b0a58ef774f5a780bf191f2d7ec9cc53efe2bf2
-
-Used by:
-
-- `epaint_default_fonts 0.35.0 / fonts/OFL.txt`
-
-```text
-This Font Software is licensed under the SIL Open Font License,
-Version 1.1.
-
-This license is copied below, and is also available with a FAQ at:
-http://scripts.sil.org/OFL
-
------------------------------------------------------------
-SIL OPEN FONT LICENSE Version 1.1 - 26 February 2007
------------------------------------------------------------
-
-PREAMBLE
-The goals of the Open Font License (OFL) are to stimulate worldwide
-development of collaborative font projects, to support the font
-creation efforts of academic and linguistic communities, and to
-provide a free and open framework in which fonts may be shared and
-improved in partnership with others.
-
-The OFL allows the licensed fonts to be used, studied, modified and
-redistributed freely as long as they are not sold by themselves. The
-fonts, including any derivative works, can be bundled, embedded,
-redistributed and/or sold with any software provided that any reserved
-names are not used by derivative works. The fonts and derivatives,
-however, cannot be released under any other type of license. The
-requirement for fonts to remain under this license does not apply to
-any document created using the fonts or their derivatives.
-
-DEFINITIONS
-"Font Software" refers to the set of files released by the Copyright
-Holder(s) under this license and clearly marked as such. This may
-include source files, build scripts and documentation.
-
-"Reserved Font Name" refers to any names specified as such after the
-copyright statement(s).
-
-"Original Version" refers to the collection of Font Software
-components as distributed by the Copyright Holder(s).
-
-"Modified Version" refers to any derivative made by adding to,
-deleting, or substituting -- in part or in whole -- any of the
-components of the Original Version, by changing formats or by porting
-the Font Software to a new environment.
-
-"Author" refers to any designer, engineer, programmer, technical
-writer or other person who contributed to the Font Software.
-
-PERMISSION & CONDITIONS
-Permission is hereby granted, free of charge, to any person obtaining
-a copy of the Font Software, to use, study, copy, merge, embed,
-modify, redistribute, and sell modified and unmodified copies of the
-Font Software, subject to the following conditions:
-
-1) Neither the Font Software nor any of its individual components, in
-Original or Modified Versions, may be sold by itself.
-
-2) Original or Modified Versions of the Font Software may be bundled,
-redistributed and/or sold with any software, provided that each copy
-contains the above copyright notice and this license. These can be
-included either as stand-alone text files, human-readable headers or
-in the appropriate machine-readable metadata fields within text or
-binary files as long as those fields can be easily viewed by the user.
-
-3) No Modified Version of the Font Software may use the Reserved Font
-Name(s) unless explicit written permission is granted by the
-corresponding Copyright Holder. This restriction only applies to the
-primary font name as presented to the users.
-
-4) The name(s) of the Copyright Holder(s) or the Author(s) of the Font
-Software shall not be used to promote, endorse or advertise any
-Modified Version, except to acknowledge the contribution(s) of the
-Copyright Holder(s) and the Author(s) or with their explicit written
-permission.
-
-5) The Font Software, modified or unmodified, in part or in whole,
-must be distributed entirely under this license, and must not be
-distributed under any other license. The requirement for fonts to
-remain under this license does not apply to any document created using
-the Font Software.
-
-TERMINATION
-This license becomes null and void if any of the above conditions are
-not met.
-
-DISCLAIMER
-THE FONT SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,
-EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO ANY WARRANTIES OF
-MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT
-OF COPYRIGHT, PATENT, TRADEMARK, OR OTHER RIGHT. IN NO EVENT SHALL THE
-COPYRIGHT HOLDER BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY,
-INCLUDING ANY GENERAL, SPECIAL, INDIRECT, INCIDENTAL, OR CONSEQUENTIAL
-DAMAGES, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
-FROM, OUT OF THE USE OR INABILITY TO USE THE FONT SOFTWARE OR FROM
-OTHER DEALINGS IN THE FONT SOFTWARE.
 ```
 
 ### sha256-6abdec69ada0c5f06d4819d9a0db0824ce54d610665df0b64c774480db9c1f2a
@@ -11474,7 +12777,9 @@ DEALINGS IN THE SOFTWARE.
 Used by:
 
 - `serde_spanned 1.1.1 / LICENSE-MIT`
+- `toml 0.9.12+spec-1.1.0 / LICENSE-MIT`
 - `toml 1.1.2+spec-1.1.0 / LICENSE-MIT`
+- `toml_datetime 0.7.5+spec-1.1.0 / LICENSE-MIT`
 - `toml_datetime 1.1.1+spec-1.1.0 / LICENSE-MIT`
 - `toml_parser 1.1.2+spec-1.1.0 / LICENSE-MIT`
 - `toml_writer 1.1.1+spec-1.1.0 / LICENSE-MIT`
@@ -11559,6 +12864,7 @@ SOFTWARE.
 
 Used by:
 
+- `alloc-stdlib 0.2.4 / standard text for BSD-3-Clause (the crate includes no separate file)`
 - `x25519-dalek 2.0.1 / LICENSE`
 
 ```text
@@ -11599,7 +12905,6 @@ Used by:
 
 - `hyper-rustls 0.27.9 / LICENSE-MIT`
 - `rustls 0.23.41 / LICENSE-MIT`
-- `rustls-native-certs 0.8.4 / LICENSE-MIT`
 
 ```text
 Copyright (c) 2016 Joseph Birr-Pixton <jpixton@gmail.com>
@@ -11696,22 +13001,6 @@ CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION
 OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR
 IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 DEALINGS IN THE SOFTWARE.
-```
-
-### sha256-7101390b4c8edd752f4c0de47f35d61b44d9cf0ee8dd032115e25644e277cfff
-
-Used by:
-
-- `fax 0.2.7 / LICENSE`
-
-```text
-Copyright © 2021 The pdf-rs contributers.
-
-Permission is hereby granted, free of charge, to any person obtaining a copy of this software and associated documentation files (the “Software”), to deal in the Software without restriction, including without limitation the rights to use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of the Software, and to permit persons to whom the Software is furnished to do so, subject to the following conditions:
-
-The above copyright notice and this permission notice shall be included in all copies or substantial portions of the Software.
-
-THE SOFTWARE IS PROVIDED “AS IS”, WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 ```
 
 ### sha256-71f321038b088358004bee991635ac09e4c703bec467d3c30c06992c0595f189
@@ -11888,11 +13177,40 @@ use or other dealings in these Data Files or Software without prior
 written authorization of the copyright holder.
 ```
 
+### sha256-74f180f4d19f51aede780e1884b37d02c19cbbad872f8ca3b6450288db66e5cd
+
+Used by:
+
+- `softbuffer 0.4.8 / LICENSE-MIT`
+
+```text
+Copyright 2022 Kirill Chibisov
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights to
+use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies
+of the Software, and to permit persons to whom the Software is furnished to do
+so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
+THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+```
+
 ### sha256-751963a8b88c0e3a9f27e98933079fbcf09b9998b2c13ac49c2e4d58444520d6
 
 Used by:
 
 - `reqwest 0.12.28 / LICENSE-APACHE`
+- `reqwest 0.13.4 / LICENSE-APACHE`
 
 ```text
                               Apache License
@@ -12104,8 +13422,9 @@ Used by:
 
 - `either 1.16.0 / LICENSE-MIT`
 - `itertools 0.14.0 / LICENSE-MIT`
-- `petgraph 0.8.3 / LICENSE-MIT`
 - `rawpointer 0.2.1 / LICENSE-MIT`
+- `serde_with 3.21.0 / LICENSE-MIT`
+- `serde_with_macros 3.21.0 / LICENSE-MIT`
 
 ```text
 Copyright (c) 2015
@@ -12139,7 +13458,6 @@ DEALINGS IN THE SOFTWARE.
 
 Used by:
 
-- `weezl 0.1.12 / LICENSE-MIT`
 - `weezl 0.2.1 / LICENSE-MIT`
 
 ```text
@@ -12655,16 +13973,6 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 ```
 
-### sha256-7a8afa0578009eee56ec5462cebfe0f08648102f97e331ae02b5753a3f672bb1
-
-Used by:
-
-- `harfrust 0.7.0 / LICENSE`
-
-```text
-../LICENSE
-```
-
 ### sha256-7abd9b6960dcf7d4d0a48606a5b71bfe37d472db68d70637f3a58a56785f1621
 
 Used by:
@@ -12691,6 +13999,8 @@ Used by:
 
 Used by:
 
+- `cpp_demangle 0.5.1 / LICENSE-MIT`
+- `gimli 0.33.0 / LICENSE-MIT`
 - `heck 0.5.0 / LICENSE-MIT`
 - `unicode-bidi 0.3.18 / LICENSE-MIT`
 - `unicode-normalization 0.1.25 / LICENSE-MIT`
@@ -12763,13 +14073,70 @@ NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
 SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 ```
 
+### sha256-7ca6700600dfa9c9497bf5556365067daa802c871ea78239f129309c7a2048f7
+
+Used by:
+
+- `precomputed-hash 0.1.1 / LICENSE`
+
+```text
+MIT License
+
+Copyright (c) 2017 Emilio Cobos Álvarez
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+```
+
+### sha256-7ccef0d35e8507fa02d7e904a5277d62723f9ec576d52f6a865cab7b4dbf12ad
+
+Used by:
+
+- `window-vibrancy 0.6.0 / LICENSE.spdx`
+
+```text
+SPDXVersion: SPDX-2.1
+DataLicense: CC0-1.0
+PackageName: window-vibrancy
+DataFormat: SPDXRef-1
+PackageSupplier: Organization: The Tauri Programme in the Commons Conservancy
+PackageHomePage: https://tauri.app
+PackageLicenseDeclared: Apache-2.0
+PackageLicenseDeclared: MIT
+PackageCopyrightText: 2020-2022, The Tauri Programme in the Commons Conservancy
+PackageSummary: <text>Make your windows vibrant.
+                </text>
+PackageComment: <text>The package includes the following libraries; see
+Relationship information.
+                </text>
+Created: 2020-05-20T09:00:00Z
+PackageDownloadLocation: git://github.com/tauri-apps/window-vibrancy
+PackageDownloadLocation: git+https://github.com/tauri-apps/window-vibrancy.git
+PackageDownloadLocation: git+ssh://github.com/tauri-apps/window-vibrancy.git
+Creator: Person: Daniel Thompson-Yvetot
+```
+
 ### sha256-7cfafc877eccc46c0e346ccbaa5c51bb6b894d2b818e617d970211e232785ad4
 
 Used by:
 
 - `hyper-rustls 0.27.9 / LICENSE-ISC`
 - `rustls 0.23.41 / LICENSE-ISC`
-- `rustls-native-certs 0.8.4 / LICENSE-ISC`
 
 ```text
 ISC License (ISC)
@@ -12789,53 +14156,19 @@ ACTION, ARISING OUT OF OR IN CONNECTION WITH THE USE OR PERFORMANCE OF
 THIS SOFTWARE.
 ```
 
-### sha256-7dc1552e88f49132cb358b1b962fc5e79fa42d70bcbb88c526d33e45b8e98036
-
-Used by:
-
-- `litrs 1.0.0 / LICENSE-MIT`
-
-```text
-Copyright (c) 2020 Project Developers
-
-Permission is hereby granted, free of charge, to any
-person obtaining a copy of this software and associated
-documentation files (the "Software"), to deal in the
-Software without restriction, including without
-limitation the rights to use, copy, modify, merge,
-publish, distribute, sublicense, and/or sell copies of
-the Software, and to permit persons to whom the Software
-is furnished to do so, subject to the following
-conditions:
-
-The above copyright notice and this permission notice
-shall be included in all copies or substantial portions
-of the Software.
-
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF
-ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED
-TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A
-PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT
-SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY
-CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION
-OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR
-IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
-DEALINGS IN THE SOFTWARE.
-```
-
 ### sha256-7e12e5df4bae12cb21581ba157ced20e1986a0508dd10d0e8a4ab9a4cf94e85c
 
 Used by:
 
 - `aho-corasick 1.1.4 / UNLICENSE`
 - `byteorder 1.5.0 / UNLICENSE`
-- `byteorder-lite 0.1.0 / UNLICENSE`
 - `jiff 0.2.32 / UNLICENSE`
 - `jiff-static 0.2.32 / UNLICENSE`
 - `jiff-tzdb 0.1.8 / UNLICENSE`
 - `jiff-tzdb-platform 0.1.3 / UNLICENSE`
 - `memchr 2.8.3 / UNLICENSE`
 - `same-file 1.0.6 / UNLICENSE`
+- `termcolor 1.4.1 / UNLICENSE`
 - `walkdir 2.5.0 / UNLICENSE`
 - `winapi-util 0.1.11 / UNLICENSE`
 
@@ -12894,42 +14227,6 @@ AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
-```
-
-### sha256-7f0f4f8802c102d35110806d1755b7681127575b644f64750810cc47fa78df5b
-
-Used by:
-
-- `webbrowser 1.2.1 / LICENSE-MIT`
-
-```text
-The MIT License (MIT)
-
-Copyright (c) 2015-2022 Amod Malviya
-
-Permission is hereby granted, free of charge, to any
-person obtaining a copy of this software and associated
-documentation files (the "Software"), to deal in the
-Software without restriction, including without
-limitation the rights to use, copy, modify, merge,
-publish, distribute, sublicense, and/or sell copies of
-the Software, and to permit persons to whom the Software
-is furnished to do so, subject to the following
-conditions:
-
-The above copyright notice and this permission notice
-shall be included in all copies or substantial portions
-of the Software.
-
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF
-ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED
-TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A
-PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT
-SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY
-CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION
-OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR
-IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
-DEALINGS IN THE SOFTWARE.
 ```
 
 ### sha256-7fe7e5e13e445074314ba0aa12ec2e71132931632876ba27b98a1020cf24eb57
@@ -13151,11 +14448,12 @@ END OF TERMS AND CONDITIONS
 
 Used by:
 
+- `bit-set 0.8.0 / LICENSE-APACHE`
+- `bit-vec 0.8.0 / LICENSE-APACHE`
 - `defmt 1.1.1 / LICENSE-APACHE`
 - `defmt-macros 1.1.1 / LICENSE-APACHE`
 - `hashlink 0.10.0 / LICENSE-APACHE`
 - `minimal-lexical 0.2.1 / LICENSE-APACHE`
-- `widestring 0.4.3 / LICENSE-APACHE`
 
 ```text
                               Apache License
@@ -13820,8 +15118,6 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 Used by:
 
-- `bytemuck 1.25.0 / LICENSE-ZLIB`
-- `bytemuck_derive 1.10.2 / LICENSE-ZLIB`
 - `tinyvec 1.11.0 / LICENSE-ZLIB.md`
 
 ```text
@@ -13857,6 +15153,42 @@ ANY SPECIAL, DIRECT, INDIRECT, OR CONSEQUENTIAL DAMAGES OR ANY DAMAGES
 WHATSOEVER RESULTING FROM LOSS OF USE, DATA OR PROFITS, WHETHER IN
 AN ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT
 OF OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
+```
+
+### sha256-86dd7f026f916daf7511e39951ad8ea8cf55a8db67ae64060dacf829761c18f3
+
+Used by:
+
+- `html5ever 0.38.0 / LICENSE-MIT`
+- `markup5ever 0.38.0 / LICENSE-MIT`
+- `web_atoms 0.2.5 / LICENSE-MIT`
+
+```text
+Copyright (c) 2014 The html5ever Project Developers
+
+Permission is hereby granted, free of charge, to any
+person obtaining a copy of this software and associated
+documentation files (the "Software"), to deal in the
+Software without restriction, including without
+limitation the rights to use, copy, modify, merge,
+publish, distribute, sublicense, and/or sell copies of
+the Software, and to permit persons to whom the Software
+is furnished to do so, subject to the following
+conditions:
+
+The above copyright notice and this permission notice
+shall be included in all copies or substantial portions
+of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF
+ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED
+TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A
+PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT
+SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY
+CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION
+OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR
+IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
+DEALINGS IN THE SOFTWARE.
 ```
 
 ### sha256-8764a597675778ddfd4e25f81b08a05dbcf089ac05662df7613fe67f150e3aa2
@@ -14103,6 +15435,36 @@ Used by:
    limitations under the License.
 ```
 
+### sha256-87f7527b1066337751f7f4d717089bf514ff8f7ee7d66c4c5b891b09e744ec11
+
+Used by:
+
+- `json-patch 3.0.1 / LICENSE-MIT`
+
+```text
+MIT License
+
+Copyright (c) 2017 Ivan Dubrov
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+```
+
 ### sha256-88dd8bac60708839888df45dd46fb390f96c1317b72a632f16e064282218a723
 
 Used by:
@@ -14176,40 +15538,35 @@ IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 DEALINGS IN THE SOFTWARE.
 ```
 
-### sha256-8a62fa27ffdccc3df19dce90f8bb3d572e27aecffc1a383d0c2601834dcec434
+### sha256-8a35369f3ca263b3c62fbb5032947e53b6bfebc6c8a4d1bb982de1c069f6fba5
 
 Used by:
 
-- `font-types 0.11.3 / LICENSE-MIT`
-- `read-fonts 0.39.2 / LICENSE-MIT`
-- `skrifa 0.42.1 / LICENSE-MIT`
+- `derive_more 2.1.1 / LICENSE`
+- `derive_more-impl 2.1.1 / LICENSE`
 
 ```text
-Copyright (c) 2019 Colin Rothfels
+The MIT License (MIT)
 
-Permission is hereby granted, free of charge, to any
-person obtaining a copy of this software and associated
-documentation files (the "Software"), to deal in the
-Software without restriction, including without
-limitation the rights to use, copy, modify, merge,
-publish, distribute, sublicense, and/or sell copies of
-the Software, and to permit persons to whom the Software
-is furnished to do so, subject to the following
-conditions:
+Copyright (c) 2016 Jelte Fennema
 
-The above copyright notice and this permission notice
-shall be included in all copies or substantial portions
-of the Software.
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
 
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF
-ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED
-TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A
-PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT
-SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY
-CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION
-OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR
-IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
-DEALINGS IN THE SOFTWARE.
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
 ```
 
 ### sha256-8ada45cd9f843acf64e4722ae262c622a2b3b3007c7310ef36ac1061a30f6adb
@@ -14217,7 +15574,7 @@ DEALINGS IN THE SOFTWARE.
 Used by:
 
 - `adler2 2.0.1 / LICENSE-APACHE`
-- `home 0.5.12 / LICENSE-APACHE`
+- `cargo-platform 0.1.9 / LICENSE-APACHE`
 
 ```text
                               Apache License
@@ -14961,10 +16318,13 @@ Used by:
 
 - `darling 0.20.11 / LICENSE`
 - `darling 0.23.0 / LICENSE`
+- `darling 0.24.1 / LICENSE`
 - `darling_core 0.20.11 / LICENSE`
 - `darling_core 0.23.0 / LICENSE`
+- `darling_core 0.24.1 / LICENSE`
 - `darling_macro 0.20.11 / LICENSE`
 - `darling_macro 0.23.0 / LICENSE`
+- `darling_macro 0.24.1 / LICENSE`
 
 ```text
 MIT License
@@ -15064,12 +16424,11 @@ The above copyright notice and this permission notice shall be included in all c
 THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 ```
 
-### sha256-90bf2d659c43045111b65c733ab2a6d4cbcb422a098368c8c58a9ba3db4ed0c5
+### sha256-908a661cf763bddfa04f2739bea561be62a246f03ad53fcb2272d3ddbd1d943f
 
 Used by:
 
-- `moxcms 0.8.1 / LICENSE-APACHE.md`
-- `pxfm 0.1.30 / LICENSE-APACHE.md`
+- `swift-rs 1.0.7 / LICENSE-APACHE`
 
 ```text
                                  Apache License
@@ -15252,7 +16611,7 @@ Used by:
    APPENDIX: How to apply the Apache License to your work.
 
       To apply the Apache License to your work, attach the following
-      boilerplate notice, with the fields enclosed by brackets "[]"
+      boilerplate notice, with the fields enclosed by brackets "{}"
       replaced with your own identifying information. (Don't include
       the brackets!)  The text should be enclosed in the appropriate
       comment syntax for the file format. We also recommend that a
@@ -15260,7 +16619,7 @@ Used by:
       same "printed page" as the copyright notice for easier
       identification within third-party archives.
 
-   Copyright 2024 Radzivon Bartoshyk
+   Copyright 2023 The swift-rs developers 
 
    Licensed under the Apache License, Version 2.0 (the "License");
    you may not use this file except in compliance with the License.
@@ -15335,6 +16694,34 @@ CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION
 OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR
 IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 DEALINGS IN THE SOFTWARE.
+```
+
+### sha256-917c0fe02296eec634820b2758519e39278716bb0104f055cfee771bd7a4c534
+
+Used by:
+
+- `reqwest 0.13.4 / LICENSE-MIT`
+
+```text
+Copyright (c) 2016-2026 Sean McArthur
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in
+all copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+THE SOFTWARE.
 ```
 
 ### sha256-91e934255ba3b2f21103d68c5581c23ef34aa95c4628e4405b8c901935e11c69
@@ -15510,6 +16897,42 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 THE SOFTWARE.
 ```
 
+### sha256-9766e5d58cae9d457057c7cdb2cde8bf357624329c1e5cc50ca9210149b77aed
+
+Used by:
+
+- `dom_query 0.27.0 / LICENSE`
+
+```text
+MIT License
+
+Copyright (c) 2023 Mykola Humanov
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+
+---
+
+This project contains portions of code and architectural concepts originally 
+derived from the "nipper" project (https://github.com/importcjj/nipper), 
+developed by Chen Jiaju, licensed under the MIT License and the Apache License 2.0 (dual licensed).
+```
+
 ### sha256-98181e7249d0c01737645ec982499ce99a0f07eb8f7d625b8840d799d10dbc01
 
 Used by:
@@ -15571,22 +16994,6 @@ AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
-```
-
-### sha256-9938ad67a06f6207e9694257339e93e402d7eecbd19788d82e4455ad14d71789
-
-Used by:
-
-- `petgraph 0.8.3 / assets/images/LICENSE.md`
-
-```text
-Graphosaurus (c) by the petgraph project.
-
-Graphosaurus is licensed under a
-Creative Commons Attribution-ShareAlike 4.0 International License.
-
-You should have received a copy of the license along with this
-work.  If not, see <http://creativecommons.org/licenses/by-sa/4.0/>.
 ```
 
 ### sha256-99864c445c106e20fb256d2c49d6eff14ed8f0191bf7a050189e6ad1cd040322
@@ -15799,6 +17206,36 @@ See the License for the specific language governing permissions and
 limitations under the License.
 ```
 
+### sha256-9c1db6b7e7eb83e1cb2af973b5df2bdc63651ede0f38506ab98dfa0940487759
+
+Used by:
+
+- `tauri-plugin-single-instance 2.4.3 / LICENSE.spdx`
+- `tauri-plugin-updater 2.10.1 / LICENSE.spdx`
+
+```text
+SPDXVersion: SPDX-2.1
+DataLicense: CC0-1.0
+PackageName: tauri
+DataFormat: SPDXRef-1
+PackageSupplier: Organization: The Tauri Programme in the Commons Conservancy
+PackageHomePage: https://tauri.app
+PackageLicenseDeclared: Apache-2.0
+PackageLicenseDeclared: MIT
+PackageCopyrightText: 2019-2022, The Tauri Programme in the Commons Conservancy
+PackageSummary: <text>Tauri is a rust project that enables developers to make secure
+and small desktop applications using a web frontend.
+                </text>
+PackageComment: <text>The package includes the following libraries; see
+Relationship information.
+                </text>
+Created: 2019-05-20T09:00:00Z
+PackageDownloadLocation: git://github.com/tauri-apps/tauri
+PackageDownloadLocation: git+https://github.com/tauri-apps/tauri.git
+PackageDownloadLocation: git+ssh://github.com/tauri-apps/tauri.git
+Creator: Person: Daniel Thompson-Yvetot
+```
+
 ### sha256-9c5a80639a57c1c945570e7ebbca0706305849ce3c098021325cca9db2f7acc4
 
 Used by:
@@ -15864,23 +17301,41 @@ IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 DEALINGS IN THE SOFTWARE.
 ```
 
-### sha256-9df9ba60a11af705f2e451b53762686e615d86f76b169cf075c3237730dbd7e2
+### sha256-9dd42ea92cff2ede5cd477cbfcce051b2d0115c0ac7f368ee88cb545055dff1d
 
 Used by:
 
-- `bytemuck 1.25.0 / LICENSE-MIT`
-- `bytemuck_derive 1.10.2 / LICENSE-MIT`
+- `tauri 2.11.5 / LICENSE_MIT`
+- `tauri-build 2.6.3 / LICENSE_MIT`
+- `tauri-codegen 2.6.3 / LICENSE_MIT`
+- `tauri-macros 2.6.3 / LICENSE_MIT`
+- `tauri-plugin-updater 2.10.1 / LICENSE_MIT`
+- `tauri-runtime 2.11.3 / LICENSE_MIT`
+- `tauri-runtime-wry 2.11.4 / LICENSE_MIT`
+- `tauri-utils 2.9.3 / LICENSE_MIT`
 
 ```text
 MIT License
 
-Copyright (c) 2019 Daniel "Lokathor" Gee.
+Copyright (c) 2017 - Present Tauri Apps Contributors
 
-Permission is hereby granted, free of charge, to any person obtaining a copy of this software and associated documentation files (the "Software"), to deal in the Software without restriction, including without limitation the rights to use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of the Software, and to permit persons to whom the Software is furnished to do so, subject to the following conditions:
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
 
-The above copyright notice and this permission notice (including the next paragraph) shall be included in all copies or substantial portions of the Software.
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
 
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
 ```
 
 ### sha256-9e0a97848ea543aef745c98e84fde696a9a3e0735538f6daefdd3cb1942effc1
@@ -16093,84 +17548,6 @@ IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 DEALINGS IN THE SOFTWARE.
 ```
 
-### sha256-a14f7d685a79c0f4fb64aee305527a6d5fa55f2401f4e6d688d7b1301868e6c0
-
-Used by:
-
-- `font-types 0.11.3 / LICENSE-APACHE`
-- `read-fonts 0.39.2 / LICENSE-APACHE`
-- `skrifa 0.42.1 / LICENSE-APACHE`
-
-```text
-Apache License
-
-Version 2.0, January 2004
-
-http://www.apache.org/licenses/
-
-TERMS AND CONDITIONS FOR USE, REPRODUCTION, AND DISTRIBUTION
-
-1. Definitions.
-
-"License" shall mean the terms and conditions for use, reproduction, and distribution as defined by Sections 1 through 9 of this document.
-
-"Licensor" shall mean the copyright owner or entity authorized by the copyright owner that is granting the License.
-
-"Legal Entity" shall mean the union of the acting entity and all other entities that control, are controlled by, or are under common control with that entity. For the purposes of this definition, "control" means (i) the power, direct or indirect, to cause the direction or management of such entity, whether by contract or otherwise, or (ii) ownership of fifty percent (50%) or more of the outstanding shares, or (iii) beneficial ownership of such entity.
-
-"You" (or "Your") shall mean an individual or Legal Entity exercising permissions granted by this License.
-
-"Source" form shall mean the preferred form for making modifications, including but not limited to software source code, documentation source, and configuration files.
-
-"Object" form shall mean any form resulting from mechanical transformation or translation of a Source form, including but not limited to compiled object code, generated documentation, and conversions to other media types.
-
-"Work" shall mean the work of authorship, whether in Source or Object form, made available under the License, as indicated by a copyright notice that is included in or attached to the work (an example is provided in the Appendix below).
-
-"Derivative Works" shall mean any work, whether in Source or Object form, that is based on (or derived from) the Work and for which the editorial revisions, annotations, elaborations, or other modifications represent, as a whole, an original work of authorship. For the purposes of this License, Derivative Works shall not include works that remain separable from, or merely link (or bind by name) to the interfaces of, the Work and Derivative Works thereof.
-
-"Contribution" shall mean any work of authorship, including the original version of the Work and any modifications or additions to that Work or Derivative Works thereof, that is intentionally submitted to Licensor for inclusion in the Work by the copyright owner or by an individual or Legal Entity authorized to submit on behalf of the copyright owner. For the purposes of this definition, "submitted" means any form of electronic, verbal, or written communication sent to the Licensor or its representatives, including but not limited to communication on electronic mailing lists, source code control systems, and issue tracking systems that are managed by, or on behalf of, the Licensor for the purpose of discussing and improving the Work, but excluding communication that is conspicuously marked or otherwise designated in writing by the copyright owner as "Not a Contribution."
-
-"Contributor" shall mean Licensor and any individual or Legal Entity on behalf of whom a Contribution has been received by Licensor and subsequently incorporated within the Work.
-
-2. Grant of Copyright License. Subject to the terms and conditions of this License, each Contributor hereby grants to You a perpetual, worldwide, non-exclusive, no-charge, royalty-free, irrevocable copyright license to reproduce, prepare Derivative Works of, publicly display, publicly perform, sublicense, and distribute the Work and such Derivative Works in Source or Object form.
-
-3. Grant of Patent License. Subject to the terms and conditions of this License, each Contributor hereby grants to You a perpetual, worldwide, non-exclusive, no-charge, royalty-free, irrevocable (except as stated in this section) patent license to make, have made, use, offer to sell, sell, import, and otherwise transfer the Work, where such license applies only to those patent claims licensable by such Contributor that are necessarily infringed by their Contribution(s) alone or by combination of their Contribution(s) with the Work to which such Contribution(s) was submitted. If You institute patent litigation against any entity (including a cross-claim or counterclaim in a lawsuit) alleging that the Work or a Contribution incorporated within the Work constitutes direct or contributory patent infringement, then any patent licenses granted to You under this License for that Work shall terminate as of the date such litigation is filed.
-
-4. Redistribution. You may reproduce and distribute copies of the Work or Derivative Works thereof in any medium, with or without modifications, and in Source or Object form, provided that You meet the following conditions:
-
-You must give any other recipients of the Work or Derivative Works a copy of this License; and
-You must cause any modified files to carry prominent notices stating that You changed the files; and
-You must retain, in the Source form of any Derivative Works that You distribute, all copyright, patent, trademark, and attribution notices from the Source form of the Work, excluding those notices that do not pertain to any part of the Derivative Works; and
-If the Work includes a "NOTICE" text file as part of its distribution, then any Derivative Works that You distribute must include a readable copy of the attribution notices contained within such NOTICE file, excluding those notices that do not pertain to any part of the Derivative Works, in at least one of the following places: within a NOTICE text file distributed as part of the Derivative Works; within the Source form or documentation, if provided along with the Derivative Works; or, within a display generated by the Derivative Works, if and wherever such third-party notices normally appear. The contents of the NOTICE file are for informational purposes only and do not modify the License. You may add Your own attribution notices within Derivative Works that You distribute, alongside or as an addendum to the NOTICE text from the Work, provided that such additional attribution notices cannot be construed as modifying the License. 
-
-You may add Your own copyright statement to Your modifications and may provide additional or different license terms and conditions for use, reproduction, or distribution of Your modifications, or for any such Derivative Works as a whole, provided Your use, reproduction, and distribution of the Work otherwise complies with the conditions stated in this License.
-5. Submission of Contributions. Unless You explicitly state otherwise, any Contribution intentionally submitted for inclusion in the Work by You to the Licensor shall be under the terms and conditions of this License, without any additional terms or conditions. Notwithstanding the above, nothing herein shall supersede or modify the terms of any separate license agreement you may have executed with Licensor regarding such Contributions.
-
-6. Trademarks. This License does not grant permission to use the trade names, trademarks, service marks, or product names of the Licensor, except as required for reasonable and customary use in describing the origin of the Work and reproducing the content of the NOTICE file.
-
-7. Disclaimer of Warranty. Unless required by applicable law or agreed to in writing, Licensor provides the Work (and each Contributor provides its Contributions) on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied, including, without limitation, any warranties or conditions of TITLE, NON-INFRINGEMENT, MERCHANTABILITY, or FITNESS FOR A PARTICULAR PURPOSE. You are solely responsible for determining the appropriateness of using or redistributing the Work and assume any risks associated with Your exercise of permissions under this License.
-
-8. Limitation of Liability. In no event and under no legal theory, whether in tort (including negligence), contract, or otherwise, unless required by applicable law (such as deliberate and grossly negligent acts) or agreed to in writing, shall any Contributor be liable to You for damages, including any direct, indirect, special, incidental, or consequential damages of any character arising as a result of this License or out of the use or inability to use the Work (including but not limited to damages for loss of goodwill, work stoppage, computer failure or malfunction, or any and all other commercial damages or losses), even if such Contributor has been advised of the possibility of such damages.
-
-9. Accepting Warranty or Additional Liability. While redistributing the Work or Derivative Works thereof, You may choose to offer, and charge a fee for, acceptance of support, warranty, indemnity, or other liability obligations and/or rights consistent with this License. However, in accepting such obligations, You may act only on Your own behalf and on Your sole responsibility, not on behalf of any other Contributor, and only if You agree to indemnify, defend, and hold each Contributor harmless for any liability incurred by, or claims asserted against, such Contributor by reason of your accepting any such warranty or additional liability.
-
-END OF TERMS AND CONDITIONS
-
-Copyright 2019 Colin Rothfels
-
-Licensed under the Apache License, Version 2.0 (the "License");
-you may not use this file except in compliance with the License.
-You may obtain a copy of the License at
-
-    http://www.apache.org/licenses/LICENSE-2.0
-
-Unless required by applicable law or agreed to in writing, software
-distributed under the License is distributed on an "AS IS" BASIS,
-WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-See the License for the specific language governing permissions and
-limitations under the License.
-```
-
 ### sha256-a2010f343487d3f7618affe54f789f5487602331c0a8d03f49e9a7c547cf0499
 
 Used by:
@@ -16363,9 +17740,7 @@ limitations under the License.
 
 Used by:
 
-- `glutin 0.32.3 / LICENSE`
-- `glutin_egl_sys 0.7.1 / LICENSE`
-- `glutin_wgl_sys 0.6.1 / LICENSE`
+- `softbuffer 0.4.8 / LICENSE-APACHE`
 
 ```text
 Apache License
@@ -16642,26 +18017,31 @@ DEALINGS IN THE SOFTWARE.
 
 Used by:
 
+- `addr2line 0.26.1 / LICENSE-APACHE`
 - `ahash 0.8.12 / LICENSE-APACHE`
+- `arbitrary 1.4.2 / LICENSE-APACHE`
 - `arrayvec 0.7.8 / LICENSE-APACHE`
 - `asn1-rs 0.7.2 / LICENSE-APACHE`
 - `asn1-rs-derive 0.6.0 / LICENSE-APACHE`
 - `atomic-waker 1.1.2 / LICENSE-APACHE`
 - `autocfg 1.5.1 / LICENSE-APACHE`
 - `base64 0.13.1 / LICENSE-APACHE`
+- `base64 0.21.7 / LICENSE-APACHE`
 - `base64 0.22.1 / LICENSE-APACHE`
+- `base64 0.23.1 / LICENSE-APACHE`
 - `bitflags 1.3.2 / LICENSE-APACHE`
 - `bitflags 2.13.0 / LICENSE-APACHE`
 - `bs58 0.5.1 / LICENSE-APACHE`
 - `bumpalo 3.20.3 / LICENSE-APACHE`
+- `camino 1.2.5 / LICENSE-APACHE`
 - `cc 1.2.66 / LICENSE-APACHE`
 - `cfg-if 1.0.4 / LICENSE-APACHE`
-- `cgl 0.3.2 / LICENSE-APACHE`
 - `core-foundation 0.10.1 / LICENSE-APACHE`
 - `core-foundation 0.9.4 / LICENSE-APACHE`
 - `core-foundation-sys 0.8.7 / LICENSE-APACHE`
-- `core-graphics 0.23.2 / LICENSE-APACHE`
-- `core-graphics-types 0.1.3 / LICENSE-APACHE`
+- `core-graphics 0.25.0 / LICENSE-APACHE`
+- `core-graphics-types 0.2.0 / LICENSE-APACHE`
+- `cpp_demangle 0.5.1 / LICENSE-APACHE`
 - `critical-section 1.2.0 / LICENSE-APACHE`
 - `crossbeam-channel 0.5.16 / LICENSE-APACHE`
 - `crossbeam-deque 0.8.7 / LICENSE-APACHE`
@@ -16669,36 +18049,43 @@ Used by:
 - `crossbeam-utils 0.8.22 / LICENSE-APACHE`
 - `curve25519-dalek-derive 0.1.1 / LICENSE-APACHE`
 - `der-parser 10.0.0 / LICENSE-APACHE`
+- `derive_arbitrary 1.4.2 / LICENSE-APACHE`
 - `displaydoc 0.2.6 / LICENSE-APACHE`
 - `either 1.16.0 / LICENSE-APACHE`
+- `embedded-io 0.4.0 / LICENSE-APACHE`
+- `embedded-io 0.6.1 / LICENSE-APACHE`
 - `equivalent 1.0.2 / LICENSE-APACHE`
 - `errno 0.3.14 / LICENSE-APACHE`
-- `euclid 0.22.14 / LICENSE-APACHE`
 - `fastrand 2.4.1 / LICENSE-APACHE`
 - `filetime 0.2.29 / LICENSE-APACHE`
 - `find-msvc-tools 0.1.9 / LICENSE-APACHE`
-- `fixedbitset 0.5.7 / LICENSE-APACHE`
 - `flate2 1.1.9 / LICENSE-APACHE`
 - `fnv 1.0.7 / LICENSE-APACHE`
 - `form_urlencoded 1.2.2 / LICENSE-APACHE`
 - `futures-timer 3.0.4 / LICENSE-APACHE`
-- `glow 0.17.0 / LICENSE-APACHE`
+- `gimli 0.33.0 / LICENSE-APACHE`
+- `glob 0.3.4 / LICENSE-APACHE`
+- `hashbrown 0.12.3 / LICENSE-APACHE`
 - `hashbrown 0.15.5 / LICENSE-APACHE`
 - `hashbrown 0.16.1 / LICENSE-APACHE`
 - `hashbrown 0.17.1 / LICENSE-APACHE`
 - `heck 0.5.0 / LICENSE-APACHE`
+- `html5ever 0.38.0 / LICENSE-APACHE`
 - `httparse 1.10.1 / LICENSE-APACHE`
 - `hyper-rustls 0.27.9 / LICENSE-APACHE`
+- `id-arena 2.3.0 / LICENSE-APACHE`
 - `idna 1.1.0 / LICENSE-APACHE`
 - `idna_adapter 1.2.2 / LICENSE-APACHE`
+- `indexmap 1.9.3 / LICENSE-APACHE`
 - `indexmap 2.14.0 / LICENSE-APACHE`
 - `ipconfig 0.3.4 / LICENSE-APACHE`
 - `itertools 0.14.0 / LICENSE-APACHE`
-- `jobserver 0.1.35 / LICENSE-APACHE`
 - `keyboard-types 0.7.0 / LICENSE-APACHE`
 - `lazy_static 1.5.0 / LICENSE-APACHE`
+- `leb128fmt 0.1.0 / LICENSE-APACHE`
 - `lock_api 0.4.14 / LICENSE-APACHE`
 - `log 0.4.33 / LICENSE-APACHE`
+- `markup5ever 0.38.0 / LICENSE-APACHE`
 - `matrixmultiply 0.3.10 / LICENSE-APACHE`
 - `mime 0.3.17 / LICENSE-APACHE`
 - `muda 0.19.3 / LICENSE-APACHE`
@@ -16707,14 +18094,16 @@ Used by:
 - `num-complex 0.4.6 / LICENSE-APACHE`
 - `num-integer 0.1.46 / LICENSE-APACHE`
 - `num-traits 0.2.19 / LICENSE-APACHE`
+- `object 0.39.1 / LICENSE-APACHE`
 - `oid-registry 0.8.1 / LICENSE-APACHE`
 - `once_cell 1.21.4 / LICENSE-APACHE`
 - `parking_lot 0.12.5 / LICENSE-APACHE`
 - `parking_lot_core 0.9.12 / LICENSE-APACHE`
 - `percent-encoding 2.3.2 / LICENSE-APACHE`
-- `petgraph 0.8.3 / LICENSE-APACHE`
 - `pkg-config 0.3.33 / LICENSE-APACHE`
+- `png 0.17.16 / LICENSE-APACHE`
 - `png 0.18.1 / LICENSE-APACHE`
+- `postcard 1.1.3 / LICENSE-APACHE`
 - `prost 0.14.4 / LICENSE`
 - `prost-derive 0.14.4 / LICENSE`
 - `rawpointer 0.2.1 / LICENSE-APACHE`
@@ -16725,26 +18114,30 @@ Used by:
 - `regex-automata 0.4.15 / LICENSE-APACHE`
 - `regex-syntax 0.8.11 / LICENSE-APACHE`
 - `ring 0.17.14 / src/polyfill/once_cell/LICENSE-APACHE`
-- `ron 0.12.2 / LICENSE-APACHE`
+- `rustc-demangle 0.1.28 / LICENSE-APACHE`
 - `rustc_version 0.4.1 / LICENSE-APACHE`
 - `rusticata-macros 4.1.0 / LICENSE-APACHE`
 - `rustix 1.1.4 / LICENSE-APACHE`
 - `rustls 0.23.41 / LICENSE-APACHE`
-- `rustls-native-certs 0.8.4 / LICENSE-APACHE`
 - `scopeguard 1.2.0 / LICENSE-APACHE`
 - `security-framework 3.7.0 / LICENSE-APACHE`
 - `security-framework-sys 2.17.0 / LICENSE-APACHE`
+- `serde_with 3.21.0 / LICENSE-APACHE`
+- `serde_with_macros 3.21.0 / LICENSE-APACHE`
+- `servo_arc 0.4.3 / LICENSE-APACHE`
 - `signal-hook-registry 1.4.8 / LICENSE-APACHE`
 - `smallvec 1.15.2 / LICENSE-APACHE`
-- `smol_str 0.2.2 / LICENSE-APACHE`
 - `socket2 0.5.10 / LICENSE-APACHE`
 - `socket2 0.6.4 / LICENSE-APACHE`
 - `stable_deref_trait 1.2.1 / LICENSE-APACHE`
+- `string_cache 0.9.0 / LICENSE-APACHE`
+- `string_cache_codegen 0.6.1 / LICENSE-APACHE`
 - `symlink 0.1.0 / LICENSE-APACHE`
 - `system-configuration 0.7.0 / LICENSE-APACHE`
 - `system-configuration-sys 0.6.0 / LICENSE-APACHE`
 - `tar 0.4.46 / LICENSE-APACHE`
 - `tempfile 3.27.0 / LICENSE-APACHE`
+- `tendril 0.5.1 / LICENSE-APACHE`
 - `thread_local 1.1.9 / LICENSE-APACHE`
 - `tray-icon 0.24.1 / LICENSE-APACHE`
 - `unic-langid 0.9.6 / LICENSE-APACHE`
@@ -16759,8 +18152,14 @@ Used by:
 - `uuid 1.23.4 / LICENSE-APACHE`
 - `vcpkg 0.2.15 / LICENSE-APACHE`
 - `version_check 0.9.5 / LICENSE-APACHE`
-- `weezl 0.1.12 / LICENSE-APACHE`
+- `wasm-encoder 0.252.0 / LICENSE-APACHE`
+- `wasmparser 0.252.0 / LICENSE-APACHE`
+- `wasmprinter 0.252.0 / LICENSE-APACHE`
+- `web_atoms 0.2.5 / LICENSE-APACHE`
 - `weezl 0.2.1 / LICENSE-APACHE`
+- `window-vibrancy 0.6.0 / LICENSE-APACHE`
+- `wit-parser 0.252.0 / LICENSE-APACHE`
+- `wry 0.55.1 / LICENSE-APACHE`
 - `x509-parser 0.17.0 / LICENSE-APACHE`
 - `xattr 1.6.1 / LICENSE-APACHE`
 
@@ -16972,7 +18371,26 @@ limitations under the License.
 
 Used by:
 
+- `cranelift-bforest 0.134.3 / LICENSE`
+- `cranelift-codegen 0.134.3 / LICENSE`
+- `cranelift-codegen-meta 0.134.3 / LICENSE`
+- `cranelift-codegen-shared 0.134.3 / LICENSE`
+- `cranelift-control 0.134.3 / LICENSE`
+- `cranelift-entity 0.134.3 / LICENSE`
+- `cranelift-frontend 0.134.3 / LICENSE`
+- `cranelift-native 0.134.3 / LICENSE`
+- `regalloc2 0.15.2 / LICENSE`
 - `rustix 1.1.4 / LICENSE-Apache-2.0_WITH_LLVM-exception`
+- `target-lexicon 0.13.5 / LICENSE`
+- `wasm-encoder 0.252.0 / LICENSE-Apache-2.0_WITH_LLVM-exception`
+- `wasmparser 0.252.0 / LICENSE-Apache-2.0_WITH_LLVM-exception`
+- `wasmprinter 0.252.0 / LICENSE-Apache-2.0_WITH_LLVM-exception`
+- `wasmtime 47.0.3 / LICENSE`
+- `wasmtime-environ 47.0.3 / LICENSE`
+- `wasmtime-internal-cranelift 47.0.3 / LICENSE`
+- `wasmtime-internal-fiber 47.0.3 / LICENSE`
+- `wasmtime-internal-unwinder 47.0.3 / LICENSE`
+- `wit-parser 0.252.0 / LICENSE-Apache-2.0_WITH_LLVM-exception`
 
 ```text
 
@@ -17200,12 +18618,7 @@ Software.
 
 Used by:
 
-- `color 0.3.3 / LICENSE-APACHE`
-- `fearless_simd 0.4.1 / LICENSE-APACHE`
 - `half 2.7.1 / LICENSE-APACHE`
-- `linebender_resource_handle 0.1.1 / LICENSE-APACHE`
-- `vello_common 0.0.9 / LICENSE-APACHE`
-- `vello_cpu 0.0.9 / LICENSE-APACHE`
 - `widestring 1.2.1 / LICENSE-APACHE`
 
 ```text
@@ -17451,9 +18864,12 @@ SOFTWARE.
 
 Used by:
 
-- `ctor 0.2.9 / LICENSE-APACHE`
+- `ctor 0.8.0 / LICENSE-APACHE`
+- `ctor-proc-macro 0.0.7 / LICENSE-APACHE`
 - `dpi 0.1.2 / LICENSE`
-- `winit 0.30.13 / LICENSE`
+- `dtor 0.3.0 / LICENSE-APACHE`
+- `dtor-proc-macro 0.0.6 / LICENSE-APACHE`
+- `tao 0.35.3 / LICENSE`
 
 ```text
 Apache License
@@ -17928,34 +19344,6 @@ The above copyright notice and this permission notice shall be included in all c
 THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 ```
 
-### sha256-aa893340d14b9844625be6a50ac644169a01b52f0211cbf81b09e1874c8cd81d
-
-Used by:
-
-- `document-features 0.2.12 / LICENSE-MIT`
-
-```text
-Copyright (c) 2020 Olivier Goffart <ogoffart@sixtyfps.io>
-
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
-
-The above copyright notice and this permission notice shall be included in all
-copies or substantial portions of the Software.
-
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-SOFTWARE.
-```
-
 ### sha256-aaff376532ea30a0cd5330b9502ad4a4c8bf769c539c87ffe78819d188a18ebf
 
 Used by:
@@ -18169,6 +19557,36 @@ See the License for the specific language governing permissions and
 limitations under the License.
 ```
 
+### sha256-ab499c75a0f0da8e0fe83bf9ba3a27e5c39705310f07107c6c66b69958d2401c
+
+Used by:
+
+- `base64 0.23.1 / LICENSE-MIT`
+
+```text
+The MIT License (MIT)
+
+Copyright (c) 2025 Alice Maz, Marshall Pierce
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in
+all copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+THE SOFTWARE.
+```
+
 ### sha256-ad64fcb9589f162720f3cc5010ad76ca6ad3764e11861f9192c489df176bb71d
 
 Used by:
@@ -18178,41 +19596,6 @@ Used by:
 
 ```text
 Copyright (c) 2020-2023 The RustCrypto Project Developers
-
-Permission is hereby granted, free of charge, to any
-person obtaining a copy of this software and associated
-documentation files (the "Software"), to deal in the
-Software without restriction, including without
-limitation the rights to use, copy, modify, merge,
-publish, distribute, sublicense, and/or sell copies of
-the Software, and to permit persons to whom the Software
-is furnished to do so, subject to the following
-conditions:
-
-The above copyright notice and this permission notice
-shall be included in all copies or substantial portions
-of the Software.
-
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF
-ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED
-TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A
-PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT
-SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY
-CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION
-OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR
-IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
-DEALINGS IN THE SOFTWARE.
-```
-
-### sha256-adf157330f722fe7cfd5964a2a6974eff851b718228c6735724a11706e6f4dec
-
-Used by:
-
-- `vello_common 0.0.9 / LICENSE-MIT`
-- `vello_cpu 0.0.9 / LICENSE-MIT`
-
-```text
-Copyright 2020 the Vello Authors
 
 Permission is hereby granted, free of charge, to any
 person obtaining a copy of this software and associated
@@ -18329,238 +19712,34 @@ IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 DEALINGS IN THE SOFTWARE.
 ```
 
-### sha256-b0e1018ab9da12e3fe3e415f5a8ae37afff663fba3f47b1fc26a29cf682c236b
+### sha256-af76c60594af325c4efdcbcd27f5d34ff441c11f09b46b627b378d04d5aa1f1d
 
 Used by:
 
-- `egui_commonmark 0.24.0 / LICENSE-MIT`
-- `egui_commonmark_backend 0.24.0 / LICENSE-MIT`
+- `tauri-plugin-single-instance 2.4.3 / LICENSE_MIT`
 
 ```text
-Copyright (c) 2022-2025 Erlend Walstad
+MIT License
 
-Permission is hereby granted, free of charge, to any
-person obtaining a copy of this software and associated
-documentation files (the "Software"), to deal in the
-Software without restriction, including without
-limitation the rights to use, copy, modify, merge,
-publish, distribute, sublicense, and/or sell copies of
-the Software, and to permit persons to whom the Software
-is furnished to do so, subject to the following
-conditions:
+Copyright (c) 2017 - Present The Tauri Programme in the Commons Conservancy
 
-The above copyright notice and this permission notice
-shall be included in all copies or substantial portions
-of the Software.
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
 
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF
-ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED
-TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A
-PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT
-SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY
-CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION
-OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR
-IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
-DEALINGS IN THE SOFTWARE.
-```
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
 
-### sha256-b0f7d40eaa9577d99132579866bf1eaf448577dc737582b8a34f1b3e7fab8994
-
-Used by:
-
-- `webbrowser 1.2.1 / LICENSE-APACHE`
-
-```text
-                              Apache License
-                        Version 2.0, January 2004
-                     http://www.apache.org/licenses/
-
-TERMS AND CONDITIONS FOR USE, REPRODUCTION, AND DISTRIBUTION
-
-1. Definitions.
-
-   "License" shall mean the terms and conditions for use, reproduction,
-   and distribution as defined by Sections 1 through 9 of this document.
-
-   "Licensor" shall mean the copyright owner or entity authorized by
-   the copyright owner that is granting the License.
-
-   "Legal Entity" shall mean the union of the acting entity and all
-   other entities that control, are controlled by, or are under common
-   control with that entity. For the purposes of this definition,
-   "control" means (i) the power, direct or indirect, to cause the
-   direction or management of such entity, whether by contract or
-   otherwise, or (ii) ownership of fifty percent (50%) or more of the
-   outstanding shares, or (iii) beneficial ownership of such entity.
-
-   "You" (or "Your") shall mean an individual or Legal Entity
-   exercising permissions granted by this License.
-
-   "Source" form shall mean the preferred form for making modifications,
-   including but not limited to software source code, documentation
-   source, and configuration files.
-
-   "Object" form shall mean any form resulting from mechanical
-   transformation or translation of a Source form, including but
-   not limited to compiled object code, generated documentation,
-   and conversions to other media types.
-
-   "Work" shall mean the work of authorship, whether in Source or
-   Object form, made available under the License, as indicated by a
-   copyright notice that is included in or attached to the work
-   (an example is provided in the Appendix below).
-
-   "Derivative Works" shall mean any work, whether in Source or Object
-   form, that is based on (or derived from) the Work and for which the
-   editorial revisions, annotations, elaborations, or other modifications
-   represent, as a whole, an original work of authorship. For the purposes
-   of this License, Derivative Works shall not include works that remain
-   separable from, or merely link (or bind by name) to the interfaces of,
-   the Work and Derivative Works thereof.
-
-   "Contribution" shall mean any work of authorship, including
-   the original version of the Work and any modifications or additions
-   to that Work or Derivative Works thereof, that is intentionally
-   submitted to Licensor for inclusion in the Work by the copyright owner
-   or by an individual or Legal Entity authorized to submit on behalf of
-   the copyright owner. For the purposes of this definition, "submitted"
-   means any form of electronic, verbal, or written communication sent
-   to the Licensor or its representatives, including but not limited to
-   communication on electronic mailing lists, source code control systems,
-   and issue tracking systems that are managed by, or on behalf of, the
-   Licensor for the purpose of discussing and improving the Work, but
-   excluding communication that is conspicuously marked or otherwise
-   designated in writing by the copyright owner as "Not a Contribution."
-
-   "Contributor" shall mean Licensor and any individual or Legal Entity
-   on behalf of whom a Contribution has been received by Licensor and
-   subsequently incorporated within the Work.
-
-2. Grant of Copyright License. Subject to the terms and conditions of
-   this License, each Contributor hereby grants to You a perpetual,
-   worldwide, non-exclusive, no-charge, royalty-free, irrevocable
-   copyright license to reproduce, prepare Derivative Works of,
-   publicly display, publicly perform, sublicense, and distribute the
-   Work and such Derivative Works in Source or Object form.
-
-3. Grant of Patent License. Subject to the terms and conditions of
-   this License, each Contributor hereby grants to You a perpetual,
-   worldwide, non-exclusive, no-charge, royalty-free, irrevocable
-   (except as stated in this section) patent license to make, have made,
-   use, offer to sell, sell, import, and otherwise transfer the Work,
-   where such license applies only to those patent claims licensable
-   by such Contributor that are necessarily infringed by their
-   Contribution(s) alone or by combination of their Contribution(s)
-   with the Work to which such Contribution(s) was submitted. If You
-   institute patent litigation against any entity (including a
-   cross-claim or counterclaim in a lawsuit) alleging that the Work
-   or a Contribution incorporated within the Work constitutes direct
-   or contributory patent infringement, then any patent licenses
-   granted to You under this License for that Work shall terminate
-   as of the date such litigation is filed.
-
-4. Redistribution. You may reproduce and distribute copies of the
-   Work or Derivative Works thereof in any medium, with or without
-   modifications, and in Source or Object form, provided that You
-   meet the following conditions:
-
-   (a) You must give any other recipients of the Work or
-       Derivative Works a copy of this License; and
-
-   (b) You must cause any modified files to carry prominent notices
-       stating that You changed the files; and
-
-   (c) You must retain, in the Source form of any Derivative Works
-       that You distribute, all copyright, patent, trademark, and
-       attribution notices from the Source form of the Work,
-       excluding those notices that do not pertain to any part of
-       the Derivative Works; and
-
-   (d) If the Work includes a "NOTICE" text file as part of its
-       distribution, then any Derivative Works that You distribute must
-       include a readable copy of the attribution notices contained
-       within such NOTICE file, excluding those notices that do not
-       pertain to any part of the Derivative Works, in at least one
-       of the following places: within a NOTICE text file distributed
-       as part of the Derivative Works; within the Source form or
-       documentation, if provided along with the Derivative Works; or,
-       within a display generated by the Derivative Works, if and
-       wherever such third-party notices normally appear. The contents
-       of the NOTICE file are for informational purposes only and
-       do not modify the License. You may add Your own attribution
-       notices within Derivative Works that You distribute, alongside
-       or as an addendum to the NOTICE text from the Work, provided
-       that such additional attribution notices cannot be construed
-       as modifying the License.
-
-   You may add Your own copyright statement to Your modifications and
-   may provide additional or different license terms and conditions
-   for use, reproduction, or distribution of Your modifications, or
-   for any such Derivative Works as a whole, provided Your use,
-   reproduction, and distribution of the Work otherwise complies with
-   the conditions stated in this License.
-
-5. Submission of Contributions. Unless You explicitly state otherwise,
-   any Contribution intentionally submitted for inclusion in the Work
-   by You to the Licensor shall be under the terms and conditions of
-   this License, without any additional terms or conditions.
-   Notwithstanding the above, nothing herein shall supersede or modify
-   the terms of any separate license agreement you may have executed
-   with Licensor regarding such Contributions.
-
-6. Trademarks. This License does not grant permission to use the trade
-   names, trademarks, service marks, or product names of the Licensor,
-   except as required for reasonable and customary use in describing the
-   origin of the Work and reproducing the content of the NOTICE file.
-
-7. Disclaimer of Warranty. Unless required by applicable law or
-   agreed to in writing, Licensor provides the Work (and each
-   Contributor provides its Contributions) on an "AS IS" BASIS,
-   WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or
-   implied, including, without limitation, any warranties or conditions
-   of TITLE, NON-INFRINGEMENT, MERCHANTABILITY, or FITNESS FOR A
-   PARTICULAR PURPOSE. You are solely responsible for determining the
-   appropriateness of using or redistributing the Work and assume any
-   risks associated with Your exercise of permissions under this License.
-
-8. Limitation of Liability. In no event and under no legal theory,
-   whether in tort (including negligence), contract, or otherwise,
-   unless required by applicable law (such as deliberate and grossly
-   negligent acts) or agreed to in writing, shall any Contributor be
-   liable to You for damages, including any direct, indirect, special,
-   incidental, or consequential damages of any character arising as a
-   result of this License or out of the use or inability to use the
-   Work (including but not limited to damages for loss of goodwill,
-   work stoppage, computer failure or malfunction, or any and all
-   other commercial damages or losses), even if such Contributor
-   has been advised of the possibility of such damages.
-
-9. Accepting Warranty or Additional Liability. While redistributing
-   the Work or Derivative Works thereof, You may choose to offer,
-   and charge a fee for, acceptance of support, warranty, indemnity,
-   or other liability obligations and/or rights consistent with this
-   License. However, in accepting such obligations, You may act only
-   on Your own behalf and on Your sole responsibility, not on behalf
-   of any other Contributor, and only if You agree to indemnify,
-   defend, and hold each Contributor harmless for any liability
-   incurred by, or claims asserted against, such Contributor by reason
-   of your accepting any such warranty or additional liability.
-
-END OF TERMS AND CONDITIONS
-
-Copyright (c) 2015-2022 Amod Malviya
-
-Licensed under the Apache License, Version 2.0 (the "License");
-you may not use this file except in compliance with the License.
-You may obtain a copy of the License at
-
-	http://www.apache.org/licenses/LICENSE-2.0
-
-Unless required by applicable law or agreed to in writing, software
-distributed under the License is distributed on an "AS IS" BASIS,
-WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-See the License for the specific language governing permissions and
-limitations under the License.
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
 ```
 
 ### sha256-b16db96b93b1d7cf7bea533f572091ec6bca3234fbe0a83038be772ff391a44c
@@ -19169,7 +20348,7 @@ limitations under the License.
 
 Used by:
 
-- `h2 0.4.15 / LICENSE`
+- `h2 0.4.16 / LICENSE`
 
 ```text
 Copyright (c) 2017 h2 authors
@@ -19197,27 +20376,6 @@ CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION
 OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR
 IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 DEALINGS IN THE SOFTWARE.
-```
-
-### sha256-b29f8b01452350c20dd1af16ef83b598fea3053578ccc1c7a0ef40e57be2620f
-
-Used by:
-
-- `libloading 0.8.9 / LICENSE`
-
-```text
-Copyright © 2015, Simonas Kazlauskas
-
-Permission to use, copy, modify, and/or distribute this software for any purpose with or without
-fee is hereby granted, provided that the above copyright notice and this permission notice appear
-in all copies.
-
-THE SOFTWARE IS PROVIDED "AS IS" AND THE AUTHOR DISCLAIMS ALL WARRANTIES WITH REGARD TO THIS
-SOFTWARE INCLUDING ALL IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS. IN NO EVENT SHALL THE
-AUTHOR BE LIABLE FOR ANY SPECIAL, DIRECT, INDIRECT, OR CONSEQUENTIAL DAMAGES OR ANY DAMAGES
-WHATSOEVER RESULTING FROM LOSS OF USE, DATA OR PROFITS, WHETHER IN AN ACTION OF CONTRACT,
-NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF OR IN CONNECTION WITH THE USE OR PERFORMANCE OF
-THIS SOFTWARE.
 ```
 
 ### sha256-b3470648aff02beb36d7a53240fc9260ed80ed93bd43bace6b67d7ef7336ee33
@@ -19309,34 +20467,11 @@ See src/polyfill/once_cell/LICENSE-APACHE and src/polyfill/once_cell/LICENSE-MIT
 for the license to code that was sourced from the once_cell project.
 ```
 
-### sha256-b3ec01ad0869c5c50937bc68780cd0bb44e235ad858dfa54a7a381dced9b115a
-
-Used by:
-
-- `glow 0.17.0 / LICENSE-ZLIB`
-
-```text
-This software is provided 'as-is', without any express or implied
-warranty.  In no event will the authors be held liable for any damages
-arising from the use of this software.
-
-Permission is granted to anyone to use this software for any purpose,
-including commercial applications, and to alter it and redistribute it
-freely, subject to the following restrictions:
-
-1. The origin of this software must not be misrepresented; you must not
-   claim that you wrote the original software. If you use this software
-   in a product, an acknowledgment in the product documentation would be
-   appreciated but is not required.
-2. Altered source versions must be plainly marked as such, and must not be
-   misrepresented as being the original software.
-3. This notice may not be removed or altered from any source distribution.
-```
-
 ### sha256-b40930bbcf80744c86c46a12bc9da056641d722716c378f5659b9e555ef833e1
 
 Used by:
 
+- `cobs 0.3.0 / LICENSE-APACHE`
 - `crc32fast 1.5.0 / LICENSE-APACHE`
 - `derive_builder 0.20.2 / LICENSE-APACHE`
 - `derive_builder_core 0.20.2 / LICENSE-APACHE`
@@ -19348,17 +20483,18 @@ Used by:
 - `foreign-types-macros 0.2.3 / LICENSE-APACHE`
 - `foreign-types-shared 0.3.1 / LICENSE-APACHE`
 - `hex 0.4.3 / LICENSE-APACHE`
+- `json-patch 3.0.1 / LICENSE-APACHE`
 - `native-tls 0.2.18 / LICENSE-APACHE`
-- `quick-error 2.0.1 / LICENSE-APACHE`
 - `resolv-conf 0.7.6 / LICENSE-APACHE`
 - `serde_spanned 1.1.1 / LICENSE-APACHE`
 - `socks 0.3.4 / LICENSE-APACHE`
 - `stringprep 0.1.5 / LICENSE-APACHE`
+- `toml 0.9.12+spec-1.1.0 / LICENSE-APACHE`
 - `toml 1.1.2+spec-1.1.0 / LICENSE-APACHE`
+- `toml_datetime 0.7.5+spec-1.1.0 / LICENSE-APACHE`
 - `toml_datetime 1.1.1+spec-1.1.0 / LICENSE-APACHE`
 - `toml_parser 1.1.2+spec-1.1.0 / LICENSE-APACHE`
 - `toml_writer 1.1.1+spec-1.1.0 / LICENSE-APACHE`
-- `unicode-general-category 1.1.0 / LICENSE`
 - `unicode_categories 0.1.1 / LICENSE-APACHE`
 - `winapi 0.3.9 / LICENSE-APACHE`
 
@@ -19640,217 +20776,6 @@ Used by:
 // copied, modified, or distributed except according to those terms.
 ```
 
-### sha256-b59affd015e517ed998dd735757f9a3693643cd389609947ed54074234a10784
-
-Used by:
-
-- `cursor-icon 1.2.0 / LICENSE-APACHE`
-
-```text
-
-                                 Apache License
-                           Version 2.0, January 2004
-                        http://www.apache.org/licenses/
-
-   TERMS AND CONDITIONS FOR USE, REPRODUCTION, AND DISTRIBUTION
-
-   1. Definitions.
-
-      "License" shall mean the terms and conditions for use, reproduction,
-      and distribution as defined by Sections 1 through 9 of this document.
-
-      "Licensor" shall mean the copyright owner or entity authorized by
-      the copyright owner that is granting the License.
-
-      "Legal Entity" shall mean the union of the acting entity and all
-      other entities that control, are controlled by, or are under common
-      control with that entity. For the purposes of this definition,
-      "control" means (i) the power, direct or indirect, to cause the
-      direction or management of such entity, whether by contract or
-      otherwise, or (ii) ownership of fifty percent (50%) or more of the
-      outstanding shares, or (iii) beneficial ownership of such entity.
-
-      "You" (or "Your") shall mean an individual or Legal Entity
-      exercising permissions granted by this License.
-
-      "Source" form shall mean the preferred form for making modifications,
-      including but not limited to software source code, documentation
-      source, and configuration files.
-
-      "Object" form shall mean any form resulting from mechanical
-      transformation or translation of a Source form, including but
-      not limited to compiled object code, generated documentation,
-      and conversions to other media types.
-
-      "Work" shall mean the work of authorship, whether in Source or
-      Object form, made available under the License, as indicated by a
-      copyright notice that is included in or attached to the work
-      (an example is provided in the Appendix below).
-
-      "Derivative Works" shall mean any work, whether in Source or Object
-      form, that is based on (or derived from) the Work and for which the
-      editorial revisions, annotations, elaborations, or other modifications
-      represent, as a whole, an original work of authorship. For the purposes
-      of this License, Derivative Works shall not include works that remain
-      separable from, or merely link (or bind by name) to the interfaces of,
-      the Work and Derivative Works thereof.
-
-      "Contribution" shall mean any work of authorship, including
-      the original version of the Work and any modifications or additions
-      to that Work or Derivative Works thereof, that is intentionally
-      submitted to Licensor for inclusion in the Work by the copyright owner
-      or by an individual or Legal Entity authorized to submit on behalf of
-      the copyright owner. For the purposes of this definition, "submitted"
-      means any form of electronic, verbal, or written communication sent
-      to the Licensor or its representatives, including but not limited to
-      communication on electronic mailing lists, source code control systems,
-      and issue tracking systems that are managed by, or on behalf of, the
-      Licensor for the purpose of discussing and improving the Work, but
-      excluding communication that is conspicuously marked or otherwise
-      designated in writing by the copyright owner as "Not a Contribution."
-
-      "Contributor" shall mean Licensor and any individual or Legal Entity
-      on behalf of whom a Contribution has been received by Licensor and
-      subsequently incorporated within the Work.
-
-   2. Grant of Copyright License. Subject to the terms and conditions of
-      this License, each Contributor hereby grants to You a perpetual,
-      worldwide, non-exclusive, no-charge, royalty-free, irrevocable
-      copyright license to reproduce, prepare Derivative Works of,
-      publicly display, publicly perform, sublicense, and distribute the
-      Work and such Derivative Works in Source or Object form.
-
-   3. Grant of Patent License. Subject to the terms and conditions of
-      this License, each Contributor hereby grants to You a perpetual,
-      worldwide, non-exclusive, no-charge, royalty-free, irrevocable
-      (except as stated in this section) patent license to make, have made,
-      use, offer to sell, sell, import, and otherwise transfer the Work,
-      where such license applies only to those patent claims licensable
-      by such Contributor that are necessarily infringed by their
-      Contribution(s) alone or by combination of their Contribution(s)
-      with the Work to which such Contribution(s) was submitted. If You
-      institute patent litigation against any entity (including a
-      cross-claim or counterclaim in a lawsuit) alleging that the Work
-      or a Contribution incorporated within the Work constitutes direct
-      or contributory patent infringement, then any patent licenses
-      granted to You under this License for that Work shall terminate
-      as of the date such litigation is filed.
-
-   4. Redistribution. You may reproduce and distribute copies of the
-      Work or Derivative Works thereof in any medium, with or without
-      modifications, and in Source or Object form, provided that You
-      meet the following conditions:
-
-      (a) You must give any other recipients of the Work or
-          Derivative Works a copy of this License; and
-
-      (b) You must cause any modified files to carry prominent notices
-          stating that You changed the files; and
-
-      (c) You must retain, in the Source form of any Derivative Works
-          that You distribute, all copyright, patent, trademark, and
-          attribution notices from the Source form of the Work,
-          excluding those notices that do not pertain to any part of
-          the Derivative Works; and
-
-      (d) If the Work includes a "NOTICE" text file as part of its
-          distribution, then any Derivative Works that You distribute must
-          include a readable copy of the attribution notices contained
-          within such NOTICE file, excluding those notices that do not
-          pertain to any part of the Derivative Works, in at least one
-          of the following places: within a NOTICE text file distributed
-          as part of the Derivative Works; within the Source form or
-          documentation, if provided along with the Derivative Works; or,
-          within a display generated by the Derivative Works, if and
-          wherever such third-party notices normally appear. The contents
-          of the NOTICE file are for informational purposes only and
-          do not modify the License. You may add Your own attribution
-          notices within Derivative Works that You distribute, alongside
-          or as an addendum to the NOTICE text from the Work, provided
-          that such additional attribution notices cannot be construed
-          as modifying the License.
-
-      You may add Your own copyright statement to Your modifications and
-      may provide additional or different license terms and conditions
-      for use, reproduction, or distribution of Your modifications, or
-      for any such Derivative Works as a whole, provided Your use,
-      reproduction, and distribution of the Work otherwise complies with
-      the conditions stated in this License.
-
-   5. Submission of Contributions. Unless You explicitly state otherwise,
-      any Contribution intentionally submitted for inclusion in the Work
-      by You to the Licensor shall be under the terms and conditions of
-      this License, without any additional terms or conditions.
-      Notwithstanding the above, nothing herein shall supersede or modify
-      the terms of any separate license agreement you may have executed
-      with Licensor regarding such Contributions.
-
-   6. Trademarks. This License does not grant permission to use the trade
-      names, trademarks, service marks, or product names of the Licensor,
-      except as required for reasonable and customary use in describing the
-      origin of the Work and reproducing the content of the NOTICE file.
-
-   7. Disclaimer of Warranty. Unless required by applicable law or
-      agreed to in writing, Licensor provides the Work (and each
-      Contributor provides its Contributions) on an "AS IS" BASIS,
-      WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or
-      implied, including, without limitation, any warranties or conditions
-      of TITLE, NON-INFRINGEMENT, MERCHANTABILITY, or FITNESS FOR A
-      PARTICULAR PURPOSE. You are solely responsible for determining the
-      appropriateness of using or redistributing the Work and assume any
-      risks associated with Your exercise of permissions under this License.
-
-   8. Limitation of Liability. In no event and under no legal theory,
-      whether in tort (including negligence), contract, or otherwise,
-      unless required by applicable law (such as deliberate and grossly
-      negligent acts) or agreed to in writing, shall any Contributor be
-      liable to You for damages, including any direct, indirect, special,
-      incidental, or consequential damages of any character arising as a
-      result of this License or out of the use or inability to use the
-      Work (including but not limited to damages for loss of goodwill,
-      work stoppage, computer failure or malfunction, or any and all
-      other commercial damages or losses), even if such Contributor
-      has been advised of the possibility of such damages.
-
-   9. Accepting Warranty or Additional Liability. While redistributing
-      the Work or Derivative Works thereof, You may choose to offer,
-      and charge a fee for, acceptance of support, warranty, indemnity,
-      or other liability obligations and/or rights consistent with this
-      License. However, in accepting such obligations, You may act only
-      on Your own behalf and on Your sole responsibility, not on behalf
-      of any other Contributor, and only if You agree to indemnify,
-      defend, and hold each Contributor harmless for any liability
-      incurred by, or claims asserted against, such Contributor by reason
-      of your accepting any such warranty or additional liability.
-
-   END OF TERMS AND CONDITIONS
-
-   APPENDIX: How to apply the Apache License to your work.
-
-      To apply the Apache License to your work, attach the following
-      boilerplate notice, with the fields enclosed by brackets "[]"
-      replaced with your own identifying information. (Don't include
-      the brackets!)  The text should be enclosed in the appropriate
-      comment syntax for the file format. We also recommend that a
-      file or class name and description of purpose be included on the
-      same "printed page" as the copyright notice for easier
-      identification within third-party archives.
-
-   Copyright 2023 Kirill Chibisov
-
-   Licensed under the Apache License, Version 2.0 (the "License");
-   you may not use this file except in compliance with the License.
-   You may obtain a copy of the License at
-
-       http://www.apache.org/licenses/LICENSE-2.0
-
-   Unless required by applicable law or agreed to in writing, software
-   distributed under the License is distributed on an "AS IS" BASIS,
-   WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-   See the License for the specific language governing permissions and
-   limitations under the License.
-```
-
 ### sha256-b5b413d7421d728c14f33d78198d6e255a0018beef717d78c4c3f6188be3dfb4
 
 Used by:
@@ -20059,6 +20984,34 @@ distributed under the License is distributed on an "AS IS" BASIS,
 WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 See the License for the specific language governing permissions and
 limitations under the License.
+```
+
+### sha256-b61cf1a75b378860940eb420fd0fd1d8e747fd5dae5f5a2f2c9cd4454e1db78a
+
+Used by:
+
+- `plist 1.10.0 / LICENCE`
+
+```text
+Copyright (c) 2015 Edward Barnard
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
 ```
 
 ### sha256-b63e167d61ced1d872a588c5ac764b0dda477d62209dc4f6b6bfea5517d0a24c
@@ -20351,24 +21304,6 @@ IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 DEALINGS IN THE SOFTWARE.
 ```
 
-### sha256-b9d2c1d909aa149996fd4c91dcb92b2362a04431640c1d200959da94caf8cde1
-
-Used by:
-
-- `epaint_default_fonts 0.35.0 / fonts/emoji-icon-font-mit-license.txt`
-
-```text
-MIT License
-
-Copyright (c) 2014 John Slegers
-
-Permission is hereby granted, free of charge, to any person obtaining a copy of this software and associated documentation files (the "Software"), to deal in the Software without restriction, including without limitation the rights to use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of the Software, and to permit persons to whom the Software is furnished to do so, subject to the following conditions:
-
-The above copyright notice and this permission notice shall be included in all copies or substantial portions of the Software.
-
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
-```
-
 ### sha256-b9eb266294324f672cbe945fe8f2e32f85024f0d61a1a7d14382cdde0ac44769
 
 Used by:
@@ -20435,6 +21370,29 @@ CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION
 OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR
 IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 DEALINGS IN THE SOFTWARE.
+```
+
+### sha256-c0c56f26d9c051cac4d200c34c84e7ae9aaa853e01a982a1df08b09931e518ae
+
+Used by:
+
+- `alloc-no-stdlib 2.0.4 / LICENSE`
+- `brotli 8.0.4 / LICENSE.BSD-3-Clause`
+- `brotli-decompressor 5.0.3 / LICENSE`
+
+```text
+Copyright (c) 2016 Dropbox, Inc.
+All rights reserved.
+
+Redistribution and use in source and binary forms, with or without modification, are permitted provided that the following conditions are met:
+
+1. Redistributions of source code must retain the above copyright notice, this list of conditions and the following disclaimer.
+
+2. Redistributions in binary form must reproduce the above copyright notice, this list of conditions and the following disclaimer in the documentation and/or other materials provided with the distribution.
+
+3. Neither the name of the copyright holder nor the names of its contributors may be used to endorse or promote products derived from this software without specific prior written permission.
+
+THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 ```
 
 ### sha256-c0d9430a95a7361e240f58e840a5bb3949483bb2c58075320f30cb94eb593d0d
@@ -20531,34 +21489,6 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 THE SOFTWARE.
 ```
 
-### sha256-c138726a726ac37bae09d0f8a48e74e8e3aa8a8952fcd10fae0fb224cc1c05f1
-
-Used by:
-
-- `cursor-icon 1.2.0 / LICENSE-MIT`
-
-```text
-Copyright (c) 2023 Kirill Chibisov
-
-Permission is hereby granted, free of charge, to any person obtaining a copy of
-this software and associated documentation files (the "Software"), to deal in
-the Software without restriction, including without limitation the rights to
-use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies
-of the Software, and to permit persons to whom the Software is furnished to do
-so, subject to the following conditions:
-
-The above copyright notice and this permission notice shall be included in all
-copies or substantial portions of the Software.
-
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-SOFTWARE.
-```
-
 ### sha256-c16f8dcf1a368b83be78d826ea23de4079fe1b4469a0ab9ee20563f37ff3d44b
 
 Used by:
@@ -20582,17 +21512,15 @@ Used by:
 - `windows-result 0.4.1 / license-apache-2.0`
 - `windows-strings 0.4.2 / license-apache-2.0`
 - `windows-strings 0.5.1 / license-apache-2.0`
-- `windows-sys 0.48.0 / license-apache-2.0`
 - `windows-sys 0.52.0 / license-apache-2.0`
 - `windows-sys 0.59.0 / license-apache-2.0`
 - `windows-sys 0.60.2 / license-apache-2.0`
 - `windows-sys 0.61.2 / license-apache-2.0`
-- `windows-targets 0.48.5 / license-apache-2.0`
 - `windows-targets 0.52.6 / license-apache-2.0`
 - `windows-targets 0.53.5 / license-apache-2.0`
 - `windows-threading 0.1.0 / license-apache-2.0`
 - `windows-threading 0.2.1 / license-apache-2.0`
-- `windows_x86_64_msvc 0.48.5 / license-apache-2.0`
+- `windows-version 0.1.7 / license-apache-2.0`
 - `windows_x86_64_msvc 0.52.6 / license-apache-2.0`
 - `windows_x86_64_msvc 0.53.1 / license-apache-2.0`
 
@@ -20854,17 +21782,15 @@ Used by:
 - `windows-result 0.4.1 / license-mit`
 - `windows-strings 0.4.2 / license-mit`
 - `windows-strings 0.5.1 / license-mit`
-- `windows-sys 0.48.0 / license-mit`
 - `windows-sys 0.52.0 / license-mit`
 - `windows-sys 0.59.0 / license-mit`
 - `windows-sys 0.60.2 / license-mit`
 - `windows-sys 0.61.2 / license-mit`
-- `windows-targets 0.48.5 / license-mit`
 - `windows-targets 0.52.6 / license-mit`
 - `windows-targets 0.53.5 / license-mit`
 - `windows-threading 0.1.0 / license-mit`
 - `windows-threading 0.2.1 / license-mit`
-- `windows_x86_64_msvc 0.48.5 / license-mit`
+- `windows-version 0.1.7 / license-mit`
 - `windows_x86_64_msvc 0.52.6 / license-mit`
 - `windows_x86_64_msvc 0.53.1 / license-mit`
 
@@ -21001,52 +21927,45 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 THE SOFTWARE.
 ```
 
-### sha256-c6d1d56bb6e2fe4f0aed4aa8553261dd65247db6db50c87c9e9f3fbe095e2202
-
-Used by:
-
-- `tiff 0.11.3 / tests/COPYRIGHT`
-
-```text
-subsubifd.tif:
-  url: https://data.kitware.com/api/v1/file/hashsum/sha512/372ca32735c8a8fdbe2286dabead9e779da63f10ba81eda84625e5273f76d74ca1a47a978f67e9c00c12f7f72009c7b2c07a641e643bb0c463812f4ae7f15d6e/download
-  credit: https://github.com/DigitalSlideArchive/tifftools/commit/4d00c70dbce828262f86c1431f7c66b1748965ac
-  license: CC0
-usda/*.tif
-  url: https://registry.opendata.aws/naip/index.html
-  credit: NAIP on AWS was accessed on 2026-01-28 from https://registry.opendata.aws/naip.
-  license: Public Domain
-```
-
 ### sha256-c71d239df91726fc519c6eb72d318ec65820627232b2f796219e87dcf35d0ab4
 
 Used by:
 
-- `accesskit_winit 0.32.2 / standard text for Apache-2.0 (the crate includes no separate file)`
 - `ciborium 0.2.2 / LICENSE`
 - `ciborium-io 0.2.2 / LICENSE`
 - `ciborium-ll 0.2.2 / LICENSE`
-- `egui_commonmark 0.24.0 / LICENSE-APACHE`
-- `egui_commonmark_backend 0.24.0 / LICENSE-APACHE`
+- `cranelift-assembler-x64 0.134.3 / standard text for Apache-2.0 WITH LLVM-exception (the crate includes no separate file)`
+- `cranelift-assembler-x64-meta 0.134.3 / standard text for Apache-2.0 WITH LLVM-exception (the crate includes no separate file)`
+- `cranelift-bitset 0.134.3 / standard text for Apache-2.0 WITH LLVM-exception (the crate includes no separate file)`
+- `cranelift-isle 0.134.3 / standard text for Apache-2.0 WITH LLVM-exception (the crate includes no separate file)`
+- `cranelift-srcgen 0.134.3 / standard text for Apache-2.0 WITH LLVM-exception (the crate includes no separate file)`
 - `esaxx-rs 0.1.10 / LICENSE`
 - `fastembed 5.17.2 / LICENSE`
-- `gl_generator 0.14.0 / standard text for Apache-2.0 (the crate includes no separate file)`
-- `khronos_api 3.1.0 / standard text for Apache-2.0 (the crate includes no separate file)`
 - `lzma-rust2 0.15.8 / LICENSE`
 - `ntapi 0.4.3 / LICENSE-APACHE`
+- `pulley-interpreter 47.0.3 / standard text for Apache-2.0 WITH LLVM-exception (the crate includes no separate file)`
+- `pulley-macros 47.0.3 / standard text for Apache-2.0 WITH LLVM-exception (the crate includes no separate file)`
 - `quinn 0.11.11 / LICENSE-APACHE`
 - `quinn-proto 0.11.16 / LICENSE-APACHE`
 - `quinn-udp 0.5.15 / LICENSE-APACHE`
-- `rmcp 2.2.0 / standard text for Apache-2.0 (the crate includes no separate file)`
-- `rmcp-macros 2.2.0 / standard text for Apache-2.0 (the crate includes no separate file)`
+- `rmcp 3.0.1 / standard text for Apache-2.0 (the crate includes no separate file)`
+- `rmcp-macros 3.1.4 / standard text for Apache-2.0 (the crate includes no separate file)`
+- `rustls-platform-verifier 0.7.0 / LICENSE-APACHE`
 - `safetensors 0.8.0 / LICENSE`
 - `self_cell 1.2.2 / LICENSE-APACHE`
+- `serialize-to-javascript 0.1.2 / LICENSE-APACHE`
+- `serialize-to-javascript-impl 0.1.2 / LICENSE-APACHE`
 - `spm_precompiled 0.1.4 / LICENSE`
 - `sys-locale 0.3.2 / LICENSE-APACHE`
 - `tokenizers 0.22.2 / LICENSE`
 - `ureq 3.3.0 / LICENSE-APACHE`
-- `zune-core 0.5.1 / LICENSE-APACHE`
-- `zune-jpeg 0.5.15 / LICENSE-APACHE`
+- `wasmtime-internal-component-macro 47.0.3 / standard text for Apache-2.0 WITH LLVM-exception (the crate includes no separate file)`
+- `wasmtime-internal-component-util 47.0.3 / standard text for Apache-2.0 WITH LLVM-exception (the crate includes no separate file)`
+- `wasmtime-internal-core 47.0.3 / standard text for Apache-2.0 WITH LLVM-exception (the crate includes no separate file)`
+- `wasmtime-internal-jit-debug 47.0.3 / standard text for Apache-2.0 WITH LLVM-exception (the crate includes no separate file)`
+- `wasmtime-internal-jit-icache-coherence 47.0.3 / standard text for Apache-2.0 WITH LLVM-exception (the crate includes no separate file)`
+- `wasmtime-internal-versioned-export-macros 47.0.3 / standard text for Apache-2.0 WITH LLVM-exception (the crate includes no separate file)`
+- `wasmtime-internal-wit-bindgen 47.0.3 / standard text for Apache-2.0 WITH LLVM-exception (the crate includes no separate file)`
 
 ```text
                                  Apache License
@@ -21257,7 +22176,6 @@ Used by:
 Used by:
 
 - `fdeflate 0.3.7 / LICENSE-MIT`
-- `image 0.25.10 / LICENSE-MIT`
 
 ```text
 MIT License
@@ -21379,8 +22297,6 @@ DEALINGS IN THE SOFTWARE.
 
 Used by:
 
-- `clipboard-win 5.4.1 / standard text for BSL-1.0 (the crate includes no separate file)`
-- `error-code 3.3.2 / LICENSE`
 - `ryu 1.0.23 / LICENSE-BOOST`
 
 ```text
@@ -21443,35 +22359,6 @@ IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 DEALINGS IN THE SOFTWARE.
 ```
 
-### sha256-cab31b979edfb1d6ff72a9a84e1092a9b68954022fc3f253338e64879961b8d2
-
-Used by:
-
-- `guillotiere 0.7.0 / LICENSE-MIT`
-
-```text
-The MIT License (MIT)
-
-Copyright (c) 2019 Nicolas Silva
-
-Permission is hereby granted, free of charge, to any person obtaining a copy of
-this software and associated documentation files (the "Software"), to deal in
-the Software without restriction, including without limitation the rights to
-use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of
-the Software, and to permit persons to whom the Software is furnished to do so,
-subject to the following conditions:
-
-The above copyright notice and this permission notice shall be included in all
-copies or substantial portions of the Software.
-
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS
-FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR
-COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER
-IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN
-CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
-```
-
 ### sha256-cb3c929a05e6cbc9de9ab06a4c57eeb60ca8c724bef6c138c87d3a577e27aa14
 
 Used by:
@@ -21507,6 +22394,7 @@ THE SOFTWARE.
 
 Used by:
 
+- `winnow 0.7.15 / LICENSE-MIT`
 - `winnow 1.0.3 / LICENSE-MIT`
 
 ```text
@@ -21886,40 +22774,6 @@ IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 DEALINGS IN THE SOFTWARE.
 ```
 
-### sha256-ce592787ff2321feab698a4c612237f4378cc658ebb1d472913e5802cc47afb4
-
-Used by:
-
-- `fixedbitset 0.5.7 / LICENSE-MIT`
-
-```text
-Copyright (c) 2015-2017
-
-Permission is hereby granted, free of charge, to any
-person obtaining a copy of this software and associated
-documentation files (the "Software"), to deal in the
-Software without restriction, including without
-limitation the rights to use, copy, modify, merge,
-publish, distribute, sublicense, and/or sell copies of
-the Software, and to permit persons to whom the Software
-is furnished to do so, subject to the following
-conditions:
-
-The above copyright notice and this permission notice
-shall be included in all copies or substantial portions
-of the Software.
-
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF
-ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED
-TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A
-PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT
-SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY
-CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION
-OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR
-IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
-DEALINGS IN THE SOFTWARE.
-```
-
 ### sha256-ce7bc3499fee93d5022ef430d5e4201e79a6d9154f3974e42f41349f0569e09b
 
 Used by:
@@ -21952,14 +22806,12 @@ SOFTWARE.
 
 Used by:
 
+- `embed_plist 1.2.2 / LICENSE-APACHE`
 - `encoding_rs 0.8.35 / LICENSE-APACHE`
-- `kurbo 0.13.1 / LICENSE-APACHE`
 - `lru-slab 0.1.2 / LICENSE-APACHE`
 - `nohash-hasher 0.2.0 / LICENSE-APACHE`
 - `ort 2.0.0-rc.12 / LICENSE-APACHE`
 - `ort-sys 2.0.0-rc.12 / LICENSE-APACHE`
-- `peniko 0.6.1 / LICENSE-APACHE`
-- `polycool 0.4.0 / LICENSE-APACHE`
 - `static_assertions 1.1.0 / LICENSE-APACHE`
 - `tinyvec 1.11.0 / LICENSE-APACHE.md`
 - `utf8_iter 1.0.4 / LICENSE-APACHE`
@@ -22202,35 +23054,6 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 ```
 
-### sha256-d201d14804d3bcd3b944147173175e4abfbd838b7c8069b6bd3452496bf13e6c
-
-Used by:
-
-- `zune-core 0.5.1 / LICENSE-ZLIB`
-- `zune-jpeg 0.5.15 / LICENSE-ZLIB`
-
-```text
-zlib License
-
-(C) zune-image developers
-
-This software is provided 'as-is', without any express or implied
-warranty. In no event will the authors be held liable for any damages
-arising from the use of this software.
-
-Permission is granted to anyone to use this software for any purpose,
-including commercial applications, and to alter it and redistribute it
-freely, subject to the following restrictions:
-
-1. The origin of this software must not be misrepresented; you must not
-   claim that you wrote the original software. If you use this software
-   in a product, an acknowledgment in the product documentation would be
-   appreciated but is not required.
-2. Altered source versions must be plainly marked as such, and must not be
-   misrepresented as being the original software.
-3. This notice may not be removed or altered from any source distribution.
-```
-
 ### sha256-d288f9c9b4590446ec18c22ead8f8b5a12a3d4025b68f62dc9015063eb9cca69
 
 Used by:
@@ -22300,44 +23123,12 @@ IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 DEALINGS IN THE SOFTWARE.
 ```
 
-### sha256-d30047bca3b516639339a3c279bb84c3483124fb5a9dafe3c75056a85090e745
-
-Used by:
-
-- `zune-core 0.5.1 / LICENSE-MIT`
-- `zune-jpeg 0.5.15 / LICENSE-MIT`
-
-```text
-MIT License
-
-Copyright (c) zune-image developers
-
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
-
-The above copyright notice and this permission notice shall be included in all
-copies or substantial portions of the Software.
-
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-SOFTWARE.
-```
-
 ### sha256-d3174ad63e721d4c9dccb8ad4320848992d314369bc46319720b5802c9153fe9
 
 Used by:
 
 - `directories 6.0.0 / LICENSE-APACHE`
-- `dirs 5.0.1 / LICENSE-APACHE`
-- `dirs-sys 0.4.1 / LICENSE-APACHE`
+- `dirs 6.0.0 / LICENSE-APACHE`
 - `dirs-sys 0.5.0 / LICENSE-APACHE`
 
 ```text
@@ -22517,34 +23308,6 @@ TERMS AND CONDITIONS FOR USE, REPRODUCTION, AND DISTRIBUTION
    of your accepting any such warranty or additional liability.
 ```
 
-### sha256-d35629aec828ca86834f76e4c813bd6a6f0dda9005da898b0f49021f8042c5bd
-
-Used by:
-
-- `glutin-winit 0.5.0 / LICENSE`
-
-```text
-Copyright © 2022 Kirill Chibisov
-
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the “Software”), to deal
-in the Software without restriction, including without limitation the rights to
-use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies
-of the Software, and to permit persons to whom the Software is furnished to do
-so, subject to the following conditions:
-
-The above copyright notice and this permission notice shall be included in all
-copies or substantial portions of the Software.
-
-THE SOFTWARE IS PROVIDED “AS IS”, WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
-THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-SOFTWARE.
-```
-
 ### sha256-d5c22aa3118d240e877ad41c5d9fa232f9c77d757d4aac0c2f943afc0a95e0ef
 
 Used by:
@@ -22553,6 +23316,43 @@ Used by:
 
 ```text
 Copyright (c) 2018-2019 The RustCrypto Project Developers
+
+Permission is hereby granted, free of charge, to any
+person obtaining a copy of this software and associated
+documentation files (the "Software"), to deal in the
+Software without restriction, including without
+limitation the rights to use, copy, modify, merge,
+publish, distribute, sublicense, and/or sell copies of
+the Software, and to permit persons to whom the Software
+is furnished to do so, subject to the following
+conditions:
+
+The above copyright notice and this permission notice
+shall be included in all copies or substantial portions
+of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF
+ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED
+TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A
+PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT
+SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY
+CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION
+OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR
+IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
+DEALINGS IN THE SOFTWARE.
+```
+
+### sha256-d9fa6b0e6fed50d4961b9c931587af6bd127df13e9473418d3e324f427db4f06
+
+Used by:
+
+- `tauri-winres 0.3.6 / LICENSE`
+
+```text
+The MIT License (MIT)
+
+Copyright (c) 2023 - Present Tauri Apps Contributors
+Copyright (c) 2016 Max Resch
 
 Permission is hereby granted, free of charge, to any
 person obtaining a copy of this software and associated
@@ -22611,6 +23411,36 @@ CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION
 OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR
 IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 DEALINGS IN THE SOFTWARE.
+```
+
+### sha256-daacc37f680c7dd0a758ac99a109f2f57d9f21d3683df9e9245055922842a695
+
+Used by:
+
+- `embed_plist 1.2.2 / LICENSE-MIT`
+
+```text
+MIT License
+
+Copyright (c) 2020 Nikolai Vazquez
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
 ```
 
 ### sha256-dbe1fff0fb1314b6af94f161511406275cf01c5a32441fbf24528a57a051d599
@@ -22811,6 +23641,34 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 ```
 
+### sha256-e0cfa1006a64520633de6bfbf563f5b1bea04ef0c5b73f049681931fa297dda3
+
+Used by:
+
+- `cobs 0.3.0 / LICENSE-MIT`
+
+```text
+Copyright (c) 2015 The cobs.rs Developers
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+```
+
 ### sha256-e20fa2b8e0a2565f24a792b94b4bf4b6c2b9d36f781d8a9516e218a036e6677a
 
 Used by:
@@ -22944,75 +23802,66 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 ```
 
-### sha256-e3ba223bb1423f0aad8c3dfce0fe3148db48926d41e6fbc3afbbf5ff9e1c89cb
+### sha256-e339134e53732f093f68ef00bcec3687ebf964ef8c6c812f31e74099c07d3f49
 
 Used by:
 
-- `bytemuck 1.25.0 / LICENSE-APACHE`
-- `bytemuck_derive 1.10.2 / LICENSE-APACHE`
+- `vswhom 0.1.0 / LICENSE`
+- `vswhom-sys 0.1.3 / LICENSE`
 
 ```text
-Apache License
-Version 2.0, January 2004
-http://www.apache.org/licenses/
+The MIT License (MIT)
 
-TERMS AND CONDITIONS FOR USE, REPRODUCTION, AND DISTRIBUTION
+Copyright (c) 2019 nabijaczleweli
 
-    1. Definitions.
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
 
-        "License" shall mean the terms and conditions for use, reproduction, and distribution as defined by Sections 1 through 9 of this document.
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
 
-        "Licensor" shall mean the copyright owner or entity authorized by the copyright owner that is granting the License.
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+```
 
-        "Legal Entity" shall mean the union of the acting entity and all other entities that control, are controlled by, or are under common control with that entity. For the purposes of this definition, "control" means (i) the power, direct or indirect, to cause the direction or management of such entity, whether by contract or otherwise, or (ii) ownership of fifty percent (50%) or more of the outstanding shares, or (iii) beneficial ownership of such entity.
+### sha256-e53a7165e8bc3ced5e5628404b3d2d28ecc14ad720f1c09ba28385d5151ecf93
 
-        "You" (or "Your") shall mean an individual or Legal Entity exercising permissions granted by this License.
+Used by:
 
-        "Source" form shall mean the preferred form for making modifications, including but not limited to software source code, documentation source, and configuration files.
+- `serialize-to-javascript 0.1.2 / LICENSE-MIT`
+- `serialize-to-javascript-impl 0.1.2 / LICENSE-MIT`
 
-        "Object" form shall mean any form resulting from mechanical transformation or translation of a Source form, including but not limited to compiled object code, generated documentation, and conversions to other media types.
+```text
+MIT License
 
-        "Work" shall mean the work of authorship, whether in Source or Object form, made available under the License, as indicated by a copyright notice that is included in or attached to the work (an example is provided in the Appendix below).
+Copyright (c) 2021 Chip Reed
 
-        "Derivative Works" shall mean any work, whether in Source or Object form, that is based on (or derived from) the Work and for which the editorial revisions, annotations, elaborations, or other modifications represent, as a whole, an original work of authorship. For the purposes of this License, Derivative Works shall not include works that remain separable from, or merely link (or bind by name) to the interfaces of, the Work and Derivative Works thereof.
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
 
-        "Contribution" shall mean any work of authorship, including the original version of the Work and any modifications or additions to that Work or Derivative Works thereof, that is intentionally submitted to Licensor for inclusion in the Work by the copyright owner or by an individual or Legal Entity authorized to submit on behalf of the copyright owner. For the purposes of this definition, "submitted" means any form of electronic, verbal, or written communication sent to the Licensor or its representatives, including but not limited to communication on electronic mailing lists, source code control systems, and issue tracking systems that are managed by, or on behalf of, the Licensor for the purpose of discussing and improving the Work, but excluding communication that is conspicuously marked or otherwise designated in writing by the copyright owner as "Not a Contribution."
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
 
-        "Contributor" shall mean Licensor and any individual or Legal Entity on behalf of whom a Contribution has been received by Licensor and subsequently incorporated within the Work.
-    2. Grant of Copyright License. Subject to the terms and conditions of this License, each Contributor hereby grants to You a perpetual, worldwide, non-exclusive, no-charge, royalty-free, irrevocable copyright license to reproduce, prepare Derivative Works of, publicly display, publicly perform, sublicense, and distribute the Work and such Derivative Works in Source or Object form.
-    3. Grant of Patent License. Subject to the terms and conditions of this License, each Contributor hereby grants to You a perpetual, worldwide, non-exclusive, no-charge, royalty-free, irrevocable (except as stated in this section) patent license to make, have made, use, offer to sell, sell, import, and otherwise transfer the Work, where such license applies only to those patent claims licensable by such Contributor that are necessarily infringed by their Contribution(s) alone or by combination of their Contribution(s) with the Work to which such Contribution(s) was submitted. If You institute patent litigation against any entity (including a cross-claim or counterclaim in a lawsuit) alleging that the Work or a Contribution incorporated within the Work constitutes direct or contributory patent infringement, then any patent licenses granted to You under this License for that Work shall terminate as of the date such litigation is filed.
-    4. Redistribution. You may reproduce and distribute copies of the Work or Derivative Works thereof in any medium, with or without modifications, and in Source or Object form, provided that You meet the following conditions:
-        (a) You must give any other recipients of the Work or Derivative Works a copy of this License; and
-        (b) You must cause any modified files to carry prominent notices stating that You changed the files; and
-        (c) You must retain, in the Source form of any Derivative Works that You distribute, all copyright, patent, trademark, and attribution notices from the Source form of the Work, excluding those notices that do not pertain to any part of the Derivative Works; and
-        (d) If the Work includes a "NOTICE" text file as part of its distribution, then any Derivative Works that You distribute must include a readable copy of the attribution notices contained within such NOTICE file, excluding those notices that do not pertain to any part of the Derivative Works, in at least one of the following places: within a NOTICE text file distributed as part of the Derivative Works; within the Source form or documentation, if provided along with the Derivative Works; or, within a display generated by the Derivative Works, if and wherever such third-party notices normally appear. The contents of the NOTICE file are for informational purposes only and do not modify the License. You may add Your own attribution notices within Derivative Works that You distribute, alongside or as an addendum to the NOTICE text from the Work, provided that such additional attribution notices cannot be construed as modifying the License.
-
-        You may add Your own copyright statement to Your modifications and may provide additional or different license terms and conditions for use, reproduction, or distribution of Your modifications, or for any such Derivative Works as a whole, provided Your use, reproduction, and distribution of the Work otherwise complies with the conditions stated in this License.
-    5. Submission of Contributions. Unless You explicitly state otherwise, any Contribution intentionally submitted for inclusion in the Work by You to the Licensor shall be under the terms and conditions of this License, without any additional terms or conditions. Notwithstanding the above, nothing herein shall supersede or modify the terms of any separate license agreement you may have executed with Licensor regarding such Contributions.
-    6. Trademarks. This License does not grant permission to use the trade names, trademarks, service marks, or product names of the Licensor, except as required for reasonable and customary use in describing the origin of the Work and reproducing the content of the NOTICE file.
-    7. Disclaimer of Warranty. Unless required by applicable law or agreed to in writing, Licensor provides the Work (and each Contributor provides its Contributions) on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied, including, without limitation, any warranties or conditions of TITLE, NON-INFRINGEMENT, MERCHANTABILITY, or FITNESS FOR A PARTICULAR PURPOSE. You are solely responsible for determining the appropriateness of using or redistributing the Work and assume any risks associated with Your exercise of permissions under this License.
-    8. Limitation of Liability. In no event and under no legal theory, whether in tort (including negligence), contract, or otherwise, unless required by applicable law (such as deliberate and grossly negligent acts) or agreed to in writing, shall any Contributor be liable to You for damages, including any direct, indirect, special, incidental, or consequential damages of any character arising as a result of this License or out of the use or inability to use the Work (including but not limited to damages for loss of goodwill, work stoppage, computer failure or malfunction, or any and all other commercial damages or losses), even if such Contributor has been advised of the possibility of such damages.
-    9. Accepting Warranty or Additional Liability. While redistributing the Work or Derivative Works thereof, You may choose to offer, and charge a fee for, acceptance of support, warranty, indemnity, or other liability obligations and/or rights consistent with this License. However, in accepting such obligations, You may act only on Your own behalf and on Your sole responsibility, not on behalf of any other Contributor, and only if You agree to indemnify, defend, and hold each Contributor harmless for any liability incurred by, or claims asserted against, such Contributor by reason of your accepting any such warranty or additional liability.
-
-END OF TERMS AND CONDITIONS
-
-APPENDIX: How to apply the Apache License to your work.
-
-To apply the Apache License to your work, attach the following boilerplate notice, with the fields enclosed by brackets "[]" replaced with your own identifying information. (Don't include the brackets!) The text should be enclosed in the appropriate comment syntax for the file format. We also recommend that a file or class name and description of purpose be included on the same "printed page" as the copyright notice for easier identification within third-party archives.
-
-Copyright [yyyy] [name of copyright owner]
-
-Licensed under the Apache License, Version 2.0 (the "License");
-you may not use this file except in compliance with the License.
-You may obtain a copy of the License at
-
-http://www.apache.org/licenses/LICENSE-2.0
-
-Unless required by applicable law or agreed to in writing, software
-distributed under the License is distributed on an "AS IS" BASIS,
-WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-See the License for the specific language governing permissions and
-limitations under the License.
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
 ```
 
 ### sha256-e5c343775a0e56c07182dd9b1667d31853cfcb6953f567ee1f5a7bf7978bf285
@@ -23079,6 +23928,40 @@ freely, subject to the following restrictions:
 3. This notice may not be removed or altered from any source distribution.
 ```
 
+### sha256-e99d88d232bf57d70f0fb87f6b496d44b6653f99f8a63d250a54c61ea4bcde40
+
+Used by:
+
+- `addr2line 0.26.1 / LICENSE-MIT`
+
+```text
+Copyright (c) 2016-2018 The gimli Developers
+
+Permission is hereby granted, free of charge, to any
+person obtaining a copy of this software and associated
+documentation files (the "Software"), to deal in the
+Software without restriction, including without
+limitation the rights to use, copy, modify, merge,
+publish, distribute, sublicense, and/or sell copies of
+the Software, and to permit persons to whom the Software
+is furnished to do so, subject to the following
+conditions:
+
+The above copyright notice and this permission notice
+shall be included in all copies or substantial portions
+of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF
+ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED
+TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A
+PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT
+SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY
+CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION
+OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR
+IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
+DEALINGS IN THE SOFTWARE.
+```
+
 ### sha256-e9c1238c5beb73c6cc130160418968058b21d486a7a445f0ceff27d51fbfdc44
 
 Used by:
@@ -23121,6 +24004,7 @@ under the original license.
 
 Used by:
 
+- `winreg 0.55.0 / LICENSE`
 - `winreg 0.56.0 / LICENSE`
 
 ```text
@@ -23212,6 +24096,7 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 Used by:
 
+- `png 0.17.16 / LICENSE-MIT`
 - `png 0.18.1 / LICENSE-MIT`
 
 ```text
@@ -23300,15 +24185,16 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 ```
 
-### sha256-eb69eece7d469c69466506e5819153646d8fb57b0350dadb62ac693f8a765c6b
+### sha256-ebaac853b53fec0ed475796f533ce676912a4df9ad9d8a621fa76d5060591e10
 
 Used by:
 
-- `memoffset 0.6.5 / LICENSE`
-- `memoffset 0.9.1 / LICENSE`
+- `cfb 0.7.3 / LICENSE`
 
 ```text
-Copyright (c) 2017 Gilad Naaman
+MIT License
+
+Copyright (c) 2017 Matthew D. Steele
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
@@ -23362,9 +24248,7 @@ CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
 Used by:
 
-- `cgl 0.3.2 / COPYING`
-- `core-graphics 0.23.2 / COPYRIGHT`
-- `euclid 0.22.14 / COPYRIGHT`
+- `core-graphics 0.25.0 / COPYRIGHT`
 
 ```text
 Licensed under the Apache License, Version 2.0 <LICENSE-APACHE or
@@ -23378,6 +24262,7 @@ copied, modified, or distributed except according to those terms.
 
 Used by:
 
+- `indexmap 1.9.3 / LICENSE-MIT`
 - `indexmap 2.14.0 / LICENSE-MIT`
 
 ```text
@@ -23648,6 +24533,36 @@ Used by:
    limitations under the License.
 ```
 
+### sha256-ef88893533af22ffbb68ceef0724ba1389518df26165a34f3c99ad30b884df4f
+
+Used by:
+
+- `wry 0.55.1 / LICENSE-MIT`
+
+```text
+MIT License
+
+Copyright (c) 2020-2023 Ngo Iok Ui & Tauri Programme within The Commons Conservancy
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+```
+
 ### sha256-f025ccfb7dfb6bdfedc75ca0f67acc69e6fb4998143d834f7c2f38a29989680f
 
 Used by:
@@ -23668,6 +24583,38 @@ SPECIAL, DIRECT, INDIRECT, OR CONSEQUENTIAL DAMAGES OR ANY DAMAGES
 WHATSOEVER RESULTING FROM LOSS OF USE, DATA OR PROFITS, WHETHER IN AN ACTION
 OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF OR IN
 CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
+```
+
+### sha256-f0cf9b1c62bbe3bd3a69f5f79c7158f513f612b4940a0a812d1db39d605318bc
+
+Used by:
+
+- `quick-xml 0.41.0 / LICENSE-MIT.md`
+
+```text
+The MIT License (MIT)
+
+Copyright (c) 2016 Johann Tuffe
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+
+The above copyright notice and this permission notice shall be included in
+all copies or substantial portions of the Software.
+
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+THE SOFTWARE.
 ```
 
 ### sha256-f1fa5f9e9d8f7827ae2235e742dd00bdf6106d4c5753df928e521d7541b7f9b6
@@ -23705,6 +24652,41 @@ IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 DEALINGS IN THE SOFTWARE.
 ```
 
+### sha256-f28420c1906af38be726cd7842798f0194b27c41d6051c0d1e9ee348b8a4a0ea
+
+Used by:
+
+- `cookie 0.18.1 / LICENSE-MIT`
+
+```text
+Copyright (c) 2017 Sergio Benitez
+Copyright (c) 2014 Alex Crichton
+
+Permission is hereby granted, free of charge, to any
+person obtaining a copy of this software and associated
+documentation files (the "Software"), to deal in the
+Software without restriction, including without
+limitation the rights to use, copy, modify, merge,
+publish, distribute, sublicense, and/or sell copies of
+the Software, and to permit persons to whom the Software
+is furnished to do so, subject to the following
+conditions:
+
+The above copyright notice and this permission notice
+shall be included in all copies or substantial portions
+of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF
+ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED
+TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A
+PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT
+SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY
+CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION
+OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR
+IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
+DEALINGS IN THE SOFTWARE.
+```
+
 ### sha256-f2ad7982ddbfa8c45eb965315718c55b70b9cc311b49afacb50d5fe84173ae2c
 
 Used by:
@@ -23713,36 +24695,6 @@ Used by:
 
 ```text
 Copyright (c) 2016 The rust-native-tls Developers
-
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
-
-The above copyright notice and this permission notice shall be included in all
-copies or substantial portions of the Software.
-
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-SOFTWARE.
-```
-
-### sha256-f35468024534e0f4f16bb94cd0e88c87fbd1314f919c2645a07d350fb77b40c0
-
-Used by:
-
-- `arboard 3.6.1 / LICENSE-MIT.txt`
-
-```text
-MIT License
-
-Copyright (c) 2022 The Arboard contributors
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
@@ -23835,6 +24787,34 @@ Portions of ICU4X may have been adapted from ICU4C and/or ICU4J.
 ICU 1.8.1 to ICU 57.1 © 1995-2016 International Business Machines Corporation and others.
 ```
 
+### sha256-f3c3e9f4febe81ff14ccc233c344e6e60051290d1c1e5a2c670d63cc3608a5bb
+
+Used by:
+
+- `swift-rs 1.0.7 / LICENSE-MIT`
+
+```text
+Copyright (c) 2023 The swift-rs Developers
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+```
+
 ### sha256-f428305bbf2e70fbd807af0f3c7ac1b7acfb95311640f451e9d2e48db6d7e96b
 
 Used by:
@@ -23863,6 +24843,41 @@ AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
+```
+
+### sha256-f51ac2c59a222f7476ce507ca879960e2b64ea64bb2786eefdbeb7b0b538d1b7
+
+Used by:
+
+- `bit-set 0.8.0 / LICENSE-MIT`
+- `bit-vec 0.8.0 / LICENSE-MIT`
+
+```text
+Copyright (c) 2023 The Rust Project Developers
+
+Permission is hereby granted, free of charge, to any
+person obtaining a copy of this software and associated
+documentation files (the "Software"), to deal in the
+Software without restriction, including without
+limitation the rights to use, copy, modify, merge,
+publish, distribute, sublicense, and/or sell copies of
+the Software, and to permit persons to whom the Software
+is furnished to do so, subject to the following
+conditions:
+
+The above copyright notice and this permission notice
+shall be included in all copies or substantial portions
+of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF
+ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED
+TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A
+PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT
+SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY
+CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION
+OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR
+IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
+DEALINGS IN THE SOFTWARE.
 ```
 
 ### sha256-f59f5a78193597e04fd932ee9af86254d14d08be5c9d0e003ab888feccce2161
@@ -23920,6 +24935,69 @@ the Apache License 2.0:
 These files were ported from the Java Caffeine library and are not dual-licensed.
 
 Please refer to the LICENSE-APACHE file for more details on the Apache License 2.0.
+```
+
+### sha256-f73041468536d0b5fd1a6610fa3f317e3dc6cf9a0c0591a5529d6556a0d8a2c3
+
+Used by:
+
+- `wry 0.55.1 / LICENSE.spdx`
+
+```text
+SPDXVersion: SPDX-2.1
+DataLicense: CC0-1.0
+PackageName: wry
+DataFormat: SPDXRef-1
+PackageSupplier: Organization: The Tauri Programme in the Commons Conservancy
+PackageHomePage: https://tauri.app
+PackageLicenseDeclared: Apache-2.0
+PackageLicenseDeclared: MIT
+PackageCopyrightText: 2020-2023, The Tauri Programme in the Commons Conservancy
+PackageSummary: <text>Wry is the official, rust-based webview
+windowing service for Tauri.
+                </text>
+PackageComment: <text>The package includes the following libraries; see
+Relationship information.
+                </text>
+Created: 2020-05-20T09:00:00Z
+PackageDownloadLocation: git://github.com/tauri-apps/wry
+PackageDownloadLocation: git+https://github.com/tauri-apps/wry.git
+PackageDownloadLocation: git+ssh://github.com/tauri-apps/wry.git
+Creator: Person: Daniel Thompson-Yvetot
+```
+
+### sha256-f7715d38a3fa1b4ac97c5729740752505a39cb92ee83ab5b102aeb5eaa7cdea4
+
+Used by:
+
+- `new_debug_unreachable 1.0.6 / LICENSE-MIT`
+
+```text
+Copyright (c) 2015 Jonathan Reem
+
+Permission is hereby granted, free of charge, to any
+person obtaining a copy of this software and associated
+documentation files (the "Software"), to deal in the
+Software without restriction, including without
+limitation the rights to use, copy, modify, merge,
+publish, distribute, sublicense, and/or sell copies of
+the Software, and to permit persons to whom the Software
+is furnished to do so, subject to the following
+conditions:
+
+The above copyright notice and this permission notice
+shall be included in all copies or substantial portions
+of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF
+ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED
+TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A
+PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT
+SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY
+CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION
+OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR
+IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
+DEALINGS IN THE SOFTWARE.
 ```
 
 ### sha256-f77c12e42245743c6ab960c67fd81715ba7a5149f35836365d442328a69d55c2
@@ -24445,38 +25523,387 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 ```
 
-### sha256-fa0598d520497731445a5bc89a2b3d47896d95568bd2be255b7bc43d771b9994
+### sha256-fab3dd6bdab226f1c08630b1dd917e11fcb4ec5e1e020e2c16f83a0a13863e85
 
 Used by:
 
-- `ron 0.12.2 / LICENSE-MIT`
+- `cssparser 0.36.0 / LICENSE`
+- `cssparser-macros 0.6.1 / LICENSE`
 
 ```text
-Copyright (c) 2017 RON developers
+Mozilla Public License Version 2.0
+==================================
 
-Permission is hereby granted, free of charge, to any
-person obtaining a copy of this software and associated
-documentation files (the "Software"), to deal in the
-Software without restriction, including without
-limitation the rights to use, copy, modify, merge,
-publish, distribute, sublicense, and/or sell copies of
-the Software, and to permit persons to whom the Software
-is furnished to do so, subject to the following
-conditions:
+1. Definitions
+--------------
 
-The above copyright notice and this permission notice
-shall be included in all copies or substantial portions
-of the Software.
+1.1. "Contributor"
+    means each individual or legal entity that creates, contributes to
+    the creation of, or owns Covered Software.
 
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF
-ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED
-TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A
-PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT
-SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY
-CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION
-OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR
-IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
-DEALINGS IN THE SOFTWARE.
+1.2. "Contributor Version"
+    means the combination of the Contributions of others (if any) used
+    by a Contributor and that particular Contributor's Contribution.
+
+1.3. "Contribution"
+    means Covered Software of a particular Contributor.
+
+1.4. "Covered Software"
+    means Source Code Form to which the initial Contributor has attached
+    the notice in Exhibit A, the Executable Form of such Source Code
+    Form, and Modifications of such Source Code Form, in each case
+    including portions thereof.
+
+1.5. "Incompatible With Secondary Licenses"
+    means
+
+    (a) that the initial Contributor has attached the notice described
+        in Exhibit B to the Covered Software; or
+
+    (b) that the Covered Software was made available under the terms of
+        version 1.1 or earlier of the License, but not also under the
+        terms of a Secondary License.
+
+1.6. "Executable Form"
+    means any form of the work other than Source Code Form.
+
+1.7. "Larger Work"
+    means a work that combines Covered Software with other material, in 
+    a separate file or files, that is not Covered Software.
+
+1.8. "License"
+    means this document.
+
+1.9. "Licensable"
+    means having the right to grant, to the maximum extent possible,
+    whether at the time of the initial grant or subsequently, any and
+    all of the rights conveyed by this License.
+
+1.10. "Modifications"
+    means any of the following:
+
+    (a) any file in Source Code Form that results from an addition to,
+        deletion from, or modification of the contents of Covered
+        Software; or
+
+    (b) any new file in Source Code Form that contains any Covered
+        Software.
+
+1.11. "Patent Claims" of a Contributor
+    means any patent claim(s), including without limitation, method,
+    process, and apparatus claims, in any patent Licensable by such
+    Contributor that would be infringed, but for the grant of the
+    License, by the making, using, selling, offering for sale, having
+    made, import, or transfer of either its Contributions or its
+    Contributor Version.
+
+1.12. "Secondary License"
+    means either the GNU General Public License, Version 2.0, the GNU
+    Lesser General Public License, Version 2.1, the GNU Affero General
+    Public License, Version 3.0, or any later versions of those
+    licenses.
+
+1.13. "Source Code Form"
+    means the form of the work preferred for making modifications.
+
+1.14. "You" (or "Your")
+    means an individual or a legal entity exercising rights under this
+    License. For legal entities, "You" includes any entity that
+    controls, is controlled by, or is under common control with You. For
+    purposes of this definition, "control" means (a) the power, direct
+    or indirect, to cause the direction or management of such entity,
+    whether by contract or otherwise, or (b) ownership of more than
+    fifty percent (50%) of the outstanding shares or beneficial
+    ownership of such entity.
+
+2. License Grants and Conditions
+--------------------------------
+
+2.1. Grants
+
+Each Contributor hereby grants You a world-wide, royalty-free,
+non-exclusive license:
+
+(a) under intellectual property rights (other than patent or trademark)
+    Licensable by such Contributor to use, reproduce, make available,
+    modify, display, perform, distribute, and otherwise exploit its
+    Contributions, either on an unmodified basis, with Modifications, or
+    as part of a Larger Work; and
+
+(b) under Patent Claims of such Contributor to make, use, sell, offer
+    for sale, have made, import, and otherwise transfer either its
+    Contributions or its Contributor Version.
+
+2.2. Effective Date
+
+The licenses granted in Section 2.1 with respect to any Contribution
+become effective for each Contribution on the date the Contributor first
+distributes such Contribution.
+
+2.3. Limitations on Grant Scope
+
+The licenses granted in this Section 2 are the only rights granted under
+this License. No additional rights or licenses will be implied from the
+distribution or licensing of Covered Software under this License.
+Notwithstanding Section 2.1(b) above, no patent license is granted by a
+Contributor:
+
+(a) for any code that a Contributor has removed from Covered Software;
+    or
+
+(b) for infringements caused by: (i) Your and any other third party's
+    modifications of Covered Software, or (ii) the combination of its
+    Contributions with other software (except as part of its Contributor
+    Version); or
+
+(c) under Patent Claims infringed by Covered Software in the absence of
+    its Contributions.
+
+This License does not grant any rights in the trademarks, service marks,
+or logos of any Contributor (except as may be necessary to comply with
+the notice requirements in Section 3.4).
+
+2.4. Subsequent Licenses
+
+No Contributor makes additional grants as a result of Your choice to
+distribute the Covered Software under a subsequent version of this
+License (see Section 10.2) or under the terms of a Secondary License (if
+permitted under the terms of Section 3.3).
+
+2.5. Representation
+
+Each Contributor represents that the Contributor believes its
+Contributions are its original creation(s) or it has sufficient rights
+to grant the rights to its Contributions conveyed by this License.
+
+2.6. Fair Use
+
+This License is not intended to limit any rights You have under
+applicable copyright doctrines of fair use, fair dealing, or other
+equivalents.
+
+2.7. Conditions
+
+Sections 3.1, 3.2, 3.3, and 3.4 are conditions of the licenses granted
+in Section 2.1.
+
+3. Responsibilities
+-------------------
+
+3.1. Distribution of Source Form
+
+All distribution of Covered Software in Source Code Form, including any
+Modifications that You create or to which You contribute, must be under
+the terms of this License. You must inform recipients that the Source
+Code Form of the Covered Software is governed by the terms of this
+License, and how they can obtain a copy of this License. You may not
+attempt to alter or restrict the recipients' rights in the Source Code
+Form.
+
+3.2. Distribution of Executable Form
+
+If You distribute Covered Software in Executable Form then:
+
+(a) such Covered Software must also be made available in Source Code
+    Form, as described in Section 3.1, and You must inform recipients of
+    the Executable Form how they can obtain a copy of such Source Code
+    Form by reasonable means in a timely manner, at a charge no more
+    than the cost of distribution to the recipient; and
+
+(b) You may distribute such Executable Form under the terms of this
+    License, or sublicense it under different terms, provided that the
+    license for the Executable Form does not attempt to limit or alter
+    the recipients' rights in the Source Code Form under this License.
+
+3.3. Distribution of a Larger Work
+
+You may create and distribute a Larger Work under terms of Your choice,
+provided that You also comply with the requirements of this License for
+the Covered Software. If the Larger Work is a combination of Covered
+Software with a work governed by one or more Secondary Licenses, and the
+Covered Software is not Incompatible With Secondary Licenses, this
+License permits You to additionally distribute such Covered Software
+under the terms of such Secondary License(s), so that the recipient of
+the Larger Work may, at their option, further distribute the Covered
+Software under the terms of either this License or such Secondary
+License(s).
+
+3.4. Notices
+
+You may not remove or alter the substance of any license notices
+(including copyright notices, patent notices, disclaimers of warranty,
+or limitations of liability) contained within the Source Code Form of
+the Covered Software, except that You may alter any license notices to
+the extent required to remedy known factual inaccuracies.
+
+3.5. Application of Additional Terms
+
+You may choose to offer, and to charge a fee for, warranty, support,
+indemnity or liability obligations to one or more recipients of Covered
+Software. However, You may do so only on Your own behalf, and not on
+behalf of any Contributor. You must make it absolutely clear that any
+such warranty, support, indemnity, or liability obligation is offered by
+You alone, and You hereby agree to indemnify every Contributor for any
+liability incurred by such Contributor as a result of warranty, support,
+indemnity or liability terms You offer. You may include additional
+disclaimers of warranty and limitations of liability specific to any
+jurisdiction.
+
+4. Inability to Comply Due to Statute or Regulation
+---------------------------------------------------
+
+If it is impossible for You to comply with any of the terms of this
+License with respect to some or all of the Covered Software due to
+statute, judicial order, or regulation then You must: (a) comply with
+the terms of this License to the maximum extent possible; and (b)
+describe the limitations and the code they affect. Such description must
+be placed in a text file included with all distributions of the Covered
+Software under this License. Except to the extent prohibited by statute
+or regulation, such description must be sufficiently detailed for a
+recipient of ordinary skill to be able to understand it.
+
+5. Termination
+--------------
+
+5.1. The rights granted under this License will terminate automatically
+if You fail to comply with any of its terms. However, if You become
+compliant, then the rights granted under this License from a particular
+Contributor are reinstated (a) provisionally, unless and until such
+Contributor explicitly and finally terminates Your grants, and (b) on an
+ongoing basis, if such Contributor fails to notify You of the
+non-compliance by some reasonable means prior to 60 days after You have
+come back into compliance. Moreover, Your grants from a particular
+Contributor are reinstated on an ongoing basis if such Contributor
+notifies You of the non-compliance by some reasonable means, this is the
+first time You have received notice of non-compliance with this License
+from such Contributor, and You become compliant prior to 30 days after
+Your receipt of the notice.
+
+5.2. If You initiate litigation against any entity by asserting a patent
+infringement claim (excluding declaratory judgment actions,
+counter-claims, and cross-claims) alleging that a Contributor Version
+directly or indirectly infringes any patent, then the rights granted to
+You by any and all Contributors for the Covered Software under Section
+2.1 of this License shall terminate.
+
+5.3. In the event of termination under Sections 5.1 or 5.2 above, all
+end user license agreements (excluding distributors and resellers) which
+have been validly granted by You or Your distributors under this License
+prior to termination shall survive termination.
+
+************************************************************************
+*                                                                      *
+*  6. Disclaimer of Warranty                                           *
+*  -------------------------                                           *
+*                                                                      *
+*  Covered Software is provided under this License on an "as is"       *
+*  basis, without warranty of any kind, either expressed, implied, or  *
+*  statutory, including, without limitation, warranties that the       *
+*  Covered Software is free of defects, merchantable, fit for a        *
+*  particular purpose or non-infringing. The entire risk as to the     *
+*  quality and performance of the Covered Software is with You.        *
+*  Should any Covered Software prove defective in any respect, You     *
+*  (not any Contributor) assume the cost of any necessary servicing,   *
+*  repair, or correction. This disclaimer of warranty constitutes an   *
+*  essential part of this License. No use of any Covered Software is   *
+*  authorized under this License except under this disclaimer.         *
+*                                                                      *
+************************************************************************
+
+************************************************************************
+*                                                                      *
+*  7. Limitation of Liability                                          *
+*  --------------------------                                          *
+*                                                                      *
+*  Under no circumstances and under no legal theory, whether tort      *
+*  (including negligence), contract, or otherwise, shall any           *
+*  Contributor, or anyone who distributes Covered Software as          *
+*  permitted above, be liable to You for any direct, indirect,         *
+*  special, incidental, or consequential damages of any character      *
+*  including, without limitation, damages for lost profits, loss of    *
+*  goodwill, work stoppage, computer failure or malfunction, or any    *
+*  and all other commercial damages or losses, even if such party      *
+*  shall have been informed of the possibility of such damages. This   *
+*  limitation of liability shall not apply to liability for death or   *
+*  personal injury resulting from such party's negligence to the       *
+*  extent applicable law prohibits such limitation. Some               *
+*  jurisdictions do not allow the exclusion or limitation of           *
+*  incidental or consequential damages, so this exclusion and          *
+*  limitation may not apply to You.                                    *
+*                                                                      *
+************************************************************************
+
+8. Litigation
+-------------
+
+Any litigation relating to this License may be brought only in the
+courts of a jurisdiction where the defendant maintains its principal
+place of business and such litigation shall be governed by laws of that
+jurisdiction, without reference to its conflict-of-law provisions.
+Nothing in this Section shall prevent a party's ability to bring
+cross-claims or counter-claims.
+
+9. Miscellaneous
+----------------
+
+This License represents the complete agreement concerning the subject
+matter hereof. If any provision of this License is held to be
+unenforceable, such provision shall be reformed only to the extent
+necessary to make it enforceable. Any law or regulation which provides
+that the language of a contract shall be construed against the drafter
+shall not be used to construe this License against a Contributor.
+
+10. Versions of the License
+---------------------------
+
+10.1. New Versions
+
+Mozilla Foundation is the license steward. Except as provided in Section
+10.3, no one other than the license steward has the right to modify or
+publish new versions of this License. Each version will be given a
+distinguishing version number.
+
+10.2. Effect of New Versions
+
+You may distribute the Covered Software under the terms of the version
+of the License under which You originally received the Covered Software,
+or under the terms of any subsequent version published by the license
+steward.
+
+10.3. Modified Versions
+
+If you create software not governed by this License, and you want to
+create a new license for such software, you may create and use a
+modified version of this License if you rename the license and remove
+any references to the name of the license steward (except to note that
+such modified license differs from this License).
+
+10.4. Distributing Source Code Form that is Incompatible With Secondary
+Licenses
+
+If You choose to distribute Source Code Form that is Incompatible With
+Secondary Licenses under the terms of this version of the License, the
+notice described in Exhibit B of this License must be attached.
+
+Exhibit A - Source Code Form License Notice
+-------------------------------------------
+
+  This Source Code Form is subject to the terms of the Mozilla Public
+  License, v. 2.0. If a copy of the MPL was not distributed with this
+  file, You can obtain one at http://mozilla.org/MPL/2.0/.
+
+If it is not possible or desirable to put the notice in a particular
+file, then You may include the notice in a location (such as a LICENSE
+file in a relevant directory) where a recipient would be likely to look
+for such a notice.
+
+You may add additional accurate notices of copyright ownership.
+
+Exhibit B - "Incompatible With Secondary Licenses" Notice
+---------------------------------------------------------
+
+  This Source Code Form is "Incompatible With Secondary Licenses", as
+  defined by the Mozilla Public License, v. 2.0.
 ```
 
 ### sha256-fb77f0a9c53e473abe5103c8632ef9f0f2874d4fb3f17cb2d8c661aab9cee9d7
@@ -24517,7 +25944,10 @@ DEALINGS IN THE SOFTWARE.
 
 Used by:
 
-- `ctor 0.2.9 / LICENSE-MIT`
+- `ctor 0.8.0 / LICENSE-MIT`
+- `ctor-proc-macro 0.0.7 / LICENSE-MIT`
+- `dtor 0.3.0 / LICENSE-MIT`
+- `dtor-proc-macro 0.0.6 / LICENSE-MIT`
 - `tinyvec 1.11.0 / LICENSE-MIT.md`
 
 ```text
@@ -24566,6 +25996,7 @@ DEALINGS IN THE SOFTWARE.
 
 Used by:
 
+- `hashbrown 0.12.3 / LICENSE-MIT`
 - `hashbrown 0.15.5 / LICENSE-MIT`
 - `hashbrown 0.16.1 / LICENSE-MIT`
 - `hashbrown 0.17.1 / LICENSE-MIT`

@@ -2,6 +2,7 @@
 
 - Status: Accepted
 - Date: 2026-07-15
+- Extended by: ADR 0010 (imported and AI-memory managed bundles)
 
 ## Context
 

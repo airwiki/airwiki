@@ -25,7 +25,13 @@ AirWiki is an open-source desktop app that turns folders, [Open Knowledge Format
 > [!IMPORTANT]
 > AirWiki is in active development and does not have a supported public download yet. Current builds are development or internal release candidates. See [Availability](#availability) before installing or testing one.
 
-![AirWiki showing a synthetic Wiki proposal that requires human review before publication](docs/assets/airwiki-review.jpg)
+<p align="center">
+  <a href="docs/assets/airwiki-demo.mp4">
+    <img src="docs/assets/airwiki-demo-poster.png" alt="AirWiki opening the complete published OKF Wiki shared by a nearby Windows device">
+  </a>
+  <br>
+  <sub><a href="docs/assets/airwiki-demo.mp4">Watch the 10-second product tour</a> · synthetic data only</sub>
+</p>
 
 ## Why AirWiki
 
@@ -52,6 +58,13 @@ Codex, ChatGPT, Claude Code, Gemini CLI, and generic MCP clients can search appr
 3. **Search and share deliberately.** Search your device, paired devices, or opted-in public Wikis. Enable access independently for each Wiki and destination.
 
 Folder Wikis can watch for new files or update manually. Imported OKF Wikis have no source watcher. Assistant memory Wikis can be edited only by their owning application or another application that you explicitly authorize.
+
+## See the flow
+
+| Review before publication | Search across authorized sources |
+| --- | --- |
+| [![AirWiki review panel showing source evidence, the proposed Wiki concept, and the human publication decision](docs/assets/airwiki-review-flow.png)](docs/assets/airwiki-review-flow.png) | [![AirWiki search showing distinct results from the current device, a private LAN device, and the public network](docs/assets/airwiki-search-sources.png)](docs/assets/airwiki-search-sources.png) |
+| Source-bound evidence stays beside the proposal and final decision. | Local, nearby, and public results remain visibly distinct in one search experience. |
 
 ## Who it is for
 
@@ -126,18 +139,31 @@ Before the public release, feedback is especially valuable around first-run clar
 
 AirWiki is a Rust workspace with a Tauri v2 desktop shell and Svelte UI. SQLite owns operational state and local paths; published OKF files are the source of truth for each visible Wiki. Domain rules stay outside the UI and transport layers.
 
-```text
-folders / OKF / assistant memory
-              │
-              ▼
-     local ingestion + review
-              │
-              ▼
-       portable OKF v0.2
-          │     │     │
-          ▼     ▼     ▼
-       local   LAN   public/MCP
+```mermaid
+flowchart LR
+    folder["Folder Wiki"] --> folder_pipeline["Ingest + local AI proposals"]
+    folder_pipeline --> review["Human evidence review"]
+    review --> bundle[("Portable OKF v0.2<br/>visible Wiki")]
+
+    imported["Imported OKF bundle"] --> import_pipeline["Validate + build local index"]
+    import_pipeline --> bundle
+
+    memory["Assistant memory Wiki"] --> capability["Capability + fingerprint gate"]
+    capability --> bundle
+
+    state[("SQLite<br/>operational state")]
+    state <-.-> folder_pipeline
+    state <-.-> import_pipeline
+    state <-.-> capability
+    state <-.-> review
+
+    bundle --> local["Local search"]
+    bundle -- "per-Wiki grant" --> lan["Paired LAN devices"]
+    bundle -- "explicit opt-in" --> public["Public network"]
+    bundle -- "app grant" --> mcp["AI apps via MCP"]
 ```
+
+Original folder documents remain outside the published bundle. Every path beyond local use crosses an explicit, independently managed access boundary.
 
 <details>
 <summary>Repository map</summary>

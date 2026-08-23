@@ -1,15 +1,17 @@
 <script lang="ts">
   import Spinner from './Spinner.svelte';
+  import ShimmerText from './ShimmerText.svelte';
 
   export let label: string;
   export let detail: string | null = null;
   export let compact = false;
+  export let tone: 'neutral' | 'ai' = 'neutral';
 </script>
 
-<div class:compact class="loading-state" role="status" aria-live="polite">
+<div class:compact class:ai={tone === 'ai'} class="loading-state" role="status" aria-live="polite">
   <Spinner size={compact ? 'small' : 'medium'} />
   <span class="loading-copy">
-    <strong>{label}</strong>
+    <strong>{#if tone === 'ai'}<ShimmerText text={label} />{:else}{label}{/if}</strong>
     {#if detail}<small>{detail}</small>{/if}
   </span>
 </div>
@@ -38,6 +40,11 @@
   .loading-copy strong {
     color: var(--strong);
     font-weight: 620;
+  }
+
+  .loading-state.ai :global(.spinner) {
+    border-color: color-mix(in srgb, var(--violet) 22%, var(--line));
+    border-top-color: var(--violet);
   }
 
   .loading-copy small {

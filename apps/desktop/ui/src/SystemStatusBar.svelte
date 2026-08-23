@@ -2,6 +2,7 @@
   import Blocks from '@lucide/svelte/icons/blocks';
   import BrainCircuit from '@lucide/svelte/icons/brain-circuit';
   import Network from '@lucide/svelte/icons/network';
+  import ShimmerText from './components/ShimmerText.svelte';
   import type { AppSnapshot } from './api';
   import type { MessageArgs } from './i18n';
 
@@ -65,7 +66,7 @@
           {#if service.id === 'knowledge'}<BrainCircuit size={17} strokeWidth={1.9} />{:else if service.id === 'connections'}<Network size={17} strokeWidth={1.9} />{:else}<Blocks size={17} strokeWidth={1.9} />{/if}
           <span class={`status-dot ${service.tone}`}></span>
         </span>
-        <span class="service-copy"><span>{service.label}</span><small>{service.detail}</small></span>
+        <span class="service-copy"><span>{service.label}</span><small>{#if service.id === 'knowledge' && service.tone === 'working'}<ShimmerText text={service.detail} />{:else}{service.detail}{/if}</small></span>
       </button>
     {/each}
   </div>

@@ -17,6 +17,7 @@
     RemoteWikiPageInput
   } from './api';
   import LoadingState from './components/LoadingState.svelte';
+  import LoadingSkeleton from './components/LoadingSkeleton.svelte';
   import DeviceIdentity from './components/identity/DeviceIdentity.svelte';
   import { focusChoiceWithoutScroll } from './focus';
   import type { MessageArgs } from './i18n';
@@ -174,8 +175,9 @@
       <ArrowLeft size={16} aria-hidden="true" />
       {t('desktop-shared-back-results')}
     </button>
-    <div class="shared-wiki-state">
+    <div class="shared-loading-workspace">
       <LoadingState label={t('desktop-shared-loading-title')} detail={t('desktop-shared-loading-body')} />
+      <LoadingSkeleton variant="workspace" rows={5} />
     </div>
   {:else if browse && unavailable()}
     <button class="shared-wiki-back" onclick={onback}>
@@ -254,7 +256,8 @@
           </aside>
           <section class="file-preview shared-file-preview" aria-live="polite">
             {#if pageLoading}
-              <LoadingState label={t('desktop-shared-loading-page')} detail={selectedDescriptor?.logicalPath ?? null} />
+              <LoadingState label={t('desktop-shared-loading-page')} detail={selectedDescriptor?.logicalPath ?? null} compact />
+              <LoadingSkeleton variant="page" />
             {:else if requestedConceptUnavailable}
               <div class="table-empty shared-target-unavailable" role="alert"><AlertTriangle size={20} aria-hidden="true" /><div><strong>{t('desktop-shared-target-unavailable-title')}</strong><p>{t('desktop-shared-target-unavailable-body')}</p></div></div>
             {:else if selectedDocument}

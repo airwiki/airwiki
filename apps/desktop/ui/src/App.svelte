@@ -18,6 +18,9 @@
   import OnboardingFlow from './OnboardingFlow.svelte';
   import SharedWikiViewer from './SharedWikiViewer.svelte';
   import LoadingState from './components/LoadingState.svelte';
+  import LoadingSkeleton from './components/LoadingSkeleton.svelte';
+  import ShimmerText from './components/ShimmerText.svelte';
+  import Spinner from './components/Spinner.svelte';
   import AiClientIcon from './components/identity/AiClientIcon.svelte';
   import DeviceIdentity from './components/identity/DeviceIdentity.svelte';
   import PlatformIcon from './components/identity/PlatformIcon.svelte';
@@ -110,6 +113,8 @@
   let activeSearchRequestId: string | null = null;
   let searchSubmissionSequence = 0;
   let pendingSearchConcept: { wikiId: string; conceptId: string } | null = null;
+  let pendingKnowledgePage: { wikiId: string; pageKey: string } | null = null;
+  let wikiLoadFailedId: string | null = null;
   let guidedRepairRequestId: string | null = null;
   let guidedRepairConfirmed = false;
   let computationSaveTargets: Record<string, string> = {};
@@ -486,6 +491,16 @@
       : Promise.resolve(() => {});
     connect((event) => {
       snapshot = event.snapshot;
+      if (
+        wikiLoadFailedId
+        && event.snapshot.knowledge?.wikiId === wikiLoadFailedId
+        && event.snapshot.knowledge.status !== 'failed'
+      ) wikiLoadFailedId = null;
+      if (
+        pendingKnowledgePage
+        && event.snapshot.knowledgePage?.wikiId === pendingKnowledgePage.wikiId
+        && pageKey(event.snapshot.knowledgePage.page) === pendingKnowledgePage.pageKey
+      ) pendingKnowledgePage = null;
       void openPendingSearchConcept(event.snapshot);
       if (event.snapshot.model?.licenseAccepted) modelLicensesConfirmed = true;
       syncPreferences(event.snapshot.preferences);
@@ -1639,6 +1654,8 @@
     wikiTab = tab;
     pushHash(`#wikis/${wikiId}${tab === 'pending' ? '/pending' : ''}`);
     knowledgeMode = 'document';
+    pendingKnowledgePage = null;
+    wikiLoadFailedId = null;
     scrollMainTo(0);
     focusRouteHeading();
     actionBusy = true;
@@ -1646,6 +1663,7 @@
     try {
       await loadWikiBundle(wikiId);
     } catch {
+      wikiLoadFailedId = wikiId;
       actionMessage = t('home-wiki-failed');
     } finally {
       actionBusy = false;
@@ -1667,11 +1685,13 @@
       actionMessage = t('knowledge-page-unavailable');
       return;
     }
+    pendingKnowledgePage = { wikiId: selectedWikiId, pageKey: pageKey(page) };
     actionBusy = true;
     actionMessage = '';
     try {
       await loadWikiPage(selectedWikiId, page, expectedFingerprint);
     } catch (error) {
+      pendingKnowledgePage = null;
       actionMessage = t(uiErrorMessageKey(error) === 'currentKnowledgeSnapshotRequired'
         ? 'knowledge-page-changed'
         : 'knowledge-page-load-failed');
@@ -1732,7 +1752,7 @@
   <main class="onboarding startup" aria-busy="true">
     <div class="onboarding-mark">A</div>
     <p class="eyebrow">AirWiki</p>
-    <h1>{t('status-working')}</h1>
+    <h1><ShimmerText text={t('status-working')} /></h1>
     <p class="lede" aria-live="polite">{t(runtimeMessageId)}</p>
   </main>
 {:else if snapshot.preferences.completedOnboardingVersion == null}
@@ -1922,6 +1942,13 @@
               <div class="wiki-toolbar"><div class="view-switch" aria-label={t('desktop-view-mode')}><button class:active={knowledgeMode === 'document'} onclick={() => setKnowledgeMode('document')}>{t('desktop-list-view')}</button><button class:active={knowledgeMode === 'graph'} onclick={() => setKnowledgeMode('graph')}>{t('knowledge-tab-graph')}</button></div></div>
               {#if knowledgeMode === 'graph' && snapshot.knowledge?.wikiId === selectedWiki.id && snapshot.knowledge.status === 'ready'}
                 <section class="graph-view">{#key `${snapshot.knowledge.wikiId}:${snapshot.knowledge.version}`}<KnowledgeGraph bundle={snapshot.knowledge} onselect={selectGraphPage} {locale} />{/key}</section>
+              {:else if wikiLoadFailedId === selectedWiki.id || (snapshot.knowledge?.wikiId === selectedWiki.id && snapshot.knowledge.status === 'failed')}
+                <div class="file-empty wiki-load-failed" role="alert"><AlertTriangle size={28} aria-hidden="true" /><h2>{t('desktop-knowledge-load-failed-title')}</h2><p>{t('desktop-knowledge-load-failed-body')}</p><button class="secondary" onclick={() => openWiki(selectedWiki.id, wikiTab)}>{t('action-retry')}</button></div>
+              {:else if snapshot.knowledge?.wikiId !== selectedWiki.id || snapshot.knowledge.status === 'updating'}
+                <section class="wiki-loading-surface" aria-busy="true">
+                  <LoadingState label={t('knowledge-updating-title')} detail={t('desktop-knowledge-loading-body')} tone="ai" />
+                  <LoadingSkeleton variant="workspace" rows={5} />
+                </section>
               {:else}
                 <div class="file-browser">
                   <aside class="file-list" aria-label={t('knowledge-pages')}>
@@ -1936,7 +1963,9 @@
                     {/if}
                   </aside>
                   <section class="file-preview" aria-live="polite">
-                    {#if snapshot.knowledge?.status === 'updating'}<p class="loading"><RefreshCw size={17} />{t('knowledge-updating-title')}</p>
+                    {#if pendingKnowledgePage?.wikiId === selectedWiki.id}
+                      <LoadingState label={t('knowledge-page-loading')} detail={t('desktop-knowledge-page-loading-body')} compact />
+                      <LoadingSkeleton variant="page" />
                     {:else if snapshot.knowledgePage?.wikiId === selectedWiki.id && snapshot.knowledgePage.status === 'ready'}
                       <header><p class="section-label">{t('desktop-verified-page')}</p><h2>{snapshot.knowledgePage.title}</h2></header>
                       {@const concept = snapshot.knowledgePage.concept}
@@ -1974,11 +2003,12 @@
               {#if !snapshot.model?.active}
                 <div class="search-welcome" role="status"><Sparkles size={32} aria-hidden="true" /><h2>{t('desktop-search-preparing-title')}</h2><p>{t('desktop-search-preparing-body')}</p><button class="secondary" onclick={() => openServiceStatus('knowledge')}>{t('desktop-search-preparing-action')}</button></div>
               {:else if searchBusy && (!snapshot.search || snapshot.search.requestId !== activeSearchRequestId)}
-                <div class="search-results"><LoadingState label={t('search-running')} detail={t('desktop-search-loading-detail')} /></div>
+                <div class="search-results" aria-busy="true"><LoadingState label={t('search-running')} detail={t('desktop-search-loading-detail')} tone="ai" /><LoadingSkeleton variant="results" rows={3} /></div>
               {:else if snapshot.search && snapshot.search.requestId === activeSearchRequestId}
                 <div class="search-results" aria-live="polite">
                   {#if snapshot.search.status === 'searching'}
-                    <LoadingState label={t('search-running')} detail={snapshot.search.hits.length > 0 ? t('desktop-search-loading-partial') : t('desktop-search-loading-detail')} compact />
+                    <LoadingState label={t('search-running')} detail={snapshot.search.hits.length > 0 ? t('desktop-search-loading-partial') : t('desktop-search-loading-detail')} tone="ai" compact />
+                    {#if snapshot.search.hits.length === 0}<LoadingSkeleton variant="results" rows={3} />{/if}
                   {:else if snapshot.search.status === 'failed'}
                     <div class="search-state error" role="alert"><AlertTriangle size={17} aria-hidden="true" /><span>{t('search-error-title')}</span></div>
                   {:else if snapshot.search.hits.length > 0}
@@ -2014,7 +2044,7 @@
               <details class="advanced-disclosure"><summary>{t('desktop-advanced-details')}</summary><dl>{#if snapshot.nodeId}<div><dt>{t('desktop-network-identity')}</dt><dd><code>{shortPeerId(snapshot.nodeId)}</code></dd></div>{/if}{#if snapshot.mcpUrl}<div><dt>{t('diagnostics-local-mcp')}</dt><dd><code>{snapshot.mcpUrl}</code></dd></div>{/if}{#if snapshot.hardware}<div><dt>{t('desktop-memory-installed')}</dt><dd>{formatBytes(snapshot.hardware.totalMemoryBytes)}</dd></div><div><dt>{t('desktop-disk-available')}</dt><dd>{formatBytes(snapshot.hardware.availableDiskBytes)}</dd></div>{/if}</dl></details>
             </div>
           {/if}
-          {#if actionMessage}<p class={`action-message ${actionMessageTone()}`} aria-live="polite">{actionMessage}</p>{/if}
+          {#if actionMessage}<p class={`action-message ${actionMessageTone()}`} aria-live="polite">{#if actionMessageTone() === 'progress'}<Spinner size="small" />{/if}<span>{#if actionMessageTone() === 'progress'}<ShimmerText text={actionMessage} />{:else}{actionMessage}{/if}</span></p>{/if}
         </div>
       {/key}
     </section>
@@ -2024,7 +2054,7 @@
 
 <div class="dialog-layer" inert={closeChoiceRequired} aria-hidden={closeChoiceRequired ? 'true' : undefined}>
 {#if createWikiOpen && folderSelection}
-  <div class="modal-backdrop" role="presentation"><div class="create-wiki-dialog" role="dialog" aria-modal="true" aria-labelledby="create-wiki-title"><form onsubmit={(event) => { event.preventDefault(); createWiki(); }}><p class="section-label">{t('desktop-new-wiki')}</p><h2 id="create-wiki-title">{t('desktop-name-wiki')}</h2><p>{folderSelection.displayName}</p><TextField label={t('desktop-wiki-name')} bind:value={wikiName} maxlength={120} required /><Switch label={t('desktop-continuous-indexing')} description={t('desktop-continuous-indexing-body')} bind:checked={continuousIndexing} /><div class="row-actions"><button type="button" class="secondary" onclick={() => { createWikiOpen = false; folderSelection = null; continuousIndexing = true; }}>{t('action-cancel')}</button><button class="primary" disabled={actionBusy || !wikiName.trim()}>{t('desktop-create-wiki')}</button></div></form></div></div>
+  <div class="modal-backdrop" role="presentation"><div class="create-wiki-dialog" role="dialog" aria-modal="true" aria-labelledby="create-wiki-title"><form onsubmit={(event) => { event.preventDefault(); createWiki(); }}><p class="section-label">{t('desktop-new-wiki')}</p><h2 id="create-wiki-title">{t('desktop-name-wiki')}</h2><p>{folderSelection.displayName}</p><TextField label={t('desktop-wiki-name')} bind:value={wikiName} maxlength={120} placeholder={t('desktop-wiki-name-placeholder')} required /><Switch label={t('desktop-continuous-indexing')} description={t('desktop-continuous-indexing-body')} bind:checked={continuousIndexing} /><div class="row-actions"><button type="button" class="secondary" onclick={() => { createWikiOpen = false; folderSelection = null; continuousIndexing = true; }}>{t('action-cancel')}</button><button class="primary" disabled={actionBusy || !wikiName.trim()}>{t('desktop-create-wiki')}</button></div></form></div></div>
 {/if}
 
 {#if newWikiMenuOpen}
@@ -2060,7 +2090,7 @@
             </ul>
           </details>
         {/if}
-        <TextField label={t('desktop-wiki-name')} bind:value={wikiName} maxlength={120} required />
+        <TextField label={t('desktop-wiki-name')} bind:value={wikiName} maxlength={120} placeholder={t('desktop-wiki-name-placeholder')} required />
         <div class="row-actions"><button type="button" class="secondary" onclick={() => { okfImportSelection = null; okfImportSummary = null; wikiName = ''; }}>{t('action-cancel')}</button><button class="primary" disabled={actionBusy || !wikiName.trim()}>{t('desktop-import-okf-action')}</button></div>
       </form>
     </div>
@@ -2101,7 +2131,7 @@
           <Switch label={t('desktop-share-public')} description={t('desktop-share-public-body')} bind:checked={wikiPolicy.internetPublic} />
           <small class="public-identity-note">{t('desktop-share-public-identity-note')}</small>
           {#if wikiPolicy.internetPublic}
-            <div class="public-share-fields"><TextField label={t('desktop-wiki-public-description')} bind:value={publicDescription} maxlength={2048} rows={3} multiline /><TextField label={t('desktop-wiki-public-languages')} bind:value={publicLanguages} maxlength={300} placeholder="es, en" /></div>
+            <div class="public-share-fields"><TextField label={t('desktop-wiki-public-description')} bind:value={publicDescription} maxlength={2048} rows={3} placeholder={t('desktop-wiki-public-description-placeholder')} multiline /><TextField label={t('desktop-wiki-public-languages')} bind:value={publicLanguages} maxlength={300} placeholder={t('desktop-wiki-public-languages-placeholder')} /></div>
           {/if}
         </section>
       </div>
@@ -2178,7 +2208,7 @@
         </div>
       </section>
       <ConnectionAdvanced lanRuntime={snapshot.lanRuntime} peerId={federationPeerId} address={federationAddress} blockedPublishers={snapshot.blockedPublicPublishers} busy={peerActionId !== null} {t} onpeerid={(value) => { federationPeerId = value; }} onaddress={(value) => { federationAddress = value; }} onadd={() => saveFederationIndex(false)} onremove={() => saveFederationIndex(true)} onunblock={(publisherId) => changePublisherBlock(publisherId, false)} />
-      <details class="advanced-disclosure"><summary>{t('desktop-advanced-details')}</summary><TextField label={t('desktop-address')} bind:value={manualPeerAddress} maxlength={500} /><button class="secondary" onclick={connectManualPeer}>{t('action-connect')}</button></details>
+      <details class="advanced-disclosure"><summary>{t('desktop-advanced-details')}</summary><TextField label={t('desktop-address')} bind:value={manualPeerAddress} maxlength={500} placeholder={t('desktop-multiaddress-placeholder')} /><button class="secondary" onclick={connectManualPeer}>{t('action-connect')}</button></details>
     </div>
   </div>
 {/if}

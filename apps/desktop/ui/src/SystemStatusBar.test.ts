@@ -56,4 +56,20 @@ describe('SystemStatusBar', () => {
     const report = await axe.run(container, { rules: { 'color-contrast': { enabled: false } } });
     expect(report.violations.filter((violation) => ['critical', 'serious'].includes(violation.impact ?? ''))).toEqual([]);
   });
+
+  it('uses shimmer only for active local knowledge processing', () => {
+    const snapshot = readySnapshot();
+    snapshot.model = {
+      stateSequence: 1, profile: 'balanced', recommendedModelId: 'local', displayName: 'Local',
+      recommendationReason: 'fixture', active: true, installed: true, degraded: false,
+      issues: [], pendingModelId: null, downloadBytes: 0, requiredFreeBytes: 0,
+      fitsAvailableDisk: true, licenseAccepted: true, license: 'Apache-2.0', licenseUrl: null,
+      revision: 'fixture'
+    };
+    snapshot.wikiScans = [{ wikiId: snapshot.wikis[0].id, state: 'scanning' }];
+    const { container } = render(SystemStatusBar, { snapshot, t: translate, onselect: vi.fn() });
+
+    expect(screen.getByRole('button', { name: 'Local knowledge: Preparing' })).toBeInTheDocument();
+    expect(container.querySelectorAll('.shimmer-text')).toHaveLength(1);
+  });
 });

@@ -104,6 +104,24 @@ function translate(id: string): string {
 describe('SharedWikiViewer', () => {
   afterEach(cleanup);
 
+  it('reserves the full remote workspace while access is validated', () => {
+    const { container } = render(SharedWikiViewer, {
+      source: 'public',
+      sourceName: 'Public network',
+      browse: null,
+      loading: true,
+      structureLoading: false,
+      pageLoading: false,
+      t: translate,
+      metadata: () => 'Unverified',
+      onback: vi.fn(),
+      onopenpage: vi.fn()
+    });
+
+    expect(screen.getByRole('status')).toHaveTextContent('desktop-shared-loading-title');
+    expect(container.querySelector('.loading-skeleton.workspace')).toBeInTheDocument();
+  });
+
   it('renders the complete published workspace without visible pagination', async () => {
     const onopenpage = vi.fn();
     render(SharedWikiViewer, {

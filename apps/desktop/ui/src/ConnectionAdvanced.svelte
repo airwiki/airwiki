@@ -38,8 +38,8 @@
   <section>
     <h3>{t('desktop-community-indexes')}</h3>
     <p>{t('desktop-community-indexes-body')}</p>
-    <TextField label={t('desktop-peer-id')} value={peerId} oninput={onpeerid} maxlength={200} />
-    <TextField label={t('desktop-multiaddress')} value={address} oninput={onaddress} maxlength={500} />
+    <TextField label={t('desktop-peer-id')} value={peerId} oninput={onpeerid} maxlength={200} placeholder={t('desktop-peer-id-placeholder')} />
+    <TextField label={t('desktop-multiaddress')} value={address} oninput={onaddress} maxlength={500} placeholder={t('desktop-multiaddress-placeholder')} />
     <div class="row-actions"><button class="secondary" onclick={onadd} disabled={!peerId.trim() || !address.trim()}>{t('search-public-index-add')}</button><button class="text-action" onclick={onremove} disabled={!peerId.trim()}>{t('search-public-index-remove')}</button></div>
   </section>
   {#if blockedPublishers.length}

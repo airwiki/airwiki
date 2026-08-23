@@ -173,6 +173,27 @@ describe('AirWiki wiki workspace', () => {
     expect(screen.queryByRole('heading', { name: 'Atlas' })).not.toBeInTheDocument();
   });
 
+  it('preserves the wiki workspace geometry while its published bundle loads', async () => {
+    const { container } = render(App);
+
+    await fireEvent.click(await screen.findByRole('button', { name: /Atlas 2 publicados/ }));
+
+    expect(await screen.findByRole('status')).toHaveTextContent('El bundle se está actualizando');
+    expect(container.querySelector('.loading-skeleton.workspace')).toBeInTheDocument();
+    expect(container.querySelector('.shimmer-text.active')).toBeInTheDocument();
+  });
+
+  it('replaces a failed wiki load with a recoverable state instead of an endless skeleton', async () => {
+    vi.mocked(loadWikiBundle).mockRejectedValueOnce(new Error('synthetic load failure'));
+    const { container } = render(App);
+
+    await fireEvent.click(await screen.findByRole('button', { name: /Atlas 2 publicados/ }));
+
+    expect(await screen.findByRole('alert')).toHaveTextContent('No se pudo abrir esta wiki');
+    expect(screen.getByRole('button', { name: 'Volver a intentar' })).toBeInTheDocument();
+    expect(container.querySelector('.loading-skeleton.workspace')).not.toBeInTheDocument();
+  });
+
   it('does not let a stale connect response replace a newer channel snapshot', async () => {
     const starting = readySnapshot();
     starting.sequence = 0;
@@ -1264,6 +1285,8 @@ describe('AirWiki wiki workspace', () => {
     expect(screen.getByRole('button', { name: 'Consultando los equipos disponibles…' })).toBeDisabled();
     expect(screen.getByRole('status')).toHaveTextContent('Consultando los equipos disponibles…');
     expect(document.querySelector('.spinner')).toBeInTheDocument();
+    expect(document.querySelector('.loading-skeleton.results')).toBeInTheDocument();
+    expect(document.querySelector('.shimmer-text.active')).toBeInTheDocument();
   });
 
   it('names every source checked by a completed public search with no matches', async () => {

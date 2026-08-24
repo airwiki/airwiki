@@ -1,10 +1,6 @@
 use std::path::{Path, PathBuf};
 
 #[cfg(windows)]
-use std::ffi::OsString;
-#[cfg(windows)]
-use std::os::windows::ffi::{OsStrExt, OsStringExt};
-#[cfg(windows)]
 use std::os::windows::fs::MetadataExt;
 
 use airwiki_types::OkfCompatibility;
@@ -589,38 +585,23 @@ fn project_root_matches_canonical(root: &Path, canonical: &Path) -> bool {
 }
 
 #[cfg(windows)]
-fn project_root_matches_canonical(root: &Path, canonical: &Path) -> bool {
-    // Windows canonicalization adds a verbatim prefix to ordinary absolute paths. Removing only
-    // that representation detail keeps lexical aliases and reparse-point escapes rejected.
-    windows_path_without_verbatim_prefix(root) == windows_path_without_verbatim_prefix(canonical)
-}
-
-#[cfg(windows)]
-fn windows_path_without_verbatim_prefix(path: &Path) -> PathBuf {
-    const SEPARATOR: u16 = b'\\' as u16;
-    const VERBATIM_PREFIX: &[u16] = &[SEPARATOR, SEPARATOR, b'?' as u16, SEPARATOR];
-    const VERBATIM_UNC_PREFIX: &[u16] = &[
-        SEPARATOR,
-        SEPARATOR,
-        b'?' as u16,
-        SEPARATOR,
-        b'U' as u16,
-        b'N' as u16,
-        b'C' as u16,
-        SEPARATOR,
-    ];
-
-    let encoded = path.as_os_str().encode_wide().collect::<Vec<_>>();
-    if let Some(remainder) = encoded.strip_prefix(VERBATIM_UNC_PREFIX) {
-        let mut normalized = Vec::with_capacity(remainder.len() + 2);
-        normalized.extend([SEPARATOR, SEPARATOR]);
-        normalized.extend(remainder);
-        return PathBuf::from(OsString::from_wide(&normalized));
+fn project_root_matches_canonical(root: &Path, _canonical: &Path) -> bool {
+    // Windows canonicalization can change path spelling as well as add a verbatim prefix. Reject
+    // lexical escapes and inspect every ancestor for reparse points, then store the canonical form.
+    if root.components().any(|component| {
+        matches!(
+            component,
+            std::path::Component::CurDir | std::path::Component::ParentDir
+        )
+    }) {
+        return false;
     }
-    if let Some(remainder) = encoded.strip_prefix(VERBATIM_PREFIX) {
-        return PathBuf::from(OsString::from_wide(remainder));
-    }
-    path.to_path_buf()
+    root.ancestors()
+        .take_while(|ancestor| !ancestor.as_os_str().is_empty())
+        .all(|ancestor| {
+            std::fs::symlink_metadata(ancestor)
+                .is_ok_and(|metadata| !metadata_is_link_or_reparse(&metadata))
+        })
 }
 
 fn validate_project_name(name: &str) -> Result<()> {
@@ -1352,24 +1333,6 @@ mod tests {
         assert_eq!(
             canonical_project_root(&root).unwrap(),
             std::fs::canonicalize(root).unwrap()
-        );
-    }
-
-    #[cfg(windows)]
-    #[test]
-    fn strips_windows_verbatim_disk_prefix_for_comparison() {
-        assert_eq!(
-            windows_path_without_verbatim_prefix(Path::new(r"\\?\C:\repo")),
-            PathBuf::from(r"C:\repo")
-        );
-    }
-
-    #[cfg(windows)]
-    #[test]
-    fn strips_windows_verbatim_unc_prefix_for_comparison() {
-        assert_eq!(
-            windows_path_without_verbatim_prefix(Path::new(r"\\?\UNC\server\share\repo")),
-            PathBuf::from(r"\\server\share\repo")
         );
     }
 

@@ -10,7 +10,7 @@
   import Sparkles from '@lucide/svelte/icons/sparkles';
   import { listen } from '@tauri-apps/api/event';
   import { onMount, tick } from 'svelte';
-  import { addFederationIndex, addWiki, allowPeerPairingAgain, approveReview, browseNearbyWiki, browsePublicWiki, cancelModelInstall, checkUpdates, configureFirewall, confirmPairing, connect, deleteWiki, dialPeer, downloadUpdate, executeComputation, executeGuidedWikiRepair, hideToTray, importOkf, installModels, installUpdate, loadReviewEvidence, loadWikiBundle, loadWikiPage, manageIntegration, openExternalLink, openSystemDestination, pairPeer, pickOkfImport, pickWikiFolder, prepareGuidedWikiRepair, quitCompletely, reanalyzeReview, refreshApplicationAccess, refreshAutostart, refreshComputations, refreshConnectivity, refreshWikiHealth, rejectComputation, rejectReview, relinkWiki, removeFederationIndex, rescanWiki, revokePeer, saveComputationResult, searchKnowledge, setApplicationWikiRole, setAutostart, setPublicPublisherBlocked, setWikiGrant, setWikiIndexing, updatePreferences, updatePublicWikiProfile, updateWikiPolicy, validateOkfImport, verifyWikiConcept, type AppSnapshot, type ApplicationWikiRoleInput, type CloseBehavior, type EnrichmentDraft, type FolderSelection, type IntegrationActionInput, type IntegrationClient, type KnowledgeConceptSummary, type KnowledgePageInput, type LanPreference, type LocalePreference, type OkfImportSummary, type PublicConceptSummaryDto, type RemoteWikiPageInput, type ReviewSummary, type SearchCoverage, type SearchHitSummary, type SourceIssueSummary, type SystemDestination, type ThemePreference, type UpdaterIssue, type WikiPolicyInput, type WikiSummary } from './api';
+  import { addFederationIndex, addWiki, allowPeerPairingAgain, approveProjectMemoryRequest, approveReview, browseNearbyWiki, browsePublicWiki, cancelModelInstall, checkUpdates, configureFirewall, confirmPairing, connect, createProjectMemory, deleteWiki, detachProjectMemory, dialPeer, downloadUpdate, executeComputation, executeGuidedWikiRepair, hideToTray, importOkf, installModels, installUpdate, loadReviewEvidence, loadWikiBundle, loadWikiPage, manageIntegration, openExternalLink, openSystemDestination, pairPeer, pickOkfImport, pickWikiFolder, prepareGuidedWikiRepair, quitCompletely, reanalyzeReview, refreshApplicationAccess, refreshAutostart, refreshComputations, refreshConnectivity, refreshWikiHealth, rejectComputation, rejectProjectMemoryRequest, rejectReview, relinkWiki, removeFederationIndex, rescanWiki, revokePeer, saveComputationResult, searchKnowledge, setApplicationWikiRole, setAutostart, setPublicPublisherBlocked, setWikiGrant, setWikiIndexing, updatePreferences, updatePublicWikiProfile, updateWikiPolicy, validateOkfImport, verifyWikiConcept, type AppSnapshot, type ApplicationWikiRoleInput, type CloseBehavior, type EnrichmentDraft, type FolderSelection, type IntegrationActionInput, type IntegrationClient, type KnowledgeConceptSummary, type KnowledgePageInput, type LanPreference, type LocalePreference, type OkfImportSummary, type PublicConceptSummaryDto, type RemoteWikiPageInput, type ReviewSummary, type SearchCoverage, type SearchHitSummary, type SourceIssueSummary, type SystemDestination, type ThemePreference, type UpdaterIssue, type WikiPolicyInput, type WikiSummary } from './api';
   import KnowledgeGraph from './KnowledgeGraph.svelte';
   import ConnectionAdvanced from './ConnectionAdvanced.svelte';
   import GlobalSearch from './GlobalSearch.svelte';
@@ -77,6 +77,7 @@
   let knowledgeMode: 'document' | 'graph' = 'document';
   let wikiTab: 'content' | 'pending' = 'content';
   let createWikiOpen = false;
+  let createProjectMemoryOpen = false;
   let connectionsOpen = false;
   let locale: LocalePreference = 'system';
   let theme: ThemePreference = 'system';
@@ -123,7 +124,7 @@
   let attentionWikis: WikiSummary[];
   let selectedWiki: WikiSummary | null;
   let selectedWikiReviews: ReviewSummary[];
-  type DialogId = 'new-wiki-source' | 'create-wiki' | 'import-okf' | 'wiki-details' | 'wiki-access' | 'review' | 'connections' | 'close-choice' | null;
+  type DialogId = 'new-wiki-source' | 'create-wiki' | 'create-project-memory' | 'import-okf' | 'wiki-details' | 'wiki-access' | 'review' | 'connections' | 'close-choice' | null;
   let activeDialogId: DialogId;
   let dialogFocusGeneration = 0;
   const dialogFocusState: { activeId: DialogId; returnTarget: HTMLElement | null } = { activeId: null, returnTarget: null };
@@ -211,6 +212,7 @@
     const labelIds: Record<Exclude<DialogId, null>, string> = {
       'new-wiki-source': 'new-wiki-source-title',
       'create-wiki': 'create-wiki-title',
+      'create-project-memory': 'create-project-memory-title',
       'import-okf': 'import-okf-title',
       'wiki-details': 'details-title',
       'wiki-access': 'share-title',
@@ -236,7 +238,7 @@
         ? dialog?.querySelector<HTMLElement>('.primary')
         : dialogId === 'new-wiki-source'
           ? dialog?.querySelector<HTMLElement>('.source-choice-item')
-          : dialogId === 'create-wiki' || dialogId === 'import-okf'
+          : dialogId === 'create-wiki' || dialogId === 'create-project-memory' || dialogId === 'import-okf'
             ? dialog?.querySelector<HTMLElement>('input:not([disabled])')
             : dialog?.querySelector<HTMLElement>('.icon-button');
       (preferredTarget ?? dialogFocusableElements(dialog).at(0))?.focus();
@@ -263,6 +265,11 @@
         createWikiOpen = false;
         folderSelection = null;
         continuousIndexing = true;
+        wikiName = '';
+        break;
+      case 'create-project-memory':
+        createProjectMemoryOpen = false;
+        folderSelection = null;
         wikiName = '';
         break;
       case 'import-okf':
@@ -310,6 +317,7 @@
       || wiki.maintenanceRequired
       || wiki.needsReviewCount > 0
       || wiki.okfCompatibility.kind === 'legacyV01'
+      || (wiki.memoryKind === 'project' && wiki.projectMemoryHealth !== 'active')
       || (snapshot?.sourceIssues.some((issue) => issue.wikiId === wiki.id) ?? false);
   }
 
@@ -365,6 +373,9 @@
     if (wiki.maintenanceRequired) summaries.push(t('desktop-attention-maintenance-summary'));
     if (wiki.needsReviewCount > 0) summaries.push(t('desktop-wiki-review-count', { count: wiki.needsReviewCount }));
     if (wiki.okfCompatibility.kind === 'legacyV01') summaries.push(t('desktop-okf-compatibility-legacyV01'));
+    if (wiki.memoryKind === 'project' && wiki.projectMemoryHealth !== 'active') {
+      summaries.push(t(`desktop-project-memory-health-${wiki.projectMemoryHealth ?? 'invalid'}`));
+    }
     return summaries.join(' · ');
   }
 
@@ -381,7 +392,8 @@
         : detailsWikiId !== null ? 'wiki-details'
           : okfImportSelection !== null && okfImportSummary !== null ? 'import-okf'
             : createWikiOpen && folderSelection !== null ? 'create-wiki'
-              : newWikiMenuOpen ? 'new-wiki-source'
+              : createProjectMemoryOpen && folderSelection !== null ? 'create-project-memory'
+                : newWikiMenuOpen ? 'new-wiki-source'
                 : connectionsOpen ? 'connections'
                   : null;
 
@@ -1049,6 +1061,17 @@
     }
   }
 
+  async function chooseProjectMemoryFolder() {
+    actionMessage = '';
+    newWikiMenuOpen = false;
+    try {
+      folderSelection = await pickWikiFolder();
+      if (folderSelection) createProjectMemoryOpen = true;
+    } catch {
+      actionMessage = t('error-collection');
+    }
+  }
+
   async function chooseOkfImport(zip: boolean) {
     actionMessage = '';
     newWikiMenuOpen = false;
@@ -1107,6 +1130,39 @@
     } catch {
       actionMessage = t('error-collection');
       folderSelection = null;
+    } finally {
+      actionBusy = false;
+    }
+  }
+
+  async function initializeProjectMemory() {
+    if (!folderSelection || !wikiName.trim()) return;
+    actionBusy = true;
+    try {
+      await createProjectMemory(wikiName, folderSelection.token);
+      wikiName = '';
+      folderSelection = null;
+      createProjectMemoryOpen = false;
+      showOperationComplete();
+    } catch (error) {
+      if (uiErrorMessageKey(error) !== 'humanConfirmationRequired') {
+        actionMessage = t('desktop-project-memory-create-error');
+      }
+    } finally {
+      actionBusy = false;
+    }
+  }
+
+  async function decideProjectMemoryRequest(requestId: string, approve: boolean) {
+    actionBusy = true;
+    try {
+      if (approve) await approveProjectMemoryRequest(requestId);
+      else await rejectProjectMemoryRequest(requestId);
+      showOperationComplete();
+    } catch (error) {
+      if (uiErrorMessageKey(error) !== 'humanConfirmationRequired') {
+        actionMessage = t('desktop-project-memory-request-error');
+      }
     } finally {
       actionBusy = false;
     }
@@ -1180,6 +1236,10 @@
   }
 
   async function removeWiki(wikiId: string) {
+    if (snapshot?.wikis.find((wiki) => wiki.id === wikiId)?.memoryKind === 'project') {
+      await detachMemory(wikiId);
+      return;
+    }
     actionBusy = true;
     try {
       await deleteWiki(wikiId);
@@ -1188,6 +1248,23 @@
       window.location.hash = '#wikis';
     } catch {
       actionMessage = t('error-collection');
+    } finally {
+      actionBusy = false;
+    }
+  }
+
+  async function detachMemory(wikiId: string) {
+    actionBusy = true;
+    try {
+      await detachProjectMemory(wikiId);
+      detailsWikiId = null;
+      selectedWikiId = null;
+      window.location.hash = '#wikis';
+      showOperationComplete();
+    } catch (error) {
+      if (uiErrorMessageKey(error) !== 'humanConfirmationRequired') {
+        actionMessage = t('desktop-project-memory-detach-error');
+      }
     } finally {
       actionBusy = false;
     }
@@ -1801,6 +1878,20 @@
               </div>
             {/if}
             <WikiTable wikis={orderedWikis} scans={snapshot.wikiScans} {t} onopen={openWiki} />
+            {#if snapshot.projectMemoryRequests.length > 0}
+              <section class="workspace-section project-memory-requests" aria-labelledby="project-memory-requests-title">
+                <div class="section-heading"><div><h2 id="project-memory-requests-title">{t('desktop-project-memory-requests-title')}</h2><p>{t('desktop-project-memory-requests-body')}</p></div><button class="text-action" onclick={refreshApplicationAccess}>{t('action-refresh')}</button></div>
+                <div class="computation-list">
+                  {#each snapshot.projectMemoryRequests as request (request.requestId)}
+                    <article>
+                      <span class="pending-icon project-memory-link" aria-hidden="true"><BookOpen size={17} /></span>
+                      <div><strong>{t(request.kind === 'initialize' ? 'desktop-project-memory-initialize-request' : 'desktop-project-memory-attach-request', { application: request.applicationName })}</strong><p>{t('desktop-project-memory-request-folder', { folder: request.folderName })}</p>{#if request.requestedName}<small>{request.requestedName}</small>{/if}</div>
+                      <div class="row-actions"><button class="secondary" disabled={actionBusy} onclick={() => decideProjectMemoryRequest(request.requestId, false)}>{t('action-reject')}</button><button class="primary" disabled={actionBusy} onclick={() => decideProjectMemoryRequest(request.requestId, true)}>{t('action-approve')}</button></div>
+                    </article>
+                  {/each}
+                </div>
+              </section>
+            {/if}
             {#if snapshot.pendingComputations.length > 0}
               <section class="workspace-section" aria-labelledby="computations-title">
                 <div class="section-heading"><div><h2 id="computations-title">{t('desktop-computation-requests-title')}</h2><p>{t('desktop-computation-requests-body')}</p></div><button class="text-action" onclick={refreshComputations}>{t('action-refresh')}</button></div>
@@ -1885,6 +1976,14 @@
               {#if wikiPeers(selectedWiki.id).length > 0}<div class="wiki-access-devices">{#each wikiPeers(selectedWiki.id) as peer (peer.peerId)}<DeviceIdentity name={peerDisplayName(peer)} platform={peer.platform} platformLabel={platformLabel(peer.platform)} compact chip />{/each}</div>{:else}<small>{t('desktop-wiki-no-specific-access')}</small>{/if}
               {#if selectedWiki.restrictions.length === 0}<button class="text-action" onclick={openConnectionsPanel}>{t('desktop-manage-access')}</button>{/if}
             </section>
+
+            {#if selectedWiki.memoryKind === 'project'}
+              <section class="project-memory-strip" class:warning={selectedWiki.projectMemoryHealth !== 'active'} aria-label={t('desktop-project-memory-label')}>
+                <span class="project-memory-route" aria-hidden="true"><span>⌂</span><span class="project-memory-route-line"></span><BookOpen size={17} /></span>
+                <div><strong>{t('desktop-project-memory-label')}</strong><small>{t(`desktop-project-memory-health-${selectedWiki.projectMemoryHealth ?? 'invalid'}`)}</small></div>
+                <div class="project-memory-strip-actions"><span class="status-pill" class:warning={selectedWiki.projectMemoryHealth !== 'active'}>{selectedWiki.projectMemoryHealth === 'active' ? t('status-ready') : t('status-blocked')}</span><button class="text-action" disabled={actionBusy} onclick={() => detachMemory(selectedWiki.id)}>{t('desktop-project-memory-detach')}</button></div>
+              </section>
+            {/if}
 
             {#if selectedWiki.okfCompatibility.kind === 'futureRestricted' || selectedWiki.okfCompatibility.kind === 'legacyV01' || selectedWiki.staleConceptCount > 0 || selectedWiki.outdatedVerificationCount > 0 || selectedWiki.metadataWarningCount > 0}
               <section class="wiki-assurance-strip" aria-label={t('desktop-okf-status-title')}>
@@ -2057,8 +2156,12 @@
   <div class="modal-backdrop" role="presentation"><div class="create-wiki-dialog" role="dialog" aria-modal="true" aria-labelledby="create-wiki-title"><form onsubmit={(event) => { event.preventDefault(); createWiki(); }}><p class="section-label">{t('desktop-new-wiki')}</p><h2 id="create-wiki-title">{t('desktop-name-wiki')}</h2><p>{folderSelection.displayName}</p><TextField label={t('desktop-wiki-name')} bind:value={wikiName} maxlength={120} placeholder={t('desktop-wiki-name-placeholder')} required /><Switch label={t('desktop-continuous-indexing')} description={t('desktop-continuous-indexing-body')} bind:checked={continuousIndexing} /><div class="row-actions"><button type="button" class="secondary" onclick={() => { createWikiOpen = false; folderSelection = null; continuousIndexing = true; }}>{t('action-cancel')}</button><button class="primary" disabled={actionBusy || !wikiName.trim()}>{t('desktop-create-wiki')}</button></div></form></div></div>
 {/if}
 
+{#if createProjectMemoryOpen && folderSelection}
+  <div class="modal-backdrop" role="presentation"><div class="create-wiki-dialog project-memory-dialog" role="dialog" aria-modal="true" aria-labelledby="create-project-memory-title"><form onsubmit={(event) => { event.preventDefault(); initializeProjectMemory(); }}><p class="section-label">{t('desktop-project-memory-label')}</p><h2 id="create-project-memory-title">{t('desktop-project-memory-create-title')}</h2><p>{folderSelection.displayName}</p><div class="project-memory-preview"><span>.airwiki</span><small>{t('desktop-project-memory-create-preview')}</small></div><TextField label={t('desktop-wiki-name')} bind:value={wikiName} maxlength={120} placeholder={t('desktop-wiki-name-placeholder')} required /><p class="form-help">{t('desktop-project-memory-create-body')}</p><div class="row-actions"><button type="button" class="secondary" onclick={() => { createProjectMemoryOpen = false; folderSelection = null; wikiName = ''; }}>{t('action-cancel')}</button><button class="primary" disabled={actionBusy || !wikiName.trim()}>{t('desktop-project-memory-create-action')}</button></div></form></div></div>
+{/if}
+
 {#if newWikiMenuOpen}
-  <div class="modal-backdrop" role="presentation" onclick={(event) => { if (event.currentTarget === event.target) newWikiMenuOpen = false; }}><div class="create-wiki-dialog source-choice" role="dialog" aria-modal="true" aria-labelledby="new-wiki-source-title"><p class="section-label">{t('desktop-new-wiki')}</p><h2 id="new-wiki-source-title">{t('desktop-new-wiki-source')}</h2><button class="source-choice-item" onclick={chooseFolder}><strong>{t('desktop-new-wiki-folder')}</strong><span>{t('desktop-new-wiki-folder-body')}</span></button><button class="source-choice-item" onclick={() => chooseOkfImport(false)}><strong>{t('desktop-import-okf-folder')}</strong><span>{t('desktop-import-okf-body')}</span></button><button class="source-choice-item" onclick={() => chooseOkfImport(true)}><strong>{t('desktop-import-okf-zip')}</strong><span>{t('desktop-import-okf-body')}</span></button><button class="text-action" onclick={() => { newWikiMenuOpen = false; }}>{t('action-cancel')}</button></div></div>
+  <div class="modal-backdrop" role="presentation" onclick={(event) => { if (event.currentTarget === event.target) newWikiMenuOpen = false; }}><div class="create-wiki-dialog source-choice" role="dialog" aria-modal="true" aria-labelledby="new-wiki-source-title"><p class="section-label">{t('desktop-new-wiki')}</p><h2 id="new-wiki-source-title">{t('desktop-new-wiki-source')}</h2><button class="source-choice-item signature-choice" onclick={chooseProjectMemoryFolder}><strong>{t('desktop-project-memory-create-title')}</strong><span>{t('desktop-project-memory-source-body')}</span><code>.airwiki/</code></button><button class="source-choice-item" onclick={chooseFolder}><strong>{t('desktop-new-wiki-folder')}</strong><span>{t('desktop-new-wiki-folder-body')}</span></button><button class="source-choice-item" onclick={() => chooseOkfImport(false)}><strong>{t('desktop-import-okf-folder')}</strong><span>{t('desktop-import-okf-body')}</span></button><button class="source-choice-item" onclick={() => chooseOkfImport(true)}><strong>{t('desktop-import-okf-zip')}</strong><span>{t('desktop-import-okf-body')}</span></button><button class="text-action" onclick={() => { newWikiMenuOpen = false; }}>{t('action-cancel')}</button></div></div>
 {/if}
 
 {#if okfImportSelection && okfImportSummary}

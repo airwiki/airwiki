@@ -2,6 +2,9 @@
 
 This runbook validates the experimental public network between two installed
 AirWiki candidates on different NATs. Use synthetic documents only.
+For the conceptual difference between LAN grants, public routing indexes, and
+owner-authorized search, first read
+[Search across local, LAN, and public Wikis](search-and-federation.md).
 
 ## Setup
 

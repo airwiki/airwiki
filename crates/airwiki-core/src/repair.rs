@@ -22,7 +22,7 @@ use crate::knowledge::{
     OkfBundleInspector,
 };
 use crate::okf::{OkfPublisher, atomic_write};
-use crate::storage::{AuditEvent, CollectionRecord, Database};
+use crate::storage::{AuditEvent, CollectionRecord, Database, MemoryScope};
 
 const SNAPSHOT_SCHEMA_VERSION: u32 = 1;
 const SNAPSHOT_RETENTION: usize = 5;
@@ -213,6 +213,8 @@ pub enum WikiRepairError {
     StalePlan,
     #[error("the collection no longer exists")]
     CollectionMissing,
+    #[error("project memory files must be repaired in the project; AirWiki will not rewrite them")]
+    ProjectMemoryRequiresManualResolution,
     #[error("the plan only contains actions that require explicit human confirmation: {risks:?}")]
     ConfirmationRequired { risks: Vec<RepairRisk> },
     #[error("the published snapshot is not coherent enough for automatic repair: {codes:?}")]
@@ -381,6 +383,9 @@ impl WikiRepairExecutor {
             .collection(plan.collection_id)
             .map_err(WikiRepairError::Storage)?
             .ok_or(WikiRepairError::CollectionMissing)?;
+        if collection.memory_scope == Some(MemoryScope::Project) {
+            return Err(WikiRepairError::ProjectMemoryRequiresManualResolution);
+        }
         let mut affected = BTreeSet::new();
         let mut scan_orphans = false;
         for preview in plan.previews.iter().filter(|preview| {
@@ -503,6 +508,9 @@ impl WikiRepairExecutor {
             .collection(preview.collection_id)
             .map_err(WikiRepairError::Storage)?
             .ok_or(WikiRepairError::CollectionMissing)?;
+        if collection.memory_scope == Some(MemoryScope::Project) {
+            return Err(WikiRepairError::ProjectMemoryRequiresManualResolution);
+        }
         let pages = preview
             .files
             .iter()
@@ -699,6 +707,9 @@ impl WikiRepairExecutor {
             .collection(plan.collection_id)
             .map_err(WikiRepairError::Storage)?
             .ok_or(WikiRepairError::CollectionMissing)?;
+        if collection.memory_scope == Some(MemoryScope::Project) {
+            return Err(WikiRepairError::ProjectMemoryRequiresManualResolution);
+        }
         let published = self
             .database
             .list_published_concepts(plan.collection_id)

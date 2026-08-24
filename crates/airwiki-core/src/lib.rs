@@ -14,6 +14,7 @@ mod memory;
 pub mod okf;
 pub mod okf_import;
 pub mod pipeline;
+mod project_memory;
 pub mod publication;
 pub mod repair;
 #[cfg(feature = "fastembed-runtime")]
@@ -55,6 +56,11 @@ pub use okf::{
 };
 pub use okf_import::{OkfImportReport, OkfImportValidator, OkfImportedConcept};
 pub use pipeline::{CollectionPreflight, IngestOutcome, IngestPipeline, ReviewEdits};
+pub use project_memory::{
+    PROJECT_MEMORY_MANIFEST_MAX_BYTES, PROJECT_MEMORY_REQUEST_TTL_MINUTES, ProjectMemoryApproval,
+    ProjectMemoryManifest, ProjectMemoryOpenResult, ProjectMemoryReconciliationReport,
+    ProjectMemoryService,
+};
 pub use publication::{OkfPublicationMaterializer, PublicationRecoveryReport};
 pub use repair::{
     GuidedRepairChange, GuidedRepairFilePreview, GuidedRepairPreview, GuidedRepairResult,
@@ -76,9 +82,12 @@ pub use storage::{
     CollectionMaintenanceRecord, CollectionMaintenanceResult, CollectionMaintenanceStatus,
     CollectionRecord, CollectionStats, ComputationRunRecord, ComputationRunState, ConceptRecord,
     Database, FederationIndexRecord, GrantRecord, IndexingMode, JobRecord,
-    ManagedBundleMutationRecord, ManagedBundleMutationState, NewCollection, NewManagedCollection,
-    OkfConceptProjectionRecord, PeerRecord, ReviewEvidenceChunkRecord, ReviewEvidencePageRecord,
-    ReviewReanalysisClaim, ReviewVersionToken, SourceDocumentRecord, StoredChunk, WikiOrigin,
+    ManagedBundleMutationRecord, ManagedBundleMutationState, MemoryScope, MemorySearchRecord,
+    NewCollection, NewManagedCollection, NewProjectMemoryAttachment, OkfConceptProjectionRecord,
+    PeerRecord, ProjectMemoryAttachmentRecord, ProjectMemoryAttachmentState,
+    ProjectMemoryRequestKind, ProjectMemoryRequestRecord, ProjectMemoryRequestState,
+    ReviewEvidenceChunkRecord, ReviewEvidencePageRecord, ReviewReanalysisClaim, ReviewVersionToken,
+    SourceDocumentRecord, StoredChunk, WikiOrigin,
 };
 
 /// Embedding dimensionality required by multilingual-e5-small.

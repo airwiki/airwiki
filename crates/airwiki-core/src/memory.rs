@@ -17,8 +17,9 @@ use crate::okf::atomic_write;
 use crate::okf_import::{append_human_verification, parse_concept};
 use crate::storage::ApplicationWikiRole;
 use crate::{
-    CollectionRecord, Database, ManagedBundleMutationState, NewManagedCollection,
-    OkfConceptProjectionRecord, OkfImportValidator, OkfImportedConcept, WikiOrigin,
+    CollectionRecord, Database, ManagedBundleMutationState, MemoryScope, NewManagedCollection,
+    OkfConceptProjectionRecord, OkfImportValidator, OkfImportedConcept,
+    ProjectMemoryAttachmentState, WikiOrigin,
 };
 
 pub const AI_MEMORY_CONCEPT_MAX_BYTES: usize = 48 * 1024;
@@ -57,7 +58,8 @@ pub struct AiMemoryConceptInput {
 }
 
 struct AttributedMemoryWrite<'a> {
-    quota_owner_app_id: Uuid,
+    authorized_app_id: Option<Uuid>,
+    quota_owner_app_id: Option<Uuid>,
     wiki_id: Uuid,
     concept_id: Option<Uuid>,
     expected_fingerprint: Option<&'a str>,
@@ -81,6 +83,7 @@ impl AiMemoryService {
     }
 
     pub fn recover_pending(&self) -> Result<ManagedBundleRecoveryReport> {
+        let _guard = self.database.managed_bundle_guard()?;
         let mut report = ManagedBundleRecoveryReport::default();
         for mutation in self.database.pending_managed_bundle_mutations()? {
             let Some(wiki) = self.database.collection(mutation.collection_id)? else {
@@ -184,7 +187,7 @@ impl AiMemoryService {
             .context("managed OKF replacement does not match its recovery journal")?;
         self.database
             .upsert_okf_concept_projection(wiki.id, replacement)?;
-        if wiki.origin == WikiOrigin::AiMemory {
+        if wiki.memory_scope == Some(MemoryScope::Personal) {
             let concepts = self.database.list_okf_concept_projection(wiki.id)?;
             regenerate_index(&wiki.wiki_folder, &wiki.name, &concepts)?;
         }
@@ -314,8 +317,17 @@ impl AiMemoryService {
         self.database
             .consume_application_rate_limit(app_id, false)?;
         let producer = self.application_producer(app_id)?;
-        let quota_owner_app_id = self.owner_app_id(wiki_id)?;
+        let wiki = self
+            .database
+            .collection(wiki_id)?
+            .context("AI memory wiki does not exist")?;
+        let quota_owner_app_id = if wiki.memory_scope == Some(MemoryScope::Personal) {
+            Some(self.owner_app_id(wiki_id)?)
+        } else {
+            None
+        };
         self.write_attributed(AttributedMemoryWrite {
+            authorized_app_id: Some(app_id),
             quota_owner_app_id,
             wiki_id,
             concept_id,
@@ -347,7 +359,11 @@ impl AiMemoryService {
         if wiki.origin != WikiOrigin::AiMemory {
             bail!("computation results can only be saved to an AI memory wiki");
         }
-        let owner_app_id = self.owner_app_id(wiki_id)?;
+        let quota_owner_app_id = match wiki.memory_scope {
+            Some(MemoryScope::Personal) => Some(self.owner_app_id(wiki_id)?),
+            Some(MemoryScope::Project) => None,
+            None => bail!("result wiki has no memory scope"),
+        };
         let logical_path = format!("results/{run_id}.md");
         if let Some(existing) = self
             .database
@@ -371,7 +387,8 @@ impl AiMemoryService {
             body_markdown,
         };
         self.write_attributed(AttributedMemoryWrite {
-            quota_owner_app_id: owner_app_id,
+            authorized_app_id: None,
+            quota_owner_app_id,
             wiki_id,
             concept_id: None,
             expected_fingerprint: None,
@@ -387,7 +404,9 @@ impl AiMemoryService {
         &self,
         write: AttributedMemoryWrite<'_>,
     ) -> Result<OkfConceptProjectionRecord> {
+        let _guard = self.database.managed_bundle_guard()?;
         let AttributedMemoryWrite {
+            authorized_app_id,
             quota_owner_app_id,
             wiki_id,
             concept_id,
@@ -399,6 +418,9 @@ impl AiMemoryService {
             rendered_size_limit,
         } = write;
         validate_input(input)?;
+        if let Some(app_id) = authorized_app_id {
+            self.require_role(app_id, wiki_id, true)?;
+        }
         let existing = self.database.list_okf_concept_projection(wiki_id)?;
         let existing = concept_id
             .map(|id| {
@@ -422,13 +444,33 @@ impl AiMemoryService {
             .database
             .collection(wiki_id)?
             .context("AI memory wiki does not exist")?;
+        let project_memory = wiki.memory_scope == Some(MemoryScope::Project);
+        if project_memory
+            && self
+                .database
+                .project_memory_attachment(wiki_id)?
+                .is_none_or(|attachment| attachment.state != ProjectMemoryAttachmentState::Active)
+        {
+            bail!("project memory attachment is unavailable");
+        }
+        let path = checked_memory_path(&wiki.wiki_folder, &logical_path)?;
+        let current = existing
+            .as_ref()
+            .map(|concept| read_current_managed_concept(&path, &concept.fingerprint))
+            .transpose()?;
         let generated_at = Utc::now();
         let verified = verification_metadata(existing.as_ref(), verifier, generated_at)?;
-        let rendered = render_concept(producer, generated_at, input, "stable", verified.as_ref())?;
+        let rendered = render_concept(
+            producer,
+            generated_at,
+            input,
+            "stable",
+            verified.as_ref(),
+            current.as_deref(),
+        )?;
         if rendered.len() > rendered_size_limit {
             bail!("AI memory concept exceeds the size limit");
         }
-        let path = checked_memory_path(&wiki.wiki_folder, &logical_path)?;
         ensure_managed_write_target_is_current(
             &path,
             existing
@@ -440,11 +482,24 @@ impl AiMemoryService {
         let provisional_id = Uuid::new_v5(&wiki_id, logical_path.as_bytes());
         projected.retain(|concept| concept.concept_id != provisional_id);
         projected.push(projection_preview(wiki_id, provisional_id, &provisional)?);
-        let next_index = render_index(&wiki.name, &projected);
-        let managed_size =
-            projected_bundle_size(&wiki.wiki_folder, &path, rendered.len(), next_index.len())?;
-        self.database
-            .ensure_application_managed_size(quota_owner_app_id, wiki_id, managed_size)?;
+        let next_index = (!project_memory).then(|| render_index(&wiki.name, &projected));
+        let managed_size = projected_bundle_size(
+            &wiki.wiki_folder,
+            &path,
+            rendered.len(),
+            next_index.as_ref().map_or(0, String::len),
+            next_index.is_some(),
+        )?;
+        if managed_size > MAX_MANAGED_BUNDLE_BYTES {
+            bail!("AI memory bundle exceeds the size limit");
+        }
+        if let Some(quota_owner_app_id) = quota_owner_app_id {
+            self.database.ensure_application_managed_size(
+                quota_owner_app_id,
+                wiki_id,
+                managed_size,
+            )?;
+        }
         let mutation = self.database.begin_managed_bundle_mutation(
             wiki_id,
             &logical_path,
@@ -468,7 +523,9 @@ impl AiMemoryService {
             let stored = self
                 .database
                 .upsert_okf_concept_projection(wiki_id, &provisional)?;
-            atomic_write(&wiki.wiki_folder.join("index.md"), next_index.as_bytes())?;
+            if let Some(next_index) = &next_index {
+                atomic_write(&wiki.wiki_folder.join("index.md"), next_index.as_bytes())?;
+            }
             self.database.update_collection_okf_metadata(
                 wiki_id,
                 Some("0.2"),
@@ -499,6 +556,7 @@ impl AiMemoryService {
         concept_id: Uuid,
         expected_fingerprint: &str,
     ) -> Result<OkfConceptProjectionRecord> {
+        let _guard = self.database.managed_bundle_guard()?;
         self.require_role(app_id, wiki_id, true)?;
         self.database
             .consume_application_rate_limit(app_id, false)?;
@@ -533,17 +591,29 @@ impl AiMemoryService {
             &input,
             "deprecated",
             verified.as_ref(),
+            Some(&original),
         )?;
         let imported = parse_concept(&concept.logical_path, &rendered, generated_at)?;
         let mut projected = self.database.list_okf_concept_projection(wiki_id)?;
         projected.retain(|projected| projected.concept_id != concept.concept_id);
         projected.push(projection_preview(wiki_id, concept.concept_id, &imported)?);
-        let next_index = render_index(&wiki.name, &projected);
-        let managed_size =
-            projected_bundle_size(&wiki.wiki_folder, &path, rendered.len(), next_index.len())?;
-        let owner_app_id = self.owner_app_id(wiki_id)?;
-        self.database
-            .ensure_application_managed_size(owner_app_id, wiki_id, managed_size)?;
+        let project_memory = wiki.memory_scope == Some(MemoryScope::Project);
+        let next_index = (!project_memory).then(|| render_index(&wiki.name, &projected));
+        let managed_size = projected_bundle_size(
+            &wiki.wiki_folder,
+            &path,
+            rendered.len(),
+            next_index.as_ref().map_or(0, String::len),
+            next_index.is_some(),
+        )?;
+        if managed_size > MAX_MANAGED_BUNDLE_BYTES {
+            bail!("AI memory bundle exceeds the size limit");
+        }
+        if !project_memory {
+            let owner_app_id = self.owner_app_id(wiki_id)?;
+            self.database
+                .ensure_application_managed_size(owner_app_id, wiki_id, managed_size)?;
+        }
         let mutation = self.database.begin_managed_bundle_mutation(
             wiki_id,
             &concept.logical_path,
@@ -565,7 +635,9 @@ impl AiMemoryService {
             let stored = self
                 .database
                 .upsert_okf_concept_projection(wiki_id, &imported)?;
-            atomic_write(&wiki.wiki_folder.join("index.md"), next_index.as_bytes())?;
+            if let Some(next_index) = &next_index {
+                atomic_write(&wiki.wiki_folder.join("index.md"), next_index.as_bytes())?;
+            }
             self.database.update_collection_okf_metadata(
                 wiki_id,
                 Some("0.2"),
@@ -595,6 +667,7 @@ impl AiMemoryService {
         logical_path: &str,
         expected_fingerprint: &str,
     ) -> Result<OkfConceptProjectionRecord> {
+        let _guard = self.database.managed_bundle_guard()?;
         let wiki = self
             .database
             .collection(wiki_id)?
@@ -639,7 +712,7 @@ impl AiMemoryService {
         if managed_size > MAX_MANAGED_BUNDLE_BYTES {
             bail!("verified OKF bundle exceeds the size limit");
         }
-        if wiki.origin == WikiOrigin::AiMemory {
+        if wiki.memory_scope == Some(MemoryScope::Personal) {
             let owner_app_id = self.owner_app_id(wiki_id)?;
             self.database
                 .ensure_application_managed_size(owner_app_id, wiki_id, managed_size)?;
@@ -790,8 +863,14 @@ fn render_concept(
     input: &AiMemoryConceptInput,
     status: &str,
     verified: Option<&serde_yaml::Value>,
+    existing: Option<&str>,
 ) -> Result<String> {
-    let frontmatter = MemoryFrontmatter {
+    let mut frontmatter = if let Some(existing) = existing {
+        parse_frontmatter_mapping(existing)?
+    } else {
+        serde_yaml::Mapping::new()
+    };
+    let managed = MemoryFrontmatter {
         r#type: input.concept_type.to_string(),
         title: input.title.trim(),
         description: input.description.trim(),
@@ -803,11 +882,32 @@ fn render_concept(
         },
         verified,
     };
+    let managed = serde_yaml::to_value(managed)
+        .context("could not serialize AI memory frontmatter")?
+        .as_mapping()
+        .cloned()
+        .context("AI memory frontmatter is not a mapping")?;
+    for (key, value) in managed {
+        frontmatter.insert(key, value);
+    }
     Ok(format!(
         "---\n{}---\n\n{}\n",
         serde_yaml::to_string(&frontmatter)?,
         input.body_markdown.trim()
     ))
+}
+
+fn parse_frontmatter_mapping(markdown: &str) -> Result<serde_yaml::Mapping> {
+    let rest = markdown
+        .strip_prefix("---\n")
+        .context("AI memory frontmatter is missing")?;
+    let end = rest
+        .find("\n---\n")
+        .context("AI memory frontmatter is incomplete")?;
+    serde_yaml::from_str::<serde_yaml::Value>(&rest[..end])?
+        .as_mapping()
+        .cloned()
+        .context("AI memory frontmatter is not a mapping")
 }
 
 fn verification_metadata(
@@ -927,14 +1027,19 @@ fn projected_bundle_size(
     concept_path: &Path,
     replacement_concept_bytes: usize,
     replacement_index_bytes: usize,
+    replace_index: bool,
 ) -> Result<u64> {
     let current = managed_bundle_size(root)?;
     let previous_concept = std::fs::metadata(concept_path)
         .map(|metadata| metadata.len())
         .unwrap_or(0);
-    let previous_index = std::fs::metadata(root.join("index.md"))
-        .map(|metadata| metadata.len())
-        .unwrap_or(0);
+    let previous_index = if replace_index {
+        std::fs::metadata(root.join("index.md"))
+            .map(|metadata| metadata.len())
+            .unwrap_or(0)
+    } else {
+        0
+    };
     current
         .checked_sub(previous_concept)
         .and_then(|size| size.checked_sub(previous_index))
@@ -1223,6 +1328,78 @@ mod tests {
         let markdown = std::fs::read_to_string(wiki.wiki_folder.join(stored.logical_path)).unwrap();
         assert!(markdown.len() > AI_MEMORY_CONCEPT_MAX_BYTES);
         assert!(markdown.contains("process:airwiki-wasm"));
+    }
+
+    #[test]
+    fn confirmed_computation_result_can_be_saved_to_active_project_memory() {
+        let (temp, database, memories, app_id) = service();
+        let project_root = temp.path().join("computed-project");
+        std::fs::create_dir(&project_root).unwrap();
+        let project_root = std::fs::canonicalize(project_root).unwrap();
+        let projects = crate::ProjectMemoryService::new(database);
+        let request_id = match projects
+            .initialize(app_id, &project_root, "Computed project")
+            .unwrap()
+        {
+            crate::ProjectMemoryOpenResult::AwaitingConfirmation { request_id } => request_id,
+            other => panic!("unexpected project memory result: {other:?}"),
+        };
+        let approval = projects.approve(request_id).unwrap();
+        projects.reconcile(approval.collection.id).unwrap();
+        let index_path = approval.collection.wiki_folder.join("index.md");
+        let original_index = std::fs::read(&index_path).unwrap();
+
+        let stored = memories
+            .save_process_result(
+                approval.collection.id,
+                Uuid::new_v4(),
+                "Portable computation",
+                &serde_json::json!({"value": 7}),
+            )
+            .unwrap();
+
+        assert_eq!(stored.assurance.trust, TrustTier::MachineConfirmed);
+        assert_eq!(std::fs::read(index_path).unwrap(), original_index);
+        assert!(
+            approval
+                .collection
+                .wiki_folder
+                .join(stored.logical_path)
+                .is_file()
+        );
+    }
+
+    #[test]
+    fn computation_result_is_rejected_when_project_memory_is_withheld() {
+        let (temp, database, memories, app_id) = service();
+        let project_root = temp.path().join("blocked-project");
+        std::fs::create_dir(&project_root).unwrap();
+        let project_root = std::fs::canonicalize(project_root).unwrap();
+        let projects = crate::ProjectMemoryService::new(database);
+        let request_id = match projects
+            .initialize(app_id, &project_root, "Blocked project")
+            .unwrap()
+        {
+            crate::ProjectMemoryOpenResult::AwaitingConfirmation { request_id } => request_id,
+            other => panic!("unexpected project memory result: {other:?}"),
+        };
+        let approval = projects.approve(request_id).unwrap();
+        projects.reconcile(approval.collection.id).unwrap();
+        projects
+            .withhold_watcher_unavailable(approval.collection.id)
+            .unwrap();
+
+        assert!(
+            memories
+                .save_process_result(
+                    approval.collection.id,
+                    Uuid::new_v4(),
+                    "Blocked computation",
+                    &serde_json::json!({"value": 7}),
+                )
+                .is_err()
+        );
+        assert!(!approval.collection.wiki_folder.join("results").exists());
     }
 
     #[cfg(unix)]
@@ -1753,5 +1930,80 @@ mod tests {
                 .producer,
             "codex/test"
         );
+    }
+
+    #[test]
+    fn project_memory_writes_keep_index_and_extended_frontmatter() {
+        let (temp, database, memories, app_id) = service();
+        let project_root = temp.path().join("project");
+        std::fs::create_dir(&project_root).unwrap();
+        let project_root = std::fs::canonicalize(project_root).unwrap();
+        let projects = crate::ProjectMemoryService::new(database.clone());
+        let request_id = match projects
+            .initialize(app_id, &project_root, "Portable memory")
+            .unwrap()
+        {
+            crate::ProjectMemoryOpenResult::AwaitingConfirmation { request_id } => request_id,
+            other => panic!("unexpected project memory result: {other:?}"),
+        };
+        let approval = projects.approve(request_id).unwrap();
+        projects.reconcile(approval.collection.id).unwrap();
+        let index_path = approval.collection.wiki_folder.join("index.md");
+        let original_index = std::fs::read(&index_path).unwrap();
+        let created = memories
+            .write(
+                app_id,
+                approval.collection.id,
+                None,
+                None,
+                &AiMemoryConceptInput {
+                    title: "Architecture".to_owned(),
+                    description: "Durable design".to_owned(),
+                    concept_type: ConceptType::parse("Architecture").unwrap(),
+                    tags: vec!["portable".to_owned()],
+                    body_markdown: "Initial body".to_owned(),
+                },
+            )
+            .unwrap();
+        assert_eq!(std::fs::read(&index_path).unwrap(), original_index);
+
+        let concept_path = approval.collection.wiki_folder.join(&created.logical_path);
+        let external = std::fs::read_to_string(&concept_path)
+            .unwrap()
+            .replacen(
+                "\n---\n",
+                "\nsources:\n  - resource: docs/design.md\nverified:\n  by: human:owner\n  at: 2026-08-23T00:00:00Z\nx-extension: keep\n---\n",
+                1,
+            );
+        std::fs::write(&concept_path, external).unwrap();
+        projects.reconcile(approval.collection.id).unwrap();
+        let refreshed = memories
+            .get(app_id, approval.collection.id)
+            .unwrap()
+            .into_iter()
+            .find(|concept| concept.concept_id == created.concept_id)
+            .unwrap();
+        memories
+            .write(
+                app_id,
+                approval.collection.id,
+                Some(refreshed.concept_id),
+                Some(&refreshed.fingerprint),
+                &AiMemoryConceptInput {
+                    title: "Architecture".to_owned(),
+                    description: "Updated durable design".to_owned(),
+                    concept_type: ConceptType::parse("Architecture").unwrap(),
+                    tags: vec!["portable".to_owned()],
+                    body_markdown: "Updated body".to_owned(),
+                },
+            )
+            .unwrap();
+        let stored = std::fs::read_to_string(concept_path).unwrap();
+
+        assert_eq!(std::fs::read(index_path).unwrap(), original_index);
+        assert!(stored.contains("x-extension: keep"));
+        assert!(stored.contains("sources:"));
+        assert!(stored.contains("human:owner"));
+        assert!(stored.contains("Updated body"));
     }
 }

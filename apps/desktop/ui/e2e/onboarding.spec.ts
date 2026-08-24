@@ -1,5 +1,7 @@
 import { $, $$, browser, expect } from '@wdio/globals';
 import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
+import { existsSync } from 'node:fs';
+import { join } from 'node:path';
 import { createInterface } from 'node:readline';
 
 const runVisualMatrix = process.env.AIRWIKI_E2E_VISUAL !== '0';
@@ -465,11 +467,85 @@ async function clickGenericMcpAction(label: 'Connect' | 'Disconnect'): Promise<v
   }
 }
 
+async function exerciseProjectMemory(client: McpStdioClient): Promise<void> {
+  const projectRoot = process.env.AIRWIKI_E2E_PROJECT_FOLDER;
+  if (!projectRoot) throw new Error('missing AIRWIKI_E2E_PROJECT_FOLDER');
+  const projectName = 'E2E portable project';
+  const initialized = await client.callTool('initialize_airwiki_project', {
+    project_root: projectRoot,
+    name: projectName
+  });
+  expect(initialized.status).toBe('awaiting_confirmation');
+
+  await $('.connections-drawer .icon-button').click();
+  await $('button*=AirWiki').click();
+  await browser.waitUntil(
+    () => browser.execute(() => document.querySelector('.project-memory-requests') !== null),
+    { timeout: 10_000, timeoutMsg: 'the project-memory confirmation did not reach the UI' }
+  );
+  const request = await $('.project-memory-requests article');
+  await expect(request).toHaveText(expect.stringContaining('E2E portable project'));
+  await request.$('button*=Approve').click();
+  await browser.waitUntil(
+    () => browser.execute((name) => Array.from(document.querySelectorAll('.wiki-row'))
+      .some((row) => row.textContent?.includes(name) === true)
+      && document.querySelector('.project-memory-requests') === null, projectName),
+    { timeout: 15_000, timeoutMsg: 'approved project memory did not become active in the app' }
+  );
+
+  const opened = await client.callTool('open_airwiki_project', { project_root: projectRoot });
+  expect(opened.status).toBe('ready');
+  const wikiId = stringField(opened, 'wiki_id');
+  const created = await client.callTool('write_airwiki_memory', {
+    wiki_id: wikiId,
+    concept_id: null,
+    expected_fingerprint: null,
+    title: 'Portable project decision',
+    description: 'Synthetic project-memory E2E fixture',
+    concept_type: 'Decision',
+    tags: ['e2e', 'project'],
+    body_markdown: '# Portable project decision\n\nKeep this synthetic conclusion with the project.\n'
+  });
+  const conceptId = stringField(created, 'conceptId');
+  const searched = await client.callTool('search_airwiki_memory', {
+    wiki_id: wikiId,
+    query: 'synthetic conclusion',
+    limit: 10
+  });
+  if (!Array.isArray(searched.matches) || searched.matches.length !== 1) {
+    throw new Error('project-memory search did not return the written concept');
+  }
+  expect(stringField(record(searched.matches[0], 'project-memory match'), 'conceptId')).toBe(conceptId);
+  const read = await client.callTool('get_airwiki_memory', {
+    wiki_id: wikiId,
+    concept_id: conceptId
+  });
+  if (!Array.isArray(read.concepts) || read.concepts.length !== 1) {
+    throw new Error('project-memory read did not return the written concept');
+  }
+  expect(record(read.concepts[0], 'project-memory concept').bodyMarkdown)
+    .toBe('# Portable project decision\n\nKeep this synthetic conclusion with the project.');
+
+  const row = await $(`.wiki-row*=${projectName}`);
+  await row.click();
+  await expect($('.project-memory-strip')).toHaveText(expect.stringContaining('Project memory'));
+  await $('.project-memory-strip').$('button*=Detach').click();
+  await browser.waitUntil(
+    () => browser.execute((name) => !Array.from(document.querySelectorAll('.wiki-row'))
+      .some((candidate) => candidate.textContent?.includes(name) === true), projectName),
+    { timeout: 10_000, timeoutMsg: 'detached project memory remained in the app' }
+  );
+  expect(existsSync(join(projectRoot, '.airwiki', 'project.yaml'))).toBe(true);
+}
+
 async function exerciseGenericMcpMemory(): Promise<void> {
   const expectedTools = [
     'search_airwiki',
     'list_airwiki_memories',
     'create_airwiki_memory',
+    'initialize_airwiki_project',
+    'open_airwiki_project',
+    'search_airwiki_memory',
     'get_airwiki_memory',
     'write_airwiki_memory',
     'deprecate_airwiki_memory',
@@ -534,6 +610,8 @@ async function exerciseGenericMcpMemory(): Promise<void> {
       expect(schema.type).toBe('object');
     }
 
+    await exerciseProjectMemory(client);
+
     const created = await client.callTool('create_airwiki_memory', { name: memoryName });
     const wikiId = stringField(created, 'wikiId');
     await browser.waitUntil(
@@ -555,7 +633,8 @@ async function exerciseGenericMcpMemory(): Promise<void> {
     const conceptId = stringField(first, 'conceptId');
     const firstFingerprint = stringField(first, 'fingerprint');
     expect(first.status).toBe('stable');
-    await $('.connections-drawer .icon-button').click();
+    const drawerClose = await $('.connections-drawer .icon-button');
+    if (await drawerClose.isExisting()) await drawerClose.click();
     await $(`.wiki-row*=${memoryName}`).click();
     await expect($('.file-list')).toHaveText(expect.stringContaining('Portable agent memory'));
 

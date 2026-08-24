@@ -22,7 +22,8 @@
 
   function originLabel(wiki: WikiSummary): string {
     if (wiki.origin === 'importedOkf') return t('desktop-wiki-origin-imported');
-    if (wiki.origin === 'aiMemory') return t('desktop-wiki-origin-memory');
+    if (wiki.memoryKind === 'project') return t('desktop-wiki-origin-project-memory');
+    if (wiki.origin === 'aiMemory') return t('desktop-wiki-origin-personal-memory');
     return wiki.indexingMode === 'continuous'
       ? t('desktop-wiki-origin-folder-continuous')
       : t('desktop-wiki-origin-folder-manual');
@@ -39,6 +40,9 @@
 
   function statusLabel(wiki: WikiSummary): string {
     if (scanState(wiki.id)) return t('status-working');
+    if (wiki.memoryKind === 'project' && wiki.projectMemoryHealth !== 'active') {
+      return t(`desktop-project-memory-health-${wiki.projectMemoryHealth ?? 'invalid'}`);
+    }
     if (wiki.failedCount > 0 || wiki.maintenanceRequired) return t('status-needs-attention');
     if (wiki.needsReviewCount > 0) return t('desktop-wiki-pending-status');
     return trustLabel(wiki);
@@ -71,7 +75,7 @@
           <span class="wiki-name"><span class="wiki-icon"><BookOpen size={18} aria-hidden="true" /></span><span><strong>{wiki.name}</strong><small>{originLabel(wiki)}</small></span></span>
           <span>{t('desktop-wiki-content-count', { published: wiki.publishedCount, pending: wiki.needsReviewCount })}</span>
           <span>{accessLabel(wiki)}</span>
-          <span class:attention={!scanning && (wiki.failedCount > 0 || wiki.maintenanceRequired || wiki.needsReviewCount > 0 || wiki.staleConceptCount > 0 || wiki.outdatedVerificationCount > 0 || wiki.metadataWarningCount > 0 || wiki.okfCompatibility.kind === 'legacyV01' || wiki.okfCompatibility.kind === 'futureRestricted')} class:working={scanning} class="wiki-status">{#if scanning}<Spinner size="small" /><ShimmerText text={statusLabel(wiki)} />{:else}{statusLabel(wiki)}{/if}</span>
+          <span class:attention={!scanning && (wiki.failedCount > 0 || wiki.maintenanceRequired || wiki.needsReviewCount > 0 || wiki.staleConceptCount > 0 || wiki.outdatedVerificationCount > 0 || wiki.metadataWarningCount > 0 || wiki.okfCompatibility.kind === 'legacyV01' || wiki.okfCompatibility.kind === 'futureRestricted' || (wiki.memoryKind === 'project' && wiki.projectMemoryHealth !== 'active'))} class:working={scanning} class="wiki-status">{#if scanning}<Spinner size="small" /><ShimmerText text={statusLabel(wiki)} />{:else}{statusLabel(wiki)}{/if}</span>
           <ChevronRight size={17} aria-hidden="true" />
         </button>
       </div>

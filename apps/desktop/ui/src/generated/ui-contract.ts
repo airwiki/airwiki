@@ -11,6 +11,10 @@ export type EnrichmentDraft = { type: ConceptType, title: string, description: s
 
 export type WikiOriginDto = "folder" | "importedOkf" | "aiMemory";
 
+export type MemoryKindDto = "personal" | "project";
+
+export type ProjectMemoryHealthDto = "active" | "invalid" | "missing" | "identityConflict";
+
 export type IndexingModeDto = "continuous" | "manual" | "notApplicable";
 
 export type TrustSummaryDto = "unverified" | "machineConfirmed" | "humanReviewed";
@@ -19,7 +23,7 @@ export type OkfCompatibilityDto = { "kind": "declaredV02" } | { "kind": "undecla
 
 export type WikiRestrictionDto = "legacyReadOnly" | "futureFormatLocalOnly";
 
-export type WikiSummary = { id: string, name: string, documentCount: number, needsReviewCount: number, publishedCount: number, failedCount: number, localOnly: boolean, peerShareable: boolean, allowExternalAi: boolean, internetPublic: boolean, publicDescription: string, publicLanguages: string, publicAnnouncement: PublicAnnouncementSummary, maintenanceRequired: boolean, origin: WikiOriginDto, indexingMode: IndexingModeDto, okfVersion: string, declaredOkfVersion: string | null, okfCompatibility: OkfCompatibilityDto, managedSizeBytes: number, staleConceptCount: number, outdatedVerificationCount: number, metadataWarningCount: number, trustSummary: TrustSummaryDto, restrictions: Array<WikiRestrictionDto>, };
+export type WikiSummary = { id: string, name: string, documentCount: number, needsReviewCount: number, publishedCount: number, failedCount: number, localOnly: boolean, peerShareable: boolean, allowExternalAi: boolean, internetPublic: boolean, publicDescription: string, publicLanguages: string, publicAnnouncement: PublicAnnouncementSummary, maintenanceRequired: boolean, origin: WikiOriginDto, memoryKind: MemoryKindDto | null, projectMemoryHealth: ProjectMemoryHealthDto | null, indexingMode: IndexingModeDto, okfVersion: string, declaredOkfVersion: string | null, okfCompatibility: OkfCompatibilityDto, managedSizeBytes: number, staleConceptCount: number, outdatedVerificationCount: number, metadataWarningCount: number, trustSummary: TrustSummaryDto, restrictions: Array<WikiRestrictionDto>, };
 
 export type PublicAnnouncementSummary = { "status": "offline" } | { "status": "advertised", acceptedIndexes: number, } | { "status": "expired" };
 
@@ -183,6 +187,10 @@ export type ApplicationWikiGrantSummary = { wikiId: string, role: ApplicationWik
 
 export type ApplicationAccessSummary = { appId: string, displayName: string, producer: string, active: boolean, ownedWikiCount: number, managedBytes: number, grants: Array<ApplicationWikiGrantSummary>, };
 
+export type ProjectMemoryRequestKindDto = "initialize" | "attach";
+
+export type ProjectMemoryRequestSummary = { requestId: string, applicationName: string, kind: ProjectMemoryRequestKindDto, folderName: string, requestedName: string | null, expiresAt: string, };
+
 export type ComputationParameterSummary = { name: string, parameterType: string, };
 
 export type PendingComputationSummary = { runId: string, wikiId: string, wikiName: string, logicalPath: string, applicationName: string, parameters: Array<ComputationParameterSummary>, expiresAt: string, };
@@ -205,7 +213,7 @@ export type HostPlatform = "macOs" | "windows";
 
 export type AppPhase = "starting" | "failed" | "ready";
 
-export type AppSnapshot = { schemaVersion: number, sequence: number, platform: HostPlatform, phase: AppPhase, nodeId: string | null, mcpUrl: string | null, blockedPublicPublishers: Array<string>, hardware: HardwareSummary | null, wikis: Array<WikiSummary>, wikiScans: Array<WikiScanSummary>, reviews: Array<ReviewSummary>, reanalyzingReviewIds: Array<string>, sourceIssues: Array<SourceIssueSummary>, peers: Array<PeerSummary>, model: ModelSummary | null, modelInstall: ModelInstallSummary | null, search: SearchSummary | null, publicBrowse: PublicBrowseSummary | null, nearbyBrowse: NearbyBrowseSummary | null, reviewEvidence: ReviewEvidenceSummary | null, knowledge: KnowledgeBundleSummary | null, knowledgePage: KnowledgePageSummary | null, preferences: PreferencesSummary | null, autostart: AutostartStatus | null, wikiHealth: WikiHealthSummary | null, guidedRepair: GuidedRepairSummary | null, connectivity: ConnectivitySummary | null, lanRuntime: LanRuntimeSummary | null, firewallOperation: FirewallOperationStatus | null, integrations: IntegrationsSummary | null, integrationRequestId: string | null, integrationCompletedRequestId: string | null, applicationAccess: Array<ApplicationAccessSummary>, pendingComputations: Array<PendingComputationSummary>, completedComputations: Array<CompletedComputationSummary>, updater: UpdaterSummary | null, notice: NoticeSummary | null, };
+export type AppSnapshot = { schemaVersion: number, sequence: number, platform: HostPlatform, phase: AppPhase, nodeId: string | null, mcpUrl: string | null, blockedPublicPublishers: Array<string>, hardware: HardwareSummary | null, wikis: Array<WikiSummary>, wikiScans: Array<WikiScanSummary>, reviews: Array<ReviewSummary>, reanalyzingReviewIds: Array<string>, sourceIssues: Array<SourceIssueSummary>, peers: Array<PeerSummary>, model: ModelSummary | null, modelInstall: ModelInstallSummary | null, search: SearchSummary | null, publicBrowse: PublicBrowseSummary | null, nearbyBrowse: NearbyBrowseSummary | null, reviewEvidence: ReviewEvidenceSummary | null, knowledge: KnowledgeBundleSummary | null, knowledgePage: KnowledgePageSummary | null, preferences: PreferencesSummary | null, autostart: AutostartStatus | null, wikiHealth: WikiHealthSummary | null, guidedRepair: GuidedRepairSummary | null, connectivity: ConnectivitySummary | null, lanRuntime: LanRuntimeSummary | null, firewallOperation: FirewallOperationStatus | null, integrations: IntegrationsSummary | null, integrationRequestId: string | null, integrationCompletedRequestId: string | null, applicationAccess: Array<ApplicationAccessSummary>, projectMemoryRequests: Array<ProjectMemoryRequestSummary>, pendingComputations: Array<PendingComputationSummary>, completedComputations: Array<CompletedComputationSummary>, updater: UpdaterSummary | null, notice: NoticeSummary | null, };
 
 export type UiEventKind = "stateChanged";
 

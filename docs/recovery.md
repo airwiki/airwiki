@@ -4,6 +4,25 @@ General rule: exit AirWiki, preserve a copy of its complete application-data
 directory, and leave watched originals unchanged. Never repair an index by
 deleting or rewriting the source folder.
 
+## Project memory is missing, invalid or conflicted
+
+AirWiki withdraws an affected `.airwiki` bundle from MCP, LAN, public and
+external-AI projection before validating it. It preserves the repository files
+and reports only a sanitized health state.
+
+1. Inspect `.airwiki/project.yaml` and `.airwiki/wiki/` with the repository's
+   normal diff and conflict tools. AirWiki does not run Git or select a side.
+2. Restore the fixed layout, strict version-one manifest and a valid bounded OKF
+   v0.2 bundle without changing its portable IDs.
+3. Wait for the watcher to reconcile, or use the Wiki health action to retry.
+4. If the portable IDs intentionally changed, detach the old project memory and
+   approve the new identity. Do not edit SQLite to force the attachment.
+
+Guided repair is intentionally unavailable for project memory in v1: no repair
+snapshot or generated index is written into the repository. Detaching is
+non-destructive and leaves `.airwiki` intact; it removes only private local
+grants, projections and attachment state.
+
 ## Download or hash failure
 
 1. Check system time, free disk space, and outbound HTTPS.

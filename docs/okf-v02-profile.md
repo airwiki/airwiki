@@ -65,6 +65,27 @@ AI-memory concepts use the immutable application producer/version stored with
 the capability and begin stable but unverified. An application cannot write
 `verified`, permissions or another actor identity.
 
+### Project-memory bundles
+
+Project memory uses the same concept profile inside the fixed
+`.airwiki/wiki/` bundle. Its sibling `project.yaml` is an AirWiki attachment
+manifest, not OKF metadata, and contains only schema version, portable project
+and Wiki UUIDs, and the display name. Permissions, local collection IDs,
+capabilities, grants, indexes, embeddings, journals, logs and repair state never
+enter the bundle.
+
+The project root `index.md` declares `okf_version: "0.2"` and the Wiki title.
+AirWiki does not regenerate it during concept writes. New pages use UUID
+filenames. Updating a page replaces only AirWiki-managed metadata and the
+requested Markdown body while preserving unknown OKF fields, provenance and
+verification. The personal-vault aggregate quota does not apply, but the
+existing per-concept, bundle-size and mutation-rate limits do.
+
+Every read or disclosure also requires an active local attachment. Missing,
+invalid or identity-conflicting bundles are retained on disk but expose no
+search results. AirWiki does not automatically repair project bundles or
+resolve source-control conflicts.
+
 ## `airwiki-wasm` execution profile
 
 OKF runtimes other than `airwiki-wasm` remain visible but are not executable.

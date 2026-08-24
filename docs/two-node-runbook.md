@@ -3,6 +3,8 @@
 This is the user-facing manual acceptance path. It uses only the application UI
 and synthetic fixtures. Maintainer commands and evidence-recording requirements
 are kept in the separate [maintainer validation guide](maintainer-validation.md).
+For the mental model behind the journey, first read
+[Search across local, LAN, and public Wikis](search-and-federation.md).
 
 Do not record PeerIds, IP addresses, ports, multiaddresses, local paths, queries,
 snippets, SAS words, or document contents while running this procedure.

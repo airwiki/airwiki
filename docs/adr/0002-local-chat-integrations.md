@@ -4,6 +4,7 @@
 - Date: 2026-08-14
 - Superseded in part by: ADR 0003 (desktop lifecycle and per-user autostart)
 - Superseded in part by: ADR 0010 (capability-authenticated memory and computation tools)
+- Superseded in part by: ADR 0011 (project-memory discovery and selection workflow)
 
 ## Context
 

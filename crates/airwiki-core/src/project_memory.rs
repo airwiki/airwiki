@@ -1,6 +1,10 @@
 use std::path::{Path, PathBuf};
 
 #[cfg(windows)]
+use std::ffi::OsString;
+#[cfg(windows)]
+use std::os::windows::ffi::{OsStrExt, OsStringExt};
+#[cfg(windows)]
 use std::os::windows::fs::MetadataExt;
 
 use airwiki_types::OkfCompatibility;
@@ -573,10 +577,50 @@ fn canonical_project_root(root: &Path) -> Result<PathBuf> {
         bail!("project root is not a safe directory");
     }
     let canonical = std::fs::canonicalize(root).context("could not canonicalize project root")?;
-    if canonical != root {
+    if !project_root_matches_canonical(root, &canonical) {
         bail!("project root must already be canonical");
     }
     Ok(canonical)
+}
+
+#[cfg(not(windows))]
+fn project_root_matches_canonical(root: &Path, canonical: &Path) -> bool {
+    root == canonical
+}
+
+#[cfg(windows)]
+fn project_root_matches_canonical(root: &Path, canonical: &Path) -> bool {
+    // Windows canonicalization adds a verbatim prefix to ordinary absolute paths. Removing only
+    // that representation detail keeps lexical aliases and reparse-point escapes rejected.
+    windows_path_without_verbatim_prefix(root) == windows_path_without_verbatim_prefix(canonical)
+}
+
+#[cfg(windows)]
+fn windows_path_without_verbatim_prefix(path: &Path) -> PathBuf {
+    const SEPARATOR: u16 = b'\\' as u16;
+    const VERBATIM_PREFIX: &[u16] = &[SEPARATOR, SEPARATOR, b'?' as u16, SEPARATOR];
+    const VERBATIM_UNC_PREFIX: &[u16] = &[
+        SEPARATOR,
+        SEPARATOR,
+        b'?' as u16,
+        SEPARATOR,
+        b'U' as u16,
+        b'N' as u16,
+        b'C' as u16,
+        SEPARATOR,
+    ];
+
+    let encoded = path.as_os_str().encode_wide().collect::<Vec<_>>();
+    if let Some(remainder) = encoded.strip_prefix(VERBATIM_UNC_PREFIX) {
+        let mut normalized = Vec::with_capacity(remainder.len() + 2);
+        normalized.extend([SEPARATOR, SEPARATOR]);
+        normalized.extend(remainder);
+        return PathBuf::from(OsString::from_wide(&normalized));
+    }
+    if let Some(remainder) = encoded.strip_prefix(VERBATIM_PREFIX) {
+        return PathBuf::from(OsString::from_wide(remainder));
+    }
+    path.to_path_buf()
 }
 
 fn validate_project_name(name: &str) -> Result<()> {
@@ -1297,5 +1341,44 @@ mod tests {
         std::fs::create_dir(&target).unwrap();
         symlink(&target, &alias).unwrap();
         assert!(canonical_project_root(&alias).is_err());
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn accepts_standard_windows_absolute_project_roots() {
+        let temp = tempfile::tempdir().unwrap();
+        let root = temp.path().to_path_buf();
+        assert!(root.is_absolute());
+        assert_eq!(
+            canonical_project_root(&root).unwrap(),
+            std::fs::canonicalize(root).unwrap()
+        );
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn strips_windows_verbatim_disk_prefix_for_comparison() {
+        assert_eq!(
+            windows_path_without_verbatim_prefix(Path::new(r"\\?\C:\repo")),
+            PathBuf::from(r"C:\repo")
+        );
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn strips_windows_verbatim_unc_prefix_for_comparison() {
+        assert_eq!(
+            windows_path_without_verbatim_prefix(Path::new(r"\\?\UNC\server\share\repo")),
+            PathBuf::from(r"\\server\share\repo")
+        );
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn rejects_windows_project_roots_with_parent_components() {
+        let temp = tempfile::tempdir().unwrap();
+        let child = temp.path().join("child");
+        std::fs::create_dir(&child).unwrap();
+        assert!(canonical_project_root(&child.join("..")).is_err());
     }
 }

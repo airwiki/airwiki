@@ -521,13 +521,17 @@ fn validate_workflow_guide() -> Result<()> {
     const MAX_SKILL_BYTES: usize = 64 * 1024;
     const MAX_AWARENESS_BYTES: usize = 16 * 1024;
     const MAX_SKILL_LINES: usize = 500;
-    const REQUIRED_SKILL_TERMS: [&str; 8] = [
+    const REQUIRED_SKILL_TERMS: [&str; 12] = [
         "list_airwiki_memories",
         "create_airwiki_memory",
+        "initialize_airwiki_project",
+        "open_airwiki_project",
+        "search_airwiki_memory",
         "get_airwiki_memory",
         "write_airwiki_memory",
         "deprecate_airwiki_memory",
         "expected_fingerprint",
+        "git commit",
         "pause AirWiki",
         "pausa AirWiki",
     ];
@@ -571,6 +575,8 @@ fn validate_workflow_guide() -> Result<()> {
         awareness.lines().count() <= 80
             && awareness.contains("`airwiki` skill")
             && awareness.contains("explicitly creates or selects a wiki")
+            && awareness.contains("`open_airwiki_project`")
+            && awareness.contains("Never run Git commands")
             && awareness.contains("Never verify, publish, share, grant access"),
         "AirWiki awareness guide is missing its concise activation or safety boundary"
     );

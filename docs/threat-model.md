@@ -18,7 +18,10 @@ Controls are not considered effective end to end until the
 - Ed25519 device identity and trusted-peer state;
 - separate public-publisher identity, signed manifests and tombstones;
 - collection grants and `allow_external_ai` policy;
-- application capability secrets, per-memory grants and managed OKF bundles;
+- application capability secrets, per-memory grants and managed personal OKF
+  bundles;
+- portable `.airwiki` manifests and project OKF bundles, plus private local
+  attachments, fingerprints and projections;
 - pending attested-computation parameters and ephemeral receipts;
 - local models, runtime, and pinned artifact identities;
 - search snippets, MCP concept summaries, and complete published OKF pages
@@ -66,6 +69,11 @@ Controls are not considered effective end to end until the
     documented global files before AirWiki installs a skill, `AirWiki.md` and one
     import. Staging, hashes, private receipts and exact-root checks constrain the
     write; no repository file is modified.
+14. **Project working tree → project-memory backend.** `.airwiki` is untrusted,
+    externally mutable repository content. AirWiki accepts only a canonical
+    absolute non-linked root, a strict bounded manifest and an in-root bounded
+    OKF bundle. Portable IDs identify files; a separate local attachment and
+    application grant authorize each clone.
 
 ## Threats and controls
 
@@ -90,6 +98,11 @@ Controls are not considered effective end to end until the
 | DNS rebinding reaches MCP | Loopback bind, exact authority including port, bounded body | Compromised local software can already call loopback |
 | Application capability is forged, crossed or revoked mid-operation | Random secret, hash-only SQLite storage, fixed bridge resolution, active-capability recheck, per-Wiki role and immediate revocation | Malware in the same user account may read the private credential file |
 | Assistant forges producer, human verification or permissions | Rust fixes immutable producer/version, generation time and lifecycle; MCP schemas exclude verification and sharing; only AI-memory bundles are writable | A user may still over-grant an application; review grants and revoke it |
+| Opening a folder silently creates or authorizes project memory | Discovery only recognizes an existing manifest; initialize/open create a bounded expiring request, and native approval revalidates the canonical root and fingerprint before any file write or grant | A user can still approve the wrong selected folder; the confirmation names the folder without exposing its path to MCP |
+| A cloned repository inherits another clone's authority | Portable project/Wiki IDs are distinct from the installation-local collection ID; approval is bound to application, canonical root and portable identity | Copying a working tree requires another local confirmation by design |
+| Manifest substitution, symlink or path escape targets other files | Strict 64 KiB YAML, exact schema version and fields, canonical absolute root, symlink/reparse rejection, normalized in-root bundle paths and atomic sibling staging | A same-user process can race filesystem operations; reconciliation fails closed and preserves diagnosable files |
+| Git conflict or external edit leaves a stale project projection exposed | Watcher and startup reconciliation mark the attachment unavailable and clear its projection before validation; missing, invalid and identity-conflicting bundles cannot serve MCP, LAN, public or external-AI results | Detection while the app is already running has watcher latency; review ordinary diffs and resolve conflicts outside AirWiki |
+| Local detach destroys versioned project documentation | Detach revokes grants and sharing and removes only local attachments/projections; `.airwiki` remains untouched and AirWiki never executes Git | The user or another tool may still delete repository files outside AirWiki |
 | Workflow-guide installation overwrites user instructions | Only documented absolute user roots, no symlink/reparse traversal, bounded UTF-8 parsing, atomic writes, BOM/EOL preservation and an exact single import; user-modified managed files become conflicts | Software under the same user account can race or alter the files; reinspection fails closed and requires manual resolution |
 | A workflow guide expands an assistant's authority | The packaged skill contains no code, excludes secrets and transient data, and explicitly forbids verification, sharing, publication and permission changes; every MCP call still requires the application's capability and Wiki grant | Models may ignore instructions; Rust contracts and authorization, not the skill, remain authoritative |
 | Disconnect removes unrelated global configuration | Private receipts identify exact installed hashes; removal occurs only while skill, guide and import still match, and rollback restores only bytes changed by the failed operation | A conflict may require the user to remove or reconcile stale text manually |

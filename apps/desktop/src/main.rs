@@ -96,6 +96,9 @@ enum NativeConfirmation {
     ConnectIntegrationWithBuiltInGuide,
     InstallWorkflowGuide,
     RemoveWorkflowGuide,
+    InitializeProjectMemory,
+    AttachProjectMemory,
+    DetachProjectMemory,
 }
 
 impl NativeConfirmation {
@@ -118,6 +121,9 @@ impl NativeConfirmation {
             }
             Self::InstallWorkflowGuide => "native-confirm-install-workflow-guide",
             Self::RemoveWorkflowGuide => "native-confirm-remove-workflow-guide",
+            Self::InitializeProjectMemory => "native-confirm-initialize-project-memory",
+            Self::AttachProjectMemory => "native-confirm-attach-project-memory",
+            Self::DetachProjectMemory => "native-confirm-detach-project-memory",
         }
     }
 }
@@ -310,6 +316,7 @@ struct AppSnapshot {
     integration_request_id: Option<String>,
     integration_completed_request_id: Option<String>,
     application_access: Vec<ApplicationAccessSummary>,
+    project_memory_requests: Vec<ProjectMemoryRequestSummary>,
     pending_computations: Vec<PendingComputationSummary>,
     completed_computations: Vec<CompletedComputationSummary>,
     updater: Option<UpdaterSummary>,
@@ -359,6 +366,8 @@ struct WikiSummary {
     public_announcement: PublicAnnouncementSummary,
     maintenance_required: bool,
     origin: WikiOriginDto,
+    memory_kind: Option<MemoryKindDto>,
+    project_memory_health: Option<ProjectMemoryHealthDto>,
     indexing_mode: IndexingModeDto,
     okf_version: String,
     declared_okf_version: Option<String>,
@@ -410,6 +419,24 @@ enum WikiOriginDto {
     Folder,
     ImportedOkf,
     AiMemory,
+}
+
+#[derive(Clone, Copy, Debug, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(rename_all = "camelCase")]
+enum MemoryKindDto {
+    Personal,
+    Project,
+}
+
+#[derive(Clone, Copy, Debug, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(rename_all = "camelCase")]
+enum ProjectMemoryHealthDto {
+    Active,
+    Invalid,
+    Missing,
+    IdentityConflict,
 }
 
 #[derive(Clone, Copy, Debug, Serialize, TS)]
@@ -1385,6 +1412,25 @@ struct ApplicationAccessSummary {
 
 #[derive(Clone, Debug, Serialize, TS)]
 #[serde(rename_all = "camelCase")]
+struct ProjectMemoryRequestSummary {
+    request_id: String,
+    application_name: String,
+    kind: ProjectMemoryRequestKindDto,
+    folder_name: String,
+    requested_name: Option<String>,
+    expires_at: String,
+}
+
+#[derive(Clone, Copy, Debug, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(rename_all = "camelCase")]
+enum ProjectMemoryRequestKindDto {
+    Initialize,
+    Attach,
+}
+
+#[derive(Clone, Debug, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
 struct ApplicationWikiGrantSummary {
     wiki_id: String,
     role: ApplicationWikiRoleSummary,
@@ -2218,6 +2264,99 @@ async fn add_wiki(
                 airwiki_core::IndexingMode::Manual
             },
         },
+    )
+    .await
+}
+
+#[tauri::command]
+async fn create_project_memory(
+    app: AppHandle,
+    runtime: tauri::State<'_, AppRuntime>,
+    name: String,
+    folder_token: String,
+) -> Result<(), UiError> {
+    let name = name.trim();
+    if name.is_empty() || name.chars().count() > 120 {
+        return Err(UiError::invalid("invalidWikiName"));
+    }
+    require_native_confirmation(
+        &app,
+        NativeConfirmation::InitializeProjectMemory,
+        Some(name),
+    )
+    .await?;
+    let folder = consume_folder_selection(&runtime, &folder_token)?;
+    send_command(
+        &runtime,
+        WorkerCommand::InitializeProjectMemory {
+            name: name.to_owned(),
+            folder,
+        },
+    )
+    .await
+}
+
+#[tauri::command]
+async fn approve_project_memory_request(
+    app: AppHandle,
+    runtime: tauri::State<'_, AppRuntime>,
+    request_id: String,
+) -> Result<(), UiError> {
+    let request_id = parse_uuid(&request_id)?;
+    let detail = {
+        let snapshot = runtime.snapshot.lock().map_err(|_| UiError::internal())?;
+        let snapshot = &snapshot.borrow().snapshot;
+        let request = snapshot
+            .project_memory_requests
+            .iter()
+            .find(|request| request.request_id == request_id.to_string())
+            .ok_or_else(|| UiError::invalid("projectMemoryRequestUnavailable"))?;
+        format!("{}\n{}", request.application_name, request.folder_name)
+    };
+    require_native_confirmation(&app, NativeConfirmation::AttachProjectMemory, Some(&detail))
+        .await?;
+    send_command(
+        &runtime,
+        WorkerCommand::ApproveProjectMemoryRequest { request_id },
+    )
+    .await
+}
+
+#[tauri::command]
+async fn reject_project_memory_request(
+    runtime: tauri::State<'_, AppRuntime>,
+    request_id: String,
+) -> Result<(), UiError> {
+    send_command(
+        &runtime,
+        WorkerCommand::RejectProjectMemoryRequest {
+            request_id: parse_uuid(&request_id)?,
+        },
+    )
+    .await
+}
+
+#[tauri::command]
+async fn detach_project_memory(
+    app: AppHandle,
+    runtime: tauri::State<'_, AppRuntime>,
+    wiki_id: String,
+) -> Result<(), UiError> {
+    let collection_id = parse_uuid(&wiki_id)?;
+    let is_project_memory = {
+        let snapshot = runtime.snapshot.lock().map_err(|_| UiError::internal())?;
+        snapshot.borrow().snapshot.wikis.iter().any(|wiki| {
+            wiki.id == collection_id.to_string()
+                && matches!(wiki.memory_kind, Some(MemoryKindDto::Project))
+        })
+    };
+    if !is_project_memory {
+        return Err(UiError::invalid("wikiUnavailable"));
+    }
+    require_native_confirmation(&app, NativeConfirmation::DetachProjectMemory, None).await?;
+    send_command(
+        &runtime,
+        WorkerCommand::DetachProjectMemory { collection_id },
     )
     .await
 }
@@ -3777,6 +3916,7 @@ impl AppSnapshot {
             integration_request_id: None,
             integration_completed_request_id: None,
             application_access: Vec::new(),
+            project_memory_requests: Vec::new(),
             pending_computations: Vec::new(),
             completed_computations: Vec::new(),
             updater: None,
@@ -4064,6 +4204,12 @@ impl AppSnapshot {
                 self.application_access = applications
                     .into_iter()
                     .map(ApplicationAccessSummary::from)
+                    .collect();
+            }
+            WorkerEvent::ProjectMemoryRequestsUpdated(requests) => {
+                self.project_memory_requests = requests
+                    .into_iter()
+                    .map(ProjectMemoryRequestSummary::from)
                     .collect();
             }
             WorkerEvent::UpdaterUpdated { result, .. } => match result {
@@ -5060,6 +5206,24 @@ impl From<worker::CollectionView> for WikiSummary {
                 airwiki_core::WikiOrigin::ImportedOkf => WikiOriginDto::ImportedOkf,
                 airwiki_core::WikiOrigin::AiMemory => WikiOriginDto::AiMemory,
             },
+            memory_kind: value.memory_scope.map(|scope| match scope {
+                airwiki_core::MemoryScope::Personal => MemoryKindDto::Personal,
+                airwiki_core::MemoryScope::Project => MemoryKindDto::Project,
+            }),
+            project_memory_health: value.project_memory_state.map(|state| match state {
+                airwiki_core::ProjectMemoryAttachmentState::Active => {
+                    ProjectMemoryHealthDto::Active
+                }
+                airwiki_core::ProjectMemoryAttachmentState::Invalid => {
+                    ProjectMemoryHealthDto::Invalid
+                }
+                airwiki_core::ProjectMemoryAttachmentState::Missing => {
+                    ProjectMemoryHealthDto::Missing
+                }
+                airwiki_core::ProjectMemoryAttachmentState::IdentityConflict => {
+                    ProjectMemoryHealthDto::IdentityConflict
+                }
+            }),
             indexing_mode: match value.indexing_mode {
                 airwiki_core::IndexingMode::Continuous => IndexingModeDto::Continuous,
                 airwiki_core::IndexingMode::Manual => IndexingModeDto::Manual,
@@ -5719,6 +5883,8 @@ fn ui_bindings_source() -> String {
         exported_declaration::<SuggestedLinkDto>(&config),
         exported_declaration::<EnrichmentDraftDto>(&config),
         exported_declaration::<WikiOriginDto>(&config),
+        exported_declaration::<MemoryKindDto>(&config),
+        exported_declaration::<ProjectMemoryHealthDto>(&config),
         exported_declaration::<IndexingModeDto>(&config),
         exported_declaration::<TrustSummaryDto>(&config),
         exported_declaration::<OkfCompatibilityDto>(&config),
@@ -5805,6 +5971,8 @@ fn ui_bindings_source() -> String {
         exported_declaration::<ApplicationWikiRoleSummary>(&config),
         exported_declaration::<ApplicationWikiGrantSummary>(&config),
         exported_declaration::<ApplicationAccessSummary>(&config),
+        exported_declaration::<ProjectMemoryRequestKindDto>(&config),
+        exported_declaration::<ProjectMemoryRequestSummary>(&config),
         exported_declaration::<ComputationParameterSummary>(&config),
         exported_declaration::<PendingComputationSummary>(&config),
         exported_declaration::<CompletedComputationSummary>(&config),
@@ -5939,6 +6107,26 @@ impl From<worker::ApplicationAccessView> for ApplicationAccessSummary {
                     },
                 })
                 .collect(),
+        }
+    }
+}
+
+impl From<worker::ProjectMemoryRequestView> for ProjectMemoryRequestSummary {
+    fn from(value: worker::ProjectMemoryRequestView) -> Self {
+        Self {
+            request_id: value.request_id.to_string(),
+            application_name: value.application_name,
+            kind: match value.kind {
+                airwiki_core::ProjectMemoryRequestKind::Initialize => {
+                    ProjectMemoryRequestKindDto::Initialize
+                }
+                airwiki_core::ProjectMemoryRequestKind::Attach => {
+                    ProjectMemoryRequestKindDto::Attach
+                }
+            },
+            folder_name: value.folder_name,
+            requested_name: value.requested_name,
+            expires_at: value.expires_at.to_rfc3339(),
         }
     }
 }
@@ -6187,6 +6375,10 @@ fn main() -> Result<()> {
             import_okf,
             set_wiki_indexing,
             add_wiki,
+            create_project_memory,
+            approve_project_memory_request,
+            reject_project_memory_request,
+            detach_project_memory,
             relink_wiki,
             rescan_wiki,
             update_wiki_policy,

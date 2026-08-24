@@ -77,6 +77,22 @@ export async function addWiki(
   return invoke('add_wiki', { name, folderToken, continuousIndexing });
 }
 
+export async function createProjectMemory(name: string, folderToken: string): Promise<void> {
+  return invoke('create_project_memory', { name, folderToken });
+}
+
+export async function approveProjectMemoryRequest(requestId: string): Promise<void> {
+  return invoke('approve_project_memory_request', { requestId });
+}
+
+export async function rejectProjectMemoryRequest(requestId: string): Promise<void> {
+  return invoke('reject_project_memory_request', { requestId });
+}
+
+export async function detachProjectMemory(wikiId: string): Promise<void> {
+  return invoke('detach_project_memory', { wikiId });
+}
+
 export async function relinkWiki(wikiId: string, folderToken: string): Promise<void> {
   return invoke('relink_wiki', { wikiId, folderToken });
 }

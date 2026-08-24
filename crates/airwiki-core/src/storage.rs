@@ -40,6 +40,7 @@ const MIGRATION_12: &str = include_str!("../migrations/0012_attested_computation
 const MIGRATION_13: &str = include_str!("../migrations/0013_restrict_incompatible_okf.sql");
 const MIGRATION_14: &str = include_str!("../migrations/0014_bound_computation_runs.sql");
 const MIGRATION_15: &str = include_str!("../migrations/0015_peer_device_platform.sql");
+const MIGRATION_16: &str = include_str!("../migrations/0016_project_memory.sql");
 
 const APPLICATION_MUTATIONS_PER_MINUTE: u32 = 30;
 const APPLICATION_WIKI_CREATIONS_PER_HOUR: u32 = 5;
@@ -77,6 +78,78 @@ pub enum WikiOrigin {
     AiMemory,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum MemoryScope {
+    Personal,
+    Project,
+}
+
+impl MemoryScope {
+    const fn as_str(self) -> &'static str {
+        match self {
+            Self::Personal => "personal",
+            Self::Project => "project",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ProjectMemoryAttachmentState {
+    Active,
+    Invalid,
+    Missing,
+    IdentityConflict,
+}
+
+impl ProjectMemoryAttachmentState {
+    const fn as_str(self) -> &'static str {
+        match self {
+            Self::Active => "active",
+            Self::Invalid => "invalid",
+            Self::Missing => "missing",
+            Self::IdentityConflict => "identity_conflict",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ProjectMemoryRequestKind {
+    Initialize,
+    Attach,
+}
+
+impl ProjectMemoryRequestKind {
+    const fn as_str(self) -> &'static str {
+        match self {
+            Self::Initialize => "initialize",
+            Self::Attach => "attach",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ProjectMemoryRequestState {
+    AwaitingConfirmation,
+    Approved,
+    Rejected,
+    Expired,
+}
+
+impl ProjectMemoryRequestState {
+    const fn as_str(self) -> &'static str {
+        match self {
+            Self::AwaitingConfirmation => "awaiting_confirmation",
+            Self::Approved => "approved",
+            Self::Rejected => "rejected",
+            Self::Expired => "expired",
+        }
+    }
+}
+
 impl WikiOrigin {
     const fn as_str(self) -> &'static str {
         match self {
@@ -109,6 +182,7 @@ impl IndexingMode {
 pub struct Database {
     inner: Arc<Mutex<Connection>>,
     publication_lock: Arc<Mutex<()>>,
+    managed_bundle_lock: Arc<Mutex<()>>,
     disclosure_gate: DisclosureGate,
     path: Option<PathBuf>,
 }
@@ -140,6 +214,7 @@ pub struct CollectionRecord {
     pub wiki_folder: PathBuf,
     pub policy: CollectionPolicy,
     pub origin: WikiOrigin,
+    pub memory_scope: Option<MemoryScope>,
     pub indexing_mode: IndexingMode,
     pub okf_version: String,
     pub declared_okf_version: Option<String>,
@@ -147,6 +222,57 @@ pub struct CollectionRecord {
     pub managed_size_bytes: u64,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ProjectMemoryAttachmentRecord {
+    pub collection_id: Uuid,
+    pub project_id: Uuid,
+    pub portable_wiki_id: Uuid,
+    pub project_root: PathBuf,
+    pub manifest_fingerprint: String,
+    pub state: ProjectMemoryAttachmentState,
+    pub last_error_code: Option<String>,
+    pub created_at: DateTime<Utc>,
+    pub updated_at: DateTime<Utc>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ProjectMemoryRequestRecord {
+    pub id: Uuid,
+    pub app_id: Uuid,
+    pub kind: ProjectMemoryRequestKind,
+    pub project_root: PathBuf,
+    pub requested_name: Option<String>,
+    pub manifest_fingerprint: Option<String>,
+    pub state: ProjectMemoryRequestState,
+    pub created_at: DateTime<Utc>,
+    pub updated_at: DateTime<Utc>,
+    pub expires_at: DateTime<Utc>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MemorySearchRecord {
+    pub collection_id: Uuid,
+    pub concept_id: Uuid,
+    pub logical_path: String,
+    pub title: String,
+    pub description: String,
+    pub tags: Vec<String>,
+    pub fingerprint: String,
+    pub snippet: String,
+    pub assurance: ConceptAssurance,
+}
+
+#[derive(Debug, Clone)]
+pub struct NewProjectMemoryAttachment {
+    pub collection_id: Uuid,
+    pub project_id: Uuid,
+    pub portable_wiki_id: Uuid,
+    pub project_root: PathBuf,
+    pub wiki_root: PathBuf,
+    pub name: String,
+    pub manifest_fingerprint: String,
 }
 
 #[derive(Debug, Clone)]
@@ -1071,12 +1197,19 @@ impl Database {
             tx.pragma_update(None, "user_version", 15)?;
             tx.commit()?;
         }
-        if version > 15 {
+        if version < 16 {
+            let tx = connection.transaction()?;
+            tx.execute_batch(MIGRATION_16)?;
+            tx.pragma_update(None, "user_version", 16)?;
+            tx.commit()?;
+        }
+        if version > 16 {
             bail!("database schema {version} is newer than this application supports");
         }
         let database = Self {
             inner: Arc::new(Mutex::new(connection)),
             publication_lock: Arc::new(Mutex::new(())),
+            managed_bundle_lock: Arc::new(Mutex::new(())),
             disclosure_gate: DisclosureGate::default(),
             path,
         };
@@ -1126,6 +1259,12 @@ impl Database {
         self.publication_lock
             .lock()
             .map_err(|_| anyhow!("OKF publication lock is poisoned"))
+    }
+
+    pub(crate) fn managed_bundle_guard(&self) -> Result<MutexGuard<'_, ()>> {
+        self.managed_bundle_lock
+            .lock()
+            .map_err(|_| anyhow!("managed OKF bundle lock is poisoned"))
     }
 
     pub fn schema_version(&self) -> Result<u32> {
@@ -1308,15 +1447,7 @@ impl Database {
         &self,
         input: NewCollection,
     ) -> Result<CollectionRecord> {
-        let record = build_collection_record(
-            input.id,
-            input.name,
-            &input.source_folder,
-            &input.wiki_folder,
-            input.policy,
-            input.origin,
-            input.indexing_mode,
-        )?;
+        let record = build_collection_record(input, None)?;
         let connection = self.connection()?;
         insert_collection(&connection, &record)?;
         Ok(record)
@@ -1333,13 +1464,16 @@ impl Database {
             bail!("AI memory creation requires exactly one owning application");
         }
         let record = build_collection_record(
-            input.id,
-            input.name,
-            &input.bundle_root,
-            &input.bundle_root,
-            CollectionPolicy::local_only(),
-            input.origin,
-            IndexingMode::NotApplicable,
+            NewCollection {
+                id: input.id,
+                name: input.name,
+                source_folder: input.bundle_root.clone(),
+                wiki_folder: input.bundle_root,
+                policy: CollectionPolicy::local_only(),
+                origin: input.origin,
+                indexing_mode: IndexingMode::NotApplicable,
+            },
+            (input.origin == WikiOrigin::AiMemory).then_some(MemoryScope::Personal),
         )?;
         let mutation = ManagedBundleMutationRecord {
             id: Uuid::new_v4(),
@@ -1432,65 +1566,7 @@ impl Database {
     ) -> Result<()> {
         let mut connection = self.connection()?;
         let tx = connection.transaction()?;
-        tx.execute(
-            "DELETE FROM okf_concept_projection WHERE collection_id=?1",
-            [collection_id.to_string()],
-        )?;
-        tx.execute(
-            "DELETE FROM okf_projection_fts WHERE collection_id=?1",
-            [collection_id.to_string()],
-        )?;
-        let now = Utc::now().to_rfc3339();
-        for concept in concepts {
-            let concept_id = Uuid::new_v5(&collection_id, concept.logical_path.as_bytes());
-            tx.execute(
-                "INSERT INTO okf_concept_projection
-                 (collection_id,concept_id,logical_path,concept_type,title,description,tags_json,
-                  lifecycle_status,generation_json,verifications_json,provenance_json,version,
-                  fingerprint,unknown_frontmatter_json,indexed_at,stale_after,trust_tier,
-                  freshness_state,verification_outdated,warnings_json,attested_computation_json)
-                 VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18,?19,?20,?21)",
-                params![
-                    collection_id.to_string(),
-                    concept_id.to_string(),
-                    concept.logical_path,
-                    concept.concept_type,
-                    concept.title,
-                    concept.description,
-                    serde_json::to_string(&concept.tags)?,
-                    concept.lifecycle_status,
-                    yaml_json(concept.generated.as_ref())?,
-                    yaml_json(concept.verified.as_ref())?.unwrap_or_else(|| "[]".to_owned()),
-                    yaml_json(concept.sources.as_ref())?.unwrap_or_else(|| "[]".to_owned()),
-                    concept.version,
-                    concept.fingerprint,
-                    serde_json::to_string(&serde_json::to_value(&concept.unknown_frontmatter)?)?,
-                    now,
-                    concept.stale_after,
-                    trust_tier_sql_value(concept.assurance.trust),
-                    freshness_state_sql_value(concept.assurance.freshness),
-                    concept.assurance.verification_outdated,
-                    serde_json::to_string(&concept.warnings)?,
-                    concept.attested_computation.as_ref().map(serde_json::to_string).transpose()?,
-                ],
-            )?;
-            tx.execute(
-                "INSERT INTO okf_projection_fts
-                 (collection_id,concept_id,logical_path,title,description,tags,text,fingerprint,lifecycle_status)
-                 VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9)",
-                params![
-                    collection_id.to_string(),
-                    concept_id.to_string(),
-                    concept.logical_path,
-                    concept.title,
-                    concept.description,
-                    concept.tags.join(" "),
-                    concept.search_text,
-                    concept.fingerprint,
-                    concept.lifecycle_status,
-                ],
-            )?;
-        }
+        replace_okf_concept_projection_on(&tx, collection_id, concepts)?;
         tx.commit()?;
         Ok(())
     }
@@ -1775,6 +1851,7 @@ impl Database {
     }
 
     pub fn set_application_capability_revoked(&self, app_id: Uuid, revoked: bool) -> Result<()> {
+        let _guard = self.managed_bundle_guard()?;
         let mut connection = self.connection()?;
         let tx = connection.transaction_with_behavior(TransactionBehavior::Immediate)?;
         let count = tx.execute(
@@ -1787,6 +1864,11 @@ impl Database {
                 "DELETE FROM application_wiki_grants WHERE app_id=?1 AND role!='owner'",
                 [app_id.to_string()],
             )?;
+            tx.execute(
+                "UPDATE project_memory_requests SET state='rejected',updated_at=?2
+                 WHERE app_id=?1 AND state='awaiting_confirmation'",
+                params![app_id.to_string(), Utc::now().to_rfc3339()],
+            )?;
         }
         tx.commit()?;
         Ok(())
@@ -1798,6 +1880,7 @@ impl Database {
         collection_id: Uuid,
         role: Option<ApplicationWikiRole>,
     ) -> Result<()> {
+        let _guard = self.managed_bundle_guard()?;
         let mut connection = self.connection()?;
         let tx = connection.transaction_with_behavior(TransactionBehavior::Immediate)?;
         let existing_role = tx
@@ -1823,13 +1906,20 @@ impl Database {
             if !active {
                 bail!("application capability is unavailable");
             }
-            let origin: String = tx.query_row(
-                "SELECT origin FROM collections WHERE id=?1",
-                [collection_id.to_string()],
-                |row| row.get(0),
-            )?;
+            let (origin, memory_scope, project_active): (String, Option<String>, bool) = tx
+                .query_row(
+                    "SELECT c.origin,c.memory_scope,
+                        EXISTS(SELECT 1 FROM project_memory_attachments p
+                               WHERE p.collection_id=c.id AND p.state='active')
+                 FROM collections c WHERE c.id=?1",
+                    [collection_id.to_string()],
+                    |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+                )?;
             if origin != WikiOrigin::AiMemory.as_str() {
                 bail!("applications may only receive grants for AI memory wikis");
+            }
+            if memory_scope.as_deref() == Some(MemoryScope::Project.as_str()) && !project_active {
+                bail!("project memory attachment is unavailable");
             }
             let now = Utc::now().to_rfc3339();
             tx.execute(
@@ -1858,7 +1948,9 @@ impl Database {
             "SELECT g.role FROM application_wiki_grants g
              JOIN application_capabilities a ON a.app_id=g.app_id
              JOIN collections c ON c.id=g.collection_id
-             WHERE g.app_id=?1 AND g.collection_id=?2 AND a.revoked_at IS NULL AND c.origin='ai_memory'",
+             LEFT JOIN project_memory_attachments p ON p.collection_id=c.id
+             WHERE g.app_id=?1 AND g.collection_id=?2 AND a.revoked_at IS NULL AND c.origin='ai_memory'
+               AND (c.memory_scope='personal' OR (c.memory_scope='project' AND p.state='active'))",
             params![app_id.to_string(), collection_id.to_string()],
             |row| row.get::<_, String>(0),
         ).optional()?;
@@ -1877,13 +1969,569 @@ impl Database {
             "SELECT c.id,c.name,c.source_folder,c.wiki_folder,c.local_only,c.peer_shareable,
              c.allow_external_ai,c.internet_public,c.origin,c.indexing_mode,c.okf_version,
              c.declared_okf_version,c.okf_compatibility,c.managed_size_bytes,
-             c.created_at,c.updated_at FROM collections c
+             c.created_at,c.updated_at,c.memory_scope FROM collections c
              JOIN application_wiki_grants g ON g.collection_id=c.id
              JOIN application_capabilities a ON a.app_id=g.app_id
+             LEFT JOIN project_memory_attachments p ON p.collection_id=c.id
              WHERE g.app_id=?1 AND c.origin='ai_memory' AND a.revoked_at IS NULL
+               AND (c.memory_scope='personal' OR (c.memory_scope='project' AND p.state='active'))
              ORDER BY c.name COLLATE NOCASE,c.id",
         )?;
         let rows = statement.query_map([app_id.to_string()], collection_from_row)?;
+        rows.collect::<rusqlite::Result<_>>().map_err(Into::into)
+    }
+
+    pub fn request_project_memory_confirmation(
+        &self,
+        app_id: Uuid,
+        kind: ProjectMemoryRequestKind,
+        project_root: &Path,
+        requested_name: Option<&str>,
+        manifest_fingerprint: Option<&str>,
+        expires_at: DateTime<Utc>,
+    ) -> Result<ProjectMemoryRequestRecord> {
+        let now = Utc::now();
+        if expires_at <= now {
+            bail!("project memory request expiry is invalid");
+        }
+        if matches!(kind, ProjectMemoryRequestKind::Initialize) != requested_name.is_some() {
+            bail!("project memory request fields are incompatible");
+        }
+        let project_root = path_text(project_root);
+        let mut connection = self.connection()?;
+        let tx = connection.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let active = tx.query_row(
+            "SELECT EXISTS(SELECT 1 FROM application_capabilities
+                           WHERE app_id=?1 AND revoked_at IS NULL)",
+            [app_id.to_string()],
+            |row| row.get::<_, bool>(0),
+        )?;
+        if !active {
+            bail!("application capability is unavailable");
+        }
+        tx.execute(
+            "UPDATE project_memory_requests SET state='expired',updated_at=?1
+             WHERE state='awaiting_confirmation' AND expires_at<=?1",
+            [now.to_rfc3339()],
+        )?;
+        let existing = tx
+            .query_row(
+                "SELECT id,app_id,kind,project_root,requested_name,manifest_fingerprint,state,
+                        created_at,updated_at,expires_at
+                 FROM project_memory_requests
+                 WHERE app_id=?1 AND project_root=?2 AND state='awaiting_confirmation'",
+                params![app_id.to_string(), project_root],
+                project_memory_request_from_row,
+            )
+            .optional()?;
+        if let Some(existing) = existing {
+            if existing.kind == kind
+                && existing.requested_name.as_deref() == requested_name
+                && existing.manifest_fingerprint.as_deref() == manifest_fingerprint
+            {
+                tx.commit()?;
+                return Ok(existing);
+            }
+            tx.execute(
+                "UPDATE project_memory_requests SET state='rejected',updated_at=?2
+                 WHERE id=?1 AND state='awaiting_confirmation'",
+                params![existing.id.to_string(), now.to_rfc3339()],
+            )?;
+        }
+        let pending: u32 = tx.query_row(
+            "SELECT count(*) FROM project_memory_requests
+             WHERE app_id=?1 AND state='awaiting_confirmation'",
+            [app_id.to_string()],
+            |row| row.get(0),
+        )?;
+        if pending >= 16 {
+            bail!("application pending project memory request limit exceeded");
+        }
+        let record = ProjectMemoryRequestRecord {
+            id: Uuid::new_v4(),
+            app_id,
+            kind,
+            project_root: PathBuf::from(&project_root),
+            requested_name: requested_name.map(str::to_owned),
+            manifest_fingerprint: manifest_fingerprint.map(str::to_owned),
+            state: ProjectMemoryRequestState::AwaitingConfirmation,
+            created_at: now,
+            updated_at: now,
+            expires_at,
+        };
+        tx.execute(
+            "INSERT INTO project_memory_requests
+             (id,app_id,kind,project_root,requested_name,manifest_fingerprint,state,
+              created_at,updated_at,expires_at)
+             VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?8,?9)",
+            params![
+                record.id.to_string(),
+                record.app_id.to_string(),
+                record.kind.as_str(),
+                project_root,
+                record.requested_name,
+                record.manifest_fingerprint,
+                record.state.as_str(),
+                now.to_rfc3339(),
+                expires_at.to_rfc3339(),
+            ],
+        )?;
+        tx.commit()?;
+        Ok(record)
+    }
+
+    pub fn project_memory_request(
+        &self,
+        request_id: Uuid,
+    ) -> Result<Option<ProjectMemoryRequestRecord>> {
+        self.connection()?
+            .query_row(
+                "SELECT id,app_id,kind,project_root,requested_name,manifest_fingerprint,state,
+                        created_at,updated_at,expires_at
+                 FROM project_memory_requests WHERE id=?1",
+                [request_id.to_string()],
+                project_memory_request_from_row,
+            )
+            .optional()
+            .map_err(Into::into)
+    }
+
+    pub fn pending_project_memory_requests(&self) -> Result<Vec<ProjectMemoryRequestRecord>> {
+        let now = Utc::now();
+        let connection = self.connection()?;
+        connection.execute(
+            "UPDATE project_memory_requests SET state='expired',updated_at=?1
+             WHERE state='awaiting_confirmation' AND expires_at<=?1",
+            [now.to_rfc3339()],
+        )?;
+        let mut statement = connection.prepare(
+            "SELECT id,app_id,kind,project_root,requested_name,manifest_fingerprint,state,
+                    created_at,updated_at,expires_at
+             FROM project_memory_requests WHERE state='awaiting_confirmation'
+             ORDER BY created_at,id",
+        )?;
+        let rows = statement.query_map([], project_memory_request_from_row)?;
+        rows.collect::<rusqlite::Result<_>>().map_err(Into::into)
+    }
+
+    pub fn reject_project_memory_request(&self, request_id: Uuid) -> Result<()> {
+        let count = self.connection()?.execute(
+            "UPDATE project_memory_requests SET state='rejected',updated_at=?2
+             WHERE id=?1 AND state='awaiting_confirmation'",
+            params![request_id.to_string(), Utc::now().to_rfc3339()],
+        )?;
+        if count != 1 {
+            bail!("project memory request is unavailable or expired");
+        }
+        Ok(())
+    }
+
+    pub fn confirm_project_memory_request(
+        &self,
+        request_id: Uuid,
+        attachment: &NewProjectMemoryAttachment,
+    ) -> Result<CollectionRecord> {
+        let record = build_collection_record(
+            NewCollection {
+                id: attachment.collection_id,
+                name: attachment.name.clone(),
+                source_folder: attachment.project_root.clone(),
+                wiki_folder: attachment.wiki_root.clone(),
+                policy: CollectionPolicy::local_only(),
+                origin: WikiOrigin::AiMemory,
+                indexing_mode: IndexingMode::NotApplicable,
+            },
+            Some(MemoryScope::Project),
+        )?;
+        let now = Utc::now();
+        let mut connection = self.connection()?;
+        let tx = connection.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let request = tx
+            .query_row(
+                "SELECT id,app_id,kind,project_root,requested_name,manifest_fingerprint,state,
+                        created_at,updated_at,expires_at
+                 FROM project_memory_requests WHERE id=?1",
+                [request_id.to_string()],
+                project_memory_request_from_row,
+            )
+            .optional()?
+            .context("project memory request does not exist")?;
+        if request.state != ProjectMemoryRequestState::AwaitingConfirmation
+            || request.expires_at <= now
+        {
+            if request.state == ProjectMemoryRequestState::AwaitingConfirmation {
+                tx.execute(
+                    "UPDATE project_memory_requests SET state='expired',updated_at=?2 WHERE id=?1",
+                    params![request_id.to_string(), now.to_rfc3339()],
+                )?;
+                tx.commit()?;
+            }
+            bail!("project memory request is unavailable or expired");
+        }
+        if request.project_root != attachment.project_root {
+            bail!("project memory request root changed before confirmation");
+        }
+        let active = tx.query_row(
+            "SELECT EXISTS(SELECT 1 FROM application_capabilities
+                           WHERE app_id=?1 AND revoked_at IS NULL)",
+            [request.app_id.to_string()],
+            |row| row.get::<_, bool>(0),
+        )?;
+        if !active {
+            bail!("application capability is unavailable");
+        }
+        insert_collection(&tx, &record)?;
+        tx.execute(
+            "INSERT INTO project_memory_attachments
+             (collection_id,project_id,portable_wiki_id,project_root,manifest_fingerprint,state,
+              last_error_code,created_at,updated_at)
+             VALUES (?1,?2,?3,?4,?5,'invalid','activating',?6,?6)",
+            params![
+                record.id.to_string(),
+                attachment.project_id.to_string(),
+                attachment.portable_wiki_id.to_string(),
+                path_text(&attachment.project_root),
+                attachment.manifest_fingerprint,
+                now.to_rfc3339(),
+            ],
+        )?;
+        tx.execute(
+            "INSERT INTO application_wiki_grants
+             (app_id,collection_id,role,granted_at,confirmed_at)
+             VALUES (?1,?2,'editor',?3,?3)",
+            params![
+                request.app_id.to_string(),
+                record.id.to_string(),
+                now.to_rfc3339()
+            ],
+        )?;
+        tx.execute(
+            "UPDATE project_memory_requests SET state='approved',updated_at=?2
+             WHERE id=?1 AND state='awaiting_confirmation'",
+            params![request_id.to_string(), now.to_rfc3339()],
+        )?;
+        tx.commit()?;
+        Ok(record)
+    }
+
+    pub fn register_project_memory_attachment(
+        &self,
+        attachment: &NewProjectMemoryAttachment,
+    ) -> Result<CollectionRecord> {
+        let record = build_collection_record(
+            NewCollection {
+                id: attachment.collection_id,
+                name: attachment.name.clone(),
+                source_folder: attachment.project_root.clone(),
+                wiki_folder: attachment.wiki_root.clone(),
+                policy: CollectionPolicy::local_only(),
+                origin: WikiOrigin::AiMemory,
+                indexing_mode: IndexingMode::NotApplicable,
+            },
+            Some(MemoryScope::Project),
+        )?;
+        let now = Utc::now().to_rfc3339();
+        let mut connection = self.connection()?;
+        let tx = connection.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        insert_collection(&tx, &record)?;
+        tx.execute(
+            "INSERT INTO project_memory_attachments
+             (collection_id,project_id,portable_wiki_id,project_root,manifest_fingerprint,state,
+              last_error_code,created_at,updated_at)
+             VALUES (?1,?2,?3,?4,?5,'invalid','activating',?6,?6)",
+            params![
+                record.id.to_string(),
+                attachment.project_id.to_string(),
+                attachment.portable_wiki_id.to_string(),
+                path_text(&attachment.project_root),
+                attachment.manifest_fingerprint,
+                now,
+            ],
+        )?;
+        tx.commit()?;
+        Ok(record)
+    }
+
+    pub fn confirm_existing_project_memory_request(
+        &self,
+        request_id: Uuid,
+        collection_id: Uuid,
+    ) -> Result<()> {
+        let now = Utc::now();
+        let mut connection = self.connection()?;
+        let tx = connection.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let request = tx
+            .query_row(
+                "SELECT id,app_id,kind,project_root,requested_name,manifest_fingerprint,state,
+                        created_at,updated_at,expires_at
+                 FROM project_memory_requests WHERE id=?1",
+                [request_id.to_string()],
+                project_memory_request_from_row,
+            )
+            .optional()?
+            .context("project memory request does not exist")?;
+        if request.state != ProjectMemoryRequestState::AwaitingConfirmation
+            || request.expires_at <= now
+        {
+            bail!("project memory request is unavailable or expired");
+        }
+        let active: bool = tx.query_row(
+            "SELECT EXISTS(SELECT 1 FROM application_capabilities
+                           WHERE app_id=?1 AND revoked_at IS NULL)",
+            [request.app_id.to_string()],
+            |row| row.get(0),
+        )?;
+        if !active {
+            bail!("application capability is unavailable");
+        }
+        let root: String = tx.query_row(
+            "SELECT project_root FROM project_memory_attachments
+             WHERE collection_id=?1 AND state='active'",
+            [collection_id.to_string()],
+            |row| row.get(0),
+        )?;
+        if Path::new(&root) != request.project_root {
+            bail!("project memory request root does not match the attachment");
+        }
+        tx.execute(
+            "INSERT INTO application_wiki_grants
+             (app_id,collection_id,role,granted_at,confirmed_at)
+             VALUES (?1,?2,'editor',?3,?3)
+             ON CONFLICT(app_id,collection_id) DO UPDATE SET
+               role='editor',confirmed_at=excluded.confirmed_at",
+            params![
+                request.app_id.to_string(),
+                collection_id.to_string(),
+                now.to_rfc3339()
+            ],
+        )?;
+        tx.execute(
+            "UPDATE project_memory_requests SET state='approved',updated_at=?2
+             WHERE id=?1 AND state='awaiting_confirmation'",
+            params![request_id.to_string(), now.to_rfc3339()],
+        )?;
+        tx.commit()?;
+        Ok(())
+    }
+
+    pub fn project_memory_attachment_for_root(
+        &self,
+        project_root: &Path,
+    ) -> Result<Option<ProjectMemoryAttachmentRecord>> {
+        self.connection()?
+            .query_row(
+                "SELECT collection_id,project_id,portable_wiki_id,project_root,
+                        manifest_fingerprint,state,last_error_code,created_at,updated_at
+                 FROM project_memory_attachments WHERE project_root=?1",
+                [path_text(project_root)],
+                project_memory_attachment_from_row,
+            )
+            .optional()
+            .map_err(Into::into)
+    }
+
+    pub fn project_memory_attachment(
+        &self,
+        collection_id: Uuid,
+    ) -> Result<Option<ProjectMemoryAttachmentRecord>> {
+        self.connection()?
+            .query_row(
+                "SELECT collection_id,project_id,portable_wiki_id,project_root,
+                        manifest_fingerprint,state,last_error_code,created_at,updated_at
+                 FROM project_memory_attachments WHERE collection_id=?1",
+                [collection_id.to_string()],
+                project_memory_attachment_from_row,
+            )
+            .optional()
+            .map_err(Into::into)
+    }
+
+    pub fn project_memory_attachments(&self) -> Result<Vec<ProjectMemoryAttachmentRecord>> {
+        let connection = self.connection()?;
+        let mut statement = connection.prepare(
+            "SELECT collection_id,project_id,portable_wiki_id,project_root,
+                    manifest_fingerprint,state,last_error_code,created_at,updated_at
+             FROM project_memory_attachments ORDER BY created_at,collection_id",
+        )?;
+        let rows = statement.query_map([], project_memory_attachment_from_row)?;
+        rows.collect::<rusqlite::Result<_>>().map_err(Into::into)
+    }
+
+    pub fn activate_project_memory_attachment(
+        &self,
+        collection_id: Uuid,
+        manifest_fingerprint: &str,
+        concepts: &[crate::okf_import::OkfImportedConcept],
+        declared_version: Option<&str>,
+        compatibility: &OkfCompatibility,
+        managed_size_bytes: u64,
+    ) -> Result<()> {
+        let effective_version = match compatibility {
+            OkfCompatibility::LegacyV01 => "0.1",
+            OkfCompatibility::FutureRestricted { .. } => "future",
+            OkfCompatibility::DeclaredV02 | OkfCompatibility::UndeclaredV02Compatible => "0.2",
+        };
+        let mut connection = self.connection()?;
+        let tx = connection.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let project_memory: bool = tx.query_row(
+            "SELECT EXISTS(
+               SELECT 1 FROM collections c
+               JOIN project_memory_attachments p ON p.collection_id=c.id
+               WHERE c.id=?1 AND c.origin='ai_memory' AND c.memory_scope='project'
+             )",
+            [collection_id.to_string()],
+            |row| row.get(0),
+        )?;
+        if !project_memory {
+            bail!("project memory attachment does not exist");
+        }
+        replace_okf_concept_projection_on(&tx, collection_id, concepts)?;
+        let now = Utc::now().to_rfc3339();
+        tx.execute(
+            "UPDATE collections SET okf_version=?2,declared_okf_version=?3,okf_compatibility=?4,
+             managed_size_bytes=?5,updated_at=?6 WHERE id=?1",
+            params![
+                collection_id.to_string(),
+                effective_version,
+                declared_version,
+                okf_compatibility_sql_value(compatibility),
+                managed_size_bytes,
+                now,
+            ],
+        )?;
+        let count = tx.execute(
+            "UPDATE project_memory_attachments
+             SET state='active',manifest_fingerprint=?2,last_error_code=NULL,updated_at=?3
+             WHERE collection_id=?1",
+            params![collection_id.to_string(), manifest_fingerprint, now],
+        )?;
+        ensure_changed(count, "project memory attachment", collection_id)?;
+        tx.commit()?;
+        Ok(())
+    }
+
+    pub fn withhold_project_memory_attachment(
+        &self,
+        collection_id: Uuid,
+        state: ProjectMemoryAttachmentState,
+        error_code: &'static str,
+    ) -> Result<()> {
+        if state == ProjectMemoryAttachmentState::Active {
+            bail!("withholding project memory requires an unavailable state");
+        }
+        let mut connection = self.connection()?;
+        let tx = connection.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        replace_okf_concept_projection_on(&tx, collection_id, &[])?;
+        let count = tx.execute(
+            "UPDATE project_memory_attachments
+             SET state=?2,last_error_code=?3,updated_at=?4 WHERE collection_id=?1",
+            params![
+                collection_id.to_string(),
+                state.as_str(),
+                error_code,
+                Utc::now().to_rfc3339(),
+            ],
+        )?;
+        ensure_changed(count, "project memory attachment", collection_id)?;
+        tx.commit()?;
+        Ok(())
+    }
+
+    pub fn detach_project_memory(&self, collection_id: Uuid) -> Result<()> {
+        let mut connection = self.connection()?;
+        let tx = connection.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let attachment: Option<(Option<String>, String)> = tx
+            .query_row(
+                "SELECT c.memory_scope,p.project_root FROM collections c
+                 JOIN project_memory_attachments p ON p.collection_id=c.id
+                 WHERE c.id=?1",
+                [collection_id.to_string()],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .optional()?;
+        let Some((scope, project_root)) = attachment else {
+            bail!("collection is not a project memory");
+        };
+        if scope.as_deref() != Some(MemoryScope::Project.as_str()) {
+            bail!("collection is not a project memory");
+        }
+        tx.execute(
+            "UPDATE project_memory_requests SET state='rejected',updated_at=?2
+             WHERE project_root=?1 AND state='awaiting_confirmation'",
+            params![project_root, Utc::now().to_rfc3339()],
+        )?;
+        tx.execute(
+            "DELETE FROM okf_projection_fts WHERE collection_id=?1",
+            [collection_id.to_string()],
+        )?;
+        let count = tx.execute(
+            "DELETE FROM collections WHERE id=?1",
+            [collection_id.to_string()],
+        )?;
+        tx.commit()?;
+        ensure_changed(count, "project memory collection", collection_id)
+    }
+
+    pub fn search_application_memory(
+        &self,
+        app_id: Uuid,
+        collection_id: Uuid,
+        query: &str,
+        limit: usize,
+    ) -> Result<Vec<MemorySearchRecord>> {
+        if limit == 0 {
+            return Ok(Vec::new());
+        }
+        let query = fts_query(query);
+        if query.is_empty() {
+            return Ok(Vec::new());
+        }
+        let connection = self.connection()?;
+        let mut statement = connection.prepare(
+            "SELECT p.collection_id,p.concept_id,p.logical_path,p.title,p.description,p.tags_json,
+                    p.fingerprint,f.text,p.trust_tier,p.freshness_state,p.verification_outdated
+             FROM okf_projection_fts f
+             JOIN okf_concept_projection p
+               ON p.collection_id=f.collection_id AND p.concept_id=f.concept_id
+             JOIN collections c ON c.id=p.collection_id
+             JOIN application_wiki_grants g
+               ON g.collection_id=c.id AND g.app_id=?1
+             JOIN application_capabilities a ON a.app_id=g.app_id
+             LEFT JOIN project_memory_attachments attachment ON attachment.collection_id=c.id
+             WHERE okf_projection_fts MATCH ?2 AND c.id=?3 AND c.origin='ai_memory'
+               AND a.revoked_at IS NULL AND p.lifecycle_status='stable'
+               AND (c.memory_scope='personal'
+                    OR (c.memory_scope='project' AND attachment.state='active'))
+               AND NOT EXISTS(SELECT 1 FROM managed_bundle_mutations m
+                              WHERE m.collection_id=c.id AND m.state!='committed')
+             ORDER BY bm25(okf_projection_fts),p.concept_id LIMIT ?4",
+        )?;
+        let rows = statement.query_map(
+            params![
+                app_id.to_string(),
+                query,
+                collection_id.to_string(),
+                i64::try_from(limit).unwrap_or(i64::MAX),
+            ],
+            |row| {
+                let text: String = row.get(7)?;
+                Ok(MemorySearchRecord {
+                    collection_id: uuid_sql(row.get(0)?)?,
+                    concept_id: uuid_sql(row.get(1)?)?,
+                    logical_path: row.get(2)?,
+                    title: row.get(3)?,
+                    description: row.get(4)?,
+                    tags: json_sql(row.get(5)?)?,
+                    fingerprint: row.get(6)?,
+                    snippet: bounded_text(&text, 1024),
+                    assurance: ConceptAssurance {
+                        trust: trust_tier_sql(row.get(8)?)?,
+                        freshness: freshness_state_sql(row.get(9)?)?,
+                        verification_outdated: row.get(10)?,
+                    },
+                })
+            },
+        )?;
         rows.collect::<rusqlite::Result<_>>().map_err(Into::into)
     }
 
@@ -2319,17 +2967,29 @@ impl Database {
     }
 
     pub fn update_collection_policy(&self, id: Uuid, mut policy: CollectionPolicy) -> Result<()> {
-        if (policy.peer_shareable || policy.allow_external_ai || policy.internet_public)
+        let expands_disclosure =
+            policy.peer_shareable || policy.allow_external_ai || policy.internet_public;
+        if expands_disclosure
             && !self
                 .pending_managed_bundle_mutations_for_collection(id)?
                 .is_empty()
         {
             bail!("managed OKF bundle has a pending recovery and cannot be shared");
         }
+        if expands_disclosure
+            && self
+                .collection(id)?
+                .is_some_and(|collection| collection.memory_scope == Some(MemoryScope::Project))
+            && self
+                .project_memory_attachment(id)?
+                .is_none_or(|attachment| attachment.state != ProjectMemoryAttachmentState::Active)
+        {
+            bail!("project memory attachment is unavailable and cannot be shared");
+        }
         if self
             .collection(id)?
             .is_some_and(|collection| !collection.okf_compatibility.permits_external_disclosure())
-            && (policy.peer_shareable || policy.allow_external_ai || policy.internet_public)
+            && expands_disclosure
         {
             bail!("this OKF compatibility level is restricted to local read-only use");
         }
@@ -2554,7 +3214,7 @@ impl Database {
             .query_row(
                 "SELECT id,name,source_folder,wiki_folder,local_only,peer_shareable,
                  allow_external_ai,internet_public,origin,indexing_mode,okf_version,declared_okf_version,
-                 okf_compatibility,managed_size_bytes,created_at,updated_at
+                 okf_compatibility,managed_size_bytes,created_at,updated_at,memory_scope
                  FROM collections WHERE id=?1",
                 [id.to_string()],
                 collection_from_row,
@@ -2568,7 +3228,7 @@ impl Database {
         let mut statement = connection.prepare(
             "SELECT id,name,source_folder,wiki_folder,local_only,peer_shareable,
              allow_external_ai,internet_public,origin,indexing_mode,okf_version,declared_okf_version,
-             okf_compatibility,managed_size_bytes,created_at,updated_at
+             okf_compatibility,managed_size_bytes,created_at,updated_at,memory_scope
              FROM collections ORDER BY name COLLATE NOCASE",
         )?;
         let rows = statement.query_map([], collection_from_row)?;
@@ -3699,6 +4359,9 @@ impl Database {
                 "SELECT origin FROM collections
                  WHERE id=?1 AND internet_public=1
                    AND okf_compatibility IN ('declared_v02','undeclared_v02_compatible')
+                   AND (memory_scope IS NULL OR memory_scope!='project'
+                        OR EXISTS(SELECT 1 FROM project_memory_attachments p
+                                  WHERE p.collection_id=collections.id AND p.state='active'))
                    AND NOT EXISTS(SELECT 1 FROM managed_bundle_mutations m
                                   WHERE m.collection_id=collections.id AND m.state!='committed')",
                 [collection_id.to_string()],
@@ -3853,6 +4516,9 @@ impl Database {
                  WHERE g.peer_id=?1 AND c.id=?2 AND p.trusted=1 AND p.blocked=0
                    AND c.peer_shareable=1
                    AND c.okf_compatibility IN ('declared_v02','undeclared_v02_compatible')
+                   AND (c.memory_scope IS NULL OR c.memory_scope!='project'
+                        OR EXISTS(SELECT 1 FROM project_memory_attachments attachment
+                                  WHERE attachment.collection_id=c.id AND attachment.state='active'))
                    AND NOT EXISTS(SELECT 1 FROM managed_bundle_mutations m
                                   WHERE m.collection_id=c.id AND m.state!='committed')",
                 params![peer_id, collection_id.to_string()],
@@ -3992,6 +4658,9 @@ impl Database {
                 "SELECT p.manifest_sequence FROM public_collection_profiles p
                  JOIN collections c ON c.id=p.collection_id
                  WHERE p.collection_id=?1 AND c.internet_public=1
+                   AND (c.memory_scope IS NULL OR c.memory_scope!='project'
+                        OR EXISTS(SELECT 1 FROM project_memory_attachments attachment
+                                  WHERE attachment.collection_id=c.id AND attachment.state='active'))
                    AND NOT EXISTS(SELECT 1 FROM managed_bundle_mutations m
                                   WHERE m.collection_id=c.id AND m.state!='committed')",
                 [collection_id.to_string()],
@@ -4024,6 +4693,9 @@ impl Database {
                 "SELECT origin FROM collections
                  WHERE id=?1 AND internet_public=1
                    AND okf_compatibility IN ('declared_v02','undeclared_v02_compatible')
+                   AND (memory_scope IS NULL OR memory_scope!='project'
+                        OR EXISTS(SELECT 1 FROM project_memory_attachments p
+                                  WHERE p.collection_id=collections.id AND p.state='active'))
                    AND NOT EXISTS(SELECT 1 FROM managed_bundle_mutations m
                                   WHERE m.collection_id=collections.id AND m.state!='committed')",
                 [collection_id.to_string()],
@@ -4077,6 +4749,9 @@ impl Database {
                 "SELECT origin FROM collections
                  WHERE id=?1 AND internet_public=1
                    AND okf_compatibility IN ('declared_v02','undeclared_v02_compatible')
+                   AND (memory_scope IS NULL OR memory_scope!='project'
+                        OR EXISTS(SELECT 1 FROM project_memory_attachments p
+                                  WHERE p.collection_id=collections.id AND p.state='active'))
                    AND NOT EXISTS(SELECT 1 FROM managed_bundle_mutations m
                                   WHERE m.collection_id=collections.id AND m.state!='committed')",
                 [collection_id.to_string()],
@@ -5310,6 +5985,9 @@ impl Database {
         let sql = format!(
             "SELECT id FROM collections WHERE internet_public=1
              AND okf_compatibility IN ('declared_v02','undeclared_v02_compatible')
+             AND (memory_scope IS NULL OR memory_scope!='project'
+                  OR EXISTS(SELECT 1 FROM project_memory_attachments p
+                            WHERE p.collection_id=collections.id AND p.state='active'))
              AND NOT EXISTS(SELECT 1 FROM managed_bundle_mutations m
                             WHERE m.collection_id=collections.id AND m.state!='committed')
              AND id IN ({placeholders})"
@@ -5336,6 +6014,9 @@ impl Database {
              WHERE g.peer_id=?1 AND p.trusted=1 AND p.blocked=0 AND c.peer_shareable=1
                AND c.okf_compatibility IN ('declared_v02','undeclared_v02_compatible')
                AND (?2=0 OR c.allow_external_ai=1)
+               AND (c.memory_scope IS NULL OR c.memory_scope!='project'
+                    OR EXISTS(SELECT 1 FROM project_memory_attachments attachment
+                              WHERE attachment.collection_id=c.id AND attachment.state='active'))
                AND NOT EXISTS(SELECT 1 FROM managed_bundle_mutations m
                               WHERE m.collection_id=c.id AND m.state!='committed')",
         )?;
@@ -5487,6 +6168,9 @@ impl Database {
                ON p.collection_id=f.collection_id AND p.concept_id=f.concept_id
              WHERE okf_projection_fts MATCH ?1
              AND f.collection_id IN ({placeholders}){external_clause}
+             AND (col.memory_scope IS NULL OR col.memory_scope!='project'
+                  OR EXISTS(SELECT 1 FROM project_memory_attachments attachment
+                            WHERE attachment.collection_id=col.id AND attachment.state='active'))
              AND NOT EXISTS(SELECT 1 FROM managed_bundle_mutations m
                             WHERE m.collection_id=col.id AND m.state!='committed')
              ORDER BY bm25(okf_projection_fts), f.concept_id LIMIT ?2"
@@ -5781,6 +6465,77 @@ impl Database {
     }
 }
 
+fn replace_okf_concept_projection_on(
+    tx: &Transaction<'_>,
+    collection_id: Uuid,
+    concepts: &[crate::okf_import::OkfImportedConcept],
+) -> Result<()> {
+    tx.execute(
+        "DELETE FROM okf_concept_projection WHERE collection_id=?1",
+        [collection_id.to_string()],
+    )?;
+    tx.execute(
+        "DELETE FROM okf_projection_fts WHERE collection_id=?1",
+        [collection_id.to_string()],
+    )?;
+    let now = Utc::now().to_rfc3339();
+    for concept in concepts {
+        let concept_id = Uuid::new_v5(&collection_id, concept.logical_path.as_bytes());
+        tx.execute(
+            "INSERT INTO okf_concept_projection
+             (collection_id,concept_id,logical_path,concept_type,title,description,tags_json,
+              lifecycle_status,generation_json,verifications_json,provenance_json,version,
+              fingerprint,unknown_frontmatter_json,indexed_at,stale_after,trust_tier,
+              freshness_state,verification_outdated,warnings_json,attested_computation_json)
+             VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18,?19,?20,?21)",
+            params![
+                collection_id.to_string(),
+                concept_id.to_string(),
+                concept.logical_path,
+                concept.concept_type,
+                concept.title,
+                concept.description,
+                serde_json::to_string(&concept.tags)?,
+                concept.lifecycle_status,
+                yaml_json(concept.generated.as_ref())?,
+                yaml_json(concept.verified.as_ref())?.unwrap_or_else(|| "[]".to_owned()),
+                yaml_json(concept.sources.as_ref())?.unwrap_or_else(|| "[]".to_owned()),
+                concept.version,
+                concept.fingerprint,
+                serde_json::to_string(&serde_json::to_value(&concept.unknown_frontmatter)?)?,
+                now,
+                concept.stale_after,
+                trust_tier_sql_value(concept.assurance.trust),
+                freshness_state_sql_value(concept.assurance.freshness),
+                concept.assurance.verification_outdated,
+                serde_json::to_string(&concept.warnings)?,
+                concept
+                    .attested_computation
+                    .as_ref()
+                    .map(serde_json::to_string)
+                    .transpose()?,
+            ],
+        )?;
+        tx.execute(
+            "INSERT INTO okf_projection_fts
+             (collection_id,concept_id,logical_path,title,description,tags,text,fingerprint,lifecycle_status)
+             VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9)",
+            params![
+                collection_id.to_string(),
+                concept_id.to_string(),
+                concept.logical_path,
+                concept.title,
+                concept.description,
+                concept.tags.join(" "),
+                concept.search_text,
+                concept.fingerprint,
+                concept.lifecycle_status,
+            ],
+        )?;
+    }
+    Ok(())
+}
+
 fn projected_hit_is_current_on(
     connection: &Connection,
     hit: &SearchHit,
@@ -5793,7 +6548,10 @@ fn projected_hit_is_current_on(
             "SELECT f.text,f.fingerprint,f.lifecycle_status,col.allow_external_ai,
              col.internet_public,col.peer_shareable,col.okf_compatibility,
              NOT EXISTS(SELECT 1 FROM managed_bundle_mutations m
-                        WHERE m.collection_id=col.id AND m.state!='committed')
+                        WHERE m.collection_id=col.id AND m.state!='committed'),
+             (col.memory_scope IS NULL OR col.memory_scope!='project'
+              OR EXISTS(SELECT 1 FROM project_memory_attachments attachment
+                        WHERE attachment.collection_id=col.id AND attachment.state='active'))
              FROM okf_projection_fts f JOIN collections col ON col.id=f.collection_id
              WHERE f.collection_id=?1 AND f.concept_id=?2",
             params![hit.collection_id.to_string(), hit.concept_id.to_string()],
@@ -5807,6 +6565,7 @@ fn projected_hit_is_current_on(
                     row.get::<_, bool>(5)?,
                     row.get::<_, String>(6)?,
                     row.get::<_, bool>(7)?,
+                    row.get::<_, bool>(8)?,
                 ))
             },
         )
@@ -5820,6 +6579,7 @@ fn projected_hit_is_current_on(
         peer_shareable,
         compatibility,
         mutation_free,
+        project_memory_available,
     )) = row
     else {
         return Ok(false);
@@ -5833,6 +6593,7 @@ fn projected_hit_is_current_on(
                 "declared_v02" | "undeclared_v02_compatible"
             ))
         || (!local_only && !mutation_free)
+        || !project_memory_available
         || (purpose == SearchPurpose::ExternalAi && !external_ai)
         || (public && !internet_public)
         || (peer_id.is_some() && !peer_shareable)
@@ -5934,6 +6695,10 @@ fn collection_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<CollectionRe
             internet_public: row.get(7)?,
         },
         origin: wiki_origin_sql(row.get::<_, String>(8)?)?,
+        memory_scope: row
+            .get::<_, Option<String>>(16)?
+            .map(memory_scope_sql)
+            .transpose()?,
         indexing_mode: indexing_mode_sql(row.get::<_, String>(9)?)?,
         okf_version: row.get(10)?,
         declared_okf_version: declared_okf_version.clone(),
@@ -5941,6 +6706,39 @@ fn collection_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<CollectionRe
         managed_size_bytes: row.get(13)?,
         created_at: datetime_sql(row.get::<_, String>(14)?)?,
         updated_at: datetime_sql(row.get::<_, String>(15)?)?,
+    })
+}
+
+fn project_memory_attachment_from_row(
+    row: &rusqlite::Row<'_>,
+) -> rusqlite::Result<ProjectMemoryAttachmentRecord> {
+    Ok(ProjectMemoryAttachmentRecord {
+        collection_id: uuid_sql(row.get(0)?)?,
+        project_id: uuid_sql(row.get(1)?)?,
+        portable_wiki_id: uuid_sql(row.get(2)?)?,
+        project_root: PathBuf::from(row.get::<_, String>(3)?),
+        manifest_fingerprint: row.get(4)?,
+        state: project_memory_attachment_state_sql(row.get(5)?)?,
+        last_error_code: row.get(6)?,
+        created_at: datetime_sql(row.get(7)?)?,
+        updated_at: datetime_sql(row.get(8)?)?,
+    })
+}
+
+fn project_memory_request_from_row(
+    row: &rusqlite::Row<'_>,
+) -> rusqlite::Result<ProjectMemoryRequestRecord> {
+    Ok(ProjectMemoryRequestRecord {
+        id: uuid_sql(row.get(0)?)?,
+        app_id: uuid_sql(row.get(1)?)?,
+        kind: project_memory_request_kind_sql(row.get(2)?)?,
+        project_root: PathBuf::from(row.get::<_, String>(3)?),
+        requested_name: row.get(4)?,
+        manifest_fingerprint: row.get(5)?,
+        state: project_memory_request_state_sql(row.get(6)?)?,
+        created_at: datetime_sql(row.get(7)?)?,
+        updated_at: datetime_sql(row.get(8)?)?,
+        expires_at: datetime_sql(row.get(9)?)?,
     })
 }
 
@@ -6259,30 +7057,41 @@ fn path_text(path: &Path) -> String {
     path.to_string_lossy().into_owned()
 }
 
+fn bounded_text(value: &str, max_bytes: usize) -> String {
+    if value.len() <= max_bytes {
+        return value.to_owned();
+    }
+    let mut end = max_bytes;
+    while end > 0 && !value.is_char_boundary(end) {
+        end = end.saturating_sub(1);
+    }
+    value[..end].to_owned()
+}
+
 fn build_collection_record(
-    id: Uuid,
-    name: String,
-    source_folder: &Path,
-    wiki_folder: &Path,
-    mut policy: CollectionPolicy,
-    origin: WikiOrigin,
-    indexing_mode: IndexingMode,
+    input: NewCollection,
+    memory_scope: Option<MemoryScope>,
 ) -> Result<CollectionRecord> {
-    match (origin, indexing_mode) {
+    match (input.origin, input.indexing_mode) {
         (WikiOrigin::Folder, IndexingMode::Continuous | IndexingMode::Manual)
         | (WikiOrigin::ImportedOkf | WikiOrigin::AiMemory, IndexingMode::NotApplicable) => {}
         _ => bail!("indexing mode is not valid for this wiki origin"),
     }
+    if (input.origin == WikiOrigin::AiMemory) != memory_scope.is_some() {
+        bail!("collection memory scope is incompatible with its origin");
+    }
+    let mut policy = input.policy;
     policy.normalize();
     let now = Utc::now();
     let record = CollectionRecord {
-        id,
-        name: name.trim().to_owned(),
-        source_folder: absolute_path(source_folder)?,
-        wiki_folder: absolute_path(wiki_folder)?,
+        id: input.id,
+        name: input.name.trim().to_owned(),
+        source_folder: absolute_path(&input.source_folder)?,
+        wiki_folder: absolute_path(&input.wiki_folder)?,
         policy,
-        origin,
-        indexing_mode,
+        origin: input.origin,
+        memory_scope,
+        indexing_mode: input.indexing_mode,
         okf_version: "0.2".to_owned(),
         declared_okf_version: Some("0.2".to_owned()),
         okf_compatibility: OkfCompatibility::DeclaredV02,
@@ -6301,8 +7110,8 @@ fn insert_collection(connection: &Connection, record: &CollectionRecord) -> Resu
         "INSERT INTO collections
          (id,name,source_folder,wiki_folder,local_only,peer_shareable,allow_external_ai,internet_public,
           origin,indexing_mode,okf_version,declared_okf_version,okf_compatibility,managed_size_bytes,
-          created_at,updated_at)
-         VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16)",
+          created_at,updated_at,memory_scope)
+         VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17)",
         params![
             record.id.to_string(),
             record.name,
@@ -6320,6 +7129,7 @@ fn insert_collection(connection: &Connection, record: &CollectionRecord) -> Resu
             record.managed_size_bytes,
             record.created_at.to_rfc3339(),
             record.updated_at.to_rfc3339(),
+            record.memory_scope.map(MemoryScope::as_str),
         ],
     )?;
     Ok(())
@@ -6452,6 +7262,44 @@ fn wiki_origin_sql(value: String) -> rusqlite::Result<WikiOrigin> {
         "imported_okf" => Ok(WikiOrigin::ImportedOkf),
         "ai_memory" => Ok(WikiOrigin::AiMemory),
         _ => Err(to_sql_error(format!("invalid wiki origin {value}"))),
+    }
+}
+
+fn memory_scope_sql(value: String) -> rusqlite::Result<MemoryScope> {
+    match value.as_str() {
+        "personal" => Ok(MemoryScope::Personal),
+        "project" => Ok(MemoryScope::Project),
+        _ => Err(to_sql_error(format!("invalid memory scope {value}"))),
+    }
+}
+
+fn project_memory_attachment_state_sql(
+    value: String,
+) -> rusqlite::Result<ProjectMemoryAttachmentState> {
+    match value.as_str() {
+        "active" => Ok(ProjectMemoryAttachmentState::Active),
+        "invalid" => Ok(ProjectMemoryAttachmentState::Invalid),
+        "missing" => Ok(ProjectMemoryAttachmentState::Missing),
+        "identity_conflict" => Ok(ProjectMemoryAttachmentState::IdentityConflict),
+        _ => Err(rusqlite::Error::InvalidQuery),
+    }
+}
+
+fn project_memory_request_kind_sql(value: String) -> rusqlite::Result<ProjectMemoryRequestKind> {
+    match value.as_str() {
+        "initialize" => Ok(ProjectMemoryRequestKind::Initialize),
+        "attach" => Ok(ProjectMemoryRequestKind::Attach),
+        _ => Err(rusqlite::Error::InvalidQuery),
+    }
+}
+
+fn project_memory_request_state_sql(value: String) -> rusqlite::Result<ProjectMemoryRequestState> {
+    match value.as_str() {
+        "awaiting_confirmation" => Ok(ProjectMemoryRequestState::AwaitingConfirmation),
+        "approved" => Ok(ProjectMemoryRequestState::Approved),
+        "rejected" => Ok(ProjectMemoryRequestState::Rejected),
+        "expired" => Ok(ProjectMemoryRequestState::Expired),
+        _ => Err(rusqlite::Error::InvalidQuery),
     }
 }
 
@@ -7038,7 +7886,7 @@ mod tests {
         let temp = tempfile::tempdir().unwrap();
         let path = temp.path().join("db.sqlite");
         let db = Database::open(&path).unwrap();
-        assert_eq!(db.schema_version().unwrap(), 15);
+        assert_eq!(db.schema_version().unwrap(), 16);
         for table in [
             "collections",
             "source_documents",
@@ -7058,7 +7906,7 @@ mod tests {
             assert_eq!(db.count(table).unwrap(), 0);
         }
         drop(db);
-        assert_eq!(Database::open(path).unwrap().schema_version().unwrap(), 15);
+        assert_eq!(Database::open(path).unwrap().schema_version().unwrap(), 16);
     }
 
     #[test]
@@ -7580,7 +8428,7 @@ mod tests {
         drop(connection);
 
         let database = Database::open(&path).unwrap();
-        assert_eq!(database.schema_version().unwrap(), 15);
+        assert_eq!(database.schema_version().unwrap(), 16);
         assert_eq!(database.count("collections").unwrap(), 1);
         assert_eq!(database.count("source_documents").unwrap(), 1);
         assert_eq!(database.count("publication_claims").unwrap(), 0);
@@ -7620,7 +8468,7 @@ mod tests {
 
         let database = Database::open(&path).unwrap();
 
-        assert_eq!(database.schema_version().unwrap(), 15);
+        assert_eq!(database.schema_version().unwrap(), 16);
         assert_eq!(
             database.collection(collection_id).unwrap().unwrap().policy,
             CollectionPolicy::local_only()
@@ -7655,7 +8503,7 @@ mod tests {
 
         let database = Database::open(&path).unwrap();
         let collection = database.collection(collection_id).unwrap().unwrap();
-        assert_eq!(database.schema_version().unwrap(), 15);
+        assert_eq!(database.schema_version().unwrap(), 16);
         assert_eq!(collection.policy, CollectionPolicy::local_only());
         assert!(
             database
@@ -7687,7 +8535,7 @@ mod tests {
         drop(connection);
 
         let database = Database::open(path).unwrap();
-        assert_eq!(database.schema_version().unwrap(), 15);
+        assert_eq!(database.schema_version().unwrap(), 16);
         let indexes = database.list_federation_indexes().unwrap();
         assert_eq!(indexes.len(), 1);
         assert_eq!(indexes[0].registry_version, 0);
@@ -7726,7 +8574,7 @@ mod tests {
             expires_at: Utc::now() + chrono::Duration::days(1),
         }];
 
-        assert_eq!(database.schema_version().unwrap(), 15);
+        assert_eq!(database.schema_version().unwrap(), 16);
         assert_eq!(
             database
                 .count("federation_bootstrap_registry_state")
@@ -7768,7 +8616,7 @@ mod tests {
         let database = Database::open(path).unwrap();
         let collection = database.collection(collection_id).unwrap().unwrap();
 
-        assert_eq!(database.schema_version().unwrap(), 15);
+        assert_eq!(database.schema_version().unwrap(), 16);
         assert_eq!(collection.origin, WikiOrigin::Folder);
         assert_eq!(collection.indexing_mode, IndexingMode::Manual);
         assert_eq!(collection.okf_version, "0.1");
@@ -7856,7 +8704,7 @@ mod tests {
             .unwrap()
             .unwrap();
 
-        assert_eq!(database.schema_version().unwrap(), 15);
+        assert_eq!(database.schema_version().unwrap(), 16);
         assert_eq!(collection.policy, CollectionPolicy::local_only());
         assert_eq!(collection.indexing_mode, IndexingMode::Manual);
         assert_eq!(database.count("collections").unwrap(), 1);
@@ -7988,7 +8836,7 @@ mod tests {
         let database = Database::open(path).unwrap();
         let concepts = database.list_okf_concept_projection(collection_id).unwrap();
 
-        assert_eq!(database.schema_version().unwrap(), 15);
+        assert_eq!(database.schema_version().unwrap(), 16);
         assert_eq!(concepts.len(), 1);
         assert_eq!(concepts[0].concept_type.to_string(), "Unknown Type");
         assert_eq!(concepts[0].lifecycle_status, "stable");
@@ -8714,7 +9562,7 @@ mod tests {
         let database = Database::open(path).unwrap();
         let peer = database.peer("existing-peer").unwrap().unwrap();
 
-        assert_eq!(database.schema_version().unwrap(), 15);
+        assert_eq!(database.schema_version().unwrap(), 16);
         assert_eq!(peer.display_name.as_deref(), Some("Atlas Mac"));
         assert!(peer.trusted);
         assert_eq!(peer.device_platform, None);
@@ -9144,6 +9992,67 @@ mod tests {
         assert_eq!(
             decode_embedding(&encode_embedding(&values)).unwrap(),
             values
+        );
+    }
+
+    #[test]
+    fn migration_15_to_16_marks_existing_ai_memory_personal() {
+        let temp = tempfile::tempdir().unwrap();
+        let path = temp.path().join("migration.sqlite3");
+        let connection = Connection::open(&path).unwrap();
+        connection
+            .pragma_update(None, "foreign_keys", "ON")
+            .unwrap();
+        for (version, migration) in [
+            MIGRATION_1,
+            MIGRATION_2,
+            MIGRATION_3,
+            MIGRATION_4,
+            MIGRATION_5,
+            MIGRATION_6,
+            MIGRATION_7,
+            MIGRATION_8,
+            MIGRATION_9,
+            MIGRATION_10,
+            MIGRATION_11,
+            MIGRATION_12,
+            MIGRATION_13,
+            MIGRATION_14,
+            MIGRATION_15,
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            connection.execute_batch(migration).unwrap();
+            connection
+                .pragma_update(None, "user_version", u32::try_from(version + 1).unwrap())
+                .unwrap();
+        }
+        let id = Uuid::new_v4();
+        let now = Utc::now().to_rfc3339();
+        connection
+            .execute(
+                "INSERT INTO collections
+                 (id,name,source_folder,wiki_folder,local_only,peer_shareable,allow_external_ai,
+                  internet_public,origin,indexing_mode,okf_version,declared_okf_version,
+                  okf_compatibility,managed_size_bytes,created_at,updated_at)
+                 VALUES (?1,'Existing memory',?2,?3,1,0,0,0,'ai_memory','not_applicable',
+                         '0.2','0.2','declared_v02',0,?4,?4)",
+                params![
+                    id.to_string(),
+                    path_text(temp.path()),
+                    path_text(&temp.path().join("wiki")),
+                    now,
+                ],
+            )
+            .unwrap();
+        drop(connection);
+
+        let database = Database::open(&path).unwrap();
+        assert_eq!(database.schema_version().unwrap(), 16);
+        assert_eq!(
+            database.collection(id).unwrap().unwrap().memory_scope,
+            Some(MemoryScope::Personal)
         );
     }
 }

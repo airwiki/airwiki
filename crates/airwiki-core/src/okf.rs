@@ -880,6 +880,7 @@ mod tests {
             wiki_folder: PathBuf::from("/private/wiki"),
             policy: airwiki_types::CollectionPolicy::local_only(),
             origin: crate::storage::WikiOrigin::Folder,
+            memory_scope: None,
             indexing_mode: crate::storage::IndexingMode::Continuous,
             okf_version: "0.2".to_owned(),
             declared_okf_version: Some("0.2".to_owned()),

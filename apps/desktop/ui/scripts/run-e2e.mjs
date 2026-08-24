@@ -16,6 +16,7 @@ const expectedPrefix = realpathSync(tmpdir()) + sep;
 if (!resolve(testRoot).startsWith(expectedPrefix)) throw new Error('unsafe E2E data root');
 const sourceFixture = join(testRoot, 'fixtures', 'source');
 const okfFixture = join(testRoot, 'fixtures', 'okf-v02');
+const projectFixture = join(testRoot, 'fixtures', 'project-memory');
 const freshnessDeadline = new Date();
 freshnessDeadline.setUTCFullYear(freshnessDeadline.getUTCFullYear() + 1);
 const staleAfter = freshnessDeadline.toISOString().slice(0, 10);
@@ -40,6 +41,7 @@ async function availableLoopbackPort() {
 const e2eMcpPort = await availableLoopbackPort();
 mkdirSync(sourceFixture, { recursive: true });
 mkdirSync(join(okfFixture, 'architecture'), { recursive: true });
+mkdirSync(projectFixture, { recursive: true });
 writeFileSync(join(sourceFixture, 'synthetic-source.md'), [
   '# Synthetic source',
   '',
@@ -175,6 +177,7 @@ const app = spawn(appBinaryPath, [], {
     AIRWIKI_E2E_CONFIRMATIONS: 'allow',
     AIRWIKI_E2E_WIKI_FOLDER: sourceFixture,
     AIRWIKI_E2E_OKF_FOLDER: okfFixture,
+    AIRWIKI_E2E_PROJECT_FOLDER: projectFixture,
     AIRWIKI_E2E_MCP_PORT: String(e2eMcpPort),
     TAURI_WEBDRIVER_PORT: '4445'
   },
@@ -190,6 +193,7 @@ try {
     env: {
       ...process.env,
       AIRWIKI_E2E_DATA_ROOT: testRoot,
+      AIRWIKI_E2E_PROJECT_FOLDER: projectFixture,
       AIRWIKI_E2E_MCP_PORT: String(e2eMcpPort)
     },
     stdio: 'inherit'

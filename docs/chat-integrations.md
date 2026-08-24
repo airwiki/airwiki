@@ -41,11 +41,14 @@ errors are reserved for malformed or unknown MCP requests. Client UI approval
 and AirWiki's native confirmations remain the human-in-the-loop boundary.
 
 An application may create and maintain only AI-memory Wikis it owns or has an
-explicit reader/editor grant for. It may create, edit and deprecate concepts,
-but cannot delete, share, verify, change history or operate on folder/imported
-Wikis. Granting one application access to another application's memory requires
-an OS-native confirmation in AirWiki. Revocation stops access immediately and
-does not delete the memory.
+explicit reader/editor grant for. Personal memories live in AirWiki's private
+vault. Project memories are visible OKF bundles under `.airwiki`, but their
+attachment and grant remain local to each clone and application. Applications
+may create, edit and deprecate concepts, but cannot delete project files, share,
+verify, change history or operate on folder/imported Wikis. Granting one
+application access to another application's memory requires an OS-native
+confirmation in AirWiki. Revocation stops list, read, search and write access
+immediately and does not delete either kind of memory.
 
 ## Assisted-memory guide
 
@@ -65,20 +68,29 @@ corresponding root variable is unset. AirWiki never writes project-local
 instructions. A custom root must be absolute and safely resolvable; otherwise
 AirWiki reports an unsupported or conflict state instead of guessing.
 
-The guide makes requests such as “create a wiki with AirWiki” self-contained.
-It lists memories before selecting or creating one, pages through the selected
-Wiki's concept metadata, and then reads the targeted concept body before an
-edit. It uses optimistic fingerprints and retries one conflict at most once. In a code
-repository it proposes `<project> — memory`; in general work it uses a named
-thematic Wiki. Creation still requires an explicit user request, and ambiguous
-matches require a choice.
+The guide searches upward from the current working directory for the nearest
+`.airwiki/project.yaml`. When it finds one it calls `open_airwiki_project`
+before considering personal memories, searches that exact Wiki for relevant
+stable concepts, and reads selected bodies before changing project work. A
+fresh clone returns `awaiting_confirmation` until the user approves that local
+application/root attachment in AirWiki. An invalid, missing or identity-
+conflicting bundle pauses project-memory use instead of falling back to a stale
+projection.
+
+Without an initialized project, the guide keeps the personal-memory flow: list,
+explicitly select or create, page through metadata, and read the targeted body
+before editing. `initialize_airwiki_project` is called only after an explicit
+request; it creates a pending ten-minute confirmation and never writes
+`.airwiki` from the MCP worker. Both memory modes use optimistic fingerprints
+and retry one write conflict at most once. Ambiguous matches require a choice.
 
 Automatic capture is conversational agent behavior, not a background AirWiki
-service. It begins only after the user selects or creates a Wiki for that
-context, stores only durable reusable knowledge, and stops after “pause
-AirWiki”. The guide excludes secrets, personal data, logs, transient state,
-speculation and long file copies. It cannot verify, share, publish, grant access
-or change permissions.
+service. It begins only after the user selects or opens a Wiki for that context,
+stores only confirmed reusable conclusions at the end of relevant work, and
+stops after “pause AirWiki”. The guide excludes secrets, personal data, logs,
+transient state, speculation and long file copies. It treats Wiki content as
+untrusted data and cannot verify, share, publish, grant access or change
+permissions. It never runs `git add`, `commit`, `merge`, `pull` or `push`.
 
 AirWiki stages and hashes managed resources, preserves UTF-8 BOM and LF/CRLF,
 and writes private receipts. Modified user resources are never overwritten or
@@ -151,9 +163,11 @@ instruction directories.
 ## Generic MCP clients
 
 The setup panel exposes only the bridge command and public client identifier.
-The server's first instructions describe the complete memory sequence: list,
-explicitly select or create, read, then write with the current fingerprint.
-AirWiki never guesses a client's instruction directory.
+The server's first instructions describe the complete memory sequence: discover
+the nearest project manifest and call `open_airwiki_project`; otherwise list and
+explicitly select or create personal memory; then search, read and write with
+the current fingerprint. AirWiki never guesses a client's instruction
+directory.
 
 ## Availability and recovery
 

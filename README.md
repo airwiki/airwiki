@@ -27,10 +27,10 @@ AirWiki is an open-source desktop app that turns folders, [Open Knowledge Format
 
 <p align="center">
   <a href="docs/assets/airwiki-demo.mp4">
-    <img src="docs/assets/airwiki-demo-poster.png" alt="AirWiki opening the complete published OKF Wiki shared by a nearby Windows device">
+    <img src="docs/assets/airwiki-demo.gif" alt="Animated AirWiki tour opening the complete published OKF Wiki shared by a nearby Windows device">
   </a>
   <br>
-  <sub><a href="docs/assets/airwiki-demo.mp4">Watch the 10-second product tour</a> · synthetic data only</sub>
+  <sub>10-second product tour · <a href="docs/assets/airwiki-demo.mp4">MP4 version</a> · synthetic data only</sub>
 </p>
 
 ## Why AirWiki
@@ -47,17 +47,49 @@ Local models can extract, enrich, index, and propose knowledge. AirWiki keeps ev
 
 Local use, paired-device access, external AI access, and experimental public discovery are separate permissions. Connecting a client or another device never silently publishes a Wiki or grants access to it.
 
-### Give assistants durable memory without committing it to Git
+### Give your agents simple, open memory without vendor lock-in
 
-Codex, ChatGPT, Claude Code, Gemini CLI, and generic MCP clients can search approved evidence. Authorized clients can also create and maintain isolated memory Wikis through AirWiki without adding generated memory files to a repository.
+Codex, ChatGPT, Claude Code, Gemini CLI, and generic MCP clients use the same AirWiki memory workflow through MCP. Conversations without a project can use the private personal vault. A code or study folder can instead carry one reviewable `.airwiki` OKF v0.2 Wiki: collaborators who clone or copy it keep the same project knowledge while every local application and clone still needs its own approval. AirWiki never stages, commits, merges, pulls, or pushes Git.
 
 ## How it works
 
-1. **Create a Wiki.** Start from a folder, import an OKF v0.2 folder or ZIP, or ask an authorized assistant to create a memory Wiki.
+1. **Create a Wiki.** Start from a folder, import an OKF v0.2 folder or ZIP, create private personal memory, or explicitly initialize portable project memory in `.airwiki`.
 2. **Build trusted knowledge.** AirWiki indexes locally. For source folders, local AI prepares proposals and shows the exact evidence behind them.
 3. **Search and share deliberately.** Search your device, paired devices, or opted-in public Wikis. Enable access independently for each Wiki and destination.
 
-Folder Wikis can watch for new files or update manually. Imported OKF Wikis have no source watcher. Assistant memory Wikis can be edited only by their owning application or another application that you explicitly authorize.
+Folder Wikis can watch for new files or update manually. Imported OKF Wikis have no source watcher. Personal and project memory can be edited only by applications you explicitly authorize. A missing, invalid, conflicted, or identity-changed project bundle is withheld from agents and every network until its files are valid again.
+
+## How distributed search works
+
+AirWiki sends a question to the places that still own the knowledge instead of
+copying every Wiki into one central service.
+
+```mermaid
+flowchart LR
+    question["Question"] --> local["This device<br/>local index"]
+    question -- "pairing + per-Wiki grant" --> lan["Trusted LAN owners<br/>their local indexes"]
+    question --> catalog["Public routing indexes<br/>signed metadata only"]
+    catalog -- "candidate owners" --> public["Opted-in public owners<br/>their local indexes"]
+
+    local --> results["Ranked evidence<br/>with provenance"]
+    lan --> results
+    public --> results
+```
+
+Each owner runs lexical and semantic retrieval locally, checks whether the
+passage answers the question, and revalidates the current publication and
+permission before returning bounded evidence. AirWiki then combines the
+independent rankings while keeping local, nearby, and public origins visible.
+An unavailable device or public route produces explicit partial coverage
+instead of silently turning an incomplete search into a complete one.
+
+LAN discovery does not grant access: devices must pair and the owner grants
+each Wiki separately. Public discovery uses replaceable indexes that know how
+to find opted-in owners but never receive their documents, snippets,
+embeddings, or operational indexes. Opening an authorized LAN or public result
+loads the complete published OKF Wiki directly from its owner in a read-only
+workspace. Read the [conceptual search and federation guide](docs/search-and-federation.md)
+for the complete journey and privacy boundaries.
 
 ## See the flow
 
@@ -86,6 +118,9 @@ Folder Wikis can watch for new files or update manually. Imported OKF Wikis have
 - Opt selected, reviewed Wikis into experimental public search and browse.
 - Connect ChatGPT/Codex, Claude, Gemini, and generic MCP clients without storing provider API keys.
 - Create isolated assistant-memory Wikis with fingerprint-based updates and revocable capabilities.
+- Initialize a portable `.airwiki` project Wiki, approve each local clone once,
+  search it automatically from supported agents, and review its changes as
+  ordinary files without AirWiki invoking Git.
 - Inspect trust, freshness, lifecycle, provenance, compatibility, and health for OKF v0.2 concepts.
 - Run explicitly confirmed `airwiki-wasm` attested computations in a constrained, no-WASI sandbox.
 
@@ -148,7 +183,9 @@ flowchart LR
     imported["Imported OKF bundle"] --> import_pipeline["Validate + build local index"]
     import_pipeline --> bundle
 
-    memory["Assistant memory Wiki"] --> capability["Capability + fingerprint gate"]
+    memory["Personal memory<br/>private vault"] --> capability["Capability + fingerprint gate"]
+    project_memory["Project memory<br/>.airwiki/wiki"] --> attachment["Local attachment +<br/>native approval"]
+    attachment --> capability
     capability --> bundle
 
     state[("SQLite<br/>operational state")]
@@ -184,6 +221,7 @@ See the [architecture overview](docs/architecture.md) and [architecture decision
 ### Use and evaluate AirWiki
 
 - [Installation and local operation](docs/install.md)
+- [Search across local, LAN, and public Wikis](docs/search-and-federation.md)
 - [Local chat integrations and assisted memory](docs/chat-integrations.md)
 - [AirWiki's OKF v0.2 profile](docs/okf-v02-profile.md)
 - [Two-node acceptance runbook](docs/two-node-runbook.md)
@@ -203,7 +241,7 @@ See the [architecture overview](docs/architecture.md) and [architecture decision
 
 ## Deliberate limits
 
-AirWiki does not currently provide OCR, DOCX ingestion, image/audio/video processing, cloud sync, accounts, SSO, source-document replication, arbitrary remote editing, arbitrary script runtimes, a system daemon, silent updates, or web/mobile access. MCP mutation is limited to explicitly authorized AI-memory Wikis. Public federation remains experimental and has no supported always-on public relay service.
+AirWiki does not currently provide OCR, DOCX ingestion, image/audio/video processing, cloud sync, accounts, SSO, source-document replication, arbitrary remote editing, automatic Git operations or conflict resolution, arbitrary script runtimes, a system daemon, silent updates, or web/mobile access. MCP mutation is limited to explicitly authorized personal or project memory Wikis. Public federation remains experimental and has no supported always-on public relay service.
 
 ## License
 

@@ -4,6 +4,7 @@
 - Date: 2026-08-13
 - Supersedes in part: ADR 0002 (read-only MCP contract) and ADR 0004
   (folder-only publication workflow)
+- Superseded in part by: ADR 0011 (portable project memory in `.airwiki`)
 
 ## Context
 

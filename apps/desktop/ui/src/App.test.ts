@@ -2,7 +2,7 @@ import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testi
 import axe from 'axe-core';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import App from './App.svelte';
-import { allowPeerPairingAgain, approveReview, browseNearbyWiki, browsePublicWiki, checkUpdates, configureFirewall, connect, installModels, loadWikiBundle, loadWikiPage, manageIntegration, openSystemDestination, pickOkfImport, prepareGuidedWikiRepair, quitCompletely, reanalyzeReview, refreshWikiHealth, rejectReview, searchKnowledge, setWikiGrant, updatePreferences, validateOkfImport, verifyWikiConcept } from './api';
+import { allowPeerPairingAgain, approveProjectMemoryRequest, approveReview, browseNearbyWiki, browsePublicWiki, checkUpdates, configureFirewall, connect, createProjectMemory, detachProjectMemory, installModels, loadWikiBundle, loadWikiPage, manageIntegration, openSystemDestination, pickOkfImport, pickWikiFolder, prepareGuidedWikiRepair, quitCompletely, reanalyzeReview, refreshWikiHealth, rejectProjectMemoryRequest, rejectReview, searchKnowledge, setWikiGrant, updatePreferences, validateOkfImport, verifyWikiConcept } from './api';
 import type { UiEventEnvelope } from './generated/ui-contract';
 import { readySnapshot } from './test/fixtures';
 
@@ -106,7 +106,12 @@ vi.mock('./api', async (importOriginal) => {
     searchKnowledge: vi.fn(async () => snapshot.search?.requestId ?? 'search-request'),
     setWikiGrant: vi.fn(async () => undefined),
     pickOkfImport: vi.fn(async () => null),
+    pickWikiFolder: vi.fn(async () => null),
     validateOkfImport: vi.fn(),
+    createProjectMemory: vi.fn(async () => undefined),
+    approveProjectMemoryRequest: vi.fn(async () => undefined),
+    rejectProjectMemoryRequest: vi.fn(async () => undefined),
+    detachProjectMemory: vi.fn(async () => undefined),
     loadWikiBundle: vi.fn(async () => undefined),
     loadWikiPage: vi.fn(async () => undefined),
     verifyWikiConcept: vi.fn(async () => undefined),
@@ -518,9 +523,9 @@ describe('AirWiki wiki workspace', () => {
     await fireEvent.click(newWikiButton);
 
     const shell = container.querySelector('.drive-shell');
-    const folderChoice = screen.getByRole('button', { name: /Desde una carpeta/ });
+    const firstChoice = screen.getByRole('button', { name: /Crear memoria de proyecto/ });
     expect((shell as HTMLElement & { inert: boolean }).inert).toBe(true);
-    await waitFor(() => expect(folderChoice).toHaveFocus());
+    await waitFor(() => expect(firstChoice).toHaveFocus());
     await fireEvent.keyDown(window, { key: 'Escape' });
 
     expect(screen.queryByRole('dialog', { name: '¿De dónde viene esta wiki?' })).not.toBeInTheDocument();
@@ -553,6 +558,54 @@ describe('AirWiki wiki workspace', () => {
 
     expect(screen.queryByRole('dialog', { name: 'Revisa el bundle antes de importarlo' })).not.toBeInTheDocument();
     expect((shell as HTMLElement & { inert: boolean }).inert).toBe(false);
+  });
+
+  it('initializes project memory only from the explicit folder-and-name flow', async () => {
+    vi.mocked(pickWikiFolder).mockResolvedValue({ token: 'project-folder-token', displayName: 'Atlas repo' });
+    render(App);
+    await fireEvent.click(await screen.findByRole('button', { name: 'Nueva wiki' }));
+    await fireEvent.click(screen.getByRole('button', { name: /Crear memoria de proyecto/ }));
+
+    const dialog = await screen.findByRole('dialog', { name: 'Crear memoria de proyecto' });
+    const name = within(dialog).getByRole('textbox', { name: 'Nombre de la wiki' });
+    await fireEvent.input(name, { target: { value: 'Atlas — memoria' } });
+    await fireEvent.click(within(dialog).getByRole('button', { name: 'Crear .airwiki' }));
+
+    await waitFor(() => {
+      expect(createProjectMemory).toHaveBeenCalledWith('Atlas — memoria', 'project-folder-token');
+    });
+  });
+
+  it('shows project attachment requests and dispatches the selected decision', async () => {
+    snapshot.projectMemoryRequests = [{
+      requestId: '20000000-0000-4000-8000-000000000001',
+      applicationName: 'Codex', kind: 'attach', folderName: 'atlas-clone',
+      requestedName: null, expiresAt: '2026-08-24T00:00:00Z'
+    }];
+    render(App);
+
+    const section = (await screen.findByRole('heading', { name: 'Solicitudes de memoria de proyecto' }))
+      .closest('section');
+    expect(section).not.toBeNull();
+    expect(within(section!).getByText('Codex quiere usar la memoria del proyecto')).toBeInTheDocument();
+    await fireEvent.click(within(section!).getByRole('button', { name: 'Aprobar' }));
+    expect(approveProjectMemoryRequest).toHaveBeenCalledWith(snapshot.projectMemoryRequests[0].requestId);
+
+    await fireEvent.click(within(section!).getByRole('button', { name: 'Rechazar' }));
+    expect(rejectProjectMemoryRequest).toHaveBeenCalledWith(snapshot.projectMemoryRequests[0].requestId);
+  });
+
+  it('labels unhealthy project memory and detaches without calling generic deletion', async () => {
+    snapshot.wikis[0].origin = 'aiMemory';
+    snapshot.wikis[0].memoryKind = 'project';
+    snapshot.wikis[0].projectMemoryHealth = 'invalid';
+    render(App);
+    await fireEvent.click(await screen.findByRole('button', { name: /Atlas 2 publicados/ }));
+
+    expect(screen.getAllByText('Memoria de proyecto').length).toBeGreaterThan(0);
+    expect(screen.getByText(/Bundle inválido/)).toBeInTheDocument();
+    await fireEvent.click(screen.getByRole('button', { name: 'Desvincular' }));
+    expect(detachProjectMemory).toHaveBeenCalledWith(snapshot.wikis[0].id);
   });
 
   it('moves the focus trap to the close confirmation above an open drawer', async () => {

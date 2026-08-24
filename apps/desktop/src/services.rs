@@ -89,8 +89,8 @@ use crate::{
     worker::{
         ApplicationAccessView, ApplicationWikiGrantView, ApplicationWikiRoleView,
         BrowseWorkspaceSelection, CollectionView, PeerActivityState, PeerTrustState, PeerView,
-        PublicAnnouncementStatusView, ReviewEvidenceErrorView, ReviewEvidenceExcerptView,
-        ReviewEvidencePageView, ReviewItemView, SourceIssueView,
+        ProjectMemoryRequestView, PublicAnnouncementStatusView, ReviewEvidenceErrorView,
+        ReviewEvidenceExcerptView, ReviewEvidencePageView, ReviewItemView, SourceIssueView,
     },
 };
 
@@ -1654,6 +1654,7 @@ pub struct DesktopServices {
     startup_preflight_blocked: RwLock<HashSet<Uuid>>,
     transient_source_issues: RwLock<HashMap<Uuid, Vec<TransientSourceIssue>>>,
     memories: airwiki_core::AiMemoryService,
+    project_memories: airwiki_core::ProjectMemoryService,
     computations: ComputationCoordinator,
     application_updates: broadcast::Sender<Uuid>,
     application_backend_cancellation: CancellationToken,
@@ -1701,6 +1702,8 @@ impl McpApplicationBackend for DesktopMcpApplicationBackend {
 fn mcp_application_timeout_error(tool: &str) -> McpApplicationError {
     match tool {
         "create_airwiki_memory"
+        | "initialize_airwiki_project"
+        | "open_airwiki_project"
         | "write_airwiki_memory"
         | "deprecate_airwiki_memory"
         | "request_airwiki_computation" => McpApplicationError::OutcomeUnknown,
@@ -1711,6 +1714,7 @@ fn mcp_application_timeout_error(tool: &str) -> McpApplicationError {
 fn spawn_mcp_application_backend(
     database: Database,
     memories: airwiki_core::AiMemoryService,
+    project_memories: airwiki_core::ProjectMemoryService,
     computations: ComputationCoordinator,
     application_updates: broadcast::Sender<Uuid>,
 ) -> (
@@ -1740,6 +1744,7 @@ fn spawn_mcp_application_backend(
             } = request;
             let database = database.clone();
             let memories = memories.clone();
+            let project_memories = project_memories.clone();
             let computations = computations.clone();
             let updates = application_updates.clone();
             let result = tokio::task::spawn_blocking(move || {
@@ -1747,7 +1752,14 @@ fn spawn_mcp_application_backend(
                     .authenticate_application_capability(&identity.capability)
                     .map_err(|_| McpApplicationError::Unavailable)?
                     .ok_or(McpApplicationError::Unauthorized)?;
-                call_memory_tool(&memories, &computations, &capability, tool, arguments)
+                call_memory_tool(
+                    &memories,
+                    &project_memories,
+                    &computations,
+                    &capability,
+                    tool,
+                    arguments,
+                )
             })
             .await;
             let result = match result {
@@ -1777,16 +1789,22 @@ fn spawn_mcp_application_backend(
 }
 
 fn application_update_wiki_id(tool: &str, result: &serde_json::Value) -> Option<Uuid> {
-    matches!(
-        tool,
-        "create_airwiki_memory" | "write_airwiki_memory" | "deprecate_airwiki_memory"
-    )
-    .then(|| result.get("wikiId")?.as_str()?.parse().ok())
-    .flatten()
+    match tool {
+        "create_airwiki_memory" | "write_airwiki_memory" | "deprecate_airwiki_memory" => {
+            result.get("wikiId")?.as_str()?.parse().ok()
+        }
+        "initialize_airwiki_project" | "open_airwiki_project" => result
+            .get("wiki_id")
+            .and_then(serde_json::Value::as_str)
+            .and_then(|value| value.parse().ok())
+            .or(Some(Uuid::nil())),
+        _ => None,
+    }
 }
 
 fn call_memory_tool(
     memories: &airwiki_core::AiMemoryService,
+    project_memories: &airwiki_core::ProjectMemoryService,
     computations: &ComputationCoordinator,
     capability: &airwiki_core::storage::ApplicationCapabilityRecord,
     tool: &str,
@@ -1799,7 +1817,14 @@ fn call_memory_tool(
                 .list(app_id)
                 .map_err(|_| McpApplicationError::Unavailable)?;
             Ok(
-                serde_json::json!({"wikis": memories.into_iter().map(|wiki| serde_json::json!({"wikiId": wiki.id, "name": wiki.name})).collect::<Vec<_>>() }),
+                serde_json::json!({"wikis": memories.into_iter().map(|wiki| serde_json::json!({
+                    "wikiId": wiki.id,
+                    "name": wiki.name,
+                    "memoryKind": match wiki.memory_scope {
+                        Some(airwiki_core::MemoryScope::Project) => "project",
+                        _ => "personal",
+                    },
+                })).collect::<Vec<_>>() }),
             )
         }
         "create_airwiki_memory" => {
@@ -1809,6 +1834,51 @@ fn call_memory_tool(
                 .create(app_id, &input.name)
                 .map_err(classify_application_mutation_error)?;
             Ok(serde_json::json!({"wikiId": wiki.id, "name": wiki.name}))
+        }
+        "initialize_airwiki_project" => {
+            let input: airwiki_mcp::InitializeAirWikiProjectInput =
+                serde_json::from_value(arguments).map_err(|_| McpApplicationError::Invalid)?;
+            let opened = project_memories
+                .initialize(app_id, Path::new(&input.project_root), &input.name)
+                .map_err(classify_application_mutation_error)?;
+            Ok(project_memory_open_json(opened))
+        }
+        "open_airwiki_project" => {
+            let input: airwiki_mcp::OpenAirWikiProjectInput =
+                serde_json::from_value(arguments).map_err(|_| McpApplicationError::Invalid)?;
+            let opened = project_memories
+                .open(app_id, Path::new(&input.project_root))
+                .map_err(classify_application_mutation_error)?;
+            Ok(project_memory_open_json(opened))
+        }
+        "search_airwiki_memory" => {
+            let input: airwiki_mcp::SearchAirWikiMemoryInput =
+                serde_json::from_value(arguments).map_err(|_| McpApplicationError::Invalid)?;
+            let wiki_id =
+                Uuid::parse_str(&input.wiki_id).map_err(|_| McpApplicationError::Invalid)?;
+            let matches = project_memories
+                .search(
+                    app_id,
+                    wiki_id,
+                    &input.query,
+                    usize::from(
+                        input
+                            .limit
+                            .unwrap_or(airwiki_mcp::DEFAULT_MEMORY_SEARCH_LIMIT),
+                    ),
+                )
+                .map_err(|_| McpApplicationError::Unauthorized)?;
+            Ok(serde_json::json!({
+                "matches": matches.into_iter().map(|concept| serde_json::json!({
+                    "conceptId": concept.concept_id,
+                    "title": concept.title,
+                    "description": concept.description,
+                    "tags": concept.tags,
+                    "fingerprint": concept.fingerprint,
+                    "snippet": concept.snippet,
+                    "assurance": concept.assurance,
+                })).collect::<Vec<_>>(),
+            }))
         }
         "get_airwiki_memory" => {
             let input: airwiki_mcp::GetAirWikiMemoryInput =
@@ -1917,6 +1987,20 @@ fn call_memory_tool(
                 .map_err(|_| McpApplicationError::Unauthorized)
         }
         _ => Err(McpApplicationError::Invalid),
+    }
+}
+
+fn project_memory_open_json(opened: airwiki_core::ProjectMemoryOpenResult) -> serde_json::Value {
+    match opened {
+        airwiki_core::ProjectMemoryOpenResult::NotInitialized => {
+            serde_json::json!({"status": "not_initialized"})
+        }
+        airwiki_core::ProjectMemoryOpenResult::AwaitingConfirmation { .. } => {
+            serde_json::json!({"status": "awaiting_confirmation"})
+        }
+        airwiki_core::ProjectMemoryOpenResult::Ready { collection_id, .. } => {
+            serde_json::json!({"status": "ready", "wiki_id": collection_id})
+        }
     }
 }
 
@@ -2111,6 +2195,7 @@ impl DesktopServices {
             database,
             recovery,
             managed_recovery,
+            project_memory_reconciliation,
             retired_recovery,
             identity,
             public_identity,
@@ -2133,6 +2218,9 @@ impl DesktopServices {
             let managed_recovery =
                 airwiki_core::AiMemoryService::new(database.clone(), core_paths.vaults.clone())
                     .recover_pending()?;
+            let project_memories = airwiki_core::ProjectMemoryService::new(database.clone());
+            let project_memory_reconciliation = project_memories.reconcile_all()?;
+            project_memories.withhold_active_until_watchers_start()?;
             let identity = NodeIdentity::load_or_create(secret_store.as_ref())
                 .context("no se pudo cargar la identidad Ed25519 del dispositivo")?;
             let public_identity =
@@ -2146,6 +2234,7 @@ impl DesktopServices {
                 database,
                 recovery,
                 managed_recovery,
+                project_memory_reconciliation,
                 retired_recovery,
                 identity,
                 public_identity,
@@ -2169,6 +2258,17 @@ impl DesktopServices {
                 pending = managed_recovery.pending,
                 recovered = managed_recovery.recovered,
                 "AI memory bundle recovery completed with pending work"
+            );
+        }
+        if project_memory_reconciliation.invalid > 0
+            || project_memory_reconciliation.missing > 0
+            || project_memory_reconciliation.identity_conflicts > 0
+        {
+            tracing::warn!(
+                invalid = project_memory_reconciliation.invalid,
+                missing = project_memory_reconciliation.missing,
+                identity_conflicts = project_memory_reconciliation.identity_conflicts,
+                "project memories were withheld during startup reconciliation"
             );
         }
         if retired_recovery.pending > 0 || retired_recovery.recovered > 0 {
@@ -2218,11 +2318,13 @@ impl DesktopServices {
         }
         let memories =
             airwiki_core::AiMemoryService::new(database.clone(), core_paths.vaults.clone());
+        let project_memories = airwiki_core::ProjectMemoryService::new(database.clone());
         let (application_updates, _) = broadcast::channel(128);
         let (application_backend, application_backend_cancellation, application_backend_task) =
             spawn_mcp_application_backend(
                 database.clone(),
                 memories.clone(),
+                project_memories.clone(),
                 computations.clone(),
                 application_updates.clone(),
             );
@@ -2276,6 +2378,7 @@ impl DesktopServices {
             startup_preflight_blocked: RwLock::new(HashSet::new()),
             transient_source_issues: RwLock::new(HashMap::new()),
             memories,
+            project_memories,
             computations,
             application_updates,
             application_backend_cancellation,
@@ -2350,6 +2453,68 @@ impl DesktopServices {
 
     pub(crate) fn subscribe_application_updates(&self) -> broadcast::Receiver<Uuid> {
         self.application_updates.subscribe()
+    }
+
+    pub(crate) fn project_memory_request_views(&self) -> Result<Vec<ProjectMemoryRequestView>> {
+        self.project_memories
+            .pending_requests()?
+            .into_iter()
+            .map(|request| {
+                let application_name = self
+                    .database
+                    .application_capability_by_app_id(request.app_id)?
+                    .map(|application| application.display_name)
+                    .unwrap_or_else(|| "Application".to_owned());
+                let folder_name = request
+                    .project_root
+                    .file_name()
+                    .and_then(|name| name.to_str())
+                    .filter(|name| !name.is_empty())
+                    .unwrap_or("Project folder")
+                    .to_owned();
+                Ok(ProjectMemoryRequestView {
+                    request_id: request.id,
+                    application_name,
+                    kind: request.kind,
+                    folder_name,
+                    requested_name: request.requested_name,
+                    expires_at: request.expires_at,
+                })
+            })
+            .collect()
+    }
+
+    pub(crate) fn initialize_project_memory(
+        &self,
+        name: &str,
+        folder: &Path,
+    ) -> Result<CollectionRecord> {
+        self.project_memories.initialize_native(folder, name)
+    }
+
+    pub(crate) fn approve_project_memory_request(
+        &self,
+        request_id: Uuid,
+    ) -> Result<CollectionRecord> {
+        self.project_memories
+            .approve(request_id)
+            .map(|approval| approval.collection)
+    }
+
+    pub(crate) fn reject_project_memory_request(&self, request_id: Uuid) -> Result<()> {
+        self.project_memories.reject(request_id)
+    }
+
+    pub(crate) fn reconcile_project_memory(
+        &self,
+        collection_id: Uuid,
+    ) -> Result<airwiki_core::ProjectMemoryAttachmentState> {
+        self.project_memories.reconcile(collection_id)
+    }
+
+    pub(crate) fn withhold_project_memory_for_watcher(&self, collection_id: Uuid) -> Result<()> {
+        self.project_memories
+            .withhold_watcher_unavailable(collection_id)
     }
 
     pub(crate) fn reject_computation(&self, run_id: Uuid) -> Result<()> {
@@ -3026,6 +3191,17 @@ impl DesktopServices {
         self.sync_public_collection(collection_id).await?;
         self.reconcile_public_network().await?;
         ensure_public_withdrawal_completed(&self.database, collection_id)?;
+
+        if collection.memory_scope == Some(airwiki_core::MemoryScope::Project) {
+            self.project_memories.detach(collection_id)?;
+            self.audit(
+                "project_memory_detached",
+                "collection",
+                Some(collection_id.to_string()),
+                serde_json::json!({"project_files_preserved": true}),
+            )?;
+            return Ok(());
+        }
 
         let database = self.database.clone();
         let vaults = self.core_paths.vaults.clone();
@@ -3731,6 +3907,12 @@ impl DesktopServices {
             .list_collections()?
             .into_iter()
             .map(|collection| {
+                let project_attachment =
+                    if collection.memory_scope == Some(airwiki_core::MemoryScope::Project) {
+                        self.database.project_memory_attachment(collection.id)?
+                    } else {
+                        None
+                    };
                 let stats = self.database.collection_stats(collection.id)?;
                 let projected = if collection.origin == airwiki_core::WikiOrigin::Folder {
                     Vec::new()
@@ -3742,7 +3924,11 @@ impl DesktopServices {
                 Ok(CollectionView {
                     id: collection.id,
                     name: collection.name,
-                    folder: collection.source_folder,
+                    folder: if collection.memory_scope == Some(airwiki_core::MemoryScope::Project) {
+                        collection.source_folder.join(".airwiki")
+                    } else {
+                        collection.source_folder
+                    },
                     document_count: if projected.is_empty() {
                         usize::try_from(stats.sources).unwrap_or(usize::MAX)
                     } else {
@@ -3772,6 +3958,8 @@ impl DesktopServices {
                     public_announcement: public_announcement_view(announcement, Utc::now()),
                     maintenance: self.database.collection_maintenance(collection.id)?,
                     origin: collection.origin,
+                    memory_scope: collection.memory_scope,
+                    project_memory_state: project_attachment.map(|attachment| attachment.state),
                     indexing_mode: collection.indexing_mode,
                     okf_version: collection.okf_version,
                     declared_okf_version: collection.declared_okf_version,
@@ -5540,6 +5728,10 @@ mod tests {
         );
         assert_eq!(
             mcp_application_timeout_error("write_airwiki_memory"),
+            McpApplicationError::OutcomeUnknown
+        );
+        assert_eq!(
+            mcp_application_timeout_error("open_airwiki_project"),
             McpApplicationError::OutcomeUnknown
         );
         assert_eq!(

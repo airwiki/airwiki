@@ -30,16 +30,19 @@ const BRIDGE_BASENAME: &str = "airwiki-mcp-bridge";
 const CLAUDE_MCPB_NAME: &str = "airwiki-claude.mcpb";
 const SEARCH_TOOL: &str = "search_airwiki";
 const MCP_PROTOCOL_VERSION: &str = "2026-07-28";
-const APPLICATION_TOOLS: [&str; 7] = [
+const APPLICATION_TOOLS: [&str; 10] = [
     "list_airwiki_memories",
     "create_airwiki_memory",
+    "initialize_airwiki_project",
+    "open_airwiki_project",
+    "search_airwiki_memory",
     "get_airwiki_memory",
     "write_airwiki_memory",
     "deprecate_airwiki_memory",
     "request_airwiki_computation",
     "get_airwiki_computation_run",
 ];
-const MANAGED_TOOLS: [&str; 8] = [
+const MANAGED_TOOLS: [&str; 11] = [
     SEARCH_TOOL,
     APPLICATION_TOOLS[0],
     APPLICATION_TOOLS[1],
@@ -48,6 +51,9 @@ const MANAGED_TOOLS: [&str; 8] = [
     APPLICATION_TOOLS[4],
     APPLICATION_TOOLS[5],
     APPLICATION_TOOLS[6],
+    APPLICATION_TOOLS[7],
+    APPLICATION_TOOLS[8],
+    APPLICATION_TOOLS[9],
 ];
 const PROCESS_TIMEOUT: Duration = Duration::from_secs(10);
 const VERIFY_TIMEOUT: Duration = Duration::from_secs(5);
@@ -2223,9 +2229,13 @@ fn expected_tool_hints(name: &str) -> Option<(bool, bool, bool)> {
     match name {
         SEARCH_TOOL
         | "list_airwiki_memories"
+        | "search_airwiki_memory"
         | "get_airwiki_memory"
         | "get_airwiki_computation_run" => Some((true, false, true)),
-        "create_airwiki_memory" | "request_airwiki_computation" => Some((false, false, false)),
+        "create_airwiki_memory"
+        | "initialize_airwiki_project"
+        | "open_airwiki_project"
+        | "request_airwiki_computation" => Some((false, false, false)),
         "write_airwiki_memory" | "deprecate_airwiki_memory" => Some((false, true, false)),
         _ => None,
     }

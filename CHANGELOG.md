@@ -16,6 +16,13 @@ All notable user-visible changes to AirWiki will be documented here. The project
 
 ### Added
 
+- Added portable project memory under `.airwiki`: explicit native
+  initialization, per-clone application approval, bounded local lexical search,
+  ordinary diff-friendly OKF concept files and non-destructive detach. Personal
+  assistant memory remains in AirWiki's private vault.
+- Added fail-closed project-memory reconciliation at startup and on filesystem
+  changes. Missing, invalid or identity-conflicting bundles retain their files
+  but cannot serve MCP, LAN, public or external-AI results.
 - Added first-class folder, imported OKF, and assistant-memory Wiki origins,
   including continuous/manual indexing, atomic ZIP or directory import, safe
   deletion, and hierarchical OKF browsing.

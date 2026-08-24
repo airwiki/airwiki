@@ -115,6 +115,8 @@ pub struct CollectionView {
     pub public_announcement: PublicAnnouncementStatusView,
     pub maintenance: Option<CollectionMaintenanceRecord>,
     pub origin: WikiOrigin,
+    pub memory_scope: Option<airwiki_core::MemoryScope>,
+    pub project_memory_state: Option<airwiki_core::ProjectMemoryAttachmentState>,
     pub indexing_mode: IndexingMode,
     pub okf_version: String,
     pub declared_okf_version: Option<String>,
@@ -124,6 +126,16 @@ pub struct CollectionView {
     pub outdated_verification_count: usize,
     pub metadata_warning_count: usize,
     pub trust_summary: TrustSummaryView,
+}
+
+#[derive(Debug, Clone)]
+pub struct ProjectMemoryRequestView {
+    pub request_id: Uuid,
+    pub application_name: String,
+    pub kind: airwiki_core::ProjectMemoryRequestKind,
+    pub folder_name: String,
+    pub requested_name: Option<String>,
+    pub expires_at: chrono::DateTime<chrono::Utc>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -465,6 +477,19 @@ pub enum WorkerCommand {
         folder: PathBuf,
         indexing_mode: IndexingMode,
     },
+    InitializeProjectMemory {
+        name: String,
+        folder: PathBuf,
+    },
+    ApproveProjectMemoryRequest {
+        request_id: Uuid,
+    },
+    RejectProjectMemoryRequest {
+        request_id: Uuid,
+    },
+    DetachProjectMemory {
+        collection_id: Uuid,
+    },
     ImportOkfBundle {
         name: String,
         source: PathBuf,
@@ -728,6 +753,7 @@ pub enum WorkerEvent {
     },
     IntegrationRequestStateChanged,
     ApplicationAccessUpdated(Vec<ApplicationAccessView>),
+    ProjectMemoryRequestsUpdated(Vec<ProjectMemoryRequestView>),
     ComputationsUpdated {
         pending: Vec<crate::computations::PendingComputation>,
         completed: Vec<crate::computations::CompletedComputation>,
@@ -1046,8 +1072,20 @@ fn should_schedule_initial_model_state(config: &DesktopConfig) -> bool {
 
 #[derive(Debug, Default)]
 struct WatcherSetup {
-    started: Vec<Uuid>,
-    failures: Vec<(Uuid, String)>,
+    started: Vec<WatcherTarget>,
+    failures: Vec<WatcherFailure>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct WatcherTarget {
+    collection_id: Uuid,
+    project_memory: bool,
+}
+
+#[derive(Debug)]
+struct WatcherFailure {
+    target: WatcherTarget,
+    error: String,
 }
 
 /// Keeps healthy nodes from reconciling at exactly the same instant while
@@ -1335,17 +1373,48 @@ pub(crate) async fn run_worker(
     let mut claude_approval_state = ClaudeApprovalState::NotRequested;
     match startup_collections {
         Ok(collections) => {
-            let WatcherSetup { failures, .. } =
+            let WatcherSetup { started, failures } =
                 ensure_watchers(collections, &mut watchers, &watch_tx);
+            for target in started {
+                if target.project_memory {
+                    let collection_id = target.collection_id;
+                    if run_service_io(&services, move |services| {
+                        services.reconcile_project_memory(collection_id).map(|_| ())
+                    })
+                    .await
+                    .is_err()
+                    {
+                        tracing::warn!(
+                            error_kind = "project_memory_startup_reconcile",
+                            "project memory remained withheld after its startup watcher began"
+                        );
+                    }
+                }
+            }
             if !failures.is_empty() {
-                for (collection_id, _) in &failures {
-                    request_quarantine(
-                        &services,
-                        &mut background,
-                        &mut watcher_quarantined,
-                        *collection_id,
-                        "no se pudo crear el watcher de la colección",
-                    );
+                for failure in &failures {
+                    let collection_id = failure.target.collection_id;
+                    if failure.target.project_memory {
+                        if run_service_io(&services, move |services| {
+                            services.withhold_project_memory_for_watcher(collection_id)
+                        })
+                        .await
+                        .is_err()
+                        {
+                            tracing::warn!(
+                                error_kind = "project_memory_watcher_withhold_failed",
+                                "project memory watcher failure could not be persisted"
+                            );
+                        }
+                    } else {
+                        request_quarantine(
+                            &services,
+                            &mut background,
+                            &mut watcher_quarantined,
+                            collection_id,
+                            "no se pudo crear el watcher de la colección",
+                        );
+                    }
                     tracing::warn!(
                         error_kind = "collection_watcher_start_failed",
                         "collection watcher could not start"
@@ -2078,6 +2147,213 @@ pub(crate) async fn run_worker(
                             }
                             Err(error) => send(&events, WorkerEvent::Error(format!("No se pudo crear la colección: {error:#}"))).await,
                         }
+                    }
+                    WorkerCommand::InitializeProjectMemory { name, folder } => {
+                        let result = run_service_io(&services, move |services| {
+                            services.initialize_project_memory(&name, &folder)
+                        })
+                        .await;
+                        match result {
+                            Ok(collection) => {
+                                let mut watcher_ready = match CollectionWatcherHandle::spawn(
+                                    collection.id,
+                                    collection.source_folder.join(".airwiki"),
+                                    watch_tx.clone(),
+                                ) {
+                                    Ok(watcher) => {
+                                        watchers.insert(collection.id, watcher);
+                                        true
+                                    }
+                                    Err(error) => {
+                                        let collection_id = collection.id;
+                                        let _ = run_service_io(&services, move |services| {
+                                            services.withhold_project_memory_for_watcher(collection_id)
+                                        })
+                                        .await;
+                                        tracing::warn!(
+                                            error_kind = "project_memory_watcher_start",
+                                            %error,
+                                            "project memory initialization was withheld because its watcher did not start"
+                                        );
+                                        send(
+                                            &events,
+                                            WorkerEvent::Error(
+                                                "La memoria de proyecto quedó bloqueada porque no se pudo observar .airwiki"
+                                                    .to_owned(),
+                                            ),
+                                        )
+                                        .await;
+                                        false
+                                    }
+                                };
+                                if watcher_ready {
+                                    let collection_id = collection.id;
+                                    if run_service_io(&services, move |services| {
+                                        services.reconcile_project_memory(collection_id).map(|_| ())
+                                    })
+                                    .await
+                                    .is_err()
+                                    {
+                                        watcher_ready = false;
+                                        send(
+                                            &events,
+                                            WorkerEvent::Error(
+                                                "La memoria de proyecto quedó bloqueada porque sus archivos no superaron la validación"
+                                                    .to_owned(),
+                                            ),
+                                        )
+                                        .await;
+                                    }
+                                }
+                                if watcher_ready {
+                                    send(
+                                        &events,
+                                        WorkerEvent::Notice(
+                                            "La memoria de proyecto quedó lista en .airwiki"
+                                                .to_owned(),
+                                        ),
+                                    )
+                                    .await;
+                                }
+                            }
+                            Err(error) => {
+                                send(
+                                    &events,
+                                    WorkerEvent::Error(format!(
+                                        "No se pudo crear la memoria de proyecto: {error:#}"
+                                    )),
+                                )
+                                .await;
+                            }
+                        }
+                        refresh_content_views(&services, &events).await;
+                        refresh_application_access(&services, &events).await;
+                    }
+                    WorkerCommand::ApproveProjectMemoryRequest { request_id } => {
+                        let result = run_service_io(&services, move |services| {
+                            services.approve_project_memory_request(request_id)
+                        })
+                        .await;
+                        match result {
+                            Ok(collection) => {
+                                let watcher_result = match watchers.entry(collection.id) {
+                                    std::collections::hash_map::Entry::Occupied(_) => Ok(()),
+                                    std::collections::hash_map::Entry::Vacant(entry) => {
+                                        CollectionWatcherHandle::spawn(
+                                            collection.id,
+                                            collection.source_folder.join(".airwiki"),
+                                            watch_tx.clone(),
+                                        )
+                                        .map(|watcher| {
+                                            entry.insert(watcher);
+                                        })
+                                    }
+                                };
+                                let mut watcher_ready = match watcher_result {
+                                    Ok(()) => true,
+                                    Err(error) => {
+                                        let collection_id = collection.id;
+                                        let _ = run_service_io(&services, move |services| {
+                                            services.withhold_project_memory_for_watcher(collection_id)
+                                        })
+                                        .await;
+                                        tracing::warn!(
+                                            error_kind = "project_memory_watcher_start",
+                                            %error,
+                                            "approved project memory was withheld because its watcher did not start"
+                                        );
+                                        send(
+                                            &events,
+                                            WorkerEvent::Error(
+                                                "La memoria de proyecto quedó bloqueada porque no se pudo observar .airwiki"
+                                                    .to_owned(),
+                                            ),
+                                        )
+                                        .await;
+                                        false
+                                    }
+                                };
+                                if watcher_ready {
+                                    let collection_id = collection.id;
+                                    if run_service_io(&services, move |services| {
+                                        services.reconcile_project_memory(collection_id).map(|_| ())
+                                    })
+                                    .await
+                                    .is_err()
+                                    {
+                                        watcher_ready = false;
+                                        send(
+                                            &events,
+                                            WorkerEvent::Error(
+                                                "La memoria de proyecto quedó bloqueada porque sus archivos no superaron la validación"
+                                                    .to_owned(),
+                                            ),
+                                        )
+                                        .await;
+                                    }
+                                }
+                                if watcher_ready {
+                                    send(
+                                        &events,
+                                        WorkerEvent::Notice(
+                                            "La aplicación ya puede usar esta memoria de proyecto"
+                                                .to_owned(),
+                                        ),
+                                    )
+                                    .await;
+                                }
+                            }
+                            Err(error) => {
+                                send(
+                                    &events,
+                                    WorkerEvent::Error(format!(
+                                        "No se pudo aprobar la memoria de proyecto: {error:#}"
+                                    )),
+                                )
+                                .await;
+                            }
+                        }
+                        refresh_content_views(&services, &events).await;
+                        refresh_application_access(&services, &events).await;
+                    }
+                    WorkerCommand::RejectProjectMemoryRequest { request_id } => {
+                        if let Err(error) = run_service_io(&services, move |services| {
+                            services.reject_project_memory_request(request_id)
+                        })
+                        .await
+                        {
+                            send(
+                                &events,
+                                WorkerEvent::Error(format!(
+                                    "No se pudo rechazar la solicitud: {error:#}"
+                                )),
+                            )
+                            .await;
+                        }
+                        refresh_application_access(&services, &events).await;
+                    }
+                    WorkerCommand::DetachProjectMemory { collection_id } => {
+                        watchers.remove(&collection_id);
+                        if let Err(error) = services.delete_wiki(collection_id).await {
+                            send(
+                                &events,
+                                WorkerEvent::Error(format!(
+                                    "No se pudo desvincular la memoria de proyecto: {error:#}"
+                                )),
+                            )
+                            .await;
+                        } else {
+                            send(
+                                &events,
+                                WorkerEvent::Notice(
+                                    "Memoria desvinculada; la carpeta .airwiki se conservó intacta"
+                                        .to_owned(),
+                                ),
+                            )
+                            .await;
+                        }
+                        refresh_content_views(&services, &events).await;
+                        refresh_application_access(&services, &events).await;
                     }
                     WorkerCommand::ImportOkfBundle { name, source } => {
                         let services = Arc::clone(&services);
@@ -2904,9 +3180,46 @@ pub(crate) async fn run_worker(
             watch = watch_rx.recv() => {
                 match watch {
                     Some(CollectionWatchEvent::Changed { collection_id, paths })
-                        if services.models_ready()
-                            && watchers.contains_key(&collection_id) =>
+                        if watchers.contains_key(&collection_id) =>
                     {
+                        let project_memory = run_service_io(&services, move |services| {
+                            Ok(services
+                                .database()
+                                .collection(collection_id)?
+                                .is_some_and(|collection| {
+                                    collection.memory_scope
+                                        == Some(airwiki_core::MemoryScope::Project)
+                                }))
+                        })
+                        .await
+                        .unwrap_or(false);
+                        if project_memory {
+                            if let Err(error) = run_service_io(&services, move |services| {
+                                services
+                                    .reconcile_project_memory(collection_id)
+                                    .map(|_| ())
+                            })
+                            .await
+                            {
+                                tracing::warn!(
+                                    error_kind = "project_memory_reconcile",
+                                    "project memory change was withheld after reconciliation failed"
+                                );
+                                send(
+                                    &events,
+                                    WorkerEvent::Error(format!(
+                                        "No se pudo validar la memoria de proyecto: {error:#}"
+                                    )),
+                                )
+                                .await;
+                            }
+                            refresh_collection_views(&services, &events).await;
+                            refresh_application_access(&services, &events).await;
+                            continue 'running;
+                        }
+                        if !services.models_ready() {
+                            continue 'running;
+                        }
                         let scan_allowed = run_service_io(&services, move |services| {
                             services
                                 .startup_preflight_blocks_automatic_scan(collection_id)
@@ -2941,6 +3254,31 @@ pub(crate) async fn run_worker(
                     Some(CollectionWatchEvent::Changed { .. }) => {}
                     Some(CollectionWatchEvent::Failed { collection_id, error }) => {
                         watchers.remove(&collection_id);
+                        let project_memory = run_service_io(&services, move |services| {
+                            Ok(services
+                                .database()
+                                .collection(collection_id)?
+                                .is_some_and(|collection| {
+                                    collection.memory_scope
+                                        == Some(airwiki_core::MemoryScope::Project)
+                                }))
+                        })
+                        .await
+                        .unwrap_or(false);
+                        if project_memory {
+                            let _ = run_service_io(&services, move |services| {
+                                services.withhold_project_memory_for_watcher(collection_id)
+                            })
+                            .await;
+                            tracing::warn!(
+                                error_kind = "project_memory_watcher_failed",
+                                %error,
+                                "project memory watcher failed and disclosure was withheld"
+                            );
+                            refresh_collection_views(&services, &events).await;
+                            refresh_application_access(&services, &events).await;
+                            continue 'running;
+                        }
                         clear_manual_rescan(&mut manual_rescans, collection_id);
                         for ready in preflight_scheduler.cancel(collection_id) {
                             spawn_preflight(&services, &mut background, ready);
@@ -2976,20 +3314,54 @@ pub(crate) async fn run_worker(
                                 failure_count = failures.len(),
                                 "collection watcher restart remains pending"
                             );
-                            for (collection_id, _) in &failures {
-                                request_quarantine(
-                                    &services,
-                                    &mut background,
-                                    &mut watcher_quarantined,
-                                    *collection_id,
-                                    "no se pudo reiniciar el watcher de la colección",
-                                );
+                            for failure in &failures {
+                                let collection_id = failure.target.collection_id;
+                                if failure.target.project_memory {
+                                    let _ = run_service_io(&services, move |services| {
+                                        services
+                                            .withhold_project_memory_for_watcher(collection_id)
+                                    })
+                                    .await;
+                                } else {
+                                    request_quarantine(
+                                        &services,
+                                        &mut background,
+                                        &mut watcher_quarantined,
+                                        collection_id,
+                                        "no se pudo reiniciar el watcher de la colección",
+                                    );
+                                }
                             }
                         }
-                        if !services.models_ready() {
-                            continue;
-                        }
-                        for collection_id in started {
+                        for target in started {
+                            let collection_id = target.collection_id;
+                            if target.project_memory {
+                                if run_service_io(&services, move |services| {
+                                    services.reconcile_project_memory(collection_id).map(|_| ())
+                                })
+                                .await
+                                .is_err()
+                                {
+                                    tracing::warn!(
+                                        error_kind = "project_memory_watcher_restart_reconcile",
+                                        "project memory remained withheld after its watcher restarted"
+                                    );
+                                    send(
+                                        &events,
+                                        WorkerEvent::Error(
+                                            "La memoria de proyecto continúa bloqueada después de reiniciar su watcher"
+                                                .to_owned(),
+                                        ),
+                                    )
+                                    .await;
+                                }
+                                refresh_collection_views(&services, &events).await;
+                                refresh_application_access(&services, &events).await;
+                                continue;
+                            }
+                            if !services.models_ready() {
+                                continue;
+                            }
                             let scan_allowed = run_service_io(&services, move |services| {
                                 services
                                     .startup_preflight_blocks_automatic_scan(collection_id)
@@ -4295,8 +4667,18 @@ async fn refresh_computations(services: &Arc<DesktopServices>, events: &Sender<W
 }
 
 async fn refresh_application_access(services: &Arc<DesktopServices>, events: &Sender<WorkerEvent>) {
-    match run_service_io(services, DesktopServices::application_access_views).await {
-        Ok(applications) => send(events, WorkerEvent::ApplicationAccessUpdated(applications)).await,
+    match run_service_io(services, |services| {
+        Ok((
+            services.application_access_views()?,
+            services.project_memory_request_views()?,
+        ))
+    })
+    .await
+    {
+        Ok((applications, requests)) => {
+            send(events, WorkerEvent::ApplicationAccessUpdated(applications)).await;
+            send(events, WorkerEvent::ProjectMemoryRequestsUpdated(requests)).await;
+        }
         Err(_) => {
             send(
                 events,
@@ -5033,26 +5415,33 @@ fn ensure_watchers(
     let mut started = Vec::new();
     let mut failures = Vec::new();
     for collection in collections {
-        if collection.indexing_mode == IndexingMode::Continuous
+        let target = WatcherTarget {
+            collection_id: collection.id,
+            project_memory: collection.memory_scope == Some(airwiki_core::MemoryScope::Project),
+        };
+        if (collection.indexing_mode == IndexingMode::Continuous || target.project_memory)
             && let std::collections::hash_map::Entry::Vacant(entry) = watchers.entry(collection.id)
         {
             match CollectionWatcherHandle::spawn(collection.id, collection.folder, watch_tx.clone())
             {
                 Ok(watcher) => {
                     entry.insert(watcher);
-                    started.push(collection.id);
+                    started.push(target);
                 }
-                Err(error) => failures.push((collection.id, format!("{error:#}"))),
+                Err(error) => failures.push(WatcherFailure {
+                    target,
+                    error: format!("{error:#}"),
+                }),
             }
         }
     }
     WatcherSetup { started, failures }
 }
 
-fn watcher_failure_summary(failures: &[(Uuid, String)]) -> String {
+fn watcher_failure_summary(failures: &[WatcherFailure]) -> String {
     failures
         .iter()
-        .map(|(collection_id, error)| format!("{collection_id}: {error}"))
+        .map(|failure| format!("{}: {}", failure.target.collection_id, failure.error))
         .collect::<Vec<_>>()
         .join("; ")
 }

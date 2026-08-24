@@ -81,13 +81,21 @@ audit events. Published OKF files are the source of truth for the visible wiki
 representation. Reconciliation reports disagreement rather than silently
 selecting one side. Original documents are never changed or replicated.
 
-Imported and AI-memory Wikis have no source folder. Their managed OKF v0.2
-bundle is the visible authority and SQLite is a searchable operational
-projection. Filesystem/SQLite mutations use atomic replacement and an
-append-only recovery journal. See the [AirWiki OKF v0.2 profile](okf-v02-profile.md).
+Imported Wikis and personal AI-memory Wikis have no source folder. Their managed
+OKF v0.2 bundle is the visible authority and SQLite is a searchable operational
+projection. Project memory instead keeps only its portable manifest and visible
+OKF bundle under `<project>/.airwiki`; SQLite still owns the local attachment,
+grant, indexes, embeddings and recovery state. Each clone therefore has a new
+local collection identity and requires its own approval even when its portable
+project and Wiki IDs match another clone. Filesystem/SQLite mutations use atomic
+replacement and an append-only recovery journal. See the
+[AirWiki OKF v0.2 profile](okf-v02-profile.md) and
+[ADR 0011](adr/0011-portable-project-memory.md).
 
 The watcher is a latency optimization. Startup and periodic full reconciliation
 are idempotent recovery paths for missed events, renames and interruptions.
+Project attachments are withdrawn from their searchable projection before each
+validation, and all attachments reconcile before MCP or network services start.
 
 ```text
 detected -> extracted -> enriched -> needs review -> published
@@ -142,6 +150,10 @@ tray is known to be operational; all foreground launches start visible.
 
 ## Trust and authorization
 
+For the end-to-end journey from one question through local, LAN, and public
+search, start with [Search across local, LAN, and public Wikis](search-and-federation.md).
+This section defines the underlying trust boundaries.
+
 - Local publication always requires review.
 - LAN search and read-only Wiki browsing require authenticated pairing,
   collection policy and a grant at the source node. Search returns bounded
@@ -174,6 +186,12 @@ tray is known to be operational; all foreground launches start visible.
 - Application memory uses a separate random capability and per-Wiki
   owner/reader/editor grant. It never implies LAN, public or other-application
   access. Grants and computation execution require native confirmation.
+  Personal memory stays in AirWiki's private vault. Project memory is an
+  explicitly initialized `.airwiki` OKF bundle; the first application access in
+  each canonical clone also requires native confirmation. Missing, invalid or
+  identity-conflicting attachments cannot serve MCP, LAN, public or external-AI
+  results. Detaching removes local authority and projections but preserves the
+  project files, and AirWiki never runs Git.
 - `airwiki-wasm` runs only internal hash-bound components with no imports and
   bounded memory, fuel, time and payloads. Saving an accepted receipt requires
   a second confirmation and creates machine-confirmed knowledge.

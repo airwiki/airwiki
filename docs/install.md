@@ -5,13 +5,14 @@ This guide covers the tested development targets: macOS arm64 and Windows
 subnet with multicast available. Hiding the window keeps the node running;
 **Exit completely** stops it.
 
-AirWiki is still a development candidate. When an official release exists, use
-only the signed installers on the
-[latest GitHub release](https://github.com/airwiki/airwiki/releases/latest) and
-verify them against its `SHA256SUMS`. Until then, use only an agreed development
-candidate and verify its provenance and SHA-256 independently. Never disable
-Gatekeeper, SmartScreen, Smart App Control, antivirus, model hashes or runtime
-verification to make a candidate run.
+AirWiki is still a development candidate. Public technical pre-releases are
+available from [GitHub Releases](https://github.com/airwiki/airwiki/releases),
+but they are explicitly unsupported, non-latest manual downloads while native
+signing is incomplete. Verify their provenance and SHA-256 independently. Never
+disable Gatekeeper, SmartScreen, Smart App Control, antivirus, model hashes or
+runtime verification to make a candidate run. When a stable release exists,
+use only the signed installers on the
+[latest GitHub release](https://github.com/airwiki/airwiki/releases/latest).
 
 ## Before installing
 
@@ -20,27 +21,29 @@ verification to make a candidate run.
    safety margin.
 2. Use only the synthetic fixtures until the two-node runbook passes.
 3. On Windows, confirm AVX2 support and a Private or Domain network profile.
-4. Treat unsigned internal candidates as development artifacts, never as public
-   releases.
+4. Treat a technical pre-release as a test candidate, never as a supported
+   stable release or updater channel.
 
-## Windows unsigned technical beta
+## Public technical pre-release
 
 The manual
-[Package unsigned pilot](https://github.com/airwiki/airwiki/actions/workflows/package-pilot.yml)
-workflow can produce a 30-day Windows x64 artifact for invited technical
-testing while SignPath enrollment is pending. It runs on a GitHub-hosted Windows
-builder and does not receive signing or updater credentials. It is not attached
-to GitHub Releases, selected by `latest.json`, or supported as a public package.
+[Package technical candidates](https://github.com/airwiki/airwiki/actions/workflows/package-pilot.yml)
+workflow may publish one permanent GitHub pre-release from the exact reviewed
+`main` commit while native signing is incomplete. All three platform jobs must
+pass before a protected human publication gate. The release is explicitly not
+`Latest`, contains no `latest.json`, receives no signing or updater credentials,
+and is never selected by AirWiki's updater.
 
 For each candidate:
 
-1. Open the successful workflow run for the reviewed commit and download the
-   `airwiki-windows-x64-unsigned-beta-<commit>` artifact. GitHub sign-in and
-   repository read access are required.
-2. Read `UNSIGNED-BETA.txt` and confirm the repository, complete commit, version,
-   workflow-run URL and expiry in `PROVENANCE.json`.
-3. Compare both installers with the SHA-256 values in the workflow summary and
-   `SHA256SUMS.txt` before opening either MSI:
+1. Open the [Releases page](https://github.com/airwiki/airwiki/releases), select
+   the required `v<version>-beta.<number>` entry and confirm it is labeled
+   **Pre-release**, not **Latest**.
+2. Read `TECHNICAL-PRE-RELEASE.txt`. Confirm the repository, complete commit,
+   tag, version, workflow-run URL and per-platform trust state in
+   `PROVENANCE.json`.
+3. Download `SHA256SUMS.txt` and compare the exact selected asset before opening
+   or deploying it. On Windows:
 
    ```powershell
    Get-Content .\SHA256SUMS.txt
@@ -48,22 +51,26 @@ For each candidate:
    ```
 
 4. Use a non-production test account or device. Do not disable or relax any
-   platform or organization protection. If Windows offers a per-file
-   confirmation and local policy permits unsigned beta software, use it only
-   after the hash matches. If Smart App Control or organization policy blocks
-   the installer, stop.
-5. Choose the MSI language, follow the Windows steps below, and report the
-   candidate commit with reproducible PASS/FAIL facts. Do not attach documents,
-   queries, identities, addresses, credentials, databases or raw logs.
+   platform or organization protection. If Windows or macOS blocks the
+   candidate under current policy, stop.
+5. Choose the platform asset described below and report the candidate commit
+   with reproducible PASS/FAIL facts. Do not attach documents, queries,
+   identities, addresses, credentials, databases or raw logs.
 
-Every workflow run is independent. Never reuse a checksum from an earlier beta,
-and never redistribute the extracted MSI as though it were an AirWiki release.
+Every pre-release is independent and immutable by tag. Never reuse a checksum
+from an earlier beta or redistribute an extracted installer as a stable AirWiki
+release.
+
+The Linux archive contains `airwiki-federation-index`, a server for maintainers
+following the public-federation runbook. It is not AirWiki Desktop and provides
+no desktop UI.
 
 ## macOS arm64
 
 1. Open the DMG and move **AirWiki** to Applications.
-2. For an internal candidate, compare its hash through the agreed channel. A
-   future public release must pass Developer ID signing and notarization.
+2. For a technical pre-release, compare the DMG hash with `SHA256SUMS.txt`. Its
+   filename states that it is unsigned for public trust and not notarized. A
+   future stable release must pass Developer ID signing and notarization.
 3. When replacing one ad-hoc internal candidate with another, macOS can ask
    whether the new build may access AirWiki's existing device identity in the
    login Keychain. Authorize that access only after verifying the candidate
@@ -86,7 +93,8 @@ per-user autostart uses `SMAppService` only after consent.
    reported without a partial AirWiki install and can be retried; the package
    intentionally does not embed the offline WebView2 runtime.
 2. Verify Authenticode when using a signed candidate. An unknown-publisher
-   warning means the artifact is not a validated public release.
+   warning means the artifact is not a validated stable release, even when it
+   came from the public technical pre-release page.
 3. Keep LAN disabled on a Public network. On a Private or Domain network, the
    wizard may request UAC to install exactly two inbound rules owned by AirWiki:
    application TCP and mDNS UDP 5353, both limited to `LocalSubnet` and

@@ -3,6 +3,7 @@
 - Status: Accepted
 - Date: 2026-07-12
 - Supersedes: ADR 0002 (desktop lifecycle and per-user autostart only)
+- Refined by: ADR 0012 (unsigned technical pre-releases remain outside updates)
 
 ## Context
 

@@ -19,6 +19,7 @@ tests, operational runbooks or evaluation reports.
 | [0009](0009-windows-msi-signpath.md) | Use per-user MSI and origin-verified open-source signing on Windows | Accepted | 2026-08-10 | Refines ADR 0003 for the Windows package and signing provider |
 | [0010](0010-okf-v02-managed-memory-and-attested-computation.md) | Adopt OKF v0.2 for managed memory and attested computation | Accepted | 2026-08-13 | Supersedes ADR 0002 read-only MCP and extends ADR 0004 beyond folder publication |
 | [0011](0011-portable-project-memory.md) | Store portable project memory in `.airwiki` | Accepted | 2026-08-23 | Supersedes ADR 0002 project selection and ADR 0010 private-only application memory |
+| [0012](0012-public-technical-prereleases.md) | Publish unsigned technical candidates as non-latest pre-releases | Accepted | 2026-08-25 | Refines ADR 0003 prerelease distribution and ADR 0009 unsigned Windows candidates |
 
 ## Policy
 

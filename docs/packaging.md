@@ -1,4 +1,4 @@
-# Internal packaging
+# Candidate packaging
 
 AirWiki produces internal development candidates with the pinned Tauri v2 CLI
 and bundler. The protected public workflows add native signing, notarization,
@@ -6,6 +6,10 @@ updater signatures, exact release metadata and a human promotion gate. Their
 existence does not make a candidate supported: every applicable item in the
 [public release checklist](release-checklist.md) must pass first. See the
 [release process](release-process.md) for repository configuration and operation.
+
+A separate protected technical pre-release path may make unsigned test
+candidates publicly downloadable without claiming stable support or entering
+the updater channel. ADR 0012 defines that boundary.
 
 Installers contain the desktop application, local MCP bridge, platform runtime,
 licenses, and platform-specific integration assets. Model weights and future
@@ -165,7 +169,7 @@ missing build receipt, or byte mismatch blocks the candidate.
 
 ### Prepare an unsigned Windows beta artifact
 
-The manual **Package unsigned pilot** workflow defaults to
+The manual **Package technical candidates** workflow defaults to
 `windows-x64-beta`. It builds the same two validated localized MSI packages on a
 GitHub-hosted Windows runner from the exact clean `main` commit, verifies that
 their Authenticode state is `NotSigned`, and stages only:
@@ -181,7 +185,8 @@ The uploaded artifact is named
 no SignPath or updater credentials and is never attached to a release, exposed
 through `latest.json`, or accepted by the signed promotion workflow. Select
 `all-internal-candidates` only when the Linux federation index and macOS
-candidate are also required.
+candidate are also required. Select `public-prerelease` only for the separately
+confirmed and protected publication path below.
 
 `prepare-unsigned-windows-beta.ps1` rejects input outside `target`, reparse
 points, unexpected files, a non-official repository identity, a mismatched
@@ -189,6 +194,43 @@ version or commit shape, and anything other than exactly two MSI compound
 files. The artifact still has no operating-system publisher identity. Testers
 must verify the commit and checksums, keep platform protections enabled and stop
 when device or organization policy rejects unsigned software.
+
+### Publish a public technical pre-release
+
+Dispatch **Package technical candidates** from the exact current `main` with:
+
+- `target`: `public-prerelease`;
+- `prerelease_number`: the next positive beta number; and
+- `publication_confirmation`:
+  `publish-v<current-version>-beta.<prerelease-number>`.
+
+The request validator derives the stable application version from the reviewed
+manifests and rejects a fork, another branch, a moved or dirty checkout, malformed
+beta number or mismatched confirmation. macOS, Windows and Linux then build from
+the same workflow commit. Linux produces only the x86-64 federation index
+server; it is never labeled as AirWiki Desktop.
+
+`technical_prerelease.py` accepts only the verified DMG, two MSI compound files
+and x86-64 ELF server below the workflow staging root. It rejects symlinks,
+escapes, invalid formats and output reuse, then emits a closed asset set:
+
+- visibly labeled macOS and Windows candidate filenames;
+- a deterministic Linux server archive with its legal payloads;
+- the reviewed license and third-party inventories;
+- strict UTF-8 bilingual safety guidance;
+- exact cross-platform `SHA256SUMS.txt`; and
+- closed provenance that fixes `supportedPublicRelease`, `updaterChannel` and
+  `latest` to false and records each platform's actual trust state.
+
+The publication job has the only `contents: write` token and waits at the
+protected `public-release` environment after all platform jobs pass. It creates
+or safely recovers only an exact private draft, uploads the closed set,
+re-downloads every asset, verifies it independently and finally publishes it as
+`v<version>-beta.<number>` with GitHub pre-release enabled and Latest disabled.
+It never creates `latest.json`, enters signing environments, requests SignPath,
+reads updater keys, rewrites an already public beta or promotes those bytes into
+the stable workflow. A failed attempt can resume only an exact private draft at
+the same immutable tag and commit with no unexpected assets.
 
 ### Repackage an already validated internal bundle
 
@@ -317,13 +359,13 @@ or on Windows:
 Get-FileHash target\packages\windows\* -Algorithm SHA256
 ```
 
-## Public distribution gate
+## Stable public distribution gate
 
-A public release requires repository governance, monitored security and conduct
-contacts, protected environments, Developer ID plus notarization, Windows
-public-trust signing, updater-key custody, final-byte SBOM and hashes, and clean
-platform acceptance. None of those requirements may be inferred from a green
-internal packaging run.
+A supported stable release requires repository governance, monitored security
+and conduct contacts, protected environments, Developer ID plus notarization,
+Windows public-trust signing, updater-key custody, final-byte SBOM and hashes,
+and clean platform acceptance. None of those requirements may be inferred from
+a green candidate packaging run.
 
 `prepare-release.yml` creates only a private draft. `promote-release.yml`
 re-downloads and verifies that draft on both platforms, then waits for the

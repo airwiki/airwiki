@@ -15,7 +15,7 @@
 <p align="center">
   <a href="#how-it-works">How it works</a> ·
   <a href="#availability">Availability</a> ·
-  <a href="https://github.com/airwiki/airwiki/releases/latest">Downloads</a> ·
+  <a href="https://github.com/airwiki/airwiki/releases">Technical beta</a> ·
   <a href="#run-from-source">Run from source</a> ·
   <a href="CONTRIBUTING.md">Contribute</a>
 </p>
@@ -23,7 +23,7 @@
 AirWiki is an open-source desktop app that turns folders, [Open Knowledge Format (OKF)](https://github.com/GoogleCloudPlatform/knowledge-catalog/blob/main/okf/SPEC.md) bundles, and assistant conversations into wikis you can search, review, and selectively share. It keeps knowledge on your device by default and uses local AI to help organize it without taking control away from you.
 
 > [!IMPORTANT]
-> AirWiki is in active development and does not have a supported public download yet. Current builds are development or internal release candidates. See [Availability](#availability) before installing or testing one.
+> AirWiki is in active development and does not have a supported stable download yet. Public technical pre-releases are explicitly unsigned or unnotarized test candidates, are never selected by the updater, and can be blocked by platform policy. See [Availability](#availability) before installing one.
 
 <p align="center">
   <a href="docs/assets/airwiki-demo.mp4">
@@ -146,13 +146,21 @@ Read the [threat model](docs/threat-model.md) for the complete trust boundaries 
 
 ## Availability
 
-| Platform | Current development target |
-| --- | --- |
-| macOS | Apple silicon, macOS 13 or later |
-| Windows | Windows 10/11 x64 with AVX2 |
-| Linux, web, mobile | Not currently supported |
+| Platform | Technical pre-release | Current boundary |
+| --- | --- | --- |
+| macOS | Apple silicon, macOS 13+ DMG | Ad-hoc signed and not notarized |
+| Windows | Windows 10/11 x64 with AVX2 | Unsigned `en-US` and `es-ES` MSI |
+| Linux x64 | Federation index server | Maintainer service, not AirWiki Desktop |
+| Linux desktop, web, mobile | None | Not currently supported |
 
-There are no supported public release artifacts yet. Once the first release passes the complete acceptance checklist, current signed installers will be available from [GitHub Releases](https://github.com/airwiki/airwiki/releases/latest). Invited technical testers may instead receive a short-lived unsigned Windows candidate from a reviewed [Package unsigned pilot](https://github.com/airwiki/airwiki/actions/workflows/package-pilot.yml) run. That artifact is not a release or updater: verify its commit and included SHA-256 file, never disable Windows protections, and stop if device or organization policy blocks unsigned software.
+There are no supported stable release artifacts yet. Reviewed builds may be
+published on [GitHub Releases](https://github.com/airwiki/airwiki/releases) as
+clearly marked technical pre-releases. They are permanent manual downloads, but
+they are not `Latest`, are never selected by the updater and do not establish a
+Windows or macOS publisher identity. Verify `SHA256SUMS.txt`, keep operating
+system and organization protections enabled, and stop when local policy blocks
+the candidate. Once the complete acceptance checklist passes, signed installers
+will use the separate [stable download](https://github.com/airwiki/airwiki/releases/latest).
 
 For current candidate requirements and first-run behavior, read [Installing and running AirWiki](docs/install.md).
 

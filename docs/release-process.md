@@ -6,9 +6,10 @@ re-downloads and verifies that draft on macOS and Windows before a protected
 human approval makes it public. A workflow run never moves or overwrites an
 existing release tag.
 
-Short-lived unsigned Windows artifacts from **Package unsigned pilot** are a
-separate technical-testing channel. They are never inputs to this process,
-release assets, updater metadata, or evidence that Windows signing passed.
+Unsigned candidates from **Package technical candidates** are a separate
+technical-testing channel. A protected run may publish them as a clearly marked
+`v<version>-beta.<number>` GitHub pre-release, but those assets are never inputs
+to this stable process, updater metadata or evidence that native signing passed.
 
 Users obtain the current stable version from
 [GitHub Releases](https://github.com/airwiki/airwiki/releases/latest):
@@ -22,6 +23,13 @@ Drafts and prereleases are not updater channels. The Windows updater uses the
 `en-US` MSI because both localized packages contain byte-identical product
 payloads and updates run without the installer UI. Both MSI files remain
 available for first installation.
+
+The technical pre-release path has its own closed provenance, cross-platform
+checksums and bilingual warning. It fixes GitHub Latest and updater eligibility
+to false, labels the macOS DMG as ad-hoc and non-notarized, labels both Windows
+MSI files as unsigned, and describes the Linux x64 artifact only as the
+federation index server. Its protected publication approval grants visibility,
+not stable support or native publisher identity.
 
 GitHub Releases may redirect manifest and artifact requests to GitHub-managed
 object storage. A redirect is transport, never authority: the client still
@@ -37,6 +45,9 @@ Create protected GitHub environments named `macos-signing`, `windows-signing`
 and `public-release`. Restrict deployment branches to `main`. Require a human
 reviewer for both signing environments and for `public-release`; do not allow an
 initiating administrator to bypass the final promotion approval.
+The technical pre-release publisher also uses `public-release` for the narrow
+act of making an already verified draft public; it receives no signing secret
+and cannot create stable or updater metadata.
 Protect tags matching `v*` against updates and deletion. The promotion workflow
 creates the exact release tag only after approval and never moves an existing
 tag.

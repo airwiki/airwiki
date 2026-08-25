@@ -102,11 +102,13 @@ group may remain instead of claiming success.
 ## Install the index candidate
 
 Build the Linux x64 index from the same commit selected for the desktop
-candidates. The manual **Package unsigned pilot** workflow produces a
-hash-verifiable Linux artifact without using bootstrap data or release
-credentials when `all-internal-candidates` is selected. Make the downloaded
-binary executable and verify that its workflow commit equals the approved
-commit.
+candidates. The manual **Package technical candidates** workflow produces a
+hash-verifiable Linux artifact without using bootstrap data or signing
+credentials when `all-internal-candidates` is selected. A protected
+`public-prerelease` run also publishes those bytes in the clearly named Linux
+federation-index archive, with the complete release provenance and checksum
+inventory. It is a maintainer service, not AirWiki Desktop. Verify that its
+workflow commit equals the approved commit before deployment.
 
 Install the same exact bytes on both VMs:
 

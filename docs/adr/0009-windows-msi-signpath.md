@@ -2,6 +2,7 @@
 
 - Status: Accepted
 - Date: 2026-08-10
+- Refined by: ADR 0012 (public unsigned technical pre-releases)
 
 ## Context
 

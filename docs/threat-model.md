@@ -134,7 +134,8 @@ Controls are not considered effective end to end until the
 | Bundle is modified outside the app | Bounded tolerant inspector, normalized in-root paths, no symlinks, DB/filesystem health report, confirmed snapshot repair | A local writer already controls data; ambiguous history remains blocked |
 | Model grants permission | Enrichment schema excludes collection, grants, publication, and cloud policy | Review schemas and preserve human approval |
 | Runtime or model is replaced | Pinned revision/hash, temporary download, atomic move, build manifest | Upstream or build-host compromise remains possible |
-| Installer is altered | Native publisher signature, independent updater signature, hashes/SBOM, platform gates | Internal unsigned candidates are not public releases; signing-key or CI compromise remains possible |
+| Stable installer is altered | Native publisher signature, independent updater signature, hashes/SBOM, platform gates | Signing-key or CI compromise remains possible |
+| An unsigned technical pre-release is altered or mistaken for stable | Exact clean `main` origin, all-platform build dependency, closed artifact names, legal payloads, SHA-256 inventory and provenance, protected private-draft publication, re-download verification, immutable beta tag, GitHub pre-release state, Latest/updater fixed false and separate README/install guidance | Windows and macOS provide no public publisher identity and can warn or block the candidate; hosting or CI compromise remains possible, and a user can still ignore the visible warnings |
 | Release dependency captures credentials | Secret-free build, isolated signing/verification, protected environments, scoped credentials | Actions, scripts, and signing services remain in the TCB |
 | Elevated helper opens broad rules | Closed arguments, sibling app, same-publisher validation, Firewall COM API, Private/Domain `LocalSubnet`, no edge traversal | Admin or domain policy can override; conflict and cancellation keep local-only mode |
 | Untrusted executable invokes helper | Helper derives its sibling desktop and requires the same valid publisher | Compromised publisher key or build host breaks the guarantee |
@@ -212,13 +213,15 @@ Controls are not considered effective end to end until the
 - No complete cross-platform public candidate has passed the protected release
   workflows and installed acceptance matrix. Windows public-trust enrollment,
   final SignPath configuration and native verification remain required before
-  any public release.
-- The temporary Windows beta artifact has no publisher signature and can be
-  warned about or blocked by Windows. Its reviewed GitHub-hosted build, exact
-  commit and workflow provenance, per-installer SHA-256 values, 30-day Actions
-  retention and exclusion from Releases and the updater reduce accidental
-  substitution but do not replace Authenticode identity. Testers never disable
-  platform or organization policy to run it.
+  any supported stable release.
+- Public technical pre-releases have no native public trust: Windows MSI files
+  are unsigned and the macOS application is ad-hoc signed and not notarized, so
+  either platform can warn about or block the candidate. Their reviewed
+  GitHub-hosted build, exact commit and workflow provenance, cross-platform
+  SHA-256 inventory, protected non-latest pre-release publication and exclusion
+  from the updater reduce accidental substitution but do not replace native
+  publisher identity. Testers never disable platform or organization policy to
+  run them. The Linux asset is only the federation index server, not Desktop.
 - Trust and grants are per device, not per individual user.
 - LAN assumes one private subnet and cannot overcome router multicast policy.
 - OCR and advanced malicious-file analysis are out of scope.

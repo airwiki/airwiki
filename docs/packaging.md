@@ -163,6 +163,33 @@ The accepted runtime directory contains exactly `llama-server.exe` and
 `BUILD-MANIFEST.json`. An unexpected DLL, executable, import, reparse point,
 missing build receipt, or byte mismatch blocks the candidate.
 
+### Prepare an unsigned Windows beta artifact
+
+The manual **Package unsigned pilot** workflow defaults to
+`windows-x64-beta`. It builds the same two validated localized MSI packages on a
+GitHub-hosted Windows runner from the exact clean `main` commit, verifies that
+their Authenticode state is `NotSigned`, and stages only:
+
+- the two MSI installers;
+- `SHA256SUMS.txt` for those exact bytes;
+- bounded `PROVENANCE.json` containing the repository, commit, version,
+  workflow-run URL and 30-day expiry; and
+- bilingual `UNSIGNED-BETA.txt` installation and protection guidance.
+
+The uploaded artifact is named
+`airwiki-windows-x64-unsigned-beta-<commit>` and expires after 30 days. It uses
+no SignPath or updater credentials and is never attached to a release, exposed
+through `latest.json`, or accepted by the signed promotion workflow. Select
+`all-internal-candidates` only when the Linux federation index and macOS
+candidate are also required.
+
+`prepare-unsigned-windows-beta.ps1` rejects input outside `target`, reparse
+points, unexpected files, a non-official repository identity, a mismatched
+version or commit shape, and anything other than exactly two MSI compound
+files. The artifact still has no operating-system publisher identity. Testers
+must verify the commit and checksums, keep platform protections enabled and stop
+when device or organization policy rejects unsigned software.
+
 ### Repackage an already validated internal bundle
 
 To exercise the per-user installer without rebuilding or signing, use a bundle

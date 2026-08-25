@@ -152,7 +152,7 @@ Read the [threat model](docs/threat-model.md) for the complete trust boundaries 
 | Windows | Windows 10/11 x64 with AVX2 |
 | Linux, web, mobile | Not currently supported |
 
-There are no supported public release artifacts yet. Once the first release passes the complete acceptance checklist, current signed installers will be available from [GitHub Releases](https://github.com/airwiki/airwiki/releases/latest). Until then, use only development candidates obtained through an agreed private channel, verify their SHA-256 independently, and do not bypass Gatekeeper, SmartScreen, model hashes, or runtime verification.
+There are no supported public release artifacts yet. Once the first release passes the complete acceptance checklist, current signed installers will be available from [GitHub Releases](https://github.com/airwiki/airwiki/releases/latest). Invited technical testers may instead receive a short-lived unsigned Windows candidate from a reviewed [Package unsigned pilot](https://github.com/airwiki/airwiki/actions/workflows/package-pilot.yml) run. That artifact is not a release or updater: verify its commit and included SHA-256 file, never disable Windows protections, and stop if device or organization policy blocks unsigned software.
 
 For current candidate requirements and first-run behavior, read [Installing and running AirWiki](docs/install.md).
 

@@ -8317,6 +8317,32 @@ mod tests {
     }
 
     #[test]
+    fn tauri_main_window_minimum_matches_its_default_size() -> Result<()> {
+        let config_path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tauri.conf.json");
+        let config: serde_json::Value = serde_json::from_slice(
+            &std::fs::read(&config_path).context("failed to read the Tauri configuration")?,
+        )
+        .context("failed to parse the Tauri configuration")?;
+        let window = config
+            .pointer("/app/windows/0")
+            .context("the main window configuration is missing")?;
+
+        for (default_key, minimum_key, expected) in
+            [("width", "minWidth", 1_180), ("height", "minHeight", 760)]
+        {
+            anyhow::ensure!(
+                window.get(default_key).and_then(serde_json::Value::as_u64) == Some(expected),
+                "the main window {default_key} must remain {expected}"
+            );
+            anyhow::ensure!(
+                window.get(minimum_key).and_then(serde_json::Value::as_u64) == Some(expected),
+                "the main window {minimum_key} must match {default_key}"
+            );
+        }
+        Ok(())
+    }
+
+    #[test]
     #[ignore = "writes the committed TypeScript contract"]
     fn generate_ui_bindings() -> Result<()> {
         let path = PathBuf::from(UI_BINDINGS_PATH);

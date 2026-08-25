@@ -167,25 +167,37 @@ async function selectValue(selector: string, index: number, value: string): Prom
 async function measureNavigationPaintP95(): Promise<number> {
   const samples: number[] = [];
   for (let sample = 0; sample < 20; sample += 1) {
-    const leavingSettings = await browser.execute(() => document.querySelector('.settings-top-bar') !== null);
-    const selector = leavingSettings ? '.settings-back' : '.system-status-button';
-    const expectedRoute = leavingSettings ? 'library' : 'settings';
-    const activated = await browser.execute((buttonSelector) => {
-      const button = document.querySelector<HTMLButtonElement>(buttonSelector);
-      if (!button) return false;
-      (window as Window & { __airwikiNavigationStarted?: number }).__airwikiNavigationStarted = performance.now();
+    const duration = await browser.executeAsync((done) => {
+      const leavingSettings = document.querySelector('.settings-top-bar') !== null;
+      const selector = leavingSettings ? '.settings-back' : '.system-status-button';
+      const expectedRoute = leavingSettings ? 'library' : 'settings';
+      const button = document.querySelector<HTMLButtonElement>(selector);
+      if (!button) {
+        done(null);
+        return;
+      }
+      const started = performance.now();
+      const deadline = started + 2_000;
+      const waitForPaint = () => {
+        const page = document.querySelector<HTMLElement>('.route-page');
+        const bounds = page?.getBoundingClientRect();
+        const style = page ? getComputedStyle(page) : null;
+        if (page?.dataset.route === expectedRoute
+          && bounds
+          && bounds.width > 0
+          && bounds.height > 0
+          && style?.visibility === 'visible') {
+          requestAnimationFrame(() => done(performance.now() - started));
+          return;
+        }
+        if (performance.now() >= deadline) {
+          done(null);
+          return;
+        }
+        requestAnimationFrame(waitForPaint);
+      };
       button.click();
-      return true;
-    }, selector);
-    if (!activated) throw new Error(`navigation paint measurement could not activate ${selector}`);
-    await browser.waitUntil(
-      () => browser.execute((route) => document.querySelector<HTMLElement>('.route-page')?.dataset.route === route, expectedRoute),
-      { timeout: 10_000, timeoutMsg: `navigation did not reach ${expectedRoute}` }
-    );
-    await browser.pause(34);
-    const duration = await browser.execute(() => {
-      const started = (window as Window & { __airwikiNavigationStarted?: number }).__airwikiNavigationStarted;
-      return typeof started === 'number' ? performance.now() - started : null;
+      requestAnimationFrame(waitForPaint);
     });
     if (typeof duration !== 'number') throw new Error('navigation paint returned an invalid timestamp');
     samples.push(duration);
@@ -828,9 +840,6 @@ describe('AirWiki real IPC journey', () => {
     await globalSearch.clearValue();
 
     const devicePixelRatio = await browser.execute(() => window.devicePixelRatio || 1);
-    const openingViewportWidth = await browser.execute(() => document.documentElement.clientWidth);
-    expect(openingViewportWidth).toBeGreaterThanOrEqual(1180);
-
     for (const viewport of [
       { width: 1180, height: 760 },
       { width: 1440, height: 900 }

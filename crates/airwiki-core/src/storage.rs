@@ -9,7 +9,8 @@ use airwiki_types::{
     ConceptAssurance, ConceptType, DisclosureGate, DisclosureLease, DisclosureMutationGuard,
     DocumentStatus, EnrichmentDraft, FreshnessState, MAX_COMPUTATION_REQUESTS_PER_MINUTE,
     MAX_PENDING_COMPUTATIONS_PER_APPLICATION, OkfCompatibility, OkfWarning, PublicConceptSummary,
-    SearchHit, SearchPurpose, SharedWikiConceptSummary, SharedWikiDescriptor, TrustTier,
+    SearchCollectionPresentation, SearchHit, SearchPurpose, SharedWikiConceptSummary,
+    SharedWikiDescriptor, TrustTier,
 };
 use anyhow::{Context, Result, anyhow, bail};
 use chrono::{DateTime, Duration, Utc};
@@ -6414,6 +6415,39 @@ impl Database {
     ) -> Result<bool> {
         let connection = self.connection_under_disclosure(lease)?;
         Self::peer_hit_is_current_on(&connection, hit, peer_id, purpose)
+    }
+
+    /// Reads bounded presentation for one exact collection while a final
+    /// disclosure lease prevents authorization state from changing.
+    pub fn collection_presentation_under_disclosure(
+        &self,
+        lease: &DisclosureLease,
+        collection_id: Uuid,
+    ) -> Result<Option<SearchCollectionPresentation>> {
+        let connection = self.connection_under_disclosure(lease)?;
+        connection
+            .query_row(
+                "SELECT name,okf_compatibility,declared_okf_version
+                 FROM collections WHERE id=?1",
+                [collection_id.to_string()],
+                |row| {
+                    let name = row.get::<_, String>(0)?;
+                    let compatibility = row.get::<_, String>(1)?;
+                    let declared_version = row.get::<_, Option<String>>(2)?;
+                    Ok(SearchCollectionPresentation {
+                        name,
+                        description: None,
+                        languages: Vec::new(),
+                        concept_count: None,
+                        okf_compatibility: Some(okf_compatibility_sql(
+                            compatibility,
+                            declared_version.as_deref(),
+                        )?),
+                    })
+                },
+            )
+            .optional()
+            .map_err(Into::into)
     }
 
     fn peer_hit_is_current_on(

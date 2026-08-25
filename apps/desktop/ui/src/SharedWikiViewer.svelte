@@ -190,7 +190,7 @@
     </div>
   {:else if browse}
     <header class="page-heading wiki-heading shared-wiki-heading">
-      <div>
+      <div class="shared-wiki-heading-copy">
         <nav class="breadcrumb" aria-label={t('desktop-page-search-title')}>
           <button onclick={onback}>{t('desktop-shared-back-results')}</button>
           <span aria-hidden="true">/</span>
@@ -199,31 +199,26 @@
         <h1 bind:this={headingElement} tabindex="-1">{browse.wikiName ?? t('desktop-public-origin-missing')}</h1>
         {#if source === 'public' && (browse as PublicBrowseSummary).description}<p>{(browse as PublicBrowseSummary).description}</p>{/if}
       </div>
+      <section class="wiki-access-strip shared-wiki-access" aria-label={t('desktop-shared-access-title')}>
+        <LockKeyhole size={17} aria-hidden="true" />
+        <div class="shared-access-copy"><span>{t('desktop-shared-read-only')}</span><DeviceIdentity name={sourceName} platform={sourcePlatform} platformLabel={sourceLabel ?? sourceName} source={source === 'public' ? 'public' : 'device'} compact /></div>
+        <small>{statusLabel()}</small>
+        {#if publisherId() && onblock}<button class="text-action" onclick={blockCurrentPublisher}>{t('search-public-block-publisher')}</button>{/if}
+      </section>
     </header>
-
-    <section class="wiki-access-strip shared-wiki-access" aria-label={t('desktop-shared-access-title')}>
-      <LockKeyhole size={17} aria-hidden="true" />
-      <div class="shared-access-copy"><span>{t('desktop-shared-read-only')}</span><DeviceIdentity name={sourceName} platform={sourcePlatform} platformLabel={sourceLabel ?? sourceName} source={source === 'public' ? 'public' : 'device'} compact /></div>
-      <small>{statusLabel()}</small>
-      {#if publisherId() && onblock}<button class="text-action" onclick={blockCurrentPublisher}>{t('search-public-block-publisher')}</button>{/if}
-    </section>
 
     <div class="content-tabs-bar shared-content-tabs">
       <div class="content-tabs" aria-label={t('desktop-wiki-sections')}>
         <span class="content-tab-label active">{t('desktop-wiki-content-tab')}<span>{browse.documents.length}</span></span>
       </div>
-      <span class="shared-format">{browse.okfCompatibility ? t(`desktop-okf-compatibility-${browse.okfCompatibility.kind}`) : t('desktop-public-format-unavailable')}</span>
+      <div class="content-tabs-actions">
+        {#if structureLoading}<LoadingState label={t('desktop-shared-loading-structure')} compact />{/if}
+        {#if browse.workspaceSupported}<div class="view-switch" aria-label={t('desktop-wiki-view')}><button class:active={viewMode === 'list'} aria-pressed={viewMode === 'list'} onclick={() => viewMode = 'list'}><List size={15} aria-hidden="true" />{t('desktop-view-list')}</button><button class:active={viewMode === 'graph'} aria-pressed={viewMode === 'graph'} onclick={() => viewMode = 'graph'}><Network size={15} aria-hidden="true" />{t('desktop-view-graph')}</button></div>{/if}
+        <span class="shared-format">{browse.okfCompatibility ? t(`desktop-okf-compatibility-${browse.okfCompatibility.kind}`) : t('desktop-public-format-unavailable')}</span>
+      </div>
     </div>
 
     {#if browse.workspaceSupported}
-      <div class="wiki-toolbar shared-wiki-toolbar">
-        {#if structureLoading}<LoadingState label={t('desktop-shared-loading-structure')} compact />{/if}
-        <div class="view-switch" aria-label={t('desktop-wiki-view')}>
-          <button class:active={viewMode === 'list'} aria-pressed={viewMode === 'list'} onclick={() => viewMode = 'list'}><List size={15} aria-hidden="true" />{t('desktop-view-list')}</button>
-          <button class:active={viewMode === 'graph'} aria-pressed={viewMode === 'graph'} onclick={() => viewMode = 'graph'}><Network size={15} aria-hidden="true" />{t('desktop-view-graph')}</button>
-        </div>
-      </div>
-
       {#if viewMode === 'graph'}
         <section class="graph-view shared-graph-view">
           {#key `${browse.wikiId}:${browse.documents.length}:${browse.links.length}`}

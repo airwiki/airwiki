@@ -301,6 +301,7 @@ mod tests {
             updated_at: Utc::now(),
             rank: 1,
             node_id: "synthetic".to_owned(),
+            collection_presentation: None,
             assurance: None,
             lifecycle_status: None,
         }

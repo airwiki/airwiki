@@ -1,16 +1,19 @@
 <script lang="ts">
   import AlertTriangle from '@lucide/svelte/icons/alert-triangle';
+  import ArrowLeft from '@lucide/svelte/icons/arrow-left';
+  import Bot from '@lucide/svelte/icons/bot';
   import BookOpen from '@lucide/svelte/icons/book-open';
   import CheckCircle2 from '@lucide/svelte/icons/circle-check-big';
   import FileText from '@lucide/svelte/icons/file-text';
   import History from '@lucide/svelte/icons/history';
   import Plus from '@lucide/svelte/icons/plus';
+  import RadioTower from '@lucide/svelte/icons/radio-tower';
   import RefreshCw from '@lucide/svelte/icons/refresh-cw';
-  import Settings2 from '@lucide/svelte/icons/settings-2';
+  import SlidersHorizontal from '@lucide/svelte/icons/sliders-horizontal';
   import Sparkles from '@lucide/svelte/icons/sparkles';
   import { listen } from '@tauri-apps/api/event';
   import { onMount, tick } from 'svelte';
-  import { addFederationIndex, addWiki, allowPeerPairingAgain, approveProjectMemoryRequest, approveReview, browseNearbyWiki, browsePublicWiki, cancelModelInstall, checkUpdates, configureFirewall, confirmPairing, connect, createProjectMemory, deleteWiki, detachProjectMemory, dialPeer, downloadUpdate, executeComputation, executeGuidedWikiRepair, hideToTray, importOkf, installModels, installUpdate, loadReviewEvidence, loadWikiBundle, loadWikiPage, manageIntegration, openExternalLink, openSystemDestination, pairPeer, pickOkfImport, pickWikiFolder, prepareGuidedWikiRepair, quitCompletely, reanalyzeReview, refreshApplicationAccess, refreshAutostart, refreshComputations, refreshConnectivity, refreshWikiHealth, rejectComputation, rejectProjectMemoryRequest, rejectReview, relinkWiki, removeFederationIndex, rescanWiki, revokePeer, saveComputationResult, searchKnowledge, setApplicationWikiRole, setAutostart, setPublicPublisherBlocked, setWikiGrant, setWikiIndexing, updatePreferences, updatePublicWikiProfile, updateWikiPolicy, validateOkfImport, verifyWikiConcept, type AppSnapshot, type ApplicationWikiRoleInput, type CloseBehavior, type EnrichmentDraft, type FolderSelection, type IntegrationActionInput, type IntegrationClient, type KnowledgeConceptSummary, type KnowledgePageInput, type LanPreference, type LocalePreference, type OkfImportSummary, type PublicConceptSummaryDto, type RemoteWikiPageInput, type ReviewSummary, type SearchCoverage, type SearchHitSummary, type SourceIssueSummary, type SystemDestination, type ThemePreference, type UpdaterIssue, type WikiPolicyInput, type WikiSummary } from './api';
+  import { addFederationIndex, addWiki, allowPeerPairingAgain, approveProjectMemoryRequest, approveReview, browseNearbyWiki, browsePublicWiki, cancelModelInstall, checkUpdates, configureFirewall, confirmPairing, connect, createProjectMemory, deleteWiki, detachProjectMemory, dialPeer, downloadUpdate, executeComputation, executeGuidedWikiRepair, hideToTray, importOkf, installModels, installUpdate, loadReviewEvidence, loadWikiBundle, loadWikiPage, manageIntegration, openExternalLink, openSystemDestination, pairPeer, pickOkfImport, pickWikiFolder, prepareGuidedWikiRepair, quitCompletely, reanalyzeReview, refreshApplicationAccess, refreshAutostart, refreshComputations, refreshConnectivity, refreshWikiHealth, rejectComputation, rejectProjectMemoryRequest, rejectReview, relinkWiki, removeFederationIndex, rescanWiki, revokePeer, saveComputationResult, searchKnowledge, setApplicationWikiRole, setAutostart, setPublicPublisherBlocked, setWikiGrant, setWikiIndexing, updatePreferences, updatePublicWikiProfile, updateWikiPolicy, validateOkfImport, verifyWikiConcept, type AppSnapshot, type ApplicationWikiRoleInput, type CloseBehavior, type EnrichmentDraft, type FolderSelection, type IntegrationActionInput, type IntegrationClient, type KnowledgeConceptSummary, type KnowledgePageInput, type LanPreference, type LocalePreference, type OkfImportSummary, type PublicConceptSummaryDto, type RemoteWikiPageInput, type ReviewSummary, type SearchCoverage, type SearchHitSummary, type SourceIssueSummary, type SystemDestination, type ThemePreference, type UpdaterIssue, type WikiPolicyInput, type WikiSearchResultSummary, type WikiSummary } from './api';
   import KnowledgeGraph from './KnowledgeGraph.svelte';
   import ConnectionAdvanced from './ConnectionAdvanced.svelte';
   import GlobalSearch from './GlobalSearch.svelte';
@@ -24,7 +27,7 @@
   import AiClientIcon from './components/identity/AiClientIcon.svelte';
   import DeviceIdentity from './components/identity/DeviceIdentity.svelte';
   import PlatformIcon from './components/identity/PlatformIcon.svelte';
-  import SystemStatusBar from './SystemStatusBar.svelte';
+  import SystemStatusButton from './SystemStatusButton.svelte';
   import WikiTable from './WikiTable.svelte';
   import Checkbox from './components/controls/Checkbox.svelte';
   import SelectField from './components/controls/SelectField.svelte';
@@ -32,25 +35,28 @@
   import TextField from './components/controls/TextField.svelte';
   import { focusChoiceWithoutScroll } from './focus';
   import { message, resolveLocale, type MessageArgs } from './i18n';
+  import { pendingApprovalCount, systemStatuses, type SystemStatusItem, type SystemStatusTarget } from './systemStatus';
+  import { wikiRequiresAttention } from './wikiHealth';
+  import airwikiMark from './assets/airwiki-mark-transparent.png';
 
-  type Destination = 'wikis' | 'search' | 'system';
+  type Destination = 'library' | 'settings';
   type SharedWikiSource = 'nearby' | 'public';
-  type SystemSection = 'models' | 'preferences' | 'updates' | 'connectivity' | 'devices' | 'integrations';
-  type ServiceTarget = 'knowledge' | 'connections' | 'apps';
+  type SettingsSection = 'general' | 'connections' | 'apps';
+  type SearchFilter = 'all' | 'local' | 'nearby' | 'public';
   type Peer = AppSnapshot['peers'][number];
 
-  const destinations = [{ id: 'wikis', labelId: 'desktop-nav-wikis' }] as const;
-  const systemSections = [
-    { id: 'models', labelId: 'settings-local-ai' },
-    { id: 'preferences', labelId: 'desktop-preferences' },
-    { id: 'updates', labelId: 'updates-title' },
-    { id: 'connectivity', labelId: 'connectivity-title' },
-    { id: 'devices', labelId: 'devices-title' },
-    { id: 'integrations', labelId: 'integrations-title' }
+  const settingsSections = [
+    { id: 'general', labelId: 'desktop-settings-general' },
+    { id: 'connections', labelId: 'desktop-connections' },
+    { id: 'apps', labelId: 'desktop-status-ai-apps' }
   ] as const;
 
-  let destination: Destination = 'wikis';
-  let systemSection: SystemSection = 'preferences';
+  let destination: Destination = 'library';
+  let settingsSection: SettingsSection = 'general';
+  let lastSettingsSection: SettingsSection = 'general';
+  let settingsReturnContext: { hash: string; scrollTop: number } | null = null;
+  let settingsLeavePending = false;
+  let searchFilter: SearchFilter = 'all';
   let runtimeMessageId = 'status-working';
   let snapshot: AppSnapshot | null = null;
   let folderSelection: FolderSelection | null = null;
@@ -78,7 +84,6 @@
   let wikiTab: 'content' | 'pending' = 'content';
   let createWikiOpen = false;
   let createProjectMemoryOpen = false;
-  let connectionsOpen = false;
   let locale: LocalePreference = 'system';
   let theme: ThemePreference = 'system';
   let lanPreference: LanPreference = 'undecided';
@@ -111,6 +116,7 @@
   let sharedBrowseSourceName = '';
   let sharedBrowsePlatform: Peer['platform'] = null;
   let sharedBrowseInitialConceptId: string | null = null;
+  let sharedBrowseReturnScrollTop: number | null = null;
   let activeSearchRequestId: string | null = null;
   let searchSubmissionSequence = 0;
   let pendingSearchConcept: { wikiId: string; conceptId: string } | null = null;
@@ -122,63 +128,88 @@
   let mainScrollRegion: HTMLElement | null = null;
   let orderedWikis: WikiSummary[];
   let attentionWikis: WikiSummary[];
+  let publishedConceptCount: number;
   let selectedWiki: WikiSummary | null;
   let selectedWikiReviews: ReviewSummary[];
-  type DialogId = 'new-wiki-source' | 'create-wiki' | 'create-project-memory' | 'import-okf' | 'wiki-details' | 'wiki-access' | 'review' | 'connections' | 'close-choice' | null;
+  let preferencesDirty: boolean;
+  let searchableNearbyCount: number;
+  let privateSearchScope: string;
+  let searchResults: WikiSearchResultSummary[];
+  let filteredSearchResults: WikiSearchResultSummary[];
+  let searchFilterCounts: Record<SearchFilter, number>;
+  let settingsStatuses: SystemStatusItem[];
+  let approvalNotice: { count: number; requestKey: string } | null = null;
+  let pendingRequestKeys = new Set<string>();
+  let pendingRequestsInitialized = false;
+  type DialogId = 'new-wiki-source' | 'create-wiki' | 'create-project-memory' | 'import-okf' | 'wiki-details' | 'wiki-access' | 'review' | 'settings-discard' | 'close-choice' | null;
   let activeDialogId: DialogId;
   let dialogFocusGeneration = 0;
   const dialogFocusState: { activeId: DialogId; returnTarget: HTMLElement | null } = { activeId: null, returnTarget: null };
 
   function actionMessageTone(): 'success' | 'progress' | 'error' {
-    if (actionMessage === t('notice-operation-complete')) return 'success';
-    if (actionMessage === t('status-working') || actionMessage === t('review-evidence-loading')) return 'progress';
+    if (actionMessage === t('notice-operation-complete') || actionMessage === t('integrations-generic-copied')) return 'success';
+    if (actionMessage === t('status-working') || actionMessage === t('review-evidence-loading') || actionMessage.startsWith(t('models-downloading', { artifact: '' }))) return 'progress';
     return 'error';
   }
 
-  function showOperationComplete() {
-    const completedMessage = t('notice-operation-complete');
-    actionMessage = completedMessage;
+  function showTransientMessage(nextMessage: string) {
+    actionMessage = nextMessage;
     if (actionMessageTimeout !== null) window.clearTimeout(actionMessageTimeout);
     actionMessageTimeout = window.setTimeout(() => {
-      if (actionMessage === completedMessage) actionMessage = '';
+      if (actionMessage === nextMessage) actionMessage = '';
       actionMessageTimeout = null;
     }, 3200);
   }
 
-  function applyPreferences(preferences: NonNullable<AppSnapshot['preferences']>) {
+  function clearActionMessage() {
+    actionMessage = '';
+    if (actionMessageTimeout !== null) window.clearTimeout(actionMessageTimeout);
+    actionMessageTimeout = null;
+  }
+
+  function showOperationComplete() {
+    showTransientMessage(t('notice-operation-complete'));
+  }
+
+  function applyGeneralPreferences(preferences: NonNullable<AppSnapshot['preferences']>) {
     locale = preferences.locale;
     theme = preferences.theme;
-    lanPreference = preferences.lanPreference;
     closeBehavior = preferences.closeBehavior;
     automaticUpdateChecks = preferences.automaticUpdateChecks;
   }
 
-  function samePreferences(
+  function sameGeneralPreferences(
     left: NonNullable<AppSnapshot['preferences']>,
     right: NonNullable<AppSnapshot['preferences']>
   ): boolean {
     return left.locale === right.locale
       && left.theme === right.theme
-      && left.lanPreference === right.lanPreference
       && left.closeBehavior === right.closeBehavior
       && left.automaticUpdateChecks === right.automaticUpdateChecks;
   }
 
-  function formMatches(preferences: NonNullable<AppSnapshot['preferences']>): boolean {
+  function generalFormMatches(preferences: NonNullable<AppSnapshot['preferences']>): boolean {
     return preferences.locale === locale
       && preferences.theme === theme
-      && preferences.lanPreference === lanPreference
       && preferences.closeBehavior === closeBehavior
       && preferences.automaticUpdateChecks === automaticUpdateChecks;
   }
 
   function syncPreferences(preferences: AppSnapshot['preferences']) {
     if (!preferences) return;
-    const formChanged = syncedPreferences !== null && !formMatches(syncedPreferences);
-    const serverChanged = syncedPreferences === null || !samePreferences(preferences, syncedPreferences);
-    if (formChanged && !serverChanged) return;
-    applyPreferences(preferences);
+    const formChanged = syncedPreferences !== null && !generalFormMatches(syncedPreferences);
+    const serverChanged = syncedPreferences === null || !sameGeneralPreferences(preferences, syncedPreferences);
+    if (!formChanged || serverChanged) applyGeneralPreferences(preferences);
+    lanPreference = preferences.lanPreference;
     syncedPreferences = { ...preferences };
+  }
+
+  function resetPreferences() {
+    if (syncedPreferences) applyGeneralPreferences(syncedPreferences);
+  }
+
+  function closeBehaviorOption(value: CloseBehavior, label: string) {
+    return { value, label };
   }
 
   function scrollMainTo(top: number) {
@@ -191,7 +222,8 @@
   function focusRouteHeading() {
     void tick().then(() => {
       mainScrollRegion
-        ?.querySelector<HTMLElement>('.route-page h1[tabindex="-1"]')
+        ?.closest<HTMLElement>('.drive-main')
+        ?.querySelector<HTMLElement>(destination === 'settings' ? '.settings-top-bar h1[tabindex="-1"]' : '.route-page h1[tabindex="-1"]')
         ?.focus({ preventScroll: true });
     });
   }
@@ -217,7 +249,7 @@
       'wiki-details': 'details-title',
       'wiki-access': 'share-title',
       review: 'review-title',
-      connections: 'connections-title',
+      'settings-discard': 'settings-discard-title',
       'close-choice': 'close-title'
     };
     return document.querySelector<HTMLElement>(`[role="dialog"][aria-labelledby="${labelIds[dialogId]}"]`);
@@ -234,14 +266,15 @@
     void tick().then(() => {
       if (generation !== dialogFocusGeneration) return;
       const dialog = dialogElement(dialogId);
-      const preferredTarget = dialogId === 'close-choice'
+      const preferredTarget = dialogId === 'close-choice' || dialogId === 'settings-discard'
         ? dialog?.querySelector<HTMLElement>('.primary')
         : dialogId === 'new-wiki-source'
           ? dialog?.querySelector<HTMLElement>('.source-choice-item')
           : dialogId === 'create-wiki' || dialogId === 'create-project-memory' || dialogId === 'import-okf'
             ? dialog?.querySelector<HTMLElement>('input:not([disabled])')
             : dialog?.querySelector<HTMLElement>('.icon-button');
-      (preferredTarget ?? dialogFocusableElements(dialog).at(0))?.focus();
+      const target = preferredTarget ?? dialogFocusableElements(dialog).at(0);
+      target?.focus();
     });
   }
 
@@ -280,8 +313,8 @@
       case 'new-wiki-source':
         newWikiMenuOpen = false;
         break;
-      case 'connections':
-        connectionsOpen = false;
+      case 'settings-discard':
+        settingsLeavePending = false;
         break;
       case null:
         confirmUpdateInstall = false;
@@ -293,11 +326,23 @@
     if (window.location.hash !== hash) window.history.pushState(null, '', hash);
   }
 
-  function openSystemSection(event: MouseEvent, section: SystemSection) {
+  function openSettingsSection(event: MouseEvent, section: SettingsSection) {
     event.preventDefault();
-    systemSection = section;
-    pushHash(`#system/${section}`);
+    activateSettingsSection(section);
+  }
+
+  function activateSettingsSection(section: SettingsSection) {
+    settingsSection = section;
+    lastSettingsSection = section;
+    pushHash(`#settings/${section}`);
     scrollMainTo(0);
+    focusRouteHeading();
+    if (section === 'connections') void runConnectivityAction('refresh');
+    if (section === 'apps' && integrationRequestId === null) {
+      void runIntegrationAction({ kind: 'refresh' });
+      void refreshApplicationAccess();
+      void refreshComputations();
+    }
   }
 
   function translate(id: string, args?: MessageArgs): string {
@@ -313,11 +358,7 @@
   $: t = translatorFor(locale);
 
   function wikiNeedsAttention(wiki: WikiSummary): boolean {
-    return wiki.failedCount > 0
-      || wiki.maintenanceRequired
-      || wiki.needsReviewCount > 0
-      || wiki.okfCompatibility.kind === 'legacyV01'
-      || (wiki.memoryKind === 'project' && wiki.projectMemoryHealth !== 'active')
+    return wikiRequiresAttention(wiki)
       || (snapshot?.sourceIssues.some((issue) => issue.wikiId === wiki.id) ?? false);
   }
 
@@ -327,6 +368,7 @@
     return rightAttention - leftAttention || left.name.localeCompare(right.name, resolveLocale(locale));
   });
   $: attentionWikis = orderedWikis.filter(wikiNeedsAttention);
+  $: publishedConceptCount = orderedWikis.reduce((total, wiki) => total + wiki.publishedCount, 0);
   $: selectedWiki = snapshot?.wikis.find((wiki) => wiki.id === selectedWikiId) ?? null;
   $: selectedWikiReviews = snapshot?.reviews.filter((review) => review.wikiId === selectedWikiId) ?? [];
 
@@ -365,20 +407,6 @@
     return label ? t(label) : '';
   }
 
-  function wikiAttentionSummary(wiki: WikiSummary): string {
-    const summaries: string[] = [];
-    const issueCount = snapshot?.sourceIssues.filter((issue) => issue.wikiId === wiki.id).length ?? 0;
-    const failedCount = Math.max(issueCount, wiki.failedCount);
-    if (failedCount > 0) summaries.push(t('desktop-attention-files-summary', { count: failedCount }));
-    if (wiki.maintenanceRequired) summaries.push(t('desktop-attention-maintenance-summary'));
-    if (wiki.needsReviewCount > 0) summaries.push(t('desktop-wiki-review-count', { count: wiki.needsReviewCount }));
-    if (wiki.okfCompatibility.kind === 'legacyV01') summaries.push(t('desktop-okf-compatibility-legacyV01'));
-    if (wiki.memoryKind === 'project' && wiki.projectMemoryHealth !== 'active') {
-      summaries.push(t(`desktop-project-memory-health-${wiki.projectMemoryHealth ?? 'invalid'}`));
-    }
-    return summaries.join(' · ');
-  }
-
   $: if (typeof document !== 'undefined') {
     document.documentElement.lang = resolveLocale(locale);
     document.documentElement.dataset.theme = theme;
@@ -386,7 +414,37 @@
     document.documentElement.style.colorScheme = theme === 'system' ? 'light dark' : theme;
   }
 
+  $: preferencesDirty = syncedPreferences !== null && (
+    syncedPreferences.locale !== locale
+    || syncedPreferences.theme !== theme
+    || syncedPreferences.closeBehavior !== closeBehavior
+    || syncedPreferences.automaticUpdateChecks !== automaticUpdateChecks
+  );
+  $: searchableNearbyCount = snapshot?.peers.filter((peer) =>
+    peer.trust === 'trusted'
+    && peer.activity !== 'notObserved'
+    && peer.grantedWikiIds.length > 0
+  ).length ?? 0;
+  $: privateSearchScope = searchableNearbyCount > 0
+    ? t('desktop-search-private-scope-nearby', { count: searchableNearbyCount })
+    : t('desktop-search-private-scope-local');
+  $: searchResults = question.trim()
+    && snapshot?.search?.requestId === activeSearchRequestId
+    ? snapshot.search.results
+    : [];
+  $: searchFilterCounts = {
+    all: searchResults.length,
+    local: searchResults.filter((result) => result.source.kind === 'local').length,
+    nearby: searchResults.filter((result) => result.source.kind === 'nearby').length,
+    public: searchResults.filter((result) => result.source.kind === 'public').length
+  };
+  $: filteredSearchResults = searchFilter === 'all'
+    ? searchResults
+    : searchResults.filter((result) => result.source.kind === searchFilter);
+  $: settingsStatuses = snapshot ? systemStatuses(snapshot, t) : [];
+
   $: activeDialogId = closeChoiceRequired ? 'close-choice'
+    : settingsLeavePending ? 'settings-discard'
     : selectedReview !== null ? 'review'
       : editingWikiId !== null ? 'wiki-access'
         : detailsWikiId !== null ? 'wiki-details'
@@ -394,7 +452,6 @@
             : createWikiOpen && folderSelection !== null ? 'create-wiki'
               : createProjectMemoryOpen && folderSelection !== null ? 'create-project-memory'
                 : newWikiMenuOpen ? 'new-wiki-source'
-                : connectionsOpen ? 'connections'
                   : null;
 
   $: {
@@ -417,40 +474,56 @@
   onMount(() => {
     const syncRoute = () => {
       const [rawRoute, section, detail] = window.location.hash.slice(1).split('/');
-      const route = rawRoute === 'library' || rawRoute === 'review' || rawRoute === 'home' || rawRoute === 'shared' || rawRoute === '' ? 'wikis' : rawRoute;
-      const matchedDestination = destinations.find((candidate) => candidate.id === route);
-      if (matchedDestination) {
-        destination = matchedDestination.id;
-        if (route !== 'search') {
-          dismissSharedBrowse();
-        }
-        if (route === 'wikis' && section) {
-          selectedWikiId = section;
-          wikiTab = detail === 'pending' ? 'pending' : 'content';
-        } else if (route === 'wikis') {
-          selectedWikiId = null;
-        }
+      const returningFromSharedBrowse = sharedBrowseOpen
+        && section === undefined
+        && ['library', 'home', 'wikis', 'search'].includes(rawRoute);
+      const sharedReturnScrollTop = returningFromSharedBrowse ? sharedBrowseReturnScrollTop : null;
+      const legacySettings: Record<string, SettingsSection> = {
+        models: 'general', preferences: 'general', updates: 'general',
+        connectivity: 'connections', devices: 'connections', integrations: 'apps',
+        connections: 'connections', apps: 'apps'
+      };
+      const requestedSettings = rawRoute === 'settings'
+        ? settingsSections.find((candidate) => candidate.id === section)?.id ?? 'general'
+        : rawRoute === 'system' || rawRoute === 'drawer'
+          ? legacySettings[section ?? ''] ?? 'general'
+          : rawRoute === 'connections'
+            ? 'connections'
+            : null;
+      if (requestedSettings) {
+        destination = 'settings';
+        settingsSection = requestedSettings;
+        lastSettingsSection = requestedSettings;
+        settingsReturnContext ??= { hash: '#library', scrollTop: 0 };
+        const canonical = `#settings/${requestedSettings}`;
+        if (window.location.hash !== canonical) window.history.replaceState(null, '', canonical);
         scrollMainTo(0);
+        return;
       }
-      const matchedSection = systemSections.find((candidate) => candidate.id === section);
-      if (route === 'system' && matchedSection) {
-        if (section === 'connectivity' || section === 'devices' || section === 'integrations') {
-          destination = 'wikis';
-          openConnectionsPanel();
-          pushHash('#wikis');
-          if (section !== 'integrations') void runConnectivityAction('refresh');
-          return;
-        }
-        destination = 'system';
-        systemSection = matchedSection.id;
-        scrollMainTo(0);
-      } else if (route === 'system') {
-        destination = 'system';
-        systemSection = 'preferences';
-        scrollMainTo(0);
-      } else if (route === 'search') {
-        destination = 'search';
+      if (destination === 'settings' && preferencesDirty) {
+        window.history.pushState(null, '', `#settings/${settingsSection}`);
+        settingsLeavePending = true;
+        return;
       }
+      destination = 'library';
+      if (rawRoute === 'wikis' && section && section !== 'wiki') {
+        selectedWikiId = section;
+        wikiTab = detail === 'pending' ? 'pending' : 'content';
+      } else if (section === 'wiki') {
+        wikiTab = detail === 'pending' ? 'pending' : 'content';
+      } else if (section === 'shared') {
+        sharedBrowseOpen = true;
+      } else if (!['search', 'review', 'shared'].includes(rawRoute)) {
+        selectedWikiId = null;
+        dismissSharedBrowse();
+      }
+      const canonical = selectedWikiId
+        ? `#library/wiki${wikiTab === 'pending' ? '/pending' : ''}`
+        : sharedBrowseOpen
+          ? '#library/shared'
+          : '#library';
+      if (window.location.hash !== canonical) window.history.replaceState(null, '', canonical);
+      scrollMainTo(sharedReturnScrollTop ?? settingsReturnContext?.scrollTop ?? 0);
     };
     syncRoute();
     window.addEventListener('hashchange', syncRoute);
@@ -461,9 +534,10 @@
         const elements = dialogFocusableElements(dialog);
         const first = elements.at(0);
         const last = elements.at(-1);
-        const initial = dialog.getAttribute('aria-labelledby') === 'close-title'
-          ? dialog?.querySelector<HTMLElement>('.primary') ?? first
-          : dialog?.querySelector<HTMLElement>('.icon-button') ?? first;
+        const dialogLabel = dialog.getAttribute('aria-labelledby');
+        const initial = dialogLabel === 'close-title' || dialogLabel === 'settings-discard-title'
+          ? dialog.querySelector<HTMLElement>('.primary') ?? first
+          : dialog.querySelector<HTMLElement>('.icon-button') ?? first;
         if (!first || !last) {
           event.preventDefault();
           return;
@@ -481,15 +555,18 @@
       const command = event.metaKey || event.ctrlKey;
       if (command && event.key === '1') {
         event.preventDefault();
-        select('wikis');
+        select('library');
       } else if (command && event.key.toLowerCase() === 'k') {
         event.preventDefault();
-        destination = 'search';
-        pushHash('#search');
-        requestAnimationFrame(() => document.querySelector<HTMLInputElement>('#global-search')?.focus());
+        if (destination === 'settings' && preferencesDirty) {
+          settingsLeavePending = true;
+        } else {
+          openGlobalSearch();
+          requestAnimationFrame(() => document.querySelector<HTMLInputElement>('#global-search')?.focus());
+        }
       } else if (command && event.key === ',') {
         event.preventDefault();
-        select('system');
+        openSettings(lastSettingsSection);
       } else if (event.key === 'Escape') {
         dismissActiveDialog();
       }
@@ -503,6 +580,7 @@
       : Promise.resolve(() => {});
     connect((event) => {
       snapshot = event.snapshot;
+      observePendingRequests(event.snapshot);
       if (
         wikiLoadFailedId
         && event.snapshot.knowledge?.wikiId === wikiLoadFailedId
@@ -552,6 +630,7 @@
     }).then(async (initial) => {
       const connected = snapshot && snapshot.sequence > initial.sequence ? snapshot : initial;
       snapshot = connected;
+      observePendingRequests(connected);
       syncIntegrationRequest(
         connected.integrationRequestId,
         connected.integrationCompletedRequestId
@@ -562,7 +641,7 @@
       await tick();
       syncRoute();
     }).catch(() => { runtimeMessageId = 'error-generic'; });
-    if (destination === 'system') {
+    if (destination === 'settings') {
       void refreshAutostartState();
       void runConnectivityAction('refresh');
       void runIntegrationAction({ kind: 'refresh' });
@@ -577,57 +656,119 @@
 
   function select(next: Destination) {
     actionMessage = '';
-    destination = next;
-    selectedWikiId = null;
-    if (next !== 'search') {
+    if (next === 'settings') openSettings(lastSettingsSection);
+    else {
+      selectedWikiId = null;
       dismissSharedBrowse();
+      destination = 'library';
+      settingsReturnContext = null;
+      pushHash('#library');
+      scrollMainTo(0);
+      void refreshHealth();
+      focusRouteHeading();
     }
-    scrollMainTo(0);
-    if (next === 'system') {
-      systemSection = 'preferences';
-      pushHash('#system/preferences');
-      void refreshAutostartState();
-      void runConnectivityAction('refresh');
-      void runIntegrationAction({ kind: 'refresh' });
-    } else {
-      pushHash(`#${next}`);
+  }
+
+  function openServiceStatus(target: SystemStatusTarget) {
+    actionMessage = '';
+    openSettings(target);
+  }
+
+  function openSettings(section: SettingsSection = lastSettingsSection) {
+    if (destination !== 'settings') {
+      settingsReturnContext = {
+        hash: window.location.hash || '#library',
+        scrollTop: mainScrollRegion?.scrollTop ?? 0
+      };
     }
-    if (next === 'wikis') void refreshHealth();
+    destination = 'settings';
+    activateSettingsSection(section);
+    void refreshAutostartState();
+  }
+
+  function restoreLibraryContext() {
+    const context = settingsReturnContext ?? { hash: '#library', scrollTop: 0 };
+    destination = 'library';
+    settingsLeavePending = false;
+    settingsReturnContext = null;
+    pushHash(context.hash.startsWith('#library') ? context.hash : '#library');
+    scrollMainTo(context.scrollTop);
     focusRouteHeading();
   }
 
-  function openServiceStatus(target: ServiceTarget) {
-    actionMessage = '';
-    if (target === 'knowledge' && (!snapshot?.model?.active || snapshot.modelInstall)) {
-      destination = 'system';
-      systemSection = 'models';
-      pushHash('#system/models');
-      scrollMainTo(0);
-      focusRouteHeading();
+  function requestSettingsBack() {
+    if (preferencesDirty) settingsLeavePending = true;
+    else restoreLibraryContext();
+  }
+
+  function resolveSettingsBack(discard: boolean) {
+    if (!discard) {
+      settingsLeavePending = false;
       return;
     }
-    destination = 'wikis';
-    selectedWikiId = null;
-    connectionsOpen = false;
-    if (target === 'connections' || target === 'apps') openConnectionsPanel();
-    pushHash('#wikis');
-    scrollMainTo(0);
-    focusRouteHeading();
-    if (target === 'connections') void runConnectivityAction('refresh');
-    if (target === 'knowledge') void refreshHealth();
+    resetPreferences();
+    restoreLibraryContext();
   }
 
-  function openConnectionsPanel() {
-    connectionsOpen = true;
-    if (integrationRequestId === null) void runIntegrationAction({ kind: 'refresh' });
+  function observePendingRequests(current: AppSnapshot) {
+    const keys = new Set([
+      ...current.projectMemoryRequests.map((request) => `memory:${request.requestId}`),
+      ...current.pendingComputations.map((request) => `computation:${request.runId}`)
+    ]);
+    if (pendingRequestsInitialized) {
+      const newKey = [...keys].find((key) => !pendingRequestKeys.has(key));
+      if (newKey) approvalNotice = { count: pendingApprovalCount(current), requestKey: newKey };
+    }
+    if (approvalNotice && !keys.has(approvalNotice.requestKey)) approvalNotice = null;
+    pendingRequestKeys = keys;
+    pendingRequestsInitialized = true;
+  }
+
+  function reviewPendingRequests() {
+    approvalNotice = null;
+    openSettings('apps');
+  }
+
+  async function changeLanPreference(value: LanPreference) {
+    const previous = lanPreference;
+    const saved = syncedPreferences;
+    if (!saved || value === previous) return;
+    lanPreference = value;
+    actionBusy = true;
+    try {
+      await updatePreferences({
+        locale: saved.locale,
+        theme: saved.theme,
+        lanPreference: value,
+        closeBehavior: saved.closeBehavior,
+        automaticUpdateChecks: saved.automaticUpdateChecks,
+        completeOnboarding: false
+      });
+      syncedPreferences = { ...saved, lanPreference: value };
+      showOperationComplete();
+      void runConnectivityAction('refresh');
+    } catch {
+      lanPreference = previous;
+      actionMessage = t('error-generic');
+    } finally {
+      actionBusy = false;
+    }
   }
 
   function openGlobalSearch() {
-    if (destination !== 'search') {
-      destination = 'search';
-      pushHash('#search');
-      scrollMainTo(0);
+    if (destination === 'settings' && preferencesDirty) {
+      settingsLeavePending = true;
+      return;
     }
+    // The search field owns focus. This transition must not call restoreLibraryContext,
+    // whose accessible back-navigation contract intentionally focuses the page heading.
+    selectedWikiId = null;
+    dismissSharedBrowse();
+    destination = 'library';
+    settingsLeavePending = false;
+    settingsReturnContext = null;
+    pushHash('#library');
+    scrollMainTo(0);
   }
 
   async function submitGlobalSearch() {
@@ -638,7 +779,7 @@
   function openWikiTab(tab: 'content' | 'pending') {
     if (!selectedWikiId) return;
     wikiTab = tab;
-    pushHash(`#wikis/${selectedWikiId}${tab === 'pending' ? '/pending' : ''}`);
+    pushHash(`#library/wiki${tab === 'pending' ? '/pending' : ''}`);
     if (tab === 'pending' && selectedWikiReviews[0] && !selectedReview) void openReview(selectedWikiReviews[0]);
   }
 
@@ -677,7 +818,7 @@
   async function copyMcpSetup(command: string, args: string[]) {
     try {
       await navigator.clipboard.writeText(mcpSetupText(command, args));
-      actionMessage = t('integrations-generic-copied');
+      showTransientMessage(t('integrations-generic-copied'));
     } catch {
       actionMessage = t('integrations-generic-copy-failed');
     }
@@ -812,11 +953,6 @@
     }
   }
 
-  function openNetworkPreferences() {
-    connectionsOpen = false;
-    select('system');
-  }
-
   function shortPeerId(peerId: string): string {
     return peerId.length > 18 ? `${peerId.slice(0, 9)}…${peerId.slice(-7)}` : peerId;
   }
@@ -856,11 +992,6 @@
       wikiHealthRequestId = null;
       actionMessage = t('home-wiki-failed');
     }
-  }
-
-  async function openAttentionWiki() {
-    const wikiId = snapshot?.wikiHealth?.attentionWikiId;
-    if (wikiId) await openWiki(wikiId);
   }
 
   function autostartLabel(currentLocale: LocalePreference): string {
@@ -966,10 +1097,6 @@
     return value.length <= 16 ? value : `${value.slice(0, 8)}…${value.slice(-4)}`;
   }
 
-  function peerFor(nodeId: string): Peer | null {
-    return snapshot?.peers.find((candidate) => candidate.peerId === nodeId) ?? null;
-  }
-
   function peerDisplayName(peer: Peer): string {
     return peer.deviceName ?? t('desktop-device-identified', { id: compactIdentity(peer.peerId) });
   }
@@ -980,33 +1107,27 @@
     return t('desktop-device-platform-unknown');
   }
 
-  function searchOwnerFor(hit: SearchHitSummary): string {
-    if (hit.route === 'publicNetwork') {
-      return t('desktop-public-publisher', { id: compactIdentity(hit.nodeId) });
+  function resultWikiName(result: WikiSearchResultSummary): string {
+    return result.wikiName ?? t('desktop-shared-wiki-fallback');
+  }
+
+  function resultScopeLabel(result: WikiSearchResultSummary): string {
+    if (result.source.kind === 'local') return t('desktop-search-local-source');
+    if (result.source.kind === 'nearby') return t('desktop-private-network');
+    return t('desktop-public-network');
+  }
+
+  function resultOwnerName(result: WikiSearchResultSummary): string {
+    if (result.source.kind === 'local') return t('desktop-local-device-owner');
+    if (result.source.kind === 'nearby') {
+      return result.source.deviceName ?? t('desktop-shared-device-fallback');
     }
-    if (hit.nodeId === snapshot?.nodeId) {
-      return t('desktop-local-device-owner');
-    }
-    const peer = peerFor(hit.nodeId);
-    return peer ? peerDisplayName(peer) : t('desktop-device-identified', { id: compactIdentity(hit.nodeId) });
+    return t('desktop-public-publisher', { id: result.source.publisherLabel });
   }
 
-  function searchPlatformFor(hit: SearchHitSummary): Peer['platform'] {
-    if (hit.route === 'publicNetwork') return null;
-    if (hit.nodeId === snapshot?.nodeId) return snapshot?.platform ?? null;
-    return peerFor(hit.nodeId)?.platform ?? null;
-  }
-
-  function searchIdentityLabel(hit: SearchHitSummary): string {
-    return hit.route === 'publicNetwork'
-      ? t('desktop-public-network')
-      : platformLabel(searchPlatformFor(hit));
-  }
-
-  function searchScopeFor(hit: SearchHitSummary): string {
-    if (hit.route === 'publicNetwork') return t('desktop-public-network');
-    if (hit.nodeId === snapshot?.nodeId) return t('desktop-search-local-source');
-    return t('desktop-private-network');
+  function resultPlatform(result: WikiSearchResultSummary): Peer['platform'] {
+    if (result.source.kind === 'local') return snapshot?.platform ?? null;
+    return result.source.kind === 'nearby' ? result.source.platform : null;
   }
 
   function peerActivityLabel(peer: Peer): string {
@@ -1025,10 +1146,6 @@
 
   function visiblePeerCount(): number {
     return snapshot?.peers.filter((peer) => peer.activity !== 'notObserved').length ?? 0;
-  }
-
-  function isPublicSearchHit(hit: SearchHitSummary): boolean {
-    return hit.route === 'publicNetwork';
   }
 
   function wikiPeers(wikiId: string): Peer[] {
@@ -1059,6 +1176,14 @@
     } catch {
       actionMessage = t('error-collection');
     }
+  }
+
+  async function pickOnboardingFolder(): Promise<FolderSelection | null> {
+    return pickWikiFolder();
+  }
+
+  async function createOnboardingWiki(name: string, folderToken: string, continuous: boolean) {
+    await addWiki(name, folderToken, continuous);
   }
 
   async function chooseProjectMemoryFolder() {
@@ -1197,14 +1322,18 @@
   function editWiki(wiki: WikiSummary) {
     if (wiki.restrictions.length !== 0) return;
     editingWikiId = wiki.id;
-    wikiPolicy = {
+    wikiPolicy = policyFromWiki(wiki);
+    publicDescription = wiki.publicDescription;
+    publicLanguages = wiki.publicLanguages;
+  }
+
+  function policyFromWiki(wiki: WikiSummary): WikiPolicyInput {
+    return {
       localOnly: wiki.localOnly,
       peerShareable: wiki.peerShareable,
       allowExternalAi: wiki.allowExternalAi,
       internetPublic: wiki.internetPublic
     };
-    publicDescription = wiki.publicDescription;
-    publicLanguages = wiki.publicLanguages;
   }
 
   function showWikiDetails(wikiId: string) {
@@ -1245,7 +1374,7 @@
       await deleteWiki(wikiId);
       detailsWikiId = null;
       selectedWikiId = null;
-      window.location.hash = '#wikis';
+      window.location.hash = '#library';
     } catch {
       actionMessage = t('error-collection');
     } finally {
@@ -1259,7 +1388,7 @@
       await detachProjectMemory(wikiId);
       detailsWikiId = null;
       selectedWikiId = null;
-      window.location.hash = '#wikis';
+      window.location.hash = '#library';
       showOperationComplete();
     } catch (error) {
       if (uiErrorMessageKey(error) !== 'humanConfirmationRequired') {
@@ -1270,19 +1399,31 @@
     }
   }
 
-  async function saveWikiPolicy() {
+  async function changeWikiPolicyChannel(
+    channel: 'peerShareable' | 'allowExternalAi' | 'internetPublic',
+    enabled: boolean
+  ) {
     if (!editingWikiId) return;
+    const wikiId = editingWikiId;
+    const previousPolicy = { ...wikiPolicy };
+    const policy: WikiPolicyInput = {
+      ...wikiPolicy,
+      [channel]: enabled,
+      localOnly: false
+    };
+    policy.localOnly = !policy.peerShareable && !policy.allowExternalAi && !policy.internetPublic;
+    wikiPolicy = policy;
     actionBusy = true;
+    actionMessage = '';
     try {
-      const policy = {
-        ...wikiPolicy,
-        localOnly: !wikiPolicy.peerShareable && !wikiPolicy.allowExternalAi && !wikiPolicy.internetPublic
-      };
-      await updateWikiPolicy(editingWikiId, policy);
-      wikiPolicy = policy;
+      await updateWikiPolicy(wikiId, policy);
       showOperationComplete();
-    } catch {
-      actionMessage = t('error-collection');
+    } catch (error) {
+      const currentWiki = snapshot?.wikis.find((wiki) => wiki.id === wikiId);
+      wikiPolicy = currentWiki ? policyFromWiki(currentWiki) : previousPolicy;
+      if (uiErrorMessageKey(error) !== 'humanConfirmationRequired') {
+        actionMessage = t('error-collection');
+      }
     } finally {
       actionBusy = false;
     }
@@ -1345,6 +1486,7 @@
     searchBusy = true;
     const submittedQuestion = question;
     const submittedPublicScope = includePublic;
+    searchFilter = 'all';
     try {
       const requestId = await searchKnowledge(submittedQuestion, submittedPublicScope);
       if (submissionSequence === searchSubmissionSequence && question === submittedQuestion && includePublic === submittedPublicScope) {
@@ -1363,6 +1505,7 @@
 
   function updateSearchQuestion(value: string) {
     question = value;
+    if (!value.trim()) searchFilter = 'all';
     searchSubmissionSequence += 1;
     searchBusy = false;
     activeSearchRequestId = null;
@@ -1377,28 +1520,33 @@
     dismissSharedBrowse();
   }
 
-  async function openSearchHit(hit: SearchHitSummary) {
-    const localWiki = snapshot?.wikis.some((wiki) => wiki.id === hit.wikiId);
-    if (localWiki && hit.nodeId === snapshot?.nodeId) {
-      destination = 'wikis';
-      selectedWikiId = hit.wikiId;
-      pushHash(`#wikis/${hit.wikiId}`);
+  async function openSearchWiki(result: WikiSearchResultSummary) {
+    const bestMatch = result.matches[0];
+    if (bestMatch) await openSearchHit(result, bestMatch);
+  }
+
+  async function openSearchHit(result: WikiSearchResultSummary, hit: SearchHitSummary) {
+    if (result.source.kind === 'local') {
+      destination = 'library';
+      selectedWikiId = result.wikiId;
+      pushHash('#library/wiki');
       knowledgeMode = 'document';
       scrollMainTo(0);
       focusRouteHeading();
-      pendingSearchConcept = { wikiId: hit.wikiId, conceptId: hit.conceptId };
-      await loadWikiBundle(hit.wikiId);
+      pendingSearchConcept = { wikiId: result.wikiId, conceptId: hit.conceptId };
+      await loadWikiBundle(result.wikiId);
       await openPendingSearchConcept(snapshot);
       return;
     }
-    destination = 'search';
-    pushHash('#search');
+    destination = 'library';
+    sharedBrowseReturnScrollTop = mainScrollRegion?.scrollTop ?? 0;
+    pushHash('#library/shared');
     scrollMainTo(0);
-    const browseSource: SharedWikiSource = hit.route === 'publicNetwork' ? 'public' : 'nearby';
+    const browseSource: SharedWikiSource = result.source.kind === 'public' ? 'public' : 'nearby';
     const browseGeneration = ++sharedBrowseGeneration;
     sharedBrowseSource = browseSource;
-    sharedBrowseSourceName = searchOwnerFor(hit);
-    sharedBrowsePlatform = searchPlatformFor(hit);
+    sharedBrowseSourceName = resultOwnerName(result);
+    sharedBrowsePlatform = resultPlatform(result);
     sharedBrowseInitialConceptId = hit.conceptId;
     sharedBrowseOpen = true;
     sharedBrowseLoading = true;
@@ -1416,9 +1564,12 @@
           expectedFingerprint: null
         }
       };
-      const requestId = browseSource === 'nearby'
-        ? await browseNearbyWiki(hit.nodeId, hit.wikiId, options)
-        : await browsePublicWiki(hit.nodeId, hit.wikiId, options);
+      const requestId = result.source.kind === 'nearby'
+        ? await browseNearbyWiki(result.source.peerId, result.wikiId, options)
+        : result.source.kind === 'public'
+          ? await browsePublicWiki(result.source.publisherId, result.wikiId, options)
+          : null;
+      if (!requestId) return;
       if (browseGeneration !== sharedBrowseGeneration || !sharedBrowseOpen) return;
       sharedBrowseRequestId = requestId;
       const completedRequestId = browseSource === 'nearby'
@@ -1449,11 +1600,14 @@
     sharedBrowseRequestKind = null;
     sharedBrowsePendingPage = null;
     sharedBrowseInitialConceptId = null;
+    sharedBrowseReturnScrollTop = null;
   }
 
   function closeSharedBrowse() {
+    const returnScrollTop = sharedBrowseReturnScrollTop ?? 0;
     dismissSharedBrowse();
-    scrollMainTo(0);
+    pushHash('#library');
+    scrollMainTo(returnScrollTop);
     focusRouteHeading();
   }
 
@@ -1726,10 +1880,10 @@
   }
 
   async function openWiki(wikiId: string, tab: 'content' | 'pending' = 'content') {
-    destination = 'wikis';
+    destination = 'library';
     selectedWikiId = wikiId;
     wikiTab = tab;
-    pushHash(`#wikis/${wikiId}${tab === 'pending' ? '/pending' : ''}`);
+    pushHash(`#library/wiki${tab === 'pending' ? '/pending' : ''}`);
     knowledgeMode = 'document';
     pendingKnowledgePage = null;
     wikiLoadFailedId = null;
@@ -1785,6 +1939,19 @@
     actionBusy = true;
     try {
       await updatePreferences({ locale, theme, lanPreference, closeBehavior, automaticUpdateChecks, completeOnboarding });
+      if (syncedPreferences) {
+        syncedPreferences = {
+          ...syncedPreferences,
+          locale,
+          theme,
+          lanPreference,
+          closeBehavior,
+          automaticUpdateChecks,
+          completedOnboardingVersion: completeOnboarding
+            ? (syncedPreferences.completedOnboardingVersion ?? 1)
+            : syncedPreferences.completedOnboardingVersion
+        };
+      }
       showOperationComplete();
     } catch {
       actionMessage = t('error-generic');
@@ -1801,10 +1968,9 @@
 
   async function prepareLocalModel() {
     actionBusy = true;
-    actionMessage = '';
+    clearActionMessage();
     try {
       await installModels();
-      actionMessage = t('models-downloading', { artifact: snapshot?.model?.displayName ?? t('component-local-ai') });
     } catch (error) {
       if (uiErrorMessageKey(error) !== 'humanConfirmationRequired') {
         actionMessage = t('error-local-ai');
@@ -1813,9 +1979,21 @@
       actionBusy = false;
     }
   }
+
+  async function cancelLocalModelInstall() {
+    actionBusy = true;
+    clearActionMessage();
+    try {
+      await cancelModelInstall();
+    } catch {
+      actionMessage = t('error-local-ai');
+    } finally {
+      actionBusy = false;
+    }
+  }
 </script>
 
-<svelte:head><meta name="theme-color" content="#0b1118" /></svelte:head>
+<svelte:head><meta name="theme-color" content="#0b151a" /></svelte:head>
 
 {#if snapshot?.phase === 'failed'}
   <main class="onboarding startup startup-failed" role="alert">
@@ -1833,149 +2011,154 @@
     <p class="lede" aria-live="polite">{t(runtimeMessageId)}</p>
   </main>
 {:else if snapshot.preferences.completedOnboardingVersion == null}
-  <OnboardingFlow {snapshot} bind:locale bind:lanPreference bind:closeBehavior bind:modelLicensesConfirmed {actionBusy} {actionMessage} onprepare={prepareLocalModel} onfinish={() => savePreferences(true)} />
+  <OnboardingFlow {snapshot} bind:locale bind:modelLicensesConfirmed {actionBusy} {actionMessage} onpickfolder={pickOnboardingFolder} oncreatewiki={createOnboardingWiki} onprepare={prepareLocalModel} onfinish={() => savePreferences(true)} />
 {:else}
 <div class="shell drive-shell" inert={activeDialogId !== null} aria-hidden={activeDialogId !== null ? 'true' : undefined}>
   <main class="drive-main">
-    <header class="top-bar">
-      <button class="top-brand" onclick={() => select('wikis')} aria-label={t('desktop-nav-wikis')}><span class="brand-mark" aria-hidden="true">A</span><span>AirWiki</span></button>
-      <GlobalSearch
-        {question}
-        {includePublic}
-        busy={searchBusy}
-        ready={snapshot.model?.active === true}
-        platform={snapshot.platform}
-        {t}
-        onquestion={updateSearchQuestion}
-        onpublic={updatePublicSearch}
-        onsearch={submitGlobalSearch}
-        onopen={openGlobalSearch}
-      />
-      <div class="top-actions"><button class="secondary" aria-expanded={newWikiMenuOpen} onclick={() => { newWikiMenuOpen = !newWikiMenuOpen; }}><Plus size={17} aria-hidden="true" />{t('desktop-new-wiki')}</button><button class="icon-button" class:active={destination === 'system'} aria-label={t('desktop-nav-system')} onclick={() => select('system')}><Settings2 size={19} aria-hidden="true" /></button></div>
-    </header>
+    {#if destination === 'settings'}
+      <header class="settings-top-bar">
+        <button class="settings-back" onclick={requestSettingsBack}><ArrowLeft size={18} aria-hidden="true" />{t('action-back')}</button>
+        <h1 tabindex="-1">{t(settingsSections.find((section) => section.id === settingsSection)?.labelId ?? 'desktop-settings-general')}</h1>
+      </header>
+    {:else}
+      <header class="top-bar">
+        <button class="top-brand" onclick={() => select('library')} aria-label={t('desktop-library-title')}><img class="top-brand-logo" src={airwikiMark} alt="" aria-hidden="true" /><span>AirWiki</span></button>
+        <GlobalSearch
+          {question}
+          {includePublic}
+          busy={searchBusy}
+          ready={snapshot.model?.active === true}
+          platform={snapshot.platform}
+          privateScopeLabel={privateSearchScope}
+          {t}
+          onquestion={updateSearchQuestion}
+          onpublic={updatePublicSearch}
+          onsearch={submitGlobalSearch}
+          onopen={openGlobalSearch}
+        />
+        <div class="top-actions"><button class="secondary new-wiki-command" aria-label={t('desktop-new-wiki')} title={t('desktop-new-wiki')} aria-expanded={newWikiMenuOpen} onclick={() => { newWikiMenuOpen = !newWikiMenuOpen; }}><Plus size={17} aria-hidden="true" />{t('desktop-new-wiki')}</button><SystemStatusButton {snapshot} {t} onclick={() => openSettings(lastSettingsSection)} /></div>
+      </header>
+    {/if}
+
+    {#if approvalNotice}
+      <aside class="approval-notice" role="status" aria-live="polite">
+        <div><strong>{t('desktop-approval-notice-title', { count: approvalNotice.count })}</strong><p>{t('desktop-approval-notice-body')}</p></div>
+        <div class="row-actions"><button class="primary" onclick={reviewPendingRequests}>{t('desktop-approval-notice-review')}</button><button class="text-action" onclick={() => { approvalNotice = null; }}>{t('desktop-approval-notice-dismiss')}</button></div>
+      </aside>
+    {/if}
 
     <section
       class="drive-page"
-      class:wiki-open={destination === 'wikis' && selectedWiki !== null}
-      class:shared-wiki-open={destination === 'search' && sharedBrowseOpen}
+      class:wiki-open={destination === 'library' && selectedWiki !== null}
+      class:shared-wiki-open={destination === 'library' && sharedBrowseOpen}
+      class:settings-open={destination === 'settings'}
       bind:this={mainScrollRegion}
     >
-      {#key `${destination}:${selectedWikiId ?? ''}:${wikiTab}:${systemSection}`}
+      {#key `${destination}:${selectedWikiId ?? ''}:${wikiTab}:${settingsSection}:${sharedBrowseOpen}`}
         <div
           class="route-page drive-route"
-          class:wiki-route={destination === 'wikis' && selectedWiki !== null}
-          class:shared-wiki-route={destination === 'search' && sharedBrowseOpen}
+          class:wiki-route={destination === 'library' && selectedWiki !== null}
+          class:shared-wiki-route={destination === 'library' && sharedBrowseOpen}
+          class:settings-route={destination === 'settings'}
           data-route={destination}
         >
-          {#if destination === 'wikis' && !selectedWiki}
-            <header class="page-heading">
-              <div><h1 tabindex="-1">{t('desktop-page-wikis-title')}</h1><p>{t('desktop-page-wikis-body')}</p></div>
-            </header>
-            {#if (snapshot.wikiHealth?.status === 'failed' || (snapshot.wikiHealth?.errorCount ?? 0) > 0) && attentionWikis.length === 0}
-              <div class="repair-summary" role="alert">
-                <div><strong>{t('desktop-health-check-failed-title')}</strong><p>{t('desktop-health-check-failed-body')}</p></div>
-                <button class="secondary" onclick={refreshHealth} disabled={wikiHealthRequestId !== null}>{wikiHealthRequestId ? t('home-wiki-checking') : t('updates-check-now')}</button>
-              </div>
-            {/if}
-            <WikiTable wikis={orderedWikis} scans={snapshot.wikiScans} {t} onopen={openWiki} />
-            {#if snapshot.projectMemoryRequests.length > 0}
-              <section class="workspace-section project-memory-requests" aria-labelledby="project-memory-requests-title">
-                <div class="section-heading"><div><h2 id="project-memory-requests-title">{t('desktop-project-memory-requests-title')}</h2><p>{t('desktop-project-memory-requests-body')}</p></div><button class="text-action" onclick={refreshApplicationAccess}>{t('action-refresh')}</button></div>
-                <div class="computation-list">
-                  {#each snapshot.projectMemoryRequests as request (request.requestId)}
-                    <article>
-                      <span class="pending-icon project-memory-link" aria-hidden="true"><BookOpen size={17} /></span>
-                      <div><strong>{t(request.kind === 'initialize' ? 'desktop-project-memory-initialize-request' : 'desktop-project-memory-attach-request', { application: request.applicationName })}</strong><p>{t('desktop-project-memory-request-folder', { folder: request.folderName })}</p>{#if request.requestedName}<small>{request.requestedName}</small>{/if}</div>
-                      <div class="row-actions"><button class="secondary" disabled={actionBusy} onclick={() => decideProjectMemoryRequest(request.requestId, false)}>{t('action-reject')}</button><button class="primary" disabled={actionBusy} onclick={() => decideProjectMemoryRequest(request.requestId, true)}>{t('action-approve')}</button></div>
-                    </article>
-                  {/each}
+          {#if destination === 'library' && sharedBrowseOpen}
+            <SharedWikiViewer source={sharedBrowseSource} sourceName={sharedBrowseSourceName} sourcePlatform={sharedBrowsePlatform} sourceLabel={sharedBrowseSource === 'public' ? t('desktop-public-network') : platformLabel(sharedBrowsePlatform)} browse={sharedBrowseLoading ? null : sharedBrowseSource === 'nearby' ? snapshot.nearbyBrowse : snapshot.publicBrowse} loading={sharedBrowseLoading} structureLoading={sharedBrowseStructureLoading} pageLoading={sharedBrowsePageLoading} initialConceptId={sharedBrowseInitialConceptId} {t} metadata={publicConceptMetadata} onback={closeSharedBrowse} onopenpage={openSharedWikiPage} onblock={sharedBrowseSource === 'public' ? (publisherId) => changePublisherBlock(publisherId, true) : null} />
+          {:else if destination === 'library' && !selectedWiki}
+            <header class="page-heading library-heading">
+              <div><p class="section-label">{t(question.trim() ? 'desktop-library-search-kicker' : 'desktop-library-kicker')}</p><h1 tabindex="-1">{t('desktop-library-title')}</h1><p>{question.trim() ? t('desktop-library-search-body') : t('desktop-library-body')}</p></div>
+              {#if !question.trim() && orderedWikis.length > 0}
+                <div class="library-catalog-summary">
+                  <span><BookOpen size={16} aria-hidden="true" />{t('desktop-library-wiki-count', { count: orderedWikis.length })}</span>
+                  <span><i aria-hidden="true"></i>{t('desktop-library-concept-count', { count: publishedConceptCount })}</span>
+                  {#if attentionWikis.length > 0}<span class="attention"><i aria-hidden="true"></i>{t('desktop-library-attention-count', { count: attentionWikis.length })}</span>{/if}
                 </div>
-              </section>
-            {/if}
-            {#if snapshot.pendingComputations.length > 0}
-              <section class="workspace-section" aria-labelledby="computations-title">
-                <div class="section-heading"><div><h2 id="computations-title">{t('desktop-computation-requests-title')}</h2><p>{t('desktop-computation-requests-body')}</p></div><button class="text-action" onclick={refreshComputations}>{t('action-refresh')}</button></div>
-                <div class="computation-list">
-                  {#each snapshot.pendingComputations as computation (computation.runId)}
-                    <article>
-                      <span class="pending-icon"><Sparkles size={17} aria-hidden="true" /></span>
-                      <div><strong>{t('desktop-computation-request-title', { application: computation.applicationName })}</strong><p>{t('desktop-computation-request-body', { wiki: computation.wikiName, path: computation.logicalPath })}</p>{#if computation.parameters.length > 0}<ul class="computation-parameters">{#each computation.parameters as parameter (`${parameter.name}:${parameter.parameterType}`)}<li><code>{parameter.name}</code><span>{parameter.parameterType}</span></li>{/each}</ul>{/if}</div>
-                      <div class="row-actions"><button class="secondary" disabled={actionBusy} onclick={() => decideComputation(computation.runId, 'reject')}>{t('action-reject')}</button><button class="primary" disabled={actionBusy} onclick={() => decideComputation(computation.runId, 'execute')}>{t('desktop-computation-review-run')}</button></div>
-                    </article>
-                  {/each}
-                </div>
-              </section>
-            {/if}
-            {#if snapshot.completedComputations.length > 0}
-              <section class="workspace-section" aria-labelledby="completed-computations-title">
-                <div class="section-heading"><div><h2 id="completed-computations-title">{t('desktop-computation-results-title')}</h2><p>{t('desktop-computation-results-body')}</p></div><button class="text-action" onclick={refreshComputations}>{t('action-refresh')}</button></div>
-                <div class="computation-list">
-                  {#each snapshot.completedComputations as computation (computation.runId)}
-                    <article>
-                      <span class="pending-icon"><CheckCircle2 size={17} aria-hidden="true" /></span>
-                      <div><strong>{t('desktop-computation-result-title', { application: computation.applicationName })}</strong><p>{t('desktop-computation-result-body', { wiki: computation.wikiName, path: computation.logicalPath })}</p></div>
-                      {#if computation.verdict === 'accepted'}
-                        <div class="row-actions computation-save-actions">
-                          <SelectField label={t('desktop-computation-save-target')} value={computationSaveTargets[computation.runId] ?? ''} onchange={(value) => { computationSaveTargets = { ...computationSaveTargets, [computation.runId]: value }; }} options={[{ value: '', label: t('desktop-computation-save-select') }, ...snapshot.wikis.filter((wiki) => wiki.origin === 'aiMemory').map((wiki) => ({ value: wiki.id, label: wiki.name }))]} />
-                          <button class="primary" disabled={actionBusy || !computationSaveTargets[computation.runId]} onclick={() => saveAcceptedComputation(computation.runId)}>{t('desktop-computation-save')}</button>
-                        </div>
-                      {:else}
-                        <span class="status-pill warning">{t('desktop-computation-rejected')}</span>
-                      {/if}
-                    </article>
-                  {/each}
-                </div>
-              </section>
-            {/if}
-            {#if attentionWikis.length}
-              <section class="workspace-section" aria-labelledby="attention-title">
-                <div class="section-heading"><div><h2 id="attention-title">{t('desktop-home-attention')}</h2><p>{t('desktop-home-attention-body')}</p></div><button class="text-action" onclick={refreshHealth} disabled={wikiHealthRequestId !== null}>{wikiHealthRequestId ? t('home-wiki-checking') : t('updates-check-now')}</button></div>
-                <div class="attention-list">
-                  {#each attentionWikis as wiki (wiki.id)}<button onclick={() => openWiki(wiki.id, !wiki.maintenanceRequired && wiki.failedCount === 0 && wiki.needsReviewCount > 0 ? 'pending' : 'content')}><span class:warning={wiki.failedCount > 0 || wiki.maintenanceRequired || wiki.okfCompatibility.kind === 'legacyV01'} class="attention-icon"><AlertTriangle size={18} aria-hidden="true" /></span><span><strong>{wiki.name}</strong><small>{wikiAttentionSummary(wiki)}</small></span><span>{t('desktop-attention-see-actions')}</span></button>{/each}
-                </div>
-                {#if snapshot.wikiHealth?.attentionWikiId}
-                  <div class="repair-summary">
-                    <div><strong>{t('knowledge-recovery-guided')}</strong><p>{t('knowledge-repair-review-help')}</p></div>
-                    <div class="row-actions"><button class="text-action" onclick={openAttentionWiki}>{t('action-open')}</button><button class="secondary" onclick={() => prepareRepair(snapshot!.wikiHealth!.attentionWikiId!)} disabled={guidedRepairRequestId !== null}>{t('knowledge-repair-review-action')}</button></div>
-                    {#if snapshot.guidedRepair?.wikiId === snapshot.wikiHealth.attentionWikiId && snapshot.guidedRepair.status === 'prepared'}
-                      <div class="repair-preview"><ul>{#each snapshot.guidedRepair.files as file, fileIndex (fileIndex)}<li><code>{file.page.kind}</code><span>{repairChangeLabel(file.change)}</span></li>{/each}</ul><Checkbox label={t('knowledge-repair-confirm-warning')} bind:checked={guidedRepairConfirmed} /><button class="danger" onclick={() => executeRepair(snapshot!.guidedRepair!.wikiId)} disabled={!guidedRepairConfirmed}>{t('knowledge-repair-confirm-action')}</button></div>
-                    {/if}
-                  </div>
-                {/if}
-              </section>
-            {/if}
-            <section class="workspace-section public-discovery" id="public-wikis" aria-labelledby="public-wikis-title">
-              <div class="section-heading"><div><h2 id="public-wikis-title">{t('desktop-public-network')}</h2><p>{t('desktop-public-discover-body')}</p></div><button class="secondary" onclick={openConnectionsPanel}>{t('desktop-connections')}</button></div>
-              {#if snapshot?.search?.hits.some(isPublicSearchHit)}
-                <div class="search-results">
-                  {#each snapshot.search.hits.filter(isPublicSearchHit) as hit (`${hit.nodeId}:${hit.wikiId}:${hit.conceptId}:${hit.rank}`)}
-                    <article class="search-result public-result">
-                      <div class="search-result-origin"><span class="network-scope public">{searchScopeFor(hit)}</span><DeviceIdentity name={searchOwnerFor(hit)} platform={null} platformLabel={searchIdentityLabel(hit)} source="public" compact /></div>
-                      <small class="search-result-path">{hit.headingOrPage}</small>
-                      <h3>{hit.title}</h3>
-                      <p>{hit.snippet}</p>
-                      <button class="text-action" onclick={() => openSearchHit(hit)}>{t('action-open')}</button>
-                    </article>
-                  {/each}
-                </div>
-              {:else}
-                <div class="inline-empty"><BookOpen size={20} aria-hidden="true" /><span><strong>{t('desktop-public-empty-title')}</strong><small>{t('desktop-public-search-help')}</small></span></div>
               {/if}
-            </section>
-          {:else if destination === 'wikis' && selectedWiki}
+            </header>
+            {#if question.trim()}
+              {#if !snapshot.model?.active}
+                <div class="search-welcome" role="status"><Sparkles size={32} aria-hidden="true" /><h2>{t('desktop-search-preparing-title')}</h2><p>{t('desktop-search-preparing-body')}</p><button class="secondary" onclick={() => openServiceStatus('general')}>{t('desktop-search-preparing-action')}</button></div>
+              {:else if searchBusy && (!snapshot.search || snapshot.search.requestId !== activeSearchRequestId)}
+                <div class="search-results" aria-busy="true"><LoadingState label={t('search-running')} detail={t('desktop-search-loading-detail')} tone="ai" /><LoadingSkeleton variant="results" rows={3} /></div>
+              {:else if snapshot.search && snapshot.search.requestId === activeSearchRequestId}
+                <section class="library-search" aria-live="polite">
+                  {#if snapshot.search.status === 'searching'}
+                    <LoadingState label={t('search-running')} detail={snapshot.search.results.length > 0 ? t('desktop-search-loading-partial') : t('desktop-search-loading-detail')} tone="ai" compact />
+                    {#if snapshot.search.results.length === 0}<LoadingSkeleton variant="results" rows={3} />{/if}
+                  {:else if snapshot.search.status === 'failed'}
+                    <div class="search-state error" role="alert"><AlertTriangle size={17} aria-hidden="true" /><span>{t('search-error-title')}</span></div>
+                  {/if}
+                  {#if snapshot.search.results.length > 0}
+                    <div class="search-filter-bar" aria-label={t('desktop-search-filter-label')}>
+                      {#each ['all', 'local', 'nearby', 'public'] as filter (filter)}
+                        <button class:active={searchFilter === filter} aria-pressed={searchFilter === filter} onclick={() => { searchFilter = filter as SearchFilter; }}>{t(`desktop-search-filter-${filter}`)} <span>{searchFilterCounts[filter as SearchFilter]}</span></button>
+                      {/each}
+                    </div>
+                  {/if}
+                  {#if snapshot.search.status === 'complete' && snapshot.search.coverage !== 'complete' && snapshot.search.results.length > 0}
+                    <div class="search-state warning" role="status"><AlertTriangle size={17} aria-hidden="true" /><span>{searchCoverageMessage(snapshot.search.coverage)}</span></div>
+                  {/if}
+                  <div class="wiki-search-results">
+                    {#each filteredSearchResults as result (`${result.source.kind}:${result.wikiId}:${result.bestRank}`)}
+                      <article class="wiki-search-group" class:public-result={result.source.kind === 'public'}>
+                        <header>
+                          <div class="search-result-origin"><span class:public={result.source.kind === 'public'} class:private={result.source.kind !== 'public'} class="network-scope">{resultScopeLabel(result)}</span><DeviceIdentity name={resultOwnerName(result)} platform={resultPlatform(result)} platformLabel={result.source.kind === 'public' ? t('desktop-public-network') : platformLabel(resultPlatform(result))} source={result.source.kind === 'public' ? 'public' : 'device'} compact /></div>
+                          <button class="text-action" onclick={() => openSearchWiki(result)} disabled={sharedBrowseRequestId !== null}>{t('desktop-open-wiki')}</button>
+                        </header>
+                        <div class="wiki-search-summary">
+                          <div><h2>{resultWikiName(result)}</h2>{#if result.description}<p>{result.description}</p>{/if}</div>
+                          <span>{t('desktop-search-match-count', { count: result.totalMatches })}</span>
+                        </div>
+                        <div class="wiki-search-metadata">
+                          {#if result.source.kind === 'local'}<span>{t(result.source.private ? 'desktop-wiki-private' : 'desktop-wiki-shared')}</span><span>{t(`desktop-search-health-${result.source.health}`)}</span>{/if}
+                          {#if result.source.kind === 'nearby'}<span>{t(result.source.accessGranted ? 'desktop-search-access-granted' : 'desktop-search-access-unavailable')}</span><span>{t(result.source.available ? 'desktop-search-available' : 'desktop-search-offline')}</span>{/if}
+                          {#if result.source.kind === 'public' && result.languages.length > 0}<span>{result.languages.join(', ')}</span>{/if}
+                          {#if result.conceptCount !== null}<span>{t('desktop-search-concept-count', { count: result.conceptCount })}</span>{/if}
+                          {#if result.okfCompatibility}<span>{t(`desktop-okf-compatibility-${result.okfCompatibility.kind}`)}</span>{/if}
+                        </div>
+                        <div class="wiki-search-matches">
+                          {#each result.matches as hit (hit.conceptId)}
+                            <button onclick={() => openSearchHit(result, hit)} disabled={sharedBrowseRequestId !== null}>
+                              <span><small>{hit.headingOrPage}</small><strong>{hit.title}</strong><p>{hit.snippet}</p></span>
+                              <span class="citation-row">{t('search-revision', { revision: hit.sourceRevision })}{#if searchAssuranceLabel(hit)} · {searchAssuranceLabel(hit)}{/if}</span>
+                            </button>
+                          {/each}
+                        </div>
+                      </article>
+                    {:else}
+                      {#if snapshot.search.status === 'complete'}
+                        {#if searchResults.length > 0}
+                          <div class="table-empty"><strong>{t('desktop-search-filter-empty-title')}</strong><p>{t('desktop-search-filter-empty-body')}</p></div>
+                        {:else}
+                          <div class="table-empty"><strong>{snapshot.search.coverage === 'complete' ? t('search-empty-title') : t('search-coverage-incomplete-title')}</strong><p>{snapshot.search.coverage === 'complete' ? t(includePublic ? 'search-empty-public-body' : 'search-empty-local-body') : searchCoverageMessage(snapshot.search.coverage)}</p></div>
+                        {/if}
+                      {/if}
+                    {/each}
+                  </div>
+                </section>
+              {:else}
+                <div class="search-welcome"><BookOpen size={32} aria-hidden="true" /><h2>{t('desktop-search-welcome-title')}</h2><p>{t('desktop-search-welcome-body')}</p></div>
+              {/if}
+            {:else}
+              {#if (snapshot.wikiHealth?.status === 'failed' || (snapshot.wikiHealth?.errorCount ?? 0) > 0) && attentionWikis.length === 0}
+                <div class="repair-summary" role="alert"><div><strong>{t('desktop-health-check-failed-title')}</strong><p>{t('desktop-health-check-failed-body')}</p></div><button class="secondary" onclick={refreshHealth} disabled={wikiHealthRequestId !== null}>{wikiHealthRequestId ? t('home-wiki-checking') : t('updates-check-now')}</button></div>
+              {/if}
+              <WikiTable wikis={orderedWikis} scans={snapshot.wikiScans} {t} onopen={openWiki} oncreate={() => { newWikiMenuOpen = true; }} />
+            {/if}
+          {:else if destination === 'library' && selectedWiki}
             {@const selectedWikiIssues = snapshot.sourceIssues.filter((issue) => issue.wikiId === selectedWiki.id)}
             <header class="page-heading wiki-heading">
-              <div><nav class="breadcrumb" aria-label={t('desktop-nav-wikis')}><button onclick={() => select('wikis')}>{t('desktop-nav-wikis')}</button><span aria-hidden="true">/</span><span>{selectedWiki.name}</span></nav><h1 tabindex="-1">{selectedWiki.name}</h1><p>{t('desktop-wiki-detail-body', { published: selectedWiki.publishedCount })}</p></div>
+              <div class="wiki-heading-copy"><nav class="breadcrumb" aria-label={t('desktop-library-title')}><button onclick={() => select('library')}>{t('desktop-library-title')}</button><span aria-hidden="true">/</span><span>{selectedWiki.name}</span></nav><div class="wiki-title-line"><h1 tabindex="-1">{selectedWiki.name}</h1><span>{t('desktop-wiki-detail-body', { published: selectedWiki.publishedCount })}</span></div></div>
               <div class="heading-actions">{#if selectedWiki.origin === 'folder' && selectedWiki.restrictions.length === 0}<button class="secondary" onclick={() => scanWiki(selectedWiki.id)} disabled={wikiScanState(selectedWiki.id) !== null}><RefreshCw size={16} aria-hidden="true" />{t('action-refresh')}</button>{/if}{#if selectedWiki.restrictions.length === 0}<button class="primary" onclick={() => editWiki(selectedWiki)}>{t('desktop-share-action')}</button>{/if}</div>
+              <section class="wiki-access-strip" aria-label={t('desktop-wiki-access-title')}>
+                <strong>{t('desktop-wiki-access-title')}</strong>
+                <div class="wiki-access-channels">{#if !selectedWiki.peerShareable && !selectedWiki.allowExternalAi && !selectedWiki.internetPublic}<span>{t('desktop-wiki-private')}</span>{/if}{#if selectedWiki.peerShareable}<span>{t(wikiPeers(selectedWiki.id).length > 0 ? 'desktop-share-nearby' : 'desktop-share-nearby-enabled')}</span>{/if}{#if selectedWiki.allowExternalAi}<span>{t('desktop-share-ai-apps')}</span>{/if}{#if selectedWiki.internetPublic}<span>{t('desktop-share-public')}</span>{/if}</div>
+                {#if wikiPeers(selectedWiki.id).length > 0}<div class="wiki-access-devices">{#each wikiPeers(selectedWiki.id) as peer (peer.peerId)}<DeviceIdentity name={peerDisplayName(peer)} platform={peer.platform} platformLabel={platformLabel(peer.platform)} compact chip />{/each}</div>{:else}<small>{t('desktop-wiki-no-specific-access')}</small>{/if}
+                {#if selectedWiki.restrictions.length === 0}<button class="text-action" onclick={() => openSettings('connections')}>{t('desktop-manage-access')}</button>{/if}
+              </section>
             </header>
 
             <div class="wiki-detail-body">
-            <section class="wiki-access-strip" aria-label={t('desktop-wiki-access-title')}>
-              <strong>{t('desktop-wiki-access-title')}</strong>
-              <div class="wiki-access-channels">{#if !selectedWiki.peerShareable && !selectedWiki.allowExternalAi && !selectedWiki.internetPublic}<span>{t('desktop-wiki-private')}</span>{/if}{#if selectedWiki.peerShareable}<span>{t(wikiPeers(selectedWiki.id).length > 0 ? 'desktop-share-nearby' : 'desktop-share-nearby-enabled')}</span>{/if}{#if selectedWiki.allowExternalAi}<span>{t('desktop-share-ai-apps')}</span>{/if}{#if selectedWiki.internetPublic}<span>{t('desktop-share-public')}</span>{/if}</div>
-              {#if wikiPeers(selectedWiki.id).length > 0}<div class="wiki-access-devices">{#each wikiPeers(selectedWiki.id) as peer (peer.peerId)}<DeviceIdentity name={peerDisplayName(peer)} platform={peer.platform} platformLabel={platformLabel(peer.platform)} compact chip />{/each}</div>{:else}<small>{t('desktop-wiki-no-specific-access')}</small>{/if}
-              {#if selectedWiki.restrictions.length === 0}<button class="text-action" onclick={openConnectionsPanel}>{t('desktop-manage-access')}</button>{/if}
-            </section>
 
             {#if selectedWiki.memoryKind === 'project'}
               <section class="project-memory-strip" class:warning={selectedWiki.projectMemoryHealth !== 'active'} aria-label={t('desktop-project-memory-label')}>
@@ -1993,10 +2176,10 @@
             {/if}
 
             {#if selectedWikiIssues.length > 0 || selectedWiki.failedCount > 0 || selectedWiki.maintenanceRequired || selectedWiki.needsReviewCount > 0}
-              <section class="wiki-interventions" aria-labelledby="wiki-interventions-title">
+              <section class="wiki-interventions" aria-labelledby="wiki-interventions-title" aria-describedby="wiki-interventions-description">
                 <div class="wiki-interventions-heading">
                   <AlertTriangle size={19} aria-hidden="true" />
-                  <div><h2 id="wiki-interventions-title">{t('desktop-attention-title')}</h2><p>{t('desktop-attention-body')}</p></div>
+                  <div><h2 id="wiki-interventions-title">{t('desktop-attention-title')}</h2><p id="wiki-interventions-description">{t('desktop-attention-body')}</p></div>
                 </div>
                 <div class="wiki-intervention-list">
                   {#if selectedWikiIssues.length > 0 || selectedWiki.failedCount > 0}
@@ -2034,11 +2217,13 @@
                 <button aria-pressed={wikiTab === 'content'} class:active={wikiTab === 'content'} onclick={() => openWikiTab('content')}>{t('desktop-wiki-content-tab')}</button>
                 <button aria-pressed={wikiTab === 'pending'} class:active={wikiTab === 'pending'} onclick={() => openWikiTab('pending')}>{t('desktop-wiki-pending-tab')}<span>{selectedWikiReviews.length}</span></button>
               </div>
-              <button class="details-tab" onclick={() => showWikiDetails(selectedWiki.id)}>{t('desktop-details')}</button>
+              <div class="content-tabs-actions">
+                {#if wikiTab === 'content'}<div class="view-switch" aria-label={t('desktop-view-mode')}><button class:active={knowledgeMode === 'document'} onclick={() => setKnowledgeMode('document')}>{t('desktop-list-view')}</button><button class:active={knowledgeMode === 'graph'} onclick={() => setKnowledgeMode('graph')}>{t('knowledge-tab-graph')}</button></div>{/if}
+                <button class="details-tab" onclick={() => showWikiDetails(selectedWiki.id)}>{t('desktop-details')}</button>
+              </div>
             </div>
 
             {#if wikiTab === 'content'}
-              <div class="wiki-toolbar"><div class="view-switch" aria-label={t('desktop-view-mode')}><button class:active={knowledgeMode === 'document'} onclick={() => setKnowledgeMode('document')}>{t('desktop-list-view')}</button><button class:active={knowledgeMode === 'graph'} onclick={() => setKnowledgeMode('graph')}>{t('knowledge-tab-graph')}</button></div></div>
               {#if knowledgeMode === 'graph' && snapshot.knowledge?.wikiId === selectedWiki.id && snapshot.knowledge.status === 'ready'}
                 <section class="graph-view">{#key `${snapshot.knowledge.wikiId}:${snapshot.knowledge.version}`}<KnowledgeGraph bundle={snapshot.knowledge} onselect={selectGraphPage} {locale} />{/key}</section>
               {:else if wikiLoadFailedId === selectedWiki.id || (snapshot.knowledge?.wikiId === selectedWiki.id && snapshot.knowledge.status === 'failed')}
@@ -2094,53 +2279,71 @@
               </section>
             {/if}
             </div>
-          {:else if destination === 'search'}
-            {#if sharedBrowseOpen}
-              <SharedWikiViewer source={sharedBrowseSource} sourceName={sharedBrowseSourceName} sourcePlatform={sharedBrowsePlatform} sourceLabel={sharedBrowseSource === 'public' ? t('desktop-public-network') : platformLabel(sharedBrowsePlatform)} browse={sharedBrowseLoading ? null : sharedBrowseSource === 'nearby' ? snapshot.nearbyBrowse : snapshot.publicBrowse} loading={sharedBrowseLoading} structureLoading={sharedBrowseStructureLoading} pageLoading={sharedBrowsePageLoading} initialConceptId={sharedBrowseInitialConceptId} {t} metadata={publicConceptMetadata} onback={closeSharedBrowse} onopenpage={openSharedWikiPage} onblock={sharedBrowseSource === 'public' ? (publisherId) => changePublisherBlock(publisherId, true) : null} />
-            {:else}
-              <header class="page-heading"><div><h1 tabindex="-1">{t('desktop-page-search-title')}</h1><p>{t('desktop-page-search-body')}</p></div></header>
-              {#if !snapshot.model?.active}
-                <div class="search-welcome" role="status"><Sparkles size={32} aria-hidden="true" /><h2>{t('desktop-search-preparing-title')}</h2><p>{t('desktop-search-preparing-body')}</p><button class="secondary" onclick={() => openServiceStatus('knowledge')}>{t('desktop-search-preparing-action')}</button></div>
-              {:else if searchBusy && (!snapshot.search || snapshot.search.requestId !== activeSearchRequestId)}
-                <div class="search-results" aria-busy="true"><LoadingState label={t('search-running')} detail={t('desktop-search-loading-detail')} tone="ai" /><LoadingSkeleton variant="results" rows={3} /></div>
-              {:else if snapshot.search && snapshot.search.requestId === activeSearchRequestId}
-                <div class="search-results" aria-live="polite">
-                  {#if snapshot.search.status === 'searching'}
-                    <LoadingState label={t('search-running')} detail={snapshot.search.hits.length > 0 ? t('desktop-search-loading-partial') : t('desktop-search-loading-detail')} tone="ai" compact />
-                    {#if snapshot.search.hits.length === 0}<LoadingSkeleton variant="results" rows={3} />{/if}
-                  {:else if snapshot.search.status === 'failed'}
-                    <div class="search-state error" role="alert"><AlertTriangle size={17} aria-hidden="true" /><span>{t('search-error-title')}</span></div>
-                  {:else if snapshot.search.hits.length > 0}
-                    <p class="section-label">{t('desktop-search-found')}</p>
-                  {/if}
-                  {#if snapshot.search.status === 'complete' && snapshot.search.coverage !== 'complete' && snapshot.search.hits.length > 0}
-                    <div class="search-state warning" role="status"><AlertTriangle size={17} aria-hidden="true" /><span>{searchCoverageMessage(snapshot.search.coverage)}</span></div>
-                  {/if}
-                  {#each snapshot.search.hits as hit (`${hit.nodeId}:${hit.wikiId}:${hit.conceptId}:${hit.rank}`)}
-                    <article class="search-result" class:public-result={hit.route === 'publicNetwork'} class:private-result={hit.route !== 'publicNetwork'}>
-                      <div class="search-result-origin"><span class:public={hit.route === 'publicNetwork'} class:private={hit.route !== 'publicNetwork'} class="network-scope">{searchScopeFor(hit)}</span><DeviceIdentity name={searchOwnerFor(hit)} platform={searchPlatformFor(hit)} platformLabel={searchIdentityLabel(hit)} source={hit.route === 'publicNetwork' ? 'public' : 'device'} compact /></div>
-                      <small class="search-result-path">{hit.headingOrPage}</small>
-                      <h3>{hit.title}</h3>
-                      <p>{hit.snippet}</p>
-                      <div class="citation-row"><span>{t('search-revision', { revision: hit.sourceRevision })}</span>{#if searchAssuranceLabel(hit)}<span>{searchAssuranceLabel(hit)}</span>{/if}</div>
-                      <button class="text-action" onclick={() => openSearchHit(hit)} disabled={sharedBrowseRequestId !== null}>{t('action-open')}</button>
-                    </article>
-                  {:else}
-                    {#if snapshot.search.status === 'complete'}<div class="table-empty"><strong>{snapshot.search.coverage === 'complete' ? t('search-empty-title') : t('search-coverage-incomplete-title')}</strong><p>{snapshot.search.coverage === 'complete' ? t(includePublic ? 'search-empty-public-body' : 'search-empty-local-body') : searchCoverageMessage(snapshot.search.coverage)}</p></div>{/if}
-                  {/each}
-                </div>
-              {:else}
-                <div class="search-welcome"><BookOpen size={32} aria-hidden="true" /><h2>{t('desktop-search-welcome-title')}</h2><p>{t('desktop-search-welcome-body')}</p></div>
-              {/if}
-            {/if}
-          {:else if destination === 'system'}
-            <header class="page-heading"><div><h1 tabindex="-1">{t('desktop-page-system-title')}</h1><p>{t('desktop-page-system-body')}</p></div></header>
-            <nav class="settings-nav" aria-label={t('desktop-page-system-title')}>{#each systemSections.slice(0, 3) as section (section.id)}<a href={`#system/${section.id}`} class:active={systemSection === section.id} onclick={(event) => openSystemSection(event, section.id)}>{t(section.labelId)}</a>{/each}</nav>
-            <div class="settings-page">
-              {#if systemSection === 'models'}<section id="system-models"><p class="section-label">{t('settings-local-ai')}</p><h2>{snapshot.model?.displayName ?? t('component-local-ai')}</h2><p>{snapshot.model?.active ? t('desktop-model-ready') : t('desktop-model-needs-setup')}</p>{#if snapshot.modelInstall}<progress max={snapshot.modelInstall.totalBytes} value={snapshot.modelInstall.downloaded}></progress><p>{modelInstallLabel(locale)}</p><button class="secondary" onclick={cancelModelInstall}>{t('action-cancel')}</button>{:else if !snapshot.model?.active}<button class="primary" onclick={prepareLocalModel} disabled={actionBusy}>{t('models-install')}</button>{/if}{#if snapshot.model?.licenseUrl}<button class="text-action" onclick={() => openVerifiedExternalLink(snapshot!.model!.licenseUrl!)}>{t('models-license-open')}</button>{/if}</section>{/if}
-              {#if systemSection === 'preferences'}<section id="system-preferences"><p class="section-label">{t('desktop-preferences')}</p><h2>{t('desktop-preferences')}</h2><div class="settings-form"><SelectField label={t('settings-language')} value={locale} onchange={(value) => { locale = value as LocalePreference; }} options={[{ value: 'system', label: t('language-system') }, { value: 'en', label: 'English' }, { value: 'es', label: 'Español' }]} /><SelectField label={t('settings-theme')} value={theme} onchange={(value) => { theme = value as ThemePreference; }} options={[{ value: 'system', label: t('theme-system') }, { value: 'light', label: t('theme-light') }, { value: 'dark', label: t('theme-dark') }]} /><SelectField label={t('desktop-lan')} value={lanPreference} onchange={(value) => { lanPreference = value as LanPreference; }} options={[{ value: 'undecided', label: t('settings-lan-undecided') }, { value: 'disabled', label: t('onboarding-lan-disable') }, { value: 'enabled', label: t('onboarding-lan-enable') }]} /><SelectField label={t('desktop-close')} value={closeBehavior} onchange={(value) => { closeBehavior = value as CloseBehavior; }} options={[{ value: 'ask', label: t('desktop-ask') }, { value: 'hide', label: t('desktop-hide-tray') }, { value: 'quit', label: t('desktop-quit') }]} /><Switch label={t('updates-automatic')} checked={automaticUpdateChecks} onchange={(checked) => { automaticUpdateChecks = checked; }} /><button class="primary" onclick={() => savePreferences()} disabled={actionBusy}>{t('desktop-save-preferences')}</button></div></section><section><p class="section-label">{t('settings-login-title')}</p><h2>{t('settings-login-heading')}</h2><p>{autostartLabel(locale)}</p><div class="row-actions"><button class="secondary" onclick={() => changeAutostart(true)} disabled={autostartBusy}>{t('action-enable')}</button><button class="text-action" onclick={refreshAutostartState} disabled={autostartBusy}>{t('action-refresh')}</button></div></section>{/if}
-              {#if systemSection === 'updates'}<section id="system-updates"><p class="section-label">{t('updates-title')}</p><h2>{t('updates-stable-title')}</h2><p role="status">{updaterLabel(locale, updaterAction)}</p><div class="row-actions"><button class="secondary" onclick={() => runUpdaterAction('check')} disabled={updaterRequestId !== null}>{t('updates-check-now')}</button>{#if snapshot.updater?.status === 'available'}<button class="primary" onclick={() => runUpdaterAction('download')} disabled={updaterRequestId !== null}>{t('updates-download')}</button>{:else if snapshot.updater?.status === 'readyToInstall'}<button class="primary" onclick={() => { confirmUpdateInstall = true; }} disabled={updaterRequestId !== null}>{t('updates-install')}</button>{/if}</div>{#if confirmUpdateInstall}<div class="install-confirmation"><p>{t('updates-install-confirm')}</p><button class="primary" onclick={() => runUpdaterAction('install')} disabled={updaterRequestId !== null}>{t('updates-install')}</button><button class="secondary" onclick={() => { confirmUpdateInstall = false; }} disabled={updaterRequestId !== null}>{t('action-cancel')}</button></div>{/if}</section>{/if}
-              <details class="advanced-disclosure"><summary>{t('desktop-advanced-details')}</summary><dl>{#if snapshot.nodeId}<div><dt>{t('desktop-network-identity')}</dt><dd><code>{shortPeerId(snapshot.nodeId)}</code></dd></div>{/if}{#if snapshot.mcpUrl}<div><dt>{t('diagnostics-local-mcp')}</dt><dd><code>{snapshot.mcpUrl}</code></dd></div>{/if}{#if snapshot.hardware}<div><dt>{t('desktop-memory-installed')}</dt><dd>{formatBytes(snapshot.hardware.totalMemoryBytes)}</dd></div><div><dt>{t('desktop-disk-available')}</dt><dd>{formatBytes(snapshot.hardware.availableDiskBytes)}</dd></div>{/if}</dl></details>
+          {:else if destination === 'settings'}
+            <div class="settings-layout">
+              <nav class="settings-sidebar" aria-label={t('desktop-nav-system')}>
+                {#each settingsSections as section (section.id)}
+                  {@const status = settingsStatuses.find((candidate) => candidate.id === section.id)}
+                  <a href={`#settings/${section.id}`} class:active={settingsSection === section.id} aria-current={settingsSection === section.id ? 'page' : undefined} onclick={(event) => openSettingsSection(event, section.id)}>
+                    <span class="settings-nav-icon" aria-hidden="true">{#if section.id === 'general'}<SlidersHorizontal size={16} />{:else if section.id === 'connections'}<RadioTower size={16} />{:else}<Bot size={16} />{/if}</span>
+                    <span class="settings-nav-label">{t(section.labelId)}</span>
+                    {#if status}<small><span class={`settings-status-dot ${status.tone}`} aria-hidden="true"></span>{status.detail}</small>{/if}
+                    {#if section.id === 'apps' && pendingApprovalCount(snapshot) > 0}<b>{pendingApprovalCount(snapshot) > 9 ? '9+' : pendingApprovalCount(snapshot)}</b>{/if}
+                  </a>
+                {/each}
+              </nav>
+              <div class="settings-page">
+                {#if settingsSection === 'general'}
+                  <section><p class="section-label">{t('settings-local-ai')}</p><h2>{snapshot.model?.displayName ?? t('component-local-ai')}</h2><p>{snapshot.model?.active ? t('desktop-model-ready') : t('desktop-model-needs-setup')}</p>{#if snapshot.modelInstall}<div class="model-install-state">{#if snapshot.modelInstall.status === 'downloading' && snapshot.modelInstall.totalBytes > 0}<progress aria-label={modelInstallLabel(locale)} max={snapshot.modelInstall.totalBytes} value={snapshot.modelInstall.downloaded}></progress><div class="model-install-copy" role="status" aria-live="polite"><strong>{modelInstallLabel(locale)}</strong><small>{t('models-install-progress', { downloaded: formatBytes(snapshot.modelInstall.downloaded), total: formatBytes(snapshot.modelInstall.totalBytes) })}</small></div>{:else}<div class="model-install-wait" role="status" aria-live="polite"><Spinner size="small" /><div><strong>{modelInstallLabel(locale)}</strong><small>{t(snapshot.modelInstall.status === 'queued' ? 'models-install-queued-detail' : 'models-install-phase-detail')}</small></div></div>{/if}<button class="secondary" onclick={cancelLocalModelInstall} disabled={actionBusy}>{t(snapshot.modelInstall.status === 'queued' ? 'models-cancel-request' : 'action-cancel')}</button></div>{:else if !snapshot.model?.active}<button class="primary" onclick={prepareLocalModel} disabled={actionBusy}>{t('models-install')}</button>{/if}{#if snapshot.model?.licenseUrl}<button class="text-action" onclick={() => openVerifiedExternalLink(snapshot!.model!.licenseUrl!)}>{t('models-license-open')}</button>{/if}</section>
+                  <section><p class="section-label">{t('desktop-preferences')}</p><h2>{t('desktop-preferences')}</h2><div class="settings-form"><SelectField label={t('settings-language')} value={locale} onchange={(value) => { locale = value as LocalePreference; }} options={[{ value: 'system', label: t('language-system') }, { value: 'en', label: 'English' }, { value: 'es', label: 'Español' }]} /><SelectField label={t('settings-theme')} value={theme} onchange={(value) => { theme = value as ThemePreference; }} options={[{ value: 'system', label: t('theme-system') }, { value: 'light', label: t('theme-light') }, { value: 'dark', label: t('theme-dark') }]} /><SelectField label={t('desktop-close')} value={closeBehavior} onchange={(value) => { closeBehavior = value as CloseBehavior; }} options={[closeBehaviorOption('ask', t('desktop-ask')), closeBehaviorOption('hide_to_tray', t('desktop-hide-tray')), closeBehaviorOption('quit', t('desktop-quit'))]} /><Switch label={t('updates-automatic')} checked={automaticUpdateChecks} onchange={(checked) => { automaticUpdateChecks = checked; }} /><p class="settings-save-state" role="status">{preferencesDirty ? t('desktop-preferences-unsaved') : t('desktop-preferences-saved')}</p><div class="settings-form-actions"><button class="secondary" onclick={resetPreferences} disabled={actionBusy || !preferencesDirty}>{t('action-cancel')}</button><button class="primary" onclick={() => savePreferences()} disabled={actionBusy || !preferencesDirty}>{t('desktop-save-preferences')}</button></div></div></section>
+                  <section><p class="section-label">{t('settings-login-title')}</p><h2>{t('settings-login-heading')}</h2><p>{autostartLabel(locale)}</p><div class="row-actions"><button class="secondary" onclick={() => changeAutostart(true)} disabled={autostartBusy}>{t('action-enable')}</button><button class="secondary" onclick={() => changeAutostart(false)} disabled={autostartBusy}>{t('action-disable')}</button><button class="text-action" onclick={refreshAutostartState} disabled={autostartBusy}>{t('action-refresh')}</button></div></section>
+                  <section><p class="section-label">{t('updates-title')}</p><h2>{t('updates-stable-title')}</h2><p role="status">{updaterLabel(locale, updaterAction)}</p><div class="row-actions"><button class="secondary" onclick={() => runUpdaterAction('check')} disabled={updaterRequestId !== null}>{t('updates-check-now')}</button>{#if snapshot.updater?.status === 'available'}<button class="primary" onclick={() => runUpdaterAction('download')} disabled={updaterRequestId !== null}>{t('updates-download')}</button>{:else if snapshot.updater?.status === 'readyToInstall'}<button class="primary" onclick={() => { confirmUpdateInstall = true; }} disabled={updaterRequestId !== null}>{t('updates-install')}</button>{/if}</div>{#if confirmUpdateInstall}<div class="install-confirmation"><p>{t('updates-install-confirm')}</p><button class="primary" onclick={() => runUpdaterAction('install')} disabled={updaterRequestId !== null}>{t('updates-install')}</button><button class="secondary" onclick={() => { confirmUpdateInstall = false; }} disabled={updaterRequestId !== null}>{t('action-cancel')}</button></div>{/if}</section>
+                  <details class="advanced-disclosure"><summary>{t('desktop-advanced-details')}</summary><dl>{#if snapshot.nodeId}<div><dt>{t('desktop-network-identity')}</dt><dd><code>{shortPeerId(snapshot.nodeId)}</code></dd></div>{/if}{#if snapshot.mcpUrl}<div><dt>{t('diagnostics-local-mcp')}</dt><dd><code>{snapshot.mcpUrl}</code></dd></div>{/if}{#if snapshot.hardware}<div><dt>{t('desktop-memory-installed')}</dt><dd>{formatBytes(snapshot.hardware.totalMemoryBytes)}</dd></div><div><dt>{t('desktop-disk-available')}</dt><dd>{formatBytes(snapshot.hardware.availableDiskBytes)}</dd></div>{/if}</dl></details>
+                {:else if settingsSection === 'connections'}
+                  <section><p class="section-label">{t('desktop-private-network')}</p><h2>{t('desktop-lan')}</h2><SelectField label={t('desktop-lan')} value={lanPreference} onchange={(value) => changeLanPreference(value as LanPreference)} options={[{ value: 'undecided', label: t('settings-lan-undecided') }, { value: 'disabled', label: t('onboarding-lan-disable') }, { value: 'enabled', label: t('onboarding-lan-enable') }]} /></section>
+                  <section class="private-network-section" aria-labelledby="settings-devices-title">
+                    <div class="section-heading connection-section-heading"><div><p class="section-label">{t('desktop-private-network')}</p><h2 id="settings-devices-title">{t('desktop-known-devices', { count: snapshot.peers.length })}</h2><p>{t('desktop-private-devices-summary', { visible: visiblePeerCount(), total: snapshot.peers.length })}</p></div><button class="text-action" disabled={connectivityRequestId !== null} onclick={() => runConnectivityAction('refresh')}>{t('action-refresh')}</button></div>
+                    {#if lanPreference !== 'enabled'}<div class="connection-guidance"><p>{lanPreference === 'undecided' ? t('connectivity-undecided') : t('connectivity-disabled')}</p></div>{:else if snapshot.connectivity?.networkProfile === 'public'}<div class="connection-guidance"><p>{t('connectivity-public-network')}</p><button class="secondary" onclick={() => runConnectivityAction('networkSettings')}>{t('connectivity-open-network-settings')}</button></div>{:else if snapshot.connectivity?.firewall === 'rulesMissing' && snapshot.connectivity.firewallHelper === 'verified'}<div class="connection-guidance"><p>{t('connectivity-firewall-needed')}</p><button class="secondary" onclick={() => runConnectivityAction('install')}>{t('connectivity-configure-firewall')}</button></div>{:else if snapshot.connectivity?.firewall === 'rulesMissing'}<div class="connection-guidance"><p>{t('connectivity-firewall-helper-repair')}</p></div>{:else if snapshot.connectivity?.firewall === 'conflict' || snapshot.connectivity?.firewall === 'legacyExposure' || snapshot.connectivity?.firewall === 'managedPolicy' || snapshot.connectivity?.firewall === 'firewallDisabled' || snapshot.connectivity?.firewall === 'blockAllInbound'}<div class="connection-guidance"><p>{firewallGuidanceLabel()}</p><button class="secondary" onclick={() => runConnectivityAction('advancedFirewall')}>{t('connectivity-open-advanced-firewall')}</button></div>{:else if snapshot.connectivity?.systemPermission === 'denied'}<div class="connection-guidance"><p>{t('connectivity-failed')}</p><button class="secondary" onclick={() => runConnectivityAction('localNetworkPrivacy')}>{t('connectivity-open-local-network-settings')}</button></div>{/if}
+                    <div class="peer-list" aria-busy={connectivityRequestId !== null}>
+                      {#each snapshot.peers as peer (peer.peerId)}
+                        {@const shareableWikis = snapshot.wikis.filter((wiki) => wiki.peerShareable)}
+                        <article class="peer-card" class:trusted={peer.trust === 'trusted'}>
+                          <header class="peer-card-header">
+                            <DeviceIdentity name={peerDisplayName(peer)} platform={peer.platform} platformLabel={platformLabel(peer.platform)} detail={peerActivityLabel(peer)} />
+                            <span class="peer-trust" class:verified={peer.trust === 'trusted'} class:blocked={peer.trust === 'blocked'}>{peer.trust === 'trusted' ? t('desktop-verified') : peer.trust === 'blocked' ? t('desktop-pairing-blocked') : t('desktop-unverified')}</span>
+                          </header>
+                          {#if peer.sasWords}
+                            <strong class="sas-words">{peer.sasWords.join(' · ')}</strong>
+                            <div class="row-actions"><button class="primary" disabled={peerActionId === peer.peerId} onclick={() => runPeerAction(peer.peerId, 'accept')}>{t('devices-code-matches')}</button><button class="danger" disabled={peerActionId === peer.peerId} onclick={() => runPeerAction(peer.peerId, 'reject')}>{t('devices-code-does-not-match')}</button></div>
+                          {:else if peer.trust === 'unpaired'}
+                            <button class="secondary peer-primary-action" disabled={peerActionId === peer.peerId} onclick={() => runPeerAction(peer.peerId, 'pair')}>{t('desktop-verify-device')}</button>
+                          {:else if peer.trust === 'blocked'}
+                            <div class="blocked-peer-guidance"><p>{t('desktop-pairing-blocked-help')}</p><button class="secondary" disabled={peerActionId === peer.peerId} onclick={() => runPeerAction(peer.peerId, 'allowAgain')}>{t('desktop-allow-pairing-again')}</button></div>
+                          {:else if peer.trust === 'trusted'}
+                            <div class="device-access-block">
+                              <div class="device-access-heading"><div><strong>{t('desktop-device-wiki-access')}</strong><small>{t('desktop-device-wiki-access-help')}</small></div><span>{t('desktop-device-access-count', { granted: peer.grantedWikiIds.length, total: shareableWikis.length })}</span></div>
+                              {#if shareableWikis.length > 0}
+                                <div class="grant-list device-grant-list">{#each shareableWikis as wiki (wiki.id)}<Checkbox label={wiki.name} accessibleLabel={t('devices-grant', { name: wiki.name })} checked={peer.grantedWikiIds.includes(wiki.id)} onchange={(checked) => changeGrant(peer.peerId, wiki.id, checked)} />{/each}</div>
+                              {:else}
+                                <p class="device-access-empty">{t('desktop-no-shareable-folders')}</p>
+                              {/if}
+                            </div>
+                            <button class="text-action revoke-trust-action" disabled={peerActionId === peer.peerId} onclick={() => runPeerAction(peer.peerId, 'revoke')}>{t('desktop-revoke-trust')}</button>
+                          {/if}
+                        </article>
+                      {:else}<p class="empty">{t('desktop-no-devices')}</p>{/each}
+                    </div>
+                  </section>
+                  <ConnectionAdvanced lanRuntime={snapshot.lanRuntime} peerId={federationPeerId} address={federationAddress} blockedPublishers={snapshot.blockedPublicPublishers} busy={peerActionId !== null} {t} onpeerid={(value) => { federationPeerId = value; }} onaddress={(value) => { federationAddress = value; }} onadd={() => saveFederationIndex(false)} onremove={() => saveFederationIndex(true)} onunblock={(publisherId) => changePublisherBlock(publisherId, false)} />
+                  <details class="advanced-disclosure"><summary>{t('desktop-advanced-details')}</summary><TextField label={t('desktop-address')} bind:value={manualPeerAddress} maxlength={500} placeholder={t('desktop-multiaddress-placeholder')} /><button class="secondary" onclick={connectManualPeer}>{t('action-connect')}</button></details>
+                {:else}
+                  <section class="integrations-settings-section"><div class="section-heading"><div><p class="section-label">{t('desktop-status-ai-apps')}</p><h2>{t('integrations-title')}</h2><p>{t('desktop-integration-body')}</p></div><button class="text-action" disabled={integrationRequestId !== null} onclick={() => runIntegrationAction({ kind: 'refresh' })}>{t('action-refresh')}</button></div><IntegrationList integrations={snapshot.integrations?.integrations ?? []} busy={integrationRequestId !== null} {t} onaction={runIntegrationAction} oncopy={copyMcpSetup} /></section>
+                  <section><h2>{t('desktop-application-access-title')}</h2><div class="application-access-list">{#each snapshot.applicationAccess.filter((application) => application.active) as application (application.appId)}<article><div class="application-identity"><AiClientIcon client={applicationClientFor(application)} label={application.displayName} decorative /><div><strong>{application.displayName}</strong><small>{t('desktop-application-quota', { count: application.ownedWikiCount, size: formatBytes(application.managedBytes) })}</small></div></div>{#each snapshot.wikis.filter((wiki) => wiki.origin === 'aiMemory' && application.grants.some((grant) => grant.wikiId === wiki.id && grant.role === 'owner') === false) as wiki (wiki.id)}<SelectField label={wiki.name} value={applicationGrantRole(application.appId, wiki.id)} options={[{ value: 'none', label: t('desktop-application-no-access') }, { value: 'reader', label: t('desktop-application-reader') }, { value: 'editor', label: t('desktop-application-editor') }]} onchange={(value) => changeApplicationGrant(application.appId, wiki.id, value === 'none' ? null : value as ApplicationWikiRoleInput)} disabled={actionBusy} />{/each}</article>{:else}<div class="inline-empty"><span><strong>{t('desktop-application-access-empty')}</strong></span></div>{/each}</div></section>
+                  {#if snapshot.projectMemoryRequests.length > 0}<section aria-labelledby="project-memory-requests-title"><div class="section-heading"><div><h2 id="project-memory-requests-title">{t('desktop-project-memory-requests-title')}</h2><p>{t('desktop-project-memory-requests-body')}</p></div><button class="text-action" onclick={refreshApplicationAccess}>{t('action-refresh')}</button></div><div class="computation-list">{#each snapshot.projectMemoryRequests as request (request.requestId)}<article><span class="pending-icon project-memory-link" aria-hidden="true"><BookOpen size={17} /></span><div><strong>{t(request.kind === 'initialize' ? 'desktop-project-memory-initialize-request' : 'desktop-project-memory-attach-request', { application: request.applicationName })}</strong><p>{t('desktop-project-memory-request-folder', { folder: request.folderName })}</p>{#if request.requestedName}<small>{request.requestedName}</small>{/if}</div><div class="row-actions"><button class="secondary" disabled={actionBusy} onclick={() => decideProjectMemoryRequest(request.requestId, false)}>{t('action-reject')}</button><button class="primary" disabled={actionBusy} onclick={() => decideProjectMemoryRequest(request.requestId, true)}>{t('action-approve')}</button></div></article>{/each}</div></section>{/if}
+                  {#if snapshot.pendingComputations.length > 0}<section aria-labelledby="computations-title"><div class="section-heading"><div><h2 id="computations-title">{t('desktop-computation-requests-title')}</h2><p>{t('desktop-computation-requests-body')}</p></div><button class="text-action" onclick={refreshComputations}>{t('action-refresh')}</button></div><div class="computation-list">{#each snapshot.pendingComputations as computation (computation.runId)}<article><span class="pending-icon"><Sparkles size={17} aria-hidden="true" /></span><div><strong>{t('desktop-computation-request-title', { application: computation.applicationName })}</strong><p>{t('desktop-computation-request-body', { wiki: computation.wikiName, path: computation.logicalPath })}</p>{#if computation.parameters.length > 0}<ul class="computation-parameters">{#each computation.parameters as parameter (`${parameter.name}:${parameter.parameterType}`)}<li><code>{parameter.name}</code><span>{parameter.parameterType}</span></li>{/each}</ul>{/if}</div><div class="row-actions"><button class="secondary" disabled={actionBusy} onclick={() => decideComputation(computation.runId, 'reject')}>{t('action-reject')}</button><button class="primary" disabled={actionBusy} onclick={() => decideComputation(computation.runId, 'execute')}>{t('desktop-computation-review-run')}</button></div></article>{/each}</div></section>{/if}
+                  {#if snapshot.completedComputations.length > 0}<section aria-labelledby="completed-computations-title"><div class="section-heading"><div><h2 id="completed-computations-title">{t('desktop-computation-results-title')}</h2><p>{t('desktop-computation-results-body')}</p></div><button class="text-action" onclick={refreshComputations}>{t('action-refresh')}</button></div><div class="computation-list">{#each snapshot.completedComputations as computation (computation.runId)}<article><span class="pending-icon"><CheckCircle2 size={17} aria-hidden="true" /></span><div><strong>{t('desktop-computation-result-title', { application: computation.applicationName })}</strong><p>{t('desktop-computation-result-body', { wiki: computation.wikiName, path: computation.logicalPath })}</p></div>{#if computation.verdict === 'accepted'}<div class="row-actions computation-save-actions"><SelectField label={t('desktop-computation-save-target')} value={computationSaveTargets[computation.runId] ?? ''} onchange={(value) => { computationSaveTargets = { ...computationSaveTargets, [computation.runId]: value }; }} options={[{ value: '', label: t('desktop-computation-save-select') }, ...snapshot.wikis.filter((wiki) => wiki.origin === 'aiMemory').map((wiki) => ({ value: wiki.id, label: wiki.name }))]} /><button class="primary" disabled={actionBusy || !computationSaveTargets[computation.runId]} onclick={() => saveAcceptedComputation(computation.runId)}>{t('desktop-computation-save')}</button></div>{:else}<span class="status-pill warning">{t('desktop-computation-rejected')}</span>{/if}</article>{/each}</div></section>{/if}
+                {/if}
+              </div>
             </div>
           {/if}
           {#if actionMessage}<p class={`action-message ${actionMessageTone()}`} aria-live="polite">{#if actionMessageTone() === 'progress'}<Spinner size="small" />{/if}<span>{#if actionMessageTone() === 'progress'}<ShimmerText text={actionMessage} />{:else}{actionMessage}{/if}</span></p>{/if}
@@ -2148,7 +2351,6 @@
       {/key}
     </section>
   </main>
-  <SystemStatusBar {snapshot} {t} onselect={openServiceStatus} />
 </div>
 
 <div class="dialog-layer" inert={closeChoiceRequired} aria-hidden={closeChoiceRequired ? 'true' : undefined}>
@@ -2161,7 +2363,7 @@
 {/if}
 
 {#if newWikiMenuOpen}
-  <div class="modal-backdrop" role="presentation" onclick={(event) => { if (event.currentTarget === event.target) newWikiMenuOpen = false; }}><div class="create-wiki-dialog source-choice" role="dialog" aria-modal="true" aria-labelledby="new-wiki-source-title"><p class="section-label">{t('desktop-new-wiki')}</p><h2 id="new-wiki-source-title">{t('desktop-new-wiki-source')}</h2><button class="source-choice-item signature-choice" onclick={chooseProjectMemoryFolder}><strong>{t('desktop-project-memory-create-title')}</strong><span>{t('desktop-project-memory-source-body')}</span><code>.airwiki/</code></button><button class="source-choice-item" onclick={chooseFolder}><strong>{t('desktop-new-wiki-folder')}</strong><span>{t('desktop-new-wiki-folder-body')}</span></button><button class="source-choice-item" onclick={() => chooseOkfImport(false)}><strong>{t('desktop-import-okf-folder')}</strong><span>{t('desktop-import-okf-body')}</span></button><button class="source-choice-item" onclick={() => chooseOkfImport(true)}><strong>{t('desktop-import-okf-zip')}</strong><span>{t('desktop-import-okf-body')}</span></button><button class="text-action" onclick={() => { newWikiMenuOpen = false; }}>{t('action-cancel')}</button></div></div>
+  <div class="modal-backdrop" role="presentation" onclick={(event) => { if (event.currentTarget === event.target) newWikiMenuOpen = false; }}><div class="create-wiki-dialog source-choice" role="dialog" aria-modal="true" aria-labelledby="new-wiki-source-title"><p class="section-label">{t('desktop-new-wiki')}</p><h2 id="new-wiki-source-title">{t('desktop-new-wiki-source')}</h2><button class="source-choice-item signature-choice" onclick={chooseProjectMemoryFolder}><strong>{t('desktop-project-memory-create-title')}</strong><span>{t('desktop-project-memory-source-body')}</span><code>.airwiki/</code></button><button class="source-choice-item" onclick={chooseFolder}><strong>{t('desktop-new-wiki-folder')}</strong><span>{t('desktop-new-wiki-folder-body')}</span></button><button class="source-choice-item" onclick={() => chooseOkfImport(false)}><strong>{t('desktop-import-okf-folder')}</strong><span>{t('desktop-import-okf-body')}</span></button><button class="source-choice-item" onclick={() => chooseOkfImport(true)}><strong>{t('desktop-import-okf-zip')}</strong><span>{t('desktop-import-okf-body')}</span></button><div class="dialog-actions source-choice-actions"><button class="secondary" onclick={() => { newWikiMenuOpen = false; }}>{t('action-cancel')}</button></div></div></div>
 {/if}
 
 {#if okfImportSelection && okfImportSummary}
@@ -2215,30 +2417,31 @@
       <div class="sharing-channels">
         <section class="sharing-channel private-channel">
           <span class="network-scope private">{t('desktop-private-network')}</span>
-          <Switch label={t('desktop-share-nearby')} description={t('desktop-share-nearby-body')} bind:checked={wikiPolicy.peerShareable} />
+          <Switch label={t('desktop-share-nearby')} description={t('desktop-share-nearby-body')} checked={wikiPolicy.peerShareable} disabled={actionBusy} onchange={(checked) => changeWikiPolicyChannel('peerShareable', checked)} />
           {#if wikiPolicy.peerShareable && activeWiki}
             <div class="share-device-list" aria-label={t('desktop-share-device-access')}>
               {#each trustedPeers() as peer (peer.peerId)}
                 <Checkbox label={peerDisplayName(peer)} accessibleLabel={`${peerDisplayName(peer)}, ${platformLabel(peer.platform)}`} description={peerActivityLabel(peer)} checked={peer.grantedWikiIds.includes(activeWiki.id)} disabled={peerActionId === peer.peerId} onchange={(checked) => changeGrant(peer.peerId, activeWiki.id, checked)}>{#snippet leading()}<PlatformIcon platform={peer.platform} label={platformLabel(peer.platform)} size={30} decorative />{/snippet}</Checkbox>
               {:else}
-                <div class="share-channel-empty"><strong>{t('desktop-share-no-verified-devices')}</strong><small>{t('desktop-share-no-verified-devices-body')}</small><button class="text-action" onclick={() => { editingWikiId = null; openConnectionsPanel(); }}>{t('desktop-connections')}</button></div>
+                <div class="share-channel-empty"><strong>{t('desktop-share-no-verified-devices')}</strong><small>{t('desktop-share-no-verified-devices-body')}</small><button class="text-action" onclick={() => { editingWikiId = null; openSettings('connections'); }}>{t('desktop-connections')}</button></div>
               {/each}
             </div>
           {/if}
         </section>
         <section class="sharing-channel app-channel">
-          <Switch label={t('desktop-share-ai-apps')} description={t('desktop-share-ai-apps-body')} bind:checked={wikiPolicy.allowExternalAi} />
+          <Switch label={t('desktop-share-ai-apps')} description={t('desktop-share-ai-apps-body')} checked={wikiPolicy.allowExternalAi} disabled={actionBusy} onchange={(checked) => changeWikiPolicyChannel('allowExternalAi', checked)} />
         </section>
         <section class="sharing-channel public-channel">
           <span class="network-scope public">{t('desktop-public-network')}</span>
-          <Switch label={t('desktop-share-public')} description={t('desktop-share-public-body')} bind:checked={wikiPolicy.internetPublic} />
+          <Switch label={t('desktop-share-public')} description={t('desktop-share-public-body')} checked={wikiPolicy.internetPublic} disabled={actionBusy} onchange={(checked) => changeWikiPolicyChannel('internetPublic', checked)} />
           <small class="public-identity-note">{t('desktop-share-public-identity-note')}</small>
           {#if wikiPolicy.internetPublic}
             <div class="public-share-fields"><TextField label={t('desktop-wiki-public-description')} bind:value={publicDescription} maxlength={2048} rows={3} placeholder={t('desktop-wiki-public-description-placeholder')} multiline /><TextField label={t('desktop-wiki-public-languages')} bind:value={publicLanguages} maxlength={300} placeholder={t('desktop-wiki-public-languages-placeholder')} /></div>
           {/if}
         </section>
       </div>
-      <div class="drawer-actions"><button class="primary" onclick={saveWikiPolicy} disabled={actionBusy}>{t('action-save')}</button>{#if wikiPolicy.internetPublic}<button class="secondary" onclick={savePublicProfile} disabled={actionBusy}>{t('desktop-wiki-public-profile-save')}</button>{/if}</div>
+      <p class="sharing-apply-note">{t('desktop-share-apply-note')}</p>
+      {#if wikiPolicy.internetPublic}<div class="drawer-actions"><button class="secondary" onclick={savePublicProfile} disabled={actionBusy}>{t('desktop-wiki-public-profile-save')}</button></div>{/if}
     </div>
   </div>
 {/if}
@@ -2247,77 +2450,17 @@
   <div class="drawer-backdrop" role="presentation" onclick={(event) => { if (event.currentTarget === event.target) selectedReview = null; }}><div class="side-drawer review-drawer" role="dialog" aria-modal="true" aria-labelledby="review-title"><header><div><p class="section-label">{t('desktop-wiki-pending-tab')}</p><h2 id="review-title">{selectedReview.sourceName}</h2></div><button class="icon-button" aria-label={t('action-close')} onclick={() => { selectedReview = null; editDraft = null; }}>×</button></header><ol class="review-steps"><li class="active"><span>1</span>{t('desktop-evidence')}</li><li><span>2</span>{t('desktop-proposal')}</li><li><span>3</span>{t('desktop-decision')}</li></ol><section><h3>{t('desktop-evidence')}</h3>{#if snapshot.reviewEvidence?.status === 'ready' && snapshot.reviewEvidence.conceptId === selectedReview.conceptId}<div class="evidence-list">{#each snapshot.reviewEvidence.excerpts as line (line.ordinal)}<blockquote>{line.text}</blockquote>{/each}</div>{#if snapshot.reviewEvidence.nextOrdinal != null}<button class="text-action" onclick={loadMoreEvidence}>{t('desktop-load-more')}</button>{/if}{:else}<p class="evidence-warning">{t('review-evidence-approval-blocked')}</p>{/if}</section><section><h3>{t('desktop-proposal')}</h3><TextField label={t('review-edit-title')} bind:value={editDraft.title} maxlength={200} disabled={selectedReviewIsReadOnly()} /><TextField label={t('review-edit-summary')} bind:value={editDraft.summary} maxlength={2000} rows={5} multiline disabled={selectedReviewIsReadOnly()} /></section>{#if selectedReviewIsReadOnly()}<p class="evidence-warning" role="status">{t('review-okf-read-only')}</p>{/if}<footer><button class="danger" onclick={() => decideReview('reject')} disabled={actionBusy}>{t('review-reject')}</button><button class="secondary" onclick={() => decideReview('reanalyze')} disabled={actionBusy || selectedReviewIsReadOnly()}>{t('review-reanalyze')}</button><button class="primary" onclick={() => decideReview('approve')} disabled={actionBusy || selectedReviewIsReadOnly() || !evidenceIsCurrent()}>{t('review-approve')}</button></footer></div></div>
 {/if}
 
-{#if connectionsOpen}
-  <div class="drawer-backdrop" role="presentation" onclick={(event) => { if (event.currentTarget === event.target) connectionsOpen = false; }}>
-    <div class="side-drawer connections-drawer" role="dialog" aria-modal="true" aria-labelledby="connections-title">
-      <header>
-        <div><p class="section-label">{t('desktop-page-shared-title')}</p><h2 id="connections-title">{t('desktop-connections')}</h2></div>
-        <button class="icon-button" aria-label={t('action-close')} onclick={() => { connectionsOpen = false; }}>×</button>
-      </header>
-      <section class="private-network-section">
-        <div class="section-heading">
-          <div><span class="network-scope private">{t('desktop-private-network')}</span><h3>{t('desktop-known-devices', { count: snapshot.peers.length })}</h3><p>{t('desktop-private-devices-summary', { visible: visiblePeerCount(), total: snapshot.peers.length })}</p></div>
-          <button class="text-action" onclick={() => runConnectivityAction('refresh')}>{t('action-refresh')}</button>
-        </div>
-        {#if lanPreference !== 'enabled'}
-          <div class="connection-guidance"><p>{lanPreference === 'undecided' ? t('connectivity-undecided') : t('connectivity-disabled')}</p><button class="secondary" onclick={openNetworkPreferences}>{t('desktop-preferences')}</button></div>
-        {:else if snapshot.connectivity?.networkProfile === 'public'}
-          <div class="connection-guidance"><p>{t('connectivity-public-network')}</p><button class="secondary" onclick={() => runConnectivityAction('networkSettings')}>{t('connectivity-open-network-settings')}</button></div>
-        {:else if snapshot.connectivity?.firewall === 'rulesMissing' && snapshot.connectivity.firewallHelper === 'verified'}
-          <div class="connection-guidance"><p>{t('connectivity-firewall-needed')}</p><button class="secondary" onclick={() => runConnectivityAction('install')}>{t('connectivity-configure-firewall')}</button></div>
-        {:else if snapshot.connectivity?.firewall === 'rulesMissing'}
-          <div class="connection-guidance"><p>{t('connectivity-firewall-helper-repair')}</p></div>
-        {:else if snapshot.connectivity?.firewall === 'conflict' || snapshot.connectivity?.firewall === 'legacyExposure' || snapshot.connectivity?.firewall === 'managedPolicy' || snapshot.connectivity?.firewall === 'firewallDisabled' || snapshot.connectivity?.firewall === 'blockAllInbound'}
-          <div class="connection-guidance"><p>{firewallGuidanceLabel()}</p><button class="secondary" onclick={() => runConnectivityAction('advancedFirewall')}>{t('connectivity-open-advanced-firewall')}</button></div>
-        {:else if snapshot.connectivity?.systemPermission === 'denied'}
-          <div class="connection-guidance"><p>{t('connectivity-failed')}</p><button class="secondary" onclick={() => runConnectivityAction('localNetworkPrivacy')}>{t('connectivity-open-local-network-settings')}</button></div>
-        {/if}
-        <div class="peer-list">
-          {#each snapshot.peers as peer (peer.peerId)}
-            <article>
-              <div class="peer-summary"><DeviceIdentity name={peerDisplayName(peer)} platform={peer.platform} platformLabel={platformLabel(peer.platform)} detail={peerActivityLabel(peer)} /><span class:verified={peer.trust === 'trusted'} class:blocked={peer.trust === 'blocked'}>{peer.trust === 'trusted' ? t('desktop-verified') : peer.trust === 'blocked' ? t('desktop-pairing-blocked') : t('desktop-unverified')}</span></div>
-              {#if peer.sasWords}
-                <strong class="sas-words">{peer.sasWords.join(' · ')}</strong>
-                <div class="row-actions"><button class="primary" disabled={peerActionId === peer.peerId} onclick={() => runPeerAction(peer.peerId, 'accept')}>{t('devices-code-matches')}</button><button class="danger" disabled={peerActionId === peer.peerId} onclick={() => runPeerAction(peer.peerId, 'reject')}>{t('devices-code-does-not-match')}</button></div>
-              {:else if peer.trust === 'unpaired'}
-                <button class="secondary" disabled={peerActionId === peer.peerId} onclick={() => runPeerAction(peer.peerId, 'pair')}>{t('desktop-verify-device')}</button>
-              {:else if peer.trust === 'blocked'}
-                <div class="blocked-peer-guidance"><p>{t('desktop-pairing-blocked-help')}</p><button class="secondary" disabled={peerActionId === peer.peerId} onclick={() => runPeerAction(peer.peerId, 'allowAgain')}>{t('desktop-allow-pairing-again')}</button></div>
-              {:else if peer.trust === 'trusted'}
-                <div class="grant-list">{#each snapshot.wikis.filter((wiki) => wiki.peerShareable) as wiki (wiki.id)}<Checkbox label={wiki.name} checked={peer.grantedWikiIds.includes(wiki.id)} onchange={(checked) => changeGrant(peer.peerId, wiki.id, checked)} />{/each}</div>
-                <button class="text-action" disabled={peerActionId === peer.peerId} onclick={() => runPeerAction(peer.peerId, 'revoke')}>{t('desktop-revoke-trust')}</button>
-              {/if}
-            </article>
-          {:else}
-            <p class="empty">{t('desktop-no-devices')}</p>
-          {/each}
-        </div>
-      </section>
-      <section>
-        <div class="section-heading">
-          <div><h3>{t('desktop-ai-clients')}</h3><p>{t('desktop-integration-body')}</p></div>
-          <button class="text-action" disabled={integrationRequestId !== null} onclick={() => runIntegrationAction({ kind: 'refresh' })}>{t('action-refresh')}</button>
-        </div>
-        <IntegrationList integrations={snapshot.integrations?.integrations ?? []} busy={integrationRequestId !== null} {t} onaction={runIntegrationAction} oncopy={copyMcpSetup} />
-        <div class="application-access-list">
-          {#each snapshot.applicationAccess.filter((application) => application.active) as application (application.appId)}
-            <article>
-              <div class="application-identity"><AiClientIcon client={applicationClientFor(application)} label={application.displayName} decorative /><div><strong>{application.displayName}</strong><small>{t('desktop-application-quota', { count: application.ownedWikiCount, size: formatBytes(application.managedBytes) })}</small></div></div>
-              {#each snapshot.wikis.filter((wiki) => wiki.origin === 'aiMemory' && application.grants.some((grant) => grant.wikiId === wiki.id && grant.role === 'owner') === false) as wiki (wiki.id)}
-                <SelectField label={wiki.name} value={applicationGrantRole(application.appId, wiki.id)} options={[{ value: 'none', label: t('desktop-application-no-access') }, { value: 'reader', label: t('desktop-application-reader') }, { value: 'editor', label: t('desktop-application-editor') }]} onchange={(value) => changeApplicationGrant(application.appId, wiki.id, value === 'none' ? null : value as ApplicationWikiRoleInput)} disabled={actionBusy} />
-              {/each}
-            </article>
-          {/each}
-        </div>
-      </section>
-      <ConnectionAdvanced lanRuntime={snapshot.lanRuntime} peerId={federationPeerId} address={federationAddress} blockedPublishers={snapshot.blockedPublicPublishers} busy={peerActionId !== null} {t} onpeerid={(value) => { federationPeerId = value; }} onaddress={(value) => { federationAddress = value; }} onadd={() => saveFederationIndex(false)} onremove={() => saveFederationIndex(true)} onunblock={(publisherId) => changePublisherBlock(publisherId, false)} />
-      <details class="advanced-disclosure"><summary>{t('desktop-advanced-details')}</summary><TextField label={t('desktop-address')} bind:value={manualPeerAddress} maxlength={500} placeholder={t('desktop-multiaddress-placeholder')} /><button class="secondary" onclick={connectManualPeer}>{t('action-connect')}</button></details>
-    </div>
-  </div>
-{/if}
-
 </div>
 
+{/if}
+{#if settingsLeavePending}
+  <div class="modal-backdrop close-confirmation-backdrop" role="presentation">
+    <div class="close-dialog" role="dialog" aria-modal="true" aria-labelledby="settings-discard-title">
+      <p class="section-label">{t('desktop-settings-general')}</p><h2 id="settings-discard-title">{t('desktop-settings-discard-title')}</h2>
+      <p>{t('desktop-settings-discard-body')}</p>
+      <div><button class="primary" onclick={() => resolveSettingsBack(false)}>{t('desktop-settings-continue-editing')}</button><button class="danger" onclick={() => resolveSettingsBack(true)}>{t('desktop-settings-discard-action')}</button></div>
+    </div>
+  </div>
 {/if}
 {#if closeChoiceRequired}
   <div class="modal-backdrop close-confirmation-backdrop" role="presentation">

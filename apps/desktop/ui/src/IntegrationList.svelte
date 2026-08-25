@@ -1,6 +1,7 @@
 <script lang="ts">
   import type { IntegrationActionInput, IntegrationSummary } from './api';
   import AiClientIcon from './components/identity/AiClientIcon.svelte';
+  import LoadingSkeleton from './components/LoadingSkeleton.svelte';
   import type { MessageArgs } from './i18n';
 
   let {
@@ -43,6 +44,20 @@
     return t(`workflow-guide-status-${status}`);
   }
 
+  function connectionSummary(status: IntegrationSummary['status']): string {
+    const labels: Record<IntegrationSummary['status'], string> = {
+      notInstalled: 'integration-summary-not-installed',
+      available: 'integration-summary-available',
+      awaitingClientApproval: 'integration-summary-awaiting-approval',
+      configured: 'integration-summary-configured',
+      updateAvailable: 'integration-summary-update-available',
+      conflict: 'integration-summary-conflict',
+      unsupported: 'integration-summary-unsupported',
+      error: 'integration-summary-error'
+    };
+    return t(labels[status]);
+  }
+
   function connectionTone(status: IntegrationSummary['status']): 'ready' | 'working' | 'off' | 'attention' {
     if (status === 'configured') return 'ready';
     if (status === 'awaitingClientApproval' || status === 'updateAvailable') return 'working';
@@ -74,16 +89,27 @@
   }
 </script>
 
-<div class="integration-list">
+<div class="integration-list" aria-busy={busy}>
+  {#if busy && integrations.length === 0}
+    <p class="sr-only" role="status">{t('integrations-checking')}</p>
+    <LoadingSkeleton variant="integrations" rows={4} />
+  {:else}
   {#each integrations as integration (integration.client)}
-    <article class="integration-item">
+    <article
+      class="integration-item"
+      class:needs-attention={integration.status === 'conflict' || integration.status === 'error' || integration.workflowGuide.status === 'conflict'}
+      class:has-update={integration.status === 'updateAvailable' || integration.workflowGuide.status === 'updateAvailable'}
+    >
       <div class="integration-client-heading">
         <AiClientIcon client={integration.client} label={clientName(integration.client)} decorative />
         <div class="integration-client-copy">
-          <strong>{clientName(integration.client)}</strong>
-          {#if integration.detectedVersion}<small>{t('integrations-version', { version: integration.detectedVersion })}</small>{/if}
+          <div class="integration-name-line">
+            <strong>{clientName(integration.client)}</strong>
+            {#if integration.activityRecent}<small class="recent-activity"><span aria-hidden="true"></span>{t('integrations-recent-activity')}</small>{/if}
+          </div>
+          <p>{connectionSummary(integration.status)}</p>
+          {#if integration.detectedVersion}<small class="integration-version">{t('integrations-version', { version: integration.detectedVersion })}</small>{/if}
         </div>
-        {#if integration.activityRecent}<small class="recent-activity"><span aria-hidden="true"></span>{t('integrations-recent-activity')}</small>{/if}
       </div>
       <dl class="integration-state-list">
         <div>
@@ -124,5 +150,8 @@
         </div>
       {/if}
     </article>
+  {:else}
+    <div class="integration-empty"><strong>{t('desktop-no-integrations')}</strong></div>
   {/each}
+  {/if}
 </div>

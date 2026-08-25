@@ -31,9 +31,11 @@ bypass Gatekeeper, SmartScreen, model hashes, or runtime verification.
    whether the new build may access AirWiki's existing device identity in the
    login Keychain. Authorize that access only after verifying the candidate
    hash. Cancelling fails closed and never creates a replacement identity.
-4. The onboarding wizard explains local-network collaboration before requesting
-   permission. Grant it only when LAN search is desired.
-5. Review the hardware recommendation, licenses, and remaining download size.
+4. The onboarding wizard offers a direct path to a first local folder Wiki.
+   Local-network collaboration remains disabled until you choose it later in
+   **Settings**; grant the system permission only when LAN search is desired.
+5. Review the optional hardware recommendation, licenses, and remaining
+   download size. You can finish onboarding and prepare local AI later.
 6. Allow the application to prepare only the selected local model assets.
 
 No daemon, system service, or Internet-facing port is installed. Optional
@@ -70,6 +72,13 @@ The application diagnoses hardware, recommends a profile, verifies installed
 assets, and downloads only missing files. Model identities are immutable by
 revision and hash; an updated artifact receives a new catalog identity and never
 silently replaces the active model.
+
+AirWiki revalidates installed model files before enabling local search. Large
+profiles can take several minutes to hash and start, especially in a development
+build. If preparation is requested during that check, Settings shows it as a
+queued request rather than false download progress. Cancelling removes that
+queued download request immediately; the read-only check already in progress may
+still finish and safely enable the model that was already installed.
 
 | Profile | Intended behavior |
 | --- | --- |
@@ -146,7 +155,7 @@ is not evidence by itself; verify the stated effect.
 
 ## Connect a local chat client
 
-After preflight is ready, open **Connections** and refresh detection. AirWiki
+After preflight is ready, open **Settings → AI apps** and refresh detection. AirWiki
 can register ChatGPT Desktop/Work, Codex, Claude Code and Gemini CLI through
 supported CLIs, and can open Claude Desktop's MCPB installer. For clients with
 documented user skills, one confirmation installs the local MCP connection and
@@ -157,10 +166,17 @@ Open a new conversation after installing or updating the guide.
 Connecting a client never enables a Wiki, sharing or publication. See
 [local chat integrations](chat-integrations.md).
 
+The Settings button uses three labelled status rings for local knowledge,
+Connections and AI apps. Open **Settings → Connections** for LAN permission,
+trusted devices, pairing, Wiki grants and advanced public configuration. Open
+**Settings → General** for local-model preparation, appearance, language,
+background behavior, startup and updates. A Back action restores the Library
+state from which Settings was opened.
+
 ## Background operation, autostart, and updates
 
 Tray operation, per-user autostart, and update checks are applied only after
-onboarding consent and can be disabled later.
+their explicit choices in Settings and can be disabled later.
 
 - macOS registers the bundled per-user agent through `SMAppService`.
 - Windows registers one exact command under the current user's Run key.

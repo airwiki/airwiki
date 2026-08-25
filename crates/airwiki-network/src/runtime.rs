@@ -2973,6 +2973,14 @@ fn add_peer_rankings(
         // Noise authenticates the sending peer. Response-controlled metadata
         // must never choose the citation identity.
         hit.node_id = peer.to_string();
+        if let Some(presentation) = &mut hit.collection_presentation {
+            // A LAN result can describe only the exact authorized Wiki hit.
+            // Rich public profile fields belong exclusively to a validated
+            // signed manifest and are discarded at this boundary.
+            presentation.description = None;
+            presentation.languages.clear();
+            presentation.concept_count = None;
+        }
         let rank = if hit.rank == 0 {
             u32::try_from(position.saturating_add(1)).unwrap_or(u32::MAX)
         } else {
@@ -3359,6 +3367,7 @@ mod tests {
                 updated_at: Utc::now(),
                 rank: 1,
                 node_id: "backend-must-not-control-this".to_owned(),
+                collection_presentation: None,
                 assurance: None,
                 lifecycle_status: Some("stable".to_owned()),
             });
@@ -3803,6 +3812,7 @@ mod tests {
             updated_at: Utc::now(),
             rank,
             node_id: node.to_owned(),
+            collection_presentation: None,
             assurance: None,
             lifecycle_status: None,
         }
@@ -4034,6 +4044,44 @@ mod tests {
 
         assert_eq!(response.hits.len(), 1);
         assert_eq!(response.hits[0].node_id, authenticated_peer.to_string());
+    }
+
+    #[tokio::test]
+    async fn lan_fusion_discards_public_only_presentation_fields() {
+        let request = SearchRequest::new("query", airwiki_types::SearchPurpose::LocalAssistant, 1);
+        let (reply, _receiver) = oneshot::channel();
+        let mut remote = SearchResponse::empty(request.request_id);
+        let mut presented = hit("remote", 1, "source-hash", uuid::Uuid::new_v4());
+        presented.collection_presentation = Some(airwiki_types::SearchCollectionPresentation {
+            name: "Shared runbooks".to_owned(),
+            description: Some("must not cross the LAN search boundary".to_owned()),
+            languages: vec!["en".to_owned()],
+            concept_count: Some(12),
+            okf_compatibility: Some(airwiki_types::OkfCompatibility::DeclaredV02),
+        });
+        remote.hits.push(presented);
+        let query = QueryAggregate {
+            request,
+            pending: HashMap::new(),
+            connecting: HashSet::new(),
+            responses: vec![(PeerId::random(), remote)],
+            offline: HashSet::new(),
+            warnings: Vec::new(),
+            deadline: Instant::now(),
+            reply,
+        };
+
+        let (response, _) = fuse_peer_rankings(query);
+        let presentation = response.hits[0]
+            .collection_presentation
+            .as_ref()
+            .expect("LAN presentation remains available");
+
+        assert_eq!(presentation.name, "Shared runbooks");
+        assert!(presentation.description.is_none());
+        assert!(presentation.languages.is_empty());
+        assert!(presentation.concept_count.is_none());
+        assert!(presentation.okf_compatibility.is_some());
     }
 
     #[test]

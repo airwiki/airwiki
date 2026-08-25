@@ -20,8 +20,8 @@
         "title": "AirWiki",
         "width": 1180,
         "height": 760,
-        "minWidth": 1020,
-        "minHeight": 640,
+        "minWidth": 1180,
+        "minHeight": 760,
         "visible": false,
         "resizable": true
       }

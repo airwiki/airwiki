@@ -18,6 +18,7 @@ status-ready = Listo
 status-working = Trabajando
 status-needs-permission = Necesita permiso
 status-needs-attention = Necesita atención
+status-failed = Falló
 status-optional-disabled = Opcional · Desactivado
 
 desktop-startup-failed-title = AirWiki no pudo iniciarse
@@ -108,11 +109,15 @@ primary-button-add-folder = Agregar carpeta
 primary-button-open-health = Abrir Salud
 primary-button-view-options = Ver opciones
 primary-button-view-diagnostics = Ver diagnóstico
-models-install-queued = Esperando turno
+models-install-queued = Comprobando la IA local de este equipo
+models-install-queued-detail = AirWiki está verificando e iniciando el modelo instalado. Los archivos grandes pueden tardar varios minutos; cualquier archivo que aún falte se descargará automáticamente después.
+models-cancel-request = Cancelar solicitud
 models-install-downloading = Descargando archivos verificados
 models-install-verifying = Verificando integridad
 models-install-extracting = Preparando runtime local
 models-install-activating = Activando el modelo
+models-install-phase-detail = Mantén AirWiki abierto. Puedes cancelar de forma segura y continuar después.
+models-install-progress = { $downloaded } de { $total }
 
 collections-title = Wikis
 collections-subtitle = Cada wiki observa una carpeta local y mantiene un bundle OKF independiente.
@@ -184,7 +189,7 @@ maintenance-failed = El último escaneo necesita atención
 maintenance-quarantined = El contenido compartido está retirado hasta recuperarse
 
 onboarding-welcome-title = Te damos la bienvenida a AirWiki
-onboarding-welcome-body = Empieza con una carpeta local y termina con una respuesta que puedas rastrear hasta su fuente.
+onboarding-welcome-body = Elige tu idioma, mantén todo privado por defecto y agrega una carpeta cuando quieras.
 onboarding-model-title = Preparar la IA local
 onboarding-collection-title = Agregar tu primera wiki
 onboarding-processing-title = Preparando tus primeros borradores
@@ -243,6 +248,10 @@ onboarding-chat-body = Conectar un chat es opcional y nunca habilita carpetas ni
 onboarding-chat-later = Puedes configurar ChatGPT, Claude o Gemini después desde Chats.
 onboarding-chat-now = Configurar un chat ahora
 onboarding-complete-body = Puedes cambiar cualquier opción más adelante. AirWiki seguirá pidiendo aprobación para publicar, emparejar, conceder acceso o enviar evidencia a un chat.
+onboarding-complete-with-wiki = Tu primera Wiki local está lista para preparar borradores privados. Aún tendrás que revisarlos antes de que puedan buscarse o compartirse.
+onboarding-complete-without-wiki = AirWiki está listo. Agrega una carpeta desde el estado vacío cuando quieras crear tu primera Wiki.
+onboarding-summary-wiki-later = Configurar más tarde
+onboarding-summary-ai-later = Queda una configuración opcional
 
 search-placeholder = ¿Qué quieres saber?
 search-empty-title = No encontramos evidencia coincidente
@@ -828,6 +837,9 @@ desktop-private-devices-summary =
         [one] 1 disponible ahora de { $total } conocidos
        *[other] { $visible } disponibles ahora de { $total } conocidos
     }
+desktop-device-wiki-access = Acceso a Wikis
+desktop-device-wiki-access-help = Elige qué Wikis puede consultar este equipo verificado.
+desktop-device-access-count = { $granted } de { $total } permitidas
 desktop-device-identified = Equipo { $id }
 desktop-device-platform-macos = macOS
 desktop-device-platform-windows = Windows
@@ -874,7 +886,7 @@ desktop-peer-id = Peer ID
 desktop-multiaddress = Multiaddress
 desktop-blocked-publishers = Publishers bloqueados
 desktop-ai-clients = Clientes de IA
-desktop-integration-body = AirWiki instala un puente MCP local. La búsqueda es de solo lectura; cambiar memorias requiere una capacidad limitada y revocable.
+desktop-integration-body = AirWiki conecta aplicaciones de IA compatibles de forma local. Cada app recibe solo el acceso que apruebes y puedes revocarlo cuando quieras.
 desktop-integration-warning = { $count } wikis permiten IA externa. Cada búsqueda sigue revalidando la política.
 desktop-restart-required = reinicio requerido
 desktop-no-integrations = Comprueba el sistema para detectar clientes compatibles.
@@ -902,7 +914,7 @@ desktop-public-loading-body = AirWiki está conectando con el publicador y valid
 desktop-public-unavailable-body = Vuelve a los resultados e inténtalo de nuevo. Tu conocimiento local y cercano sigue disponible.
 desktop-shared-back-results = Volver a los resultados
 desktop-shared-loading-title = Abriendo wiki compartida
-desktop-shared-loading-body = AirWiki está validando el acceso y cargando la wiki OKF publicada.
+desktop-shared-loading-body = AirWiki está validando el acceso y cargando la Wiki publicada actual.
 desktop-shared-loading-structure = Cargando la estructura completa de la wiki…
 desktop-shared-loading-page = Abriendo la página publicada…
 desktop-shared-structure-failed = La wiki cambió durante la carga o se interrumpió la conexión. Vuelve a los resultados e inténtalo de nuevo.
@@ -951,8 +963,8 @@ native-confirm-attach-project-memory = ¿Permitir que esta aplicación lea y esc
 native-confirm-detach-project-memory = ¿Desvincular esta memoria de proyecto de AirWiki? Se retirarán accesos, proyecciones y estado local, pero los archivos .airwiki permanecerán intactos.
 desktop-project-memory-label = Memoria de proyecto
 desktop-project-memory-create-title = Crear memoria de proyecto
-desktop-project-memory-source-body = Conserva documentación OKF portable junto al proyecto para que agentes en clones aprobados puedan usarla.
-desktop-project-memory-create-body = AirWiki crea solo el manifiesto y el bundle OKF. Aparecen en Git como archivos normales; AirWiki nunca hace stage ni commit.
+desktop-project-memory-source-body = Conserva documentación portable junto al proyecto para que agentes en clones aprobados puedan usarla.
+desktop-project-memory-create-body = AirWiki crea archivos de documentación portable dentro de .airwiki. Git los muestra como archivos normales del proyecto; AirWiki nunca modifica el control de versiones.
 desktop-project-memory-create-preview = Documentación portable del proyecto y memoria para agentes
 desktop-project-memory-create-action = Crear .airwiki
 desktop-project-memory-create-error = No se pudo crear la memoria de proyecto.
@@ -969,7 +981,7 @@ desktop-project-memory-health-active = Activa y sincronizada
 desktop-project-memory-health-invalid = Bundle inválido; el acceso queda bloqueado hasta corregir los archivos
 desktop-project-memory-health-missing = Falta el bundle .airwiki; el acceso está bloqueado
 desktop-project-memory-health-identityConflict = Cambió la identidad portable; desvincula y aprueba nuevamente
-desktop-wiki-origin-project-memory = Memoria de proyecto · OKF portable
+desktop-wiki-origin-project-memory = Memoria de proyecto · archivos portables
 desktop-wiki-origin-personal-memory = Memoria personal · vault privado
 action-approve = Aprobar
 status-blocked = Bloqueado
@@ -986,6 +998,70 @@ native-confirm-remove-workflow-guide = ¿Retirar la skill, AirWiki.md y su líne
 # Shell centrado en Wikis
 desktop-nav-home = Inicio
 desktop-nav-wikis = Wikis
+desktop-library-title = Biblioteca
+desktop-library-kicker = Índice de conocimiento local
+desktop-library-search-kicker = Búsqueda entre orígenes
+desktop-library-body = Un catálogo de trabajo del conocimiento guardado en este equipo.
+desktop-library-search-body = Resultados agrupados por Wiki desde este equipo, equipos cercanos autorizados y, cuando lo eliges, la red pública.
+desktop-library-wiki-count =
+    { $count ->
+        [one] 1 Wiki en este equipo
+       *[other] { $count } Wikis en este equipo
+    }
+desktop-library-concept-count =
+    { $count ->
+        [one] 1 concepto publicado
+       *[other] { $count } conceptos publicados
+    }
+desktop-library-attention-count =
+    { $count ->
+        [one] 1 requiere atención
+       *[other] { $count } requieren atención
+    }
+desktop-settings-general = General
+desktop-approval-notice-title =
+    { $count ->
+        [one] Hay 1 aprobación pendiente
+       *[other] Hay { $count } aprobaciones pendientes
+    }
+desktop-approval-notice-body = Revísala en Apps de IA. Descartar este aviso no rechaza la solicitud.
+desktop-approval-notice-review = Revisar
+desktop-approval-notice-dismiss = Descartar aviso
+desktop-shared-wiki-fallback = Wiki compartida
+desktop-shared-device-fallback = Equipo cercano
+desktop-open-wiki = Abrir Wiki
+desktop-search-filter-label = Filtrar resultados por origen
+desktop-search-filter-all = Todas
+desktop-search-filter-local = Este equipo
+desktop-search-filter-nearby = Cercanas
+desktop-search-filter-public = Públicas
+desktop-search-filter-empty-title = No hay resultados de este origen
+desktop-search-filter-empty-body = Hay coincidencias en otros orígenes. Elige otro filtro para verlas.
+desktop-search-match-count =
+    { $count ->
+        [one] 1 coincidencia
+       *[other] { $count } coincidencias
+    }
+desktop-wiki-shared = Acceso compartido
+desktop-search-health-ready = Salud lista
+desktop-search-health-attention = Requiere atención
+desktop-search-health-failed = No disponible hasta resolver errores
+desktop-search-access-granted = Acceso concedido
+desktop-search-access-unavailable = Acceso no confirmado
+desktop-search-available = Disponible ahora
+desktop-search-offline = Equipo sin conexión
+desktop-search-concept-count =
+    { $count ->
+        [one] 1 concepto
+       *[other] { $count } conceptos
+    }
+desktop-application-access-title = Acceso por aplicación
+desktop-application-access-empty = No hay aplicaciones activas con acceso administrable.
+desktop-settings-discard-title = ¿Descartar los cambios de General?
+desktop-settings-discard-body = El idioma, la apariencia, el cierre y las actualizaciones aún no se guardaron. El ajuste de LAN se guarda por separado y no se perderá.
+desktop-settings-continue-editing = Continuar editando
+desktop-settings-discard-action = Descartar cambios
+action-back = Volver
 desktop-nav-shared = Compartido
 desktop-new-wiki = Nueva wiki
 desktop-page-home-title = Inicio
@@ -995,8 +1071,13 @@ desktop-page-wikis-body = Tus carpetas convertidas en conocimiento portable y ve
 desktop-page-shared-title = Compartido
 desktop-page-shared-body = Decide qué wikis pueden ver tus equipos, aplicaciones de IA o la red pública.
 desktop-search-scope-label = Alcance de la búsqueda
-desktop-search-private-scope = Este equipo + cercanos
-desktop-search-public-short = Incluir pública
+desktop-search-private-scope-local = Este equipo
+desktop-search-private-scope-nearby =
+    { $count ->
+        [one] Este equipo + 1 cercano
+       *[other] Este equipo + { $count } cercanos
+    }
+desktop-search-public-short = Buscar también en la red pública
 desktop-search-local-source = En este dispositivo
 desktop-search-nearby-source = Equipo cercano
 desktop-search-welcome-title = Busca en todas tus wikis
@@ -1020,6 +1101,11 @@ desktop-status-ai-apps-connected =
         [one] 1 conectada
        *[other] { $count } conectadas
     }
+desktop-status-ai-apps-pending =
+    { $count ->
+        [one] 1 aprobación pendiente
+       *[other] { $count } aprobaciones pendientes
+    }
 desktop-system-status = Estado del sistema
 desktop-wiki-access-title = Acceso compartido
 desktop-share-nearby-enabled = Compartición por LAN habilitada
@@ -1031,9 +1117,27 @@ desktop-wiki-column-content = Contenido
 desktop-wiki-column-access = Acceso
 desktop-wiki-column-status = Estado
 desktop-wiki-content-count = { $published } publicados · { $pending } pendientes
+desktop-wiki-source-count =
+    { $count ->
+        [one] 1 documento de origen
+       *[other] { $count } documentos de origen
+    }
+desktop-wiki-row-checking = Comprobando cambios en el origen
+desktop-wiki-row-project-blocked = El acceso sigue bloqueado hasta recuperar la memoria de proyecto
+desktop-wiki-row-failed-count =
+    { $count ->
+        [one] 1 archivo de origen con error
+       *[other] { $count } archivos de origen con error
+    }
+desktop-wiki-row-review-count =
+    { $count ->
+        [one] 1 propuesta en espera
+       *[other] { $count } propuestas en espera
+    }
 desktop-wiki-pending-status = Pendiente de revisión
 desktop-wiki-empty-title = Aún no hay wikis
-desktop-wiki-empty-body = Elige una carpeta para crear tu primera wiki.
+desktop-wiki-empty-body = Agrega una carpeta, importa conocimiento portable o crea memoria de proyecto para comenzar.
+desktop-wiki-empty-action = Crear tu primera Wiki
 desktop-wiki-private = Solo tú
 desktop-wiki-unknown = Wiki no disponible
 desktop-home-attention = Necesita atención
@@ -1083,7 +1187,7 @@ desktop-public-network = Red pública
 desktop-shared-owned-title = Wikis con acceso habilitado
 desktop-shared-owned-body = Cada canal de acceso se autoriza de forma independiente.
 desktop-public-discover-title = Descubrir wikis públicas
-desktop-public-discover-body = Consulta bundles publicados y verificados por la red federada.
+desktop-public-discover-body = Busca conocimiento publicado deliberadamente en la red pública.
 desktop-public-search-help = Activa “Red pública” en la búsqueda superior para incluir resultados públicos.
 desktop-name-wiki = Ponle un nombre a esta wiki
 desktop-wiki-name = Nombre de la wiki
@@ -1181,15 +1285,16 @@ desktop-application-editor = Puede editar
 desktop-application-grant-failed = El acceso no pudo cambiarse. La aplicación o la wiki pueden haber cambiado.
 action-reject = Rechazar
 desktop-share-drawer-body = El contenido sigue siendo privado salvo en los canales que habilites aquí.
+desktop-share-apply-note = Los cambios de canal se aplican después de confirmarlos. La descripción pública y los idiomas se guardan por separado.
 desktop-share-nearby = Equipos cercanos
 desktop-share-nearby-body = Solo equipos verificados y con permiso explícito por wiki.
 desktop-share-device-access = Equipos privados con acceso a esta Wiki
 desktop-share-no-verified-devices = Aún no hay equipos verificados
 desktop-share-no-verified-devices-body = Conecta y verifica un equipo antes de darle acceso a esta Wiki.
 desktop-share-ai-apps = Aplicaciones de IA
-desktop-share-ai-apps-body = Acceso de búsqueda de solo lectura mediante el puente MCP local. Esto no permite editar memorias.
+desktop-share-ai-apps-body = Acceso de búsqueda de solo lectura para apps de IA conectadas localmente. Esto no permite editar memorias.
 desktop-share-public = Red pública
-desktop-share-public-body = Publica el bundle OKF sin exponer la carpeta fuente.
+desktop-share-public-body = Publica la Wiki revisada sin exponer la carpeta fuente.
 desktop-share-public-identity-note = Los lectores públicos ven una identidad de publicador firmada y separada. AirWiki no revela el nombre ni el sistema operativo de este equipo.
 desktop-wiki-public-description = Descripción pública
 desktop-wiki-public-languages = Idiomas
@@ -1198,6 +1303,8 @@ desktop-wiki-public-languages-placeholder = Ej. es, en
 desktop-peer-id-placeholder = Ej. 12D3KooW…
 desktop-multiaddress-placeholder = Ej. /ip4/192.0.2.1/tcp/4242
 desktop-wiki-public-profile-save = Guardar perfil público
+desktop-preferences-unsaved = Cambios sin guardar
+desktop-preferences-saved = Preferencias guardadas
 desktop-wiki-relink = Volver a vincular carpeta
 desktop-wiki-details-body = Estado de la fuente y contenido publicado de esta wiki.
 desktop-delete-wiki = Eliminar wiki

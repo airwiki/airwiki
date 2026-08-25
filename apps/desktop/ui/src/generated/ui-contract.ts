@@ -83,15 +83,19 @@ export type ModelInstallStatus = "queued" | "downloading" | "verifying" | "extra
 
 export type ModelInstallSummary = { status: ModelInstallStatus, downloaded: number, totalBytes: number, };
 
-export type SearchHitSummary = { conceptId: string, wikiId: string, title: string, snippet: string, headingOrPage: string, logicalResourceUri: string, sourceRevision: number, sourceSha256: string, rank: number, nodeId: string, route: SearchHitRoute, assurance: ConceptAssuranceSummary | null, lifecycle: string | null, };
+export type SearchHitSummary = { conceptId: string, wikiId: string, title: string, snippet: string, headingOrPage: string, logicalResourceUri: string, sourceRevision: number, sourceSha256: string, rank: number, assurance: ConceptAssuranceSummary | null, lifecycle: string | null, };
+
+export type WikiSearchHealth = "ready" | "attention" | "failed";
+
+export type WikiSearchSourceSummary = { "kind": "local", private: boolean, health: WikiSearchHealth, } | { "kind": "nearby", peerId: string, deviceName: string | null, platform: HostPlatform | null, accessGranted: boolean, available: boolean, } | { "kind": "public", publisherId: string, publisherLabel: string, };
+
+export type WikiSearchResultSummary = { wikiId: string, wikiName: string | null, description: string | null, languages: Array<string>, conceptCount: number | null, okfCompatibility: OkfCompatibilityDto | null, bestRank: number, totalMatches: number, matches: Array<SearchHitSummary>, source: WikiSearchSourceSummary, };
 
 export type SearchStatus = "searching" | "complete" | "failed";
 
 export type SearchCoverage = "complete" | "federationDisabled" | "offlineDevices" | "publicNetworkOffline" | "partial";
 
-export type SearchHitRoute = "deviceNetwork" | "publicNetwork";
-
-export type SearchSummary = { requestId: string, status: SearchStatus, hits: Array<SearchHitSummary>, coverage: SearchCoverage, };
+export type SearchSummary = { requestId: string, status: SearchStatus, results: Array<WikiSearchResultSummary>, coverage: SearchCoverage, };
 
 export type RemoteWikiPageInput = { "kind": "index" } | { "kind": "log" } | { "kind": "concept", conceptId: string, };
 

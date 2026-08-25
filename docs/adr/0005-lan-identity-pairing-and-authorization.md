@@ -67,6 +67,14 @@ true immediately before handoff:
   `allow_external_ai`;
 - the requested revision remains published and passed the answerability gate.
 
+An authorized search hit may carry a bounded presentation for only that exact
+Wiki: its display name and OKF compatibility. This optional field is additive,
+so older clients ignore it and newer clients accept its absence. It is emitted
+only after the same final authorization check as the evidence and is removed
+with the hit if trust, grant or publication is revoked. It is not a catalog:
+the LAN response contains no other Wiki names, descriptions, counts, local
+paths or public-profile metadata.
+
 After an authorized search identifies a specific Wiki, the reader may open its
 complete published OKF workspace over `/airwiki/shared-wiki-browse/2.0.0`.
 AirWiki retrieves bounded concept and graph frames automatically and individual
@@ -107,6 +115,8 @@ previous collection grants.
 - Revocation takes effect without waiting for mDNS expiry or a process restart.
 - Authorized LAN results can reuse the local file-oriented Wiki workspace in a
   bounded read-only mode without replicating source documents.
+- Authorized results can identify their exact Wiki without exposing a peer-wide
+  catalog; clients use a neutral shared-Wiki label when presentation is absent.
 - Either endpoint can reopen an authorized result after an idle connection
   closes, including the endpoint that originally accepted the connection.
 - Keychain or credential-store failure disables the trusted LAN identity rather

@@ -809,12 +809,18 @@ fn retain_disclosable_hits(
     purpose: SearchPurpose,
 ) -> std::result::Result<Vec<SearchHit>, SearchContractError> {
     let mut current = Vec::with_capacity(hits.len());
-    for hit in hits {
+    for mut hit in hits {
         if grants.contains(&hit.collection_id)
             && database
                 .peer_hit_is_current_under_disclosure(lease, &hit, caller_node_id, purpose)
                 .map_err(|error| SearchContractError::Backend(error.to_string()))?
         {
+            let presentation = database
+                .collection_presentation_under_disclosure(lease, hit.collection_id)
+                .map_err(|error| SearchContractError::Backend(error.to_string()))?
+                .ok_or(SearchContractError::Unauthorized)?;
+            hit.collection_presentation = Some(presentation);
+            hit.sanitize_for_wire();
             current.push(hit);
         }
     }
@@ -5832,6 +5838,7 @@ mod tests {
             updated_at: Utc::now(),
             rank,
             node_id: "synthetic-node".to_owned(),
+            collection_presentation: None,
             assurance: None,
             lifecycle_status: Some("stable".to_owned()),
         }
@@ -7508,7 +7515,10 @@ mod tests {
         let concept = database
             .save_enrichment(source.id(), draft.clone(), "test-node", "test-model")
             .unwrap();
-        let chunk_id = Uuid::new_v4();
+        let chunk_id = Uuid::new_v5(
+            &Uuid::NAMESPACE_URL,
+            format!("urn:airwiki:chunk:{source_hash}:0:chunk-hash").as_bytes(),
+        );
         database
             .replace_chunks(
                 concept.id,
@@ -7552,11 +7562,34 @@ mod tests {
             updated_at: published.updated_at,
             rank: 1,
             node_id: "test-node".into(),
+            collection_presentation: None,
             assurance: None,
             lifecycle_status: Some("stable".to_owned()),
         };
         response.hits.push(hit.clone());
         response.authorized_candidates.push(hit);
+
+        let disclosed = finalize_authorized_response_blocking(
+            &database,
+            &proxy.access,
+            response.clone(),
+            authorization.clone(),
+            SearchPurpose::ExternalAi,
+        )
+        .unwrap();
+        let presentation = disclosed.response().hits[0]
+            .collection_presentation
+            .as_ref()
+            .expect("authorized LAN hits identify only their exact Wiki");
+        assert_eq!(presentation.name, "shared");
+        assert!(presentation.description.is_none());
+        assert!(presentation.languages.is_empty());
+        assert!(presentation.concept_count.is_none());
+        assert_eq!(
+            presentation.okf_compatibility,
+            Some(airwiki_types::OkfCompatibility::DeclaredV02)
+        );
+        drop(disclosed);
 
         database
             .update_collection_policy(collection_id, CollectionPolicy::local_only())

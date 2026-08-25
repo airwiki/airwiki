@@ -53,6 +53,7 @@ impl PublicSourceBackend for PublicFixtureBackend {
             updated_at: now,
             rank: 1,
             node_id: "replaced-by-transport".to_owned(),
+            collection_presentation: None,
             assurance: None,
             lifecycle_status: Some("stable".to_owned()),
         };

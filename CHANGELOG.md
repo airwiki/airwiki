@@ -4,6 +4,35 @@ All notable user-visible changes to AirWiki will be documented here. The project
 
 ## [Unreleased]
 
+- Replaced the permanent system footer and combined connection drawer with a
+  full-screen Settings workspace for General, Connections and AI apps. A
+  three-segment accessible status donut, pending-approval badge and non-modal
+  approval notice keep uncommon system work visible without crowding Library.
+- Renamed the primary Wiki inventory to Library and grouped search results by
+  origin, owner and Wiki, with bounded concept previews, counted origin filters,
+  partial-coverage guidance and public search remaining explicit per query.
+- Gave the desktop a distinct local-library visual language: hyperlegible body
+  type, layered folio marks, a calmer archive palette, useful catalog context
+  and one continuous Settings surface instead of a stack of generic cards.
+- Refined desktop information density with compact Wiki and Library headers,
+  richer Wiki rows, structured integration and device records, and loading
+  skeletons that preserve layout during initial discovery.
+- Fixed global-search focus loss, aligned compact toolbar and dialog actions,
+  and distinguished queued model preparation from an active download.
+- Matched the minimum desktop window size to its default 1180 × 760 opening
+  size so the primary workspace cannot be compressed below its usable layout.
+- Kept Wiki recovery actions fully visible at the minimum window size, restored
+  the canonical transparent AirWiki mark across the app header, native window,
+  executable and package icons, and made queued Local AI cancellation clear its
+  pending state and feedback immediately.
+- Added optional bounded Wiki presentation to search hits. LAN reveals only the
+  exact authorized Wiki name and compatibility, while public presentation is
+  derived only from the validated signed manifest; older clients remain
+  compatible and neutral fallbacks never expose UUIDs.
+- Refocused first run on a real first Wiki, added a direct empty-state action,
+  surfaced time-limited AI approvals before the Wiki list, made search scope
+  reflect currently authorized nearby devices, and clarified saved versus
+  immediate settings and sharing changes.
 - Replaced generic AI-client pictograms with the original ChatGPT, Codex,
   Claude Desktop, Claude Code and Gemini CLI artwork while retaining a neutral
   fallback for unknown MCP clients.

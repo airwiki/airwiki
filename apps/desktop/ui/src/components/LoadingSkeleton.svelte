@@ -1,5 +1,5 @@
 <script lang="ts">
-  export let variant: 'results' | 'workspace' | 'page';
+  export let variant: 'results' | 'workspace' | 'page' | 'integrations';
   export let rows = 3;
 
   $: rowIndexes = Array.from({ length: Math.max(1, rows) }, (_, index) => index);
@@ -32,6 +32,26 @@
       <span class="skeleton-line paragraph"></span>
       <span class="skeleton-line paragraph short"></span>
     </section>
+  {:else if variant === 'integrations'}
+    <div class="integration-skeleton-list">
+      {#each rowIndexes as row (row)}
+        <div class="integration-skeleton-row">
+          <span class="skeleton-block client-icon"></span>
+          <span class="integration-skeleton-copy">
+            <i class="skeleton-line client-name"></i>
+            <i class="skeleton-line client-summary"></i>
+            <i class="skeleton-line client-version"></i>
+          </span>
+          <span class="skeleton-block client-action"></span>
+          <span class="integration-skeleton-states">
+            <i class="skeleton-line state-label"></i>
+            <i class="skeleton-line state-value"></i>
+            <i class="skeleton-line state-label"></i>
+            <i class="skeleton-line state-value"></i>
+          </span>
+        </div>
+      {/each}
+    </div>
   {:else}
     <section class="workspace-page page-only">
       <span class="skeleton-line eyebrow"></span>
@@ -91,6 +111,35 @@
   .result-row .copy { width: 92%; height: 11px; }
   .result-row .copy.short { width: 68%; }
 
+  .integrations { display: block; }
+  .integration-skeleton-list { display: grid; }
+  .integration-skeleton-row {
+    display: grid;
+    grid-template-columns: 48px minmax(0, 1fr) auto;
+    gap: 8px 14px;
+    min-height: 148px;
+    padding: 20px 0;
+  }
+  .integration-skeleton-row + .integration-skeleton-row { border-top: 1px solid var(--line); }
+  .integration-skeleton-row:nth-child(2) { opacity: .86; }
+  .integration-skeleton-row:nth-child(3) { opacity: .72; }
+  .integration-skeleton-row:nth-child(n + 4) { opacity: .6; }
+  .client-icon { grid-row: 1; width: 48px; height: 48px; border-radius: 13px 13px 5px 13px; }
+  .integration-skeleton-copy { display: grid; align-content: start; gap: 8px; min-width: 0; padding-top: 2px; }
+  .client-name { width: min(240px, 48%); height: 15px; }
+  .client-summary { width: min(520px, 86%); height: 10px; }
+  .client-version { width: min(180px, 36%); height: 8px; }
+  .client-action { width: 126px; height: 36px; border-radius: 8px; }
+  .integration-skeleton-states {
+    grid-column: 2 / -1;
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 8px 20px;
+    padding-top: 8px;
+  }
+  .integration-skeleton-states .state-label { width: 38%; height: 8px; }
+  .integration-skeleton-states .state-value { width: 66%; height: 11px; }
+
   .workspace {
     display: grid;
     grid-template-columns: minmax(250px, 34%) minmax(0, 1fr);
@@ -145,6 +194,13 @@
   @keyframes skeleton-sweep {
     0% { transform: translateX(0); }
     60%, 100% { transform: translateX(430%); }
+  }
+
+  @media (max-width: 760px) {
+    .integration-skeleton-row { grid-template-columns: 42px minmax(0, 1fr); }
+    .client-icon { width: 42px; height: 42px; }
+    .client-action { grid-column: 2; grid-row: 2; width: 112px; }
+    .integration-skeleton-states { grid-column: 2; grid-row: 3; grid-template-columns: 1fr; }
   }
 
   @media (prefers-reduced-motion: reduce) {

@@ -55,7 +55,7 @@ Codex, ChatGPT, Claude Code, Gemini CLI, and generic MCP clients use the same Ai
 
 1. **Create a Wiki.** Start from a folder, import an OKF v0.2 folder or ZIP, create private personal memory, or explicitly initialize portable project memory in `.airwiki`.
 2. **Build trusted knowledge.** AirWiki indexes locally. For source folders, local AI prepares proposals and shows the exact evidence behind them.
-3. **Search and share deliberately.** Search your device, paired devices, or opted-in public Wikis. Enable access independently for each Wiki and destination.
+3. **Search and share deliberately.** The Library groups matches from your device, paired devices, and—only when selected for that search—public Wikis. Enable access independently for each Wiki and destination.
 
 Folder Wikis can watch for new files or update manually. Imported OKF Wikis have no source watcher. Personal and project memory can be edited only by applications you explicitly authorize. A missing, invalid, conflicted, or identity-changed project bundle is withheld from agents and every network until its files are valid again.
 
@@ -112,6 +112,9 @@ for the complete journey and privacy boundaries.
 - Browse published concepts as a file-like tree or an on-demand relationship graph.
 - Review local-AI proposals against revision-bound source evidence before publishing.
 - Search with local lexical and vector retrieval, including provenance and assurance state.
+- Use one Library for the local inventory and grouped local, nearby and explicitly
+  opted-in public search results; Settings keeps General, Connections and AI
+  apps in focused sections with accessible status.
 - Pair devices on a private LAN and grant access per Wiki.
 - Open an authorized LAN or public result in the same read-only, file-oriented
   Wiki workspace used for local knowledge.
@@ -164,7 +167,7 @@ cd ..
 ./ui/node_modules/.bin/tauri dev
 ```
 
-The first-run flow checks the device, recommends a local model profile, and explains each permission before applying it. Initial model preparation needs disk space and network access; curation and local search work offline after the required assets are verified.
+The first-run flow explains local privacy, offers a direct path to the first folder Wiki, and shows the recommended local model without forcing optional network, background, or integration decisions. Initial model preparation needs disk space and network access; curation and local search work offline after the required assets are verified.
 
 This repository welcomes contributors interested in Rust, local AI, privacy-preserving search, knowledge management, and accessible desktop UX. Start with [CONTRIBUTING.md](CONTRIBUTING.md) and the [open issues](https://github.com/airwiki/airwiki/issues).
 

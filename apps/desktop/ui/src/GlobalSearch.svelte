@@ -9,6 +9,7 @@
   export let busy: boolean;
   export let ready: boolean;
   export let platform: 'macOs' | 'windows';
+  export let privateScopeLabel: string;
   export let t: (id: string) => string;
   export let onquestion: (value: string) => void;
   export let onpublic: (value: boolean) => void;
@@ -21,7 +22,7 @@
   <TextField id="global-search" label={t('desktop-search-question')} value={question} oninput={onquestion} onfocus={onopen} maxlength={4096} describedby={!ready ? 'global-search-readiness' : undefined} placeholder={ready ? t('desktop-search-placeholder') : t('desktop-search-preparing-placeholder')} variant="search" />
   {#if !ready}<span id="global-search-readiness" class="sr-only">{t('desktop-search-preparing-body')}</span>{/if}
   <div class="search-scope" aria-label={t('desktop-search-scope-label')}>
-    <span class="search-scope-base">{t('desktop-search-private-scope')}</span>
+    <span class="search-scope-base">{privateScopeLabel}</span>
     <Checkbox label={t('desktop-search-public-short')} checked={includePublic} onchange={onpublic} compact />
   </div>
   <kbd aria-hidden="true">{platform === 'macOs' ? '⌘K' : 'Ctrl+K'}</kbd>

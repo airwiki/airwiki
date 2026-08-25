@@ -322,6 +322,7 @@ impl HybridSearchEngine {
                 updated_at: candidate.updated_at,
                 rank: 0,
                 node_id: self.node_id.clone(),
+                collection_presentation: None,
                 assurance: candidate.assurance,
                 lifecycle_status: candidate.lifecycle_status,
             };

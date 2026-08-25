@@ -28,6 +28,15 @@ const labels: Record<string, string> = {
   'integration-status-available': 'Available',
   'integration-status-configured': 'Configured',
   'integration-status-conflict': 'Conflict',
+  'integration-summary-not-installed': 'Install this chat app before connecting it.',
+  'integration-summary-available': 'This chat app is ready to connect.',
+  'integration-summary-awaiting-approval': 'Complete approval in the chat app.',
+  'integration-summary-configured': 'AirWiki is connected to this chat app.',
+  'integration-summary-update-available': 'The local bridge can be updated.',
+  'integration-summary-conflict': 'Review the existing setting.',
+  'integration-summary-unsupported': 'This version is not compatible.',
+  'integration-summary-error': 'This integration could not be checked.',
+  'integrations-checking': 'Checking chat integrations…',
   'workflow-guide-status-available': 'Ready to install',
   'workflow-guide-status-installed': 'Installed',
   'workflow-guide-status-builtIn': 'Included with the connection',
@@ -67,11 +76,27 @@ describe('IntegrationList', () => {
     expect(within(item as HTMLElement).getByText('Assisted memory')).toBeInTheDocument();
     expect(within(item as HTMLElement).getByText('Configured')).toBeInTheDocument();
     expect(within(item as HTMLElement).getByText('Installed')).toBeInTheDocument();
+    expect(within(item as HTMLElement).getByText('AirWiki is connected to this chat app.')).toBeInTheDocument();
 
     await fireEvent.click(within(item as HTMLElement).getByRole('button', { name: 'Disconnect' }));
     await fireEvent.click(within(item as HTMLElement).getByRole('button', { name: 'Remove guide' }));
     expect(onaction).toHaveBeenNthCalledWith(1, { kind: 'disconnect', client: 'claudeCode' });
     expect(onaction).toHaveBeenNthCalledWith(2, { kind: 'removeWorkflowGuide', client: 'claudeCode' });
+  });
+
+  it('preserves the integration-list geometry while the initial discovery is running', () => {
+    const { container } = render(IntegrationList, {
+      integrations: [],
+      busy: true,
+      t: translate,
+      onaction: vi.fn(),
+      oncopy: vi.fn()
+    });
+
+    expect(screen.getByRole('status')).toHaveTextContent('Checking chat integrations…');
+    expect(container.querySelector('.loading-skeleton.integrations')).toBeInTheDocument();
+    expect(container.querySelectorAll('.integration-skeleton-row')).toHaveLength(4);
+    expect(container.querySelector('.integration-list')).toHaveAttribute('aria-busy', 'true');
   });
 
   it('installs an available native guide without changing the connection action', async () => {

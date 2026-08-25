@@ -2,96 +2,175 @@
   import ArrowLeft from '@lucide/svelte/icons/arrow-left';
   import ArrowRight from '@lucide/svelte/icons/arrow-right';
   import Check from '@lucide/svelte/icons/check';
-  import type { AppSnapshot, CloseBehavior, LanPreference, LocalePreference } from './api';
+  import FolderOpen from '@lucide/svelte/icons/folder-open';
+  import { tick } from 'svelte';
+  import type { AppSnapshot, FolderSelection, LocalePreference } from './api';
   import Checkbox from './components/controls/Checkbox.svelte';
   import SelectField from './components/controls/SelectField.svelte';
+  import Switch from './components/controls/Switch.svelte';
+  import TextField from './components/controls/TextField.svelte';
   import { message } from './i18n';
 
   export let snapshot: AppSnapshot;
   export let locale: LocalePreference;
-  export let lanPreference: LanPreference;
-  export let closeBehavior: CloseBehavior;
   export let modelLicensesConfirmed: boolean;
   export let actionBusy: boolean;
   export let actionMessage: string;
+  export let onpickfolder: () => Promise<FolderSelection | null>;
+  export let oncreatewiki: (name: string, token: string, continuous: boolean) => Promise<void>;
   export let onprepare: () => void;
   export let onfinish: () => void;
 
+  const existingFolderWiki = snapshot.wikis.find((wiki) => wiki.origin === 'folder');
   let step = 0;
   let stepIndexes: number[];
+  let heading: HTMLHeadingElement | null = null;
+  let folderSelection: FolderSelection | null = null;
+  let folderName = existingFolderWiki?.name ?? '';
+  let continuousIndexing = true;
+  let folderBusy = false;
+  let folderCreated = existingFolderWiki !== undefined;
+  let folderSkipped = false;
+  let folderError = '';
   $: hasModelStep = Boolean(snapshot.model && !snapshot.model.active);
-  $: reviewStep = hasModelStep ? 4 : 3;
+  $: reviewStep = hasModelStep ? 3 : 2;
   $: totalSteps = reviewStep + 1;
   $: stepIndexes = Array.from({ length: totalSteps }, (_, index) => index);
+
   function t(id: string): string {
     return message(locale, id);
   }
 
+  async function moveTo(nextStep: number) {
+    step = nextStep;
+    await tick();
+    heading?.focus({ preventScroll: true });
+  }
+
   function next() {
-    if (step < reviewStep) step += 1;
+    if (step < reviewStep) void moveTo(step + 1);
   }
 
   function back() {
-    if (step > 0) step -= 1;
+    if (step > 0) void moveTo(step - 1);
+  }
+
+  async function chooseFolder() {
+    folderBusy = true;
+    folderError = '';
+    try {
+      folderSelection = await onpickfolder();
+      if (folderSelection) {
+        folderName = folderSelection.displayName || t('onboarding-default-folder-name');
+        folderSkipped = false;
+      }
+    } catch {
+      folderError = t('error-collection');
+    } finally {
+      folderBusy = false;
+    }
+  }
+
+  async function createFolderWiki() {
+    if (!folderSelection || !folderName.trim()) return;
+    folderBusy = true;
+    folderError = '';
+    try {
+      await oncreatewiki(folderName.trim(), folderSelection.token, continuousIndexing);
+      folderCreated = true;
+      folderSelection = null;
+    } catch {
+      folderError = t('error-collection');
+    } finally {
+      folderBusy = false;
+    }
+  }
+
+  function skipFolder() {
+    folderSelection = null;
+    folderSkipped = true;
+    folderError = '';
   }
 </script>
 
 <main class="onboarding" data-step={step}>
   <div class="onboarding-chrome">
     <div class="onboarding-mark" aria-hidden="true">A</div>
-    <div class="step-meter" aria-label={t('onboarding-progress-title')}>
+    <div
+      class="step-meter"
+      role="progressbar"
+      aria-label={t('onboarding-progress-title')}
+      aria-valuemin="1"
+      aria-valuemax={totalSteps}
+      aria-valuenow={step + 1}
+      aria-valuetext={`${step + 1} / ${totalSteps}`}
+    >
       {#each stepIndexes as index (index)}
-        <i class:complete={index < step} class:current={index === step}></i>
+        <i class:complete={index < step} class:current={index === step} aria-hidden="true"></i>
       {/each}
     </div>
-    <span>{step + 1} / {totalSteps}</span>
+    <span aria-hidden="true">{step + 1} / {totalSteps}</span>
   </div>
 
   <div class="onboarding-stage">
     {#key step}
-      <section class="onboarding-page">
+      <section class="onboarding-page" aria-labelledby={`onboarding-step-${step}`}>
         {#if step === 0}
           <p class="eyebrow">{t('onboarding-welcome-title')}</p>
-          <h1>{t('settings-language')}</h1>
-          <p class="lede">{t('settings-subtitle')}</p>
+          <h1 id={`onboarding-step-${step}`} tabindex="-1" bind:this={heading}>{t('settings-language')}</h1>
+          <p class="lede">{t('onboarding-welcome-body')}</p>
           <div class="choice-field"><SelectField label={t('settings-language')} bind:value={locale} options={[{ value: 'system', label: t('language-system') }, { value: 'es', label: t('language-spanish') }, { value: 'en', label: t('language-english') }]} /></div>
+          <p class="privacy-note">{t('onboarding-privacy-local')}</p>
         {:else if step === 1}
           <p class="eyebrow">{t('onboarding-privacy-title')}</p>
-          <h1>{t('onboarding-lan-title')}</h1>
-          <p class="lede">{t('onboarding-lan-body')}</p>
-          <div class="choice-field"><SelectField label={t('desktop-lan')} bind:value={lanPreference} options={[{ value: 'disabled', label: t('onboarding-lan-disable') }, { value: 'enabled', label: t('onboarding-lan-enable') }]} /></div>
-          <p class="privacy-note">{t('onboarding-privacy-local')}</p>
-        {:else if step === 2}
-          <p class="eyebrow">{t('desktop-sign-in')}</p>
-          <h1>{t('onboarding-background-title')}</h1>
-          <p class="lede">{t('onboarding-background-body')}</p>
-          <div class="choice-field"><SelectField label={t('desktop-close')} bind:value={closeBehavior} options={[{ value: 'ask', label: t('close-dialog-title') }, { value: 'hide_to_tray', label: t('close-dialog-background') }, { value: 'quit', label: t('tray-quit') }]} /></div>
-        {:else if step === 3 && hasModelStep && snapshot.model}
+          <h1 id={`onboarding-step-${step}`} tabindex="-1" bind:this={heading}>{t('onboarding-collection-title')}</h1>
+          <p class="lede">{t('onboarding-collection-body')}</p>
+          {#if folderCreated}
+            <div class="onboarding-folder-success" role="status"><Check size={18} aria-hidden="true" /><span><strong>{t('onboarding-collection-linked')}</strong><small>{folderName}</small></span></div>
+          {:else if folderSelection}
+            <div class="onboarding-folder-form">
+              <div class="onboarding-folder-selection"><FolderOpen size={18} aria-hidden="true" /><span><strong>{folderSelection.displayName}</strong><small>{t('desktop-folder-privacy')}</small></span></div>
+              <TextField label={t('desktop-wiki-name')} bind:value={folderName} maxlength={120} required />
+              <Switch label={t('desktop-continuous-indexing')} description={t('desktop-continuous-indexing-body')} bind:checked={continuousIndexing} />
+              <div class="row-actions"><button class="text-action" onclick={chooseFolder} disabled={folderBusy}>{t('onboarding-review-choose-folder')}</button><button class="primary" onclick={createFolderWiki} disabled={folderBusy || !folderName.trim()}>{t('desktop-create-wiki')}</button></div>
+            </div>
+          {:else}
+            <div class="onboarding-folder-choice">
+              <button class="primary" onclick={chooseFolder} disabled={folderBusy}><FolderOpen size={17} aria-hidden="true" />{t('collections-choose-folder')}</button>
+              <button class="text-action" onclick={skipFolder}>{t('onboarding-skip-folder')}</button>
+              <small>{t('onboarding-skip-folder-help')}</small>
+            </div>
+          {/if}
+          {#if folderSkipped}<p class="privacy-note" role="status">{t('onboarding-skip-folder-help')}</p>{/if}
+          {#if folderError}<p class="onboarding-inline-error" role="alert">{folderError}</p>{/if}
+        {:else if step === 2 && hasModelStep && snapshot.model}
           <p class="eyebrow">{t('component-local-ai')}</p>
-          <h1>{t('onboarding-model-title')}</h1>
-          <p class="lede">{snapshot.model.displayName ?? t('onboarding-model-recommended')} · {(snapshot.model.downloadBytes / 1073741824).toFixed(1)} GiB</p>
+          <h1 id={`onboarding-step-${step}`} tabindex="-1" bind:this={heading}>{t('onboarding-model-title')}</h1>
+          <p class="lede">{t('onboarding-model-body')}</p>
+          <p class="onboarding-model-summary"><strong>{snapshot.model.displayName ?? t('onboarding-model-recommended')}</strong><span>{(snapshot.model.downloadBytes / 1073741824).toFixed(1)} GiB</span></p>
           <div class="license-choice"><Checkbox label={t('models-accept-licenses')} description={snapshot.model.license ?? t('models-license')} bind:checked={modelLicensesConfirmed} /></div>
-          <button class="secondary onboarding-model" onclick={onprepare} disabled={actionBusy || (!modelLicensesConfirmed && !snapshot.model.licenseAccepted) || !snapshot.model.fitsAvailableDisk}>{t('primary-button-prepare')}</button>
+          <div class="row-actions"><button class="secondary onboarding-model" onclick={onprepare} disabled={actionBusy || (!modelLicensesConfirmed && !snapshot.model.licenseAccepted) || !snapshot.model.fitsAvailableDisk}>{t('primary-button-prepare')}</button><small>{t('onboarding-model-change-later')}</small></div>
         {:else}
           <p class="eyebrow">{t('onboarding-review-title')}</p>
-          <h1>{t('onboarding-finish')}</h1>
-          <p class="lede">{t('onboarding-welcome-body')}</p>
+          <h1 id={`onboarding-step-${step}`} tabindex="-1" bind:this={heading}>{t('onboarding-complete-title')}</h1>
+          <p class="lede">{folderCreated ? t('onboarding-complete-with-wiki') : t('onboarding-complete-without-wiki')}</p>
           <dl class="onboarding-summary">
-            <div><dt>{t('settings-language')}</dt><dd><Check size={16} />{locale === 'system' ? t('language-system') : locale === 'es' ? t('language-spanish') : t('language-english')}</dd></div>
-            <div><dt>{t('desktop-lan')}</dt><dd><Check size={16} />{lanPreference === 'enabled' ? t('desktop-enabled') : t('desktop-disabled')}</dd></div>
-            <div><dt>{t('desktop-close')}</dt><dd><Check size={16} />{closeBehavior === 'ask' ? t('desktop-ask') : closeBehavior === 'hide_to_tray' ? t('desktop-hide-tray') : t('desktop-quit')}</dd></div>
+            <div><dt>{t('settings-language')}</dt><dd><Check size={16} aria-hidden="true" />{locale === 'system' ? t('language-system') : locale === 'es' ? t('language-spanish') : t('language-english')}</dd></div>
+            <div><dt>{t('desktop-page-wikis-title')}</dt><dd><Check size={16} aria-hidden="true" />{folderCreated ? folderName : t('onboarding-summary-wiki-later')}</dd></div>
+            <div><dt>{t('component-local-ai')}</dt><dd><Check size={16} aria-hidden="true" />{snapshot.model?.active ? t('status-ready') : t('onboarding-summary-ai-later')}</dd></div>
           </dl>
+          <p class="privacy-note">{t('onboarding-complete-body')}</p>
         {/if}
       </section>
     {/key}
   </div>
 
   <footer class="onboarding-actions">
-    <button class="text-action onboarding-back" onclick={back} disabled={step === 0}><ArrowLeft size={16} />{t('onboarding-back')}</button>
+    <button class="text-action onboarding-back" onclick={back} disabled={step === 0}><ArrowLeft size={16} aria-hidden="true" />{t('onboarding-back')}</button>
     {#if step < reviewStep}
-      <button class="primary onboarding-next" onclick={next} disabled={step === 1 && lanPreference === 'undecided'}>{t('onboarding-next')}<ArrowRight size={16} /></button>
+      <button class="primary onboarding-next" onclick={next} disabled={step === 1 && !folderCreated && !folderSkipped}>{t('onboarding-next')}<ArrowRight size={16} aria-hidden="true" /></button>
     {:else}
-      <button class="primary onboarding-action" onclick={onfinish} disabled={actionBusy || lanPreference === 'undecided'}>{t('onboarding-finish')}<Check size={16} /></button>
+      <button class="primary onboarding-action" onclick={onfinish} disabled={actionBusy}>{t('onboarding-finish')}<Check size={16} aria-hidden="true" /></button>
     {/if}
   </footer>
   {#if actionMessage}<p class="action-message" aria-live="polite">{actionMessage}</p>{/if}

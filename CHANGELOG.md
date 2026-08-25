@@ -7,7 +7,8 @@ All notable user-visible changes to AirWiki will be documented here. The project
 - Added a 30-day unsigned Windows technical-beta artifact with exact workflow
   provenance, per-installer SHA-256 values, bilingual safety guidance and a
   fail-closed separation from GitHub Releases, the updater and SignPath
-  promotion.
+  promotion. The bilingual notice is read through explicit strict UTF-8 so
+  Windows PowerShell cannot corrupt non-ASCII guidance.
 - Replaced the permanent system footer and combined connection drawer with a
   full-screen Settings workspace for General, Connections and AI apps. A
   three-segment accessible status donut, pending-approval badge and non-modal

@@ -104,8 +104,9 @@ group may remain instead of claiming success.
 Build the Linux x64 index from the same commit selected for the desktop
 candidates. The manual **Package unsigned pilot** workflow produces a
 hash-verifiable Linux artifact without using bootstrap data or release
-credentials. Make the downloaded binary executable and verify that its workflow
-commit equals the approved commit.
+credentials when `all-internal-candidates` is selected. Make the downloaded
+binary executable and verify that its workflow commit equals the approved
+commit.
 
 Install the same exact bytes on both VMs:
 

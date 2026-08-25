@@ -6,6 +6,10 @@ re-downloads and verifies that draft on macOS and Windows before a protected
 human approval makes it public. A workflow run never moves or overwrites an
 existing release tag.
 
+Short-lived unsigned Windows artifacts from **Package unsigned pilot** are a
+separate technical-testing channel. They are never inputs to this process,
+release assets, updater metadata, or evidence that Windows signing passed.
+
 Users obtain the current stable version from
 [GitHub Releases](https://github.com/airwiki/airwiki/releases/latest):
 

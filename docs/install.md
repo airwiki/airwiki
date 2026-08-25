@@ -8,9 +8,10 @@ subnet with multicast available. Hiding the window keeps the node running;
 AirWiki is still a development candidate. When an official release exists, use
 only the signed installers on the
 [latest GitHub release](https://github.com/airwiki/airwiki/releases/latest) and
-verify them against its `SHA256SUMS`. Until then, use only artifacts supplied
-through an agreed private channel and verify their SHA-256 independently. Do not
-bypass Gatekeeper, SmartScreen, model hashes, or runtime verification.
+verify them against its `SHA256SUMS`. Until then, use only an agreed development
+candidate and verify its provenance and SHA-256 independently. Never disable
+Gatekeeper, SmartScreen, Smart App Control, antivirus, model hashes or runtime
+verification to make a candidate run.
 
 ## Before installing
 
@@ -21,6 +22,42 @@ bypass Gatekeeper, SmartScreen, model hashes, or runtime verification.
 3. On Windows, confirm AVX2 support and a Private or Domain network profile.
 4. Treat unsigned internal candidates as development artifacts, never as public
    releases.
+
+## Windows unsigned technical beta
+
+The manual
+[Package unsigned pilot](https://github.com/airwiki/airwiki/actions/workflows/package-pilot.yml)
+workflow can produce a 30-day Windows x64 artifact for invited technical
+testing while SignPath enrollment is pending. It runs on a GitHub-hosted Windows
+builder and does not receive signing or updater credentials. It is not attached
+to GitHub Releases, selected by `latest.json`, or supported as a public package.
+
+For each candidate:
+
+1. Open the successful workflow run for the reviewed commit and download the
+   `airwiki-windows-x64-unsigned-beta-<commit>` artifact. GitHub sign-in and
+   repository read access are required.
+2. Read `UNSIGNED-BETA.txt` and confirm the repository, complete commit, version,
+   workflow-run URL and expiry in `PROVENANCE.json`.
+3. Compare both installers with the SHA-256 values in the workflow summary and
+   `SHA256SUMS.txt` before opening either MSI:
+
+   ```powershell
+   Get-Content .\SHA256SUMS.txt
+   Get-FileHash -Algorithm SHA256 .\<installer>.msi
+   ```
+
+4. Use a non-production test account or device. Do not disable or relax any
+   platform or organization protection. If Windows offers a per-file
+   confirmation and local policy permits unsigned beta software, use it only
+   after the hash matches. If Smart App Control or organization policy blocks
+   the installer, stop.
+5. Choose the MSI language, follow the Windows steps below, and report the
+   candidate commit with reproducible PASS/FAIL facts. Do not attach documents,
+   queries, identities, addresses, credentials, databases or raw logs.
+
+Every workflow run is independent. Never reuse a checksum from an earlier beta,
+and never redistribute the extracted MSI as though it were an AirWiki release.
 
 ## macOS arm64
 

@@ -213,6 +213,12 @@ Controls are not considered effective end to end until the
   workflows and installed acceptance matrix. Windows public-trust enrollment,
   final SignPath configuration and native verification remain required before
   any public release.
+- The temporary Windows beta artifact has no publisher signature and can be
+  warned about or blocked by Windows. Its reviewed GitHub-hosted build, exact
+  commit and workflow provenance, per-installer SHA-256 values, 30-day Actions
+  retention and exclusion from Releases and the updater reduce accidental
+  substitution but do not replace Authenticode identity. Testers never disable
+  platform or organization policy to run it.
 - Trust and grants are per device, not per individual user.
 - LAN assumes one private subnet and cannot overcome router multicast policy.
 - OCR and advanced malicious-file analysis are out of scope.

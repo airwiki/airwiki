@@ -9,6 +9,27 @@ Apache-2.0 software. Signing does not turn a development candidate into a
 supported public release; the release checklist and installed-platform gates
 remain authoritative.
 
+## Unsigned technical beta boundary
+
+While public-trust enrollment is pending, the manual **Package unsigned pilot**
+workflow may produce a temporary Windows artifact for invited technical
+testing. This exception does not use SignPath or updater credentials and does
+not weaken any public-release gate:
+
+- the source is the exact workflow commit in `airwiki/airwiki` and the MSI
+  packages are built and validated on a GitHub-hosted Windows runner;
+- the workflow requires an unsigned Authenticode state, packages the complete
+  commit and workflow-run provenance, and includes SHA-256 values for both
+  localized installers;
+- the artifact expires after 30 days and is not a GitHub Release asset, stable
+  tag, update endpoint, or supported public download; and
+- testers keep Windows protections enabled and stop when a device or
+  organization policy does not permit unsigned beta software.
+
+These controls establish source and transport provenance for a constrained beta
+but cannot provide a Windows publisher identity. Only the protected SignPath
+workflow below can produce a Windows candidate eligible for public promotion.
+
 ## Roles
 
 - Authors and committers: [Michael Pintos (`machester4`)](https://github.com/machester4)

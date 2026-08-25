@@ -182,50 +182,30 @@ $Provenance = [ordered] @{
     [Text.UTF8Encoding]::new($false)
 )
 
-$Instructions = @"
-AIRWIKI WINDOWS X64 - UNSIGNED BETA / BETA SIN FIRMA
-
-This is a temporary development candidate for invited technical testing. It is
-not a supported public release, is not connected to automatic updates, and has
-not been signed by SignPath. / Este es un candidato temporal para pruebas
-técnicas invitadas. No es un release público soportado, no está conectado a las
-actualizaciones automáticas y no fue firmado por SignPath.
-
-BEFORE INSTALLING / ANTES DE INSTALAR
-
-1. Confirm that this artifact came from:
-   $WorkflowRunUrl
-2. Confirm commit $CommitSha and version $Version in PROVENANCE.json.
-3. Verify each MSI from PowerShell and compare it with SHA256SUMS.txt:
-   Get-FileHash -Algorithm SHA256 .\<installer>.msi
-4. Use a non-production test account or device and back up any existing AirWiki
-   data needed for the test.
-
-WINDOWS PROTECTION / PROTECCIÓN DE WINDOWS
-
-Do not disable SmartScreen, Smart App Control, antivirus, or organization policy.
-After verifying the hash, use a per-file confirmation only when Windows offers
-one and the device owner or administrator permits unsigned beta software. If
-Windows or organization policy blocks the installer, stop; do not weaken that
-policy. / No desactives SmartScreen, Smart App Control, el antivirus ni las
-políticas de la organización. Después de verificar el hash, usa una confirmación
-para ese archivo únicamente si Windows la ofrece y el propietario o administrador
-permite software beta sin firma. Si Windows o la organización bloquean el
-instalador, detente y no debilites esa política.
-
-Choose the MSI for the desired installer language. Quit AirWiki completely
-before uninstalling. Local application data is intentionally preserved by the
-uninstaller. Report reproducible problems through GitHub Issues without attaching
-private documents, queries, identities, addresses, credentials, databases, or
-raw logs.
-
-This artifact expires from GitHub Actions after $RetentionDays days. A newer
-artifact must be verified independently; never reuse checksums from this build.
-"@
+$NoticeTemplatePath = Get-VerifiedWindowsRegularFile `
+    (Join-Path $PSScriptRoot "windows-unsigned-beta-notice.txt") `
+    "unsigned beta notice template"
+$StrictUtf8 = [Text.UTF8Encoding]::new($false, $true)
+$Instructions = [IO.File]::ReadAllText($NoticeTemplatePath, $StrictUtf8)
+$NoticeValues = [ordered] @{
+    "{{WORKFLOW_RUN_URL}}" = $WorkflowRunUrl
+    "{{COMMIT_SHA}}" = $CommitSha
+    "{{VERSION}}" = $Version
+    "{{RETENTION_DAYS}}" = [string] $RetentionDays
+}
+foreach ($NoticeValue in $NoticeValues.GetEnumerator()) {
+    if (-not $Instructions.Contains($NoticeValue.Key)) {
+        throw "unsigned beta notice template is missing a required value"
+    }
+    $Instructions = $Instructions.Replace($NoticeValue.Key, $NoticeValue.Value)
+}
+if ($Instructions -match '\{\{[A-Z_]+\}\}') {
+    throw "unsigned beta notice template contains an unknown value"
+}
 [IO.File]::WriteAllText(
     (Join-Path $ResolvedOutputRoot "UNSIGNED-BETA.txt"),
     ($Instructions.Trim() + "`n"),
-    [Text.UTF8Encoding]::new($false)
+    $StrictUtf8
 )
 
 Write-Host "Prepared unsigned Windows beta artifact for commit $CommitSha"

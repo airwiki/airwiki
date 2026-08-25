@@ -66,6 +66,19 @@ try {
         throw "unsigned beta provenance does not match the closed schema"
     }
 
+    $StrictUtf8 = [Text.UTF8Encoding]::new($false, $true)
+    $Notice = [IO.File]::ReadAllText(
+        (Join-Path $OutputRoot "UNSIGNED-BETA.txt"),
+        $StrictUtf8
+    )
+    $SpanishTechnical = "t" + [char] 0x00e9 + "cnicas invitadas"
+    $SpanishProtection = "PROTECCI" + [char] 0x00d3 + "N DE WINDOWS"
+    if (-not $Notice.Contains($SpanishTechnical) -or
+        -not $Notice.Contains($SpanishProtection) -or
+        $Notice.Contains("{{")) {
+        throw "unsigned beta notice must preserve UTF-8 and replace every value"
+    }
+
     $ChecksumLines = @(Get-Content -LiteralPath (Join-Path $OutputRoot "SHA256SUMS.txt"))
     if ($ChecksumLines.Count -ne 2) {
         throw "unsigned beta checksum file must contain exactly two installers"

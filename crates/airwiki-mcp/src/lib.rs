@@ -2592,6 +2592,7 @@ mod tests {
             updated_at: Utc::now(),
             rank: 1,
             node_id,
+            collection_presentation: None,
             assurance: None,
             lifecycle_status: None,
         }

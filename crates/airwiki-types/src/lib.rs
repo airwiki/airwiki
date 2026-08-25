@@ -590,6 +590,13 @@ pub struct SearchHit {
     pub updated_at: DateTime<Utc>,
     pub rank: u32,
     pub node_id: String,
+    /// Bounded display metadata for the exact Wiki that produced this hit.
+    ///
+    /// Older peers omit this field and newer peers must continue to accept
+    /// that shape. Transports may deliberately expose only a subset of the
+    /// presentation according to their disclosure boundary.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub collection_presentation: Option<SearchCollectionPresentation>,
     #[serde(default)]
     pub assurance: Option<ConceptAssurance>,
     #[serde(default)]
@@ -606,11 +613,62 @@ impl SearchHit {
             .take(MAX_HEADING_OR_PAGE_CHARS)
             .collect();
         self.logical_resource_uri = self.logical_resource_uri.chars().take(500).collect();
+        if let Some(presentation) = &mut self.collection_presentation {
+            presentation.sanitize();
+            if presentation.name.is_empty() {
+                self.collection_presentation = None;
+            }
+        }
     }
 
     pub fn dedup_key(&self) -> (&str, Uuid) {
         (&self.source_sha256, self.chunk_id)
     }
+}
+
+/// User-facing metadata for one Wiki represented by a search hit.
+///
+/// This is not a catalog: it can only describe the collection identifier on
+/// the enclosing hit. Authorization and signed-manifest validation remain the
+/// responsibility of the transport that attaches it.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SearchCollectionPresentation {
+    pub name: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub languages: Vec<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub concept_count: Option<u32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub okf_compatibility: Option<OkfCompatibility>,
+}
+
+impl SearchCollectionPresentation {
+    pub fn sanitize(&mut self) {
+        self.name = sanitize_presentation_text(&self.name, 240);
+        self.description = self
+            .description
+            .take()
+            .map(|description| sanitize_presentation_text(&description, 1_000))
+            .filter(|description| !description.is_empty());
+        self.languages = self
+            .languages
+            .drain(..)
+            .map(|language| sanitize_presentation_text(&language, 16))
+            .filter(|language| !language.is_empty())
+            .take(16)
+            .collect();
+    }
+}
+
+fn sanitize_presentation_text(value: &str, max_chars: usize) -> String {
+    value
+        .trim()
+        .chars()
+        .filter(|character| !character.is_control())
+        .take(max_chars)
+        .collect()
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -1022,6 +1080,82 @@ mod tests {
             Err(SearchContractError::UnsupportedProtocol(protocol))
                 if protocol == "/airwiki/search/1.0.0"
         ));
+    }
+
+    #[test]
+    fn search_collection_presentation_is_bounded_and_sanitized() {
+        let mut presentation = SearchCollectionPresentation {
+            name: format!("  Wiki\n{}  ", "x".repeat(260)),
+            description: Some(format!("Description\t{}", "y".repeat(1_100))),
+            languages: (0..18)
+                .map(|index| format!("language-{index}-too-long"))
+                .collect(),
+            concept_count: Some(42),
+            okf_compatibility: Some(OkfCompatibility::DeclaredV02),
+        };
+
+        presentation.sanitize();
+
+        assert_eq!(presentation.name.chars().count(), 240);
+        assert!(!presentation.name.chars().any(char::is_control));
+        assert_eq!(
+            presentation
+                .description
+                .as_deref()
+                .map(|description| description.chars().count()),
+            Some(1_000)
+        );
+        assert_eq!(presentation.languages.len(), 16);
+        assert!(
+            presentation
+                .languages
+                .iter()
+                .all(|language| language.chars().count() <= 16)
+        );
+    }
+
+    #[test]
+    fn search_hit_presentation_is_backward_compatible() {
+        #[derive(Deserialize)]
+        struct LegacyHit {
+            title: String,
+        }
+
+        let mut hit = SearchHit {
+            concept_id: Uuid::new_v4(),
+            collection_id: Uuid::new_v4(),
+            chunk_id: Uuid::new_v4(),
+            title: "Portable memory".to_owned(),
+            snippet: "A bounded result".to_owned(),
+            heading_or_page: "Memory".to_owned(),
+            logical_resource_uri: "urn:airwiki:test".to_owned(),
+            source_revision: 1,
+            source_sha256: "a".repeat(64),
+            updated_at: Utc::now(),
+            rank: 1,
+            node_id: "local".to_owned(),
+            collection_presentation: Some(SearchCollectionPresentation {
+                name: "Project Wiki".to_owned(),
+                description: None,
+                languages: Vec::new(),
+                concept_count: None,
+                okf_compatibility: Some(OkfCompatibility::DeclaredV02),
+            }),
+            assurance: None,
+            lifecycle_status: Some("stable".to_owned()),
+        };
+        hit.sanitize_for_wire();
+        let encoded = serde_json::to_value(&hit).unwrap();
+        let legacy: LegacyHit = serde_json::from_value(encoded.clone()).unwrap();
+        assert_eq!(legacy.title, hit.title);
+
+        let mut legacy_shape = encoded;
+        legacy_shape
+            .as_object_mut()
+            .unwrap()
+            .remove("collection_presentation");
+        let decoded: SearchHit = serde_json::from_value(legacy_shape).unwrap();
+        assert!(decoded.collection_presentation.is_none());
     }
 
     #[test]

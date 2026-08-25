@@ -5,11 +5,13 @@
   import Spinner from './components/Spinner.svelte';
   import type { WikiSummary, WikiScanSummary } from './api';
   import type { MessageArgs } from './i18n';
+  import { wikiRequiresAttention } from './wikiHealth';
 
   export let wikis: WikiSummary[];
   export let scans: WikiScanSummary[];
   export let t: (id: string, args?: MessageArgs) => string;
   export let onopen: (wikiId: string) => void;
+  export let oncreate: () => void;
 
   function scanState(wikiId: string) {
     return scans.find((scan) => scan.wikiId === wikiId)?.state ?? null;
@@ -48,39 +50,67 @@
     return trustLabel(wiki);
   }
 
+  function statusDetail(wiki: WikiSummary): string {
+    if (scanState(wiki.id)) return t('desktop-wiki-row-checking');
+    if (wiki.memoryKind === 'project' && wiki.projectMemoryHealth !== 'active') {
+      return t('desktop-wiki-row-project-blocked');
+    }
+    if (wiki.failedCount > 0) return t('desktop-wiki-row-failed-count', { count: wiki.failedCount });
+    if (wiki.maintenanceRequired) return t('desktop-wiki-maintenance-required');
+    if (wiki.needsReviewCount > 0) return t('desktop-wiki-row-review-count', { count: wiki.needsReviewCount });
+    if (wiki.staleConceptCount > 0 || wiki.outdatedVerificationCount > 0 || wiki.metadataWarningCount > 0) {
+      return t('desktop-okf-status-summary', {
+        stale: wiki.staleConceptCount,
+        outdated: wiki.outdatedVerificationCount,
+        warnings: wiki.metadataWarningCount
+      });
+    }
+    return t(`desktop-okf-compatibility-${wiki.okfCompatibility.kind}`);
+  }
+
+  function folioTone(wiki: WikiSummary): 'folder' | 'project' | 'personal' | 'imported' {
+    if (wiki.memoryKind === 'project') return 'project';
+    if (wiki.origin === 'aiMemory') return 'personal';
+    if (wiki.origin === 'importedOkf') return 'imported';
+    return 'folder';
+  }
+
   function rowLabel(wiki: WikiSummary): string {
     const identity = `${wiki.name} ${t('desktop-wiki-content-count', { published: wiki.publishedCount, pending: wiki.needsReviewCount })}`;
     return [
       identity,
       accessLabel(wiki),
       statusLabel(wiki),
+      statusDetail(wiki),
       originLabel(wiki),
     ].join(' · ');
   }
 </script>
 
 <div class="wiki-table">
-  <div class="wiki-table-head" aria-hidden="true">
-    <span>{t('desktop-wiki-column-name')}</span>
-    <span>{t('desktop-wiki-column-content')}</span>
-    <span>{t('desktop-wiki-column-access')}</span>
-    <span>{t('desktop-wiki-column-status')}</span>
-    <span aria-hidden="true"></span>
-  </div>
-  <div class="wiki-table-list" role="list" aria-label={t('desktop-nav-wikis')}>
+  {#if wikis.length > 0}
+    <div class="wiki-table-head" aria-hidden="true">
+      <span>{t('desktop-wiki-column-name')}</span>
+      <span>{t('desktop-wiki-column-content')}</span>
+      <span>{t('desktop-wiki-column-access')}</span>
+      <span>{t('desktop-wiki-column-status')}</span>
+      <span aria-hidden="true"></span>
+    </div>
+  {/if}
+  <div class="wiki-table-list" role="list" aria-label={t('desktop-library-title')}>
     {#each wikis as wiki (wiki.id)}
       {@const scanning = scanState(wiki.id) !== null}
       <div class="wiki-row-item" role="listitem">
-        <button class="wiki-row" aria-busy={scanning} aria-label={rowLabel(wiki)} onclick={() => onopen(wiki.id)}>
+        <button class={`wiki-row folio-${folioTone(wiki)}`} aria-busy={scanning} aria-label={rowLabel(wiki)} onclick={() => onopen(wiki.id)}>
           <span class="wiki-name"><span class="wiki-icon"><BookOpen size={18} aria-hidden="true" /></span><span><strong>{wiki.name}</strong><small>{originLabel(wiki)}</small></span></span>
-          <span>{t('desktop-wiki-content-count', { published: wiki.publishedCount, pending: wiki.needsReviewCount })}</span>
+          <span class="wiki-data-cell"><span>{t('desktop-wiki-content-count', { published: wiki.publishedCount, pending: wiki.needsReviewCount })}</span><small>{t('desktop-wiki-source-count', { count: wiki.documentCount })}</small></span>
           <span>{accessLabel(wiki)}</span>
-          <span class:attention={!scanning && (wiki.failedCount > 0 || wiki.maintenanceRequired || wiki.needsReviewCount > 0 || wiki.staleConceptCount > 0 || wiki.outdatedVerificationCount > 0 || wiki.metadataWarningCount > 0 || wiki.okfCompatibility.kind === 'legacyV01' || wiki.okfCompatibility.kind === 'futureRestricted' || (wiki.memoryKind === 'project' && wiki.projectMemoryHealth !== 'active'))} class:working={scanning} class="wiki-status">{#if scanning}<Spinner size="small" /><ShimmerText text={statusLabel(wiki)} />{:else}{statusLabel(wiki)}{/if}</span>
+          <span class:attention={!scanning && wikiRequiresAttention(wiki)} class:working={scanning} class="wiki-status wiki-data-cell"><span>{#if scanning}<Spinner size="small" /><ShimmerText text={statusLabel(wiki)} />{:else}<i class="wiki-status-signal" aria-hidden="true"></i>{statusLabel(wiki)}{/if}</span><small>{statusDetail(wiki)}</small></span>
           <ChevronRight size={17} aria-hidden="true" />
         </button>
       </div>
     {:else}
-      <div class="table-empty"><BookOpen size={28} aria-hidden="true" /><strong>{t('desktop-wiki-empty-title')}</strong><p>{t('desktop-wiki-empty-body')}</p></div>
+      <div class="table-empty"><BookOpen size={28} aria-hidden="true" /><strong>{t('desktop-wiki-empty-title')}</strong><p>{t('desktop-wiki-empty-body')}</p><button class="primary" onclick={oncreate}>{t('desktop-wiki-empty-action')}</button></div>
     {/each}
   </div>
 </div>

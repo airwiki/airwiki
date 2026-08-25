@@ -30,6 +30,15 @@ LAN therefore appears as two deliberately separate identities: a named trusted
 device in the private channel and a shortened public publisher identifier in
 the public channel.
 
+An accepted public search hit may include a bounded collection presentation:
+a name of at most 240 characters, an optional description of at most 1,000,
+up to 16 language tags of at most 16 characters each, an optional concept count
+and OKF compatibility. The reader reconstructs these fields only from the
+already verified signed manifest for that exact collection; owner response data
+cannot add LAN identity, device labels, paths or unsigned profile metadata.
+The field is optional and additive, preserving the existing protocol versions:
+old clients ignore it and new clients accept responses that omit it.
+
 Manifest expiry and its signed update-to-expiry interval are at most 24 hours;
 an update timestamp may be at most five minutes ahead of receipt. Each index
 admits at most 100,000 total manifest or tombstone rows and 1,000 rows per
@@ -82,7 +91,8 @@ remain unchanged.
 ## Consequences
 
 Public availability depends on the owner being online. Third parties may retain
-search snippets and any published OKF Wiki content they opened before revocation.
+search snippets, bounded signed presentation and any published OKF Wiki content
+they opened before revocation.
 Index entries may remain stale until expiry, but owners fail closed and stop
 serving immediately. There is no
 offline replication, remote editing, account system, DHT, gossip, global

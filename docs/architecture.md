@@ -123,6 +123,16 @@ only explicit capability-specific commands. `ts-rs` generates the committed
 TypeScript contract; CI rejects stale bindings. JavaScript receives no direct
 filesystem, shell, HTTP, SQL, updater, autostart or process capability.
 
+The desktop composition layer groups authorized search hits into typed
+`WikiSearchResultSummary` records before they cross IPC. Each record represents
+one origin, owner and Wiki, carries at most two bounded concept previews for the
+initial view, and exposes a total match count. Svelte may filter and render
+those summaries, but it does not reconstruct trust boundaries from raw hits.
+The search query remains transient WebView state: it is absent from routes,
+durable preferences and logs. The canonical shell routes are `#library` and
+`#settings/{general,connections,apps}`; Settings replaces the normal header so
+returning restores the Library selection, results and scroll position.
+
 `AppRuntime` and the domain services run on Tauri's Tokio runtime. UI intents
 use a bounded `mpsc` channel, consolidated state uses `watch`, transient
 progress uses bounded `broadcast`, and request-scoped responses use identifiers
@@ -157,7 +167,10 @@ This section defines the underlying trust boundaries.
 - Local publication always requires review.
 - LAN search and read-only Wiki browsing require authenticated pairing,
   collection policy and a grant at the source node. Search returns bounded
-  evidence. Browsing a Wiki identified by one of those results negotiates
+  evidence. An authorized hit may include only a bounded presentation of that
+  exact Wiki: its name and OKF compatibility. It never enumerates another Wiki,
+  and the final grant revalidation removes both the hit and presentation after
+  revocation. Browsing a Wiki identified by one of those results negotiates
   `/airwiki/shared-wiki-browse/2.0.0` and automatically reconstructs the complete
   published OKF workspace from bounded frames: hierarchy, root `index.md` and
   `log.md`, stable concept pages, metadata, and verified internal graph edges.
@@ -181,7 +194,10 @@ This section defines the underlying trust boundaries.
   event. Addresses remain discovery data and confer no authority.
 - Public federation is a separate opt-in. Discovery needs no pairing or grant,
   but the owner revalidates current publication, sequence and fingerprint under
-  a disclosure lease before every response. See [ADR 0008](adr/0008-public-federation.md).
+  a disclosure lease before every response. Public Wiki presentation comes
+  only from the already validated signed manifest; no LAN identity, device
+  label or local path is accepted into that presentation. See
+  [ADR 0008](adr/0008-public-federation.md).
 - Local MCP requires `allow_external_ai`; it does not imply peer sharing.
 - Application memory uses a separate random capability and per-Wiki
   owner/reader/editor grant. It never implies LAN, public or other-application

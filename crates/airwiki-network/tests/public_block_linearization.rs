@@ -124,6 +124,7 @@ impl PublicSourceBackend for ControlledPublicSourceBackend {
                         updated_at: now,
                         rank: 1,
                         node_id: "replaced-by-transport".to_owned(),
+                        collection_presentation: None,
                         assurance: None,
                         lifecycle_status: Some("stable".to_owned()),
                     }],
@@ -289,6 +290,17 @@ async fn publisher_block_linearizes_in_flight_search_and_cached_browse() {
         1,
         "the cache setup must return the synthetic source"
     );
+    let presentation = cache_warming_search.hits[0]
+        .collection_presentation
+        .as_ref()
+        .expect("a validated manifest supplies public presentation metadata");
+    assert_eq!(presentation.name, "Synthetic public runbooks");
+    assert_eq!(
+        presentation.description.as_deref(),
+        Some("Synthetic public collection")
+    );
+    assert_eq!(presentation.languages, ["en"]);
+    assert_eq!(presentation.concept_count, Some(1));
     let browse_task = {
         let reader = Arc::clone(&reader);
         let publisher_id = publisher_id.clone();

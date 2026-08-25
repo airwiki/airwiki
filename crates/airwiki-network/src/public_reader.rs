@@ -7,8 +7,8 @@ use airwiki_types::{
     PUBLIC_BROWSE_PROTOCOL_V4, PUBLIC_CATALOG_PROTOCOL, PUBLIC_CATALOG_PROTOCOL_V2,
     PUBLIC_SEARCH_PROTOCOL, PUBLIC_SEARCH_PROTOCOL_V2, PublicBrowsePage, PublicBrowseRequest,
     PublicCatalogQuery, PublicCollectionSummary, PublicCollectionTarget, PublicSearchRequest,
-    PublishedWikiPageRequest, SearchContractError, SearchHit, SearchRequest, SearchResponse,
-    SignedPublicCollectionManifest, SignedPublicCollectionTombstone,
+    PublishedWikiPageRequest, SearchCollectionPresentation, SearchContractError, SearchHit,
+    SearchRequest, SearchResponse, SignedPublicCollectionManifest, SignedPublicCollectionTombstone,
 };
 use libp2p::identity::Keypair;
 use libp2p::request_response::{self, OutboundRequestId, ProtocolSupport};
@@ -1267,6 +1267,20 @@ fn collect_search_event(
                         };
                         for hit in &mut response.response.hits {
                             hit.node_id.clone_from(&publisher_id);
+                            hit.collection_presentation = manifests
+                                .iter()
+                                .find(|manifest| {
+                                    manifest.manifest.collection_id == hit.collection_id
+                                })
+                                .map(|manifest| SearchCollectionPresentation {
+                                    name: manifest.manifest.name.clone(),
+                                    description: (!manifest.manifest.description.is_empty())
+                                        .then(|| manifest.manifest.description.clone()),
+                                    languages: manifest.manifest.languages.clone(),
+                                    concept_count: Some(manifest.manifest.concept_count),
+                                    okf_compatibility: manifest.manifest.okf_compatibility.clone(),
+                                });
+                            hit.sanitize_for_wire();
                         }
                         sources.push(response.response.hits);
                         return Some(AcceptedOwnerRoute {
@@ -1533,6 +1547,7 @@ mod tests {
             updated_at: Utc::now(),
             rank,
             node_id: "synthetic".to_owned(),
+            collection_presentation: None,
             assurance: None,
             lifecycle_status: None,
         }

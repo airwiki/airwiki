@@ -61,25 +61,34 @@ if (destination === 'search') {
     sasWords: null, grantedWikiIds: [snapshot.wikis[0].id]
   }];
   snapshot.search = {
-    requestId: 'synthetic-search', status: 'complete', coverage: 'complete', hits: [{
+    requestId: 'synthetic-search', status: 'complete', coverage: 'complete', results: [{
+      wikiId: snapshot.wikis[0].id, wikiName: snapshot.wikis[0].name, description: null,
+      languages: [], conceptCount: snapshot.wikis[0].publishedCount, okfCompatibility: { kind: 'declaredV02' },
+      bestRank: 1, totalMatches: 1, source: { kind: 'local', private: true, health: 'ready' }, matches: [{
       conceptId: 'synthetic-result', wikiId: snapshot.wikis[0].id,
       title: 'Safe maintenance window', snippet: 'Back up local state and verify integrity before applying a change.',
       headingOrPage: 'Preparation', logicalResourceUri: 'okf://atlas/concepts/safe-maintenance',
-      sourceRevision: 4, sourceSha256: 'a'.repeat(64), rank: 0.98, nodeId: snapshot.nodeId ?? 'local', route: 'deviceNetwork',
+      sourceRevision: 4, sourceSha256: 'a'.repeat(64), rank: 1,
       assurance: { trust: 'humanReviewed', freshness: 'fresh', verificationOutdated: false }, lifecycle: 'stable'
-    }, {
+    }]}, {
+      wikiId: '20000000-0000-4000-8000-000000000002', wikiName: 'Windows recovery checklist', description: null,
+      languages: [], conceptCount: null, okfCompatibility: { kind: 'declaredV02' }, bestRank: 2, totalMatches: 1,
+      source: { kind: 'nearby', peerId: nearbyPeerId, deviceName: 'RUSTICO', platform: 'windows', accessGranted: true, available: true }, matches: [{
       conceptId: 'synthetic-nearby-result', wikiId: '20000000-0000-4000-8000-000000000002',
       title: 'Windows recovery checklist', snippet: 'Restore the local backup and verify the recovered index.',
       headingOrPage: 'Recovery', logicalResourceUri: 'okf://rustico/concepts/recovery',
-      sourceRevision: 2, sourceSha256: 'b'.repeat(64), rank: 0.91, nodeId: nearbyPeerId, route: 'deviceNetwork',
+      sourceRevision: 2, sourceSha256: 'b'.repeat(64), rank: 2,
       assurance: { trust: 'machineConfirmed', freshness: 'fresh', verificationOutdated: false }, lifecycle: 'stable'
-    }, {
+    }]}, {
+      wikiId: '20000000-0000-4000-8000-000000000003', wikiName: 'Community maintenance guidance', description: 'Public guidance for recoverable maintenance.',
+      languages: ['en'], conceptCount: 18, okfCompatibility: { kind: 'declaredV02' }, bestRank: 3, totalMatches: 1,
+      source: { kind: 'public', publisherId: '12D3KooSyntheticPublicPublisher', publisherLabel: '12D3KooS…Publisher' }, matches: [{
       conceptId: 'synthetic-public-result', wikiId: '20000000-0000-4000-8000-000000000003',
       title: 'Community maintenance guidance', snippet: 'A public procedure for planning a recoverable maintenance window.',
       headingOrPage: 'Community guide', logicalResourceUri: 'okf://public/concepts/maintenance',
-      sourceRevision: 7, sourceSha256: 'c'.repeat(64), rank: 0.83, nodeId: '12D3KooSyntheticPublicPublisher', route: 'publicNetwork',
+      sourceRevision: 7, sourceSha256: 'c'.repeat(64), rank: 3,
       assurance: { trust: 'unverified', freshness: 'notDeclared', verificationOutdated: false }, lifecycle: 'stable'
-    }]
+    }] }]
   };
 }
 if (destination === 'shared') {
@@ -164,10 +173,12 @@ if (destination === 'system') {
   };
 }
 window.location.hash = destination === 'review'
-  ? `wikis/${snapshot.wikis[0].id}/pending`
-  : destination === 'graph' ? `wikis/${snapshot.wikis[0].id}`
-  : destination === 'shared' ? 'search'
-  : destination === 'library' || destination === 'connections' ? 'wikis' : destination;
+  ? 'library/wiki/pending'
+  : destination === 'graph' ? 'library/wiki'
+  : destination === 'shared' || destination === 'search' ? 'library'
+  : destination === 'connections' ? 'settings/connections'
+  : destination === 'system' ? 'settings/general'
+  : destination === 'library' ? 'library' : destination;
 
 let eventSink: ((event: UiEventEnvelope) => void) | null = null;
 const bridge: DevelopmentBridge = {
@@ -183,14 +194,17 @@ const bridge: DevelopmentBridge = {
     if (destination === 'shared' && _command === 'search' && requestId) {
       snapshot.search = {
         requestId, status: 'complete', coverage: 'complete',
-        hits: [{
+        results: [{
+          wikiId: sharedWikiId, wikiName: 'Guía operativa compartida', description: null,
+          languages: [], conceptCount: null, okfCompatibility: { kind: 'declaredV02' }, bestRank: 1, totalMatches: 1,
+          source: { kind: 'nearby', peerId: sharedPeerId, deviceName: 'RUSTICO', platform: 'windows', accessGranted: true, available: true }, matches: [{
           conceptId: sharedConceptId, wikiId: sharedWikiId,
           title: 'Ventana de mantenimiento segura',
           snippet: 'Respalda el estado local y verifica su integridad antes de aplicar cambios.',
           headingOrPage: 'Preparación', logicalResourceUri: 'urn:airwiki:shared:maintenance',
-          sourceRevision: 4, sourceSha256: 'c'.repeat(64), rank: 1, nodeId: sharedPeerId, route: 'deviceNetwork',
+          sourceRevision: 4, sourceSha256: 'c'.repeat(64), rank: 1,
           assurance: { trust: 'humanReviewed', freshness: 'fresh', verificationOutdated: false }, lifecycle: 'stable'
-        }]
+        }] }]
       };
     }
     if (destination === 'shared' && _command === 'browse_nearby_wiki' && requestId) {
@@ -256,6 +270,3 @@ installDevelopmentBridge(bridge);
 const target = document.getElementById('app');
 if (!target) throw new Error('visual fixture root is missing');
 mount(App, { target });
-if (destination === 'connections') {
-  requestAnimationFrame(() => target.querySelector<HTMLButtonElement>('.system-status-bar button:last-child')?.click());
-}

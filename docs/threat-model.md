@@ -25,7 +25,8 @@ Controls are not considered effective end to end until the
 - pending attested-computation parameters and ephemeral receipts;
 - local models, runtime, and pinned artifact identities;
 - search snippets, MCP concept summaries, and complete published OKF pages
-  returned to authorized LAN or public readers;
+  returned to authorized LAN or public readers, plus bounded per-result Wiki
+  presentation metadata;
 - client-owned ChatGPT, Claude, and Gemini configuration;
 - per-user background, autostart, and update configuration; and
 - integrity of the desktop, bridge, firewall helper, installer, and update data.
@@ -81,6 +82,8 @@ Controls are not considered effective end to end until the
 | --- | --- | --- |
 | Unauthorized LAN peer queries data, learns listener endpoints or device metadata, restores stale endpoints or steers private-network probes | Noise, SAS pairing, trust state, per-collection grants and rate limits; the wildcard listener is never announced, a dedicated bounded exchange sends OS-inspected private/on-link endpoints plus a display name and OS family only after durable trust, receivers persist metadata only for the already trusted PeerId, accept only the IP observed on that exact authenticated connection, and reject delayed state with session-scoped monotonic revisions | Excessive grants still disclose data; names and OS labels are mutable presentation metadata rather than authorization, an endpoint is discovery data only, and every redial authenticates the expected PeerId; test pre-trust non-disclosure of endpoints and metadata, multi-interface selection, stale revision and cross-host endpoint rejection, interrupted retry, and the full grant and revocation matrix |
 | LAN browsing enumerates more knowledge than the selected result authorized | Browsing accepts one Wiki ID obtained from an authorized result, revalidates trust, the exact per-Wiki grant, policy, OKF compatibility and publication under a disclosure lease before every bounded frame or page, exposes only that Wiki's complete published OKF workspace, refuses mixed-generation frames and rejects dangling graph edges | A reader can retain the complete published knowledge of a granted Wiki; grant only Wikis intended for that device |
+| Search presentation becomes a private Wiki catalog or crosses trust domains | LAN may attach only the bounded name and OKF compatibility of the exact Wiki that produced an authorized hit; final revalidation removes the hit and metadata together. Public presentation is rebuilt only from a validated signed manifest and excludes LAN identity, device labels and local paths | An authorized reader can retain the displayed name and compatibility after revocation, just as it can retain the returned snippet |
+| A search query leaks through navigation, persistence or diagnostics | The query remains transient UI state and is excluded from hashes, durable preferences and sanitized logs; grouped desktop summaries contain bounded display data rather than query state | Screen capture, manual copying and a compromised host remain outside this protection |
 | Private or stale content reaches a public reader | Separate opt-in, stable reviewed-publication checks, fingerprint-bound page reads, signed sequence and fingerprint, final disclosure lease, immediate owner-side revocation | A third party can retain previously returned search metadata or published OKF content |
 | Malicious index redirects or ranks content | Expected index PeerId is pinned; owner manifests are independently signed; index rank selects routes but never final ranking | An index can omit publishers, delay tombstones, or degrade availability until replaced |
 | Public queries exhaust an owner | Three-index, 64-candidate, 12-peer and two-collection caps; bounded payloads, semaphores, per-peer rate limits with a 1,024-identity window cap, a 1 s index stage, a 3 s cold owner-connection budget and a separate 800 ms owner-response budget | Bounded connection setup, local verification and ranking add work after catalog selection; distributed abuse can still consume bounded relay and inference capacity |
@@ -170,6 +173,10 @@ Controls are not considered effective end to end until the
   indexes and peer-wide Wiki listings do not cross LAN. Opening a result may
   retrieve the complete published OKF workspace for only its exact currently
   granted Wiki; bounded transport frames are drained automatically.
+- Optional collection presentation does not widen authorization. LAN exposes
+  only the exact hit Wiki's bounded name and compatibility; public presentation
+  is derived only from its signed, validated manifest. Missing presentation is
+  compatible and renders as a neutral shared-Wiki fallback rather than an ID.
 - Bundle visualization is read-only. Graph layout and interaction are local and
   cause no polling after the bounded published graph has loaded.
 - Unknown OKF fields/types are preserved; invalid optional metadata cannot raise

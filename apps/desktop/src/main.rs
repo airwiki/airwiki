@@ -18,7 +18,7 @@ mod worker;
 mod workflow_guides;
 
 use std::{
-    collections::HashMap,
+    collections::{HashMap, HashSet},
     ffi::OsStr,
     path::{Path, PathBuf},
     sync::{
@@ -37,7 +37,7 @@ use airwiki_inference::ModelProfile;
 use airwiki_types::{
     ConceptType, DevicePlatform, EnrichmentDraft, PublishedWikiDocument,
     PublishedWikiPageDescriptor, PublishedWikiPageId, PublishedWikiPageRequest,
-    PublishedWikiWorkspacePage, SearchPurpose, SuggestedEntity, SuggestedLink,
+    PublishedWikiWorkspacePage, SearchHit, SearchPurpose, SuggestedEntity, SuggestedLink,
 };
 use anyhow::{Context, Result};
 use pulldown_cmark::{CodeBlockKind, Event as MarkdownEvent, HeadingLevel, Parser, Tag, TagEnd};
@@ -323,7 +323,7 @@ struct AppSnapshot {
     notice: Option<NoticeSummary>,
 }
 
-#[derive(Clone, Copy, Debug, Serialize, TS)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, TS)]
 #[serde(rename_all = "camelCase")]
 #[ts(rename_all = "camelCase")]
 enum HostPlatform {
@@ -429,7 +429,7 @@ enum MemoryKindDto {
     Project,
 }
 
-#[derive(Clone, Copy, Debug, Serialize, TS)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, TS)]
 #[serde(rename_all = "camelCase")]
 #[ts(rename_all = "camelCase")]
 enum ProjectMemoryHealthDto {
@@ -874,7 +874,7 @@ enum PeerTrust {
     Blocked,
 }
 
-#[derive(Clone, Copy, Debug, Serialize, TS)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, TS)]
 #[serde(rename_all = "camelCase")]
 #[ts(rename_all = "camelCase")]
 enum PeerActivity {
@@ -935,8 +935,63 @@ enum ModelInstallStatus {
 struct SearchSummary {
     request_id: String,
     status: SearchStatus,
-    hits: Vec<SearchHitSummary>,
+    results: Vec<WikiSearchResultSummary>,
     coverage: SearchCoverage,
+}
+
+#[derive(Clone, Debug, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+struct WikiSearchResultSummary {
+    wiki_id: String,
+    wiki_name: Option<String>,
+    description: Option<String>,
+    languages: Vec<String>,
+    concept_count: Option<u32>,
+    okf_compatibility: Option<OkfCompatibilityDto>,
+    best_rank: u32,
+    total_matches: usize,
+    matches: Vec<SearchHitSummary>,
+    source: WikiSearchSourceSummary,
+}
+
+#[derive(Clone, Debug, Serialize, TS)]
+#[serde(rename_all = "camelCase", tag = "kind")]
+#[ts(rename_all = "camelCase", tag = "kind")]
+enum WikiSearchSourceSummary {
+    Local {
+        private: bool,
+        health: WikiSearchHealth,
+    },
+    Nearby {
+        #[serde(rename = "peerId")]
+        #[ts(rename = "peerId")]
+        peer_id: String,
+        #[serde(rename = "deviceName")]
+        #[ts(rename = "deviceName")]
+        device_name: Option<String>,
+        platform: Option<HostPlatform>,
+        #[serde(rename = "accessGranted")]
+        #[ts(rename = "accessGranted")]
+        access_granted: bool,
+        available: bool,
+    },
+    Public {
+        #[serde(rename = "publisherId")]
+        #[ts(rename = "publisherId")]
+        publisher_id: String,
+        #[serde(rename = "publisherLabel")]
+        #[ts(rename = "publisherLabel")]
+        publisher_label: String,
+    },
+}
+
+#[derive(Clone, Copy, Debug, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(rename_all = "camelCase")]
+enum WikiSearchHealth {
+    Ready,
+    Attention,
+    Failed,
 }
 
 #[derive(Clone, Debug, Serialize, TS)]
@@ -1064,14 +1119,6 @@ enum SearchCoverage {
     Partial,
 }
 
-#[derive(Clone, Copy, Debug, Serialize, TS)]
-#[serde(rename_all = "camelCase")]
-#[ts(rename_all = "camelCase")]
-enum SearchHitRoute {
-    DeviceNetwork,
-    PublicNetwork,
-}
-
 #[derive(Clone, Debug, Serialize, TS)]
 #[serde(rename_all = "camelCase")]
 struct SearchHitSummary {
@@ -1084,8 +1131,6 @@ struct SearchHitSummary {
     source_revision: u32,
     source_sha256: String,
     rank: u32,
-    node_id: String,
-    route: SearchHitRoute,
     assurance: Option<ConceptAssuranceSummary>,
     lifecycle: Option<String>,
 }
@@ -4468,7 +4513,12 @@ impl AppSnapshot {
                 self.search = Some(SearchSummary {
                     request_id: request_id.to_string(),
                     status: SearchStatus::Searching,
-                    hits: hits.into_iter().map(SearchHitSummary::from).collect(),
+                    results: group_search_results(
+                        hits,
+                        self.node_id.as_deref(),
+                        &self.wikis,
+                        &self.peers,
+                    ),
                     coverage: SearchCoverage::Partial,
                 });
             }
@@ -4477,7 +4527,12 @@ impl AppSnapshot {
                     Ok((hits, coverage, _route)) => SearchSummary {
                         request_id: request_id.to_string(),
                         status: SearchStatus::Complete,
-                        hits: hits.into_iter().map(SearchHitSummary::from).collect(),
+                        results: group_search_results(
+                            hits,
+                            self.node_id.as_deref(),
+                            &self.wikis,
+                            &self.peers,
+                        ),
                         coverage: match coverage {
                             worker::SearchCoverageView::Complete => SearchCoverage::Complete,
                             worker::SearchCoverageView::FederationDisabled => {
@@ -4495,7 +4550,7 @@ impl AppSnapshot {
                     Err(_) => SearchSummary {
                         request_id: request_id.to_string(),
                         status: SearchStatus::Failed,
-                        hits: Vec::new(),
+                        results: Vec::new(),
                         coverage: SearchCoverage::Partial,
                     },
                 });
@@ -5920,9 +5975,11 @@ fn ui_bindings_source() -> String {
         exported_declaration::<ModelInstallStatus>(&config),
         exported_declaration::<ModelInstallSummary>(&config),
         exported_declaration::<SearchHitSummary>(&config),
+        exported_declaration::<WikiSearchHealth>(&config),
+        exported_declaration::<WikiSearchSourceSummary>(&config),
+        exported_declaration::<WikiSearchResultSummary>(&config),
         exported_declaration::<SearchStatus>(&config),
         exported_declaration::<SearchCoverage>(&config),
-        exported_declaration::<SearchHitRoute>(&config),
         exported_declaration::<SearchSummary>(&config),
         exported_declaration::<RemoteWikiPageInput>(&config),
         exported_declaration::<RemoteWikiPageRequestInput>(&config),
@@ -6160,9 +6217,8 @@ impl From<worker::ModelStateView> for ModelSummary {
     }
 }
 
-impl From<worker::RoutedSearchHit> for SearchHitSummary {
-    fn from(value: worker::RoutedSearchHit) -> Self {
-        let worker::RoutedSearchHit { hit, route } = value;
+impl SearchHitSummary {
+    fn from_hit(hit: SearchHit) -> Self {
         Self {
             concept_id: hit.concept_id.to_string(),
             wiki_id: hit.collection_id.to_string(),
@@ -6173,15 +6229,184 @@ impl From<worker::RoutedSearchHit> for SearchHitSummary {
             source_revision: hit.source_revision,
             source_sha256: hit.source_sha256,
             rank: hit.rank,
-            node_id: hit.node_id,
-            route: match route {
-                worker::SearchHitRouteView::DeviceNetwork => SearchHitRoute::DeviceNetwork,
-                worker::SearchHitRouteView::PublicNetwork => SearchHitRoute::PublicNetwork,
-            },
             assurance: hit.assurance.map(ConceptAssuranceSummary::from),
             lifecycle: hit.lifecycle_status,
         }
     }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+enum SearchGroupOrigin {
+    Local,
+    Nearby,
+    Public,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+struct SearchGroupKey {
+    origin: SearchGroupOrigin,
+    node_id: String,
+    wiki_id: Uuid,
+}
+
+fn group_search_results(
+    hits: Vec<worker::RoutedSearchHit>,
+    local_node_id: Option<&str>,
+    wikis: &[WikiSummary],
+    peers: &[PeerSummary],
+) -> Vec<WikiSearchResultSummary> {
+    let mut positions = HashMap::<SearchGroupKey, usize>::new();
+    let mut seen_concepts = HashMap::<usize, HashSet<Uuid>>::new();
+    let mut results = Vec::<WikiSearchResultSummary>::new();
+    for worker::RoutedSearchHit { hit, route } in hits {
+        let origin = match route {
+            worker::SearchHitRouteView::PublicNetwork => SearchGroupOrigin::Public,
+            worker::SearchHitRouteView::DeviceNetwork
+                if local_node_id.is_some_and(|node_id| node_id == hit.node_id) =>
+            {
+                SearchGroupOrigin::Local
+            }
+            worker::SearchHitRouteView::DeviceNetwork => SearchGroupOrigin::Nearby,
+        };
+        let key = SearchGroupKey {
+            origin,
+            node_id: if origin == SearchGroupOrigin::Local {
+                String::new()
+            } else {
+                hit.node_id.clone()
+            },
+            wiki_id: hit.collection_id,
+        };
+        let position = if let Some(position) = positions.get(&key).copied() {
+            position
+        } else {
+            let position = results.len();
+            results.push(search_result_for_hit(&hit, origin, wikis, peers));
+            positions.insert(key, position);
+            position
+        };
+        if let Some(result) = results.get_mut(position) {
+            result.best_rank = result.best_rank.min(hit.rank);
+            if seen_concepts
+                .entry(position)
+                .or_default()
+                .insert(hit.concept_id)
+            {
+                result.total_matches = result.total_matches.saturating_add(1);
+                if result.matches.len() < 2 {
+                    result.matches.push(SearchHitSummary::from_hit(hit));
+                }
+            }
+        }
+    }
+    results.sort_by(|left, right| {
+        left.best_rank.cmp(&right.best_rank).then_with(|| {
+            left.wiki_name
+                .as_deref()
+                .unwrap_or_default()
+                .cmp(right.wiki_name.as_deref().unwrap_or_default())
+        })
+    });
+    results
+}
+
+fn search_result_for_hit(
+    hit: &SearchHit,
+    origin: SearchGroupOrigin,
+    wikis: &[WikiSummary],
+    peers: &[PeerSummary],
+) -> WikiSearchResultSummary {
+    let wiki_id = hit.collection_id.to_string();
+    let presentation = hit.collection_presentation.as_ref();
+    let local_wiki = (origin == SearchGroupOrigin::Local)
+        .then(|| wikis.iter().find(|wiki| wiki.id == wiki_id))
+        .flatten();
+    let peer = (origin == SearchGroupOrigin::Nearby)
+        .then(|| peers.iter().find(|peer| peer.peer_id == hit.node_id))
+        .flatten();
+    let wiki_name = local_wiki
+        .map(|wiki| wiki.name.clone())
+        .or_else(|| presentation.map(|presentation| presentation.name.clone()))
+        .filter(|name| !name.is_empty());
+    let description = presentation
+        .and_then(|presentation| presentation.description.clone())
+        .filter(|description| !description.is_empty());
+    let languages = presentation
+        .map(|presentation| presentation.languages.clone())
+        .unwrap_or_default();
+    let concept_count = presentation
+        .and_then(|presentation| presentation.concept_count)
+        .or_else(|| local_wiki.map(|wiki| u32::try_from(wiki.published_count).unwrap_or(u32::MAX)));
+    let okf_compatibility = presentation
+        .and_then(|presentation| presentation.okf_compatibility.clone())
+        .map(OkfCompatibilityDto::from)
+        .or_else(|| local_wiki.map(|wiki| wiki.okf_compatibility.clone()));
+    let source = match origin {
+        SearchGroupOrigin::Local => WikiSearchSourceSummary::Local {
+            private: local_wiki.is_none_or(|wiki| wiki.local_only),
+            health: local_wiki.map_or(WikiSearchHealth::Attention, search_wiki_health),
+        },
+        SearchGroupOrigin::Nearby => WikiSearchSourceSummary::Nearby {
+            peer_id: hit.node_id.clone(),
+            device_name: peer.and_then(|peer| peer.device_name.clone()),
+            platform: peer.and_then(|peer| peer.platform),
+            access_granted: true,
+            available: peer.is_some_and(|peer| peer.activity != PeerActivity::NotObserved),
+        },
+        SearchGroupOrigin::Public => WikiSearchSourceSummary::Public {
+            publisher_id: hit.node_id.clone(),
+            publisher_label: abbreviate_public_publisher(&hit.node_id),
+        },
+    };
+    WikiSearchResultSummary {
+        wiki_id,
+        wiki_name,
+        description,
+        languages,
+        concept_count,
+        okf_compatibility,
+        best_rank: hit.rank,
+        total_matches: 0,
+        matches: Vec::new(),
+        source,
+    }
+}
+
+fn search_wiki_health(wiki: &WikiSummary) -> WikiSearchHealth {
+    if wiki.failed_count > 0
+        || matches!(
+            wiki.project_memory_health,
+            Some(
+                ProjectMemoryHealthDto::Invalid
+                    | ProjectMemoryHealthDto::Missing
+                    | ProjectMemoryHealthDto::IdentityConflict
+            )
+        )
+    {
+        WikiSearchHealth::Failed
+    } else if wiki.needs_review_count > 0
+        || wiki.maintenance_required
+        || wiki.stale_concept_count > 0
+        || wiki.outdated_verification_count > 0
+        || wiki.metadata_warning_count > 0
+    {
+        WikiSearchHealth::Attention
+    } else {
+        WikiSearchHealth::Ready
+    }
+}
+
+fn abbreviate_public_publisher(publisher_id: &str) -> String {
+    let characters = publisher_id.chars().collect::<Vec<_>>();
+    if characters.len() <= 16 {
+        return publisher_id.to_owned();
+    }
+    let start = characters.iter().take(8).collect::<String>();
+    let end = characters
+        .iter()
+        .skip(characters.len().saturating_sub(6))
+        .collect::<String>();
+    format!("{start}…{end}")
 }
 
 fn main() -> Result<()> {
@@ -6441,10 +6666,118 @@ mod tests {
         "/ui/src/generated/ui-contract.ts"
     );
 
+    fn search_hit(
+        concept_id: Uuid,
+        wiki_id: Uuid,
+        node_id: &str,
+        rank: u32,
+        presentation: Option<airwiki_types::SearchCollectionPresentation>,
+    ) -> SearchHit {
+        SearchHit {
+            concept_id,
+            collection_id: wiki_id,
+            chunk_id: Uuid::new_v4(),
+            title: format!("Concept {rank}"),
+            snippet: "Bounded evidence".to_owned(),
+            heading_or_page: "Overview".to_owned(),
+            logical_resource_uri: "urn:airwiki:test".to_owned(),
+            source_revision: 1,
+            source_sha256: format!("{rank:064x}"),
+            updated_at: chrono::Utc::now(),
+            rank,
+            node_id: node_id.to_owned(),
+            collection_presentation: presentation,
+            assurance: None,
+            lifecycle_status: Some("stable".to_owned()),
+        }
+    }
+
     #[test]
     fn background_mode_requires_the_exact_flag() {
         assert!(launch_in_background(["--background"]));
         assert!(!launch_in_background(["background", "--foreground"]));
+    }
+
+    #[test]
+    fn desktop_search_groups_by_origin_node_and_wiki() {
+        let local_wiki = Uuid::new_v4();
+        let public_wiki = Uuid::new_v4();
+        let first_concept = Uuid::new_v4();
+        let concepts = [first_concept, first_concept, Uuid::new_v4(), Uuid::new_v4()];
+        let mut routed = concepts
+            .into_iter()
+            .enumerate()
+            .map(|(index, concept_id)| worker::RoutedSearchHit {
+                hit: search_hit(
+                    concept_id,
+                    local_wiki,
+                    "local-node",
+                    u32::try_from(index + 1).unwrap_or(u32::MAX),
+                    None,
+                ),
+                route: worker::SearchHitRouteView::DeviceNetwork,
+            })
+            .collect::<Vec<_>>();
+        routed.push(worker::RoutedSearchHit {
+            hit: search_hit(
+                Uuid::new_v4(),
+                public_wiki,
+                "publisher-identity-that-is-long",
+                5,
+                Some(airwiki_types::SearchCollectionPresentation {
+                    name: "Public runbooks".to_owned(),
+                    description: Some("Reviewed operational guidance".to_owned()),
+                    languages: vec!["en".to_owned()],
+                    concept_count: Some(12),
+                    okf_compatibility: Some(airwiki_types::OkfCompatibility::DeclaredV02),
+                }),
+            ),
+            route: worker::SearchHitRouteView::PublicNetwork,
+        });
+
+        let results = group_search_results(routed, Some("local-node"), &[], &[]);
+
+        assert_eq!(results.len(), 2);
+        assert_eq!(results[0].wiki_id, local_wiki.to_string());
+        assert_eq!(results[0].total_matches, 3);
+        assert_eq!(results[0].matches.len(), 2);
+        assert_ne!(
+            results[0].matches[0].concept_id,
+            results[0].matches[1].concept_id
+        );
+        assert!(matches!(
+            results[0].source,
+            WikiSearchSourceSummary::Local { .. }
+        ));
+        assert_eq!(results[1].wiki_name.as_deref(), Some("Public runbooks"));
+        assert_eq!(results[1].concept_count, Some(12));
+        assert!(matches!(
+            &results[1].source,
+            WikiSearchSourceSummary::Public {
+                publisher_label,
+                ..
+            } if publisher_label.contains('…')
+        ));
+    }
+
+    #[test]
+    fn desktop_search_marks_authorized_nearby_hits_as_granted_without_outgoing_grants() {
+        let wiki_id = Uuid::new_v4();
+        let routed = vec![worker::RoutedSearchHit {
+            hit: search_hit(Uuid::new_v4(), wiki_id, "nearby-node", 1, None),
+            route: worker::SearchHitRouteView::DeviceNetwork,
+        }];
+
+        let results = group_search_results(routed, Some("local-node"), &[], &[]);
+
+        assert!(matches!(
+            results[0].source,
+            WikiSearchSourceSummary::Nearby {
+                access_granted: true,
+                available: false,
+                ..
+            }
+        ));
     }
 
     #[test]
@@ -7824,6 +8157,43 @@ mod tests {
         assert!(!tray_click_opens_window(MouseButton::Middle));
     }
 
+    #[tokio::test]
+    async fn cancelling_a_queued_model_install_clears_the_projected_activity() {
+        let review_versions = Mutex::new(HashMap::new());
+        let knowledge_fingerprints = Mutex::new(HashMap::new());
+        let guided_repairs = Mutex::new(HashMap::new());
+        let requests = Mutex::new(RequestTracker::default());
+        let mut snapshot = AppSnapshot::starting();
+
+        snapshot
+            .apply(
+                WorkerEvent::InstallQueued("synthetic queued check".to_owned()),
+                &review_versions,
+                &knowledge_fingerprints,
+                &guided_repairs,
+                &requests,
+            )
+            .await;
+        assert!(matches!(
+            snapshot
+                .model_install
+                .as_ref()
+                .map(|install| install.status),
+            Some(ModelInstallStatus::Queued)
+        ));
+
+        snapshot
+            .apply(
+                WorkerEvent::InstallStopped,
+                &review_versions,
+                &knowledge_fingerprints,
+                &guided_repairs,
+                &requests,
+            )
+            .await;
+        assert!(snapshot.model_install.is_none());
+    }
+
     #[test]
     fn lagged_progress_receiver_republishes_a_complete_snapshot() {
         let (progress_sender, _) = broadcast::channel(1);
@@ -7943,6 +8313,32 @@ mod tests {
                 == Some(""),
             "the base updater key must remain empty; release values are compile-time only"
         );
+        Ok(())
+    }
+
+    #[test]
+    fn tauri_main_window_minimum_matches_its_default_size() -> Result<()> {
+        let config_path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tauri.conf.json");
+        let config: serde_json::Value = serde_json::from_slice(
+            &std::fs::read(&config_path).context("failed to read the Tauri configuration")?,
+        )
+        .context("failed to parse the Tauri configuration")?;
+        let window = config
+            .pointer("/app/windows/0")
+            .context("the main window configuration is missing")?;
+
+        for (default_key, minimum_key, expected) in
+            [("width", "minWidth", 1_180), ("height", "minHeight", 760)]
+        {
+            anyhow::ensure!(
+                window.get(default_key).and_then(serde_json::Value::as_u64) == Some(expected),
+                "the main window {default_key} must remain {expected}"
+            );
+            anyhow::ensure!(
+                window.get(minimum_key).and_then(serde_json::Value::as_u64) == Some(expected),
+                "the main window {minimum_key} must match {default_key}"
+            );
+        }
         Ok(())
     }
 

@@ -32,6 +32,28 @@ The public indexes are maps, not knowledge stores. They help a reader find
 candidate owners. The owners search their own indexes, authorize the response,
 and serve the result.
 
+## The Library experience
+
+The desktop opens on **Library**. Without a query it is an inventory of only the
+Wikis on this device, ordered first by items needing attention and then by
+name. Health, pending work and the relevant actions stay on each Wiki rather
+than being duplicated in a separate alert list.
+
+After a query, AirWiki replaces that inventory with Wiki-level result groups.
+Each group belongs to exactly one origin, owner and Wiki, shows up to two best
+matching concepts, and states the total number of matches. Filters with counts
+select **All**, **This device**, **Nearby**, or **Public** without rerunning or
+re-authorizing the search. Opening a concept selects that exact match; opening
+the Wiki uses its best result. Returning restores the query, filter, completed
+results and scroll position, while clearing the query restores the local
+inventory.
+
+**Search the public network too** is explicit consent for that search. Without
+it, **All** means this device plus currently authorized LAN peers. Successful
+results remain visible when another peer is offline or the public branch is
+unavailable, alongside actionable partial-coverage status. Queries remain out
+of the URL, durable settings and logs.
+
 ## One search pipeline, different authorization scopes
 
 Each source device uses the same basic retrieval pipeline:
@@ -83,6 +105,13 @@ collection list that can broaden its access. The peer searches locally,
 revalidates every prospective result, and returns only bounded evidence with
 source provenance.
 
+An authorized LAN hit may identify only the exact Wiki that produced it, using
+a bounded name and OKF compatibility. It cannot enumerate another Wiki or
+carry descriptions, counts, paths or public-profile metadata. The final
+authorization check treats that presentation and its evidence as one disclosure:
+revocation removes both. Clients that do not receive a name show **Shared Wiki**
+instead of exposing a UUID.
+
 Because scores produced on different devices are not directly comparable, the
 reader fuses their ranked lists rather than comparing raw internal scores. If a
 trusted device is offline or a response fails validation, the search can still
@@ -121,6 +150,11 @@ bounded lexical catalog query to configured federation indexes. Those indexes
 return signed manifests for possible matching Wikis. The reader verifies the
 manifests, ignores blocked or expired publishers, groups candidates by owner,
 and contacts a bounded number of owners directly.
+
+The public result presentation—name, optional description, languages, concept
+count and OKF compatibility—is copied only from that already validated signed
+manifest. It never accepts a LAN device name, operating-system label, local path
+or unsigned metadata returned by an owner.
 
 QUIC over Noise is preferred. When a publisher is behind NAT, it can maintain
 an outbound Circuit Relay reservation; a direct connection may replace that

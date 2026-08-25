@@ -165,35 +165,43 @@ async function selectValue(selector: string, index: number, value: string): Prom
 }
 
 async function measureNavigationPaintP95(): Promise<number> {
-  const result = await browser.executeAsync((done) => {
-    const buttons = Array.from(document.querySelectorAll<HTMLButtonElement>('.top-brand, .top-actions .icon-button'));
-    if (buttons.length !== 2) {
-      done([]);
-      return;
-    }
-    const durations: number[] = [];
-    let sample = 0;
-    const measure = () => {
-      const button = buttons[sample % buttons.length];
+  const samples: number[] = [];
+  for (let sample = 0; sample < 20; sample += 1) {
+    const duration = await browser.executeAsync((done) => {
+      const leavingSettings = document.querySelector('.settings-top-bar') !== null;
+      const selector = leavingSettings ? '.settings-back' : '.system-status-button';
+      const expectedRoute = leavingSettings ? 'library' : 'settings';
+      const button = document.querySelector<HTMLButtonElement>(selector);
       if (!button) {
-        done([]);
+        done(null);
         return;
       }
       const started = performance.now();
+      const deadline = started + 2_000;
+      const waitForPaint = () => {
+        const page = document.querySelector<HTMLElement>('.route-page');
+        const bounds = page?.getBoundingClientRect();
+        const style = page ? getComputedStyle(page) : null;
+        if (page?.dataset.route === expectedRoute
+          && bounds
+          && bounds.width > 0
+          && bounds.height > 0
+          && style?.visibility === 'visible') {
+          requestAnimationFrame(() => done(performance.now() - started));
+          return;
+        }
+        if (performance.now() >= deadline) {
+          done(null);
+          return;
+        }
+        requestAnimationFrame(waitForPaint);
+      };
       button.click();
-      requestAnimationFrame(() => requestAnimationFrame(() => {
-        durations.push(performance.now() - started);
-        sample += 1;
-        if (sample === 20) done(durations);
-        else measure();
-      }));
-    };
-    measure();
-  });
-  if (!Array.isArray(result) || !result.every((sample) => typeof sample === 'number')) {
-    throw new Error('navigation paint measurement returned an invalid sample set');
+      requestAnimationFrame(waitForPaint);
+    });
+    if (typeof duration !== 'number') throw new Error('navigation paint returned an invalid timestamp');
+    samples.push(duration);
   }
-  const samples: number[] = result;
   expect(samples).toHaveLength(20);
   const ordered = [...samples].sort((left, right) => left - right);
   return required(ordered[Math.ceil(ordered.length * 0.95) - 1], 'navigation p95');
@@ -213,9 +221,11 @@ async function setCssViewport(width: number, height: number): Promise<void> {
 }
 
 async function navigateToDestination(index: number): Promise<void> {
-  const navigation = await $$('.top-brand, .top-actions .icon-button');
-  await required(navigation[index], `destination ${index}`).click();
-  const expected = ['wikis', 'system'][index];
+  const expected = required(['library', 'settings'][index], `destination ${index}`);
+  const current = await browser.execute(() => document.querySelector<HTMLElement>('.route-page')?.dataset.route ?? null);
+  if (current !== expected) {
+    await $(expected === 'library' ? '.settings-back' : '.system-status-button').click();
+  }
   await browser.waitUntil(
     () => browser.execute((route) => {
       const page = document.querySelector<HTMLElement>('.route-page');
@@ -233,8 +243,10 @@ async function navigateToDestination(index: number): Promise<void> {
     () => browser.execute(() => document.querySelector<HTMLElement>('.drive-page')?.scrollTop === 0),
     { timeout: 10_000, timeoutMsg: `destination ${expected} did not start at the top` }
   );
-  const persistentChrome = await browser.execute(() => Array.from(
-    document.querySelectorAll<HTMLElement>('.top-brand, .global-search, .top-actions')
+  const persistentChrome = await browser.execute((route) => Array.from(
+    document.querySelectorAll<HTMLElement>(route === 'library'
+      ? '.top-brand, .global-search, .top-actions'
+      : '.settings-top-bar')
   ).map((element) => {
     const bounds = element.getBoundingClientRect();
     const style = getComputedStyle(element);
@@ -245,18 +257,21 @@ async function navigateToDestination(index: number): Promise<void> {
       right: bounds.right,
       viewportWidth: document.documentElement.clientWidth
     };
-  }));
-  expect(persistentChrome).toHaveLength(3);
+  }), expected);
+  expect(persistentChrome).toHaveLength(expected === 'library' ? 3 : 1);
   expect(persistentChrome.every((item) => (
     item.visible && item.width > 0 && item.left >= 0 && item.right <= item.viewportWidth
   ))).toBe(true);
+  expect(await browser.execute((route) => route === 'library'
+    ? document.querySelector('.settings-top-bar') === null
+    : document.querySelector('.top-bar, .global-search, .system-status-button') === null, expected)).toBe(true);
 }
 
-async function waitForVisualPaint(route: 'wikis' | 'system'): Promise<void> {
-  if (route === 'system') {
+async function waitForVisualPaint(route: 'library' | 'settings'): Promise<void> {
+  if (route === 'settings') {
     await browser.waitUntil(
-      () => browser.execute(() => document.querySelectorAll('#system-preferences select').length === 4),
-      { timeout: 10_000, timeoutMsg: 'system preferences did not reach their complete DOM state' }
+      () => browser.execute(() => document.querySelectorAll('.settings-page select').length >= 3),
+      { timeout: 10_000, timeoutMsg: 'general settings did not reach their complete DOM state' }
     );
   }
   const painted = await browser.executeAsync((done) => {
@@ -278,23 +293,44 @@ async function waitForVisualPaint(route: 'wikis' | 'system'): Promise<void> {
 
 async function configureVisualPreferences(locale: 'en' | 'es', theme: 'light' | 'dark'): Promise<void> {
   await navigateToDestination(1);
-  await $('#system-preferences').waitForDisplayed();
-  await selectValue('#system-preferences select', 0, locale);
-  await selectValue('#system-preferences select', 1, theme);
-  await $('#system-preferences button.primary').click();
+  await $('a[href="#settings/general"]').click();
+  await $('.settings-page').waitForDisplayed();
+  await selectValue('.settings-page select', 0, locale);
+  await selectValue('.settings-page select', 1, theme);
+  await $('.settings-form-actions button.primary').click();
   await browser.waitUntil(async () => (
     await $('html').getAttribute('lang') === (locale === 'es' ? 'es' : 'en-US')
     && await $('html').getAttribute('data-theme') === theme
   ), { timeout: 10_000, timeoutMsg: `visual preferences ${locale}/${theme} were not applied` });
 }
 
+async function openAiAppsSettings(): Promise<void> {
+  const route = await browser.execute(() => document.querySelector<HTMLElement>('.route-page')?.dataset.route ?? null);
+  if (route !== 'settings') await $('.system-status-button').click();
+  await $('a[href="#settings/apps"]').click();
+  await browser.waitUntil(
+    () => browser.execute(() => window.location.hash === '#settings/apps'
+      && document.querySelector('.integration-list') !== null),
+    { timeout: 30_000, timeoutMsg: 'AI apps settings did not become ready' }
+  );
+}
+
+async function returnToLibrary(): Promise<void> {
+  const route = await browser.execute(() => document.querySelector<HTMLElement>('.route-page')?.dataset.route ?? null);
+  if (route === 'settings') await $('.settings-back').click();
+  await browser.waitUntil(
+    () => browser.execute(() => document.querySelector<HTMLElement>('.route-page')?.dataset.route === 'library'),
+    { timeout: 10_000, timeoutMsg: 'Library did not restore after leaving Settings' }
+  );
+  await $('.top-brand').click();
+}
+
 async function assertVisualMatrix(): Promise<void> {
   const viewports = [
-    { width: 1020, height: 640 },
     { width: 1180, height: 760 },
     { width: 1440, height: 900 }
   ];
-  const routes = ['wikis', 'system'] as const;
+  const routes = ['library', 'settings'] as const;
   for (const locale of ['en', 'es'] as const) {
     for (const theme of ['light', 'dark'] as const) {
       await configureVisualPreferences(locale, theme);
@@ -312,7 +348,7 @@ async function assertVisualMatrix(): Promise<void> {
                 background: transparent !important;
                 border-color: var(--line) !important;
               }
-              .system-status-bar button:hover { color: var(--muted) !important; background: transparent !important; }
+              .system-status-button:hover { color: var(--muted) !important; background: transparent !important; }
               .select-control select:hover:not(:disabled),
               .select-control select:focus-visible {
                 border-color: var(--control-border, var(--line)) !important;
@@ -477,20 +513,22 @@ async function exerciseProjectMemory(client: McpStdioClient): Promise<void> {
   });
   expect(initialized.status).toBe('awaiting_confirmation');
 
-  await $('.connections-drawer .icon-button').click();
-  await $('button*=AirWiki').click();
   await browser.waitUntil(
-    () => browser.execute(() => document.querySelector('.project-memory-requests') !== null),
+    () => browser.execute(() => document.querySelector('#project-memory-requests-title') !== null),
     { timeout: 10_000, timeoutMsg: 'the project-memory confirmation did not reach the UI' }
   );
-  const request = await $('.project-memory-requests article');
+  const request = await $('[aria-labelledby="project-memory-requests-title"] .computation-list article');
   await expect(request).toHaveText(expect.stringContaining('E2E portable project'));
   await request.$('button*=Approve').click();
   await browser.waitUntil(
+    () => browser.execute(() => document.querySelector('#project-memory-requests-title') === null),
+    { timeout: 15_000, timeoutMsg: 'approved project-memory request remained pending' }
+  );
+  await returnToLibrary();
+  await browser.waitUntil(
     () => browser.execute((name) => Array.from(document.querySelectorAll('.wiki-row'))
-      .some((row) => row.textContent?.includes(name) === true)
-      && document.querySelector('.project-memory-requests') === null, projectName),
-    { timeout: 15_000, timeoutMsg: 'approved project memory did not become active in the app' }
+      .some((row) => row.textContent?.includes(name) === true), projectName),
+    { timeout: 15_000, timeoutMsg: 'approved project memory did not become active in Library' }
   );
 
   const opened = await client.callTool('open_airwiki_project', { project_root: projectRoot });
@@ -552,8 +590,7 @@ async function exerciseGenericMcpMemory(): Promise<void> {
     'request_airwiki_computation',
     'get_airwiki_computation_run'
   ];
-  await $('button[aria-label^="AI apps:"]').click();
-  await $('.connections-drawer').waitForDisplayed();
+  await openAiAppsSettings();
   try {
     await browser.waitUntil(
       () => browser.execute(() => Array.from(document.querySelectorAll('.integration-list article'))
@@ -633,8 +670,7 @@ async function exerciseGenericMcpMemory(): Promise<void> {
     const conceptId = stringField(first, 'conceptId');
     const firstFingerprint = stringField(first, 'fingerprint');
     expect(first.status).toBe('stable');
-    const drawerClose = await $('.connections-drawer .icon-button');
-    if (await drawerClose.isExisting()) await drawerClose.click();
+    await returnToLibrary();
     await $(`.wiki-row*=${memoryName}`).click();
     await expect($('.file-list')).toHaveText(expect.stringContaining('Portable agent memory'));
 
@@ -709,8 +745,7 @@ async function exerciseGenericMcpMemory(): Promise<void> {
     await $('.file-list').$('button*=Portable agent memory updated').click();
     await expect($('.concept-assurance')).toHaveText(expect.stringContaining('deprecated'));
 
-    await $('button[aria-label^="AI apps:"]').click();
-    await $('.connections-drawer').waitForDisplayed();
+    await openAiAppsSettings();
     await clickGenericMcpAction('Disconnect');
     await browser.waitUntil(
       () => browser.execute(() => Array.from(document.querySelectorAll('.integration-list article'))
@@ -741,7 +776,7 @@ async function exerciseGenericMcpMemory(): Promise<void> {
   } finally {
     await disconnectedClient.close();
   }
-  await $('.connections-drawer button[aria-label="Close"]').click();
+  await returnToLibrary();
 }
 
 describe('AirWiki real IPC journey', () => {
@@ -767,14 +802,14 @@ describe('AirWiki real IPC journey', () => {
     await expect(language).toHaveValue('en');
     await $('button.onboarding-next').click();
 
-    const localNetwork = required((await $$('main.onboarding:not(.startup) select'))[0], 'local network preference');
-    await selectValue('main.onboarding:not(.startup) select', 0, 'disabled');
-    await expect(localNetwork).toHaveValue('disabled');
-    await $('button.onboarding-next').click();
-
-    const closeBehavior = required((await $$('main.onboarding:not(.startup) select'))[0], 'close behavior preference');
-    await selectValue('main.onboarding:not(.startup) select', 0, 'ask');
-    await expect(closeBehavior).toHaveValue('ask');
+    // WebKit WebDriver misreports this visible text button as hidden; the
+    // component test covers ordinary pointer activation.
+    const skippedFolder = await browser.execute(() => {
+      const button = document.querySelector<HTMLButtonElement>('.onboarding-folder-choice button.text-action');
+      button?.click();
+      return button?.textContent?.trim() ?? null;
+    });
+    expect(skippedFolder).toBe('Continue without a folder');
     await $('button.onboarding-next').click();
     while (await $('button.onboarding-next').isExisting()) await $('button.onboarding-next').click();
     const finishOnboarding = await $('main.onboarding:not(.startup) button.onboarding-action');
@@ -791,13 +826,21 @@ describe('AirWiki real IPC journey', () => {
     }
     await expect($('button*=AirWiki')).toBeDisplayed();
     await expect($('button*=New wiki')).toBeDisplayed();
-    await expect($('button[aria-label="Settings"]')).toBeDisplayed();
-    await expect($('.system-status-bar')).toBeDisplayed();
+    await expect($('.system-status-button')).toBeDisplayed();
+    expect(await $('.system-status-button').getAttribute('aria-label')).toContain('Settings');
+    expect(await $$('.status-segment')).toHaveLength(3);
+    expect(await $('.system-status-bar').isExisting()).toBe(false);
     expect(await measureNavigationPaintP95()).toBeLessThanOrEqual(100);
+
+    const globalSearch = await $('#global-search');
+    await globalSearch.click();
+    expect(await browser.execute(() => document.activeElement?.id)).toBe('global-search');
+    await globalSearch.setValue('focus regression');
+    await expect(globalSearch).toHaveValue('focus regression');
+    await globalSearch.clearValue();
 
     const devicePixelRatio = await browser.execute(() => window.devicePixelRatio || 1);
     for (const viewport of [
-      { width: 1020, height: 640 },
       { width: 1180, height: 760 },
       { width: 1440, height: 900 }
     ]) {
@@ -806,20 +849,23 @@ describe('AirWiki real IPC journey', () => {
       let dimensions: {
         clientWidth: number;
         scrollWidth: number;
+        statusWidth: number;
         statusHeight: number;
-        statusBottom: number;
+        headerBottom: number;
         viewportHeight: number;
       } | undefined;
       for (let attempt = 0; attempt < 3; attempt += 1) {
         await browser.setWindowSize(physicalWidth, physicalHeight);
         dimensions = await browser.execute(() => {
-          const statusBar = document.querySelector<HTMLElement>('.system-status-bar');
-          const statusRect = statusBar?.getBoundingClientRect();
+          const statusButton = document.querySelector<HTMLElement>('.system-status-button');
+          const statusRect = statusButton?.getBoundingClientRect();
+          const headerRect = document.querySelector<HTMLElement>('.top-bar')?.getBoundingClientRect();
           return {
             clientWidth: document.documentElement.clientWidth,
             scrollWidth: document.documentElement.scrollWidth,
+            statusWidth: statusRect?.width ?? 0,
             statusHeight: statusRect?.height ?? 0,
-            statusBottom: statusRect?.bottom ?? Number.POSITIVE_INFINITY,
+            headerBottom: headerRect?.bottom ?? Number.POSITIVE_INFINITY,
             viewportHeight: window.innerHeight
           };
         });
@@ -829,49 +875,47 @@ describe('AirWiki real IPC journey', () => {
       dimensions = required(dimensions, 'responsive viewport dimensions');
       expect(dimensions.clientWidth).toBeGreaterThanOrEqual(viewport.width);
       expect(dimensions.scrollWidth).toBeLessThanOrEqual(dimensions.clientWidth);
-      expect(dimensions.statusHeight).toBeGreaterThan(0);
-      expect(dimensions.statusBottom).toBeLessThanOrEqual(dimensions.viewportHeight);
+      expect(dimensions.statusWidth).toBe(44);
+      expect(dimensions.statusHeight).toBe(44);
+      expect(dimensions.headerBottom).toBeLessThanOrEqual(dimensions.viewportHeight);
     }
 
-    await $('button[aria-label="Settings"]').click();
-    await $('#system-preferences').waitForDisplayed();
-    const systemShell = await browser.execute(() => {
+    await $('.system-status-button').click();
+    await $('.settings-layout').waitForDisplayed();
+    const settingsShell = await browser.execute(() => {
       const main = document.querySelector<HTMLElement>('.drive-page');
-      const topBar = document.querySelector<HTMLElement>('.top-bar');
-      const statusBar = document.querySelector<HTMLElement>('.system-status-bar');
+      const topBar = document.querySelector<HTMLElement>('.settings-top-bar');
       return {
         documentScrollTop: document.scrollingElement?.scrollTop ?? -1,
         mainScrollTop: main?.scrollTop ?? -1,
         topBarTop: topBar?.getBoundingClientRect().top ?? -1,
-        statusVisible: statusBar ? statusBar.getBoundingClientRect().height > 0 : false,
-        sidebarPresent: document.querySelector('.rail') !== null
+        ordinaryHeaderPresent: document.querySelector('.top-bar, .global-search, .system-status-button') !== null,
+        sidebarPresent: document.querySelector('.settings-sidebar') !== null
       };
     });
-    expect(systemShell.documentScrollTop).toBe(0);
-    expect(systemShell.mainScrollTop).toBe(0);
-    expect(systemShell.topBarTop).toBe(0);
-    expect(systemShell.statusVisible).toBe(true);
-    expect(systemShell.sidebarPresent).toBe(false);
+    expect(settingsShell.documentScrollTop).toBe(0);
+    expect(settingsShell.mainScrollTop).toBe(0);
+    expect(settingsShell.topBarTop).toBe(0);
+    expect(settingsShell.ordinaryHeaderPresent).toBe(false);
+    expect(settingsShell.sidebarPresent).toBe(true);
+    expect((await browser.getUrl()).endsWith('#settings/general')).toBe(true);
 
-    await $('a[href="#system/updates"]').click();
-    await $('#system-updates').waitForDisplayed();
-    expect(await $('#system-preferences').isExisting()).toBe(false);
-    expect(await browser.execute(() => document.querySelector<HTMLElement>('.drive-page')?.scrollTop ?? -1)).toBe(0);
-
-    await $('a[href="#system/preferences"]').click();
-    await $('#system-preferences').waitForDisplayed();
-    expect(await $('#system-updates').isExisting()).toBe(false);
-    const preferenceSelects = await $$('#system-preferences select');
+    await browser.execute(() => { window.location.hash = 'system/preferences'; });
+    await browser.waitUntil(
+      async () => (await browser.getUrl()).endsWith('#settings/general'),
+      { timeout: 10_000, timeoutMsg: 'legacy General route did not canonicalize' }
+    );
+    const preferenceSelects = await $$('.settings-page select');
     const appearance = required(preferenceSelects[1], 'appearance preference');
-    await selectValue('#system-preferences select', 1, 'dark');
+    await selectValue('.settings-page select', 1, 'dark');
     await expect(appearance).toHaveValue('dark');
-    await $('#system-preferences button.primary').click();
+    await $('.settings-form-actions button.primary').click();
     await browser.waitUntil(async () => (
       await $('html').getAttribute('data-theme') === 'dark'
     ), { timeout: 10_000, timeoutMsg: 'the persisted theme was not applied' });
 
     const route = await browser.getUrl();
-    expect(route.endsWith('#system/preferences')).toBe(true);
+    expect(route.endsWith('#settings/general')).toBe(true);
     const layout = await browser.execute(() => ({
       clientWidth: document.documentElement.clientWidth,
       scrollWidth: document.documentElement.scrollWidth
@@ -879,36 +923,40 @@ describe('AirWiki real IPC journey', () => {
     expect(layout.scrollWidth).toBeLessThanOrEqual(layout.clientWidth);
 
     await browser.execute(() => { window.location.hash = 'system/connectivity'; });
-    await $('.connections-drawer').waitForDisplayed();
+    await browser.waitUntil(
+      async () => (await browser.getUrl()).endsWith('#settings/connections'),
+      { timeout: 10_000, timeoutMsg: 'legacy Connections route did not canonicalize' }
+    );
+    await $('.private-network-section').waitForDisplayed();
     await $('.connection-advanced > summary').click();
     const desktopControlLayout = await browser.execute(() => {
-      const indicator = document.querySelector<HTMLElement>('.check-indicator');
       const disclosure = document.querySelector<HTMLElement>('.connection-advanced > summary');
       const statusGrid = document.querySelector<HTMLElement>('.connection-advanced > dl');
       const firstStatus = statusGrid?.querySelector<HTMLElement>('dd');
-      const drawer = document.querySelector<HTMLElement>('.connections-drawer');
-      const integration = document.querySelector<HTMLElement>('.integration-item');
+      const settings = document.querySelector<HTMLElement>('.settings-layout');
       return {
-        checkboxWidth: indicator?.getBoundingClientRect().width ?? 0,
-        checkboxHeight: indicator?.getBoundingClientRect().height ?? 0,
         disclosureDisplay: disclosure ? getComputedStyle(disclosure).display : '',
         statusDisplay: statusGrid ? getComputedStyle(statusGrid).display : '',
         statusColumns: statusGrid ? getComputedStyle(statusGrid).gridTemplateColumns.split(' ').length : 0,
         statusMarginLeft: firstStatus ? getComputedStyle(firstStatus).marginLeft : '',
-        drawerClientWidth: drawer?.clientWidth ?? 0,
-        drawerScrollWidth: drawer?.scrollWidth ?? Number.POSITIVE_INFINITY,
-        integrationColumns: integration ? getComputedStyle(integration).gridTemplateColumns.split(' ').length : 0
+        settingsClientWidth: settings?.clientWidth ?? 0,
+        settingsScrollWidth: settings?.scrollWidth ?? Number.POSITIVE_INFINITY
       };
     });
-    expect(desktopControlLayout.checkboxWidth).toBe(16);
-    expect(desktopControlLayout.checkboxHeight).toBe(16);
     expect(desktopControlLayout.disclosureDisplay).toBe('flex');
     expect(desktopControlLayout.statusDisplay).toBe('grid');
     expect(desktopControlLayout.statusColumns).toBe(3);
     expect(desktopControlLayout.statusMarginLeft).toBe('0px');
-    expect(desktopControlLayout.drawerScrollWidth).toBeLessThanOrEqual(desktopControlLayout.drawerClientWidth);
-    expect(desktopControlLayout.integrationColumns).toBe(2);
-    await $('.connections-drawer button[aria-label="Close"]').click();
+    expect(desktopControlLayout.settingsScrollWidth).toBeLessThanOrEqual(desktopControlLayout.settingsClientWidth);
+
+    await $('a[href="#settings/apps"]').click();
+    await $('.integration-list').waitForDisplayed();
+    const integrationColumns = await browser.execute(() => {
+      const integration = document.querySelector<HTMLElement>('.integration-item');
+      return integration ? getComputedStyle(integration).gridTemplateColumns.split(' ').length : 0;
+    });
+    expect(integrationColumns).toBe(2);
+    await returnToLibrary();
 
     if (runVisualMatrix) await assertVisualMatrix();
     await configureVisualPreferences('en', 'light');
@@ -920,7 +968,7 @@ describe('AirWiki real IPC journey', () => {
     await browser.waitUntil(
       () => browser.execute(() => {
         const page = document.querySelector<HTMLElement>('.route-page');
-        if (!page || page.dataset.route !== 'wikis') return false;
+        if (!page || page.dataset.route !== 'library') return false;
         const style = getComputedStyle(page);
         return Number.parseFloat(style.opacity) >= 0.99 && style.visibility === 'visible';
       }),

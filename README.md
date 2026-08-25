@@ -1,7 +1,7 @@
 # AirWiki
 
 <p align="center">
-  <img src="resources/branding/airwiki-mark.png" alt="AirWiki" width="150">
+  <img src="resources/branding/airwiki-app-icon.png" alt="AirWiki" width="128">
 </p>
 
 <p align="center">
@@ -27,7 +27,7 @@ AirWiki is an open-source desktop app that turns folders, [Open Knowledge Format
 
 <p align="center">
   <a href="docs/assets/airwiki-demo.mp4">
-    <img src="docs/assets/airwiki-demo.gif" alt="Animated AirWiki tour opening the complete published OKF Wiki shared by a nearby Windows device">
+    <img src="docs/assets/airwiki-demo.gif" alt="Animated AirWiki tour searching the Library and opening a complete published OKF Wiki shared by a nearby Windows device">
   </a>
   <br>
   <sub>10-second product tour · <a href="docs/assets/airwiki-demo.mp4">MP4 version</a> · synthetic data only</sub>

@@ -25,6 +25,8 @@
   export let variant: 'standard' | 'search' = 'standard';
   export let onfocus: (() => void) | undefined = undefined;
   export let oninput: ((value: string) => void) | undefined = undefined;
+  export let oncompositionstart: (() => void) | undefined = undefined;
+  export let oncompositionend: ((value: string) => void) | undefined = undefined;
 
   const generatedId = allocateFieldId();
   $: controlId = id ?? generatedId;
@@ -53,6 +55,8 @@
       aria-invalid={error ? 'true' : undefined}
       aria-describedby={describedBy}
       onfocus={() => onfocus?.()}
+      oncompositionstart={() => oncompositionstart?.()}
+      oncompositionend={(event) => oncompositionend?.(event.currentTarget.value)}
       oninput={(event) => update(event.currentTarget.value)}
     ></textarea>
   {:else}
@@ -67,6 +71,8 @@
       aria-invalid={error ? 'true' : undefined}
       aria-describedby={describedBy}
       onfocus={() => onfocus?.()}
+      oncompositionstart={() => oncompositionstart?.()}
+      oncompositionend={(event) => oncompositionend?.(event.currentTarget.value)}
       oninput={(event) => update(event.currentTarget.value)}
     />
   {/if}

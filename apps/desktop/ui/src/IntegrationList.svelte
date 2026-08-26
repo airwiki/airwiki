@@ -87,6 +87,24 @@
   function removeGuide(integration: IntegrationSummary) {
     onaction({ kind: 'removeWorkflowGuide', client: integration.client });
   }
+
+  function needsFreshClientSession(integration: IntegrationSummary): boolean {
+    return (integration.restartRequired || integration.workflowGuide.restartRequired)
+      && integration.status === 'configured'
+      && (integration.workflowGuide.status === 'installed' || integration.workflowGuide.status === 'builtIn');
+  }
+
+  function recoveryTitle(client: IntegrationSummary['client']): string {
+    if (client === 'chatGptDesktop') return t('integration-recovery-chatgpt-title');
+    if (client === 'geminiCli') return t('integration-recovery-gemini-title');
+    return t('integration-recovery-conversation-title', { client: clientName(client) });
+  }
+
+  function recoveryBody(client: IntegrationSummary['client']): string {
+    if (client === 'chatGptDesktop') return t('integrations-restart-chatgpt');
+    if (client === 'geminiCli') return t('integrations-restart-gemini');
+    return t('integrations-restart-conversation', { client: clientName(client) });
+  }
 </script>
 
 <div class="integration-list" aria-busy={busy}>
@@ -139,8 +157,16 @@
       </div>
       {#if integration.workflowGuide.status === 'conflict'}
         <p class="integration-guidance warning-text">{t('workflow-guide-conflict-help')}</p>
-      {:else if integration.workflowGuide.restartRequired && (integration.workflowGuide.status === 'installed' || integration.workflowGuide.status === 'builtIn')}
-        <p class="integration-guidance">{t('workflow-guide-new-conversation')}</p>
+      {:else if needsFreshClientSession(integration)}
+        <aside
+          class="integration-recovery"
+          role="note"
+          aria-labelledby={`integration-recovery-title-${integration.client}`}
+        >
+          <span class="integration-recovery-label">{t('integration-recovery-label')}</span>
+          <strong id={`integration-recovery-title-${integration.client}`}>{recoveryTitle(integration.client)}</strong>
+          <p>{recoveryBody(integration.client)}</p>
+        </aside>
       {/if}
       {#if integration.mcpSetup}
         <div class="mcp-setup">

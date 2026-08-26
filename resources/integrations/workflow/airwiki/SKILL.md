@@ -19,13 +19,14 @@ Use the connected AirWiki MCP tools to maintain durable knowledge. Project memor
 ## Select the active wiki
 
 1. From the current working directory, look upward for the nearest `.airwiki/project.yaml` without searching outside the current filesystem workspace.
-2. When found, call `open_airwiki_project` with that project root before listing personal memories. Never infer readiness from the files alone.
-3. If the result is `ready`, keep the returned project Wiki active for this project and call `search_airwiki_memory` for relevant concepts before starting substantive work. Read selected bodies with `get_airwiki_memory`.
-4. If the result is `awaiting_confirmation`, do not retry repeatedly or write memory. Continue safe primary work when possible and tell the user that local AirWiki approval is pending.
-5. If no project manifest exists or `open` returns `not_initialized`, do not create `.airwiki`. Fall back to the personal-memory flow: call `list_airwiki_memories`, reuse an exact accessible match, and ask when matches are ambiguous.
-6. Call `initialize_airwiki_project` or `create_airwiki_memory` only after the user explicitly asks to create that kind of memory. Initialization creates a pending native confirmation; it does not authorize the agent to create files directly.
-7. Keep the selected Wiki active only for the current conversation or project. Never silently reuse a selection from another context.
-8. If the user says "pause AirWiki", "pausa AirWiki", or equivalent, stop automatic consultation and capture until explicitly resumed.
+2. If a project manifest exists but `open_airwiki_project` or `search_airwiki_memory` is missing from the current tool set, treat the client task as stale rather than treating AirWiki as unavailable. Do not fall back to personal memory or use generic concept tools against the project. Tell the user to open **AirWiki → Settings → AI apps**, refresh or update this client, then start a new task or conversation in the same project. Restart the client only if the tools are still absent, and explicitly say not to recreate `.airwiki`.
+3. When the project tools are present, call `open_airwiki_project` with that project root before listing personal memories. Never infer readiness from the files alone.
+4. If the result is `ready`, keep the returned project Wiki active for this project and call `search_airwiki_memory` for relevant concepts before starting substantive work. Read selected bodies with `get_airwiki_memory`.
+5. If the result is `awaiting_confirmation`, do not retry repeatedly or write memory. Continue safe primary work when possible and tell the user that local AirWiki approval is pending.
+6. If no project manifest exists or `open` returns `not_initialized`, do not create `.airwiki`. Fall back to the personal-memory flow: call `list_airwiki_memories`, reuse an exact accessible match, and ask when matches are ambiguous.
+7. Call `initialize_airwiki_project` or `create_airwiki_memory` only after the user explicitly asks to create that kind of memory. Initialization creates a pending native confirmation; it does not authorize the agent to create files directly.
+8. Keep the selected Wiki active only for the current conversation or project. Never silently reuse a selection from another context.
+9. If the user says "pause AirWiki", "pausa AirWiki", or equivalent, stop automatic consultation and capture until explicitly resumed.
 
 ## Read before writing
 

@@ -46,7 +46,13 @@ const labels: Record<string, string> = {
   'workflow-guide-install': 'Install memory',
   'workflow-guide-remove': 'Remove guide',
   'workflow-guide-conflict-help': 'AirWiki preserves modified files.',
-  'workflow-guide-new-conversation': 'Open a new conversation.',
+  'integration-recovery-label': 'Next step',
+  'integration-recovery-chatgpt-title': 'Open a new ChatGPT/Codex task',
+  'integration-recovery-conversation-title': 'Open a new client conversation',
+  'integration-recovery-gemini-title': 'Reload AirWiki in Gemini CLI',
+  'integrations-restart-chatgpt': 'Existing tasks keep their loaded tools. Open a new task in the same project.',
+  'integrations-restart-conversation': 'Open a new client conversation in the same project.',
+  'integrations-restart-gemini': 'Run /mcp reload or start a new session.',
   'integrations-generic-mcp': 'Generic MCP client',
   'integrations-generic-setup': 'MCP stdio configuration',
   'integrations-generic-setup-help': 'Copy this configuration.',
@@ -117,6 +123,39 @@ describe('IntegrationList', () => {
     expect(onaction).toHaveBeenCalledWith({ kind: 'installWorkflowGuide', client: 'claudeCode' });
   });
 
+  it('promotes a fresh ChatGPT task as the next step after setup', () => {
+    render(IntegrationList, {
+      integrations: [integration({
+        client: 'chatGptDesktop',
+        restartRequired: true
+      })],
+      busy: false,
+      t: translate,
+      onaction: vi.fn(),
+      oncopy: vi.fn()
+    });
+
+    const recovery = screen.getByRole('note', { name: 'Open a new ChatGPT/Codex task' });
+    expect(recovery).toHaveTextContent('Next step');
+    expect(recovery).toHaveTextContent('Existing tasks keep their loaded tools. Open a new task in the same project.');
+  });
+
+  it('keeps the fresh-task recovery hidden until the integration is current', () => {
+    render(IntegrationList, {
+      integrations: [integration({
+        client: 'chatGptDesktop',
+        status: 'updateAvailable',
+        restartRequired: true
+      })],
+      busy: false,
+      t: translate,
+      onaction: vi.fn(),
+      oncopy: vi.fn()
+    });
+
+    expect(screen.queryByRole('note')).not.toBeInTheDocument();
+  });
+
   it('can install an independent guide while preserving a conflicting MCP configuration', async () => {
     const onaction = vi.fn();
     render(IntegrationList, {
@@ -162,9 +201,30 @@ describe('IntegrationList', () => {
     expect(oncopy).toHaveBeenCalledWith('/managed/airwiki-mcp-bridge', ['--client', 'generic-mcp']);
   });
 
+  it('keeps the fresh-session recovery visible for a configured generic client', () => {
+    render(IntegrationList, {
+      integrations: [integration({
+        client: 'genericMcp',
+        workflowGuide: {
+          kind: 'mcpInstructions', status: 'builtIn', version: '1', restartRequired: true
+        }
+      })],
+      busy: false,
+      t: translate,
+      onaction: vi.fn(),
+      oncopy: vi.fn()
+    });
+
+    expect(screen.getByRole('note', { name: 'Open a new client conversation' }))
+      .toHaveTextContent('Open a new client conversation in the same project.');
+  });
+
   it('has no critical or serious accessibility violations', async () => {
     const { container } = render(IntegrationList, {
-      integrations: [integration()],
+      integrations: [integration({
+        client: 'chatGptDesktop',
+        restartRequired: true
+      })],
       busy: false,
       t: translate,
       onaction: vi.fn(),

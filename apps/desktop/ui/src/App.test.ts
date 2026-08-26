@@ -1745,6 +1745,122 @@ describe('AirWiki wiki workspace', () => {
     expect(screen.getByRole('list', { name: 'Biblioteca' })).toBeInTheDocument();
   });
 
+  it('searches the latest query automatically after typing pauses', async () => {
+    activateLocalSearch();
+    render(App);
+    const form = await screen.findByRole('search');
+    const input = form.querySelector('input');
+    expect(input).not.toBeNull();
+    vi.useFakeTimers();
+    try {
+      await fireEvent.input(input!, { target: { value: 'consulta' } });
+      await act(async () => { await vi.advanceTimersByTimeAsync(250); });
+      await fireEvent.input(input!, { target: { value: 'consulta actualizada' } });
+      await act(async () => { await vi.advanceTimersByTimeAsync(399); });
+      expect(searchKnowledge).not.toHaveBeenCalled();
+
+      await act(async () => { await vi.advanceTimersByTimeAsync(1); });
+
+      expect(searchKnowledge).toHaveBeenCalledOnce();
+      expect(searchKnowledge).toHaveBeenLastCalledWith('consulta actualizada', false);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('keeps public consent scoped to the exact query', async () => {
+    activateLocalSearch();
+    render(App);
+    const form = await screen.findByRole('search');
+    const input = form.querySelector('input');
+    expect(input).not.toBeNull();
+    vi.useFakeTimers();
+    try {
+      await fireEvent.input(input!, { target: { value: 'consulta pública' } });
+      const publicSearch = screen.getByRole('checkbox', { name: 'Buscar también en la red pública' });
+      await fireEvent.click(publicSearch);
+      await act(async () => { await vi.advanceTimersByTimeAsync(400); });
+      expect(searchKnowledge).toHaveBeenLastCalledWith('consulta pública', true);
+
+      await fireEvent.input(input!, { target: { value: 'consulta privada revisada' } });
+      expect(publicSearch).not.toBeChecked();
+      await act(async () => { await vi.advanceTimersByTimeAsync(400); });
+
+      expect(searchKnowledge).toHaveBeenLastCalledWith('consulta privada revisada', false);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('searches a pending query when the local model becomes ready', async () => {
+    render(App);
+    const form = await screen.findByRole('search');
+    const input = form.querySelector('input');
+    expect(input).not.toBeNull();
+    vi.useFakeTimers();
+    try {
+      await fireEvent.input(input!, { target: { value: 'consulta en espera' } });
+      await act(async () => { await vi.advanceTimersByTimeAsync(400); });
+      expect(searchKnowledge).not.toHaveBeenCalled();
+
+      activateLocalSearch();
+      snapshot = { ...snapshot, sequence: snapshot.sequence + 1 };
+      await act(() => {
+        snapshotListener?.({ schemaVersion: snapshot.schemaVersion, sequence: snapshot.sequence, requestId: null, kind: 'stateChanged', snapshot });
+      });
+      await act(async () => { await vi.advanceTimersByTimeAsync(400); });
+
+      expect(searchKnowledge).toHaveBeenCalledOnce();
+      expect(searchKnowledge).toHaveBeenLastCalledWith('consulta en espera', false);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('lets Enter search immediately without leaving a duplicate delayed search', async () => {
+    activateLocalSearch();
+    render(App);
+    const form = await screen.findByRole('search');
+    const input = form.querySelector('input');
+    expect(input).not.toBeNull();
+    vi.useFakeTimers();
+    try {
+      await fireEvent.input(input!, { target: { value: 'consulta inmediata' } });
+      await fireEvent.submit(form);
+      await act(async () => { await vi.runAllTimersAsync(); });
+
+      expect(searchKnowledge).toHaveBeenCalledOnce();
+      expect(searchKnowledge).toHaveBeenLastCalledWith('consulta inmediata', false);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('waits for text composition to finish before searching', async () => {
+    activateLocalSearch();
+    render(App);
+    const form = await screen.findByRole('search');
+    const input = form.querySelector('input');
+    expect(input).not.toBeNull();
+    vi.useFakeTimers();
+    try {
+      await fireEvent.compositionStart(input!);
+      await fireEvent.input(input!, { target: { value: '検' } });
+      await fireEvent.submit(form);
+      await act(async () => { await vi.advanceTimersByTimeAsync(400); });
+      expect(searchKnowledge).not.toHaveBeenCalled();
+
+      await fireEvent.compositionEnd(input!, { data: '検索' });
+      await fireEvent.input(input!, { target: { value: '検索' } });
+      await act(async () => { await vi.advanceTimersByTimeAsync(400); });
+
+      expect(searchKnowledge).toHaveBeenCalledOnce();
+      expect(searchKnowledge).toHaveBeenLastCalledWith('検索', false);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it('hides local-only results when the public search scope changes', async () => {
     activateLocalSearch();
     snapshot.search = searchSummary('local-only-search', 'complete', []);

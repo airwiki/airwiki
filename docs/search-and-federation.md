@@ -39,7 +39,9 @@ Wikis on this device, ordered first by items needing attention and then by
 name. Health, pending work and the relevant actions stay on each Wiki rather
 than being duplicated in a separate alert list.
 
-After a query, AirWiki replaces that inventory with Wiki-level result groups.
+After a brief pause in typing, AirWiki runs the latest query automatically;
+pressing Enter runs it immediately. It then replaces the inventory with
+Wiki-level result groups.
 Each group belongs to exactly one origin, owner and Wiki, shows up to two best
 matching concepts, and states the total number of matches. Filters with counts
 select **All**, **This device**, **Nearby**, or **Public** without rerunning or
@@ -52,7 +54,9 @@ inventory.
 it, **All** means this device plus currently authorized LAN peers. Successful
 results remain visible when another peer is offline or the public branch is
 unavailable, alongside actionable partial-coverage status. Queries remain out
-of the URL, durable settings and logs.
+of the URL, durable settings and logs. Editing a non-empty query clears the
+public option, so the revised query stays on this device and authorized LAN
+peers until the user explicitly includes the public network again.
 
 ## One search pipeline, different authorization scopes
 

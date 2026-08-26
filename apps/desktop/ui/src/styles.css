@@ -750,6 +750,10 @@ button:active:not(:disabled) { transform: scale(.985); }
 .integration-actions .secondary { min-height: 38px; }
 .integration-actions .subtle-action { color: var(--muted); }
 .integration-guidance { grid-column: 1 / -1; margin: -2px 0 0 61px; color: var(--muted); font-size: 12px; }
+.integration-recovery { grid-column: 1 / -1; display: grid; gap: 3px; margin: -2px 0 0 61px; padding: 11px 14px; color: var(--body-copy); background: color-mix(in srgb, var(--violet) 8%, transparent); border-left: 2px solid var(--violet); }
+.integration-recovery-label { color: var(--violet); font: 650 10px/1.2 'Space Grotesk', sans-serif; letter-spacing: .065em; text-transform: uppercase; }
+.integration-recovery strong { color: var(--strong); font: 640 13px/1.35 'Space Grotesk', sans-serif; }
+.integration-recovery p { max-width: 720px; margin: 0; color: var(--muted); font-size: 12px; line-height: 1.45; }
 .integration-item .mcp-setup { grid-column: 1 / -1; }
 .integration-empty { padding: 24px 12px; color: var(--muted); text-align: center; }
 .connections-drawer .integration-state-list dt,
@@ -762,6 +766,7 @@ button:active:not(:disabled) { transform: scale(.985); }
   .integration-list .integration-item { grid-template-columns: minmax(0, 1fr) auto; }
   .integration-state-list { grid-column: 1 / -1; }
   .integration-guidance { grid-column: 1 / -1; }
+  .integration-recovery { grid-column: 1 / -1; }
 }
 .computation-parameters { display: flex; flex-wrap: wrap; gap: 6px; margin: 8px 0 0; padding: 0; list-style: none; }
 .computation-parameters li { display: inline-flex; align-items: center; gap: 5px; padding: 3px 7px; color: var(--muted); background: var(--surface-raised); border: 1px solid var(--line); border-radius: 999px; font-size: 12px; }

@@ -119,6 +119,14 @@ Open a new task or restart the client if the skill or tool is not visible.
 **Disconnect** removes the entry only while it still matches the configuration
 installed by AirWiki.
 
+An existing task can keep the bridge and tool catalog that were loaded before
+an integration update while reading the newer skill from disk. If an agent
+finds `.airwiki/project.yaml` but reports that project memory cannot be opened,
+do not recreate the project memory. In **AirWiki → Settings → AI apps**, refresh
+the client, apply any offered integration or assisted-memory update, and then
+open a new task in the same project. Fully restart ChatGPT only if the new task
+still does not expose project memory.
+
 ## Claude Code
 
 Select **Connect**, review the global files listed by the native confirmation,
@@ -180,6 +188,8 @@ If an integration stops working:
 - select **Refresh** and check whether the connection or guide needs an update;
 - use **Update guide** only when AirWiki offers it and after reviewing the native prompt;
 - start a new conversation after installing or updating assisted memory;
+- when `.airwiki` exists but the agent reports missing project-memory tools,
+  update the integration and start a new task instead of recreating the bundle;
 - confirm that no unrelated process owns `127.0.0.1:43123`;
 - never expose that port through the LAN firewall;
 - resolve guide conflicts manually without deleting another client's configuration; and

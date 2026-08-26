@@ -4,6 +4,16 @@ All notable user-visible changes to AirWiki will be documented here. The project
 
 ## [Unreleased]
 
+- Made Library search update automatically after a brief typing pause while
+  retaining Enter as an immediate action, ignoring unfinished text composition
+  and preventing delayed or stale requests from replacing the latest results.
+  Queries entered while local search is preparing resume when it becomes ready,
+  while editing a public query clears that query-specific public consent.
+- Made assisted-memory updates recoverable when an already-open AI task keeps
+  an older AirWiki tool catalog. AI apps now presents a prominent client-specific
+  next step, while the installed skill identifies the stale task, directs the
+  user to update and reopen it, forbids personal-memory fallback, and preserves
+  the existing `.airwiki` project bundle.
 - Added protected public technical pre-releases with permanent, non-latest
   downloads for the ad-hoc non-notarized macOS app, two unsigned localized
   Windows MSI packages and the Linux x64 federation index server. A closed

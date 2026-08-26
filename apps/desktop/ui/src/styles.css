@@ -6,7 +6,7 @@
   color: #edf7f8;
   background: #07131f;
   font-synthesis: none;
-  --ink: #07131f; --slate: #102638; --cyan: #61d6e8; --violet: #9b8cff;
+  --ink: #07131f; --slate: #102638; --cyan: #61d6e8; --violet: #9b8cff; --recovery-accent: #9b8cff;
   --verify: #61c995; --amber: #e0aa55; --line: #29465b; --muted: #9fb6c2;
   --strong: #fff; --rail: #091a28; --rail-line: #183449; --nav-active: #12354a;
   --body-copy: #d5e5e8; --code-copy: #c9f4f8; --code-bg: #05101a; --graph-canvas: #081824;
@@ -19,7 +19,7 @@
   --rail-line: #bfd0d6; --nav-active: #cbe4e8; --body-copy: #294957;
   --code-copy: #123b47; --code-bg: #fff; --graph-canvas: #f4f8f9;
   --private-accent: #087f91; --private-soft: #087f9112;
-  --public-accent: #5e4dc9; --public-soft: #5e4dc912;
+  --public-accent: #5e4dc9; --public-soft: #5e4dc912; --recovery-accent: #5e4dc9;
 }
 @media (prefers-color-scheme: light) {
   :root[data-theme='system'] {
@@ -28,7 +28,7 @@
     --rail-line: #bfd0d6; --nav-active: #cbe4e8; --body-copy: #294957;
     --code-copy: #123b47; --code-bg: #fff; --graph-canvas: #f4f8f9;
     --private-accent: #087f91; --private-soft: #087f9112;
-    --public-accent: #5e4dc9; --public-soft: #5e4dc912;
+    --public-accent: #5e4dc9; --public-soft: #5e4dc912; --recovery-accent: #5e4dc9;
   }
 }
 * { box-sizing: border-box; }
@@ -750,8 +750,8 @@ button:active:not(:disabled) { transform: scale(.985); }
 .integration-actions .secondary { min-height: 38px; }
 .integration-actions .subtle-action { color: var(--muted); }
 .integration-guidance { grid-column: 1 / -1; margin: -2px 0 0 61px; color: var(--muted); font-size: 12px; }
-.integration-recovery { grid-column: 1 / -1; display: grid; gap: 3px; margin: -2px 0 0 61px; padding: 11px 14px; color: var(--body-copy); background: color-mix(in srgb, var(--violet) 8%, transparent); border-left: 2px solid var(--violet); }
-.integration-recovery-label { color: var(--violet); font: 650 10px/1.2 'Space Grotesk', sans-serif; letter-spacing: .065em; text-transform: uppercase; }
+.integration-recovery { grid-column: 1 / -1; display: grid; gap: 3px; margin: -2px 0 0 61px; padding: 11px 14px; color: var(--body-copy); background: color-mix(in srgb, var(--recovery-accent) 8%, transparent); border-left: 2px solid var(--recovery-accent); }
+.integration-recovery-label { color: var(--recovery-accent); font: 650 10px/1.2 'Space Grotesk', sans-serif; letter-spacing: .065em; text-transform: uppercase; }
 .integration-recovery strong { color: var(--strong); font: 640 13px/1.35 'Space Grotesk', sans-serif; }
 .integration-recovery p { max-width: 720px; margin: 0; color: var(--muted); font-size: 12px; line-height: 1.45; }
 .integration-item .mcp-setup { grid-column: 1 / -1; }

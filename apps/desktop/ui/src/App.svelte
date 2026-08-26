@@ -80,7 +80,7 @@
   let searchBusy = false;
   let searchDebounceTimeout: number | null = null;
   let searchCompositionActive = false;
-  let searchPendingForModel = false;
+  let searchPending = false;
   let selectedReview: ReviewSummary | null = null;
   let editDraft: EnrichmentDraft | null = null;
   let selectedWikiId: string | null = null;
@@ -528,6 +528,7 @@
           : '#library';
       if (window.location.hash !== canonical) window.history.replaceState(null, '', canonical);
       scrollMainTo(sharedReturnScrollTop ?? settingsReturnContext?.scrollTop ?? 0);
+      resumePendingSearch();
     };
     syncRoute();
     window.addEventListener('hashchange', syncRoute);
@@ -585,9 +586,10 @@
     connect((event) => {
       snapshot = event.snapshot;
       if (
-        searchPendingForModel
+        searchPending
         && event.snapshot.model?.active === true
         && destination !== 'settings'
+        && searchDebounceTimeout === null
       ) scheduleSearch();
       observePendingRequests(event.snapshot);
       if (
@@ -676,6 +678,7 @@
       scrollMainTo(0);
       void refreshHealth();
       focusRouteHeading();
+      resumePendingSearch();
     }
   }
 
@@ -686,7 +689,6 @@
 
   function openSettings(section: SettingsSection = lastSettingsSection) {
     cancelScheduledSearch();
-    searchPendingForModel = false;
     if (destination !== 'settings') {
       settingsReturnContext = {
         hash: window.location.hash || '#library',
@@ -706,6 +708,7 @@
     pushHash(context.hash.startsWith('#library') ? context.hash : '#library');
     scrollMainTo(context.scrollTop);
     focusRouteHeading();
+    resumePendingSearch();
   }
 
   function requestSettingsBack() {
@@ -781,6 +784,7 @@
     settingsReturnContext = null;
     pushHash('#library');
     scrollMainTo(0);
+    resumePendingSearch();
   }
 
   async function submitGlobalSearch() {
@@ -1491,9 +1495,16 @@
 
   async function submitSearch() {
     cancelScheduledSearch();
-    searchPendingForModel = false;
     actionMessage = '';
-    if (searchCompositionActive || !snapshot?.model?.active || !question.trim()) return;
+    if (searchCompositionActive || !question.trim()) {
+      if (!question.trim()) searchPending = false;
+      return;
+    }
+    if (!snapshot?.model?.active) {
+      searchPending = true;
+      return;
+    }
+    searchPending = false;
     const submissionSequence = ++searchSubmissionSequence;
     dismissSharedBrowse();
     activeSearchRequestId = null;
@@ -1522,17 +1533,20 @@
     searchDebounceTimeout = null;
   }
 
+  function resumePendingSearch() {
+    if (searchPending && searchDebounceTimeout === null) scheduleSearch();
+  }
+
   function scheduleSearch() {
     cancelScheduledSearch();
     if (searchCompositionActive || !question.trim()) {
-      if (!question.trim()) searchPendingForModel = false;
+      if (!question.trim()) searchPending = false;
       return;
     }
+    searchPending = true;
     if (!snapshot?.model?.active) {
-      searchPendingForModel = true;
       return;
     }
-    searchPendingForModel = false;
     searchDebounceTimeout = window.setTimeout(() => {
       searchDebounceTimeout = null;
       void submitGlobalSearch();

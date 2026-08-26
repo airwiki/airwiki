@@ -231,6 +231,25 @@ class TechnicalPrereleaseWorkflowTests(unittest.TestCase):
         self.assertIn("gh release download", publish)
         self.assertIn("technical_prerelease.py verify", publish)
 
+    def test_tag_is_bound_after_draft_reverification_before_publication(self) -> None:
+        publish = self.workflow.split("  publish-technical-prerelease:", 1)[1]
+        premature_tag_check = (
+            '          git fetch --no-tags origin "refs/tags/$TAG:refs/tags/$TAG"\n'
+            '          if [[ "$(git rev-list -n 1 "$TAG")" != "$GITHUB_SHA" ]]'
+        )
+        self.assertNotIn(premature_tag_check, publish)
+
+        verify_index = publish.index("technical_prerelease.py verify")
+        tag_creation_index = publish.index(
+            '"repos/$GITHUB_REPOSITORY/git/refs"'
+        )
+        release_publication_index = publish.index(
+            '"repos/$GITHUB_REPOSITORY/releases/$RELEASE_ID"'
+        )
+        self.assertLess(verify_index, tag_creation_index)
+        self.assertLess(tag_creation_index, release_publication_index)
+        self.assertIn("published_commit=", publish[release_publication_index:])
+
     def test_every_external_action_is_pinned_to_a_commit(self) -> None:
         references = re.findall(r"uses:\s*[^@\s]+@([^\s]+)", self.workflow)
         self.assertTrue(references)

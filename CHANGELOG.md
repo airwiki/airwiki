@@ -131,6 +131,8 @@ All notable user-visible changes to AirWiki will be documented here. The project
 
 ### Fixed
 
+- Fixed protected technical pre-release publication so the private draft is
+  uploaded and independently verified before its immutable tag is created.
 - Made the normal search scope explicitly include the current device and
   authorized nearby devices, with public search as a separate opt-in. LAN and
   public results now open in one consistent, read-only Wiki workspace instead

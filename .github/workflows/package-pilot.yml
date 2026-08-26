@@ -334,11 +334,6 @@ jobs:
                 --notes-file target/technical-prerelease/RELEASE_NOTES.md
             fi
           fi
-          git fetch --no-tags origin "refs/tags/$TAG:refs/tags/$TAG"
-          if [[ "$(git rev-list -n 1 "$TAG")" != "$GITHUB_SHA" ]]; then
-            echo "technical prerelease tag does not resolve to the workflow commit" >&2
-            exit 1
-          fi
           gh release edit "$TAG" \
             --draft=true \
             --prerelease=true \
@@ -366,6 +361,24 @@ jobs:
           TAG: ${{ needs.validate-request.outputs.tag }}
         run: |
           set -euo pipefail
+          tag_ref="refs/tags/$TAG"
+          tag_refs="$(git ls-remote --tags origin "$tag_ref" "${tag_ref}^{}")"
+          if [[ -z "$tag_refs" ]]; then
+            gh api --method POST "repos/$GITHUB_REPOSITORY/git/refs" \
+              -f "ref=$tag_ref" \
+              -f "sha=$GITHUB_SHA" >/dev/null
+            tag_refs="$(git ls-remote --tags origin "$tag_ref" "${tag_ref}^{}")"
+          fi
+          tag_commit="$(awk -v tag="$tag_ref" '
+            $2 == tag { direct = $1 }
+            $2 == tag "^{}" { peeled = $1 }
+            END { print peeled != "" ? peeled : direct }
+          ' <<<"$tag_refs")"
+          if [[ "$tag_commit" != "$GITHUB_SHA" ]]; then
+            echo "technical prerelease tag does not resolve to the verified workflow commit" >&2
+            exit 1
+          fi
+
           gh api \
             --method PATCH \
             "repos/$GITHUB_REPOSITORY/releases/$RELEASE_ID" \
@@ -373,10 +386,16 @@ jobs:
             -F prerelease=true \
             -f make_latest=false >/dev/null
           release="$(gh release view "$TAG" --json assets,isDraft,isPrerelease,tagName,targetCommitish,url)"
+          published_commit="$(git ls-remote --tags origin "$tag_ref" "${tag_ref}^{}" | awk -v tag="$tag_ref" '
+            $2 == tag { direct = $1 }
+            $2 == tag "^{}" { peeled = $1 }
+            END { print peeled != "" ? peeled : direct }
+          ')"
           if [[ "$(jq -r '.isDraft' <<<"$release")" != "false" ]] ||
              [[ "$(jq -r '.isPrerelease' <<<"$release")" != "true" ]] ||
              [[ "$(jq -r '.tagName' <<<"$release")" != "$TAG" ]] ||
-             [[ "$(jq -r '.targetCommitish' <<<"$release")" != "$GITHUB_SHA" ]]; then
+             [[ "$(jq -r '.targetCommitish' <<<"$release")" != "$GITHUB_SHA" ]] ||
+             [[ "$published_commit" != "$GITHUB_SHA" ]]; then
             echo "GitHub did not publish the exact technical prerelease" >&2
             exit 1
           fi

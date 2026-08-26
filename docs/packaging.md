@@ -225,9 +225,10 @@ escapes, invalid formats and output reuse, then emits a closed asset set:
 The publication job has the only `contents: write` token and waits at the
 protected `public-release` environment after all platform jobs pass. It creates
 or safely recovers only an exact private draft, uploads the closed set,
-re-downloads every asset, verifies it independently and finally publishes it as
-`v<version>-beta.<number>` with GitHub pre-release enabled and Latest disabled.
-It never creates `latest.json`, enters signing environments, requests SignPath,
+re-downloads every asset and verifies it independently. Only then does it create
+or validate the immutable `v<version>-beta.<number>` tag at the workflow commit
+and publish the draft with GitHub pre-release enabled and Latest disabled. It
+never creates `latest.json`, enters signing environments, requests SignPath,
 reads updater keys, rewrites an already public beta or promotes those bytes into
 the stable workflow. A failed attempt can resume only an exact private draft at
 the same immutable tag and commit with no unexpected assets.

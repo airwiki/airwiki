@@ -50,6 +50,7 @@
     { id: 'connections', labelId: 'desktop-connections' },
     { id: 'apps', labelId: 'desktop-status-ai-apps' }
   ] as const;
+  const SEARCH_DEBOUNCE_MS = 400;
 
   let destination: Destination = 'library';
   let settingsSection: SettingsSection = 'general';
@@ -77,6 +78,9 @@
   let actionMessageTimeout: number | null = null;
   let actionBusy = false;
   let searchBusy = false;
+  let searchDebounceTimeout: number | null = null;
+  let searchCompositionActive = false;
+  let searchPendingForModel = false;
   let selectedReview: ReviewSummary | null = null;
   let editDraft: EnrichmentDraft | null = null;
   let selectedWikiId: string | null = null;
@@ -580,6 +584,11 @@
       : Promise.resolve(() => {});
     connect((event) => {
       snapshot = event.snapshot;
+      if (
+        searchPendingForModel
+        && event.snapshot.model?.active === true
+        && destination !== 'settings'
+      ) scheduleSearch();
       observePendingRequests(event.snapshot);
       if (
         wikiLoadFailedId
@@ -647,6 +656,7 @@
       void runIntegrationAction({ kind: 'refresh' });
     }
     return () => {
+      cancelScheduledSearch();
       window.removeEventListener('hashchange', syncRoute);
       window.removeEventListener('popstate', syncRoute);
       window.removeEventListener('keydown', handleShortcut);
@@ -675,6 +685,8 @@
   }
 
   function openSettings(section: SettingsSection = lastSettingsSection) {
+    cancelScheduledSearch();
+    searchPendingForModel = false;
     if (destination !== 'settings') {
       settingsReturnContext = {
         hash: window.location.hash || '#library',
@@ -1478,8 +1490,10 @@
   }
 
   async function submitSearch() {
+    cancelScheduledSearch();
+    searchPendingForModel = false;
     actionMessage = '';
-    if (!snapshot?.model?.active || !question.trim()) return;
+    if (searchCompositionActive || !snapshot?.model?.active || !question.trim()) return;
     const submissionSequence = ++searchSubmissionSequence;
     dismissSharedBrowse();
     activeSearchRequestId = null;
@@ -1503,13 +1517,47 @@
     }
   }
 
+  function cancelScheduledSearch() {
+    if (searchDebounceTimeout !== null) window.clearTimeout(searchDebounceTimeout);
+    searchDebounceTimeout = null;
+  }
+
+  function scheduleSearch() {
+    cancelScheduledSearch();
+    if (searchCompositionActive || !question.trim()) {
+      if (!question.trim()) searchPendingForModel = false;
+      return;
+    }
+    if (!snapshot?.model?.active) {
+      searchPendingForModel = true;
+      return;
+    }
+    searchPendingForModel = false;
+    searchDebounceTimeout = window.setTimeout(() => {
+      searchDebounceTimeout = null;
+      void submitGlobalSearch();
+    }, SEARCH_DEBOUNCE_MS);
+  }
+
   function updateSearchQuestion(value: string) {
+    if (includePublic && question.trim() && value !== question) includePublic = false;
     question = value;
     if (!value.trim()) searchFilter = 'all';
     searchSubmissionSequence += 1;
     searchBusy = false;
     activeSearchRequestId = null;
     dismissSharedBrowse();
+    scheduleSearch();
+  }
+
+  function beginSearchComposition() {
+    searchCompositionActive = true;
+    cancelScheduledSearch();
+  }
+
+  function endSearchComposition(value: string) {
+    searchCompositionActive = false;
+    updateSearchQuestion(value);
   }
 
   function updatePublicSearch(value: boolean) {
@@ -1518,6 +1566,7 @@
     searchBusy = false;
     activeSearchRequestId = null;
     dismissSharedBrowse();
+    scheduleSearch();
   }
 
   async function openSearchWiki(result: WikiSearchResultSummary) {
@@ -2032,6 +2081,8 @@
           privateScopeLabel={privateSearchScope}
           {t}
           onquestion={updateSearchQuestion}
+          oncompositionstart={beginSearchComposition}
+          oncompositionend={endSearchComposition}
           onpublic={updatePublicSearch}
           onsearch={submitGlobalSearch}
           onopen={openGlobalSearch}

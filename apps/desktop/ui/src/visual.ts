@@ -118,8 +118,8 @@ if (destination === 'library' || destination === 'connections') {
     externalAiWikiCount: 1,
     integrations: [{
       client: 'chatGptDesktop', status: 'configured', detectedVersion: '1.2026.210',
-      activityRecent: true, restartRequired: false, mcpSetup: null,
-      workflowGuide: { kind: 'nativeSkill', status: 'installed', version: '1', restartRequired: false }
+      activityRecent: false, restartRequired: true, mcpSetup: null,
+      workflowGuide: { kind: 'nativeSkill', status: 'installed', version: '1', restartRequired: true }
     }, {
       client: 'claudeDesktop', status: 'available', detectedVersion: '0.14.2',
       activityRecent: false, restartRequired: false, mcpSetup: null,

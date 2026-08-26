@@ -521,7 +521,7 @@ fn validate_workflow_guide() -> Result<()> {
     const MAX_SKILL_BYTES: usize = 64 * 1024;
     const MAX_AWARENESS_BYTES: usize = 16 * 1024;
     const MAX_SKILL_LINES: usize = 500;
-    const REQUIRED_SKILL_TERMS: [&str; 12] = [
+    const REQUIRED_SKILL_TERMS: [&str; 13] = [
         "list_airwiki_memories",
         "create_airwiki_memory",
         "initialize_airwiki_project",
@@ -534,6 +534,7 @@ fn validate_workflow_guide() -> Result<()> {
         "git commit",
         "pause AirWiki",
         "pausa AirWiki",
+        "start a new task",
     ];
     let root = workspace_root().join("resources/integrations/workflow");
     let skill_root = root.join("airwiki");
@@ -576,6 +577,7 @@ fn validate_workflow_guide() -> Result<()> {
             && awareness.contains("`airwiki` skill")
             && awareness.contains("explicitly creates or selects a wiki")
             && awareness.contains("`open_airwiki_project`")
+            && awareness.contains("start a new task")
             && awareness.contains("Never run Git commands")
             && awareness.contains("Never verify, publish, share, grant access"),
         "AirWiki awareness guide is missing its concise activation or safety boundary"

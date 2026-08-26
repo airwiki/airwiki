@@ -1817,6 +1817,34 @@ describe('AirWiki wiki workspace', () => {
     }
   });
 
+  it('resumes a pending query after local model setup in Settings', async () => {
+    render(App);
+    const form = await screen.findByRole('search');
+    const input = form.querySelector('input');
+    expect(input).not.toBeNull();
+    vi.useFakeTimers();
+    try {
+      await fireEvent.input(input!, { target: { value: 'consulta tras preparar el modelo' } });
+      await fireEvent.click(screen.getByRole('button', { name: 'Ver estado de la IA local' }));
+
+      activateLocalSearch();
+      snapshot = { ...snapshot, sequence: snapshot.sequence + 1 };
+      await act(() => {
+        snapshotListener?.({ schemaVersion: snapshot.schemaVersion, sequence: snapshot.sequence, requestId: null, kind: 'stateChanged', snapshot });
+      });
+      await act(async () => { await vi.advanceTimersByTimeAsync(400); });
+      expect(searchKnowledge).not.toHaveBeenCalled();
+
+      await fireEvent.click(screen.getByRole('button', { name: 'Volver' }));
+      await act(async () => { await vi.advanceTimersByTimeAsync(400); });
+
+      expect(searchKnowledge).toHaveBeenCalledOnce();
+      expect(searchKnowledge).toHaveBeenLastCalledWith('consulta tras preparar el modelo', false);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it('lets Enter search immediately without leaving a duplicate delayed search', async () => {
     activateLocalSearch();
     render(App);

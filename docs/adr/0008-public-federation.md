@@ -80,6 +80,20 @@ publication fingerprint under a disclosure lease immediately before returning
 content. Disabling public exposure changes durable policy first, stops serving
 content, and emits a signed tombstone.
 
+The catalog request carries an explicit `browse` operation plus the `*` marker
+for a bounded directory view and negotiates the dedicated
+`/airwiki/public-catalog-browse/1.0.0` capability protocol. A supporting index
+returns current signed v1/v2 manifests without applying FTS; the reader still
+verifies signatures, expiry, publisher blocks and newest sequence before
+presenting them. Normal searches stay on the v1/v2 catalog protocols and treat
+`*` as ordinary input, so free-form text cannot activate directory
+enumeration. An older index that lacks the browse protocol cannot negotiate the
+request and is reported as requiring an update when no compatible index answers,
+or as partial when another compatible index does answer, instead of producing a
+false successful empty directory. This operation never contacts an owner or retrieves
+Wiki content. The desktop issues it only after the person selects the Public
+Library view; the default local Library view performs no public catalog request.
+
 QUIC/Noise is preferred. AutoNAT, Circuit Relay and DCUtR support publishers
 behind NAT; relay connections are outbound and no Windows Public-profile
 firewall rule is installed. A publisher includes a relay route only after the

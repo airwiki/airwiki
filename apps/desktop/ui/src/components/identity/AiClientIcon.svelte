@@ -52,7 +52,7 @@
     color: var(--cyan);
     background: transparent;
     border: 1px solid transparent;
-    border-radius: calc(var(--control-radius) + 1px);
+    border-radius: var(--control-radius);
     overflow: hidden;
   }
 

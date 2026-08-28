@@ -3,12 +3,16 @@
   import ChevronRight from '@lucide/svelte/icons/chevron-right';
   import ShimmerText from './components/ShimmerText.svelte';
   import Spinner from './components/Spinner.svelte';
-  import type { WikiSummary, WikiScanSummary } from './api';
+  import type { ApplicationAccessSummary, PeerSummary, WikiSummary, WikiScanSummary } from './api';
   import type { MessageArgs } from './i18n';
+  import { applicationCanAccessWiki, wikiExternalAccessBlocked, wikiHasApplicationAccess, wikiHasLanAccess, wikiHasPublicAccess, wikiIsPrivate } from './wikiAccess';
   import { wikiRequiresAttention } from './wikiHealth';
 
   export let wikis: WikiSummary[];
   export let scans: WikiScanSummary[];
+  export let sourceIssueCounts: Record<string, number>;
+  export let applications: ApplicationAccessSummary[];
+  export let peers: PeerSummary[];
   export let t: (id: string, args?: MessageArgs) => string;
   export let onopen: (wikiId: string) => void;
   export let oncreate: () => void;
@@ -17,9 +21,26 @@
     return scans.find((scan) => scan.wikiId === wikiId)?.state ?? null;
   }
 
-  function accessLabel(wiki: WikiSummary): string {
-    const channels = [wiki.peerShareable ? t('desktop-share-nearby') : '', wiki.allowExternalAi ? t('desktop-share-ai-apps') : '', wiki.internetPublic ? t('desktop-share-public') : ''].filter(Boolean);
-    return channels.length ? channels.join(' · ') : t('desktop-wiki-private');
+  function accessSummary(wiki: WikiSummary): string {
+    if (wikiIsPrivate(wiki, peers)) return t('desktop-wiki-private');
+    if (wikiHasPublicAccess(wiki)) return t('desktop-journey-public-on-internet');
+    return t('desktop-journey-not-public');
+  }
+
+  function accessDetail(wiki: WikiSummary): string {
+    if (wikiExternalAccessBlocked(wiki)) return t('desktop-wiki-no-external-access');
+    const accessibleChannels = [
+      wikiHasLanAccess(wiki, peers) ? t('desktop-share-nearby') : '',
+      wikiHasPublicAccess(wiki) ? t('desktop-share-public') : ''
+    ].filter(Boolean);
+    if (accessibleChannels.length) return accessibleChannels.join(' · ');
+    const configuredChannels = [
+      wiki.peerShareable ? `${t('desktop-share-nearby')}: ${t('desktop-compact-exposure-lan-enabled')}` : '',
+      wiki.internetPublic ? t('desktop-journey-public-enabled') : ''
+    ].filter(Boolean);
+    return configuredChannels.length
+      ? configuredChannels.join(' · ')
+      : t('desktop-wiki-no-external-access');
   }
 
   function originLabel(wiki: WikiSummary): string {
@@ -31,23 +52,37 @@
       : t('desktop-wiki-origin-folder-manual');
   }
 
-  function trustLabel(wiki: WikiSummary): string {
-    if (wiki.okfCompatibility.kind === 'legacyV01') return t('desktop-okf-compatibility-legacyV01');
-    if (wiki.okfCompatibility.kind === 'futureRestricted') return t('desktop-okf-local-only');
-    if (wiki.outdatedVerificationCount > 0) return t('desktop-assurance-outdated');
-    if (wiki.staleConceptCount > 0) return t('desktop-freshness-stale');
-    if (wiki.metadataWarningCount > 0) return t('desktop-okf-metadata-warning');
-    return t(`desktop-trust-${wiki.trustSummary}`);
+  function rowRequiresAttention(wiki: WikiSummary): boolean {
+    return wikiRequiresAttention(wiki) || (sourceIssueCounts[wiki.id] ?? 0) > 0;
+  }
+
+  function publicIsAdvertised(wiki: WikiSummary): boolean {
+    return wiki.internetPublic && wiki.publicAnnouncement.status === 'advertised';
+  }
+
+  function lanStatus(wiki: WikiSummary): string {
+    if (wikiExternalAccessBlocked(wiki) && wiki.peerShareable) return t('desktop-compact-exposure-unavailable');
+    return t(wiki.peerShareable ? 'desktop-compact-exposure-lan-enabled' : 'desktop-compact-exposure-off');
+  }
+
+  function internetStatus(wiki: WikiSummary): string {
+    if (wikiExternalAccessBlocked(wiki) && wiki.internetPublic) return t('desktop-compact-exposure-unavailable');
+    if (publicIsAdvertised(wiki)) return t('desktop-compact-exposure-public');
+    if (wiki.internetPublic && wiki.publicAnnouncement.status === 'expired') return t('desktop-compact-exposure-expired');
+    if (wiki.internetPublic) return t('desktop-compact-exposure-enabled-offline');
+    return t('desktop-compact-exposure-off');
   }
 
   function statusLabel(wiki: WikiSummary): string {
-    if (scanState(wiki.id)) return t('status-working');
-    if (wiki.memoryKind === 'project' && wiki.projectMemoryHealth !== 'active') {
-      return t(`desktop-project-memory-health-${wiki.projectMemoryHealth ?? 'invalid'}`);
-    }
+    if (scanState(wiki.id)) return t('desktop-wiki-updating-status');
+    if (wiki.memoryKind === 'project' && wiki.projectMemoryHealth !== 'active') return t('desktop-home-attention');
     if (wiki.failedCount > 0 || wiki.maintenanceRequired) return t('status-needs-attention');
     if (wiki.needsReviewCount > 0) return t('desktop-wiki-pending-status');
-    return trustLabel(wiki);
+    if (wiki.excludedCount > 0 && wiki.publishedCount === 0) return t('desktop-wiki-excluded-status');
+    if (wiki.documentCount > 0 && wiki.publishedCount === 0) return t('desktop-wiki-indexing-check-status');
+    if (wiki.documentCount === 0 && wiki.publishedCount === 0) return t('desktop-wiki-empty-status');
+    if (rowRequiresAttention(wiki)) return t('status-needs-attention');
+    return t('desktop-wiki-ready-status');
   }
 
   function statusDetail(wiki: WikiSummary): string {
@@ -55,9 +90,12 @@
     if (wiki.memoryKind === 'project' && wiki.projectMemoryHealth !== 'active') {
       return t('desktop-wiki-row-project-blocked');
     }
-    if (wiki.failedCount > 0) return t('desktop-wiki-row-failed-count', { count: wiki.failedCount });
+    if (wiki.failedCount > 0 || (sourceIssueCounts[wiki.id] ?? 0) > 0) return t('desktop-wiki-row-failed-count', { count: Math.max(wiki.failedCount, sourceIssueCounts[wiki.id] ?? 0) });
     if (wiki.maintenanceRequired) return t('desktop-wiki-maintenance-required');
     if (wiki.needsReviewCount > 0) return t('desktop-wiki-row-review-count', { count: wiki.needsReviewCount });
+    if (wiki.excludedCount > 0 && wiki.publishedCount === 0) return t('desktop-wiki-row-excluded-count', { count: wiki.excludedCount });
+    if (wiki.documentCount > 0 && wiki.publishedCount === 0) return t('desktop-wiki-row-indexing-check');
+    if (wiki.documentCount === 0 && wiki.publishedCount === 0) return t('desktop-wiki-row-empty');
     if (wiki.staleConceptCount > 0 || wiki.outdatedVerificationCount > 0 || wiki.metadataWarningCount > 0) {
       return t('desktop-okf-status-summary', {
         stale: wiki.staleConceptCount,
@@ -65,21 +103,26 @@
         warnings: wiki.metadataWarningCount
       });
     }
-    return t(`desktop-okf-compatibility-${wiki.okfCompatibility.kind}`);
+    if (wiki.okfCompatibility.kind !== 'declaredV02') return t(`desktop-okf-compatibility-${wiki.okfCompatibility.kind}`);
+    return t('desktop-wiki-row-ready');
   }
 
-  function folioTone(wiki: WikiSummary): 'folder' | 'project' | 'personal' | 'imported' {
-    if (wiki.memoryKind === 'project') return 'project';
-    if (wiki.origin === 'aiMemory') return 'personal';
-    if (wiki.origin === 'importedOkf') return 'imported';
-    return 'folder';
+  function statusTone(wiki: WikiSummary): 'working' | 'attention' | 'ready' | 'neutral' {
+    if (scanState(wiki.id)) return 'working';
+    if (rowRequiresAttention(wiki)) return 'attention';
+    if (wiki.publishedCount > 0) return 'ready';
+    return 'neutral';
   }
 
   function rowLabel(wiki: WikiSummary): string {
-    const identity = `${wiki.name} ${t('desktop-wiki-content-count', { published: wiki.publishedCount, pending: wiki.needsReviewCount })}`;
+    const identity = `${wiki.name} ${t('desktop-wiki-review-progress', { reviewed: wiki.publishedCount, total: wiki.publishedCount + wiki.needsReviewCount + wiki.excludedCount, pending: wiki.needsReviewCount, excluded: wiki.excludedCount })}`;
     return [
       identity,
-      accessLabel(wiki),
+      accessSummary(wiki),
+      accessDetail(wiki),
+      wikiHasApplicationAccess(wiki, applications)
+        ? t('desktop-compact-ai-access-count', { count: applications.filter((application) => applicationCanAccessWiki(application, wiki)).length })
+        : t('desktop-compact-ai-no-wiki-access'),
       statusLabel(wiki),
       statusDetail(wiki),
       originLabel(wiki),
@@ -87,26 +130,40 @@
   }
 </script>
 
-<div class="wiki-table">
-  {#if wikis.length > 0}
-    <div class="wiki-table-head" aria-hidden="true">
-      <span>{t('desktop-wiki-column-name')}</span>
-      <span>{t('desktop-wiki-column-content')}</span>
-      <span>{t('desktop-wiki-column-access')}</span>
-      <span>{t('desktop-wiki-column-status')}</span>
-      <span aria-hidden="true"></span>
-    </div>
-  {/if}
-  <div class="wiki-table-list" role="list" aria-label={t('desktop-library-title')}>
+<div class="wiki-library-shelf">
+  <div class="wiki-table-list" role="list" aria-label={t('desktop-wiki-list-title')}>
     {#each wikis as wiki (wiki.id)}
       {@const scanning = scanState(wiki.id) !== null}
       <div class="wiki-row-item" role="listitem">
-        <button class={`wiki-row folio-${folioTone(wiki)}`} aria-busy={scanning} aria-label={rowLabel(wiki)} onclick={() => onopen(wiki.id)}>
-          <span class="wiki-name"><span class="wiki-icon"><BookOpen size={18} aria-hidden="true" /></span><span><strong>{wiki.name}</strong><small>{originLabel(wiki)}</small></span></span>
-          <span class="wiki-data-cell"><span>{t('desktop-wiki-content-count', { published: wiki.publishedCount, pending: wiki.needsReviewCount })}</span><small>{t('desktop-wiki-source-count', { count: wiki.documentCount })}</small></span>
-          <span>{accessLabel(wiki)}</span>
-          <span class:attention={!scanning && wikiRequiresAttention(wiki)} class:working={scanning} class="wiki-status wiki-data-cell"><span>{#if scanning}<Spinner size="small" /><ShimmerText text={statusLabel(wiki)} />{:else}<i class="wiki-status-signal" aria-hidden="true"></i>{statusLabel(wiki)}{/if}</span><small>{statusDetail(wiki)}</small></span>
-          <ChevronRight size={17} aria-hidden="true" />
+        <button class={`wiki-row status-${statusTone(wiki)}`} aria-busy={scanning} aria-label={rowLabel(wiki)} onclick={() => onopen(wiki.id)}>
+          <span class="wiki-name">
+            <span class="wiki-icon"><BookOpen size={17} aria-hidden="true" /></span>
+            <span><strong>{wiki.name}</strong><small>{originLabel(wiki)}</small></span>
+          </span>
+
+          <span class="wiki-row-knowledge" aria-hidden="true">
+            <small class="wiki-row-kicker">{t('desktop-wiki-column-content')}</small>
+            <span class="wiki-row-summary">
+              <strong>{t('desktop-wiki-review-progress', { reviewed: wiki.publishedCount, total: wiki.publishedCount + wiki.needsReviewCount + wiki.excludedCount, pending: wiki.needsReviewCount, excluded: wiki.excludedCount })}</strong>
+              <small>{t('desktop-wiki-detected-count', { count: wiki.documentCount })}</small>
+            </span>
+          </span>
+
+          <span class="wiki-row-exposure" aria-hidden="true">
+            <small class="wiki-row-kicker">{t('desktop-compact-exposure-label')}</small>
+            <span class="wiki-row-exposure-text">
+              <span class="active">{t('desktop-compact-exposure-local')}</span>
+              <span class:active={wiki.peerShareable && !wikiExternalAccessBlocked(wiki)} class:attention={wiki.peerShareable && wikiExternalAccessBlocked(wiki)}>{t('desktop-compact-exposure-lan')} {lanStatus(wiki)}</span>
+              <span class:active={publicIsAdvertised(wiki) && !wikiExternalAccessBlocked(wiki)} class:attention={wiki.internetPublic && (!publicIsAdvertised(wiki) || wikiExternalAccessBlocked(wiki))}>{t('desktop-compact-exposure-internet')} {internetStatus(wiki)}</span>
+            </span>
+          </span>
+
+          <span class={`wiki-row-status ${statusTone(wiki)}`}>
+            <span>{#if scanning}<Spinner size="small" /><ShimmerText text={statusLabel(wiki)} />{:else}<i class="wiki-status-signal" aria-hidden="true"></i><strong>{statusLabel(wiki)}</strong>{/if}</span>
+            <small title={statusDetail(wiki)}>{statusDetail(wiki)}</small>
+          </span>
+
+          <span class="wiki-row-open"><ChevronRight size={16} aria-hidden="true" /></span>
         </button>
       </div>
     {:else}

@@ -4,7 +4,8 @@ use std::time::{Duration, Instant};
 use airwiki_federation_index::CatalogStore;
 use airwiki_network::{Keypair, sign_manifest};
 use airwiki_types::{
-    MAX_PUBLIC_CANDIDATES, PUBLIC_CATALOG_PROTOCOL, PublicCatalogQuery, PublicCollectionManifest,
+    MAX_PUBLIC_CANDIDATES, PUBLIC_CATALOG_PROTOCOL, PublicCatalogOperation, PublicCatalogQuery,
+    PublicCollectionManifest,
 };
 use chrono::{Duration as ChronoDuration, Utc};
 use uuid::Uuid;
@@ -63,6 +64,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         let query = PublicCatalogQuery {
             protocol_version: PUBLIC_CATALOG_PROTOCOL.to_owned(),
             request_id: Uuid::from_u128(u128::from(sample) + 1),
+            operation: PublicCatalogOperation::Search,
             query: format!("topic{:04}", sample % 1_000),
             languages: vec!["en".to_owned()],
             limit: MAX_PUBLIC_CANDIDATES,

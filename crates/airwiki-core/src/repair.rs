@@ -561,6 +561,19 @@ impl WikiRepairExecutor {
                 publisher
                     .remove(*concept_id, &source.source_sha256, &remaining)
                     .map_err(WikiRepairError::Regeneration)?;
+                let draft_concept = self
+                    .database
+                    .concept(*concept_id)
+                    .map_err(WikiRepairError::Storage)?
+                    .ok_or(WikiRepairError::StalePlan)?;
+                let draft_source = self
+                    .database
+                    .source_document(concept.source_document_id)
+                    .map_err(WikiRepairError::Storage)?
+                    .ok_or(WikiRepairError::StalePlan)?;
+                publisher
+                    .write_draft(&draft_concept, &draft_source)
+                    .map_err(WikiRepairError::Regeneration)?;
             }
             for concept_id in &preview.orphan_concepts_removed {
                 validate_guided_page_fingerprint(
@@ -1646,7 +1659,7 @@ mod tests {
     use tempfile::TempDir;
 
     use super::*;
-    use crate::{EMBEDDING_DIMENSIONS, StoredChunk};
+    use crate::{EMBEDDING_DIMENSIONS, OkfConcept, StoredChunk};
 
     struct Fixture {
         _temp: TempDir,
@@ -1847,7 +1860,9 @@ mod tests {
                 .status,
             airwiki_types::DocumentStatus::NeedsReview
         );
-        assert!(!concept_path.exists());
+        let repaired = OkfConcept::parse(&fs::read_to_string(concept_path).unwrap()).unwrap();
+        assert_eq!(repaired.status, crate::okf::OkfLifecycleStatus::Draft);
+        assert!(repaired.verified.is_empty());
         assert_eq!(result.concepts_returned_to_review, vec![fixture.concept_id]);
     }
 

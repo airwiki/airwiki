@@ -20,6 +20,7 @@ pub const SEARCH_PROTOCOL: &str = "/airwiki/search/2.0.0";
 pub const SHARED_WIKI_BROWSE_PROTOCOL: &str = "/airwiki/shared-wiki-browse/1.0.0";
 pub const SHARED_WIKI_BROWSE_PROTOCOL_V2: &str = "/airwiki/shared-wiki-browse/2.0.0";
 pub const PUBLIC_CATALOG_PROTOCOL: &str = "/airwiki/public-catalog/1.0.0";
+pub const PUBLIC_CATALOG_BROWSE_PROTOCOL: &str = "/airwiki/public-catalog-browse/1.0.0";
 pub const PUBLIC_SEARCH_PROTOCOL: &str = "/airwiki/public-search/1.0.0";
 pub const PUBLIC_BROWSE_PROTOCOL: &str = "/airwiki/public-browse/1.0.0";
 pub const PUBLIC_CATALOG_PROTOCOL_V2: &str = "/airwiki/public-catalog/2.0.0";
@@ -252,6 +253,9 @@ pub enum DocumentStatus {
     Extracted,
     Enriched,
     NeedsReview,
+    /// A local OKF draft that a person deliberately set aside.
+    /// It remains inspectable and may be reviewed later, but is never searchable or shareable.
+    Excluded,
     /// Human-approved metadata whose durable OKF bundle is still being materialized.
     /// This state is deliberately not searchable or shareable.
     Publishing,
@@ -267,6 +271,7 @@ impl fmt::Display for DocumentStatus {
             Self::Extracted => "extracted",
             Self::Enriched => "enriched",
             Self::NeedsReview => "needs_review",
+            Self::Excluded => "excluded",
             Self::Publishing => "publishing",
             Self::Published => "published",
             Self::Deleted => "deleted",
@@ -417,6 +422,15 @@ impl CollectionPolicy {
         }
     }
 
+    pub const fn connected_to_ai_apps() -> Self {
+        Self {
+            local_only: false,
+            peer_shareable: false,
+            allow_external_ai: true,
+            internet_public: false,
+        }
+    }
+
     /// Whether neither peer sharing nor disclosure to an external AI is enabled.
     pub const fn is_local_only(self) -> bool {
         !self.peer_shareable && !self.allow_external_ai && !self.internet_public
@@ -543,6 +557,14 @@ pub struct SearchRequest {
     pub query: String,
     pub purpose: SearchPurpose,
     pub top_k: u8,
+    /// Process-local collection scope applied only to this node.
+    ///
+    /// The field is deliberately absent from the wire format: remote peers
+    /// derive their own scope from durable grants. Its presence also marks the
+    /// request as local-only so a caller-specific scope cannot be bypassed by
+    /// federating to peers that cannot identify that caller.
+    #[serde(skip)]
+    local_collection_scope: Option<Vec<Uuid>>,
 }
 
 impl SearchRequest {
@@ -553,7 +575,19 @@ impl SearchRequest {
             query: query.into(),
             purpose,
             top_k,
+            local_collection_scope: None,
         }
+    }
+
+    pub fn with_local_collection_scope(mut self, mut collections: Vec<Uuid>) -> Self {
+        collections.sort_unstable();
+        collections.dedup();
+        self.local_collection_scope = Some(collections);
+        self
+    }
+
+    pub fn local_collection_scope(&self) -> Option<&[Uuid]> {
+        self.local_collection_scope.as_deref()
     }
 
     pub fn validate(&self) -> Result<(), SearchContractError> {

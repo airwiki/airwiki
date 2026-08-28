@@ -15,6 +15,7 @@ use crate::ingest::{
     ChunkDraft, Chunker, FileCandidate, FileDiscovery, IngestLimits, SourceFormat, SourceIssueCode,
     Tokenizer, WhitespaceTokenizer, discover_files_with_issues, extract_file, sha256_file,
 };
+use crate::okf::OkfPublisher;
 use crate::publication::OkfPublicationMaterializer;
 use crate::storage::{
     AuditEvent, CollectionMaintenanceCounts, CollectionMaintenanceResult,
@@ -136,6 +137,8 @@ pub struct IngestPipeline {
     chunker: Chunker,
     limits: IngestLimits,
     node_id: String,
+    #[cfg(test)]
+    draft_materialization_observer: Option<Arc<dyn Fn() -> Result<()> + Send + Sync>>,
 }
 
 impl std::fmt::Debug for IngestPipeline {
@@ -166,6 +169,8 @@ impl IngestPipeline {
             chunker: Chunker::default(),
             limits: IngestLimits::default(),
             node_id: node_id.into(),
+            #[cfg(test)]
+            draft_materialization_observer: None,
         }
     }
 
@@ -181,6 +186,15 @@ impl IngestPipeline {
 
     pub fn with_limits(mut self, limits: IngestLimits) -> Self {
         self.limits = limits;
+        self
+    }
+
+    #[cfg(test)]
+    fn with_draft_materialization_observer(
+        mut self,
+        observer: Arc<dyn Fn() -> Result<()> + Send + Sync>,
+    ) -> Self {
+        self.draft_materialization_observer = Some(observer);
         self
     }
 
@@ -697,7 +711,10 @@ impl IngestPipeline {
         let chunk_claim = claim.clone();
         let concept_id = concept.id;
         let collection_id = concept.collection_id;
+        #[cfg(test)]
+        let draft_materialization_observer = self.draft_materialization_observer.clone();
         let replaced = run_blocking("search index writer stopped unexpectedly", move || {
+            let _publication = database.publication_guard()?;
             let stored = stored_chunks_from_embeddings(
                 chunks,
                 embeddings,
@@ -707,7 +724,15 @@ impl IngestPipeline {
                 &source_sha256,
                 source_revision,
             )?;
-            database.replace_chunks_if_current(concept_id, &chunk_claim, &stored)
+            if !database.replace_chunks_if_current(concept_id, &chunk_claim, &stored)? {
+                return Ok(false);
+            }
+            #[cfg(test)]
+            if let Some(observer) = draft_materialization_observer {
+                observer()?;
+            }
+            materialize_current_draft(&database, concept_id)?;
+            Ok(true)
         })
         .await?;
         if !replaced {
@@ -792,7 +817,10 @@ impl IngestPipeline {
         let claimed_source = claim.clone();
         let database = self.database.clone();
         let generator_model = self.generation.model_id().to_owned();
+        #[cfg(test)]
+        let draft_materialization_observer = self.draft_materialization_observer.clone();
         run_blocking("review index writer stopped unexpectedly", move || {
+            let _publication = database.publication_guard()?;
             if sha256_file(&claimed_source.source_path)? != claimed_source.source_sha256 {
                 bail!("source changed during reanalysis; rescan it before reviewing");
             }
@@ -812,6 +840,17 @@ impl IngestPipeline {
                 &stored,
             )? {
                 bail!("source revision was superseded while it was being reanalyzed");
+            }
+            #[cfg(test)]
+            if let Some(observer) = draft_materialization_observer {
+                observer()?;
+            }
+            if let Err(error) = materialize_current_draft(&database, claimed_source.concept_id) {
+                database.mark_source_failed(
+                    claimed_source.source_document_id,
+                    format!("could not materialize the OKF draft: {error:#}"),
+                )?;
+                return Err(error);
             }
             database
                 .concept(claimed_source.concept_id)?
@@ -991,6 +1030,20 @@ fn stored_chunks_from_embeddings(
         .collect())
 }
 
+fn materialize_current_draft(database: &Database, concept_id: Uuid) -> Result<()> {
+    let concept = database
+        .concept(concept_id)?
+        .with_context(|| format!("draft concept {concept_id} disappeared"))?;
+    let source = database
+        .source_document(concept.source_document_id)?
+        .context("draft concept lost its source document")?;
+    let collection = database
+        .collection(concept.collection_id)?
+        .context("draft concept lost its collection")?;
+    OkfPublisher::new(collection.wiki_folder).write_draft(&concept, &source)?;
+    Ok(())
+}
+
 fn fallback_draft(
     path: &Path,
     text: &str,
@@ -1038,6 +1091,7 @@ mod tests {
     use std::sync::{
         Mutex,
         atomic::{AtomicBool, AtomicUsize, Ordering},
+        mpsc,
     };
 
     use airwiki_types::{CollectionPolicy, SearchPurpose, SearchRequest};
@@ -1048,6 +1102,7 @@ mod tests {
     use crate::inference::{
         DeterministicEmbeddingProvider, DeterministicGenerationProvider, GenerationProvider,
     };
+    use crate::okf::OkfConcept;
     use crate::search::HybridSearchEngine;
 
     fn setup(
@@ -1427,7 +1482,12 @@ mod tests {
             db.concept(concept_id).unwrap().unwrap().status,
             DocumentStatus::NeedsReview
         );
-        assert!(!temp.path().join("wiki/concepts").exists());
+        let draft_path = temp.path().join(format!("wiki/concepts/{concept_id}.md"));
+        let local_draft = std::fs::read_to_string(&draft_path).unwrap();
+        let parsed_draft = OkfConcept::parse(&local_draft).unwrap();
+        assert_eq!(parsed_draft.status, crate::okf::OkfLifecycleStatus::Draft);
+        assert!(parsed_draft.verified.is_empty());
+        assert!(!temp.path().join("wiki/index.md").exists());
 
         let draft = db.concept(concept_id).unwrap().unwrap().draft;
         approve_current(&pipeline, &db, concept_id, draft).unwrap();
@@ -1448,6 +1508,102 @@ mod tests {
         ));
         assert_eq!(db.count("source_documents").unwrap(), 1);
         assert_eq!(db.count("concepts").unwrap(), 1);
+    }
+
+    #[tokio::test]
+    async fn approval_cannot_overtake_draft_materialization() {
+        let (temp, db, collection_id, pipeline) = setup(Arc::new(DeterministicGenerationProvider));
+        let (materialization_entered_tx, materialization_entered_rx) = mpsc::channel();
+        let (materialization_release_tx, materialization_release_rx) = mpsc::channel();
+        let materialization_release_rx = Arc::new(Mutex::new(materialization_release_rx));
+        let observer = {
+            let materialization_release_rx = materialization_release_rx.clone();
+            Arc::new(move || {
+                materialization_entered_tx
+                    .send(())
+                    .map_err(|_| anyhow!("draft materialization observer disconnected"))?;
+                materialization_release_rx
+                    .lock()
+                    .unwrap()
+                    .recv()
+                    .map_err(|_| anyhow!("draft materialization release disconnected"))?;
+                Ok(())
+            })
+        };
+        let pipeline = pipeline.with_draft_materialization_observer(observer);
+        let path = temp.path().join("source/serialized-draft.md");
+        std::fs::write(&path, "# Serialización\nEvidencia sintética").unwrap();
+        let ingest_pipeline = pipeline.clone();
+        let ingest = tokio::spawn(async move {
+            ingest_pipeline
+                .ingest_path(collection_id, path)
+                .await
+                .unwrap()
+        });
+        tokio::task::spawn_blocking(move || {
+            materialization_entered_rx
+                .recv_timeout(std::time::Duration::from_secs(2))
+                .unwrap();
+        })
+        .await
+        .unwrap();
+
+        let concept = db.list_concepts_for_review().unwrap().pop().unwrap();
+        let review_version = review_version(&db, concept.id).unwrap();
+        let draft = concept.draft.clone();
+        let approval_pipeline = pipeline.clone();
+        let concept_id = concept.id;
+        let (approval_started_tx, approval_started_rx) = mpsc::channel();
+        let (approval_result_tx, approval_result_rx) = mpsc::channel();
+        let approval = std::thread::spawn(move || {
+            approval_started_tx.send(()).unwrap();
+            let result =
+                approval_pipeline.approve(concept_id, ReviewEdits { draft }, &review_version);
+            approval_result_tx.send(result).unwrap();
+        });
+        tokio::task::spawn_blocking(move || {
+            approval_started_rx
+                .recv_timeout(std::time::Duration::from_secs(2))
+                .unwrap();
+        })
+        .await
+        .unwrap();
+        let (approval_result_rx, blocked_result) = tokio::task::spawn_blocking(move || {
+            let result = approval_result_rx.recv_timeout(std::time::Duration::from_millis(250));
+            (approval_result_rx, result)
+        })
+        .await
+        .unwrap();
+        assert!(matches!(
+            blocked_result,
+            Err(mpsc::RecvTimeoutError::Timeout)
+        ));
+
+        materialization_release_tx.send(()).unwrap();
+        assert!(matches!(
+            ingest.await.unwrap(),
+            IngestOutcome::NeedsReview { .. }
+        ));
+        let approved = tokio::task::spawn_blocking(move || {
+            approval.join().unwrap();
+            approval_result_rx
+                .recv_timeout(std::time::Duration::from_secs(2))
+                .unwrap()
+                .unwrap()
+        })
+        .await
+        .unwrap();
+
+        assert_eq!(approved.status, DocumentStatus::Published);
+        let materialized = std::fs::read_to_string(
+            temp.path()
+                .join(format!("wiki/concepts/{}.md", approved.id)),
+        )
+        .unwrap();
+        assert_eq!(
+            OkfConcept::parse(&materialized).unwrap().status,
+            crate::okf::OkfLifecycleStatus::Stable
+        );
     }
 
     #[tokio::test]
@@ -1840,7 +1996,8 @@ mod tests {
         };
         let draft = db.concept(concept_id).unwrap().unwrap().draft;
         let wiki = temp.path().join("wiki");
-        std::fs::write(&wiki, "blocks the wiki directory").unwrap();
+        let blocked_index = wiki.join("index.md");
+        std::fs::create_dir(&blocked_index).unwrap();
 
         assert!(approve_current(&pipeline, &db, concept_id, draft.clone()).is_err());
         assert_eq!(
@@ -1849,7 +2006,7 @@ mod tests {
         );
         assert!(!db.chunks_for_concept(concept_id).unwrap().is_empty());
 
-        std::fs::remove_file(wiki).unwrap();
+        std::fs::remove_dir(blocked_index).unwrap();
         approve_current(&pipeline, &db, concept_id, draft).unwrap();
         assert_eq!(
             db.concept(concept_id).unwrap().unwrap().status,
@@ -1876,7 +2033,13 @@ mod tests {
             db.concept(concept_id).unwrap().unwrap().status,
             DocumentStatus::NeedsReview
         );
-        assert!(!temp.path().join("wiki/concepts").exists());
+        let draft_path = temp.path().join(format!("wiki/concepts/{concept_id}.md"));
+        assert_eq!(
+            OkfConcept::parse(&std::fs::read_to_string(draft_path).unwrap())
+                .unwrap()
+                .status,
+            crate::okf::OkfLifecycleStatus::Draft
+        );
     }
 
     struct AlwaysInvalid {
@@ -1970,7 +2133,13 @@ mod tests {
         assert_eq!(source.status, DocumentStatus::NeedsReview);
         assert!(source.last_error.is_none());
         assert!(!db.chunks_for_concept(concept_id).unwrap().is_empty());
-        assert!(!temp.path().join("wiki/concepts").exists());
+        let materialized = OkfConcept::parse(
+            &std::fs::read_to_string(temp.path().join(format!("wiki/concepts/{concept_id}.md")))
+                .unwrap(),
+        )
+        .unwrap();
+        assert_eq!(materialized.status, crate::okf::OkfLifecycleStatus::Draft);
+        assert_eq!(materialized.title, updated.draft.title);
         assert_eq!(generator.calls.load(Ordering::SeqCst), 3);
     }
 

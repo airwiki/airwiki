@@ -34,6 +34,7 @@ use airwiki_core::{
     RepairAuthority, ReviewVersionToken,
 };
 use airwiki_inference::ModelProfile;
+use airwiki_network::PublicCatalogError;
 use airwiki_types::{
     ConceptType, DevicePlatform, EnrichmentDraft, PublishedWikiDocument,
     PublishedWikiPageDescriptor, PublishedWikiPageId, PublishedWikiPageRequest,
@@ -91,6 +92,7 @@ enum NativeConfirmation {
     ExecuteComputation,
     SaveComputationResult,
     ApplicationGrant,
+    ConnectWikiToAiApps,
     VerifyManagedConcept,
     ConnectIntegration,
     ConnectIntegrationWithBuiltInGuide,
@@ -114,6 +116,7 @@ impl NativeConfirmation {
             Self::ExecuteComputation => "native-confirm-execute-computation",
             Self::SaveComputationResult => "native-confirm-save-computation-result",
             Self::ApplicationGrant => "native-confirm-application-grant",
+            Self::ConnectWikiToAiApps => "native-confirm-connect-wiki-ai-apps",
             Self::VerifyManagedConcept => "native-confirm-verify-managed-concept",
             Self::ConnectIntegration => "native-confirm-connect-integration",
             Self::ConnectIntegrationWithBuiltInGuide => {
@@ -259,6 +262,7 @@ struct CachedReviewVersion {
 #[derive(Default)]
 struct RequestTracker {
     search: Option<Uuid>,
+    public_catalog: Option<Uuid>,
     review_evidence: HashMap<Uuid, Uuid>,
     knowledge_bundle: HashMap<Uuid, Uuid>,
     knowledge_page: HashMap<Uuid, Uuid>,
@@ -300,6 +304,7 @@ struct AppSnapshot {
     model: Option<ModelSummary>,
     model_install: Option<ModelInstallSummary>,
     search: Option<SearchSummary>,
+    public_catalog: Option<PublicCatalogSummary>,
     public_browse: Option<PublicBrowseSummary>,
     nearby_browse: Option<NearbyBrowseSummary>,
     review_evidence: Option<ReviewEvidenceSummary>,
@@ -355,6 +360,7 @@ struct WikiSummary {
     name: String,
     document_count: usize,
     needs_review_count: usize,
+    excluded_count: usize,
     published_count: usize,
     failed_count: usize,
     local_only: bool,
@@ -502,6 +508,7 @@ struct ReviewSummary {
     source_revision: u32,
     source_name: String,
     wiki_name: String,
+    excluded: bool,
     draft: EnrichmentDraftDto,
 }
 
@@ -894,6 +901,7 @@ struct ModelSummary {
     display_name: Option<String>,
     recommendation_reason: Option<String>,
     active: bool,
+    active_model_id: Option<String>,
     installed: bool,
     degraded: bool,
     issues: Vec<String>,
@@ -937,6 +945,37 @@ struct SearchSummary {
     status: SearchStatus,
     results: Vec<WikiSearchResultSummary>,
     coverage: SearchCoverage,
+}
+
+#[derive(Clone, Debug, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+struct PublicCatalogSummary {
+    request_id: String,
+    status: PublicCatalogStatus,
+    wikis: Vec<PublicCatalogWikiSummary>,
+}
+
+#[derive(Clone, Copy, Debug, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(rename_all = "camelCase")]
+enum PublicCatalogStatus {
+    Complete,
+    Partial,
+    NotConfigured,
+    UpgradeRequired,
+    Unavailable,
+}
+
+#[derive(Clone, Debug, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+struct PublicCatalogWikiSummary {
+    publisher_id: String,
+    wiki_id: String,
+    name: String,
+    description: String,
+    languages: Vec<String>,
+    concept_count: u32,
+    okf_compatibility: Option<OkfCompatibilityDto>,
 }
 
 #[derive(Clone, Debug, Serialize, TS)]
@@ -1446,6 +1485,7 @@ struct CompletedComputationSummary {
 #[serde(rename_all = "camelCase")]
 struct ApplicationAccessSummary {
     app_id: String,
+    client_name: String,
     display_name: String,
     producer: String,
     active: bool,
@@ -1541,6 +1581,9 @@ enum UpdaterIssueDto {
 struct IntegrationSummary {
     client: IntegrationClientDto,
     status: IntegrationStatusDto,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    issue: Option<IntegrationIssueDto>,
     detected_version: Option<String>,
     activity_recent: bool,
     restart_required: bool,
@@ -1607,6 +1650,14 @@ enum IntegrationStatusDto {
     Conflict,
     Unsupported,
     Error,
+}
+
+#[derive(Clone, Copy, Debug, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(rename = "IntegrationIssue", rename_all = "camelCase")]
+enum IntegrationIssueDto {
+    ExistingConfiguration,
+    ManagedBridgeIntegrity,
 }
 
 impl From<IntegrationClientDto> for integrations::ChatClientKind {
@@ -1805,6 +1856,14 @@ impl From<integrations::ChatIntegrationsSnapshot> for IntegrationsSummary {
                     IntegrationSummary {
                         client: integration.client.into(),
                         status,
+                        issue: integration.issue.map(|issue| match issue {
+                            integrations::IntegrationIssue::ExistingConfiguration => {
+                                IntegrationIssueDto::ExistingConfiguration
+                            }
+                            integrations::IntegrationIssue::ManagedBridgeIntegrity => {
+                                IntegrationIssueDto::ManagedBridgeIntegrity
+                            }
+                        }),
                         detected_version: integration.detected_version,
                         activity_recent: integration.activity_recent,
                         restart_required: integration.restart_required,
@@ -2246,6 +2305,7 @@ async fn validate_okf_import(
 
 #[tauri::command]
 async fn import_okf(
+    app: AppHandle,
     runtime: tauri::State<'_, AppRuntime>,
     name: String,
     selection_token: String,
@@ -2253,6 +2313,19 @@ async fn import_okf(
     let name = name.trim();
     if name.is_empty() || name.chars().count() > 120 {
         return Err(UiError::invalid("invalidWikiName"));
+    }
+    let has_active_applications = runtime
+        .snapshot
+        .lock()
+        .map_err(|_| UiError::internal())?
+        .borrow()
+        .snapshot
+        .application_access
+        .iter()
+        .any(|application| application.active);
+    if has_active_applications {
+        require_native_confirmation(&app, NativeConfirmation::ConnectWikiToAiApps, Some(name))
+            .await?;
     }
     let source = consume_folder_selection(&runtime, &selection_token)?;
     send_command(
@@ -2288,6 +2361,7 @@ async fn set_wiki_indexing(
 
 #[tauri::command]
 async fn add_wiki(
+    app: AppHandle,
     runtime: tauri::State<'_, AppRuntime>,
     name: String,
     folder_token: String,
@@ -2296,6 +2370,19 @@ async fn add_wiki(
     let name = name.trim();
     if name.is_empty() || name.chars().count() > 120 {
         return Err(UiError::invalid("invalidWikiName"));
+    }
+    let has_active_applications = runtime
+        .snapshot
+        .lock()
+        .map_err(|_| UiError::internal())?
+        .borrow()
+        .snapshot
+        .application_access
+        .iter()
+        .any(|application| application.active);
+    if has_active_applications {
+        require_native_confirmation(&app, NativeConfirmation::ConnectWikiToAiApps, Some(name))
+            .await?;
     }
     let folder = consume_folder_selection(&runtime, &folder_token)?;
     send_command(
@@ -2539,6 +2626,37 @@ async fn update_public_wiki_profile(
         },
     )
     .await
+}
+
+#[tauri::command]
+async fn explore_public_wikis(
+    runtime: tauri::State<'_, AppRuntime>,
+    request_id: String,
+    limit: u8,
+) -> Result<(), UiError> {
+    if !(1..=64).contains(&limit) {
+        return Err(UiError::invalid("invalidPublicCatalogLimit"));
+    }
+    let request_id = parse_uuid(&request_id)?;
+    runtime
+        .requests
+        .lock()
+        .map_err(|_| UiError::internal())?
+        .public_catalog = Some(request_id);
+    if let Err(error) = send_command(
+        &runtime,
+        WorkerCommand::ExplorePublicCatalog { request_id, limit },
+    )
+    .await
+    {
+        if let Ok(mut requests) = runtime.requests.lock()
+            && requests.public_catalog == Some(request_id)
+        {
+            requests.public_catalog = None;
+        }
+        return Err(error);
+    }
+    Ok(())
 }
 
 #[tauri::command]
@@ -2895,8 +3013,10 @@ async fn set_application_wiki_role(
         let wiki_name = snapshot
             .wikis
             .iter()
-            .find(|wiki| {
-                wiki.id == wiki_id.to_string() && matches!(wiki.origin, WikiOriginDto::AiMemory)
+            .find(|wiki| wiki.id == wiki_id.to_string() && wiki.restrictions.is_empty())
+            .filter(|wiki| {
+                role != Some(ApplicationWikiRoleInput::Editor)
+                    || matches!(wiki.origin, WikiOriginDto::AiMemory)
             })
             .map(|wiki| wiki.name.clone())
             .ok_or_else(|| UiError::invalid("wikiUnavailable"))?;
@@ -3129,25 +3249,13 @@ fn approval_version(
 async fn reject_review(
     runtime: tauri::State<'_, AppRuntime>,
     concept_id: String,
+    source_revision: u32,
 ) -> Result<(), UiError> {
     send_command(
         &runtime,
         WorkerCommand::Reject {
             concept_id: parse_uuid(&concept_id)?,
-        },
-    )
-    .await
-}
-
-#[tauri::command]
-async fn reanalyze_review(
-    runtime: tauri::State<'_, AppRuntime>,
-    concept_id: String,
-) -> Result<(), UiError> {
-    send_command(
-        &runtime,
-        WorkerCommand::ReanalyzeReview {
-            concept_id: parse_uuid(&concept_id)?,
+            source_revision,
         },
     )
     .await
@@ -3945,6 +4053,7 @@ impl AppSnapshot {
             model: None,
             model_install: None,
             search: None,
+            public_catalog: None,
             public_browse: None,
             nearby_browse: None,
             review_evidence: None,
@@ -4555,6 +4664,44 @@ impl AppSnapshot {
                     },
                 });
             }
+            WorkerEvent::PublicCatalogFinished { request_id, result } => {
+                self.public_catalog = Some(match result {
+                    Ok(result) => PublicCatalogSummary {
+                        request_id: request_id.to_string(),
+                        status: if result.partial {
+                            PublicCatalogStatus::Partial
+                        } else {
+                            PublicCatalogStatus::Complete
+                        },
+                        wikis: result
+                            .collections
+                            .into_iter()
+                            .map(|wiki| PublicCatalogWikiSummary {
+                                publisher_id: wiki.publisher_id,
+                                wiki_id: wiki.collection_id.to_string(),
+                                name: wiki.name,
+                                description: wiki.description,
+                                languages: wiki.languages,
+                                concept_count: wiki.concept_count,
+                                okf_compatibility: wiki
+                                    .okf_compatibility
+                                    .map(OkfCompatibilityDto::from),
+                            })
+                            .collect(),
+                    },
+                    Err(error) => PublicCatalogSummary {
+                        request_id: request_id.to_string(),
+                        status: match error {
+                            PublicCatalogError::NotConfigured => PublicCatalogStatus::NotConfigured,
+                            PublicCatalogError::UpgradeRequired => {
+                                PublicCatalogStatus::UpgradeRequired
+                            }
+                            PublicCatalogError::Unavailable => PublicCatalogStatus::Unavailable,
+                        },
+                        wikis: Vec::new(),
+                    },
+                });
+            }
             WorkerEvent::PublicBrowseFinished {
                 request_id,
                 update,
@@ -5071,6 +5218,7 @@ const fn worker_event_request_id(event: &WorkerEvent) -> Option<Uuid> {
         | WorkerEvent::KnowledgePageLoaded { request_id, .. }
         | WorkerEvent::SearchFinished { request_id, .. }
         | WorkerEvent::SearchPartial { request_id, .. }
+        | WorkerEvent::PublicCatalogFinished { request_id, .. }
         | WorkerEvent::PublicBrowseFinished { request_id, .. }
         | WorkerEvent::NearbyWikiBrowseFinished { request_id, .. }
         | WorkerEvent::ChatIntegrationsUpdated { request_id, .. } => Some(*request_id),
@@ -5087,6 +5235,14 @@ fn request_is_current(event: &WorkerEvent, requests: &Mutex<RequestTracker>) -> 
         WorkerEvent::SearchFinished { request_id, .. } => {
             if requests.search == Some(*request_id) {
                 requests.search = None;
+                true
+            } else {
+                false
+            }
+        }
+        WorkerEvent::PublicCatalogFinished { request_id, .. } => {
+            if requests.public_catalog == Some(*request_id) {
+                requests.public_catalog = None;
                 true
             } else {
                 false
@@ -5236,6 +5392,7 @@ impl From<worker::CollectionView> for WikiSummary {
             name: value.name,
             document_count: value.document_count,
             needs_review_count: value.needs_review_count,
+            excluded_count: value.excluded_count,
             published_count: value.published_count,
             failed_count: value.failed_count,
             local_only: value.local_only,
@@ -5404,6 +5561,7 @@ impl From<worker::ReviewItemView> for ReviewSummary {
             source_revision: value.source_revision,
             source_name: value.source_name,
             wiki_name: value.collection_name,
+            excluded: value.excluded,
             draft: value.draft.into(),
         }
     }
@@ -5981,6 +6139,9 @@ fn ui_bindings_source() -> String {
         exported_declaration::<SearchStatus>(&config),
         exported_declaration::<SearchCoverage>(&config),
         exported_declaration::<SearchSummary>(&config),
+        exported_declaration::<PublicCatalogStatus>(&config),
+        exported_declaration::<PublicCatalogWikiSummary>(&config),
+        exported_declaration::<PublicCatalogSummary>(&config),
         exported_declaration::<RemoteWikiPageInput>(&config),
         exported_declaration::<RemoteWikiPageRequestInput>(&config),
         exported_declaration::<RemoteWikiBrowseInput>(&config),
@@ -6018,6 +6179,7 @@ fn ui_bindings_source() -> String {
         exported_declaration::<SystemDestinationInput>(&config),
         exported_declaration::<IntegrationClientDto>(&config),
         exported_declaration::<IntegrationStatusDto>(&config),
+        exported_declaration::<IntegrationIssueDto>(&config),
         exported_declaration::<McpStdioSetupDto>(&config),
         exported_declaration::<WorkflowGuideKindDto>(&config),
         exported_declaration::<WorkflowGuideStatusDto>(&config),
@@ -6143,6 +6305,7 @@ impl From<worker::ApplicationAccessView> for ApplicationAccessSummary {
     fn from(value: worker::ApplicationAccessView) -> Self {
         Self {
             app_id: value.app_id.to_string(),
+            client_name: value.client_name,
             display_name: value.display_name,
             producer: value.producer,
             active: value.active,
@@ -6190,6 +6353,7 @@ impl From<worker::ProjectMemoryRequestView> for ProjectMemoryRequestSummary {
 
 impl From<worker::ModelStateView> for ModelSummary {
     fn from(value: worker::ModelStateView) -> Self {
+        let active = value.active_model_id.is_some();
         Self {
             state_sequence: value.state_sequence,
             profile: match value.profile {
@@ -6201,7 +6365,8 @@ impl From<worker::ModelStateView> for ModelSummary {
             recommended_model_id: value.recommended_model_id,
             display_name: value.recommended_display_name,
             recommendation_reason: value.recommendation_reason,
-            active: value.active_model_id.is_some(),
+            active,
+            active_model_id: value.active_model_id,
             installed: value.recommended_assets_installed,
             degraded: value.degraded,
             issues: value.issues,
@@ -6611,6 +6776,7 @@ fn main() -> Result<()> {
             add_federation_index,
             remove_federation_index,
             update_public_wiki_profile,
+            explore_public_wikis,
             browse_public_wiki,
             browse_nearby_wiki,
             set_public_publisher_blocked,
@@ -6631,7 +6797,6 @@ fn main() -> Result<()> {
             load_review_evidence,
             approve_review,
             reject_review,
-            reanalyze_review,
             load_wiki_bundle,
             load_wiki_page,
             verify_wiki_concept,
@@ -6935,6 +7100,7 @@ mod tests {
             NativeConfirmation::ExecuteComputation,
             NativeConfirmation::SaveComputationResult,
             NativeConfirmation::ApplicationGrant,
+            NativeConfirmation::ConnectWikiToAiApps,
             NativeConfirmation::VerifyManagedConcept,
             NativeConfirmation::DeleteWiki,
             NativeConfirmation::ConnectIntegration,
@@ -8080,6 +8246,7 @@ mod tests {
                 integrations::IntegrationView {
                     client: integrations::ChatClientKind::ClaudeDesktop,
                     status: integrations::IntegrationStatus::Error,
+                    issue: Some(integrations::IntegrationIssue::ManagedBridgeIntegrity),
                     detected_version: Some("synthetic".to_owned()),
                     detail: "sensitive diagnostic".to_owned(),
                     planned_path: Some(PathBuf::from("/synthetic/private/config")),
@@ -8090,6 +8257,7 @@ mod tests {
                 integrations::IntegrationView {
                     client: integrations::ChatClientKind::GenericMcp,
                     status: integrations::IntegrationStatus::Configured,
+                    issue: None,
                     detected_version: None,
                     detail: "sensitive diagnostic".to_owned(),
                     planned_path: Some(PathBuf::from("/synthetic/managed/bridge")),
@@ -8109,9 +8277,10 @@ mod tests {
             (
                 integration.get("detail").is_none(),
                 integration.get("plannedPath").is_none(),
+                integration.get("issue") == Some(&serde_json::json!("managedBridgeIntegrity")),
                 integration.get("mcpSetup") == Some(&serde_json::Value::Null),
             ),
-            (true, true, true)
+            (true, true, true, true)
         );
         assert_eq!(
             serialized.pointer("/integrations/1/mcpSetup"),
@@ -8317,7 +8486,7 @@ mod tests {
     }
 
     #[test]
-    fn tauri_main_window_minimum_matches_its_default_size() -> Result<()> {
+    fn tauri_main_window_supports_the_constrained_desktop_layout() -> Result<()> {
         let config_path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tauri.conf.json");
         let config: serde_json::Value = serde_json::from_slice(
             &std::fs::read(&config_path).context("failed to read the Tauri configuration")?,
@@ -8327,16 +8496,15 @@ mod tests {
             .pointer("/app/windows/0")
             .context("the main window configuration is missing")?;
 
-        for (default_key, minimum_key, expected) in
-            [("width", "minWidth", 1_180), ("height", "minHeight", 760)]
-        {
+        for (key, expected) in [
+            ("width", 1_180),
+            ("height", 760),
+            ("minWidth", 1_024),
+            ("minHeight", 720),
+        ] {
             anyhow::ensure!(
-                window.get(default_key).and_then(serde_json::Value::as_u64) == Some(expected),
-                "the main window {default_key} must remain {expected}"
-            );
-            anyhow::ensure!(
-                window.get(minimum_key).and_then(serde_json::Value::as_u64) == Some(expected),
-                "the main window {minimum_key} must match {default_key}"
+                window.get(key).and_then(serde_json::Value::as_u64) == Some(expected),
+                "the main window {key} must remain {expected}"
             );
         }
         Ok(())

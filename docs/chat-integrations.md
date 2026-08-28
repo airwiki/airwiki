@@ -3,7 +3,10 @@
 AirWiki exposes `search_airwiki` plus capability-authenticated memory and
 attested-computation tools to ChatGPT Desktop/Work, Codex, Claude Desktop,
 Claude Code, Gemini CLI and generic local MCP clients. AirWiki does not need
-provider API keys; each client owns its account and session.
+provider API keys; each client owns its account and session. AI applications
+search only the local Wikis granted to that exact application. LAN search stays
+in AirWiki's native Library because a remote device cannot authenticate a
+local application's capability or per-Wiki grant.
 
 The managed bridge implements MCP `2026-07-28`: clients may begin with
 `server/discover`, requests self-describe through `_meta`, and the fixed
@@ -14,19 +17,47 @@ advertises typed input/output schemas and explicit safety hints.
 
 ## Before connecting
 
-1. Keep AirWiki open or hidden in the tray and wait until local models, Wiki
+1. Open the intended Wiki and use its compact status bar to confirm what is
+   searchable, its Local/LAN/Internet exposure and which AI applications have
+   access. Select the AI-app area to change per-Wiki permissions. Use
+   **Settings → AI apps** only for the complete client inventory, connection and
+   advanced recovery.
+2. Keep AirWiki open or hidden in the tray and wait until local models, Wiki
    reconciliation, LAN, and MCP are ready.
-2. Publish only synthetic content or content deliberately approved for an
+3. Publish only synthetic content or content deliberately approved for an
    external chat provider.
-3. Enable **Allow in external chats** only on the required Wikis. This remains
-   independent from peer sharing.
-4. Open **Connections**, select **Refresh**, and review the two independent
+4. Open **AI Apps** on the Wiki and review or revoke the application's default
+   read permission. This remains independent from peer sharing and publication.
+5. AirWiki checks installed clients when it starts and whenever its window
+   returns to the foreground. In **Settings → AI apps**, select **Refresh** when
+   you need an immediate additional check, then review the two independent
    states for the client: **Local connection** and **Assisted memory**.
 
-Connecting a client never publishes documents, grants Wikis, changes peer
-permissions, or enables cloud access. Snippets requested from an authorized
-Wiki may enter the provider cloud and are then governed by that provider's
-policies.
+The status bar keeps local connection, per-Wiki access and recent client
+activity separate for every displayed AI application. Recent activity proves
+that the client reached AirWiki; it does not prove that the most recent request
+read that specific Wiki. **Share** contains only one network group with
+independent LAN and Internet choices. The separate **AI Apps** panel controls
+each active application's permission for that Wiki: ordinary Wikis offer no
+access or search access; memory Wikis add reader/editor semantics and keep the
+owner visible. **Settings → AI apps** remains the place to connect, update or
+recover clients rather than a second per-Wiki permission editor.
+
+Confirming a client connection grants that application read access to compatible
+Wikis by default. The confirmation says so explicitly, and every grant remains
+revocable per Wiki. Connecting never changes LAN or Internet exposure, peer
+permissions, publication, verification, or another application's grants.
+Snippets requested by the connected application may enter its provider cloud
+and are then governed by that provider's policies.
+
+Creating or importing a Wiki from AirWiki's native UI grants reader access to
+the AI applications already active on that device only after the native prompt
+states that default. A personal memory created through MCP starts with its
+requesting application as the sole owner; other active applications receive no
+implicit grant. Native approval of project memory grants the requester editor
+access and the already active applications reader access, as disclosed by the
+confirmation. Every later permission change remains per application and per
+Wiki.
 
 Each managed integration receives a random capability stored in AirWiki's
 private per-user files. The client configuration contains only a public
@@ -114,6 +145,13 @@ Managed bridge paths are content-addressed. A bridge from an earlier candidate
 appears as **Update available** only after its path and bytes pass integrity
 checks; selecting **Update integration** installs and verifies the packaged
 bridge before changing the client entry.
+
+AirWiki pins the packaged bridge identity when the desktop process starts and
+validates every installed content-addressed bridge against the digest encoded
+in its managed path. This preserves tamper detection without treating a later
+development rebuild of the packaged source as corruption in an already running
+desktop candidate. Restarting that candidate adopts the rebuilt identity and
+then reports the previous valid bridge as **Update available**.
 
 Open a new task or restart the client if the skill or tool is not visible.
 **Disconnect** removes the entry only while it still matches the configuration

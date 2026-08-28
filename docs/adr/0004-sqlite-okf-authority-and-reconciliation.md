@@ -22,11 +22,19 @@ SQLite is authoritative for operational state: collections, source paths and
 hashes, revisions, jobs, review and publication state, search indexes, trust,
 grants and audit events. Local source paths never appear in OKF.
 
-Managed OKF files are authoritative for the visible published wiki: concept
-pages, `index.md` and append-only `log.md`. Original source documents remain
+Managed OKF files are authoritative for the locally visible wiki: unverified
+`draft` concept pages, human-approved `stable` concept pages, `index.md` and
+append-only `log.md`. The index and log describe the stable publication; draft
+pages are visible only in the local workspace. Original source documents remain
 user-owned inputs and are never modified or replicated by reconciliation.
 
-Human approval crosses the two authorities through a durable publication claim:
+Ingestion crosses the authority boundary before human review only to
+materialize the current proposal as an OKF `draft`. SQLite keeps the exact
+source revision, evidence and the operational distinction between pending and
+excluded; OKF uses `status: draft` for both. This transition never adds the
+concept to search, the root index, LAN, public federation or MCP.
+
+Human approval promotes one current draft through a durable publication claim:
 
 1. SQLite verifies that the reviewed source revision is still current and
    withdraws it from searchable exposure while publication is pending.
@@ -35,14 +43,18 @@ Human approval crosses the two authorities through a durable publication claim:
 3. SQLite marks the same revision published only after the OKF materialization
    remains current.
 
-Startup recovery completes a still-current claim or cancels it and removes its
-derived artifacts. A source modification, deletion or unavailable collection
-withdraws SQLite/FTS exposure before removing the corresponding OKF artifact.
-Search therefore fails closed even if filesystem cleanup is incomplete.
+Startup recovery completes a still-current claim or cancels it, removes any
+partial stable artifact and restores a coherent local draft when the source is
+still current. A source modification, deletion or unavailable collection
+withdraws SQLite/FTS exposure before replacing or removing the corresponding
+OKF artifact. Search therefore fails closed even if filesystem cleanup is
+incomplete.
 
-The OKF inspector is read-only. It compares stable concept identity, revision,
-source hash and metadata against SQLite and reports disagreement as health or a
-transient updating state. It never resolves a conflict by choosing one side.
+The OKF inspector is read-only. Its local scope compares managed draft and
+stable concept identity, revision, source hash, lifecycle and metadata against
+SQLite. Its disclosure scope projects only coherent stable concepts and never
+reads or returns draft pages. Both report disagreement as health or a transient
+updating state and never resolve a conflict by choosing one side.
 
 Automation may regenerate only unambiguous derived artifacts from a coherent
 published snapshot, such as `index.md` or local indexes. Concept content,
@@ -54,6 +66,8 @@ content remains withdrawn until the result validates coherently.
 
 - The application can recover interrupted publication without treating partial
   files as published knowledge.
+- People can browse generated resources before review without making them
+  searchable or shareable.
 - A bundle and SQLite may visibly disagree during recovery; this is reported
   rather than hidden.
 - Direct edits to managed OKF do not silently rewrite operational state.

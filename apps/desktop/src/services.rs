@@ -26,11 +26,12 @@ use airwiki_core::{
     BootstrapFederationIndexEntry, CollectionRecord, Database, E5Tokenizer, EmbeddingProvider,
     EvidenceDecision, EvidenceRelevanceProvider, FastEmbedE5Small, FastEmbedMmarcoReranker,
     FolderWatcher, GenerationProvider, GenerationRuntimeConfig, GuidedRepairPreview,
-    GuidedRepairResult, HybridSearchEngine, IngestOutcome, IngestPipeline, KnowledgeBundleState,
-    KnowledgeBundleView, KnowledgeLinkDisposition, KnowledgePageId, KnowledgePageView,
-    LlamaServerProvider, OkfBundleInspector, OkfPublicationMaterializer, PinnedE5Snapshot,
-    PinnedMmarcoRerankerSnapshot, RelevanceInput, ReviewEdits, ReviewVersionToken, SourceIssueCode,
-    Tokenizer, WikiOrigin, WikiRepairExecutor, WikiRepairPlanner,
+    GuidedRepairResult, HybridSearchEngine, IngestOutcome, IngestPipeline,
+    InitialApplicationAccess, KnowledgeBundleState, KnowledgeBundleView, KnowledgeLinkDisposition,
+    KnowledgePageId, KnowledgePageView, LlamaServerProvider, OkfBundleInspector,
+    OkfPublicationMaterializer, PinnedE5Snapshot, PinnedMmarcoRerankerSnapshot, RelevanceInput,
+    ReviewEdits, ReviewVersionToken, SourceIssueCode, Tokenizer, WikiOrigin, WikiRepairExecutor,
+    WikiRepairPlanner,
 };
 use airwiki_inference::{
     GenerationSettings, InstallOutcome, LlamaSupervisor, LlamaSupervisorFailure,
@@ -39,7 +40,7 @@ use airwiki_inference::{
 };
 use airwiki_mcp::{
     McpApplicationBackend, McpApplicationError, McpApplicationIdentity, McpClientActivitySnapshot,
-    McpServerConfig, McpServerHandle, start_with_application_backend,
+    McpSearchAuthorization, McpServerConfig, McpServerHandle, start_with_application_backend,
 };
 #[cfg(feature = "e2e")]
 use airwiki_network::FileSecretStore;
@@ -50,10 +51,11 @@ use airwiki_network::{
     FederatedCoordinator, MAX_MDNS_ADDRESSES_PER_PEER, MAX_VOLATILE_LAN_PEERS, ManualLanAddress,
     Multiaddr, NetworkConfig, NetworkEvent, NetworkHandle, NetworkWarningKind, NodeIdentity,
     PairingFailureReason, PeerAccess, PeerId, PublicBrowseDelivery, PublicBrowseOptions,
-    PublicBrowseResult, PublicIndexEndpoint, PublicReader, PublicRelayReadiness, PublicRouteKind,
-    PublicSearchDelivery, PublicSearchResult, PublicSourceBackend, PublicSourceBackendError,
-    PublicSourceServerConfig, SecretStore, relay_circuit_address, relayed_peer_address,
-    run_public_source_server, sign_manifest, sign_tombstone, spawn_network,
+    PublicBrowseResult, PublicCatalogError, PublicCatalogResult, PublicIndexEndpoint, PublicReader,
+    PublicRelayReadiness, PublicRouteKind, PublicSearchDelivery, PublicSearchResult,
+    PublicSourceBackend, PublicSourceBackendError, PublicSourceServerConfig, SecretStore,
+    relay_circuit_address, relayed_peer_address, run_public_source_server, sign_manifest,
+    sign_tombstone, spawn_network,
 };
 use airwiki_types::{
     CollectionPolicy, DevicePlatform, DisclosureLease, DocumentStatus, EnrichmentDraft,
@@ -1670,6 +1672,8 @@ pub struct DesktopServices {
 #[derive(Clone)]
 struct DesktopMcpApplicationBackend {
     requests: mpsc::Sender<McpApplicationRequest>,
+    database: Database,
+    local_node_id: String,
 }
 
 const MCP_APPLICATION_RESPONSE_TIMEOUT: Duration = Duration::from_secs(5);
@@ -1683,6 +1687,29 @@ struct McpApplicationRequest {
 
 #[async_trait]
 impl McpApplicationBackend for DesktopMcpApplicationBackend {
+    async fn authorize_search(
+        &self,
+        identity: McpApplicationIdentity,
+    ) -> std::result::Result<McpSearchAuthorization, McpApplicationError> {
+        let database = self.database.clone();
+        let local_node_id = self.local_node_id.clone();
+        tokio::task::spawn_blocking(move || {
+            let capability = database
+                .authenticate_application_capability(&identity.capability)
+                .map_err(|_| McpApplicationError::Unavailable)?
+                .ok_or(McpApplicationError::Unauthorized)?;
+            let allowed_collection_ids = database
+                .application_search_collection_ids(capability.app_id)
+                .map_err(|_| McpApplicationError::Unavailable)?;
+            Ok(McpSearchAuthorization {
+                local_node_id,
+                allowed_collection_ids,
+            })
+        })
+        .await
+        .map_err(|_| McpApplicationError::Unavailable)?
+    }
+
     async fn call(
         &self,
         identity: McpApplicationIdentity,
@@ -1719,6 +1746,7 @@ fn mcp_application_timeout_error(tool: &str) -> McpApplicationError {
 
 fn spawn_mcp_application_backend(
     database: Database,
+    local_node_id: String,
     memories: airwiki_core::AiMemoryService,
     project_memories: airwiki_core::ProjectMemoryService,
     computations: ComputationCoordinator,
@@ -1730,6 +1758,11 @@ fn spawn_mcp_application_backend(
 ) {
     const REQUEST_CAPACITY: usize = 64;
     let (sender, mut receiver) = mpsc::channel::<McpApplicationRequest>(REQUEST_CAPACITY);
+    let backend = DesktopMcpApplicationBackend {
+        requests: sender,
+        database: database.clone(),
+        local_node_id,
+    };
     let cancellation = CancellationToken::new();
     let task_cancellation = cancellation.clone();
     let task = tokio::spawn(async move {
@@ -1787,11 +1820,7 @@ fn spawn_mcp_application_backend(
             let _ = response.send(result);
         }
     });
-    (
-        DesktopMcpApplicationBackend { requests: sender },
-        cancellation,
-        task,
-    )
+    (backend, cancellation, task)
 }
 
 fn application_update_wiki_id(tool: &str, result: &serde_json::Value) -> Option<Uuid> {
@@ -2329,6 +2358,7 @@ impl DesktopServices {
         let (application_backend, application_backend_cancellation, application_backend_task) =
             spawn_mcp_application_backend(
                 database.clone(),
+                node_id.clone(),
                 memories.clone(),
                 project_memories.clone(),
                 computations.clone(),
@@ -2590,6 +2620,7 @@ impl DesktopServices {
                     .fold(0_u64, u64::saturating_add);
                 Ok(ApplicationAccessView {
                     app_id: application.app_id,
+                    client_name: application.owner_kind,
                     display_name: application.display_name,
                     producer: application.producer,
                     active: application.revoked_at.is_none(),
@@ -2910,9 +2941,10 @@ impl DesktopServices {
                     name: name.into(),
                     source_folder,
                     wiki_folder: bundle_root,
-                    policy: CollectionPolicy::local_only(),
+                    policy: CollectionPolicy::connected_to_ai_apps(),
                     origin: airwiki_core::WikiOrigin::Folder,
                     indexing_mode,
+                    initial_application_access: InitialApplicationAccess::ActiveReaders,
                 })?;
         self.audit(
             "collection_created",
@@ -2962,9 +2994,15 @@ impl DesktopServices {
                 id: collection_id,
                 name,
                 bundle_root: bundle_root.clone(),
+                policy: if report.compatibility.permits_external_disclosure() {
+                    CollectionPolicy::connected_to_ai_apps()
+                } else {
+                    CollectionPolicy::local_only()
+                },
                 origin: airwiki_core::WikiOrigin::ImportedOkf,
                 replacement_fingerprint: report.bundle_fingerprint.clone(),
                 owner_app_id: None,
+                initial_application_access: InitialApplicationAccess::ActiveReaders,
             },
         );
         match prepared {
@@ -3416,22 +3454,19 @@ impl DesktopServices {
         Ok(collection_id)
     }
 
-    /// A rejection is fail-closed: the concept remains in NeedsReview and is
-    /// therefore absent from all searchable publication surfaces. Chunks are
-    /// deliberately retained so a human can edit and approve it later.
-    pub fn reject_review(&self, concept_id: Uuid) -> Result<()> {
-        let concept = self
-            .database
-            .concept(concept_id)?
-            .context("el concepto a rechazar no existe")?;
-        if concept.status != DocumentStatus::NeedsReview {
-            bail!("solo se puede rechazar un concepto pendiente de revisión");
-        }
+    /// Sets one exact review revision aside while retaining its local OKF
+    /// draft and evidence. Exclusion is operational state, not an OKF
+    /// lifecycle value, and never makes the concept searchable or shareable.
+    pub fn reject_review(&self, concept_id: Uuid, source_revision: u32) -> Result<()> {
+        let concept = self.database.exclude_review(concept_id, source_revision)?;
         self.audit(
-            "review_rejected",
+            "review_excluded",
             "concept",
             Some(concept_id.to_string()),
-            serde_json::json!({}),
+            serde_json::json!({
+                "collection_id": concept.collection_id,
+                "source_revision": source_revision,
+            }),
         )
     }
 
@@ -3519,6 +3554,18 @@ impl DesktopServices {
             }
             (Err(error), Err(_)) => Err(error),
         }
+    }
+
+    pub async fn explore_public_catalog(
+        &self,
+        limit: u8,
+    ) -> std::result::Result<PublicCatalogResult, PublicCatalogError> {
+        let database = self.database.clone();
+        let endpoints = tokio::task::spawn_blocking(move || federation_index_endpoints(&database))
+            .await
+            .map_err(|_| PublicCatalogError::Unavailable)?
+            .map_err(|_| PublicCatalogError::Unavailable)?;
+        self.public_reader.explore_catalog(&endpoints, limit).await
     }
 
     pub fn add_federation_index(&self, peer_id: &str, address: &str) -> Result<()> {
@@ -3941,6 +3988,7 @@ impl DesktopServices {
                         projected.len()
                     },
                     needs_review_count: usize::try_from(stats.needs_review).unwrap_or(usize::MAX),
+                    excluded_count: usize::try_from(stats.excluded).unwrap_or(usize::MAX),
                     published_count: if projected.is_empty() {
                         usize::try_from(stats.published).unwrap_or(usize::MAX)
                     } else {
@@ -4152,10 +4200,24 @@ impl DesktopServices {
                     source_revision: source.revision,
                     source_name,
                     collection_name: collection.name,
+                    excluded: concept.status == DocumentStatus::Excluded,
                     draft: concept.draft,
                 })
             })
             .collect()
+    }
+
+    pub(crate) fn pending_review_ids(&self, collection_id: Uuid) -> Result<Vec<Uuid>> {
+        Ok(self
+            .database
+            .list_concepts_for_review()?
+            .into_iter()
+            .filter(|concept| {
+                concept.collection_id == collection_id
+                    && concept.status == DocumentStatus::NeedsReview
+            })
+            .map(|concept| concept.id)
+            .collect())
     }
 
     pub fn load_review_evidence(
@@ -5809,7 +5871,11 @@ mod tests {
                 response,
             })
             .expect("fill request queue");
-        let backend = DesktopMcpApplicationBackend { requests: sender };
+        let backend = DesktopMcpApplicationBackend {
+            requests: sender,
+            database: Database::in_memory().expect("test database"),
+            local_node_id: "test-node".to_owned(),
+        };
 
         let result = backend
             .call(

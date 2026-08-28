@@ -73,6 +73,32 @@ describe('desktop style tokens', () => {
     expect(sharedRule).not.toContain('overflow: clip');
   });
 
+  it('keeps the sticky wiki toolbar flush with the scroll viewport', () => {
+    const stylesheet = desktopStyles();
+    const stickyRule = stylesheet.match(/\.wiki-content-sticky\s*{([^}]*)}/)?.[1];
+    const stickyOffsets = Array.from(
+      stylesheet.matchAll(/--wiki-sticky-offset:\s*(-\d+px)/g),
+      (match) => match[1],
+    );
+
+    expect(stickyRule).toContain('top: var(--wiki-sticky-offset)');
+    expect(stickyOffsets).toEqual(['-28px', '-24px']);
+  });
+
+  it('keeps long review content inside the review surface', () => {
+    const stylesheet = desktopStyles();
+    const drawerRule = stylesheet.match(/\.review-drawer\s*{([^}]*)}/)?.[1];
+    const titleRule = stylesheet.match(/\.review-title-copy h2\s*{([^}]*)}/)?.[1];
+    const evidenceRule = stylesheet.match(/\.evidence-list blockquote\s*{([^}]*)}/)?.[1];
+    const comparisonRule = stylesheet.match(/\.review-comparison\s*{([^}]*)}/)?.[1];
+
+    expect(drawerRule).toContain('overflow-x: hidden');
+    expect(drawerRule).toContain('min-width: 0');
+    expect(titleRule).toContain('overflow-wrap: anywhere');
+    expect(evidenceRule).toContain('overflow-wrap: anywhere');
+    expect(comparisonRule).toContain('minmax(260px, .88fr)');
+  });
+
   it('keeps recovery guidance readable in every appearance', () => {
     const stylesheet = desktopStyles();
     const themeBlocks = Array.from(
@@ -94,5 +120,67 @@ describe('desktop style tokens', () => {
     const recoveryLabelRule = stylesheet.match(/\.integration-recovery-label\s*{([^}]*)}/)?.[1];
     expect(recoveryRule).toContain('var(--recovery-accent)');
     expect(recoveryLabelRule).toContain('color: var(--recovery-accent)');
+  });
+
+  it('keeps light appearance text, actions, and control boundaries distinguishable', () => {
+    const stylesheet = desktopStyles();
+    const lightBlocks = Array.from(
+      stylesheet.matchAll(/:root\[data-theme='light'\]\s*{([^}]*)}/g),
+      (match) => match[1],
+    );
+    const lightTheme = lightBlocks.at(-1);
+    expect(lightTheme).toBeDefined();
+    if (!lightTheme) return;
+
+    const windowSurface = rgb(customProperty(lightTheme, '--ink'));
+    const contentSurface = rgb(customProperty(lightTheme, '--slate'));
+    const primaryText = rgb(customProperty(lightTheme, '--strong'));
+    const secondaryText = rgb(customProperty(lightTheme, '--muted'));
+    const accent = rgb(customProperty(lightTheme, '--cyan'));
+    const controlBorder = rgb(customProperty(lightTheme, '--control-border'));
+
+    expect(contrast(primaryText, windowSurface), 'primary text on window').toBeGreaterThanOrEqual(4.5);
+    expect(contrast(secondaryText, windowSurface), 'secondary text on window').toBeGreaterThanOrEqual(4.5);
+    expect(contrast(secondaryText, contentSurface), 'secondary text on surface').toBeGreaterThanOrEqual(4.5);
+    expect(contrast(accent, contentSurface), 'accent action on surface').toBeGreaterThanOrEqual(4.5);
+    expect(contrast(controlBorder, contentSurface), 'control boundary on surface').toBeGreaterThanOrEqual(3);
+  });
+
+  it('keeps dark appearance text, actions, and control boundaries distinguishable', () => {
+    const stylesheet = desktopStyles();
+    const darkBlocks = Array.from(
+      stylesheet.matchAll(/:root\s*{([^}]*)}/g),
+      (match) => match[1],
+    ).filter((block) => block.includes('--control-border'));
+    const darkTheme = darkBlocks.at(-1);
+    expect(darkTheme).toBeDefined();
+    if (!darkTheme) return;
+
+    const windowSurface = rgb(customProperty(darkTheme, '--ink'));
+    const contentSurface = rgb(customProperty(darkTheme, '--slate'));
+    const primaryText = rgb(customProperty(darkTheme, '--strong'));
+    const secondaryText = rgb(customProperty(darkTheme, '--muted'));
+    const accent = rgb(customProperty(darkTheme, '--cyan'));
+    const controlBorder = rgb(customProperty(darkTheme, '--control-border'));
+
+    expect(contrast(primaryText, windowSurface), 'primary text on window').toBeGreaterThanOrEqual(4.5);
+    expect(contrast(secondaryText, windowSurface), 'secondary text on window').toBeGreaterThanOrEqual(4.5);
+    expect(contrast(secondaryText, contentSurface), 'secondary text on surface').toBeGreaterThanOrEqual(4.5);
+    expect(contrast(accent, contentSurface), 'accent action on surface').toBeGreaterThanOrEqual(4.5);
+    expect(contrast(controlBorder, contentSurface), 'control boundary on surface').toBeGreaterThanOrEqual(3);
+  });
+
+  it('does not render persistent desktop labels below ten pixels', () => {
+    const stylesheet = desktopStyles();
+    const explicitSizes = Array.from(
+      stylesheet.matchAll(/font-size:\s*([\d.]+)px/g),
+      (match) => Number.parseFloat(match[1]),
+    );
+    const shorthandSizes = Array.from(
+      stylesheet.matchAll(/font:\s*[^;{}]*?\s([\d.]+)px(?:\/|\s)/g),
+      (match) => Number.parseFloat(match[1]),
+    );
+
+    expect([...explicitSizes, ...shorthandSizes].filter((size) => size < 10)).toEqual([]);
   });
 });

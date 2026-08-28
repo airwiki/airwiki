@@ -4,6 +4,48 @@ All notable user-visible changes to AirWiki will be documented here. The project
 
 ## [Unreleased]
 
+- Kept per-application MCP search strictly local, closed the collection AI gate
+  when its last active grant is revoked, made connection setup establish and
+  roll back default grants before touching client configuration, and exposed a
+  canonical client identity so ChatGPT/Codex is not rendered twice.
+- Added an explicit catalog-browse capability protocol: current indexes can
+  return bounded signed public profiles, while older indexes now report the
+  Public directory as unavailable or partial instead of a successful empty
+  result.
+- Serialized draft OKF materialization with publication so a concurrent human
+  approval cannot be overwritten by a late draft write.
+- Replaced the mandatory up-front review queue with progressive curation:
+  folder resources now appear immediately as local, unverified OKF `draft`
+  concepts inside Content; filters separate all, draft, reviewed and excluded
+  resources; approval promotes the exact revision to `stable`; and reversible
+  exclusion keeps its draft and evidence without making it searchable or
+  available to AI apps, LAN or the Internet.
+- Simplified project-memory status in the Wiki workspace: a healthy local
+  `.airwiki` link and its non-destructive Detach action now live in Details,
+  while the main content view reserves its banner for missing, invalid or
+  identity-conflicting project files that require attention.
+- Added an explicit **Public** view to Library so people can browse signed,
+  current Wiki profiles without first inventing a search query. The default
+  view remains local and performs no public request; opening a public row is the
+  separate action that contacts its owner. Local and public rows are now denser
+  and remove decorative folio stacks, route diagrams and redundant open labels.
+- Rebalanced the desktop shape language with low-radius structural surfaces and
+  controls, reserving fully rounded forms for status, identity and count
+  semantics; Wiki shelf markers now sit inside each row instead of colliding
+  with the outer container edge.
+- Added one compact status and access bar to every Wiki so people can see what
+  is searchable, the separate Local, LAN and Internet exposure levels, and the
+  actual AI applications with access; a direct Share action groups independent
+  LAN and Internet controls and keeps AI-memory reader/editor grants beside the
+  Wiki they affect instead of in global Settings.
+- Made each Wiki a single continuous reading surface: the page owns vertical
+  scrolling, content panes no longer introduce nested scrollbars, and the Wiki
+  access bar stays in context beside the content controls.
+- Reworked the Library landing view into a compact **Your Wikis** workspace:
+  plain-language filters separate attention, private and shared Wikis, while
+  each self-contained shelf row groups its identity, detected/searchable/review
+  counts, Local/LAN/Internet exposure and concrete next step without a repeated
+  administrative table header.
 - Made Library search update automatically after a brief typing pause while
   retaining Enter as an immediate action, ignoring unfinished text composition
   and preventing delayed or stale requests from replacing the latest results.
@@ -36,8 +78,10 @@ All notable user-visible changes to AirWiki will be documented here. The project
   skeletons that preserve layout during initial discovery.
 - Fixed global-search focus loss, aligned compact toolbar and dialog actions,
   and distinguished queued model preparation from an active download.
-- Matched the minimum desktop window size to its default 1180 × 760 opening
-  size so the primary workspace cannot be compressed below its usable layout.
+- Kept the default desktop opening at 1180 × 760 while restoring a tested
+  1024 × 720 minimum for Split View and tiled layouts. The Wiki status bar now
+  moves its content controls onto a second row before indexing or AI-access
+  labels need truncation.
 - Kept Wiki recovery actions fully visible at the minimum window size, restored
   the canonical transparent AirWiki mark across the app header, native window,
   executable and package icons, and made queued Local AI cancellation clear its

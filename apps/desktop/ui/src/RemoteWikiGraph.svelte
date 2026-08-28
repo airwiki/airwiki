@@ -161,7 +161,7 @@
   .graph-canvas { position: relative; grid-area: 1 / 1; min-width: 0; min-height: 340px; background: var(--graph-canvas); }
   .graph-loading { z-index: 1; display: grid; grid-area: 1 / 1; place-items: center; background: var(--graph-canvas); pointer-events: none; }
   .graph-index { display: flex; flex-wrap: wrap; gap: 7px; padding-top: 14px; }
-  .graph-index button { flex: 1 1 220px; min-width: 0; padding: 7px 10px; overflow-wrap: anywhere; color: var(--muted); background: transparent; border: 1px solid var(--line); border-radius: 8px; text-align: left; cursor: pointer; }
+  .graph-index button { flex: 1 1 220px; min-width: 0; padding: 7px 10px; overflow-wrap: anywhere; color: var(--muted); background: transparent; border: 1px solid var(--line); border-radius: var(--control-radius); text-align: left; cursor: pointer; }
   .graph-index button:hover, .graph-index button:focus-visible { color: inherit; border-color: var(--cyan); }
   .graph-error { padding: 20px; color: var(--amber); border-left: 2px solid var(--amber); }
 </style>

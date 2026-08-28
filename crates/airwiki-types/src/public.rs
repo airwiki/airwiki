@@ -6,14 +6,18 @@ use uuid::Uuid;
 use crate::{
     ConceptType, MAX_QUERY_BYTES, MAX_SNIPPET_CHARS, MAX_TOP_K, MIN_TOP_K, OkfCompatibility,
     PUBLIC_BROWSE_PROTOCOL, PUBLIC_BROWSE_PROTOCOL_V2, PUBLIC_BROWSE_PROTOCOL_V3,
-    PUBLIC_BROWSE_PROTOCOL_V4, PUBLIC_CATALOG_PROTOCOL, PUBLIC_CATALOG_PROTOCOL_V2,
-    PUBLIC_SEARCH_PROTOCOL, PUBLIC_SEARCH_PROTOCOL_V2, PublishedConceptId, PublishedWikiDocument,
-    PublishedWikiPageId, PublishedWikiPageRequest, PublishedWikiWorkspacePage, SearchPurpose,
-    SearchResponse,
+    PUBLIC_BROWSE_PROTOCOL_V4, PUBLIC_CATALOG_BROWSE_PROTOCOL, PUBLIC_CATALOG_PROTOCOL,
+    PUBLIC_CATALOG_PROTOCOL_V2, PUBLIC_SEARCH_PROTOCOL, PUBLIC_SEARCH_PROTOCOL_V2,
+    PublishedConceptId, PublishedWikiDocument, PublishedWikiPageId, PublishedWikiPageRequest,
+    PublishedWikiWorkspacePage, SearchPurpose, SearchResponse,
 };
 
 pub const MAX_PUBLIC_PAGE_SIZE: u8 = 50;
 pub const MAX_PUBLIC_CANDIDATES: u8 = 64;
+/// Marker carried by an explicit, bounded public-directory operation.
+///
+/// The marker alone never changes a normal catalog search into a directory browse.
+pub const PUBLIC_CATALOG_BROWSE_QUERY: &str = "*";
 pub const MAX_PUBLIC_ROUTING_TERMS: usize = 256;
 pub const MAX_PUBLIC_ROUTES: usize = 8;
 pub const MAX_PUBLIC_MANIFEST_LIFETIME_SECONDS: i64 = 24 * 60 * 60;
@@ -166,21 +170,50 @@ pub struct PublicConceptSummary {
 pub struct PublicCatalogQuery {
     pub protocol_version: String,
     pub request_id: Uuid,
+    #[serde(default, skip_serializing_if = "PublicCatalogOperation::is_search")]
+    pub operation: PublicCatalogOperation,
     pub query: String,
     pub languages: Vec<String>,
     pub limit: u8,
 }
 
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum PublicCatalogOperation {
+    #[default]
+    Search,
+    Browse,
+}
+
+impl PublicCatalogOperation {
+    pub const fn is_search(&self) -> bool {
+        matches!(self, Self::Search)
+    }
+}
+
 impl PublicCatalogQuery {
+    pub fn is_browse(&self) -> bool {
+        self.operation == PublicCatalogOperation::Browse
+    }
+
     pub fn validate(&self) -> Result<(), PublicContractError> {
-        if !protocol_is_supported(
-            &self.protocol_version,
-            PUBLIC_CATALOG_PROTOCOL,
-            PUBLIC_CATALOG_PROTOCOL_V2,
-        ) {
+        let protocol_matches_operation = match self.operation {
+            PublicCatalogOperation::Search => protocol_is_supported(
+                &self.protocol_version,
+                PUBLIC_CATALOG_PROTOCOL,
+                PUBLIC_CATALOG_PROTOCOL_V2,
+            ),
+            PublicCatalogOperation::Browse => {
+                self.protocol_version == PUBLIC_CATALOG_BROWSE_PROTOCOL
+            }
+        };
+        if !protocol_matches_operation {
             return Err(PublicContractError::UnsupportedProtocol);
         }
         validate_text(&self.query, MAX_QUERY_BYTES)?;
+        if self.is_browse() && self.query != PUBLIC_CATALOG_BROWSE_QUERY {
+            return Err(PublicContractError::InvalidText);
+        }
         if self.languages.len() > 8 || !(1..=MAX_PUBLIC_CANDIDATES).contains(&self.limit) {
             return Err(PublicContractError::InvalidLimit);
         }
@@ -572,6 +605,7 @@ mod tests {
         let catalog = PublicCatalogQuery {
             protocol_version: PUBLIC_CATALOG_PROTOCOL.to_owned(),
             request_id: Uuid::new_v4(),
+            operation: PublicCatalogOperation::Search,
             query: "x".repeat(MAX_QUERY_BYTES + 1),
             languages: Vec::new(),
             limit: MAX_PUBLIC_CANDIDATES,
@@ -605,6 +639,37 @@ mod tests {
             limit: MAX_PUBLIC_PAGE_SIZE,
         };
         assert!(browse.validate().is_err());
+    }
+
+    #[test]
+    fn public_catalog_browse_requires_the_browse_marker() {
+        let browse = PublicCatalogQuery {
+            protocol_version: PUBLIC_CATALOG_BROWSE_PROTOCOL.to_owned(),
+            request_id: Uuid::new_v4(),
+            operation: PublicCatalogOperation::Browse,
+            query: "ordinary search".to_owned(),
+            languages: Vec::new(),
+            limit: MAX_PUBLIC_CANDIDATES,
+        };
+
+        assert_eq!(browse.validate(), Err(PublicContractError::InvalidText));
+    }
+
+    #[test]
+    fn public_catalog_browse_requires_its_negotiated_protocol() {
+        let browse = PublicCatalogQuery {
+            protocol_version: PUBLIC_CATALOG_PROTOCOL_V2.to_owned(),
+            request_id: Uuid::new_v4(),
+            operation: PublicCatalogOperation::Browse,
+            query: PUBLIC_CATALOG_BROWSE_QUERY.to_owned(),
+            languages: Vec::new(),
+            limit: MAX_PUBLIC_CANDIDATES,
+        };
+
+        assert_eq!(
+            browse.validate(),
+            Err(PublicContractError::UnsupportedProtocol)
+        );
     }
 
     #[test]

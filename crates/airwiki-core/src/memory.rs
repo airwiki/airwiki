@@ -17,8 +17,8 @@ use crate::okf::atomic_write;
 use crate::okf_import::{append_human_verification, parse_concept};
 use crate::storage::ApplicationWikiRole;
 use crate::{
-    CollectionRecord, Database, ManagedBundleMutationState, MemoryScope, NewManagedCollection,
-    OkfConceptProjectionRecord, OkfImportValidator, OkfImportedConcept,
+    CollectionRecord, Database, InitialApplicationAccess, ManagedBundleMutationState, MemoryScope,
+    NewManagedCollection, OkfConceptProjectionRecord, OkfImportValidator, OkfImportedConcept,
     ProjectMemoryAttachmentState, WikiOrigin,
 };
 
@@ -234,9 +234,11 @@ impl AiMemoryService {
                     id: wiki_id,
                     name: name.to_owned(),
                     bundle_root: bundle.clone(),
+                    policy: airwiki_types::CollectionPolicy::connected_to_ai_apps(),
                     origin: WikiOrigin::AiMemory,
                     replacement_fingerprint,
                     owner_app_id: Some(app_id),
+                    initial_application_access: InitialApplicationAccess::None,
                 }) {
                 Ok(prepared) => prepared,
                 Err(error) => {
@@ -1208,6 +1210,42 @@ mod tests {
     }
 
     #[test]
+    fn application_created_memory_grants_only_its_owner() {
+        let (_temp, database, service, owner) = service();
+        let other = Uuid::new_v4();
+        database
+            .create_application_capability(
+                other,
+                "Claude",
+                "claude",
+                "claude/test",
+                "fedcba9876543210",
+                &"b".repeat(64),
+            )
+            .unwrap();
+
+        let wiki = service.create(owner, "Owner-only memory").unwrap();
+        let grants = database.list_application_wiki_grants().unwrap();
+
+        assert!(grants.iter().any(|grant| {
+            grant.app_id == owner
+                && grant.collection_id == wiki.id
+                && grant.role == ApplicationWikiRole::Owner
+        }));
+        assert!(
+            !grants
+                .iter()
+                .any(|grant| { grant.app_id == other && grant.collection_id == wiki.id })
+        );
+        assert!(
+            database
+                .application_search_collection_ids(other)
+                .unwrap()
+                .is_empty()
+        );
+    }
+
+    #[test]
     fn owner_can_read_a_current_memory_concept_body() {
         let (_temp, _database, service, app_id) = service();
         let wiki = service.create(app_id, "Readable memory").unwrap();
@@ -1792,9 +1830,11 @@ mod tests {
                 id: wiki_id,
                 name: "Interrupted memory".to_owned(),
                 bundle_root: bundle,
+                policy: airwiki_types::CollectionPolicy::connected_to_ai_apps(),
                 origin: WikiOrigin::AiMemory,
                 replacement_fingerprint: "f".repeat(64),
                 owner_app_id: Some(app_id),
+                initial_application_access: InitialApplicationAccess::None,
             })
             .unwrap();
 

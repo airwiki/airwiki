@@ -325,11 +325,15 @@ impl CatalogStore {
             .validate()
             .map_err(|_| CatalogStoreError::InvalidQuery)?;
         let fts = fts_query(&query.query);
-        if fts.is_empty() {
+        if !query.is_browse() && fts.is_empty() {
             return Ok(Vec::new());
         }
         let connection = self.connection()?;
-        let protocols = if query.protocol_version == airwiki_types::PUBLIC_CATALOG_PROTOCOL_V2 {
+        let protocols = if matches!(
+            query.protocol_version.as_str(),
+            airwiki_types::PUBLIC_CATALOG_BROWSE_PROTOCOL
+                | airwiki_types::PUBLIC_CATALOG_PROTOCOL_V2
+        ) {
             (
                 airwiki_types::PUBLIC_CATALOG_PROTOCOL_V2,
                 airwiki_types::PUBLIC_CATALOG_PROTOCOL,
@@ -340,35 +344,55 @@ impl CatalogStore {
                 airwiki_types::PUBLIC_CATALOG_PROTOCOL,
             )
         };
-        let mut statement = connection.prepare(
-            "SELECT m.signed_cbor FROM catalog_fts f
-             JOIN manifests m ON m.manifest_id=f.rowid
-             WHERE catalog_fts MATCH ?1 AND m.withdrawn=0 AND m.expires_at>?2
-               AND m.protocol_version IN (?3,?4)
-               AND (m.protocol_version=?3 OR NOT EXISTS(
-                 SELECT 1 FROM manifests preferred
-                 WHERE preferred.publisher_id=m.publisher_id
-                   AND preferred.collection_id=m.collection_id
-                   AND preferred.protocol_version=?3
-                   AND preferred.withdrawn=0 AND preferred.expires_at>?2
-               ))
-             ORDER BY bm25(catalog_fts),m.publisher_id,m.collection_id
-             LIMIT ?5",
-        )?;
-        let rows = statement.query_map(
-            params![
-                fts,
-                now.to_rfc3339(),
-                protocols.0,
-                protocols.1,
-                i64::from(query.limit.min(MAX_PUBLIC_CANDIDATES)).saturating_mul(2),
-            ],
-            |row| row.get::<_, Vec<u8>>(0),
-        )?;
+        let row_limit = i64::from(query.limit.min(MAX_PUBLIC_CANDIDATES)).saturating_mul(2);
+        let encoded = if query.is_browse() {
+            let mut statement = connection.prepare(
+                "SELECT m.signed_cbor FROM manifests m
+                 WHERE m.withdrawn=0 AND m.expires_at>?1
+                   AND m.protocol_version IN (?2,?3)
+                   AND (m.protocol_version=?2 OR NOT EXISTS(
+                     SELECT 1 FROM manifests preferred
+                     WHERE preferred.publisher_id=m.publisher_id
+                       AND preferred.collection_id=m.collection_id
+                       AND preferred.protocol_version=?2
+                       AND preferred.withdrawn=0 AND preferred.expires_at>?1
+                   ))
+                 ORDER BY m.expires_at DESC,m.publisher_id,m.collection_id
+                 LIMIT ?4",
+            )?;
+            statement
+                .query_map(
+                    params![now.to_rfc3339(), protocols.0, protocols.1, row_limit],
+                    |row| row.get::<_, Vec<u8>>(0),
+                )?
+                .collect::<Result<Vec<_>, _>>()?
+        } else {
+            let mut statement = connection.prepare(
+                "SELECT m.signed_cbor FROM catalog_fts f
+                 JOIN manifests m ON m.manifest_id=f.rowid
+                 WHERE catalog_fts MATCH ?1 AND m.withdrawn=0 AND m.expires_at>?2
+                   AND m.protocol_version IN (?3,?4)
+                   AND (m.protocol_version=?3 OR NOT EXISTS(
+                     SELECT 1 FROM manifests preferred
+                     WHERE preferred.publisher_id=m.publisher_id
+                       AND preferred.collection_id=m.collection_id
+                       AND preferred.protocol_version=?3
+                       AND preferred.withdrawn=0 AND preferred.expires_at>?2
+                   ))
+                 ORDER BY bm25(catalog_fts),m.publisher_id,m.collection_id
+                 LIMIT ?5",
+            )?;
+            statement
+                .query_map(
+                    params![fts, now.to_rfc3339(), protocols.0, protocols.1, row_limit],
+                    |row| row.get::<_, Vec<u8>>(0),
+                )?
+                .collect::<Result<Vec<_>, _>>()?
+        };
         let mut manifests = Vec::new();
         let mut selected = std::collections::HashSet::new();
-        for row in rows {
-            let signed: SignedPublicCollectionManifest = decode(&row?)?;
+        for row in encoded {
+            let signed: SignedPublicCollectionManifest = decode(&row)?;
             let key = (
                 signed.manifest.publisher_id.clone(),
                 signed.manifest.collection_id,
@@ -726,8 +750,8 @@ fn decode<T: serde::de::DeserializeOwned>(bytes: &[u8]) -> Result<T, CatalogStor
 mod tests {
     use airwiki_network::{sign_manifest, sign_tombstone};
     use airwiki_types::{
-        PUBLIC_CATALOG_PROTOCOL, PUBLIC_CATALOG_PROTOCOL_V2, PublicCollectionManifest,
-        PublicCollectionTombstone,
+        PUBLIC_CATALOG_BROWSE_PROTOCOL, PUBLIC_CATALOG_PROTOCOL, PUBLIC_CATALOG_PROTOCOL_V2,
+        PublicCatalogOperation, PublicCollectionManifest, PublicCollectionTombstone,
     };
     use chrono::Duration;
     use libp2p::identity::Keypair;
@@ -801,6 +825,7 @@ mod tests {
         PublicCatalogQuery {
             protocol_version: PUBLIC_CATALOG_PROTOCOL.to_owned(),
             request_id: Uuid::new_v4(),
+            operation: PublicCatalogOperation::Search,
             query: term.to_owned(),
             languages: Vec::new(),
             limit: MAX_PUBLIC_CANDIDATES,
@@ -824,6 +849,46 @@ mod tests {
             store.register(&manifest, now),
             Err(CatalogStoreError::StaleSequence)
         ));
+    }
+
+    #[test]
+    fn explicit_browse_returns_recent_manifests_without_search_terms() {
+        let store = CatalogStore::in_memory().unwrap();
+        let keypair = Keypair::generate_ed25519();
+        let now = Utc::now();
+        let older = signed_manifest(&keypair, Uuid::new_v4(), 1, now - Duration::minutes(2));
+        let newer = signed_manifest(&keypair, Uuid::new_v4(), 1, now - Duration::minutes(1));
+
+        store.register(&older, now).unwrap();
+        store.register(&newer, now).unwrap();
+        let mut browse = query(airwiki_types::PUBLIC_CATALOG_BROWSE_QUERY);
+        browse.protocol_version = PUBLIC_CATALOG_BROWSE_PROTOCOL.to_owned();
+        browse.operation = PublicCatalogOperation::Browse;
+        browse.limit = 1;
+
+        let results = store.query(&browse, now).unwrap();
+        assert_eq!(results.len(), 1);
+        assert_eq!(
+            results[0].manifest.collection_id,
+            newer.manifest.collection_id
+        );
+    }
+
+    #[test]
+    fn star_search_does_not_enumerate_public_manifests() {
+        let store = CatalogStore::in_memory().unwrap();
+        let keypair = Keypair::generate_ed25519();
+        let now = Utc::now();
+        let manifest = signed_manifest(&keypair, Uuid::new_v4(), 1, now);
+
+        store.register(&manifest, now).unwrap();
+
+        assert!(
+            store
+                .query(&query(airwiki_types::PUBLIC_CATALOG_BROWSE_QUERY), now)
+                .unwrap()
+                .is_empty()
+        );
     }
 
     #[test]

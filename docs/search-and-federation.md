@@ -34,10 +34,18 @@ and serve the result.
 
 ## The Library experience
 
-The desktop opens on **Library**. Without a query it is an inventory of only the
-Wikis on this device, ordered first by items needing attention and then by
-name. Health, pending work and the relevant actions stay on each Wiki rather
-than being duplicated in a separate alert list.
+The desktop opens on **Library**, with two explicit views. **On this device** is
+the default inventory, ordered first by items needing attention and then by
+name. **Public** is an explorable directory of bounded signed Wiki profiles and
+does not require a search query. Selecting it is the action that permits a
+bounded catalog request; merely opening Library performs no public networking.
+The directory contacts configured indexes only. It does not contact Wiki owners
+or request published content until a person opens one exact Wiki.
+
+Local health, pending work and relevant actions stay on each Wiki rather than
+being duplicated in a separate alert list. Both local and public entries use
+compact, information-first rows; internal identifiers are not normal list
+content.
 
 After a brief pause in typing, AirWiki runs the latest query automatically;
 pressing Enter runs it immediately. It then replaces the inventory with
@@ -47,8 +55,8 @@ matching concepts, and states the total number of matches. Filters with counts
 select **All**, **This device**, **Nearby**, or **Public** without rerunning or
 re-authorizing the search. Opening a concept selects that exact match; opening
 the Wiki uses its best result. Returning restores the query, filter, completed
-results and scroll position, while clearing the query restores the local
-inventory.
+results and scroll position, while clearing the query restores the previously
+selected Library view.
 
 **Search the public network too** is explicit consent for that search. Without
 it, **All** means this device plus currently authorized LAN peers. Successful
@@ -147,13 +155,30 @@ Federated indexes store only signed manifests and compact withdrawal
 tombstones. They have no publication authority and receive no documents,
 snippets, chunks, embeddings, source paths, or complete indexes.
 
-### 2. The reader finds and contacts owners
+### 2. The reader explores or searches the catalog
 
-The reader uses an ephemeral identity for the application session and sends a
-bounded lexical catalog query to configured federation indexes. Those indexes
-return signed manifests for possible matching Wikis. The reader verifies the
-manifests, ignores blocked or expired publishers, groups candidates by owner,
-and contacts a bounded number of owners directly.
+Selecting **Public** sends an explicit catalog **browse** operation with the `*`
+marker, a bounded result limit and the dedicated
+`/airwiki/public-catalog-browse/1.0.0` capability protocol. An index returns
+only current signed manifests; it does not perform an owner search or return
+Wiki content. A normal search remains on the v1/v2 catalog protocols even when
+its free-form text is exactly `*`, so it cannot enumerate the directory. An
+older index that does not advertise the browse capability is reported as
+requiring an update when no compatible index answers, or as partial when
+another compatible index does answer, rather than as a successful empty directory. The reader
+verifies the returned manifests, removes expired and blocked publishers, keeps
+the newest sequence per publisher and Wiki, and caches only those validated
+routes for a later explicit open.
+
+A public knowledge search remains a separate per-query choice. In that path,
+the reader sends a bounded lexical catalog query to configured federation
+indexes. Those indexes return signed manifests for possible matching Wikis.
+The reader verifies the manifests, ignores blocked or expired publishers,
+groups candidates by owner, and contacts a bounded number of owners directly.
+
+The reader uses an ephemeral identity for the application session in both
+paths. Catalog exploration ends after validated profile metadata is presented;
+search continues to owners because it needs evidence for the question.
 
 The public result presentation—name, optional description, languages, concept
 count and OKF compatibility—is copied only from that already validated signed
@@ -191,7 +216,7 @@ exposure must be treated as disclosure rather than temporary viewing.
 | Local | Local SQLite state | Current local publication and purpose | This device |
 | LAN | Local discovery or a validated manual route | Authenticated pairing, per-Wiki grant, collection policy, and current publication | Each trusted source device |
 | Public | Signed, expiring manifests from replaceable routing indexes | Explicit public opt-in and the owner's current reviewed publication | Each public owner's device |
-| External AI | Local MCP gateway, optionally including authorized LAN peers | Independent external-AI policy plus every applicable local or LAN gate | Each authorized source device |
+| External AI | Local MCP gateway | Active application capability, per-Wiki application grant and local external-AI gate | This device |
 
 The permissions are intentionally independent. Pairing a device does not grant
 a Wiki. Granting LAN access does not make the Wiki public. Connecting an AI

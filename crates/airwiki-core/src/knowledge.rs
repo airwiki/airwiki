@@ -353,10 +353,17 @@ pub struct OkfBundleInspector {
 struct DatabaseBundleSnapshot {
     collection: CollectionRecord,
     published: Vec<ConceptRecord>,
+    drafts: Vec<ConceptRecord>,
     sources: BTreeMap<Uuid, Option<SourceDocumentRecord>>,
     publication_pending: bool,
     fingerprint: String,
     projection: Vec<OkfConceptProjectionRecord>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum InspectionScope {
+    Local,
+    Disclosure,
 }
 
 impl OkfBundleInspector {
@@ -365,7 +372,9 @@ impl OkfBundleInspector {
     }
 
     pub fn inspect_bundle(&self, collection_id: Uuid) -> Result<KnowledgeBundleView> {
-        self.inspect_bundle_with(|| self.database_snapshot(collection_id))
+        self.inspect_bundle_with(InspectionScope::Local, || {
+            self.database_snapshot(collection_id)
+        })
     }
 
     /// Inspects a published bundle while the caller retains the disclosure
@@ -380,17 +389,23 @@ impl OkfBundleInspector {
         lease: &DisclosureLease,
         collection_id: Uuid,
     ) -> Result<KnowledgeBundleView> {
-        self.inspect_bundle_with(|| self.database_snapshot_under_disclosure(lease, collection_id))
+        self.inspect_bundle_with(InspectionScope::Disclosure, || {
+            self.database_snapshot_under_disclosure(lease, collection_id)
+        })
     }
 
-    fn inspect_bundle_with<F>(&self, mut database_snapshot: F) -> Result<KnowledgeBundleView>
+    fn inspect_bundle_with<F>(
+        &self,
+        scope: InspectionScope,
+        mut database_snapshot: F,
+    ) -> Result<KnowledgeBundleView>
     where
         F: FnMut() -> Result<DatabaseBundleSnapshot>,
     {
         let before = database_snapshot()?;
         let files_before = bundle_tree_fingerprint(&before.collection.wiki_folder);
         let mut view = if before.collection.origin == WikiOrigin::Folder {
-            self.inspect_collection(&before)?
+            self.inspect_collection(&before, scope)?
         } else {
             self.inspect_projected_collection(&before)?
         };
@@ -434,6 +449,7 @@ impl OkfBundleInspector {
             page_id,
             expected_fingerprint,
             max_bytes,
+            InspectionScope::Local,
             || self.database_snapshot(collection_id),
         )
     }
@@ -453,6 +469,7 @@ impl OkfBundleInspector {
             page_id,
             expected_fingerprint,
             max_bytes,
+            InspectionScope::Disclosure,
             || self.database_snapshot_under_disclosure(lease, collection_id),
         )
     }
@@ -463,6 +480,7 @@ impl OkfBundleInspector {
         page_id: KnowledgePageId,
         expected_fingerprint: Option<&str>,
         max_bytes: usize,
+        scope: InspectionScope,
         mut database_snapshot: F,
     ) -> Result<KnowledgePageView>
     where
@@ -472,11 +490,11 @@ impl OkfBundleInspector {
             bail!("El límite de la página de conocimiento debe ser mayor que cero");
         }
         let database_before = database_snapshot()?;
-        Self::authorize_page(&database_before, page_id)?;
+        Self::authorize_page(&database_before, page_id, scope)?;
 
         // Inspect first so backlinks and internal-link resolution are derived
         // from the same fail-closed set of database-published concepts.
-        let bundle = self.inspect_bundle_with(&mut database_snapshot)?;
+        let bundle = self.inspect_bundle_with(scope, &mut database_snapshot)?;
         if bundle.state == KnowledgeBundleState::Updating {
             bail!("El bundle OKF se está actualizando; vuelva a cargarlo antes de abrir la página");
         }
@@ -506,7 +524,7 @@ impl OkfBundleInspector {
         // parsing. This prevents a withdrawal/republication race from
         // returning bytes that were authorized only at the beginning.
         let database_after = database_snapshot()?;
-        Self::authorize_page(&database_after, page_id)?;
+        Self::authorize_page(&database_after, page_id, scope)?;
         if database_before.fingerprint != database_after.fingerprint {
             bail!("La autorización o publicación cambió mientras se cargaba la página");
         }
@@ -532,7 +550,11 @@ impl OkfBundleInspector {
         })
     }
 
-    fn authorize_page(snapshot: &DatabaseBundleSnapshot, page_id: KnowledgePageId) -> Result<()> {
+    fn authorize_page(
+        snapshot: &DatabaseBundleSnapshot,
+        page_id: KnowledgePageId,
+        scope: InspectionScope,
+    ) -> Result<()> {
         if let KnowledgePageId::Concept(concept_id) = page_id {
             if snapshot.collection.origin != WikiOrigin::Folder {
                 if snapshot
@@ -548,21 +570,36 @@ impl OkfBundleInspector {
                 .published
                 .iter()
                 .find(|concept| concept.id == concept_id)
+                .or_else(|| {
+                    (scope == InspectionScope::Local)
+                        .then(|| {
+                            snapshot
+                                .drafts
+                                .iter()
+                                .find(|concept| concept.id == concept_id)
+                        })
+                        .flatten()
+                })
                 .with_context(|| format!("El concepto {concept_id} no existe"))?;
-            if concept.collection_id != snapshot.collection.id
-                || concept.status != DocumentStatus::Published
-            {
-                bail!("El concepto no está publicado en la colección solicitada");
+            if concept.collection_id != snapshot.collection.id {
+                bail!("El concepto no pertenece a la colección solicitada");
             }
             let source = snapshot
                 .sources
                 .get(&concept.source_document_id)
                 .and_then(Option::as_ref)
                 .context("El concepto publicado perdió su documento fuente")?;
-            if source.collection_id != snapshot.collection.id
-                || source.status != DocumentStatus::Published
-            {
-                bail!("El documento fuente del concepto no está publicado");
+            let coherent = match concept.status {
+                DocumentStatus::Published => source.status == DocumentStatus::Published,
+                DocumentStatus::NeedsReview | DocumentStatus::Excluded
+                    if scope == InspectionScope::Local =>
+                {
+                    source.status == concept.status
+                }
+                _ => false,
+            };
+            if source.collection_id != snapshot.collection.id || !coherent {
+                bail!("El documento fuente no coincide con el estado visible del concepto");
             }
         }
         Ok(())
@@ -572,7 +609,7 @@ impl OkfBundleInspector {
         let records = self
             .database
             .published_bundle_database_records(collection_id)?;
-        Self::database_snapshot_from_records(records)
+        Self::database_snapshot_from_records(records, InspectionScope::Local)
     }
 
     fn database_snapshot_under_disclosure(
@@ -583,24 +620,40 @@ impl OkfBundleInspector {
         let records = self
             .database
             .published_bundle_database_records_under_disclosure(lease, collection_id)?;
-        Self::database_snapshot_from_records(records)
+        Self::database_snapshot_from_records(records, InspectionScope::Disclosure)
     }
 
     fn database_snapshot_from_records(
         records: PublishedBundleDatabaseRecords,
+        scope: InspectionScope,
     ) -> Result<DatabaseBundleSnapshot> {
         let PublishedBundleDatabaseRecords {
             collection,
             published,
-            sources,
+            drafts,
+            mut sources,
             publication_pending,
-            projection,
+            mut projection,
         } = records;
+        let visible = if scope == InspectionScope::Local {
+            published.iter().chain(&drafts).collect::<Vec<_>>()
+        } else {
+            published.iter().collect::<Vec<_>>()
+        };
+        if scope == InspectionScope::Disclosure {
+            let published_source_ids = published
+                .iter()
+                .map(|concept| concept.source_document_id)
+                .collect::<BTreeSet<_>>();
+            sources.retain(|source_id, _| published_source_ids.contains(source_id));
+            projection.retain(|concept| concept.lifecycle_status == "stable");
+        }
         let fingerprint =
-            database_snapshot_fingerprint(&collection, &published, &sources, publication_pending)?;
+            database_snapshot_fingerprint(&collection, visible, &sources, publication_pending)?;
         Ok(DatabaseBundleSnapshot {
             collection,
             published,
+            drafts,
             sources,
             publication_pending,
             fingerprint,
@@ -608,12 +661,26 @@ impl OkfBundleInspector {
         })
     }
 
-    fn inspect_collection(&self, snapshot: &DatabaseBundleSnapshot) -> Result<KnowledgeBundleView> {
+    fn inspect_collection(
+        &self,
+        snapshot: &DatabaseBundleSnapshot,
+        scope: InspectionScope,
+    ) -> Result<KnowledgeBundleView> {
         let collection = &snapshot.collection;
         let published = snapshot.published.as_slice();
+        let local_drafts = if scope == InspectionScope::Local {
+            snapshot.drafts.as_slice()
+        } else {
+            &[]
+        };
+        let visible = published
+            .iter()
+            .chain(local_drafts)
+            .cloned()
+            .collect::<Vec<_>>();
         let mut health = BundleHealthReport {
             checked_at: Utc::now(),
-            total_concepts: published.len(),
+            total_concepts: visible.len(),
             error_count: 0,
             warning_count: 0,
             issues: Vec::new(),
@@ -631,7 +698,7 @@ impl OkfBundleInspector {
                 ));
                 return Ok(finalize_bundle(
                     collection,
-                    published,
+                    &visible,
                     BundleParts::empty(fingerprint_entries, health),
                 ));
             }
@@ -644,13 +711,13 @@ impl OkfBundleInspector {
                 ));
                 return Ok(finalize_bundle(
                     collection,
-                    published,
+                    &visible,
                     BundleParts::empty(fingerprint_entries, health),
                 ));
             }
             Ok(_) => {}
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
-                if !published.is_empty() {
+                if !visible.is_empty() {
                     health.push(HealthIssue::new(
                         HealthSeverity::Error,
                         "missing_bundle",
@@ -660,7 +727,7 @@ impl OkfBundleInspector {
                 }
                 return Ok(finalize_bundle(
                     collection,
-                    published,
+                    &visible,
                     BundleParts::empty(fingerprint_entries, health),
                 ));
             }
@@ -684,6 +751,7 @@ impl OkfBundleInspector {
 
         let expected_ids = published
             .iter()
+            .chain(&snapshot.drafts)
             .map(|concept| concept.id)
             .collect::<BTreeSet<_>>();
         inspect_unexpected_markdown(
@@ -693,7 +761,7 @@ impl OkfBundleInspector {
             &mut health,
         )?;
 
-        for concept in published {
+        for concept in &visible {
             let page_id = KnowledgePageId::Concept(concept.id);
             if let Some(page) =
                 inspect_managed_page(&collection.wiki_folder, page_id, &mut health, true)?
@@ -722,7 +790,7 @@ impl OkfBundleInspector {
         );
 
         let mut concepts = Vec::new();
-        for concept in published {
+        for concept in &visible {
             let page_id = KnowledgePageId::Concept(concept.id);
             let Some(page) = inspected_pages.get(&page_id) else {
                 continue;
@@ -750,7 +818,7 @@ impl OkfBundleInspector {
             .map(|page| page.snapshot.fingerprint.clone());
         Ok(finalize_bundle(
             collection,
-            published,
+            &visible,
             BundleParts {
                 concepts,
                 links,
@@ -979,9 +1047,9 @@ fn checked_projected_path(root: &Path, logical_path: &str) -> Result<PathBuf> {
     Ok(path)
 }
 
-fn database_snapshot_fingerprint(
+fn database_snapshot_fingerprint<'a>(
     collection: &CollectionRecord,
-    published: &[ConceptRecord],
+    concepts: impl IntoIterator<Item = &'a ConceptRecord>,
     sources: &BTreeMap<Uuid, Option<SourceDocumentRecord>>,
     publication_pending: bool,
 ) -> Result<String> {
@@ -1004,7 +1072,7 @@ fn database_snapshot_fingerprint(
     hash_datetime(&mut hasher, collection.updated_at);
     hash_bool(&mut hasher, publication_pending);
 
-    let mut concepts = published.iter().collect::<Vec<_>>();
+    let mut concepts = concepts.into_iter().collect::<Vec<_>>();
     concepts.sort_by_key(|concept| concept.id);
     for concept in concepts {
         hash_bytes(&mut hasher, concept.id.as_bytes());
@@ -2264,6 +2332,16 @@ fn reconcile_concept(
 ) -> KnowledgeConceptView {
     let page_id = KnowledgePageId::Concept(concept.id);
     let expected_type = concept.draft.concept_type.to_string();
+    let expected_lifecycle = if concept.status == DocumentStatus::Published {
+        "stable"
+    } else {
+        "draft"
+    };
+    let expected_reviewed_at = if concept.status == DocumentStatus::Published {
+        concept.reviewed_at.as_ref()
+    } else {
+        None
+    };
     let yaml = page.parsed.yaml.as_ref();
     let concept_type = yaml.and_then(|value| yaml_string_at(value, &["type"]));
     let title = yaml.and_then(|value| yaml_string_at(value, &["title"]));
@@ -2365,7 +2443,7 @@ fn reconcile_concept(
             page_id,
             "status",
             lifecycle_status.as_deref(),
-            Some("stable"),
+            Some(expected_lifecycle),
         );
         let expected_generator = format!("airwiki/{}", concept.generator_model);
         compare_field(
@@ -2381,7 +2459,7 @@ fn reconcile_concept(
             page_id,
             "verified",
             reviewed_at.as_ref(),
-            concept.reviewed_at.as_ref(),
+            expected_reviewed_at,
         );
         compare_field(
             health,
@@ -2403,7 +2481,7 @@ fn reconcile_concept(
                 HealthSeverity::Error,
                 "missing_airwiki_profile",
                 Some(page_id),
-                "El concepto publicado no contiene el perfil `airwiki`.",
+                "El concepto administrado no contiene el perfil `airwiki`.",
             ));
         }
     }
@@ -2423,12 +2501,12 @@ fn reconcile_concept(
             source_sha256.as_deref(),
             Some(source.source_sha256.as_str()),
         );
-        if source.status != DocumentStatus::Published {
+        if source.status != concept.status {
             health.push(HealthIssue::new(
                 HealthSeverity::Error,
-                "source_not_published",
+                "source_status_mismatch",
                 Some(page_id),
-                "SQLite marca el concepto como publicado pero no su documento fuente.",
+                "SQLite no mantiene el mismo estado para el concepto y su documento fuente.",
             ));
         }
     } else {
@@ -2436,7 +2514,7 @@ fn reconcile_concept(
             HealthSeverity::Error,
             "missing_source_record",
             Some(page_id),
-            "El concepto publicado perdió su documento fuente en SQLite.",
+            "El concepto administrado perdió su documento fuente en SQLite.",
         ));
     }
 
@@ -2454,7 +2532,7 @@ fn reconcile_concept(
         language,
         generator_model,
         reviewed_at,
-        lifecycle_status: lifecycle_status.unwrap_or_else(|| "stable".to_owned()),
+        lifecycle_status: lifecycle_status.unwrap_or_else(|| expected_lifecycle.to_owned()),
         generated_by: yaml.and_then(|value| yaml_string_at(value, &["generated", "by"])),
         verified_by: yaml.map(verification_actors_yaml).unwrap_or_default(),
         sources: yaml.map(source_views_yaml).unwrap_or_default(),
@@ -2704,20 +2782,24 @@ fn compare_concept_timestamp(
     actual: Option<&DateTime<Utc>>,
     concept: &ConceptRecord,
 ) {
-    let matches_published_revision = actual.is_some_and(|actual| {
-        concept.reviewed_at.is_some_and(|reviewed_at| {
+    let matches_revision = actual.is_some_and(|actual| match concept.status {
+        DocumentStatus::Published => concept.reviewed_at.is_some_and(|reviewed_at| {
             // Profile v1 used the publishing transition's operational
             // `updated_at` before timestamp became canonical. Those legacy
             // values are bounded by the durable review and final commit.
             *actual >= reviewed_at && *actual <= concept.updated_at
-        })
+        }),
+        DocumentStatus::NeedsReview | DocumentStatus::Excluded => {
+            *actual >= concept.created_at && *actual <= concept.updated_at
+        }
+        _ => false,
     });
-    if !matches_published_revision {
+    if !matches_revision {
         health.push(HealthIssue::new(
             HealthSeverity::Error,
             "metadata_mismatch",
             Some(page_id),
-            "El campo `timestamp` del bundle no coincide con la revisión publicada en SQLite.",
+            "El campo `generated.at` no coincide con la revisión administrada en SQLite.",
         ));
     }
 }
@@ -2850,7 +2932,7 @@ mod tests {
             OkfBundleInspector::new(self.database.clone())
         }
 
-        fn publish(&self, file_name: &str, title: &str) -> ConceptRecord {
+        fn prepare_draft(&self, file_name: &str, title: &str) -> ConceptRecord {
             let source_text = format!("# {title}\n\nContenido fuente verificable.");
             let source_path = self.source_root.join(file_name);
             fs::write(&source_path, &source_text).unwrap();
@@ -2869,10 +2951,9 @@ mod tests {
             self.database
                 .mark_extracted(source_id, 1, u64::try_from(source_text.len()).unwrap())
                 .unwrap();
-            let draft = draft(title);
             let concept = self
                 .database
-                .save_enrichment(source_id, draft.clone(), "peer-test", "model-test")
+                .save_enrichment(source_id, draft(title), "peer-test", "model-test")
                 .unwrap();
             let text_hash = hex::encode(Sha256::digest(source_text.as_bytes()));
             self.database
@@ -2892,8 +2973,24 @@ mod tests {
                     }],
                 )
                 .unwrap();
-            let published = self.database.approve_concept(concept.id, draft).unwrap();
             let source = self.database.source_document(source_id).unwrap().unwrap();
+            OkfPublisher::new(&self.collection.wiki_folder)
+                .write_draft(&concept, &source)
+                .unwrap();
+            concept
+        }
+
+        fn publish(&self, file_name: &str, title: &str) -> ConceptRecord {
+            let concept = self.prepare_draft(file_name, title);
+            let published = self
+                .database
+                .approve_concept(concept.id, concept.draft)
+                .unwrap();
+            let source = self
+                .database
+                .source_document(published.source_document_id)
+                .unwrap()
+                .unwrap();
             let all = self
                 .database
                 .list_published_concepts(self.collection.id)
@@ -3106,6 +3203,44 @@ mod tests {
         assert_eq!(page.page_id, KnowledgePageId::Concept(concept.id));
         assert!(page.body_markdown.contains("Conocimiento publicado"));
         assert!(!page.truncated);
+    }
+
+    #[test]
+    fn local_draft_is_browsable_but_never_visible_under_disclosure() {
+        let fixture = Fixture::new();
+        let concept = fixture.prepare_draft("draft.md", "Borrador local");
+        let inspector = fixture.inspector();
+
+        let local = inspector.inspect_bundle(fixture.collection.id).unwrap();
+        assert_eq!(local.concepts.len(), 1);
+        assert_eq!(local.concepts[0].id, concept.id);
+        assert_eq!(local.concepts[0].lifecycle_status, "draft");
+        let local_page = inspector
+            .load_page(
+                fixture.collection.id,
+                KnowledgePageId::Concept(concept.id),
+                local.page_fingerprint(KnowledgePageId::Concept(concept.id)),
+                MAX_KNOWLEDGE_PAGE_BYTES,
+            )
+            .unwrap();
+        assert!(local_page.body_markdown.contains("Borrador local"));
+
+        let lease = fixture.database.disclosure_gate().acquire_disclosure();
+        let disclosed = inspector
+            .inspect_bundle_under_disclosure(&lease, fixture.collection.id)
+            .unwrap();
+        assert!(disclosed.concepts.is_empty());
+        assert!(
+            inspector
+                .load_page_under_disclosure(
+                    &lease,
+                    fixture.collection.id,
+                    KnowledgePageId::Concept(concept.id),
+                    None,
+                    MAX_KNOWLEDGE_PAGE_BYTES,
+                )
+                .is_err()
+        );
     }
 
     #[test]

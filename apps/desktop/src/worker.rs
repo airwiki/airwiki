@@ -21,7 +21,9 @@ use airwiki_inference::{
     install_failure_is_transient, select_model, selection_for_model,
 };
 use airwiki_mcp::{McpClientActivity, McpClientKind};
-use airwiki_network::{NetworkEvent, PublicBrowseResult, PublicRouteKind};
+use airwiki_network::{
+    NetworkEvent, PublicBrowseResult, PublicCatalogError, PublicCatalogResult, PublicRouteKind,
+};
 use airwiki_types::{
     CollectionPolicy, DevicePlatform, EnrichmentDraft, PublishedWikiPageRequest, SearchHit,
     SearchPurpose, SearchResponse, SharedWikiBrowsePage,
@@ -104,6 +106,7 @@ pub struct CollectionView {
     pub folder: PathBuf,
     pub document_count: usize,
     pub needs_review_count: usize,
+    pub excluded_count: usize,
     pub published_count: usize,
     pub failed_count: usize,
     pub local_only: bool,
@@ -172,6 +175,7 @@ pub struct ReviewItemView {
     pub source_revision: u32,
     pub source_name: String,
     pub collection_name: String,
+    pub excluded: bool,
     pub draft: EnrichmentDraft,
 }
 
@@ -300,6 +304,7 @@ pub struct ApplicationWikiGrantView {
 #[derive(Debug, Clone)]
 pub struct ApplicationAccessView {
     pub app_id: Uuid,
+    pub client_name: String,
     pub display_name: String,
     pub producer: String,
     pub active: bool,
@@ -520,9 +525,7 @@ pub enum WorkerCommand {
     },
     Reject {
         concept_id: Uuid,
-    },
-    ReanalyzeReview {
-        concept_id: Uuid,
+        source_revision: u32,
     },
     LoadReviewEvidence {
         request_id: Uuid,
@@ -553,6 +556,10 @@ pub enum WorkerCommand {
         top_k: u8,
         purpose: SearchPurpose,
         public_network: bool,
+    },
+    ExplorePublicCatalog {
+        request_id: Uuid,
+        limit: u8,
     },
     AddFederationIndex {
         peer_id: String,
@@ -735,6 +742,10 @@ pub enum WorkerEvent {
         request_id: Uuid,
         hits: Vec<RoutedSearchHit>,
     },
+    PublicCatalogFinished {
+        request_id: Uuid,
+        result: Result<PublicCatalogResult, PublicCatalogError>,
+    },
     PublicBrowseFinished {
         request_id: Uuid,
         update: BrowseUpdate,
@@ -870,9 +881,11 @@ enum BackgroundCompletion {
         collection_id: Uuid,
         result: Result<Vec<IngestOutcome>, String>,
     },
-    ReanalyzeReview {
-        concept_id: Uuid,
-        result: Result<(), String>,
+    ReanalyzeCollection {
+        concept_ids: Vec<Uuid>,
+        scan_summary: String,
+        updated: usize,
+        failed: usize,
     },
     ReviewEvidence {
         request_id: Uuid,
@@ -895,6 +908,10 @@ enum BackgroundCompletion {
         request_id: Uuid,
         result: Result<(SearchResponse, HashSet<(String, Uuid)>), String>,
         route_kind: PublicRouteKind,
+    },
+    PublicCatalog {
+        request_id: Uuid,
+        result: Result<PublicCatalogResult, PublicCatalogError>,
     },
     PublicBrowse {
         request_id: Uuid,
@@ -1362,6 +1379,7 @@ pub(crate) async fn run_worker(
     let mut approving_reviews = HashSet::new();
     let mut reanalyzing_reviews = HashSet::new();
     let mut manual_rescans = HashSet::new();
+    let mut manual_reanalysis_targets = HashMap::<Uuid, Vec<Uuid>>::new();
     let mut preflight_scheduler = ScanScheduler::new(MAX_CONCURRENT_PREFLIGHTS);
     let mut scan_scheduler = ScanScheduler::new(MAX_CONCURRENT_SCANS);
     let mut active_integration_request = None;
@@ -1627,7 +1645,7 @@ pub(crate) async fn run_worker(
                             services.set_application_wiki_role(app_id, wiki_id, role)
                         })
                         .await;
-                        if let Err(error) = result {
+                        if let Err(error) = &result {
                             send(
                                 &events,
                                 WorkerEvent::Error(format!(
@@ -1637,6 +1655,7 @@ pub(crate) async fn run_worker(
                             .await;
                         }
                         refresh_application_access(&services, &events).await;
+                        refresh_collection_views(&services, &events).await;
                     }
                     WorkerCommand::RejectComputation { run_id } => {
                         if let Err(error) = run_service_io(&services, move |services| {
@@ -2144,6 +2163,7 @@ pub(crate) async fn run_worker(
                                     ).await;
                                 }
                                 refresh_content_views(&services, &events).await;
+                                refresh_application_access(&services, &events).await;
                             }
                             Err(error) => send(&events, WorkerEvent::Error(format!("No se pudo crear la colección: {error:#}"))).await,
                         }
@@ -2418,14 +2438,44 @@ pub(crate) async fn run_worker(
                                 },
                             ).await;
                         } else {
-                            manual_rescans.insert(collection_id);
-                            request_scan(
-                                &services,
-                                &mut scan_scheduler,
-                                &mut background,
-                                &events,
-                                collection_id,
-                            ).await;
+                            match run_service_io(&services, move |services| {
+                                services.pending_review_ids(collection_id)
+                            })
+                            .await
+                            {
+                                Ok(review_ids) => {
+                                    if manual_rescans.insert(collection_id) {
+                                        manual_reanalysis_targets
+                                            .insert(collection_id, review_ids);
+                                    }
+                                    request_scan(
+                                        &services,
+                                        &mut scan_scheduler,
+                                        &mut background,
+                                        &events,
+                                        collection_id,
+                                    )
+                                    .await;
+                                }
+                                Err(_) => {
+                                    send(
+                                        &events,
+                                        WorkerEvent::Error(
+                                            "No se pudo preparar la actualización de la wiki"
+                                                .into(),
+                                        ),
+                                    )
+                                    .await;
+                                    send(
+                                        &events,
+                                        WorkerEvent::CollectionScan {
+                                            collection_id,
+                                            state: None,
+                                        },
+                                    )
+                                    .await;
+                                }
+                            }
                         }
                     }
                     WorkerCommand::SetCollectionIndexing { collection_id, indexing_mode } => {
@@ -2577,42 +2627,18 @@ pub(crate) async fn run_worker(
                             );
                         }
                     }
-                    WorkerCommand::Reject { concept_id } => {
+                    WorkerCommand::Reject {
+                        concept_id,
+                        source_revision,
+                    } => {
                         if let Err(error) = run_service_io(&services, move |services| {
-                            services.reject_review(concept_id)
+                            services.reject_review(concept_id, source_revision)
                         }).await {
-                            send(&events, WorkerEvent::Error(format!("No se pudo rechazar el borrador: {error:#}"))).await;
+                            send(&events, WorkerEvent::Error(format!("No se pudo excluir el borrador: {error:#}"))).await;
                         } else {
-                            send(&events, WorkerEvent::Notice("Borrador rechazado; permanece fuera de publicación".into())).await;
+                            send(&events, WorkerEvent::Notice("Borrador excluido; permanece local y puede revisarse más adelante".into())).await;
                         }
                         refresh_content_views(&services, &events).await;
-                    }
-                    WorkerCommand::ReanalyzeReview { concept_id } => {
-                        if model_lifecycle != ModelLifecycle::Ready || !services.models_ready() {
-                            send(
-                                &events,
-                                WorkerEvent::Error(
-                                    "El modelo local todavía no está listo para volver a analizar"
-                                        .into(),
-                                ),
-                            ).await;
-                        } else if !reanalyzing_reviews.insert(concept_id) {
-                            send(
-                                &events,
-                                WorkerEvent::Notice(
-                                    "Ese documento ya se está volviendo a analizar".into(),
-                                ),
-                            ).await;
-                        } else {
-                            send(
-                                &events,
-                                WorkerEvent::ReviewReanalysis {
-                                    concept_id,
-                                    running: true,
-                                },
-                            ).await;
-                            spawn_review_reanalysis(&services, &mut background, concept_id);
-                        }
                     }
                     WorkerCommand::LoadReviewEvidence {
                         request_id,
@@ -2688,6 +2714,21 @@ pub(crate) async fn run_worker(
                                 public_network,
                             },
                         );
+                    }
+                    WorkerCommand::ExplorePublicCatalog { request_id, limit } => {
+                        let services = Arc::clone(&services);
+                        background.spawn(async move {
+                            let result = match AssertUnwindSafe(
+                                services.explore_public_catalog(limit),
+                            )
+                            .catch_unwind()
+                            .await
+                            {
+                                Ok(result) => result,
+                                Err(_) => Err(PublicCatalogError::Unavailable),
+                            };
+                            BackgroundCompletion::PublicCatalog { request_id, result }
+                        });
                     }
                     WorkerCommand::AddFederationIndex { peer_id, address } => {
                         match run_service_io(&services, move |services| {
@@ -3279,7 +3320,11 @@ pub(crate) async fn run_worker(
                             refresh_application_access(&services, &events).await;
                             continue 'running;
                         }
-                        clear_manual_rescan(&mut manual_rescans, collection_id);
+                        clear_manual_update(
+                            &mut manual_rescans,
+                            &mut manual_reanalysis_targets,
+                            collection_id,
+                        );
                         for ready in preflight_scheduler.cancel(collection_id) {
                             spawn_preflight(&services, &mut background, ready);
                         }
@@ -3610,7 +3655,11 @@ pub(crate) async fn run_worker(
                         if matches!(indexing_mode, Ok(IndexingMode::Continuous))
                             && !watchers.contains_key(&collection_id)
                         {
-                            clear_manual_rescan(&mut manual_rescans, collection_id);
+                            clear_manual_update(
+                                &mut manual_rescans,
+                                &mut manual_reanalysis_targets,
+                                collection_id,
+                            );
                             request_quarantine(
                                 &services,
                                 &mut background,
@@ -3635,6 +3684,11 @@ pub(crate) async fn run_worker(
                                 }
                                 watcher_quarantined.remove(&collection_id);
                                 report_ingest_outcomes(&outcomes, &events).await;
+                                if let Some(targets) =
+                                    manual_reanalysis_targets.get_mut(&collection_id)
+                                {
+                                    remove_scan_processed_targets(targets, &outcomes);
+                                }
                                 successful_manual_summary =
                                     Some(manual_rescan_summary(&outcomes));
                                 spawn_wiki_maintenance(
@@ -3644,7 +3698,11 @@ pub(crate) async fn run_worker(
                                 );
                             }
                             Err(error) => {
-                                clear_manual_rescan(&mut manual_rescans, collection_id);
+                                clear_manual_update(
+                                    &mut manual_rescans,
+                                    &mut manual_reanalysis_targets,
+                                    collection_id,
+                                );
                                 send(&events, WorkerEvent::Error(format!(
                                     "Falló el escaneo de la colección {collection_id}: {error}"
                                 ))).await;
@@ -3658,7 +3716,11 @@ pub(crate) async fn run_worker(
                             }
                             }
                         } else {
-                            clear_manual_rescan(&mut manual_rescans, collection_id);
+                            clear_manual_update(
+                                &mut manual_rescans,
+                                &mut manual_reanalysis_targets,
+                                collection_id,
+                            );
                             send(
                                 &events,
                                 WorkerEvent::Error(
@@ -3676,7 +3738,56 @@ pub(crate) async fn run_worker(
                             collection_id,
                             successful_manual_summary,
                         ) {
-                            send(&events, WorkerEvent::Notice(summary)).await;
+                            let requested = manual_reanalysis_targets
+                                .remove(&collection_id)
+                                .unwrap_or_default();
+                            match run_service_io(&services, move |services| {
+                                services.pending_review_ids(collection_id)
+                            })
+                            .await
+                            {
+                                Ok(current) => {
+                                    let current = current.into_iter().collect::<HashSet<_>>();
+                                    let mut started = Vec::new();
+                                    for concept_id in requested
+                                        .into_iter()
+                                        .filter(|concept_id| current.contains(concept_id))
+                                    {
+                                        if reanalyzing_reviews.insert(concept_id) {
+                                            send(
+                                                &events,
+                                                WorkerEvent::ReviewReanalysis {
+                                                    concept_id,
+                                                    running: true,
+                                                },
+                                            )
+                                            .await;
+                                            started.push(concept_id);
+                                        }
+                                    }
+                                    if started.is_empty() {
+                                        send(&events, WorkerEvent::Notice(summary)).await;
+                                    } else {
+                                        spawn_collection_reanalysis(
+                                            &services,
+                                            &mut background,
+                                            started,
+                                            summary,
+                                        );
+                                    }
+                                }
+                                Err(_) => {
+                                    send(&events, WorkerEvent::Notice(summary)).await;
+                                    send(
+                                        &events,
+                                        WorkerEvent::Error(
+                                            "La carpeta se actualizó, pero no se pudieron preparar los borradores para un nuevo análisis"
+                                                .into(),
+                                        ),
+                                    )
+                                    .await;
+                                }
+                            }
                         }
                         spawn_ready_scans(
                             &services,
@@ -3708,29 +3819,39 @@ pub(crate) async fn run_worker(
                         }
                         refresh_content_views(&services, &events).await;
                     }
-                    Some(Ok(BackgroundCompletion::ReanalyzeReview { concept_id, result })) => {
-                        reanalyzing_reviews.remove(&concept_id);
-                        send(
-                            &events,
-                            WorkerEvent::ReviewReanalysis {
-                                concept_id,
-                                running: false,
-                            },
-                        ).await;
-                        match result {
-                            Ok(()) => send(
+                    Some(Ok(BackgroundCompletion::ReanalyzeCollection {
+                        concept_ids,
+                        scan_summary,
+                        updated,
+                        failed,
+                    })) => {
+                        for concept_id in concept_ids {
+                            reanalyzing_reviews.remove(&concept_id);
+                            send(
                                 &events,
-                                WorkerEvent::Notice(
-                                    "El borrador automático se actualizó y continúa pendiente de aprobación"
-                                        .into(),
-                                ),
-                            ).await,
-                            Err(error) => send(
+                                WorkerEvent::ReviewReanalysis {
+                                    concept_id,
+                                    running: false,
+                                },
+                            )
+                            .await;
+                        }
+                        if failed == 0 {
+                            send(
+                                &events,
+                                WorkerEvent::Notice(format!(
+                                    "{scan_summary}. Se volvieron a analizar {updated} borrador(es)"
+                                )),
+                            )
+                            .await;
+                        } else {
+                            send(
                                 &events,
                                 WorkerEvent::Error(format!(
-                                    "No se pudo volver a analizar el documento; se conservó el borrador anterior: {error}"
+                                    "La carpeta se actualizó y {updated} borrador(es) se analizaron de nuevo; {failed} conservaron su propuesta anterior"
                                 )),
-                            ).await,
+                            )
+                            .await;
                         }
                         refresh_content_views(&services, &events).await;
                     }
@@ -3795,6 +3916,18 @@ pub(crate) async fn run_worker(
                         send(
                             &events,
                             WorkerEvent::SearchFinished { request_id, result },
+                        ).await;
+                    }
+                    Some(Ok(BackgroundCompletion::PublicCatalog { request_id, result })) => {
+                        if let Err(error) = result {
+                            tracing::warn!(
+                                error_kind = error.code(),
+                                "public catalog exploration failed"
+                            );
+                        }
+                        send(
+                            &events,
+                            WorkerEvent::PublicCatalogFinished { request_id, result },
                         ).await;
                     }
                     Some(Ok(BackgroundCompletion::PublicBrowse { request_id, update, result })) => {
@@ -3867,6 +4000,7 @@ pub(crate) async fn run_worker(
                             Err(error) => Err(error),
                         };
                         refresh_application_access(&services, &events).await;
+                        refresh_collection_views(&services, &events).await;
                         send(
                             &events,
                             WorkerEvent::ChatIntegrationsUpdated { request_id, result },
@@ -4022,6 +4156,7 @@ pub(crate) async fn run_worker(
                             ).await,
                         }
                         refresh_content_views(&services, &events).await;
+                        refresh_application_access(&services, &events).await;
                     }
                     Some(Ok(BackgroundCompletion::LanAddressesResolved {
                         generation,
@@ -5967,19 +6102,31 @@ fn spawn_scan(
     });
 }
 
-fn spawn_review_reanalysis(
+fn spawn_collection_reanalysis(
     services: &Arc<DesktopServices>,
     background: &mut JoinSet<BackgroundCompletion>,
-    concept_id: Uuid,
+    concept_ids: Vec<Uuid>,
+    scan_summary: String,
 ) {
     let services = Arc::clone(services);
     background.spawn(async move {
-        let result = AssertUnwindSafe(services.reanalyze_review(concept_id))
-            .catch_unwind()
-            .await
-            .map_err(panic_message)
-            .and_then(|result| result.map_err(|error| format!("{error:#}")));
-        BackgroundCompletion::ReanalyzeReview { concept_id, result }
+        let mut updated = 0_usize;
+        let mut failed = 0_usize;
+        for concept_id in &concept_ids {
+            match AssertUnwindSafe(services.reanalyze_review(*concept_id))
+                .catch_unwind()
+                .await
+            {
+                Ok(Ok(())) => updated = updated.saturating_add(1),
+                Ok(Err(_)) | Err(_) => failed = failed.saturating_add(1),
+            }
+        }
+        BackgroundCompletion::ReanalyzeCollection {
+            concept_ids,
+            scan_summary,
+            updated,
+            failed,
+        }
     });
 }
 
@@ -6249,6 +6396,20 @@ fn panic_message(payload: Box<dyn std::any::Any + Send>) -> String {
     }
 }
 
+fn remove_scan_processed_targets(targets: &mut Vec<Uuid>, outcomes: &[IngestOutcome]) {
+    let processed = outcomes
+        .iter()
+        .filter_map(|outcome| match outcome {
+            IngestOutcome::NeedsReview { concept_id, .. } => Some(*concept_id),
+            IngestOutcome::Unchanged { .. }
+            | IngestOutcome::Renamed { .. }
+            | IngestOutcome::Deleted { .. }
+            | IngestOutcome::Failed { .. } => None,
+        })
+        .collect::<HashSet<_>>();
+    targets.retain(|concept_id| !processed.contains(concept_id));
+}
+
 fn manual_rescan_summary(outcomes: &[IngestOutcome]) -> String {
     let mut analyzed = 0_usize;
     let mut unchanged = 0_usize;
@@ -6282,8 +6443,13 @@ fn take_manual_rescan_summary(
     summary
 }
 
-fn clear_manual_rescan(manual_rescans: &mut HashSet<Uuid>, collection_id: Uuid) {
+fn clear_manual_update(
+    manual_rescans: &mut HashSet<Uuid>,
+    manual_reanalysis_targets: &mut HashMap<Uuid, Vec<Uuid>>,
+    collection_id: Uuid,
+) {
     manual_rescans.remove(&collection_id);
+    manual_reanalysis_targets.remove(&collection_id);
 }
 
 async fn report_ingest_outcomes(outcomes: &[IngestOutcome], events: &Sender<WorkerEvent>) {
@@ -6869,6 +7035,7 @@ mod tests {
         IntegrationView {
             client,
             status: IntegrationStatus::Available,
+            issue: None,
             detected_version: None,
             detail: "available".to_owned(),
             planned_path: None,
@@ -7094,6 +7261,22 @@ mod tests {
         assert!(!summary.contains("private failure"));
     }
 
+    #[test]
+    fn manual_update_does_not_analyze_a_changed_draft_twice() {
+        let processed = Uuid::new_v4();
+        let unchanged = Uuid::new_v4();
+        let mut targets = vec![processed, unchanged];
+        let outcomes = vec![IngestOutcome::NeedsReview {
+            source_document_id: Uuid::new_v4(),
+            concept_id: processed,
+            used_fallback_metadata: false,
+        }];
+
+        remove_scan_processed_targets(&mut targets, &outcomes);
+
+        assert_eq!(targets, vec![unchanged]);
+    }
+
     #[tokio::test]
     async fn ingest_failure_is_presented_by_the_typed_issue_list_not_a_raw_notice() {
         let outcomes = vec![IngestOutcome::Failed {
@@ -7186,10 +7369,16 @@ mod tests {
         let collection = Uuid::new_v4();
         let mut scheduler = ScanScheduler::new(1);
         let mut manual_rescans = HashSet::from([collection]);
+        let mut manual_reanalysis_targets = HashMap::from([(collection, vec![Uuid::new_v4()])]);
         assert_eq!(scheduler.request(collection), vec![collection]);
 
-        clear_manual_rescan(&mut manual_rescans, collection);
+        clear_manual_update(
+            &mut manual_rescans,
+            &mut manual_reanalysis_targets,
+            collection,
+        );
         assert!(!manual_rescans.contains(&collection));
+        assert!(!manual_reanalysis_targets.contains_key(&collection));
         assert!(scheduler.finish(collection).is_empty());
         assert_eq!(
             take_manual_rescan_summary(

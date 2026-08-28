@@ -224,7 +224,7 @@ Routine checks:
 - before every candidate: live cost check, bootstrap expiry and version;
 - 30 days before expiry: start registry renewal;
 - after any binary update: exact hash on both nodes, service restart and
-  per-node public probe.
+  per-node public probe covering catalog browse plus synthetic search.
 
 ## Failure and recovery
 

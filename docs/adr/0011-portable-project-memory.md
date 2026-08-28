@@ -53,9 +53,10 @@ rename. MCP `initialize_airwiki_project` and first
 `open_airwiki_project` create only a deduplicated ten-minute request. They never
 write files or grant access. Native approval repeats root, filesystem,
 manifest, fingerprint and application checks, then creates or attaches the
-bundle and grants that application `editor`. Approval is local to the
-application/root/portable-identity combination; another clone requires another
-approval.
+bundle, grants that application `editor`, and grants already active AI
+applications `reader`. The native confirmation discloses both effects. Approval
+is local to the application/root/portable-identity combination; another clone
+requires another approval.
 
 Project bundle mutations share the managed-bundle lock, fingerprint contract,
 atomic replacement and journal used by personal memory. The lock is never held

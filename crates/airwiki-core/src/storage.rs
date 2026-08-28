@@ -42,6 +42,7 @@ const MIGRATION_13: &str = include_str!("../migrations/0013_restrict_incompatibl
 const MIGRATION_14: &str = include_str!("../migrations/0014_bound_computation_runs.sql");
 const MIGRATION_15: &str = include_str!("../migrations/0015_peer_device_platform.sql");
 const MIGRATION_16: &str = include_str!("../migrations/0016_project_memory.sql");
+const MIGRATION_17: &str = include_str!("../migrations/0017_application_search_grants.sql");
 
 const APPLICATION_MUTATIONS_PER_MINUTE: u32 = 30;
 const APPLICATION_WIKI_CREATIONS_PER_HOUR: u32 = 5;
@@ -276,6 +277,13 @@ pub struct NewProjectMemoryAttachment {
     pub manifest_fingerprint: String,
 }
 
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum InitialApplicationAccess {
+    #[default]
+    None,
+    ActiveReaders,
+}
+
 #[derive(Debug, Clone)]
 pub struct NewCollection {
     pub id: Uuid,
@@ -285,6 +293,7 @@ pub struct NewCollection {
     pub policy: CollectionPolicy,
     pub origin: WikiOrigin,
     pub indexing_mode: IndexingMode,
+    pub initial_application_access: InitialApplicationAccess,
 }
 
 #[derive(Debug, Clone)]
@@ -292,9 +301,11 @@ pub struct NewManagedCollection {
     pub id: Uuid,
     pub name: String,
     pub bundle_root: PathBuf,
+    pub policy: CollectionPolicy,
     pub origin: WikiOrigin,
     pub replacement_fingerprint: String,
     pub owner_app_id: Option<Uuid>,
+    pub initial_application_access: InitialApplicationAccess,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -399,6 +410,7 @@ pub struct OkfConceptProjectionRecord {
 pub(crate) struct PublishedBundleDatabaseRecords {
     pub collection: CollectionRecord,
     pub published: Vec<ConceptRecord>,
+    pub drafts: Vec<ConceptRecord>,
     pub sources: BTreeMap<Uuid, Option<SourceDocumentRecord>>,
     pub publication_pending: bool,
     pub projection: Vec<OkfConceptProjectionRecord>,
@@ -674,6 +686,7 @@ pub struct CollectionStats {
     pub needs_review: u64,
     pub published: u64,
     pub failed: u64,
+    pub excluded: u64,
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
@@ -931,7 +944,8 @@ fn pending_review_snapshot(
                     co.classification_explanation,co.logical_resource_uri,co.generator_model
              FROM concepts co
              JOIN source_documents sd ON sd.id=co.source_document_id
-             WHERE co.id=?1 AND co.status='needs_review' AND sd.status='needs_review'
+             WHERE co.id=?1 AND co.status IN ('needs_review','excluded')
+               AND sd.status=co.status
                AND sd.concept_id=co.id AND sd.collection_id=co.collection_id
                AND sd.revision=?2",
             params![concept_id.to_string(), expected_revision],
@@ -1204,7 +1218,13 @@ impl Database {
             tx.pragma_update(None, "user_version", 16)?;
             tx.commit()?;
         }
-        if version > 16 {
+        if version < 17 {
+            let tx = connection.transaction()?;
+            tx.execute_batch(MIGRATION_17)?;
+            tx.pragma_update(None, "user_version", 17)?;
+            tx.commit()?;
+        }
+        if version > 17 {
             bail!("database schema {version} is newer than this application supports");
         }
         let database = Self {
@@ -1441,6 +1461,7 @@ impl Database {
             policy,
             origin,
             indexing_mode,
+            initial_application_access: InitialApplicationAccess::None,
         })
     }
 
@@ -1448,9 +1469,10 @@ impl Database {
         &self,
         input: NewCollection,
     ) -> Result<CollectionRecord> {
+        let initial_application_access = input.initial_application_access;
         let record = build_collection_record(input, None)?;
         let connection = self.connection()?;
-        insert_collection(&connection, &record)?;
+        insert_collection(&connection, &record, initial_application_access)?;
         Ok(record)
     }
 
@@ -1470,9 +1492,10 @@ impl Database {
                 name: input.name,
                 source_folder: input.bundle_root.clone(),
                 wiki_folder: input.bundle_root,
-                policy: CollectionPolicy::local_only(),
+                policy: input.policy,
                 origin: input.origin,
                 indexing_mode: IndexingMode::NotApplicable,
+                initial_application_access: input.initial_application_access,
             },
             (input.origin == WikiOrigin::AiMemory).then_some(MemoryScope::Personal),
         )?;
@@ -1487,7 +1510,7 @@ impl Database {
         let now = Utc::now().to_rfc3339();
         let mut connection = self.connection()?;
         let tx = connection.transaction()?;
-        insert_collection(&tx, &record)?;
+        insert_collection(&tx, &record, input.initial_application_access)?;
         if let Some(app_id) = input.owner_app_id {
             let active = tx.query_row(
                 "SELECT EXISTS(SELECT 1 FROM application_capabilities
@@ -1501,7 +1524,9 @@ impl Database {
             tx.execute(
                 "INSERT INTO application_wiki_grants
                  (app_id,collection_id,role,granted_at,confirmed_at)
-                 VALUES (?1,?2,'owner',?3,?3)",
+                 VALUES (?1,?2,'owner',?3,?3)
+                 ON CONFLICT(app_id,collection_id) DO UPDATE SET
+                   role='owner',confirmed_at=excluded.confirmed_at",
                 params![app_id.to_string(), record.id.to_string(), now],
             )?;
         }
@@ -1855,12 +1880,27 @@ impl Database {
         let _guard = self.managed_bundle_guard()?;
         let mut connection = self.connection()?;
         let tx = connection.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let now = Utc::now().to_rfc3339();
         let count = tx.execute(
             "UPDATE application_capabilities SET revoked_at=?2 WHERE app_id=?1",
-            params![app_id.to_string(), revoked.then(|| Utc::now().to_rfc3339())],
+            params![app_id.to_string(), revoked.then_some(now.as_str())],
         )?;
         ensure_changed(count, "application capability", app_id)?;
         if revoked {
+            tx.execute(
+                "UPDATE collections
+                 SET allow_external_ai=0,
+                     local_only=CASE WHEN peer_shareable=0 AND internet_public=0 THEN 1 ELSE 0 END,
+                     updated_at=?2
+                 WHERE id IN (
+                     SELECT collection_id FROM application_wiki_grants WHERE app_id=?1
+                 ) AND NOT EXISTS (
+                     SELECT 1 FROM application_wiki_grants g
+                     JOIN application_capabilities a ON a.app_id=g.app_id
+                     WHERE g.collection_id=collections.id AND a.revoked_at IS NULL
+                 )",
+                params![app_id.to_string(), now],
+            )?;
             tx.execute(
                 "DELETE FROM application_wiki_grants WHERE app_id=?1 AND role!='owner'",
                 [app_id.to_string()],
@@ -1907,17 +1947,28 @@ impl Database {
             if !active {
                 bail!("application capability is unavailable");
             }
-            let (origin, memory_scope, project_active): (String, Option<String>, bool) = tx
-                .query_row(
-                    "SELECT c.origin,c.memory_scope,
+            let (origin, memory_scope, project_active, compatibility): (
+                String,
+                Option<String>,
+                bool,
+                String,
+            ) = tx.query_row(
+                "SELECT c.origin,c.memory_scope,
                         EXISTS(SELECT 1 FROM project_memory_attachments p
-                               WHERE p.collection_id=c.id AND p.state='active')
+                               WHERE p.collection_id=c.id AND p.state='active'),
+                        c.okf_compatibility
                  FROM collections c WHERE c.id=?1",
-                    [collection_id.to_string()],
-                    |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
-                )?;
-            if origin != WikiOrigin::AiMemory.as_str() {
-                bail!("applications may only receive grants for AI memory wikis");
+                [collection_id.to_string()],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
+            )?;
+            if !matches!(
+                compatibility.as_str(),
+                "declared_v02" | "undeclared_v02_compatible"
+            ) {
+                bail!("this OKF compatibility level cannot be connected to applications");
+            }
+            if role == ApplicationWikiRole::Editor && origin != WikiOrigin::AiMemory.as_str() {
+                bail!("only AI memory wikis may receive application editor grants");
             }
             if memory_scope.as_deref() == Some(MemoryScope::Project.as_str()) && !project_active {
                 bail!("project memory attachment is unavailable");
@@ -1930,10 +1981,26 @@ impl Database {
                  ON CONFLICT(app_id,collection_id) DO UPDATE SET role=excluded.role,confirmed_at=excluded.confirmed_at",
                 params![app_id.to_string(), collection_id.to_string(), role.as_str(), now],
             )?;
+            tx.execute(
+                "UPDATE collections SET allow_external_ai=1,local_only=0,updated_at=?2 WHERE id=?1",
+                params![collection_id.to_string(), now],
+            )?;
         } else {
             tx.execute(
                 "DELETE FROM application_wiki_grants WHERE app_id=?1 AND collection_id=?2",
                 params![app_id.to_string(), collection_id.to_string()],
+            )?;
+            tx.execute(
+                "UPDATE collections
+                 SET allow_external_ai=0,
+                     local_only=CASE WHEN peer_shareable=0 AND internet_public=0 THEN 1 ELSE 0 END,
+                     updated_at=?2
+                 WHERE id=?1 AND NOT EXISTS(
+                     SELECT 1 FROM application_wiki_grants g
+                     JOIN application_capabilities a ON a.app_id=g.app_id
+                     WHERE g.collection_id=?1 AND a.revoked_at IS NULL
+                 )",
+                params![collection_id.to_string(), Utc::now().to_rfc3339()],
             )?;
         }
         tx.commit()?;
@@ -1962,6 +2029,62 @@ impl Database {
             _ => bail!("application wiki role is invalid"),
         })
         .transpose()
+    }
+
+    pub fn application_search_collection_ids(&self, app_id: Uuid) -> Result<Vec<Uuid>> {
+        let connection = self.connection()?;
+        let mut statement = connection.prepare(
+            "SELECT DISTINCT c.id FROM application_wiki_grants g
+             JOIN application_capabilities a ON a.app_id=g.app_id
+             JOIN collections c ON c.id=g.collection_id
+             LEFT JOIN project_memory_attachments p ON p.collection_id=c.id
+             WHERE g.app_id=?1 AND a.revoked_at IS NULL AND c.allow_external_ai=1
+               AND c.okf_compatibility IN ('declared_v02','undeclared_v02_compatible')
+               AND (c.origin!='ai_memory' OR c.memory_scope='personal'
+                    OR (c.memory_scope='project' AND p.state='active'))
+             ORDER BY c.id",
+        )?;
+        let rows = statement.query_map([app_id.to_string()], |row| {
+            uuid_sql(row.get::<_, String>(0)?)
+        })?;
+        rows.collect::<rusqlite::Result<_>>().map_err(Into::into)
+    }
+
+    pub fn connect_application_to_default_wikis(&self, app_id: Uuid) -> Result<()> {
+        let now = Utc::now().to_rfc3339();
+        let mut connection = self.connection()?;
+        let tx = connection.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let active: bool = tx.query_row(
+            "SELECT EXISTS(SELECT 1 FROM application_capabilities
+                           WHERE app_id=?1 AND revoked_at IS NULL)",
+            [app_id.to_string()],
+            |row| row.get(0),
+        )?;
+        if !active {
+            bail!("application capability is unavailable");
+        }
+        tx.execute(
+            "UPDATE collections
+             SET allow_external_ai=1,local_only=0,updated_at=?1
+             WHERE okf_compatibility IN ('declared_v02','undeclared_v02_compatible')
+               AND (origin!='ai_memory' OR memory_scope='personal'
+                    OR EXISTS(SELECT 1 FROM project_memory_attachments p
+                              WHERE p.collection_id=collections.id AND p.state='active'))",
+            [&now],
+        )?;
+        tx.execute(
+            "INSERT INTO application_wiki_grants
+             (app_id,collection_id,role,granted_at,confirmed_at)
+             SELECT ?1,c.id,'reader',?2,?2 FROM collections c
+             WHERE c.okf_compatibility IN ('declared_v02','undeclared_v02_compatible')
+               AND (c.origin!='ai_memory' OR c.memory_scope='personal'
+                    OR EXISTS(SELECT 1 FROM project_memory_attachments p
+                              WHERE p.collection_id=c.id AND p.state='active'))
+             ON CONFLICT(app_id,collection_id) DO NOTHING",
+            params![app_id.to_string(), now],
+        )?;
+        tx.commit()?;
+        Ok(())
     }
 
     pub fn application_memory_wikis(&self, app_id: Uuid) -> Result<Vec<CollectionRecord>> {
@@ -2138,9 +2261,10 @@ impl Database {
                 name: attachment.name.clone(),
                 source_folder: attachment.project_root.clone(),
                 wiki_folder: attachment.wiki_root.clone(),
-                policy: CollectionPolicy::local_only(),
+                policy: CollectionPolicy::connected_to_ai_apps(),
                 origin: WikiOrigin::AiMemory,
                 indexing_mode: IndexingMode::NotApplicable,
+                initial_application_access: InitialApplicationAccess::ActiveReaders,
             },
             Some(MemoryScope::Project),
         )?;
@@ -2181,7 +2305,7 @@ impl Database {
         if !active {
             bail!("application capability is unavailable");
         }
-        insert_collection(&tx, &record)?;
+        insert_collection(&tx, &record, InitialApplicationAccess::ActiveReaders)?;
         tx.execute(
             "INSERT INTO project_memory_attachments
              (collection_id,project_id,portable_wiki_id,project_root,manifest_fingerprint,state,
@@ -2199,7 +2323,9 @@ impl Database {
         tx.execute(
             "INSERT INTO application_wiki_grants
              (app_id,collection_id,role,granted_at,confirmed_at)
-             VALUES (?1,?2,'editor',?3,?3)",
+             VALUES (?1,?2,'editor',?3,?3)
+             ON CONFLICT(app_id,collection_id) DO UPDATE SET
+               role='editor',confirmed_at=excluded.confirmed_at",
             params![
                 request.app_id.to_string(),
                 record.id.to_string(),
@@ -2225,16 +2351,17 @@ impl Database {
                 name: attachment.name.clone(),
                 source_folder: attachment.project_root.clone(),
                 wiki_folder: attachment.wiki_root.clone(),
-                policy: CollectionPolicy::local_only(),
+                policy: CollectionPolicy::connected_to_ai_apps(),
                 origin: WikiOrigin::AiMemory,
                 indexing_mode: IndexingMode::NotApplicable,
+                initial_application_access: InitialApplicationAccess::ActiveReaders,
             },
             Some(MemoryScope::Project),
         )?;
         let now = Utc::now().to_rfc3339();
         let mut connection = self.connection()?;
         let tx = connection.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        insert_collection(&tx, &record)?;
+        insert_collection(&tx, &record, InitialApplicationAccess::ActiveReaders)?;
         tx.execute(
             "INSERT INTO project_memory_attachments
              (collection_id,project_id,portable_wiki_id,project_root,manifest_fingerprint,state,
@@ -3495,7 +3622,10 @@ impl Database {
         {
             let id = parse_uuid(&id)?;
             if old_hash == sha256 {
-                if matches!(status.as_str(), "needs_review" | "publishing" | "published") {
+                if matches!(
+                    status.as_str(),
+                    "needs_review" | "excluded" | "publishing" | "published"
+                ) {
                     tx.execute(
                         "UPDATE source_documents SET source_path=?2,updated_at=?3,deleted_at=NULL
                          WHERE id=?1",
@@ -3584,8 +3714,10 @@ impl Database {
             && path_is_definitely_missing(previous_path)
         {
             let id = parse_uuid(id)?;
-            let needs_processing =
-                !matches!(status.as_str(), "needs_review" | "publishing" | "published");
+            let needs_processing = !matches!(
+                status.as_str(),
+                "needs_review" | "excluded" | "publishing" | "published"
+            );
             if needs_processing {
                 supersede_active_ingest_jobs(&tx, id, &now)?;
                 withdraw_source(&tx, id)?;
@@ -4007,10 +4139,57 @@ impl Database {
             "SELECT id,source_document_id,collection_id,concept_type,title,description,language,
              tags_json,entities_json,links_json,summary,classification_confidence,
              classification_explanation,logical_resource_uri,generator_model,status,reviewed_at,
-             created_at,updated_at FROM concepts WHERE status='needs_review' ORDER BY updated_at",
+             created_at,updated_at FROM concepts
+             WHERE status IN ('needs_review','excluded')
+             ORDER BY status='excluded',updated_at",
         )?;
         let rows = statement.query_map([], concept_from_row)?;
         rows.collect::<rusqlite::Result<_>>().map_err(Into::into)
+    }
+
+    /// Sets one exact source revision aside without deleting its local OKF
+    /// draft or evidence. A later source revision automatically returns to the
+    /// normal ingestion path, and explicit approval can still publish this
+    /// revision after the person reopens it.
+    pub fn exclude_review(
+        &self,
+        concept_id: Uuid,
+        expected_revision: u32,
+    ) -> Result<ConceptRecord> {
+        let now = Utc::now().to_rfc3339();
+        let mut connection = self.connection()?;
+        let tx = connection.transaction()?;
+        let source_id = tx
+            .query_row(
+                "SELECT sd.id FROM concepts co
+                 JOIN source_documents sd ON sd.id=co.source_document_id
+                 WHERE co.id=?1 AND co.status IN ('needs_review','excluded')
+                   AND sd.status=co.status AND sd.concept_id=co.id
+                   AND sd.revision=?2",
+                params![concept_id.to_string(), expected_revision],
+                |row| row.get::<_, String>(0),
+            )
+            .optional()?
+            .with_context(|| {
+                format!("concept {concept_id} is no longer the review revision shown")
+            })?;
+        let concept_changed = tx.execute(
+            "UPDATE concepts SET status='excluded',reviewed_at=NULL,updated_at=?2
+             WHERE id=?1 AND status IN ('needs_review','excluded')",
+            params![concept_id.to_string(), now],
+        )?;
+        let source_changed = tx.execute(
+            "UPDATE source_documents SET status='excluded',last_error=NULL,updated_at=?2
+             WHERE id=?1 AND status IN ('needs_review','excluded') AND revision=?3",
+            params![source_id, now, expected_revision],
+        )?;
+        if concept_changed != 1 || source_changed != 1 {
+            bail!("review state changed while excluding concept {concept_id}");
+        }
+        tx.commit()?;
+        drop(connection);
+        self.concept(concept_id)?
+            .with_context(|| format!("excluded concept {concept_id} disappeared"))
     }
 
     /// Exclusively claims a pending concept for reanalysis without deleting
@@ -4028,7 +4207,8 @@ impl Database {
                  FROM concepts co
                  JOIN source_documents sd ON sd.id=co.source_document_id
                  JOIN collections col ON col.id=co.collection_id
-                 WHERE co.id=?1 AND co.status='needs_review' AND sd.status='needs_review'
+                 WHERE co.id=?1 AND co.status IN ('needs_review','excluded')
+                   AND sd.status=co.status
                    AND sd.concept_id=co.id
                    AND col.okf_compatibility IN ('declared_v02','undeclared_v02_compatible')",
                 [concept_id.to_string()],
@@ -4071,12 +4251,12 @@ impl Database {
         )?;
         let concept_changed = tx.execute(
             "UPDATE concepts SET status='enriched',reviewed_at=NULL,updated_at=?2
-             WHERE id=?1 AND status='needs_review'",
+             WHERE id=?1 AND status IN ('needs_review','excluded')",
             params![concept_id.to_string(), now.to_rfc3339()],
         )?;
         let source_changed = tx.execute(
             "UPDATE source_documents SET status='enriched',last_error=NULL,updated_at=?2
-             WHERE id=?1 AND status='needs_review'",
+             WHERE id=?1 AND status IN ('needs_review','excluded')",
             params![source_document_id.to_string(), now.to_rfc3339()],
         )?;
         if concept_changed != 1 || source_changed != 1 {
@@ -4298,6 +4478,21 @@ impl Database {
              classification_explanation,logical_resource_uri,generator_model,status,reviewed_at,
              created_at,updated_at FROM concepts WHERE collection_id=?1 AND status='published'
              ORDER BY title COLLATE NOCASE",
+        )?;
+        let rows = statement.query_map([collection_id.to_string()], concept_from_row)?;
+        rows.collect::<rusqlite::Result<_>>().map_err(Into::into)
+    }
+
+    fn list_local_draft_concepts_on(
+        connection: &Connection,
+        collection_id: Uuid,
+    ) -> Result<Vec<ConceptRecord>> {
+        let mut statement = connection.prepare(
+            "SELECT id,source_document_id,collection_id,concept_type,title,description,language,
+             tags_json,entities_json,links_json,summary,classification_confidence,
+             classification_explanation,logical_resource_uri,generator_model,status,reviewed_at,
+             created_at,updated_at FROM concepts WHERE collection_id=?1
+             AND status IN ('needs_review','excluded') ORDER BY title COLLATE NOCASE",
         )?;
         let rows = statement.query_map([collection_id.to_string()], concept_from_row)?;
         rows.collect::<rusqlite::Result<_>>().map_err(Into::into)
@@ -5101,7 +5296,7 @@ impl Database {
             "UPDATE concepts SET concept_type=?2,title=?3,description=?4,language=?5,tags_json=?6,
              entities_json=?7,links_json=?8,summary=?9,classification_confidence=?10,
              classification_explanation=?11,status='publishing',reviewed_at=?12,updated_at=?13
-             WHERE id=?1 AND status='needs_review'",
+             WHERE id=?1 AND status IN ('needs_review','excluded')",
             params![
                 concept_id.to_string(),
                 draft.concept_type.to_string(),
@@ -5120,7 +5315,8 @@ impl Database {
         )?;
         let source_changed = tx.execute(
             "UPDATE source_documents SET status='publishing',last_error=NULL,updated_at=?2
-             WHERE id=?1 AND status='needs_review' AND source_sha256=?3 AND revision=?4",
+             WHERE id=?1 AND status IN ('needs_review','excluded')
+               AND source_sha256=?3 AND revision=?4",
             params![
                 source_id.to_string(),
                 now.to_rfc3339(),
@@ -5212,8 +5408,9 @@ impl Database {
         let collection = Self::collection_on(connection, collection_id)?
             .with_context(|| format!("collection {collection_id} does not exist"))?;
         let published = Self::list_published_concepts_on(connection, collection_id)?;
+        let drafts = Self::list_local_draft_concepts_on(connection, collection_id)?;
         let mut sources = BTreeMap::new();
-        for concept in &published {
+        for concept in published.iter().chain(&drafts) {
             if let std::collections::btree_map::Entry::Vacant(entry) =
                 sources.entry(concept.source_document_id)
             {
@@ -5229,6 +5426,7 @@ impl Database {
         Ok(PublishedBundleDatabaseRecords {
             collection,
             published,
+            drafts,
             sources,
             publication_pending,
             projection,
@@ -5507,7 +5705,8 @@ impl Database {
             .query_row(
                 "SELECT co.source_document_id FROM concepts co
                  JOIN source_documents sd ON sd.id=co.source_document_id
-                 WHERE co.id=?1 AND co.status='needs_review' AND sd.status='needs_review'
+                 WHERE co.id=?1 AND co.status IN ('needs_review','excluded')
+                   AND sd.status=co.status
                    AND sd.source_sha256=?2 AND sd.revision=?3
                    AND EXISTS (
                      SELECT 1 FROM chunks ch
@@ -5529,10 +5728,11 @@ impl Database {
             "UPDATE concepts SET concept_type=?2,title=?3,description=?4,language=?5,tags_json=?6,
              entities_json=?7,links_json=?8,summary=?9,classification_confidence=?10,
              classification_explanation=?11,status='published',reviewed_at=?12,updated_at=?12
-             WHERE id=?1 AND status='needs_review'
+             WHERE id=?1 AND status IN ('needs_review','excluded')
                AND EXISTS (
                  SELECT 1 FROM source_documents sd
-                 WHERE sd.id=concepts.source_document_id AND sd.status='needs_review'
+                 WHERE sd.id=concepts.source_document_id
+                   AND sd.status=concepts.status
                    AND sd.source_sha256=?13 AND sd.revision=?14
                )
                AND EXISTS (SELECT 1 FROM chunks ch WHERE ch.concept_id=concepts.id)",
@@ -5555,7 +5755,8 @@ impl Database {
         )?;
         let source_changed = tx.execute(
             "UPDATE source_documents SET status='published',updated_at=?2
-             WHERE id=?1 AND status='needs_review' AND source_sha256=?3 AND revision=?4",
+             WHERE id=?1 AND status IN ('needs_review','excluded')
+               AND source_sha256=?3 AND revision=?4",
             params![
                 source_id,
                 now.to_rfc3339(),
@@ -6077,7 +6278,8 @@ impl Database {
                 "SELECT sum(CASE WHEN status!='deleted' THEN 1 ELSE 0 END),
                  sum(CASE WHEN status='needs_review' THEN 1 ELSE 0 END),
                  sum(CASE WHEN status='published' THEN 1 ELSE 0 END),
-                 sum(CASE WHEN status='failed' THEN 1 ELSE 0 END)
+                 sum(CASE WHEN status='failed' THEN 1 ELSE 0 END),
+                 sum(CASE WHEN status='excluded' THEN 1 ELSE 0 END)
                  FROM source_documents WHERE collection_id=?1",
                 [collection_id.to_string()],
                 |row| {
@@ -6086,6 +6288,7 @@ impl Database {
                         needs_review: row.get::<_, Option<u64>>(1)?.unwrap_or(0),
                         published: row.get::<_, Option<u64>>(2)?.unwrap_or(0),
                         failed: row.get::<_, Option<u64>>(3)?.unwrap_or(0),
+                        excluded: row.get::<_, Option<u64>>(4)?.unwrap_or(0),
                     })
                 },
             )
@@ -7139,7 +7342,11 @@ fn build_collection_record(
     Ok(record)
 }
 
-fn insert_collection(connection: &Connection, record: &CollectionRecord) -> Result<()> {
+fn insert_collection(
+    connection: &Connection,
+    record: &CollectionRecord,
+    initial_application_access: InitialApplicationAccess,
+) -> Result<()> {
     connection.execute(
         "INSERT INTO collections
          (id,name,source_folder,wiki_folder,local_only,peer_shareable,allow_external_ai,internet_public,
@@ -7166,6 +7373,19 @@ fn insert_collection(connection: &Connection, record: &CollectionRecord) -> Resu
             record.memory_scope.map(MemoryScope::as_str),
         ],
     )?;
+    if initial_application_access == InitialApplicationAccess::ActiveReaders
+        && record.policy.allow_external_ai
+        && record.okf_compatibility.permits_external_disclosure()
+    {
+        connection.execute(
+            "INSERT INTO application_wiki_grants
+             (app_id,collection_id,role,granted_at,confirmed_at)
+             SELECT app_id,?1,'reader',?2,?2 FROM application_capabilities
+             WHERE revoked_at IS NULL
+             ON CONFLICT(app_id,collection_id) DO NOTHING",
+            params![record.id.to_string(), record.created_at.to_rfc3339()],
+        )?;
+    }
     Ok(())
 }
 
@@ -7278,6 +7498,7 @@ fn status_sql(value: String) -> rusqlite::Result<DocumentStatus> {
         "extracted" => Ok(DocumentStatus::Extracted),
         "enriched" => Ok(DocumentStatus::Enriched),
         "needs_review" => Ok(DocumentStatus::NeedsReview),
+        "excluded" => Ok(DocumentStatus::Excluded),
         "publishing" => Ok(DocumentStatus::Publishing),
         "published" => Ok(DocumentStatus::Published),
         "deleted" => Ok(DocumentStatus::Deleted),
@@ -7769,6 +7990,34 @@ mod tests {
     }
 
     #[test]
+    fn excluded_review_remains_available_and_can_be_approved_later() {
+        let (_temp, db, _collection, source_id, concept_id) = setup_review_evidence(1);
+
+        let excluded = db.exclude_review(concept_id, 1).unwrap();
+
+        assert_eq!(excluded.status, DocumentStatus::Excluded);
+        assert_eq!(
+            db.source_document(source_id).unwrap().unwrap().status,
+            DocumentStatus::Excluded
+        );
+        assert!(
+            db.list_concepts_for_review()
+                .unwrap()
+                .iter()
+                .any(|concept| concept.id == concept_id
+                    && concept.status == DocumentStatus::Excluded)
+        );
+        assert!(
+            db.review_evidence_page(concept_id, 1, None, None, 20)
+                .unwrap()
+                .is_some()
+        );
+
+        let approved = db.approve_concept(concept_id, excluded.draft).unwrap();
+        assert_eq!(approved.status, DocumentStatus::Published);
+    }
+
+    #[test]
     fn review_evidence_is_stale_after_publication() {
         let (_temp, db, _collection, _source_id, concept_id) = setup_review_evidence(1);
         db.approve_concept(concept_id, draft()).unwrap();
@@ -7920,7 +8169,7 @@ mod tests {
         let temp = tempfile::tempdir().unwrap();
         let path = temp.path().join("db.sqlite");
         let db = Database::open(&path).unwrap();
-        assert_eq!(db.schema_version().unwrap(), 16);
+        assert_eq!(db.schema_version().unwrap(), 17);
         for table in [
             "collections",
             "source_documents",
@@ -7940,7 +8189,7 @@ mod tests {
             assert_eq!(db.count(table).unwrap(), 0);
         }
         drop(db);
-        assert_eq!(Database::open(path).unwrap().schema_version().unwrap(), 16);
+        assert_eq!(Database::open(path).unwrap().schema_version().unwrap(), 17);
     }
 
     #[test]
@@ -8462,7 +8711,7 @@ mod tests {
         drop(connection);
 
         let database = Database::open(&path).unwrap();
-        assert_eq!(database.schema_version().unwrap(), 16);
+        assert_eq!(database.schema_version().unwrap(), 17);
         assert_eq!(database.count("collections").unwrap(), 1);
         assert_eq!(database.count("source_documents").unwrap(), 1);
         assert_eq!(database.count("publication_claims").unwrap(), 0);
@@ -8502,7 +8751,7 @@ mod tests {
 
         let database = Database::open(&path).unwrap();
 
-        assert_eq!(database.schema_version().unwrap(), 16);
+        assert_eq!(database.schema_version().unwrap(), 17);
         assert_eq!(
             database.collection(collection_id).unwrap().unwrap().policy,
             CollectionPolicy::local_only()
@@ -8537,7 +8786,7 @@ mod tests {
 
         let database = Database::open(&path).unwrap();
         let collection = database.collection(collection_id).unwrap().unwrap();
-        assert_eq!(database.schema_version().unwrap(), 16);
+        assert_eq!(database.schema_version().unwrap(), 17);
         assert_eq!(collection.policy, CollectionPolicy::local_only());
         assert!(
             database
@@ -8569,7 +8818,7 @@ mod tests {
         drop(connection);
 
         let database = Database::open(path).unwrap();
-        assert_eq!(database.schema_version().unwrap(), 16);
+        assert_eq!(database.schema_version().unwrap(), 17);
         let indexes = database.list_federation_indexes().unwrap();
         assert_eq!(indexes.len(), 1);
         assert_eq!(indexes[0].registry_version, 0);
@@ -8608,7 +8857,7 @@ mod tests {
             expires_at: Utc::now() + chrono::Duration::days(1),
         }];
 
-        assert_eq!(database.schema_version().unwrap(), 16);
+        assert_eq!(database.schema_version().unwrap(), 17);
         assert_eq!(
             database
                 .count("federation_bootstrap_registry_state")
@@ -8650,7 +8899,7 @@ mod tests {
         let database = Database::open(path).unwrap();
         let collection = database.collection(collection_id).unwrap().unwrap();
 
-        assert_eq!(database.schema_version().unwrap(), 16);
+        assert_eq!(database.schema_version().unwrap(), 17);
         assert_eq!(collection.origin, WikiOrigin::Folder);
         assert_eq!(collection.indexing_mode, IndexingMode::Manual);
         assert_eq!(collection.okf_version, "0.1");
@@ -8738,7 +8987,7 @@ mod tests {
             .unwrap()
             .unwrap();
 
-        assert_eq!(database.schema_version().unwrap(), 16);
+        assert_eq!(database.schema_version().unwrap(), 17);
         assert_eq!(collection.policy, CollectionPolicy::local_only());
         assert_eq!(collection.indexing_mode, IndexingMode::Manual);
         assert_eq!(database.count("collections").unwrap(), 1);
@@ -8870,7 +9119,7 @@ mod tests {
         let database = Database::open(path).unwrap();
         let concepts = database.list_okf_concept_projection(collection_id).unwrap();
 
-        assert_eq!(database.schema_version().unwrap(), 16);
+        assert_eq!(database.schema_version().unwrap(), 17);
         assert_eq!(concepts.len(), 1);
         assert_eq!(concepts[0].concept_type.to_string(), "Unknown Type");
         assert_eq!(concepts[0].lifecycle_status, "stable");
@@ -9596,7 +9845,7 @@ mod tests {
         let database = Database::open(path).unwrap();
         let peer = database.peer("existing-peer").unwrap().unwrap();
 
-        assert_eq!(database.schema_version().unwrap(), 16);
+        assert_eq!(database.schema_version().unwrap(), 17);
         assert_eq!(peer.display_name.as_deref(), Some("Atlas Mac"));
         assert!(peer.trusted);
         assert_eq!(peer.device_platform, None);
@@ -10021,6 +10270,199 @@ mod tests {
     }
 
     #[test]
+    fn connecting_an_application_grants_search_but_not_editing_to_regular_wikis() {
+        let (_temp, db, collection) = setup();
+        let app_id = Uuid::new_v4();
+        db.create_application_capability(
+            app_id,
+            "ChatGPT",
+            "chatgpt",
+            "chatgpt/test",
+            "0123456789abcdef",
+            &"a".repeat(64),
+        )
+        .unwrap();
+
+        db.connect_application_to_default_wikis(app_id).unwrap();
+
+        assert_eq!(
+            db.list_application_wiki_grants()
+                .unwrap()
+                .into_iter()
+                .find(|grant| grant.app_id == app_id && grant.collection_id == collection.id)
+                .map(|grant| grant.role),
+            Some(ApplicationWikiRole::Reader)
+        );
+        assert_eq!(
+            db.application_search_collection_ids(app_id).unwrap(),
+            [collection.id]
+        );
+        assert!(
+            db.collection(collection.id)
+                .unwrap()
+                .unwrap()
+                .policy
+                .allow_external_ai
+        );
+        assert!(
+            db.set_application_wiki_role(app_id, collection.id, Some(ApplicationWikiRole::Editor),)
+                .is_err()
+        );
+
+        db.set_application_wiki_role(app_id, collection.id, None)
+            .unwrap();
+        assert!(
+            db.application_search_collection_ids(app_id)
+                .unwrap()
+                .is_empty()
+        );
+        assert!(
+            !db.collection(collection.id)
+                .unwrap()
+                .unwrap()
+                .policy
+                .allow_external_ai
+        );
+    }
+
+    #[test]
+    fn revoking_the_last_application_closes_ai_access_without_disabling_lan() {
+        let (_temp, db, collection) = setup();
+        db.update_collection_policy(collection.id, CollectionPolicy::shared_with_peers())
+            .unwrap();
+        let app_id = Uuid::new_v4();
+        db.create_application_capability(
+            app_id,
+            "ChatGPT",
+            "chatgpt",
+            "chatgpt/test",
+            "0123456789abcdef",
+            &"a".repeat(64),
+        )
+        .unwrap();
+        db.connect_application_to_default_wikis(app_id).unwrap();
+
+        db.set_application_capability_revoked(app_id, true).unwrap();
+
+        let policy = db.collection(collection.id).unwrap().unwrap().policy;
+        assert!(policy.peer_shareable);
+        assert!(!policy.allow_external_ai);
+        assert!(!policy.local_only);
+    }
+
+    #[test]
+    fn revoking_one_application_preserves_ai_access_for_another_active_grant() {
+        let (_temp, db, collection) = setup();
+        let revoked_app_id = Uuid::new_v4();
+        let active_app_id = Uuid::new_v4();
+        for (app_id, name, prefix, digest) in [
+            (
+                revoked_app_id,
+                "ChatGPT",
+                "0123456789abcdef",
+                "a".repeat(64),
+            ),
+            (
+                active_app_id,
+                "Claude Code",
+                "fedcba9876543210",
+                "b".repeat(64),
+            ),
+        ] {
+            db.create_application_capability(app_id, name, name, "managed/test", prefix, &digest)
+                .unwrap();
+            db.connect_application_to_default_wikis(app_id).unwrap();
+        }
+
+        db.set_application_capability_revoked(revoked_app_id, true)
+            .unwrap();
+
+        assert!(
+            db.collection(collection.id)
+                .unwrap()
+                .unwrap()
+                .policy
+                .allow_external_ai
+        );
+        assert_eq!(
+            db.application_search_collection_ids(active_app_id).unwrap(),
+            [collection.id]
+        );
+    }
+
+    #[test]
+    fn initial_application_access_must_be_explicit_for_a_new_wiki() {
+        let temp = tempfile::tempdir().unwrap();
+        let source = temp.path().join("source");
+        let wiki = temp.path().join("wiki");
+        std::fs::create_dir_all(&source).unwrap();
+        std::fs::create_dir_all(&wiki).unwrap();
+        let db = Database::in_memory().unwrap();
+        let app_id = Uuid::new_v4();
+        db.create_application_capability(
+            app_id,
+            "Claude Code",
+            "claude-code",
+            "claude-code/test",
+            "fedcba9876543210",
+            &"b".repeat(64),
+        )
+        .unwrap();
+
+        let collection = db
+            .create_collection_with_id_and_origin(NewCollection {
+                id: Uuid::new_v4(),
+                name: "Connected".to_owned(),
+                source_folder: source,
+                wiki_folder: wiki,
+                policy: CollectionPolicy::connected_to_ai_apps(),
+                origin: WikiOrigin::Folder,
+                indexing_mode: IndexingMode::Continuous,
+                initial_application_access: InitialApplicationAccess::ActiveReaders,
+            })
+            .unwrap();
+
+        assert_eq!(
+            db.application_search_collection_ids(app_id).unwrap(),
+            [collection.id]
+        );
+    }
+
+    #[test]
+    fn generic_collection_creation_does_not_grant_active_applications() {
+        let temp = tempfile::tempdir().unwrap();
+        let source = temp.path().join("source");
+        let wiki = temp.path().join("wiki");
+        std::fs::create_dir_all(&source).unwrap();
+        std::fs::create_dir_all(&wiki).unwrap();
+        let db = Database::in_memory().unwrap();
+        let app_id = Uuid::new_v4();
+        db.create_application_capability(
+            app_id,
+            "Claude Code",
+            "claude-code",
+            "claude-code/test",
+            "fedcba9876543210",
+            &"b".repeat(64),
+        )
+        .unwrap();
+
+        db.create_collection(
+            "Connected",
+            source,
+            wiki,
+            CollectionPolicy::connected_to_ai_apps(),
+        )
+        .unwrap();
+
+        assert!(
+            db.application_search_collection_ids(app_id)
+                .unwrap()
+                .is_empty()
+        );
+    }
+
+    #[test]
     fn embedding_round_trip_is_exact() {
         let values = vec![0.0, 1.0, -3.25, f32::MAX];
         assert_eq!(
@@ -10083,10 +10525,188 @@ mod tests {
         drop(connection);
 
         let database = Database::open(&path).unwrap();
-        assert_eq!(database.schema_version().unwrap(), 16);
+        assert_eq!(database.schema_version().unwrap(), 17);
         assert_eq!(
             database.collection(id).unwrap().unwrap().memory_scope,
             Some(MemoryScope::Personal)
+        );
+    }
+
+    #[test]
+    fn migration_16_to_17_scopes_only_previously_approved_ai_access() {
+        let temp = tempfile::tempdir().unwrap();
+        let path = temp.path().join("application-grants.sqlite3");
+        let connection = Connection::open(&path).unwrap();
+        connection
+            .pragma_update(None, "foreign_keys", "ON")
+            .unwrap();
+        for (version, migration) in [
+            MIGRATION_1,
+            MIGRATION_2,
+            MIGRATION_3,
+            MIGRATION_4,
+            MIGRATION_5,
+            MIGRATION_6,
+            MIGRATION_7,
+            MIGRATION_8,
+            MIGRATION_9,
+            MIGRATION_10,
+            MIGRATION_11,
+            MIGRATION_12,
+            MIGRATION_13,
+            MIGRATION_14,
+            MIGRATION_15,
+            MIGRATION_16,
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            connection.execute_batch(migration).unwrap();
+            connection
+                .pragma_update(None, "user_version", u32::try_from(version + 1).unwrap())
+                .unwrap();
+        }
+
+        let approved_memory_id = Uuid::new_v4();
+        let closed_id = Uuid::new_v4();
+        let incompatible_id = Uuid::new_v4();
+        let editor_app_id = Uuid::new_v4();
+        let reader_app_id = Uuid::new_v4();
+        let revoked_app_id = Uuid::new_v4();
+        let now = Utc::now().to_rfc3339();
+        for (id, name, allow_external_ai, origin, indexing_mode, compatibility, memory_scope) in [
+            (
+                approved_memory_id,
+                "Approved memory",
+                true,
+                "ai_memory",
+                "not_applicable",
+                "declared_v02",
+                Some("personal"),
+            ),
+            (
+                closed_id,
+                "Closed folder",
+                false,
+                "folder",
+                "continuous",
+                "declared_v02",
+                None,
+            ),
+            (
+                incompatible_id,
+                "Restricted import",
+                true,
+                "imported_okf",
+                "not_applicable",
+                "future_restricted",
+                None,
+            ),
+        ] {
+            connection
+                .execute(
+                    "INSERT INTO collections
+                     (id,name,source_folder,wiki_folder,local_only,peer_shareable,
+                      allow_external_ai,internet_public,origin,indexing_mode,okf_version,
+                      declared_okf_version,okf_compatibility,managed_size_bytes,created_at,
+                      updated_at,memory_scope)
+                     VALUES (?1,?2,?3,?4,?5,0,?6,0,?7,?8,'0.2','0.2',?9,0,?10,?10,?11)",
+                    params![
+                        id.to_string(),
+                        name,
+                        format!("/synthetic/source/{id}"),
+                        format!("/synthetic/wiki/{id}"),
+                        i64::from(!allow_external_ai),
+                        i64::from(allow_external_ai),
+                        origin,
+                        indexing_mode,
+                        compatibility,
+                        now,
+                        memory_scope,
+                    ],
+                )
+                .unwrap();
+        }
+        for (app_id, name, prefix, hash, revoked_at) in [
+            (
+                editor_app_id,
+                "Existing editor",
+                "1111111111111111",
+                "a".repeat(64),
+                None,
+            ),
+            (
+                reader_app_id,
+                "New reader",
+                "2222222222222222",
+                "b".repeat(64),
+                None,
+            ),
+            (
+                revoked_app_id,
+                "Revoked",
+                "3333333333333333",
+                "c".repeat(64),
+                Some(now.clone()),
+            ),
+        ] {
+            connection
+                .execute(
+                    "INSERT INTO application_capabilities
+                     (app_id,display_name,owner_kind,secret_hash,created_at,producer,
+                      capability_prefix,revoked_at)
+                     VALUES (?1,?2,'generic',?3,?4,'synthetic/1.0',?5,?6)",
+                    params![app_id.to_string(), name, hash, now, prefix, revoked_at],
+                )
+                .unwrap();
+        }
+        connection
+            .execute(
+                "INSERT INTO application_wiki_grants
+                 (app_id,collection_id,role,granted_at,confirmed_at)
+                 VALUES (?1,?2,'editor',?3,?3)",
+                params![
+                    editor_app_id.to_string(),
+                    approved_memory_id.to_string(),
+                    now
+                ],
+            )
+            .unwrap();
+        drop(connection);
+
+        let database = Database::open(&path).unwrap();
+        assert_eq!(database.schema_version().unwrap(), 17);
+        assert_eq!(
+            database
+                .application_wiki_role(editor_app_id, approved_memory_id)
+                .unwrap(),
+            Some(ApplicationWikiRole::Editor)
+        );
+        assert_eq!(
+            database
+                .application_wiki_role(reader_app_id, approved_memory_id)
+                .unwrap(),
+            Some(ApplicationWikiRole::Reader)
+        );
+        assert_eq!(
+            database
+                .application_search_collection_ids(reader_app_id)
+                .unwrap(),
+            [approved_memory_id]
+        );
+        assert!(
+            database
+                .application_search_collection_ids(revoked_app_id)
+                .unwrap()
+                .is_empty()
+        );
+        assert!(
+            database
+                .list_application_wiki_grants()
+                .unwrap()
+                .into_iter()
+                .all(|grant| grant.collection_id != closed_id
+                    && grant.collection_id != incompatible_id)
         );
     }
 }

@@ -176,8 +176,14 @@ async function measureNavigationPaintP95(): Promise<number> {
         done(null);
         return;
       }
-      const started = performance.now();
-      const deadline = started + 2_000;
+      const startMark = 'airwiki-navigation-start';
+      const endMark = 'airwiki-navigation-painted';
+      const measureName = 'airwiki-navigation-paint';
+      performance.clearMarks(startMark);
+      performance.clearMarks(endMark);
+      performance.clearMeasures(measureName);
+      performance.mark(startMark);
+      const deadline = performance.now() + 2_000;
       const waitForPaint = () => {
         const page = document.querySelector<HTMLElement>('.route-page');
         const bounds = page?.getBoundingClientRect();
@@ -187,7 +193,11 @@ async function measureNavigationPaintP95(): Promise<number> {
           && bounds.width > 0
           && bounds.height > 0
           && style?.visibility === 'visible') {
-          requestAnimationFrame(() => done(performance.now() - started));
+          requestAnimationFrame(() => {
+            performance.mark(endMark);
+            const measurement = performance.measure(measureName, startMark, endMark);
+            done(measurement.duration);
+          });
           return;
         }
         if (performance.now() >= deadline) {
@@ -199,7 +209,7 @@ async function measureNavigationPaintP95(): Promise<number> {
       button.click();
       requestAnimationFrame(waitForPaint);
     });
-    if (typeof duration !== 'number') throw new Error('navigation paint returned an invalid timestamp');
+    if (typeof duration !== 'number') throw new Error(`navigation paint sample ${sample} returned an invalid timestamp`);
     samples.push(duration);
   }
   expect(samples).toHaveLength(20);
@@ -295,8 +305,8 @@ async function configureVisualPreferences(locale: 'en' | 'es', theme: 'light' | 
   await navigateToDestination(1);
   await $('a[href="#settings/general"]').click();
   await $('.settings-page').waitForDisplayed();
-  await selectValue('.settings-page select', 0, locale);
-  await selectValue('.settings-page select', 1, theme);
+  await selectValue('.device-preferences-form select', 0, locale);
+  await selectValue('.device-preferences-form select', 1, theme);
   await $('.settings-form-actions button.primary').click();
   await browser.waitUntil(async () => (
     await $('html').getAttribute('lang') === (locale === 'es' ? 'es' : 'en-US')
@@ -398,6 +408,7 @@ async function createFolderWiki(): Promise<void> {
 }
 
 async function importOkfWiki(): Promise<void> {
+  const captureTheme = process.env.AIRWIKI_E2E_JOURNEY_THEME === 'dark' ? 'dark' : 'light';
   await $('button*=New wiki').click();
   await $('#new-wiki-source-title').waitForDisplayed();
   await $('button*=Import OKF folder').click();
@@ -420,6 +431,43 @@ async function importOkfWiki(): Promise<void> {
     async () => (await $('.file-list')).isExisting(),
     { timeout: 10_000, timeoutMsg: 'imported OKF hierarchy did not load' }
   );
+  await setCssViewport(1180, 760);
+  const statusBar = await $('.wiki-journey-compact');
+  await expect(statusBar).toHaveText(expect.stringContaining('Searchable'));
+  await expect(statusBar).toHaveText(expect.stringContaining('Local'));
+  await expect(statusBar).toHaveText(expect.stringContaining('LAN'));
+  await expect(statusBar).toHaveText(expect.stringContaining('Internet'));
+  await expect(statusBar).toHaveText(expect.stringContaining('AI apps'));
+  await expect(statusBar).toHaveText(expect.stringContaining('Share'));
+  expect(await $$('.wiki-journey')).toHaveLength(0);
+  expect(await $$('.exposure-route li')).toHaveLength(3);
+  const statusBarLayout = await browser.execute(() => {
+    const status = document.querySelector<HTMLElement>('.wiki-journey-compact');
+    const controls = Array.from(status?.querySelectorAll<HTMLElement>('button') ?? []);
+    const page = document.querySelector<HTMLElement>('.wiki-detail-body');
+    const statusRect = status?.getBoundingClientRect();
+    return {
+      statusLeft: statusRect?.left ?? -1,
+      statusRight: statusRect?.right ?? Number.POSITIVE_INFINITY,
+      pageLeft: page?.getBoundingClientRect().left ?? 0,
+      pageRight: page?.getBoundingClientRect().right ?? 0,
+      essentialTextVisible: [
+        status?.querySelector<HTMLElement>('.journey-compact-identity-copy small'),
+        status?.querySelector<HTMLElement>('.journey-compact-ai-copy strong')
+      ].every((label) => label instanceof HTMLElement && label.scrollWidth <= label.clientWidth + 1),
+      controlsOperable: controls.every((control) => {
+        const bounds = control.getBoundingClientRect();
+        return getComputedStyle(control).visibility === 'visible' && bounds.width >= 24 && bounds.height >= 24;
+      })
+    };
+  });
+  expect(statusBarLayout.statusLeft).toBeGreaterThanOrEqual(statusBarLayout.pageLeft);
+  expect(statusBarLayout.statusRight).toBeLessThanOrEqual(statusBarLayout.pageRight);
+  expect(statusBarLayout.essentialTextVisible).toBe(true);
+  expect(statusBarLayout.controlsOperable).toBe(true);
+  if (process.env.AIRWIKI_E2E_CAPTURE_JOURNEY === '1') {
+    await browser.saveScreenshot(join(process.cwd(), '.artifacts', 'visual', `wiki-access-bar-review-${captureTheme}.png`));
+  }
   await expect($('.file-list')).toHaveText(expect.stringContaining('architecture/decision.md'));
   await expect($('.file-list')).toHaveText(expect.stringContaining('architecture/verified.md'));
 
@@ -437,27 +485,89 @@ async function importOkfWiki(): Promise<void> {
   );
   const workspaceLayout = await browser.execute(() => {
     const page = document.querySelector<HTMLElement>('.drive-page');
+    const topBar = document.querySelector<HTMLElement>('.top-bar');
     const heading = document.querySelector<HTMLElement>('.wiki-route > .wiki-heading');
+    const detail = document.querySelector<HTMLElement>('.wiki-detail-body');
     const browserPanel = document.querySelector<HTMLElement>('.wiki-detail-body > .file-browser');
+    const list = browserPanel?.querySelector<HTMLElement>('.file-list');
+    const preview = browserPanel?.querySelector<HTMLElement>('.file-preview');
+    const sticky = document.querySelector<HTMLElement>('.wiki-content-sticky');
     const pageRect = page?.getBoundingClientRect();
-    const headingRect = heading?.getBoundingClientRect();
-    const browserRect = browserPanel?.getBoundingClientRect();
     if (page) page.scrollTop = 10_000;
+    const topBarRect = topBar?.getBoundingClientRect();
+    const headingRect = heading?.getBoundingClientRect();
+    const stickyRect = sticky?.getBoundingClientRect();
     return {
       pageScrollTop: page?.scrollTop ?? -1,
       pageOverflowY: page ? getComputedStyle(page).overflowY : '',
+      detailOverflowY: detail ? getComputedStyle(detail).overflowY : '',
+      listOverflowY: list ? getComputedStyle(list).overflowY : '',
+      previewOverflowY: preview ? getComputedStyle(preview).overflowY : '',
       headingTop: headingRect?.top ?? -1,
       pageTop: pageRect?.top ?? -1,
-      browserBottom: browserRect?.bottom ?? Number.POSITIVE_INFINITY,
-      pageBottom: pageRect?.bottom ?? -1,
-      browserHeight: browserRect?.height ?? 0
+      topBarTop: topBarRect?.top ?? -1,
+      topBarBottom: topBarRect?.bottom ?? -1,
+      stickyTop: stickyRect?.top ?? Number.POSITIVE_INFINITY,
+      stickyPosition: sticky ? getComputedStyle(sticky).position : '',
+      browserHeight: browserPanel?.getBoundingClientRect().height ?? 0
     };
   });
-  expect(workspaceLayout.pageScrollTop).toBe(0);
-  expect(workspaceLayout.pageOverflowY).toBe('clip');
-  expect(workspaceLayout.headingTop).toBeGreaterThanOrEqual(workspaceLayout.pageTop);
-  expect(workspaceLayout.browserBottom).toBeLessThanOrEqual(workspaceLayout.pageBottom);
+  expect(workspaceLayout.pageScrollTop).toBeGreaterThan(0);
+  expect(workspaceLayout.pageOverflowY).toBe('auto');
+  expect(workspaceLayout.detailOverflowY).toBe('visible');
+  expect(workspaceLayout.listOverflowY).toBe('visible');
+  expect(workspaceLayout.previewOverflowY).toBe('visible');
+  expect(workspaceLayout.headingTop).toBeLessThan(workspaceLayout.pageTop);
+  expect(workspaceLayout.topBarTop).toBeGreaterThanOrEqual(0);
+  expect(workspaceLayout.pageTop).toBeGreaterThanOrEqual(workspaceLayout.topBarBottom);
+  expect(workspaceLayout.stickyPosition).toBe('sticky');
+  expect(workspaceLayout.stickyTop).toBeGreaterThanOrEqual(workspaceLayout.topBarBottom);
+  expect(workspaceLayout.stickyTop).toBeLessThanOrEqual(workspaceLayout.topBarBottom + 2);
   expect(workspaceLayout.browserHeight).toBeGreaterThan(0);
+  const contentToolbarGeometry = await browser.execute(() => {
+    const sticky = document.querySelector<HTMLElement>('.wiki-content-sticky');
+    const summary = sticky?.querySelector<HTMLElement>('.wiki-journey-compact');
+    const actions = sticky?.querySelector<HTMLElement>('.content-tabs-actions');
+    return {
+      stickyHeight: sticky?.getBoundingClientRect().height ?? 0,
+      summaryWidth: summary?.getBoundingClientRect().width ?? 0,
+      actionsWidth: actions?.getBoundingClientRect().width ?? 0
+    };
+  });
+  await $('.content-tabs').$('button*=Pending').click();
+  await browser.waitUntil(
+    () => browser.execute(() => document.querySelector('.view-switch') === null),
+    { timeout: 5_000, timeoutMsg: 'content-only view controls remained visible in Pending' }
+  );
+  const pendingToolbarGeometry = await browser.execute(() => {
+    const sticky = document.querySelector<HTMLElement>('.wiki-content-sticky');
+    const summary = sticky?.querySelector<HTMLElement>('.wiki-journey-compact');
+    const actions = sticky?.querySelector<HTMLElement>('.content-tabs-actions');
+    return {
+      stickyHeight: sticky?.getBoundingClientRect().height ?? 0,
+      summaryWidth: summary?.getBoundingClientRect().width ?? 0,
+      actionsWidth: actions?.getBoundingClientRect().width ?? 0
+    };
+  });
+  expect(Math.abs(pendingToolbarGeometry.stickyHeight - contentToolbarGeometry.stickyHeight)).toBeLessThan(1);
+  expect(Math.abs(pendingToolbarGeometry.summaryWidth - contentToolbarGeometry.summaryWidth)).toBeLessThan(1);
+  expect(Math.abs(pendingToolbarGeometry.actionsWidth - contentToolbarGeometry.actionsWidth)).toBeLessThan(1);
+  await $('.content-tabs').$('button*=Content').click();
+  await browser.waitUntil(
+    () => browser.execute(() => document.querySelector('.view-switch') !== null),
+    { timeout: 5_000, timeoutMsg: 'content view controls did not return after leaving Pending' }
+  );
+  if (process.env.AIRWIKI_E2E_CAPTURE_JOURNEY === '1') {
+    await browser.saveScreenshot(join(process.cwd(), '.artifacts', 'visual', `wiki-content-scroll-review-${captureTheme}.png`));
+    await setCssViewport(1440, 900);
+    await browser.execute(() => {
+      const page = document.querySelector<HTMLElement>('.drive-page');
+      if (page) page.scrollTop = 10_000;
+    });
+    await waitForVisualPaint('library');
+    await browser.saveScreenshot(join(process.cwd(), '.artifacts', 'visual', `wiki-content-scroll-wide-${captureTheme}.png`));
+    await setCssViewport(1180, 760);
+  }
   const assurance = await $('.concept-assurance');
   await expect(assurance).toHaveText(expect.stringContaining('Reference'));
   await expect(assurance).toHaveText(expect.stringContaining('Current'));
@@ -905,9 +1015,9 @@ describe('AirWiki real IPC journey', () => {
       async () => (await browser.getUrl()).endsWith('#settings/general'),
       { timeout: 10_000, timeoutMsg: 'legacy General route did not canonicalize' }
     );
-    const preferenceSelects = await $$('.settings-page select');
+    const preferenceSelects = await $$('.device-preferences-form select');
     const appearance = required(preferenceSelects[1], 'appearance preference');
-    await selectValue('.settings-page select', 1, 'dark');
+    await selectValue('.device-preferences-form select', 1, 'dark');
     await expect(appearance).toHaveValue('dark');
     await $('.settings-form-actions button.primary').click();
     await browser.waitUntil(async () => (
@@ -959,7 +1069,7 @@ describe('AirWiki real IPC journey', () => {
     await returnToLibrary();
 
     if (runVisualMatrix) await assertVisualMatrix();
-    await configureVisualPreferences('en', 'light');
+    await configureVisualPreferences('en', process.env.AIRWIKI_E2E_JOURNEY_THEME === 'dark' ? 'dark' : 'light');
     await navigateToDestination(0);
     await exerciseGenericMcpMemory();
     await createFolderWiki();
@@ -974,5 +1084,56 @@ describe('AirWiki real IPC journey', () => {
       }),
       { timeout: 10_000, timeoutMsg: 'visible wiki list did not restore after the OKF journey' }
     );
+    await expect($('h1=Your Wikis')).toBeDisplayed();
+    await expect($('.library-filter-group')).toHaveText(expect.stringContaining('All'));
+    await expect($('.library-filter-group')).toHaveText(expect.stringContaining('Needs attention'));
+    await expect($('.library-filter-group')).toHaveText(expect.stringContaining('Only you'));
+    await expect($('.library-filter-group')).toHaveText(expect.stringContaining('Shared'));
+    await expect($('.library-scope-tabs')).toHaveText(expect.stringContaining('On this device'));
+    await expect($('.library-scope-tabs')).toHaveText(expect.stringContaining('Public'));
+    expect(await $$('.wiki-row')).toHaveLength(3);
+    expect(await $$('.wiki-table-head')).toHaveLength(0);
+    const libraryRows = await browser.execute(() => Array.from(document.querySelectorAll<HTMLElement>('.wiki-row')).map((row) => {
+      const shelf = row.closest<HTMLElement>('.wiki-library-shelf');
+      const icon = row.querySelector<HTMLElement>('.wiki-icon');
+      return {
+        height: row.getBoundingClientRect().height,
+        summaryParts: row.querySelectorAll('.wiki-row-summary > *').length,
+        exposureItems: row.querySelectorAll('.wiki-row-exposure-text > span').length,
+        hasOpenLabel: row.querySelector('.wiki-row-open')?.textContent?.includes('Open Wiki') === true,
+        shelfRadius: shelf ? Number.parseFloat(getComputedStyle(shelf).borderTopLeftRadius) : null,
+        iconShadow: icon ? getComputedStyle(icon).boxShadow : null,
+      };
+    }));
+    for (const row of libraryRows) {
+      expect(row.height).toBeGreaterThanOrEqual(68);
+      expect(row.height).toBeLessThanOrEqual(78);
+      expect(row.summaryParts).toBe(2);
+      expect(row.exposureItems).toBe(3);
+      expect(row.hasOpenLabel).toBe(false);
+      expect(row.shelfRadius).not.toBeNull();
+      expect(row.shelfRadius ?? Number.POSITIVE_INFINITY).toBeLessThanOrEqual(6);
+      expect(row.iconShadow).toBe('none');
+    }
+    await $('.library-scope-tabs').$('button*=Public').click();
+    await browser.waitUntil(
+      () => browser.execute(() => window.location.hash === '#library/public'
+        && document.querySelector('.public-library-state') !== null),
+      { timeout: 10_000, timeoutMsg: 'explicit public catalog exploration did not settle' }
+    );
+    await expect($('h1=Explore public Wikis')).toBeDisplayed();
+    await expect($('.public-library-state')).toHaveText(expect.stringContaining('public catalog is unavailable'));
+    expect(await $$('.public-wiki-row')).toHaveLength(0);
+    await $('.library-scope-tabs').$('button*=On this device').click();
+    await browser.waitUntil(
+      () => browser.execute(() => document.querySelectorAll('.wiki-row').length === 3),
+      { timeout: 10_000, timeoutMsg: 'local Wiki rows did not return after public exploration' }
+    );
+    if (process.env.AIRWIKI_E2E_CAPTURE_LIBRARY === '1') {
+      const theme = process.env.AIRWIKI_E2E_JOURNEY_THEME === 'dark' ? 'dark' : 'light';
+      await browser.saveScreenshot(join(process.cwd(), '.artifacts', 'visual', `wiki-list-review-${theme}.png`));
+      await setCssViewport(1020, 728);
+      await browser.saveScreenshot(join(process.cwd(), '.artifacts', 'visual', `wiki-list-review-${theme}-narrow.png`));
+    }
   });
 });

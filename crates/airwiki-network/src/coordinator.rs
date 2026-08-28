@@ -46,6 +46,9 @@ impl FederatedCoordinator {
 impl FederatedSearch for FederatedCoordinator {
     async fn search(&self, request: SearchRequest) -> Result<SearchResponse, SearchContractError> {
         request.validate()?;
+        if request.local_collection_scope().is_some() {
+            return self.local.search(request).await;
+        }
         let (local, peers) = tokio::join!(
             self.local.search(request.clone()),
             self.peers.search(request.clone())
@@ -265,6 +268,27 @@ mod tests {
         assert_eq!(response.warnings, ["LAN search unavailable"]);
         assert!(!response.warnings.join(" ").contains("CANARY-REASON"));
         assert!(!response.warnings.join(" ").contains("C:\\private"));
+    }
+
+    #[tokio::test]
+    async fn caller_scoped_search_never_reaches_lan_peers() {
+        let request = SearchRequest::new("pagos", airwiki_types::SearchPurpose::ExternalAi, 5)
+            .with_local_collection_scope(vec![uuid::Uuid::new_v4()]);
+        let mut local = SearchResponse::empty(request.request_id);
+        local
+            .hits
+            .push(hit("local", 1, "local-hash", uuid::Uuid::new_v4()));
+        let peers = FakeSearch::returns(Ok(SearchResponse::empty(request.request_id)));
+        let coordinator =
+            FederatedCoordinator::with_backends(FakeSearch::returns(Ok(local)), peers.clone());
+
+        let response = coordinator.search(request).await.unwrap();
+
+        assert_eq!(response.hits.len(), 1);
+        assert!(
+            peers.result.lock().is_some(),
+            "LAN backend must not be called"
+        );
     }
 
     #[tokio::test]

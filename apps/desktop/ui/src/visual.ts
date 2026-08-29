@@ -11,6 +11,7 @@ const locale = parameters.get('locale') === 'en' ? 'en' : 'es';
 const theme = parameters.get('theme') === 'light' ? 'light' : 'dark';
 const platform = parameters.get('platform') === 'windows' ? 'windows' : 'macOs';
 const destination = parameters.get('destination') ?? 'home';
+const documentationMedia = parameters.get('media') === '1';
 const sharedPeerId = '12D3KooSyntheticNearbyNode';
 const sharedWikiId = '20000000-0000-4000-8000-000000000001';
 const sharedConceptId = '30000000-0000-4000-8000-000000000001';
@@ -29,7 +30,9 @@ if (destination === 'review') {
   snapshot.wikis[0].needsReviewCount = 1;
   const review = {
     conceptId: 'synthetic-review', wikiId: snapshot.wikis[0].id, sourceRevision: 4,
-    sourceName: 'actividades_matematicas_sobre_fracciones_repartos_y_situaciones_problema_que_se_pueden_resolver_de_forma_individual_o_grupal.pdf',
+    sourceName: documentationMedia
+      ? 'operating-guide.md'
+      : 'actividades_matematicas_sobre_fracciones_repartos_y_situaciones_problema_que_se_pueden_resolver_de_forma_individual_o_grupal.pdf',
     wikiName: 'Atlas', excluded: false,
     draft: {
       type: 'Procedure' as const, title: 'Safe maintenance window',
@@ -120,6 +123,7 @@ if (destination === 'library' || destination === 'connections' || destination ==
     externalAiWikiCount: 1,
     integrations: [{
       client: 'chatGptDesktop', status: 'configured', detectedVersion: '1.2026.210',
+      appId: 'chatgpt-desktop', publicSearchEnabled: false,
       activityRecent: false, restartRequired: true, mcpSetup: null,
       workflowGuide: { kind: 'nativeSkill', status: 'installed', version: '1', restartRequired: true }
     }, {
@@ -128,14 +132,17 @@ if (destination === 'library' || destination === 'connections' || destination ==
       workflowGuide: { kind: 'mcpInstructions', status: 'builtIn', version: '1', restartRequired: false }
     }, {
       client: 'claudeCode', status: 'configured', detectedVersion: '2.1.227',
+      appId: 'claude-code', publicSearchEnabled: false,
       activityRecent: true, restartRequired: false, mcpSetup: null,
       workflowGuide: { kind: 'nativeSkill', status: 'installed', version: '1', restartRequired: false }
     }, {
       client: 'geminiCli', status: 'updateAvailable', detectedVersion: '0.12.0',
+      appId: 'gemini-cli', publicSearchEnabled: false,
       activityRecent: false, restartRequired: true, mcpSetup: null,
       workflowGuide: { kind: 'nativeSkill', status: 'updateAvailable', version: '2', restartRequired: true }
     }, {
       client: 'genericMcp', status: 'configured', detectedVersion: null,
+      appId: 'generic-mcp', publicSearchEnabled: false,
       activityRecent: false, restartRequired: false,
       mcpSetup: { command: '/Applications/AirWiki.app/Contents/MacOS/airwiki-mcp-bridge', args: ['--client', 'generic-mcp'] },
       workflowGuide: { kind: 'mcpInstructions', status: 'builtIn', version: '1', restartRequired: false }

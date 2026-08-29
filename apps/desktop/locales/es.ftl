@@ -1221,6 +1221,7 @@ desktop-wiki-content-filter-excluded-empty-body = Los borradores que dejes de la
 desktop-review-state-draft = Borrador
 desktop-review-state-reviewed = Revisado
 desktop-review-state-excluded = Excluido
+desktop-review-state-deprecated = Retirado
 desktop-wiki-detected-count =
     { $count ->
         [one] 1 elemento detectado

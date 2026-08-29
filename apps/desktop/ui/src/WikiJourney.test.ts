@@ -10,6 +10,8 @@ const t = (id: string, args?: MessageArgs) => message('es', id, args);
 function integration(overrides: Partial<IntegrationSummary> = {}): IntegrationSummary {
   return {
     client: 'chatGptDesktop',
+    appId: '00000000-0000-0000-0000-000000000001',
+    publicSearchEnabled: false,
     status: 'configured',
     detectedVersion: '1.0.0',
     activityRecent: false,

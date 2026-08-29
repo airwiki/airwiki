@@ -75,7 +75,7 @@ export type PeerTrust = "unpaired" | "trusted" | "blocked";
 
 export type PeerActivity = "notObserved" | "discovered" | "pairing" | "connected";
 
-export type PeerSummary = { peerId: string, deviceName: string | null, platform: HostPlatform | null, address: string, trust: PeerTrust, activity: PeerActivity, sasWords: Array<string> | null, grantedWikiIds: Array<string>, };
+export type PeerSummary = { peerId: string, deviceName: string | null, platform: HostPlatform | null, address: string, trust: PeerTrust, activity: PeerActivity, sasWords: Array<string> | null, grantedWikiIds: Array<string>, legacyAiGrantWikiIds?: Array<string>, };
 
 export type ModelSummary = { stateSequence: number, profile: string, recommendedModelId: string | null, displayName: string | null, recommendationReason: string | null, active: boolean, activeModelId: string | null, installed: boolean, degraded: boolean, issues: Array<string>, pendingModelId: string | null, downloadBytes: number, requiredFreeBytes: number, fitsAvailableDisk: boolean, licenseAccepted: boolean, license: string | null, licenseUrl: string | null, revision: string | null, };
 
@@ -187,7 +187,7 @@ export type WorkflowGuideStatus = "available" | "installed" | "updateAvailable" 
 
 export type WorkflowGuideSummary = { kind: WorkflowGuideKind, status: WorkflowGuideStatus, version: string | null, restartRequired: boolean, };
 
-export type IntegrationSummary = { client: IntegrationClient, status: IntegrationStatus, issue?: IntegrationIssue, detectedVersion: string | null, activityRecent: boolean, restartRequired: boolean, mcpSetup: McpStdioSetupDto | null, workflowGuide: WorkflowGuideSummary, };
+export type IntegrationSummary = { client: IntegrationClient, appId?: string, publicSearchEnabled?: boolean, status: IntegrationStatus, issue?: IntegrationIssue, detectedVersion: string | null, activityRecent: boolean, restartRequired: boolean, mcpSetup: McpStdioSetupDto | null, workflowGuide: WorkflowGuideSummary, };
 
 export type IntegrationsSummary = { integrations: Array<IntegrationSummary>, externalAiWikiCount: number, };
 
@@ -209,7 +209,7 @@ export type PendingComputationSummary = { runId: string, wikiId: string, wikiNam
 
 export type CompletedComputationSummary = { runId: string, wikiName: string, logicalPath: string, applicationName: string, verdict: string, expiresAt: string, };
 
-export type IntegrationActionInput = { "kind": "refresh" } | { "kind": "connect", client: IntegrationClient, } | { "kind": "disconnect", client: IntegrationClient, } | { "kind": "confirmClaudeInstalled" } | { "kind": "openClaudeSettings" } | { "kind": "installWorkflowGuide", client: IntegrationClient, } | { "kind": "removeWorkflowGuide", client: IntegrationClient, };
+export type IntegrationActionInput = { "kind": "refresh" } | { "kind": "connect", client: IntegrationClient, } | { "kind": "disconnect", client: IntegrationClient, } | { "kind": "confirmClaudeInstalled" } | { "kind": "openClaudeSettings" } | { "kind": "installWorkflowGuide", client: IntegrationClient, } | { "kind": "removeWorkflowGuide", client: IntegrationClient, } | { "kind": "setPublicSearch", appId: string, enabled: boolean, };
 
 export type UpdaterStatus = "disabled" | "idle" | "checking" | "upToDate" | "available" | "downloading" | "readyToInstall" | "installing" | "installed";
 
@@ -225,7 +225,7 @@ export type HostPlatform = "macOs" | "windows";
 
 export type AppPhase = "starting" | "failed" | "ready";
 
-export type AppSnapshot = { schemaVersion: number, sequence: number, platform: HostPlatform, phase: AppPhase, nodeId: string | null, mcpUrl: string | null, blockedPublicPublishers: Array<string>, hardware: HardwareSummary | null, wikis: Array<WikiSummary>, wikiScans: Array<WikiScanSummary>, reviews: Array<ReviewSummary>, reanalyzingReviewIds: Array<string>, sourceIssues: Array<SourceIssueSummary>, peers: Array<PeerSummary>, model: ModelSummary | null, modelInstall: ModelInstallSummary | null, search: SearchSummary | null, publicCatalog: PublicCatalogSummary | null, publicBrowse: PublicBrowseSummary | null, nearbyBrowse: NearbyBrowseSummary | null, reviewEvidence: ReviewEvidenceSummary | null, knowledge: KnowledgeBundleSummary | null, knowledgePage: KnowledgePageSummary | null, preferences: PreferencesSummary | null, autostart: AutostartStatus | null, wikiHealth: WikiHealthSummary | null, guidedRepair: GuidedRepairSummary | null, connectivity: ConnectivitySummary | null, lanRuntime: LanRuntimeSummary | null, firewallOperation: FirewallOperationStatus | null, integrations: IntegrationsSummary | null, integrationRequestId: string | null, integrationCompletedRequestId: string | null, applicationAccess: Array<ApplicationAccessSummary>, projectMemoryRequests: Array<ProjectMemoryRequestSummary>, pendingComputations: Array<PendingComputationSummary>, completedComputations: Array<CompletedComputationSummary>, updater: UpdaterSummary | null, notice: NoticeSummary | null, };
+export type AppSnapshot = { schemaVersion: number, sequence: number, platform: HostPlatform, phase: AppPhase, nodeId: string | null, mcpUrl: string | null, blockedPublicPublishers: Array<string>, hardware: HardwareSummary | null, wikis: Array<WikiSummary>, wikiScans: Array<WikiScanSummary>, reviews: Array<ReviewSummary>, reanalyzingReviewIds: Array<string>, sourceIssues: Array<SourceIssueSummary>, peers: Array<PeerSummary>, model: ModelSummary | null, modelInstall: ModelInstallSummary | null, search: SearchSummary | null, publicCatalog: PublicCatalogSummary | null, publicBrowse: PublicBrowseSummary | null, nearbyBrowse: NearbyBrowseSummary | null, reviewEvidence: ReviewEvidenceSummary | null, knowledge: KnowledgeBundleSummary | null, knowledgePage: KnowledgePageSummary | null, preferences: PreferencesSummary | null, autostart: AutostartStatus | null, wikiHealth: WikiHealthSummary | null, guidedRepair: GuidedRepairSummary | null, connectivity: ConnectivitySummary | null, lanRuntime: LanRuntimeSummary | null, firewallOperation: FirewallOperationStatus | null, integrations: IntegrationsSummary | null, integrationRequestId: string | null, integrationCompletedRequestId: string | null, integrationCompletedRequestSucceeded: boolean | null, applicationAccess: Array<ApplicationAccessSummary>, projectMemoryRequests: Array<ProjectMemoryRequestSummary>, pendingComputations: Array<PendingComputationSummary>, completedComputations: Array<CompletedComputationSummary>, updater: UpdaterSummary | null, notice: NoticeSummary | null, };
 
 export type UiEventKind = "stateChanged";
 

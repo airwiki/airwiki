@@ -4,9 +4,11 @@ AirWiki exposes `search_airwiki` plus capability-authenticated memory and
 attested-computation tools to ChatGPT Desktop/Work, Codex, Claude Desktop,
 Claude Code, Gemini CLI and generic local MCP clients. AirWiki does not need
 provider API keys; each client owns its account and session. AI applications
-search only the local Wikis granted to that exact application. LAN search stays
-in AirWiki's native Library because a remote device cannot authenticate a
-local application's capability or per-Wiki grant.
+search local Wikis granted to that exact application plus knowledge already
+shared with this device by verified LAN peers. Each remote owner authorizes its
+own result; AirWiki does not add a second permission matrix for remote Wikis.
+Public knowledge is available only after **Search public knowledge** is enabled
+for that application, because its query may then leave the device.
 
 The managed bridge implements MCP `2026-07-28`: clients may begin with
 `server/discover`, requests self-describe through `_meta`, and the fixed
@@ -33,6 +35,13 @@ advertises typed input/output schemas and explicit safety hints.
    you need an immediate additional check, then review the two independent
    states for the client: **Local connection** and **Assisted memory**.
 
+For an active client, Settings also shows **Search public knowledge**. It is off
+for existing and new capabilities. Enabling it uses a native confirmation that
+names query egress to configured indexes and publishers and states that no
+local Wiki is published. Disabling it is immediate; capability rotation,
+disconnect or revocation resets it to off. Failure and retry state belong only
+to that application's switch.
+
 The status bar keeps local connection, per-Wiki access and recent client
 activity separate for every displayed AI application. Recent activity proves
 that the client reached AirWiki; it does not prove that the most recent request
@@ -49,6 +58,15 @@ revocable per Wiki. Connecting never changes LAN or Internet exposure, peer
 permissions, publication, verification, or another application's grants.
 Snippets requested by the connected application may enter its provider cloud
 and are then governed by that provider's policies.
+
+MCP knowledge search always attempts local and authorized LAN sources
+concurrently. The local collection scope never crosses the network: the
+Noise-authenticated publisher derives device trust and grants itself. New LAN
+grants include the receiver's connected AI applications. Older grants continue
+to work for native AirWiki LAN search but require the owner's one-time update
+before answering receiver-AI requests. Mixed-version peers can therefore omit
+LAN results until the publisher is upgraded; clients never bypass the older
+publisher's policy.
 
 Creating or importing a Wiki from AirWiki's native UI grants reader access to
 the AI applications already active on that device only after the native prompt
@@ -80,6 +98,14 @@ verify, change history or operate on folder/imported Wikis. Granting one
 application access to another application's memory requires an OS-native
 confirmation in AirWiki. Revocation stops list, read, search and write access
 immediately and does not delete either kind of memory.
+
+After each federated search, AirWiki revalidates the application. Revocation
+discards the whole response; a local grant change removes local hits that are
+no longer authorized. If public search is turned off while a public request is
+in flight, AirWiki discards that response and asks the application to retry.
+LAN identity comes from the authenticated transport and public provenance from
+verified signed manifests. Every remote result remains untrusted evidence with
+the same complete citation requirements as local results.
 
 ## Assisted-memory guide
 

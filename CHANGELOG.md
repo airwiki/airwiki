@@ -4,10 +4,16 @@ All notable user-visible changes to AirWiki will be documented here. The project
 
 ## [Unreleased]
 
-- Kept per-application MCP search strictly local, closed the collection AI gate
-  when its last active grant is revoked, made connection setup establish and
-  roll back default grants before touching client configuration, and exposed a
-  canonical client identity so ChatGPT/Codex is not rendered twice.
+- Let each connected AI application search its permitted local Wikis and
+  knowledge already shared by verified LAN devices through the same bounded
+  federated coordinator. Optional public knowledge is disabled per application
+  until native query-egress confirmation; revocation and consent changes are
+  revalidated after every search without changing any local Wiki's exposure.
+  Existing LAN grants preserve their old behavior until one explicit atomic
+  upgrade, while new grants cover the receiver device and its connected AI
+  applications. Connection setup still establishes and rolls back default
+  local grants before touching client configuration, and canonical client
+  identity prevents duplicate ChatGPT/Codex rows.
 - Added an explicit catalog-browse capability protocol: current indexes can
   return bounded signed public profiles, while older indexes now report the
   Public directory as unavailable or partial instead of a successful empty

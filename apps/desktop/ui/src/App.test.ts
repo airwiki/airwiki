@@ -2,7 +2,7 @@ import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testi
 import axe from 'axe-core';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import App from './App.svelte';
-import { allowPeerPairingAgain, approveProjectMemoryRequest, approveReview, browseNearbyWiki, browsePublicWiki, cancelModelInstall, checkUpdates, configureFirewall, connect, createProjectMemory, detachProjectMemory, explorePublicWikis, installModels, loadReviewEvidence, loadWikiBundle, loadWikiPage, manageIntegration, openSystemDestination, pickOkfImport, pickWikiFolder, prepareGuidedWikiRepair, quitCompletely, refreshApplicationAccess, refreshConnectivity, refreshWikiHealth, rejectProjectMemoryRequest, rejectReview, rescanWiki, searchKnowledge, setApplicationWikiRole, setWikiGrant, updatePreferences, updateWikiPolicy, validateOkfImport, verifyWikiConcept } from './api';
+import { allowPeerPairingAgain, approveProjectMemoryRequest, approveReview, browseNearbyWiki, browsePublicWiki, cancelModelInstall, checkUpdates, configureFirewall, confirmLegacyLanAiGrants, connect, createProjectMemory, detachProjectMemory, explorePublicWikis, installModels, loadReviewEvidence, loadWikiBundle, loadWikiPage, manageIntegration, openSystemDestination, pickOkfImport, pickWikiFolder, prepareGuidedWikiRepair, quitCompletely, refreshApplicationAccess, refreshConnectivity, refreshWikiHealth, rejectProjectMemoryRequest, rejectReview, rescanWiki, searchKnowledge, setApplicationWikiRole, setWikiGrant, updatePreferences, updateWikiPolicy, validateOkfImport, verifyWikiConcept } from './api';
 import { setModelProfile } from './api';
 import type { AppSnapshot, SearchCoverage, SearchHitSummary, SearchStatus, UiEventEnvelope } from './generated/ui-contract';
 import { readySnapshot } from './test/fixtures';
@@ -164,6 +164,7 @@ vi.mock('./api', async (importOriginal) => {
     prepareGuidedWikiRepair: vi.fn(async () => 'repair-request'),
     updatePreferences: vi.fn(async () => undefined),
     configureFirewall: vi.fn(async () => undefined),
+    confirmLegacyLanAiGrants: vi.fn(async () => undefined),
     checkUpdates: vi.fn(async () => undefined),
     installModels: vi.fn(async () => undefined),
     cancelModelInstall: vi.fn(async () => undefined),
@@ -630,6 +631,37 @@ describe('AirWiki wiki workspace', () => {
     expect(window.location.hash).toBe('#settings/connections');
   });
 
+  it('offers one explicit upgrade for legacy LAN AI grants', async () => {
+    const wikiId = snapshot.wikis[0].id;
+    snapshot.peers = [{
+      peerId: '12D3KooSyntheticLegacyNode', deviceName: 'Nearby Mac', platform: 'macOs', address: '',
+      trust: 'trusted', activity: 'connected', sasWords: null, grantedWikiIds: [wikiId],
+      legacyAiGrantWikiIds: [wikiId]
+    }];
+    render(App);
+    await openSettingsSection('connections');
+
+    expect(screen.getByRole('note')).toHaveTextContent('Actualizar accesos LAN existentes');
+    await fireEvent.click(screen.getByRole('button', { name: 'Actualizar todos' }));
+    expect(confirmLegacyLanAiGrants).toHaveBeenCalledOnce();
+
+    snapshot = {
+      ...snapshot,
+      sequence: snapshot.sequence + 1,
+      peers: snapshot.peers.map((peer) => ({ ...peer, legacyAiGrantWikiIds: undefined }))
+    };
+    await act(() => {
+      snapshotListener?.({
+        schemaVersion: snapshot.schemaVersion,
+        sequence: snapshot.sequence,
+        requestId: null,
+        kind: 'stateChanged',
+        snapshot
+      });
+    });
+    await waitFor(() => expect(screen.queryByRole('note')).not.toBeInTheDocument());
+  });
+
   it('keeps Connections focused when it opens from public sharing', async () => {
     render(App);
     await fireEvent.click(await screen.findByRole('button', { name: /Atlas 2 de 2 revisados/ }));
@@ -783,6 +815,68 @@ describe('AirWiki wiki workspace', () => {
       await Promise.resolve();
     });
     expect(connectButton).toBeEnabled();
+  });
+
+  it('reports an asynchronous public-search failure only on the affected app', async () => {
+    const appId = '00000000-0000-4000-8000-000000000001';
+    snapshot.integrations = {
+      externalAiWikiCount: 1,
+      integrations: [{
+        client: 'genericMcp', appId, publicSearchEnabled: false,
+        status: 'configured', detectedVersion: null,
+        activityRecent: false, restartRequired: false, mcpSetup: null,
+        workflowGuide: { kind: 'mcpInstructions', status: 'builtIn', version: '1', restartRequired: true }
+      }]
+    };
+    render(App);
+    await openSettingsSection('apps');
+    await waitFor(() => expect(manageIntegration).toHaveBeenCalledWith(expect.any(String), { kind: 'refresh' }));
+    const startupRequestId = vi.mocked(manageIntegration).mock.calls[0]?.[0];
+    expect(startupRequestId).toEqual(expect.any(String));
+
+    snapshot = {
+      ...snapshot,
+      sequence: snapshot.sequence + 1,
+      integrationRequestId: null,
+      integrationCompletedRequestId: startupRequestId ?? null,
+      integrationCompletedRequestSucceeded: true
+    };
+    await act(() => {
+      snapshotListener?.({
+        schemaVersion: snapshot.schemaVersion,
+        sequence: snapshot.sequence,
+        requestId: startupRequestId ?? null,
+        kind: 'stateChanged',
+        snapshot
+      });
+    });
+
+    await fireEvent.click(screen.getByRole('switch', { name: 'Buscar conocimiento público' }));
+    await waitFor(() => expect(manageIntegration).toHaveBeenCalledTimes(2));
+    const publicSearchRequestId = vi.mocked(manageIntegration).mock.calls[1]?.[0];
+    expect(manageIntegration).toHaveBeenLastCalledWith(publicSearchRequestId, {
+      kind: 'setPublicSearch', appId, enabled: true
+    });
+
+    snapshot = {
+      ...snapshot,
+      sequence: snapshot.sequence + 1,
+      integrationRequestId: null,
+      integrationCompletedRequestId: publicSearchRequestId ?? null,
+      integrationCompletedRequestSucceeded: false
+    };
+    await act(() => {
+      snapshotListener?.({
+        schemaVersion: snapshot.schemaVersion,
+        sequence: snapshot.sequence,
+        requestId: publicSearchRequestId ?? null,
+        kind: 'stateChanged',
+        snapshot
+      });
+    });
+
+    expect(await screen.findByRole('alert')).toHaveTextContent('No se pudo actualizar. Intenta de nuevo.');
+    expect(screen.getByRole('button', { name: 'Volver a intentar' })).toBeEnabled();
   });
 
   it('opens device preferences from disabled local-network guidance', async () => {

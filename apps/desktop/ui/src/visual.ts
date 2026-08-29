@@ -279,6 +279,7 @@ const bridge: DevelopmentBridge = {
     if (_command === 'manage_integration' && requestId) {
       snapshot.integrationRequestId = null;
       snapshot.integrationCompletedRequestId = requestId;
+      snapshot.integrationCompletedRequestSucceeded = true;
     }
     queueMicrotask(() => {
       snapshot.sequence += 1;

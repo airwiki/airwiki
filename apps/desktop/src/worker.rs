@@ -262,6 +262,7 @@ pub struct PeerView {
     pub activity: PeerActivityState,
     pub sas_words: Option<[String; 6]>,
     pub granted_collections: HashSet<Uuid>,
+    pub legacy_ai_granted_collections: HashSet<Uuid>,
 }
 
 #[derive(Debug, Clone)]
@@ -599,6 +600,7 @@ pub enum WorkerCommand {
         wiki_id: Uuid,
         role: Option<ApplicationWikiRoleView>,
     },
+    ConfirmLegacyLanAiGrants,
     RefreshComputations,
     RejectComputation {
         run_id: Uuid,
@@ -1656,6 +1658,22 @@ pub(crate) async fn run_worker(
                         }
                         refresh_application_access(&services, &events).await;
                         refresh_collection_views(&services, &events).await;
+                    }
+                    WorkerCommand::ConfirmLegacyLanAiGrants => {
+                        if let Err(error) = run_service_io(&services, |services| {
+                            services.confirm_all_legacy_lan_ai_grants().map(|_| ())
+                        })
+                        .await
+                        {
+                            send(
+                                &events,
+                                WorkerEvent::Error(format!(
+                                    "No se pudieron actualizar los accesos LAN existentes: {error:#}"
+                                )),
+                            )
+                            .await;
+                        }
+                        refresh_peers(&services, &events).await;
                     }
                     WorkerCommand::RejectComputation { run_id } => {
                         if let Err(error) = run_service_io(&services, move |services| {
@@ -6541,7 +6559,8 @@ fn update_claude_approval_after_action(state: &mut ClaudeApprovalState, action: 
         | IntegrationAction::Disconnect(_)
         | IntegrationAction::OpenClaudeSettings
         | IntegrationAction::InstallWorkflowGuide(_)
-        | IntegrationAction::RemoveWorkflowGuide(_) => {}
+        | IntegrationAction::RemoveWorkflowGuide(_)
+        | IntegrationAction::SetPublicSearch { .. } => {}
     }
 }
 
@@ -7034,6 +7053,8 @@ mod tests {
     fn integration_view(client: ChatClientKind) -> IntegrationView {
         IntegrationView {
             client,
+            app_id: None,
+            public_search_enabled: false,
             status: IntegrationStatus::Available,
             issue: None,
             detected_version: None,

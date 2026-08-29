@@ -142,6 +142,8 @@ pub(crate) enum IntegrationIssue {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct IntegrationView {
     pub client: ChatClientKind,
+    pub app_id: Option<Uuid>,
+    pub public_search_enabled: bool,
     pub status: IntegrationStatus,
     pub issue: Option<IntegrationIssue>,
     pub detected_version: Option<String>,
@@ -167,6 +169,7 @@ pub(crate) enum IntegrationAction {
     OpenClaudeSettings,
     InstallWorkflowGuide(ChatClientKind),
     RemoveWorkflowGuide(ChatClientKind),
+    SetPublicSearch { app_id: Uuid, enabled: bool },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -482,6 +485,25 @@ impl ChatIntegrationManager {
                     .context("este cliente no admite una skill nativa")?;
                 self.workflow_guides.remove(workflow_client).await?;
             }
+            IntegrationAction::SetPublicSearch { app_id, enabled } => {
+                if !ChatClientKind::ALL
+                    .iter()
+                    .any(|client| application_id(*client) == app_id)
+                {
+                    bail!("la aplicación solicitada no es una integración administrada")
+                }
+                let audit = airwiki_core::AuditEvent {
+                    id: Uuid::new_v4(),
+                    actor: "desktop".to_owned(),
+                    action: "application_public_search_changed".to_owned(),
+                    target_type: "application".to_owned(),
+                    target_id: Some(app_id.to_string()),
+                    details: serde_json::json!({ "enabled": enabled }),
+                    created_at: chrono::Utc::now(),
+                };
+                self.database
+                    .set_application_public_search(app_id, enabled, &audit)?;
+            }
         }
         let mut views = self.inspect_all().await?;
         if matches!(
@@ -533,6 +555,13 @@ impl ChatIntegrationManager {
         } else {
             WorkflowGuideView::built_in()
         };
+        if let Some(capability) = self
+            .database
+            .application_capability_by_app_id(application_id(client))?
+        {
+            view.app_id = Some(capability.app_id);
+            view.public_search_enabled = capability.public_search_enabled;
+        }
         Ok(view)
     }
 
@@ -1823,6 +1852,8 @@ fn view(
 ) -> IntegrationView {
     IntegrationView {
         client,
+        app_id: None,
+        public_search_enabled: false,
         status,
         issue: None,
         detected_version,

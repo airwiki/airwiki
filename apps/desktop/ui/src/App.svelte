@@ -13,7 +13,7 @@
   import Sparkles from '@lucide/svelte/icons/sparkles';
   import { listen } from '@tauri-apps/api/event';
   import { onMount, tick } from 'svelte';
-  import { addFederationIndex, addWiki, allowPeerPairingAgain, approveProjectMemoryRequest, approveReview, browseNearbyWiki, browsePublicWiki, cancelModelInstall, checkUpdates, configureFirewall, confirmPairing, connect, createProjectMemory, deleteWiki, detachProjectMemory, dialPeer, downloadUpdate, executeComputation, executeGuidedWikiRepair, explorePublicWikis, hideToTray, importOkf, installModels, installUpdate, loadReviewEvidence, loadWikiBundle, loadWikiPage, manageIntegration, openExternalLink, openSystemDestination, pairPeer, pickOkfImport, pickWikiFolder, prepareGuidedWikiRepair, quitCompletely, refreshApplicationAccess, refreshAutostart, refreshComputations, refreshConnectivity, refreshWikiHealth, rejectComputation, rejectProjectMemoryRequest, rejectReview, relinkWiki, removeFederationIndex, rescanWiki, revokePeer, saveComputationResult, searchKnowledge, setApplicationWikiRole, setAutostart, setPublicPublisherBlocked, setWikiGrant, setWikiIndexing, updatePreferences, updatePublicWikiProfile, updateWikiPolicy, validateOkfImport, verifyWikiConcept, type AppSnapshot, type ApplicationWikiRoleInput, type CloseBehavior, type EnrichmentDraft, type FolderSelection, type IntegrationActionInput, type KnowledgeConceptSummary, type KnowledgePageInput, type LanPreference, type LocalePreference, type OkfImportSummary, type PublicCatalogWikiSummary, type PublicConceptSummaryDto, type RemoteWikiPageInput, type ReviewSummary, type SearchCoverage, type SearchHitSummary, type SourceIssueSummary, type SystemDestination, type ThemePreference, type UpdaterIssue, type WikiPolicyInput, type WikiSearchResultSummary, type WikiSummary } from './api';
+  import { addFederationIndex, addWiki, allowPeerPairingAgain, approveProjectMemoryRequest, approveReview, browseNearbyWiki, browsePublicWiki, cancelModelInstall, checkUpdates, configureFirewall, confirmLegacyLanAiGrants, confirmPairing, connect, createProjectMemory, deleteWiki, detachProjectMemory, dialPeer, downloadUpdate, executeComputation, executeGuidedWikiRepair, explorePublicWikis, hideToTray, importOkf, installModels, installUpdate, loadReviewEvidence, loadWikiBundle, loadWikiPage, manageIntegration, openExternalLink, openSystemDestination, pairPeer, pickOkfImport, pickWikiFolder, prepareGuidedWikiRepair, quitCompletely, refreshApplicationAccess, refreshAutostart, refreshComputations, refreshConnectivity, refreshWikiHealth, rejectComputation, rejectProjectMemoryRequest, rejectReview, relinkWiki, removeFederationIndex, rescanWiki, revokePeer, saveComputationResult, searchKnowledge, setApplicationWikiRole, setAutostart, setPublicPublisherBlocked, setWikiGrant, setWikiIndexing, updatePreferences, updatePublicWikiProfile, updateWikiPolicy, validateOkfImport, verifyWikiConcept, type AppSnapshot, type ApplicationWikiRoleInput, type CloseBehavior, type EnrichmentDraft, type FolderSelection, type IntegrationActionInput, type KnowledgeConceptSummary, type KnowledgePageInput, type LanPreference, type LocalePreference, type OkfImportSummary, type PublicCatalogWikiSummary, type PublicConceptSummaryDto, type RemoteWikiPageInput, type ReviewSummary, type SearchCoverage, type SearchHitSummary, type SourceIssueSummary, type SystemDestination, type ThemePreference, type UpdaterIssue, type WikiPolicyInput, type WikiSearchResultSummary, type WikiSummary } from './api';
   import { setModelProfile, type ModelProfile } from './api';
   import { applicationClientFor } from './aiClientIdentity';
   import KnowledgeGraph from './KnowledgeGraph.svelte';
@@ -119,6 +119,10 @@
   let connectivityRequestId: string | null = null;
   let peerActionId: string | null = null;
   let integrationRequestId: string | null = null;
+  let publicSearchRequestId: string | null = null;
+  let publicSearchBusyAppId: string | null = null;
+  let publicSearchErrorAppId: string | null = null;
+  let legacyLanAiGrantBusy = false;
   let automaticSystemStatusRefreshStarted = false;
   let updaterRequestId: string | null = null;
   let updaterAction: 'check' | 'download' | 'install' | null = null;
@@ -166,6 +170,7 @@
   let contentFilterCounts: Record<ContentFilter, number>;
   let preferencesDirty: boolean;
   let searchableNearbyCount: number;
+  let legacyLanAiGrantCount: number;
   let privateSearchScope: string;
   let searchResults: WikiSearchResultSummary[];
   let filteredSearchResults: WikiSearchResultSummary[];
@@ -226,7 +231,7 @@
     if (includeConnectivity && connectivityRequestId === null) {
       void runConnectivityAction('refresh', false);
     }
-    if (integrationRequestId === null) {
+    if (integrationRequestId === null && publicSearchRequestId === null) {
       void runIntegrationAction({ kind: 'refresh' }, false);
     }
   }
@@ -559,6 +564,10 @@
     && peer.activity !== 'notObserved'
     && peer.grantedWikiIds.length > 0
   ).length ?? 0;
+  $: legacyLanAiGrantCount = snapshot?.peers.reduce(
+    (count, peer) => count + (peer.legacyAiGrantWikiIds?.length ?? 0),
+    0
+  ) ?? 0;
   $: privateSearchScope = searchableNearbyCount > 0
     ? t('desktop-search-private-scope-nearby', { count: searchableNearbyCount })
     : t('desktop-search-private-scope-local');
@@ -799,7 +808,8 @@
       if (event.requestId && event.requestId === connectivityRequestId) connectivityRequestId = null;
       syncIntegrationRequest(
         event.snapshot.integrationRequestId,
-        event.snapshot.integrationCompletedRequestId
+        event.snapshot.integrationCompletedRequestId,
+        event.snapshot.integrationCompletedRequestSucceeded
       );
       if (event.requestId && event.requestId === updaterRequestId) {
         updaterRequestId = null;
@@ -817,7 +827,8 @@
       observePendingRequests(connected);
       syncIntegrationRequest(
         connected.integrationRequestId,
-        connected.integrationCompletedRequestId
+        connected.integrationCompletedRequestId,
+        connected.integrationCompletedRequestSucceeded
       );
       if (connected.model?.licenseAccepted) modelLicensesConfirmed = true;
       syncPreferences(connected.preferences);
@@ -1013,7 +1024,21 @@
     scrollMainTo(currentTop);
   }
 
-  function syncIntegrationRequest(activeRequestId: string | null, completedRequestId: string | null) {
+  function syncIntegrationRequest(
+    activeRequestId: string | null,
+    completedRequestId: string | null,
+    completedRequestSucceeded: boolean | null
+  ) {
+    if (publicSearchRequestId !== null) {
+      if (completedRequestId === publicSearchRequestId) {
+        const completedAppId = publicSearchBusyAppId;
+        publicSearchRequestId = null;
+        publicSearchBusyAppId = null;
+        publicSearchErrorAppId = completedRequestSucceeded === false ? completedAppId : null;
+        return;
+      }
+      if (activeRequestId === publicSearchRequestId) return;
+    }
     if (integrationRequestId === null) {
       integrationRequestId = activeRequestId;
       return;
@@ -1024,7 +1049,7 @@
   }
 
   async function runIntegrationAction(action: IntegrationActionInput, reportError = true) {
-    if (integrationRequestId !== null) return;
+    if (integrationRequestId !== null || publicSearchRequestId !== null) return;
     const requestId = crypto.randomUUID();
     integrationRequestId = requestId;
     try {
@@ -1032,6 +1057,33 @@
     } catch {
       integrationRequestId = null;
       if (reportError) actionMessage = t('error-chat');
+    }
+  }
+
+  async function changeApplicationPublicSearch(appId: string, enabled: boolean) {
+    if (!appId || integrationRequestId !== null || publicSearchRequestId !== null) return;
+    const requestId = crypto.randomUUID();
+    publicSearchRequestId = requestId;
+    publicSearchBusyAppId = appId;
+    publicSearchErrorAppId = null;
+    try {
+      await manageIntegration(requestId, { kind: 'setPublicSearch', appId, enabled });
+    } catch {
+      publicSearchRequestId = null;
+      publicSearchBusyAppId = null;
+      publicSearchErrorAppId = appId;
+    }
+  }
+
+  async function updateLegacyLanAiGrants() {
+    if (legacyLanAiGrantBusy) return;
+    legacyLanAiGrantBusy = true;
+    try {
+      await confirmLegacyLanAiGrants();
+    } catch {
+      actionMessage = t('error-connectivity');
+    } finally {
+      legacyLanAiGrantBusy = false;
     }
   }
 
@@ -2835,6 +2887,12 @@
                   <section class="private-network-section" aria-labelledby="settings-devices-title">
                     <div class="section-heading connection-section-heading"><div><p class="section-label">{t('desktop-private-network')}</p><h2 id="settings-devices-title">{t('desktop-known-devices', { count: snapshot.peers.length })}</h2><p>{t('desktop-private-devices-summary', { visible: visiblePeerCount(), total: snapshot.peers.length })}</p></div><button class="text-action" disabled={connectivityRequestId !== null} onclick={() => runConnectivityAction('refresh')}>{t('action-refresh')}</button></div>
                     {#if lanPreference !== 'enabled'}<div class="connection-guidance"><p>{lanPreference === 'undecided' ? t('connectivity-undecided') : t('connectivity-disabled')}</p></div>{:else if snapshot.connectivity?.networkProfile === 'public'}<div class="connection-guidance"><p>{t('connectivity-public-network')}</p><button class="secondary" onclick={() => runConnectivityAction('networkSettings')}>{t('connectivity-open-network-settings')}</button></div>{:else if snapshot.connectivity?.firewall === 'rulesMissing' && snapshot.connectivity.firewallHelper === 'verified'}<div class="connection-guidance"><p>{t('connectivity-firewall-needed')}</p><button class="secondary" onclick={() => runConnectivityAction('install')}>{t('connectivity-configure-firewall')}</button></div>{:else if snapshot.connectivity?.firewall === 'rulesMissing'}<div class="connection-guidance"><p>{t('connectivity-firewall-helper-repair')}</p></div>{:else if snapshot.connectivity?.firewall === 'conflict' || snapshot.connectivity?.firewall === 'legacyExposure' || snapshot.connectivity?.firewall === 'managedPolicy' || snapshot.connectivity?.firewall === 'firewallDisabled' || snapshot.connectivity?.firewall === 'blockAllInbound'}<div class="connection-guidance"><p>{firewallGuidanceLabel()}</p><button class="secondary" onclick={() => runConnectivityAction('advancedFirewall')}>{t('connectivity-open-advanced-firewall')}</button></div>{:else if snapshot.connectivity?.systemPermission === 'denied'}<div class="connection-guidance"><p>{t('connectivity-failed')}</p><button class="secondary" onclick={() => runConnectivityAction('localNetworkPrivacy')}>{t('connectivity-open-local-network-settings')}</button></div>{/if}
+                    {#if legacyLanAiGrantCount > 0}
+                      <aside class="legacy-lan-ai-notice" role="note" aria-labelledby="legacy-lan-ai-title" aria-busy={legacyLanAiGrantBusy}>
+                        <div><strong id="legacy-lan-ai-title">{t('desktop-legacy-lan-ai-title')}</strong><p>{t('desktop-legacy-lan-ai-body')}</p></div>
+                        <button class="secondary" disabled={legacyLanAiGrantBusy} onclick={updateLegacyLanAiGrants}>{t('desktop-legacy-lan-ai-action')}</button>
+                      </aside>
+                    {/if}
                     <div class="peer-list" aria-busy={connectivityRequestId !== null}>
                       {#each snapshot.peers as peer (peer.peerId)}
                         {@const shareableWikis = snapshot.wikis.filter((wiki) => wiki.peerShareable)}
@@ -2868,7 +2926,7 @@
                   <ConnectionAdvanced lanRuntime={snapshot.lanRuntime} peerId={federationPeerId} address={federationAddress} blockedPublishers={snapshot.blockedPublicPublishers} busy={peerActionId !== null} {t} onpeerid={(value) => { federationPeerId = value; }} onaddress={(value) => { federationAddress = value; }} onadd={() => saveFederationIndex(false)} onremove={() => saveFederationIndex(true)} onunblock={(publisherId) => changePublisherBlock(publisherId, false)} />
                   <details class="advanced-disclosure"><summary>{t('desktop-advanced-details')}</summary><TextField label={t('desktop-address')} bind:value={manualPeerAddress} maxlength={500} placeholder={t('desktop-multiaddress-placeholder')} /><button class="secondary" onclick={connectManualPeer}>{t('action-connect')}</button></details>
                 {:else}
-                  <section class="integrations-settings-section"><div class="section-heading"><div><p class="section-label">{t('desktop-status-ai-apps')}</p><h2>{t('integrations-title')}</h2><p>{t('desktop-integration-body')}</p></div><button class="text-action" disabled={integrationRequestId !== null} onclick={() => runIntegrationAction({ kind: 'refresh' })}>{t('action-refresh')}</button></div><IntegrationList integrations={snapshot.integrations?.integrations ?? []} busy={integrationRequestId !== null} {t} onaction={runIntegrationAction} oncopy={copyMcpSetup} /></section>
+                  <section class="integrations-settings-section"><div class="section-heading"><div><p class="section-label">{t('desktop-status-ai-apps')}</p><h2>{t('integrations-title')}</h2><p>{t('desktop-integration-body')}</p></div><button class="text-action" disabled={integrationRequestId !== null || publicSearchRequestId !== null} onclick={() => runIntegrationAction({ kind: 'refresh' })}>{t('action-refresh')}</button></div><IntegrationList integrations={snapshot.integrations?.integrations ?? []} busy={integrationRequestId !== null} {publicSearchBusyAppId} {publicSearchErrorAppId} {t} onaction={runIntegrationAction} onpublicsearch={changeApplicationPublicSearch} oncopy={copyMcpSetup} /></section>
                   {#if snapshot.projectMemoryRequests.length > 0}<section aria-labelledby="project-memory-requests-title"><div class="section-heading"><div><h2 id="project-memory-requests-title">{t('desktop-project-memory-requests-title')}</h2><p>{t('desktop-project-memory-requests-body')}</p></div><button class="text-action" onclick={refreshApplicationAccess}>{t('action-refresh')}</button></div><div class="computation-list">{#each snapshot.projectMemoryRequests as request (request.requestId)}<article><span class="pending-icon project-memory-link" aria-hidden="true"><BookOpen size={17} /></span><div><strong>{t(request.kind === 'initialize' ? 'desktop-project-memory-initialize-request' : 'desktop-project-memory-attach-request', { application: request.applicationName })}</strong><p>{t('desktop-project-memory-request-folder', { folder: request.folderName })}</p>{#if request.requestedName}<small>{request.requestedName}</small>{/if}</div><div class="row-actions"><button class="secondary" disabled={actionBusy} onclick={() => decideProjectMemoryRequest(request.requestId, false)}>{t('action-reject')}</button><button class="primary" disabled={actionBusy} onclick={() => decideProjectMemoryRequest(request.requestId, true)}>{t('action-approve')}</button></div></article>{/each}</div></section>{/if}
                   {#if snapshot.pendingComputations.length > 0}<section aria-labelledby="computations-title"><div class="section-heading"><div><h2 id="computations-title">{t('desktop-computation-requests-title')}</h2><p>{t('desktop-computation-requests-body')}</p></div><button class="text-action" onclick={refreshComputations}>{t('action-refresh')}</button></div><div class="computation-list">{#each snapshot.pendingComputations as computation (computation.runId)}<article><span class="pending-icon"><Sparkles size={17} aria-hidden="true" /></span><div><strong>{t('desktop-computation-request-title', { application: computation.applicationName })}</strong><p>{t('desktop-computation-request-body', { wiki: computation.wikiName, path: computation.logicalPath })}</p>{#if computation.parameters.length > 0}<ul class="computation-parameters">{#each computation.parameters as parameter (`${parameter.name}:${parameter.parameterType}`)}<li><code>{parameter.name}</code><span>{parameter.parameterType}</span></li>{/each}</ul>{/if}</div><div class="row-actions"><button class="secondary" disabled={actionBusy} onclick={() => decideComputation(computation.runId, 'reject')}>{t('action-reject')}</button><button class="primary" disabled={actionBusy} onclick={() => decideComputation(computation.runId, 'execute')}>{t('desktop-computation-review-run')}</button></div></article>{/each}</div></section>{/if}
                   {#if snapshot.completedComputations.length > 0}<section aria-labelledby="completed-computations-title"><div class="section-heading"><div><h2 id="completed-computations-title">{t('desktop-computation-results-title')}</h2><p>{t('desktop-computation-results-body')}</p></div><button class="text-action" onclick={refreshComputations}>{t('action-refresh')}</button></div><div class="computation-list">{#each snapshot.completedComputations as computation (computation.runId)}<article><span class="pending-icon"><CheckCircle2 size={17} aria-hidden="true" /></span><div><strong>{t('desktop-computation-result-title', { application: computation.applicationName })}</strong><p>{t('desktop-computation-result-body', { wiki: computation.wikiName, path: computation.logicalPath })}</p></div>{#if computation.verdict === 'accepted'}<div class="row-actions computation-save-actions"><SelectField label={t('desktop-computation-save-target')} value={computationSaveTargets[computation.runId] ?? ''} onchange={(value) => { computationSaveTargets = { ...computationSaveTargets, [computation.runId]: value }; }} options={[{ value: '', label: t('desktop-computation-save-select') }, ...snapshot.wikis.filter((wiki) => wiki.origin === 'aiMemory').map((wiki) => ({ value: wiki.id, label: wiki.name }))]} /><button class="primary" disabled={actionBusy || !computationSaveTargets[computation.runId]} onclick={() => saveAcceptedComputation(computation.runId)}>{t('desktop-computation-save')}</button></div>{:else}<span class="status-pill warning">{t('desktop-computation-rejected')}</span>{/if}</article>{/each}</div></section>{/if}

@@ -208,6 +208,10 @@ export async function setWikiGrant(peerId: string, wikiId: string, granted: bool
   return invoke('set_wiki_grant', { peerId, wikiId, granted });
 }
 
+export async function confirmLegacyLanAiGrants(): Promise<void> {
+  return invoke('confirm_legacy_lan_ai_grants');
+}
+
 export async function manageIntegration(requestId: string, action: IntegrationActionInput): Promise<void> {
   return invoke('manage_integration', { requestId, action });
 }

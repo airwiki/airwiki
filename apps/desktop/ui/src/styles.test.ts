@@ -76,12 +76,14 @@ describe('desktop style tokens', () => {
   it('keeps the sticky wiki toolbar flush with the scroll viewport', () => {
     const stylesheet = desktopStyles();
     const stickyRule = stylesheet.match(/\.wiki-content-sticky\s*{([^}]*)}/)?.[1];
+    const actionsRule = stylesheet.match(/^\.content-tabs-actions\s*{([^}]*)}/m)?.[1];
     const stickyOffsets = Array.from(
       stylesheet.matchAll(/--wiki-sticky-offset:\s*(-\d+px)/g),
       (match) => match[1],
     );
 
     expect(stickyRule).toContain('top: var(--wiki-sticky-offset)');
+    expect(actionsRule).toContain('min-height: 38px');
     expect(stickyOffsets).toEqual(['-28px', '-24px']);
   });
 

@@ -119,6 +119,7 @@ describe('SharedWikiViewer', () => {
     });
 
     expect(screen.getByRole('status')).toHaveTextContent('desktop-shared-loading-title');
+    expect(container.querySelector('.shimmer-text.active.neutral')).toHaveTextContent('desktop-shared-loading-title');
     expect(container.querySelector('.loading-skeleton.workspace')).toBeInTheDocument();
   });
 
